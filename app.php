@@ -42,6 +42,10 @@ $app->patternRoute('/raw/(?P<rest>.*)', ['methods' => ['GET']], function($rest) 
     echo "You requested: $rest";
 });
 
+$app->nsRoute('api', '{name}', function($name) {
+    echo "<h1>Namespace Route, $name!</h1>";
+});
+
 $app->nsPathRoute('api', "{module}/{rquest}", [
     'methods' => ['GET', 'POST']
 ], function($module, $rquest, $response){
