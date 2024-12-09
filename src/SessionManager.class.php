@@ -47,6 +47,7 @@ class SessionManager
      */
     public function __invoke(\Swoole\Http\Request $request, \Swoole\Http\Response $response)
     {
+        // error_log('SessionManager::__invoke');
         $sessionName = session_name();
         if ($this->useCookies && isset($request->cookie[$sessionName])) {
             $sessionId = $request->cookie[$sessionName];
@@ -56,7 +57,10 @@ class SessionManager
             $sessionId = call_user_func($this->idGenerator);
         }
         session_id($sessionId);
+        // error_log('SessionManager::__invoke session_id: ' . session_id());
+
         session_start();
+        // error_log('SessionManager:: session_start');
         if ($this->useCookies) {
             $cookie = session_get_cookie_params();
             $response->cookie(
@@ -71,11 +75,14 @@ class SessionManager
         }
         try {
             call_user_func($this->middleware, $request, $response);
+            // error_log('SessionManager:: middleware executed');
         } finally {
+            // error_log('SessionManager:: session_write_close');
             session_write_close();
             session_id('');
             $_SESSION = [];
             unset($_SESSION);
+            // error_log('SessionManager:: session_id unset and reset');
         }
     }
 }

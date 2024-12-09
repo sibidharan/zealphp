@@ -14,3 +14,4 @@ Baby steps needed to configure ZealPHP Project
     >>> ZealPHP server running at http://0.0.0.0:9501
 
 5. Add `swoole` to Intelephense stubs 
+sudo

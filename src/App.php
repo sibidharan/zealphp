@@ -19,13 +19,13 @@ class App
     protected $routes = [];
     protected $host;
     protected $port;
-    protected $cwd;
+    static $cwd;
 
     public function __construct($cwd = __DIR__, $host = '0.0.0.0', $port = 9501)
     {
         $this->host = $host;
         $this->port = $port;
-        $this->cwd = $cwd;
+        self::$cwd = $cwd;
 
         //TODO: $_ENV - read from /etc/environment, make this optional?
         $_ENV = [];
@@ -185,11 +185,36 @@ class App
         ];
     }
 
+    public static function render($_template = 'index', $_data = [])
+    {
+        $_source = Session::getCurrentFile(null);
+        extract($_data, EXTR_SKIP);
+        //This function returns the current script to build the template path.
+        $_general = strpos($_template, '/') === 0;
+        if ($_template == '_error') {
+            include self::$cwd . '/template/' . $_template . '.php';
+        } elseif ($_general) {
+            if (!file_exists(self::$cwd . '/template/' . $_template . '.php')) {
+                $bt = debug_backtrace();
+                $caller = array_shift($bt);
+                throw new TemplateUnavailableException("The template $_template does not exist on line " . $caller['line'] . " in file " . $caller['file'] . ".");
+            }
+            include self::$cwd . '/template/' . $_template . '.php';
+        } else {
+            if (!file_exists(self::$cwd . '/template/' . $_source . '/' . $_template . '.php')) {
+                $bt = debug_backtrace();
+                $caller = array_shift($bt);
+                throw new TemplateUnavailableException("The template $_template does not exist on line " . $caller['line'] . " in file " . $caller['file'] . ".");
+            }
+            include self::$cwd . '/template/' . $_source . '/' . $_template . '.php';
+        }
+    }
+
     public function run($settings = null)
     {
         $default_settings = [
             'enable_static_handler' => true,
-            'document_root' => $this->cwd . '/public',
+            'document_root' => self::$cwd . '/public',
             'enable_coroutine' => true,
         ];
         $server = new \Swoole\HTTP\Server($this->host, $this->port);
@@ -229,7 +254,7 @@ class App
         });
 
         $this->route('/{file}', function($file){
-            $abs_file = $this->cwd."/public/".$file.".php";
+            $abs_file = self::$cwd."/public/".$file.".php";
             if(file_exists($abs_file)){
                 include $abs_file;
             } else {
@@ -288,7 +313,7 @@ class App
                 $_SERVER['SERVER_NAME'] = $_SERVER['HTTP_HOST'] ?? 'localhost';
             }
             if (!isset($_SERVER['DOCUMENT_ROOT'])) {
-                $_SERVER['DOCUMENT_ROOT'] = $this->cwd;
+                $_SERVER['DOCUMENT_ROOT'] = self::$cwd;
             }
             if (!isset($_SERVER['PHP_SELF'])) {
                 $_SERVER['PHP_SELF'] = 'app.php';

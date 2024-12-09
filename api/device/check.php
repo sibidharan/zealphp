@@ -1,0 +1,5 @@
+<?
+
+$check = function(){
+    echo "Hello";
+};

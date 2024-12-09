@@ -5,11 +5,11 @@ require_once __DIR__ . '/src/App.php';
 use OpenSwoole\Coroutine as Co;
 use OpenSwoole\Coroutine\Channel;
 use ZealPHP\App;
-
+use ZealPHP\Render;
 $app = new App(__DIR__);
 
 $app->route('/', function() {
-    echo "<h1>Hello, ZealPHP!</h1>";
+    App::render('/home/_master');
 });
 
 $app->route('/co', function() {
