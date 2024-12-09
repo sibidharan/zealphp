@@ -7,11 +7,13 @@ class App
     protected $routes = [];
     protected $host;
     protected $port;
+    protected $cwd;
 
-    public function __construct($host = '0.0.0.0', $port = 9501)
+    public function __construct($cwd = __DIR__, $host = '0.0.0.0', $port = 9501)
     {
         $this->host = $host;
         $this->port = $port;
+        $this->cwd = $cwd;
     }
 
     public function route($path, $options = [], $handler = null)
@@ -41,13 +43,91 @@ class App
         ];
     }
 
-    public function run()
+    public function run($settings = null)
     {
+        $default_settings = [
+            'enable_static_handler' => true,
+            'document_root' => $this->cwd . '/public',
+        ];
         $server = new \Swoole\HTTP\Server($this->host, $this->port);
+        if ($settings == null){
+            $server->set($default_settings);
+        } else {
+            $settings = array_merge($default_settings, $settings);
+            $server->set($settings);
+        }
 
         $server->on("request", function($request, $response) {
-            $uri = $request->server['request_uri'] ?? '/';
-            $method = strtoupper($request->server['request_method'] ?? 'GET');
+            // Fill PHP superglobals with Swoole request object
+
+            // $_GET
+            $_GET = $request->get ?? [];
+
+            // $_POST
+            $_POST = $request->post ?? [];
+
+            //$_REQUEST
+            $_REQUEST = array_merge($_GET, $_POST);
+
+            // $_COOKIE
+            $_COOKIE = $request->cookie ?? [];
+
+            // $_ENV - read from /etc/environment, make this optional
+            $_ENV = [];
+            if (file_exists('/etc/environment')) {
+                $env = file_get_contents('/etc/environment');
+                $env = explode("\n", $env);
+                foreach ($env as $line) {
+                    $line = trim($line);
+                    if (empty($line) || strpos($line, '#') === 0) {
+                        continue;
+                    }
+                    list($key, $value) = explode('=', $line, 2);
+                    $_ENV[$key] = $value;
+                }
+            }
+
+            // $_FILES
+            $_FILES = [];
+            if (!empty($request->files)) {
+                $_FILES = $request->files; // Structure is similar enough to PHP’s $_FILES
+            }
+
+            // $_SERVER
+            $_SERVER = [];
+            if (!empty($request->server)) {
+                foreach ($request->server as $key => $value) {
+                    $_SERVER[strtoupper($key)] = $value;
+                }
+            }
+            // Headers go into $_SERVER as HTTP_ variables
+            if (!empty($request->header)) {
+                foreach ($request->header as $key => $value) {
+                    $headerKey = 'HTTP_' . str_replace('-', '_', strtoupper($key));
+                    $_SERVER[$headerKey] = $value;
+                }
+            }
+
+            // Common server vars typically set by web servers:
+            // If not already set, define some defaults
+            if (!isset($_SERVER['REQUEST_METHOD'])) {
+                $_SERVER['REQUEST_METHOD'] = 'GET';
+            }
+            if (!isset($_SERVER['REQUEST_URI'])) {
+                $_SERVER['REQUEST_URI'] = '/';
+            }
+            if (!isset($_SERVER['SCRIPT_NAME'])) {
+                $_SERVER['SCRIPT_NAME'] = '/app.php';
+            }
+            if (!isset($_SERVER['SERVER_NAME'])) {
+                $_SERVER['SERVER_NAME'] = $_SERVER['HTTP_HOST'] ?? 'localhost';
+            }
+
+            $uri = $_SERVER['REQUEST_URI'];
+            $method = $_SERVER['REQUEST_METHOD'];
+
+            // $uri = $request->server['request_uri'] ?? '/';
+            // $method = strtoupper($request->server['request_method'] ?? 'GET');
 
             foreach ($this->routes as $route) {
                 // Check if method matches
@@ -71,14 +151,18 @@ class App
                         $pname = $param->getName();
                         if (isset($params[$pname])) {
                             $invokeArgs[] = $params[$pname];
+                        } else if ($pname == 'app') {
+                            $invokeArgs[] = $this;
+                        } else if ($pname == 'request' || $pname == 'req'){
+                            $invokeArgs[] = $request;
+                        } else if ($pname == 'response' || $pname == 'res'){
+                            $invokeArgs[] = $response;
                         } else {
-                            // Default or null
                             $invokeArgs[] = $param->isDefaultValueAvailable() 
                                 ? $param->getDefaultValue() 
                                 : null;
                         }
                     }
-
                     $result = call_user_func_array($handler, $invokeArgs);
 
                     // Determine response type
