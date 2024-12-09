@@ -2,6 +2,10 @@
 
 namespace ZealPHP;
 
+function zapi($filename){
+    return basename($filename, '.php');
+}
+
 class App
 {
     protected $routes = [];
@@ -59,11 +63,11 @@ class App
     }
 
     /**
-     * Define a route under a specific namespace.
-     * e.g. $app->namespaceRoute('api', '/users', ['methods' => ['GET']], fn() => "User list");
+     * nsRoute: Define a route under a specific namespace.
+     * e.g. $app->nsRoute('api', '/users', ['methods' => ['GET']], fn() => "User list");
      * This will create a route at /api/users
      */
-    public function namespaceRoute($namespace, $path, $options = [], $handler = null)
+    public function nsRoute($namespace, $path, $options = [], $handler = null)
     {
         // If only two arguments are provided, assume second is handler and no options.
         if (is_callable($options) && $handler === null) {
@@ -78,7 +82,7 @@ class App
         // Default methods to GET if not specified
         $methods = $options['methods'] ?? ['GET'];
 
-        // Convert {param} style placeholders
+        // Convert {param} style placeholders (no change from route)
         $pattern = preg_replace('/\{([^}]+)\}/', '(?P<$1>[^/]+)', $path);
         $pattern = "#^" . $pattern . "$#";
 
@@ -86,7 +90,90 @@ class App
             'pattern' => $pattern,
             'methods' => array_map('strtoupper', $methods),
             'handler' => $handler,
-            // endpoint, strict_slashes etc. can also be handled similarly as in route()
+        ];
+    }
+
+    /**
+     * nsPathRoute: Define a route under a namespace but allow the last parameter to capture everything (including slashes).
+     * Here we assume the route is something like $app->nsPathRoute('api', ...)
+     * and the actual route will be `/api/{path}` with {path} capturing all trailing segments.
+     * 
+     * Example:
+     * $app->nsPathRoute('api', ['methods' => ['GET']], function($path) {
+     *     return "Full path under /api: $path";
+     * });
+     * 
+     * Accessing /api/devices/set_pref will set $path = "devices/set_pref".
+     */
+    public function nsPathRoute($namespace, $path, $options = [], $handler = null)
+    {
+        // If only two arguments are provided, assume second is handler and no options.
+        if (is_callable($options) && $handler === null) {
+            $handler = $options;
+            $options = [];
+        }
+    
+        // Prepend the namespace prefix to the path
+        $namespace = trim($namespace, '/');
+        $path = '/' . $namespace . '/' . ltrim($path, '/');
+    
+        // Default methods to GET if not specified
+        $methods = $options['methods'] ?? ['GET'];
+    
+        // Find all parameters
+        preg_match_all('/\{([^}]+)\}/', $path, $paramMatches);
+        $paramsFound = $paramMatches[1] ?? [];
+        $lastParam = end($paramsFound);
+    
+        // Replace parameters: all but last use [^/]+, last one uses .+
+        $pattern = preg_replace_callback('/\{([^}]+)\}/', function($m) use ($lastParam) {
+            $paramName = $m[1];
+            if ($paramName === $lastParam) {
+                // Last parameter is catch-all, match everything remaining
+                return '(?P<' . $paramName . '>.+)';
+            } else {
+                // Intermediate parameters match a single segment only
+                return '(?P<' . $paramName . '>[^/]+)';
+            }
+        }, $path);
+    
+        $pattern = "#^" . $pattern . "$#";
+    
+        $this->routes[] = [
+            'pattern' => $pattern,
+            'methods' => array_map('strtoupper', $methods),
+            'handler' => $handler,
+        ];
+    }
+    
+
+    /**
+     * patternRoute: Allow full control of the pattern without {param} placeholders.
+     * Here, the user provides a fully formed regex pattern (without anchors) and we anchor it internally.
+     * e.g. $app->patternRoute('/api/(.*)', ['methods'=>['GET']], fn() => "Pattern matched!");
+     * This will match any route starting with /api/.
+     * 
+     * TODO: Allow users to provide variable names for the regex groups.
+     */
+    public function patternRoute($regex, $options = [], $handler = null)
+    {
+        // If only two arguments are provided
+        if (is_callable($options) && $handler === null) {
+            $handler = $options;
+            $options = [];
+        }
+
+        $methods = $options['methods'] ?? ['GET'];
+
+        // Ensure the pattern is properly anchored if not already
+        if (substr($regex, 0, 1) !== '#') {
+            $regex = "#^" . $regex . "$#";
+        }
+
+        $this->routes[] = [
+            'pattern' => $regex,
+            'methods' => array_map('strtoupper', $methods),
+            'handler' => $handler,
         ];
     }
 
@@ -122,7 +209,7 @@ class App
             // $_FILES
             $_FILES = [];
             if (!empty($request->files)) {
-                $_FILES = $request->files; // Structure is similar enough to PHP’s $_FILES
+                $_FILES = $request->files;
             }
 
             // $_SERVER
@@ -141,7 +228,6 @@ class App
             }
 
             // Common server vars typically set by web servers:
-            // If not already set, define some defaults
             if (!isset($_SERVER['REQUEST_METHOD'])) {
                 $_SERVER['REQUEST_METHOD'] = 'GET';
             }
@@ -153,6 +239,9 @@ class App
             }
             if (!isset($_SERVER['SERVER_NAME'])) {
                 $_SERVER['SERVER_NAME'] = $_SERVER['HTTP_HOST'] ?? 'localhost';
+            }
+            if (!isset($_SERVER['DOCUMENT_ROOT'])) {
+                $_SERVER['DOCUMENT_ROOT'] = $this->cwd;
             }
 
             $uri = $_SERVER['REQUEST_URI'];
@@ -192,16 +281,18 @@ class App
                                 : null;
                         }
                     }
-                    $result = call_user_func_array($handler, $invokeArgs);
-
-                    // Determine response type
-                    if (is_array($result)) {
-                        $response->header('Content-Type', 'application/json');
-                        $response->end(json_encode($result));
-                    } else {
-                        $response->header('Content-Type', 'text/html; charset=UTF-8');
-                        $response->end($result);
-                    }
+                    ob_start();
+                    call_user_func_array($handler, $invokeArgs);
+                    $buffer = ob_get_clean();
+                    $response->end($buffer);
+                    // // Determine response type
+                    // if (is_array($result)) {
+                    //     $response->header('Content-Type', 'application/json');
+                    //     $response->end(json_encode($result));
+                    // } else {
+                    //     $response->header('Content-Type', 'text/html; charset=UTF-8');
+                    //     $response->end($result);
+                    // }
                     return;
                 }
             }

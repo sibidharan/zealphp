@@ -2,6 +2,8 @@
 
 require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__ . '/src/App.php';
+require_once __DIR__ . '/src/API.class.php';
+
 use ZealPHP\App;
 
 $app = new App(__DIR__);
@@ -27,11 +29,28 @@ $app->route("/global/{name}", [
 $app->route('/user/{id}/post/{postId}',[
     'methods' => ['GET', 'POST']
 ], function($id, $postId) {
-    return "<h1>User $id, Post $postId</h1>";
+    echo "<h1>User $id, Post $postId</h1>";
 });
 
-$app->namespaceRoute('api', '/get/{key}', function($key){
-    return $_GET[$key] ?? null;
+$app->nsRoute('watch', '/get/{key}', function($key){
+    echo $_GET[$key] ?? null;
+});
+
+// patternRoute
+// Matches any URL starting with /raw/
+$app->patternRoute('/raw/(?P<rest>.*)', ['methods' => ['GET']], function($rest) {
+    echo "You requested: $rest";
+});
+
+$app->nsPathRoute('api', "{module}/{rquest}", [
+    'methods' => ['GET', 'POST']
+], function($module, $rquest, $response){
+    $api = new API($response);
+    try {
+        $api->processApi($module, $rquest);
+    } catch (Exception $e){
+        $api->die($e);
+    }
 });
 
 $app->run();
