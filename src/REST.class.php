@@ -8,8 +8,9 @@
         private $_method = "";
         private $_code = 200;
         public $_response;
-        public function __construct($response){
+        public function __construct($request, $response){
             $this->_response = $response;
+            $this->_request = $request;
             $this->inputs();
         }
 
@@ -118,4 +119,3 @@
             $this->_content_type = $type;
         }
     }
-?>

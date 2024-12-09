@@ -8,12 +8,14 @@ class API extends REST
 
     private $current_call;
     private $auth = null;
-    public $response = null;
+    public $_response = null;
+    public $request = null;
 
-    public function __construct($response)
+    public function __construct($request, $response)
     {
-        $this->response = $response;
-        parent::__construct($response);                  // Init parent contructor
+        $this->_response = $response;
+        $this->request = $request;
+        parent::__construct($request, $response);                  // Init parent contructor
     }
 
     /*

@@ -1,6 +1,14 @@
 <?php
-
 namespace ZealPHP;
+
+
+require_once 'API.class.php';
+require_once 'REST.class.php';
+require_once 'Session.class.php';
+require_once 'SessionManager.class.php';
+
+use ZealPHP\Session;
+use ZealPHP\Session\SessionManager;
 
 function zapi($filename){
     return basename($filename, '.php');
@@ -182,6 +190,7 @@ class App
         $default_settings = [
             'enable_static_handler' => true,
             'document_root' => $this->cwd . '/public',
+            'enable_coroutine' => false,
         ];
         $server = new \Swoole\HTTP\Server($this->host, $this->port);
         if ($settings == null){
@@ -191,7 +200,45 @@ class App
             $server->set($settings);
         }
 
-        $server->on("request", function($request, $response) {
+        $this->nsPathRoute('api', "{rquest}", [
+            'methods' => ['GET', 'POST', 'PUT', 'DELETE']
+        ], function($rquest, $response, $request){
+            $api = new \API($request, $response);
+            try {
+                $api->processApi("", $rquest);
+            } catch (\Exception $e){
+                $api->die($e);
+            }
+        });
+
+        
+        $this->nsPathRoute('api', "{module}/{rquest}", [
+            'methods' => ['GET', 'POST', 'PUT', 'DELETE']
+        ], function($module, $rquest, $response, $request){
+            $api = new \API($request, $response);
+            try {
+                $api->processApi($module, $rquest);
+            } catch (\Exception $e){
+                $api->die($e);
+            }
+        });
+
+        $this->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
+            $response->status(403);
+            $response->write("<h1>403 Forbidden</h1>");
+        });
+
+        $this->route('/{file}', function($file){
+            $abs_file = $this->cwd."/public/".$file.".php";
+            if(file_exists($abs_file)){
+                include $abs_file;
+            } else {
+                //TODO: Can load user page here if file not found
+                echo "File not found";
+            }
+        });
+
+        $server->on("request", new SessionManager(function($request, $response) {
             // Fill PHP superglobals with Swoole request object
 
             // $_GET
@@ -243,6 +290,9 @@ class App
             if (!isset($_SERVER['DOCUMENT_ROOT'])) {
                 $_SERVER['DOCUMENT_ROOT'] = $this->cwd;
             }
+            if (!isset($_SERVER['PHP_SELF'])) {
+                $_SERVER['PHP_SELF'] = 'app.php';
+            }
 
             $uri = $_SERVER['REQUEST_URI'];
             $method = $_SERVER['REQUEST_METHOD'];
@@ -285,14 +335,6 @@ class App
                     call_user_func_array($handler, $invokeArgs);
                     $buffer = ob_get_clean();
                     $response->end($buffer);
-                    // // Determine response type
-                    // if (is_array($result)) {
-                    //     $response->header('Content-Type', 'application/json');
-                    //     $response->end(json_encode($result));
-                    // } else {
-                    //     $response->header('Content-Type', 'text/html; charset=UTF-8');
-                    //     $response->end($result);
-                    // }
                     return;
                 }
             }
@@ -300,9 +342,8 @@ class App
             // 404 if no match
             $response->status(404);
             $response->end("<h1>404 Not Found</h1>");
-        });
+        }));
 
-        echo "ZealPHP server running at http://{$this->host}:{$this->port}\n";
         $server->start();
     }
 }
