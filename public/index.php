@@ -7,11 +7,14 @@ use ZealPHP\App;
 $app = new App();
 
 // Now we can define a route with parameters:
-$app->route('GET', '/hello/{name}', function($name) {
+$app->route('/hello/{name}', function($name) {
     return "<h1>Hello, $name!</h1>";
 });
 
-$app->route('GET', '/user/{id}/post/{postId}', function($id, $postId) {
+// We can also define multiple methods for a route:
+$app->route('/user/{id}/post/{postId}',[
+    'methods' => ['GET', 'POST']
+], function($id, $postId) {
     return "<h1>User $id, Post $postId</h1>";
 });
 

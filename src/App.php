@@ -14,16 +14,30 @@ class App
         $this->port = $port;
     }
 
-    public function route($method, $path, $handler)
+    public function route($path, $options = [], $handler = null)
     {
+        // If only two arguments are provided, assume second is handler and no options.
+        // But it's good that we clearly specify all three arguments in usage.
+        if (is_callable($options) && $handler === null) {
+            $handler = $options;
+            $options = [];
+        }
+
+        // Default methods to GET if not specified
+        $methods = $options['methods'] ?? ['GET'];
+
         // Convert flask-like {param} to named regex group
         $pattern = preg_replace('/\{([^}]+)\}/', '(?P<$1>[^/]+)', $path);
         $pattern = "#^" . $pattern . "$#";
 
         $this->routes[] = [
-            'method' => strtoupper($method),
             'pattern' => $pattern,
-            'handler' => $handler
+            'methods' => array_map('strtoupper', $methods),
+            'handler' => $handler,
+            // You could also store other options like:
+            // 'endpoint' => $options['endpoint'] ?? null,
+            // 'strict_slashes' => $options['strict_slashes'] ?? true,
+            // ...and handle them later in matching logic
         ];
     }
 
@@ -36,23 +50,29 @@ class App
             $method = strtoupper($request->server['request_method'] ?? 'GET');
 
             foreach ($this->routes as $route) {
-                if ($route['method'] === $method && preg_match($route['pattern'], $uri, $matches)) {
+                // Check if method matches
+                if (!in_array($method, $route['methods'])) {
+                    continue;
+                }
+
+                // Check if URI matches
+                if (preg_match($route['pattern'], $uri, $matches)) {
                     $params = array_filter($matches, fn($k) => !is_numeric($k), ARRAY_FILTER_USE_KEY);
 
                     $handler = $route['handler'];
 
-                    // Reflect the function to map parameters
+                    // Reflect the handler parameters
                     $reflection = is_array($handler)
                         ? new \ReflectionMethod($handler[0], $handler[1])
                         : new \ReflectionFunction($handler);
 
                     $invokeArgs = [];
                     foreach ($reflection->getParameters() as $param) {
-                        $paramName = $param->getName();
-                        if (isset($params[$paramName])) {
-                            $invokeArgs[] = $params[$paramName];
+                        $pname = $param->getName();
+                        if (isset($params[$pname])) {
+                            $invokeArgs[] = $params[$pname];
                         } else {
-                            // If param is missing and has default value, use it. Otherwise, null.
+                            // Default or null
                             $invokeArgs[] = $param->isDefaultValueAvailable() 
                                 ? $param->getDefaultValue() 
                                 : null;
