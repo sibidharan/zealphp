@@ -190,7 +190,7 @@ class App
         $default_settings = [
             'enable_static_handler' => true,
             'document_root' => $this->cwd . '/public',
-            'enable_coroutine' => false,
+            'enable_coroutine' => true,
         ];
         $server = new \Swoole\HTTP\Server($this->host, $this->port);
         if ($settings == null){

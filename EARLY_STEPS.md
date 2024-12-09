@@ -10,7 +10,7 @@ Baby steps needed to configure ZealPHP Project
     ` php -m | grep swoole `
 
 4. Run 
-    `php public/index.php`
+    `php app.php`
     >>> ZealPHP server running at http://0.0.0.0:9501
 
 5. Add `swoole` to Intelephense stubs 

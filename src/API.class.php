@@ -1,6 +1,7 @@
 <?php
 
 error_reporting(E_ALL ^ E_DEPRECATED);
+
 require_once 'REST.class.php';
 class API extends REST
 {
@@ -102,6 +103,7 @@ class API extends REST
     //TODO: Buggy current-call- hangs if calling nonexisting method inside API.
     public function __call($method, $args)
     {
+        
         if (is_callable($this->current_call)) {
             return call_user_func_array($this->current_call, $args);
         } else {

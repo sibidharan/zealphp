@@ -2,13 +2,45 @@
 
 require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__ . '/src/App.php';
-
+use OpenSwoole\Coroutine as Co;
+use OpenSwoole\Coroutine\Channel;
 use ZealPHP\App;
 
 $app = new App(__DIR__);
 
 $app->route('/', function() {
     echo "<h1>Hello, ZealPHP!</h1>";
+});
+
+$app->route('/co', function() {
+    $channel = new Channel(5);
+    go(function() use ($channel) {
+        co::sleep(3);
+        $channel->push('Hello, Coroutine 1!');
+    });
+    go(function() use ($channel) {
+        co::sleep(3);
+        $channel->push('Hello, Coroutine! 2');
+    });
+    go(function() use ($channel) {
+        co::sleep(1);
+        $channel->push('Hello, Coroutine! 3');
+    });
+    go(function() use ($channel) {
+        co::sleep(2);
+        $channel->push('Hello, Coroutine! 4');
+    });
+    go(function() use ($channel) {
+        co::sleep(3);
+        $channel->push('Hello, Coroutine 5!');
+    });
+    $results = [];
+    for ($i = 0; $i < 5; $i++) {
+        $results[] = $channel->pop();
+    }
+    echo "<pre>";
+    print_r($results);
+    echo "</pre>";
 });
 
 $app->route('/home', function() {
