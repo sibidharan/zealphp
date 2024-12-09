@@ -14,6 +14,21 @@ class App
         $this->host = $host;
         $this->port = $port;
         $this->cwd = $cwd;
+
+        //TODO: $_ENV - read from /etc/environment, make this optional?
+        $_ENV = [];
+        if (file_exists('/etc/environment')) {
+            $env = file_get_contents('/etc/environment');
+            $env = explode("\n", $env);
+            foreach ($env as $line) {
+                $line = trim($line);
+                if (empty($line) || strpos($line, '#') === 0) {
+                    continue;
+                }
+                list($key, $value) = explode('=', $line, 2);
+                $_ENV[$key] = $value;
+            }
+        }
     }
 
     public function route($path, $options = [], $handler = null)
@@ -72,21 +87,6 @@ class App
             // $_COOKIE
             $_COOKIE = $request->cookie ?? [];
 
-            // $_ENV - read from /etc/environment, make this optional
-            $_ENV = [];
-            if (file_exists('/etc/environment')) {
-                $env = file_get_contents('/etc/environment');
-                $env = explode("\n", $env);
-                foreach ($env as $line) {
-                    $line = trim($line);
-                    if (empty($line) || strpos($line, '#') === 0) {
-                        continue;
-                    }
-                    list($key, $value) = explode('=', $line, 2);
-                    $_ENV[$key] = $value;
-                }
-            }
-
             // $_FILES
             $_FILES = [];
             if (!empty($request->files)) {
@@ -126,9 +126,6 @@ class App
             $uri = $_SERVER['REQUEST_URI'];
             $method = $_SERVER['REQUEST_METHOD'];
 
-            // $uri = $request->server['request_uri'] ?? '/';
-            // $method = strtoupper($request->server['request_method'] ?? 'GET');
-
             foreach ($this->routes as $route) {
                 // Check if method matches
                 if (!in_array($method, $route['methods'])) {
@@ -141,7 +138,7 @@ class App
 
                     $handler = $route['handler'];
 
-                    // Reflect the handler parameters
+                    // Reflect the handler parameters and inject them dynamically
                     $reflection = is_array($handler)
                         ? new \ReflectionMethod($handler[0], $handler[1])
                         : new \ReflectionFunction($handler);
@@ -151,7 +148,7 @@ class App
                         $pname = $param->getName();
                         if (isset($params[$pname])) {
                             $invokeArgs[] = $params[$pname];
-                        } else if ($pname == 'app') {
+                        } else if ($pname == 'app' || $pname == 'self'){
                             $invokeArgs[] = $this;
                         } else if ($pname == 'request' || $pname == 'req'){
                             $invokeArgs[] = $request;
