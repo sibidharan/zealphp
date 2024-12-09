@@ -47,7 +47,7 @@ $app->nsRoute('api', '{name}', function($name) {
 });
 
 $app->nsPathRoute('api', "{module}/{rquest}", [
-    'methods' => ['GET', 'POST']
+    'methods' => ['GET', 'POST', 'PUT', 'DELETE']
 ], function($module, $rquest, $response){
     $api = new API($response);
     try {
