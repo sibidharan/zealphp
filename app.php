@@ -30,4 +30,8 @@ $app->route('/user/{id}/post/{postId}',[
     return "<h1>User $id, Post $postId</h1>";
 });
 
+$app->namespaceRoute('api', '/get/{key}', function($key){
+    return $_GET[$key] ?? null;
+});
+
 $app->run();

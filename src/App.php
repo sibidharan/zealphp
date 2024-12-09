@@ -58,6 +58,38 @@ class App
         ];
     }
 
+    /**
+     * Define a route under a specific namespace.
+     * e.g. $app->namespaceRoute('api', '/users', ['methods' => ['GET']], fn() => "User list");
+     * This will create a route at /api/users
+     */
+    public function namespaceRoute($namespace, $path, $options = [], $handler = null)
+    {
+        // If only two arguments are provided, assume second is handler and no options.
+        if (is_callable($options) && $handler === null) {
+            $handler = $options;
+            $options = [];
+        }
+
+        // Prepend the namespace prefix to the path
+        $namespace = trim($namespace, '/');
+        $path = '/' . $namespace . '/' . ltrim($path, '/');
+
+        // Default methods to GET if not specified
+        $methods = $options['methods'] ?? ['GET'];
+
+        // Convert {param} style placeholders
+        $pattern = preg_replace('/\{([^}]+)\}/', '(?P<$1>[^/]+)', $path);
+        $pattern = "#^" . $pattern . "$#";
+
+        $this->routes[] = [
+            'pattern' => $pattern,
+            'methods' => array_map('strtoupper', $methods),
+            'handler' => $handler,
+            // endpoint, strict_slashes etc. can also be handled similarly as in route()
+        ];
+    }
+
     public function run($settings = null)
     {
         $default_settings = [
