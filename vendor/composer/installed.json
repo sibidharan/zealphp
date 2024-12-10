@@ -75,6 +75,48 @@
             "install-path": "../openswoole/core"
         },
         {
+            "name": "openswoole/ide-helper",
+            "version": "22.0.1",
+            "version_normalized": "22.0.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/openswoole/ide-helper.git",
+                "reference": "43fc13f3cc3212784822103efeec82829f6f22f5"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/openswoole/ide-helper/zipball/43fc13f3cc3212784822103efeec82829f6f22f5",
+                "reference": "43fc13f3cc3212784822103efeec82829f6f22f5",
+                "shasum": ""
+            },
+            "require": {
+                "ext-openswoole": ">=22.0",
+                "php": ">=7.4"
+            },
+            "require-dev": {
+                "friendsofphp/php-cs-fixer": "^3.6"
+            },
+            "time": "2023-02-05T22:27:37+00:00",
+            "type": "library",
+            "installation-source": "dist",
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "Apache-2.0"
+            ],
+            "authors": [
+                {
+                    "name": "OpenSwoole Group",
+                    "email": "hello@openswoole.com"
+                }
+            ],
+            "description": "IDE helper for OpenSwoole.",
+            "support": {
+                "issues": "https://github.com/openswoole/ide-helper/issues",
+                "source": "https://github.com/openswoole/ide-helper/tree/22.0.1"
+            },
+            "install-path": "../openswoole/ide-helper"
+        },
+        {
             "name": "psr/http-message",
             "version": "2.0",
             "version_normalized": "2.0.0.0",
@@ -248,6 +290,41 @@
                 "source": "https://github.com/php-fig/http-server-middleware/tree/1.0.2"
             },
             "install-path": "../psr/http-server-middleware"
+        },
+        {
+            "name": "swoole/ide-helper",
+            "version": "5.0.3",
+            "version_normalized": "5.0.3.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/swoole/ide-helper.git",
+                "reference": "4b6e615cb27c251b6248b8bd9501edbd02a45c18"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/swoole/ide-helper/zipball/4b6e615cb27c251b6248b8bd9501edbd02a45c18",
+                "reference": "4b6e615cb27c251b6248b8bd9501edbd02a45c18",
+                "shasum": ""
+            },
+            "time": "2023-04-28T22:20:18+00:00",
+            "type": "library",
+            "installation-source": "dist",
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "Apache-2.0"
+            ],
+            "authors": [
+                {
+                    "name": "Team Swoole",
+                    "email": "team@swoole.com"
+                }
+            ],
+            "description": "IDE help files for Swoole.",
+            "support": {
+                "issues": "https://github.com/swoole/ide-helper/issues",
+                "source": "https://github.com/swoole/ide-helper/tree/5.0.3"
+            },
+            "install-path": "../swoole/ide-helper"
         }
     ],
     "dev": true,

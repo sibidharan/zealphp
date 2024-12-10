@@ -14,4 +14,9 @@ Baby steps needed to configure ZealPHP Project
     >>> ZealPHP server running at http://0.0.0.0:9501
 
 5. Add `swoole` to Intelephense stubs 
-sudo
+
+6. Make sure you have included the openswoole ide-helper https://github.com/openswoole/ide-helper in the includePaths:
+
+"intelephense.environment.includePaths": [
+  "vendor/openswoole/ide-helper"
+]

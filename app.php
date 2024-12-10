@@ -2,10 +2,10 @@
 
 require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__ . '/src/App.php';
-use OpenSwoole\Coroutine as Co;
+use OpenSwoole\Coroutine as co;
 use OpenSwoole\Coroutine\Channel;
 use ZealPHP\App;
-use ZealPHP\Render;
+
 $app = new App(__DIR__);
 
 $app->route('/', function() {

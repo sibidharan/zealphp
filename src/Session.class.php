@@ -122,7 +122,7 @@ class Session
     {
         Session::$documentRoot = $_SERVER['DOCUMENT_ROOT'];
         if (php_sapi_name() == "cli" and StringUtils::str_ends_with($_SERVER['PHP_SELF'], 'worker.php')) {
-            parse_str(implode('&', array_slice($_SERVER['argv'], 1)), $_GET);
+            parse_str(implode('&', array_slice((array)$_SERVER['argv'], 1)), $_GET);
             if (isset($_GET['sessid'])) {
                 // logit("Trying to reconstruct session ID from $_GET[sessid]", "fatal");
                 session_id($_GET['sessid']);
