@@ -1,9 +1,9 @@
 # Zeal PHP - an opensource PHP framework that runs on OpenSwoole
 
-A powerful light weight opensource alternate to NextJS - that uses OpenSwoole's Coroutine Capabalities to do everything NextJS can and do much more. 
+A powerful light weight opensource alternative to NextJS - that uses OpenSwoole's Coroutine Capabalities to do everything NextJS can and do much more. 
 
 Features:
-1. Dynamic HTML Streaming
+1. Dynamic HTML Streaming with APIs and Sockets
 2. Parallel Data Fetching and Processing (Use go() to run async coroutine)
 3. Dynamic Routing Tree with Implicit Routes for Public and API 
 4. Programmable and Injectable Routes for Authentication

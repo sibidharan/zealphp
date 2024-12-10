@@ -368,7 +368,7 @@ class App
             $response->status(404);
             $response->end("<h1>404 Not Found</h1>");
         }));
-
+        error_log("ZealPHP Server started at http://{$this->host}:{$this->port}");
         $server->start();
     }
 }
