@@ -66,7 +66,7 @@ class App
     protected $port;
     static $cwd;
 
-    public function __construct($cwd = __DIR__, $host = '0.0.0.0', $port = 9501)
+    public function __construct($cwd = __DIR__, $host = '0.0.0.0', $port = 8080)
     {
         $this->host = $host;
         $this->port = $port;
@@ -288,8 +288,10 @@ class App
         }
     }
 
-    public function run($settings = null)
+    public function run($host="0.0.0.0", $port="8080", $settings = null)
     {
+        $this->host = $host;
+        $this->port = $port;
         $default_settings = [
             'enable_static_handler' => true,
             'document_root' => self::$cwd . '/public',
