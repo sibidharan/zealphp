@@ -212,6 +212,15 @@ class App
         }
     }
 
+    public function includeCheck($abs_file){
+        error_log("Checking file: $abs_file inside ".self::$cwd);
+        if (!$abs_file || strpos($abs_file, self::$cwd) !== 0) {
+            return false; //May be operating outside the public directory
+        } else {
+            return true;
+        }
+    }
+
     public function run($settings = null)
     {
         $default_settings = [
@@ -255,7 +264,8 @@ class App
             $response->write("<h1>403 Forbidden</h1>");
         });
 
-        $this->route('/{file}', function($file, $response){
+        $this->route('/', function($response){
+            $file = 'index';
             $_SERVER['PHP_SELF'] = '/'.$file.'.php';
             $abs_file = self::$cwd."/public/".$file.".php";
             if(file_exists($abs_file)){
@@ -263,24 +273,65 @@ class App
             } else {
                 //TODO: Can load user page here if file not found
                 $response->status(404);
-                echo("<h1>404 Not Found</h1>");
+                echo("<pre>404 Not Found</pre>");
             }
         });
 
-        $this->nsPathRoute('{file}', '{path}', function($file, $path, $response){
-            $_SERVER['PHP_SELF'] = '/'.$file.'/'.$path.'.php';
-            $abs_file = self::$cwd."/public/".$file.'/'.$path.'.php';
+        # Gobal route for all root in the public directory
+        $this->route('/{file}', function($file, $response){
+            $_SERVER['PHP_SELF'] = '/'.$file.'.php';
+            $abs_file = realpath(self::$cwd."/public/".$file.'.php');
             if(file_exists($abs_file)){
-                include $abs_file;
+                if ($this->includeCheck($abs_file)){
+                    include $abs_file;
+                } else {
+                    $response->status(403);
+                    echo("<pre>403 Forbidden</pre>");
+                }
+            } else if(is_dir(self::$cwd."/public/".$file)){
+                $abs_file = realpath(self::$cwd."/public/".$file."/index.php");
+                if(file_exists($abs_file)){
+                    if ($this->includeCheck($abs_file)){
+                        include $abs_file;
+                    } else {
+                        $response->status(403);
+                        echo("<pre>403 Forbidden here</pre>");
+                    }
+                } else {
+                    $response->status(404);
+                    echo("<pre>404 Not Found</pre>");
+                }
             } else {
                 //TODO: Can load user page here if file not found
                 $response->status(404);
-                echo("<h1>404 Not Found</h1>");
+                echo("<pre>404 Not Found</pre>");
+            }
+        });
+
+        # Gobal route for all files in the public directory
+        $this->nsPathRoute('{file}', '{path}', function($file, $path, $response){
+            // error_log("File: $file, Path: $path");
+            $_SERVER['PHP_SELF'] = '/'.$file.'/'.$path.'.php';
+            $abs_file = realpath(self::$cwd."/public/".$file.'/'.$path.'.php');
+            // error_log("Abs File: $abs_file");
+            if(file_exists($abs_file)){
+                include $abs_file;
+            } else if(is_dir(self::$cwd."/public/".$file.'/'.$path)){
+                $abs_path = self::$cwd."/public/".$file.'/'.$path."/index.php";
+                if(file_exists($abs_path)){
+                    include $abs_path;
+                } else {
+                    $response->status(404);
+                    echo("<pre>404 Not Found</pre>");
+                }
+            } else {
+                //TODO: Can load user page here if file not found
+                $response->status(404);
+                echo("<pre>404 Not Found</pre>");
             }
         });
 
         $server->on("request", new SessionManager(function($request, $response) {
-            // Fill PHP superglobals with Swoole request object
 
             // $_GET
             $_GET = $request->get ?? [];
@@ -346,6 +397,7 @@ class App
 
                 // Check if URI matches
                 if (preg_match($route['pattern'], $uri, $matches)) {
+                    // error_log("Matched route: $uri, $route[pattern]");
                     $params = array_filter($matches, fn($k) => !is_numeric($k), ARRAY_FILTER_USE_KEY);
 
                     $handler = $route['handler'];
@@ -382,7 +434,7 @@ class App
 
             // 404 if no match
             $response->status(404);
-            $response->end("<h1>404 Not Found</h1>");
+            $response->end("<pre>404 Not Found</pre>");
         }));
         error_log("ZealPHP server running at http://{$this->host}:{$this->port}");
         $server->start();
