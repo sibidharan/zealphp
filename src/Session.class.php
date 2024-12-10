@@ -5,7 +5,7 @@ require_once __DIR__ . '/SessionManager.class.php';
 /**
  * Session class is a bunch of static methods helpful for easy handling of the session.
  */
-$_SERVER['UNIQUE_ID'] = uniqidReal();
+$_SESSION['UNIQUE_REQUEST_ID'] = uniqidReal();
 class Session
 {
     /**
@@ -188,6 +188,11 @@ class Session
         return null;
     }
 
+    public static function getUserSession()
+    {
+        return Session::$userSession;
+    }
+
     public static function getUserID()
     {
         return empty(Session::getUserSession()) ? null : Session::getUserSession()->getUser()->getID(false);
@@ -239,191 +244,6 @@ class Session
         }
     }
 
-    /**
-     *
-     * @param String $key   Key for the value
-     * @param Any $value Value can be of any type.
-     */
-    public static function addMetaTag($tag)
-    {
-        if (!Session::get('meta-processed')) {
-            if (is_array($tag)) {
-                array_push(Session::$meta, $tag);
-            }
-        } else {
-            trigger_error("Unable to add meta tags after Session::loadMaster() has been called", E_USER_WARNING);
-        }
-    }
-
-    public static function bcPush($name, $link = null)
-    {
-        if (empty($link)) {
-            $link = $_SERVER['REQUEST_URI'];
-        }
-        $bc = Session::get('breadcrumbs', array());
-        $breadcrumb = [
-            "name" => $name,
-            "uri" => $link
-        ];
-        if (empty($bc)) {
-            $bc = [
-                $breadcrumb
-            ];
-        } else {
-            if (is_array($bc)) {
-                if (!in_array($breadcrumb, $bc)) {
-                    array_push($bc, $breadcrumb);
-                } else {
-                    $key = array_search($breadcrumb, $bc);
-                    //Console::log("Found and replaced: ".$key);
-                    $bc = array_slice($bc, 0, $key + 1);
-                }
-            }
-        }
-        Session::set('breadcrumbs', $bc);
-    }
-
-    public static function bcClear()
-    {
-        Session::set('breadcrumbs', array());
-    }
-
-    public static function bcPop($length = 2)
-    {
-        $bc = Session::get('breadcrumbs', array());
-        if (is_array($bc) and count($bc) > $length) {
-            array_pop($bc);
-        }
-        Session::set('breadcrumbs', $bc);
-    }
-
-    /**
-     * Used internally, this chooses what page to be generated depending on the $authStatus.
-     *
-     * For example, profile.php exists at htdocs.
-     * While loading master from the profile.php, it looks for the template at /bin/templates/profile.php.
-     * Here, the file can be named against it's status like profile[default].php or profile[loggedin].php,
-     * and this method will automatically generates the appropriate page body.
-     * @return [type] [description]
-     */
-    public static function generatePageBody()
-    {
-        $self = explode('.', $_SERVER['PHP_SELF']);
-        array_pop($self);
-        $self = implode('.', $self);
-        $self = explode('/', $self);
-        $self = array_pop($self);
-        if (Session::getAuthStatus() == true) {
-            if (file_exists(__DIR__ . '/../template/' . $self . ".php")) {
-                include __DIR__ . '/../template/' . $self . ".php";
-            } else {
-                include __DIR__ . '/../template/' . "_error.php"; //TODO: Enhance error handling
-            }
-        } else {
-            logw($self, "session");
-            
-        }
-    }
-
-    /**
-     * This method has to be called from the caller file from the htdocs root.
-     * It is essencial for the page to get loaded.
-     * @return null
-     */
-    public static function loadMaster($_data = array())
-    {
-        extract($_data, EXTR_SKIP);
-        include __DIR__ . '/../template/_master.php';
-    }
-
-    /**
-     * This method has to be called from the caller file from the htdocs root.
-     * It is essencial for the page to get loaded.
-     * @return null
-     */
-    public static function loadPortfolioMaster($_data = array())
-    {
-        extract($_data, EXTR_SKIP);
-        include __DIR__ . '/../template/_portfolio_master.php';
-    }
-
-
-    /**
-     * Used internally from _master.php, this method is responsible for generating the page footer.
-     * @return null
-     */
-    public static function generateFooter()
-    {
-        include __DIR__ . '/../template/_footer.php';
-    }
-
-    /**
-     * Used internally from _master.php, this method is responsible for generating the page footer.
-     * @return null
-     */
-    public static function generateMetaTags()
-    {
-        include __DIR__ . '/../template/_meta.php';
-    }
-
-    /**
-     * This template is different from the /bin/template folder, but used to load additional templaces accorss the current file. For example, domain/interets will load /src/template/<currentfile>.php. If you want to load different templates, you can program the /bin/template/<currentfile>.php to load the templaces from <currentfile> folder under the same directory, it will load /src/template/<currentfile>/index.php or any other which you specify.
-     *
-     * In some cases, we need to have more than one template loaded in same page for different URL parameters. You can add multiple php files in the /src/template/<currentfile> folder, and you can use this method to load them in place. Best example, please check /src/template/interests.php and all the files under /bin/template/interests (folder), and how they are loaded with respect th the parameter using this loadTemplate() method from within the template itself.
-     *
-     * When $general is set to true, the lookup happen fromn the root of the template, that is the template folder itself.
-     * @param  String $_template
-     * @return null
-     */
-    public static function loadTemplate($_template = 'index', $_data = [])
-    {
-        $_source = Session::getCurrentFile(null);
-        extract($_data, EXTR_SKIP);
-        //This function returns the current script to build the template path.
-        $_general = strpos($_template, '/') === 0;
-        if ($_template == '_error') {
-            include __DIR__ . '/../template/' . $_template . '.php';
-        } elseif ($_general) {
-            if (!file_exists(__DIR__ . '/../template/' . $_template . '.php')) {
-                $bt = debug_backtrace();
-                $caller = array_shift($bt);
-                throw new TemplateUnavailableException("The template $_template does not exist on line " . $caller['line'] . " in file " . $caller['file'] . ".");
-            }
-            include __DIR__ . '/../template/' . $_template . '.php';
-        } else {
-            if (!file_exists(__DIR__ . '/../template/' . $_source . '/' . $_template . '.php')) {
-                $bt = debug_backtrace();
-                $caller = array_shift($bt);
-                throw new TemplateUnavailableException("The template $_template does not exist on line " . $caller['line'] . " in file " . $caller['file'] . ".");
-            }
-            include __DIR__ . '/../template/' . $_source . '/' . $_template . '.php';
-        }
-    }
-
-    public static function templateExists($_template, $general = false, $_source = null)
-    {
-        $_source = Session::getCurrentFile($_source);
-        if ($_template == "_error") {
-            return true;
-        } elseif ($general) {
-            if (!file_exists(__DIR__ . '/../template/' . $_template . '.php')) {
-                return false;
-            }
-            return true;
-        } else {
-            if (!file_exists(__DIR__ . '/../template/' . $_source . '/' . $_template . '.php')) {
-                return false;
-            }
-            return true;
-        }
-    }
-
-    public static function loadErrorPage()
-    {
-        Session::set('brokenPage', true);
-        Session::set('footer', false);
-        Session::loadMaster();
-    }
 
     /**
      * To display the errors in the webpages
@@ -479,53 +299,9 @@ class Session
         return basename($_SERVER['REDIRECT_URL']);
     }
 
-    public static function getProcessorCount()
-    {
-        $ncpu = Cache::get('processor_count');
-        if ($ncpu) {
-            return $ncpu;
-        } else {
-            $cpus = file_get_contents('/sys/devices/system/cpu/online');
-            $ncpu = (int)explode('-', $cpus)[1] + 1;
-            Cache::set('processor_count', $ncpu);
-            return $ncpu;
-        }
-    }
-
     public function getEnvironment()
     {
         return $this->environment;
-    }
-
-    public function isBeta()
-    {
-    }
-
-    public function isProd()
-    {
-    }
-
-    public function isAlpha()
-    {
-    }
-
-    /**
-     * Get generated at the WebAPI on the page load. It is one of the first things to get processed. If cookie information is present, it automatically generates all the session information about the current user(if logged in).
-     *
-     * @return  UserSession
-     */
-    public static function getUserSession()
-    {
-        return Session::$userSession;
-    }
-
-    public static function isAdmin()
-    {
-        if (isset($_SESSION['profile']) and Session::get('has_lab_access') and in_array(get_config('admin_group'), $_SESSION['profile']->groups)) {
-            return true;
-        } else {
-            return false;
-        }
     }
 
     /**
@@ -546,29 +322,6 @@ class Session
         return Session::$authStatus == 'success';
     }
 
-    public static function parseCss($file)
-    {
-        $css = file_get_contents($file);
-        preg_match_all('/(?ims)([a-z0-9\s\.\:#_\-@,]+)\{([^\}]*)\}/', $css, $arr);
-        $result = array();
-        foreach ($arr[0] as $i => $x) {
-            $selector = trim($arr[1][$i]);
-            $rules = explode(';', trim($arr[2][$i]));
-            $rules_arr = array();
-            foreach ($rules as $strRule) {
-                if (!empty($strRule)) {
-                    $rule = explode(":", $strRule);
-                    $rules_arr[trim($rule[0])] = trim($rule[1]);
-                }
-            }
-
-            $selectors = explode(',', trim($selector));
-            foreach ($selectors as $strSel) {
-                $result[$strSel] = $rules_arr;
-            }
-        }
-        return $result;
-    }
 }
 
 function uniqidReal($length = 13)
@@ -657,60 +410,14 @@ function get_config($key)
     }
 }
 
-function logw($log, $tag = "system", $filter = null, $invert_filter = false)
+function get_current_render_time()
 {
-    if ($filter != null and !StringUtils::str_contains($_SERVER['REQUEST_URI'], $filter)) {
-        return;
-    }
-    if ($filter != null and $invert_filter) {
-        return;
-    }
-
-    if(get_class(Session::getUser()) == "User") {
-        $user = Session::getUser()->getUsername();
-    } else {
-        $user = 'worker';
-    }
-
-    if (!isset($_SERVER['REQUEST_URI'])) {
-        $_SERVER['REQUEST_URI'] = 'cli';
-    }
-
-    $bt = debug_backtrace();
-    $caller = array_shift($bt);
-
-    $haystack = $_SERVER['PHP_SELF'];
-    $needle = 'worker.php';
-    $length = strlen($needle);
-    if (substr($haystack, -$length) === $needle) {
-        $_SERVER['SCRIPT_NAME'] = 'worker:' . basename($_SERVER['PHP_SELF']);
-        $_SERVER['REQUEST_URI'] = "";
-        $_SERVER['UNIQUE_ID'] = uniqidReal();
-    }
-    if (class_exists('Session') and (in_array($tag, ["cust_lnch", "dev"]))) {
-        $date = date('l jS F Y h:i:s A');
-        //$date = date('h:i:s A');
-        if (is_object($log)) {
-            $log = purify_array($log);
-        }
-        if (is_array($log)) {
-            $log = json_encode($log, JSON_PRETTY_PRINT);
-        }
-        if (error_log(
-            '[*] #' . $tag . ' [' . $date . '] ' . " Request ID: $_SERVER[UNIQUE_ID]\n" .
-                '    URL: ' . $_SERVER['SCRIPT_NAME'] . $_SERVER['REQUEST_URI'] . " \n" .
-                '    Caller: ' . $caller['file'] . ':' . $caller['line'] . "\n" .
-                '    Render time: ' . get_current_render_time() . ' sec' . " \n" .
-                "    Message: \n" . indent($log) . "\n\n",
-            3,
-            get_config('app_log')
-        )) {
-        }
-    }
-}
-
-function get_current_render_time(){
-    return "NOT IMPLEMENTED";
+    $time = microtime();
+    $time = explode(' ', $time);
+    $time = $time[1] + $time[0];
+    $finish = $time;
+    $total_time = number_format(($finish - $_SESSION['__start_time']), 4);
+    return $total_time;
 }
 
 

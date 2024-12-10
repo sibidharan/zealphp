@@ -5,7 +5,8 @@ declare(strict_types=1);
  * See LICENSE.txt for license details.
  */
 namespace ZealPHP\Session;
-
+use function ZealPHP\zlog;
+use function ZealPHP\uniqidReal;
 class SessionManager
 {
     /**
@@ -60,6 +61,7 @@ class SessionManager
         // error_log('SessionManager::__invoke session_id: ' . session_id());
 
         session_start();
+
         // error_log('SessionManager:: session_start');
         if ($this->useCookies) {
             $cookie = session_get_cookie_params();
@@ -74,6 +76,12 @@ class SessionManager
             );
         }
         try {
+            $time = microtime();
+            $time = explode(' ', $time);
+            $time = $time[1] + $time[0];
+            $_SESSION['__start_time'] = $time;
+            $_SESSION['UNIQUE_REQUEST_ID'] = uniqidReal();
+            // zlog("SessionManager:: session_id: " . session_id() . " session_start: " . $_SESSION['__start_time']. " UNIQUE_ID: " . $_SESSION['UNIQUE_REQUEST_ID']);
             call_user_func($this->middleware, $request, $response);
             // error_log('SessionManager:: middleware executed');
         } finally {

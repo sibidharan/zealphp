@@ -1,7 +1,23 @@
 {
+    "name": "sibidharan/zealphp",
+    "description": "A dynamic PHP web development framework built with OpenSwoole.",
+    "type": "library",
+    "license": "MIT",
     "require": {
+        "php": ">=7.4",
         "openswoole/core": "22.1.5",
         "swoole/ide-helper": "~5.0.0",
         "openswoole/ide-helper": "~22.0.1"
-    }
+    },
+    "autoload": {
+        "psr-4": {
+            "ZealPHP\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Sibidharan",
+            "email": "sibi.nandhu@gmail.com"
+        }
+    ]
 }

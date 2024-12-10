@@ -11,9 +11,52 @@ use ZealPHP\Session;
 use ZealPHP\Session\SessionManager;
 use ZealPHP\API;
 
+global $__start;
 
 function zapi($filename){
     return basename($filename, '.php');
+}
+
+function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
+{
+    if ($filter != null and !StringUtils::str_contains($_SERVER['REQUEST_URI'], $filter)) {
+        return;
+    }
+    if ($filter != null and $invert_filter) {
+        return;
+    }
+
+    // if(get_class(Session::getUser()) == "User") {
+    //     $user = Session::getUser()->getUsername();
+    // } else {
+    //     $user = 'worker';
+    // }
+
+    if (!isset($_SERVER['REQUEST_URI'])) {
+        $_SERVER['REQUEST_URI'] = 'cli';
+    }
+
+    $bt = debug_backtrace();
+    $caller = array_shift($bt);
+
+    if ((in_array($tag, ["system", "fatal", "error", "warning", "info", "debug"]))) {
+        $date = date('l jS F Y h:i:s A');
+        //$date = date('h:i:s A');
+        if (is_object($log)) {
+            $log = purify_array($log);
+        }
+        if (is_array($log)) {
+            $log = json_encode($log, JSON_PRETTY_PRINT);
+        }
+        if (error_log(
+            '[*] #' . $tag . ' [' . $date . '] ' . " Request ID: $_SESSION[UNIQUE_REQUEST_ID]\n" .
+                '    URL: ' . $_SERVER['REQUEST_URI'] . " \n" .
+                '    Caller: ' . $caller['file'] . ':' . $caller['line'] . "\n" .
+                '    Timer: ' . get_current_render_time() . ' sec' . " \n" .
+                "    Message: \n" . indent($log) . "\n\n"
+        )) {
+        }
+    }
 }
 
 class App
@@ -187,6 +230,30 @@ class App
         ];
     }
 
+    public static function parseCss($file)
+    {
+        $css = file_get_contents($file);
+        preg_match_all('/(?ims)([a-z0-9\s\.\:#_\-@,]+)\{([^\}]*)\}/', $css, $arr);
+        $result = array();
+        foreach ($arr[0] as $i => $x) {
+            $selector = trim($arr[1][$i]);
+            $rules = explode(';', trim($arr[2][$i]));
+            $rules_arr = array();
+            foreach ($rules as $strRule) {
+                if (!empty($strRule)) {
+                    $rule = explode(":", $strRule);
+                    $rules_arr[trim($rule[0])] = trim($rule[1]);
+                }
+            }
+
+            $selectors = explode(',', trim($selector));
+            foreach ($selectors as $strSel) {
+                $result[$strSel] = $rules_arr;
+            }
+        }
+        return $result;
+    }
+
     public static function render($_template = 'index', $_data = [])
     {
         $_source = Session::getCurrentFile(null);
@@ -213,8 +280,8 @@ class App
     }
 
     public function includeCheck($abs_file){
-        error_log("Checking file: $abs_file inside ".self::$cwd);
-        if (!$abs_file || strpos($abs_file, self::$cwd) !== 0) {
+        // error_log("Checking file: $abs_file inside ".self::$cwd);
+        if (!$abs_file || strpos($abs_file, self::$cwd."/public") !== 0) {
             return false; //May be operating outside the public directory
         } else {
             return true;
@@ -332,7 +399,6 @@ class App
         });
 
         $server->on("request", new SessionManager(function($request, $response) {
-
             // $_GET
             $_GET = $request->get ?? [];
 
