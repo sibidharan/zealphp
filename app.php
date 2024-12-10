@@ -8,11 +8,11 @@ use ZealPHP\App;
 
 use function ZealPHP\zlog;
 
-$app = new App(__DIR__, '0.0.0.0', 8181);
+$app = App::init(__DIR__, '0.0.0.0', 8181);
 
 $app->route('/', function() {
     zlog("App started", "system");
-    echo "<h1>This is home override</h1>";
+    echo "<h1>This is index override</h1>";
 });
 
 $app->route('/co', function() {
@@ -98,4 +98,4 @@ $app->patternRoute('/raw/(?P<rest>.*)', ['methods' => ['GET']], function($rest) 
 // });
 
 
-$app->run('0.0.0.0', 8181);
+$app->run();

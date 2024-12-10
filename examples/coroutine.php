@@ -1,5 +1,5 @@
 <?php
-use OpenSwoole\Coroutine;
+use OpenSwoole\Coroutine as co;
 use OpenSwoole\Coroutine\Http\Client;
 use OpenSwoole\Coroutine\Channel;
 

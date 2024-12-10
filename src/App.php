@@ -65,8 +65,9 @@ class App
     protected $host;
     protected $port;
     static $cwd;
+    private static $instance = null;
 
-    public function __construct($cwd = __DIR__, $host = '0.0.0.0', $port = 8080)
+    private function __construct($cwd = __DIR__, $host = '0.0.0.0', $port = 8080)
     {
         $this->host = $host;
         $this->port = $port;
@@ -86,6 +87,29 @@ class App
                 $_ENV[$key] = $value;
             }
         }
+    }
+
+    public static function init($cwd = __DIR__, $host = '0.0.0.0', $port = 8080)
+    {
+        if (self::$instance == null) {
+            self::$instance = new App($cwd, $host, $port);
+        }
+        return self::$instance;
+    }
+
+    public static function instance()
+    {
+        return self::$instance;
+    }
+
+    // Prevent the instance from being cloned.
+    private function __clone()
+    {
+    }
+
+    // Prevent from being unserialized.
+    public function __wakeup()
+    {
     }
 
     public function route($path, $options = [], $handler = null)
@@ -303,6 +327,15 @@ class App
             $server->set($settings);
         }
 
+        # Include all files in route directory and its sub directories
+
+        $route_files = glob(self::$cwd."/route/*.php");
+        foreach ($route_files as $route_file) {
+            error_log("Including route file: $route_file");
+            include $route_file;
+        }
+
+        # Implicit route for including APIs
         $this->nsPathRoute('api', "{rquest}", [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE']
         ], function($rquest, $response, $request){
@@ -326,10 +359,14 @@ class App
             }
         });
 
+        # Implicit route for ignoring PHP extensions
+
         $this->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
             $response->status(403);
             $response->write("<h1>403 Forbidden</h1>");
         });
+
+        # Implicit route for index.php
 
         $this->route('/', function($response){
             $file = 'index';
@@ -508,7 +545,7 @@ class App
             $response->status(404);
             $response->end("<pre>404 Not Found</pre>");
         }));
-        error_log("ZealPHP server running at http://{$this->host}:{$this->port}");
+        error_log("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
         $server->start();
     }
 }
