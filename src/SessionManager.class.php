@@ -49,6 +49,7 @@ class SessionManager
     public function __invoke(\Swoole\Http\Request $request, \Swoole\Http\Response $response)
     {
         // error_log('SessionManager::__invoke');
+        unset($_SESSION);
         $sessionName = session_name();
         if ($this->useCookies && isset($request->cookie[$sessionName])) {
             $sessionId = $request->cookie[$sessionName];

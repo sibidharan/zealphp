@@ -8,7 +8,7 @@ use ZealPHP\App;
 
 use function ZealPHP\zlog;
 
-$app = new App(__DIR__);
+$app = new App(__DIR__, '0.0.0.0', 8181);
 
 $app->route('/', function() {
     zlog("App started", "system");
@@ -98,4 +98,4 @@ $app->patternRoute('/raw/(?P<rest>.*)', ['methods' => ['GET']], function($rest) 
 // });
 
 
-$app->run();
+$app->run('0.0.0.0', 8181);

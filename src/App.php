@@ -288,10 +288,8 @@ class App
         }
     }
 
-    public function run($host="0.0.0.0", $port="8080", $settings = null)
+    public function run($settings = null)
     {
-        $this->host = $host;
-        $this->port = $port;
         $default_settings = [
             'enable_static_handler' => true,
             'document_root' => self::$cwd . '/public',
@@ -402,24 +400,30 @@ class App
 
         $server->on("request", new SessionManager(function($request, $response) {
             // $_GET
+            unset($_GET);
             $_GET = $request->get ?? [];
 
             // $_POST
+            unset($_POST);
             $_POST = $request->post ?? [];
 
             //$_REQUEST
+            unset($_REQUEST);
             $_REQUEST = array_merge($_GET, $_POST);
 
             // $_COOKIE
+            unset($_COOKIE);
             $_COOKIE = $request->cookie ?? [];
 
             // $_FILES
+            unset($_FILES);
             $_FILES = [];
             if (!empty($request->files)) {
                 $_FILES = $request->files;
             }
 
             // $_SERVER
+            unset($_SERVER);
             $_SERVER = [];
             if (!empty($request->server)) {
                 foreach ($request->server as $key => $value) {
