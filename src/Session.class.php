@@ -5,7 +5,6 @@ require_once __DIR__ . '/SessionManager.class.php';
 /**
  * Session class is a bunch of static methods helpful for easy handling of the session.
  */
-$_SESSION['UNIQUE_REQUEST_ID'] = uniqidReal();
 class Session
 {
     /**
@@ -407,6 +406,56 @@ function get_config($key)
         return $array[$key];
     } else {
         return null;
+    }
+}
+
+function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
+{
+    if ($filter != null and !StringUtils::str_contains($_SERVER['REQUEST_URI'], $filter)) {
+        return;
+    }
+    if ($filter != null and $invert_filter) {
+        return;
+    }
+
+    // if(get_class(Session::getUser()) == "User") {
+    //     $user = Session::getUser()->getUsername();
+    // } else {
+    //     $user = 'worker';
+    // }
+
+    if (!isset($_SERVER['REQUEST_URI'])) {
+        $_SERVER['REQUEST_URI'] = 'cli';
+    }
+
+    $bt = debug_backtrace();
+    $caller = array_shift($bt);
+
+    $haystack = $_SERVER['PHP_SELF'];
+    $needle = 'worker.php';
+    $length = strlen($needle);
+    if (substr($haystack, -$length) === $needle) {
+        $_SERVER['SCRIPT_NAME'] = 'worker:' . basename($_SERVER['PHP_SELF']);
+        $_SERVER['REQUEST_URI'] = "";
+        $_SESSION['UNIQUE_REQUEST_ID'] = uniqidReal();
+    }
+    if ((in_array($tag, ["system", "fatal", "error", "warning", "info", "debug"]))) {
+        $date = date('l jS F Y h:i:s A');
+        //$date = date('h:i:s A');
+        if (is_object($log)) {
+            $log = purify_array($log);
+        }
+        if (is_array($log)) {
+            $log = json_encode($log, JSON_PRETTY_PRINT);
+        }
+        if (error_log(
+            '[*] #' . $tag . ' [' . $date . '] ' . " Request ID: $_SERVER[UNIQUE_ID]\n" .
+                '    URL: ' . $_SERVER['REQUEST_URI'] . " \n" .
+                '    Caller: ' . $caller['file'] . ':' . $caller['line'] . "\n" .
+                '    Render time: ' . get_current_render_time() . ' sec' . " \n" .
+                "    Message: \n" . indent($log) . "\n\n"
+        )) {
+        }
     }
 }
 

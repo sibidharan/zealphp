@@ -11,6 +11,10 @@ class ComposerStaticInit1b6fbb16024c07a28729efcdf1b64e92
     );
 
     public static $prefixLengthsPsr4 = array (
+        'Z' => 
+        array (
+            'ZealPHP\\' => 8,
+        ),
         'P' => 
         array (
             'Psr\\Http\\Server\\' => 16,
@@ -23,6 +27,10 @@ class ComposerStaticInit1b6fbb16024c07a28729efcdf1b64e92
     );
 
     public static $prefixDirsPsr4 = array (
+        'ZealPHP\\' => 
+        array (
+            0 => __DIR__ . '/../..' . '/src',
+        ),
         'Psr\\Http\\Server\\' => 
         array (
             0 => __DIR__ . '/..' . '/psr/http-server-handler/src',

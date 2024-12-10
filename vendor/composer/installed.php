@@ -1,24 +1,15 @@
 <?php return array(
     'root' => array(
-        'name' => '__root__',
+        'name' => 'sibidharan/zealphp',
         'pretty_version' => 'dev-master',
         'version' => 'dev-master',
-        'reference' => '98b81ae5f51b2d4b4abb848d172a4b78a3497259',
+        'reference' => '2d25fb9db7d87af61eb424ec010de2eb4d57913f',
         'type' => 'library',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
         'dev' => true,
     ),
     'versions' => array(
-        '__root__' => array(
-            'pretty_version' => 'dev-master',
-            'version' => 'dev-master',
-            'reference' => '98b81ae5f51b2d4b4abb848d172a4b78a3497259',
-            'type' => 'library',
-            'install_path' => __DIR__ . '/../../',
-            'aliases' => array(),
-            'dev_requirement' => false,
-        ),
         'openswoole/core' => array(
             'pretty_version' => '22.1.5',
             'version' => '22.1.5.0',
@@ -61,6 +52,15 @@
             'reference' => 'c1481f747daaa6a0782775cd6a8c26a1bf4a3829',
             'type' => 'library',
             'install_path' => __DIR__ . '/../psr/http-server-middleware',
+            'aliases' => array(),
+            'dev_requirement' => false,
+        ),
+        'sibidharan/zealphp' => array(
+            'pretty_version' => 'dev-master',
+            'version' => 'dev-master',
+            'reference' => '2d25fb9db7d87af61eb424ec010de2eb4d57913f',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
             'dev_requirement' => false,
         ),
