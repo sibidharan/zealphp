@@ -9,8 +9,8 @@ use ZealPHP\App;
 
     <!-- Header Section -->
     <header>
-        <h1>My Website</h1>
-        <p>Welcome to my awesome website!</p>
+        <h1><?=$title?></h1>
+        <p><?=$description?></p>
     </header>
 
     <?App::render('/home/content');?>

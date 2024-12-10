@@ -418,11 +418,6 @@ class Session
         }
     }
 
-    public static function isDevUser()
-    {
-        return in_array(Session::getUser()->getEmail(), get_config('in_development_users'));
-    }
-
     public static function loadErrorPage()
     {
         Session::set('brokenPage', true);

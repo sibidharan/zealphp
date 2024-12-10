@@ -9,6 +9,8 @@ require_once 'SessionManager.class.php';
 
 use ZealPHP\Session;
 use ZealPHP\Session\SessionManager;
+use ZealPHP\API;
+
 
 function zapi($filename){
     return basename($filename, '.php');
@@ -228,7 +230,7 @@ class App
         $this->nsPathRoute('api', "{rquest}", [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE']
         ], function($rquest, $response, $request){
-            $api = new \API($request, $response);
+            $api = new API($request, $response, self::$cwd);
             try {
                 $api->processApi("", $rquest);
             } catch (\Exception $e){
@@ -240,7 +242,7 @@ class App
         $this->nsPathRoute('api', "{module}/{rquest}", [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE']
         ], function($module, $rquest, $response, $request){
-            $api = new \API($request, $response);
+            $api = new API($request, $response, self::$cwd);
             try {
                 $api->processApi($module, $rquest);
             } catch (\Exception $e){
@@ -253,13 +255,27 @@ class App
             $response->write("<h1>403 Forbidden</h1>");
         });
 
-        $this->route('/{file}', function($file){
+        $this->route('/{file}', function($file, $response){
+            $_SERVER['PHP_SELF'] = '/'.$file.'.php';
             $abs_file = self::$cwd."/public/".$file.".php";
             if(file_exists($abs_file)){
                 include $abs_file;
             } else {
                 //TODO: Can load user page here if file not found
-                echo "File not found";
+                $response->status(404);
+                echo("<h1>404 Not Found</h1>");
+            }
+        });
+
+        $this->nsPathRoute('{file}', '{path}', function($file, $path, $response){
+            $_SERVER['PHP_SELF'] = '/'.$file.'/'.$path.'.php';
+            $abs_file = self::$cwd."/public/".$file.'/'.$path.'.php';
+            if(file_exists($abs_file)){
+                include $abs_file;
+            } else {
+                //TODO: Can load user page here if file not found
+                $response->status(404);
+                echo("<h1>404 Not Found</h1>");
             }
         });
 
@@ -313,10 +329,10 @@ class App
                 $_SERVER['SERVER_NAME'] = $_SERVER['HTTP_HOST'] ?? 'localhost';
             }
             if (!isset($_SERVER['DOCUMENT_ROOT'])) {
-                $_SERVER['DOCUMENT_ROOT'] = self::$cwd;
+                $_SERVER['DOCUMENT_ROOT'] = self::$cwd . '/public';
             }
             if (!isset($_SERVER['PHP_SELF'])) {
-                $_SERVER['PHP_SELF'] = 'app.php';
+                $_SERVER['PHP_SELF'] = '/app.php';
             }
 
             $uri = $_SERVER['REQUEST_URI'];
@@ -368,7 +384,7 @@ class App
             $response->status(404);
             $response->end("<h1>404 Not Found</h1>");
         }));
-        error_log("ZealPHP Server started at http://{$this->host}:{$this->port}");
+        error_log("ZealPHP server running at http://{$this->host}:{$this->port}");
         $server->start();
     }
 }

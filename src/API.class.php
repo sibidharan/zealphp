@@ -1,5 +1,5 @@
 <?php
-
+namespace ZealPHP;
 error_reporting(E_ALL ^ E_DEPRECATED);
 
 require_once 'REST.class.php';
@@ -11,9 +11,11 @@ class API extends REST
     private $auth = null;
     public $_response = null;
     public $request = null;
+    public $cwd = null;
 
-    public function __construct($request, $response)
+    public function __construct($request, $response, $cwd)
     {
+        $this->cwd = $cwd;
         $this->_response = $response;
         $this->request = $request;
         parent::__construct($request, $response);                  // Init parent contructor
@@ -26,16 +28,18 @@ class API extends REST
     */
     public function processApi($module, $request=null)
     {
+        $module = $module ? '/'.$module : '';
         $func = basename($request);
         if (!isset($module) and (int)method_exists($this, $func) > 0) {
             $this->$func();
         } else {
             if (isset($module)) {
-                $dir = $_SERVER['DOCUMENT_ROOT'].'/api/'.$module;
+                $dir = $this->cwd.'/api'.$module;
                 $file = $dir.'/'.$request.'.php';
                 if (file_exists($file)) {
                     include $file;
-                    $this->current_call = Closure::bind(${$func}, $this, get_class());
+                    $this->current_call = \Closure::bind(${$func}, $this, get_class());
+                    $_SERVER['PHP_SELF'] = $module.'/'.$request.'.php';
                     $this->$func();
                 } else {
                     $this->response($this->json(['error'=>'method_not_found']), 404);

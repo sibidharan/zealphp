@@ -43,9 +43,9 @@ $app->route('/co', function() {
     echo "</pre>";
 });
 
-$app->route('/home', function() {
-    echo "<h1>This is home override</h1>";
-});
+// $app->route('/home', function() {
+//     echo "<h1>This is home override</h1>";
+// });
 
 $app->route('/quiz/{page}', function($page) {
     echo "<h1>This is quiz: $page</h1>";

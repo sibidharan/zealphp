@@ -21,11 +21,14 @@ Features:
     
 3. Check if openswoole is configured properly
     ` php -m | grep swoole `
-Uptil this setup.php can do it for you. 
+
+Uptil this `setup.sh` can do it for you. 
 
 4. Run 
     `php app.php`
     >>> ZealPHP server running at http://0.0.0.0:9501
+
+#### Configure IDE for Smooth Development Experience
 
 5. Add `swoole` to Intelephense stubs 
 
