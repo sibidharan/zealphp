@@ -97,7 +97,7 @@ Now lets get started.
 
 ## 3. Getting started with ZealPHP Framework
 
-To create a new project from our go-to template. Replace `my-project` with your project name.
+To create a new project from our go-to template, replace `my-project` with your project name and execute the below composer command. Since this project is in development, use `--stability=dev` until we arrive at a stable version.  
 
 ```
 composer create-project --stability=dev sibidharan/zealphp-project my-project 
@@ -114,9 +114,9 @@ ZealPHP server running at http://0.0.0.0:8080 with 8 routes
 
 ## 4. Understanding what is happenning
 
-When you run `app.php` the inbuilt openswoole got server started by ZealPHP. It will stay attached to your terminal unless you deamonize, which we wont be doing while development. Unlike Apache+PHP setup, the Apache is replaced by OpenSwoole and ZealPHP, where OpenSwoole is offering the server and ZealPHP is offering the routing with a very efficient route tree model. On top of that, ZealPHP offers implicit routes that serves the files located under `public` and `api` directories. These routes can be overridden by you. 
+When you run `app.php` the inbuilt openswoole is being run by ZealPHP. It will stay attached to your terminal unless you deamonize, which we wont be doing while development. When moving to production, you can do `$app->run(['daemonize'=>true])` to the run function. It can take all OpenSwoole Configuration as mentioned in https://openswoole.com/docs/modules/swoole-server/configuration. Unlike Apache+PHP setup, with ZealPHP the functions Apache like URL Rewriting is replaced by ZealPHP, while OpenSwoole is offering the server. ZealPHP is offering the routing with a very efficient route tree model, which is O(1) in code injection and lookup. On top of that, ZealPHP offers implicit routes that serves the files located under `public` and `api` directories. These routes can be overridden by you.
 
-You can start by defining your routes in `app.php` or under `route` directory which gets imported automatically when you run `app.php`. See the code to understand dynamic route injection using `route` folder. 
+You can start by defining your routes in `app.php` or under `route` directory which gets imported automatically when you run `app.php`. See the code examples in this project to understand dynamic route injection using `route` folder. This comes handy to maintain large projects, and also maintain a healthy project structure.
 
 You can start writing APIs out of the box without any additional configuration. Look inside `api `folder for more examples. To understand more on how to handle the response, please wait for the documentation or you can checkout https://github.com/sibidharan/zealphp for more development examples. 
 
