@@ -163,6 +163,7 @@ Uptil this `setup.sh` can do it for you.
   "vendor/openswoole/ide-helper"
 ]
 
-Important:
+# Important
+
 1. Do not close PHP tags in file if not using HTML 
 2. Use coroutines with caution - more testing needed to see if any data leak happens and validate SessionManager implementation
