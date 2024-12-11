@@ -54,7 +54,7 @@ enable coroutine curl? [no] : yes
 enable coroutine postgres? [no] : no
 ```
 
-After a lot of console messages, the build process should end with this messages
+After a lot of console messages, the build process should end with these messages
 
 ```
 Build process completed successfully
