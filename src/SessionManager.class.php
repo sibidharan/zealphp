@@ -49,6 +49,9 @@ class SessionManager
     public function __invoke(\Swoole\Http\Request $request, \Swoole\Http\Response $response)
     {
         // error_log('SessionManager::__invoke');
+        if(isset($_SESSION) and isset($_SESSION['__start_time'])) {
+            error_log('[warn] Session leak detected');
+        }
         unset($_SESSION);
         $_SESSION = [];
         $sessionName = session_name();

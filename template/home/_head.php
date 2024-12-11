@@ -6,3 +6,9 @@
     <title>HTML Page with Header, Side Panel, Body, and Footer</title>
     <?App::render('/home/_style')?>
 </head>
+
+<?
+
+for($i = 1; $i <= 10; $i++){
+    echo $i . "<br> $title";
+}

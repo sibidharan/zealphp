@@ -1,7 +1,6 @@
 <?php
 
 require_once __DIR__ . '/vendor/autoload.php';
-require_once __DIR__ . '/src/App.php';
 use OpenSwoole\Coroutine as co;
 use OpenSwoole\Coroutine\Channel;
 use ZealPHP\App;
@@ -10,10 +9,10 @@ use function ZealPHP\zlog;
 
 $app = App::init(__DIR__, '0.0.0.0', 8181);
 
-$app->route('/', function() {
-    zlog("App started", "system");
-    echo "<h1>This is index override</h1>";
-});
+// $app->route('/', function() {
+//     zlog("App started", "system");
+//     echo "<h1>This is index override</h1>";
+// });
 
 $app->route('/co', function() {
     $channel = new Channel(5);
@@ -54,7 +53,7 @@ $app->route('/quiz/{page}', function($page) {
     echo "<h1>This is quiz: $page</h1>";
 });
 
-$app->route('/quiz/{page}/{tab}', function($tab, $page) {
+$app->route('/quiz/{page}/{tab}/{nwe}', function($nwe, $tab, $page) {
     echo "<h1>This is quiz: $page tab=$tab</h1>";
 });
 

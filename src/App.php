@@ -546,6 +546,7 @@ class App
             $response->end("<pre>404 Not Found</pre>");
         }));
         error_log("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
+        zlog($this->routes, "info");
         $server->start();
     }
 }
