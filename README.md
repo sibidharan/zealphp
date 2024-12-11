@@ -1,4 +1,4 @@
-# Zeal PHP - an opensource PHP framework that runs on OpenSwoole
+# ZealPHP - an opensource PHP framework that runs on OpenSwoole
 
 A powerful light weight opensource alternative to NextJS - that uses OpenSwoole's Coroutine Caps to do everything NextJS can and do much more. 
 
@@ -73,7 +73,7 @@ cd /etc/php/8.3/cli/conf.d
 touch 00-openswoole.ini
 echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/00-openswoole.ini
 
-# Enable Short Open Tags for Flexiblity 
+# Enable Short Open Tags for Flexiblity
 echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/00-openswoole.ini
 
 ```
@@ -112,7 +112,15 @@ Including route file: /var/labsstorage/home/sibidharan/test/my-project/route/inf
 ZealPHP server running at http://0.0.0.0:8080 with 8 routes
 ```
 
-We are good to go. You can checkout https://github.com/sibidharan/zealphp for more development examples. We will write documentation for the Classes and usage very soon. 
+## 4. Understanding what is happenning
+
+When you run `app.php` the inbuilt openswoole got server started by ZealPHP. It will stay attached to your terminal unless you deamonize, which we wont be doing while development. Unlike Apache+PHP setup, the Apache is replaced by OpenSwoole and ZealPHP, where OpenSwoole is offering the server and ZealPHP is offering the routing with a very efficient route tree model. On top of that, ZealPHP offers implicit routes that serves the files located under `public` and `api` directories. These routes can be overridden by you. 
+
+You can start by defining your routes in `app.php` or under `route` directory which gets imported automatically when you run `app.php`. See the code to understand dynamic route injection using `route` folder. 
+
+You can start writing APIs out of the box without any additional configuration. Look inside `api `folder for more examples. To understand more on how to handle the response, please wait for the documentation or you can checkout https://github.com/sibidharan/zealphp for more development examples. 
+
+Any and all contributions are welcome ❤️
 
 
 # Common Errors
