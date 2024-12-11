@@ -72,6 +72,10 @@ According to your PHP version, you simply need to add `extension=openswoole.so` 
 cd /etc/php/8.3/cli/conf.d
 touch 00-openswoole.ini
 echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/00-openswoole.ini
+
+# Enable Short Open Tags for Flexiblity 
+echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/00-openswoole.ini
+
 ```
 
 We are good to go. Let's check if the setup is working. 
