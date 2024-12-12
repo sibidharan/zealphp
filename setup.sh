@@ -2,11 +2,14 @@
 
 # Function to check if PHP 8.3 is installed
 check_php_version() {
-    if command -v php8.3 > /dev/null; then
-        echo "PHP 8.3 is already installed."
-        return 0
+    local required_version="7.4"
+    local current_version=$(php -r "echo PHP_VERSION;")
+
+    if [ "$(printf '%s\n' "$required_version" "$current_version" | sort -V | head -n1)" = "$required_version" ]; then
+        echo "Current PHP version $current_version is sufficient."
+        return 0  
     else
-        echo "PHP 8.3 is not installed. Proceeding with installation..."
+        echo "Current PHP version $current_version is not sufficient. Minimum version is $required_version."
         return 1
     fi
 }
@@ -48,7 +51,7 @@ configure_php_path() {
 # Function to install required packages for OpenSwoole and development tools
 install_dependencies() {
     echo "Installing required packages..."
-    sudo apt install -y gcc php-dev openssl libssl-dev curl libcurl4-openssl-dev libpcre3-dev build-essential postgresql libpq-dev
+    sudo apt install -y gcc php-dev openssl libssl-dev curl libcurl4-openssl-dev libpcre3-dev build-essential php8.3-mysqlnd postgresql libpq-dev
 }
 
 # Function to check if OpenSwoole is already installed
@@ -66,14 +69,13 @@ check_openswoole_installed() {
 install_openswoole() {
     echo "Installing OpenSwoole..."
     sudo pecl install openswoole-22.1.2
-    echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/00-openswoole.ini > /dev/null
-    echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/00-openswoole.ini > /dev/null
+    sudo sh -c 'echo "extension=openswoole.so\nshort_open_tag=on" | tee /etc/php/8.3/cli/conf.d/openswoole.ini' > /dev/null
     sudo systemctl restart apache2
 
     # Confirm installation of Swoole extension
-    php -m | grep -q swoole
+    php -m | grep -q openswoole
     if [ $? -eq 0 ]; then
-        echo "OpenSwoole installed and enabled."
+        echo "OpenSwoole installed."
     else
         echo "OpenSwoole installation failed."
         exit 1
