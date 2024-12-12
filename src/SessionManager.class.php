@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace ZealPHP\Session;
 use function ZealPHP\zlog;
 use function ZealPHP\uniqidReal;
+use function ZealPHP\elog;
 class SessionManager
 {
     /**
@@ -48,9 +49,9 @@ class SessionManager
      */
     public function __invoke(\Swoole\Http\Request $request, \Swoole\Http\Response $response)
     {
-        // error_log('SessionManager::__invoke');
+        // elog('SessionManager::__invoke');
         if(isset($_SESSION) and isset($_SESSION['__start_time'])) {
-            error_log('[warn] Session leak detected');
+            elog('[warn] Session leak detected');
         }
         unset($_SESSION);
         $_SESSION = [];
@@ -63,11 +64,11 @@ class SessionManager
             $sessionId = call_user_func($this->idGenerator);
         }
         session_id($sessionId);
-        // error_log('SessionManager::__invoke session_id: ' . session_id());
+        // elog('SessionManager::__invoke session_id: ' . session_id());
 
         session_start();
 
-        // error_log('SessionManager:: session_start');
+        // elog('SessionManager:: session_start');
         if ($this->useCookies) {
             $cookie = session_get_cookie_params();
             $response->cookie(
@@ -88,14 +89,14 @@ class SessionManager
             $_SESSION['UNIQUE_REQUEST_ID'] = uniqidReal();
             // zlog("SessionManager:: session_id: " . session_id() . " session_start: " . $_SESSION['__start_time']. " UNIQUE_ID: " . $_SESSION['UNIQUE_REQUEST_ID']);
             call_user_func($this->middleware, $request, $response);
-            // error_log('SessionManager:: middleware executed');
+            // elog('SessionManager:: middleware executed');
         } finally {
-            // error_log('SessionManager:: session_write_close');
+            // elog('SessionManager:: session_write_close');
             session_write_close();
             session_id('');
             $_SESSION = [];
             unset($_SESSION);
-            // error_log('SessionManager:: session_id unset and reset');
+            // elog('SessionManager:: session_id unset and reset');
         }
     }
 }
