@@ -7,7 +7,7 @@ use ZealPHP\App;
 
 use function ZealPHP\zlog;
 
-$app = App::init(__DIR__, '0.0.0.0', 8181);
+$app = App::init('0.0.0.0', 8181);
 
 // $app->route('/', function() {
 //     zlog("App started", "system");

@@ -140,7 +140,7 @@ class Session
                     $_SESSION[$k] = $v;
                 }
             } else {
-                error_log("No session id", "fatal");
+                elog("No session id", "fatal");
             }
         } else {
             session_start();
