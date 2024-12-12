@@ -17,6 +17,18 @@ function zapi($filename){
     return basename($filename, '.php');
 }
 
+function elog($message, $tag = "*"){
+    $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
+    $caller = array_shift($bt);
+
+    $date = date('d-m-Y H:i:s');
+    # add microseconds or nano seconds down to 6 decimal places
+    $date .= substr((string)microtime(), 1, 6);
+    $relative_path = str_replace(App::$cwd, '', $caller['file']);
+    error_log("┌[$tag] $date $relative_path:$caller[line]
+└❯ $message \n");
+}
+
 function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
 {
     if ($filter != null and !StringUtils::str_contains($_SERVER['REQUEST_URI'], $filter)) {
@@ -36,7 +48,7 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
         $_SERVER['REQUEST_URI'] = 'cli';
     }
 
-    $bt = debug_backtrace();
+    $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
     $caller = array_shift($bt);
 
     if ((in_array($tag, ["system", "fatal", "error", "warning", "info", "debug"]))) {
@@ -67,7 +79,7 @@ class App
     static $cwd;
     private static $instance = null;
 
-    private function __construct($cwd = __DIR__, $host = '0.0.0.0', $port = 8080)
+    private function __construct($host = '0.0.0.0', $port = 8080,$cwd = __DIR__)
     {
         $this->host = $host;
         $this->port = $port;
@@ -89,10 +101,24 @@ class App
         }
     }
 
-    public static function init($cwd = __DIR__, $host = '0.0.0.0', $port = 8080)
+    /**
+     * Initializes the application.
+     *
+     * @param string $host The host address to bind to. Defaults to '0.0.0.0'.
+     * @param int    $port The port number to bind to. Defaults to 8080.
+     * @param string $cwd  The current working directory. Defaults to the directory of the script.
+     *
+     * @return App
+     */
+    public static function init($host = '0.0.0.0', $port = 8080, $cwd=null): App
     {
+        if ($cwd === null) {
+            $cwd = dirname(debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1)[0]['file']);
+        }
         if (self::$instance == null) {
-            self::$instance = new App($cwd, $host, $port);
+            self::$instance = new App($host, $port, $cwd);
+        } else {
+            elog("App already initialized", "warn");
         }
         return self::$instance;
     }
@@ -304,7 +330,7 @@ class App
     }
 
     public function includeCheck($abs_file){
-        // error_log("Checking file: $abs_file inside ".self::$cwd);
+        // elog("Checking file: $abs_file inside ".self::$cwd);
         if (!$abs_file || strpos($abs_file, self::$cwd."/public") !== 0) {
             return false; //May be operating outside the public directory
         } else {
@@ -319,6 +345,7 @@ class App
             'document_root' => self::$cwd . '/public',
             'enable_coroutine' => true,
         ];
+        // elog("Initializing ZealPHP server at http://{$this->host}:{$this->port}");
         $server = new \Swoole\HTTP\Server($this->host, $this->port);
         if ($settings == null){
             $server->set($default_settings);
@@ -331,7 +358,7 @@ class App
 
         $route_files = glob(self::$cwd."/route/*.php");
         foreach ($route_files as $route_file) {
-            error_log("Including route file: $route_file");
+            elog("Including route file: ".str_replace(App::$cwd, '', $route_file));
             include $route_file;
         }
 
@@ -414,10 +441,10 @@ class App
 
         # Gobal route for all files in the public directory
         $this->nsPathRoute('{file}', '{path}', function($file, $path, $response){
-            // error_log("File: $file, Path: $path");
+            // elog("File: $file, Path: $path");
             $_SERVER['PHP_SELF'] = '/'.$file.'/'.$path.'.php';
             $abs_file = realpath(self::$cwd."/public/".$file.'/'.$path.'.php');
-            // error_log("Abs File: $abs_file");
+            // elog("Abs File: $abs_file");
             if(file_exists($abs_file)){
                 include $abs_file;
             } else if(is_dir(self::$cwd."/public/".$file.'/'.$path)){
@@ -506,7 +533,7 @@ class App
 
                 // Check if URI matches
                 if (preg_match($route['pattern'], $uri, $matches)) {
-                    // error_log("Matched route: $uri, $route[pattern]");
+                    // elog("Matched route: $uri, $route[pattern]");
                     $params = array_filter($matches, fn($k) => !is_numeric($k), ARRAY_FILTER_USE_KEY);
 
                     $handler = $route['handler'];
@@ -545,7 +572,7 @@ class App
             $response->status(404);
             $response->end("<pre>404 Not Found</pre>");
         }));
-        error_log("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
+        elog("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
         $server->start();
     }
 }

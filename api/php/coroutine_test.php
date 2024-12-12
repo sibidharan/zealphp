@@ -3,6 +3,8 @@ use OpenSwoole\Coroutine as Co;
 use OpenSwoole\Coroutine\Http\Client;
 use OpenSwoole\Coroutine\Channel;
 
+use function ZealPHP\elog;
+
 $coroutine_test = function(){
     $urls = [];
     for ($i = 1; $i <= 100; $i++) {
@@ -15,11 +17,9 @@ $coroutine_test = function(){
     // Spawn a coroutine for each URL
     foreach ($urls as $url) {
         go(function () use ($url, $channel) {
-            error_log("Fetching {$url}");
+            elog("Fetching {$url}");
 
             $data = file_get_contents($url);
-            error_log("Fetched {$url}");
-
             // Push the result to the channel
             $channel->push([
                 'url'  => $url,
