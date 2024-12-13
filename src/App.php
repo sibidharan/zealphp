@@ -1,76 +1,8 @@
 <?php
 namespace ZealPHP;
 
-
-require_once 'API.class.php';
-require_once 'REST.class.php';
-require_once 'Session.class.php';
-require_once 'SessionManager.class.php';
-
-use ZealPHP\Session;
-use ZealPHP\Session\SessionManager;
 use ZealPHP\API;
-
-global $__start;
-
-function zapi($filename){
-    return basename($filename, '.php');
-}
-
-function elog($message, $tag = "*"){
-    $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
-    $caller = array_shift($bt);
-
-    $date = date('d-m-Y H:i:s');
-    # add microseconds or nano seconds down to 6 decimal places
-    $date .= substr((string)microtime(), 1, 6);
-    $relative_path = str_replace(App::$cwd, '', $caller['file']);
-    error_log("┌[$tag] $date $relative_path:$caller[line]
-└❯ $message \n");
-}
-
-function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
-{
-    if ($filter != null and !StringUtils::str_contains($_SERVER['REQUEST_URI'], $filter)) {
-        return;
-    }
-    if ($filter != null and $invert_filter) {
-        return;
-    }
-
-    // if(get_class(Session::getUser()) == "User") {
-    //     $user = Session::getUser()->getUsername();
-    // } else {
-    //     $user = 'worker';
-    // }
-
-    if (!isset($_SERVER['REQUEST_URI'])) {
-        $_SERVER['REQUEST_URI'] = 'cli';
-    }
-
-    $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
-    $caller = array_shift($bt);
-
-    if ((in_array($tag, ["system", "fatal", "error", "warning", "info", "debug"]))) {
-        $date = date('l jS F Y h:i:s A');
-        //$date = date('h:i:s A');
-        if (is_object($log)) {
-            $log = purify_array($log);
-        }
-        if (is_array($log)) {
-            $log = json_encode($log, JSON_PRETTY_PRINT);
-        }
-        if (error_log(
-            '[*] #' . $tag . ' [' . $date . '] ' . " Request ID: $_SESSION[UNIQUE_REQUEST_ID]\n" .
-                '    URL: ' . $_SERVER['REQUEST_URI'] . " \n" .
-                '    Caller: ' . $caller['file'] . ':' . $caller['line'] . "\n" .
-                '    Timer: ' . get_current_render_time() . ' sec' . " \n" .
-                "    Message: \n" . indent($log) . "\n\n"
-        )) {
-        }
-    }
-}
-
+use ZealPHP\Session\SessionManager;
 class App
 {
     protected $routes = [];
@@ -138,6 +70,24 @@ class App
     {
     }
 
+    
+    /**
+     * Registers a route with the application.
+     *
+     * @param string $path The URL path pattern for the route. Flask-like {param} syntax can be used for named parameters.
+     * @param array $options Optional settings for the route, such as HTTP methods.
+     *                       - 'methods' (array): HTTP methods allowed for this route. Defaults to ['GET'].
+     * @param callable|null $handler The callback function to handle the route.
+     *
+     * If only two arguments are provided, the second argument is assumed to be the handler, and no options are set.
+     *
+     * The route pattern is converted to a named regex group for parameter matching.
+     *
+     * Example usage:
+     * $app->route('/user/{id}', ['methods' => ['GET', 'POST']], function($id) {
+     *     // Handler code here
+     * });
+     */
     public function route($path, $options = [], $handler = null)
     {
         // If only two arguments are provided, assume second is handler and no options.
@@ -280,6 +230,12 @@ class App
         ];
     }
 
+    /**
+     * Parses the given CSS file.
+     *
+     * @param string $file The path to the CSS file to be parsed.
+     * @return array The parsed CSS rules as an associative array.
+     */
     public static function parseCss($file)
     {
         $css = file_get_contents($file);
@@ -304,6 +260,17 @@ class App
         return $result;
     }
 
+    /**
+     * Renders a template with the provided data.
+     * This function looks for templates in the ./template folder located in the current working directory of the server.
+     * It takes PHP_SELF into account and uses it as the source folder to look for templates unless the $_template starts with /.
+     * Starting the $_template with / tells the render function to look for the template from the root of the template folder.
+     *
+     * @param string $_template The name of the template to render. Defaults to 'index'.
+     * @param array $_data An associative array of data to pass to the template. Defaults to an empty array.
+     * @throws TemplateUnavailableException if the template does not exist.
+     * @return void
+     */
     public static function render($_template = 'index', $_data = [])
     {
         $_source = Session::getCurrentFile(null);
@@ -329,6 +296,13 @@ class App
         }
     }
 
+    
+    /**
+     * Checks if the given file path is within the public directory.
+     *
+     * @param string $abs_file The absolute file path to check.
+     * @return bool Returns true if the file is within the public directory, false otherwise.
+     */
     public function includeCheck($abs_file){
         // elog("Checking file: $abs_file inside ".self::$cwd);
         if (!$abs_file || strpos($abs_file, self::$cwd."/public") !== 0) {
@@ -338,12 +312,29 @@ class App
         }
     }
 
+    /**
+     * Runs the ZealPHP application.
+     *
+     * @param array|null $settings Optional settings to override the default OpenSwoole Server Configuration settings.
+     *
+     * Default settings:
+     * - enable_static_handler: bool (default: true)
+     * - document_root: string (default: self::$cwd . '/public')
+     * - enable_coroutine: bool (default: true)
+     * - pid_file: string (default: '/tmp/zealphp.pid')
+     *
+     * This method initializes the Swoole HTTP server with the provided settings or default settings.
+     * It includes all route files from the route directory and sets up various implicit and global routes.
+     * It also handles the request and response lifecycle, including setting up superglobals ($_GET, $_POST, etc.)
+     * and matching the request URI to the defined routes.
+     */
     public function run($settings = null)
     {
         $default_settings = [
             'enable_static_handler' => true,
             'document_root' => self::$cwd . '/public',
-            'enable_coroutine' => true,
+            'enable_coroutine' => false,
+            'pid_file' => '/tmp/zealphp.pid',
         ];
         // elog("Initializing ZealPHP server at http://{$this->host}:{$this->port}");
         $server = new \Swoole\HTTP\Server($this->host, $this->port);
@@ -351,6 +342,7 @@ class App
             $server->set($default_settings);
         } else {
             $settings = array_merge($default_settings, $settings);
+            $settings['enable_coroutine'] = false;
             $server->set($settings);
         }
 
@@ -426,7 +418,7 @@ class App
                         include $abs_file;
                     } else {
                         $response->status(403);
-                        echo("<pre>403 Forbidden here</pre>");
+                        echo("<pre>403 Forbidden</pre>");
                     }
                 } else {
                     $response->status(404);
@@ -439,18 +431,28 @@ class App
             }
         });
 
-        # Gobal route for all files in the public directory
-        $this->nsPathRoute('{file}', '{path}', function($file, $path, $response){
-            // elog("File: $file, Path: $path");
-            $_SERVER['PHP_SELF'] = '/'.$file.'/'.$path.'.php';
-            $abs_file = realpath(self::$cwd."/public/".$file.'/'.$path.'.php');
+        # Global route for all directories in the public directory
+        $this->nsPathRoute('{dir}', '{uri}', function($dir, $uri, $response){
+            // elog("Directory: $dir, URI: $uri");
+            $_SERVER['PHP_SELF'] = '/'.$dir.'/'.$uri.'.php';
+            $abs_file = realpath(self::$cwd."/public/".$dir.'/'.$uri.'.php');
             // elog("Abs File: $abs_file");
             if(file_exists($abs_file)){
-                include $abs_file;
-            } else if(is_dir(self::$cwd."/public/".$file.'/'.$path)){
-                $abs_path = self::$cwd."/public/".$file.'/'.$path."/index.php";
+                if ($this->includeCheck($abs_file)){
+                    include $abs_file;
+                } else {
+                    $response->status(403);
+                    echo("<pre>403 Forbidden</pre>");
+                }
+            } else if(is_dir(self::$cwd."/public/".$dir.'/'.$uri)){
+                $abs_path = self::$cwd."/public/".$dir.'/'.$uri."/index.php";
                 if(file_exists($abs_path)){
-                    include $abs_path;
+                    if ($this->includeCheck($abs_path)){
+                        include $abs_path;
+                    } else {
+                        $response->status(403);
+                        echo("<pre>403 Forbidden</pre>");
+                    }
                 } else {
                     $response->status(404);
                     echo("<pre>404 Not Found</pre>");
@@ -560,11 +562,19 @@ class App
                                 : null;
                         }
                     }
-                    ob_start();
-                    call_user_func_array($handler, $invokeArgs);
-                    $buffer = ob_get_clean();
-                    $response->end($buffer);
-                    return;
+                    try {
+                        ob_start();
+                        call_user_func_array($handler, $invokeArgs);
+                        $buffer = ob_get_clean();
+                        $response->end($buffer);
+                        return;
+                    } catch (\Exception $e) {
+                        $response->status(500);
+                        $response->end("<pre>500 Internal Server Error</pre>");
+                        // print the error message to the error log
+                        jTraceEx($e);
+                        return;
+                    }
                 }
             }
 

@@ -12,7 +12,10 @@
     "autoload": {
         "psr-4": {
             "ZealPHP\\": "src/"
-        }
+        },
+        "files": [
+            "src/utils.php"
+        ]
     },
     "authors": [
         {

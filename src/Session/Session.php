@@ -1,7 +1,6 @@
 <?php
 namespace ZealPHP;
 
-require_once __DIR__ . '/SessionManager.class.php';
 /**
  * Session class is a bunch of static methods helpful for easy handling of the session.
  */
@@ -323,19 +322,6 @@ class Session
 
 }
 
-function uniqidReal($length = 13)
-{
-    // uniqid gives 13 chars, but you could adjust it to your needs.
-    if (function_exists("random_bytes")) {
-        $bytes = random_bytes(ceil($length / 2));
-    } elseif (function_exists("openssl_random_pseudo_bytes")) {
-        $bytes = openssl_random_pseudo_bytes(ceil($length / 2));
-    } else {
-        throw new \Exception("no cryptographically secure random function available");
-    }
-    return substr(bin2hex($bytes), 0, $length);
-}
-
 class TemplateUnavailableException extends \Exception {
 
 	protected $message = "The template you are trying to include does not seem to exist. Please check the file name.
@@ -395,63 +381,5 @@ class StringUtils
    {
        return strpos($haystack, $needle) !== false;
    }
-}
-
-
-function get_config($key)
-{
-    global $__site_config;
-    $array = json_decode($__site_config, true);
-    if (isset($array[$key])) {
-        return $array[$key];
-    } else {
-        return null;
-    }
-}
-
-function get_current_render_time()
-{
-    $time = microtime();
-    $time = explode(' ', $time);
-    $time = $time[1] + $time[0];
-    $finish = $time;
-    $total_time = number_format(($finish - $_SESSION['__start_time']), 4);
-    return $total_time;
-}
-
-
-/**
- * Indend the given text with the given number of spaces
- *
- * @param String $string
- * @param Integer $indend	Number of lines to indent
- * @return String
- */
-function indent($string, $indend = 4)
-{
-    $lines = explode(PHP_EOL, $string);
-    $newlines = array();
-    $s = "";
-    $i = 0;
-    while ($i < $indend) {
-        $s = $s . " ";
-        $i++;
-    }
-    foreach ($lines as $line) {
-        array_push($newlines, $s . $line);
-    }
-    return implode(PHP_EOL, $newlines);
-}
-
-/**
- * Takes an iterator or object, and converts it into an Array.
- * @param  Any $obj
- * @return Array
- */
-function purify_array($obj)
-{
-    $h = json_decode(json_encode($obj), true);
-    //print_r($h);
-    return empty($h) ? [] : $h;
 }
 

@@ -5,6 +5,7 @@ use OpenSwoole\Coroutine as co;
 use OpenSwoole\Coroutine\Channel;
 use ZealPHP\App;
 
+use function ZealPHP\elog;
 use function ZealPHP\zlog;
 
 $app = App::init('0.0.0.0', 8181);
@@ -13,6 +14,28 @@ $app = App::init('0.0.0.0', 8181);
 //     zlog("App started", "system");
 //     echo "<h1>This is index override</h1>";
 // });
+
+$app->route('/sessleak', function() {
+    $channel = new Channel(1);
+    go(function() use ($channel){
+        elog("Session leak started, inside coroutine, waiting for 10 seconds to check if _SESSION gets overwritten. Now bombard the server with requests...", "test");
+        co::sleep(2);
+        $_SESSION['test'];
+        co::sleep(2);
+        $_SESSION['test'];
+        co::sleep(2);
+        $_SESSION['test'];
+        co::sleep(2);
+        $_SESSION['test'];
+        co::sleep(2);
+        $_SESSION['test'];
+        $channel->push($_SESSION);
+    });
+    $data = $channel->pop();
+    echo "<pre>";
+    print_r($data ?? "Session leak detected");
+    echo "</pre>";
+});
 
 $app->route('/co', function() {
     $channel = new Channel(5);

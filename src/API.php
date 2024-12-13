@@ -2,7 +2,7 @@
 namespace ZealPHP;
 error_reporting(E_ALL ^ E_DEPRECATED);
 
-require_once 'REST.class.php';
+use ZealPHP\REST;
 class API extends REST
 {
     public $data = "";

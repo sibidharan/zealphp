@@ -1,13 +1,15 @@
 <?php
-declare(strict_types=1);
-/**
- * Copyright © Upscale Software. All rights reserved.
- * See LICENSE.txt for license details.
- */
 namespace ZealPHP\Session;
-use function ZealPHP\zlog;
-use function ZealPHP\uniqidReal;
+
 use function ZealPHP\elog;
+use function ZealPHP\uniqidReal;
+use function ZealPHP\get_current_render_time;
+
+use OpenSwoole\Coroutine as co;
+
+use ZealPHP\Session\Handler\FileSessionHandler;
+use ZealPHP\G;
+
 class SessionManager
 {
     /**
@@ -49,6 +51,7 @@ class SessionManager
      */
     public function __invoke(\Swoole\Http\Request $request, \Swoole\Http\Response $response)
     {
+        // G::init();
         // elog('SessionManager::__invoke');
         if(isset($_SESSION) and isset($_SESSION['__start_time'])) {
             elog('[warn] Session leak detected');
@@ -65,6 +68,9 @@ class SessionManager
         }
         session_id($sessionId);
         // elog('SessionManager::__invoke session_id: ' . session_id());
+
+        $handler = new FileSessionHandler();
+        session_set_save_handler($handler, true);
 
         session_start();
 
@@ -91,7 +97,7 @@ class SessionManager
             call_user_func($this->middleware, $request, $response);
             // elog('SessionManager:: middleware executed');
         } finally {
-            // elog('SessionManager:: session_write_close');
+            elog('SessionManager:: session_write_close took '.get_current_render_time(), 'info');
             session_write_close();
             session_id('');
             $_SESSION = [];
@@ -100,3 +106,4 @@ class SessionManager
         }
     }
 }
+
