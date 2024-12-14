@@ -70,11 +70,11 @@ According to your PHP version, you simply need to add `extension=openswoole.so` 
 
 ```
 cd /etc/php/8.3/cli/conf.d
-touch 00-openswoole.ini
-echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/00-openswoole.ini
+touch 99-zealphp-swoole.ini
+echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-swoole.ini
 
 # Enable Short Open Tags for Flexiblity
-echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/00-openswoole.ini
+echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-swoole.ini
 
 ```
 
@@ -121,6 +121,16 @@ You can start by defining your routes in `app.php` or under `route` directory wh
 You can start writing APIs out of the box without any additional configuration. Look inside `api `folder for more examples. To understand more on how to handle the response, please wait for the documentation or you can checkout https://github.com/sibidharan/zealphp for more development examples. 
 
 Any and all contributions are welcome ❤️
+
+# ZealPHP Design Principals
+
+- Integrating OpenSwoole is a very good move but reaping the full performance of the corotines and still able to run an Apache Styled web server with powerful in-memory dynamic nested ZealPHP template render functions and also reconstructing superglobls on top of all these comes with a cost, and we have to pay for it. The ZealPHP Server wont enable corountines for every request, so instead of the server processes share the superglobal memory while running coroutines, we disable coroutine for the server process. To understand what is happenning, lets say if a main thread is waiting for an IO or sleeping, the same server worker process will be used to serve another request and this new request will cause the superglobals to overwrite the ones waiting for IO and cause data leak/corruption, we decide to disable coroutines in the main thread, this enables us to support PHP superglobals in an Apache Styled way. 
+
+- But to still be able to reap the the benifits of coroutines, ZealPHP introduces a function called `coprocess` alias `coproc` that enables you to create a process that has coroutine context and you can run as many fibers/coroutines inside that process. This function keeps the design pattern clean and each server worker deals with one request at a time, thus we can use the superglobals while reaping maximum performance. 
+
+- `coproc` creates a process which has its own memory space, it is like a fork, so communicating with that process cannot be over superglobals, and the data passing needs to be done delecately. `coproc` is a wrapper to `OpenSwoole\Process` with coroutines enabled, and it also makes sharing variables as easy as copying them into the memory before the process forks, then the data is available to the new process. But the limitation here is we cannot pass anything that is not serializeable. For example, Database Connection, Sockets, FD etc. Those unserializeable objects has to be reconstructed inside the `coproc`. This design decision may change in future with us removing support for Superglobals with our own implementation. More research and development is needed on this area. (Still in development, documentation will be avilable later)
+
+- The tradeoff between having superglobals and not using coroutines in the main server process and the implications of security here are still to be researched and a more stable and sustainable design pattern has to be arrived. ZealPHP decides to sanitizes every request with a default middleware which can be overrided if needed. 
 
 
 # Common Errors

@@ -4,6 +4,25 @@ namespace ZealPHP;
 
 use ZealPHP\App;
 use ZealPHP\StringUtils;
+use OpenSwoole\Process;
+use OpenSwoole\Coroutine as co;
+
+function coprocess($taskLogic)
+{
+    $worker = new Process(function ($worker) use ($taskLogic) {
+        $taskLogic($worker);
+        $worker->exit();
+    }, true, SOCK_DGRAM, true);
+
+    // Start the worker
+    $worker->start();
+    Process::wait(true);
+    return $worker->read();
+}
+
+function coproc($taskLogic){
+    return coprocess($taskLogic);
+}
 
 /**
 * jTraceEx() - provide a Java style exception trace
