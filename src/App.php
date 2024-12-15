@@ -385,7 +385,7 @@ class App
         $this->nsPathRoute('api', "{module}/{rquest}", [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE']
         ], function($module, $rquest, $response, $request){
-            $api = new API($request, $response, self::$cwd);
+            $api = new ZealAPI($request, $response, self::$cwd);
             try {
                 $api->processApi($module, $rquest);
             } catch (\Exception $e){
