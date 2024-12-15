@@ -10,6 +10,8 @@ use OpenSwoole\Coroutine as co;
 function coprocess($taskLogic)
 {
     $worker = new Process(function ($worker) use ($taskLogic) {
+        error_reporting(0);
+        ini_set('display_errors', '0');
         $taskLogic($worker);
         $worker->exit();
     }, true, SOCK_DGRAM, true);
@@ -54,7 +56,7 @@ function jTraceEx($e, $seen=null)
             count($trace) && array_key_exists('class', $trace[0]) ? str_replace('\\', '.', $trace[0]['class']) : '',
             count($trace) && array_key_exists('class', $trace[0]) && array_key_exists('function', $trace[0]) ? '.' : '',
             count($trace) && array_key_exists('function', $trace[0]) ? str_replace('\\', '.', $trace[0]['function']) : '(main)',
-            $line === null ? $file : basename($file),
+            $line === null ? $file : str_replace(App::$cwd, '', $file),
             $line === null ? '' : ':',
             $line === null ? '' : $line
         );
@@ -64,7 +66,7 @@ function jTraceEx($e, $seen=null)
         if (!count($trace)) {
             break;
         }
-        $file = array_key_exists('file', $trace[0]) ? $trace[0]['file'] : 'Unknown Source';
+        $file = array_key_exists('file', $trace[0]) ? $trace[0]['file'] : 'anonymous';
         $line = array_key_exists('file', $trace[0]) && array_key_exists('line', $trace[0]) && $trace[0]['line'] ? $trace[0]['line'] : null;
         array_shift($trace);
     }
@@ -80,8 +82,8 @@ function zapi($filename){
     return basename($filename, '.php');
 }
 
-function elog($message, $tag = "*"){
-    $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
+function elog($message, $tag = "*", $limit = 1){
+    $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, $limit);
     $caller = array_shift($bt);
 
     $date = date('d-m-Y H:i:s');
@@ -152,7 +154,7 @@ function get_current_render_time()
     $time = explode(' ', $time);
     $time = $time[1] + $time[0];
     $finish = $time;
-    $total_time = number_format(($finish - $_SESSION['__start_time']), 4);
+    $total_time = number_format(($finish - $_SESSION['__start_time']), 5);
     return $total_time;
 }
 

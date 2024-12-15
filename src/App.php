@@ -1,7 +1,8 @@
 <?php
 namespace ZealPHP;
 
-use ZealPHP\API;
+use ZealPHP\ZealAPI;
+use ZealPHP\Session;
 use ZealPHP\Session\SessionManager;
 class App
 {
@@ -9,7 +10,9 @@ class App
     protected $host;
     protected $port;
     static $cwd;
+    static $server;
     private static $instance = null;
+    public static $display_errors = true;
 
     private function __construct($host = '0.0.0.0', $port = 8080,$cwd = __DIR__)
     {
@@ -68,6 +71,16 @@ class App
     // Prevent from being unserialized.
     public function __wakeup()
     {
+    }
+
+    public static function getServer()
+    {
+        return self::$server;
+    }
+
+    public static function display_errors($display_errors = true)
+    {
+        self::$display_errors = $display_errors;
     }
 
     
@@ -283,14 +296,14 @@ class App
             if (!file_exists(self::$cwd . '/template/' . $_template . '.php')) {
                 $bt = debug_backtrace();
                 $caller = array_shift($bt);
-                throw new TemplateUnavailableException("The template $_template does not exist on line " . $caller['line'] . " in file " . $caller['file'] . ".");
+                throw new TemplateUnavailableException("The template $_template does not exist in file " . str_replace(App::$cwd, '', $caller['file']) . ":" . $caller['line'] );
             }
             include self::$cwd . '/template/' . $_template . '.php';
         } else {
             if (!file_exists(self::$cwd . '/template/' . $_source . '/' . $_template . '.php')) {
                 $bt = debug_backtrace();
                 $caller = array_shift($bt);
-                throw new TemplateUnavailableException("The template $_template does not exist on line " . $caller['line'] . " in file " . $caller['file'] . ".");
+                throw new TemplateUnavailableException("The template $_template does not exist in file " . str_replace(App::$cwd, '', $caller['file']) . ":" . $caller['line'] );
             }
             include self::$cwd . '/template/' . $_source . '/' . $_template . '.php';
         }
@@ -335,9 +348,11 @@ class App
             'document_root' => self::$cwd . '/public',
             'enable_coroutine' => false,
             'pid_file' => '/tmp/zealphp.pid',
+            'task_worker_num' => 4,
+            // 'task_enable_coroutine' => true,
         ];
         // elog("Initializing ZealPHP server at http://{$this->host}:{$this->port}");
-        $server = new \Swoole\HTTP\Server($this->host, $this->port);
+        self::$server = $server = new \Swoole\HTTP\Server($this->host, $this->port);
         if ($settings == null){
             $server->set($default_settings);
         } else {
@@ -358,7 +373,7 @@ class App
         $this->nsPathRoute('api', "{rquest}", [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE']
         ], function($rquest, $response, $request){
-            $api = new API($request, $response, self::$cwd);
+            $api = new ZealAPI($request, $response, self::$cwd);
             try {
                 $api->processApi("", $rquest);
             } catch (\Exception $e){
@@ -463,8 +478,32 @@ class App
                 echo("<pre>404 Not Found</pre>");
             }
         });
+        
+        $server->on('task', function ($server, $id, $rid, $data) {
+            $handler = $data['handler'];
+            $_func = basename($handler);
+            if(file_exists(App::$cwd.$handler.'.php')){
+                # TODO: Include check for task handlers
+                require_once App::$cwd.$handler.'.php';
 
-        $server->on("request", new SessionManager(function($request, $response) {
+                # call the function from the included file
+                $result = $$_func(...$data['args']);
+            } else {
+                elog("Task handler not found: $handler", "error");
+                $result = false;
+            }
+            elog(json_encode([$data, $result]), "task");
+            return [
+                'query' => $data,
+                'result' => null
+            ];
+        });
+
+        $server->on('finish', function ($server, $task_id, $data) {
+            elog(json_encode($data), "task_task");
+        });
+
+        $server->on("request", new SessionManager(function($request, $response) use ($server) {
             // $_GET
             unset($_GET);
             $_GET = $request->get ?? [];
@@ -550,12 +589,14 @@ class App
                         $pname = $param->getName();
                         if (isset($params[$pname])) {
                             $invokeArgs[] = $params[$pname];
-                        } else if ($pname == 'app' || $pname == 'self'){
+                        } else if ($pname == 'app'){
                             $invokeArgs[] = $this;
-                        } else if ($pname == 'request' || $pname == 'req'){
+                        } else if ($pname == 'request'){
                             $invokeArgs[] = $request;
-                        } else if ($pname == 'response' || $pname == 'res'){
+                        } else if ($pname == 'response'){
                             $invokeArgs[] = $response;
+                        } else if ($pname == 'server'){
+                            $invokeArgs[] = $server;
                         } else {
                             $invokeArgs[] = $param->isDefaultValueAvailable() 
                                 ? $param->getDefaultValue() 
@@ -570,10 +611,15 @@ class App
                         return;
                     } catch (\Exception $e) {
                         $response->status(500);
-                        $response->end("<pre>500 Internal Server Error</pre>");
-                        // print the error message to the error log
-                        jTraceEx($e);
+                        elog(jTraceEx($e), "error");
+                        if (self::$display_errors) {
+                            // print the error message to the error log
+                            $response->end("<pre>".jTraceEx($e)."</pre>");
+                        } else {
+                            $response->end("<pre>500 Internal Server Error</pre>");
+                        }
                         return;
+
                     }
                 }
             }
