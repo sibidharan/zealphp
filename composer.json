@@ -14,7 +14,8 @@
             "ZealPHP\\": "src/"
         },
         "files": [
-            "src/utils.php"
+            "src/utils.php",
+            "src/Session/utils.php"
         ]
     },
     "authors": [

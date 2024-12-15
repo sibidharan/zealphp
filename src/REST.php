@@ -73,7 +73,9 @@ class REST {
     }
 
     public function get_request_method(){
-        return $_SERVER['REQUEST_METHOD'];
+        return G::getInstance()->server['REQUEST_METHOD'];
+        
+        // return $_SERVER['REQUEST_METHOD'];
     }
 
     private function inputs(){

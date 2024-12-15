@@ -1,64 +1,50 @@
 <?php
 namespace ZealPHP;
+use ZealPHP\App;
 use OpenSwoole\Coroutine as co;
 class G
 {
-    public static function init()
-    {
-        // Initialize the global context
-        $context = co::getContext();
-        $context['session'] = [];
-        $context['get'] = [];
-        $context['post'] = [];
-        $context['files'] = [];
-        $context['cookie'] = [];
-        $context['server'] = [];
-        $context['env'] = [];
+    private static $instance;
 
-        // Initialize the global session
-        $_GET = &$context['get'];
-        $_POST = &$context['post'];
-        $_FILES = &$context['files'];
-        $_COOKIE = &$context['cookie'];
-        $_SERVER = &$context['server'];
-        $_ENV = &$context['env'];
-        $_REQUEST = &$context['request'];
-        $_SESSION = &$context['session'];
+    private function __construct()
+    {
+        $this->get = [];
+        $this->post = [];
+        $this->files = [];
+        $this->cookie = [];
+        $this->session = [];
+        $this->server = [];
+        $this->request = [];
+        $this->env = [];
+        $this->session_params = [];
     }
 
-    // Set is used to save a new value under the context
-    public static function set(string $key, mixed $value)
+    public static function getInstance()
     {
-        co::getContext()[$key] = $value;
+        if (self::$instance === null) {
+            self::$instance = new G();
+        }
+        return self::$instance;
     }
 
-    // Navigate the coroutine tree and search for the requested key
-    public static function get(string $key, mixed $default = null): mixed
+    public function __get($key)
     {
-        // Get the current coroutine ID
-        $cid = co::getCid();
+        return $this->$key;
+    }
 
-        do
-        {
-            /*
-             * Get the context object using the current coroutine
-             * ID and check if our key exists, looping through the
-             * coroutine tree if we are deep inside sub coroutines.
-             */
-            if(isset(co::getContext($cid)[$key]))
-            {
-                return co::getContext($cid)[$key];
-            }
+    public function __set($key, $value)
+    {
+        $this->$key = $value;
+    }
 
-            // We may be inside a child coroutine, let's check the parent ID for a context
-            $cid = co::getPcid($cid);
+    public static function get($key)
+    {
+        return self::getInstance()->$key;
+    }
 
-        } while ($cid !== -1 && $cid !== false);
-
-        // The requested context variable and value could not be found
-        return $default ?? throw new \InvalidArgumentException(
-            "Could not find `{$key}` in current coroutine context."
-            );
+    public static function set($key, $value)
+    {
+        self::getInstance()->$key = $value;
     }
 }
 

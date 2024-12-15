@@ -9,6 +9,9 @@ use OpenSwoole\Coroutine as co;
 
 function coprocess($taskLogic, $wait = true)
 {
+    if(App::$superglobals == false){
+        throw new \Exception("Superglobals are disabled which enables coroutines, cannot use coprocess inside coroutine, use coroutines directly.");
+    }
     $worker = new Process(function ($worker) use ($taskLogic) {
         error_reporting(0);
         ini_set('display_errors', '0');
@@ -115,7 +118,7 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
 
     $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
     $caller = array_shift($bt);
-
+    $g = G::getInstance();
     if ((in_array($tag, ["system", "fatal", "error", "warning", "info", "debug"]))) {
         $date = date('l jS F Y h:i:s A');
         //$date = date('h:i:s A');
@@ -125,9 +128,11 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
         if (is_array($log)) {
             $log = json_encode($log, JSON_PRETTY_PRINT);
         }
+        $unique_req_id = $g->session['UNIQUE_REQUEST_ID'];
+        $request_uri = $g->server['REQUEST_URI'];
         if (error_log(
-            '[*] #' . $tag . ' [' . $date . '] ' . " Request ID: $_SESSION[UNIQUE_REQUEST_ID]\n" .
-                '    URL: ' . $_SERVER['REQUEST_URI'] . " \n" .
+            '[*] #' . $tag . ' [' . $date . '] ' . " Request ID: $unique_req_id\n" .
+                '    URL: ' . $request_uri . " \n" .
                 '    Caller: ' . $caller['file'] . ':' . $caller['line'] . "\n" .
                 '    Timer: ' . get_current_render_time() . ' sec' . " \n" .
                 "    Message: \n" . indent($log) . "\n\n"
@@ -154,7 +159,7 @@ function get_current_render_time()
     $time = explode(' ', $time);
     $time = $time[1] + $time[0];
     $finish = $time;
-    $total_time = number_format(($finish - $_SESSION['__start_time']), 5);
+    $total_time = number_format(($finish - G::getInstance()->session['__start_time']), 5);
     return $total_time;
 }
 

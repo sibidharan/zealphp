@@ -1,8 +1,12 @@
 <?php
 namespace ZealPHP;
-error_reporting(E_ALL ^ E_DEPRECATED);
+// error_reporting(E_ALL ^ E_DEPRECATED);
 
 use ZealPHP\REST;
+use ZealPHP\App;
+use function ZealPHP\elog;
+use function ZealPHP\jTraceEx;
+
 class ZealAPI extends REST
 {
     public $data = "";
@@ -28,6 +32,7 @@ class ZealAPI extends REST
     */
     public function processApi($module, $request=null)
     {
+        $g = G::getInstance();
         $module = $module ? '/'.$module : '';
         $func = basename($request);
         if (!isset($module) and (int)method_exists($this, $func) > 0) {
@@ -35,11 +40,21 @@ class ZealAPI extends REST
         } else {
             if (isset($module)) {
                 $dir = $this->cwd.'/api'.$module;
+                $g->server['DOCUMENT_ROOT'] = App::$cwd . '/api';
                 $file = $dir.'/'.$request.'.php';
                 if (file_exists($file)) {
                     include $file;
-                    $this->api_rpc = \Closure::bind(${$func}, $this, get_class());
-                    $_SERVER['PHP_SELF'] = $module.'/'.$request.'.php';
+                    try {
+                        $this->api_rpc = \Closure::bind(${$func}, $this, get_class());
+                    } catch (\TypeError $e) {
+                        elog(jTraceEx($e), "error");
+                        $this->response($this->json(['error'=>'method_not_found']), 404);
+                        return;
+                    }
+                    $g->server['PHP_SELF'] = $module.'/'.$request.'.php';
+                    if(App::$superglobals) {
+                        $_SERVER['PHP_SELF'] = $g->server['PHP_SELF'];
+                    }
                     $handler = $this->api_rpc;
                     $reflection = is_array($handler)
                     ? new \ReflectionMethod($handler[0], $handler[1])

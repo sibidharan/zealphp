@@ -269,8 +269,9 @@ class Session
      */
     public static function getCurrentFile($file = null)
     {
+        $g = G::getInstance();
         if ($file == null) {
-            $tokens = explode('/', $_SERVER['PHP_SELF']);
+            $tokens = explode('/', $g->server['PHP_SELF']);
             // Console::log($_SERVER);
             $currentFile = array_pop($tokens);
             $currentFile = explode('.', $currentFile);
