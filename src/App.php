@@ -492,13 +492,14 @@ class App
                 $result = $$_func(...$data['args']);
                 unset($$_func);
             } else {
+                # TODO: Should throw exception?
                 elog("Task handler not found: $handler", "error");
                 $result = false;
             }
             elog(json_encode([$data, $result]), "task");
             return [
-                'query' => $data,
-                'result' => null
+                'task' => $data,
+                'result' => $result
             ];
         });
 
