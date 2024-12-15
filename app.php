@@ -8,7 +8,7 @@ use ZealPHP\G;
 
 use function ZealPHP\elog;
 use function ZealPHP\zlog;
-App::superglobals(false);
+App::superglobals(true);
 
 $app = App::init('0.0.0.0', 8181);
 // $app->route('/', function() {

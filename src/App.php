@@ -415,9 +415,9 @@ class App
             $g = G::getInstance();
             $file = 'index';
             $g->server['PHP_SELF'] = '/'.$file.'.php';
-            if(self::$superglobals){
-                $_SERVER['PHP_SELF'] = $g->server['PHP_SELF'];
-            }
+            // if(self::$superglobals){
+            //     $_SERVER['PHP_SELF'] = $g->server['PHP_SELF'];
+            // }
             $abs_file = self::$cwd."/public/".$file.".php";
             if(file_exists($abs_file)){
                 include $abs_file;
@@ -435,9 +435,9 @@ class App
             if(file_exists($abs_file)){
                 if ($this->includeCheck($abs_file)){
                     $g->server['PHP_SELF'] = '/'.$file.'.php';
-                    if(self::$superglobals){
-                        $_SERVER['PHP_SELF'] = $g->server['PHP_SELF'];
-                    }
+                    // if(self::$superglobals){
+                    //     $_SERVER['PHP_SELF'] = $g->server['PHP_SELF'];
+                    // }
                     include $abs_file;
                 } else {
                     $response->status(403);
@@ -448,9 +448,9 @@ class App
                 if(file_exists($abs_file)){
                     if ($this->includeCheck($abs_file)){
                         $g->server['PHP_SELF'] = '/'.$file.'/index.php';
-                        if(self::$superglobals){
-                            $_SERVER['PHP_SELF'] =  $g->server['PHP_SELF'];
-                        }
+                        // if(self::$superglobals){
+                        //     $_SERVER['PHP_SELF'] =  $g->server['PHP_SELF'];
+                        // }
                         include $abs_file;
                     } else {
                         $response->status(403);
@@ -476,9 +476,9 @@ class App
             if(file_exists($abs_file)){
                 if ($this->includeCheck($abs_file)){
                     $g->server['PHP_SELF'] = '/'.$dir.'/'.$uri.'.php';
-                    if(self::$superglobals){
-                        $_SERVER['PHP_SELF'] =  $g->server['PHP_SELF'];
-                    }
+                    // if(self::$superglobals){
+                    //     $_SERVER['PHP_SELF'] =  $g->server['PHP_SELF'];
+                    // }
                     include $abs_file;
                 } else {
                     $response->status(403);
@@ -489,9 +489,9 @@ class App
                 if(file_exists($abs_path)){
                     if ($this->includeCheck($abs_path)){
                         $g->server['PHP_SELF'] = '/'.$dir.'/'.$uri.'/index.php';
-                        if(self::$superglobals){
-                            $_SERVER['PHP_SELF'] =  $g->server['PHP_SELF'];
-                        }
+                        // if(self::$superglobals){
+                        //     $_SERVER['PHP_SELF'] =  $g->server['PHP_SELF'];
+                        // }
                         include $abs_path;
                     } else {
                         $response->status(403);

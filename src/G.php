@@ -1,21 +1,17 @@
 <?php
+
 namespace ZealPHP;
+
 use ZealPHP\App;
-use OpenSwoole\Coroutine as co;
+
 class G
 {
-    private static $instance;
+    private static $instance = null;
+    // Other properties...
 
     private function __construct()
     {
-        $this->get = [];
-        $this->post = [];
-        $this->files = [];
-        $this->cookie = [];
-        $this->session = [];
-        $this->server = [];
-        $this->request = [];
-        $this->env = [];
+        // Initialize properties...
         $this->session_params = [];
     }
 
@@ -27,14 +23,33 @@ class G
         return self::$instance;
     }
 
-    public function __get($key)
+    // Return by reference
+    public function &__get($key)
     {
-        return $this->$key;
+        if (App::$superglobals) {
+            $superglobalKey = '_' . strtoupper($key);
+            if (!isset($GLOBALS[$superglobalKey])) {
+                // Initialize the superglobal if it doesn't exist
+                $GLOBALS[$superglobalKey] = null;
+            }
+            return $GLOBALS[$superglobalKey];
+        } else {
+            if (!isset($this->$key)) {
+                // Initialize the property if it doesn't exist
+                $this->$key = null;
+            }
+            return $this->$key;
+        }
     }
 
     public function __set($key, $value)
     {
-        $this->$key = $value;
+        if (App::$superglobals) {
+            $superglobalKey = '_' . strtoupper($key);
+            $GLOBALS[$superglobalKey] = $value;
+        } else {
+            $this->$key = $value;
+        }
     }
 
     public static function get($key)
@@ -46,28 +61,5 @@ class G
     {
         self::getInstance()->$key = $value;
     }
+
 }
-
-// // Our HTTP server instance
-// $server = new Swoole\HTTP\Server("127.0.0.1", 9501);
-
-// // ...
-
-// // The request event handler callback
-// $server->on('Request', function($request, $response)
-// {
-//     /*
-//      * At the start of every new request, setup global
-//      * request variables using Swoole server methods.
-//      */
-//    ContextManager::set('_GET', (array)$request->get);
-//    ContextManager::set('_POST', (array)$request->post);
-//    ContextManager::set('_FILES', (array)$request->files);
-//    ContextManager::set('_COOKIE', (array)$request->cookie);
-
-//   // And when you use them
-//   echo ContextManager::get('_GET')['foo'] ?? 'bar';
-
-//   // Instead of traditional PHP global variables...
-//   echo $_GET['foo'] ?? 'bar';
-// });
