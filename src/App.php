@@ -416,11 +416,11 @@ class App
         });
 
         # Gobal route for all root in the public directory
-        $this->route('/{file}', function($file, $response){
-            $_SERVER['PHP_SELF'] = '/'.$file.'.php';
+        $this->route('/{file}/?', function($file, $response){
             $abs_file = realpath(self::$cwd."/public/".$file.'.php');
             if(file_exists($abs_file)){
                 if ($this->includeCheck($abs_file)){
+                    $_SERVER['PHP_SELF'] = '/'.$file.'.php';
                     include $abs_file;
                 } else {
                     $response->status(403);
@@ -430,6 +430,7 @@ class App
                 $abs_file = realpath(self::$cwd."/public/".$file."/index.php");
                 if(file_exists($abs_file)){
                     if ($this->includeCheck($abs_file)){
+                        $_SERVER['PHP_SELF'] = '/'.$file.'/index.php';
                         include $abs_file;
                     } else {
                         $response->status(403);
@@ -447,13 +448,13 @@ class App
         });
 
         # Global route for all directories in the public directory
-        $this->nsPathRoute('{dir}', '{uri}', function($dir, $uri, $response){
+        $this->nsPathRoute('{dir}', '{uri}/?', function($dir, $uri, $response){
             // elog("Directory: $dir, URI: $uri");
-            $_SERVER['PHP_SELF'] = '/'.$dir.'/'.$uri.'.php';
             $abs_file = realpath(self::$cwd."/public/".$dir.'/'.$uri.'.php');
             // elog("Abs File: $abs_file");
             if(file_exists($abs_file)){
                 if ($this->includeCheck($abs_file)){
+                    $_SERVER['PHP_SELF'] = '/'.$dir.'/'.$uri.'.php';
                     include $abs_file;
                 } else {
                     $response->status(403);
@@ -463,6 +464,7 @@ class App
                 $abs_path = self::$cwd."/public/".$dir.'/'.$uri."/index.php";
                 if(file_exists($abs_path)){
                     if ($this->includeCheck($abs_path)){
+                        $_SERVER['PHP_SELF'] = '/'.$dir.'/'.$uri.'/index.php';
                         include $abs_path;
                     } else {
                         $response->status(403);
