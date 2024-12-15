@@ -14,7 +14,7 @@ function coprocess($taskLogic)
         ini_set('display_errors', '0');
         $taskLogic($worker);
         $worker->exit();
-    }, true, SOCK_DGRAM, true);
+    }, true, SOCK_STREAM, true);
 
     // Start the worker
     $worker->start();
