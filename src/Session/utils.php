@@ -13,10 +13,10 @@ function zeal_session_start()
 
     // Ensure session parameters are initialized
     if (!isset($g->session_params['save_path'])) {
-        $g->session_params['save_path'] = '/tmp/zeal_sessions';
+        $g->session_params['save_path'] = '/var/lib/php/sessions';
     }
     if (!isset($g->session_params['name'])) {
-        $g->session_params['name'] = 'ZEALPHPSESSID';
+        $g->session_params['name'] = 'PHPSESSID';
     }
     if (!isset($g->session_params['cookie_params'])) {
         $g->session_params['cookie_params'] = [
@@ -57,7 +57,7 @@ function zeal_session_id($id = null)
     $g = G::getInstance();
 
     if (!isset($g->session_params['name'])) {
-        $g->session_params['name'] = 'ZEALPHPSESSID';
+        $g->session_params['name'] = 'PHPSESSID';
     }
 
     $session_name = $g->session_params['name'];
@@ -86,7 +86,7 @@ function zeal_session_name($name = null)
     $g = G::getInstance();
 
     if ($name === null) {
-        return $g->session_params['name'] ?? 'ZEALPHPSESSID';
+        return $g->session_params['name'] ?? 'PHPSESSID';
     } else {
         $g->session_params['name'] = $name;
         return $name;
