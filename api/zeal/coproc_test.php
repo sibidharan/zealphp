@@ -2,7 +2,7 @@
 use OpenSwoole\Coroutine as co;
 use function ZealPHP\coproc;
 
-$coproc_test = function(){
+$coproc_test = function($response){
     $data = "Sample Data";
     $data = coproc(function($worker) use ($data){
         echo "Processing data: $data\n";
@@ -40,4 +40,5 @@ $coproc_test = function(){
         $_SESSION['test'] = "test";
     });
     echo $data;
+    $response->status(202);
 };

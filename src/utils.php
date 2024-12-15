@@ -7,7 +7,7 @@ use ZealPHP\StringUtils;
 use OpenSwoole\Process;
 use OpenSwoole\Coroutine as co;
 
-function coprocess($taskLogic)
+function coprocess($taskLogic, $wait = true)
 {
     $worker = new Process(function ($worker) use ($taskLogic) {
         error_reporting(0);
@@ -18,7 +18,7 @@ function coprocess($taskLogic)
 
     // Start the worker
     $worker->start();
-    Process::wait(true);
+    Process::wait($wait);
     return $worker->read();
 }
 

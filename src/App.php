@@ -486,10 +486,11 @@ class App
             $_func = basename($handler);
             if(file_exists(App::$cwd.$handler.'.php')){
                 # TODO: Include check for task handlers
-                require_once App::$cwd.$handler.'.php';
+                include App::$cwd.$handler.'.php';
 
                 # call the function from the included file
                 $result = $$_func(...$data['args']);
+                unset($$_func);
             } else {
                 elog("Task handler not found: $handler", "error");
                 $result = false;
