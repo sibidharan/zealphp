@@ -432,7 +432,7 @@ class App
             }
         });
 
-        # Gobal route for all root in the public directory
+        # Global route for all files in the root of the public directory
         $this->route('/{file}/?', function($file, $response){
             $g = G::instance();
             $abs_file = realpath(self::$cwd."/public/".$file.'.php');
@@ -471,7 +471,7 @@ class App
             }
         });
 
-        # Global route for all directories in the public directory
+        # Global route for all directories and sub directories in the public directory
         $this->nsPathRoute('{dir}', '{uri}/?', function($dir, $uri, $response){
             $g = G::instance();
             // elog("Directory: $dir, URI: $uri");

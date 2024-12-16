@@ -1,5 +1,6 @@
 <?php
 namespace ZealPHP;
+use ZealPHP\G;
 
 /**
  * Session class is a bunch of static methods helpful for easy handling of the session.
@@ -118,15 +119,16 @@ class Session
      */
     public static function init()
     {
-        Session::$documentRoot = $_SERVER['DOCUMENT_ROOT'];
-        if (php_sapi_name() == "cli" and StringUtils::str_ends_with($_SERVER['PHP_SELF'], 'worker.php')) {
-            parse_str(implode('&', array_slice((array)$_SERVER['argv'], 1)), $_GET);
+        $g = G::instance();
+        Session::$documentRoot = $g->server['DOCUMENT_ROOT'];
+        if (php_sapi_name() == "cli" and StringUtils::str_ends_with($g->server['PHP_SELF'], 'worker.php')) {
+            parse_str(implode('&', array_slice((array)$g->server['argv'], 1)), $_GET);
             if (isset($_GET['sessid'])) {
                 // logit("Trying to reconstruct session ID from $_GET[sessid]", "fatal");
                 session_id($_GET['sessid']);
                 session_start();
                 $session = array();
-                foreach ($_SESSION as $k => $v) {
+                foreach ($g->session as $k => $v) {
                     $session[$k] = $v;
                 }
                 session_commit();
@@ -136,7 +138,7 @@ class Session
                 session_id($newid);
                 session_start();
                 foreach ($session as $k => $v) {
-                    $_SESSION[$k] = $v;
+                    $g->session[$k] = $v;
                 }
             } else {
                 elog("No session id", "fatal");
@@ -208,23 +210,26 @@ class Session
      */
     public static function set($key, $value)
     {
-        $_SESSION[$key] = $value;
+        $g = G::instance();
+        $g->session[$key] = $value;
     }
 
     public static function unset($key)
     {
-        unset($_SESSION[$key]);
+        $g = G::instance();
+        unset($g->session[$key]);
     }
 
     /**
-     * Checks if the given key is present in $_SESSION, only if session_start() is already called.
+     * Checks if the given key is present in $g->session, only if session_start() is already called.
      *
      * @param String $key
      * @return Any
      */
     public static function isset($key)
     {
-        return isset($_SESSION[$key]);
+        $g = G::instance();
+        return isset($g->session[$key]);
     }
 
     /**
@@ -235,8 +240,9 @@ class Session
      */
     public static function get($key, $default = false)
     {
-        if (isset($_SESSION[$key])) {
-            return $_SESSION[$key];
+        $g = G::instance();
+        if (isset($g->session[$key])) {
+            return $g->session[$key];
         } else {
             return $default;
         }
@@ -246,11 +252,15 @@ class Session
     /**
      * To display the errors in the webpages
      */
-    public static function devEnv()
+    public static function devEnv($enable = true)
     {
-        ini_set('display_errors', 1);
-        ini_set('display_startup_errors', 1);
-        error_reporting(E_ALL);
+        ini_set('display_errors', $enable);
+        ini_set('display_startup_errors', $enable);
+        if ($enable) {
+            error_reporting(E_ALL);
+        } else {
+            error_reporting(0);
+        }
     }
 
     /**
@@ -272,7 +282,7 @@ class Session
         $g = G::instance();
         if ($file == null) {
             $tokens = explode('/', $g->server['PHP_SELF']);
-            // Console::log($_SERVER);
+            // Console::log($g->server);
             $currentFile = array_pop($tokens);
             $currentFile = explode('.', $currentFile);
             array_pop($currentFile);
@@ -285,17 +295,20 @@ class Session
 
     public static function getCurrentTab()
     {
-        return $_GET['tab'];
+        $g = G::instance();
+        return $g->get['tab'];
     }
 
     public static function getCurrentPage()
     {
-        return $_GET['page'];
+        $g = G::instance();
+        return $g->get['page'];
     }
 
     public static function getCurrentLocation()
     {
-        return basename($_SERVER['REDIRECT_URL']);
+        $g = G::instance();
+        return basename($g->server['REDIRECT_URL']);
     }
 
     public function getEnvironment()
