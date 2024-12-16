@@ -6,6 +6,7 @@ use ZealPHP\Session;
 use ZealPHP\Session\CoSessionManager;
 use function ZealPHP\elog;
 use function ZealPHP\jTraceEx;
+use OpenSwoole\Coroutine as co;
 class App
 {
     protected $routes = [];
@@ -52,6 +53,9 @@ class App
     {
         if ($cwd === null) {
             $cwd = dirname(debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1)[0]['file']);
+        }
+        if(!App::$superglobals){
+            co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
         }
         if (self::$instance == null) {
             self::$instance = new App($host, $port, $cwd);
