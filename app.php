@@ -7,8 +7,9 @@ use ZealPHP\App;
 use ZealPHP\G;
 
 use function ZealPHP\elog;
+use function ZealPHP\get_current_render_time;
 use function ZealPHP\zlog;
-App::superglobals(true);
+App::superglobals(false);
 
 $app = App::init('0.0.0.0', 8181);
 // $app->route('/', function() {
@@ -16,8 +17,126 @@ $app = App::init('0.0.0.0', 8181);
 //     echo "<h1>This is index override</h1>";
 // });
 
+$app->route('/gotest', function(){
+    // Create a temporary memory stream
+    $tempStream = fopen('php://memory', 'w+');
+    if ($tempStream === false) {
+        return "Failed to create memory stream.\n";
+    }
+    // Coroutine execution or regular function
+    go(function () use ($tempStream) {
+        // Write to the temporary stream
+        co::sleep(1); 
+        fwrite($tempStream, "Hello, Coroutine 1!\n");   
+    });
+
+    go(function () use ($tempStream) {
+        co::sleep(1); 
+
+        // Write to the temporary stream
+        fwrite($tempStream, "Hello, Coroutine 2!\n");    
+    });
+
+    go(function () use ($tempStream) {
+        co::sleep(1); 
+        // Write to the temporary stream
+        fwrite($tempStream, "Hello, Coroutine 3!\n");    
+    });
+
+    go(function () use ($tempStream) {
+        co::sleep(1); 
+        // Write to the temporary stream
+        fwrite($tempStream, "Hello, Coroutine 4!\n");    
+    });
+
+    go(function () use ($tempStream) {
+        // Write to the temporary stream
+        co::sleep(1);
+        fwrite($tempStream, "Hello, Coroutine 5!\n");    
+    });
+
+    // Rewind and capture output from the temporary stream
+    rewind($tempStream);
+    $output = stream_get_contents($tempStream);
+
+    // Close the temporary stream
+    fclose($tempStream);
+
+    echo $output;
+});
+
 $app->route('/sessleak', function() {
-    $channel = new Channel(1);
+    $channel = new Channel(5);
+    $g = G::getInstance();
+    $g->session['test'] = 'test';
+    go(function() use ($channel){
+        $g = G::getInstance();
+        $g->session['test'] = 'test';
+        elog("Session leak started, inside coroutine, waiting for 10 seconds to check if _SESSION gets overwritten. Now bombard the server with requests...", "test");
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        $channel->push($g->session);
+    });
+
+    go(function() use ($channel){
+        $g = G::getInstance();
+        $g->session['test'] = 'test';
+        elog("Session leak started, inside coroutine, waiting for 10 seconds to check if _SESSION gets overwritten. Now bombard the server with requests...", "test");
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        $channel->push($g->session);
+    });
+
+    go(function() use ($channel){
+        $g = G::getInstance();
+        $g->session['test'] = 'test';
+        elog("Session leak started, inside coroutine, waiting for 10 seconds to check if _SESSION gets overwritten. Now bombard the server with requests...", "test");
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        $channel->push($g->session);
+    });
+
+    go(function() use ($channel){
+        $g = G::getInstance();
+        $g->session['test'] = 'test';
+        elog("Session leak started, inside coroutine, waiting for 10 seconds to check if _SESSION gets overwritten. Now bombard the server with requests...", "test");
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        co::sleep(2);
+        $g->session['test'];
+        $channel->push($g->session);
+    });
+
     go(function() use ($channel){
         $g = G::getInstance();
         $g->session['test'] = 'test';
@@ -35,10 +154,14 @@ $app->route('/sessleak', function() {
         $channel->push($g->session);
     });
         // elog("Session leak started, inside coroutine, waiting for 10 seconds to check if _SESSION gets overwritten. Now bombard the server with requests...", "test");
-    $data = $channel->pop();
-    echo "<pre>";
-    print_r($data ?? "Session leak detected");
-    echo "</pre>";
+    for($i = 0; $i < 5; $i++) {
+        $data = $channel->pop();
+        echo "<br>\n<pre>";
+        print_r($data ?? "Session leak detected");
+        echo "</pre>";
+    }
+    echo "\n<br>It took ".get_current_render_time()." seconds to complete the request";
+
 });
 
 $app->route('/co', function() {
@@ -137,4 +260,6 @@ $app->patternRoute('/raw/(?P<rest>.*)', ['methods' => ['GET']], function($rest) 
 // });
 
 
-$app->run();
+$app->run([
+    'task_worker_num' => 8
+]);
