@@ -361,7 +361,7 @@ class App
             // 'task_enable_coroutine' => true,
         ];
         // elog("Initializing ZealPHP server at http://{$this->host}:{$this->port}");
-        self::$server = $server = new \Swoole\HTTP\Server($this->host, $this->port);
+        self::$server = $server = new \OpenSwoole\HTTP\Server($this->host, $this->port);
         if ($settings == null){
             $server->set($default_settings);
         } else {
