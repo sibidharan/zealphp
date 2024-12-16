@@ -95,6 +95,7 @@ $app->route('/quiz/{page}/{tab}/{nwe}', function($nwe, $tab, $page) {
 $app->route("/global/{name}", [
     'methods' => ['GET', 'POST']
 ],function($name) {
+    // $g = G::getInstance();
     if (isset($GLOBALS[$name])) {
         print_r($GLOBALS[$name]);
     } else{

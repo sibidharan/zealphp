@@ -8,25 +8,25 @@ $coproc_test = function($response){
         echo "Processing data: $data\n";
         $channel = new OpenSwoole\Coroutine\Channel(5);
         go(function() use($channel){
-            // co::sleep(1);
+            co::sleep(1);
             print_r($_SERVER);
             $channel->push("Hello, Coroutine 1!");
         });
         go(function() use($channel){
-            // co::sleep(1);
+            co::sleep(1);
             print_r($_GET);
             $channel->push("Hello, Coroutine 2!");
         });
         go(function() use($channel){
-            // co::sleep(1);
+            co::sleep(1);
             $channel->push("Hello, Coroutine 3!");
         });
         go(function() use($channel){
-            // co::sleep(1);
+            co::sleep(1);
             $channel->push("Hello, Coroutine 4!");
         });
         go(function() use($channel){
-            // co::sleep(1);
+            co::sleep(1);
             $channel->push("Hello, Coroutine 5!");
         });
 
