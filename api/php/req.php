@@ -3,7 +3,7 @@
 use ZealPHP\G;
 
 $req = function(){
-    $g = G::getInstance();
+    $g = G::instance();
     print_r($g->server);
     print_r($g->get);
 };

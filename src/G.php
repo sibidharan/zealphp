@@ -15,7 +15,7 @@ class G
         $this->session_params = [];
     }
 
-    public static function getInstance()
+    public static function instance()
     {
         if (self::$instance === null) {
             self::$instance = new G();
@@ -54,12 +54,12 @@ class G
 
     public static function get($key)
     {
-        return self::getInstance()->$key;
+        return self::instance()->$key;
     }
 
     public static function set($key, $value)
     {
-        self::getInstance()->$key = $value;
+        self::instance()->$key = $value;
     }
 
 }

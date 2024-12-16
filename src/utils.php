@@ -118,7 +118,7 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
 
     $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
     $caller = array_shift($bt);
-    $g = G::getInstance();
+    $g = G::instance();
     if ((in_array($tag, ["system", "fatal", "error", "warning", "info", "debug"]))) {
         $date = date('l jS F Y h:i:s A');
         //$date = date('h:i:s A');
@@ -159,7 +159,7 @@ function get_current_render_time()
     $time = explode(' ', $time);
     $time = $time[1] + $time[0];
     $finish = $time;
-    $total_time = number_format(($finish - G::getInstance()->session['__start_time']), 5);
+    $total_time = number_format(($finish - G::instance()->session['__start_time']), 5);
     return $total_time;
 }
 

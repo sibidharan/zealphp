@@ -32,7 +32,7 @@ class ZealAPI extends REST
     */
     public function processApi($module, $request=null)
     {
-        $g = G::getInstance();
+        $g = G::instance();
         $module = $module ? '/'.$module : '';
         $func = basename($request);
         if (!isset($module) and (int)method_exists($this, $func) > 0) {

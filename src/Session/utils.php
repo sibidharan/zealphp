@@ -9,7 +9,7 @@ use ZealPHP\G;
  */
 function zeal_session_start()
 {
-    $g = G::getInstance();
+    $g = G::instance();
 
     // Ensure session parameters are initialized
     if (!isset($g->session_params['save_path'])) {
@@ -54,7 +54,7 @@ function zeal_session_start()
  */
 function zeal_session_id($id = null)
 {
-    $g = G::getInstance();
+    $g = G::instance();
 
     if (!isset($g->session_params['name'])) {
         $g->session_params['name'] = 'PHPSESSID';
@@ -83,7 +83,7 @@ function zeal_session_id($id = null)
  */
 function zeal_session_name($name = null)
 {
-    $g = G::getInstance();
+    $g = G::instance();
 
     if ($name === null) {
         return $g->session_params['name'] ?? 'PHPSESSID';
@@ -98,7 +98,7 @@ function zeal_session_name($name = null)
  */
 function zeal_session_write_close()
 {
-    $g = G::getInstance();
+    $g = G::instance();
 
     if (isset($g->session)) {
         // Get session ID
@@ -119,7 +119,7 @@ function zeal_session_write_close()
  */
 function zeal_session_destroy()
 {
-    $g = G::getInstance();
+    $g = G::instance();
 
     // Get session ID
     $session_id = zeal_session_id();
@@ -142,7 +142,7 @@ function zeal_session_destroy()
  */
 function zeal_session_unset()
 {
-    $g = G::getInstance();
+    $g = G::instance();
     $g->session = [];
 }
 
@@ -151,7 +151,7 @@ function zeal_session_unset()
  */
 function zeal_session_regenerate_id($delete_old_session = false)
 {
-    $g = G::getInstance();
+    $g = G::instance();
 
     // Get old session ID
     $old_session_id = zeal_session_id();
@@ -180,7 +180,7 @@ function zeal_session_regenerate_id($delete_old_session = false)
  */
 function zeal_session_get_cookie_params()
 {
-    $g = G::getInstance();
+    $g = G::instance();
     return $g->session_params['cookie_params'] ?? [
         'lifetime' => 0,
         'path' => '/',
@@ -195,6 +195,6 @@ function zeal_session_get_cookie_params()
  */
 function zeal_session_set_cookie_params($lifetime, $path = '/', $domain = '', $secure = false, $httponly = false)
 {
-    $g = G::getInstance();
+    $g = G::instance();
     $g->session_params['cookie_params'] = compact('lifetime', 'path', 'domain', 'secure', 'httponly');
 }

@@ -67,10 +67,10 @@ $app->route('/gotest', function(){
 
 $app->route('/sessleak', function() {
     $channel = new Channel(5);
-    $g = G::getInstance();
+    $g = G::instance();
     $g->session['test'] = 'test';
     go(function() use ($channel){
-        $g = G::getInstance();
+        $g = G::instance();
         $g->session['test'] = 'test';
         elog("Session leak started, inside coroutine, waiting for 10 seconds to check if _SESSION gets overwritten. Now bombard the server with requests...", "test");
         co::sleep(2);
@@ -87,7 +87,7 @@ $app->route('/sessleak', function() {
     });
 
     go(function() use ($channel){
-        $g = G::getInstance();
+        $g = G::instance();
         $g->session['test'] = 'test';
         elog("Session leak started, inside coroutine, waiting for 10 seconds to check if _SESSION gets overwritten. Now bombard the server with requests...", "test");
         co::sleep(2);
@@ -104,7 +104,7 @@ $app->route('/sessleak', function() {
     });
 
     go(function() use ($channel){
-        $g = G::getInstance();
+        $g = G::instance();
         $g->session['test'] = 'test';
         elog("Session leak started, inside coroutine, waiting for 10 seconds to check if _SESSION gets overwritten. Now bombard the server with requests...", "test");
         co::sleep(2);
@@ -121,7 +121,7 @@ $app->route('/sessleak', function() {
     });
 
     go(function() use ($channel){
-        $g = G::getInstance();
+        $g = G::instance();
         $g->session['test'] = 'test';
         elog("Session leak started, inside coroutine, waiting for 10 seconds to check if _SESSION gets overwritten. Now bombard the server with requests...", "test");
         co::sleep(2);
@@ -138,7 +138,7 @@ $app->route('/sessleak', function() {
     });
 
     go(function() use ($channel){
-        $g = G::getInstance();
+        $g = G::instance();
         $g->session['test'] = 'test';
         elog("Session leak started, inside coroutine, waiting for 10 seconds to check if _SESSION gets overwritten. Now bombard the server with requests...", "test");
         co::sleep(2);
@@ -218,7 +218,7 @@ $app->route('/quiz/{page}/{tab}/{nwe}', function($nwe, $tab, $page) {
 $app->route("/global/{name}", [
     'methods' => ['GET', 'POST']
 ],function($name) {
-    // $g = G::getInstance();
+    // $g = G::instance();
     if (isset($GLOBALS[$name])) {
         print_r($GLOBALS[$name]);
     } else{

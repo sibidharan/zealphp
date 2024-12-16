@@ -351,7 +351,7 @@ class App
      */
     public function run($settings = null)
     {
-        $g = G::getInstance();
+        $g = G::instance();
         $default_settings = [
             'enable_static_handler' => true,
             'document_root' => self::$cwd . '/public',
@@ -412,7 +412,7 @@ class App
         # Implicit route for index.php
 
         $this->route('/', function($response){
-            $g = G::getInstance();
+            $g = G::instance();
             $file = 'index';
             $g->server['PHP_SELF'] = '/'.$file.'.php';
             // if(self::$superglobals){
@@ -430,7 +430,7 @@ class App
 
         # Gobal route for all root in the public directory
         $this->route('/{file}/?', function($file, $response){
-            $g = G::getInstance();
+            $g = G::instance();
             $abs_file = realpath(self::$cwd."/public/".$file.'.php');
             if(file_exists($abs_file)){
                 if ($this->includeCheck($abs_file)){
@@ -469,7 +469,7 @@ class App
 
         # Global route for all directories in the public directory
         $this->nsPathRoute('{dir}', '{uri}/?', function($dir, $uri, $response){
-            $g = G::getInstance();
+            $g = G::instance();
             // elog("Directory: $dir, URI: $uri");
             $abs_file = realpath(self::$cwd."/public/".$dir.'/'.$uri.'.php');
             // elog("Abs File: $abs_file");
@@ -536,72 +536,7 @@ class App
 
         $SessionManager = self::$superglobals ?  'ZealPHP\Session\SessionManager' : 'ZealPHP\Session\CoSessionManager';
         $server->on("request",new $SessionManager(function($request, $response) use ($server) {
-            // Set up superglobals
-            //if(self::$superglobals){
-            //     // $_GET
-            //     unset($_GET);
-            //     $_GET = $request->get ?? [];
-
-            //     // $_POST
-            //     unset($_POST);
-            //     $_POST = $request->post ?? [];
-
-            //     //$_REQUEST
-            //     unset($_REQUEST);
-            //     $_REQUEST = array_merge($_GET, $_POST);
-
-            //     // $_COOKIE
-            //     unset($_COOKIE);
-            //     $_COOKIE = $request->cookie ?? [];
-
-            //     // $_FILES
-            //     unset($_FILES);
-            //     $_FILES = [];
-            //     if (!empty($request->files)) {
-            //         $_FILES = $request->files;
-            //     }
-
-            //     // $_SERVER
-            //     unset($_SERVER);
-            //     $_SERVER = [];
-            //     if (!empty($request->server)) {
-            //         foreach ($request->server as $key => $value) {
-            //             $_SERVER[strtoupper($key)] = $value;
-            //         }
-            //     }
-            //     // Headers go into $_SERVER as HTTP_ variables
-            //     if (!empty($request->header)) {
-            //         foreach ($request->header as $key => $value) {
-            //             $headerKey = 'HTTP_' . str_replace('-', '_', strtoupper($key));
-            //             $_SERVER[$headerKey] = $value;
-            //         }
-            //     }
-
-            //     // Common server vars typically set by web servers:
-            //     if (!isset($_SERVER['REQUEST_METHOD'])) {
-            //         $_SERVER['REQUEST_METHOD'] = 'GET';
-            //     }
-            //     if (!isset($_SERVER['REQUEST_URI'])) {
-            //         $_SERVER['REQUEST_URI'] = '/';
-            //     }
-            //     if (!isset($_SERVER['SCRIPT_NAME'])) {
-            //         $_SERVER['SCRIPT_NAME'] = '/app.php';
-            //     }
-            //     if (!isset($_SERVER['SERVER_NAME'])) {
-            //         $_SERVER['SERVER_NAME'] = $_SERVER['HTTP_HOST'] ?? 'localhost';
-            //     }
-            //     if (!isset($_SERVER['DOCUMENT_ROOT'])) {
-            //         $_SERVER['DOCUMENT_ROOT'] = self::$cwd . '/public';
-            //     }
-            //     if (!isset($_SERVER['PHP_SELF'])) {
-            //         $_SERVER['PHP_SELF'] = '/app.php';
-            //     }
-
-            //     $uri = $_SERVER['REQUEST_URI'];
-            //     $method = $_SERVER['REQUEST_METHOD'];
-            // } 
-
-            $g = G::getInstance();
+            $g = G::instance();
             // $_GET alternative
             $g->get = $request->get ?? [];
 

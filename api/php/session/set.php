@@ -3,7 +3,7 @@ use ZealPHP\G;
 use function ZealPHP\Session\zeal_session_id;
 $set = function(){
     //set all $_GET to the session
-    $g = G::getInstance();
+    $g = G::instance();
     foreach($g->get as $key=>$val){
         $g->session[$key] = $val;
     }

@@ -46,7 +46,7 @@ class SessionManager
         $this->idGenerator = $idGenerator;
         $this->useCookies = is_null($useCookies) ? (bool)ini_get('session.use_cookies') : $useCookies;
         $this->useOnlyCookies = is_null($useOnlyCookies) ? (bool)ini_get('session.use_only_cookies') : $useOnlyCookies;
-        $this->g = G::getInstance();
+        $this->g = G::instance();
     }
 
     /**
