@@ -10,8 +10,8 @@ class REST {
     private $_code = 200;
     public $_response;
     public function __construct($request, $response){
-        $this->_response = $response;
-        $this->_request = $request;
+        $this->_response = G::instance()->openswoole_response;
+        $this->_request = G::instance()->openswoole_request;
         $this->inputs();
     }
 
@@ -115,7 +115,7 @@ class REST {
     }
 
     private function setHeaders(){
-        $this->_response->header("Content-Type",$this->_content_type);
+       $this->_response->header("Content-Type",$this->_content_type);
     }
 
     public function setContentType($type){

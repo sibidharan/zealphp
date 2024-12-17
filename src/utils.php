@@ -212,3 +212,17 @@ function uniqidReal($length = 13)
     }
     return substr(bin2hex($bytes), 0, $length);
 }
+
+function access_log($status = 200, $length){
+    $g = G::instance();
+    $time = date('d/M/Y:H:i:s O');
+    $time .= substr((string)microtime(), 1, 6);
+    # add microtime to the time
+    $remote = $g->server['REMOTE_ADDR'];
+    $request = $g->server['REQUEST_METHOD'].' '.$g->server['REQUEST_URI'].' '.$g->server['SERVER_PROTOCOL'];
+    $referer = $g->server['HTTP_REFERER'] ?? '-';
+    $user_agent = $g->server['HTTP_USER_AGENT'] ?? '-';
+    $log = "$remote - - [$time] \"$request\" $status $length \"$referer\" \"$user_agent\"\n";
+    // file_put_contents('/var/log/zealphp/access.log', $log, FILE_APPEND);
+    error_log($log);
+}

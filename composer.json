@@ -7,7 +7,8 @@
         "php": ">=7.4",
         "openswoole/core": "~22.1.5",
         "swoole/ide-helper": "~5.0.0",
-        "openswoole/ide-helper": "~22.0.1"
+        "openswoole/ide-helper": "~22.0.1",
+        "psr/http-message": "^1.1"
     },
     "autoload": {
         "psr-4": {
