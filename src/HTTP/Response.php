@@ -53,13 +53,9 @@ class Response
         }
     }
 
-    // Add your custom methods here
-
     public function status(int $statusCode, string $reason = ''): bool
     {
-        // \ZealPHP\elog("Setting status to $statusCode");
         $this->statusCode = $statusCode;
-        // \ZealPHP\elog("Set status to $statusCode");
         $g = \ZealPHP\G::instance();
         $g->status = $statusCode;
         return $this->parent->status($statusCode, $reason);
