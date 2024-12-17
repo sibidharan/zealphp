@@ -13,7 +13,7 @@ class G
     {
         // Initialize properties...
         $this->session_params = [];
-        $this->status = 0;
+        $this->status = null;
     }
 
     public static function instance()

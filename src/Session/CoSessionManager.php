@@ -97,6 +97,8 @@ class CoSessionManager
             $g->session['UNIQUE_REQUEST_ID'] = uniqidReal();
             $request = new \ZealPHP\HTTP\Request($request);
             $response = new \ZealPHP\HTTP\Response($response);
+            $g->zealphp_request = $request;
+            $g->zealphp_response = $response;
             // zlog("SessionManager:: session_id: " . session_id() . " session_start: " . $g->session['__start_time']. " UNIQUE_ID: " . $g->session['UNIQUE_REQUEST_ID']);
             call_user_func($this->middleware, $request, $response);
             // elog('SessionManager:: middleware executed');

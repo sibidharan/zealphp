@@ -64,7 +64,7 @@ class SessionManager
     /**
      * Delegate execution to the underlying middleware wrapping it into the session start/stop calls
      */
-    public function __invoke(\Swoole\Http\Request $request, \Swoole\Http\Response $response)
+    public function __invoke($request,$response)
     {
         // G::init();
         // elog('SessionManager::__invoke');
@@ -109,6 +109,10 @@ class SessionManager
             $_SESSION['__start_time'] = $time;
             $_SESSION['UNIQUE_REQUEST_ID'] = uniqidReal();
             // zlog("SessionManager:: session_id: " . session_id() . " session_start: " . $_SESSION['__start_time']. " UNIQUE_ID: " . $_SESSION['UNIQUE_REQUEST_ID']);
+            $request = new \ZealPHP\HTTP\Request($request);
+            $response = new \ZealPHP\HTTP\Response($response);
+            $this->g->zealphp_request = $request;
+            $this->g->zealphp_response = $response;
             call_user_func($this->middleware, $request, $response);
             // elog('SessionManager:: middleware executed');
         } finally {

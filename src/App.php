@@ -404,7 +404,7 @@ class App
         ], function($rquest, $response, $request){
             $api = new ZealAPI($request, $response, self::$cwd);
             try {
-                $api->processApi("", $rquest);
+                return $api->processApi("", $rquest);
             } catch (\Exception $e){
                 $api->die($e);
             }
@@ -416,7 +416,7 @@ class App
         ], function($module, $rquest, $response, $request){
             $api = new ZealAPI($request, $response, self::$cwd);
             try {
-                $api->processApi($module, $rquest);
+                return $api->processApi($module, $rquest);
             } catch (\Exception $e){
                 $api->die($e);
             }
@@ -671,9 +671,9 @@ class ResponseMiddleware implements MiddlewareInterface
                     } else if ($pname == 'app'){
                         $invokeArgs[] = $this;
                     } else if ($pname == 'request'){
-                        $invokeArgs[] = $request;
+                        $invokeArgs[] = $g->zealphp_request;
                     } else if ($pname == 'response'){
-                        $invokeArgs[] = null;
+                        $invokeArgs[] = $g->zealphp_response;
                     } else {
                         $invokeArgs[] = $param->isDefaultValueAvailable() 
                             ? $param->getDefaultValue() 
