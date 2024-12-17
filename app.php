@@ -1,13 +1,16 @@
 <?php
 
 require_once __DIR__ . '/vendor/autoload.php';
+
+use OpenSwoole\Core\Psr\Response;
 use OpenSwoole\Coroutine as co;
 use OpenSwoole\Coroutine\Channel;
 use ZealPHP\App;
 use ZealPHP\G;
 
 use function ZealPHP\elog;
-use function ZealPHP\get_current_render_time;
+use function ZealPHP\response_add_header;
+use function ZealPHP\response_set_status;
 use function ZealPHP\zlog;
 
 App::superglobals(false);
@@ -72,21 +75,34 @@ $app->route('/quiz/{page}/{tab}/{nwe}', function($nwe, $tab, $page) {
 //     echo "<h1>Hello, $self->get $name!</h1>";
 // });
 
-$app->route("/global/{name}", [
+$app->route("/suglobal/{name}", [
     'methods' => ['GET', 'POST']
 ],function($name) {
+    response_add_header('X-Prototype',  'buffer');
+    response_set_status(202);
     // $g = G::instance();
-    if (isset($GLOBALS[$name])) {
-        print_r($GLOBALS[$name]);
-    } else{
-        echo "Unknown superglobal";
+    if(App::$superglobals){
+        if (isset($GLOBALS[$name])) {
+            print_r($GLOBALS[$name]);
+        } else{
+            echo "Unknown superglobal";
+        }
+    } else {
+        $g = G::instance();
+        if (isset($g->$name)) {
+            print_r($g->$name);
+        } else{
+            echo "Unknown global";
+        }
     }
 });
 
 $app->route("/coglobal/set/session", [
     'methods' => ['GET', 'POST']
 ],function($name) {
-    G::set('session', ['name' => 'John Doe']);
+    $G = G::instance();
+    $G->session['name'] = $name;
+    return new Response('Session set', 300, 'success', ['Content-Type' => 'text/plain', 'X-Test' => 'test']);
 });
 
 $app->route("/coglobal/get/session", [

@@ -682,12 +682,25 @@ class ResponseMiddleware implements MiddlewareInterface
                 }
                 try {
                     ob_start();
-                    $status = call_user_func_array($handler, $invokeArgs);
-                    if($status == null){
+                    $object = call_user_func_array($handler, $invokeArgs);
+                    if(is_int($object)){
+                        $status = (int)$object;
+                    } else {
+                        $status = null;
+                    }
+
+                    if($status == null && $g->status == 0){
                         $status = 200;
+                    } else {
+                        $status = $status ?? $g->status;
                     }
                     $buffer = ob_get_clean();
-                    #TODO: Do something for custom headers
+
+                    if($object instanceof ResponseInterface){
+                        $buffer ?? elog("Response Object Returned, Buffer Ignored:\n$buffer");
+                        return $object;
+                    }
+
                     return (new Response($buffer, $status));
                 } catch (\Exception $e) {
                     elog(jTraceEx($e), "error");
