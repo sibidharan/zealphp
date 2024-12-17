@@ -6,6 +6,9 @@ use ZealPHP\Session;
 use ZealPHP\Session\CoSessionManager;
 use function ZealPHP\elog;
 use function ZealPHP\jTraceEx;
+
+
+
 use OpenSwoole\Coroutine as co;
 class App
 {
@@ -410,7 +413,7 @@ class App
 
         $this->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
             $response->status(403);
-            $response->write("<h1>403 Forbidden</h1>");
+            $response->write("403 Forbidden");
         });
 
         # Implicit route for index.php
@@ -540,6 +543,7 @@ class App
 
         $SessionManager = self::$superglobals ?  'ZealPHP\Session\SessionManager' : 'ZealPHP\Session\CoSessionManager';
         $server->on("request",new $SessionManager(function($request, $response) use ($server) {
+            $status = 200;
             $g = G::instance();
             // $_GET alternative
             $g->get = $request->get ?? [];
@@ -640,9 +644,8 @@ class App
                         call_user_func_array($handler, $invokeArgs);
                         $buffer = ob_get_clean();
                         $response->end($buffer);
-                        return;
                     } catch (\Exception $e) {
-                        $response->status(500);
+                        $response->status($status = 500);
                         elog(jTraceEx($e), "error");
                         if (self::$display_errors) {
                             // print the error message to the error log
@@ -650,17 +653,31 @@ class App
                         } else {
                             $response->end("<pre>500 Internal Server Error</pre>");
                         }
-                        return;
-
                     }
+                    break;
                 }
             }
+            if($response->isWritable()){
+                $response->status($status = 404);
+                $response->end("<pre>404 Not Found</pre>");
+            }
 
-            // 404 if no match
-            $response->status(404);
-            $response->end("<pre>404 Not Found</pre>");
+            access_log($status, strlen($buffer));
+
         }));
         elog("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
         $server->start();
     }
+}
+
+function access_log($status = 200, $length){
+    $g = G::instance();
+    $time = date('d/M/Y:H:i:s O');
+    $remote = $g->server['REMOTE_ADDR'];
+    $request = $g->server['REQUEST_METHOD'].' '.$g->server['REQUEST_URI'].' '.$g->server['SERVER_PROTOCOL'];
+    $referer = $g->server['HTTP_REFERER'] ?? '-';
+    $user_agent = $g->server['HTTP_USER_AGENT'] ?? '-';
+    $log = "$remote - - [$time] \"$request\" $status $length \"$referer\" \"$user_agent\"\n";
+    // file_put_contents('/var/log/zealphp/access.log', $log, FILE_APPEND);
+    error_log($log);
 }

@@ -9,7 +9,6 @@ use ZealPHP\G;
 use function ZealPHP\elog;
 use function ZealPHP\get_current_render_time;
 use function ZealPHP\zlog;
-Co::set(['hook_flags' => OpenSwoole\Runtime::HOOK_ALL]);
 
 App::superglobals(false);
 
