@@ -314,7 +314,7 @@ class App
     public static function render($_template = 'index', $_data = [])
     {
         $_source = Session::getCurrentFile(null);
-        elog("Rendering template: $_template from $_source");
+        // elog("Rendering template: $_template from $_source", "render");
         extract($_data, EXTR_SKIP);
         //This function returns the current script to build the template path.
         $_general = strpos($_template, '/') === 0;
@@ -563,11 +563,11 @@ class App
         ->add(new ResponseMiddleware())
         ->add(new LoggingMiddleware());
 
-        $server->on("request",new $SessionManager(function($request, $response) use ($server) {
+        $server->on("request",new $SessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) use ($server) {
+            
             $g = G::instance();
             // $_GET alternative
             $g->get = $request->get ?? [];
-
             // $_POST alternative
             $g->post = $request->post ?? [];
 
@@ -621,10 +621,10 @@ class App
             $g->openswoole_response = $response;
             // elog("SwooleHandler ".get_current_render_time());
             // TODO: PSR Takes over 0.00040 seconds, see if something can be done about it.
-            $serverRequest  = \OpenSwoole\Core\Psr\ServerRequest::from($request);
+            $serverRequest  = \OpenSwoole\Core\Psr\ServerRequest::from($request->parent);
             $serverResponse = App::middleware()->handle($serverRequest);
             // elog("PSRResponse ".get_current_render_time());
-            \OpenSwoole\Core\Psr\Response::emit($response, $serverResponse->withHeader('X-Powered-By', 'ZealPHP + OpenSwoole'));
+            \OpenSwoole\Core\Psr\Response::emit($response->parent, $serverResponse->withHeader('X-Powered-By', 'ZealPHP + OpenSwoole'));
         }));
 
         elog("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
@@ -689,15 +689,12 @@ class ResponseMiddleware implements MiddlewareInterface
                         $status = null;
                     }
 
-                    if($status == null && $g->status == 0){
-                        $status = 200;
-                    } else {
-                        $status = $status ?? $g->status;
+                    if($status == null){
+                        $status = $g->status ?? 200;
                     }
                     $buffer = ob_get_clean();
 
                     if($object instanceof ResponseInterface){
-                        $buffer ?? elog("Response Object Returned, Buffer Ignored:\n$buffer");
                         return $object;
                     }
 

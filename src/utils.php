@@ -215,7 +215,7 @@ function uniqidReal($length = 13)
 
 function access_log($status = 200, $length){
     $g = G::instance();
-    $time = date('d/M/Y:H:i:s O');
+    $time = date('d/M/Y:H:i:s');
     $time .= substr((string)microtime(), 1, 6);
     $remote = $g->server['REMOTE_ADDR'];
     $request = $g->server['REQUEST_METHOD'].' '.$g->server['REQUEST_URI'].' '.$g->server['SERVER_PROTOCOL'];
