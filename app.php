@@ -24,7 +24,7 @@ class AuthenticationMiddleware implements MiddlewareInterface
         elog("AuthenticationMiddleware: process()");
         $g = G::instance();
         $g->session['test'] = 'test';
-        return $handler->handle($request);
+        return new Response('Forbidden', 403, 'success', ['Content-Type' => 'text/plain']);
     }
 }
 
