@@ -24,6 +24,7 @@ class App
     protected $port;
     static $cwd;
     static $server;
+    static $default_php_self;
     private static $instance = null;
     public static $display_errors = true;
     public static $superglobals = true;
@@ -63,7 +64,10 @@ class App
     public static function init($host = '0.0.0.0', $port = 8080, $cwd=null): App
     {
         if ($cwd === null) {
-            $cwd = dirname(debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1)[0]['file']);
+            $php_self = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1)[0]['file'];
+            $file_name = '/'.basename($php_self);
+            $cwd = dirname($php_self);
+            self::$default_php_self = $file_name;
         }
         if(!App::$superglobals){
             co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
@@ -615,7 +619,7 @@ class App
                 $g->server['DOCUMENT_ROOT'] = self::$cwd . '/public';
             }
             if (!isset($g->server['PHP_SELF'])) {
-                $g->server['PHP_SELF'] = '/app.php';
+                $g->server['PHP_SELF'] = App::$default_php_self;
             }
             $g->openswoole_request = $request;
             $g->openswoole_response = $response;

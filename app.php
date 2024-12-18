@@ -19,7 +19,7 @@ $app = App::init('0.0.0.0', 8080);
 
 # Route for /phpinfo 
 $app->route('/phpinfo', function() {
-    //Loads template from app/phpinfo.php since PHP_SELF is /phpinfo.php
+    //Loads template from app/phpinfo.php since PHP_SELF is /app.php
     App::render('phpinfo');
 });
 
