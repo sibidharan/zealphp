@@ -29,6 +29,7 @@ class App
     public static $display_errors = true;
     public static $superglobals = true;
     public static $middleware_stack = null;
+    public static $middleware_wait_stack = [];
 
     private function __construct($host = '0.0.0.0', $port = 8080,$cwd = __DIR__)
     {
@@ -68,6 +69,8 @@ class App
             $file_name = '/'.basename($php_self);
             $cwd = dirname($php_self);
             self::$default_php_self = $file_name;
+            self::$middleware_stack = (new StackHandler())->add(new ResponseMiddleware())->add(new LoggingMiddleware());
+
         }
         if(!App::$superglobals){
             co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
@@ -89,7 +92,7 @@ class App
         return self::$instance;
     }
 
-    public function getRoutes()
+    public function routes()
     {
         return $this->routes;
     }
@@ -357,6 +360,22 @@ class App
         }
     }
 
+    public function addMiddleware($middleware){
+        self::$middleware_wait_stack[] = $middleware;
+    }
+
+    // public function registerMiddleware($middleware){
+    //     if($middleware instanceof MiddlewareInterface){
+    //         if (self::$middleware_stack == null){
+    //             throw new \Exception("Middleware stack not initialized, have you run init()?");
+    //         }
+    //         self::$middleware_stack = self::$middleware_stack->add($middleware);
+    //         elog("Added middleware: ".get_class($middleware), "middleware");
+    //     } else {
+    //         throw new \Exception("Middleware must implement Psr\Http\Server\MiddlewareInterface");
+    //     } 
+    // }
+
     /**
      * Runs the ZealPHP application.
      *
@@ -563,9 +582,10 @@ class App
 
         $SessionManager = self::$superglobals ?  'ZealPHP\Session\SessionManager' : 'ZealPHP\Session\CoSessionManager';
 
-        self::$middleware_stack = (new StackHandler())
-        ->add(new ResponseMiddleware())
-        ->add(new LoggingMiddleware());
+        foreach (array_reverse(self::$middleware_wait_stack) as $middleware) {
+            elog("Registering middleware: ".get_class($middleware));
+            self::$middleware_stack = self::$middleware_stack->add($middleware);
+        }
 
         $server->on("request",new $SessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) use ($server) {
             
@@ -644,12 +664,12 @@ class ResponseMiddleware implements MiddlewareInterface
 {
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
+        // elog("ResponseMiddleware process()");
         $g = G::instance();
         $uri = $g->server['REQUEST_URI'];
         $method = $g->server['REQUEST_METHOD'];
-
         $app = App::instance();
-        foreach ($app->getRoutes() as $route) {
+        foreach ($app->routes() as $route) {
             // Check if method matches
             if (!in_array($method, $route['methods'])) {
                 continue;
@@ -724,21 +744,9 @@ class LoggingMiddleware implements MiddlewareInterface
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $response = $handler->handle($request);
+        // elog("LoggingMiddleware process() received:".$response->getBody());
         access_log($response->getStatusCode(), strlen($response->getBody()));
         return $response;
     }
 }
 
-class MiddlewareB implements MiddlewareInterface
-{
-    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
-    {
-        $requestBody = $request->getBody();
-        var_dump('B1');
-        $response = $handler->handle($request);
-        var_dump('B2');
-        return $response;
-    }
-}
-
-  
