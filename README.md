@@ -76,13 +76,13 @@ You should add "extension=openswoole.so" to php.ini
 According to your PHP version, you simply need to add `extension=openswoole.so` in your php.ini file. I am using PHP 8.3 in this case.
 
 ```
-cd /etc/php/8.3/cli/conf.d
+$ cd /etc/php/8.3/cli/conf.d
 
-touch 99-zealphp-swoole.ini
-echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-swoole.ini
+$ touch 99-zealphp-swoole.ini
+$ echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-swoole.ini
 
 # Enable Short Open Tags for Flexibility
-echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-swoole.ini
+$ echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-swoole.ini
 
 ```
 
@@ -99,7 +99,7 @@ If it prints `openswoole` then the module is loaded and is ready to go.
 
 We are going to rely on `composer`. So install it if not already done.
 ```
-sudo apt install composer 
+$ sudo apt install composer 
 ```
 Now lets get started. 
 
@@ -108,15 +108,15 @@ Now lets get started.
 To create a new project from our go-to template, replace `my-project` with your project name and execute the below composer command. Since this project is in development, use `--stability=dev` until we arrive at a stable version.  
 
 ```
-composer create-project --stability=dev sibidharan/zealphp-project my-project 
+$ composer create-project --stability=dev sibidharan/zealphp-project my-project 
 ```
 
 With composer installed, lets run our ZealPHP Project
 
 ```
-cd my-project
-composer update
-php app.php 
+$ cd my-project
+$ composer update
+$ php app.php 
 
 ZealPHP server running at http://0.0.0.0:8080 with 8 routes
 ```
