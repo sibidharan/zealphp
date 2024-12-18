@@ -131,7 +131,7 @@ You can start writing APIs out of the box without any additional configuration. 
 
 Any and all contributions are welcome ❤️
 
-# ZealPHP Design Principals
+# ZealPHP Design Principles
 
 - Integrating OpenSwoole is a very good move but reaping the full performance of the coroutines and still being able to run an Apache/FPM styled web server with powerful in-memory dynamic nested ZealPHP template render functions while reconstructing superglobals on top of all these comes with a cost. The ZealPHP Server won't enable coroutines for the HTTP server by default, so the main response thread can't run `go()` calls. Instead of the server processes sharing the superglobal memory while running coroutines, we disable coroutines for the server process. To understand what is happening, let's say if a main thread is waiting for an IO or sleeping, the same server worker process will be used to serve another request. This new request will cause the superglobals to overwrite the ones waiting for IO and cause data leak/corruption. We decide to disable coroutines in the main thread, which enables us to support PHP superglobals in an Apache styled way.
 
