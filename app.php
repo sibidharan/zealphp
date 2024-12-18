@@ -12,11 +12,43 @@ use function ZealPHP\elog;
 use function ZealPHP\response_add_header;
 use function ZealPHP\response_set_status;
 use function ZealPHP\zlog;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\MiddlewareInterface;
+use Psr\Http\Server\RequestHandlerInterface;
+
+class AuthenticationMiddleware implements MiddlewareInterface
+{
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+    {
+        elog("AuthenticationMiddleware: process()");
+        $g = G::instance();
+        $g->session['test'] = 'test';
+        return $handler->handle($request);
+    }
+}
+
+class ValidationMiddleware implements MiddlewareInterface
+{
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+    {
+        elog("Validation: process()");
+        $g = G::instance();
+        ob_start();
+        print_r($request->getQueryParams());
+        $data = ob_get_clean();
+        elog($data, "validate");;
+        $g->session['validate'] = 'test';
+        return $handler->handle($request);
+    }
+}
 
 App::superglobals(false);
 
 $app = App::init('0.0.0.0', 8080);
-
+$app->addMiddleware(new AuthenticationMiddleware());
+$app->addMiddleware(new ValidationMiddleware());
+elog("Middleware added");
 # Route for /phpinfo 
 $app->route('/phpinfo', function() {
     //Loads template from app/phpinfo.php since PHP_SELF is /app.php
