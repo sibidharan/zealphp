@@ -1,39 +1,49 @@
 <?php
 
 require_once __DIR__ . '/vendor/autoload.php';
+
+use OpenSwoole\Core\Psr\Response;
 use OpenSwoole\Coroutine as co;
 use OpenSwoole\Coroutine\Channel;
 use ZealPHP\App;
+use ZealPHP\G;
 
+use function ZealPHP\elog;
+use function ZealPHP\response_add_header;
+use function ZealPHP\response_set_status;
 use function ZealPHP\zlog;
 
-$app = App::init('0.0.0.0', 8181);
+App::superglobals(false);
 
-// $app->route('/', function() {
-//     zlog("App started", "system");
-//     echo "<h1>This is index override</h1>";
-// });
+$app = App::init('0.0.0.0', 8080);
+
+# Route for /phpinfo 
+$app->route('/phpinfo', function() {
+    //Loads template from app/phpinfo.php since PHP_SELF is /phpinfo.php
+    App::render('phpinfo');
+});
+
 
 $app->route('/co', function() {
     $channel = new Channel(5);
     go(function() use ($channel) {
-        co::sleep(3);
+        sleep(3);
         $channel->push('Hello, Coroutine 1!');
     });
     go(function() use ($channel) {
-        co::sleep(3);
+        sleep(3);
         $channel->push('Hello, Coroutine! 2');
     });
     go(function() use ($channel) {
-        co::sleep(1);
+        sleep(1);
         $channel->push('Hello, Coroutine! 3');
     });
     go(function() use ($channel) {
-        co::sleep(2);
+        sleep(2);
         $channel->push('Hello, Coroutine! 4');
     });
     go(function() use ($channel) {
-        co::sleep(3);
+        sleep(3);
         $channel->push('Hello, Coroutine 5!');
     });
     $results = [];
@@ -65,14 +75,40 @@ $app->route('/quiz/{page}/{tab}/{nwe}', function($nwe, $tab, $page) {
 //     echo "<h1>Hello, $self->get $name!</h1>";
 // });
 
-$app->route("/global/{name}", [
+$app->route("/suglobal/{name}", [
     'methods' => ['GET', 'POST']
 ],function($name) {
-    if (isset($GLOBALS[$name])) {
-        print_r($GLOBALS[$name]);
-    } else{
-        echo "Unknown superglobal";
+    response_add_header('X-Prototype',  'buffer');
+    response_set_status(202);
+    // $g = G::instance();
+    if(App::$superglobals){
+        if (isset($GLOBALS[$name])) {
+            print_r($GLOBALS[$name]);
+        } else{
+            echo "Unknown superglobal";
+        }
+    } else {
+        $g = G::instance();
+        if (isset($g->$name)) {
+            print_r($g->$name);
+        } else{
+            echo "Unknown global";
+        }
     }
+});
+
+$app->route("/coglobal/set/session", [
+    'methods' => ['GET', 'POST']
+],function($name) {
+    $G = G::instance();
+    $G->session['name'] = $name;
+    return new Response('Session set', 300, 'success', ['Content-Type' => 'text/plain', 'X-Test' => 'test']);
+});
+
+$app->route("/coglobal/get/session", [
+    'methods' => ['GET', 'POST']
+],function($name) {
+    echo G::get('session')['name'];
 });
 
 $app->route('/user/{id}/post/{postId}',[
@@ -97,4 +133,6 @@ $app->patternRoute('/raw/(?P<rest>.*)', ['methods' => ['GET']], function($rest) 
 // });
 
 
-$app->run();
+$app->run([
+    'task_worker_num' => 8
+]);

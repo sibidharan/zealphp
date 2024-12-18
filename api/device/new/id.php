@@ -1,7 +1,10 @@
 <?
 
 use ZealPHP\App;
-
-$id = function(){
-    echo $_SESSION['UNIQUE_REQUEST_ID'];
+use ZealPHP\G;
+$id = function($response){
+    $g = G::instance();
+    echo "Received id: ".$g->get['id'];
+    $response->status(206);
+    $response->write($g->get['id']);
 };
