@@ -1,18 +1,30 @@
 <?php
 namespace ZealPHP;
-error_reporting(E_ALL ^ E_DEPRECATED);
+// error_reporting(E_ALL ^ E_DEPRECATED);
 
-require_once 'REST.class.php';
-class API extends REST
+use ZealPHP\REST;
+use ZealPHP\App;
+use function ZealPHP\elog;
+use function ZealPHP\jTraceEx;
+
+use OpenSwoole\Core\Psr\Middleware\StackHandler;
+use OpenSwoole\Core\Psr\Response;
+use OpenSwoole\HTTP\Server;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\MiddlewareInterface;
+use Psr\Http\Server\RequestHandlerInterface;
+
+class ZealAPI extends REST
 {
     public $data = "";
 
-    private $current_call;
+    private $api_rpc;
     private $auth = null;
     public $_response = null;
     public $request = null;
     public $cwd = null;
-
+    
     public function __construct($request, $response, $cwd)
     {
         $this->cwd = $cwd;
@@ -28,6 +40,7 @@ class API extends REST
     */
     public function processApi($module, $request=null)
     {
+        $g = G::instance();
         $module = $module ? '/'.$module : '';
         $func = basename($request);
         if (!isset($module) and (int)method_exists($this, $func) > 0) {
@@ -35,12 +48,64 @@ class API extends REST
         } else {
             if (isset($module)) {
                 $dir = $this->cwd.'/api'.$module;
+                $g->server['DOCUMENT_ROOT'] = App::$cwd . '/api';
                 $file = $dir.'/'.$request.'.php';
                 if (file_exists($file)) {
                     include $file;
-                    $this->current_call = \Closure::bind(${$func}, $this, get_class());
-                    $_SERVER['PHP_SELF'] = $module.'/'.$request.'.php';
-                    $this->$func();
+                    try {
+                        $this->api_rpc = \Closure::bind(${$func}, $this, get_class());
+                    } catch (\TypeError $e) {
+                        elog(jTraceEx($e), "error");
+                        $this->response($this->json(['error'=>'method_not_found']), 404);
+                        return;
+                    }
+                    $g->server['PHP_SELF'] = $module.'/'.$request.'.php';
+                    if(App::$superglobals) {
+                        $_SERVER['PHP_SELF'] = $g->server['PHP_SELF'];
+                    }
+                    $handler = $this->api_rpc;
+                    $reflection = is_array($handler)
+                    ? new \ReflectionMethod($handler[0], $handler[1])
+                    : new \ReflectionFunction($handler);
+
+                    $invokeArgs = [];
+                    foreach ($reflection->getParameters() as $param) {
+                        $pname = $param->getName();
+                        if (isset($params[$pname])) {
+                            $invokeArgs[] = $params[$pname];
+                        } else if ($pname == 'app'){
+                            $invokeArgs[] = $this;
+                        } else if ($pname == 'request'){
+                            $invokeArgs[] = $this->request;
+                        } else if ($pname == 'response'){
+                            $invokeArgs[] = $this->_response;
+                        } else if ($pname == 'server'){
+                            $invokeArgs[] = App::$server;
+                        } else {
+                            $invokeArgs[] = $param->isDefaultValueAvailable() 
+                                ? $param->getDefaultValue() 
+                                : null;
+                        }
+                    }
+                    ob_start();
+                    $object = $this->$func(...$invokeArgs);;
+                    if(is_int($object)){
+                        $status = (int)$object;
+                    } else {
+                        $status = null;
+                    }
+
+                    if($status == null){
+                        $status = $g->status ?? 200;
+                    }
+                    $buffer = ob_get_clean();
+
+                    if($object instanceof ResponseInterface){
+                        return $object;
+                    }
+
+                    return (new Response($buffer, $status));
+                    
                 } else {
                     $this->response($this->json(['error'=>'method_not_found']), 404);
                 }
@@ -90,8 +155,10 @@ class API extends REST
     {
         $data = [
             "error" => $e->getMessage(),
+            "stack" => jTraceEx($e),
             "type" => "exception"
         ];
+        elog(jTraceEx($e), "error");
         $response_code = 400;
         if ($e->getMessage() == "Expired token" || $e->getMessage() == "Unauthorized") {
             $response_code = 403;
@@ -108,8 +175,8 @@ class API extends REST
     public function __call($method, $args)
     {
         
-        if (is_callable($this->current_call)) {
-            return call_user_func_array($this->current_call, $args);
+        if (is_callable($this->api_rpc)) {
+            return call_user_func_array($this->api_rpc, $args);
         } else {
             $error = ['error'=>'methood_not_callable', 'method'=>$method];
             // logit($error, "fatal");

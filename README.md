@@ -2,6 +2,10 @@
 
 A powerful light weight opensource alternative to NextJS - that uses OpenSwoole's Async IO to do everything NextJS can and do much more. 
 
+[![Latest Stable Version](https://poser.pugx.org/sibidharan/zealphp/v)](https://packagist.org/packages/sibidharan/zealphp) [![Total Downloads](https://poser.pugx.org/sibidharan/zealphp/downloads)](https://packagist.org/packages/sibidharan/zealphp) [![Latest Unstable Version](https://poser.pugx.org/sibidharan/zealphp/v/unstable)](https://packagist.org/packages/sibidharan/zealphp) [![License](https://poser.pugx.org/sibidharan/zealphp/license)](https://packagist.org/packages/sibidharan/zealphp)
+
+Homepage: https://php.zeal.lol
+
 Features:
 1. Dynamic HTML Streaming with APIs and Sockets
 2. Parallel Data Fetching and Processing (Use go() to run async coroutine)
@@ -73,11 +77,12 @@ According to your PHP version, you simply need to add `extension=openswoole.so` 
 
 ```
 cd /etc/php/8.3/cli/conf.d
-touch openswoole.ini
-echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/openswoole.ini
 
-# Enable Short Open Tags for Flexiblity
-echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/openswoole.ini
+touch 99-zealphp-swoole.ini
+echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-swoole.ini
+
+# Enable Short Open Tags for Flexibility
+echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-swoole.ini
 
 ```
 
@@ -110,12 +115,13 @@ With composer installed, lets run our ZealPHP Project
 
 ```
 cd my-project
+composer update
 php app.php 
 Including route file: /var/labsstorage/home/sibidharan/test/my-project/route/info.php
 ZealPHP server running at http://0.0.0.0:8080 with 8 routes
 ```
 
-## 4. Understanding what is happenning
+## 4. Understanding what is happening
 
 When you run `app.php` the openswoole server is being run and managed by ZealPHP. It will stay attached to your terminal unless you deamonize, which we wont be doing while development. When moving to production, you can do `$app->run(['daemonize'=>true])` to the run function, which detaches the running script in background. This can be configured to systemctl to run on boot, or to run behind Apache or Nginx. The `run` function can take all OpenSwoole Configuration as mentioned in https://openswoole.com/docs/modules/swoole-server/configuration. Unlike Apache+PHP setup, the functions of Apache like URL Rewriting, Superglobals is replaced by ZealPHP, while OpenSwoole is offering the server. ZealPHP is offering the routing with a very efficient route tree model, which is O(1) in code injection and lookup. On top of that, ZealPHP offers implicit routes that serves the files located under `public` and `api` directories. These routes can be overridden by you.
 
@@ -125,6 +131,17 @@ You can start writing APIs out of the box without any additional configuration. 
 
 Any and all contributions are welcome ❤️
 
+# ZealPHP Design Principals
+
+- Integrating OpenSwoole is a very good move but reaping the full performance of the coroutines and still being able to run an Apache/FPM styled web server with powerful in-memory dynamic nested ZealPHP template render functions while reconstructing superglobals on top of all these comes with a cost. The ZealPHP Server won't enable coroutines for the HTTP server by default, so the main response thread can't run `go()` calls. Instead of the server processes sharing the superglobal memory while running coroutines, we disable coroutines for the server process. To understand what is happening, let's say if a main thread is waiting for an IO or sleeping, the same server worker process will be used to serve another request. This new request will cause the superglobals to overwrite the ones waiting for IO and cause data leak/corruption. We decide to disable coroutines in the main thread, which enables us to support PHP superglobals in an Apache styled way.
+
+- To support incremental adoption of async capabilities and still be able to reap the benefits of coroutines alongside backward compatibility for traditional PHP applications, ZealPHP introduces a function called `coprocess` alias `coproc` that enables you to create a process that has coroutine context, and you can run as many fibers/coroutines inside that process. This function keeps the design pattern clean, and each server worker deals with one request at a time, thus we can use the superglobals while reaping maximum performance on demand.
+
+- `coproc` creates a process which has its own memory space, it is like a fork, so communicating with that process cannot be over superglobals, and the data passing needs to be done delicately. The StdOut is returned. `coproc` is a wrapper to `OpenSwoole\Process` with coroutines enabled and StdIO forwarded. It also makes sharing variables as easy as copying them into the memory before the process forks, then the data is available to the new process. But the limitation here is we cannot pass anything that is not serializable. For example, Database Connection, Sockets, FD, etc. Those unserializable objects have to be reconstructed inside the `coproc`. This design decision may change in the future with us removing support for superglobals with our own implementation. More research and development is needed in this area. (Still in development, documentation will be available later)
+
+- The tradeoff between having superglobals and not using coroutines in the main server process and the implications of security here are still to be researched, and a more stable and sustainable design pattern has to be arrived at. ZealPHP decides to sanitize every request with a default middleware which can be overridden if needed.
+
+- But this is optional. If you want coroutines in the ZealPHP main HTTP server, you just have to turn off superglobals using `App::superglobals(false);` and `Coroutines` will be enabled automatically. To have backward compatibility and to educate users about the design of ZealPHP and OpenSwoole, the default option comes with superglobals enabled. Deliberately requiring users to disable it for using coroutines helps user awareness about what's going on.
 
 # Common Errors
 
@@ -150,7 +167,7 @@ Stack trace:
 3. Check if openswoole is configured properly
     ` php -m | grep swoole `
 
-Uptil this `setup.sh` can do it for you. 
+Until this point, the `setup.sh` can do it for you. 
 
 4. Run 
     `php app.php`

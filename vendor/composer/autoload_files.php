@@ -7,4 +7,6 @@ $baseDir = dirname($vendorDir);
 
 return array(
     '0f5c2e42cd57cee173a4e5751046ee6b' => $vendorDir . '/openswoole/core/src/Coroutine/functions.php',
+    '30cad1d86aa302cbea0f94edb38a9a00' => $baseDir . '/src/utils.php',
+    'e19b310a3e997f884fb8d7a276f6bdea' => $baseDir . '/src/Session/utils.php',
 );
