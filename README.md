@@ -77,7 +77,7 @@ cd /etc/php/8.3/cli/conf.d
 touch 99-zealphp-swoole.ini
 echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-swoole.ini
 
-# Enable Short Open Tags for Flexiblity
+# Enable Short Open Tags for Flexibility
 echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-swoole.ini
 
 ```
@@ -116,7 +116,7 @@ Including route file: /var/labsstorage/home/sibidharan/test/my-project/route/inf
 ZealPHP server running at http://0.0.0.0:8080 with 8 routes
 ```
 
-## 4. Understanding what is happenning
+## 4. Understanding what is happening
 
 When you run `app.php` the openswoole server is being run and managed by ZealPHP. It will stay attached to your terminal unless you deamonize, which we wont be doing while development. When moving to production, you can do `$app->run(['daemonize'=>true])` to the run function, which detaches the running script in background. This can be configured to systemctl to run on boot, or to run behind Apache or Nginx. The `run` function can take all OpenSwoole Configuration as mentioned in https://openswoole.com/docs/modules/swoole-server/configuration. Unlike Apache+PHP setup, the functions of Apache like URL Rewriting, Superglobals is replaced by ZealPHP, while OpenSwoole is offering the server. ZealPHP is offering the routing with a very efficient route tree model, which is O(1) in code injection and lookup. On top of that, ZealPHP offers implicit routes that serves the files located under `public` and `api` directories. These routes can be overridden by you.
 
@@ -162,7 +162,7 @@ Stack trace:
 3. Check if openswoole is configured properly
     ` php -m | grep swoole `
 
-Uptil this `setup.sh` can do it for you. 
+Until this point, the `setup.sh` can do it for you. 
 
 4. Run 
     `php app.php`
