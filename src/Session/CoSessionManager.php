@@ -95,6 +95,8 @@ class CoSessionManager
             $time = $time[1] + $time[0];
             $g->session['__start_time'] = $time;
             $g->session['UNIQUE_REQUEST_ID'] = uniqidReal();
+            $g->openswoole_request = $request;
+            $g->openswoole_response = $response;
             $request = new \ZealPHP\HTTP\Request($request);
             $response = new \ZealPHP\HTTP\Response($response);
             $g->zealphp_request = $request;

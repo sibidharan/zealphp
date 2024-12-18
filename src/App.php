@@ -640,8 +640,7 @@ class App
             if (!isset($g->server['PHP_SELF'])) {
                 $g->server['PHP_SELF'] = App::$default_php_self;
             }
-            $g->openswoole_request = $request;
-            $g->openswoole_response = $response;
+
             $serverRequest  = \OpenSwoole\Core\Psr\ServerRequest::from($request->parent);
             $serverResponse = App::middleware()->handle($serverRequest);
             access_log($serverResponse->getStatusCode(), strlen($serverResponse->getBody()));

@@ -10,8 +10,8 @@ class REST {
     private $_code = 200;
     public $_response;
     public function __construct($request, $response){
-        $this->_response = G::instance()->openswoole_response;
-        $this->_request = G::instance()->openswoole_request;
+        $this->_response = G::instance()->zealphp_response;
+        $this->_request = G::instance()->zealphp_request;
         $this->inputs();
     }
 
