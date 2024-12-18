@@ -69,8 +69,7 @@ class App
             $file_name = '/'.basename($php_self);
             $cwd = dirname($php_self);
             self::$default_php_self = $file_name;
-            self::$middleware_stack = (new StackHandler())->add(new ResponseMiddleware())->add(new LoggingMiddleware());
-
+            self::$middleware_stack = (new StackHandler())->add(new ResponseMiddleware());
         }
         if(!App::$superglobals){
             co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
@@ -360,7 +359,7 @@ class App
         }
     }
 
-    public function addMiddleware($middleware){
+    public function addMiddleware(\Psr\Http\Server\MiddlewareInterface $middleware){
         self::$middleware_wait_stack[] = $middleware;
     }
 
@@ -643,11 +642,9 @@ class App
             }
             $g->openswoole_request = $request;
             $g->openswoole_response = $response;
-            // elog("SwooleHandler ".get_current_render_time());
-            // TODO: PSR Takes over 0.00040 seconds, see if something can be done about it.
             $serverRequest  = \OpenSwoole\Core\Psr\ServerRequest::from($request->parent);
             $serverResponse = App::middleware()->handle($serverRequest);
-            // elog("PSRResponse ".get_current_render_time());
+            access_log($serverResponse->getStatusCode(), strlen($serverResponse->getBody()));
             \OpenSwoole\Core\Psr\Response::emit($response->parent, $serverResponse->withHeader('X-Powered-By', 'ZealPHP + OpenSwoole'));
         }));
 
@@ -739,14 +736,14 @@ class ResponseMiddleware implements MiddlewareInterface
     }
 }
 
-class LoggingMiddleware implements MiddlewareInterface
-{
-    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
-    {
-        $response = $handler->handle($request);
-        // elog("LoggingMiddleware process() received:".$response->getBody());
-        access_log($response->getStatusCode(), strlen($response->getBody()));
-        return $response;
-    }
-}
+// class LoggingMiddleware implements MiddlewareInterface
+// {
+//     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+//     {
+//         $response = $handler->handle($request);
+//         // elog("LoggingMiddleware process() received:".$response->getBody());
+//         access_log($response->getStatusCode(), strlen($response->getBody()));
+//         return $response;
+//     }
+// }
 

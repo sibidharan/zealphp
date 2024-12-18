@@ -117,7 +117,7 @@ With composer installed, lets run our ZealPHP Project
 cd my-project
 composer update
 php app.php 
-Including route file: /var/labsstorage/home/sibidharan/test/my-project/route/info.php
+
 ZealPHP server running at http://0.0.0.0:8080 with 8 routes
 ```
 
