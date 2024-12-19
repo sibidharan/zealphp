@@ -92,17 +92,21 @@ class ZealAPI extends REST
                     if(is_int($object)){
                         $status = (int)$object;
                     } else {
-                        $status = null;
+                        $status = $g->status ?? 200;;
                     }
-
-                    if($status == null){
-                        $status = $g->status ?? 200;
-                    }
-                    $buffer = ob_get_clean();
 
                     if($object instanceof ResponseInterface){
                         return $object;
                     }
+
+                    if(is_array($object) or is_object($object)){
+                        response_add_header('Content-Type', 'application/json');
+                        echo json_encode($object, JSON_PRETTY_PRINT);
+                    } else if (is_string($object)){
+                        echo $object;
+                    }
+                    
+                    $buffer = ob_get_clean();
 
                     return (new Response($buffer, $status));
                     

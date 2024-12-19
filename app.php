@@ -24,6 +24,7 @@ class AuthenticationMiddleware implements MiddlewareInterface
         elog("AuthenticationMiddleware: process()");
         $g = G::instance();
         $g->session['test'] = 'test';
+        return $handler->handle($request);
         return new Response('Forbidden', 403, 'success', ['Content-Type' => 'text/plain']);
     }
 }
@@ -37,7 +38,7 @@ class ValidationMiddleware implements MiddlewareInterface
         ob_start();
         print_r($request->getQueryParams());
         $data = ob_get_clean();
-        elog($data, "validate");;
+        // elog($data, "validate");;
         $g->session['validate'] = 'test';
         return $handler->handle($request);
     }
@@ -53,6 +54,11 @@ elog("Middleware added");
 $app->route('/phpinfo', function() {
     //Loads template from app/phpinfo.php since PHP_SELF is /app.php
     App::render('phpinfo');
+});
+
+$app->route('/json', function($request) {
+    // echo "<h1>Test</h1>";
+    return $request;
 });
 
 
