@@ -105,21 +105,11 @@ check_openswoole_installed() {
 install_openswoole() {
     echo "Installing OpenSwoole..."
     sudo pecl install openswoole-22.1.2 || { echo "Failed to install OpenSwoole."; exit 1; }
-    local config_path="/etc/php/8.3/cli/conf.d/openswoole.ini"
+    local config_path="/etc/php/8.3/cli/conf.d/99-zealphp-openswoole.ini"
     echo "extension=openswoole.so" | sudo tee "$config_path" > /dev/null
     echo "short_open_tag=on" | sudo tee -a "$config_path" > /dev/null
 
-    # Check for web server and configure accordingly
-    if systemctl is-active --quiet apache2; then
-        echo "Configuring OpenSwoole for Apache..."
-        sudo systemctl restart apache2 || { echo "Failed to restart Apache."; exit 1; }
-    elif systemctl is-active --quiet nginx; then
-        echo "Configuring OpenSwoole for Nginx..."
-        sudo systemctl restart php8.3-fpm || { echo "Failed to restart PHP-FPM for Nginx."; exit 1; }
-    else
-        echo "No active web server detected. Skipping web server configuration."
-    fi
-
+    
     # Confirm installation of Swoole extension
     if php -m | grep -q openswoole; then
         echo "OpenSwoole installed successfully."
