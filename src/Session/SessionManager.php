@@ -66,6 +66,7 @@ class SessionManager
      */
     public function __invoke($request,$response)
     {
+        $g = G::instance();
         if(isset($_SESSION) and isset($_SESSION['__start_time'])) {
             elog('[warn] Session leak detected');
         }
@@ -104,12 +105,12 @@ class SessionManager
             $time = $time[1] + $time[0];
             $_SESSION['__start_time'] = $time;
             $_SESSION['UNIQUE_REQUEST_ID'] = uniqidReal();
-            $this->g->openswoole_request = $request;
-            $this->g->openswoole_response = $response;
+            $g->openswoole_request = $request;
+            $g->openswoole_response = $response;
             $request = new \ZealPHP\HTTP\Request($request);
             $response = new \ZealPHP\HTTP\Response($response);
-            $this->g->zealphp_request = $request;
-            $this->g->zealphp_response = $response;
+            $g->zealphp_request = $request;
+            $g->zealphp_response = $response;
             call_user_func($this->middleware, $request, $response);
         } finally {
             elog('SessionManager:: session_write_close took '.get_current_render_time(), 'info');

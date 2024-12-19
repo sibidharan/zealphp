@@ -25,7 +25,7 @@ class AuthenticationMiddleware implements MiddlewareInterface
         $g = G::instance();
         $g->session['test'] = 'test';
         return $handler->handle($request);
-        return new Response('Forbidden', 403, 'success', ['Content-Type' => 'text/plain']);
+        // return new Response('Forbidden', 403, 'success', ['Content-Type' => 'text/plain']);
     }
 }
 
@@ -58,7 +58,7 @@ $app->route('/phpinfo', function() {
 
 $app->route('/json', function($request) {
     // echo "<h1>Test</h1>";
-    return $request;
+    return $_SESSION;
 });
 
 
@@ -123,14 +123,14 @@ $app->route("/suglobal/{name}", [
         if (isset($GLOBALS[$name])) {
             print_r($GLOBALS[$name]);
         } else{
-            echo "Unknown superglobal";
+            echo "Unknown superglobal $name";
         }
     } else {
         $g = G::instance();
         if (isset($g->$name)) {
             print_r($g->$name);
         } else{
-            echo "Unknown global";
+            echo "Unknown global $name";
         }
     }
 });

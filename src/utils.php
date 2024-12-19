@@ -229,12 +229,12 @@ function access_log($status = 200, $length){
 function response_add_header($key, $value, $ucwords = true)
 {
     $g = G::instance();
-    $g->openswoole_response->header($key, $value, $ucwords);
+    $g->zealphp_response->header($key, $value, $ucwords);
 }
 
 function response_set_status($status)
 {
     $g = G::instance();
     $g->status = $status;
-    $g->openswoole_response->status($status);
+    $g->zealphp_response->status($status);
 }
