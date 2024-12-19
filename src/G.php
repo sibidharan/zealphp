@@ -49,8 +49,14 @@ class G
     public function __set($key, $value)
     {
         if (App::$superglobals) {
-            $superglobalKey = '_' . strtoupper($key);
-            $GLOBALS[$superglobalKey] = $value;
+            if (in_array($key, ['get', 'post', 'cookie', 'files', 'server', 'request', 'env', 'session'])) {
+                $superglobalKey = '_' . strtoupper($key);
+                elog("Setting superglobal $key");
+                $GLOBALS[$superglobalKey] = $value;
+            } else {
+                $GLOBALS[$key] = $value;
+            }
+            
         } else {
             $this->$key = $value;
         }
