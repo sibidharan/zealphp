@@ -51,7 +51,7 @@ class G
         if (App::$superglobals) {
             if (in_array($key, ['get', 'post', 'cookie', 'files', 'server', 'request', 'env', 'session'])) {
                 $superglobalKey = '_' . strtoupper($key);
-                elog("Setting superglobal $key");
+                // elog("Setting superglobal $key");
                 $GLOBALS[$superglobalKey] = $value;
             } else {
                 $GLOBALS[$key] = $value;
