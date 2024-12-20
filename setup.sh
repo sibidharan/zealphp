@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Function to check add-apt-repository command is available 
+# Function to check if add-apt-repository command is available
 check_app_apt_repository_installed(){
     if ! command -v add-apt-repository >/dev/null; then
         echo "add-apt-repository command is not available."
@@ -17,12 +17,11 @@ install_add_apt_repository() {
     sudo apt update || { echo "Failed to update package lists."; exit 1; }
     sudo apt install -y software-properties-common || { echo "Failed to install software-properties-common."; exit 1; }
     echo "Software-properties-common [for add_apt_repository] installed successfully."
-    
 }
 
-# Function to check if PHP 8.3 is installed
+# Function to check if PHP 7.4 or above is installed
 check_php_version() {
-    local required_version="8.3"
+    local required_version="7.4"
     local current_version=$(php -r "echo PHP_VERSION;" 2>/dev/null)
 
     if [ -z "$current_version" ]; then
@@ -48,7 +47,6 @@ install_php() {
     if ! check_app_apt_repository_installed; then
         install_add_apt_repository
     fi
-    
 
     echo "Adding Ondřej Surý PPA for PHP..."
     sudo add-apt-repository -y ppa:ondrej/php || { echo "Failed to add Ondřej Surý PPA."; exit 1; }
@@ -84,10 +82,20 @@ configure_php_path() {
 
 # Function to install required packages for OpenSwoole and development tools
 install_dependencies() {
-    echo "Installing required packages..."
-    sudo apt install -y gcc php-dev openssl libssl-dev curl libcurl4-openssl-dev libpcre3-dev build-essential php8.3-mysqlnd postgresql libpq-dev || {
+    local php_version=$(php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;" 2>/dev/null)
+
+    echo "Installing required packages for PHP $php_version..."
+    sudo apt install -y gcc php-dev openssl libssl-dev curl libcurl4-openssl-dev \
+        libpcre3-dev build-essential php${php_version}-mysql postgresql libpq-dev || {
         echo "Failed to install dependencies."; exit 1;
     }
+
+    # Ensure the MySQL extension is enabled
+    sudo phpenmod mysql || {
+        echo "Failed to enable the MySQL extension."; exit 1;
+    }
+
+    echo "Dependencies installed successfully."
 }
 
 # Function to check if OpenSwoole is already installed
@@ -104,19 +112,48 @@ check_openswoole_installed() {
 # Function to install OpenSwoole via PECL
 install_openswoole() {
     echo "Installing OpenSwoole..."
-    sudo pecl install openswoole-22.1.2 || { echo "Failed to install OpenSwoole."; exit 1; }
-    local config_path="/etc/php/8.3/cli/conf.d/99-zealphp-openswoole.ini"
-    echo "extension=openswoole.so" | sudo tee "$config_path" > /dev/null
-    echo "short_open_tag=on" | sudo tee -a "$config_path" > /dev/null
 
-    
-    # Confirm installation of Swoole extension
-    if php -m | grep -q openswoole; then
-        echo "OpenSwoole installed successfully."
-    else
-        echo "OpenSwoole installation failed."
-        exit 1
-    fi
+    # Install OpenSwoole with required options automatically (coroutine sockets, OpenSSL, etc.)
+    echo -e "yes\nyes\nyes\nyes\nyes\nyes" | sudo pecl install openswoole || { echo "Failed to install OpenSwoole."; exit 1; }
+
+    # Get PHP config directory and configure OpenSwoole
+    local config_dir=$(php --ini | grep "Scan for additional .ini files in" | awk '{print $7}')
+    local config_file="${config_dir}/99-zealphp-openswoole.ini"
+
+    echo "extension=openswoole.so" | sudo tee "$config_file" > /dev/null
+    echo "short_open_tag=on" | sudo tee -a "$config_file" > /dev/null
+    echo "swoole.use_shortname=off" | sudo tee -a "$config_file" > /dev/null
+    echo "Enable coroutine sockets, OpenSSL, HTTP2, etc."
+
+    # Ensure OpenSwoole settings are enabled correctly
+    sudo sed -i 's/^enable_coroutine_sockets.*/enable_coroutine_sockets=yes/' "$config_file"
+    sudo sed -i 's/^enable_openssl.*/enable_openssl=yes/' "$config_file"
+    sudo sed -i 's/^enable_http2.*/enable_http2=yes/' "$config_file"
+    sudo sed -i 's/^enable_coroutine_mysqlnd.*/enable_coroutine_mysqlnd=yes/' "$config_file"
+    sudo sed -i 's/^enable_coroutine_curl.*/enable_coroutine_curl=yes/' "$config_file"
+    sudo sed -i 's/^enable_coroutine_postgres.*/enable_coroutine_postgres=yes/' "$config_file"
+
+    echo "OpenSwoole installed and configured successfully with the required options."
+}
+
+# Function to configure existing OpenSwoole with the required options
+configure_existing_openswoole() {
+    echo "Configuring existing OpenSwoole..."
+
+    # Get PHP config directory dynamically
+    local config_dir=$(php --ini | grep "Scan for additional .ini files in" | awk '{print $7}')
+    local config_file="${config_dir}/99-zealphp-openswoole.ini"
+
+    # Ensure OpenSwoole settings are enabled correctly
+    echo "Ensuring necessary settings are enabled in OpenSwoole config..."
+    sudo sed -i 's/^enable_coroutine_sockets.*/enable_coroutine_sockets=yes/' "$config_file"
+    sudo sed -i 's/^enable_openssl.*/enable_openssl=yes/' "$config_file"
+    sudo sed -i 's/^enable_http2.*/enable_http2=yes/' "$config_file"
+    sudo sed -i 's/^enable_coroutine_mysqlnd.*/enable_coroutine_mysqlnd=yes/' "$config_file"
+    sudo sed -i 's/^enable_coroutine_curl.*/enable_coroutine_curl=yes/' "$config_file"
+    sudo sed -i 's/^enable_coroutine_postgres.*/enable_coroutine_postgres=yes/' "$config_file"
+
+    echo "OpenSwoole configuration updated successfully."
 }
 
 # Function to check if Composer is installed
@@ -147,16 +184,34 @@ install_composer() {
 }
 
 
-#!/bin/bash
-
 # Pre-information for the user
-echo "============================================================================"
-echo "                         ZealPHP Setup Script"
-echo "============================================================================"
-echo "This script will set up the PHP environment for ZealPHP."
-echo "Please wait while the setup is in progress... This may take a few minutes."
-echo "For more information, visit: php.zeal.ninja"
-echo "============================================================================"
+echo -e "\e[1;33m         Welcome to ZealPHP - An open-source PHP framework powered by OpenSwoole.\e[0m"
+
+echo -e "\n"
+
+echo -e "\e[1;35mZealPHP offers a lightweight, high-performance alternative to Next.js,\e[0m"
+echo -e "\e[1;35mleveraging OpenSwoole’s asynchronous I/O to perform everything Next.js can and much more.\e[0m"
+echo -e "\e[1;35mUnlock the full potential of PHP with ZealPHP and OpenSwoole's speed and scalability!\e[0m"
+
+
+echo -e "\n"
+
+echo -e "\e[1;37mFeatures:\e[0m"
+echo -e "\e[1;37m1. Dynamic HTML Streaming with APIs and Sockets\e[0m"
+echo -e "\e[1;37m2. Parallel Data Fetching and Processing (Use go() to run async coroutine)\e[0m"
+echo -e "\e[1;37m3. Dynamic Routing Tree with Implicit Routes for Public and API\e[0m"
+echo -e "\e[1;37m4. Programmable and Injectable Routes for Authentication\e[0m"
+echo -e "\e[1;37m5. Dynamic and Nested Templating and HTML Rendering\e[0m"
+echo -e "\e[1;37m6. Workers, Tasks and Processes\e[0m"
+echo -e "\e[1;37m7. All PHP Superglobals are constructed per request\e[0m"
+
+echo -e "\n"
+
+echo -e "\e[1;33mThis script will set up the PHP environment for ZealPHP.\e[0m"
+echo -e "\e[1;33mPlease wait while the setup is in progress... This may take a few minutes.\e[0m"
+echo -e "\e[1;31mFor more information, visit: https://php.zeal.ninja\e[0m"
+
+
 
 # Prompt for user confirmation
 while true; do
@@ -168,7 +223,7 @@ while true; do
             break
             ;;
         n|N)
-            echo "Setup aborted."
+            echo -e "\e[1;31mSetup aborted.\e[0m"
             exit 1
             ;;
         *)
@@ -177,19 +232,22 @@ while true; do
     esac
 done
 
-
-
 # Main script execution
 if ! check_php_version; then
     install_php
+else
+    echo "PHP is already installed. Ensuring dependencies and OpenSwoole are available."
 fi
 
 install_dependencies
 
-
-#check and install OpenSwoole
-if ! check_openswoole_installed; then
+# Check and install OpenSwoole, if already installed, configure it
+if check_openswoole_installed; then
+    echo "OpenSwoole is already installed. Configuring..."
+    configure_existing_openswoole
+else
     install_openswoole
+    configure_openswoole
 fi
 
 # Check and install Composer
@@ -197,7 +255,10 @@ if ! check_composer_installed; then
     install_composer
 fi
 
-echo "Setup completed successfully!"
-echo "Feel free to explore all features in zealphp."
-echo "Visit php.zeal.ninja for more information."
+# clear the terminal
+clear
 
+# Final message
+echo -e "\e[1;32mSetup completed successfully!\e[0m"
+echo -e "\e[1;33mFeel free to explore all features in ZealPHP.\e[0m"
+echo -e "\e[1;34mVisit https://php.zeal.ninja to explore ZealPHP.\e[0m"
