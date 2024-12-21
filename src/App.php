@@ -309,37 +309,36 @@ class App
     /**
      * Renders a template with the provided data.
      * This function looks for templates in the ./template folder located in the current working directory of the server.
-     * It takes PHP_SELF into account and uses it as the source folder to look for templates unless the $_template starts with /.
-     * Starting the $_template with / tells the render function to look for the template from the root of the template folder.
+     * It takes PHP_SELF into account and uses it as the source folder to look for templates unless the $__template_file starts with /.
+     * Starting the $__template_file with / tells the render function to look for the template from the root of the template folder.
      *
-     * @param string $_template The name of the template to render. Defaults to 'index'.
-     * @param array $_data An associative array of data to pass to the template. Defaults to an empty array.
+     * @param string $__template_file The name of the template to render. Defaults to 'index'.
+     * @param array $__args An associative array of data to pass to the template. Defaults to an empty array.
      * @throws TemplateUnavailableException if the template does not exist.
      * @return void
      */
-    public static function render($_template = 'index', $_data = [])
+    public static function render($__template_file = 'index', $__args = [])
     {
-        $_source = Session::getCurrentFile(null);
-        // elog("Rendering template: $_template from $_source", "render");
-        extract($_data, EXTR_SKIP);
-        //This function returns the current script to build the template path.
-        $_general = strpos($_template, '/') === 0;
-        if ($_template == '_error') {
-            include self::$cwd . '/template/' . $_template . '.php';
-        } elseif ($_general) {
-            if (!file_exists(self::$cwd . '/template/' . $_template . '.php')) {
-                $bt = debug_backtrace();
-                $caller = array_shift($bt);
-                throw new TemplateUnavailableException("The template $_template does not exist in file " . str_replace(App::$cwd, '', $caller['file']) . ":" . $caller['line'] );
-            }
-            include self::$cwd . '/template/' . $_template . '.php';
+        $__current_file = Session::getCurrentFile(null);
+        extract($__args, EXTR_SKIP);
+        $__root_lookup = strpos($__template_file, '/') === 0;
+
+        if(!is_null($__current_file) and is_dir(self::$cwd . '/template/' . $__current_file) and !$__root_lookup){
+            $__template_file_path = self::$cwd . '/template/' . $__current_file . '/' . $__template_file . '.php';
+        } else if ($__root_lookup) {
+            $__template_file_path = self::$cwd . '/template' . $__template_file . '.php';
         } else {
-            if (!file_exists(self::$cwd . '/template/' . $_source . '/' . $_template . '.php')) {
-                $bt = debug_backtrace();
-                $caller = array_shift($bt);
-                throw new TemplateUnavailableException("The template $_template does not exist in file " . str_replace(App::$cwd, '', $caller['file']) . ":" . $caller['line'] );
-            }
-            include self::$cwd . '/template/' . $_source . '/' . $_template . '.php';
+            $__template_file_path = self::$cwd . '/template/' . $__template_file . '.php';
+        }
+
+        $__template_file_path = realpath($__template_file_path);
+
+        // elog("Rendering template: $__template_file_path", "render");
+        if (!$__template_file_path or !file_exists($__template_file_path) or strpos($__template_file_path, self::$cwd) !== 0) {
+            $caller = array_shift(debug_backtrace());
+            throw new TemplateUnavailableException("The template $__template_file_path does not exist in file " . str_replace(App::$cwd, '', $caller['file']) . ":" . $caller['line'] );
+        } else {
+            include $__template_file_path;
         }
     }
 
@@ -362,18 +361,6 @@ class App
     public function addMiddleware(\Psr\Http\Server\MiddlewareInterface $middleware){
         self::$middleware_wait_stack[] = $middleware;
     }
-
-    // public function registerMiddleware($middleware){
-    //     if($middleware instanceof MiddlewareInterface){
-    //         if (self::$middleware_stack == null){
-    //             throw new \Exception("Middleware stack not initialized, have you run init()?");
-    //         }
-    //         self::$middleware_stack = self::$middleware_stack->add($middleware);
-    //         elog("Added middleware: ".get_class($middleware), "middleware");
-    //     } else {
-    //         throw new \Exception("Middleware must implement Psr\Http\Server\MiddlewareInterface");
-    //     } 
-    // }
 
     /**
      * Runs the ZealPHP application.
