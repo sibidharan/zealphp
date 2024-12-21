@@ -290,41 +290,6 @@
                 "source": "https://github.com/php-fig/http-server-middleware/tree/1.0.2"
             },
             "install-path": "../psr/http-server-middleware"
-        },
-        {
-            "name": "swoole/ide-helper",
-            "version": "5.0.3",
-            "version_normalized": "5.0.3.0",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/swoole/ide-helper.git",
-                "reference": "4b6e615cb27c251b6248b8bd9501edbd02a45c18"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/swoole/ide-helper/zipball/4b6e615cb27c251b6248b8bd9501edbd02a45c18",
-                "reference": "4b6e615cb27c251b6248b8bd9501edbd02a45c18",
-                "shasum": ""
-            },
-            "time": "2023-04-28T22:20:18+00:00",
-            "type": "library",
-            "installation-source": "dist",
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "Apache-2.0"
-            ],
-            "authors": [
-                {
-                    "name": "Team Swoole",
-                    "email": "team@swoole.com"
-                }
-            ],
-            "description": "IDE help files for Swoole.",
-            "support": {
-                "issues": "https://github.com/swoole/ide-helper/issues",
-                "source": "https://github.com/swoole/ide-helper/tree/5.0.3"
-            },
-            "install-path": "../swoole/ide-helper"
         }
     ],
     "dev": true,
