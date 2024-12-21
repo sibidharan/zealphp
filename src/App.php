@@ -320,9 +320,7 @@ class App
     public static function render($__template_file = 'index', $__args = [])
     {
         $__current_file = Session::getCurrentFile(null);
-        extract($__args, EXTR_SKIP);
         $__root_lookup = strpos($__template_file, '/') === 0;
-
         if(!is_null($__current_file) and is_dir(self::$cwd . '/template/' . $__current_file) and !$__root_lookup){
             $__template_file_path = self::$cwd . '/template/' . $__current_file . '/' . $__template_file . '.php';
         } else if ($__root_lookup) {
@@ -333,11 +331,11 @@ class App
 
         $__template_file_path = realpath($__template_file_path);
 
-        // elog("Rendering template: $__template_file_path", "render");
         if (!$__template_file_path or !file_exists($__template_file_path) or strpos($__template_file_path, self::$cwd) !== 0) {
             $caller = array_shift(debug_backtrace());
             throw new TemplateUnavailableException("The template $__template_file_path does not exist in file " . str_replace(App::$cwd, '', $caller['file']) . ":" . $caller['line'] );
         } else {
+            extract($__args, EXTR_SKIP);
             include $__template_file_path;
         }
     }
