@@ -319,12 +319,12 @@ class App
      */
     public static function render($__template_file = 'index', $__args = [])
     {
-        $__current_file = Session::getCurrentFile(null);
+        $__current_file = self::getCurrentFile(null);
         $__root_lookup = strpos($__template_file, '/') === 0;
-        if(!is_null($__current_file) and is_dir(self::$cwd . '/template/' . $__current_file) and !$__root_lookup){
-            $__template_file_path = self::$cwd . '/template/' . $__current_file . '/' . $__template_file . '.php';
-        } else if ($__root_lookup) {
+        if ($__root_lookup) {
             $__template_file_path = self::$cwd . '/template' . $__template_file . '.php';
+        } else if(!empty($__current_file) and is_dir(self::$cwd . '/template/' . $__current_file)){
+            $__template_file_path = self::$cwd . '/template/' . $__current_file . '/' . $__template_file . '.php';
         } else {
             $__template_file_path = self::$cwd . '/template/' . $__template_file . '.php';
         }
@@ -337,6 +337,21 @@ class App
         } else {
             extract($__args, EXTR_SKIP);
             include $__template_file_path;
+        }
+    }
+
+    
+    /**
+     * Returns the current executing script name without extenstion
+     * @return String
+     */
+    public static function getCurrentFile($file = null)
+    {
+        $g = G::instance();
+        if ($file == null) {
+            return basename($g->server['PHP_SELF'], '.php');
+        } else {
+            return basename($file, '.php');
         }
     }
 
@@ -737,3 +752,19 @@ class ResponseMiddleware implements MiddlewareInterface
 //     }
 // }
 
+class TemplateUnavailableException extends \Exception {
+
+	protected $message = "The template you are trying to include does not seem to exist. Please check the file name.
+	Invalid error message. ";
+	protected $code = 1002;
+
+	public function __construct($message) {
+		$this->message = $message;
+		parent::__construct($this->message, $this->code);
+	}
+
+	public function __toString() {
+		return __CLASS__ . ": [{$this->code}]: {$this->message}\n";
+	}
+
+}
