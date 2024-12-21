@@ -24,21 +24,21 @@ We will install some dependencies before configuring OpenSwoole.
 #!/bin/bash
 
 # Install the GCC Compiler
-sudo apt install gcc
+$ sudo apt install gcc
 
 # Required for PECL installation and manual OpenSwoole compilation
-sudo apt install php-dev
+$ sudo apt install php-dev
 
 # Main requirements for OpenSwoole and useful packages
-sudo apt install openssl
-sudo apt install libssl-dev
-sudo apt install curl
-sudo apt install libcurl4-openssl-dev
-sudo apt install libpcre3-dev
-sudo apt install build-essential
-sudo apt install php8.3-mysqlnd
-sudo apt install postgresql
-sudo apt install libpq-dev
+$ sudo apt install openssl
+$ sudo apt install libssl-dev
+$ sudo apt install curl
+$ sudo apt install libcurl4-openssl-dev
+$ sudo apt install libpcre3-dev
+$ sudo apt install build-essential
+$ sudo apt install php8.3-mysqlnd
+$ sudo apt install postgresql
+$ sudo apt install libpq-dev
 ```
 
 Now lets install OpenSwoole. Compared with other async programming frameworks or software such as Nginx, Tornado, Node.js, Open Swoole is a complete async solution that has built-in support for async programming via fibers/coroutines, a range of multi-threaded I/O modules (HTTP Server, WebSockets, GRPC, TaskWorkers, Process Pools) and support for popular PHP clients like PDO for MySQL, Redis and CURL.
@@ -78,11 +78,11 @@ According to your PHP version, you simply need to add `extension=openswoole.so` 
 ```
 $ cd /etc/php/8.3/cli/conf.d
 
-$ touch 99-zealphp-swoole.ini
-$ echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-swoole.ini
+$ touch 99-zealphp-openswoole.ini
+$ echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-openswoole.ini
 
 # Enable Short Open Tags for Flexibility
-$ echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-swoole.ini
+$ echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-openswoole.ini
 
 ```
 
