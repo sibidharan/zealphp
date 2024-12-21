@@ -317,16 +317,17 @@ class App
      * @throws TemplateUnavailableException if the template does not exist.
      * @return void
      */
-    public static function render($__template_file = 'index', $__args = [])
+    public static function render($__template_file = 'index', $__args = [], $__default_template_dir = 'template')
     {
         $__current_file = self::getCurrentFile(null);
+        $__template_dir = self::$cwd . "/$__default_template_dir";
         $__root_lookup = strpos($__template_file, '/') === 0;
         if ($__root_lookup) {
-            $__template_file_path = self::$cwd . '/template' . $__template_file . '.php';
-        } else if(!empty($__current_file) and is_dir(self::$cwd . '/template/' . $__current_file)){
-            $__template_file_path = self::$cwd . '/template/' . $__current_file . '/' . $__template_file . '.php';
+            $__template_file_path = $__template_dir . $__template_file . '.php';
+        } else if(!empty($__current_file) and is_dir("$__template_dir/" . $__current_file)){
+            $__template_file_path = "$__template_dir/" . $__current_file . '/' . $__template_file . '.php';
         } else {
-            $__template_file_path = self::$cwd . '/template/' . $__template_file . '.php';
+            $__template_file_path = "$__template_dir/" . $__template_file . '.php';
         }
 
         $__template_file_path = realpath($__template_file_path);
