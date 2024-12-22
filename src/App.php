@@ -114,7 +114,7 @@ class App
             $file_name = '/'.basename($php_self);
             $cwd = dirname($php_self);
             self::$default_php_self = $file_name;
-            self::$middleware_stack = (new StackHandler())->add(new ResponseMiddleware())->add(new LocationHeaderMiddleware($port));
+            self::$middleware_stack = (new StackHandler())->add(new ResponseMiddleware());
         }
         if(!App::$superglobals){
             co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
