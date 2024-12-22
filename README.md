@@ -37,13 +37,7 @@ $ sudo apt install openssl libssl-dev curl libcurl4-openssl-dev libpcre3-dev bui
 
 Now lets install OpenSwoole. Compared with other async programming frameworks or software such as Nginx, Tornado, Node.js, Open Swoole is a complete async solution that has built-in support for async programming via fibers/coroutines, a range of multi-threaded I/O modules (HTTP Server, WebSockets, GRPC, TaskWorkers, Process Pools) and support for popular PHP clients like PDO for MySQL, Redis and CURL.
 
-ZealPHP uses OpenSwoole and offers a Web Development Framework that offers APIs, Routes, Sessions, Superglobals, Impicit Routing, Templating, Dynamic Injection, Dynamic HTML Streaming and much more that brings modern web development paradigms for your favorite language. 
-
-Installation of OpenSwoole will take a while, grab a cup of coffee ☕
-
-```
-$ sudo pecl install openswoole-22.1.2
-```
+ZealPHP uses OpenSwoole and offers a Web Development Framework that offers APIs, Routes, Sessions, Superglobals, Impicit Routing, Templating, Dynamic Injection, Dynamic HTML Streaming and much more that brings modern web development paradigms for your favorite language. ZealPHP also overrides some of PHP's inbuilt functions, for this to work, we use `uopz` extension and it is needed for ZealPHP to work. This wont take much longer to install, so before installing openswoole, lets install this.
 
 ### Install uopz
 
@@ -51,6 +45,14 @@ $ sudo pecl install openswoole-22.1.2
 
 ```
 $ sudo pecl install uopz
+```
+
+### Install OpenSwoole
+
+Installation of OpenSwoole will take a while, grab a cup of coffee ☕
+
+```
+$ sudo pecl install openswoole-22.1.2
 ```
 
 Now the building process will start, and within seconds you need to answer a few questions as follows for the compiling to begin. Compilation will take sometime depending on your CPU.
