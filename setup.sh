@@ -156,6 +156,32 @@ configure_existing_openswoole() {
     echo "OpenSwoole configuration updated successfully."
 }
 
+# Function to check if uopz is already installed
+check_uopz_installed() {
+    if php -m | grep -q 'uopz'; then
+        echo "uopz is already installed."
+        return 0
+    else
+        echo "uopz is not installed. Proceeding with installation..."
+        return 1
+    fi
+}
+
+# Function to install uopz via PECL
+install_uopz() {
+    echo "Installing uopz..."
+
+    sudo pecl install uopz || { echo "Failed to install uopz."; exit 1; }
+
+    # Get PHP config directory and configure uopz
+    local config_dir=$(php --ini | grep "Scan for additional .ini files in" | awk '{print $7}')
+    local config_file="${config_dir}/99-zealphp-openswoole.ini"
+
+    echo "extension=uopz.so" | sudo tee -a "$config_file" > /dev/null
+
+    echo "uopz installed and configured successfully."
+}
+
 # Function to check if Composer is installed
 check_composer_installed() {
     if command -v composer >/dev/null; then
@@ -248,6 +274,11 @@ if check_openswoole_installed; then
 else
     install_openswoole
     configure_openswoole
+fi
+
+# Check and install uopz
+if ! check_uopz_installed; then
+    install_uopz
 fi
 
 # Check and install Composer

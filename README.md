@@ -44,6 +44,15 @@ Installation of OpenSwoole will take a while, grab a cup of coffee ☕
 ```
 $ sudo pecl install openswoole-22.1.2
 ```
+
+### Install uopz
+
+`uopz` is a PECL extension that allows for the manipulation of user-defined functions and classes. It is useful for testing and debugging by allowing you to mock functions and classes. In ZealPHP, we use the `uopz` library to override built-in PHP functions such as `header` and `setcookie` within the ZealPHP context.
+
+```
+$ sudo pecl install uopz
+```
+
 Now the building process will start, and within seconds you need to answer a few questions as follows for the compiling to begin. Compilation will take sometime depending on your CPU.
 
 ```
@@ -67,17 +76,17 @@ configuration option "php_ini" is not set to php.ini location
 You should add "extension=openswoole.so" to php.ini
 ```
 
-According to your PHP version, you simply need to add `extension=openswoole.so` in your php.ini file. I am using PHP 8.3 in this case.
+According to your PHP version, you simply need to add `extension=openswoole.so` and `extension=uopz.so` in your php.ini file. I am using PHP 8.3 in this case.
 
 ```
 $ cd /etc/php/8.3/cli/conf.d
 
 $ sudo touch 99-zealphp-openswoole.ini
 $ echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-openswoole.ini
+$ echo "extension=uopz.so" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-openswoole.ini
 
 # Enable Short Open Tags for Flexibility
 $ echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-openswoole.ini
-
 ```
 
 We are good to go. Let's check if the setup is working. 
@@ -85,9 +94,11 @@ We are good to go. Let's check if the setup is working.
 ```
 $ php -m | grep openswoole
 openswoole
+$ php -m | grep uopz
+uopz
 ```
 
-If it prints `openswoole` then the module is loaded and is ready to go. 
+If it prints `openswoole` and `uopz` then the modules are loaded and are ready to go. 
 
 ## 2. Installing Composer (skip if already done)
 

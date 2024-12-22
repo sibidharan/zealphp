@@ -7,17 +7,97 @@ use ZealPHP\StringUtils;
 use OpenSwoole\Process;
 use OpenSwoole\Coroutine as co;
 
+function prefork_request_handler($taskLogic, $wait = true)
+{
+    $worker = new Process(function ($worker) use ($taskLogic) {
+        try {
+            $g = G::instance();
+            ob_start();
+            $taskLogic($worker);
+            $data = ob_get_clean();
+            $worker->write($data);
+            $response_code = http_response_code();
+            $worker->push(serialize([
+                'status_code' => $response_code ? $response_code : 200,
+                'headers' => $g->response_headers_list,
+                'exit_code' => 0
+            ]));
+            elog("coprocess response metadata: ".var_export($response_code, true));
+            $worker->exit(0);
+        } catch (\Throwable $e) {
+            $data = ob_get_clean();
+            if($data){
+                $worker->write($data);
+            } else {
+                $worker->write('EOF');
+            }
+
+            $exit_code = $e instanceof \OpenSwoole\ExitException;
+            $response_code = http_response_code();
+            if(!$response_code){
+                $response_code = $exit_code ? 200 : 500;
+            }
+            $worker->push(serialize([
+                'status_code' => $response_code,
+                'headers' => $g->response_headers_list,
+                'exited' => $exit_code,
+                // 'error' => serialize($e)
+            ]));
+            // elog("coprocess error: ".var_export($e, true));
+            $worker->exit(0);
+        }
+    }, false, SOCK_STREAM, false);
+
+    // Start the worker
+    $worker->useQueue(0, 2);
+    $worker->start();
+    Process::wait($wait);
+    # read all data from buffer using while loop using $worker->read(8192)
+    $recv = $data = $worker->read();
+    # test if this logic works
+    while (strlen($recv) == 8192) {
+        $recv = $worker->read();
+        if ($recv === '' || $recv === false) {
+            break;
+        }
+        $data .= $recv;
+    }
+    if($data == 'EOF'){
+        $data   = '';
+    }
+    $response_metadata = unserialize($worker->pop(65535));
+    response_set_status($response_metadata['status_code']);
+    foreach($response_metadata['headers'] as $key => $value){
+        response_add_header($key, $value, true);
+    }
+    elog("coprocess request metadata: ".var_export($_SERVER, true));
+    elog("coprocess resposnse metadata: ".var_export($response_metadata, true));
+    return $data;
+
+}
+
 function coprocess($taskLogic, $wait = true)
 {
     if(App::$superglobals == false){
         throw new \Exception("Superglobals are disabled which enables coroutines, cannot use coprocess inside coroutine, use coroutines directly.");
     }
     $worker = new Process(function ($worker) use ($taskLogic) {
-        error_reporting(0);
-        ini_set('display_errors', '0');
-        $taskLogic($worker);
-        $worker->exit();
-    }, true, SOCK_STREAM, true);
+        try{
+            ob_start();
+            $taskLogic($worker);
+            $data = ob_get_clean();
+            $worker->write($data);
+            $worker->exit();
+        } catch (\Throwable $e) {
+            $data = ob_get_clean();
+            if($data) $worker->write($data);
+            if($e instanceof \OpenSwoole\ExitException){
+                $worker->exit(0);
+            } else {
+                $worker->exit(1);
+            }
+        }
+    }, false, SOCK_STREAM, true);
 
     // Start the worker
     $worker->start();
@@ -28,6 +108,7 @@ function coprocess($taskLogic, $wait = true)
 function coproc($taskLogic){
     return coprocess($taskLogic);
 }
+
 
 /**
 * jTraceEx() - provide a Java style exception trace
@@ -229,6 +310,7 @@ function access_log($status = 200, $length){
 function response_add_header($key, $value, $ucwords = true)
 {
     $g = G::instance();
+    elog("response_add_header: $key ".var_export($value, true));
     $g->zealphp_response->header($key, $value, $ucwords);
 }
 
@@ -237,4 +319,10 @@ function response_set_status($status)
     $g = G::instance();
     $g->status = $status;
     $g->zealphp_response->status($status);
+}
+
+function response_headers_list()
+{
+    $g = G::instance();
+    return $g->response_headers_list;
 }

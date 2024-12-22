@@ -14,8 +14,6 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
-
-
 use OpenSwoole\Coroutine as co;
 class App
 {
@@ -30,9 +28,15 @@ class App
     public static $superglobals = true;
     public static $middleware_stack = null;
     public static $middleware_wait_stack = [];
+    public static $ignore_php_ext = true;
+    public static $coproc_implicit_request_handler = false;
 
     private function __construct($host = '0.0.0.0', $port = 8080,$cwd = __DIR__)
     {
+        # if uopz not enabled, throw error
+        if (!extension_loaded('uopz')) {
+            throw new \Exception("uopz extension is required for ZealPHP to work, 'pecl install uopz' to install and load it in your php.ini");
+        }
         $this->host = $host;
         $this->port = $port;
         self::$cwd = $cwd;
@@ -51,6 +55,47 @@ class App
                 $_ENV[$key] = $value;
             }
         }
+        // \uopz_allow_exit(false); Wont work since OpenSwoole overrides exit in a better way
+
+        \uopz_set_return('header', function($header, $replace = true, $http_response_code = null) {
+            elog("Setting header: $header");
+            $header = explode(':', $header, 2);
+            if (count($header) < 2) {
+                return false;
+            }
+            $name = trim($header[0]);
+            $value = trim($header[1]);
+            if(strtolower($name) == 'location'){
+                elog("Setting location header: $value");
+                response_set_status(302);
+            }
+            response_add_header($name, $value);
+        }, true);
+
+        \uopz_set_return('headers_list', function() {
+            return response_headers_list();
+        }, true);
+
+        \uopz_set_return('setcookie', function($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false) {
+            $cookie = "$name=$value";
+            if ($expire) {
+                $cookie .= "; expires=" . gmdate('D, d-M-Y H:i:s T', $expire);
+            }
+            if ($path) {
+                $cookie .= "; path=$path";
+            }
+            if ($domain) {
+                $cookie .= "; domain=$domain";
+            }
+            if ($secure) {
+                $cookie .= "; secure";
+            }
+            if ($httponly) {
+                $cookie .= "; httponly";
+            }
+            response_add_header('Set-Cookie', $cookie);
+        }, true);
+
     }
 
     /**
@@ -69,7 +114,7 @@ class App
             $file_name = '/'.basename($php_self);
             $cwd = dirname($php_self);
             self::$default_php_self = $file_name;
-            self::$middleware_stack = (new StackHandler())->add(new ResponseMiddleware());
+            self::$middleware_stack = (new StackHandler())->add(new ResponseMiddleware())->add(new LocationHeaderMiddleware($port));
         }
         if(!App::$superglobals){
             co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
@@ -447,23 +492,41 @@ class App
 
         # Implicit route for ignoring PHP extensions
 
-        $this->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
-            echo("<pre>403 Forbidden</pre>");
-            return(403);
-        });
+        if(App::$ignore_php_ext){
+            $this->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
+                echo("<pre>403 Forbidden</pre>");
+                return(403);
+            });
+        }
+        // $this->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
+        //     echo("<pre>403 Forbidden</pre>");
+        //     return(403);
+        // });
 
         # Implicit route for index.php
 
         $this->route('/', function($response){
+            // elog("Index route hit");
             $g = G::instance();
             $file = 'index';
             $g->server['PHP_SELF'] = '/'.$file.'.php';
-            // if(self::$superglobals){
-            //     $_SERVER['PHP_SELF'] = $g->server['PHP_SELF'];
-            // }
+            $g->server['SCRIPT_NAME'] = '/'.$file.'.php';
+            $g->server['SCRIPT_FILENAME'] = self::$cwd."/public/".$file.".php";
             $abs_file = self::$cwd."/public/".$file.".php";
             if(file_exists($abs_file)){
-                include $abs_file;
+                if ($this->includeCheck($abs_file)){
+                    if(self::$coproc_implicit_request_handler){
+                        echo prefork_request_handler(function() use ($abs_file){
+                            // throw new \Exception("Include: $abs_file");
+                            include $abs_file;
+                        });
+                    } else {
+                        include $abs_file;
+                    }
+                } else {
+                    echo("<pre>403 Forbidden</pre>");
+                    return(403);
+                }
             } else {
                 //TODO: Can load user page here if file not found
                 echo("<pre>404 Not Found</pre>");
@@ -472,16 +535,26 @@ class App
         });
 
         # Global route for all files in the root of the public directory
-        $this->route('/{file}/?', function($file, $response){
+        $this->route(App::$ignore_php_ext ? '/{file}/?' : '/{file}(\.php)?/?', function($file, $response){
             $g = G::instance();
+            # if file ends with .php remove it
+            if (substr($file, -4) == '.php') {
+                $file = substr($file, 0, -4);
+            }
             $abs_file = realpath(self::$cwd."/public/".$file.'.php');
             if(file_exists($abs_file)){
                 if ($this->includeCheck($abs_file)){
                     $g->server['PHP_SELF'] = '/'.$file.'.php';
-                    // if(self::$superglobals){
-                    //     $_SERVER['PHP_SELF'] = $g->server['PHP_SELF'];
-                    // }
-                    include $abs_file;
+                    $g->server['SCRIPT_NAME'] = '/'.$file.'.php';
+                    $g->server['SCRIPT_FILENAME'] = $abs_file;
+                    if(self::$coproc_implicit_request_handler){
+                        echo prefork_request_handler(function() use ($abs_file){
+                            // throw new \Exception("Include: $abs_file");
+                            include $abs_file;
+                        });
+                    } else {
+                        include $abs_file;
+                    }
                 } else {
                     echo("<pre>403 Forbidden</pre>");
                     return 403;
@@ -491,10 +564,16 @@ class App
                 if(file_exists($abs_file)){
                     if ($this->includeCheck($abs_file)){
                         $g->server['PHP_SELF'] = '/'.$file.'/index.php';
-                        // if(self::$superglobals){
-                        //     $_SERVER['PHP_SELF'] =  $g->server['PHP_SELF'];
-                        // }
-                        include $abs_file;
+                        $g->server['SCRIPT_NAME'] = '/'.$file.'/index.php';
+                        $g->server['SCRIPT_FILENAME'] = $abs_file;
+                        if(self::$coproc_implicit_request_handler){
+                            echo prefork_request_handler(function() use ($abs_file){
+                                // throw new \Exception("Include: $abs_file");
+                                include $abs_file;
+                            });
+                        } else {
+                            include $abs_file;
+                        }
                     } else {
                         echo("<pre>403 Forbidden</pre>");
                         return 403;
@@ -511,18 +590,28 @@ class App
         });
 
         # Global route for all directories and sub directories in the public directory
-        $this->nsPathRoute('{dir}', '{uri}/?', function($dir, $uri, $response){
+        $this->nsPathRoute('{dir}', App::$ignore_php_ext ? '{uri}/?' : '{uri}(\.php)?/?', function($dir, $uri, $response){
             $g = G::instance();
-            // elog("Directory: $dir, URI: $uri");
+            elog("Directory: $dir, URI: $uri");
+            # if uri ends with .php remove it
+            if (substr($uri, -4) == '.php') {
+                $uri = substr($uri, 0, -4);
+            }
             $abs_file = realpath(self::$cwd."/public/".$dir.'/'.$uri.'.php');
-            // elog("Abs File: $abs_file");
             if(file_exists($abs_file)){
                 if ($this->includeCheck($abs_file)){
                     $g->server['PHP_SELF'] = '/'.$dir.'/'.$uri.'.php';
-                    // if(self::$superglobals){
-                    //     $_SERVER['PHP_SELF'] =  $g->server['PHP_SELF'];
-                    // }
-                    include $abs_file;
+                    $g->server['SCRIPT_NAME'] = '/'.$dir.'/'.$uri.'.php';
+                    $g->server['SCRIPT_FILENAME'] = $abs_file;
+                    // include $abs_file;
+                    if(self::$coproc_implicit_request_handler){
+                        echo prefork_request_handler(function() use ($abs_file){
+                            // throw new \Exception("Include: $abs_file");
+                            include $abs_file;
+                        });
+                    } else {
+                        include $abs_file;
+                    }
                 } else {
                     echo("<pre>403 Forbidden</pre>");
                     return(403);
@@ -532,10 +621,16 @@ class App
                 if(file_exists($abs_path)){
                     if ($this->includeCheck($abs_path)){
                         $g->server['PHP_SELF'] = '/'.$dir.'/'.$uri.'/index.php';
-                        // if(self::$superglobals){
-                        //     $_SERVER['PHP_SELF'] =  $g->server['PHP_SELF'];
-                        // }
-                        include $abs_path;
+                        $g->server['SCRIPT_NAME'] = '/'.$dir.'/'.$uri.'/index.php';
+                        $g->server['SCRIPT_FILENAME'] = $abs_path;
+                        if(self::$coproc_implicit_request_handler){
+                            echo prefork_request_handler(function() use ($abs_path){
+                                // throw new \Exception("Include: $abs_path");
+                                include $abs_path;
+                            });
+                        } else {
+                            include $abs_path;
+                        }
                     } else {
                         echo("<pre>403 Forbidden</pre>");
                         return(403);
@@ -588,7 +683,6 @@ class App
         }
 
         $server->on("request",new $SessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) use ($server) {
-            
             $g = G::instance();
             // $_GET alternative
             $g->get = $request->get ?? [];
@@ -640,6 +734,10 @@ class App
             }
             if (!isset($g->server['PHP_SELF'])) {
                 $g->server['PHP_SELF'] = App::$default_php_self;
+            }
+
+            if (!isset($g->server['SCRIPT_FILENAME'])) {
+                $g->server['SCRIPT_FILENAME'] = $g->server['DOCUMENT_ROOT'] . $g->server['PHP_SELF'];
             }
 
             $serverRequest  = \OpenSwoole\Core\Psr\ServerRequest::from($request->parent);
@@ -722,11 +820,16 @@ class ResponseMiddleware implements MiddlewareInterface
                     }
 
                     $buffer = ob_get_clean();
-
-                    
-
                     return (new Response($buffer, $status));
-                } catch (\Exception $e) {
+                } catch (\Exception|\OpenSwoole\ExitException $e) {
+                    if($e instanceof \OpenSwoole\ExitException){
+                        if($e->getStatus() == 0){
+                            elog("HTTP Status: ".$g->status);
+                            return (new Response(ob_get_clean()))->withStatus($g->status ?? 200);
+                        } else {
+                            return (new Response(ob_get_clean()))->withStatus(500);
+                        }
+                    }
                     elog(jTraceEx($e), "error");
                     if (App::$display_errors) {
                         // print the error message to the error log
@@ -768,4 +871,45 @@ class TemplateUnavailableException extends \Exception {
 		return __CLASS__ . ": [{$this->code}]: {$this->message}\n";
 	}
 
+}
+
+
+class LocationHeaderMiddleware implements MiddlewareInterface
+{
+    private $correctPort;
+
+    public function __construct($correctPort)
+    {
+        $this->correctPort = $correctPort;
+    }
+
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+    {
+        $response = $handler->handle($request);
+
+        if ($response->hasHeader('Location')) {
+            $location = $response->getHeaderLine('Location');
+            $parsedUrl = parse_url($location);
+
+            if (isset($parsedUrl['host']) && isset($parsedUrl['port']) && $parsedUrl['port'] != $this->correctPort) {
+                $parsedUrl['port'] = $this->correctPort;
+                $newLocation = $this->buildUrl($parsedUrl);
+                $response = $response->withHeader('Location', $newLocation);
+            }
+        }
+
+        return $response;
+    }
+
+    private function buildUrl($parsedUrl)
+    {
+        $scheme   = isset($parsedUrl['scheme']) ? $parsedUrl['scheme'] . '://' : '';
+        $host     = isset($parsedUrl['host']) ? $parsedUrl['host'] : '';
+        $port     = isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '';
+        $path     = isset($parsedUrl['path']) ? $parsedUrl['path'] : '';
+        $query    = isset($parsedUrl['query']) ? '?' . $parsedUrl['query'] : '';
+        $fragment = isset($parsedUrl['fragment']) ? '#' . $parsedUrl['fragment'] : '';
+
+        return "$scheme$host$port$path$query$fragment";
+    }
 }
