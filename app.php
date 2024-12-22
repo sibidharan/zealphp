@@ -44,7 +44,7 @@ class ValidationMiddleware implements MiddlewareInterface
     }
 }
 
-App::superglobals(false);
+App::superglobals(true);
 
 $app = App::init('0.0.0.0', 8080);
 $app->addMiddleware(new AuthenticationMiddleware());
@@ -133,6 +133,23 @@ $app->route("/suglobal/{name}", [
             echo "Unknown global $name";
         }
     }
+});
+
+$app->route("/header", [
+    'methods' => ['GET', 'POST']
+],function() {
+    header('Content-Type: text/plain');
+    header('X-Test: foo');
+    setcookie('test', 'test');
+
+    echo "Headers set";
+});
+
+$app->route("/exittest", [
+    'methods' => ['GET', 'POST']
+],function() {
+    echo "Exiting...";
+    exit(1);
 });
 
 $app->route("/coglobal/set/session", [

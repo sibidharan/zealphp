@@ -3,18 +3,12 @@
 use function ZealPHP\elog;
 use ZealPHP\App;
 use function ZealPHP\coproc;
+use OpenSwoole\Core\Psr\Response;
 
 $backup = function ($a, $b) {
-    elog("Received $a $b", "task");
-    coproc(function(){
-        go(function(){
-            elog("In coroutine", "task");
-        });
-        go(function(){
-            elog("In coroutine 2", "task");
-        });
-        echo "Hello from coroutine";
-    });
-    elog("After coproc", "task");
-    return $a+$b;
+    $response = new Response("Hello World",200, 'child_fork', ['Content-Type' => 'application/json']);
+
+    // Serialize the response
+    $serializedResponse = serialize($response);
+    return $serializedResponse;
 };

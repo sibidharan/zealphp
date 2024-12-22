@@ -71,6 +71,11 @@ class Response
     // You can override methods if necessary or add more custom methods
     public function header(string $key, string $value): bool
     {
+        $g = \ZealPHP\G::instance();
+        $g->response_headers_list[$key] = $value;
+        if(strtolower($key) == 'location'){
+            response_set_status(302);
+        }
         return $this->parent->header($key, $value);
     }
 

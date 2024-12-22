@@ -9,6 +9,10 @@ $task = function($request, $response,OpenSwoole\HTTP\Server  $server) {
         'handler' => '/task/backup',
         'args' => [1, 2]
     ], -1, function ($server, $task_id, $data) {
-        elog(json_encode($data), "api");
+        print_r($data);
+        $response = unserialize($data['result']);
+        print_r($response);
+        // Output the response body
+        echo "Received from child: " . $response->getBody();
     });
 };
