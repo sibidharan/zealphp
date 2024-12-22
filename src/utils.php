@@ -20,9 +20,9 @@ function prefork_request_handler($taskLogic, $wait = true)
             $worker->push(serialize([
                 'status_code' => $response_code ? $response_code : 200,
                 'headers' => $g->response_headers_list,
-                'exit_code' => 0
+                'exit_code' => 0,
+                'length' => strlen($data)
             ]));
-            elog("coprocess response metadata: ".var_export($response_code, true));
             $worker->exit(0);
         } catch (\Throwable $e) {
             $data = ob_get_clean();
@@ -41,6 +41,7 @@ function prefork_request_handler($taskLogic, $wait = true)
                 'status_code' => $response_code,
                 'headers' => $g->response_headers_list,
                 'exited' => $exit_code,
+                'length' => strlen($data),
                 // 'error' => serialize($e)
             ]));
             // elog("coprocess error: ".var_export($e, true));
