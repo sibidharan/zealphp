@@ -73,7 +73,7 @@ class Response
     {
         $g = \ZealPHP\G::instance();
         $g->response_headers_list[$key] = $value;
-        if(strtolower($key) == 'location'){
+        if(strtolower($key) == 'location' && $value){
             response_set_status(302);
         }
         return $this->parent->header($key, $value);
