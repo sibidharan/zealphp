@@ -11,9 +11,11 @@ function prefork_request_handler($taskLogic, $wait = true)
 {
     $worker = new Process(function ($worker) use ($taskLogic) {
         $g = G::instance();
-        elog("prefork_request_handler response_header_list: ".var_export($g->response_headers_list, true));
+        // elog("prefork_request_handler response_header_list: ".var_export($g->response_headers_list, true));
         try {
             $g->response_headers_list = [];
+            $g->status = 200;
+            
             ob_start();
             $taskLogic($worker);
             $data = ob_get_clean();
@@ -44,7 +46,7 @@ function prefork_request_handler($taskLogic, $wait = true)
                 'headers' => $g->response_headers_list,
                 'exited' => $exit_code,
                 'length' => strlen($data),
-                // 'error' => serialize($e)
+                'error' => $e
             ]));
             // elog("coprocess error: ".var_export($e, true));
             $worker->exit(0);
@@ -76,7 +78,7 @@ function prefork_request_handler($taskLogic, $wait = true)
         response_add_header($key, $value, true);
     }
     // elog("coprocess request metadata: ".var_export($_SERVER, true));
-    elog("coprocess resposnse metadata: ".var_export($response_metadata, true));
+    // elog("coprocess resposnse metadata: ".var_export($response_metadata, true));
     return $data;
 
 }

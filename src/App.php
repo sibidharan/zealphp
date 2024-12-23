@@ -58,7 +58,7 @@ class App
         // \uopz_allow_exit(false); Wont work since OpenSwoole overrides exit in a better way
 
         \uopz_set_return('header', function($header, $replace = true, $http_response_code = null) {
-            elog("Setting header: $header");
+            // elog("Setting header: $header");
             $header = explode(':', $header, 2);
             if (count($header) < 2) {
                 return false;
