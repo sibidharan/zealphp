@@ -10,8 +10,10 @@ use OpenSwoole\Coroutine as co;
 function prefork_request_handler($taskLogic, $wait = true)
 {
     $worker = new Process(function ($worker) use ($taskLogic) {
+        $g = G::instance();
+        elog("prefork_request_handler response_header_list: ".var_export($g->response_headers_list, true));
         try {
-            $g = G::instance();
+            $g->response_headers_list = [];
             ob_start();
             $taskLogic($worker);
             $data = ob_get_clean();
@@ -47,6 +49,7 @@ function prefork_request_handler($taskLogic, $wait = true)
             // elog("coprocess error: ".var_export($e, true));
             $worker->exit(0);
         }
+        elog("prefork_request_handler response_header_list: ".var_export($g->response_headers_list, true));
     }, false, SOCK_STREAM, false);
 
     // Start the worker
@@ -67,11 +70,12 @@ function prefork_request_handler($taskLogic, $wait = true)
         $data   = '';
     }
     $response_metadata = unserialize($worker->pop(65535));
+    $worker->freeQueue();
     response_set_status($response_metadata['status_code']);
     foreach($response_metadata['headers'] as $key => $value){
         response_add_header($key, $value, true);
     }
-    elog("coprocess request metadata: ".var_export($_SERVER, true));
+    // elog("coprocess request metadata: ".var_export($_SERVER, true));
     elog("coprocess resposnse metadata: ".var_export($response_metadata, true));
     return $data;
 
@@ -311,7 +315,7 @@ function access_log($status = 200, $length){
 function response_add_header($key, $value, $ucwords = true)
 {
     $g = G::instance();
-    elog("response_add_header: $key ".var_export($value, true));
+    // elog("response_add_header: $key ".var_export($value, true));
     $g->zealphp_response->header($key, $value, $ucwords);
 }
 

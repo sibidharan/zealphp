@@ -65,10 +65,6 @@ class App
             }
             $name = trim($header[0]);
             $value = trim($header[1]);
-            if(strtolower($name) == 'location'){
-                elog("Setting location header: $value");
-                response_set_status(302);
-            }
             response_add_header($name, $value);
         }, true);
 
@@ -94,6 +90,14 @@ class App
                 $cookie .= "; httponly";
             }
             response_add_header('Set-Cookie', $cookie);
+        }, true);
+
+        \uopz_set_return('http_response_code', function($code = null) {
+            if ($code !== null) {
+                response_set_status($code);
+            } else {
+                return G::instance()->status;
+            }
         }, true);
 
     }
