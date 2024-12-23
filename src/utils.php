@@ -333,3 +333,51 @@ function response_headers_list()
     $g = G::instance();
     return $g->response_headers_list;
 }
+
+function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false) {
+    $cookie = "$name=$value";
+    if ($expire) {
+        $cookie .= "; expires=" . gmdate('D, d-M-Y H:i:s T', $expire);
+    }
+    if ($path) {
+        $cookie .= "; path=$path";
+    }
+    if ($domain) {
+        $cookie .= "; domain=$domain";
+    }
+    if ($secure) {
+        $cookie .= "; secure";
+    }
+    if ($httponly) {
+        $cookie .= "; httponly";
+    }
+    response_add_header('Set-Cookie', $cookie);
+}
+
+function http_response_code($code = null) {
+    if ($code !== null) {
+        response_set_status($code);
+    } else {
+        return G::instance()->status;
+    }
+}
+
+function headers_list() {
+    $headers = response_headers_list();
+    $result = [];
+    foreach ($headers as $name => $value) {
+        $result[] = "$name: $value";
+    }
+    return $result;
+}
+
+function header($header, $replace = true, $http_response_code = null) {
+    // elog("Setting header: $header");
+    $header = explode(':', $header, 2);
+    if (count($header) < 2) {
+        return false;
+    }
+    $name = trim($header[0]);
+    $value = trim($header[1]);
+    response_add_header($name, $value);
+}
