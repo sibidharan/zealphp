@@ -509,7 +509,9 @@ class App
 
         # Implicit route for index.php
 
-        $this->route('/', function($response){
+        $this->route('/',[
+            'methods' => ['GET', 'POST', 'PUT', 'DELETE']
+        ], function($response){
             // elog("Index route hit");
             $g = G::instance();
             $file = 'index';
@@ -539,7 +541,9 @@ class App
         });
 
         # Global route for all files in the root of the public directory
-        $this->route(App::$ignore_php_ext ? '/{file}/?' : '/{file}(\.php)?/?', function($file, $response){
+        $this->route(App::$ignore_php_ext ? '/{file}/?' : '/{file}(\.php)?/?', [
+            'methods' => ['GET', 'POST', 'PUT', 'DELETE']
+        ], function($file, $response){
             $g = G::instance();
             # if file ends with .php remove it
             if (substr($file, -4) == '.php') {
@@ -594,7 +598,9 @@ class App
         });
 
         # Global route for all directories and sub directories in the public directory
-        $this->nsPathRoute('{dir}', App::$ignore_php_ext ? '{uri}/?' : '{uri}(\.php)?/?', function($dir, $uri, $response){
+        $this->nsPathRoute('{dir}', App::$ignore_php_ext ? '{uri}/?' : '{uri}(\.php)?/?', [
+            'methods' => ['GET', 'POST', 'PUT', 'DELETE']
+        ], function($dir, $uri, $response){
             $g = G::instance();
             elog("Directory: $dir, URI: $uri");
             # if uri ends with .php remove it
