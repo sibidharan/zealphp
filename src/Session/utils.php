@@ -49,7 +49,6 @@ function zeal_session_start()
     return true;
 }
 
-
 /**
  * Get or set the session ID
  */
@@ -79,15 +78,18 @@ function zeal_session_id($id = null)
     }
 }
 
-function zeal_session_status(){
+/**
+ * Get the current session status
+ */
+function zeal_session_status()
+{
     $g = G::instance();
-    if(isset($g->session)){
+    if (isset($g->session)) {
         return PHP_SESSION_ACTIVE;
-    }else{
+    } else {
         return PHP_SESSION_NONE;
     }
 }
-
 
 /**
  * Get or set the session name
@@ -168,7 +170,7 @@ function zeal_session_regenerate_id($delete_old_session = false)
     $old_session_id = zeal_session_id();
 
     // Generate new session ID
-    $new_session_id = uniqid('', true);
+    $new_session_id = session_create_id();
     zeal_session_id($new_session_id);
 
     // Rename session file if keeping old session data
@@ -210,6 +212,9 @@ function zeal_session_set_cookie_params($lifetime, $path = '/', $domain = '', $s
     $g->session_params['cookie_params'] = compact('lifetime', 'path', 'domain', 'secure', 'httponly');
 }
 
+/**
+ * Get or set the cache limiter
+ */
 function zeal_session_cache_limiter($cache_limiter = null)
 {
     $g = G::instance();
@@ -222,11 +227,17 @@ function zeal_session_cache_limiter($cache_limiter = null)
     }
 }
 
+/**
+ * Write session data and end session
+ */
 function zeal_session_commit()
 {
     return zeal_session_write_close();
 }
 
+/**
+ * Get or set the cache expire
+ */
 function zeal_session_cache_expire($cache_expire = null)
 {
     $g = G::instance();
@@ -239,6 +250,9 @@ function zeal_session_cache_expire($cache_expire = null)
     }
 }
 
+/**
+ * Discard session changes
+ */
 function zeal_session_abort()
 {
     $g = G::instance();
@@ -261,21 +275,33 @@ function zeal_session_abort()
     return true;
 }
 
+/**
+ * Encode session data
+ */
 function zeal_session_encode()
 {
     return serialize(G::instance()->session);
 }
 
+/**
+ * Decode session data
+ */
 function zeal_session_decode($data)
 {
     G::instance()->session = unserialize($data);
 }
 
+/**
+ * Create a new session ID
+ */
 function zeal_session_create_id($prefix = '')
 {
     return session_create_id($prefix);
 }
 
+/**
+ * Get or set the session save path
+ */
 function zeal_session_save_path($path = null)
 {
     $g = G::instance();
@@ -288,6 +314,9 @@ function zeal_session_save_path($path = null)
     }
 }
 
+/**
+ * Get or set the session module name
+ */
 function zeal_session_module_name($module = null)
 {
     $g = G::instance();
