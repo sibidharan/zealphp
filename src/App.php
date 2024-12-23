@@ -56,7 +56,7 @@ class App
             }
         }
 
-        \uopz_set_return('header', \Closure::fromCallable('\ZealPHP\headers'), true);
+        \uopz_set_return('header', \Closure::fromCallable('\ZealPHP\header'), true);
         \uopz_set_return('headers_list', \Closure::fromCallable('\ZealPHP\headers_list'), true);
         \uopz_set_return('setcookie', \Closure::fromCallable('\ZealPHP\setcookie') , true);
         \uopz_set_return('http_response_code', \Closure::fromCallable('\ZealPHP\http_response_code'), true);
