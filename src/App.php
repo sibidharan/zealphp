@@ -55,51 +55,29 @@ class App
                 $_ENV[$key] = $value;
             }
         }
-        // \uopz_allow_exit(false); Wont work since OpenSwoole overrides exit in a better way
 
-        \uopz_set_return('header', function($header, $replace = true, $http_response_code = null) {
-            // elog("Setting header: $header");
-            $header = explode(':', $header, 2);
-            if (count($header) < 2) {
-                return false;
-            }
-            $name = trim($header[0]);
-            $value = trim($header[1]);
-            response_add_header($name, $value);
-        }, true);
-
-        \uopz_set_return('headers_list', function() {
-            return response_headers_list();
-        }, true);
-
-        \uopz_set_return('setcookie', function($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false) {
-            $cookie = "$name=$value";
-            if ($expire) {
-                $cookie .= "; expires=" . gmdate('D, d-M-Y H:i:s T', $expire);
-            }
-            if ($path) {
-                $cookie .= "; path=$path";
-            }
-            if ($domain) {
-                $cookie .= "; domain=$domain";
-            }
-            if ($secure) {
-                $cookie .= "; secure";
-            }
-            if ($httponly) {
-                $cookie .= "; httponly";
-            }
-            response_add_header('Set-Cookie', $cookie);
-        }, true);
-
-        \uopz_set_return('http_response_code', function($code = null) {
-            if ($code !== null) {
-                response_set_status($code);
-            } else {
-                return G::instance()->status;
-            }
-        }, true);
-
+        \uopz_set_return('header', \Closure::fromCallable('\ZealPHP\headers'), true);
+        \uopz_set_return('headers_list', \Closure::fromCallable('\ZealPHP\headers_list'), true);
+        \uopz_set_return('setcookie', \Closure::fromCallable('\ZealPHP\setcookie') , true);
+        \uopz_set_return('http_response_code', \Closure::fromCallable('\ZealPHP\http_response_code'), true);
+        \uopz_set_return('session_start', \Closure::fromCallable('\ZealPHP\Session\zeal_session_start'), true);
+        \uopz_set_return('session_id', \Closure::fromCallable('\ZealPHP\Session\zeal_session_id'), true);
+        \uopz_set_return('session_status', \Closure::fromCallable('\ZealPHP\Session\zeal_session_status'), true);
+        \uopz_set_return('session_name', \Closure::fromCallable('\ZealPHP\Session\zeal_session_name'), true);
+        \uopz_set_return('session_write_close', \Closure::fromCallable('\ZealPHP\Session\zeal_session_write_close'), true);
+        \uopz_set_return('session_destroy', \Closure::fromCallable('\ZealPHP\Session\zeal_session_destroy'), true);
+        \uopz_set_return('session_unset', \Closure::fromCallable('\ZealPHP\Session\zeal_session_unset'), true);
+        \uopz_set_return('session_regenerate_id', \Closure::fromCallable('\ZealPHP\Session\zeal_session_regenerate_id'), true);
+        \uopz_set_return('session_get_cookie_params', \Closure::fromCallable('\ZealPHP\Session\zeal_session_get_cookie_params'), true);
+        \uopz_set_return('session_set_cookie_params', \Closure::fromCallable('\ZealPHP\Session\zeal_session_set_cookie_params'), true);
+        \uopz_set_return('session_cache_limiter', \Closure::fromCallable('\ZealPHP\Session\zeal_session_cache_limiter'), true);
+        \uopz_set_return('session_cache_expire', \Closure::fromCallable('\ZealPHP\Session\zeal_session_cache_expire'), true);
+        \uopz_set_return('session_commit', \Closure::fromCallable('\ZealPHP\Session\zeal_session_commit'), true);
+        \uopz_set_return('session_abort', \Closure::fromCallable('\ZealPHP\Session\zeal_session_abort'), true);
+        \uopz_set_return('session_encode', \Closure::fromCallable('\ZealPHP\Session\zeal_session_encode'), true);
+        \uopz_set_return('session_decode', \Closure::fromCallable('\ZealPHP\Session\zeal_session_decode'), true);
+        \uopz_set_return('session_save_path', \Closure::fromCallable('\ZealPHP\Session\zeal_session_save_path'), true);
+        \uopz_set_return('session_module_name', \Closure::fromCallable('\ZealPHP\Session\zeal_session_module_name'), true);
     }
 
     /**
