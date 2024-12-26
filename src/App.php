@@ -672,6 +672,7 @@ class App
 
         $server->on("request",new $SessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) use ($server) {
             $g = G::instance();
+            $g->status = 200; //Unless changed by the handler
             // $_GET alternative
             $g->get = $request->get ?? [];
             // $_POST alternative
@@ -727,6 +728,12 @@ class App
             if (!isset($g->server['SCRIPT_FILENAME'])) {
                 $g->server['SCRIPT_FILENAME'] = $g->server['DOCUMENT_ROOT'] . $g->server['PHP_SELF'];
             }
+
+            if (!isset($g->server['SERVER_SOFTWARE'])) {
+                $g->server['SERVER_SOFTWARE'] = 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion();
+            }
+
+
 
             $serverRequest  = \OpenSwoole\Core\Psr\ServerRequest::from($request->parent);
             $serverResponse = App::middleware()->handle($serverRequest);
