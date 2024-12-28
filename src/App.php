@@ -421,7 +421,6 @@ class App
      */
     public function run($settings = null)
     {
-        $g = G::instance();
         $default_settings = [
             'enable_static_handler' => true,
             'document_root' => self::$cwd . '/public',

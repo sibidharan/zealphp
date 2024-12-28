@@ -7,11 +7,9 @@ use ZealPHP\App;
 class G
 {
     private static $instance = null;
-    // Other properties...
 
     private function __construct()
     {
-        // Initialize properties...
         $this->session_params = [];
         $this->status = null;
     }
@@ -19,6 +17,10 @@ class G
     public static function instance()
     {
         if (self::$instance === null) {
+            $bt = debug_backtrace();
+            $bt = array_shift($bt);
+
+            elog("Creating new G instance from $bt[file]:$bt[line]");
             self::$instance = new G();
         }
         return self::$instance;
