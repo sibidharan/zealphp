@@ -72,7 +72,7 @@ class Response
     public function header(string $key, string $value): bool
     {
         $g = \ZealPHP\G::instance();
-        $g->response_headers_list[$key] = $value;
+        $g->response_headers_list[] = [$key, $value];
         if(strtolower($key) == 'location' && $value){
             response_set_status(302);
         }
