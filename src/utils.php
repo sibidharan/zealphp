@@ -7,11 +7,22 @@ use ZealPHP\StringUtils;
 use OpenSwoole\Process;
 use OpenSwoole\Coroutine as co;
 
+function get($key, $default = null)
+{
+    return $_GET[$key] ?? $default;
+}
+
+/**
+ * Handles a request using a preforking model.
+ *
+ * @param callable $taskLogic The logic to be executed in the preforked process.
+ * @param bool $wait Optional. Whether to wait for the task to complete. Default is true.
+ */
 function prefork_request_handler($taskLogic, $wait = true)
 {
     $worker = new Process(function ($worker) use ($taskLogic) {
         $g = G::instance();
-        // elog("prefork_request_handler response_header_list: ".var_export($g->response_headers_list, true));
+        elog("prefork_request_handler response_header_list: ".var_export($g->response_headers_list, true));
         try {
             $g->response_headers_list = [];
             $g->status = 200;
@@ -19,7 +30,7 @@ function prefork_request_handler($taskLogic, $wait = true)
             ob_start();
             $taskLogic($worker);
             $data = ob_get_clean();
-            $worker->write($data);
+            $worker->write(empty($data) ? 'EOF' : $data);
             $response_code = http_response_code();
             $worker->push(serialize([
                 'status_code' => $response_code ? $response_code : 200,
@@ -30,12 +41,7 @@ function prefork_request_handler($taskLogic, $wait = true)
             $worker->exit(0);
         } catch (\Throwable $e) {
             $data = ob_get_clean();
-            if($data){
-                $worker->write($data);
-            } else {
-                $worker->write('EOF');
-            }
-
+            $worker->write(empty($data) ? 'EOF' : $data);
             $exit_code = $e instanceof \OpenSwoole\ExitException;
             $response_code = http_response_code();
             if(!$response_code){
@@ -83,6 +89,14 @@ function prefork_request_handler($taskLogic, $wait = true)
 
 }
 
+/**
+ * Executes a task logic in a separate process.
+ *
+ * @param callable $taskLogic The logic to be executed in the separate process.
+ * @param bool $wait Optional. Whether to wait for the process to complete. Default is true.
+ *
+ * @return mixed The result of the task logic if $wait is true, otherwise null.
+ */
 function coprocess($taskLogic, $wait = true)
 {
     if(App::$superglobals == false){
@@ -93,11 +107,15 @@ function coprocess($taskLogic, $wait = true)
             ob_start();
             $taskLogic($worker);
             $data = ob_get_clean();
-            $worker->write($data);
+            $worker->write(empty($data) ? 'EOF' : $data);
             $worker->exit();
         } catch (\Throwable $e) {
             $data = ob_get_clean();
-            if($data) $worker->write($data);
+            if(!empty($data)){
+                $worker->write($data);
+            } else {
+                $worker->write('EOF');
+            }
             if($e instanceof \OpenSwoole\ExitException){
                 $worker->exit(0);
             } else {
@@ -109,7 +127,11 @@ function coprocess($taskLogic, $wait = true)
     // Start the worker
     $worker->start();
     Process::wait($wait);
-    return $worker->read();
+    $data = $worker->read();
+    if($data == 'EOF'){
+        $data   = '';
+    }
+    return $data;
 }
 
 function coproc($taskLogic){
@@ -169,14 +191,22 @@ function jTraceEx($e, $seen=null)
     return $result;
 }
 
-function zapi($filename){
-    return basename($filename, '.php');
+function zapi(){
+    $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
+    $caller = array_shift($bt);
+    return basename($caller['file'], '.php');
 }
 
+/**
+ * Logs a message with an optional tag and limit.
+ *
+ * @param string $message The message to log.
+ * @param string $tag The tag to associate with the log message. Default is "*".
+ * @param int $limit The limit for the log message. Default is 1.
+ */
 function elog($message, $tag = "*", $limit = 1){
     $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, $limit);
     $caller = array_shift($bt);
-
     $date = date('d-m-Y H:i:s');
     # add microseconds or nano seconds down to 6 decimal places
     $date .= substr((string)microtime(), 1, 6);
@@ -185,6 +215,14 @@ function elog($message, $tag = "*", $limit = 1){
 └❯ $message \n");
 }
 
+/**
+ * Logs a message with an optional tag and filter.
+ *
+ * @param mixed  $log           The message or data to log.
+ * @param string $tag           The tag to categorize the log entry. Default is "system".
+ * @param mixed  $filter        Optional filter to apply to the log entry.
+ * @param bool   $invert_filter Whether to invert the filter logic. Default is false.
+ */
 function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
 {
     if ($filter != null and !StringUtils::str_contains($_SERVER['REQUEST_URI'], $filter)) {
@@ -241,6 +279,13 @@ function get_config($key)
     }
 }
 
+/**
+ * Get the current render time since request received and started processing.
+ *
+ * This function calculates and returns the current render time.
+ *
+ * @return float The current render time in seconds.
+ */
 function get_current_render_time()
 {
     $time = microtime();
@@ -288,6 +333,12 @@ function purify_array($obj)
 }
 
 
+/**
+ * Generates a unique identifier of a specified length.
+ *
+ * @param int $length The length of the unique identifier to generate. Default is 13.
+ * @return string The generated unique identifier.
+ */
 function uniqidReal($length = 13)
 {
     // uniqid gives 13 chars, but you could adjust it to your needs.
@@ -301,6 +352,12 @@ function uniqidReal($length = 13)
     return substr(bin2hex($bytes), 0, $length);
 }
 
+/**
+ * Logs access details with the given status and length.
+ *
+ * @param int $status The HTTP status code to log. Default is 200.
+ * @param int $length The length of the response content.
+ */
 function access_log($status = 200, $length){
     $g = G::instance();
     $time = date('d/M/Y:H:i:s');
@@ -314,6 +371,13 @@ function access_log($status = 200, $length){
     error_log($log);
 }
 
+/**
+ * Adds a header to the response.
+ *
+ * @param string $key The name of the header.
+ * @param string $value The value of the header.
+ * @param bool $ucwords Optional. Whether to capitalize the first letter of each word in the header name. Default is true.
+ */
 function response_add_header($key, $value, $ucwords = true)
 {
     $g = G::instance();
@@ -321,19 +385,45 @@ function response_add_header($key, $value, $ucwords = true)
     $g->zealphp_response->header($key, $value, $ucwords);
 }
 
+/**
+ * Sets the HTTP response status code.
+ *
+ * @param int $status The HTTP status code to set for the response.
+ */
 function response_set_status($status)
 {
     $g = G::instance();
-    $g->status = $status;
-    $g->zealphp_response->status($status);
+    if(is_int($status)){
+        $g->status = $status;
+        $g->zealphp_response->status($status);
+    } else {
+        $g->status = 200;
+        $g->zealphp_response->status(200);
+    } 
 }
 
+/**
+ * Retrieves all the response headers.
+ *
+ * @return array An associative array of all the response headers.
+ */
 function response_headers_list()
 {
     $g = G::instance();
     return $g->response_headers_list;
 }
 
+/**
+ * Set a cookie.
+ *
+ * @param string $name The name of the cookie.
+ * @param string $value The value of the cookie. Default is an empty string.
+ * @param int $expire The time the cookie expires. This is a Unix timestamp so is in number of seconds since the epoch. Default is 0.
+ * @param string $path The path on the server in which the cookie will be available on. Default is an empty string.
+ * @param string $domain The (sub)domain that the cookie is available to. Default is an empty string.
+ * @param bool $secure Indicates that the cookie should only be transmitted over a secure HTTPS connection from the client. Default is false.
+ * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
+ */
 function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false) {
     $cookie = "$name=$value";
     if ($expire) {
@@ -354,6 +444,15 @@ function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $s
     response_add_header('Set-Cookie', $cookie);
 }
 
+/**
+ * Sets or retrieves the HTTP response status code.
+ *
+ * If a code is provided, this function sets the HTTP response status code to the given value.
+ * If no code is provided, this function returns the current HTTP response status code.
+ *
+ * @param int|null $code The HTTP status code to set. If null, the current status code is returned.
+ * @return int The current HTTP response status code.
+ */
 function http_response_code($code = null) {
     if ($code !== null) {
         response_set_status($code);
@@ -362,6 +461,14 @@ function http_response_code($code = null) {
     }
 }
 
+/**
+ * Retrieves all HTTP headers sent by the server.
+ *
+ * This function returns an array of all the HTTP headers that have been sent
+ * by the server. It can be useful for debugging or logging purposes.
+ *
+ * @return array An associative array of all the HTTP headers.
+ */
 function headers_list() {
     $headers = response_headers_list();
     $result = [];
@@ -371,6 +478,26 @@ function headers_list() {
     return $result;
 }
 
+/**
+ * Checks if headers have already been sent and optionally returns the file and line number where the output started.
+ *
+ * @param string|null $file Optional. If provided, this will be set to the filename where output started.
+ * @param int|null $line Optional. If provided, this will be set to the line number where output started.
+ * @return bool Returns true if headers have already been sent, false otherwise.
+ */
+function headers_sent(&$file = null, &$line = null) {
+    return false;
+}
+
+/**
+ * Sends a raw HTTP header.
+ *
+ * @param string $header The header string.
+ * @param bool $replace Whether to replace a previous similar header, or add a second header of the same type. Default is true.
+ * @param int|null $http_response_code The HTTP response code. Default is null.
+ *
+ * @return void
+ */
 function header($header, $replace = true, $http_response_code = null) {
     // elog("Setting header: $header");
     $header = explode(':', $header, 2);

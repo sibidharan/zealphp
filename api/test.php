@@ -1,8 +1,10 @@
 <?
 use function ZealPHP\zlog;
+use OpenSwoole\Coroutine as co;
 use ZealPHP\G;
 $test = function () {
     $g = G::instance();
-    // zlog(session_id(), 'fatal');
-    $this->response($this->json($g->server), 200);
+    // $g->name = 'John Doe';
+    // co::sleep(5);
+    return $g;
 };

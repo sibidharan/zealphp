@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/vendor/autoload.php';
 
+date_default_timezone_set('Asia/Kolkata');
 use OpenSwoole\Core\Psr\Response;
 use OpenSwoole\Coroutine as co;
 use OpenSwoole\Coroutine\Channel;
@@ -44,7 +45,7 @@ class ValidationMiddleware implements MiddlewareInterface
     }
 }
 
-App::superglobals(true);
+App::superglobals(false);
 
 $app = App::init('0.0.0.0', 8080);
 $app->addMiddleware(new AuthenticationMiddleware());
@@ -113,6 +114,10 @@ $app->route('/quiz/{page}/{tab}/{nwe}', function($nwe, $tab, $page) {
 //     echo "<h1>Hello, $self->get $name!</h1>";
 // });
 
+$app->route('/sessleak', function(){
+
+});
+
 $app->route("/suglobal/{name}", [
     'methods' => ['GET', 'POST']
 ],function($name) {
@@ -141,8 +146,9 @@ $app->route("/header", [
     header('Content-Type: text/plain');
     header('X-Test: foo');
     setcookie('test', 'test');
+    header("Location: https://example.com");
 
-    echo "Headers set";
+    return $_SERVER;
 });
 
 $app->route("/exittest", [

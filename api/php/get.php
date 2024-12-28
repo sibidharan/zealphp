@@ -1,5 +1,9 @@
 <?php
 
+use function ZealPHP\response_add_header;
+
 $get = function() {
-    $this->response($this->json(['msg'=>__FILE__]), 200);
+    response_add_header('X-Prototype',  'buffer');
+    header('X-Varient: 1');
+    return headers_list();
 };
