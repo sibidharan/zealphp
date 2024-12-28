@@ -443,7 +443,7 @@ class App
 
         $route_files = glob(self::$cwd."/route/*.php");
         foreach ($route_files as $route_file) {
-            elog("Including route file: ".str_replace(App::$cwd, '', $route_file));
+            elog("Including route file 1: ".str_replace(App::$cwd, '', $route_file));
             include $route_file;
         }
 

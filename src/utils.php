@@ -22,7 +22,7 @@ function prefork_request_handler($taskLogic, $wait = true)
 {
     $worker = new Process(function ($worker) use ($taskLogic) {
         $g = G::instance();
-        elog("prefork_request_handler response_header_list: ".var_export($g->response_headers_list, true));
+        elog("prefork_request_handler enter response_header_list: ".var_export($g->response_headers_list, true));
         try {
             $g->response_headers_list = [];
             $g->status = 200;
@@ -38,6 +38,8 @@ function prefork_request_handler($taskLogic, $wait = true)
                 'exit_code' => 0,
                 'length' => strlen($data)
             ]));
+            elog("prefork_request_handler exit response_header_list: ".var_export($g->response_headers_list, true));
+
             $worker->exit(0);
         } catch (\Throwable $e) {
             $data = ob_get_clean();
@@ -55,9 +57,9 @@ function prefork_request_handler($taskLogic, $wait = true)
                 'error' => $e
             ]));
             // elog("coprocess error: ".var_export($e, true));
+            elog("prefork_request_handler exit response_header_list: ".var_export($g->response_headers_list, true));
             $worker->exit(0);
         }
-        elog("prefork_request_handler response_header_list: ".var_export($g->response_headers_list, true));
     }, false, SOCK_STREAM, false);
 
     // Start the worker
@@ -78,13 +80,17 @@ function prefork_request_handler($taskLogic, $wait = true)
         $data   = '';
     }
     $response_metadata = unserialize($worker->pop(65535));
+    elog("coprocess resposnse metadata: ".var_export($response_metadata, true));
     $worker->freeQueue();
     response_set_status($response_metadata['status_code']);
-    foreach($response_metadata['headers'] as $key => $value){
-        response_add_header($key, $value, true);
+    foreach($response_metadata['headers'] as $pair){
+        elog("coprocess response header: ".var_export($pair, true));
+        response_add_header($pair[0], $pair[1], true);
+    }
+    if (isset($response_metadata['exited']) and isset($response_metadata['error']) and !$response_metadata['exited'] and $response_metadata['error']) {
+        throw $response_metadata['error'];
     }
     // elog("coprocess request metadata: ".var_export($_SERVER, true));
-    // elog("coprocess resposnse metadata: ".var_export($response_metadata, true));
     return $data;
 
 }
@@ -472,8 +478,8 @@ function http_response_code($code = null) {
 function headers_list() {
     $headers = response_headers_list();
     $result = [];
-    foreach ($headers as $name => $value) {
-        $result[] = "$name: $value";
+    foreach ($headers as $pair) {
+        $result[] = "$pair[0]: $pair[1]";
     }
     return $result;
 }
