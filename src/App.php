@@ -737,6 +737,7 @@ class App
             $serverRequest  = \OpenSwoole\Core\Psr\ServerRequest::from($request->parent);
             $serverResponse = App::middleware()->handle($serverRequest);
             access_log($serverResponse->getStatusCode(), strlen($serverResponse->getBody()));
+            $response->flush();
             \OpenSwoole\Core\Psr\Response::emit($response->parent, $serverResponse->withHeader('X-Powered-By', 'ZealPHP + OpenSwoole'));
         }));
 
@@ -815,7 +816,7 @@ class ResponseMiddleware implements MiddlewareInterface
 
                     $buffer = ob_get_clean();
                     return (new Response($buffer, $status));
-                } catch (\Exception|\OpenSwoole\ExitException $e) {
+                } catch (\Throwable|\OpenSwoole\ExitException $e) {
                     if($e instanceof \OpenSwoole\ExitException){
                         if($e->getStatus() == 0){
                             elog("HTTP Status: ".$g->status);
