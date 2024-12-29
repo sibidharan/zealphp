@@ -704,10 +704,17 @@ class App
                 }
             }
 
+
             // Common server vars typically set by web servers:
             if (!isset($g->server['REQUEST_METHOD'])) {
                 $g->server['REQUEST_METHOD'] = 'GET';
             }
+
+            // Check if X-HTTP-Method-Override header is present
+            if ($g->server['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
+                $g->server['REQUEST_METHOD'] = $g->server['HTTP_X_HTTP_METHOD_OVERRIDE'];
+            }
+
             if (!isset($g->server['REQUEST_URI'])) {
                 $g->server['REQUEST_URI'] = '/';
             }
@@ -732,7 +739,7 @@ class App
                 $g->server['SERVER_SOFTWARE'] = 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion();
             }
 
-
+            
 
             $serverRequest  = \OpenSwoole\Core\Psr\ServerRequest::from($request->parent);
             $serverResponse = App::middleware()->handle($serverRequest);

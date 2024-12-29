@@ -23,6 +23,8 @@ function get($key, $default = null)
 function prefork_request_handler($taskLogic, $wait = true)
 {
     $worker = new Process(function ($worker) use ($taskLogic) {
+        stream_wrapper_unregister("php");
+        stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class, STREAM_IS_URL);
         $g = G::instance();
         elog("prefork_request_handler enter response_header_list: ".var_export($g->response_headers_list, true));
         try {
@@ -71,10 +73,8 @@ function prefork_request_handler($taskLogic, $wait = true)
     // Start the worker
     $worker->useQueue(0, 2);
     $worker->start();
-    # read all data from buffer using while loop using $worker->read(8192)
-    elog("prefork_request_handler reading data from worker");
     $recv = $data = $worker->read();
-    # test if this logic works
+    #TODO: test if this logic works
     while (strlen($recv) == 8192) {
         $recv = $worker->read();
         if ($recv === '' || $recv === false) {

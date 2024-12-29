@@ -62,6 +62,16 @@ $app->route('/json', function($request) {
     return $_SESSION;
 });
 
+$app->route('/rawdata',[
+    'methods' => ['PUT']
+], function($request) {
+    $data = $request->parent->getContent();
+    echo file_get_contents( 'php://input' );
+    echo "<pre>";
+    echo $data;
+    echo "</pre>";
+});
+
 
 $app->route('/co', function() {
     $channel = new Channel(5);
