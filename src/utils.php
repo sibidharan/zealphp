@@ -28,7 +28,6 @@ function prefork_request_handler($taskLogic, $wait = true)
         try {
             $g->response_headers_list = [];
             $g->status = 200;
-            
             ob_start();
             $taskLogic($worker);
             $data = ob_get_clean();
@@ -40,7 +39,9 @@ function prefork_request_handler($taskLogic, $wait = true)
                 'cookies' => $g->response_cookies_list,
                 'rawcookies' => $g->response_rawcookies_list,
                 'exit_code' => 0,
-                'length' => strlen($data)
+                'length' => strlen($data),
+                'exited' => false,
+                'finished' => true
             ]));
             elog("prefork_request_handler exit response_header_list: ".var_export($g->response_headers_list, true));
             $worker->exit(0);
@@ -70,11 +71,11 @@ function prefork_request_handler($taskLogic, $wait = true)
     // Start the worker
     $worker->useQueue(0, 2);
     $worker->start();
-    Process::wait($wait);
     # read all data from buffer using while loop using $worker->read(8192)
-    $recv = $data = $worker->read(65535);
+    elog("prefork_request_handler reading data from worker");
+    $recv = $data = $worker->read();
     # test if this logic works
-    while (strlen($recv) == 65535) {
+    while (strlen($recv) == 8192) {
         $recv = $worker->read();
         if ($recv === '' || $recv === false) {
             break;
@@ -84,11 +85,12 @@ function prefork_request_handler($taskLogic, $wait = true)
     if($data == 'EOF'){
         $data   = '';
     }
+    Process::wait($wait);
     $g = G::instance();
     $response_metadata = unserialize($worker->pop(65535));
     elog("coprocess resposnse metadata: ".var_export($response_metadata, true));
     $worker->freeQueue();
-    response_set_status($response_metadata['status_code']);
+    response_set_status($response_metadata['status_code'] ?? 200);
     foreach($response_metadata['headers'] as $pair){
         $g->zealphp_response->header(...$pair);
     }
@@ -221,6 +223,9 @@ function zapi(){
  * @param int $limit The limit for the log message. Default is 1.
  */
 function elog($message, $tag = "*", $limit = 1){
+    if($tag == "wordpress"){
+        return;
+    }
     $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, $limit);
     $caller = array_shift($bt);
     $date = date('d-m-Y H:i:s');
