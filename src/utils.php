@@ -2,10 +2,12 @@
 
 namespace ZealPHP;
 
+use Exception;
 use ZealPHP\App;
 use ZealPHP\StringUtils;
 use OpenSwoole\Process;
 use OpenSwoole\Coroutine as co;
+use Throwable;
 
 function get($key, $default = null)
 {
@@ -35,13 +37,14 @@ function prefork_request_handler($taskLogic, $wait = true)
             $worker->push(serialize([
                 'status_code' => $response_code ? $response_code : 200,
                 'headers' => $g->response_headers_list,
+                'cookies' => $g->response_cookies_list,
+                'rawcookies' => $g->response_rawcookies_list,
                 'exit_code' => 0,
                 'length' => strlen($data)
             ]));
             elog("prefork_request_handler exit response_header_list: ".var_export($g->response_headers_list, true));
-
             $worker->exit(0);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $data = ob_get_clean();
             $worker->write(empty($data) ? 'EOF' : $data);
             $exit_code = $e instanceof \OpenSwoole\ExitException;
@@ -52,6 +55,8 @@ function prefork_request_handler($taskLogic, $wait = true)
             $worker->push(serialize([
                 'status_code' => $response_code,
                 'headers' => $g->response_headers_list,
+                'cookies' => $g->response_cookies_list,
+                'rawcookies' => $g->response_rawcookies_list,
                 'exited' => $exit_code,
                 'length' => strlen($data),
                 'error' => $e
@@ -67,9 +72,9 @@ function prefork_request_handler($taskLogic, $wait = true)
     $worker->start();
     Process::wait($wait);
     # read all data from buffer using while loop using $worker->read(8192)
-    $recv = $data = $worker->read();
+    $recv = $data = $worker->read(65535);
     # test if this logic works
-    while (strlen($recv) == 8192) {
+    while (strlen($recv) == 65535) {
         $recv = $worker->read();
         if ($recv === '' || $recv === false) {
             break;
@@ -79,20 +84,25 @@ function prefork_request_handler($taskLogic, $wait = true)
     if($data == 'EOF'){
         $data   = '';
     }
+    $g = G::instance();
     $response_metadata = unserialize($worker->pop(65535));
     elog("coprocess resposnse metadata: ".var_export($response_metadata, true));
     $worker->freeQueue();
     response_set_status($response_metadata['status_code']);
     foreach($response_metadata['headers'] as $pair){
-        elog("coprocess response header: ".var_export($pair, true));
-        response_add_header($pair[0], $pair[1], true);
+        $g->zealphp_response->header(...$pair);
+    }
+    foreach($response_metadata['cookies'] as $pair){
+        $g->zealphp_response->cookie(...$pair);
+    }
+    foreach($response_metadata['rawcookies'] as $pair){
+        $g->zealphp_response->rawCookie(...$pair);
     }
     if (isset($response_metadata['exited']) and isset($response_metadata['error']) and !$response_metadata['exited'] and $response_metadata['error']) {
+        response_set_status(500);
         throw $response_metadata['error'];
     }
-    // elog("coprocess request metadata: ".var_export($_SERVER, true));
     return $data;
-
 }
 
 /**
@@ -133,7 +143,7 @@ function coprocess($taskLogic, $wait = true)
     // Start the worker
     $worker->start();
     Process::wait($wait);
-    $data = $worker->read();
+    $data = $worker->read(65535);
     if($data == 'EOF'){
         $data   = '';
     }
@@ -396,15 +406,13 @@ function response_add_header($key, $value, $ucwords = true)
  *
  * @param int $status The HTTP status code to set for the response.
  */
-function response_set_status($status)
+function response_set_status(int $status)
 {
     $g = G::instance();
     if(is_int($status)){
         $g->status = $status;
-        $g->zealphp_response->status($status);
     } else {
         $g->status = 200;
-        $g->zealphp_response->status(200);
     } 
 }
 
@@ -431,6 +439,38 @@ function response_headers_list()
  * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
  */
 function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false) {
+    // $cookie = "$name=$value";
+    // if ($expire) {
+    //     $cookie .= "; expires=" . gmdate('D, d-M-Y H:i:s T', $expire);
+    // }
+    // if ($path) {
+    //     $cookie .= "; path=$path";
+    // }
+    // if ($domain) {
+    //     $cookie .= "; domain=$domain";
+    // }
+    // if ($secure) {
+    //     $cookie .= "; secure";
+    // }
+    // if ($httponly) {
+    //     $cookie .= "; httponly";
+    // }
+    $g = G::instance();
+    $g->zealphp_response->cookie($name, $value, $expire, $path, $domain, $secure, $httponly);
+}
+
+/**
+ * Set a raw cookie.
+ *
+ * @param string $name The name of the cookie.
+ * @param string $value The value of the cookie. Default is an empty string.
+ * @param int $expire The time the cookie expires. This is a Unix timestamp so is in number of seconds since the epoch. Default is 0.
+ * @param string $path The path on the server in which the cookie will be available on. Default is an empty string.
+ * @param string $domain The (sub)domain that the cookie is available to. Default is an empty string.
+ * @param bool $secure Indicates that the cookie should only be transmitted over a secure HTTPS connection from the client. Default is false.
+ * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
+ */
+function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false) {
     $cookie = "$name=$value";
     if ($expire) {
         $cookie .= "; expires=" . gmdate('D, d-M-Y H:i:s T', $expire);
@@ -447,63 +487,10 @@ function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $s
     if ($httponly) {
         $cookie .= "; httponly";
     }
-    response_add_header('Set-Cookie', $cookie);
+    $g = G::instance();
+    $g->zealphp_response->rawCookie($name, $value, $expire, $path, $domain, $secure, $httponly);
 }
 
-/**
- * Sets or retrieves the HTTP response status code.
- *
- * If a code is provided, this function sets the HTTP response status code to the given value.
- * If no code is provided, this function returns the current HTTP response status code.
- *
- * @param int|null $code The HTTP status code to set. If null, the current status code is returned.
- * @return int The current HTTP response status code.
- */
-function http_response_code($code = null) {
-    if ($code !== null) {
-        response_set_status($code);
-    } else {
-        return G::instance()->status;
-    }
-}
-
-/**
- * Retrieves all HTTP headers sent by the server.
- *
- * This function returns an array of all the HTTP headers that have been sent
- * by the server. It can be useful for debugging or logging purposes.
- *
- * @return array An associative array of all the HTTP headers.
- */
-function headers_list() {
-    $headers = response_headers_list();
-    $result = [];
-    foreach ($headers as $pair) {
-        $result[] = "$pair[0]: $pair[1]";
-    }
-    return $result;
-}
-
-/**
- * Checks if headers have already been sent and optionally returns the file and line number where the output started.
- *
- * @param string|null $file Optional. If provided, this will be set to the filename where output started.
- * @param int|null $line Optional. If provided, this will be set to the line number where output started.
- * @return bool Returns true if headers have already been sent, false otherwise.
- */
-function headers_sent(&$file = null, &$line = null) {
-    return false;
-}
-
-/**
- * Sends a raw HTTP header.
- *
- * @param string $header The header string.
- * @param bool $replace Whether to replace a previous similar header, or add a second header of the same type. Default is true.
- * @param int|null $http_response_code The HTTP response code. Default is null.
- *
- * @return void
- */
 function header($header, $replace = true, $http_response_code = null) {
     // elog("Setting header: $header");
     $header = explode(':', $header, 2);
@@ -513,4 +500,45 @@ function header($header, $replace = true, $http_response_code = null) {
     $name = trim($header[0]);
     $value = trim($header[1]);
     response_add_header($name, $value);
+}
+
+
+/*
+* @param int|null $code The HTTP status code to set. If null, the current status code is returned.
+* @return int The current HTTP response status code.
+*/
+function http_response_code($code = null) {
+   if ($code !== null) {
+       response_set_status($code);
+   } else {
+       return G::instance()->status;
+   }
+}
+
+/**
+* Retrieves all HTTP headers sent by the server.
+*
+* This function returns an array of all the HTTP headers that have been sent
+* by the server. It can be useful for debugging or logging purposes.
+*
+* @return array An associative array of all the HTTP headers.
+*/
+function headers_list() {
+   $headers = response_headers_list();
+   $result = [];
+   foreach ($headers as $pair) {
+       $result[] = "$pair[0]: $pair[1]";
+   }
+   return $result;
+}
+
+/**
+* Checks if headers have already been sent and optionally returns the file and line number where the output started.
+*
+* @param string|null $file Optional. If provided, this will be set to the filename where output started.
+* @param int|null $line Optional. If provided, this will be set to the line number where output started.
+* @return bool Returns true if headers have already been sent, false otherwise.
+*/
+function headers_sent(&$file = null, &$line = null) {
+   return false;
 }
