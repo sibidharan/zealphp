@@ -43,7 +43,7 @@ function prefork_request_handler($taskLogic, $wait = true)
                 'exited' => false,
                 'finished' => true
             ]));
-            elog("prefork_request_handler exit response_header_list: ".var_export($g->response_headers_list, true));
+            // elog("prefork_request_handler exit response_header_list: ".var_export($g->response_headers_list, true));
             $worker->exit(0);
         } catch (Throwable $e) {
             $data = ob_get_clean();
@@ -63,7 +63,7 @@ function prefork_request_handler($taskLogic, $wait = true)
                 'error' => $e
             ]));
             // elog("coprocess error: ".var_export($e, true));
-            elog("prefork_request_handler exit response_header_list: ".var_export($g->response_headers_list, true));
+            // elog("prefork_request_handler exit response_header_list: ".var_export($g->response_headers_list, true));
             $worker->exit(0);
         }
     }, false, SOCK_STREAM, false);
@@ -88,21 +88,23 @@ function prefork_request_handler($taskLogic, $wait = true)
     Process::wait($wait);
     $g = G::instance();
     $response_metadata = unserialize($worker->pop(65535));
-    elog("coprocess resposnse metadata: ".var_export($response_metadata, true));
+    // elog("coprocess resposnse metadata: ".var_export($response_metadata, true));
     $worker->freeQueue();
-    response_set_status($response_metadata['status_code'] ?? 200);
-    foreach($response_metadata['headers'] as $pair){
-        $g->zealphp_response->header(...$pair);
-    }
-    foreach($response_metadata['cookies'] as $pair){
-        $g->zealphp_response->cookie(...$pair);
-    }
-    foreach($response_metadata['rawcookies'] as $pair){
-        $g->zealphp_response->rawCookie(...$pair);
-    }
-    if (isset($response_metadata['exited']) and isset($response_metadata['error']) and !$response_metadata['exited'] and $response_metadata['error']) {
-        response_set_status(500);
-        throw $response_metadata['error'];
+    if($response_metadata){
+        response_set_status($response_metadata['status_code'] ?? 200);
+        foreach($response_metadata['headers'] as $pair){
+            $g->zealphp_response->header(...$pair);
+        }
+        foreach($response_metadata['cookies'] as $pair){
+            $g->zealphp_response->cookie(...$pair);
+        }
+        foreach($response_metadata['rawcookies'] as $pair){
+            $g->zealphp_response->rawCookie(...$pair);
+        }
+        if (isset($response_metadata['exited']) and isset($response_metadata['error']) and !$response_metadata['exited'] and $response_metadata['error']) {
+            response_set_status(500);
+            throw $response_metadata['error'];
+        }
     }
     return $data;
 }
