@@ -40,11 +40,12 @@ namespace ZealPHP;
 
 // Custom Stream Wrapper for php://input with passthrough
 class IOStreamWrapper {
+    public $context;
     private $position = 0;
     private $input = '';
-    private $defaultStream = null;
 
     public function stream_open($path, $mode, $options, &$opened_path) {
+        elog("stream_open: $path, $mode, $options", "streamio");
         // Handle php://input specifically
         if ($path === 'php://input') {
             $g = \ZealPHP\G::instance();
@@ -54,17 +55,13 @@ class IOStreamWrapper {
         }
 
         // Temporarily restore the default wrapper for other php:// streams
-        elog(var_export(stream_get_wrappers(), true));
         stream_wrapper_restore('php');
-        elog("Opening stream: $path");
         $handle = fopen($path, $mode); // Delegate to original stream
-        
-        // Re-register this custom wrapper after the stream is opened
         stream_wrapper_unregister('php');
         stream_wrapper_register('php', self::class);
 
         if ($handle !== false) {
-            $this->defaultStream = $handle;
+            $this->context = $handle;
             return true;
         }
         elog("Failed to open stream: $path");
@@ -72,21 +69,21 @@ class IOStreamWrapper {
     }
 
     public function stream_read($count) {
-        if ($this->defaultStream) {
+        if ($this->context) {
             // Passthrough read for other streams
-            return fread($this->defaultStream, $count);
+            return fread($this->context, $count);
+        } else {
+            // Send to php://input
+            $data = substr($this->input, $this->position, $count);
+            $this->position += strlen($data);
+            return $data;
         }
-
-        // Read from php://input
-        $data = substr($this->input, $this->position, $count);
-        $this->position += strlen($data);
-        return $data;
     }
 
     public function stream_write($data) {
-        if ($this->defaultStream) {
+        if ($this->context) {
             // Passthrough write for other streams
-            return fwrite($this->defaultStream, $data);
+            return fwrite($this->context, $data);
         }
 
         // Writing is not applicable for php://input
@@ -94,9 +91,9 @@ class IOStreamWrapper {
     }
 
     public function stream_eof() {
-        if ($this->defaultStream) {
+        if ($this->context) {
             // Passthrough EOF for other streams
-            return feof($this->defaultStream);
+            return feof($this->context);
         }
 
         // EOF for php://input
@@ -104,9 +101,9 @@ class IOStreamWrapper {
     }
 
     public function stream_stat() {
-        if ($this->defaultStream) {
+        if ($this->context) {
             // Passthrough stat for other streams
-            return fstat($this->defaultStream);
+            return fstat($this->context);
         }
 
         // Provide empty stats for php://input
@@ -114,26 +111,27 @@ class IOStreamWrapper {
     }
 
     public function stream_close() {
-        if ($this->defaultStream) {
+        if ($this->context) {
             // Passthrough close for other streams
-            fclose($this->defaultStream);
+            fclose($this->context);
         }
     }
 
     public function stream_rewind() {
-        if ($this->defaultStream) {
+        if ($this->context) {
             // Passthrough rewind for other streams
-            rewind($this->defaultStream);
+            return rewind($this->context);
         } else {
             // Rewind for php://input
             $this->position = 0;
+            return true;
         }
     }
 
-    public function stream_seek($offset, $whence) {
-        if ($this->defaultStream) {
+    public function stream_seek($offset, $whence = SEEK_SET) {
+        if ($this->context) {
             // Passthrough seek for other streams
-            return fseek($this->defaultStream, $offset, $whence);
+            return fseek($this->context, $offset, $whence);
         }
 
         // Seek is not applicable for php://input
@@ -141,9 +139,9 @@ class IOStreamWrapper {
     }
 
     public function stream_tell() {
-        if ($this->defaultStream) {
+        if ($this->context) {
             // Passthrough tell for other streams
-            return ftell($this->defaultStream);
+            return ftell($this->context);
         }
 
         // Tell for php://input
@@ -151,9 +149,9 @@ class IOStreamWrapper {
     }
 
     public function stream_truncate($new_size) {
-        if ($this->defaultStream) {
+        if ($this->context) {
             // Passthrough truncate for other streams
-            return ftruncate($this->defaultStream, $new_size);
+            return ftruncate($this->context, $new_size);
         }
 
         // Truncate is not applicable for php://input
@@ -161,9 +159,9 @@ class IOStreamWrapper {
     }
 
     public function stream_flush() {
-        if ($this->defaultStream) {
+        if ($this->context) {
             // Passthrough flush for other streams
-            return fflush($this->defaultStream);
+            return fflush($this->context);
         }
 
         // Flush is not applicable for php://input
@@ -171,9 +169,9 @@ class IOStreamWrapper {
     }
 
     public function stream_lock($operation) {
-        if ($this->defaultStream) {
+        if ($this->context) {
             // Passthrough lock for other streams
-            return flock($this->defaultStream, $operation);
+            return flock($this->context, $operation);
         }
 
         // Lock is not applicable for php://input
@@ -181,7 +179,7 @@ class IOStreamWrapper {
     }
 
     public function stream_url_stat($path, $flags) {
-        if ($this->defaultStream) {
+        if ($this->context) {
             // Passthrough url_stat for other streams
             return stat($path);
         }
@@ -191,7 +189,7 @@ class IOStreamWrapper {
     }
 
     public function stream_unlink($path) {
-        if ($this->defaultStream) {
+        if ($this->context) {
             // Passthrough unlink for other streams
             return unlink($path);
         }
@@ -202,14 +200,15 @@ class IOStreamWrapper {
 
     # write magic method __get and __call for all other methods
     public function __get($name) {
-        if ($this->defaultStream) {
-            return $this->defaultStream->$name;
+        if ($this->context) {
+            return $this->context->$name;
         }
     }
 
     public function __call($name, $args) {
-        if ($this->defaultStream) {
-            return call_user_func_array([$this->defaultStream, $name], $args);
+        if ($this->context) {
+            return $this->context->$name(...$args);
+            // return call_user_func_array([, $name], $args);
         }
     }
 

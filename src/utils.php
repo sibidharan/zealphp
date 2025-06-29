@@ -68,7 +68,7 @@ function prefork_request_handler($taskLogic, $wait = true)
             // elog("prefork_request_handler exit response_header_list: ".var_export($g->response_headers_list, true));
             $worker->exit(0);
         }
-    }, false, SOCK_STREAM, false);
+    }, false, SOCK_STREAM, true);
 
     // Start the worker
     $worker->useQueue(0, 2);
