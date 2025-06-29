@@ -1,5 +1,4 @@
-<?
-
+<?php
 namespace ZealPHP;
 
 use Exception;
@@ -24,7 +23,7 @@ function prefork_request_handler($taskLogic, $wait = true)
 {
     $worker = new Process(function ($worker) use ($taskLogic) {
         stream_wrapper_unregister("php");
-        stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class, STREAM_IS_URL);
+        stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class);
         $g = G::instance();
         elog("prefork_request_handler enter response_header_list: ".var_export($g->response_headers_list, true));
         try {
@@ -68,7 +67,7 @@ function prefork_request_handler($taskLogic, $wait = true)
             // elog("prefork_request_handler exit response_header_list: ".var_export($g->response_headers_list, true));
             $worker->exit(0);
         }
-    }, false, SOCK_STREAM, false);
+    }, false, SOCK_STREAM, true);
 
     // Start the worker
     $worker->useQueue(0, 2);
