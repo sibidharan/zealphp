@@ -739,13 +739,24 @@ class App
                 $g->server['SERVER_SOFTWARE'] = 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion();
             }
 
-            
-
             $serverRequest  = \OpenSwoole\Core\Psr\ServerRequest::from($request->parent);
-            $serverResponse = App::middleware()->handle($serverRequest);
-            access_log($serverResponse->getStatusCode(), strlen($serverResponse->getBody()));
-            $response->flush();
-            \OpenSwoole\Core\Psr\Response::emit($response->parent, $serverResponse->withHeader('X-Powered-By', 'ZealPHP + OpenSwoole'));
+
+            try {
+                $serverResponse = App::middleware()->handle($serverRequest);
+                access_log($serverResponse->getStatusCode(), strlen($serverResponse->getBody()));
+                $response->flush();
+                \OpenSwoole\Core\Psr\Response::emit($response->parent, $serverResponse->withHeader('X-Powered-By', 'ZealPHP + OpenSwoole'));
+            } catch (\Throwable|\OpenSwoole\ExitException $e) {
+                elog(jTraceEx($e), "error");
+                $response->parent->status(500);                    
+                if (App::$display_errors) {
+                    $g->status = 500;
+                    $response->parent->end("<pre>".jTraceEx($e)."</pre>");
+                } else {
+                    $g->status = 500;
+                    $response->parent->end("<pre> Internal Server Error </pre>");
+                }
+            }
         }));
 
         elog("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
@@ -811,6 +822,10 @@ class ResponseMiddleware implements MiddlewareInterface
                     }
 
                     if($object instanceof ResponseInterface){
+                        ob_end_clean();
+                        $body = $object->getBody();
+                        $body->rewind();
+                        elog("ResponseMiddleware process() received ResponseInterface>".$body->getContents());
                         return $object;
                     }
 

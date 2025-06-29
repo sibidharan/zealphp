@@ -45,7 +45,7 @@ class ValidationMiddleware implements MiddlewareInterface
     }
 }
 
-App::superglobals(false);
+App::superglobals(true);
 
 $app = App::init('0.0.0.0', 8080);
 $app->addMiddleware(new AuthenticationMiddleware());
@@ -62,14 +62,47 @@ $app->route('/json', function($request) {
     return $_SESSION;
 });
 
-$app->route('/rawdata',[
+$app->route('/stream_test',[
     'methods' => ['PUT']
 ], function($request) {
-    $data = $request->parent->getContent();
-    echo file_get_contents( 'php://input' );
-    echo "<pre>";
-    echo $data;
-    echo "</pre>";
+        // Original data
+    $originalData = "ZealPHP is awesome!";
+    $stream = \OpenSwoole\Core\Psr\Stream::streamFor("Test Data");
+    elog($stream->read(10), "streamio_psr");
+    $stream = fopen('php://memory', 'r+');
+    $resource = $originalData;
+    if ($resource !== '') {
+        fwrite($stream, (string) $resource);
+        fseek($stream, 0);
+    }
+    $data = stream_get_contents($stream);
+    elog("Stream Data: $data");
+    // Step 1: Base64 Encoding
+    $stream = fopen('php://memory', 'w+');
+    $encodedStream = fopen('php://filter/write=convert.base64-encode/resource=php://memory', 'w+');
+    fwrite($encodedStream, $originalData);
+    rewind($encodedStream);
+    $base64Encoded = stream_get_contents($encodedStream);
+    fseek($encodedStream, 0);
+    fclose($encodedStream);
+    elog("Base64 Encoded:\n$base64Encoded\n");
+
+    // Step 2: Base64 Decoding
+    rewind($stream); // Reset the stream position
+    $decodedStream = fopen('php://filter/read=convert.base64-decode/resource=php://memory', 'r');
+    $decodedStream = fopen('php://filter/read=convert.base64-decode/resource=php://memory', 'w+');
+    fwrite($decodedStream, $base64Encoded);
+    rewind($decodedStream);
+    $decodedData = stream_get_contents($decodedStream);
+    elog("Base64 Decoded:\n$decodedData\n");
+    // Close the streams
+    fclose($stream);
+    fclose($decodedStream);
+
+    $file = file_get_contents('php://input');
+    elog("php://input file_get_contents(): ".$file);
+
+    return new Response('Stream Test', 200, 'success', ['Content-Type' => 'text/plain']);
 });
 
 
@@ -113,6 +146,7 @@ $app->route('/quiz/{page}', function($page) {
 });
 
 $app->route('/quiz/{page}/{tab}/{nwe}', function($nwe, $tab, $page) {
+
     echo "<h1>This is quiz: $page tab=$tab</h1>";
 });
 
@@ -176,7 +210,7 @@ $app->route("/coglobal/set/session", [
     return new Response('Session set', 300, 'success', ['Content-Type' => 'text/plain', 'X-Test' => 'test']);
 });
 
-$app->route("/coglobal/get/session", [
+$app->route("/coglobal/get/{name}", [
     'methods' => ['GET', 'POST']
 ],function($name) {
     echo G::get('session')['name'];
