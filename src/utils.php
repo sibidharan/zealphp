@@ -23,7 +23,7 @@ function prefork_request_handler($taskLogic, $wait = true)
 {
     $worker = new Process(function ($worker) use ($taskLogic) {
         stream_wrapper_unregister("php");
-        stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class, STREAM_IS_URL);
+        stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class);
         $g = G::instance();
         elog("prefork_request_handler enter response_header_list: ".var_export($g->response_headers_list, true));
         try {

@@ -29,7 +29,7 @@ class App
     public static $middleware_stack = null;
     public static $middleware_wait_stack = [];
     public static $ignore_php_ext = true;
-    public static $coproc_implicit_request_handler = false;
+    public static $coproc_implicit_request_handler = true;
 
     private function __construct($host = '0.0.0.0', $port = 8080,$cwd = __DIR__)
     {
@@ -773,6 +773,8 @@ class ResponseMiddleware implements MiddlewareInterface
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         // elog("ResponseMiddleware process()");
+        stream_wrapper_unregister("php");
+        stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class);
         $g = G::instance();
         $uri = $g->server['REQUEST_URI'];
         $method = $g->server['REQUEST_METHOD'];
@@ -825,7 +827,7 @@ class ResponseMiddleware implements MiddlewareInterface
                         ob_end_clean();
                         $body = $object->getBody();
                         $body->rewind();
-                        elog("ResponseMiddleware process() received ResponseInterface>".$body->getContents());
+                        elog("ResponseMiddleware process() received ResponseInterface > ".$body->getContents());
                         return $object;
                     }
 
