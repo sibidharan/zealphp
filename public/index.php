@@ -2,4 +2,6 @@
 
 <?
 use function ZealPHP\zlog;
-zlog("index processed")?>
+zlog("index processed");
+echo(file_get_contents("php://input"));
+?>
