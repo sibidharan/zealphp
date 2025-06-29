@@ -1,5 +1,4 @@
 <?php
-
 namespace ZealPHP\Session;
 
 use ZealPHP\G;

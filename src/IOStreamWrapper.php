@@ -1,7 +1,7 @@
 <?php
 
 namespace ZealPHP;
-
+use function ZealPHP\elog;
 // class streamWrapper {
 //     /* Properties */
 //     public resource $context;
@@ -178,7 +178,7 @@ class IOStreamWrapper {
         return false;
     }
 
-    public function stream_url_stat($path, $flags) {
+    public function url_stat($path, $flags) {
         if ($this->context) {
             // Passthrough url_stat for other streams
             return stat($path);

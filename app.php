@@ -63,10 +63,10 @@ $app->route('/json', function($request) {
 });
 
 $app->route('/stream_test',[
-    'methods' => ['PUT']
+    'methods' => ['GET', 'PUT']
 ], function($request) {
         // Original data
-    $originalData = "ZealPHP is awesome!";
+    $originalData = "ZealPHP is awesome!!!";
     $stream = \OpenSwoole\Core\Psr\Stream::streamFor("Test Data");
     elog($stream->read(10), "streamio_psr");
     $stream = fopen('php://memory', 'r+');
@@ -102,7 +102,7 @@ $app->route('/stream_test',[
     $file = file_get_contents('php://input');
     elog("php://input file_get_contents(): ".$file);
 
-    return new Response('Stream Test', 200, 'success', ['Content-Type' => 'text/plain']);
+    return new Response('Stream Test: '.$file, 200, 'success', ['Content-Type' => 'text/plain']);
 });
 
 
