@@ -44,13 +44,33 @@ class IOStreamWrapper {
     private $position = 0;
     private $input = '';
 
+    // public function stream_open($path, $mode, $options, &$opened_path) {
+    //     if ($path === 'php://input') {
+    //         // Read the entire php://input into memory
+    //         $this->input = file_get_contents('php://input');
+    //         $this->position = 0;
+    //         return true;
+    //     } else {
+    //         // For other streams, open the context normally
+    //         $this->context = fopen($path, $mode);
+    //         return $this->context !== false;
+    //     }
+    // }
+
     public function stream_open($path, $mode, $options, &$opened_path) {
         elog("stream_open: $path, $mode, $options", "streamio");
-        // Handle php://input specifically
+        // Handle php://input specifically: load content into an in-memory stream
         if ($path === 'php://input') {
             $g = \ZealPHP\G::instance();
-            $this->input = $g->zealphp_request->parent->getContent();
-            $this->position = 0;
+            $content = $g->zealphp_request->parent->getContent();
+            $stream = fopen('php://memory', 'r+');
+            if ($stream === false) {
+                elog("Failed to open php://memory for php://input");
+                return false;
+            }
+            fwrite($stream, $content);
+            rewind($stream);
+            $this->context = $stream;
             return true;
         }
 
@@ -58,7 +78,7 @@ class IOStreamWrapper {
         stream_wrapper_restore('php');
         $handle = fopen($path, $mode); // Delegate to original stream
         stream_wrapper_unregister('php');
-        stream_wrapper_register('php', self::class);
+        stream_wrapper_register('php', IOStreamWrapper::class);
 
         if ($handle !== false) {
             $this->context = $handle;
@@ -67,6 +87,7 @@ class IOStreamWrapper {
         elog("Failed to open stream: $path");
         return false; // Fail if the original stream couldn't open
     }
+    
 
     public function stream_read($count) {
         if ($this->context) {
@@ -130,12 +151,44 @@ class IOStreamWrapper {
 
     public function stream_seek($offset, $whence = SEEK_SET) {
         if ($this->context) {
-            // Passthrough seek for other streams
-            return fseek($this->context, $offset, $whence);
+            // Passthrough seek for other streams (resource)
+            if (is_resource($this->context)) {
+                return fseek($this->context, $offset, $whence) === 0;
+            }
+            // Passthrough seek for PSR Stream instance
+            if (is_object($this->context) && method_exists($this->context, 'seek')) {
+                $this->context->seek($offset, $whence);
+                return true;
+            }
+            return false;
         }
 
-        // Seek is not applicable for php://input
-        return false;
+        // Seek for php://input stream: adjust position manually
+        $length = strlen($this->input);
+        switch ($whence) {
+            case SEEK_SET:
+                if ($offset >= 0 && $offset <= $length) {
+                    $this->position = $offset;
+                    return true;
+                }
+                return false;
+            case SEEK_CUR:
+                $new = $this->position + $offset;
+                if ($new >= 0 && $new <= $length) {
+                    $this->position = $new;
+                    return true;
+                }
+                return false;
+            case SEEK_END:
+                $new = $length + $offset;
+                if ($new >= 0 && $new <= $length) {
+                    $this->position = $new;
+                    return true;
+                }
+                return false;
+            default:
+                return false;
+        }
     }
 
     public function stream_tell() {

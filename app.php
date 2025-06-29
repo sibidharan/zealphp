@@ -67,8 +67,8 @@ $app->route('/stream_test',[
 ], function($request) {
         // Original data
     $originalData = "ZealPHP is awesome!!!";
-    $stream = \OpenSwoole\Core\Psr\Stream::streamFor("Test Data");
-    elog($stream->read(10), "streamio_psr");
+    // $stream = \OpenSwoole\Core\Psr\Stream::streamFor("Test Data");
+    // elog($stream->read(10), "streamio_psr");
     $stream = fopen('php://memory', 'r+');
     $resource = $originalData;
     if ($resource !== '') {

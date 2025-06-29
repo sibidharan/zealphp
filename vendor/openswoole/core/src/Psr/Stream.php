@@ -251,7 +251,7 @@ class Stream implements StreamInterface
                 fwrite($stream, (string) $resource);
                 \ZealPHP\elog(var_export(stream_get_meta_data($stream), true));
                 fseek($stream, 0);
-                \ZealPHP\elog("Data written to stream: ".stream_get_contents($stream));
+                // \ZealPHP\elog("Data written to stream: ".stream_get_contents($stream));
                 fseek($stream, 0);
             }
             return new Stream($stream);
