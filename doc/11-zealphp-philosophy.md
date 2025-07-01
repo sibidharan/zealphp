@@ -21,7 +21,7 @@ ZealPHP can be read as *“Swoole for normal PHP developers”*.  It offers a ba
 * Route files that look like `index.php` in Apache, but are actually long-lived workers
 * HTML-first templating coupled with coroutine aware helper functions (`go()`, `coproc()`)
 
-In exchange for this familiarity ZealPHP introduces a small runtime shim that monkey-patches core functions (via `uopz`) and an *opinionated* project layout (`public/`, `api/`, `route/`, `template/`).  The entire core weighs in at **~2 500 LOC** – small enough to audit in a single afternoon.
+In exchange for this familiarity ZealPHP introduces a small runtime shim that monkey-patches core functions (via `uopz`) and a *sensible-by-default* project layout (`public/`, `api/`, `route/`, `template/`).  These folders are **conventions, not constraints** – any of them can be overridden by registering an explicit route before the implicit ones are hit.  The entire core weighs in at **~2 500 LOC** – small enough to audit in a single afternoon.
 
 ---
 
@@ -130,4 +130,3 @@ In short: **ZealPHP sits between Slim and Hyperf** – bringing the performance 
 ZealPHP is **small, opinionated and pragmatic**.  It lowers the barrier to entry into async PHP while staying true to the “view-source” ethos that made PHP popular in the first place.  If your team wants to squeeze *Node-like* throughput out of existing PHP talent without rewriting half the codebase, ZealPHP is worth a serious look.
 
 Happy hacking 🚀
-
