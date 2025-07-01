@@ -45,7 +45,7 @@ class ValidationMiddleware implements MiddlewareInterface
     }
 }
 
-App::superglobals(true);
+App::superglobals(false);
 
 $app = App::init('0.0.0.0', 8080);
 $app->addMiddleware(new AuthenticationMiddleware());
@@ -229,7 +229,11 @@ $app->nsRoute('watch', '/get/{key}', function($key){
 // patternRoute
 // Matches any URL starting with /raw/
 $app->patternRoute('/raw/(?P<rest>.*)', ['methods' => ['GET']], function($rest) {
+    $GET = G::instance()->_GET;
+
     echo "You requested: $rest";
+    echo "<br>GET Parameters: ";
+    print_r($GET);
 });
 
 # Override Implicit Rules

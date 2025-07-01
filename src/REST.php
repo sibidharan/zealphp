@@ -1,5 +1,10 @@
 <?php
 namespace ZealPHP;
+/**
+ * REST class for handling HTTP RESTful requests and responses.
+ *
+ * Provides methods to parse input data, set headers, and send responses.
+ */
 class REST {
 
     public $_allow = array();
@@ -9,24 +14,52 @@ class REST {
     private $_method = "";
     private $_code = 200;
     public $_response;
-    public function __construct($request, $response){
+    /**
+     * Initialize the REST handler and parse incoming request inputs.
+     *
+     * @param mixed $request  The incoming request context.
+     * @param mixed $response The response context or object.
+     * @return void
+     */
+    public function __construct($request, $response)
+    {
         $this->_response = G::instance()->zealphp_response;
         $this->_request = G::instance()->zealphp_request;
         $this->inputs();
     }
 
-    public function get_referer(){
+    /**
+     * Retrieve the HTTP 'Referer' header from the current request.
+     *
+     * @return string|null The referer URL, or null if not set.
+     */
+    public function get_referer()
+    {
         return $_SERVER['HTTP_REFERER'];
     }
 
-    public function response($data, $status){
+    /**
+     * Send an HTTP response with the given data and status code.
+     *
+     * @param string $data   The response body to send.
+     * @param int    $status The HTTP status code to set.
+     * @return void
+     */
+    public function response($data, $status)
+    {
         $this->_code = ($status)?$status:200;
         $this->setHeaders();
         $this->_response->status($this->_code);
         echo $data;
     }
 
-    private function get_status_message(){
+    /**
+     * Get the standard HTTP status message for the current response code.
+     *
+     * @return string The status message corresponding to the current code.
+     */
+    private function get_status_message()
+    {
         $status = array(
                     100 => 'Continue',
                     101 => 'Switching Protocols',
@@ -72,13 +105,27 @@ class REST {
         return ($status[$this->_code])?$status[$this->_code]:$status[500];
     }
 
-    public function get_request_method(){
+    /**
+     * Get the HTTP request method (e.g., GET, POST, PUT, DELETE).
+     *
+     * @return string The request method.
+     */
+    public function get_request_method()
+    {
         return G::instance()->server['REQUEST_METHOD'];
         
         // return $_SERVER['REQUEST_METHOD'];
     }
 
-    private function inputs(){
+    /**
+     * Parse and sanitize input data based on the HTTP request method.
+     *
+     * Populates the $_request property with cleaned input values.
+     *
+     * @return void
+     */
+    private function inputs()
+    {
         switch($this->get_request_method()){
             case "POST":
                 //$this->_request = $this->cleanInputs($_POST);
@@ -99,7 +146,14 @@ class REST {
         }
     }
 
-    private function cleanInputs($data){
+    /**
+     * Recursively sanitize input data by stripping tags and trimming whitespace.
+     *
+     * @param mixed $data Raw input data.
+     * @return mixed Sanitized data.
+     */
+    private function cleanInputs($data)
+    {
         $clean_input = array();
         if(is_array($data)){
             foreach($data as $k => $v){
@@ -114,11 +168,26 @@ class REST {
         return $clean_input;
     }
 
-    private function setHeaders(){
+    /**
+     * Set the response headers before sending the response.
+     *
+     * Currently sets the Content-Type header.
+     *
+     * @return void
+     */
+    private function setHeaders()
+    {
        $this->_response->header("Content-Type",$this->_content_type);
     }
 
-    public function setContentType($type){
+    /**
+     * Set the Content-Type for the HTTP response.
+     *
+     * @param string $type The MIME type to set for the response.
+     * @return void
+     */
+    public function setContentType($type)
+    {
         $this->_content_type = $type;
     }
 }

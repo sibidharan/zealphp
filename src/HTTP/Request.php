@@ -4,6 +4,12 @@ namespace ZealPHP\HTTP;
 
 namespace ZealPHP\HTTP;
 
+/**
+ * Request wraps the OpenSwoole HTTP Request and exposes its fields in ZealPHP.
+ *
+ * Provides properties for headers, server parameters, cookies, GET/POST data,
+ * and forwards method calls to the underlying request object.
+ */
 class Request extends \OpenSwoole\HTTP\Request
 {
     private \OpenSwoole\Http\Request $parent;
@@ -21,6 +27,11 @@ class Request extends \OpenSwoole\HTTP\Request
 
     public $tmpfiles;
 
+    /**
+     * Construct a new Request wrapper for the given OpenSwoole HTTP Request.
+     *
+     * @param \OpenSwoole\Http\Request $request The original Swoole HTTP request.
+     */
     public function __construct(\OpenSwoole\Http\Request $request)
     {
         $this->parent = $request;
@@ -33,7 +44,14 @@ class Request extends \OpenSwoole\HTTP\Request
         $this->tmpfiles = &$request->tmpfiles;
     }
 
-    // Magic method to forward method calls to the parent
+    /**
+     * Forward method calls to the underlying OpenSwoole request object.
+     *
+     * @param string $name      Method name to call.
+     * @param array  $arguments Arguments for the method.
+     * @return mixed            Result of the forwarded method.
+     * @throws \BadMethodCallException If method does not exist.
+     */
     public function __call($name, $arguments)
     {
         if (method_exists($this->parent, $name)) {
@@ -42,7 +60,13 @@ class Request extends \OpenSwoole\HTTP\Request
         throw new \BadMethodCallException("Method {$name} does not exist");
     }
 
-    // Magic method to get properties from the parent
+    /**
+     * Forward property access to the underlying OpenSwoole request or this wrapper.
+     *
+     * @param string $name The property name.
+     * @return mixed       Reference to the property value.
+     * @throws \InvalidArgumentException If property does not exist.
+     */
     public function &__get($name)
     {
         if($name == 'parent'){
@@ -54,7 +78,12 @@ class Request extends \OpenSwoole\HTTP\Request
         throw new \InvalidArgumentException("Property {$name} does not exist");
     }
 
-    // Magic method to set properties on the parent
+    /**
+     * Forward setting a property on the underlying request or this wrapper.
+     *
+     * @param string $name  The property name.
+     * @param mixed  $value The value to assign.
+     */
     public function __set($name, $value)
     {
         if (property_exists($this->parent, $name)) {

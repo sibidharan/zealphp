@@ -8,16 +8,27 @@ use OpenSwoole\Process;
 use OpenSwoole\Coroutine as co;
 use Throwable;
 
+/**
+ * Retrieve a value from the $_GET superglobal with a default fallback.
+ *
+ * @param string $key     The GET parameter name.
+ * @param mixed  $default Value to return if the key is not set.
+ * @return mixed          The value from $_GET or the default.
+ */
 function get($key, $default = null)
 {
     return $_GET[$key] ?? $default;
 }
 
 /**
- * Handles a request using a preforking model.
+ * Handle a request using a preforking process model.
  *
- * @param callable $taskLogic The logic to be executed in the preforked process.
- * @param bool $wait Optional. Whether to wait for the task to complete. Default is true.
+ * Executes the provided task logic in a separate Process, captures its output,
+ * HTTP headers, and cookies metadata, then returns the response data.
+ *
+ * @param callable $taskLogic The logic to execute in the preforked process.
+ * @param bool     $wait      Whether to wait for the task to complete. Default true.
+ * @return string             The output from the task logic.
  */
 function prefork_request_handler($taskLogic, $wait = true)
 {
@@ -109,12 +120,14 @@ function prefork_request_handler($taskLogic, $wait = true)
 }
 
 /**
- * Executes a task logic in a separate process.
+ * Execute a task in a separate process and capture its output.
  *
- * @param callable $taskLogic The logic to be executed in the separate process.
- * @param bool $wait Optional. Whether to wait for the process to complete. Default is true.
+ * Runs the provided $taskLogic in a new Process, waits if requested,
+ * and returns any buffered output.
  *
- * @return mixed The result of the task logic if $wait is true, otherwise null.
+ * @param callable $taskLogic The logic to execute in the separate process.
+ * @param bool     $wait      Whether to wait for the process to complete. Default true.
+ * @return string             The captured output from the process.
  */
 function coprocess($taskLogic, $wait = true)
 {
@@ -153,18 +166,24 @@ function coprocess($taskLogic, $wait = true)
     return $data;
 }
 
+/**
+ * Alias for coprocess(): execute a task in a separate process.
+ *
+ * @param callable $taskLogic The logic to execute in a separate process.
+ * @return string             The captured output from the process.
+ */
 function coproc($taskLogic){
     return coprocess($taskLogic);
 }
 
 
 /**
-* jTraceEx() - provide a Java style exception trace
-* @param $exception
-* @param $seen      - array passed to recursive calls to accumulate trace lines already seen
-*                     leave as NULL when calling this function
-* @return string of array strings, one entry per trace line
-*/
+ * Generate a Java-style stack trace string for an exception, including nested causes.
+ *
+ * @param \Throwable   $e    The exception to trace.
+ * @param array|null    $seen (Internal) Array of seen file:line entries to prevent recursion.
+ * @return string           The formatted exception trace.
+ */
 function jTraceEx($e, $seen=null)
 {
     $starter = $seen ? 'Caused by: ' : '';
@@ -210,6 +229,11 @@ function jTraceEx($e, $seen=null)
     return $result;
 }
 
+/**
+ * Get the base name of the calling PHP script without its .php extension.
+ *
+ * @return string The script name without extension.
+ */
 function zapi(){
     $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
     $caller = array_shift($bt);
@@ -217,11 +241,12 @@ function zapi(){
 }
 
 /**
- * Logs a message with an optional tag and limit.
+ * Log a message with a tag and optional backtrace limit to PHP error log.
  *
  * @param string $message The message to log.
- * @param string $tag The tag to associate with the log message. Default is "*".
- * @param int $limit The limit for the log message. Default is 1.
+ * @param string $tag     The tag for grouping log entries. Default '*'.
+ * @param int    $limit   Number of backtrace frames to include. Default 1.
+ * @return void
  */
 function elog($message, $tag = "*", $limit = 1){
     if($tag == "wordpress"){
@@ -238,12 +263,13 @@ function elog($message, $tag = "*", $limit = 1){
 }
 
 /**
- * Logs a message with an optional tag and filter.
+ * Log detailed debug information with optional URI filter.
  *
- * @param mixed  $log           The message or data to log.
- * @param string $tag           The tag to categorize the log entry. Default is "system".
- * @param mixed  $filter        Optional filter to apply to the log entry.
- * @param bool   $invert_filter Whether to invert the filter logic. Default is false.
+ * @param mixed       $log           The message or data to log.
+ * @param string      $tag           The log category (e.g. 'system', 'info').
+ * @param string|null $filter        Optional URI substring filter.
+ * @param bool        $invert_filter Whether to invert the filter logic.
+ * @return void
  */
 function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
 {
@@ -290,6 +316,12 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
 }
 
 
+/**
+ * Get a configuration value from the global $__site_config JSON.
+ *
+ * @param string $key The configuration key to retrieve.
+ * @return mixed      The configuration value, or null if not set.
+ */
 function get_config($key)
 {
     global $__site_config;
@@ -302,11 +334,9 @@ function get_config($key)
 }
 
 /**
- * Get the current render time since request received and started processing.
+ * Calculate elapsed time since session start.
  *
- * This function calculates and returns the current render time.
- *
- * @return float The current render time in seconds.
+ * @return float The render time in seconds with microsecond precision.
  */
 function get_current_render_time()
 {
@@ -320,11 +350,11 @@ function get_current_render_time()
 
 
 /**
- * Indend the given text with the given number of spaces
+ * Indent each line of the given string by a number of spaces.
  *
- * @param String $string
- * @param Integer $indend	Number of lines to indent
- * @return String
+ * @param string $string The text to indent.
+ * @param int    $indend Number of spaces to prepend to each line.
+ * @return string        The indented text.
  */
 function indent($string, $indend = 4)
 {
@@ -343,9 +373,10 @@ function indent($string, $indend = 4)
 }
 
 /**
- * Takes an iterator or object, and converts it into an Array.
- * @param  Any $obj
- * @return Array
+ * Convert an object or iterator to a pure array.
+ *
+ * @param mixed $obj The object or array to purify.
+ * @return array     The resulting array.
  */
 function purify_array($obj)
 {
@@ -356,10 +387,10 @@ function purify_array($obj)
 
 
 /**
- * Generates a unique identifier of a specified length.
+ * Generate a cryptographically secure unique identifier string.
  *
- * @param int $length The length of the unique identifier to generate. Default is 13.
- * @return string The generated unique identifier.
+ * @param int $length Desired length of the ID. Default is 13.
+ * @return string     The generated unique ID.
  */
 function uniqidReal($length = 13)
 {
@@ -374,11 +405,13 @@ function uniqidReal($length = 13)
     return substr(bin2hex($bytes), 0, $length);
 }
 
+
 /**
- * Logs access details with the given status and length.
+ * Log an HTTP access entry with status and response length.
  *
- * @param int $status The HTTP status code to log. Default is 200.
- * @param int $length The length of the response content.
+ * @param int $status HTTP status code. Default is 200.
+ * @param int $length Response body length in bytes.
+ * @return void
  */
 function access_log($status = 200, $length){
     $g = G::instance();
@@ -394,11 +427,12 @@ function access_log($status = 200, $length){
 }
 
 /**
- * Adds a header to the response.
+ * Add an HTTP header to the current response.
  *
- * @param string $key The name of the header.
- * @param string $value The value of the header.
- * @param bool $ucwords Optional. Whether to capitalize the first letter of each word in the header name. Default is true.
+ * @param string $key     Header name.
+ * @param string $value   Header value.
+ * @param bool   $ucwords Whether to capitalize header words. Default true.
+ * @return void
  */
 function response_add_header($key, $value, $ucwords = true)
 {
@@ -407,10 +441,12 @@ function response_add_header($key, $value, $ucwords = true)
     $g->zealphp_response->header($key, $value, $ucwords);
 }
 
+
 /**
- * Sets the HTTP response status code.
+ * Set the HTTP status code for the current response.
  *
- * @param int $status The HTTP status code to set for the response.
+ * @param int $status The HTTP status code to set.
+ * @return void
  */
 function response_set_status(int $status)
 {
@@ -423,9 +459,9 @@ function response_set_status(int $status)
 }
 
 /**
- * Retrieves all the response headers.
+ * Retrieve the list of HTTP headers queued for the response.
  *
- * @return array An associative array of all the response headers.
+ * @return array Array of header name/value pairs.
  */
 function response_headers_list()
 {
@@ -434,15 +470,16 @@ function response_headers_list()
 }
 
 /**
- * Set a cookie.
+ * Set a cookie in the HTTP response.
  *
- * @param string $name The name of the cookie.
- * @param string $value The value of the cookie. Default is an empty string.
- * @param int $expire The time the cookie expires. This is a Unix timestamp so is in number of seconds since the epoch. Default is 0.
- * @param string $path The path on the server in which the cookie will be available on. Default is an empty string.
- * @param string $domain The (sub)domain that the cookie is available to. Default is an empty string.
- * @param bool $secure Indicates that the cookie should only be transmitted over a secure HTTPS connection from the client. Default is false.
- * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
+ * @param string $name     The name of the cookie.
+ * @param string $value    The value of the cookie.
+ * @param int    $expire   Expiration timestamp.
+ * @param string $path     Cookie path.
+ * @param string $domain   Cookie domain.
+ * @param bool   $secure   Secure flag (HTTPS only).
+ * @param bool   $httponly HttpOnly flag.
+ * @return void
  */
 function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false) {
     // $cookie = "$name=$value";
@@ -466,15 +503,16 @@ function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $s
 }
 
 /**
- * Set a raw cookie.
+ * Set a raw cookie in the HTTP response without URL encoding.
  *
- * @param string $name The name of the cookie.
- * @param string $value The value of the cookie. Default is an empty string.
- * @param int $expire The time the cookie expires. This is a Unix timestamp so is in number of seconds since the epoch. Default is 0.
- * @param string $path The path on the server in which the cookie will be available on. Default is an empty string.
- * @param string $domain The (sub)domain that the cookie is available to. Default is an empty string.
- * @param bool $secure Indicates that the cookie should only be transmitted over a secure HTTPS connection from the client. Default is false.
- * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
+ * @param string $name     The name of the cookie.
+ * @param string $value    The value of the cookie.
+ * @param int    $expire   Expiration timestamp.
+ * @param string $path     Cookie path.
+ * @param string $domain   Cookie domain.
+ * @param bool   $secure   Secure flag (HTTPS only).
+ * @param bool   $httponly HttpOnly flag.
+ * @return void
  */
 function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false) {
     $cookie = "$name=$value";
@@ -497,6 +535,14 @@ function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "",
     $g->zealphp_response->rawCookie($name, $value, $expire, $path, $domain, $secure, $httponly);
 }
 
+/**
+ * Add a raw header line to the HTTP response.
+ *
+ * @param string     $header             The header line (e.g., "Key: Value").
+ * @param bool       $replace            Whether to replace a previous similar header.
+ * @param int|null   $http_response_code Optional HTTP status code.
+ * @return void
+ */
 function header($header, $replace = true, $http_response_code = null) {
     // elog("Setting header: $header");
     $header = explode(':', $header, 2);
@@ -509,10 +555,12 @@ function header($header, $replace = true, $http_response_code = null) {
 }
 
 
-/*
-* @param int|null $code The HTTP status code to set. If null, the current status code is returned.
-* @return int The current HTTP response status code.
-*/
+/**
+ * Get or set the HTTP response status code.
+ *
+ * @param int|null $code Optional status code to set. If null, returns the current code.
+ * @return int          The HTTP status code when getting.
+ */
 function http_response_code($code = null) {
    if ($code !== null) {
        response_set_status($code);
@@ -522,13 +570,10 @@ function http_response_code($code = null) {
 }
 
 /**
-* Retrieves all HTTP headers sent by the server.
-*
-* This function returns an array of all the HTTP headers that have been sent
-* by the server. It can be useful for debugging or logging purposes.
-*
-* @return array An associative array of all the HTTP headers.
-*/
+ * Retrieve the list of HTTP headers to send, formatted as strings.
+ *
+ * @return string[] Array of header lines (e.g., "Key: Value").
+ */
 function headers_list() {
    $headers = response_headers_list();
    $result = [];
@@ -539,12 +584,13 @@ function headers_list() {
 }
 
 /**
-* Checks if headers have already been sent and optionally returns the file and line number where the output started.
-*
-* @param string|null $file Optional. If provided, this will be set to the filename where output started.
-* @param int|null $line Optional. If provided, this will be set to the line number where output started.
-* @return bool Returns true if headers have already been sent, false otherwise.
-*/
+ * Check if headers have already been sent to the client.
+ *
+ * @param string|null &$file If provided, filled with the filename where output started.
+ * @param int|null    &$line If provided, filled with the line number where output started.
+ * @return bool True if headers have already been sent, false otherwise.
+ */
 function headers_sent(&$file = null, &$line = null) {
    return false;
 }
+    

@@ -4,9 +4,14 @@ namespace ZealPHP\Session;
 use ZealPHP\G;
 
 /**
- * Start a new session or resume existing one
+ * Start or resume a session and populate session data from file storage.
+ *
+ * Ensures session parameters are initialized, reads existing session file,
+ * and restores data into the global session container.
+ *
+ * @return bool True on success.
  */
-function zeal_session_start()
+function zeal_session_start(): bool
 {
     $g = G::instance();
 
@@ -52,7 +57,16 @@ function zeal_session_start()
 /**
  * Get or set the session ID
  */
-function zeal_session_id($id = null)
+/**
+ * Get or set the current session ID in the session container.
+ *
+ * When called without an argument, returns the existing session ID or generates a new one.
+ * When an ID is provided, sets it as the current session ID.
+ *
+ * @param string|null $id Optional session ID to set.
+ * @return string The current session ID.
+ */
+function zeal_session_id($id = null): string
 {
     $g = G::instance();
 
@@ -78,7 +92,12 @@ function zeal_session_id($id = null)
     }
 }
 
-function zeal_session_status(){
+/**
+ * Get the current session status.
+ *
+ * @return int One of PHP_SESSION_NONE or PHP_SESSION_ACTIVE.
+ */
+function zeal_session_status(): int
     $g = G::instance();
     if(isset($g->session)){
         return PHP_SESSION_ACTIVE;
@@ -91,7 +110,13 @@ function zeal_session_status(){
 /**
  * Get or set the session name
  */
-function zeal_session_name($name = null)
+/**
+ * Get or set the session name.
+ *
+ * @param string|null $name Optional name to set for the session.
+ * @return string The current session name.
+ */
+function zeal_session_name($name = null): string
 {
     $g = G::instance();
 
@@ -104,9 +129,13 @@ function zeal_session_name($name = null)
 }
 
 /**
- * Write session data and close the session
+ * Write session data to storage and close the session.
+ *
+ * Serializes the current session data to file and clears it from memory.
+ *
+ * @return bool True on success.
  */
-function zeal_session_write_close()
+function zeal_session_write_close(): bool
 {
     $g = G::instance();
 
@@ -125,9 +154,11 @@ function zeal_session_write_close()
 }
 
 /**
- * Destroy the session
+ * Destroy the current session: remove data file and unset session variables and cookie.
+ *
+ * @return bool True on success.
  */
-function zeal_session_destroy()
+function zeal_session_destroy(): bool
 {
     $g = G::instance();
 
@@ -150,7 +181,12 @@ function zeal_session_destroy()
 /**
  * Unset all session variables
  */
-function zeal_session_unset()
+/**
+ * Unset all session variables in the current session.
+ *
+ * @return void
+ */
+function zeal_session_unset(): void
 {
     $g = G::instance();
     $g->session = [];
@@ -159,7 +195,13 @@ function zeal_session_unset()
 /**
  * Regenerate session ID
  */
-function zeal_session_regenerate_id($delete_old_session = false)
+/**
+ * Generate a new session ID and optionally delete the old session file.
+ *
+ * @param bool $delete_old_session If true, removes the old session file.
+ * @return bool True on success.
+ */
+function zeal_session_regenerate_id($delete_old_session = false): bool
 {
     $g = G::instance();
 
@@ -188,7 +230,12 @@ function zeal_session_regenerate_id($delete_old_session = false)
 /**
  * Get session cookie parameters
  */
-function zeal_session_get_cookie_params()
+/**
+ * Retrieve the cookie parameters for the session.
+ *
+ * @return array Associative array with keys: lifetime, path, domain, secure, httponly.
+ */
+function zeal_session_get_cookie_params(): array
 {
     $g = G::instance();
     return $g->session_params['cookie_params'] ?? [
@@ -203,13 +250,29 @@ function zeal_session_get_cookie_params()
 /**
  * Set session cookie parameters
  */
-function zeal_session_set_cookie_params($lifetime, $path = '/', $domain = '', $secure = false, $httponly = false)
+/**
+ * Set the cookie parameters for the session.
+ *
+ * @param int    $lifetime  Lifetime of the cookie in seconds.
+ * @param string $path      Path on the server in which the cookie will be available.
+ * @param string $domain    Cookie domain.
+ * @param bool   $secure    Whether the cookie should only be transmitted over HTTPS.
+ * @param bool   $httponly  Whether the cookie is accessible only through HTTP protocol.
+ * @return void
+ */
+function zeal_session_set_cookie_params($lifetime, $path = '/', $domain = '', $secure = false, $httponly = false): void
 {
     $g = G::instance();
     $g->session_params['cookie_params'] = compact('lifetime', 'path', 'domain', 'secure', 'httponly');
 }
 
-function zeal_session_cache_limiter($cache_limiter = null)
+/**
+ * Get or set the session cache limiter.
+ *
+ * @param string|null $cache_limiter Optional new cache limiter value.
+ * @return string The current or new cache limiter.
+ */
+function zeal_session_cache_limiter($cache_limiter = null): string
 {
     $g = G::instance();
 
@@ -221,12 +284,23 @@ function zeal_session_cache_limiter($cache_limiter = null)
     }
 }
 
-function zeal_session_commit()
+/**
+ * Commit session data and end session (alias for write and close).
+ *
+ * @return bool True on success.
+ */
+function zeal_session_commit(): bool
 {
     return zeal_session_write_close();
 }
 
-function zeal_session_cache_expire($cache_expire = null)
+/**
+ * Get or set the session cache expiration time.
+ *
+ * @param int|null $cache_expire New cache expiration in minutes.
+ * @return int The current or new cache expiration in minutes.
+ */
+function zeal_session_cache_expire($cache_expire = null): int
 {
     $g = G::instance();
 
@@ -238,7 +312,14 @@ function zeal_session_cache_expire($cache_expire = null)
     }
 }
 
-function zeal_session_abort()
+/**
+ * Abort session changes and restore data from storage.
+ *
+ * Discards any changes to session variables and reloads original data.
+ *
+ * @return bool True on success.
+ */
+function zeal_session_abort(): bool
 {
     $g = G::instance();
 
@@ -260,22 +341,45 @@ function zeal_session_abort()
     return true;
 }
 
-function zeal_session_encode()
+/**
+ * Serialize the current session data to a string.
+ *
+ * @return string Serialized session data.
+ */
+function zeal_session_encode(): string
 {
     return serialize(G::instance()->session);
 }
 
-function zeal_session_decode($data)
+/**
+ * Unserialize session data from a string into the current session.
+ *
+ * @param string $data Serialized session data.
+ * @return void
+ */
+function zeal_session_decode($data): void
 {
     G::instance()->session = unserialize($data);
 }
 
-function zeal_session_create_id($prefix = '')
+/**
+ * Generate a new session ID with an optional prefix.
+ *
+ * @param string $prefix Optional prefix for the session ID.
+ * @return string The generated session ID.
+ */
+function zeal_session_create_id($prefix = ''): string
 {
     return session_create_id($prefix);
 }
 
-function zeal_session_save_path($path = null)
+/**
+ * Get or set the session save path.
+ *
+ * @param string|null $path Optional new path to store session files.
+ * @return string The current or new session save path.
+ */
+function zeal_session_save_path($path = null): string
 {
     $g = G::instance();
 
@@ -287,7 +391,13 @@ function zeal_session_save_path($path = null)
     }
 }
 
-function zeal_session_module_name($module = null)
+/**
+ * Get or set the session storage module name.
+ *
+ * @param string|null $module Optional module name (e.g., 'files').
+ * @return string The current or new session module name.
+ */
+function zeal_session_module_name($module = null): string
 {
     $g = G::instance();
 

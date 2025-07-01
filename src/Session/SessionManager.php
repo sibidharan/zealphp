@@ -18,6 +18,13 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
+/**
+ * SessionManager handles PHP session lifecycle as PSR middleware.
+ *
+ * Starts and closes sessions around request handling,
+ * manages session IDs via cookies or query parameters,
+ * and delegates request processing to the provided middleware.
+ */
 class SessionManager
 {
     /**
@@ -62,9 +69,13 @@ class SessionManager
     // }
 
     /**
-     * Delegate execution to the underlying middleware wrapping it into the session start/stop calls
+     * Invoke the session middleware: start session, run handler, and close session.
+     *
+     * @param mixed $request  The incoming request object.
+     * @param mixed $response The outgoing response object.
+     * @return void
      */
-    public function __invoke($request,$response)
+    public function __invoke($request, $response)
     {
         $g = G::instance();
         if(isset($_SESSION) and isset($_SESSION['__start_time'])) {

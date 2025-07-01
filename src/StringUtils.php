@@ -1,14 +1,33 @@
 <?php
 namespace ZealPHP;
 
+/**
+ * StringUtils provides utility functions for common string operations.
+ *
+ * Includes methods for checking prefixes, suffixes, substrings, and extracting text.
+ */
 class StringUtils
 {
+    /**
+     * Check if a string begins with a given substring.
+     *
+     * @param string $haystack The string to search in.
+     * @param string $needle   The substring to search for at the start.
+     * @return bool True if $haystack starts with $needle.
+     */
     public static function str_starts_with($haystack, $needle)
     {
         $length = strlen($needle);
         return (substr($haystack, 0, $length) === $needle);
     }
 
+    /**
+     * Check if a string ends with a given substring.
+     *
+     * @param string $haystack The string to search in.
+     * @param string $needle   The substring to search for at the end.
+     * @return bool True if $haystack ends with $needle.
+     */
     public static function str_ends_with($haystack, $needle)
     {
         $length = strlen($needle);
@@ -39,6 +58,13 @@ class StringUtils
     }
 
 
+   /**
+    * Determine if a string contains a given substring.
+    *
+    * @param string $haystack The string to search in.
+    * @param string $needle   The substring to search for.
+    * @return bool True if $needle is found in $haystack.
+    */
    public static function str_contains($haystack, $needle)
    {
        return strpos($haystack, $needle) !== false;

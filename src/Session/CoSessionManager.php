@@ -10,6 +10,12 @@ use OpenSwoole\Coroutine as co;
 use ZealPHP\Session\Handler\FileSessionHandler;
 use ZealPHP\G;
 
+/**
+ * CoSessionManager handles PHP sessions within OpenSwoole coroutine context.
+ *
+ * Wraps request handling in coroutine-local session start and write-close logic,
+ * using zeal_session_* overrides for session functions.
+ */
 class CoSessionManager
 {
     /**
@@ -50,7 +56,11 @@ class CoSessionManager
     }
 
     /**
-     * Delegate execution to the underlying middleware wrapping it into the session start/stop calls
+     * Invoke the coroutine session middleware: start session, execute handler, then close session.
+     *
+     * @param \OpenSwoole\Http\Request  $request  The Swoole HTTP request.
+     * @param \OpenSwoole\Http\Response $response The Swoole HTTP response.
+     * @return void
      */
     public function __invoke(\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response)
     {
@@ -115,4 +125,3 @@ class CoSessionManager
         }
     }
 }
-

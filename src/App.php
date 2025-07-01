@@ -15,6 +15,11 @@ use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
 use OpenSwoole\Coroutine as co;
+/**
+ * Class App
+ *
+    * Main application class that registers routes, manages middleware, and runs the HTTP server.
+ */
 class App
 {
     protected $routes = [];
@@ -31,6 +36,16 @@ class App
     public static $ignore_php_ext = true;
     public static $coproc_implicit_request_handler = true;
 
+    /**
+     * Initialize the App singleton with the given host, port, and working directory.
+     *
+     * Loads required extensions, sets up environment variables, and configures custom PHP functions.
+     *
+     * @param string $host Host address to bind the server to.
+     * @param int    $port Port number to bind the server to.
+     * @param string $cwd  Current working directory for the application.
+     * @return void
+     */
     private function __construct($host = '0.0.0.0', $port = 8080,$cwd = __DIR__)
     {
         # if uopz not enabled, throw error
@@ -118,17 +133,32 @@ class App
         return self::$instance;
     }
 
+    /**
+     * Get the list of registered routes.
+     *
+     * @return array List of route definitions, each with 'pattern', 'methods', and 'handler'.
+     */
     public function routes()
     {
         return $this->routes;
     }
 
     // Prevent the instance from being cloned.
+    /**
+     * Prevent cloning of the App singleton.
+     *
+     * @return void
+     */
     private function __clone()
     {
     }
 
     // Prevent from being unserialized.
+    /**
+     * Prevent unserialization of the App singleton.
+     *
+     * @return void
+     */
     public function __wakeup()
     {
     }
@@ -160,7 +190,7 @@ class App
      * $app->route('/user/{id}', ['methods' => ['GET', 'POST']], function($id) {
      *     // Handler code here
      * });
-     */
+    */
     public function route($path, $options = [], $handler = null)
     {
         // If only two arguments are provided, assume second is handler and no options.
@@ -280,6 +310,11 @@ class App
      * This will match any route starting with /api/.
      * 
      * TODO: Allow users to provide variable names for the regex groups.
+     *
+     * @param string   $regex   Fully formed regex pattern (with or without anchors).
+     * @param array    $options Optional settings such as 'methods'.
+     * @param callable $handler The route handler callback.
+     * @return void
      */
     public function patternRoute($regex, $options = [], $handler = null)
     {
@@ -399,7 +434,14 @@ class App
         }
     }
 
-    public function addMiddleware(\Psr\Http\Server\MiddlewareInterface $middleware){
+    /**
+     * Add a PSR-15 middleware to the application queue.
+     *
+     * @param MiddlewareInterface $middleware The middleware instance to add.
+     * @return void
+     */
+    public function addMiddleware(MiddlewareInterface $middleware)
+    {
         self::$middleware_wait_stack[] = $middleware;
     }
 
@@ -768,8 +810,20 @@ class App
     }
 }
 
+/**
+ * Class ResponseMiddleware
+ *
+ * Middleware that processes incoming requests, matches defined routes, invokes handlers, and returns PSR-7 responses.
+ */
 class ResponseMiddleware implements MiddlewareInterface
 {
+    /**
+     * Process the incoming ServerRequest by matching it to registered routes and returning a PSR-7 Response.
+     *
+     * @param mixed $request
+     * @param mixed $handler
+     * @return ResponseInterface
+     */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         // elog("ResponseMiddleware process()");
@@ -875,17 +929,33 @@ class ResponseMiddleware implements MiddlewareInterface
 //     }
 // }
 
+/**
+ * Class TemplateUnavailableException
+ *
+ * Exception thrown when the requested template file cannot be found or loaded.
+ */
 class TemplateUnavailableException extends \Exception {
 
 	protected $message = "The template you are trying to include does not seem to exist. Please check the file name.
 	Invalid error message. ";
 	protected $code = 1002;
 
+	/**
+     * Initialize with the correct port to rewrite 'Location' response headers.
+	 *
+	 * @param mixed $message
+	 * @return mixed
+	 */
 	public function __construct($message) {
 		$this->message = $message;
 		parent::__construct($this->message, $this->code);
 	}
 
+	/**
+     * Return the string representation of the exception including class, code, and message.
+	 *
+	 * @return mixed
+	 */
 	public function __toString() {
 		return __CLASS__ . ": [{$this->code}]: {$this->message}\n";
 	}
@@ -893,15 +963,33 @@ class TemplateUnavailableException extends \Exception {
 }
 
 
+/**
+ * Class LocationHeaderMiddleware
+ *
+ * Middleware that adjusts the port in 'Location' headers of HTTP responses to a specified correct port.
+ */
 class LocationHeaderMiddleware implements MiddlewareInterface
 {
     private $correctPort;
 
+    /**
+     * Construct the exception with a specific message explaining the missing template.
+     *
+     * @param mixed $correctPort
+     * @return mixed
+     */
     public function __construct($correctPort)
     {
         $this->correctPort = $correctPort;
     }
 
+    /**
+     * Process the request and adjust the 'Location' header port if it does not match the configured port.
+     *
+     * @param mixed $request
+     * @param mixed $handler
+     * @return ResponseInterface
+     */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $response = $handler->handle($request);
@@ -920,6 +1008,12 @@ class LocationHeaderMiddleware implements MiddlewareInterface
         return $response;
     }
 
+    /**
+     * Build a complete URL string from parsed URL components.
+     *
+     * @param mixed $parsedUrl
+     * @return mixed
+     */
     private function buildUrl($parsedUrl)
     {
         $scheme   = isset($parsedUrl['scheme']) ? $parsedUrl['scheme'] . '://' : '';

@@ -4,10 +4,17 @@ namespace ZealPHP;
 
 use ZealPHP\App;
 
+/**
+ * G is a global singleton registry providing unified access to PHP superglobals
+ * and application state within ZealPHP.
+ */
 class G
 {
     private static $instance = null;
 
+    /**
+     * Initialize the global registry, setting up default session parameters and status.
+     */
     private function __construct()
     {
         $this->session_params = [];
@@ -26,7 +33,15 @@ class G
         return self::$instance;
     }
 
-    // Return by reference
+    /**
+     * Magic getter to access superglobals or internal registry properties.
+     *
+     * When superglobals are enabled, keys like 'get', 'post', 'cookie', etc.
+     * map to the corresponding PHP superglobals. Otherwise returns stored properties.
+     *
+     * @param string $key The property or superglobal name.
+     * @return mixed Reference to the requested data.
+     */
     public function &__get($key)
     {
         if (App::$superglobals) {
@@ -48,6 +63,12 @@ class G
         }
     }
 
+    /**
+     * Magic setter to assign values to superglobals or internal registry properties.
+     *
+     * @param string $key   The property or superglobal name.
+     * @param mixed  $value The value to set.
+     */
     public function __set($key, $value)
     {
         if (App::$superglobals) {

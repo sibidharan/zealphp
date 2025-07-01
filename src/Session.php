@@ -4,7 +4,11 @@ use ZealPHP\G;
 use ZealPHP\StringUtils;
 
 /**
- * Session class is a bunch of static methods helpful for easy handling of the session.
+ * Session provides static methods and properties for managing PHP sessions.
+ *
+ * Handles initialization and teardown of sessions, stores shared data,
+ * manages CSRF tokens, user session info, custom assets (JS/CSS), meta tags,
+ * and other session-scoped properties.
  */
 class Session
 {
@@ -275,4 +279,3 @@ class Session
     }
 
 }
-

@@ -15,6 +15,12 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
+/**
+ * ZealAPI extends REST to provide dynamic loading and execution of API modules.
+ *
+ * Processes API requests by including module scripts or calling class methods,
+ * and returns JSON or text responses accordingly.
+ */
 class ZealAPI extends REST
 {
     public $data = "";
@@ -25,6 +31,13 @@ class ZealAPI extends REST
     public $request = null;
     public $cwd = null;
     
+    /**
+     * Initialize the ZealAPI instance.
+     *
+     * @param mixed  $request  The incoming request context.
+     * @param mixed  $response The response context or object.
+     * @param string $cwd      The current working directory for locating API scripts.
+     */
     public function __construct($request, $response, $cwd)
     {
         $this->cwd = $cwd;
@@ -33,12 +46,17 @@ class ZealAPI extends REST
         parent::__construct($request, $response);                  // Init parent contructor
     }
 
-    /*
-    * Public method for access api.
-    * This method dynmically call the method based on the query string
-    *
-    */
-    public function processApi($module, $request=null)
+    /**
+     * Process an API call by module and request name.
+     *
+     * Attempts to invoke a class method or include a PHP script under api/<module>,
+     * binds and calls the resulting function closure, and returns a PSR Response.
+     *
+     * @param string      $module  The API module name (directory under api/).
+     * @param string|null $request The API script or method name to call.
+     * @return ResponseInterface|null The PSR response, or null on failure.
+     */
+    public function processApi($module, $request = null)
     {
         $g = G::instance();
         $module = $module ? '/'.$module : '';
@@ -129,6 +147,12 @@ class ZealAPI extends REST
      * @param $param Http Parameters
      * Checks if all supplied parameters exists
      */
+    /**
+     * Check if all specified parameters exist in the request data.
+     *
+     * @param array $parms List of parameter names to verify.
+     * @return bool True if all parameters are present, false otherwise.
+     */
     public function paramsExists($parms = array())
     {
         $exists = true;
@@ -155,6 +179,12 @@ class ZealAPI extends REST
     //     return Session::getUser()->getUsername();
     // }
 
+    /**
+     * Handle an exception by sending an error response with stack trace.
+     *
+     * @param \Exception $e The exception to report.
+     * @return void
+     */
     public function die($e)
     {
         $data = [
@@ -176,6 +206,13 @@ class ZealAPI extends REST
     }
 
     //TODO: Buggy current-call- hangs if calling nonexisting method inside API.
+    /**
+     * Magic __call to handle method calls delegated to the API closure.
+     *
+     * @param string $method The method name.
+     * @param array  $args   Arguments to pass to the API closure.
+     * @return mixed
+     */
     public function __call($method, $args)
     {
         
@@ -188,9 +225,12 @@ class ZealAPI extends REST
         }
     }
 
-    /*
-    Encode array into JSON
-    */
+    /**
+     * Encode an array or object into a pretty-printed JSON string.
+     *
+     * @param mixed $data The data to encode.
+     * @return string JSON representation of the data.
+     */
     private function json($data)
     {
         if (is_array($data)) {

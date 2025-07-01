@@ -141,6 +141,16 @@ You can start by defining your routes in `app.php` or under `route` directory wh
 You can start writing APIs out of the box without any additional configuration. Look inside `api `folder for more examples. To understand more on how to handle the response, please wait for the documentation or you can checkout https://github.com/sibidharan/zealphp for more development examples. 
 
 Any and all contributions are welcome ❤️
+ 
+## Generating Docblocks
+
+To insert stub PHPDoc comments for all classes and methods in the ZealPHP core library, run:
+
+```bash
+php generate_docblocks.php
+```
+
+This command scans the `src/` directory and adds missing docblocks. After running it, review each file to fill in the `[TODO]` placeholders with meaningful descriptions.
 
 # ZealPHP Design Principles
 

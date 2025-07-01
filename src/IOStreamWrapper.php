@@ -39,24 +39,25 @@ use function ZealPHP\elog;
 // }
 
 // Custom Stream Wrapper for php://input with passthrough
+/**
+ * Class IOStreamWrapper
+ *
+ * Custom stream wrapper for php:// streams that buffers php://input in memory and delegates other php:// streams to the default PHP wrapper.
+ */
 class IOStreamWrapper {
     public $context;
     private $position = 0;
     private $input = '';
-
-    // public function stream_open($path, $mode, $options, &$opened_path) {
-    //     if ($path === 'php://input') {
-    //         // Read the entire php://input into memory
-    //         $this->input = file_get_contents('php://input');
-    //         $this->position = 0;
-    //         return true;
-    //     } else {
-    //         // For other streams, open the context normally
-    //         $this->context = fopen($path, $mode);
-    //         return $this->context !== false;
-    //     }
-    // }
-
+    
+    /**
+     * Open a php:// stream. Buffers php://input in memory if requested; delegates other streams to the default PHP wrapper.
+     *
+     * @param mixed $path
+     * @param mixed $mode
+     * @param mixed $options
+     * @param mixed $opened_path
+     * @return mixed
+     */
     public function stream_open($path, $mode, $options, &$opened_path) {
         elog("stream_open: $path, $mode, $options", "streamio");
         // Handle php://input specifically: load content into an in-memory stream
@@ -89,6 +90,12 @@ class IOStreamWrapper {
     }
     
 
+    /**
+     * Read data from the stream, returning buffered php://input data or delegating to the underlying stream resource.
+     *
+     * @param mixed $count
+     * @return mixed
+     */
     public function stream_read($count) {
         if ($this->context) {
             // Passthrough read for other streams
@@ -101,6 +108,12 @@ class IOStreamWrapper {
         }
     }
 
+    /**
+     * Write data to the stream, delegating to the underlying stream resource or returning false for buffered input.
+     *
+     * @param mixed $data
+     * @return mixed
+     */
     public function stream_write($data) {
         if ($this->context) {
             // Passthrough write for other streams
@@ -111,6 +124,11 @@ class IOStreamWrapper {
         return false;
     }
 
+    /**
+     * Determine if end-of-file has been reached for the stream or buffered input.
+     *
+     * @return mixed
+     */
     public function stream_eof() {
         if ($this->context) {
             // Passthrough EOF for other streams
@@ -121,6 +139,11 @@ class IOStreamWrapper {
         return $this->position >= strlen($this->input);
     }
 
+    /**
+     * Retrieve metadata for the stream resource or return an empty array for buffered input.
+     *
+     * @return mixed
+     */
     public function stream_stat() {
         if ($this->context) {
             // Passthrough stat for other streams
@@ -131,6 +154,11 @@ class IOStreamWrapper {
         return [];
     }
 
+    /**
+     * Close the stream resource or no-op for buffered input.
+     *
+     * @return mixed
+     */
     public function stream_close() {
         if ($this->context) {
             // Passthrough close for other streams
@@ -138,6 +166,11 @@ class IOStreamWrapper {
         }
     }
 
+    /**
+     * Rewind the stream resource or reset the read position for buffered input.
+     *
+     * @return mixed
+     */
     public function stream_rewind() {
         if ($this->context) {
             // Passthrough rewind for other streams
@@ -149,6 +182,13 @@ class IOStreamWrapper {
         }
     }
 
+    /**
+     * Seek to a specified position in the stream or buffered input.
+     *
+     * @param mixed $offset
+     * @param mixed $whence
+     * @return mixed
+     */
     public function stream_seek($offset, $whence = SEEK_SET) {
         if ($this->context) {
             // Passthrough seek for other streams (resource)
@@ -191,6 +231,11 @@ class IOStreamWrapper {
         }
     }
 
+    /**
+     * Return the current read/write position of the stream or buffered input.
+     *
+     * @return mixed
+     */
     public function stream_tell() {
         if ($this->context) {
             // Passthrough tell for other streams
@@ -201,6 +246,12 @@ class IOStreamWrapper {
         return $this->position;
     }
 
+    /**
+     * Truncate the stream to a given size or no-op for buffered input.
+     *
+     * @param mixed $new_size
+     * @return mixed
+     */
     public function stream_truncate($new_size) {
         if ($this->context) {
             // Passthrough truncate for other streams
@@ -211,6 +262,11 @@ class IOStreamWrapper {
         return false;
     }
 
+    /**
+     * Flush the stream buffer or no-op for buffered input.
+     *
+     * @return mixed
+     */
     public function stream_flush() {
         if ($this->context) {
             // Passthrough flush for other streams
@@ -221,6 +277,12 @@ class IOStreamWrapper {
         return false;
     }
 
+    /**
+     * Acquire or release a lock on the stream or no-op for buffered input.
+     *
+     * @param mixed $operation
+     * @return mixed
+     */
     public function stream_lock($operation) {
         if ($this->context) {
             // Passthrough lock for other streams
@@ -231,6 +293,13 @@ class IOStreamWrapper {
         return false;
     }
 
+    /**
+     * Retrieve information about a URL path or no-op for buffered input streams.
+     *
+     * @param mixed $path
+     * @param mixed $flags
+     * @return mixed
+     */
     public function url_stat($path, $flags) {
         if ($this->context) {
             // Passthrough url_stat for other streams
@@ -241,6 +310,12 @@ class IOStreamWrapper {
         return false;
     }
 
+    /**
+     * Delete a file via the stream resource or no-op for buffered input.
+     *
+     * @param mixed $path
+     * @return mixed
+     */
     public function stream_unlink($path) {
         if ($this->context) {
             // Passthrough unlink for other streams
@@ -252,12 +327,25 @@ class IOStreamWrapper {
     }
 
     # write magic method __get and __call for all other methods
+    /**
+     * Pass property access through to the underlying stream resource.
+     *
+     * @param mixed $name
+     * @return mixed
+     */
     public function __get($name) {
         if ($this->context) {
             return $this->context->$name;
         }
     }
 
+    /**
+     * Forward method calls to the underlying stream resource.
+     *
+     * @param mixed $name
+     * @param mixed $args
+     * @return mixed
+     */
     public function __call($name, $args) {
         if ($this->context) {
             return $this->context->$name(...$args);
