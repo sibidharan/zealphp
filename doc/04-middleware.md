@@ -37,7 +37,54 @@ ZealPHP provides lightweight shims around common response helpers:
 
 These functions manipulate the PSR-7 `Response` instance that travels along the chain.
 
+## 4.2 Practical authentication examples
+
+The bundled `app.php` now includes an `AuthenticationMiddleware` that supports **three** common credential styles:
+
+1. **Bearer token** via the `Authorization: Bearer …` header.
+2. **Query token** via a simple `?token=` URL parameter.
+3. **Default PHP session** via the `PHPSESSID` cookie.
+
+Below is an abbreviated snippet that shows the relevant control-flow.  Check the real source for complete details:
+
+```php
+class AuthenticationMiddleware implements MiddlewareInterface
+{
+    private const VALID_BEARER_TOKENS = ['zeal-secret-123', 'zeal-secret-456'];
+
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+    {
+        $cred = $this->extractCredential($request);
+        if ($cred === null) {
+            return $this->unauthorised();
+        }
+
+        switch ($cred['type']) {
+            case 'bearer':
+                // static allow-list check
+                if (!in_array($cred['value'], self::VALID_BEARER_TOKENS, true)) {
+                    return $this->unauthorised();
+                }
+                $user = ['token' => $cred['value']];
+                break;
+
+            case 'session':
+                // resume PHP session and read user payload
+                $user = $this->resumeSession($cred['value']);
+                if ($user === null) {
+                    return $this->unauthorised();
+                }
+                break;
+        }
+
+        return $handler->handle($request->withAttribute('user', $user));
+    }
+}
+```
+
+Swap the in-memory array for a DB lookup or JWT verification to move from demo
+to production – the pattern remains the same.
+
 ---
 
 Next up: [Coroutines →](05-coroutines.md)
-

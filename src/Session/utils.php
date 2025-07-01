@@ -98,6 +98,7 @@ function zeal_session_id($id = null): string
  * @return int One of PHP_SESSION_NONE or PHP_SESSION_ACTIVE.
  */
 function zeal_session_status(): int
+{
     $g = G::instance();
     if(isset($g->session)){
         return PHP_SESSION_ACTIVE;

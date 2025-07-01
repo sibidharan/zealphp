@@ -18,30 +18,144 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
+/**
+ * Demo authentication middleware.
+ *
+ * Looks for a bearer token in the `Authorization` header (or a `token` query
+ * parameter) and rejects the request with status 401 when it is missing or
+ * invalid.  For the sake of the example we simply compare the token against a
+ * static allow-list.
+ */
 class AuthenticationMiddleware implements MiddlewareInterface
 {
+    private const VALID_BEARER_TOKENS = [
+        'zeal-secret-123',
+        'zeal-secret-456',
+    ];
+
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        elog("AuthenticationMiddleware: process()");
-        $g = G::instance();
-        $g->session['test'] = 'test';
+        $credential = $this->extractCredential($request);
+
+        if ($credential === null) {
+            return $this->unauthorised();
+        }
+
+        switch ($credential['type']) {
+            case 'bearer':
+                if (!in_array($credential['value'], self::VALID_BEARER_TOKENS, true)) {
+                    return $this->unauthorised();
+                }
+                $user = ['token' => $credential['value']];
+                break;
+
+            case 'session':
+                $sessionUser = $this->resumeSession($credential['value']);
+                if ($sessionUser === null) {
+                    return $this->unauthorised();
+                }
+                $user = $sessionUser;
+                break;
+
+            default:
+                return $this->unauthorised();
+        }
+
+        $request = $request->withAttribute('user', $user);
         return $handler->handle($request);
-        // return new Response('Forbidden', 403, 'success', ['Content-Type' => 'text/plain']);
+    }
+
+    private function unauthorised(): ResponseInterface
+    {
+        $payload = json_encode([
+            'status'  => 'error',
+            'message' => 'Unauthorized',
+        ], JSON_UNESCAPED_SLASHES);
+
+        return new Response($payload, 401, 'Unauthorized', [
+            'Content-Type' => 'application/json',
+        ]);
+    }
+
+    private function extractCredential(ServerRequestInterface $request): ?array
+    {
+        // Bearer via header
+        $authHeader = $request->getHeaderLine('Authorization');
+        if ($authHeader !== '' && strpos($authHeader, 'Bearer ') === 0) {
+            return ['type' => 'bearer', 'value' => substr($authHeader, 7)];
+        }
+
+        // Bearer via query param
+        $queryParams = $request->getQueryParams();
+        if (isset($queryParams['token']) && $queryParams['token'] !== '') {
+            return ['type' => 'bearer', 'value' => $queryParams['token']];
+        }
+
+        // PHP session cookie
+        $cookieParams = $request->getCookieParams();
+        if (isset($cookieParams['PHPSESSID']) && trim($cookieParams['PHPSESSID']) !== '') {
+            return ['type' => 'session', 'value' => $cookieParams['PHPSESSID']];
+        }
+
+        return null;
+    }
+
+    private function resumeSession(string $sessionId): ?array
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_id($sessionId);
+            session_start();
+        }
+
+        return isset($_SESSION['user']) && is_array($_SESSION['user']) ? $_SESSION['user'] : null;
     }
 }
 
+/**
+ * Very small JSON validation middleware.
+ *
+ * For write operations (POST/PUT/PATCH) with an `application/json` content
+ * type it parses the body, checks that the field `name` is present and passes
+ * the decoded payload downstream via `withParsedBody()`.
+ */
 class ValidationMiddleware implements MiddlewareInterface
 {
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        elog("Validation: process()");
-        $g = G::instance();
-        ob_start();
-        print_r($request->getQueryParams());
-        $data = ob_get_clean();
-        // elog($data, "validate");;
-        $g->session['validate'] = 'test';
+        $method = strtoupper($request->getMethod());
+
+        if (in_array($method, ['POST', 'PUT', 'PATCH'], true)) {
+            $contentType = $request->getHeaderLine('Content-Type');
+
+            if (strpos($contentType, 'application/json') !== false) {
+                $rawBody = (string) $request->getBody();
+                $data    = json_decode($rawBody, true);
+
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    return $this->failed('Malformed JSON payload');
+                }
+
+                if (!isset($data['name']) || trim((string) $data['name']) === '') {
+                    return $this->failed('Field "name" is required');
+                }
+
+                $request = $request->withParsedBody($data);
+            }
+        }
+
         return $handler->handle($request);
+    }
+
+    private function failed(string $message): ResponseInterface
+    {
+        $payload = json_encode([
+            'status'  => 'error',
+            'message' => $message,
+        ], JSON_UNESCAPED_SLASHES);
+
+        return new Response($payload, 422, 'Unprocessable Entity', [
+            'Content-Type' => 'application/json',
+        ]);
     }
 }
 
