@@ -12,6 +12,9 @@ This documentation is broken up into small, focused guides.  If you are in a rus
 * [06 – Implicit routing (API & public folder)](06-implicit-routes.md)
 * [07 – File-based API routing](07-api-routing.md)
 * [08 – Porting an Apache/FPM project](08-porting-from-apache.md)
+* [09 – Incremental migration with `App::superglobals()`](09-incremental-superglobals-migration.md)
+* [10 – Monkey-patched PHP functions & polyfills](10-monkey-patched-functions.md)
+* [11 – ZealPHP Design Philosophy & Technical Review](11-zealphp-philosophy.md)
 
 The documentation lives inside your project (`doc/` folder) so that it is always available – even when you are offline.
 

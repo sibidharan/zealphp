@@ -8,6 +8,8 @@
 
 Legacy PHP applications and many third-party libraries expect good old `$_GET`, `$_POST`, `$_SERVER`, `$_SESSION` … to be populated **per request**.  ZealPHP can emulate that behaviour while still running on a persistent OpenSwoole worker.
 
+> 🧩  In addition, ZealPHP **monkey-patches** the native `header`, `setcookie`, `session_*` and related functions so that they talk to the current PSR-7 `Response` object instead of global process state.  See chapter&nbsp;10 for the nitty-gritty details.
+
 ## 3.1 Enabling / disabling emulated superglobals
 
 Superglobals are **enabled by default**.  If you want raw coroutine power inside your route handlers you can opt-out at bootstrap:
@@ -49,4 +51,3 @@ If you keep superglobals **enabled**, launching a coroutine with `go()` will clo
 ---
 
 Next up: [Middleware →](04-middleware.md)
-

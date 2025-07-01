@@ -8,6 +8,9 @@
 
 OpenSwoole brings Golang-style coroutines (fibers) to PHP.  ZealPHP adopts them while keeping a foot in the synchronous world so that existing code continues to work.
 
+> ❓ **`go()` vs `Co\run()`**  
+> You will sometimes see `OpenSwoole\Coroutine\run()` (or the short alias `Co\run()`) in tutorials.  That helper *starts* the coroutine scheduler for a one-off CLI script.  Inside ZealPHP workers the scheduler is already running, therefore you spawn additional coroutines with **`go()`**.  Using `Co\run()` inside a request handler would spin up a *nested* event loop – avoid it unless you know what you are doing.
+
 ---
 
 ## 5.1 Using `go()` inside a route
@@ -67,4 +70,3 @@ Each worker is then able to serve thousands of concurrent HTTP requests while ke
 ---
 
 Next up: [Implicit routing →](06-implicit-routes.md)
-

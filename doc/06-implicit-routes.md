@@ -24,6 +24,16 @@ There are two major groups:
 
 Because the framework creates these routes *after* loading your `route/*.php` files, any **explicit** route you declare will override the implicit one.
 
+### Quick reference
+
+| Group | Purpose | URL Prefix | Maps to | Supported HTTP verbs |
+|-------|---------|-----------|---------|----------------------|
+| *API implicit* | File-based API endpoints that return JSON or PSR-7 responses | `/api` | `api/**/*.php` | ALL (GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD) |
+| *Public implicit* | Classic public document root – serves HTML/PHP pages and static assets | `/` (root) | `public/` | GET, HEAD (other verbs fall back to 405) |
+| *Fallback 404* | Built-in 404 response | — | — | ALL |
+
+The rest of this chapter dives into the details of each group.
+
 ---
 
 ## 1. API Implicit Routes
@@ -136,4 +146,3 @@ If `App::$coproc_implicit_request_handler` is **true** (default) ZealPHP runs th
 ---
 
 Next up: [File-based API routing →](07-api-routing.md)
-
