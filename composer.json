@@ -4,7 +4,7 @@
     "type": "library",
     "license": "MIT",
     "require": {
-        "php": ">=8.2",
+        "php": ">=8.3",
         "openswoole/core": "~22.1.5",
         "openswoole/ide-helper": "~22.0.1",
         "psr/http-message": "^1.1"
