@@ -29,7 +29,7 @@ class App
     public static $middleware_stack = null;
     public static $middleware_wait_stack = [];
     public static $ignore_php_ext = true;
-    public static $coproc_implicit_request_handler = true;
+    public static $coproc_implicit_request_handler = false;
 
     private function __construct($host = '0.0.0.0', $port = 8080,$cwd = __DIR__)
     {
@@ -421,6 +421,10 @@ class App
      */
     public function run($settings = null)
     {
+        App::$coproc_implicit_request_handler = App::$superglobals;
+        if(!App::$superglobals){
+            co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
+        }
         $default_settings = [
             'enable_static_handler' => true,
             'document_root' => self::$cwd . '/public',
