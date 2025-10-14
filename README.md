@@ -113,20 +113,20 @@ Now lets get started.
 
 ## 3. Getting started with ZealPHP Framework
 
-To create a new project from our go-to template, replace `my-project` with your project name and execute the command below. The installer now resolves the latest stable tag (starting with `v0.1.0`).
+We're lining up a `v0.1.0` release across the framework and the project template. Until that tag is published to Packagist, install from the development branch as shown below. Once `v0.1.0` is live, you can switch back to the tagged release constraint instead of the development branch.
 
 **Note: Ensure you are in the correct directory**
 
 Before running the command, make sure you navigate to the directory where you want to save your project.
 
 ```
-$ composer create-project sibidharan/zealphp-project:^0.1 my-project
+$ composer create-project --stability=dev sibidharan/zealphp-project my-project
 ```
 
 Already have an application and just want the framework runtime?
 
 ```
-$ composer require sibidharan/zealphp:^0.1
+$ composer require --stability=dev sibidharan/zealphp:dev-master
 ```
 
 With composer installed, lets run our ZealPHP Project
@@ -153,9 +153,9 @@ Any and all contributions are welcome ❤️
 
 1. Ensure the documentation and metadata (including `CHANGELOG.md`) capture the upcoming version number and notable changes.
 2. Run `composer validate` and project checks to confirm the package installs cleanly.
-3. Commit your changes, then create the annotated tag (for example `git tag -a v0.1.0 -m "Release v0.1.0"`).
-4. Push the main branch and the tag (`git push origin master && git push origin v0.1.0`).
-5. Visit Packagist and trigger a manual update if the repository is not already configured for auto-updates; Packagist will pick up the new tag and publish the release.
+3. Tag both repositories in lockstep (`zealphp` and `zealphp-project`) with the same version, for example `git tag -a v0.1.0 -m "Release v0.1.0"`.
+4. Push the main branch and the tag to every remote for each repository (`git push origin master && git push origin v0.1.0`, etc.).
+5. Visit Packagist (or call the webhook) for both packages so the new tags are indexed and the `v0.1.0` constraint becomes available.
 
 # ZealPHP Design Principles
 
