@@ -5,6 +5,7 @@ A powerful light weight opensource alternative to NextJS - that uses OpenSwoole'
 [![Latest Stable Version](https://poser.pugx.org/sibidharan/zealphp/v)](https://packagist.org/packages/sibidharan/zealphp) [![Total Downloads](https://poser.pugx.org/sibidharan/zealphp/downloads)](https://packagist.org/packages/sibidharan/zealphp) [![Latest Unstable Version](https://poser.pugx.org/sibidharan/zealphp/v/unstable)](https://packagist.org/packages/sibidharan/zealphp) [![License](https://poser.pugx.org/sibidharan/zealphp/license)](https://packagist.org/packages/sibidharan/zealphp)
 
 Homepage: https://php.zeal.lol
+Changelog: [CHANGELOG.md](CHANGELOG.md)
 
 Features:
 1. Dynamic HTML Streaming with APIs and Sockets
@@ -112,14 +113,20 @@ Now lets get started.
 
 ## 3. Getting started with ZealPHP Framework
 
-To create a new project from our go-to template, replace `my-project` with your project name and execute the below composer command. Since this project is in development, use `--stability=dev` until we arrive at a stable version.  
+To create a new project from our go-to template, replace `my-project` with your project name and execute the command below. The installer now resolves the latest stable tag (starting with `v0.1.0`).
 
 **Note: Ensure you are in the correct directory**
 
 Before running the command, make sure you navigate to the directory where you want to save your project.
 
 ```
-$ composer create-project --stability=dev sibidharan/zealphp-project my-project 
+$ composer create-project sibidharan/zealphp-project:^0.1 my-project
+```
+
+Already have an application and just want the framework runtime?
+
+```
+$ composer require sibidharan/zealphp:^0.1
 ```
 
 With composer installed, lets run our ZealPHP Project
@@ -141,6 +148,14 @@ You can start by defining your routes in `app.php` or under `route` directory wh
 You can start writing APIs out of the box without any additional configuration. Look inside `api `folder for more examples. To understand more on how to handle the response, please wait for the documentation or you can checkout https://github.com/sibidharan/zealphp for more development examples. 
 
 Any and all contributions are welcome ❤️
+
+## Publishing releases
+
+1. Ensure the documentation and metadata (including `CHANGELOG.md`) capture the upcoming version number and notable changes.
+2. Run `composer validate` and project checks to confirm the package installs cleanly.
+3. Commit your changes, then create the annotated tag (for example `git tag -a v0.1.0 -m "Release v0.1.0"`).
+4. Push the main branch and the tag (`git push origin master && git push origin v0.1.0`).
+5. Visit Packagist and trigger a manual update if the repository is not already configured for auto-updates; Packagist will pick up the new tag and publish the release.
 
 # ZealPHP Design Principles
 
