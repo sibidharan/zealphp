@@ -3,7 +3,7 @@
         'name' => 'sibidharan/zealphp',
         'pretty_version' => 'dev-master',
         'version' => 'dev-master',
-        'reference' => '2b9425bdd9cc5c0da75e096beb32da66bb0d554f',
+        'reference' => 'c6ae4d15296386bf3576edf7c408fd152d8d2659',
         'type' => 'library',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -58,7 +58,7 @@
         'sibidharan/zealphp' => array(
             'pretty_version' => 'dev-master',
             'version' => 'dev-master',
-            'reference' => '2b9425bdd9cc5c0da75e096beb32da66bb0d554f',
+            'reference' => 'c6ae4d15296386bf3576edf7c408fd152d8d2659',
             'type' => 'library',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
