@@ -1,8 +1,21 @@
 {
     "name": "sibidharan/zealphp",
     "description": "A dynamic PHP web development framework built with OpenSwoole.",
+    "homepage": "https://php.zeal.lol",
+    "keywords": [
+        "openswoole",
+        "framework",
+        "php",
+        "async",
+        "http",
+        "zealphp"
+    ],
     "type": "library",
     "license": "MIT",
+    "support": {
+        "issues": "https://github.com/sibidharan/zealphp/issues",
+        "source": "https://github.com/sibidharan/zealphp"
+    },
     "require": {
         "php": ">=8.3",
         "openswoole/core": "~22.1.5",
