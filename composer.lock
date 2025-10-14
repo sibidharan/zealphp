@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "87179f4f0a0744c10af3306fa2683a98",
+    "content-hash": "df73040264c5361b843d6e73c86727eb",
     "packages": [
         {
             "name": "openswoole/core",
@@ -290,7 +290,7 @@
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
-        "php": ">=7.4"
+        "php": ">=8.3"
     },
     "platform-dev": [],
     "plugin-api-version": "2.3.0"
