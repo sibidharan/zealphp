@@ -113,20 +113,20 @@ Now lets get started.
 
 ## 3. Getting started with ZealPHP Framework
 
-We're lining up a `v0.1.0` release across the framework and the project template. Until that tag is published to Packagist, install from the development branch as shown below. Once `v0.1.0` is live, you can switch back to the tagged release constraint instead of the development branch.
+ZealPHP `v0.1.0` is available on Packagist for both the framework and the project template. Use the stable tag when scaffolding a new application as shown below.
 
 **Note: Ensure you are in the correct directory**
 
 Before running the command, make sure you navigate to the directory where you want to save your project.
 
 ```
-$ composer create-project --stability=dev sibidharan/zealphp-project my-project
+$ composer create-project sibidharan/zealphp-project:^0.1 my-project
 ```
 
 Already have an application and just want the framework runtime?
 
 ```
-$ composer require --stability=dev sibidharan/zealphp:dev-master
+$ composer require sibidharan/zealphp:^0.1
 ```
 
 With composer installed, lets run our ZealPHP Project
