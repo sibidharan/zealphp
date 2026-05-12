@@ -98,14 +98,44 @@ App::getServer()->task(['handler' => '/task/backup', 'args' => [...]]);
 
 The `task` event handler in `App::run()` includes the file and calls the function named after `basename($handler)`.
 
+### SSR Streaming
+
+ZealPHP supports three streaming patterns via `src/HTTP/Response.php` and `ResponseMiddleware`:
+
+| Pattern | How | When to use |
+|---------|-----|-------------|
+| **Generator `yield`** | Route handler returns a `\Generator`; each `yield $string` is written to the client immediately | SSR — stream HTML shell first, then yield sections as coroutines resolve |
+| **`$response->stream($fn)`** | `$fn` receives a `$write(string)` closure; headers are flushed before `$fn` runs | Fine-grained streaming control inside a callback |
+| **`$response->sse($fn)`** | `$fn` receives `$emit($data, $event='', $id='')` — formats SSE wire protocol automatically | Server-Sent Events for real-time browser push (JS `EventSource`) |
+
+**`App::renderToString($template, $args)`** — captures `App::render()` into a string so it is safe to `yield` or `$write()` inside a streaming context (no active ob buffer exists there).
+
+SSE vs SSR: SSR streaming delivers progressive HTML the browser paints directly; SSE delivers structured events consumed by JavaScript `EventSource`. Both use the same underlying `write()` mechanism.
+
+---
+
+## Examples (`examples/`)
+
+**`examples/streaming/`** — ZealPHP API usage examples. These show how to use ZealPHP's own APIs and are the canonical reference for framework features. Routes are auto-loaded via `route/streaming_examples.php`.
+
+| File | Route | Demonstrates |
+|------|-------|-------------|
+| `generator_ssr.php` | `GET /examples/generator-ssr` | Generator yield SSR — parallel Channel fetches, streams sections as they resolve |
+| `stream_callback.php` | `GET /examples/stream` | `$response->stream()` — word-by-word streaming with parallel coroutines |
+| `sse_events.php` | `GET /examples/sse` | `$response->sse()` — 10 tick events, 1 s apart |
+| `sse_client.html` | `GET /examples/sse-client` | Browser `EventSource` page for the SSE demo |
+| `render_to_string.php` | `GET /examples/render-to-string` | `App::renderToString()` with skeleton → stream pattern |
+
+**`examples/*.php` (root level)** — OpenSwoole implementation reference. These are standalone scripts that explore raw OpenSwoole/PHP primitives (`co::run()`, `pcntl_fork()`, stream wrappers, etc.) and are **not** ZealPHP usage examples. Do not use these as patterns for application code.
+
 ---
 
 ## Source Layout (`src/`)
 
 | File | Role |
 |------|------|
-| `App.php` | Framework core: singleton init, route registration, `run()`, `ResponseMiddleware`, `TemplateUnavailableException` |
-| `G.php` | Per-request global state; dual-mode (superglobals / coroutine context) |
+| `App.php` | Framework core: singleton init, route registration, `run()`, `ResponseMiddleware`, `TemplateUnavailableException`; `render()` / `renderToString()` |
+| `G.php` | Per-request global state; dual-mode — superglobals mode uses a static singleton, coroutine mode uses `Coroutine::getContext()` for per-coroutine isolation |
 | `ZealAPI.php` | File-based API dispatcher; extends `REST.php` |
 | `REST.php` | Base class with input cleaning and response helpers |
 | `utils.php` | Global functions: `prefork_request_handler`, `coprocess`, `elog`, `zlog`, `access_log`, `response_add_header`, overridden `header`/`setcookie`/`http_response_code` |
@@ -114,4 +144,4 @@ The `task` event handler in `App::run()` includes the file and calls the functio
 | `Session/SessionManager.php` | Traditional session lifecycle (superglobals ON) |
 | `IOStreamWrapper.php` | `php://` stream wrapper that redirects `php://input` to request body |
 | `HTTP/Request.php` | Thin wrapper around `OpenSwoole\Http\Request` |
-| `HTTP/Response.php` | Thin wrapper around `OpenSwoole\Http\Response` |
+| `HTTP/Response.php` | Thin wrapper around `OpenSwoole\Http\Response`; adds `stream()`, `sse()`, `flush()` |
