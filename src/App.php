@@ -18,6 +18,7 @@ use OpenSwoole\Coroutine as co;
 class App
 {
     protected $routes = [];
+    protected $routes_by_method = [];
     protected $host;
     protected $port;
     static $cwd;
@@ -100,6 +101,7 @@ class App
         }
         if(!App::$superglobals){
             co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
+            \OpenSwoole\Runtime::enableCoroutine(\OpenSwoole\Runtime::HOOK_ALL);
         }
         if (self::$instance == null) {
             self::$instance = new App($host, $port, $cwd);
@@ -121,6 +123,32 @@ class App
     public function routes()
     {
         return $this->routes;
+    }
+
+    public function routesByMethod(): array
+    {
+        return $this->routes_by_method;
+    }
+
+    private function buildParamMap($handler): array
+    {
+        try {
+            $reflection = is_array($handler)
+                ? new \ReflectionMethod($handler[0], $handler[1])
+                : new \ReflectionFunction($handler);
+            $map = [];
+            foreach ($reflection->getParameters() as $param) {
+                $pname = $param->getName();
+                $map[] = [
+                    'name'        => $pname,
+                    'has_default' => $param->isDefaultValueAvailable(),
+                    'default'     => $param->isDefaultValueAvailable() ? $param->getDefaultValue() : null,
+                ];
+            }
+            return $map;
+        } catch (\ReflectionException $e) {
+            return [];
+        }
     }
 
     // Prevent the instance from being cloned.
@@ -178,13 +206,10 @@ class App
         $pattern = "#^" . $pattern . "$#";
 
         $this->routes[] = [
-            'pattern' => $pattern,
-            'methods' => array_map('strtoupper', $methods),
-            'handler' => $handler,
-            // You could also store other options like:
-            // 'endpoint' => $options['endpoint'] ?? null,
-            // 'strict_slashes' => $options['strict_slashes'] ?? true,
-            // ...and handle them later in matching logic
+            'pattern'   => $pattern,
+            'methods'   => array_map('strtoupper', $methods),
+            'handler'   => $handler,
+            'param_map' => $this->buildParamMap($handler),
         ];
     }
 
@@ -213,9 +238,10 @@ class App
         $pattern = "#^" . $pattern . "$#";
 
         $this->routes[] = [
-            'pattern' => $pattern,
-            'methods' => array_map('strtoupper', $methods),
-            'handler' => $handler,
+            'pattern'   => $pattern,
+            'methods'   => array_map('strtoupper', $methods),
+            'handler'   => $handler,
+            'param_map' => $this->buildParamMap($handler),
         ];
     }
 
@@ -266,12 +292,13 @@ class App
         $pattern = "#^" . $pattern . "$#";
     
         $this->routes[] = [
-            'pattern' => $pattern,
-            'methods' => array_map('strtoupper', $methods),
-            'handler' => $handler,
+            'pattern'   => $pattern,
+            'methods'   => array_map('strtoupper', $methods),
+            'handler'   => $handler,
+            'param_map' => $this->buildParamMap($handler),
         ];
     }
-    
+
 
     /**
      * patternRoute: Allow full control of the pattern without {param} placeholders.
@@ -297,9 +324,10 @@ class App
         }
 
         $this->routes[] = [
-            'pattern' => $regex,
-            'methods' => array_map('strtoupper', $methods),
-            'handler' => $handler,
+            'pattern'   => $regex,
+            'methods'   => array_map('strtoupper', $methods),
+            'handler'   => $handler,
+            'param_map' => $this->buildParamMap($handler),
         ];
     }
 
@@ -424,6 +452,7 @@ class App
         App::$coproc_implicit_request_handler = App::$superglobals;
         if(!App::$superglobals){
             co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
+            \OpenSwoole\Runtime::enableCoroutine(\OpenSwoole\Runtime::HOOK_ALL);
         }
         $default_settings = [
             'enable_static_handler' => true,
@@ -763,6 +792,19 @@ class App
             }
         }));
 
+        // Build method-indexed dispatch table once at boot (O(1) method lookup per request)
+        foreach ($this->routes as $route) {
+            foreach ($route['methods'] as $m) {
+                $this->routes_by_method[$m][] = $route;
+            }
+        }
+
+        // Register the php:// stream wrapper once per worker process instead of per-request
+        $server->on('workerStart', function($server, $workerId) {
+            @stream_wrapper_unregister("php");
+            stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class);
+        });
+
         elog("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
         $server->start();
     }
@@ -776,46 +818,29 @@ class ResponseMiddleware implements MiddlewareInterface
 {
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        // elog("ResponseMiddleware process()");
-        stream_wrapper_unregister("php");
-        stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class);
         $g = G::instance();
         $uri = $g->server['REQUEST_URI'];
         $method = $g->server['REQUEST_METHOD'];
         $app = App::instance();
-        foreach ($app->routes() as $route) {
-            // Check if method matches
-            if (!in_array($method, $route['methods'])) {
-                continue;
-            }
-
-            // Check if URI matches
+        foreach ($app->routesByMethod()[$method] ?? [] as $route) {
             if (preg_match($route['pattern'], $uri, $matches)) {
-                // elog("Matched route: $uri, $route[pattern]");
                 $params = array_filter($matches, fn($k) => !is_numeric($k), ARRAY_FILTER_USE_KEY);
 
                 $handler = $route['handler'];
 
-                // Reflect the handler parameters and inject them dynamically
-                $reflection = is_array($handler)
-                    ? new \ReflectionMethod($handler[0], $handler[1])
-                    : new \ReflectionFunction($handler);
-
                 $invokeArgs = [];
-                foreach ($reflection->getParameters() as $param) {
-                    $pname = $param->getName();
+                foreach ($route['param_map'] as $param) {
+                    $pname = $param['name'];
                     if (isset($params[$pname])) {
                         $invokeArgs[] = $params[$pname];
-                    } else if ($pname == 'app'){
+                    } else if ($pname === 'app') {
                         $invokeArgs[] = $this;
-                    } else if ($pname == 'request'){
+                    } else if ($pname === 'request') {
                         $invokeArgs[] = $g->zealphp_request;
-                    } else if ($pname == 'response'){
+                    } else if ($pname === 'response') {
                         $invokeArgs[] = $g->zealphp_response;
                     } else {
-                        $invokeArgs[] = $param->isDefaultValueAvailable() 
-                            ? $param->getDefaultValue() 
-                            : null;
+                        $invokeArgs[] = $param['has_default'] ? $param['default'] : null;
                     }
                 }
                 try {

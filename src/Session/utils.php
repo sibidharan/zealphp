@@ -27,9 +27,14 @@ function zeal_session_start()
         ];
     }
 
-    // Ensure session save path exists
-    if (!is_dir($g->session_params['save_path'])) {
-        mkdir($g->session_params['save_path'], 0777, true);
+    // Ensure session save path exists (cached per path — directory never disappears mid-run)
+    static $verified_paths = [];
+    $save_path = $g->session_params['save_path'];
+    if (!isset($verified_paths[$save_path])) {
+        if (!is_dir($save_path)) {
+            mkdir($save_path, 0777, true);
+        }
+        $verified_paths[$save_path] = true;
     }
 
     // Get session ID from cookie or generate a new one

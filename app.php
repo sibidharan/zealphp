@@ -45,7 +45,7 @@ class ValidationMiddleware implements MiddlewareInterface
     }
 }
 
-App::superglobals(true);
+App::superglobals(false);
 
 $app = App::init('0.0.0.0', 8080);
 $app->addMiddleware(new AuthenticationMiddleware());
@@ -58,8 +58,7 @@ $app->route('/phpinfo', function() {
 });
 
 $app->route('/json', function($request) {
-    // echo "<h1>Test</h1>";
-    return $_SESSION;
+    return G::instance()->session;
 });
 
 $app->route('/stream_test',[
@@ -109,23 +108,23 @@ $app->route('/stream_test',[
 $app->route('/co', function() {
     $channel = new Channel(5);
     go(function() use ($channel) {
-        sleep(3);
+        co::sleep(3);
         $channel->push('Hello, Coroutine 1!');
     });
     go(function() use ($channel) {
-        sleep(3);
+        co::sleep(3);
         $channel->push('Hello, Coroutine! 2');
     });
     go(function() use ($channel) {
-        sleep(1);
+        co::sleep(1);
         $channel->push('Hello, Coroutine! 3');
     });
     go(function() use ($channel) {
-        sleep(2);
+        co::sleep(2);
         $channel->push('Hello, Coroutine! 4');
     });
     go(function() use ($channel) {
-        sleep(3);
+        co::sleep(3);
         $channel->push('Hello, Coroutine 5!');
     });
     $results = [];
@@ -192,7 +191,7 @@ $app->route("/header", [
     setcookie('test', 'test');
     header("Location: https://example.com");
 
-    return $_SERVER;
+    return G::instance()->server;
 });
 
 $app->route("/exittest", [
@@ -223,7 +222,7 @@ $app->route('/user/{id}/post/{postId}',[
 });
 
 $app->nsRoute('watch', '/get/{key}', function($key){
-    echo $_GET[$key] ?? null;
+    echo G::instance()->get[$key] ?? null;
 });
 
 // patternRoute

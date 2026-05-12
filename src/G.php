@@ -16,10 +16,19 @@ class G
 
     public static function instance()
     {
+        if (!App::$superglobals) {
+            $cid = \OpenSwoole\Coroutine::getCid();
+            if ($cid >= 0) {
+                $context = \OpenSwoole\Coroutine::getContext($cid);
+                if (!isset($context['__g'])) {
+                    $context['__g'] = new G();
+                }
+                return $context['__g'];
+            }
+        }
         if (self::$instance === null) {
             $bt = debug_backtrace();
             $bt = array_shift($bt);
-
             elog("Creating new G instance from $bt[file]:$bt[line]");
             self::$instance = new G();
         }

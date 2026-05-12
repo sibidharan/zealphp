@@ -26,8 +26,6 @@ class CoSessionManager
 
     protected bool $useOnlyCookies;
 
-    public $g;
-
     /**
      * Inject dependencies
      *
@@ -46,7 +44,6 @@ class CoSessionManager
         $this->idGenerator = $idGenerator;
         $this->useCookies = is_null($useCookies) ? (bool)ini_get('session.use_cookies') : $useCookies;
         $this->useOnlyCookies = is_null($useOnlyCookies) ? (bool)ini_get('session.use_only_cookies') : $useOnlyCookies;
-        $this->g = G::instance();
     }
 
     /**
@@ -54,7 +51,7 @@ class CoSessionManager
      */
     public function __invoke(\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response)
     {
-        $g = $this->g;
+        $g = G::instance();
         if(isset($g->session) and isset($g->session['__start_time'])) {
             elog('[warn] Session leak detected');
         }
