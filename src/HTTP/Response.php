@@ -100,6 +100,47 @@ class Response
         return $this->parent->end($data);
     }
 
+    /**
+     * Stream a response body in chunks. Headers are flushed immediately.
+     * The $fn callback receives a $write(string $chunk) closure; call it
+     * for each piece of content. The response is closed when $fn returns.
+     *
+     * Use inside a coroutine route — co::sleep() or channel ops between
+     * $write() calls yield the event loop so other requests aren't blocked.
+     */
+    public function stream(callable $fn): void
+    {
+        $g = \ZealPHP\G::instance();
+        $g->_streaming = true;
+        $this->flush();
+        $write = fn(string $chunk) => $this->parent->write($chunk);
+        $fn($write);
+        $this->parent->end();
+    }
+
+    /**
+     * Server-Sent Events endpoint. Sets the required headers and delegates
+     * to stream(). The $fn callback receives an $emit() closure:
+     *   $emit(string $data, string $event = '', string $id = '')
+     * which formats and sends one SSE message.
+     */
+    public function sse(callable $fn): void
+    {
+        $this->header('Content-Type', 'text/event-stream');
+        $this->header('Cache-Control', 'no-cache');
+        $this->header('X-Accel-Buffering', 'no');
+        $this->stream(function($write) use ($fn) {
+            $emit = function(string $data, string $event = '', string $id = '') use ($write) {
+                $msg = '';
+                if ($id !== '')    $msg .= "id: $id\n";
+                if ($event !== '') $msg .= "event: $event\n";
+                $msg .= "data: $data\n\n";
+                $write($msg);
+            };
+            $fn($emit);
+        });
+    }
+
     public function flush(): bool
     {
         if($this->parent->isWritable()){

@@ -372,6 +372,18 @@ class App
      * @throws TemplateUnavailableException if the template does not exist.
      * @return void
      */
+    public static function renderToString(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): string
+    {
+        ob_start();
+        try {
+            self::render($__template_file, $__args, $__default_template_dir);
+        } catch (\Throwable $e) {
+            ob_end_clean();
+            throw $e;
+        }
+        return (string) ob_get_clean();
+    }
+
     public static function render($__template_file = 'index', $__args = [], $__default_template_dir = 'template')
     {
         $__current_file = self::getCurrentFile(null);
@@ -846,6 +858,25 @@ class ResponseMiddleware implements MiddlewareInterface
                 try {
                     ob_start();
                     $object = call_user_func_array($handler, $invokeArgs);
+
+                    // Generator streaming — yield chunks directly to the client
+                    if ($object instanceof \Generator) {
+                        ob_end_clean();
+                        $g->zealphp_response->flush();
+                        foreach ($object as $chunk) {
+                            $g->openswoole_response->write((string)$chunk);
+                            \OpenSwoole\Coroutine::sleep(0);
+                        }
+                        $g->openswoole_response->end();
+                        return (new Response('', $g->status ?? 200));
+                    }
+
+                    // stream() / sse() — response body already sent via write()
+                    if ($g->_streaming ?? false) {
+                        ob_end_clean();
+                        return (new Response('', $g->status ?? 200));
+                    }
+
                     if(is_int($object)){
                         $status = (int)$object;
                     } else {
