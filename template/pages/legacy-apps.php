@@ -198,6 +198,7 @@ $app->run(['task_worker_num' => 0]);
 PHP]); ?>
 
 <h2>Setup Steps</h2>
+<p>See the full working example: <a href="https://github.com/sibidharan/zealphp-wordpress" target="_blank">github.com/sibidharan/zealphp-wordpress</a></p>
 <ol style="line-height:2">
   <li>Create a ZealPHP project: <code>composer create-project sibidharan/zealphp-project my-wordpress</code></li>
   <li>Download WordPress into <code>public/</code>: <code>cd my-wordpress/public && wp core download</code></li>

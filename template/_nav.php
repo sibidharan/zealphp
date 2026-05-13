@@ -44,11 +44,11 @@ $groups = [
         ?>
         <div class="nav-group<?= $groupActive ? ' group-active' : '' ?>">
           <span class="nav-group-label"><?= $group['label'] ?> <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor"><path d="M1 1l4 4 4-4"/></svg></span>
-          <div class="nav-dropdown">
+          <div class="nav-dropdown"><div class="nav-dropdown-inner">
             <?php foreach ($group['items'] as $key => [$href, $label]): ?>
               <a href="<?= $href ?>"<?= ($active === $key ? ' class="active"' : '') ?>><?= $label ?></a>
             <?php endforeach; ?>
-          </div>
+          </div></div>
         </div>
       <?php endif; ?>
     <?php endforeach; ?>
