@@ -232,18 +232,22 @@ p  { max-width: 70ch; }
 .demo-output {
   background: var(--bg-alt); padding: 1.25rem;
   font-family: var(--font-mono); font-size: .82rem;
-  min-height: 120px; position: relative;
+  min-height: 120px; max-height: 360px; overflow: auto;
+  position: relative;
 }
 .demo-output .label {
-  position: absolute; top: .5rem; right: .75rem;
+  position: sticky; top: 0; float: right; margin-left: auto;
   font-size: .7rem; color: var(--text-muted); font-family: var(--font); text-transform: uppercase;
+  background: var(--bg-alt); padding: .25rem .5rem; border-radius: 3px;
+  z-index: 2;
 }
-.demo-output pre { white-space: pre-wrap; word-break: break-all; color: #1e293b; }
+.demo-output pre { white-space: pre-wrap; word-break: break-all; color: #1e293b; margin: 0; }
 .demo-loading { color: var(--text-muted); font-style: italic; font-family: var(--font); }
 .demo-run-btn {
-  position: absolute; bottom: .75rem; right: .75rem;
+  position: sticky; bottom: .25rem; float: right; margin: .5rem 0 0 .5rem;
   background: var(--accent); color: #fff; border: none; cursor: pointer;
   padding: .3rem .8rem; border-radius: 5px; font-size: .78rem; font-weight: 600;
+  z-index: 2;
 }
 .demo-run-btn:hover { background: var(--accent-dark); }
 
