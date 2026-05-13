@@ -75,10 +75,25 @@ class Response
     {
         $g = \ZealPHP\G::instance();
         $g->response_headers_list[] = [$key, $value];
-        if(strtolower($key) == 'location' && $value){
+        // Only auto-set 302 when no explicit status has been chosen yet
+        if (strtolower($key) === 'location' && $value && ($g->status === 200 || $g->status === null)) {
             $g->status = 302;
         }
         return true;
+    }
+
+    /**
+     * Send an HTTP redirect.
+     *
+     * @param string $url    Destination URL (absolute or relative)
+     * @param int    $status 301 Moved Permanently, 302 Found (default),
+     *                       307 Temporary Redirect, 308 Permanent Redirect
+     */
+    public function redirect(string $url, int $status = 302): void
+    {
+        $g = \ZealPHP\G::instance();
+        $g->status = $status;
+        $g->response_headers_list[] = ['Location', $url];
     }
 
     public function cookie(string $key, string $value = '', int $expire = 0, string $path = '/', string $domain = '', bool $secure = false, bool $httponly = false, string $samesite = '', string $priority = ''): bool

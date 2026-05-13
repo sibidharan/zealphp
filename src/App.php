@@ -5,6 +5,8 @@ use ZealPHP\ZealAPI;
 use ZealPHP\Session;
 use function ZealPHP\elog;
 use function ZealPHP\jTraceEx;
+use function ZealPHP\response_add_header;
+use function ZealPHP\response_set_status;
 
 use OpenSwoole\Core\Psr\Middleware\StackHandler;
 use OpenSwoole\Core\Psr\Response;
@@ -19,6 +21,7 @@ class App
 {
     protected $routes = [];
     protected $routes_by_method = [];
+    protected $ws_routes = [];
     protected $host;
     protected $port;
     static $cwd;
@@ -128,6 +131,28 @@ class App
     public function routesByMethod(): array
     {
         return $this->routes_by_method;
+    }
+
+    /**
+     * Register a WebSocket endpoint.
+     *
+     * @param string        $path      URI path, e.g. '/ws/chat'
+     * @param callable      $onMessage function($server, $frame, $g) — called for each message
+     * @param callable|null $onOpen    function($server, $request, $g) — called on connect
+     * @param callable|null $onClose   function($server, $fd, $g)     — called on disconnect
+     */
+    public function ws(string $path, callable $onMessage, ?callable $onOpen = null, ?callable $onClose = null): void
+    {
+        $this->ws_routes[$path] = [
+            'message' => $onMessage,
+            'open'    => $onOpen,
+            'close'   => $onClose,
+        ];
+    }
+
+    public function wsRoutes(): array
+    {
+        return $this->ws_routes;
     }
 
     private function buildParamMap($handler): array
@@ -475,7 +500,8 @@ class App
             // 'task_enable_coroutine' => true,
         ];
         // elog("Initializing ZealPHP server at http://{$this->host}:{$this->port}");
-        self::$server = $server = new \OpenSwoole\HTTP\Server($this->host, $this->port);
+        // WebSocket\Server extends HTTP\Server — all HTTP routes still work
+        self::$server = $server = new \OpenSwoole\WebSocket\Server($this->host, $this->port);
         if ($settings == null){
             $server->set($default_settings);
         } else {
@@ -817,6 +843,38 @@ class App
             stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class);
         });
 
+        // fd → ws path map, shared across WebSocket event closures
+        $wsFdMap = [];
+
+        $server->on('open', function(\OpenSwoole\WebSocket\Server $server, \OpenSwoole\Http\Request $request) use (&$wsFdMap) {
+            $path  = $request->server['path_info'] ?? '/';
+            $wsFdMap[$request->fd] = $path;
+            $g     = G::instance();
+            $route = App::instance()->wsRoutes()[$path] ?? null;
+            if ($route && $route['open']) {
+                ($route['open'])($server, $request, $g);
+            }
+        });
+
+        $server->on('message', function(\OpenSwoole\WebSocket\Server $server, \OpenSwoole\WebSocket\Frame $frame) use (&$wsFdMap) {
+            $path  = $wsFdMap[$frame->fd] ?? null;
+            $g     = G::instance();
+            $route = $path ? (App::instance()->wsRoutes()[$path] ?? null) : null;
+            if ($route && $route['message']) {
+                ($route['message'])($server, $frame, $g);
+            }
+        });
+
+        $server->on('close', function(\OpenSwoole\WebSocket\Server $server, int $fd) use (&$wsFdMap) {
+            $path  = $wsFdMap[$fd] ?? null;
+            unset($wsFdMap[$fd]);
+            $g     = G::instance();
+            $route = $path ? (App::instance()->wsRoutes()[$path] ?? null) : null;
+            if ($route && $route['close']) {
+                ($route['close'])($server, $fd, $g);
+            }
+        });
+
         elog("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
         $server->start();
     }
@@ -834,7 +892,29 @@ class ResponseMiddleware implements MiddlewareInterface
         $uri = $g->server['REQUEST_URI'];
         $method = $g->server['REQUEST_METHOD'];
         $app = App::instance();
-        foreach ($app->routesByMethod()[$method] ?? [] as $route) {
+
+        // OPTIONS — return allowed methods for this URI without running a handler
+        if ($method === 'OPTIONS') {
+            $allowed = ['OPTIONS'];
+            foreach ($app->routesByMethod() as $m => $routes) {
+                foreach ($routes as $route) {
+                    if (preg_match($route['pattern'], $uri)) {
+                        $allowed[] = $m;
+                        if ($m === 'GET') $allowed[] = 'HEAD';
+                        break;
+                    }
+                }
+            }
+            $allowed = array_unique($allowed);
+            response_set_status(204);
+            response_add_header('Allow', implode(', ', $allowed));
+            return new Response('', 204);
+        }
+
+        // HEAD — match GET routes, run the handler, strip the body
+        $matchMethod = ($method === 'HEAD') ? 'GET' : $method;
+
+        foreach ($app->routesByMethod()[$matchMethod] ?? [] as $route) {
             if (preg_match($route['pattern'], $uri, $matches)) {
                 $params = array_filter($matches, fn($k) => !is_numeric($k), ARRAY_FILTER_USE_KEY);
 
@@ -899,6 +979,11 @@ class ResponseMiddleware implements MiddlewareInterface
                     }
 
                     $buffer = ob_get_clean();
+                    // HEAD — return headers only, body stripped (Content-Length preserved)
+                    if ($method === 'HEAD') {
+                        response_add_header('Content-Length', (string)strlen($buffer));
+                        return (new Response('', $status));
+                    }
                     return (new Response($buffer, $status));
                 } catch (\Throwable|\OpenSwoole\ExitException $e) {
                     if($e instanceof \OpenSwoole\ExitException){

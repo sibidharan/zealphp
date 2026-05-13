@@ -444,25 +444,9 @@ function response_headers_list()
  * @param bool $secure Indicates that the cookie should only be transmitted over a secure HTTPS connection from the client. Default is false.
  * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
  */
-function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false) {
-    // $cookie = "$name=$value";
-    // if ($expire) {
-    //     $cookie .= "; expires=" . gmdate('D, d-M-Y H:i:s T', $expire);
-    // }
-    // if ($path) {
-    //     $cookie .= "; path=$path";
-    // }
-    // if ($domain) {
-    //     $cookie .= "; domain=$domain";
-    // }
-    // if ($secure) {
-    //     $cookie .= "; secure";
-    // }
-    // if ($httponly) {
-    //     $cookie .= "; httponly";
-    // }
+function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false, $samesite = '') {
     $g = G::instance();
-    $g->zealphp_response->cookie($name, $value, $expire, $path, $domain, $secure, $httponly);
+    $g->zealphp_response->cookie($name, $value, $expire, $path, $domain, $secure, $httponly, $samesite);
 }
 
 /**
