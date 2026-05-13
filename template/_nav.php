@@ -2,6 +2,7 @@
 $active ??= 'home';
 $links = [
   'home'        => ['/', 'Home'],
+  'getting-started' => ['/getting-started', 'Start'],
   'routing'     => ['/routing',   'Routing'],
   'responses'   => ['/responses', 'Responses'],
   'coroutines'  => ['/coroutines','Coroutines'],

@@ -4,6 +4,7 @@ namespace ZealPHP;
 
 use ZealPHP\App;
 
+#[\AllowDynamicProperties]
 class G
 {
     private static $instance = null;

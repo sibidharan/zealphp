@@ -58,11 +58,11 @@ function resolve_log_dir(): ?string
     if ($envDir !== false && trim((string) $envDir) !== '') {
         $candidates[] = trim((string) $envDir);
     }
-    $candidates[] = '/var/log/zealphp';
+    $candidates[] = '/tmp/zealphp';
 
     $cwd = getcwd();
     if ($cwd !== false && $cwd !== '') {
-        $candidates[] = $cwd . '/var/log/zealphp';
+        $candidates[] = $cwd . '/tmp/zealphp';
         $candidates[] = $cwd . '/logs/zealphp';
     }
 

@@ -196,7 +196,7 @@ start_server() {
             "ZEALPHP_TASK_WORKERS=$TASK_WORKERS"
             "ZEALPHP_BENCH_MODE=${ZEALPHP_BENCH_MODE:-1}"
             "ZEALPHP_LOG_ASYNC=${ZEALPHP_LOG_ASYNC:-1}"
-            "ZEALPHP_LOG_DIR=${ZEALPHP_LOG_DIR:-/var/log/zealphp}"
+            "ZEALPHP_LOG_DIR=${ZEALPHP_LOG_DIR:-/tmp/zealphp}"
             "ZEALPHP_DEBUG_LOG=${ZEALPHP_DEBUG_LOG:-0}"
             "ZEALPHP_ACCESS_LOG=${ZEALPHP_ACCESS_LOG:-0}"
             "ZEALPHP_PID_FILE=$SERVER_PID_FILE"

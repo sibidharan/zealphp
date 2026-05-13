@@ -290,8 +290,44 @@ foreach ([
 }
 
 $pidFile = getenv('ZEALPHP_PID_FILE');
-if ($pidFile !== false && $pidFile !== '') {
+if ($pidFile === false || trim((string) $pidFile) === '') {
+    $logDir = getenv('ZEALPHP_LOG_DIR');
+    if ($logDir === false || trim((string) $logDir) === '') {
+        $logDir = '/tmp/zealphp';
+    }
+    $pidFile = rtrim(trim((string) $logDir), '/') . '/zealphp.pid';
+}
+$pidFile = trim((string) $pidFile);
+if ($pidFile !== '') {
+    $pidDir = dirname($pidFile);
+    if ($pidDir !== '.' && !is_dir($pidDir)) {
+        @mkdir($pidDir, 0775, true);
+    }
     $settings['pid_file'] = $pidFile;
+}
+
+$daemonize = env_flag('ZEALPHP_DAEMONIZE', false);
+if ($daemonize) {
+    $settings['daemonize'] = true;
+}
+
+$serverLogFile = getenv('ZEALPHP_SERVER_LOG_FILE');
+if ($serverLogFile === false || $serverLogFile === '') {
+    if ($daemonize) {
+        $logDir = getenv('ZEALPHP_LOG_DIR');
+        if ($logDir === false || trim((string) $logDir) === '') {
+            $logDir = '/tmp/zealphp';
+        }
+        $serverLogFile = rtrim(trim((string) $logDir), '/') . '/server.log';
+    }
+}
+if ($serverLogFile !== false && trim((string) $serverLogFile) !== '') {
+    $serverLogFile = trim((string) $serverLogFile);
+    $serverLogDir = dirname($serverLogFile);
+    if ($serverLogDir !== '.' && !is_dir($serverLogDir)) {
+        @mkdir($serverLogDir, 0775, true);
+    }
+    $settings['log_file'] = $serverLogFile;
 }
 
 $app->run($settings);

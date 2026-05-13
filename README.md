@@ -33,7 +33,7 @@ A lightweight, high-performance open-source PHP web framework built on **OpenSwo
 
 ```bash
 # New project
-composer create-project sibidharan/zealphp-project:^0.1 my-project
+composer create-project sibidharan/zealphp-project:^0.1.1 my-project
 cd my-project
 php app.php
 # → http://localhost:8080
@@ -93,6 +93,29 @@ $app->run();
 
 ---
 
+## Background Run
+
+Use the helper when you want ZealPHP detached from the terminal:
+
+```bash
+scripts/zealphp.sh start
+scripts/zealphp.sh restart
+scripts/zealphp.sh status
+scripts/zealphp.sh logs
+scripts/zealphp.sh stop
+```
+
+It writes the PID file to `/tmp/zealphp/zealphp.pid` by default, stores the
+server log in `/tmp/zealphp/server.log`, and tails `server.log`,
+`access.log`, `debug.log`, and `zlog.log` from the same directory. If a server
+is already running, the start command asks before killing and restarting it.
+`restart` stops any live process it finds, then starts it again with the same
+defaults without prompting.
+
+Use `scripts/zealphp.sh foreground` if you want the attached mode back.
+
+---
+
 ## Docker Benchmark
 
 Run the benchmark in Docker with PHP, OpenSwoole, uopz, Composer deps, and `wrk`
@@ -117,12 +140,12 @@ docker compose run --rm --build compare
 Set `ZEALPHP_BENCH_MODE=1` to skip the demo middleware and session file I/O on
 the benchmark path. The sample auth/validation middleware is opt-in via
 `ZEALPHP_DEMO_MIDDLEWARE=1`.
-Set `ZEALPHP_LOG_DIR=/var/log/zealphp` to send `debug.log`, `access.log`, and
+Set `ZEALPHP_LOG_DIR=/tmp/zealphp` to send `debug.log`, `access.log`, and
 `zlog.log` there, and keep `ZEALPHP_LOG_ASYNC=1` so request logging is queued
 off the hot path. Use `ZEALPHP_DEBUG_LOG=0` and `ZEALPHP_ACCESS_LOG=0` for
 quiet runs.
-If `/var/log/zealphp` is not writable, ZealPHP falls back to a writable local
-log directory.
+If `/tmp/zealphp` is not writable, ZealPHP falls back to a writable local log
+directory.
 
 ---
 

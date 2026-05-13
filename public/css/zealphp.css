@@ -57,8 +57,9 @@ p  { max-width: 70ch; }
 }
 .topnav .logo {
   font-size: 1.1rem; font-weight: 800; color: #fff;
-  display: flex; align-items: center; gap: .5rem;
+  display: flex; align-items: center; gap: 0;
   margin-right: 2rem; text-decoration: none;
+  white-space: nowrap;
 }
 .topnav .logo span { color: var(--accent); }
 .topnav nav { display: flex; gap: .1rem; flex: 1; }
@@ -120,10 +121,17 @@ p  { max-width: 70ch; }
 .btn-ghost:hover { background: var(--bg-alt); }
 
 /* ── Benchmark bar ── */
+.bench-note {
+  text-align: center;
+  color: #cbd5e1;
+  font-size: .82rem;
+  margin: 1.75rem auto .75rem;
+  position: relative;
+}
 .bench {
   display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap;
   padding: 1.5rem; background: rgba(255,255,255,.04); border-radius: var(--radius);
-  margin: 2.5rem auto 0; max-width: 700px; position: relative;
+  margin: 0 auto 0; max-width: 700px; position: relative;
 }
 .bench-stat { text-align: center; }
 .bench-stat .num { font-size: 1.8rem; font-weight: 800; color: var(--accent); }

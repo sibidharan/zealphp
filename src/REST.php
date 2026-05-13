@@ -16,7 +16,7 @@ class REST {
     }
 
     public function get_referer(){
-        return $_SERVER['HTTP_REFERER'];
+        return $this->serverValue('HTTP_REFERER');
     }
 
     public function response($data, $status){
@@ -73,21 +73,22 @@ class REST {
     }
 
     public function get_request_method(){
-        return G::instance()->server['REQUEST_METHOD'];
-        
-        // return $_SERVER['REQUEST_METHOD'];
+        return $this->serverValue('REQUEST_METHOD', 'GET');
     }
 
     private function inputs(){
+        $getData = $this->requestValues('get');
+        $postData = $this->requestValues('post');
+
         switch($this->get_request_method()){
             case "POST":
-                //$this->_request = $this->cleanInputs($_POST);
-                $this->_request =  $this->cleanInputs(array_merge($_GET,$_POST));
+                $this->_request = $this->cleanInputs(array_merge($getData, $postData));
                 break;
             case "GET":
-                $this->_request = $this->cleanInputs($_GET);
+                $this->_request = $this->cleanInputs($getData);
+                break;
             case "DELETE":
-                $this->_request = $this->cleanInputs($_GET);
+                $this->_request = $this->cleanInputs($getData);
                 break;
             case "PUT":
                 parse_str(file_get_contents("php://input"),$this->_request);
@@ -97,6 +98,19 @@ class REST {
                 $this->response('',406);
                 break;
         }
+    }
+
+    private function serverValue($key, $default = null){
+        $server = G::instance()->server;
+        if (!is_array($server)) {
+            return $default;
+        }
+        return $server[$key] ?? $default;
+    }
+
+    private function requestValues($key){
+        $value = G::instance()->$key;
+        return is_array($value) ? $value : [];
     }
 
     private function cleanInputs($data){

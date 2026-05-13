@@ -7,9 +7,10 @@
     <p>An async PHP framework tuned for coroutine I/O, SSR streaming, WebSocket, and low-latency services.<br>
        Built to keep requests lean and the event loop moving.</p>
     <div class="cta">
-      <a href="/routing" class="btn btn-primary">Get Started →</a>
+      <a href="/getting-started" class="btn btn-primary">Get Started →</a>
       <a href="https://github.com/sibidharan/zealphp" class="btn btn-outline" target="_blank">GitHub ↗</a>
     </div>
+    <div class="bench-note">Local benchmark on 4 workers</div>
     <div class="bench">
       <div class="bench-stat"><div class="num">4</div><div class="label">workers</div></div>
       <div class="bench-stat"><div class="num">67k</div><div class="label">req/s</div></div>
@@ -23,27 +24,20 @@
 <section class="section" style="background:var(--bg-dark);color:#e2e8f0">
   <div class="container">
     <h2 style="color:#fff;margin-bottom:.5rem">Quick Start</h2>
-    <p style="color:#94a3b8;margin-bottom:1.5rem">Three lines to a running async server.</p>
+    <p style="color:#94a3b8;margin-bottom:1.5rem">Pick the starter-project path or run the framework repo directly.</p>
     <div class="quickstart">
-      <div><span class="comment"># Install</span></div>
-      <div><span class="cmd">composer require sibidharan/zealphp</span></div>
-      <div>&nbsp;</div>
-      <div><span class="comment"># app.php</span></div>
-      <div><span class="php">&lt;?php</span></div>
-      <div>use ZealPHP\App;</div>
-      <div>&nbsp;</div>
-      <div>App::superglobals(false);</div>
-      <div>$app = App::init('0.0.0.0', 8080);</div>
-      <div>&nbsp;</div>
-      <div>$app->route('/hello/{name}', function($name) {</div>
-      <div>&nbsp;&nbsp;&nbsp;&nbsp;return ['hello' => $name, 'framework' => 'ZealPHP'];</div>
-      <div>});</div>
-      <div>&nbsp;</div>
-      <div>$app->run();</div>
-      <div>&nbsp;</div>
-      <div><span class="comment"># Start</span></div>
+      <div><span class="comment"># Starter project</span></div>
+      <div><span class="cmd">composer create-project sibidharan/zealphp-project:^0.1.1 ~/zealphp-project</span></div>
+      <div><span class="cmd">cd ~/zealphp-project</span></div>
       <div><span class="cmd">php app.php</span></div>
-      <div><span class="comment"># → http://localhost:8080/hello/world</span></div>
+      <div><span class="comment"># → http://localhost:8080</span></div>
+    </div>
+    <div class="quickstart">
+      <div><span class="comment"># Framework repo</span></div>
+      <div><span class="cmd">git clone https://github.com/sibidharan/zealphp.git ~/zealphp</span></div>
+      <div><span class="cmd">cd ~/zealphp</span></div>
+      <div><span class="cmd">php app.php</span></div>
+      <div><span class="comment"># → http://localhost:8080</span></div>
     </div>
   </div>
 </section>
@@ -87,7 +81,7 @@
         ['🧵', 'True coroutines',    'Not fake async with callbacks. Real coroutines with go() + Channel. Write synchronous code that runs concurrently.'],
         ['🔧', 'PHP you already know','Superglobals, sessions, headers — all work via uopz overrides. Migrate existing apps without rewriting everything.'],
         ['📐', 'PSR standards',      'PSR-7 request/response, PSR-15 middleware. Drop in any PSR-15 middleware package.'],
-        ['📊', 'Benchmarked',        'Local quad-core /raw/bench sweep at c=1000 in bench mode: ZealPHP sustained 67k req/s, 21ms p90, and 0 failures on 4 workers.'],
+        ['📊', 'Benchmark',          'Local quad-core /raw/bench sweep at c=1000 in bench mode: ZealPHP sustained 67k req/s, 21ms p90, and 0 failures on 4 workers.'],
         ['🔓', 'Open source',        'MIT licensed. Maintained by the community. Built on OpenSwoole, one of PHP\'s most battle-tested async runtimes.'],
       ];
       foreach ($why as [$icon, $title, $body]):

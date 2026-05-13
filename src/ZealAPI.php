@@ -60,9 +60,6 @@ class ZealAPI extends REST
                         return;
                     }
                     $g->server['PHP_SELF'] = $module.'/'.$request.'.php';
-                    if(App::$superglobals) {
-                        $_SERVER['PHP_SELF'] = $g->server['PHP_SELF'];
-                    }
                     $handler = $this->api_rpc;
                     $reflection = is_array($handler)
                     ? new \ReflectionMethod($handler[0], $handler[1])

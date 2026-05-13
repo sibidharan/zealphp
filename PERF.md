@@ -82,12 +82,12 @@ workers, and 4 wrk threads. It writes:
 For quieter runs, set `ZEALPHP_BENCH_MODE=1` to skip the demo middleware and
 session file I/O on the benchmark path. The sample auth/validation middleware
 is opt-in via `ZEALPHP_DEMO_MIDDLEWARE=1`.
-Set `ZEALPHP_LOG_DIR=/var/log/zealphp` to write `debug.log`, `access.log`, and
+Set `ZEALPHP_LOG_DIR=/tmp/zealphp` to write `debug.log`, `access.log`, and
 `zlog.log` there, and keep `ZEALPHP_LOG_ASYNC=1` so logging is queued off the
 request path. Also set `ZEALPHP_DEBUG_LOG=0` and `ZEALPHP_ACCESS_LOG=0` for
 quiet runs.
-If `/var/log/zealphp` is not writable, ZealPHP falls back to a writable local
-log directory.
+If `/tmp/zealphp` is not writable, ZealPHP falls back to a writable local log
+directory.
 
 `--p1000` is only a project shorthand for a concurrency sweep up to `c=1000`.
 Latency percentiles are still reported as p50, p90, and p99.
@@ -104,7 +104,7 @@ The script:
 | Endpoint | `/raw/bench` |
 | Bench mode | `ZEALPHP_BENCH_MODE=1` for the lean benchmark profile |
 | Demo middleware | `ZEALPHP_DEMO_MIDDLEWARE=1` to enable the sample auth/validation layer |
-| Logs | `ZEALPHP_LOG_DIR=/var/log/zealphp`, `ZEALPHP_LOG_ASYNC=1` |
+| Logs | `ZEALPHP_LOG_DIR=/tmp/zealphp`, `ZEALPHP_LOG_ASYNC=1` |
 | Sweep | `1,10,50,100,200,500,1000` concurrency |
 | Output | `bench/results/zealphp-*.csv` plus raw logs |
 
