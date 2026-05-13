@@ -95,7 +95,7 @@ class Store
     /** Check if a row exists. */
     public static function exists(string $table, string $key): bool
     {
-        return (self::$tables[$table] ?? null)?->exist($key) ?? false;
+        return (self::$tables[$table] ?? null)?->exists($key) ?? false;
     }
 
     /** Atomically increment an integer column and return new value. */
