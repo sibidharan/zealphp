@@ -2,7 +2,26 @@
 <section class="section">
 <div class="container">
 <h1 class="section-title">Running Legacy PHP Apps</h1>
-<p class="section-desc">ZealPHP can serve unmodified PHP applications like WordPress, Drupal, or any traditional PHP app. Superglobals mode + CGI-style process isolation provides Apache mod_php-like behavior on top of OpenSwoole's async architecture.</p>
+<p class="section-desc">ZealPHP runs <strong>unmodified WordPress</strong> — admin dashboard, login, posts, plugins — out of the box. No patches, no forks, no compatibility layers. If it runs on Apache, it runs on ZealPHP.</p>
+
+<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin: 2rem 0;">
+  <div style="border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-md);">
+    <img src="/img/wordpress-home.png" alt="WordPress homepage served by ZealPHP" style="width:100%; display:block;">
+    <div style="padding: .5rem .75rem; background: var(--bg-alt); font-size: .82rem; color: var(--text-muted); text-align:center;">WordPress front page</div>
+  </div>
+  <div style="border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-md);">
+    <img src="/img/wordpress-admin.png" alt="WordPress admin dashboard on ZealPHP" style="width:100%; display:block;">
+    <div style="padding: .5rem .75rem; background: var(--bg-alt); font-size: .82rem; color: var(--text-muted); text-align:center;">Admin dashboard — full menu, widgets, Quick Draft</div>
+  </div>
+  <div style="border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-md);">
+    <img src="/img/wordpress-posts.png" alt="WordPress posts list on ZealPHP" style="width:100%; display:block;">
+    <div style="padding: .5rem .75rem; background: var(--bg-alt); font-size: .82rem; color: var(--text-muted); text-align:center;">Posts management — CRUD, bulk actions, filters</div>
+  </div>
+</div>
+
+<div class="callout info" style="margin-bottom: 2rem;">
+<p><strong>Zero WordPress modifications required.</strong> Login, sessions, cookies, redirects, file uploads, REST API, pretty permalinks — everything works through ZealPHP's CGI worker with true global scope isolation. The same <code>app.php</code> works for Drupal, Laravel, or any traditional PHP application.</p>
+</div>
 
 <h2>How It Works</h2>
 <p>Three framework features enable legacy app compatibility:</p>

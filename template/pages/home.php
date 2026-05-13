@@ -10,7 +10,7 @@ $siteUrl = site_url();
   <div class="container">
     <h1>ZealPHP <span>on OpenSwoole</span></h1>
     <p>An async PHP framework tuned for coroutine I/O, SSR streaming, WebSocket, and low-latency services.<br>
-       Built to keep requests lean and the event loop moving.</p>
+       Runs <strong>WordPress out of the box</strong> — zero modifications required.</p>
     <div class="cta">
       <a href="/getting-started" class="btn btn-primary">Get Started →</a>
       <a href="https://github.com/sibidharan/zealphp" class="btn btn-outline" target="_blank">GitHub ↗</a>
@@ -92,6 +92,7 @@ $siteUrl = site_url();
         ['⏱️', 'Timers',    'App::tick/after for recurring tasks. Per-worker via onWorkerStart.', '/timers',      'Timer'],
         ['🌐', 'HTTP',      'HEAD, OPTIONS, 301/307 redirects, CORS, ETag, gzip — full HTTP/1.1.', '/http',       'HTTP/1.1'],
         ['🔗', 'ZealAPI',   'File-based REST endpoints. Drop a PHP file in api/ and it becomes a route.', '/api',        'implicit routes'],
+        ['🏗️', 'Legacy Apps', 'Run WordPress, Drupal, or any PHP app unmodified. CGI worker provides true global scope isolation.', '/legacy-apps', 'WordPress'],
       ];
       foreach ($features as [$icon, $title, $body, $href, $badge]) {
         App::render('/components/_card', compact('icon', 'title', 'body', 'href', 'badge'));
