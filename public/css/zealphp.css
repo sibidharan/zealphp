@@ -62,13 +62,13 @@ p  { max-width: 70ch; }
   white-space: nowrap;
 }
 .topnav .logo span { color: var(--accent); }
-.topnav nav { display: flex; gap: .1rem; flex: 1; align-items: center; }
-.topnav nav > a {
+.nav-links { display: flex; gap: .1rem; flex: 1; align-items: center; }
+.nav-links > a {
   color: #94a3b8; font-size: .85rem; font-weight: 500;
   padding: .4rem .75rem; border-radius: 5px;
   transition: background .15s, color .15s;
 }
-.topnav nav > a:hover, .topnav nav > a.active {
+.nav-links > a:hover, .nav-links > a.active {
   color: #fff; background: rgba(255,255,255,.08); text-decoration: none;
 }
 .nav-group {
@@ -107,6 +107,9 @@ p  { max-width: 70ch; }
 .nav-dropdown-inner a:hover, .nav-dropdown-inner a.active {
   color: #fff; background: rgba(255,255,255,.08); text-decoration: none;
 }
+/* ── Mobile hamburger toggle ── */
+.nav-toggle-input { display: none; }
+.nav-toggle-btn { display: none; }
 .topnav .actions { display: flex; gap: .5rem; margin-left: auto; }
 .topnav .actions a {
   color: #cbd5e1; font-size: .82rem; padding: .35rem .8rem;
@@ -409,10 +412,32 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   .demo-panel { grid-template-columns: 1fr; }
   .demo-code { border-right: none; border-bottom: 1px solid var(--border); }
   .inject-case-body { grid-template-columns: 1fr; }
-  .topnav nav { display: none; }
   h1 { font-size: 1.75rem; }
   .hero { padding: 3rem 1rem 2.5rem; }
   .bench { gap: 1rem; }
+  .topnav { flex-wrap: wrap; height: auto; min-height: 56px; }
+  .nav-toggle-btn {
+    display: flex; flex-direction: column; gap: 4px; cursor: pointer;
+    padding: .5rem; margin-left: auto; order: 2;
+  }
+  .nav-toggle-btn span {
+    display: block; width: 20px; height: 2px; background: #94a3b8;
+    transition: transform .2s, opacity .2s;
+  }
+  .nav-toggle-input:checked ~ .nav-toggle-btn span:nth-child(1) { transform: rotate(45deg) translate(4px, 4px); }
+  .nav-toggle-input:checked ~ .nav-toggle-btn span:nth-child(2) { opacity: 0; }
+  .nav-toggle-input:checked ~ .nav-toggle-btn span:nth-child(3) { transform: rotate(-45deg) translate(4px, -4px); }
+  .nav-links {
+    display: none !important; flex-direction: column; width: 100%;
+    order: 3; padding: .5rem 0;
+  }
+  .nav-toggle-input:checked ~ .nav-links { display: flex !important; }
+  .nav-links > a { padding: .6rem 1rem; }
+  .nav-group { width: 100%; }
+  .nav-group-label { padding: .6rem 1rem; }
+  .nav-dropdown { position: static; padding-top: 0; }
+  .nav-dropdown-inner { border: none; box-shadow: none; padding-left: 1.5rem; background: transparent; }
+  .topnav .actions { order: 1; margin-left: auto; }
 }
 
 /* ── Highlight.js overrides ── */

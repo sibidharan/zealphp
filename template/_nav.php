@@ -1,57 +1,50 @@
 <?php
 $active ??= 'home';
 
-$groups = [
-  ['items' => [
-    'home'            => ['/', 'Home'],
-    'getting-started' => ['/getting-started', 'Start'],
-  ]],
-  ['label' => 'Core', 'items' => [
-    'routing'    => ['/routing',    'Routing'],
-    'responses'  => ['/responses',  'Responses'],
-    'middleware' => ['/middleware',  'Middleware'],
-    'sessions'   => ['/sessions',   'Sessions'],
-  ]],
-  ['label' => 'Async', 'items' => [
-    'coroutines' => ['/coroutines', 'Coroutines'],
-    'streaming'  => ['/streaming',  'Streaming'],
-    'websocket'  => ['/ws',         'WebSocket'],
-    'timers'     => ['/timers',     'Timers'],
-  ]],
-  ['label' => 'More', 'items' => [
-    'store'       => ['/store',       'Store'],
-    'http'        => ['/http',        'HTTP'],
-    'api'         => ['/api',         'ZealAPI'],
-    'legacy-apps' => ['/legacy-apps', 'Legacy Apps'],
-  ]],
+$topLinks = [
+  'home'        => ['/', 'Home'],
+  'getting-started' => ['/getting-started', 'Start'],
+  'routing'     => ['/routing', 'Routing'],
+  'responses'   => ['/responses', 'Responses'],
+  'coroutines'  => ['/coroutines', 'Coroutines'],
+  'streaming'   => ['/streaming', 'Streaming'],
 ];
+
+$moreItems = [
+  'middleware'  => ['/middleware',  'Middleware'],
+  'sessions'    => ['/sessions',   'Sessions'],
+  'websocket'   => ['/ws',         'WebSocket'],
+  'timers'      => ['/timers',     'Timers'],
+  'store'       => ['/store',      'Store'],
+  'http'        => ['/http',       'HTTP'],
+  'api'         => ['/api',        'ZealAPI'],
+  'legacy-apps' => ['/legacy-apps', 'Legacy Apps'],
+];
+
+$moreActive = false;
+foreach ($moreItems as $key => $item) {
+  if ($active === $key) { $moreActive = true; break; }
+}
 ?>
 <header>
 <nav class="topnav">
   <a href="/" class="logo">Zeal<span>PHP</span></a>
-  <nav>
-    <?php foreach ($groups as $group): ?>
-      <?php if (empty($group['label'])): ?>
-        <?php foreach ($group['items'] as $key => [$href, $label]): ?>
+  <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
+  <label for="nav-toggle" class="nav-toggle-btn" aria-label="Toggle menu">
+    <span></span><span></span><span></span>
+  </label>
+  <nav class="nav-links">
+    <?php foreach ($topLinks as $key => [$href, $label]): ?>
+      <a href="<?= $href ?>"<?= ($active === $key ? ' class="active"' : '') ?>><?= $label ?></a>
+    <?php endforeach; ?>
+    <div class="nav-group<?= $moreActive ? ' group-active' : '' ?>">
+      <span class="nav-group-label">More <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor"><path d="M1 1l4 4 4-4"/></svg></span>
+      <div class="nav-dropdown"><div class="nav-dropdown-inner">
+        <?php foreach ($moreItems as $key => [$href, $label]): ?>
           <a href="<?= $href ?>"<?= ($active === $key ? ' class="active"' : '') ?>><?= $label ?></a>
         <?php endforeach; ?>
-      <?php else: ?>
-        <?php
-          $groupActive = false;
-          foreach ($group['items'] as $key => $item) {
-            if ($active === $key) { $groupActive = true; break; }
-          }
-        ?>
-        <div class="nav-group<?= $groupActive ? ' group-active' : '' ?>">
-          <span class="nav-group-label"><?= $group['label'] ?> <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor"><path d="M1 1l4 4 4-4"/></svg></span>
-          <div class="nav-dropdown"><div class="nav-dropdown-inner">
-            <?php foreach ($group['items'] as $key => [$href, $label]): ?>
-              <a href="<?= $href ?>"<?= ($active === $key ? ' class="active"' : '') ?>><?= $label ?></a>
-            <?php endforeach; ?>
-          </div></div>
-        </div>
-      <?php endif; ?>
-    <?php endforeach; ?>
+      </div></div>
+    </div>
   </nav>
   <div class="actions">
     <a href="https://deepwiki.com/sibidharan/zealphp" target="_blank">DeepWiki ↗</a>
