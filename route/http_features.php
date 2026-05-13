@@ -66,7 +66,7 @@ $app->route('/http/etag-test', ['methods' => ['GET']], function() {
 });
 
 // ---------------------------------------------------------------------------
-// 6. Compression — handled by OpenSwoole http_compression
+// 6. Compression — handled by OpenSwoole http_compression or ZealPHP's CompressionMiddleware
 //    curl --compressed http://localhost:8080/http/compress-test
 // ---------------------------------------------------------------------------
 $app->route('/http/compress-test', ['methods' => ['GET']], function() {

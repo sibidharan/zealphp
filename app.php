@@ -20,6 +20,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use ZealPHP\Middleware\CorsMiddleware;
+use ZealPHP\Middleware\CompressionMiddleware;
 use ZealPHP\Middleware\ETagMiddleware;
 use ZealPHP\Store;
 use ZealPHP\Counter;
@@ -54,6 +55,7 @@ class ValidationMiddleware implements MiddlewareInterface
 App::superglobals(false);
 $benchMode = bench_mode_enabled();
 $demoMiddleware = env_flag('ZEALPHP_DEMO_MIDDLEWARE', false);
+$compressionMiddleware = env_flag('ZEALPHP_COMPRESSION_MIDDLEWARE', false);
 
 $envInt = static function (string $name, int $default, int $min = 1): int {
     $value = getenv($name);
@@ -71,6 +73,9 @@ $app = App::init(
 if (!$benchMode) {
     $app->addMiddleware(new CorsMiddleware());         // outermost — handles preflight, adds Allow-Origin
     $app->addMiddleware(new ETagMiddleware());         // generates ETag, returns 304 on cache hit
+    if ($compressionMiddleware) {
+        $app->addMiddleware(new CompressionMiddleware());
+    }
     // Demo-only middleware. Enable with ZEALPHP_DEMO_MIDDLEWARE=1.
     if ($demoMiddleware) {
         $app->addMiddleware(new AuthenticationMiddleware());
@@ -271,6 +276,8 @@ $app->patternRoute('/raw/(?P<rest>.*)', ['methods' => ['GET']], function($rest) 
 $settings = [
     'task_worker_num' => $envInt('ZEALPHP_TASK_WORKERS', 8, 0),
 ];
+
+$settings['http_compression'] = env_flag('ZEALPHP_HTTP_COMPRESSION', !$compressionMiddleware);
 
 $workerNum = getenv('ZEALPHP_WORKERS');
 if ($workerNum !== false && $workerNum !== '') {

@@ -30,6 +30,9 @@ jobs:
         run: composer install --no-interaction --prefer-dist
 
       - name: Start ZealPHP
+        env:
+          ZEALPHP_COMPRESSION_MIDDLEWARE: '1'
+          ZEALPHP_HTTP_COMPRESSION: '0'
         run: |
           php app.php >/tmp/zealphp-server.log 2>&1 &
           echo $! > /tmp/zealphp-server.pid
