@@ -207,19 +207,157 @@ PHP]); ?>
 </table>
 
 <h2>AI Config Converter</h2>
-<p>Don't want to convert manually? An OpenAI-powered agent does it for you — with the full ZealPHP API reference and few-shot examples built in:</p>
+<p>Paste your <code>.htaccess</code> or nginx config — get a working <code>app.php</code> streamed in real-time. Powered by gpt-4.1-mini with the full ZealPHP API reference.</p>
+
+<div class="converter-split" style="display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin:1.5rem 0;">
+  <div style="border-right:1px solid var(--border);">
+    <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
+      <span>Apache / nginx config</span>
+      <select id="convert-preset" style="font-size:.75rem; padding:.2rem .4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg);">
+        <option value="">— paste your own —</option>
+        <option value="wordpress">WordPress .htaccess</option>
+        <option value="nginx-cms">nginx CMS</option>
+        <option value="redirects">Redirect rules</option>
+      </select>
+    </div>
+    <textarea id="convert-input" style="width:100%; min-height:280px; border:none; padding:.75rem; font-family:var(--font-mono); font-size:.82rem; background:var(--code-bg); color:var(--code-text); resize:vertical; outline:none;" placeholder="Paste your .htaccess or nginx server { } config here..."></textarea>
+    <div style="padding:.5rem .75rem; background:var(--bg-alt); display:flex; align-items:center; gap:.5rem;">
+      <button id="convert-btn" onclick="runConvert()" style="padding:.4rem 1.2rem; background:var(--accent); color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:.82rem; font-weight:600;">Convert →</button>
+      <span id="convert-status" style="font-size:.75rem; color:var(--text-muted);"></span>
+    </div>
+  </div>
+  <div>
+    <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
+      <span>ZealPHP app.php</span>
+      <button onclick="copyOutput()" style="font-size:.72rem; padding:.15rem .5rem; border:1px solid var(--border); border-radius:4px; background:var(--bg); cursor:pointer; color:var(--text-muted);">Copy</button>
+    </div>
+    <pre id="convert-output" style="min-height:280px; padding:.75rem; margin:0; font-family:var(--font-mono); font-size:.82rem; background:var(--code-bg); color:var(--code-text); overflow:auto; white-space:pre-wrap;"><span style="color:var(--text-muted);">// Output will appear here...</span></pre>
+    <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.72rem; color:var(--text-muted);">
+      Rate limit: 5 conversions per 10 minutes · Powered by gpt-4.1-mini · <a href="https://github.com/sibidharan/zealphp/blob/master/examples/agents/config_converter.py" target="_blank">Source</a>
+    </div>
+  </div>
+</div>
+
+<style>
+@media (max-width:768px) { .converter-split { grid-template-columns:1fr !important; } }
+</style>
+
+<script>
+const PRESETS = {
+  wordpress: `# BEGIN WordPress
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+RewriteRule ^index\\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+# END WordPress`,
+  'nginx-cms': `server {
+    listen 80;
+    server_name example.com;
+    root /var/www/html;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+    location ~ \\.php$ {
+        fastcgi_pass unix:/run/php/php-fpm.sock;
+        include fastcgi_params;
+    }
+    location ~* \\.(css|js|png|jpg|gif|ico)$ {
+        expires 30d;
+    }
+}`,
+  redirects: `RewriteEngine On
+RewriteRule ^old-page$ /new-page [R=301,L]
+RewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]
+RewriteRule ^docs$ https://docs.example.com [R=301,L]`
+};
+
+document.getElementById('convert-preset').addEventListener('change', function() {
+  if (this.value && PRESETS[this.value]) {
+    document.getElementById('convert-input').value = PRESETS[this.value];
+  }
+});
+
+function runConvert() {
+  const input = document.getElementById('convert-input').value.trim();
+  const output = document.getElementById('convert-output');
+  const status = document.getElementById('convert-status');
+  const btn = document.getElementById('convert-btn');
+
+  if (!input) { status.textContent = 'Paste a config first'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Converting...';
+  status.textContent = 'Streaming from gpt-4.1-mini...';
+  output.textContent = '';
+
+  const es = new EventSource('/api/convert?' + new URLSearchParams({_t: Date.now()}));
+  // EventSource is GET-only; use fetch+POST with ReadableStream instead
+  es.close();
+
+  fetch('/api/convert', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({config: input})
+  }).then(response => {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    function read() {
+      reader.read().then(({done, value}) => {
+        if (done) {
+          btn.disabled = false;
+          btn.textContent = 'Convert →';
+          status.textContent = 'Done';
+          return;
+        }
+        buffer += decoder.decode(value, {stream: true});
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const text = line.slice(6);
+            if (text === '[DONE]') continue;
+            output.textContent += text + '\n';
+          }
+        }
+        output.scrollTop = output.scrollHeight;
+        read();
+      });
+    }
+    read();
+  }).catch(err => {
+    output.textContent = '// Error: ' + err.message;
+    btn.disabled = false;
+    btn.textContent = 'Convert →';
+    status.textContent = 'Failed';
+  });
+}
+
+function copyOutput() {
+  const text = document.getElementById('convert-output').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = event.target;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1500);
+  });
+}
+</script>
 
 <?php App::render('/components/_code', [
-    'label' => 'Install and run (requires OPENAI_API_KEY)',
+    'label' => 'CLI usage (also available as a command-line tool)',
     'code'  => <<<'BASH'
-# Pipe any .htaccess or nginx config — get a working app.php
+# Pipe any config — get app.php on stdout
 cat .htaccess | uv run examples/agents/config_converter.py
 
-# Or paste interactively
+# Interactive mode
 uv run examples/agents/config_converter.py
 BASH, 'lang' => 'bash']); ?>
-
-<p>The agent uses gpt-4.1-mini with streaming, calls <code>get_zealphp_reference()</code> to load the routing API, retrieves few-shot conversion examples, and validates the output. Source: <a href="https://github.com/sibidharan/zealphp/blob/master/examples/agents/config_converter.py" target="_blank">examples/agents/config_converter.py</a></p>
 
 <h2>WordPress Example</h2>
 <p>A complete <code>app.php</code> that runs WordPress on ZealPHP:</p>
