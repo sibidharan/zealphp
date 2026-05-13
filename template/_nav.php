@@ -14,6 +14,7 @@ $links = [
   'timers'      => ['/timers',    'Timers'],
   'http'        => ['/http',      'HTTP'],
   'api'         => ['/api',       'ZealAPI'],
+  'legacy-apps' => ['/legacy-apps', 'Legacy Apps'],
 ];
 ?>
 <header>

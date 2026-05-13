@@ -36,6 +36,7 @@ class App
     public static $middleware_wait_stack = [];
     public static $ignore_php_ext = true;
     public static $coproc_implicit_request_handler = false;
+    private static $fallback_handler = null;
 
     private function __construct($host = '0.0.0.0', $port = 8080,$cwd = __DIR__)
     {
@@ -517,8 +518,228 @@ class App
         }
     }
 
+    /**
+     * Include a PHP file with process isolation when superglobals mode is active.
+     * Uses a separate PHP process (CGI-style) to ensure files run at the true
+     * global scope — required for legacy apps like WordPress that use bare
+     * variable assignments and `global` keyword declarations.
+     */
+    public static function includeFile(string $path): void
+    {
+        if (self::$coproc_implicit_request_handler) {
+            echo self::cgiInclude($path);
+        } else {
+            include $path;
+        }
+    }
+
+    private static function cgiInclude(string $path): string
+    {
+        $g = G::instance();
+
+        $ctx = json_encode([
+            'server' => $g->server ?? [],
+            'get'    => $g->get ?? [],
+            'post'   => $g->post ?? [],
+            'cookie' => $g->cookie ?? [],
+            'files'  => $g->files ?? [],
+        ], JSON_UNESCAPED_SLASHES);
+
+        $env = [];
+        foreach ($g->server ?? [] as $k => $v) {
+            if (is_string($v)) $env[$k] = $v;
+        }
+        $env['ZEALPHP_REQUEST_CONTEXT'] = $ctx;
+        $env['ZEALPHP_CWD'] = self::$cwd;
+
+        $cgiWorker = __DIR__ . '/cgi_worker.php';
+        $descriptors = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $process = proc_open(
+            PHP_BINARY . ' ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path),
+            $descriptors,
+            $pipes,
+            self::$cwd . '/public',
+            $env
+        );
+
+        if (!is_resource($process)) {
+            elog("cgiInclude: failed to start process for $path", "error");
+            return '<pre>500 Internal Server Error</pre>';
+        }
+
+        try {
+            $postBody = $g->zealphp_request->parent->getContent();
+            if ($postBody) fwrite($pipes[0], $postBody);
+        } catch (\Throwable $e) {}
+        fclose($pipes[0]);
+
+        $body = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        $metaJson = stream_get_contents($pipes[2]);
+        fclose($pipes[2]);
+        proc_close($process);
+
+        if ($metaJson) {
+            $meta = json_decode(trim($metaJson), true);
+            if ($meta) {
+                response_set_status($meta['status_code'] ?? 200);
+                foreach ($meta['headers'] ?? [] as $pair) {
+                    if (count($pair) >= 2) {
+                        $g->zealphp_response->header($pair[0], $pair[1]);
+                    }
+                }
+                foreach ($meta['cookies'] ?? [] as $args) {
+                    if (!empty($args)) {
+                        $g->zealphp_response->cookie(...$args);
+                    }
+                }
+            }
+        }
+
+        return $body;
+    }
+
+    /**
+     * Register a fallback handler for unmatched routes (like Apache's RewriteRule . /index.php [L]).
+     */
+    public function setFallback(callable $handler): void
+    {
+        self::$fallback_handler = [
+            'handler'   => $handler,
+            'param_map' => $this->buildParamMap($handler),
+            'raw'       => false,
+        ];
+    }
+
+    public static function getFallback(): ?array
+    {
+        return self::$fallback_handler;
+    }
+
     public function addMiddleware(\Psr\Http\Server\MiddlewareInterface $middleware){
         self::$middleware_wait_stack[] = $middleware;
+    }
+
+    private function invokeFallbackOrNotFound(): int
+    {
+        if (self::$fallback_handler !== null) {
+            $handler = self::$fallback_handler['handler'];
+            $handler();
+            $g = G::instance();
+            return $g->status ?? 200;
+        }
+        echo("<pre>404 Not Found</pre>");
+        return 404;
+    }
+
+    protected static function parseCliArgs(): array
+    {
+        $argv = $_SERVER['argv'] ?? $GLOBALS['argv'] ?? [];
+        if (count($argv) <= 1) {
+            return [];
+        }
+
+        array_shift($argv);
+        $command = 'start';
+        $flags = [];
+        $i = 0;
+        while ($i < count($argv)) {
+            $arg = $argv[$i];
+            if ($arg === 'start' || $arg === 'stop' || $arg === 'status') {
+                $command = $arg;
+                $i++;
+                continue;
+            }
+            if ($arg === '-p' || $arg === '--port') {
+                $flags['port'] = (int)($argv[++$i] ?? 8080);
+            } elseif ($arg === '-H' || $arg === '--host') {
+                $flags['host'] = $argv[++$i] ?? '0.0.0.0';
+            } elseif ($arg === '-w' || $arg === '--workers') {
+                $flags['worker_num'] = max(1, (int)($argv[++$i] ?? 4));
+            } elseif ($arg === '-d' || $arg === '--daemonize') {
+                $flags['daemonize'] = true;
+            } elseif ($arg === '--task-workers') {
+                $flags['task_worker_num'] = max(0, (int)($argv[++$i] ?? 0));
+            } elseif ($arg === '--pid-file') {
+                $flags['pid_file'] = $argv[++$i] ?? null;
+            }
+            $i++;
+        }
+
+        switch ($command) {
+            case 'stop':
+                self::cliStop(self::resolvePidFile($flags));
+                exit(0);
+            case 'status':
+                self::cliStatus(self::resolvePidFile($flags));
+                exit(0);
+            default:
+                $overrides = [];
+                if (isset($flags['host'])) { $overrides['_host'] = $flags['host']; }
+                if (isset($flags['port'])) { $overrides['_port'] = $flags['port']; }
+                if (isset($flags['worker_num'])) { $overrides['worker_num'] = $flags['worker_num']; }
+                if (isset($flags['daemonize'])) { $overrides['daemonize'] = true; }
+                if (isset($flags['task_worker_num'])) { $overrides['task_worker_num'] = $flags['task_worker_num']; }
+                if (isset($flags['pid_file'])) { $overrides['pid_file'] = $flags['pid_file']; }
+                return $overrides;
+        }
+    }
+
+    private static function resolvePidFile(array $flags): string
+    {
+        if (!empty($flags['pid_file'])) {
+            return $flags['pid_file'];
+        }
+        $port = $flags['port'] ?? (self::$instance ? self::$instance->port : 8080);
+        return "/tmp/zealphp_{$port}.pid";
+    }
+
+    private static function cliStop(string $pidFile): void
+    {
+        if (!file_exists($pidFile)) {
+            echo "ZealPHP is not running (no PID file: {$pidFile})\n";
+            return;
+        }
+        $pid = (int)trim(file_get_contents($pidFile));
+        if ($pid <= 0 || !posix_kill($pid, 0)) {
+            echo "ZealPHP is not running (stale PID file)\n";
+            @unlink($pidFile);
+            return;
+        }
+        echo "Stopping ZealPHP (pid {$pid})...\n";
+        posix_kill($pid, SIGTERM);
+        for ($i = 0; $i < 100; $i++) {
+            if (!posix_kill($pid, 0)) {
+                echo "Stopped.\n";
+                return;
+            }
+            usleep(100000);
+        }
+        echo "Force killing...\n";
+        posix_kill($pid, SIGKILL);
+        usleep(200000);
+        @unlink($pidFile);
+    }
+
+    private static function cliStatus(string $pidFile): void
+    {
+        if (!file_exists($pidFile)) {
+            echo "ZealPHP is not running\n";
+            exit(1);
+        }
+        $pid = (int)trim(file_get_contents($pidFile));
+        if ($pid <= 0 || !posix_kill($pid, 0)) {
+            echo "ZealPHP is not running (stale PID file)\n";
+            @unlink($pidFile);
+            exit(1);
+        }
+        echo "ZealPHP is running (pid {$pid})\n";
+        exit(0);
     }
 
     /**
@@ -530,15 +751,26 @@ class App
      * - enable_static_handler: bool (default: true)
      * - document_root: string (default: self::$cwd . '/public')
      * - enable_coroutine: bool (default: true)
-     * - pid_file: string (default: '/tmp/zealphp.pid')
+     * - pid_file: string (default: '/tmp/zealphp_{port}.pid')
      *
-     * This method initializes the Swoole HTTP server with the provided settings or default settings.
-     * It includes all route files from the route directory and sets up various implicit and global routes.
-     * It also handles the request and response lifecycle, including setting up superglobals ($_GET, $_POST, etc.)
-     * and matching the request URI to the defined routes.
+     * CLI usage:
+     *   php app.php [start|stop|status] [-p port] [-H host] [-w workers] [-d] [--task-workers N] [--pid-file path]
      */
     public function run($settings = null)
     {
+        $cliOverrides = self::parseCliArgs();
+        if (isset($cliOverrides['_host'])) {
+            $this->host = $cliOverrides['_host'];
+            unset($cliOverrides['_host']);
+        }
+        if (isset($cliOverrides['_port'])) {
+            $this->port = (int)$cliOverrides['_port'];
+            unset($cliOverrides['_port']);
+        }
+        if (!empty($cliOverrides)) {
+            $settings = array_merge($settings ?? [], $cliOverrides);
+        }
+
         App::$coproc_implicit_request_handler = App::$superglobals;
         if(!App::$superglobals){
             co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
@@ -551,8 +783,8 @@ class App
             // Runtime compression is owned by OpenSwoole. Do not also register
             // CompressionMiddleware unless this setting is disabled.
             'http_compression' => true,
-            'pid_file' => '/tmp/zealphp.pid',
-            'task_worker_num' => 4,
+            'pid_file' => "/tmp/zealphp_{$this->port}.pid",
+            'task_worker_num' => 0,
             'task_enable_coroutine' => true,
             // Suppress NOTICE-level messages from OpenSwoole internals (e.g. ERRNO 1005
             // "session does not exist" when SSE/WS clients disconnect mid-stream).
@@ -563,12 +795,12 @@ class App
         // WebSocket\Server extends HTTP\Server — all HTTP routes still work
         self::$server = $server = new \OpenSwoole\WebSocket\Server($this->host, $this->port);
         if ($settings == null){
-            $server->set($default_settings);
+            $effective_settings = $default_settings;
         } else {
-            $settings = array_merge($default_settings, $settings);
-            $settings['enable_coroutine'] = !self::$superglobals;
-            $server->set($settings);
+            $effective_settings = array_merge($default_settings, $settings);
+            $effective_settings['enable_coroutine'] = !self::$superglobals;
         }
+        $server->set($effective_settings);
 
         # Include all files in route directory and its sub directories
 
@@ -629,22 +861,13 @@ class App
             $abs_file = self::$cwd."/public/".$file.".php";
             if(file_exists($abs_file)){
                 if ($this->includeCheck($abs_file)){
-                    if(self::$coproc_implicit_request_handler){
-                        echo prefork_request_handler(function() use ($abs_file){
-                            // throw new \Exception("Include: $abs_file");
-                            include $abs_file;
-                        });
-                    } else {
-                        include $abs_file;
-                    }
+                    App::includeFile($abs_file);
                 } else {
                     echo("<pre>403 Forbidden</pre>");
                     return(403);
                 }
             } else {
-                //TODO: Can load user page here if file not found
-                echo("<pre>404 Not Found</pre>");
-                return(404);
+                return $this->invokeFallbackOrNotFound();
             }
         });
 
@@ -663,14 +886,7 @@ class App
                     $g->server['PHP_SELF'] = '/'.$file.'.php';
                     $g->server['SCRIPT_NAME'] = '/'.$file.'.php';
                     $g->server['SCRIPT_FILENAME'] = $abs_file;
-                    if(self::$coproc_implicit_request_handler){
-                        echo prefork_request_handler(function() use ($abs_file){
-                            // throw new \Exception("Include: $abs_file");
-                            include $abs_file;
-                        });
-                    } else {
-                        include $abs_file;
-                    }
+                    App::includeFile($abs_file);
                 } else {
                     echo("<pre>403 Forbidden</pre>");
                     return 403;
@@ -682,26 +898,16 @@ class App
                         $g->server['PHP_SELF'] = '/'.$file.'/index.php';
                         $g->server['SCRIPT_NAME'] = '/'.$file.'/index.php';
                         $g->server['SCRIPT_FILENAME'] = $abs_file;
-                        if(self::$coproc_implicit_request_handler){
-                            echo prefork_request_handler(function() use ($abs_file){
-                                // throw new \Exception("Include: $abs_file");
-                                include $abs_file;
-                            });
-                        } else {
-                            include $abs_file;
-                        }
+                        App::includeFile($abs_file);
                     } else {
                         echo("<pre>403 Forbidden</pre>");
                         return 403;
                     }
                 } else {
-                    echo("<pre>404 Not Found</pre>");
-                    return 404;
+                    return $this->invokeFallbackOrNotFound();
                 }
             } else {
-                //TODO: Can load user page here if file not found
-                echo("<pre>404 Not Found</pre>");
-                return 404;
+                return $this->invokeFallbackOrNotFound();
             }
         });
 
@@ -722,14 +928,7 @@ class App
                     $g->server['SCRIPT_NAME'] = '/'.$dir.'/'.$uri.'.php';
                     $g->server['SCRIPT_FILENAME'] = $abs_file;
                     // include $abs_file;
-                    if(self::$coproc_implicit_request_handler){
-                        echo prefork_request_handler(function() use ($abs_file){
-                            // throw new \Exception("Include: $abs_file");
-                            include $abs_file;
-                        });
-                    } else {
-                        include $abs_file;
-                    }
+                    App::includeFile($abs_file);
                 } else {
                     echo("<pre>403 Forbidden</pre>");
                     return(403);
@@ -741,57 +940,43 @@ class App
                         $g->server['PHP_SELF'] = '/'.$dir.'/'.$uri.'/index.php';
                         $g->server['SCRIPT_NAME'] = '/'.$dir.'/'.$uri.'/index.php';
                         $g->server['SCRIPT_FILENAME'] = $abs_path;
-                        if(self::$coproc_implicit_request_handler){
-                            echo prefork_request_handler(function() use ($abs_path){
-                                // throw new \Exception("Include: $abs_path");
-                                include $abs_path;
-                            });
-                        } else {
-                            include $abs_path;
-                        }
+                        App::includeFile($abs_path);
                     } else {
                         echo("<pre>403 Forbidden</pre>");
                         return(403);
                        
                     }
                 } else {
-                    echo("<pre>404 Not Found</pre>");
-                    return(404);
-                   
+                    return $this->invokeFallbackOrNotFound();
                 }
             } else {
-                //TODO: Can load user page here if file not found
-                echo("<pre>404 Not Found</pre>");
-                return(404);
-                
+                return $this->invokeFallbackOrNotFound();
             }
         });
-        
-        $server->on('task', function ($server, $id, $rid, $data) {
-            $handler = $data['handler'];
-            $_func = basename($handler);
-            if(file_exists(App::$cwd.$handler.'.php')){
-                # TODO: Include check for task handlers
-                include App::$cwd.$handler.'.php';
 
-                # call the function from the included file
-                $result = $$_func(...$data['args']);
-                unset($$_func);
-            } else {
-                # TODO: Should throw exception?
-                elog("Task handler not found: $handler", "error");
-                $result = false;
-            }
-            elog(json_encode([$data, $result]), "task");
-            return [
-                'task' => $data,
-                'result' => $result
-            ];
-        });
+        if (($effective_settings['task_worker_num'] ?? 0) > 0) {
+            $server->on('task', function ($server, $id, $rid, $data) {
+                $handler = $data['handler'];
+                $_func = basename($handler);
+                if(file_exists(App::$cwd.$handler.'.php')){
+                    include App::$cwd.$handler.'.php';
+                    $result = $$_func(...$data['args']);
+                    unset($$_func);
+                } else {
+                    elog("Task handler not found: $handler", "error");
+                    $result = false;
+                }
+                elog(json_encode([$data, $result]), "task");
+                return [
+                    'task' => $data,
+                    'result' => $result
+                ];
+            });
 
-        $server->on('finish', function ($server, $task_id, $data) {
-            elog(json_encode($data), "task_task");
-        });
+            $server->on('finish', function ($server, $task_id, $data) {
+                elog(json_encode($data), "task_task");
+            });
+        }
 
         $SessionManager = self::$superglobals ?  'ZealPHP\Session\SessionManager' : 'ZealPHP\Session\CoSessionManager';
 
@@ -1189,6 +1374,10 @@ class ResponseMiddleware implements MiddlewareInterface
                 $params = array_filter($matches, fn($k) => !is_numeric($k), ARRAY_FILTER_USE_KEY);
                 return $this->dispatchRoute($route, $params, $method);
             }
+        }
+        $fallback = App::getFallback();
+        if ($fallback !== null) {
+            return $this->dispatchRoute($fallback, [], $method);
         }
         return (new Response('<pre>404 Not Found</pre>'))->withStatus(404);
     }
