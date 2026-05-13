@@ -155,17 +155,83 @@ Reflection is cached per route at registration time — zero reflection overhead
 
 ### SSR Streaming
 
-Three streaming patterns via `src/HTTP/Response.php` and `ResponseMiddleware`:
+Four streaming patterns via `src/HTTP/Response.php` and `ResponseMiddleware`:
 
 | Pattern | How | When to use |
 |---------|-----|-------------|
 | **Generator `yield`** | Return `\Generator`; each `yield $string` sent immediately | SSR — stream HTML shell, yield sections as coroutines resolve |
+| **`App::renderStream()`** | Returns `\Generator`; template declares params, framework injects by name | Streaming from template files — compose with `yield from` |
 | **`$response->stream($fn)`** | `$fn` receives `$write(string)` closure; headers flushed before `$fn` runs | Fine-grained streaming control |
 | **`$response->sse($fn)`** | `$fn` receives `$emit($data, $event, $id)` — formats SSE wire protocol | Server-Sent Events for JS `EventSource` |
 
-`App::renderToString($template, $args)` — captures `App::render()` into a string safe to `yield` or `$write()` inside a streaming context.
+### Template Rendering
+
+Three render methods:
+
+| Method | Returns | Use when |
+|--------|---------|----------|
+| `App::render($tpl, $args)` | `void` (echoes) | Direct output in route handler or inside another template |
+| `App::renderToString($tpl, $args)` | `string` | Need HTML as value — email, cache, or `yield` |
+| `App::renderStream($tpl, $args)` | `Generator` | SSR streaming — works with both regular and streaming templates |
+
+**Streaming templates** — template returns a Closure with named parameters; framework injects by name (same as route handlers):
+
+```php
+// template/users/stream.php — streaming template
+<?php return function($users, $page = 1) {
+    yield "<section>";
+    foreach ($users as $user) {
+        yield "<div>{$user->name}</div>";
+    }
+    yield "</section>";
+};
+
+// Route handler — compose streams
+$app->route('/users', fn() => (function() {
+    yield from App::renderStream('shell-open', ['title' => 'Users']);
+    yield from App::renderStream('users/stream', ['users' => User::all()]);
+    yield from App::renderStream('shell-close');
+})());
+```
+
+`renderStream()` supports three template styles:
+1. `return function($var) { yield ...; };` — Closure with param injection (cleanest)
+2. `return (function() use ($var) { yield ...; })();` — IIFE Generator (explicit)
+3. Regular echo template — captured output yielded as one chunk
+
+**Return value conventions** in route handlers:
+
+| Return | Behavior |
+|--------|----------|
+| `int` | HTTP status code (e.g., `return 404;`) |
+| `array` / `object` | JSON-serialized, Content-Type set |
+| `string` | HTML body |
+| `Generator` | SSR streaming (each yield sent immediately) |
+| `void` + `echo` | Output buffer captured via `ob_get_clean()` |
+| `ResponseInterface` | PSR-7 response used directly |
 
 `$g->_streaming = true` is set by `stream()`/`sse()` so `ResponseMiddleware` knows to skip `ob_get_clean()`.
+
+### Legacy App Support (CGI Worker)
+
+`App::includeFile($path)` runs PHP files in a separate process (`proc_open`) at true global scope when `App::superglobals(true)` is set. This enables unmodified WordPress/Drupal to run on ZealPHP.
+
+`App::setFallback(callable)` registers a catch-all handler for unmatched routes — replaces Apache's `.htaccess` `RewriteRule . /index.php [L]`.
+
+**CGI worker** (`src/cgi_worker.php`) captures `header()`, `setcookie()`, `setrawcookie()`, `header_remove()`, `headers_list()`, `http_response_code()`, `headers_sent()` via uopz. SSE streaming works in CGI mode via `flush()` override.
+
+### CLI Management
+
+```
+php app.php start -p 8080 -d   # Start daemonized
+php app.php stop               # Stop via PID file
+php app.php status             # Check if running
+php app.php --help             # All options
+```
+
+Flags: `-p PORT`, `-H HOST`, `-w WORKERS`, `-d` (daemonize), `--task-workers N`, `--pid-file PATH`
+
+PID files are per-port: `/tmp/zealphp_{port}.pid`
 
 ### WebSocket
 
@@ -233,9 +299,10 @@ template/
     _card.php          — Feature card
     _demo.php          — Split code + live output panel
   pages/               — One file per website section
-    home.php, routing.php, responses.php, coroutines.php,
-    middleware.php, sessions.php, streaming.php, websocket.php,
-    store.php, timers.php, http.php, api.php
+    home.php, getting-started.php, routing.php, responses.php,
+    coroutines.php, streaming.php, websocket.php, middleware.php,
+    sessions.php, store.php, timers.php, http.php, api.php,
+    templates.php, legacy-apps.php
 ```
 
 CSS: `public/css/zealphp.css` — single file, CSS variables, indigo accent, no inline styles.
@@ -270,7 +337,8 @@ All ZealPHP usage examples live as first-class project files:
 
 | File | Role |
 |------|------|
-| `App.php` | Framework core: init, route registration, `run()`, `ResponseMiddleware`, `render()`/`renderToString()`, `tick()`/`after()`/`onWorkerStart()` |
+| `App.php` | Framework core: init, route registration, `run()`, `ResponseMiddleware`, `render()`/`renderToString()`/`renderStream()`, `includeFile()`, `setFallback()`, `tick()`/`after()`/`onWorkerStart()`, CLI `parseCliArgs()` |
+| `cgi_worker.php` | CGI-style process for legacy apps — true global scope, uopz header/cookie capture, SSE streaming via flush() |
 | `G.php` | Per-request global state; superglobals mode uses static singleton, coroutine mode uses `Coroutine::getContext()` |
 | `Store.php` | `OpenSwoole\Table` adapter — cross-worker shared-memory key-value store |
 | `Counter.php` | `OpenSwoole\Atomic` adapter — lock-free cross-worker integer counter |
@@ -286,3 +354,16 @@ All ZealPHP usage examples live as first-class project files:
 | `Middleware/CorsMiddleware.php` | CORS preflight + `Access-Control-*` headers |
 | `Middleware/ETagMiddleware.php` | ETag generation + 304 Not Modified |
 | `Middleware/CompressionMiddleware.php` | Reference gzip/deflate middleware; only use when OpenSwoole `http_compression` is disabled |
+| `deploy/zealphp.service` | systemd service template (Type=simple, no -d) |
+
+---
+
+## Scaffold Project (`~/zealphp-project`)
+
+The starter project at `~/zealphp-project` (repo: `sibidharan/zealphp-project`) is the template used by `composer create-project`. **Keep it in sync with this main repo:**
+
+- When adding new framework features (new methods, new patterns), update `~/zealphp-project/.claude/CLAUDE.md` with the latest API reference.
+- When adding deploy artifacts (service files, configs), copy them to `~/zealphp-project/deploy/`.
+- After syncing, commit, force-update the `v0.1.1` tag, and push: `git tag -f v0.1.1 && git push origin main && git push origin -f v0.1.1`
+
+The starter project's `.claude/CLAUDE.md` should always reflect the latest ZealPHP API so AI tools can assist developers immediately after scaffolding.

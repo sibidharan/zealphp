@@ -75,6 +75,105 @@ $app->route('/stream/events', function($response) {
 // es.addEventListener('tick', e => console.log(JSON.parse(e.data)));
 PHP]); ?>
 
+<h2 style="margin:2.5rem 0 1rem">Streaming from templates — <code>App::renderStream()</code></h2>
+
+<p>Templates can <code>yield</code>. Return a Closure with named parameters — the framework injects them by name (same as route handlers). Each yield flushes to the browser immediately. Regular echo-based templates work too — output captured as one chunk.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Streaming template — template/dashboard/stats.php',
+    'code'  => <<<'PHP'
+<?php
+// Declare what data you need — framework injects by name
+return function($metrics) {
+    yield "<div class='stats-grid'>";
+    foreach ($metrics as $label => $value) {
+        yield "<div class='stat'>"
+            . "<span class='stat-value'>{$value}</span>"
+            . "<span class='stat-label'>{$label}</span>"
+            . "</div>";
+    }
+    yield "</div>";
+};
+PHP]); ?>
+
+<?php App::render('/components/_code', [
+    'label' => 'Compose multiple streaming + regular templates in one route',
+    'code'  => <<<'PHP'
+$app->route('/dashboard', function() {
+    return (function() {
+        // Regular template → yields as single chunk
+        yield from App::renderStream('shell-open', ['title' => 'Dashboard']);
+
+        // Streaming template → yields per-metric card
+        yield from App::renderStream('dashboard/stats', [
+            'metrics' => ['Requests' => '67k/s', 'Latency' => '21ms', 'Workers' => 4],
+        ]);
+
+        // Another streaming template — yields per-row
+        yield from App::renderStream('dashboard/activity', [
+            'events' => fetchRecentEvents(),
+        ]);
+
+        // Regular template → yields as single chunk
+        yield from App::renderStream('shell-close');
+    })();
+});
+PHP]); ?>
+
+<h3>Three template styles — all compose in the same pipeline</h3>
+
+<table class="ztable">
+<tr><th>Template style</th><th>Code</th><th>What renderStream() does</th></tr>
+<tr>
+  <td>Closure (cleanest)</td>
+  <td><code>return function($users) { yield ...; };</code></td>
+  <td>Injects params by name via Reflection, calls closure, yield from Generator</td>
+</tr>
+<tr>
+  <td>IIFE Generator</td>
+  <td><code>return (function() use ($v) { yield ...; })();</code></td>
+  <td>Template returns Generator directly, yield from it</td>
+</tr>
+<tr>
+  <td>Regular echo</td>
+  <td><code>&lt;h1&gt;&lt;?= $title ?&gt;&lt;/h1&gt;</code></td>
+  <td>Captures output, yields as one chunk</td>
+</tr>
+</table>
+
+<?php App::render('/components/_code', [
+    'label' => 'Advanced: parallel coroutine fetches + template streaming',
+    'code'  => <<<'PHP'
+use OpenSwoole\Coroutine\Channel;
+
+$app->route('/feed', function() {
+    return (function() {
+        yield from App::renderStream('shell-open', ['title' => 'Feed']);
+
+        // Fetch data in parallel — stream results as each completes
+        $ch = new Channel(3);
+        go(fn() => $ch->push(['type' => 'users',    'data' => fetchUsers()]));
+        go(fn() => $ch->push(['type' => 'posts',    'data' => fetchPosts()]));
+        go(fn() => $ch->push(['type' => 'comments', 'data' => fetchComments()]));
+
+        for ($i = 0; $i < 3; $i++) {
+            $result = $ch->pop();
+            // Each section streams as its data arrives
+            yield from App::renderStream(
+                "feed/{$result['type']}",
+                ['items' => $result['data']]
+            );
+        }
+
+        yield from App::renderStream('shell-close');
+    })();
+});
+PHP]); ?>
+
+<div class="callout info">
+<strong>Why PHP for streaming?</strong> Unlike Blade/Twig which require a compile step and can't yield, ZealPHP templates are raw PHP — <code>yield</code> is a native language feature. Templates declare their dependencies as function parameters, the framework injects them, and each yield flushes to the client. No special template syntax, no streaming adapter — just PHP generators.
+</div>
+
 </div>
 </section>
 
