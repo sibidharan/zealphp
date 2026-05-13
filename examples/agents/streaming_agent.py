@@ -89,7 +89,7 @@ async def main():
         print("Agent: ", end="", flush=True)
         result = Runner.run_streamed(triage_agent, input=user_input)
         async for event in result.stream_events():
-            if event.type == "raw_response_event" and hasattr(event.data, "delta"):
+            if event.type == "raw_response_event" and getattr(event.data, "type", "") == "response.output_text.delta":
                 print(event.data.delta, end="", flush=True)
         print("\n")
 

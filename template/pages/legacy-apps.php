@@ -213,6 +213,39 @@ PHP]); ?>
   <li>Visit <code>http://localhost:9501/wp-admin/install.php</code> to complete installation</li>
 </ol>
 
+<h2>AI Config Converter</h2>
+<p>An OpenAI-powered agent converts Apache <code>.htaccess</code> and nginx configs to <code>app.php</code> automatically:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Convert a WordPress .htaccess',
+    'code'  => <<<'BASH'
+# Pipe any .htaccess or nginx config — get a working app.php
+cat .htaccess | uv run examples/agents/config_converter.py
+
+# Interactive mode
+uv run examples/agents/config_converter.py
+BASH, 'lang' => 'bash']); ?>
+
+<?php App::render('/components/_code', [
+    'label' => 'Example: nginx try_files → ZealPHP fallback',
+    'code'  => <<<'TEXT'
+# Input (nginx):
+location / { try_files $uri $uri/ /index.php?$args; }
+location ~ \.php$ { fastcgi_pass unix:/run/php/php-fpm.sock; }
+
+# Output (ZealPHP app.php):
+App::superglobals(true);
+$app->setFallback(function() {
+    $g = G::instance();
+    $g->server['PHP_SELF'] = '/index.php';
+    $g->server['SCRIPT_FILENAME'] = App::$cwd . '/public/index.php';
+    App::includeFile(App::$cwd . '/public/index.php');
+});
+$app->run();
+TEXT]); ?>
+
+<p>Uses gpt-4.1-mini with streaming, tool-assisted validation, and the ZealPHP API reference. See <a href="https://github.com/sibidharan/zealphp/blob/master/examples/agents/" target="_blank">examples/agents/</a> for the full source.</p>
+
 <h2>CLI Management</h2>
 <p>ZealPHP includes built-in process management:</p>
 
