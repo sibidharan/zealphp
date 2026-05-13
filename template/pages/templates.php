@@ -137,9 +137,9 @@ PHP]); ?>
     'label' => 'Streaming template (template/users/stream.php)',
     'code'  => <<<'PHP'
 <?php
-// This template YIELDS — each user
-// is sent to the browser as it renders
-return (function() use ($users) {
+// Declare what data this template needs —
+// framework injects by name (like route handlers)
+return function($users) {
     yield "<section class='users'>";
     foreach ($users as $user) {
         yield "<div class='card'>"
@@ -147,7 +147,7 @@ return (function() use ($users) {
             . "</div>\n";
     }
     yield "</section>";
-})();
+};
 PHP]); ?>
 </div>
 <div>
@@ -174,26 +174,28 @@ PHP]); ?>
 </div>
 </div>
 
-<p>The browser sees the shell immediately, then each user card streams in as the database query progresses. No waiting for all data to load.</p>
+<p>The template declares <code>function($users)</code> — the framework injects <code>$users</code> from the args array by name, exactly like route parameter injection. Each <code>yield</code> flushes to the browser immediately.</p>
 
-<?php App::render('/components/_code', [
-    'label' => 'How renderStream() works internally',
-    'code'  => <<<'PHP'
-public static function renderStream($tpl, $args = []): \Generator
-{
-    // 1. Resolve template path (same rules as render)
-    // 2. extract($args) — variables available in template
-    ob_start();
-    $result = include $path;
-    $output = ob_get_clean();
-
-    if ($result instanceof \Generator) {
-        yield from $result;  // Streaming template
-    } else {
-        yield $output;       // Regular template (one chunk)
-    }
-}
-PHP]); ?>
+<h3>Three streaming template styles</h3>
+<table class="ztable">
+<tr><th>Style</th><th>Template code</th><th>Best for</th></tr>
+<tr>
+  <td>Closure (cleanest)</td>
+  <td><code>return function($users) { yield ...; };</code></td>
+  <td>New streaming templates — parameter injection, no <code>use()</code> needed</td>
+</tr>
+<tr>
+  <td>IIFE Generator</td>
+  <td><code>return (function() use ($users) { yield ...; })();</code></td>
+  <td>When you need variables from the include scope via <code>use()</code></td>
+</tr>
+<tr>
+  <td>Regular echo</td>
+  <td><code>&lt;h1&gt;&lt;?= $title ?&gt;&lt;/h1&gt;</code></td>
+  <td>Non-streaming templates — output captured as one chunk</td>
+</tr>
+</table>
+<p>All three compose in the same <code>yield from App::renderStream(...)</code> pipeline.</p>
 
 <h2>PHP template patterns cheat sheet</h2>
 <table class="ztable">

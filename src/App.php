@@ -457,19 +457,24 @@ class App
      * templates. If the template echoes normally, captures output and yields it
      * as a single chunk. Backwards-compatible with all existing templates.
      *
-     * Usage in a route handler:
+     * Streaming template — declare parameters, framework injects by name:
+     *   <?php return function($users) {
+     *       foreach ($users as $user) {
+     *           yield "<div>{$user['name']}</div>";
+     *       }
+     *   };
+     *
+     * Route handler:
      *   return (function() {
      *       yield from App::renderStream('shell-open', ['title' => 'Users']);
      *       yield from App::renderStream('users/list', ['users' => $users]);
      *       yield from App::renderStream('shell-close');
      *   })();
      *
-     * Streaming template (template/users/list.php):
-     *   <?php return (function() use ($users) {
-     *       foreach ($users as $user) {
-     *           yield "<div>{$user['name']}</div>";
-     *       }
-     *   })();
+     * Supports three template styles:
+     *   1. return function($var) { yield ...; }  → Closure with param injection (cleanest)
+     *   2. return (function() use ($var) { yield ...; })()  → Generator (IIFE, explicit)
+     *   3. Regular echo template  → captured output yielded as one chunk
      */
     public static function renderStream(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): \Generator
     {
@@ -496,7 +501,17 @@ class App
         $__result = include $__template_file_path;
         $__output = ob_get_clean();
 
-        if ($__result instanceof \Generator) {
+        if ($__result instanceof \Closure) {
+            $__ref = new \ReflectionFunction($__result);
+            $__params = [];
+            foreach ($__ref->getParameters() as $__p) {
+                $__params[] = $__args[$__p->getName()] ?? ($__p->isDefaultValueAvailable() ? $__p->getDefaultValue() : null);
+            }
+            $__gen = $__result(...$__params);
+            if ($__gen instanceof \Generator) {
+                yield from $__gen;
+            }
+        } else if ($__result instanceof \Generator) {
             yield from $__result;
         } else if ($__output !== '' && $__output !== false) {
             yield $__output;
