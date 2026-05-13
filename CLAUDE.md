@@ -45,13 +45,14 @@ PHPUnit 11 test suite lives in `tests/`. `ZEALPHP_TEST_PORT` env var sets the se
 | `CounterTest.php` | `increment/decrement/byN`, `CAS`, `reset`, `raw()` |
 | `BuildParamMapTest.php` | Every parameter injection case via reflection |
 | `RoutePatternTest.php` | `{param}` → regex, namespace prefix, method casing |
+| `CompressionMiddlewareTest.php` | Reference compression middleware gzip/proxy-skip behavior |
 
 ### Integration tests (`tests/Integration/`) — requires `php app.php`
 | File | What it tests |
 |------|--------------|
 | `RoutingTest.php` | All 7 injection cases + route types + 404 |
 | `HttpFeaturesTest.php` | 301/302/307, HEAD, OPTIONS, cookies, CORS |
-| `MiddlewareTest.php` | CORS preflight, ETag + 304, gzip |
+| `MiddlewareTest.php` | CORS preflight, ETag + 304, OpenSwoole gzip |
 | `StreamingTest.php` | Generator SSR, `stream()`, SSE events |
 
 `tests/TestCase.php` — base class with `http()`, `get()`, `post()`, `assertStatus()`, `assertHeader()`, `assertJsonResponse()` helpers. HEAD requests use `CURLOPT_NOBODY` for correct header parsing.
@@ -127,7 +128,7 @@ Reflection is cached per route at registration time — zero reflection overhead
 **Built-in middleware** (all in `src/Middleware/`):
 - `CorsMiddleware` — CORS preflight (OPTIONS + Origin) + `Access-Control-*` headers on every response
 - `ETagMiddleware` — `W/"md5"` ETag on GET, returns 304 on `If-None-Match` match
-- `CompressionMiddleware` — gzip/deflate for bodies > 1 KB when `Accept-Encoding` present
+- `CompressionMiddleware` — reference gzip/deflate implementation for apps that disable OpenSwoole `http_compression`; the demo app does not register it
 
 ### HTTP Protocol Features
 
@@ -137,6 +138,7 @@ Reflection is cached per route at registration time — zero reflection overhead
 | OPTIONS method | Returns 204 + `Allow:` header listing all methods for that URI |
 | Redirects 301/307/308 | `$response->redirect($url, $status)` |
 | Cookie SameSite | `setcookie()` override accepts `$samesite` param |
+| Gzip compression | OpenSwoole `http_compression` is enabled by default in `App::run()`; do not also register `CompressionMiddleware` |
 | HTTP/2 | Pass `'enable_http2' => true` to `$app->run()` (requires TLS) |
 
 ### SSR Streaming
@@ -236,7 +238,7 @@ CSS: `public/css/zealphp.css` — single file, CSS variables, indigo accent, no 
 - `/demo/coroutine/{pattern}` — parallel, channel
 - `/demo/store/` and `/demo/counter/` — Store + Counter demos
 - `/demo/session/` — write + read session
-- `/demo/middleware/` — CORS, ETag, compression
+- `/demo/middleware/` — CORS, ETag, OpenSwoole compression
 
 ---
 
@@ -271,4 +273,4 @@ All ZealPHP usage examples live as first-class project files:
 | `HTTP/Response.php` | Thin wrapper around `OpenSwoole\Http\Response`; adds `stream()`, `sse()`, `redirect()`, `flush()` |
 | `Middleware/CorsMiddleware.php` | CORS preflight + `Access-Control-*` headers |
 | `Middleware/ETagMiddleware.php` | ETag generation + 304 Not Modified |
-| `Middleware/CompressionMiddleware.php` | gzip/deflate compression |
+| `Middleware/CompressionMiddleware.php` | Reference gzip/deflate middleware; only use when OpenSwoole `http_compression` is disabled |

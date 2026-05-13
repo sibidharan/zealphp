@@ -161,7 +161,8 @@ function wsLog(text, cls) {
 function wsConnect() {
   if (ws2) ws2.close();
   const mode = document.getElementById('ws-mode').value;
-  const url = 'ws://' + location.host + '/ws/' + mode;
+  const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  const url = scheme + location.host + '/ws/' + mode;
   wsLog('Connecting → ' + url, 'sys');
   ws2 = new WebSocket(url);
   ws2.binaryType = 'arraybuffer';
