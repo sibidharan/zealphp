@@ -2,6 +2,7 @@
 namespace ZealPHP\Session;
 
 use function ZealPHP\elog;
+use function ZealPHP\bench_mode_enabled;
 use function ZealPHP\uniqidReal;
 use function ZealPHP\get_current_render_time;
 
@@ -52,6 +53,22 @@ class CoSessionManager
     public function __invoke(\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response)
     {
         $g = G::instance();
+        if (bench_mode_enabled()) {
+            $g->session = [];
+            $g->openswoole_request = $request;
+            $g->openswoole_response = $response;
+            $request = new \ZealPHP\HTTP\Request($request);
+            $response = new \ZealPHP\HTTP\Response($response);
+            $g->zealphp_request = $request;
+            $g->zealphp_response = $response;
+            try {
+                call_user_func($this->middleware, $request, $response);
+            } finally {
+                unset($g->session);
+            }
+            return;
+        }
+
         if(isset($g->session) and isset($g->session['__start_time'])) {
             elog('[warn] Session leak detected');
         }
@@ -112,4 +129,3 @@ class CoSessionManager
         }
     }
 }
-

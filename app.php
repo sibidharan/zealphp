@@ -9,6 +9,8 @@ use OpenSwoole\Coroutine\Channel;
 use ZealPHP\App;
 use ZealPHP\G;
 
+use function ZealPHP\bench_mode_enabled;
+use function ZealPHP\env_flag;
 use function ZealPHP\elog;
 use function ZealPHP\response_add_header;
 use function ZealPHP\response_set_status;
@@ -50,6 +52,8 @@ class ValidationMiddleware implements MiddlewareInterface
 }
 
 App::superglobals(false);
+$benchMode = bench_mode_enabled();
+$demoMiddleware = env_flag('ZEALPHP_DEMO_MIDDLEWARE', false);
 
 $envInt = static function (string $name, int $default, int $min = 1): int {
     $value = getenv($name);
@@ -64,11 +68,16 @@ $app = App::init(
     getenv('ZEALPHP_HOST') ?: '0.0.0.0',
     $envInt('ZEALPHP_PORT', 8080)
 );
-$app->addMiddleware(new CorsMiddleware());         // outermost — handles preflight, adds Allow-Origin
-$app->addMiddleware(new ETagMiddleware());         // generates ETag, returns 304 on cache hit
-$app->addMiddleware(new AuthenticationMiddleware());
-$app->addMiddleware(new ValidationMiddleware());
-elog("Middleware added");
+if (!$benchMode) {
+    $app->addMiddleware(new CorsMiddleware());         // outermost — handles preflight, adds Allow-Origin
+    $app->addMiddleware(new ETagMiddleware());         // generates ETag, returns 304 on cache hit
+    // Demo-only middleware. Enable with ZEALPHP_DEMO_MIDDLEWARE=1.
+    if ($demoMiddleware) {
+        $app->addMiddleware(new AuthenticationMiddleware());
+        $app->addMiddleware(new ValidationMiddleware());
+    }
+    elog("Core middleware added");
+}
 # Route for /phpinfo 
 $app->route('/phpinfo', function() {
     //Loads template from app/phpinfo.php since PHP_SELF is /app.php
@@ -77,6 +86,10 @@ $app->route('/phpinfo', function() {
 
 $app->route('/json', function($request) {
     return G::instance()->session;
+});
+
+$app->route('/raw/bench', ['raw' => true], function() {
+    return 'You requested: bench';
 });
 
 $app->route('/stream_test',[

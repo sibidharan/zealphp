@@ -13,6 +13,238 @@ function get($key, $default = null)
     return $_GET[$key] ?? $default;
 }
 
+function env_flag(string $name, bool $default): bool
+{
+    $value = getenv($name);
+    if ($value === false || $value === '') {
+        return $default;
+    }
+
+    $value = strtolower(trim((string) $value));
+    return !in_array($value, ['0', 'false', 'off', 'no', 'none'], true);
+}
+
+function bench_mode_enabled(): bool
+{
+    static $enabled = null;
+    if ($enabled !== null) {
+        return $enabled;
+    }
+
+    $enabled = env_flag('ZEALPHP_BENCH_MODE', false);
+    return $enabled;
+}
+
+function async_logging_enabled(): bool
+{
+    static $enabled = null;
+    if ($enabled !== null) {
+        return $enabled;
+    }
+
+    $enabled = env_flag('ZEALPHP_LOG_ASYNC', true);
+    return $enabled;
+}
+
+function resolve_log_dir(): ?string
+{
+    static $resolved = null;
+    if ($resolved !== null) {
+        return $resolved;
+    }
+
+    $candidates = [];
+    $envDir = getenv('ZEALPHP_LOG_DIR');
+    if ($envDir !== false && trim((string) $envDir) !== '') {
+        $candidates[] = trim((string) $envDir);
+    }
+    $candidates[] = '/var/log/zealphp';
+
+    $cwd = getcwd();
+    if ($cwd !== false && $cwd !== '') {
+        $candidates[] = $cwd . '/var/log/zealphp';
+        $candidates[] = $cwd . '/logs/zealphp';
+    }
+
+    foreach (array_unique($candidates) as $candidate) {
+        if ($candidate === '') {
+            continue;
+        }
+        if (!is_dir($candidate)) {
+            @mkdir($candidate, 0775, true);
+        }
+        if (is_dir($candidate) && is_writable($candidate)) {
+            $resolved = rtrim($candidate, '/');
+            return $resolved;
+        }
+    }
+
+    $resolved = null;
+    return $resolved;
+}
+
+function debug_logging_enabled(): bool
+{
+    static $enabled = null;
+    if ($enabled !== null) {
+        return $enabled;
+    }
+
+    if (bench_mode_enabled()) {
+        $enabled = false;
+        return $enabled;
+    }
+
+    $value = getenv('ZEALPHP_DEBUG_LOG');
+    if ($value === false || $value === '') {
+        $value = getenv('ZEALPHP_ELOG');
+    }
+
+    if ($value === false || $value === '') {
+        $enabled = true;
+        return $enabled;
+    }
+
+    $value = strtolower(trim((string) $value));
+    $enabled = !in_array($value, ['0', 'false', 'off', 'no', 'none'], true);
+    return $enabled;
+}
+
+function access_logging_enabled(): bool
+{
+    static $enabled = null;
+    if ($enabled !== null) {
+        return $enabled;
+    }
+
+    if (bench_mode_enabled()) {
+        $enabled = false;
+        return $enabled;
+    }
+
+    $enabled = env_flag('ZEALPHP_ACCESS_LOG', true);
+    return $enabled;
+}
+
+function log_file_for(string $kind): ?string
+{
+    static $cache = [];
+    if (array_key_exists($kind, $cache)) {
+        return $cache[$kind];
+    }
+
+    $path = null;
+    if ($kind === 'access') {
+        $path = getenv('ZEALPHP_ACCESS_LOG_FILE');
+    } elseif ($kind === 'zlog') {
+        $path = getenv('ZEALPHP_ZLOG_FILE');
+    } elseif ($kind === 'debug') {
+        $path = getenv('ZEALPHP_DEBUG_LOG_FILE');
+    }
+
+    if ($path === false || $path === null || $path === '') {
+        $path = getenv('ZEALPHP_LOG_FILE');
+    }
+
+    if ($path === false || $path === null || trim((string) $path) === '') {
+        $dir = resolve_log_dir();
+        if ($dir === null) {
+            return null;
+        }
+        if ($kind === 'access') {
+            $path = $dir . '/access.log';
+        } elseif ($kind === 'zlog') {
+            $path = $dir . '/zlog.log';
+        } else {
+            $path = $dir . '/debug.log';
+        }
+    }
+
+    $path = trim((string) $path);
+    $cache[$kind] = $path === '' ? null : $path;
+    return $cache[$kind];
+}
+
+function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
+{
+    static $sinks = [];
+    static $started = [];
+
+    if (isset($sinks[$path])) {
+        return $sinks[$path];
+    }
+
+    if (!async_logging_enabled() || co::getCid() < 0 || !function_exists('go')) {
+        return null;
+    }
+
+    $queue = new \OpenSwoole\Coroutine\Channel(8192);
+    $sinks[$path] = $queue;
+
+    if (!isset($started[$path])) {
+        $started[$path] = true;
+        go(static function () use ($queue, $path): void {
+            if (!str_contains($path, '://')) {
+                $dir = dirname($path);
+                if ($dir !== '.' && !is_dir($dir)) {
+                    @mkdir($dir, 0775, true);
+                }
+            }
+
+            $handle = @fopen($path, 'ab');
+            if ($handle === false) {
+                while (($message = $queue->pop()) !== false) {
+                    error_log($message);
+                }
+                return;
+            }
+
+            stream_set_write_buffer($handle, 0);
+            while (($message = $queue->pop()) !== false) {
+                if ($message === '') {
+                    continue;
+                }
+                fwrite($handle, $message);
+            }
+            fclose($handle);
+        });
+    }
+
+    return $queue;
+}
+
+function log_write(string $message, string $kind = 'debug'): void
+{
+    $path = log_file_for($kind);
+    if ($path === null) {
+        error_log($message);
+        return;
+    }
+
+    $sink = log_sink_for($path);
+    if ($sink instanceof \OpenSwoole\Coroutine\Channel) {
+        if ($sink->push($message, 0.001)) {
+            return;
+        }
+    }
+
+    if (!str_contains($path, '://')) {
+        $dir = dirname($path);
+        if ($dir !== '.' && !is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+    }
+
+    $handle = @fopen($path, 'ab');
+    if ($handle === false) {
+        error_log($message);
+        return;
+    }
+    stream_set_write_buffer($handle, 0);
+    fwrite($handle, $message);
+    fclose($handle);
+}
+
 /**
  * Handles a request using a preforking model.
  *
@@ -224,6 +456,9 @@ function zapi(){
  * @param int $limit The limit for the log message. Default is 1.
  */
 function elog($message, $tag = "*", $limit = 1){
+    if (!debug_logging_enabled()) {
+        return;
+    }
     if($tag == "wordpress"){
         return;
     }
@@ -233,7 +468,7 @@ function elog($message, $tag = "*", $limit = 1){
     # add microseconds or nano seconds down to 6 decimal places
     $date .= substr((string)microtime(), 1, 6);
     $relative_path = str_replace(App::$cwd, '', $caller['file']);
-    error_log("┌[$tag] $date $relative_path:$caller[line]
+    log_write("┌[$tag] $date $relative_path:$caller[line]
 └❯ $message \n");
 }
 
@@ -247,6 +482,9 @@ function elog($message, $tag = "*", $limit = 1){
  */
 function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
 {
+    if (!debug_logging_enabled()) {
+        return;
+    }
     if ($filter != null and !StringUtils::str_contains($_SERVER['REQUEST_URI'], $filter)) {
         return;
     }
@@ -278,14 +516,14 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
         }
         $unique_req_id = $g->session['UNIQUE_REQUEST_ID'];
         $request_uri = $g->server['REQUEST_URI'];
-        if (error_log(
+        log_write(
             '[*] #' . $tag . ' [' . $date . '] ' . " Request ID: $unique_req_id\n" .
                 '    URL: ' . $request_uri . " \n" .
                 '    Caller: ' . $caller['file'] . ':' . $caller['line'] . "\n" .
                 '    Timer: ' . get_current_render_time() . ' sec' . " \n" .
-                "    Message: \n" . indent($log) . "\n\n"
-        )) {
-        }
+                "    Message: \n" . indent($log) . "\n\n",
+            'zlog'
+        );
     }
 }
 
@@ -381,6 +619,9 @@ function uniqidReal($length = 13)
  * @param int $length The length of the response content.
  */
 function access_log($status = 200, $length){
+    if (!access_logging_enabled()) {
+        return;
+    }
     $g = G::instance();
     $time = date('d/M/Y:H:i:s');
     $time .= substr((string)microtime(), 1, 6);
@@ -389,8 +630,7 @@ function access_log($status = 200, $length){
     $referer = $g->server['HTTP_REFERER'] ?? '-';
     $user_agent = $g->server['HTTP_USER_AGENT'] ?? '-';
     $log = "$remote - - [$time] \"$request\" $status $length \"$referer\" \"$user_agent\"\n";
-    // file_put_contents('/var/log/zealphp/access.log', $log, FILE_APPEND);
-    error_log($log);
+    log_write($log, 'access');
 }
 
 /**

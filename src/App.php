@@ -21,6 +21,7 @@ class App
 {
     protected $routes = [];
     protected $routes_by_method = [];
+    protected $routes_by_exact_method = [];
     protected $ws_routes = [];
     protected static $workerStartHooks = [];
     protected $host;
@@ -132,6 +133,16 @@ class App
     public function routesByMethod(): array
     {
         return $this->routes_by_method;
+    }
+
+    public function routesByExactMethod(): array
+    {
+        return $this->routes_by_exact_method;
+    }
+
+    protected function isExactRoutePath(string $path): bool
+    {
+        return preg_match('/[\\\\^$.|?*+()[\\]{}]/', $path) === 0;
     }
 
     /**
@@ -265,10 +276,12 @@ class App
         $pattern = "#^" . $pattern . "$#";
 
         $this->routes[] = [
+            'path'      => $path,
             'pattern'   => $pattern,
             'methods'   => array_map('strtoupper', $methods),
             'handler'   => $handler,
             'param_map' => $this->buildParamMap($handler),
+            'raw'       => (bool)($options['raw'] ?? false),
         ];
     }
 
@@ -297,10 +310,12 @@ class App
         $pattern = "#^" . $pattern . "$#";
 
         $this->routes[] = [
+            'path'      => $path,
             'pattern'   => $pattern,
             'methods'   => array_map('strtoupper', $methods),
             'handler'   => $handler,
             'param_map' => $this->buildParamMap($handler),
+            'raw'       => (bool)($options['raw'] ?? false),
         ];
     }
 
@@ -351,10 +366,12 @@ class App
         $pattern = "#^" . $pattern . "$#";
     
         $this->routes[] = [
+            'path'      => $path,
             'pattern'   => $pattern,
             'methods'   => array_map('strtoupper', $methods),
             'handler'   => $handler,
             'param_map' => $this->buildParamMap($handler),
+            'raw'       => (bool)($options['raw'] ?? false),
         ];
     }
 
@@ -383,10 +400,12 @@ class App
         }
 
         $this->routes[] = [
+            'path'      => $regex,
             'pattern'   => $regex,
             'methods'   => array_map('strtoupper', $methods),
             'handler'   => $handler,
             'param_map' => $this->buildParamMap($handler),
+            'raw'       => (bool)($options['raw'] ?? false),
         ];
     }
 
@@ -880,6 +899,9 @@ class App
         foreach ($this->routes as $route) {
             foreach ($route['methods'] as $m) {
                 $this->routes_by_method[$m][] = $route;
+                if (isset($route['path']) && $this->isExactRoutePath($route['path'])) {
+                    $this->routes_by_exact_method[$m][$route['path']] = $route;
+                }
             }
         }
 
@@ -952,6 +974,183 @@ class App
 
 class ResponseMiddleware implements MiddlewareInterface
 {
+    private function dispatchRawRoute(array $route, array $params, string $method): ResponseInterface
+    {
+        $g = G::instance();
+        $handler = $route['handler'];
+
+        $invokeArgs = [];
+        foreach ($route['param_map'] as $param) {
+            $pname = $param['name'];
+            if (isset($params[$pname])) {
+                $invokeArgs[] = $params[$pname];
+            } else if ($pname === 'app') {
+                $invokeArgs[] = $this;
+            } else if ($pname === 'request') {
+                $invokeArgs[] = $g->zealphp_request;
+            } else if ($pname === 'response') {
+                $invokeArgs[] = $g->zealphp_response;
+            } else {
+                $invokeArgs[] = $param['has_default'] ? $param['default'] : null;
+            }
+        }
+
+        try {
+            $object = call_user_func_array($handler, $invokeArgs);
+            if ($object instanceof ResponseInterface) {
+                return $object;
+            }
+
+            if ($object instanceof \Generator) {
+                $g->zealphp_response->flush();
+                foreach ($object as $chunk) {
+                    if (!$g->openswoole_response->isWritable()) break;
+                    $g->openswoole_response->write((string)$chunk);
+                    \OpenSwoole\Coroutine::sleep(0);
+                }
+                if ($g->openswoole_response->isWritable()) {
+                    $g->openswoole_response->end();
+                }
+                return (new Response('', $g->status ?? 200));
+            }
+
+            if ($g->_streaming ?? false) {
+                return (new Response('', $g->status ?? 200));
+            }
+
+            if (is_int($object)) {
+                $status = (int)$object;
+                $body = '';
+            } else {
+                $status = $g->status ?? 200;
+                if (is_array($object) or is_object($object)) {
+                    response_add_header('Content-Type', 'application/json');
+                    $body = json_encode($object, JSON_PRETTY_PRINT);
+                } else if (is_string($object)) {
+                    $body = $object;
+                } else {
+                    $body = '';
+                }
+            }
+
+            if ($method === 'HEAD') {
+                response_add_header('Content-Length', (string)strlen($body));
+                return (new Response('', $status));
+            }
+            return (new Response($body, $status));
+        } catch (\Throwable|\OpenSwoole\ExitException $e) {
+            if($e instanceof \OpenSwoole\ExitException){
+                if($e->getStatus() == 0){
+                    return (new Response(''))->withStatus($g->status ?? 200);
+                } else {
+                    return (new Response(''))->withStatus(500);
+                }
+            }
+            if (App::$display_errors) {
+                return (new Response("<pre>".jTraceEx($e)."</pre>"))->withStatus(500);
+            } else {
+                return (new Response("<pre>500 Internal Server Error</pre>"))->withStatus(500);
+            }
+        }
+    }
+
+    private function dispatchRoute(array $route, array $params, string $method): ResponseInterface
+    {
+        if (($route['raw'] ?? false) === true) {
+            return $this->dispatchRawRoute($route, $params, $method);
+        }
+
+        $g = G::instance();
+        $handler = $route['handler'];
+
+        $invokeArgs = [];
+        foreach ($route['param_map'] as $param) {
+            $pname = $param['name'];
+            if (isset($params[$pname])) {
+                $invokeArgs[] = $params[$pname];
+            } else if ($pname === 'app') {
+                $invokeArgs[] = $this;
+            } else if ($pname === 'request') {
+                $invokeArgs[] = $g->zealphp_request;
+            } else if ($pname === 'response') {
+                $invokeArgs[] = $g->zealphp_response;
+            } else {
+                $invokeArgs[] = $param['has_default'] ? $param['default'] : null;
+            }
+        }
+
+        try {
+            ob_start();
+            $object = call_user_func_array($handler, $invokeArgs);
+
+            // Generator streaming — yield chunks directly to the client
+            if ($object instanceof \Generator) {
+                ob_end_clean();
+                $g->zealphp_response->flush();
+                foreach ($object as $chunk) {
+                    if (!$g->openswoole_response->isWritable()) break;
+                    $g->openswoole_response->write((string)$chunk);
+                    \OpenSwoole\Coroutine::sleep(0);
+                }
+                if ($g->openswoole_response->isWritable()) {
+                    $g->openswoole_response->end();
+                }
+                return (new Response('', $g->status ?? 200));
+            }
+
+            // stream() / sse() — response body already sent via write()
+            if ($g->_streaming ?? false) {
+                ob_end_clean();
+                return (new Response('', $g->status ?? 200));
+            }
+
+            if(is_int($object)){
+                $status = (int)$object;
+            } else {
+                $status = $g->status ?? 200;;
+            }
+
+            if($object instanceof ResponseInterface){
+                ob_end_clean();
+                $body = $object->getBody();
+                $body->rewind();
+                elog("ResponseMiddleware process() received ResponseInterface > ".$body->getContents());
+                return $object;
+            }
+
+            if(is_array($object) or is_object($object)){
+                response_add_header('Content-Type', 'application/json');
+                echo json_encode($object, JSON_PRETTY_PRINT);
+            } else if (is_string($object)){
+                echo $object;
+            }
+
+            $buffer = ob_get_clean();
+            // HEAD — return headers only, body stripped (Content-Length preserved)
+            if ($method === 'HEAD') {
+                response_add_header('Content-Length', (string)strlen($buffer));
+                return (new Response('', $status));
+            }
+            return (new Response($buffer, $status));
+        } catch (\Throwable|\OpenSwoole\ExitException $e) {
+            if($e instanceof \OpenSwoole\ExitException){
+                if($e->getStatus() == 0){
+                    elog("HTTP Status: ".$g->status);
+                    return (new Response(ob_get_clean()))->withStatus($g->status ?? 200);
+                } else {
+                    return (new Response(ob_get_clean()))->withStatus(500);
+                }
+            }
+            elog(jTraceEx($e), "error");
+            if (App::$display_errors) {
+                // print the error message to the error log
+                return (new Response("<pre>".jTraceEx($e)."</pre>"))->withStatus(500);
+            } else {
+                return (new Response("<pre>500 Internal Server Error</pre>"))->withStatus(500);
+            }
+        }
+    }
+
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $g = G::instance();
@@ -980,98 +1179,15 @@ class ResponseMiddleware implements MiddlewareInterface
         // HEAD — match GET routes, run the handler, strip the body
         $matchMethod = ($method === 'HEAD') ? 'GET' : $method;
 
+        $exactRoutes = $app->routesByExactMethod();
+        if (isset($exactRoutes[$matchMethod][$uri])) {
+            return $this->dispatchRoute($exactRoutes[$matchMethod][$uri], [], $method);
+        }
+
         foreach ($app->routesByMethod()[$matchMethod] ?? [] as $route) {
             if (preg_match($route['pattern'], $uri, $matches)) {
                 $params = array_filter($matches, fn($k) => !is_numeric($k), ARRAY_FILTER_USE_KEY);
-
-                $handler = $route['handler'];
-
-                $invokeArgs = [];
-                foreach ($route['param_map'] as $param) {
-                    $pname = $param['name'];
-                    if (isset($params[$pname])) {
-                        $invokeArgs[] = $params[$pname];
-                    } else if ($pname === 'app') {
-                        $invokeArgs[] = $this;
-                    } else if ($pname === 'request') {
-                        $invokeArgs[] = $g->zealphp_request;
-                    } else if ($pname === 'response') {
-                        $invokeArgs[] = $g->zealphp_response;
-                    } else {
-                        $invokeArgs[] = $param['has_default'] ? $param['default'] : null;
-                    }
-                }
-                try {
-                    ob_start();
-                    $object = call_user_func_array($handler, $invokeArgs);
-
-                    // Generator streaming — yield chunks directly to the client
-                    if ($object instanceof \Generator) {
-                        ob_end_clean();
-                        $g->zealphp_response->flush();
-                        foreach ($object as $chunk) {
-                            if (!$g->openswoole_response->isWritable()) break;
-                            $g->openswoole_response->write((string)$chunk);
-                            \OpenSwoole\Coroutine::sleep(0);
-                        }
-                        if ($g->openswoole_response->isWritable()) {
-                            $g->openswoole_response->end();
-                        }
-                        return (new Response('', $g->status ?? 200));
-                    }
-
-                    // stream() / sse() — response body already sent via write()
-                    if ($g->_streaming ?? false) {
-                        ob_end_clean();
-                        return (new Response('', $g->status ?? 200));
-                    }
-
-                    if(is_int($object)){
-                        $status = (int)$object;
-                    } else {
-                        $status = $g->status ?? 200;;
-                    }
-
-                    if($object instanceof ResponseInterface){
-                        ob_end_clean();
-                        $body = $object->getBody();
-                        $body->rewind();
-                        elog("ResponseMiddleware process() received ResponseInterface > ".$body->getContents());
-                        return $object;
-                    }
-
-                    if(is_array($object) or is_object($object)){
-                        response_add_header('Content-Type', 'application/json');
-                        echo json_encode($object, JSON_PRETTY_PRINT);
-                    } else if (is_string($object)){
-                        echo $object;
-                    }
-
-                    $buffer = ob_get_clean();
-                    // HEAD — return headers only, body stripped (Content-Length preserved)
-                    if ($method === 'HEAD') {
-                        response_add_header('Content-Length', (string)strlen($buffer));
-                        return (new Response('', $status));
-                    }
-                    return (new Response($buffer, $status));
-                } catch (\Throwable|\OpenSwoole\ExitException $e) {
-                    if($e instanceof \OpenSwoole\ExitException){
-                        if($e->getStatus() == 0){
-                            elog("HTTP Status: ".$g->status);
-                            return (new Response(ob_get_clean()))->withStatus($g->status ?? 200);
-                        } else {
-                            return (new Response(ob_get_clean()))->withStatus(500);
-                        }
-                    }
-                    elog(jTraceEx($e), "error");
-                    if (App::$display_errors) {
-                        // print the error message to the error log
-                        return (new Response("<pre>".jTraceEx($e)."</pre>"))->withStatus(500);
-                    } else {
-                        return (new Response("<pre>500 Internal Server Error</pre>"))->withStatus(500);
-                    }
-                }
-                break;
+                return $this->dispatchRoute($route, $params, $method);
             }
         }
         return (new Response('<pre>404 Not Found</pre>'))->withStatus(404);

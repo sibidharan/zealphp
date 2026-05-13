@@ -114,6 +114,16 @@ mkdir -p bench/results
 docker compose run --rm --build compare
 ```
 
+Set `ZEALPHP_BENCH_MODE=1` to skip the demo middleware and session file I/O on
+the benchmark path. The sample auth/validation middleware is opt-in via
+`ZEALPHP_DEMO_MIDDLEWARE=1`.
+Set `ZEALPHP_LOG_DIR=/var/log/zealphp` to send `debug.log`, `access.log`, and
+`zlog.log` there, and keep `ZEALPHP_LOG_ASYNC=1` so request logging is queued
+off the hot path. Use `ZEALPHP_DEBUG_LOG=0` and `ZEALPHP_ACCESS_LOG=0` for
+quiet runs.
+If `/var/log/zealphp` is not writable, ZealPHP falls back to a writable local
+log directory.
+
 ---
 
 ## Installation

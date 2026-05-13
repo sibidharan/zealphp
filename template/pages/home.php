@@ -3,18 +3,18 @@
 <!-- Hero -->
 <section class="hero">
   <div class="container">
-    <h1>PHP at the <span>speed of Go</span></h1>
-    <p>ZealPHP is an async PHP framework built on OpenSwoole.<br>
-       Coroutines, SSR streaming, WebSocket, and zero blocking — all in PHP.</p>
+    <h1>ZealPHP <span>on OpenSwoole</span></h1>
+    <p>An async PHP framework tuned for coroutine I/O, SSR streaming, WebSocket, and low-latency services.<br>
+       Built to keep requests lean and the event loop moving.</p>
     <div class="cta">
       <a href="/routing" class="btn btn-primary">Get Started →</a>
       <a href="https://github.com/sibidharan/zealphp" class="btn btn-outline" target="_blank">GitHub ↗</a>
     </div>
     <div class="bench">
-      <div class="bench-stat"><div class="num">wrk</div><div class="label">Benchmark runner</div></div>
-      <div class="bench-stat"><div class="num">1K</div><div class="label">Concurrency sweep</div></div>
-      <div class="bench-stat"><div class="num">env</div><div class="label">Worker count</div></div>
-      <div class="bench-stat"><div class="num">0</div><div class="label">Blocking calls</div></div>
+      <div class="bench-stat"><div class="num">4</div><div class="label">workers</div></div>
+      <div class="bench-stat"><div class="num">67k</div><div class="label">req/s</div></div>
+      <div class="bench-stat"><div class="num">21ms</div><div class="label">p90 latency</div></div>
+      <div class="bench-stat"><div class="num">0</div><div class="label">failures</div></div>
     </div>
   </div>
 </section>
@@ -87,7 +87,7 @@
         ['🧵', 'True coroutines',    'Not fake async with callbacks. Real coroutines with go() + Channel. Write synchronous code that runs concurrently.'],
         ['🔧', 'PHP you already know','Superglobals, sessions, headers — all work via uopz overrides. Migrate existing apps without rewriting everything.'],
         ['📐', 'PSR standards',      'PSR-7 request/response, PSR-15 middleware. Drop in any PSR-15 middleware package.'],
-        ['📊', 'Benchmarked',        'Built on OpenSwoole for high-concurrency PHP services, with repeatable wrk/ab scripts for publishing ZealPHP-specific results.'],
+        ['📊', 'Benchmarked',        'Local quad-core /raw/bench sweep at c=1000 in bench mode: ZealPHP sustained 67k req/s, 21ms p90, and 0 failures on 4 workers.'],
         ['🔓', 'Open source',        'MIT licensed. Maintained by the community. Built on OpenSwoole, one of PHP\'s most battle-tested async runtimes.'],
       ];
       foreach ($why as [$icon, $title, $body]):
