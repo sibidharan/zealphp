@@ -18,11 +18,31 @@ App::onWorkerStart(function($server, $workerId) use ($tickCounter) {
 });
 
 // One-shot timer from a route:
-$app->route('/delayed', function($response) {
+$app->route('/timers/oneshot', function($response) {
     $response->stream(function($write) {
         $result = new Channel(1);
         App::after(3000, fn() => $result->push('done after 3s'));
         $write($result->pop(5));
+    });
+});
+PHP]); ?>
+
+<?php App::render('/components/_code', [
+    'label' => 'SSE — /timers/sse',
+    'code'  => <<<'PHP'
+$app->route('/timers/sse', function($response) use ($tickCounter, $requestCounter) {
+    $requestCounter->increment();
+    $response->sse(function($emit) use ($tickCounter, $requestCounter) {
+        $emit(json_encode(['event' => 'connected', 'tick' => $tickCounter->get()]), 'open');
+        for ($i = 0; $i < 20; $i++) {
+            usleep(2000000);
+            $emit(json_encode([
+                'tick'     => $tickCounter->get(),
+                'requests' => $requestCounter->get(),
+                'time'     => date('H:i:s'),
+            ]), 'tick', (string)$i);
+        }
+        $emit(json_encode(['done' => true]), 'done');
     });
 });
 PHP]); ?>
@@ -38,6 +58,19 @@ App::onWorkerStart(function($server, $workerId) use ($tickCounter) {
 $app->route('/timers/counter', function() use ($requestCounter, $tickCounter) {
     $requestCounter->increment();
     return ['requests_served' => $requestCounter->get(), 'tick_count' => $tickCounter->get()];
+});
+PHP],
+  ['timer-oneshot', 'One-shot delayed task', '/timers/oneshot',
+   <<<'PHP'
+$app->route('/timers/oneshot', function($response) use ($requestCounter) {
+    $requestCounter->increment();
+    $response->stream(function($write) {
+        $result = new Channel(1);
+        App::after(3000, function() use ($result) {
+            $result->push(['done' => true, 'time' => date('H:i:s'), 'pid' => getmypid()]);
+        });
+        $write($result->pop(5));
+    });
 });
 PHP],
   ['timer-metrics', 'Per-worker metrics via Store', '/timers/metrics',
@@ -61,6 +94,26 @@ foreach ($demos as [$id, $title, $url, $code]) {
 }
 ?>
 
+<div class="inject-case" style="margin-top:1.5rem">
+  <div class="inject-case-header"><span class="badge badge-sse">SSE</span><code>/timers/sse — Server-Sent Events</code></div>
+  <div class="inject-case-body">
+    <div class="demo-code">
+      <pre><code class="language-php">// Connect with EventSource and stream tick events.
+const es = new EventSource('/timers/sse');
+es.addEventListener('tick', e => console.log(JSON.parse(e.data)));
+es.addEventListener('done', () => es.close());</code></pre>
+    </div>
+    <div class="demo-output">
+      <span class="label">LIVE OUTPUT</span>
+      <div style="display:flex; gap:.5rem; flex-wrap:wrap; padding-top:1rem; margin-bottom:.75rem">
+        <button class="btn btn-primary btn-sm" type="button" onclick="startTimerSSE()">Connect EventSource</button>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="stopTimerSSE()">Disconnect</button>
+      </div>
+      <div class="sse-log" id="timer-sse-out">Click Connect to start…</div>
+    </div>
+  </div>
+</div>
+
 <h2 style="margin:2rem 0 .5rem">Timer API</h2>
 <table class="ztable">
   <tr><th>Method</th><th>When to use</th></tr>
@@ -76,3 +129,42 @@ foreach ($demos as [$id, $title, $url, $code]) {
 </div>
 </div>
 </section>
+
+<script>
+let timerEventSource = null;
+
+function stopTimerSSE() {
+  if (timerEventSource) {
+    timerEventSource.close();
+    timerEventSource = null;
+  }
+}
+
+function addTimerSSELine(text, cls) {
+  const log = document.getElementById('timer-sse-out');
+  if (!log) return;
+  const el = document.createElement('div');
+  el.className = 'sse-event ' + (cls || '');
+  el.textContent = new Date().toLocaleTimeString() + ' — ' + text;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
+function startTimerSSE() {
+  stopTimerSSE();
+  const log = document.getElementById('timer-sse-out');
+  if (!log) return;
+  log.textContent = '';
+  timerEventSource = new EventSource('/timers/sse');
+  timerEventSource.addEventListener('open', e => addTimerSSELine(e.data, 'open'));
+  timerEventSource.addEventListener('tick', e => addTimerSSELine(e.data, 'tick'));
+  timerEventSource.addEventListener('done', e => {
+    addTimerSSELine(e.data, 'done');
+    stopTimerSSE();
+  });
+  timerEventSource.onerror = () => {
+    addTimerSSELine('connection closed', 'done');
+    stopTimerSSE();
+  };
+}
+</script>
