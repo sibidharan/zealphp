@@ -11,6 +11,7 @@ $topLinks = [
 ];
 
 $moreItems = [
+  'templates'   => ['/templates',  'Templates'],
   'middleware'  => ['/middleware',  'Middleware'],
   'sessions'    => ['/sessions',   'Sessions'],
   'websocket'   => ['/ws',         'WebSocket'],

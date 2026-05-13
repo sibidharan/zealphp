@@ -254,6 +254,7 @@ document.addEventListener('click', function(e) {
         ['🗃️', 'Store',     'Cross-worker shared memory via OpenSwoole\\Table. Lock-free atomic counters.', '/store',      'Store · Counter'],
         ['⏱️', 'Timers',    'App::tick/after for recurring tasks. Per-worker via onWorkerStart.', '/timers',      'Timer'],
         ['🌐', 'HTTP',      'HEAD, OPTIONS, 301/307 redirects, CORS, ETag, gzip — full HTTP/1.1.', '/http',       'HTTP/1.1'],
+        ['📝', 'Templates', 'App::render() with smart path resolution + renderToString for SSR streaming and email/cache use.', '/templates', 'App::render()'],
         ['🔗', 'ZealAPI',   'File-based REST endpoints. Drop a PHP file in api/ and it becomes a route.', '/api',        'implicit routes'],
         ['🏗️', 'Legacy Apps', 'Run WordPress, Drupal, or any PHP app unmodified. CGI worker provides true global scope isolation.', '/legacy-apps', 'WordPress'],
       ];
