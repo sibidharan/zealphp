@@ -270,6 +270,18 @@ footer {
   border: 1px solid var(--border); border-radius: var(--radius);
   overflow: hidden; margin: 1.5rem 0;
 }
+.ws-topbar {
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  padding: .7rem 1rem; display: flex; align-items: center;
+  justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+}
+.ws-status { display: inline-flex; align-items: center; gap: .45rem; font-size: .82rem; font-weight: 700; }
+.ws-dot { width: .6rem; height: .6rem; border-radius: 50%; background: #94a3b8; display: inline-block; }
+.ws-status[data-state="connecting"] .ws-dot { background: #f59e0b; }
+.ws-status[data-state="open"] .ws-dot { background: #16a34a; }
+.ws-status[data-state="error"] .ws-dot { background: #dc2626; }
+.ws-meta { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; color: var(--text-muted); font-size: .78rem; }
+.ws-meta code { background: var(--bg-alt); padding: .16rem .42rem; border-radius: 4px; color: var(--text); }
 .ws-log {
   background: var(--code-bg); color: var(--code-text);
   font-family: var(--font-mono); font-size: .78rem;
@@ -281,15 +293,32 @@ footer {
 .ws-msg.recv { color: #3fb950; }
 .ws-msg.sys  { color: #8b949e; font-style: italic; }
 .ws-msg.err  { color: #f85149; }
+.ws-quick {
+  background: #f8fafc; border-top: 1px solid var(--border);
+  padding: .6rem 1rem; display: flex; gap: .45rem; flex-wrap: wrap;
+}
+.ws-chip {
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  border-radius: 5px; padding: .25rem .6rem; font-size: .78rem;
+  cursor: pointer; font-weight: 600;
+}
+.ws-chip:hover { border-color: var(--accent); color: var(--accent); }
 .ws-controls {
   background: var(--bg-alt); border-top: 1px solid var(--border);
   padding: .75rem 1rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap;
 }
+.ws-select {
+  padding: .4rem .7rem; border: 1px solid var(--border);
+  border-radius: 5px; font-size: .85rem; background: var(--bg);
+  min-width: 14rem;
+}
 .ws-input {
   flex: 1; background: var(--bg); border: 1px solid var(--border);
   border-radius: 5px; padding: .4rem .7rem; font-size: .85rem; outline: none;
+  min-width: 13rem;
 }
 .ws-input:focus { border-color: var(--accent); }
+button:disabled { opacity: .55; cursor: not-allowed; }
 
 /* ── SSE log ── */
 .sse-log {

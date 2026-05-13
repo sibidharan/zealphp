@@ -125,67 +125,192 @@ $app->ws('/ws/binary',
 );
 PHP]); ?>
   </div>
-</div>
+	</div>
 
-<h2 style="margin:2rem 0 1rem">Browser client</h2>
-<div class="ws-shell">
-  <div class="ws-log" id="ws-log"><span style="color:#8b949e;font-style:italic">Click Connect above to start…</span></div>
-  <div class="ws-controls">
-    <select id="ws-mode" style="padding:.4rem .7rem;border:1px solid var(--border);border-radius:5px;font-size:.85rem" onchange="wsUpdateHint()">
-      <option value="echo">Echo (/ws/echo)</option>
-      <option value="broadcast">Broadcast (/ws/broadcast)</option>
-      <option value="ticker">Ticker (/ws/ticker)</option>
+	<h2 style="margin:2rem 0 1rem">Browser JavaScript</h2>
+	<?php App::render('/components/_code', [
+	    'label' => 'HTTPS-aware browser client',
+	    'lang'  => 'javascript',
+	    'code'  => <<<'JS'
+	const endpoint = '/ws/echo';
+	const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+	const socket = new WebSocket(scheme + location.host + endpoint);
+
+	socket.addEventListener('open', () => {
+	    socket.send('Hello from the browser');
+	});
+
+	socket.addEventListener('message', event => {
+	    console.log('received:', event.data);
+	});
+
+	function sendWhenReady(message) {
+	    if (socket.readyState === WebSocket.OPEN) {
+	        socket.send(message);
+	        return;
+	    }
+
+	    socket.addEventListener('open', () => socket.send(message), { once: true });
+	}
+	JS]); ?>
+
+		<h2 style="margin:2rem 0 1rem">Live browser client</h2>
+	<div class="ws-shell">
+	  <div class="ws-topbar">
+	    <div class="ws-status" id="ws-status" data-state="closed">
+	      <span class="ws-dot" aria-hidden="true"></span>
+	      <span id="ws-state-text">Disconnected</span>
+	    </div>
+	    <div class="ws-meta">
+	      <code id="ws-url">/ws/echo</code>
+	      <span id="ws-counts">0 sent / 0 received</span>
+	    </div>
+	  </div>
+	  <div class="ws-log" id="ws-log"><div class="ws-msg sys">Choose an endpoint and connect. Send will auto-connect if needed.</div></div>
+	  <div class="ws-quick">
+	    <button class="ws-chip" type="button" data-msg="Hello from the browser">Hello</button>
+	    <button class="ws-chip" type="button" data-msg="Broadcast test">Broadcast</button>
+	    <button class="ws-chip" type="button" data-msg="stop">Stop ticker</button>
+	    <button class="ws-chip" type="button" data-msg="Binary test payload">Binary text</button>
+	    <button class="ws-chip" type="button" data-action="clear">Clear log</button>
+	  </div>
+	  <div class="ws-controls">
+	    <select id="ws-mode" class="ws-select" onchange="wsUpdateHint()">
+	      <option value="echo">Echo (/ws/echo)</option>
+	      <option value="broadcast">Broadcast (/ws/broadcast)</option>
+	      <option value="ticker">Ticker (/ws/ticker)</option>
       <option value="rooms">Rooms (/ws/rooms?room=general)</option>
       <option value="auth?token=secret">Auth w/ token (/ws/auth?token=secret)</option>
       <option value="auth">Auth NO token (/ws/auth — rejected)</option>
       <option value="binary">Binary (/ws/binary)</option>
-    </select>
-    <button class="btn btn-primary btn-sm" onclick="wsConnect()">Connect</button>
-    <button class="btn btn-ghost btn-sm" onclick="wsDisconnect()">Disconnect</button>
-    <input class="ws-input" id="ws-msg" placeholder="Type a message…" onkeydown="if(event.key==='Enter')wsSend()">
-    <button class="btn btn-primary btn-sm" onclick="wsSend()">Send</button>
-  </div>
-</div>
-</div>
-</section>
-<script>
-let ws2 = null;
-function wsLog(text, cls) {
-  const box = document.getElementById('ws-log');
-  const el = document.createElement('div');
-  el.className = 'ws-msg ' + (cls||'');
-  el.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text;
+	    </select>
+	    <button class="btn btn-primary btn-sm" id="ws-connect" onclick="wsConnect()">Connect</button>
+	    <button class="btn btn-ghost btn-sm" id="ws-disconnect" onclick="wsDisconnect()">Disconnect</button>
+	    <input class="ws-input" id="ws-msg" placeholder="Type a message…" onkeydown="if(event.key==='Enter')wsSend()">
+	    <button class="btn btn-primary btn-sm" id="ws-send" onclick="wsSend()">Send</button>
+	  </div>
+	</div>
+	</div>
+	</section>
+	<script>
+	let ws2 = null;
+	let wsQueuedMessage = '';
+	const wsStats = { sent: 0, recv: 0 };
+
+	function wsEndpoint() {
+	  const mode = document.getElementById('ws-mode').value;
+	  const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+	  return scheme + location.host + '/ws/' + mode;
+	}
+
+	function wsSetState(state, text) {
+	  const status = document.getElementById('ws-status');
+	  status.dataset.state = state;
+	  document.getElementById('ws-state-text').textContent = text;
+	  document.getElementById('ws-connect').disabled = state === 'open' || state === 'connecting';
+	  document.getElementById('ws-disconnect').disabled = state !== 'open' && state !== 'connecting';
+	}
+
+	function wsUpdateCounts() {
+	  document.getElementById('ws-counts').textContent = wsStats.sent + ' sent / ' + wsStats.recv + ' received';
+	}
+
+	function wsLog(text, cls) {
+	  const box = document.getElementById('ws-log');
+	  const el = document.createElement('div');
+	  el.className = 'ws-msg ' + (cls||'');
+	  el.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text;
   box.appendChild(el);
   box.scrollTop = box.scrollHeight;
-}
-function wsConnect() {
-  if (ws2) ws2.close();
-  const mode = document.getElementById('ws-mode').value;
-  const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
-  const url = scheme + location.host + '/ws/' + mode;
-  wsLog('Connecting → ' + url, 'sys');
-  ws2 = new WebSocket(url);
-  ws2.binaryType = 'arraybuffer';
-  ws2.onopen  = () => wsLog('Connected ✓', 'sys');
-  ws2.onclose = e => { wsLog('Closed (' + e.code + ')', 'sys'); ws2 = null; };
-  ws2.onerror = () => wsLog('Error', 'err');
-  ws2.onmessage = e => {
-    if (e.data instanceof ArrayBuffer) {
-      wsLog('[binary ' + e.data.byteLength + ' bytes]', 'recv');
-    } else {
-      try { wsLog(JSON.stringify(JSON.parse(e.data), null, 2), 'recv'); }
-      catch { wsLog(e.data, 'recv'); }
-    }
-  };
-}
-function wsDisconnect() { if (ws2) ws2.close(); }
-function wsSend() {
-  const input = document.getElementById('ws-msg');
-  const text = input.value.trim();
-  if (!text || !ws2 || ws2.readyState !== 1) return;
-  ws2.send(text);
-  wsLog(text, 'sent');
-  input.value = '';
-}
-function wsUpdateHint() {}
-</script>
+	}
+	function wsConnect() {
+	  if (ws2 && (ws2.readyState === WebSocket.OPEN || ws2.readyState === WebSocket.CONNECTING)) return;
+	  const url = wsEndpoint();
+	  wsSetState('connecting', 'Connecting');
+	  wsLog('Connecting -> ' + url, 'sys');
+	  ws2 = new WebSocket(url);
+	  ws2.binaryType = 'arraybuffer';
+	  ws2.onopen  = () => {
+	    wsSetState('open', 'Connected');
+	    wsLog('Connected', 'sys');
+	    if (wsQueuedMessage) {
+	      const queued = wsQueuedMessage;
+	      wsQueuedMessage = '';
+	      wsSendText(queued);
+	    }
+	  };
+	  ws2.onclose = e => {
+	    wsSetState('closed', 'Disconnected');
+	    wsLog('Closed (' + e.code + ')', 'sys');
+	    ws2 = null;
+	  };
+	  ws2.onerror = () => {
+	    wsSetState('error', 'Error');
+	    wsLog('Connection error', 'err');
+	  };
+	  ws2.onmessage = e => {
+	    if (e.data instanceof ArrayBuffer) {
+	      wsLog('[binary ' + e.data.byteLength + ' bytes]', 'recv');
+	    } else {
+	      try { wsLog(JSON.stringify(JSON.parse(e.data), null, 2), 'recv'); }
+	      catch { wsLog(e.data, 'recv'); }
+	    }
+	    wsStats.recv++;
+	    wsUpdateCounts();
+	  };
+	}
+	function wsDisconnect() {
+	  wsQueuedMessage = '';
+	  if (ws2) ws2.close();
+	  else wsSetState('closed', 'Disconnected');
+	}
+	function wsSend() {
+	  const input = document.getElementById('ws-msg');
+	  const text = input.value.trim();
+	  if (!text) {
+	    wsLog('Type a message or choose a quick message.', 'err');
+	    input.focus();
+	    return;
+	  }
+	  if (!ws2 || ws2.readyState !== WebSocket.OPEN) {
+	    wsQueuedMessage = text;
+	    wsLog('Queued until connected: ' + text, 'sys');
+	    wsConnect();
+	    input.value = '';
+	    return;
+	  }
+	  wsSendText(text);
+	  input.value = '';
+	}
+	function wsSendText(text) {
+	  if (!ws2 || ws2.readyState !== WebSocket.OPEN) return;
+	  ws2.send(text);
+	  wsLog(text, 'sent');
+	  wsStats.sent++;
+	  wsUpdateCounts();
+	}
+	function wsUpdateHint() {
+	  document.getElementById('ws-url').textContent = wsEndpoint().replace(location.origin.replace(/^http/, 'ws'), '');
+	  const input = document.getElementById('ws-msg');
+	  const mode = document.getElementById('ws-mode').value;
+	  input.placeholder = mode.startsWith('ticker') ? 'Send "stop" to close ticker...' : 'Type a message...';
+	  if (ws2 && ws2.readyState === WebSocket.OPEN) {
+	    wsDisconnect();
+	    wsLog('Endpoint changed. Reconnect to use the new route.', 'sys');
+	  }
+	}
+	document.querySelectorAll('.ws-chip').forEach(btn => {
+	  btn.addEventListener('click', () => {
+	    if (btn.dataset.action === 'clear') {
+	      document.getElementById('ws-log').innerHTML = '';
+	      return;
+	    }
+	    const input = document.getElementById('ws-msg');
+	    input.value = btn.dataset.msg || '';
+	    wsSend();
+	  });
+	});
+	wsUpdateHint();
+	wsSetState('closed', 'Disconnected');
+	wsUpdateCounts();
+	</script>
