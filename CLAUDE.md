@@ -39,6 +39,9 @@ scripts/bench.sh --p1000
 
 # Dockerized benchmark sweep
 mkdir -p bench/results && docker compose run --rm --build bench
+
+# Dockerized quad-core ZealPHP vs Node.js comparison
+mkdir -p bench/results && docker compose run --rm --build compare
 ```
 
 ---

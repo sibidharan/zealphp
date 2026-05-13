@@ -30,6 +30,7 @@ docker_setup() {
         libpq-dev \
         libssl-dev \
         make \
+        nodejs \
         pkg-config \
         procps \
         unzip \

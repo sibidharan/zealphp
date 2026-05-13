@@ -2,18 +2,28 @@ const http = require('http');
 const cluster = require('cluster');
 const os = require('os');
 
-const WORKERS = os.cpus().length; // match ZealPHP's worker count
+const WORKERS = Number.parseInt(process.env.NODE_WORKERS || process.env.WORKERS || os.cpus().length, 10);
+const PORT = Number.parseInt(process.env.NODE_PORT || process.env.PORT || 3000, 10);
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 if (cluster.isPrimary) {
+    console.log(`Node benchmark server starting on :${PORT} with ${WORKERS} workers`);
     for (let i = 0; i < WORKERS; i++) cluster.fork();
     cluster.on('exit', (w) => cluster.fork());
 } else {
     http.createServer(async (req, res) => {
         const url = req.url.split('?')[0];
+
+        // /raw/:rest - simple text response matching ZealPHP /raw/*
+        if (url.startsWith('/raw/')) {
+            const rest = url.slice(5);
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end(`You requested: ${rest}`);
+            return;
+        }
 
         // /quiz/:page — simple string response (mirrors ZealPHP /quiz/{page})
         if (url.startsWith('/quiz/')) {
@@ -46,5 +56,5 @@ if (cluster.isPrimary) {
 
         res.writeHead(404);
         res.end('Not Found');
-    }).listen(3000);
+    }).listen(PORT);
 }

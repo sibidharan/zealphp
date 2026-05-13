@@ -28,3 +28,20 @@ services:
       - 30s
     volumes:
       - ./bench/results:/app/bench/results
+
+  compare:
+    build:
+      context: .
+    image: zealphp:local
+    cpus: 4.0
+    command:
+      - ./scripts/bench_compare.sh
+      - --workers
+      - "4"
+      - --threads
+      - "4"
+      - --p1000
+      - --duration
+      - 30s
+    volumes:
+      - ./bench/results:/app/bench/results

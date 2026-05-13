@@ -107,6 +107,13 @@ Results are written to `bench/results/` on the host.
 On Docker Desktop for Mac, set Resources -> CPU limit to 16 if you want the
 container to use all 16 cores.
 
+For a quad-core ZealPHP vs Node.js comparison:
+
+```bash
+mkdir -p bench/results
+docker compose run --rm --build compare
+```
+
 ---
 
 ## Installation

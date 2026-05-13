@@ -63,6 +63,22 @@ On Docker Desktop for Mac, set Resources -> CPU limit to 16 before comparing
 results. Docker results are still container results; label them separately from
 bare-metal macOS runs.
 
+For a controlled quad-core ZealPHP vs Node.js comparison:
+
+```bash
+mkdir -p bench/results
+docker compose run --rm --build compare
+```
+
+This runs `scripts/bench_compare.sh` with 4 ZealPHP workers, 4 Node.js cluster
+workers, and 4 wrk threads. It writes:
+
+| File | Contents |
+|------|----------|
+| `bench/results/compare/quad-compare-*.csv` | Per-runtime totals: requests, elapsed time, req/s, p50/p90/p99, failures |
+| `bench/results/compare/quad-compare-summary-*.csv` | ZealPHP vs Node side-by-side ratios per path/concurrency |
+| `bench/results/compare/raw/*.txt` | Raw wrk output for audit/debugging |
+
 `--p1000` is only a project shorthand for a concurrency sweep up to `c=1000`.
 Latency percentiles are still reported as p50, p90, and p99.
 
