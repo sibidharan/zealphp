@@ -1,13 +1,13 @@
 <?php
 /**
- * Timer + Counter demo routes
+ * Timer + Counter demo routes.
  *
  * App::tick($ms, $fn)  — recurring timer per worker (uses OpenSwoole\Timer::tick)
  * App::after($ms, $fn) — one-shot timer (uses OpenSwoole\Timer::after)
  * Counter              — lock-free atomic integer shared across all workers
  *
  * Routes:
- *   GET /timers              — hub page
+ *   GET /timers              — designed timers page
  *   GET /timers/counter      — JSON dump of all counters
  *   GET /timers/sse          — SSE stream of the tick counter (updates every 2s)
  *   GET /timers/oneshot      — trigger a one-shot 3s delayed task
@@ -45,26 +45,16 @@ App::onWorkerStart(function($server, $workerId) use ($tickCounter) {
 });
 
 // ---------------------------------------------------------------------------
-// Middleware-style request counting via a route hook
+// Timers landing page
 // ---------------------------------------------------------------------------
 $app->route('/timers', ['methods' => ['GET']], function() use ($requestCounter) {
     $requestCounter->increment();
-    echo <<<'HTML'
-    <!doctype html><html><head><meta charset="utf-8"><title>ZealPHP Timers</title>
-    <style>body{font-family:system-ui;max-width:800px;margin:2rem auto;padding:0 1rem}
-    table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.6rem .8rem}th{background:#f4f4f4}
-    code{background:#f0f0f0;padding:1px 5px;border-radius:3px}a{color:#0070f3}</style></head><body>
-    <h1>Timer &amp; Counter Demos</h1>
-    <table>
-      <tr><th>Feature</th><th>Route</th><th>What it shows</th></tr>
-      <tr><td>Atomic counter</td><td><a href="/timers/counter">/timers/counter</a></td><td>Cross-worker request + tick counts</td></tr>
-      <tr><td>SSE tick stream</td><td><a href="/timers/sse">/timers/sse</a></td><td>Live counter via Server-Sent Events</td></tr>
-      <tr><td>One-shot timer</td><td><a href="/timers/oneshot">/timers/oneshot</a></td><td>App::after() — fires once after 3s</td></tr>
-      <tr><td>Worker metrics</td><td><a href="/timers/metrics">/timers/metrics</a></td><td>Per-worker pid/requests/ticks from Store</td></tr>
-    </table>
-    <p><code>curl -N http://localhost:8080/timers/sse</code> to see the live tick stream.</p>
-    </body></html>
-    HTML;
+    App::render('_master', [
+        'title' => 'ZealPHP · Timers',
+        'description' => 'Timers, counters, and worker metrics in ZealPHP.',
+        'page' => 'timers',
+        'active' => 'timers',
+    ]);
 });
 
 $app->route('/timers/counter', ['methods' => ['GET']], function() use ($requestCounter, $tickCounter) {
