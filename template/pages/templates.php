@@ -114,6 +114,47 @@ PHP]); ?>
 <strong>Pro tip:</strong> Combine SSR streaming with <code>go()</code> (coroutines) to fetch multiple data sources in parallel, then yield results as each completes — first available, first rendered.
 </div>
 
+<h3>Reusable Streaming Components</h3>
+<p>Wrap streaming logic in a generator function. Any route can <code>yield from</code> it — composing complex streamed pages from reusable parts:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'A reusable streaming list',
+    'code'  => <<<'PHP'
+use ZealPHP\App;
+
+// Generator function that yields rendered fragments
+function streamUserList(array $users) {
+    yield "<ul class='users'>";
+    foreach ($users as $user) {
+        yield App::renderToString('user-row', ['user' => $user]);
+    }
+    yield "</ul>";
+}
+
+// Compose it into any route
+$app->route('/users', function() {
+    return (function() {
+        yield App::renderToString('shell-open', ['title' => 'Users']);
+        yield "<h1>All Users</h1>";
+        yield from streamUserList(User::all());
+        yield App::renderToString('shell-close');
+    })();
+});
+PHP]); ?>
+
+<div class="callout warn" style="margin-top:1rem">
+<strong>Can a template file itself <code>yield</code>?</strong> No. <code>App::render()</code> uses PHP's <code>include</code> which does not preserve generator semantics — the <code>yield</code> would create a local generator that goes nowhere. Always wrap streaming logic in a function and use <code>renderToString()</code> to emit fragments from inside.
+</div>
+
+<h3>render() vs renderToString() — choosing</h3>
+<table class="ztable">
+<tr><th>Use</th><th>Method</th></tr>
+<tr><td>Direct output to the response body</td><td><code>App::render($tpl, $args)</code></td></tr>
+<tr><td>Inside a Generator route handler — yield each fragment</td><td><code>yield App::renderToString($tpl, $args)</code></td></tr>
+<tr><td>Build a string for email / cache / API JSON field</td><td><code>$html = App::renderToString(...)</code></td></tr>
+<tr><td>Compose templates inside another template</td><td><code>App::render('/components/...')</code> (direct echo)</td></tr>
+</table>
+
 <h2>Writing APIs with Templates</h2>
 <p>Mix template rendering with JSON responses. The same route can return different formats based on Accept header or query param:</p>
 

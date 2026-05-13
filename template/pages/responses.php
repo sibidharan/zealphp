@@ -97,5 +97,66 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <strong>Streaming responses</strong> — stream() and sse() are covered on the
   <a href="/streaming">Streaming page</a>. They send headers immediately and bypass the PSR-7 output buffer.
 </div>
+
+<h2 style="margin-top:2.5rem">PSR-7 Response objects</h2>
+<p>Return a PSR-7 <code>Response</code> directly when you need full control over status, headers, and body in one shot. The output buffer is ignored.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Return new Response(...)',
+    'code'  => <<<'PHP'
+use OpenSwoole\Core\Psr\Response;
+use ZealPHP\G;
+
+$app->route('/coglobal/set/session', ['methods' => ['GET', 'POST']], function($name) {
+    // This echo is IGNORED when a Response object is returned
+    echo "Hello World";
+
+    $g = G::instance();
+    $g->session['name'] = $name;
+
+    return new Response(
+        'Session set',           // body
+        300,                     // status
+        'success',               // reason phrase
+        ['Content-Type' => 'text/plain', 'X-Test' => 'test']
+    );
+});
+PHP]); ?>
+
+<h2 style="margin-top:2.5rem">Bypass the output buffer</h2>
+<p>Use <code>$response->status()</code> + <code>$response->write()</code> when you want to send the response immediately and skip output buffering entirely.</p>
+
+<?php App::render('/components/_code', [
+    'label' => '$response->write() takes precedence',
+    'code'  => <<<'PHP'
+$app->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
+    $response->status(403);
+    $response->write("403 Forbidden");
+    // No return needed — write() ends the response. Output buffer ignored.
+});
+PHP]); ?>
+
+<h2 style="margin-top:2.5rem">Utility functions</h2>
+<p>Free functions that work in any route handler — no need to grab <code>$response</code> first:</p>
+
+<table class="ztable">
+<tr><th>Function</th><th>Equivalent to</th></tr>
+<tr><td><code>response_set_status(int $code)</code></td><td><code>$response->status($code)</code></td></tr>
+<tr><td><code>response_add_header(string $name, string $value)</code></td><td><code>$response->header($name, $value)</code></td></tr>
+</table>
+
+<?php App::render('/components/_code', [
+    'label' => 'Utility functions in action',
+    'code'  => <<<'PHP'
+use function ZealPHP\response_add_header;
+use function ZealPHP\response_set_status;
+
+$app->route('/api/created', function() {
+    response_add_header('Location', '/api/items/42');
+    response_set_status(201);
+    return ['id' => 42, 'created' => true];
+});
+PHP]); ?>
+
 </div>
 </section>

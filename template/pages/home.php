@@ -397,6 +397,7 @@ document.addEventListener('click', function(e) {
       <?php
       $why = [
         ['🚀', 'No blocking',        'Every I/O call — file, DB, HTTP — yields to the event loop. OpenSwoole HOOK_ALL makes existing PHP libraries async automatically.'],
+        ['🌊', 'Solves C1000K',      'True parallelism via multi-process workers + coroutines. One server, 1M+ concurrent connections — no worker thread juggling, no microservice fan-out.'],
         ['🧵', 'True coroutines',    'Not fake async with callbacks. Real coroutines with go() + Channel. Write synchronous code that runs concurrently.'],
         ['🔧', 'PHP you already know','Superglobals, sessions, headers — all work via uopz overrides. Migrate existing apps without rewriting everything.'],
         ['📐', 'PSR standards',      'PSR-7 request/response, PSR-15 middleware. Drop in any PSR-15 middleware package.'],

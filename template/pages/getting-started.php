@@ -56,6 +56,7 @@ sudo apt install php8.3 php8.3-cli php8.3-dev php8.3-mbstring php-pear
 # 2. OpenSwoole (via PECL)
 sudo pecl install openswoole
 echo "extension=openswoole.so" | sudo tee /etc/php/8.3/cli/conf.d/zz-openswoole.ini
+echo "short_open_tag=On" | sudo tee -a /etc/php/8.3/cli/conf.d/zz-openswoole.ini
 
 # 3. uopz (via PECL)
 sudo pecl install uopz
@@ -68,6 +69,10 @@ curl -sS https://getcomposer.org/installer | sudo php -- --install-dir=/usr/loca
 php -m | grep -E 'openswoole|uopz'
 BASH
     ]); ?>
+
+    <div class="callout info" style="margin-top:1rem">
+      <strong>Why <code>short_open_tag=On</code>?</strong> ZealPHP templates often use <code>&lt;?= $var ?&gt;</code> for compact output. This is technically a "short echo tag" (always on in PHP 8) but enabling <code>short_open_tag</code> matches the recommended setup for OpenSwoole.
+    </div>
 
     <div class="callout info" style="margin-top:1rem">
       <strong>Docker?</strong> The framework repo includes a <code>Dockerfile</code> and <code>docker-compose.yml</code>.

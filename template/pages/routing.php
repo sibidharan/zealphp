@@ -97,5 +97,45 @@ foreach ($routeTypes as [$id, $title, $url, $code]) {
 }
 ?>
 
+<h2 style="margin-top:2.5rem">Route priority</h2>
+<p>Routes are matched in this order — the first match wins. Earlier in the list = higher priority:</p>
+
+<table class="ztable">
+<tr><th>#</th><th>Source</th><th>Loaded</th></tr>
+<tr><td>1</td><td>Files in <code>route/*.php</code></td><td>At server startup (auto-included via <code>glob</code>)</td></tr>
+<tr><td>2</td><td>Explicit <code>$app->route()</code> in <code>app.php</code></td><td>Before <code>$app->run()</code></td></tr>
+<tr><td>3</td><td>Implicit API: <code>/api/{module}/{request}</code></td><td>Inside <code>$app->run()</code></td></tr>
+<tr><td>4</td><td>Implicit public files: <code>/</code>, <code>/{file}</code>, <code>/{dir}/{uri}</code></td><td>Inside <code>$app->run()</code></td></tr>
+<tr><td>5</td><td>Fallback handler (if <code>setFallback()</code> registered)</td><td>When nothing else matches</td></tr>
+</table>
+
+<div class="callout info">
+<strong>Override implicit routes</strong> by placing a file in <code>route/</code>. For example, to customize <code>/admin/users</code> instead of letting it auto-resolve to <code>public/admin/users.php</code>, define an explicit route in <code>route/admin.php</code> — it loads first and takes precedence.
+</div>
+
+<h2 style="margin-top:2.5rem">Pattern routes with named regex groups</h2>
+<p><code>patternRoute</code> accepts any regex with named capture groups (PCRE <code>(?P&lt;name&gt;...)</code> syntax). Captured names are injected as handler parameters:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Named capture group → handler parameter',
+    'code'  => <<<'PHP'
+// Match any URL starting with /raw/
+$app->patternRoute('/raw/(?P<rest>.*)', ['methods' => ['GET']], function($rest) {
+    echo "You requested: $rest";
+    return 202;
+});
+
+// Multiple groups
+$app->patternRoute('/blog/(?P<year>\d{4})/(?P<slug>[a-z-]+)', function($year, $slug) {
+    return ['year' => $year, 'slug' => $slug];
+});
+
+// Block .php extension entirely
+$app->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
+    $response->status(403);
+    $response->write("403 Forbidden");
+});
+PHP]); ?>
+
 </div>
 </section>
