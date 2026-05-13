@@ -11,6 +11,7 @@ $links = [
   'middleware'  => ['/middleware','Middleware'],
   'sessions'    => ['/sessions',  'Sessions'],
   'store'       => ['/store',     'Store'],
+  'timers'      => ['/timers',    'Timers'],
   'http'        => ['/http',      'HTTP'],
   'api'         => ['/api',       'ZealAPI'],
 ];

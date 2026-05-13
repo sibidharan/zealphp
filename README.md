@@ -4,7 +4,8 @@ A lightweight, high-performance open-source PHP web framework built on **OpenSwo
 
 [![Latest Stable Version](https://poser.pugx.org/sibidharan/zealphp/v)](https://packagist.org/packages/sibidharan/zealphp) [![Total Downloads](https://poser.pugx.org/sibidharan/zealphp/downloads)](https://packagist.org/packages/sibidharan/zealphp) [![License](https://poser.pugx.org/sibidharan/zealphp/license)](https://packagist.org/packages/sibidharan/zealphp)
 
-**Homepage / Live Docs:** `php app.php` → `http://localhost:8080`  
+**Homepage / Live Docs:** `php app.php` → `https://php.zeal.ninja`  
+Set `ZEALPHP_SITE_URL` if you want the rendered example URLs to point somewhere else.
 **Changelog:** [CHANGELOG.md](CHANGELOG.md)
 
 ---
@@ -36,7 +37,7 @@ A lightweight, high-performance open-source PHP web framework built on **OpenSwo
 composer create-project sibidharan/zealphp-project:^0.1.1 my-project
 cd my-project
 php app.php
-# → http://localhost:8080
+# → https://php.zeal.ninja
 ```
 
 ```php
@@ -109,7 +110,7 @@ It writes the PID file to `/tmp/zealphp/zealphp.pid` by default, stores the
 server log in `/tmp/zealphp/server.log`, and tails `server.log`,
 `access.log`, `debug.log`, and `zlog.log` from the same directory. If a server
 is already running, the start command asks before killing and restarting it.
-`restart` stops any live process it finds, then starts it again with the same
+`restart` stops the whole live server group, then starts it again with the same
 defaults without prompting.
 
 Use `scripts/zealphp.sh foreground` if you want the attached mode back.

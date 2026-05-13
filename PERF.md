@@ -119,7 +119,8 @@ scripts/bench.sh --workers 16 --threads 16 --task-workers 0 \
   --paths /raw/bench,/json,/co --concurrency 10,100,500,1000
 
 # Test an already-running server
-scripts/bench.sh --no-start --base-url http://127.0.0.1:8080 --path /raw/bench --p1000
+ZEALPHP_BENCH_URL=${ZEALPHP_BENCH_URL:-http://127.0.0.1:8080} \
+  scripts/bench.sh --no-start --base-url "$ZEALPHP_BENCH_URL" --path /raw/bench --p1000
 
 # Explicit OpenSwoole limits for larger connection tests
 scripts/bench.sh --workers 16 --threads 16 --p1000 \

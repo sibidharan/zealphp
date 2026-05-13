@@ -1,4 +1,9 @@
-<?php use ZealPHP\App; ?>
+<?php
+use ZealPHP\App;
+use function ZealPHP\site_url;
+
+$siteUrl = site_url();
+?>
 <section class="section">
 <div class="container">
 <h1 class="section-title">HTTP Protocol Features</h1>
@@ -20,25 +25,25 @@
 <?php
 $demos = [
   ['http-head',    'HEAD — headers only, body stripped',     'HEAD',    '/http/head-test',
-   <<<'PHP'
+   str_replace('__SITE_URL__', $siteUrl, <<<'PHP'
 // Register GET route — HEAD works automatically:
 $app->route('/http/head-test', function() {
     header('X-Custom-Header: zealphp');
     echo str_repeat('x', 2048);  // 2KB body
 });
 
-// curl -I http://localhost:8080/http/head-test
+// curl -I __SITE_URL__/http/head-test
 // → Content-Length: 2048 (no body)
 // → X-Custom-Header: zealphp
-PHP],
+PHP)],
   ['http-options', 'OPTIONS — Allow header for URI',          'OPTIONS', '/http/options-test',
-   <<<'PHP'
+   str_replace('__SITE_URL__', $siteUrl, <<<'PHP'
 $app->route('/http/options-test', ['methods' => ['GET','POST','PUT']], fn() => '');
 
-// curl -X OPTIONS http://localhost:8080/http/options-test -v
+// curl -X OPTIONS __SITE_URL__/http/options-test -v
 // → HTTP/1.1 204 No Content
 // → Allow: OPTIONS, GET, HEAD, POST, PUT
-PHP],
+PHP)],
   ['http-redirect','Redirects — 301/302/307/308',             'GET',     '/http/redirect/301',
    <<<'PHP'
 // $response->redirect() sets Location + status

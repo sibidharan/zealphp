@@ -1,4 +1,9 @@
-<?php use ZealPHP\App; ?>
+<?php
+use ZealPHP\App;
+use function ZealPHP\site_url;
+
+$siteUrl = site_url();
+?>
 
 <!-- Hero -->
 <section class="hero">
@@ -30,14 +35,14 @@
       <div><span class="cmd">composer create-project sibidharan/zealphp-project:^0.1.1 ~/zealphp-project</span></div>
       <div><span class="cmd">cd ~/zealphp-project</span></div>
       <div><span class="cmd">php app.php</span></div>
-      <div><span class="comment"># → http://localhost:8080</span></div>
+      <div><span class="comment"># → <?= htmlspecialchars($siteUrl) ?></span></div>
     </div>
     <div class="quickstart">
       <div><span class="comment"># Framework repo</span></div>
       <div><span class="cmd">git clone https://github.com/sibidharan/zealphp.git ~/zealphp</span></div>
       <div><span class="cmd">cd ~/zealphp</span></div>
       <div><span class="cmd">php app.php</span></div>
-      <div><span class="comment"># → http://localhost:8080</span></div>
+      <div><span class="comment"># → <?= htmlspecialchars($siteUrl) ?></span></div>
     </div>
   </div>
 </section>

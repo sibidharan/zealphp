@@ -1,4 +1,9 @@
-<?php use ZealPHP\App; ?>
+<?php
+use ZealPHP\App;
+use function ZealPHP\site_url;
+
+$siteUrl = site_url();
+?>
 <section class="section">
 <div class="container">
 <h1 class="section-title">Middleware</h1>
@@ -27,33 +32,33 @@ PHP]);
 <?php
 $demos = [
   ['mw-cors', 'CORS — Access-Control-Allow-Origin on every response', '/demo/middleware/cors',
-   <<<'PHP'
+   str_replace('__SITE_URL__', $siteUrl, <<<'PHP'
 // Add middleware once in app.php:
 $app->addMiddleware(new CorsMiddleware(['*']));
 
 // Hit any endpoint with Origin header:
-// curl -H "Origin: http://app.test" http://localhost:8080/demo/middleware/cors
+// curl -H "Origin: http://app.test" __SITE_URL__/demo/middleware/cors
 // → Access-Control-Allow-Origin: *
-PHP],
+PHP)],
   ['mw-etag', 'ETag / 304 — conditional GET', '/demo/middleware/etag',
-   <<<'PHP'
+   str_replace('__SITE_URL__', $siteUrl, <<<'PHP'
 // ETagMiddleware auto-generates W/"md5(body)" on GET
 // Second request with If-None-Match: <etag> → 304 Not Modified
 
 // First hit:
-// curl -D - http://localhost:8080/http/etag-test
+// curl -D - __SITE_URL__/http/etag-test
 // → ETag: W/"abc..."
 // Second hit:
-// curl -H 'If-None-Match: W/"abc..."' http://localhost:8080/http/etag-test
+// curl -H 'If-None-Match: W/"abc..."' __SITE_URL__/http/etag-test
 // → HTTP/1.1 304 Not Modified (empty body)
-PHP],
+PHP)],
   ['mw-comp', 'Compression — gzip when Accept-Encoding: gzip', '/demo/middleware/compress',
-   <<<'PHP'
+   str_replace('__SITE_URL__', $siteUrl, <<<'PHP'
 // OpenSwoole handles runtime compression by default.
 // Keep CompressionMiddleware only as a reference if you disable http_compression.
-// curl --compressed http://localhost:8080/http/compress-test
+// curl --compressed __SITE_URL__/http/compress-test
 // → Content-Encoding: gzip  (body is compressed)
-PHP],
+PHP)],
 ];
 foreach ($demos as [$id, $title, $url, $code]) {
     App::render('/components/_demo', compact('id', 'title', 'url', 'code'));

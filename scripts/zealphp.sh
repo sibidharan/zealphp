@@ -82,6 +82,15 @@ pid_cmdline() {
     ps -p "$pid" -o args= 2>/dev/null | trim || true
 }
 
+pid_group() {
+    local pid="$1"
+    ps -p "$pid" -o pgid= 2>/dev/null | trim || true
+}
+
+shell_group() {
+    ps -p $$ -o pgid= 2>/dev/null | trim || true
+}
+
 pid_is_running() {
     local pid="$1"
     [[ -n "$pid" ]] || return 1
@@ -89,6 +98,41 @@ pid_is_running() {
     local args
     args="$(pid_cmdline "$pid")"
     [[ "$args" == *"app.php"* ]]
+}
+
+wait_for_shutdown() {
+    local i pid
+    for i in $(seq 1 100); do
+        pid="$(server_pid || true)"
+        if [[ -z "$pid" ]]; then
+            rm -f "$PID_FILE"
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
+kill_server_group() {
+    local pid="$1"
+    local pgid
+    pgid="$(pid_group "$pid" || true)"
+    if [[ -n "$pgid" ]] && [[ "$pgid" != "$(shell_group || true)" ]]; then
+        kill -TERM -- "-$pgid" >/dev/null 2>&1 || true
+    else
+        kill -TERM "$pid" >/dev/null 2>&1 || true
+    fi
+}
+
+kill_server_group_force() {
+    local pid="$1"
+    local pgid
+    pgid="$(pid_group "$pid" || true)"
+    if [[ -n "$pgid" ]] && [[ "$pgid" != "$(shell_group || true)" ]]; then
+        kill -KILL -- "-$pgid" >/dev/null 2>&1 || true
+    else
+        kill -KILL "$pid" >/dev/null 2>&1 || true
+    fi
 }
 
 cleanup_stale_pidfile() {
@@ -141,18 +185,14 @@ stop_pid() {
         return 0
     fi
 
-    kill "$pid" >/dev/null 2>&1 || true
-    local i
-    for i in $(seq 1 50); do
-        if ! pid_is_running "$pid"; then
-            rm -f "$PID_FILE"
-            return 0
-        fi
-        sleep 0.1
-    done
+    kill_server_group "$pid"
+    if wait_for_shutdown; then
+        return 0
+    fi
 
-    kill -9 "$pid" >/dev/null 2>&1 || true
+    kill_server_group_force "$pid"
     rm -f "$PID_FILE"
+    wait_for_shutdown || true
 }
 
 start_server() {
@@ -209,11 +249,10 @@ restart_server() {
     cleanup_stale_pidfile
 
     local pid
-    while pid="$(server_pid || true)"; do
+    pid="$(server_pid || true)"
+    if [[ -n "$pid" ]]; then
         stop_pid "$pid"
-        cleanup_stale_pidfile
-    done
-
+    fi
     start_server 1
 }
 

@@ -35,6 +35,44 @@ function bench_mode_enabled(): bool
     return $enabled;
 }
 
+function site_url(string $path = ''): string
+{
+    static $base = null;
+    if ($base === null) {
+        $configured = getenv('ZEALPHP_SITE_URL');
+        if ($configured === false || trim((string) $configured) === '') {
+            $configured = getenv('ZEALPHP_SITE_HOST');
+        }
+        if ($configured === false || trim((string) $configured) === '') {
+            $configured = 'https://php.zeal.ninja';
+        }
+
+        $configured = trim((string) $configured);
+        if (!preg_match('~^[a-z][a-z0-9+.-]*://~i', $configured)) {
+            $configured = 'https://' . ltrim($configured, '/');
+        }
+        $base = rtrim($configured, '/');
+    }
+
+    $path = trim($path);
+    if ($path === '') {
+        return $base;
+    }
+
+    return $base . '/' . ltrim($path, '/');
+}
+
+function site_host(): string
+{
+    $url = site_url();
+    $parts = parse_url($url);
+    if (is_array($parts) && !empty($parts['host'])) {
+        return $parts['host'];
+    }
+
+    return $url;
+}
+
 function async_logging_enabled(): bool
 {
     static $enabled = null;

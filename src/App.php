@@ -853,7 +853,7 @@ class App
                 $g->server['SCRIPT_NAME'] = '/app.php';
             }
             if (!isset($g->server['SERVER_NAME'])) {
-                $g->server['SERVER_NAME'] = $g->server['HTTP_HOST'] ?? 'localhost';
+                $g->server['SERVER_NAME'] = $g->server['HTTP_HOST'] ?? site_host();
             }
             if (!isset($g->server['DOCUMENT_ROOT'])) {
                 $g->server['DOCUMENT_ROOT'] = self::$cwd . '/public';
