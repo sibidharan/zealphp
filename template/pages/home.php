@@ -52,26 +52,147 @@ $siteUrl = site_url();
 </section>
 
 <!-- Quick start -->
-<section class="section" style="background:var(--bg-dark);color:#e2e8f0">
+<section class="section" style="background:var(--bg-dark);color:#e2e8f0;padding-top:3rem;padding-bottom:3rem">
   <div class="container">
-    <h2 style="color:#fff;margin-bottom:.5rem">Quick Start</h2>
-    <p style="color:#94a3b8;margin-bottom:1.5rem">Pick the starter-project path or run the framework repo directly.</p>
-    <div class="quickstart">
-      <div><span class="comment"># Starter project</span></div>
-      <div><span class="cmd">composer create-project sibidharan/zealphp-project:^0.1.1 ~/zealphp-project</span></div>
-      <div><span class="cmd">cd ~/zealphp-project</span></div>
-      <div><span class="cmd">php app.php</span></div>
-      <div><span class="comment"># → <?= htmlspecialchars($siteUrl) ?></span></div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem">
+      <div>
+        <h2 style="color:#fff;margin-bottom:.25rem">Quick Start</h2>
+        <p style="color:#94a3b8;margin:0">From zero to running server in 60 seconds.</p>
+      </div>
+      <div style="display:flex;gap:.5rem;font-size:.78rem" class="qs-tabs">
+        <button class="qs-tab active" data-tab="starter" onclick="qsTab('starter')">⚡ Starter Project</button>
+        <button class="qs-tab" data-tab="framework" onclick="qsTab('framework')">🔧 Framework Repo</button>
+        <button class="qs-tab" data-tab="wordpress" onclick="qsTab('wordpress')">🏗️ WordPress</button>
+      </div>
     </div>
-    <div class="quickstart">
-      <div><span class="comment"># Framework repo</span></div>
-      <div><span class="cmd">git clone https://github.com/sibidharan/zealphp.git ~/zealphp</span></div>
-      <div><span class="cmd">cd ~/zealphp</span></div>
-      <div><span class="cmd">php app.php</span></div>
-      <div><span class="comment"># → <?= htmlspecialchars($siteUrl) ?></span></div>
+
+    <div class="qs-panel active" data-panel="starter">
+      <div class="qs-block">
+        <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project:^0.1.1 my-app</span><button class="qs-copy" data-copy="composer create-project sibidharan/zealphp-project:^0.1.1 my-app">copy</button></div>
+        <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd my-app && php app.php</span><button class="qs-copy" data-copy="cd my-app && php app.php">copy</button></div>
+        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">Server running at <a href="<?= htmlspecialchars($siteUrl) ?>" target="_blank"><?= htmlspecialchars($siteUrl) ?></a></span></div>
+      </div>
+      <div class="qs-note">Includes CLAUDE.md for AI-assisted development. Edit <code>app.php</code> and reload — the server is hot-reloaded.</div>
+    </div>
+
+    <div class="qs-panel" data-panel="framework">
+      <div class="qs-block">
+        <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> git clone https://github.com/sibidharan/zealphp.git</span><button class="qs-copy" data-copy="git clone https://github.com/sibidharan/zealphp.git">copy</button></div>
+        <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd zealphp && composer install && php app.php</span><button class="qs-copy" data-copy="cd zealphp && composer install && php app.php">copy</button></div>
+        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">This very site, running locally at <a href="<?= htmlspecialchars($siteUrl) ?>" target="_blank"><?= htmlspecialchars($siteUrl) ?></a></span></div>
+      </div>
+      <div class="qs-note">The framework repo IS the OSS website — every page is a live, working example of a feature.</div>
+    </div>
+
+    <div class="qs-panel" data-panel="wordpress">
+      <div class="qs-block">
+        <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> git clone https://github.com/sibidharan/zealphp-wordpress.git</span><button class="qs-copy" data-copy="git clone https://github.com/sibidharan/zealphp-wordpress.git">copy</button></div>
+        <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd zealphp-wordpress && composer install</span><button class="qs-copy" data-copy="cd zealphp-wordpress && composer install">copy</button></div>
+        <div class="qs-line"><span class="qs-num">3</span><span class="qs-cmd"><span class="qs-prompt">$</span> php app.php</span><button class="qs-copy" data-copy="php app.php">copy</button></div>
+        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">WordPress on OpenSwoole — admin, login, REST API all working</span></div>
+      </div>
+      <div class="qs-note">Zero WordPress modifications. CGI worker provides Apache mod_php compatibility. See <a href="/legacy-apps">Legacy Apps</a>.</div>
+    </div>
+
+    <div class="qs-prereq">
+      <span class="qs-prereq-label">Requires</span>
+      <code>PHP 8.3+</code>
+      <code>OpenSwoole 25+</code>
+      <code>uopz</code>
+      <code>composer</code>
+      <a href="/getting-started" class="qs-prereq-link">Install help →</a>
     </div>
   </div>
 </section>
+
+<style>
+.qs-tabs button {
+  background: transparent; color: #94a3b8; border: 1px solid rgba(255,255,255,.1);
+  padding: .45rem .85rem; border-radius: 6px; cursor: pointer; font-weight: 500;
+  font-size: .78rem; transition: all .15s; font-family: var(--font);
+}
+.qs-tabs button:hover { color: #e2e8f0; border-color: rgba(255,255,255,.2); }
+.qs-tabs button.active {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.qs-panel { display: none; }
+.qs-panel.active { display: block; }
+.qs-block {
+  background: #0a0f1e; border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 1rem;
+  font-family: var(--font-mono); font-size: .87rem;
+}
+.qs-line {
+  display: flex; align-items: center; gap: .85rem;
+  padding: .35rem 0; line-height: 1.6;
+}
+.qs-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(99,102,241,.15); color: var(--accent);
+  font-size: .72rem; font-weight: 700; flex-shrink: 0;
+  font-family: var(--font);
+}
+.qs-arrow {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; color: #10b981; font-size: 1rem; flex-shrink: 0;
+}
+.qs-prompt { color: #64748b; margin-right: .4rem; user-select: none; }
+.qs-cmd { color: #e2e8f0; flex: 1; word-break: break-all; }
+.qs-out { color: #94a3b8; font-style: italic; flex: 1; }
+.qs-out a { color: #818cf8; }
+.qs-copy {
+  background: transparent; color: #64748b; border: 1px solid rgba(255,255,255,.08);
+  padding: .15rem .55rem; border-radius: 4px; cursor: pointer; font-size: .68rem;
+  font-family: var(--font); transition: all .15s;
+}
+.qs-copy:hover { color: #e2e8f0; border-color: rgba(255,255,255,.2); background: rgba(255,255,255,.03); }
+.qs-copy.copied { color: #10b981; border-color: #10b981; }
+.qs-note {
+  color: #64748b; font-size: .82rem; padding: .25rem .5rem;
+}
+.qs-note code { background: rgba(255,255,255,.05); padding: .1rem .35rem; border-radius: 3px; color: #cbd5e1; }
+.qs-note a { color: #818cf8; }
+.qs-prereq {
+  margin-top: 1.5rem; padding-top: 1.5rem;
+  border-top: 1px solid rgba(255,255,255,.05);
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  font-size: .78rem;
+}
+.qs-prereq-label { color: #64748b; text-transform: uppercase; letter-spacing: .05em; font-size: .68rem; font-weight: 700; margin-right: .25rem; }
+.qs-prereq code {
+  background: rgba(255,255,255,.04); color: #cbd5e1;
+  padding: .2rem .55rem; border-radius: 4px; font-size: .76rem;
+  border: 1px solid rgba(255,255,255,.06);
+}
+.qs-prereq-link { color: #818cf8; margin-left: auto; font-weight: 500; }
+@media (max-width: 768px) {
+  .qs-tabs { width: 100%; flex-wrap: wrap; }
+  .qs-tabs button { flex: 1; min-width: 0; padding: .4rem .5rem; font-size: .72rem; }
+  .qs-prereq-link { margin-left: 0; width: 100%; margin-top: .5rem; }
+  .qs-cmd { font-size: .78rem; }
+}
+</style>
+
+<script>
+function qsTab(name) {
+  document.querySelectorAll('.qs-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.qs-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === name));
+}
+document.addEventListener('click', function(e) {
+  if (e.target.classList && e.target.classList.contains('qs-copy')) {
+    navigator.clipboard.writeText(e.target.dataset.copy).then(() => {
+      const orig = e.target.textContent;
+      e.target.textContent = 'copied!';
+      e.target.classList.add('copied');
+      setTimeout(() => {
+        e.target.textContent = orig;
+        e.target.classList.remove('copied');
+      }, 1200);
+    });
+  }
+});
+</script>
 
 <!-- Feature grid -->
 <section class="section">
