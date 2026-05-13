@@ -4,16 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
-ZealPHP is a PHP web framework library built on **OpenSwoole**. This repo is the framework itself — `app.php` and `api/`, `public/`, `route/`, `template/` are a built-in demo app that exercises the framework's features.
+ZealPHP is a PHP web framework library built on **OpenSwoole**. This repo is the framework itself — `app.php` and `api/`, `public/`, `route/`, `template/` are the built-in demo app / OSS website that exercises every framework feature.
 
 ## Commands
 
 ```bash
-# Install PHP dependencies
+# Install PHP dependencies (including PHPUnit dev dep)
 composer install
 
-# Start the dev server (runs the demo app on :8080)
+# Start the dev server — serves the OSS website on :8080
 php app.php
+
+# Unit tests (no server needed)
+./vendor/bin/phpunit tests/Unit/ --testdox
+
+# Integration tests (server must be running on :8080)
+php app.php &
+./vendor/bin/phpunit tests/Integration/ --testdox
+
+# All tests
+./vendor/bin/phpunit --testdox
 
 # Install system dependencies (PHP 8.3, OpenSwoole, uopz) — requires root
 sudo bash setup.sh
@@ -22,7 +32,29 @@ sudo bash setup.sh
 php -m | grep -E 'openswoole|uopz'
 ```
 
-There is no test suite in this repository.
+---
+
+## Testing
+
+PHPUnit 11 test suite lives in `tests/`. `ZEALPHP_TEST_PORT` env var sets the server port (defaults to `8080`).
+
+### Unit tests (`tests/Unit/`) — no server needed
+| File | What it tests |
+|------|--------------|
+| `StoreTest.php` | `Store::make`, `set/get/del`, `exists`, `incr/decr`, `count`, `iterate` |
+| `CounterTest.php` | `increment/decrement/byN`, `CAS`, `reset`, `raw()` |
+| `BuildParamMapTest.php` | Every parameter injection case via reflection |
+| `RoutePatternTest.php` | `{param}` → regex, namespace prefix, method casing |
+
+### Integration tests (`tests/Integration/`) — requires `php app.php`
+| File | What it tests |
+|------|--------------|
+| `RoutingTest.php` | All 7 injection cases + route types + 404 |
+| `HttpFeaturesTest.php` | 301/302/307, HEAD, OPTIONS, cookies, CORS |
+| `MiddlewareTest.php` | CORS preflight, ETag + 304, gzip |
+| `StreamingTest.php` | Generator SSR, `stream()`, SSE events |
+
+`tests/TestCase.php` — base class with `http()`, `get()`, `post()`, `assertStatus()`, `assertHeader()`, `assertJsonResponse()` helpers. HEAD requests use `CURLOPT_NOBODY` for correct header parsing.
 
 ---
 
@@ -32,8 +64,8 @@ There is no test suite in this repository.
 
 Every inbound request flows through these layers (defined across multiple files):
 
-1. **OpenSwoole HTTP server** (`src/App.php:run()`) receives the raw request.
-2. **SessionManager or CoSessionManager** (`src/Session/SessionManager.php`, `src/Session/CoSessionManager.php`) is registered as the `onRequest` handler. It initialises the session, creates `ZealPHP\HTTP\Request`/`Response` wrappers, and stores them in `G::instance()`.
+1. **OpenSwoole WebSocket\Server** (`src/App.php:run()`) receives the raw request. (WebSocket\Server extends HTTP\Server — all HTTP routes still work.)
+2. **CoSessionManager** (`src/Session/CoSessionManager.php`) is registered as the `onRequest` handler in coroutine mode. It initialises the session, creates `ZealPHP\HTTP\Request`/`Response` wrappers, and stores them in `G::instance()`.
 3. **G singleton** (`src/G.php`) is populated with `get`, `post`, `cookie`, `server`, `files`, `session`, `zealphp_request`, `zealphp_response`, etc.
 4. **PSR-15 middleware stack** (`OpenSwoole\Core\Psr\Middleware\StackHandler`) is invoked via `App::middleware()->handle($serverRequest)`.
 5. **ResponseMiddleware** (inner-most layer, bottom of `src/App.php`) matches the URI against the route table, resolves handler parameters by name via reflection, calls the handler, and wraps the return value as a PSR-7 response.
@@ -47,24 +79,24 @@ Every inbound request flows through these layers (defined across multiple files)
 | Superglobals ON | A single process-wide singleton; `$g->session` proxies to `$_SESSION`, `$g->get` to `$_GET`, etc. via `$GLOBALS` |
 | Superglobals OFF | A per-coroutine instance stored in `OpenSwoole\Coroutine::getContext()` — each coroutine has isolated state |
 
-This is why you **cannot safely share `$_GET`/`$_SESSION` across coroutines in superglobals-OFF mode** — use `G::instance()` instead.
+The **demo app uses `superglobals(false)` (coroutine mode)**. This is now the recommended default for new projects.
 
 ### uopz Function Overrides
 
 At startup (`src/App.php:__construct()`), `uopz_set_return()` permanently replaces PHP built-ins:
 
-- `header()`, `headers_list()`, `setcookie()`, `http_response_code()` → implementations in `src/utils.php` that write to `$g->zealphp_response`
+- `header()`, `headers_list()`, `setcookie()` (+ `$samesite` param), `http_response_code()` → implementations in `src/utils.php` that write to `$g->zealphp_response`
 - All `session_*()` functions → implementations in `src/Session/utils.php` that read/write `$g->session` and file-based session storage in `/var/lib/php/sessions`
 
 This lets legacy PHP code call `header()` or `session_start()` unchanged while the framework routes those calls to the correct per-request objects.
 
 ### IOStreamWrapper
 
-`src/IOStreamWrapper.php` replaces the `php://` stream wrapper (registered once per worker in `workerStart`). When code reads `php://input`, the wrapper instead returns `$g->zealphp_request->parent->getContent()`. Other `php://` streams are delegated to the original wrapper. This makes `file_get_contents('php://input')` and PSR streams work correctly inside OpenSwoole workers.
+`src/IOStreamWrapper.php` replaces the `php://` stream wrapper (registered once per worker in `workerStart`). When code reads `php://input`, the wrapper instead returns `$g->zealphp_request->parent->getContent()`. Other `php://` streams are delegated to the original wrapper.
 
 ### Route Registration and Priority
 
-Routes are registered in this order inside `App::run()` (earlier = higher priority for first-match):
+Routes are registered in this order inside `App::run()` (earlier = higher priority):
 
 1. Files from `route/*.php` (loaded at startup via `glob`)
 2. Explicit routes defined in `app.php` before `$app->run()` is called
@@ -72,21 +104,81 @@ Routes are registered in this order inside `App::run()` (earlier = higher priori
 4. `.php` extension block (returns 403)
 5. Implicit public file routes: `/` → `public/index.php`, `/{file}` → `public/{file}.php`, `/{dir}/{uri}` → `public/{dir}/{uri}.php`
 
-**API handler naming rule**: `api/users/get.php` must define a variable `$get = function(...)`. The variable name must match `basename($file, '.php')`. ZealAPI binds it as a closure with `$this` set to the `ZealAPI` instance.
+**API handler naming rule**: `api/users/get.php` must define `$get = function(...)`. The variable name must match `basename($file, '.php')`. ZealAPI binds it as a closure with `$this` set to the `ZealAPI` instance.
 
-### Superglobals Mode vs Coroutine Mode
+### Parameter Injection
 
-`App::superglobals(false)` must be called **before** `App::init()`. When disabled:
-- `OpenSwoole\Runtime::HOOK_ALL` is enabled — all I/O (curl, PDO, file I/O, sleep) becomes coroutine-aware
-- `CoSessionManager` is used (coroutine-safe session handling)
-- `go()` / `co::sleep()` / `Channel` work directly in route handlers
-- `coprocess()` throws an exception (use coroutines instead)
+`ResponseMiddleware` uses reflection (cached at route registration via `buildParamMap()`) to inject handler arguments by name:
 
-When superglobals are enabled, implicit routes run through `prefork_request_handler()` (`src/utils.php`), which forks a child process, captures `echo` output plus response headers/cookies via a POSIX message queue, and returns them to the parent. This enables blocking PHP code to run safely without corrupting shared server state.
+| Parameter name | Injected value |
+|---------------|---------------|
+| `$request` | `ZealPHP\HTTP\Request` wrapper |
+| `$response` | `ZealPHP\HTTP\Response` wrapper |
+| `$app` | `ResponseMiddleware` instance |
+| `{param}` names | Matched URL segments |
+| Any other name with default | PHP default value |
+
+Reflection is cached per route at registration time — zero reflection overhead per request.
 
 ### Middleware Stack Order
 
 `addMiddleware()` appends to `$middleware_wait_stack`. In `run()`, that array is **reversed** before being added to `StackHandler`. Result: the last-added middleware executes first (outermost wrap), `ResponseMiddleware` always runs innermost.
+
+**Built-in middleware** (all in `src/Middleware/`):
+- `CorsMiddleware` — CORS preflight (OPTIONS + Origin) + `Access-Control-*` headers on every response
+- `ETagMiddleware` — `W/"md5"` ETag on GET, returns 304 on `If-None-Match` match
+- `CompressionMiddleware` — gzip/deflate for bodies > 1 KB when `Accept-Encoding` present
+
+### HTTP Protocol Features
+
+| Feature | How |
+|---------|-----|
+| HEAD method | Auto-mapped to GET in `ResponseMiddleware`; body stripped, `Content-Length` preserved |
+| OPTIONS method | Returns 204 + `Allow:` header listing all methods for that URI |
+| Redirects 301/307/308 | `$response->redirect($url, $status)` |
+| Cookie SameSite | `setcookie()` override accepts `$samesite` param |
+| HTTP/2 | Pass `'enable_http2' => true` to `$app->run()` (requires TLS) |
+
+### SSR Streaming
+
+Three streaming patterns via `src/HTTP/Response.php` and `ResponseMiddleware`:
+
+| Pattern | How | When to use |
+|---------|-----|-------------|
+| **Generator `yield`** | Return `\Generator`; each `yield $string` sent immediately | SSR — stream HTML shell, yield sections as coroutines resolve |
+| **`$response->stream($fn)`** | `$fn` receives `$write(string)` closure; headers flushed before `$fn` runs | Fine-grained streaming control |
+| **`$response->sse($fn)`** | `$fn` receives `$emit($data, $event, $id)` — formats SSE wire protocol | Server-Sent Events for JS `EventSource` |
+
+`App::renderToString($template, $args)` — captures `App::render()` into a string safe to `yield` or `$write()` inside a streaming context.
+
+`$g->_streaming = true` is set by `stream()`/`sse()` so `ResponseMiddleware` knows to skip `ob_get_clean()`.
+
+### WebSocket
+
+`App::ws($path, $onMessage, $onOpen, $onClose)` registers a WebSocket endpoint.
+
+- Server switched from `HTTP\Server` to `WebSocket\Server` (backward-compatible; all HTTP routes still work)
+- Per-worker `$wsFdMap` tracks `fd → path`; cleaned up in `onClose`
+- `onMessage` handler **silently drops PING (9), PONG (10), CONTINUATION (0)** frames — only TEXT (1) and BINARY (2) reach route handlers
+- `onShutdown` sends WebSocket CLOSE frame 1001 (Going Away) to all connections
+- `App::onWorkerStart(callable $fn)` — register per-worker startup hook (timers, warmup, etc.)
+- `getClientList` must be paginated in chunks of 100 (OpenSwoole hard limit)
+
+### OpenSwoole Adapters
+
+**`Store` (`src/Store.php`)** — `OpenSwoole\Table` wrapper for cross-worker shared memory.
+- Must be created **before** `$app->run()` (master process, shared on fork)
+- `Store::make($name, $maxRows, $columns)` — column types: `TYPE_INT`, `TYPE_FLOAT`, `TYPE_STRING`
+- `Store::set/get/del/exists/incr/decr/count/table/names()`
+
+**`Counter` (`src/Counter.php`)** — `OpenSwoole\Atomic` wrapper for lock-free cross-worker integer.
+- Must be created before `$app->run()`
+- `increment($by=1)`, `decrement($by=1)`, `get()`, `set()`, `reset()`, `compareAndSet($expected, $new)`
+
+**Timers** (via `App::tick/after/clearTimer`):
+- `App::tick(int $ms, callable $fn)` — recurring per-worker timer
+- `App::after(int $ms, callable $fn)` — one-shot timer
+- Must be called inside a coroutine context (`onWorkerStart` or request handler)
 
 ### Task Workers
 
@@ -96,37 +188,67 @@ Task handlers live in `task/` (e.g., `task/backup.php`). Dispatch with:
 App::getServer()->task(['handler' => '/task/backup', 'args' => [...]]);
 ```
 
-The `task` event handler in `App::run()` includes the file and calls the function named after `basename($handler)`.
+Task workers run in coroutine mode (`task_enable_coroutine => true` is set by default).
 
-### SSR Streaming
+---
 
-ZealPHP supports three streaming patterns via `src/HTTP/Response.php` and `ResponseMiddleware`:
+## OSS Website
 
-| Pattern | How | When to use |
-|---------|-----|-------------|
-| **Generator `yield`** | Route handler returns a `\Generator`; each `yield $string` is written to the client immediately | SSR — stream HTML shell first, then yield sections as coroutines resolve |
-| **`$response->stream($fn)`** | `$fn` receives a `$write(string)` closure; headers are flushed before `$fn` runs | Fine-grained streaming control inside a callback |
-| **`$response->sse($fn)`** | `$fn` receives `$emit($data, $event='', $id='')` — formats SSE wire protocol automatically | Server-Sent Events for real-time browser push (JS `EventSource`) |
+The demo app IS the ZealPHP documentation website. Run `php app.php` and browse `http://localhost:8080`.
 
-**`App::renderToString($template, $args)`** — captures `App::render()` into a string so it is safe to `yield` or `$write()` inside a streaming context (no active ob buffer exists there).
+### Template System
 
-SSE vs SSR: SSR streaming delivers progressive HTML the browser paints directly; SSE delivers structured events consumed by JavaScript `EventSource`. Both use the same underlying `write()` mechanism.
+Single `template/_master.php` used by every page. Every `public/X.php` is 3 lines:
+
+```php
+<?php use ZealPHP\App;
+App::render('_master', ['title' => 'ZealPHP · Routing', 'page' => 'routing', 'active' => 'routing']);
+```
+
+`_master.php` reads `$page` and renders `template/pages/$page.php`.
+
+Template structure:
+```
+template/
+  _master.php          — Universal layout (nav + content + footer)
+  _head.php            — <head> with CSS/JS links
+  _nav.php             — Top navigation
+  _footer.php          — Footer
+  components/
+    _code.php          — Syntax-highlighted code block
+    _card.php          — Feature card
+    _demo.php          — Split code + live output panel
+  pages/               — One file per website section
+    home.php, routing.php, responses.php, coroutines.php,
+    middleware.php, sessions.php, streaming.php, websocket.php,
+    store.php, timers.php, http.php, api.php
+```
+
+CSS: `public/css/zealphp.css` — single file, CSS variables, indigo accent, no inline styles.
+
+### Demo API Endpoints
+
+`route/demo.php` — 25 live endpoints used by the website's "LIVE OUTPUT" panels:
+
+- `/demo/inject/{case}` — every parameter injection pattern
+- `/demo/route/{type}` — nsRoute, nsPathRoute, patternRoute
+- `/demo/response/{method}` — json, redirect, headers, cookie
+- `/demo/coroutine/{pattern}` — parallel, channel
+- `/demo/store/` and `/demo/counter/` — Store + Counter demos
+- `/demo/session/` — write + read session
+- `/demo/middleware/` — CORS, ETag, compression
 
 ---
 
 ## Examples (`examples/`)
 
-**`examples/streaming/`** — ZealPHP API usage examples. These show how to use ZealPHP's own APIs and are the canonical reference for framework features. Routes are auto-loaded via `route/streaming_examples.php`.
+**`examples/*.php` (root level)** — OpenSwoole implementation reference scripts (standalone, not ZealPHP API usage). Do not use as application patterns.
 
-| File | Route | Demonstrates |
-|------|-------|-------------|
-| `generator_ssr.php` | `GET /examples/generator-ssr` | Generator yield SSR — parallel Channel fetches, streams sections as they resolve |
-| `stream_callback.php` | `GET /examples/stream` | `$response->stream()` — word-by-word streaming with parallel coroutines |
-| `sse_events.php` | `GET /examples/sse` | `$response->sse()` — 10 tick events, 1 s apart |
-| `sse_client.html` | `GET /examples/sse-client` | Browser `EventSource` page for the SSE demo |
-| `render_to_string.php` | `GET /examples/render-to-string` | `App::renderToString()` with skeleton → stream pattern |
-
-**`examples/*.php` (root level)** — OpenSwoole implementation reference. These are standalone scripts that explore raw OpenSwoole/PHP primitives (`co::run()`, `pcntl_fork()`, stream wrappers, etc.) and are **not** ZealPHP usage examples. Do not use these as patterns for application code.
+All ZealPHP usage examples live as first-class project files:
+- Routes: `route/streaming.php`, `route/ws.php`, `route/timers.php`, `route/http_features.php`, `route/demo.php`
+- Public pages: `public/*.php` (website pages)
+- APIs: `api/` directory (ZealAPI pattern)
+- Templates: `template/pages/*.php`
 
 ---
 
@@ -134,8 +256,10 @@ SSE vs SSR: SSR streaming delivers progressive HTML the browser paints directly;
 
 | File | Role |
 |------|------|
-| `App.php` | Framework core: singleton init, route registration, `run()`, `ResponseMiddleware`, `TemplateUnavailableException`; `render()` / `renderToString()` |
-| `G.php` | Per-request global state; dual-mode — superglobals mode uses a static singleton, coroutine mode uses `Coroutine::getContext()` for per-coroutine isolation |
+| `App.php` | Framework core: init, route registration, `run()`, `ResponseMiddleware`, `render()`/`renderToString()`, `tick()`/`after()`/`onWorkerStart()` |
+| `G.php` | Per-request global state; superglobals mode uses static singleton, coroutine mode uses `Coroutine::getContext()` |
+| `Store.php` | `OpenSwoole\Table` adapter — cross-worker shared-memory key-value store |
+| `Counter.php` | `OpenSwoole\Atomic` adapter — lock-free cross-worker integer counter |
 | `ZealAPI.php` | File-based API dispatcher; extends `REST.php` |
 | `REST.php` | Base class with input cleaning and response helpers |
 | `utils.php` | Global functions: `prefork_request_handler`, `coprocess`, `elog`, `zlog`, `access_log`, `response_add_header`, overridden `header`/`setcookie`/`http_response_code` |
@@ -144,4 +268,7 @@ SSE vs SSR: SSR streaming delivers progressive HTML the browser paints directly;
 | `Session/SessionManager.php` | Traditional session lifecycle (superglobals ON) |
 | `IOStreamWrapper.php` | `php://` stream wrapper that redirects `php://input` to request body |
 | `HTTP/Request.php` | Thin wrapper around `OpenSwoole\Http\Request` |
-| `HTTP/Response.php` | Thin wrapper around `OpenSwoole\Http\Response`; adds `stream()`, `sse()`, `flush()` |
+| `HTTP/Response.php` | Thin wrapper around `OpenSwoole\Http\Response`; adds `stream()`, `sse()`, `redirect()`, `flush()` |
+| `Middleware/CorsMiddleware.php` | CORS preflight + `Access-Control-*` headers |
+| `Middleware/ETagMiddleware.php` | ETag generation + 304 Not Modified |
+| `Middleware/CompressionMiddleware.php` | gzip/deflate compression |

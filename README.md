@@ -1,215 +1,273 @@
-# ZealPHP - an opensource PHP framework that runs on OpenSwoole
+# ZealPHP — Async PHP Framework on OpenSwoole
 
-A powerful light weight opensource alternative to NextJS - that uses OpenSwoole's Async IO to do everything NextJS can and do much more. 
+A lightweight, high-performance open-source PHP web framework built on **OpenSwoole**. Brings async coroutines, SSR streaming, WebSocket, and real-time capabilities to PHP — without rewriting your existing code.
 
-[![Latest Stable Version](https://poser.pugx.org/sibidharan/zealphp/v)](https://packagist.org/packages/sibidharan/zealphp) [![Total Downloads](https://poser.pugx.org/sibidharan/zealphp/downloads)](https://packagist.org/packages/sibidharan/zealphp) [![Latest Unstable Version](https://poser.pugx.org/sibidharan/zealphp/v/unstable)](https://packagist.org/packages/sibidharan/zealphp) [![License](https://poser.pugx.org/sibidharan/zealphp/license)](https://packagist.org/packages/sibidharan/zealphp)
+[![Latest Stable Version](https://poser.pugx.org/sibidharan/zealphp/v)](https://packagist.org/packages/sibidharan/zealphp) [![Total Downloads](https://poser.pugx.org/sibidharan/zealphp/downloads)](https://packagist.org/packages/sibidharan/zealphp) [![License](https://poser.pugx.org/sibidharan/zealphp/license)](https://packagist.org/packages/sibidharan/zealphp)
 
-Homepage: https://php.zeal.lol
-Changelog: [CHANGELOG.md](CHANGELOG.md)
+**Homepage / Live Docs:** `php app.php` → `http://localhost:8080`  
+**Changelog:** [CHANGELOG.md](CHANGELOG.md)
 
-Features:
-1. Dynamic HTML Streaming with APIs and Sockets
-2. Parallel Data Fetching and Processing (Use go() to run async coroutine)
-3. Dynamic Routing Tree with Implicit Routes for Public and API 
-4. Programmable and Injectable Routes for Authentication
-5. Dynamic and Nested Templating and HTML Rendering
-6. Workers, Tasks and Processes
-7. All PHP Superglobals are constructed per request
+---
 
-# Get Started
+## Features
 
-## 1. Install OpenSwoole - PHP Server with Asynchronous IO
-Before configuring OpenSwoole, we need to install its dependencies. 
+| Feature | Details |
+|---------|---------|
+| **Async coroutines** | `go()` + `Channel` — thousands of concurrent requests per worker |
+| **SSR streaming** | Generator `yield`, `$response->stream()`, `$response->sse()` — like React's `renderToPipeableStream` |
+| **WebSocket** | `App::ws($path, $onMessage, $onOpen, $onClose)` — rooms, auth, binary, heartbeat |
+| **Dynamic routing** | `route()`, `nsRoute()`, `nsPathRoute()`, `patternRoute()` with reflection-based parameter injection |
+| **Middleware** | PSR-15 stack — CORS, ETag/304, gzip/deflate built-in |
+| **HTTP/1.1 compliance** | HEAD, OPTIONS, 301/302/307/308 redirects, Cookie SameSite, ETag, compression |
+| **Shared memory** | `Store` (OpenSwoole\Table) + `Counter` (OpenSwoole\Atomic) — cross-worker state |
+| **Timers** | `App::tick()`, `App::after()`, `App::onWorkerStart()` — per-worker recurring tasks |
+| **ZealAPI** | File-based REST: drop `api/users/get.php` → `/api/users/get` works automatically |
+| **Templating** | Nested `App::render()` / `App::renderToString()` — single `_master.php`, component-based |
+| **Sessions** | All `session_*()` functions overridden via uopz — coroutine-safe, per-request isolation |
+| **Unit tests** | PHPUnit 11 — 42 unit tests + 38 integration tests, all green |
+| **Benchmarks** | 14,927 req/s · p90 = 4 ms · 24 workers (vs Node.js: dead heat on async IO) |
 
-**It is highly recommended to run `apt update` to refresh the system’s package index.** This ensures all package versions are up-to-date and avoids installation errors.
+---
 
-Install the GCC Compiler
-```
-$ sudo apt install gcc
-```
-Required for PECL installation and manual OpenSwoole compilation
-```
-$ sudo apt install php-dev
-```
-Main requirements for OpenSwoole and useful packages
-```
-$ sudo apt install openssl libssl-dev curl libcurl4-openssl-dev libpcre3-dev build-essential php8.3-mysqlnd postgresql libpq-dev
-```
+## Quick Start
 
-Now lets install OpenSwoole. Compared with other async programming frameworks or software such as Nginx, Tornado, Node.js, Open Swoole is a complete async solution that has built-in support for async programming via fibers/coroutines, a range of multi-threaded I/O modules (HTTP Server, WebSockets, GRPC, TaskWorkers, Process Pools) and support for popular PHP clients like PDO for MySQL, Redis and CURL.
-
-ZealPHP uses OpenSwoole and offers a Web Development Framework that offers APIs, Routes, Sessions, Superglobals, Impicit Routing, Templating, Dynamic Injection, Dynamic HTML Streaming and much more that brings modern web development paradigms for your favorite language. ZealPHP also overrides some of PHP's inbuilt functions, for this to work, we use `uopz` extension and it is needed for ZealPHP to work. This wont take much longer to install, so before installing openswoole, lets install this.
-
-### Install uopz
-
-`uopz` is a PECL extension that allows for the manipulation of user-defined functions and classes. It is useful for testing and debugging by allowing you to mock functions and classes. In ZealPHP, we use the `uopz` library to override built-in PHP functions such as `header` and `setcookie` within the ZealPHP context.
-
-```
-$ sudo pecl install uopz
+```bash
+# New project
+composer create-project sibidharan/zealphp-project:^0.1 my-project
+cd my-project
+php app.php
+# → http://localhost:8080
 ```
 
-### Install OpenSwoole
+```php
+<?php
+// app.php
+require_once __DIR__ . '/vendor/autoload.php';
 
-Installation of OpenSwoole will take a while, grab a cup of coffee ☕
+use ZealPHP\App;
+use ZealPHP\G;
 
-```
-$ sudo pecl install openswoole-22.1.2
-```
+App::superglobals(false);  // full coroutine mode (recommended)
+$app = App::init('0.0.0.0', 8080);
 
-Now the building process will start, and within seconds you need to answer a few questions as follows for the compiling to begin. Compilation will take sometime depending on your CPU.
+// Simple route — return array → JSON automatically
+$app->route('/hello/{name}', function($name) {
+    return ['hello' => $name, 'framework' => 'ZealPHP'];
+});
 
-```
-enable coroutine sockets? [no] : yes
-enable openssl support? [no] : yes
-enable http2 protocol? [no] : yes
-enable coroutine mysqlnd? [no] : yes
-enable coroutine curl? [no] : yes
-enable coroutine postgres? [no] : yes
-```
+// Parameter injection: $request, $response, $app auto-injected by name
+$app->route('/greet/{id}', function($id, $request, $response) {
+    $response->header('X-User-Id', $id);
+    return ['id' => $id, 'method' => $request->server['REQUEST_METHOD']];
+});
 
-After a lot of console messages, the build process should end with these messages
+// Parallel coroutine fetch — 3 sources in ~1s not 3s
+$app->route('/parallel', function() {
+    $ch = new \OpenSwoole\Coroutine\Channel(3);
+    go(fn() => [$ch->push(fetch('users')),  co::sleep(1)]);
+    go(fn() => [$ch->push(fetch('orders')), co::sleep(1)]);
+    go(fn() => [$ch->push(fetch('stats')),  co::sleep(1)]);
+    $results = [];
+    for ($i = 0; $i < 3; $i++) $results[] = $ch->pop();
+    return $results;
+});
 
-```
-Build process completed successfully
-Installing '/usr/lib/php/20230831/openswoole.so'
-Installing '/usr/include/php/20230831/ext/openswoole/config.h'
-Installing '/usr/include/php/20230831/ext/openswoole/php_openswoole.h'
-install ok: channel://pecl.php.net/openswoole-22.1.2
-configuration option "php_ini" is not set to php.ini location
-You should add "extension=openswoole.so" to php.ini
-```
+// SSR streaming — browser gets HTML progressively
+$app->route('/page', function() {
+    return (function() {
+        yield '<html><body><h1>Shell (instant)</h1>';
+        co::sleep(1); yield '<div>Section 1</div>';
+        co::sleep(1); yield '<div>Section 2</div>';
+        yield '</body></html>';
+    })();
+});
 
-According to your PHP version, you simply need to add `extension=openswoole.so` and `extension=uopz.so` in your php.ini file. I am using PHP 8.3 in this case.
+// WebSocket
+$app->ws('/ws/echo',
+    onMessage: fn($server, $frame) => $server->push($frame->fd, 'echo: ' . $frame->data),
+    onOpen:    fn($server, $req)   => $server->push($req->fd, json_encode(['event' => 'connected']))
+);
 
-```
-$ cd /etc/php/8.3/cli/conf.d
-
-$ sudo touch 99-zealphp-openswoole.ini
-$ echo "extension=openswoole.so" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-openswoole.ini
-$ echo "extension=uopz.so" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-openswoole.ini
-
-# Enable Short Open Tags for Flexibility
-$ echo "short_open_tag=on" | sudo tee -a /etc/php/8.3/cli/conf.d/99-zealphp-openswoole.ini
-```
-
-We are good to go. Let's check if the setup is working. 
-
-```
-$ php -m | grep openswoole
-openswoole
-$ php -m | grep uopz
-uopz
-```
-
-If it prints `openswoole` and `uopz` then the modules are loaded and are ready to go. 
-
-## 2. Installing Composer (skip if already done)
-
-We are going to rely on `composer`. So install it if not already done.
-```
-$ sudo apt install composer 
-```
-Now lets get started. 
-
-## 3. Getting started with ZealPHP Framework
-
-ZealPHP `v0.1.0` is available on Packagist for both the framework and the project template. Use the stable tag when scaffolding a new application as shown below.
-
-**Note: Ensure you are in the correct directory**
-
-Before running the command, make sure you navigate to the directory where you want to save your project.
-
-```
-$ composer create-project sibidharan/zealphp-project:^0.1 my-project
+$app->run();
 ```
 
-Already have an application and just want the framework runtime?
+---
 
-```
-$ composer require sibidharan/zealphp:^0.1
-```
+## Installation
 
-With composer installed, lets run our ZealPHP Project
+### 1. Install OpenSwoole
 
-```
-$ cd my-project
-$ composer update
-$ php app.php 
+```bash
+sudo apt install gcc php-dev openssl libssl-dev curl libcurl4-openssl-dev libpcre3-dev build-essential
 
-ZealPHP server running at http://0.0.0.0:8080 with 8 routes
+sudo pecl install openswoole-22.1.2
+# Answer yes to: coroutine sockets, openssl, http2, mysqlnd, curl, postgres
 ```
 
-## 4. Understanding what is happening
+Add to `/etc/php/8.3/cli/conf.d/99-zealphp.ini`:
+```ini
+extension=openswoole.so
+extension=uopz.so
+short_open_tag=on
+```
 
-When you run `app.php` the openswoole server is being run and managed by ZealPHP. It will stay attached to your terminal unless you deamonize, which we wont be doing while development. When moving to production, you can do `$app->run(['daemonize'=>true])` to the run function, which detaches the running script in background. This can be configured to systemctl to run on boot, or to run behind Apache or Nginx. The `run` function can take all OpenSwoole Configuration as mentioned in https://openswoole.com/docs/modules/swoole-server/configuration. Unlike Apache+PHP setup, the functions of Apache like URL Rewriting, Superglobals is replaced by ZealPHP, while OpenSwoole is offering the server. ZealPHP is offering the routing with a very efficient route tree model, which is O(1) in code injection and lookup. On top of that, ZealPHP offers implicit routes that serves the files located under `public` and `api` directories. These routes can be overridden by you.
+### 2. Install uopz
 
-You can start by defining your routes in `app.php` or under `route` directory which gets imported automatically when you run `app.php`. See the code examples in this project to understand dynamic route injection using `route` folder. This comes handy to maintain large projects, and also maintain a healthy project structure.
+```bash
+sudo pecl install uopz
+```
 
-You can start writing APIs out of the box without any additional configuration. Look inside `api `folder for more examples. To understand more on how to handle the response, please wait for the documentation or you can checkout https://github.com/sibidharan/zealphp for more development examples. 
+### 3. Verify
+
+```bash
+php -m | grep -E 'openswoole|uopz'
+# openswoole
+# uopz
+```
+
+Or use the automated setup:
+```bash
+sudo bash setup.sh
+```
+
+---
+
+## Testing
+
+```bash
+# Unit tests — no server needed
+./vendor/bin/phpunit tests/Unit/ --testdox
+
+# Integration tests — server must be running
+php app.php &
+./vendor/bin/phpunit tests/Integration/ --testdox
+
+# All tests
+./vendor/bin/phpunit --testdox
+```
+
+**Unit suites** (`tests/Unit/`): `StoreTest`, `CounterTest`, `BuildParamMapTest`, `RoutePatternTest`  
+**Integration suites** (`tests/Integration/`): `RoutingTest`, `HttpFeaturesTest`, `MiddlewareTest`, `StreamingTest`
+
+---
+
+## Core Concepts
+
+### Parameter Injection
+
+ZealPHP uses reflection (cached at route registration, zero overhead per request) to inject handler arguments by name:
+
+```php
+// URL param only
+$app->route('/users/{id}', function($id) { return ['id' => $id]; });
+
+// URL + $request
+$app->route('/users/{id}', function($id, $request) {
+    return ['id' => $id, 'method' => $request->server['REQUEST_METHOD']];
+});
+
+// $response for header/cookie control
+$app->route('/users/{id}', function($id, $response) {
+    $response->header('X-Id', $id);
+    return ['id' => $id];
+});
+
+// Default values
+$app->route('/posts/{slug}/{page?}', function($slug, $page = 1) {
+    return ['slug' => $slug, 'page' => $page];
+});
+```
+
+### Middleware
+
+```php
+// Built-in middleware
+$app->addMiddleware(new \ZealPHP\Middleware\CorsMiddleware());
+$app->addMiddleware(new \ZealPHP\Middleware\ETagMiddleware());
+$app->addMiddleware(new \ZealPHP\Middleware\CompressionMiddleware());
+
+// Custom PSR-15 middleware
+class TimingMiddleware implements MiddlewareInterface {
+    public function process(ServerRequestInterface $req, RequestHandlerInterface $next): ResponseInterface {
+        $start = microtime(true);
+        $response = $next->handle($req);
+        response_add_header('X-Time', round((microtime(true)-$start)*1000, 2).'ms');
+        return $response;
+    }
+}
+```
+
+### Store & Counter (cross-worker shared memory)
+
+```php
+// Create BEFORE $app->run() — shared across all forked workers
+$clientTable = Store::make('clients', 4096, [
+    'room' => [\OpenSwoole\Table::TYPE_STRING, 64],
+    'uid'  => [\OpenSwoole\Table::TYPE_STRING, 128],
+]);
+$hitCounter = new Counter(0);
+
+// In any route — all 24 workers see the same data
+Store::set('clients', "$fd", ['room' => 'general', 'uid' => 'alice']);
+$hitCounter->increment();
+```
+
+### Timers (per-worker)
+
+```php
+App::onWorkerStart(function($server, $workerId) use ($hitCounter) {
+    App::tick(60000, fn() => elog("Hits/min: " . $hitCounter->get()));
+    $hitCounter->reset();
+});
+```
+
+---
+
+## Design Principles
+
+**Coroutine mode (recommended):** `App::superglobals(false)` enables `OpenSwoole\Runtime::HOOK_ALL` so all PHP I/O (file, curl, PDO, sleep) yields the event loop automatically. Each request runs in its own coroutine with isolated `G::instance()` state. This is the default in the demo app.
+
+**Superglobals mode (legacy compatibility):** `App::superglobals(true)` disables coroutines in the main thread — `$_GET`, `$_POST`, `$_SESSION` work safely because only one request runs at a time per worker. Implicit file routes use `prefork_request_handler()` (forks a child process) to run blocking PHP safely. Use this when migrating existing apps incrementally.
+
+**`coprocess` / `coproc`:** Available in superglobals mode — spawns a child process with coroutine context for background async work. Not needed in coroutine mode (use `go()` directly).
+
+**uopz overrides:** `header()`, `setcookie()`, all `session_*()` functions are permanently replaced at startup via `uopz_set_return()`. This makes existing PHP code work unchanged inside the long-running OpenSwoole process.
+
+---
+
+## Publishing Releases
+
+1. Update `CHANGELOG.md` with the new version and changes.
+2. Run `composer validate` and confirm tests pass.
+3. Tag both `zealphp` and `zealphp-project` with the same version:
+   ```bash
+   git tag -a v0.2.0 -m "Release v0.2.0"
+   git push origin master && git push origin v0.2.0
+   ```
+4. Trigger Packagist webhook for both packages.
+
+---
+
+## Common Errors
+
+**OpenSwoole not installed:**
+```
+PHP Fatal error: Class "OpenSwoole\HTTP\Server" not found
+```
+→ Install OpenSwoole via PECL and add `extension=openswoole.so` to php.ini.
+
+**uopz not installed:**
+```
+Exception: uopz extension is required for ZealPHP to work
+```
+→ `sudo pecl install uopz` and add `extension=uopz.so` to php.ini.
+
+**IDE autocompletion:**  
+Add to VS Code `settings.json`:
+```json
+"intelephense.environment.includePaths": ["vendor/openswoole/ide-helper"]
+```
+
+---
 
 Any and all contributions are welcome ❤️
-
-## Publishing releases
-
-1. Ensure the documentation and metadata (including `CHANGELOG.md`) capture the upcoming version number and notable changes.
-2. Run `composer validate` and project checks to confirm the package installs cleanly.
-3. Tag both repositories in lockstep (`zealphp` and `zealphp-project`) with the same version, for example `git tag -a v0.1.0 -m "Release v0.1.0"`.
-4. Push the main branch and the tag to every remote for each repository (`git push origin master && git push origin v0.1.0`, etc.).
-5. Visit Packagist (or call the webhook) for both packages so the new tags are indexed and the `v0.1.0` constraint becomes available.
-
-# ZealPHP Design Principles
-
-- Integrating OpenSwoole is a very good move but reaping the full performance of the coroutines and still being able to run an Apache/FPM styled web server with powerful in-memory dynamic nested ZealPHP template render functions while reconstructing superglobals on top of all these comes with a cost. The ZealPHP Server won't enable coroutines for the HTTP server by default, so the main response thread can't run `go()` calls. Instead of the server processes sharing the superglobal memory while running coroutines, we disable coroutines for the server process. To understand what is happening, let's say if a main thread is waiting for an IO or sleeping, the same server worker process will be used to serve another request. This new request will cause the superglobals to overwrite the ones waiting for IO and cause data leak/corruption. We decide to disable coroutines in the main thread, which enables us to support PHP superglobals in an Apache styled way.
-
-- To support incremental adoption of async capabilities and still be able to reap the benefits of coroutines alongside backward compatibility for traditional PHP applications, ZealPHP introduces a function called `coprocess` alias `coproc` that enables you to create a process that has coroutine context, and you can run as many fibers/coroutines inside that process. This function keeps the design pattern clean, and each server worker deals with one request at a time, thus we can use the superglobals while reaping maximum performance on demand.
-
-- `coproc` creates a process which has its own memory space, it is like a fork, so communicating with that process cannot be over superglobals, and the data passing needs to be done delicately. The StdOut is returned. `coproc` is a wrapper to `OpenSwoole\Process` with coroutines enabled and StdIO forwarded. It also makes sharing variables as easy as copying them into the memory before the process forks, then the data is available to the new process. But the limitation here is we cannot pass anything that is not serializable. For example, Database Connection, Sockets, FD, etc. Those unserializable objects have to be reconstructed inside the `coproc`. This design decision may change in the future with us removing support for superglobals with our own implementation. More research and development is needed in this area. (Still in development, documentation will be available later)
-
-- The tradeoff between having superglobals and not using coroutines in the main server process and the implications of security here are still to be researched, and a more stable and sustainable design pattern has to be arrived at. ZealPHP decides to sanitize every request with a default middleware which can be overridden if needed.
-
-- But this is optional. If you want coroutines in the ZealPHP main HTTP server, you just have to turn off superglobals using `App::superglobals(false);` and `Coroutines` will be enabled automatically. To have backward compatibility and to educate users about the design of ZealPHP and OpenSwoole, the default option comes with superglobals enabled. Deliberately requiring users to disable it for using coroutines helps user awareness about what's going on.
-
-# Common Errors
-
-### 1. When openswoole is not installed and configured
-
-```
-└❯ php app.php 
-PHP Fatal error:  Uncaught Error: Class "Swoole\HTTP\Server" not found in /var/labsstorage/home/sibidharan/zealphp/src/App.php:322
-Stack trace:
-#0 /var/labsstorage/home/sibidharan/zealphp/app.php(100): ZealPHP\App->run()
-#1 {main}
-  thrown in /var/labsstorage/home/sibidharan/zealphp/src/App.php on line 322
-```
-
-### Summary steps needed to configure ZealPHP Project
-
-1. Install OpenSwoole using pecl
-    `sudo pecl install openswoole-22.1.2`
-    - Enable curl coroutines and coroutine sockets, if curl.h error throws, `sudo apt install libcurl4-openssl-dev`
-
-2. Add the extension to php.ini (cli prefered)
-    
-3. Check if openswoole is configured properly
-    ` php -m | grep swoole `
-
-Until this point, the `setup.sh` can do it for you. 
-
-4. Run 
-    `php app.php`
-    >>> ZealPHP server running at http://0.0.0.0:9501
-
-# Configure IDE for Smooth Development Experience
-
-5. Add `swoole` to Intelephense stubs 
-
-6. Make sure you have included the openswoole ide-helper https://github.com/openswoole/ide-helper in the includePaths:
-
-"intelephense.environment.includePaths": [
-  "vendor/openswoole/ide-helper"
-]
-
-# Important
-
-1. Do not close PHP tags in file if not using HTML 
-2. Use coroutines with caution - more testing needed to see if any data leak happens and validate SessionManager implementation

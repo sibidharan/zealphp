@@ -222,17 +222,22 @@ $app->ws(
 //    Registered via App::onWorkerStart() so each worker runs its own timer.
 // ---------------------------------------------------------------------------
 App::onWorkerStart(function($server, $workerId) {
+    // OpenSwoole caps getClientList find_count at 100 — paginate to cover all fds
     App::tick(30000, function() use ($server) {
-        $fds = $server->getClientList(0, 1000);
-        if (!$fds) return;
-        foreach ($fds as $fd) {
-            if ($server->isEstablished($fd)) {
-                $server->push($fd, json_encode([
-                    'type'   => 'heartbeat',
-                    'ts'     => time(),
-                    'worker' => getmypid(),
-                ]));
+        $startFd = 0;
+        do {
+            $fds = $server->getClientList($startFd, 100);
+            if (!$fds) break;
+            foreach ($fds as $fd) {
+                if ($server->isEstablished($fd)) {
+                    $server->push($fd, json_encode([
+                        'type'   => 'heartbeat',
+                        'ts'     => time(),
+                        'worker' => getmypid(),
+                    ]));
+                }
             }
-        }
+            $startFd = max($fds) + 1;
+        } while (count($fds) === 100);
     });
 });
