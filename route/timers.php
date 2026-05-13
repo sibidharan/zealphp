@@ -49,7 +49,7 @@ App::onWorkerStart(function($server, $workerId) use ($tickCounter) {
 // ---------------------------------------------------------------------------
 $app->route('/timers', ['methods' => ['GET']], function() use ($requestCounter) {
     $requestCounter->increment();
-    App::render('_master', [
+    App::render('/_master', [
         'title' => 'ZealPHP · Timers',
         'description' => 'Timers, counters, and worker metrics in ZealPHP.',
         'page' => 'timers',

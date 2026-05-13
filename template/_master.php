@@ -7,13 +7,13 @@ $active      ??= $page;
 ?>
 <!doctype html>
 <html lang="en">
-<?php App::render('_head', compact('title', 'description')); ?>
+<?php App::render('/_head', compact('title', 'description')); ?>
 <body>
-<?php App::render('_nav', ['active' => $active]); ?>
+<?php App::render('/_nav', ['active' => $active]); ?>
 <main class="page-body">
-<?php App::render("pages/$page", compact('title', 'description', 'page', 'active')); ?>
+<?php App::render("/pages/$page", compact('title', 'description', 'page', 'active')); ?>
 </main>
-<?php App::render('_footer'); ?>
+<?php App::render('/_footer'); ?>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
