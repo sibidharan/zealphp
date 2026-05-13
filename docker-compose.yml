@@ -1,0 +1,30 @@
+services:
+  app:
+    build:
+      context: .
+    image: zealphp:local
+    ports:
+      - "8080:8080"
+    environment:
+      ZEALPHP_HOST: 0.0.0.0
+      ZEALPHP_PORT: 8080
+      ZEALPHP_WORKERS: 16
+      ZEALPHP_TASK_WORKERS: 0
+
+  bench:
+    build:
+      context: .
+    image: zealphp:local
+    command:
+      - ./scripts/bench.sh
+      - --workers
+      - "16"
+      - --threads
+      - "16"
+      - --task-workers
+      - "0"
+      - --p1000
+      - --duration
+      - 30s
+    volumes:
+      - ./bench/results:/app/bench/results

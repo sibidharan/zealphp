@@ -250,7 +250,7 @@ function to_ms(value, raw) {
 parse_wrk() {
     local file="$1"
     awk "$latency_to_ms_awk"'
-        $1 == "Latency" { avg = to_ms($2) }
+        $1 == "Latency" && $2 != "Distribution" { avg = to_ms($2) }
         $1 == "50%" { p50 = to_ms($2) }
         $1 == "90%" { p90 = to_ms($2) }
         $1 == "99%" { p99 = to_ms($2) }

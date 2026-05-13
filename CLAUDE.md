@@ -36,6 +36,9 @@ php -m | grep -E 'openswoole|uopz'
 
 # Local performance sweep (defaults to 16 workers and c=1000)
 scripts/bench.sh --p1000
+
+# Dockerized benchmark sweep
+mkdir -p bench/results && docker compose run --rm --build bench
 ```
 
 ---

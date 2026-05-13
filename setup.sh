@@ -8,6 +8,74 @@ MAGENTA="\e[1;35m"
 WHITE="\e[1;37m"
 RESET="\e[0m"
 
+docker_setup() {
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+
+    echo -e "${YELLOW}Installing Docker image dependencies for ZealPHP.${RESET}"
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        apache2-utils \
+        autoconf \
+        ca-certificates \
+        curl \
+        g++ \
+        git \
+        iproute2 \
+        libbrotli-dev \
+        libc-ares-dev \
+        libcurl4-openssl-dev \
+        libnghttp2-dev \
+        libpcre2-dev \
+        libpq-dev \
+        libssl-dev \
+        make \
+        pkg-config \
+        procps \
+        unzip \
+        wrk \
+        zlib1g-dev
+    rm -rf /var/lib/apt/lists/*
+
+    echo -e "${YELLOW}Installing bundled PHP extensions needed by OpenSwoole.${RESET}"
+    docker-php-ext-install sockets pcntl mysqli pdo_mysql
+
+    echo -e "${YELLOW}Installing OpenSwoole and uopz for Docker image.${RESET}"
+    pecl channel-update pecl.php.net
+    if [ -n "${OPENSWOOLE_VERSION:-}" ]; then
+        printf "yes\nyes\nyes\nyes\nyes\nyes\nyes\n" | pecl install "openswoole-${OPENSWOOLE_VERSION}"
+    else
+        printf "yes\nyes\nyes\nyes\nyes\nyes\nyes\n" | pecl install openswoole
+    fi
+    docker-php-ext-enable --ini-name zz-openswoole.ini openswoole
+
+    if [ -n "${UOPZ_VERSION:-}" ]; then
+        pecl install "uopz-${UOPZ_VERSION}"
+    else
+        pecl install uopz
+    fi
+    docker-php-ext-enable --ini-name zz-uopz.ini uopz
+
+    {
+        echo "short_open_tag=On"
+        echo "memory_limit=1024M"
+    } > /usr/local/etc/php/conf.d/99-zealphp.ini
+
+    mkdir -p /var/lib/php/sessions
+    chmod 1733 /var/lib/php/sessions
+
+    php -m | grep -q '^sockets$'
+    php -m | grep -q '^openswoole$'
+    php -m | grep -q '^uopz$'
+
+    echo -e "${GREEN}Docker image dependencies installed successfully.${RESET}"
+}
+
+if [ "${1:-}" = "--docker" ]; then
+    docker_setup
+    exit 0
+fi
+
 # Function to check if the script is being run as root
 # Returns 0 if the script is run as root, 1 otherwise
 is_root() {

@@ -1,0 +1,8 @@
+.git
+.DS_Store
+.phpunit.result.cache
+bench/results
+vendor
+node_modules
+coverage
+tmp

@@ -52,6 +52,17 @@ Run the default c=1000 sweep with 16 HTTP workers:
 scripts/bench.sh --workers 16 --threads 16 --task-workers 0 --p1000 --duration 30s
 ```
 
+Or run the same profile in Docker:
+
+```bash
+mkdir -p bench/results
+docker compose run --rm --build bench
+```
+
+On Docker Desktop for Mac, set Resources -> CPU limit to 16 before comparing
+results. Docker results are still container results; label them separately from
+bare-metal macOS runs.
+
 `--p1000` is only a project shorthand for a concurrency sweep up to `c=1000`.
 Latency percentiles are still reported as p50, p90, and p99.
 

@@ -93,6 +93,22 @@ $app->run();
 
 ---
 
+## Docker Benchmark
+
+Run the benchmark in Docker with PHP, OpenSwoole, uopz, Composer deps, and `wrk`
+inside the image:
+
+```bash
+mkdir -p bench/results
+docker compose run --rm --build bench
+```
+
+Results are written to `bench/results/` on the host.
+On Docker Desktop for Mac, set Resources -> CPU limit to 16 if you want the
+container to use all 16 cores.
+
+---
+
 ## Installation
 
 ### 1. Install OpenSwoole
