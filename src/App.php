@@ -451,6 +451,58 @@ class App
      * @throws TemplateUnavailableException if the template does not exist.
      * @return void
      */
+    /**
+     * Returns a Generator that yields template output. If the template file returns
+     * a Generator (via IIFE), delegates to it with yield from — enabling streaming
+     * templates. If the template echoes normally, captures output and yields it
+     * as a single chunk. Backwards-compatible with all existing templates.
+     *
+     * Usage in a route handler:
+     *   return (function() {
+     *       yield from App::renderStream('shell-open', ['title' => 'Users']);
+     *       yield from App::renderStream('users/list', ['users' => $users]);
+     *       yield from App::renderStream('shell-close');
+     *   })();
+     *
+     * Streaming template (template/users/list.php):
+     *   <?php return (function() use ($users) {
+     *       foreach ($users as $user) {
+     *           yield "<div>{$user['name']}</div>";
+     *       }
+     *   })();
+     */
+    public static function renderStream(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): \Generator
+    {
+        $__current_file = self::getCurrentFile(null);
+        $__template_dir = self::$cwd . "/$__default_template_dir";
+        $__root_lookup = strpos($__template_file, '/') === 0;
+        if ($__root_lookup) {
+            $__template_file_path = $__template_dir . $__template_file . '.php';
+        } else if(!empty($__current_file) and is_dir("$__template_dir/" . $__current_file)){
+            $__template_file_path = "$__template_dir/" . $__current_file . '/' . $__template_file . '.php';
+        } else {
+            $__template_file_path = "$__template_dir/" . $__template_file . '.php';
+        }
+
+        $__template_file_path = realpath($__template_file_path);
+
+        if (!$__template_file_path or !file_exists($__template_file_path) or strpos($__template_file_path, self::$cwd) !== 0) {
+            $caller = array_shift(debug_backtrace());
+            throw new TemplateUnavailableException("The template $__template_file_path does not exist in file " . str_replace(App::$cwd, '', $caller['file']) . ":" . $caller['line'] );
+        }
+
+        ob_start();
+        extract($__args, EXTR_SKIP);
+        $__result = include $__template_file_path;
+        $__output = ob_get_clean();
+
+        if ($__result instanceof \Generator) {
+            yield from $__result;
+        } else if ($__output !== '' && $__output !== false) {
+            yield $__output;
+        }
+    }
+
     public static function renderToString(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): string
     {
         ob_start();

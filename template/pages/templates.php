@@ -2,242 +2,226 @@
 <section class="section">
 <div class="container">
 <h1 class="section-title">Templates & Views</h1>
-<p class="section-desc"><code>App::render()</code> and <code>App::renderToString()</code> — PHP-native templating with smart path resolution and SSR streaming.</p>
+<p class="section-desc">No Blade. No Twig. No Mustache. <strong>PHP IS the template engine.</strong> ZealPHP templates are plain <code>.php</code> files — loops, conditionals, expressions, classes, everything you know works. Zero learning curve, full language power.</p>
 
-<h2>Basic Render</h2>
-<p>Pass a template name and a data array. Variables are extracted into the template scope.</p>
+<h2>Pass data, render a template</h2>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.5rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'Route handler',
+    'code'  => <<<'PHP'
+$app->route('/users/{id}', function($id) {
+    $user = User::find($id);
+    if (!$user) return 404;
+
+    App::render('profile', [
+        'user'    => $user,
+        'posts'   => $user->posts(),
+        'isAdmin' => $user->role === 'admin',
+    ]);
+});
+PHP]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'template/profile.php',
+    'code'  => <<<'PHP'
+<h1><?= htmlspecialchars($user->name) ?></h1>
+
+<?php if ($isAdmin): ?>
+  <span class="badge">Admin</span>
+<?php endif; ?>
+
+<h2>Posts (<?= count($posts) ?>)</h2>
+<ul>
+  <?php foreach ($posts as $post): ?>
+    <li>
+      <a href="/post/<?= $post->id ?>">
+        <?= htmlspecialchars($post->title) ?>
+      </a>
+      <small><?= $post->created_at ?></small>
+    </li>
+  <?php endforeach; ?>
+</ul>
+PHP]); ?>
+</div>
+</div>
+
+<p>Every key in the <code>$args</code> array becomes a local variable in the template via <code>extract()</code>. No magic syntax — just PHP.</p>
+
+<h2>Layouts & composition</h2>
+<p>Templates can render other templates. Build a layout system with a single master template and components:</p>
 
 <?php App::render('/components/_code', [
-    'label' => 'Route handler + template',
+    'label' => 'public/about.php — page entry (3 lines)',
     'code'  => <<<'PHP'
-// In your route handler:
-$app->route('/welcome/{name}', function($name) {
-    App::render('welcome', ['name' => $name, 'tagline' => 'Welcome aboard']);
-});
-
-// template/welcome.php — vars from $args become locals:
-<h1>Hello, <?= htmlspecialchars($name) ?></h1>
-<p><?= htmlspecialchars($tagline) ?></p>
+<?php use ZealPHP\App;
+App::render('_master', ['title' => 'About Us', 'page' => 'about']);
 PHP]); ?>
 
-<h2>Path Resolution</h2>
-<p>Templates live in <code>template/</code> by default. The resolver tries paths in this order:</p>
+<?php App::render('/components/_code', [
+    'label' => 'template/_master.php — layout wrapper',
+    'code'  => <<<'PHP'
+<!doctype html>
+<html>
+<head><title><?= htmlspecialchars($title) ?></title></head>
+<body>
+  <?php App::render('_nav', ['active' => $page]) ?>
 
+  <main>
+    <?php App::render("/pages/$page") ?>
+  </main>
+
+  <?php App::render('_footer') ?>
+</body>
+</html>
+PHP]); ?>
+
+<div class="callout info">
+This is exactly how the ZealPHP docs site works — every page in <code>public/</code> is 3 lines that call <code>App::render('_master', [...])</code>. The master template renders the nav, the page content, and the footer. <strong>No template inheritance syntax needed — it's just PHP includes.</strong>
+</div>
+
+<h2>Components with slots</h2>
+<p>Reusable UI components that accept data as arguments:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'template/components/_card.php',
+    'code'  => <<<'PHP'
+<div class="card">
+  <div class="card-icon"><?= $icon ?></div>
+  <h3><?= htmlspecialchars($title) ?></h3>
+  <p><?= htmlspecialchars($body) ?></p>
+  <?php if (!empty($href)): ?>
+    <a href="<?= htmlspecialchars($href) ?>">Read more</a>
+  <?php endif; ?>
+</div>
+PHP]); ?>
+
+<?php App::render('/components/_code', [
+    'label' => 'Using the component in any template',
+    'code'  => <<<'PHP'
+<?php foreach ($features as $f): ?>
+  <?php App::render('/components/_card', [
+      'icon'  => $f['icon'],
+      'title' => $f['name'],
+      'body'  => $f['desc'],
+      'href'  => $f['url'],
+  ]) ?>
+<?php endforeach; ?>
+PHP]); ?>
+
+<h2>Path resolution</h2>
 <table class="ztable">
 <tr><th>Call</th><th>Resolves to</th><th>When</th></tr>
 <tr><td><code>App::render('home')</code></td><td><code>template/home.php</code></td><td>Top-level template</td></tr>
-<tr><td><code>App::render('/components/_card')</code></td><td><code>template/components/_card.php</code></td><td>Leading slash = absolute from <code>template/</code></td></tr>
-<tr><td><code>App::render('header')</code> from <code>public/users.php</code></td><td><code>template/users/header.php</code> (if exists)</td><td>Auto-namespaces by current public file</td></tr>
+<tr><td><code>App::render('/components/_card')</code></td><td><code>template/components/_card.php</code></td><td>Leading <code>/</code> = absolute from <code>template/</code></td></tr>
+<tr><td><code>App::render('header')</code> from <code>public/users.php</code></td><td><code>template/users/header.php</code></td><td>Auto-namespaces by current public file</td></tr>
 <tr><td><code>App::render('header')</code> (fallback)</td><td><code>template/header.php</code></td><td>If namespaced path doesn't exist</td></tr>
 </table>
 
-<div class="callout info">
-The <strong>auto-namespacing</strong> means a page in <code>public/users.php</code> can call <code>App::render('row')</code> and ZealPHP looks for <code>template/users/row.php</code> first — keeping page-specific templates organized by route.
-</div>
-
-<h2>Component Composition</h2>
-<p>Templates can render other templates. This is how the demo site is built — pages compose components:</p>
-
-<?php App::render('/components/_code', [
-    'label' => 'template/pages/users.php composes components',
-    'code'  => <<<'PHP'
-<?php use ZealPHP\App; ?>
-<section class="section">
-  <h1>Users</h1>
-
-  <?php foreach ($users as $user): ?>
-    <?php App::render('/components/_card', [
-        'icon'  => '👤',
-        'title' => $user['name'],
-        'body'  => $user['email'],
-        'href'  => "/user/{$user['id']}",
-    ]); ?>
-  <?php endforeach; ?>
-
-  <?php App::render('/components/_code', [
-      'label' => 'Try it',
-      'code'  => 'curl localhost:8080/api/users',
-      'lang'  => 'bash',
-  ]); ?>
-</section>
-PHP]); ?>
-
-<h2>renderToString — Capture Output</h2>
-<p>Use <code>renderToString()</code> when you need the rendered HTML as a string — for emails, caching, or SSR streaming with <code>yield</code>:</p>
-
-<?php App::render('/components/_code', [
-    'label' => 'Three uses for renderToString',
-    'code'  => <<<'PHP'
-use ZealPHP\App;
-
-// 1. Capture for an email
-$html = App::renderToString('emails/welcome', ['name' => 'Alice']);
-mail($to, 'Welcome', $html, "Content-Type: text/html\r\n");
-
-// 2. Cache a heavy page
-$html = $cache->remember('home', 60, fn() =>
-    App::renderToString('home', ['posts' => fetchPosts()])
-);
-
-// 3. Combine with Generator streaming (see below)
-yield App::renderToString('header');
-PHP]); ?>
-
-<h2>SSR Streaming with App::render</h2>
-<p>Return a <code>Generator</code> from a route handler. Each <code>yield</code> is sent to the client immediately — perfect for streaming a slow page section-by-section without blocking the shell.</p>
-
-<?php App::render('/components/_code', [
-    'label' => 'Stream the shell, then sections as they resolve',
-    'code'  => <<<'PHP'
-use ZealPHP\App;
-
-$app->route('/dashboard', function() {
-    return (function() {
-        // 1. Send the HTML shell immediately
-        yield App::renderToString('shell-open', ['title' => 'Dashboard']);
-        yield "<div class='hero'>Welcome!</div>";
-
-        // 2. Yield each section as its data becomes available
-        yield App::renderToString('stats', ['stats' => fetchStats()]);
-        yield App::renderToString('chart', ['data' => fetchChartData()]);
-        yield App::renderToString('activity', ['events' => fetchRecent()]);
-
-        // 3. Close the shell
-        yield App::renderToString('shell-close');
-    })();
-});
-PHP]); ?>
-
-<p>Each <code>yield</code> flushes to the browser — the user sees the page progressively, instead of waiting for all data to load.</p>
-
-<div class="callout info">
-<strong>Pro tip:</strong> Combine SSR streaming with <code>go()</code> (coroutines) to fetch multiple data sources in parallel, then yield results as each completes — first available, first rendered.
-</div>
-
-<h3>Reusable Streaming Components</h3>
-<p>Wrap streaming logic in a generator function. Any route can <code>yield from</code> it — composing complex streamed pages from reusable parts:</p>
-
-<?php App::render('/components/_code', [
-    'label' => 'A reusable streaming list',
-    'code'  => <<<'PHP'
-use ZealPHP\App;
-
-// Generator function that yields rendered fragments
-function streamUserList(array $users) {
-    yield "<ul class='users'>";
-    foreach ($users as $user) {
-        yield App::renderToString('user-row', ['user' => $user]);
-    }
-    yield "</ul>";
-}
-
-// Compose it into any route
-$app->route('/users', function() {
-    return (function() {
-        yield App::renderToString('shell-open', ['title' => 'Users']);
-        yield "<h1>All Users</h1>";
-        yield from streamUserList(User::all());
-        yield App::renderToString('shell-close');
-    })();
-});
-PHP]); ?>
-
-<div class="callout warn" style="margin-top:1rem">
-<strong>Can a template file itself <code>yield</code>?</strong> No. <code>App::render()</code> uses PHP's <code>include</code> which does not preserve generator semantics — the <code>yield</code> would create a local generator that goes nowhere. Always wrap streaming logic in a function and use <code>renderToString()</code> to emit fragments from inside.
-</div>
-
-<h3>render() vs renderToString() — choosing</h3>
-<table class="ztable">
-<tr><th>Use</th><th>Method</th></tr>
-<tr><td>Direct output to the response body</td><td><code>App::render($tpl, $args)</code></td></tr>
-<tr><td>Inside a Generator route handler — yield each fragment</td><td><code>yield App::renderToString($tpl, $args)</code></td></tr>
-<tr><td>Build a string for email / cache / API JSON field</td><td><code>$html = App::renderToString(...)</code></td></tr>
-<tr><td>Compose templates inside another template</td><td><code>App::render('/components/...')</code> (direct echo)</td></tr>
-</table>
-
-<h2>Writing APIs with Templates</h2>
-<p>Mix template rendering with JSON responses. The same route can return different formats based on Accept header or query param:</p>
-
-<?php App::render('/components/_code', [
-    'label' => 'Content negotiation',
-    'code'  => <<<'PHP'
-$app->route('/users/{id}', function($id, $request) {
-    $user = User::find($id);
-    if (!$user) return 404;  // int → status
-
-    // JSON for API clients
-    if (str_contains($request->header['accept'] ?? '', 'json')) {
-        return $user->toArray();  // array → JSON
-    }
-
-    // HTML for browsers
-    App::render('user/profile', ['user' => $user]);  // void → output buffer
-});
-PHP]); ?>
-
-<h2>API + Template Combo Example</h2>
-<p>Real-world pattern: a public PHP file uses templates for the page, ZealAPI handles the data:</p>
-
-<?php App::render('/components/_code', [
-    'label' => 'public/products.php — page',
-    'code'  => <<<'PHP'
-<?php
-// File: public/products.php → GET /products
-use ZealPHP\App;
-App::render('_master', [
-    'title' => 'Products',
-    'page'  => 'products',
-]);
-PHP]); ?>
-
-<?php App::render('/components/_code', [
-    'label' => 'api/products/list.php — data',
-    'code'  => <<<'PHP'
-<?php
-// File: api/products/list.php → GET /api/products/list
-$list = function() {
-    return [
-        'products' => Product::query()->get()->toArray(),
-        'count'    => Product::count(),
-    ];
-};
-PHP]); ?>
-
-<?php App::render('/components/_code', [
-    'label' => 'template/products/index.php — view',
-    'code'  => <<<'PHP'
-<h1>Products</h1>
-<div id="grid"></div>
-
-<script>
-fetch('/api/products/list')
-  .then(r => r.json())
-  .then(data => {
-    const grid = document.getElementById('grid');
-    data.products.forEach(p => {
-      grid.innerHTML += `<div class="card">${p.name}</div>`;
-    });
-  });
-</script>
-PHP]); ?>
-
-<h2>Method Reference</h2>
+<h2>Three render methods</h2>
 <table class="ztable">
 <tr><th>Method</th><th>Returns</th><th>Use when</th></tr>
-<tr>
-  <td><code>App::render($tpl, $args = [])</code></td>
-  <td>void (echoes to output buffer)</td>
-  <td>Inside a route handler — output goes to the client</td>
-</tr>
-<tr>
-  <td><code>App::renderToString($tpl, $args = [])</code></td>
-  <td><code>string</code></td>
-  <td>Need the HTML as a value — for streaming, caching, email, or passing to another template</td>
-</tr>
+<tr><td><code>App::render($tpl, $args)</code></td><td><code>void</code> (echoes)</td><td>Direct output in route handler or another template</td></tr>
+<tr><td><code>App::renderToString($tpl, $args)</code></td><td><code>string</code></td><td>Need HTML as value — email, cache, or <code>yield</code></td></tr>
+<tr><td><code>App::renderStream($tpl, $args)</code></td><td><code>Generator</code></td><td>SSR streaming — works with both regular and streaming templates</td></tr>
+</table>
+
+<h2>SSR Streaming — yield from templates</h2>
+<p><code>App::renderStream()</code> returns a Generator. If the template file returns a Generator (via IIFE), it delegates with <code>yield from</code>. If the template echoes normally, the output is captured and yielded as one chunk. <strong>Both patterns compose in the same streaming pipeline.</strong></p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.5rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'Streaming template (template/users/stream.php)',
+    'code'  => <<<'PHP'
+<?php
+// This template YIELDS — each user
+// is sent to the browser as it renders
+return (function() use ($users) {
+    yield "<section class='users'>";
+    foreach ($users as $user) {
+        yield "<div class='card'>"
+            . htmlspecialchars($user->name)
+            . "</div>\n";
+    }
+    yield "</section>";
+})();
+PHP]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'Route handler — compose streams',
+    'code'  => <<<'PHP'
+$app->route('/users', function() {
+    return (function() {
+        // Regular template → single chunk
+        yield from App::renderStream(
+            'shell-open', ['title' => 'Users']
+        );
+
+        // Streaming template → per-user chunks
+        yield from App::renderStream(
+            'users/stream',
+            ['users' => User::all()]
+        );
+
+        yield from App::renderStream('shell-close');
+    })();
+});
+PHP]); ?>
+</div>
+</div>
+
+<p>The browser sees the shell immediately, then each user card streams in as the database query progresses. No waiting for all data to load.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'How renderStream() works internally',
+    'code'  => <<<'PHP'
+public static function renderStream($tpl, $args = []): \Generator
+{
+    // 1. Resolve template path (same rules as render)
+    // 2. extract($args) — variables available in template
+    ob_start();
+    $result = include $path;
+    $output = ob_get_clean();
+
+    if ($result instanceof \Generator) {
+        yield from $result;  // Streaming template
+    } else {
+        yield $output;       // Regular template (one chunk)
+    }
+}
+PHP]); ?>
+
+<h2>PHP template patterns cheat sheet</h2>
+<table class="ztable">
+<tr><th>Pattern</th><th>PHP</th></tr>
+<tr><td>Output a variable</td><td><code>&lt;?= $name ?&gt;</code></td></tr>
+<tr><td>Escape HTML</td><td><code>&lt;?= htmlspecialchars($input) ?&gt;</code></td></tr>
+<tr><td>Conditional</td><td><code>&lt;?php if ($cond): ?&gt; ... &lt;?php endif; ?&gt;</code></td></tr>
+<tr><td>Loop</td><td><code>&lt;?php foreach ($items as $i): ?&gt; ... &lt;?php endforeach; ?&gt;</code></td></tr>
+<tr><td>Include component</td><td><code>&lt;?php App::render('/components/_card', $args) ?&gt;</code></td></tr>
+<tr><td>Ternary default</td><td><code>&lt;?= $subtitle ?? 'Default' ?&gt;</code></td></tr>
+<tr><td>Format number</td><td><code>&lt;?= number_format($price, 2) ?&gt;</code></td></tr>
+<tr><td>Date format</td><td><code>&lt;?= date('M j, Y', strtotime($created)) ?&gt;</code></td></tr>
+<tr><td>Raw HTML (trusted)</td><td><code>&lt;?= $trusted_html ?&gt;</code></td></tr>
+<tr><td>JSON encode</td><td><code>&lt;script&gt;const data = &lt;?= json_encode($data) ?&gt;&lt;/script&gt;</code></td></tr>
 </table>
 
 <div class="callout warn" style="margin-top:1.5rem">
-<strong>Always escape user data.</strong> Templates are plain PHP — use <code>htmlspecialchars()</code> on any variable that comes from user input. ZealPHP does not auto-escape.
+<strong>Always escape user data</strong> with <code>htmlspecialchars()</code>. PHP templates have no auto-escaping — you get full control, which means full responsibility.
+</div>
+
+<h2>Why PHP over Blade/Twig/Mustache?</h2>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-top:1rem">
+  <div class="card" style="padding:1rem"><strong>Zero learning curve</strong><br>No new syntax. If you know PHP, you know the template engine.</div>
+  <div class="card" style="padding:1rem"><strong>Full language power</strong><br>Classes, closures, exceptions, generators — not a subset.</div>
+  <div class="card" style="padding:1rem"><strong>No compile step</strong><br>No cache directory. Templates are interpreted directly.</div>
+  <div class="card" style="padding:1rem"><strong>IDE support</strong><br>Autocompletion, type checking, refactoring — all free.</div>
+  <div class="card" style="padding:1rem"><strong>SSR streaming</strong><br>Templates can <code>yield</code>. Progressive rendering built in.</div>
+  <div class="card" style="padding:1rem"><strong>Composable</strong><br>Render inside render. No "extends", no "blocks" — just function calls.</div>
 </div>
 
 </div>
