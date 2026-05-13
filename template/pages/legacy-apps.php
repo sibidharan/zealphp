@@ -99,11 +99,16 @@ TEXT]); ?>
 <tr><th>Feature</th><th>How</th></tr>
 <tr><td>All HTTP methods</td><td><code>$_SERVER['REQUEST_METHOD']</code> passed via context; request body piped to stdin (<code>php://input</code>)</td></tr>
 <tr><td><code>header()</code></td><td>Captured via <code>uopz_set_return</code> — stored in array, sent back as JSON metadata</td></tr>
+<tr><td><code>header_remove()</code></td><td>Captured — removes headers from the response by name</td></tr>
+<tr><td><code>headers_list()</code></td><td>Returns all captured headers as <code>"Name: Value"</code> strings</td></tr>
 <tr><td><code>setcookie()</code></td><td>Captured via <code>uopz_set_return</code> — applied to response by parent worker</td></tr>
+<tr><td><code>setrawcookie()</code></td><td>Captured — applied via <code>rawCookie()</code> on the response</td></tr>
 <tr><td><code>http_response_code()</code></td><td>Captured — status code returned in metadata</td></tr>
 <tr><td><code>exit()</code> / <code>die()</code></td><td>Terminates the CGI process; <code>register_shutdown_function</code> flushes output and metadata</td></tr>
+<tr><td>PHP warnings/notices</td><td>Custom <code>set_error_handler</code> outputs them in the response body (same as Apache <code>display_errors</code>)</td></tr>
 <tr><td>Static files</td><td>Served directly by OpenSwoole's <code>enable_static_handler</code> — never reaches PHP</td></tr>
 <tr><td>File uploads</td><td><code>$_FILES</code> passed via context; temp files are on the same filesystem</td></tr>
+<tr><td><code>$_ENV</code></td><td>Passed from the parent worker via context JSON</td></tr>
 <tr><td>Sessions</td><td>PHP's native session handling works in the CGI process (file-based by default)</td></tr>
 </table>
 

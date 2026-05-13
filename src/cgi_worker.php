@@ -1,7 +1,5 @@
 <?php
 // ZealPHP CGI Worker — runs PHP files at true global scope for legacy app compatibility.
-// Solves the fundamental PHP scoping issue where `include` inside a closure puts
-// variables in the closure scope instead of $GLOBALS, breaking WordPress admin.
 //
 // Usage: php cgi_worker.php /path/to/file.php
 // Input:  stdin = POST body, env ZEALPHP_REQUEST_CONTEXT = JSON context
@@ -9,11 +7,12 @@
 
 $__z_ctx = json_decode(getenv('ZEALPHP_REQUEST_CONTEXT') ?: '{}', true);
 
-$_SERVER = array_merge($_SERVER, $__z_ctx['server'] ?? []);
-$_GET    = $__z_ctx['get'] ?? [];
-$_POST   = $__z_ctx['post'] ?? [];
-$_COOKIE = $__z_ctx['cookie'] ?? [];
-$_FILES  = $__z_ctx['files'] ?? [];
+$_SERVER  = array_merge($_SERVER, $__z_ctx['server'] ?? []);
+$_GET     = $__z_ctx['get'] ?? [];
+$_POST    = $__z_ctx['post'] ?? [];
+$_COOKIE  = $__z_ctx['cookie'] ?? [];
+$_FILES   = $__z_ctx['files'] ?? [];
+$_ENV     = array_merge($_ENV ?? [], $__z_ctx['env'] ?? []);
 $_REQUEST = array_merge($_GET, $_POST);
 
 $__z_headers = [];
@@ -44,6 +43,27 @@ if (function_exists('uopz_set_return')) {
         }
     }, true);
 
+    uopz_set_return('header_remove', function(?string $name = null) {
+        global $__z_headers;
+        if ($name === null) {
+            $__z_headers = [];
+        } else {
+            $__z_headers = array_values(array_filter(
+                $__z_headers,
+                fn($h) => strcasecmp($h[0], $name) !== 0
+            ));
+        }
+    }, true);
+
+    uopz_set_return('headers_list', function() {
+        global $__z_headers;
+        return array_map(fn($h) => $h[0] . ': ' . $h[1], $__z_headers);
+    }, true);
+
+    uopz_set_return('headers_sent', function(&$file = null, &$line = null) {
+        return false;
+    }, true);
+
     uopz_set_return('setcookie', function(
         string $name, string $value = '', $expires_or_options = 0,
         string $path = '', string $domain = '', bool $secure = false,
@@ -54,16 +74,34 @@ if (function_exists('uopz_set_return')) {
         return true;
     }, true);
 
+    uopz_set_return('setrawcookie', function(
+        string $name, string $value = '', $expires_or_options = 0,
+        string $path = '', string $domain = '', bool $secure = false,
+        bool $httponly = false
+    ) {
+        global $__z_rawcookies;
+        $__z_rawcookies[] = [$name, $value, $expires_or_options, $path, $domain, $secure, $httponly];
+        return true;
+    }, true);
+
     uopz_set_return('http_response_code', function($code = null) {
         global $__z_status;
         if ($code !== null) $__z_status = (int)$code;
         return $__z_status;
     }, true);
-
-    uopz_set_return('headers_sent', function(&$file = null, &$line = null) {
-        return false;
-    }, true);
 }
+
+// Surface PHP warnings/notices in the response body (same as Apache display_errors)
+set_error_handler(function($severity, $message, $file, $line) {
+    $label = match($severity) {
+        E_WARNING, E_USER_WARNING => 'Warning',
+        E_NOTICE, E_USER_NOTICE => 'Notice',
+        E_DEPRECATED, E_USER_DEPRECATED => 'Deprecated',
+        default => 'Error',
+    };
+    echo "<br>\n<b>{$label}</b>: {$message} in <b>{$file}</b> on line <b>{$line}</b><br>\n";
+    return true;
+});
 
 $__z_file = $argv[1] ?? null;
 if (!$__z_file || !file_exists($__z_file)) {

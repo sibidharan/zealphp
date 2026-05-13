@@ -543,6 +543,7 @@ class App
             'post'   => $g->post ?? [],
             'cookie' => $g->cookie ?? [],
             'files'  => $g->files ?? [],
+            'env'    => $g->env ?? $_ENV ?? [],
         ], JSON_UNESCAPED_SLASHES);
 
         $env = [];
@@ -596,6 +597,11 @@ class App
                 foreach ($meta['cookies'] ?? [] as $args) {
                     if (!empty($args)) {
                         $g->zealphp_response->cookie(...$args);
+                    }
+                }
+                foreach ($meta['rawcookies'] ?? [] as $args) {
+                    if (!empty($args)) {
+                        $g->zealphp_response->rawCookie(...$args);
                     }
                 }
             }
@@ -654,6 +660,10 @@ class App
                 $command = $arg;
                 $i++;
                 continue;
+            }
+            if ($arg === '-h' || $arg === '--help' || $arg === 'help') {
+                self::cliHelp();
+                exit(0);
             }
             if ($arg === '-p' || $arg === '--port') {
                 $flags['port'] = (int)($argv[++$i] ?? 8080);
@@ -740,6 +750,34 @@ class App
         }
         echo "ZealPHP is running (pid {$pid})\n";
         exit(0);
+    }
+
+    private static function cliHelp(): void
+    {
+        echo <<<'HELP'
+Usage: php app.php [command] [options]
+
+Commands:
+  start    Start the server (default)
+  stop     Stop a running server
+  status   Check if server is running
+
+Options:
+  -p, --port N         Listen port (default: from App::init)
+  -H, --host ADDR      Listen address (default: 0.0.0.0)
+  -w, --workers N      Number of worker processes
+  -d, --daemonize      Run in background
+  --task-workers N     Number of task workers (default: 0)
+  --pid-file PATH      Custom PID file path
+  -h, --help           Show this help message
+
+Examples:
+  php app.php                     Start with defaults
+  php app.php start -p 9501 -d   Start daemonized on port 9501
+  php app.php stop               Stop the running server
+  php app.php status             Check if server is running
+
+HELP;
     }
 
     /**
