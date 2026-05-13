@@ -4,6 +4,45 @@
 <h1 class="section-title">HTTP Responses</h1>
 <p class="section-desc">ZealPHP wraps OpenSwoole's response with a clean API. Every method is coroutine-safe — no output buffering leaks across concurrent requests.</p>
 
+<h2>Return Value Conventions</h2>
+<p>What you return from a route handler determines the response — no boilerplate needed:</p>
+<table class="ztable" style="margin-bottom:2rem">
+  <tr><th>Return type</th><th>Behavior</th><th>Example</th></tr>
+  <tr><td><code>int</code></td><td>HTTP status code (empty body)</td><td><code>return 404;</code> <code>return 201;</code> <code>return 403;</code></td></tr>
+  <tr><td><code>array</code> / <code>object</code></td><td>JSON-serialized, <code>Content-Type: application/json</code> set</td><td><code>return ['id' => 42, 'name' => 'alice'];</code></td></tr>
+  <tr><td><code>string</code></td><td>Sent as response body (HTML)</td><td><code>return '&lt;h1&gt;Hello&lt;/h1&gt;';</code></td></tr>
+  <tr><td><code>Generator</code></td><td>SSR streaming — each <code>yield</code> sent immediately</td><td><code>yield '&lt;head&gt;...'; yield $content;</code></td></tr>
+  <tr><td><code>void</code> + <code>echo</code></td><td>Output buffer captured via <code>ob_get_clean()</code></td><td><code>echo "Hello"; echo " World";</code></td></tr>
+  <tr><td><code>ResponseInterface</code></td><td>PSR-7 response used directly</td><td><code>return new Response($body, 200);</code></td></tr>
+</table>
+
+<?php App::render('/components/_code', [
+    'label' => 'All return patterns in one glance',
+    'code'  => <<<'PHP'
+// Status code
+$app->route('/not-found', fn() => 404);
+
+// JSON (array or object)
+$app->route('/api/user/{id}', fn($id) => ['id' => $id, 'name' => 'alice']);
+
+// HTML string
+$app->route('/hello', fn() => '<h1>Hello World</h1>');
+
+// Generator streaming
+$app->route('/stream', fn() => (function() {
+    yield '<html><body>';
+    yield '<h1>Streamed!</h1>';
+    yield '</body></html>';
+})());
+
+// Echo (output buffering)
+$app->route('/echo', function() {
+    echo '<div>This is captured</div>';
+    echo '<div>by output buffering</div>';
+});
+PHP]); ?>
+
+<h2>Response Object Methods</h2>
 <table class="ztable" style="margin-bottom:2rem">
   <tr><th>Method</th><th>Signature</th><th>What it does</th></tr>
   <tr><td><code>json()</code></td><td><code>json($data, $status=200)</code></td><td>Sets Content-Type: application/json, encodes and ends response</td></tr>

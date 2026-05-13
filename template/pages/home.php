@@ -82,7 +82,7 @@ $siteUrl = site_url();
       <?php
       $features = [
         ['⚡', 'Routing',    'Flask-style routes with URL params, namespaces, and regex patterns. Reflection-based parameter injection.', '/routing',    'route(), nsRoute()'],
-        ['📦', 'Responses',  'json(), redirect(), stream(), sse(), header(), cookie() — all coroutine-safe.', '/responses',  'HTTP\Response'],
+        ['📦', 'Responses',  'Return int → status, array → JSON, string → HTML, Generator → stream. Plus redirect(), sse(), cookie().', '/responses',  'HTTP\Response'],
         ['🔀', 'Coroutines', 'go() + Channel for parallel async IO. Thousands of concurrent requests on a single worker.', '/coroutines', 'OpenSwoole'],
         ['📡', 'Streaming',  'SSR streaming via Generator yield, stream() callback, and Server-Sent Events.', '/streaming',  'SSR · SSE'],
         ['🔌', 'WebSocket',  'Real-time bi-directional with rooms, auth, binary frames, and heartbeat.', '/ws',          'App::ws()'],
@@ -101,6 +101,129 @@ $siteUrl = site_url();
     </div>
   </div>
 </section>
+
+<!-- Return conventions -->
+<section class="section" style="background:var(--bg-alt)">
+  <div class="container">
+    <h2 class="section-title">Return anything, get the right response</h2>
+    <p class="section-desc">ZealPHP inspects your return type and does the right thing — no boilerplate.</p>
+    <table class="ztable" style="margin-top:1.5rem">
+      <tr><th style="width:30%">Return</th><th style="width:35%">Result</th><th>Example</th></tr>
+      <tr>
+        <td><code>int</code></td>
+        <td>HTTP status code</td>
+        <td><code>return 404;</code> <code>return 201;</code></td>
+      </tr>
+      <tr>
+        <td><code>array</code> / <code>object</code></td>
+        <td>Auto-serialized as JSON</td>
+        <td><code>return ['users' => $list];</code></td>
+      </tr>
+      <tr>
+        <td><code>string</code></td>
+        <td>HTML body</td>
+        <td><code>return '&lt;h1&gt;Hello&lt;/h1&gt;';</code></td>
+      </tr>
+      <tr>
+        <td><code>Generator</code></td>
+        <td>SSR streaming (each yield sent immediately)</td>
+        <td><code>yield '&lt;head&gt;'; yield $body;</code></td>
+      </tr>
+      <tr>
+        <td><code>void</code> + <code>echo</code></td>
+        <td>Buffered output via <code>ob_get_clean()</code></td>
+        <td><code>echo "Hello"; echo " World";</code></td>
+      </tr>
+      <tr>
+        <td><code>ResponseInterface</code></td>
+        <td>PSR-7 response used directly</td>
+        <td><code>return new Response(...);</code></td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<!-- Live converter -->
+<section class="section">
+  <div class="container">
+    <h2 class="section-title">Try it — convert your config to ZealPHP</h2>
+    <p class="section-desc">Paste Apache <code>.htaccess</code> or nginx config. AI converts it to <code>app.php</code> in real-time.</p>
+    <div class="converter-split" style="display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin-top:1.5rem;">
+      <div style="border-right:1px solid var(--border); display:flex; flex-direction:column;">
+        <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
+          <span>Input</span>
+          <select id="hp-preset" style="font-size:.75rem; padding:.2rem .4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg);">
+            <option value="wordpress">WordPress .htaccess</option>
+            <option value="nginx-cms">nginx CMS</option>
+            <option value="redirects">Redirect rules</option>
+            <option value="">— paste your own —</option>
+          </select>
+        </div>
+        <textarea id="hp-input" style="flex:1; min-height:220px; border:none; padding:.75rem; font-family:var(--font-mono); font-size:.8rem; background:var(--code-bg); color:var(--code-text); resize:none; outline:none;"></textarea>
+        <div style="padding:.4rem .75rem; background:var(--bg-alt); display:flex; align-items:center; gap:.5rem;">
+          <button id="hp-btn" onclick="hpConvert()" style="padding:.35rem 1rem; background:var(--accent); color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:.8rem; font-weight:600;">Convert →</button>
+          <span id="hp-status" style="font-size:.73rem; color:var(--text-muted);"></span>
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column;">
+        <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted);">ZealPHP app.php</div>
+        <pre id="hp-output" style="flex:1; min-height:220px; max-height:320px; overflow:auto; padding:.75rem; margin:0; font-family:var(--font-mono); font-size:.8rem; background:var(--code-bg); color:var(--code-text); white-space:pre-wrap;"><span style="color:var(--text-muted);">// Click Convert to generate...</span></pre>
+        <div style="padding:.4rem .75rem; background:var(--bg-alt); font-size:.7rem; color:var(--text-muted);">Powered by gpt-4.1-mini · Cached for 1hr · <a href="/legacy-apps">Full docs →</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+  const HP = {
+    wordpress: `# BEGIN WordPress\n<IfModule mod_rewrite.c>\nRewriteEngine On\nRewriteBase /\nRewriteRule ^index\\.php$ - [L]\nRewriteCond %{REQUEST_FILENAME} !-f\nRewriteCond %{REQUEST_FILENAME} !-d\nRewriteRule . /index.php [L]\n</IfModule>\n# END WordPress`,
+    'nginx-cms': `server {\n    listen 80;\n    server_name example.com;\n    root /var/www/html;\n\n    location / {\n        try_files $uri $uri/ /index.php?$args;\n    }\n    location ~ \\.php$ {\n        fastcgi_pass unix:/run/php/php-fpm.sock;\n    }\n    location ~* \\.(css|js|png)$ {\n        expires 30d;\n    }\n}`,
+    redirects: `RewriteEngine On\nRewriteRule ^old-page$ /new-page [R=301,L]\nRewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]\nRewriteRule ^docs$ https://docs.example.com [R=301,L]`
+  };
+
+  const presetEl = document.getElementById('hp-preset');
+  const inputEl = document.getElementById('hp-input');
+  presetEl.addEventListener('change', function() {
+    if (this.value && HP[this.value]) inputEl.value = HP[this.value];
+    else inputEl.value = '';
+  });
+  if (presetEl.value && HP[presetEl.value]) inputEl.value = HP[presetEl.value];
+
+  window.hpConvert = function() {
+    const input = inputEl.value.trim();
+    const output = document.getElementById('hp-output');
+    const status = document.getElementById('hp-status');
+    const btn = document.getElementById('hp-btn');
+    if (!input) { status.textContent = 'Paste a config first'; return; }
+    btn.disabled = true; btn.textContent = 'Converting...';
+    status.textContent = 'Streaming...'; output.textContent = '';
+    fetch('/api/convert', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({config: input})
+    }).then(r => {
+      const reader = r.body.getReader(), dec = new TextDecoder();
+      let buf = '';
+      function read() {
+        reader.read().then(({done, value}) => {
+          if (done) { btn.disabled = false; btn.textContent = 'Convert →'; status.textContent = 'Done'; return; }
+          buf += dec.decode(value, {stream: true});
+          const lines = buf.split('\n'); buf = lines.pop();
+          for (const l of lines) {
+            if (l.startsWith('data: ') && !l.includes('[DONE]')) output.textContent += l.slice(6) + '\n';
+          }
+          output.scrollTop = output.scrollHeight;
+          read();
+        });
+      }
+      read();
+    }).catch(e => {
+      output.textContent = '// Error: ' + e.message;
+      btn.disabled = false; btn.textContent = 'Convert →'; status.textContent = 'Failed';
+    });
+  };
+})();
+</script>
 
 <!-- Why ZealPHP -->
 <section class="section" style="background:var(--bg-alt)">
