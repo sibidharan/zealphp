@@ -54,6 +54,7 @@ $groups = [
     <?php endforeach; ?>
   </nav>
   <div class="actions">
+    <a href="https://deepwiki.com/sibidharan/zealphp" target="_blank">DeepWiki ↗</a>
     <a href="https://github.com/sibidharan/zealphp" target="_blank">GitHub ↗</a>
   </div>
 </nav>
