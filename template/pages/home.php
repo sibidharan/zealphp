@@ -32,7 +32,7 @@ $siteUrl = site_url();
         <img src="https://img.shields.io/github/stars/sibidharan/zealphp?style=flat-square&logo=github&logoColor=white" alt="GitHub stars">
       </a>
       <a href="https://www.php.net/" target="_blank" rel="noopener noreferrer">
-        <img src="https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square&logo=php&logoColor=white" alt="PHP 8.3 or newer">
+        <img src="https://img.shields.io/badge/PHP-8.3.x-777bb4?style=flat-square&logo=php&logoColor=white" alt="PHP 8.3.x">
       </a>
       <a href="https://github.com/sibidharan/zealphp/actions/workflows/tests.yml" target="_blank" rel="noopener noreferrer">
         <img src="https://github.com/sibidharan/zealphp/actions/workflows/tests.yml/badge.svg" alt="GitHub Actions test status">
@@ -96,7 +96,7 @@ $siteUrl = site_url();
 
     <div class="qs-prereq">
       <span class="qs-prereq-label">Requires</span>
-      <code>PHP 8.3+</code>
+      <code>PHP 8.3.x</code>
       <code>OpenSwoole 25+</code>
       <code>uopz</code>
       <code>composer</code>

@@ -17,7 +17,7 @@
     <h2 id="prereqs" style="margin-top:2rem">1. Prerequisites</h2>
     <table class="ztable">
       <tr><th>Package</th><th>Version</th><th>Why</th></tr>
-      <tr><td><code>PHP</code></td><td>8.3+</td><td>Framework uses PHP 8 features (readonly props, enums, attributes)</td></tr>
+      <tr><td><code>PHP</code></td><td>8.3.x</td><td>OpenSwoole does not support PHP 8.4 yet — stay on 8.3</td></tr>
       <tr><td><code>OpenSwoole</code></td><td>25.0+</td><td>Async runtime, HTTP/WebSocket server, coroutines</td></tr>
       <tr><td><code>uopz</code></td><td>any</td><td>Overrides <code>header()</code>, <code>setcookie()</code>, <code>session_*</code> at runtime</td></tr>
       <tr><td><code>composer</code></td><td>2.x</td><td>Dependency management</td></tr>
@@ -25,6 +25,10 @@
     </table>
 
     <h2 id="install" style="margin-top:2.5rem">2. Install</h2>
+
+    <div class="callout warn" style="margin-bottom:1rem">
+      <strong>PHP 8.3 only.</strong> OpenSwoole does not currently support PHP 8.4. If your system has PHP 8.4 installed, install PHP 8.3 alongside it and use that for ZealPHP.
+    </div>
 
     <p>The framework repo ships a <code>setup.sh</code> that handles everything for Ubuntu/Debian:</p>
 
