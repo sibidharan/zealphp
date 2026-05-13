@@ -58,9 +58,10 @@ class IOStreamWrapper {
     // }
 
     public function stream_open($path, $mode, $options, &$opened_path) {
-        elog("stream_open: $path, $mode, $options", "streamio");
-        // Handle php://input specifically: load content into an in-memory stream
+        // Only log php://input — other php:// streams (memory, filter, etc.) are
+        // used internally by the PSR layer and logging them adds noise per request.
         if ($path === 'php://input') {
+            elog("stream_open: $path, $mode, $options", "streamio");
             $g = \ZealPHP\G::instance();
             $content = $g->zealphp_request->parent->getContent();
             $stream = fopen('php://memory', 'r+');

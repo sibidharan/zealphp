@@ -532,6 +532,10 @@ class App
             'pid_file' => '/tmp/zealphp.pid',
             'task_worker_num' => 4,
             'task_enable_coroutine' => true,
+            // Suppress NOTICE-level messages from OpenSwoole internals (e.g. ERRNO 1005
+            // "session does not exist" when SSE/WS clients disconnect mid-stream).
+            // Pass 'log_level' => 0 in $app->run() settings to restore full debug output.
+            'log_level' => 4,  // 0=DEBUG 1=TRACE 2=INFO 3=NOTICE 4=WARNING 5=ERROR 6=NONE
         ];
         // elog("Initializing ZealPHP server at http://{$this->host}:{$this->port}");
         // WebSocket\Server extends HTTP\Server — all HTTP routes still work
@@ -1003,10 +1007,13 @@ class ResponseMiddleware implements MiddlewareInterface
                         ob_end_clean();
                         $g->zealphp_response->flush();
                         foreach ($object as $chunk) {
+                            if (!$g->openswoole_response->isWritable()) break;
                             $g->openswoole_response->write((string)$chunk);
                             \OpenSwoole\Coroutine::sleep(0);
                         }
-                        $g->openswoole_response->end();
+                        if ($g->openswoole_response->isWritable()) {
+                            $g->openswoole_response->end();
+                        }
                         return (new Response('', $g->status ?? 200));
                     }
 

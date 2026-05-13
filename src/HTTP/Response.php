@@ -128,9 +128,20 @@ class Response
         $g = \ZealPHP\G::instance();
         $g->_streaming = true;
         $this->flush();
-        $write = fn(string $chunk) => $this->parent->write($chunk);
-        $fn($write);
-        $this->parent->end();
+        // Guard each write: if the client disconnected, write() would return false
+        // and OpenSwoole would emit ERRNO 1005 notices — return false silently instead.
+        $write = function(string $chunk): bool {
+            if (!$this->parent->isWritable()) return false;
+            return $this->parent->write($chunk) !== false;
+        };
+        try {
+            $fn($write);
+        } catch (\Throwable $e) {
+            // Swallow exceptions from disconnected client writes inside streaming callbacks
+        }
+        if ($this->parent->isWritable()) {
+            $this->parent->end();
+        }
     }
 
     /**
