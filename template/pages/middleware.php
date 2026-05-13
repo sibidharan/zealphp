@@ -9,7 +9,7 @@
   <tr><th>Class</th><th>Constructor</th><th>What it does</th></tr>
   <tr><td><code>CorsMiddleware</code></td><td><code>($origins, $methods, $headers, $credentials, $maxAge)</code></td><td>CORS preflight + Access-Control headers on every response</td></tr>
   <tr><td><code>ETagMiddleware</code></td><td>(none)</td><td>Generates <code>W/"md5"</code> ETag, returns 304 on cache hit</td></tr>
-  <tr><td><code>CompressionMiddleware</code></td><td><code>($minLength=1024, $level=6)</code></td><td>gzip/deflate when Accept-Encoding present + body &gt; threshold</td></tr>
+  <tr><td><code>CompressionMiddleware</code></td><td><code>($minLength=1024, $level=6, $skipProxiedRequests=false)</code></td><td>Reference gzip/deflate middleware; runtime compression is handled by OpenSwoole by default</td></tr>
 </table>
 
 <?php
@@ -18,7 +18,6 @@ App::render('/components/_code', [
     'code'  => <<<'PHP'
 $app->addMiddleware(new CorsMiddleware());         // outermost — handles preflight
 $app->addMiddleware(new ETagMiddleware());         // generates ETag
-$app->addMiddleware(new CompressionMiddleware());  // compresses response body
 $app->addMiddleware(new AuthMiddleware());         // your custom middleware
 // ResponseMiddleware is always innermost (built-in)
 PHP]);
@@ -50,7 +49,8 @@ PHP],
 PHP],
   ['mw-comp', 'Compression — gzip when Accept-Encoding: gzip', '/demo/middleware/compress',
    <<<'PHP'
-// CompressionMiddleware kicks in for responses > 1024 bytes
+// OpenSwoole handles runtime compression by default.
+// Keep CompressionMiddleware only as a reference if you disable http_compression.
 // curl --compressed http://localhost:8080/http/compress-test
 // → Content-Encoding: gzip  (body is compressed)
 PHP],

@@ -529,6 +529,9 @@ class App
             'enable_static_handler' => true,
             'document_root' => self::$cwd . '/public',
             'enable_coroutine' =>  !self::$superglobals,
+            // Runtime compression is owned by OpenSwoole. Do not also register
+            // CompressionMiddleware unless this setting is disabled.
+            'http_compression' => true,
             'pid_file' => '/tmp/zealphp.pid',
             'task_worker_num' => 4,
             'task_enable_coroutine' => true,

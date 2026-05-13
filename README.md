@@ -184,7 +184,7 @@ $app->route('/posts/{slug}/{page?}', function($slug, $page = 1) {
 // Built-in middleware
 $app->addMiddleware(new \ZealPHP\Middleware\CorsMiddleware());
 $app->addMiddleware(new \ZealPHP\Middleware\ETagMiddleware());
-$app->addMiddleware(new \ZealPHP\Middleware\CompressionMiddleware());
+// HTTP compression is handled by OpenSwoole by default.
 
 // Custom PSR-15 middleware
 class TimingMiddleware implements MiddlewareInterface {

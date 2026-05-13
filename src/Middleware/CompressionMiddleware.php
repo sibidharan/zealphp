@@ -12,17 +12,31 @@ use ZealPHP\G;
  * Compression Middleware (gzip / deflate)
  *
  * Compresses response bodies when the client advertises support via
- * Accept-Encoding. Skips streaming responses (SSE, Generator, stream())
- * and responses smaller than the threshold.
+ * Accept-Encoding. Skips streaming responses (SSE, Generator, stream()),
+ * responses smaller than the threshold, and optionally requests that already
+ * came through a reverse proxy such as Traefik.
  *
- * Usage in app.php (add LAST so it wraps innermost):
+ * Reference usage when OpenSwoole http_compression is disabled:
  *   $app->addMiddleware(new \ZealPHP\Middleware\CompressionMiddleware());
  */
 class CompressionMiddleware implements MiddlewareInterface
 {
+    private const PROXY_HEADERS = [
+        'Forwarded',
+        'Via',
+        'X-Forwarded-For',
+        'X-Forwarded-Host',
+        'X-Forwarded-Port',
+        'X-Forwarded-Proto',
+        'X-Forwarded-Prefix',
+        'X-Forwarded-Server',
+        'X-Real-IP',
+    ];
+
     public function __construct(
         private int $minLength  = 1024,  // bytes — skip tiny responses
-        private int $level      = 6      // gzip level 1–9
+        private int $level      = 6,     // gzip level 1–9
+        private bool $skipProxiedRequests = false
     ) {}
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
@@ -35,7 +49,11 @@ class CompressionMiddleware implements MiddlewareInterface
             return $response;
         }
 
-        $accept = $request->getHeaderLine('Accept-Encoding');
+        if ($this->skipProxiedRequests && $this->isProxiedRequest($request)) {
+            return $response;
+        }
+
+        $accept = strtolower($request->getHeaderLine('Accept-Encoding'));
         $body   = (string) $response->getBody();
 
         if (strlen($body) < $this->minLength) {
@@ -72,6 +90,17 @@ class CompressionMiddleware implements MiddlewareInterface
         }
 
         return $response;
+    }
+
+    private function isProxiedRequest(ServerRequestInterface $request): bool
+    {
+        foreach (self::PROXY_HEADERS as $header) {
+            if ($request->getHeaderLine($header) !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function isUncompressible(string $ct): bool

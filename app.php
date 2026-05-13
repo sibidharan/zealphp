@@ -18,7 +18,6 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use ZealPHP\Middleware\CorsMiddleware;
-use ZealPHP\Middleware\CompressionMiddleware;
 use ZealPHP\Middleware\ETagMiddleware;
 use ZealPHP\Store;
 use ZealPHP\Counter;
@@ -55,7 +54,6 @@ App::superglobals(false);
 $app = App::init('0.0.0.0', 8080);
 $app->addMiddleware(new CorsMiddleware());         // outermost — handles preflight, adds Allow-Origin
 $app->addMiddleware(new ETagMiddleware());         // generates ETag, returns 304 on cache hit
-$app->addMiddleware(new CompressionMiddleware());  // gzip/deflate before sending
 $app->addMiddleware(new AuthenticationMiddleware());
 $app->addMiddleware(new ValidationMiddleware());
 elog("Middleware added");

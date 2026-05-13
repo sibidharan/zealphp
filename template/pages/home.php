@@ -61,7 +61,7 @@
         ['🔀', 'Coroutines', 'go() + Channel for parallel async IO. Thousands of concurrent requests on a single worker.', '/coroutines', 'OpenSwoole'],
         ['📡', 'Streaming',  'SSR streaming via Generator yield, stream() callback, and Server-Sent Events.', '/streaming',  'SSR · SSE'],
         ['🔌', 'WebSocket',  'Real-time bi-directional with rooms, auth, binary frames, and heartbeat.', '/ws',          'App::ws()'],
-        ['🛡️', 'Middleware', 'CORS, ETag/304, gzip compression — PSR-15 middleware stack, any order.', '/middleware', 'PSR-15'],
+        ['🛡️', 'Middleware', 'CORS, ETag/304, and custom PSR-15 middleware in any order.', '/middleware', 'PSR-15'],
         ['🗄️', 'Sessions',  'Coroutine-safe sessions replacing all native session_*() functions via uopz.', '/sessions',   'uopz hooks'],
         ['🗃️', 'Store',     'Cross-worker shared memory via OpenSwoole\\Table. Lock-free atomic counters.', '/store',      'Store · Counter'],
         ['⏱️', 'Timers',    'App::tick/after for recurring tasks. Per-worker via onWorkerStart.', '/timers',      'Timer'],

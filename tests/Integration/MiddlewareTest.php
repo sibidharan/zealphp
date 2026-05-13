@@ -63,6 +63,9 @@ class MiddlewareTest extends TestCase
         $r = $this->get('/http/compress-test', ['Accept-Encoding' => 'gzip']);
         $this->assertStatus(200, $r);
         $this->assertHeader('content-encoding', 'gzip', $r);
+        $decoded = gzdecode($r['body']);
+        $this->assertIsString($decoded);
+        $this->assertStringContainsString('<html>', $decoded);
     }
 
     public function testNonCorsOptionsNoOrigin(): void

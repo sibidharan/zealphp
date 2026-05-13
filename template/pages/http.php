@@ -9,7 +9,7 @@
   <tr><td>HEAD method</td><td>✅ Auto-mapped</td><td>ResponseMiddleware runs GET handler, strips body, adds Content-Length</td></tr>
   <tr><td>OPTIONS method</td><td>✅ Built-in</td><td>Returns 204 + Allow header with all methods registered for that URI</td></tr>
   <tr><td>ETag / 304</td><td>✅ Middleware</td><td>ETagMiddleware generates W/"md5", returns 304 on If-None-Match hit</td></tr>
-  <tr><td>Gzip compression</td><td>✅ Middleware</td><td>CompressionMiddleware on bodies &gt; 1KB with Accept-Encoding: gzip</td></tr>
+  <tr><td>Gzip compression</td><td>✅ OpenSwoole</td><td><code>http_compression</code> handles bodies when Accept-Encoding includes gzip</td></tr>
   <tr><td>CORS</td><td>✅ Middleware</td><td>CorsMiddleware handles preflight + adds headers to every response</td></tr>
   <tr><td>Redirects 301/302/307/308</td><td>✅ Built-in</td><td><code>$response->redirect($url, $status)</code></td></tr>
   <tr><td>Cookie SameSite</td><td>✅ Built-in</td><td><code>setcookie($name, $value, ..., $samesite)</code></td></tr>
