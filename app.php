@@ -20,6 +20,8 @@ use Psr\Http\Server\RequestHandlerInterface;
 use ZealPHP\Middleware\CorsMiddleware;
 use ZealPHP\Middleware\CompressionMiddleware;
 use ZealPHP\Middleware\ETagMiddleware;
+use ZealPHP\Store;
+use ZealPHP\Counter;
 
 class AuthenticationMiddleware implements MiddlewareInterface
 {

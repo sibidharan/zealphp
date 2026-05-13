@@ -22,6 +22,7 @@ class App
     protected $routes = [];
     protected $routes_by_method = [];
     protected $ws_routes = [];
+    protected static $workerStartHooks = [];
     protected $host;
     protected $port;
     static $cwd;
@@ -153,6 +154,39 @@ class App
     public function wsRoutes(): array
     {
         return $this->ws_routes;
+    }
+
+    // -----------------------------------------------------------------------
+    // Timer helpers (must be called inside a coroutine context: workerStart,
+    // request handler, or onWorkerStart callback)
+    // -----------------------------------------------------------------------
+
+    /** Recurring timer: calls $fn every $ms milliseconds in this worker. */
+    public static function tick(int $ms, callable $fn): int
+    {
+        return \OpenSwoole\Timer::tick($ms, $fn);
+    }
+
+    /** One-shot timer: calls $fn once after $ms milliseconds. */
+    public static function after(int $ms, callable $fn): int
+    {
+        return \OpenSwoole\Timer::after($ms, $fn);
+    }
+
+    /** Cancel a timer returned by tick() or after(). */
+    public static function clearTimer(int $id): void
+    {
+        \OpenSwoole\Timer::clear($id);
+    }
+
+    /**
+     * Register a callback to run inside every worker's workerStart event.
+     * Use this to start per-worker timers, warm caches, open connections, etc.
+     * Called as: $fn($server, $workerId)
+     */
+    public static function onWorkerStart(callable $fn): void
+    {
+        self::$workerStartHooks[] = $fn;
     }
 
     private function buildParamMap($handler): array
@@ -497,7 +531,7 @@ class App
             'enable_coroutine' =>  !self::$superglobals,
             'pid_file' => '/tmp/zealphp.pid',
             'task_worker_num' => 4,
-            // 'task_enable_coroutine' => true,
+            'task_enable_coroutine' => true,
         ];
         // elog("Initializing ZealPHP server at http://{$this->host}:{$this->port}");
         // WebSocket\Server extends HTTP\Server — all HTTP routes still work
@@ -838,9 +872,13 @@ class App
         }
 
         // Register the php:// stream wrapper once per worker process instead of per-request
+        // and invoke any user-registered onWorkerStart hooks (timers, warmup, etc.)
         $server->on('workerStart', function($server, $workerId) {
             @stream_wrapper_unregister("php");
             stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class);
+            foreach (self::$workerStartHooks as $hook) {
+                $hook($server, $workerId);
+            }
         });
 
         // fd → ws path map, shared across WebSocket event closures
@@ -857,6 +895,13 @@ class App
         });
 
         $server->on('message', function(\OpenSwoole\WebSocket\Server $server, \OpenSwoole\WebSocket\Frame $frame) use (&$wsFdMap) {
+            // Skip control frames: PING(9), PONG(10), CONTINUATION(0)
+            // Only dispatch TEXT(1) and BINARY(2) to route handlers
+            $op = $frame->opcode;
+            if ($op !== \OpenSwoole\WebSocket\Server::WEBSOCKET_OPCODE_TEXT &&
+                $op !== \OpenSwoole\WebSocket\Server::WEBSOCKET_OPCODE_BINARY) {
+                return;
+            }
             $path  = $wsFdMap[$frame->fd] ?? null;
             $g     = G::instance();
             $route = $path ? (App::instance()->wsRoutes()[$path] ?? null) : null;
@@ -872,6 +917,15 @@ class App
             $route = $path ? (App::instance()->wsRoutes()[$path] ?? null) : null;
             if ($route && $route['close']) {
                 ($route['close'])($server, $fd, $g);
+            }
+        });
+
+        // Graceful shutdown: send WebSocket CLOSE frame 1001 (Going Away) to all connections
+        $server->on('shutdown', function(\OpenSwoole\WebSocket\Server $server) use (&$wsFdMap) {
+            foreach (array_keys($wsFdMap) as $fd) {
+                if ($server->isEstablished($fd)) {
+                    $server->disconnect($fd, 1001, 'Server shutting down');
+                }
             }
         });
 
