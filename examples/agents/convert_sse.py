@@ -13,24 +13,39 @@ import sys
 import base64
 from agents import Agent, Runner, function_tool
 
-ZEALPHP_REF = """
-ZealPHP route registration:
+ZEALPHP_REF = r"""
+ZealPHP is a PHP web framework on OpenSwoole. ZealPHP IS the HTTP server — no Apache/nginx needed.
 
-$app = App::init('0.0.0.0', 8080);  // Always assign to $app
+## App Structure
+- app.php — entry point. Defines routes, calls $app->run().
+- public/ — web root. PHP files auto-served (hello.php → /hello). Static files served by OpenSwoole.
+- route/ — route files auto-included at startup.
 
-// Basic route with params
-$app->route('/user/{id}', ['methods' => ['GET','POST']], function($id, $request, $response) {
-    return ['id' => $id];
-});
+## Initialization
+```php
+$app = App::init('0.0.0.0', 8080);  // ONLY takes ($host, $port, $cwd)
+$app->run(['task_worker_num' => 0]);
+```
 
-// Namespace routes
-$app->nsRoute('admin', '/dashboard', function() { ... });
-$app->nsPathRoute('api', '{resource}', ['methods' => ['GET','POST','PUT','DELETE']], function($resource) { ... });
+## Routes — {param} Syntax (parameters injected by name via reflection)
+```php
+$app->route('/user/{id}', function($id) { return ['id' => $id]; });
+$app->route('/user/{id}/{tab}', function($id, $tab) { ... });
+$app->nsRoute('admin', '/users', function() { ... });           // → /admin/users
+$app->nsPathRoute('api', '{path}', function($path) { ... });    // last param catches /slashes/
+$app->patternRoute('/files/.*', function() { ... });             // raw regex
+```
 
-// Regex pattern
-$app->patternRoute('/files/.*', function() { ... });
+Magic params (injected automatically): $request, $response, $app
 
-// Fallback (replaces RewriteRule . /index.php [L])
+## Redirects
+```php
+$app->route('/old', function() { header('Location: /new'); return 301; });
+$app->route('/blog/{slug}', function($slug) { header('Location: /articles/' . $slug); return 302; });
+```
+
+## Fallback (ONLY for CMS front-controller: WordPress, Drupal, Laravel)
+```php
 $app->setFallback(function() {
     $g = G::instance();
     $g->server['PHP_SELF'] = '/index.php';
@@ -38,21 +53,30 @@ $app->setFallback(function() {
     $g->server['SCRIPT_FILENAME'] = App::$cwd . '/public/index.php';
     App::includeFile(App::$cwd . '/public/index.php');
 });
+```
 
-// Redirect
-$app->route('/old', function() { header('Location: /new'); return 301; });
+## Legacy Mode (ONLY for unmodifiable apps like WordPress)
+```php
+App::superglobals(true);        // Enable $_GET, $_POST, $_SESSION
+App::$ignore_php_ext = false;   // Allow .php URLs (/wp-login.php)
+```
 
-// Legacy mode (WordPress/Drupal)
-App::superglobals(true);
-App::$ignore_php_ext = false;
+## Middleware
+```php
+$app->addMiddleware(new CorsMiddleware(['*']));    // CORS
+$app->addMiddleware(new ETagMiddleware());          // ETag/304
+```
 
-// Middleware
-$app->addMiddleware(new CorsMiddleware(['*']));
+## NOT NEEDED in ZealPHP (drop or comment briefly):
+- Static file serving, directory indexing, charset, MIME types → OpenSwoole handles it
+- ServerSignature, Options, ModPagespeed → not applicable
+- PHP file handling, .php extension blocking → built-in
+- SSL, proxy_pass, rate limiting → reverse proxy concern
 
-// Static files: OpenSwoole enable_static_handler handles CSS/JS/images automatically
-// SSL: $app->run(['ssl_cert_file'=>'...','ssl_key_file'=>'...','enable_http2'=>true]);
-
-$app->run(['task_worker_num' => 0]);
+## upload_max_filesize / post_max_size → package_max_length in $app->run()
+```php
+$app->run(['package_max_length' => 512 * 1024 * 1024]);
+```
 """
 
 
@@ -64,18 +88,22 @@ def get_reference() -> str:
 
 converter = Agent(
     name="converter",
-    model="gpt-4.1-mini",
+    model="gpt-5.4-mini",
     instructions="""Convert Apache .htaccess or nginx config to a ZealPHP app.php.
 
-1. Call get_reference() first
-2. Output ONLY the PHP code — no explanations, no markdown fences, no commentary
-3. Always include: <?php, require, use statements, App::init(), routes, $app->run()
-4. For CMS front-controller rewrites: use App::superglobals(true) + setFallback()
-5. For redirects: use $app->route() with header('Location: ...')
-6. For API routes: use explicit $app->route() calls
-7. Static file/cache directives: add a single comment that OpenSwoole handles it
-8. proxy_pass: comment that a reverse proxy should be used in front
-9. If the input is not a valid Apache or nginx config, output ONLY: // Error: Not a valid Apache .htaccess or nginx server config""",
+1. Call get_reference() first.
+2. Classify: LEGACY CMS (front-controller → setFallback + includeFile + superglobals) vs MODERN APP ({param} routes, no include).
+3. Output ONLY PHP code — no markdown, no explanations.
+
+RULES:
+- App::init() takes ($host, $port) — NEVER arrays or phpSettings.
+- Use {param} syntax: $app->route('/user/{id}', function($id) { ... })
+- NEVER use $matches[], $_GET assignment, require/include in handlers, or exit()/die().
+- Drop Apache directives that don't apply (ServerSignature, Options, AddType, charset, static caching) — one brief comment.
+- CORS → CorsMiddleware. Upload size → package_max_length.
+- HTTPS/SSL redirect → comment: reverse proxy concern.
+- Always include: <?php, require autoload, use statements, App::init(), routes, $app->run().
+- If not valid config: output ONLY: // Error: Not a valid Apache .htaccess or nginx server config""",
     tools=[get_reference],
 )
 

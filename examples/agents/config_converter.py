@@ -21,44 +21,110 @@ import sys
 from agents import Agent, Runner, function_tool
 
 
-ZEALPHP_REFERENCE = """
-## ZealPHP Framework Reference
+ZEALPHP_REFERENCE = r"""
+## ZealPHP Framework Reference — for Converter Agent
 
-ZealPHP is a PHP web framework built on OpenSwoole. It serves as both a modern async
-framework AND a backwards-compatible Apache/nginx replacement for legacy PHP apps.
+ZealPHP is a PHP web framework built on OpenSwoole. It replaces Apache/nginx entirely —
+ZealPHP IS the HTTP server. There is no separate web server.
 
-### Core Concepts
+### Architecture
 
-**app.php** is the entry point. It configures the framework, defines routes, and starts the server.
-**public/** is the web root — static files and PHP page files live here.
-**route/** contains route files auto-included at startup.
+- **app.php** — entry point. Defines routes, configures server, calls $app->run().
+- **public/** — web root. PHP files here are auto-served at their base name.
+  `public/hello.php` → served at `/hello`. Static files (CSS, JS, images) served by OpenSwoole.
+  IMPORTANT: auto-serving ONLY handles the base URL. `/hello` works, but `/hello/{id}` does NOT.
+  Any URL with parameters (RewriteRule with capture groups) MUST have an explicit $app->route().
+- **route/** — route definition files. Auto-included at startup via glob.
 
-### Route Registration
+### App Initialization
 
 ```php
-// Basic route
-$app->route('/path', function() { echo "hello"; });
+<?php
+require 'vendor/autoload.php';
+use ZealPHP\App;
 
-// With HTTP methods and URL params (Flask-style {param} syntax)
-$app->route('/user/{id}', ['methods' => ['GET', 'POST']], function($id, $request, $response) {
-    return ['id' => $id];  // Auto JSON
+$app = App::init('0.0.0.0', 8080);
+// ... define routes ...
+$app->run(['task_worker_num' => 0]);
+```
+
+App::init() signature: `App::init($host, $port, $cwd)` — no other parameters.
+NEVER pass arrays, phpSettings, or config objects to App::init().
+
+### Route Registration — {param} Syntax
+
+ZealPHP uses Flask-style `{param}` placeholders. Parameters are injected into the handler
+function BY NAME via reflection. No manual $_GET assignment needed.
+
+```php
+// Single param — $id is injected from URL
+$app->route('/user/{id}', function($id) {
+    return ['user_id' => $id];  // arrays auto-encode to JSON
 });
 
-// Namespace route (adds prefix)
+// Multiple params
+$app->route('/user/{id}/post/{post_id}', function($id, $post_id) {
+    return ['user' => $id, 'post' => $post_id];
+});
+
+// With HTTP methods
+$app->route('/user/{id}', ['methods' => ['GET', 'POST']], function($id) {
+    return ['id' => $id];
+});
+```
+
+### Magic Parameter Names (injected automatically, not from URL)
+
+| Name        | Type                    | Description                          |
+|-------------|-------------------------|--------------------------------------|
+| `$request`  | `ZealPHP\HTTP\Request`  | HTTP request object                  |
+| `$response` | `ZealPHP\HTTP\Response` | HTTP response object                 |
+| `$app`      | `App`                   | App instance                         |
+
+Any parameter not matching a URL {param} or magic name gets its PHP default value.
+
+### Route Types
+
+```php
+// 1. Basic route — most common
+$app->route('/path/{param}', function($param) { ... });
+
+// 2. Namespace route — adds a prefix
 $app->nsRoute('admin', '/dashboard', function() { ... });
+// Creates route at /admin/dashboard
 
-// Namespace path route (directory-style)
-$app->nsPathRoute('api', '{resource}', ['methods' => ['GET','POST','PUT','DELETE']], function($resource) { ... });
+// 3. Namespace path route — last {param} catches everything including slashes
+$app->nsPathRoute('api', '{path}', function($path) { ... });
+// /api/users/123/posts → $path = "users/123/posts"
 
-// Regex pattern route
+// 4. Pattern route — raw regex, no {param} syntax
 $app->patternRoute('/files/.*', function() { ... });
 ```
 
-### Fallback Handler (replaces .htaccess RewriteRule)
+### Redirects
+
+```php
+$app->route('/old-page', function() {
+    header('Location: /new-page');
+    return 301;
+});
+
+// With captured param
+$app->route('/blog/{slug}', function($slug) {
+    header('Location: /articles/' . $slug);
+    return 301;
+});
+```
+
+### Fallback Handler
+
+Catch-all for unmatched routes. Equivalent to Apache's `RewriteRule . /index.php [L]`.
+ONLY use for CMS/front-controller apps (WordPress, Laravel, Drupal) that route everything
+through a single entry point.
 
 ```php
 $app->setFallback(function() {
-    $g = G::instance();
+    $g = \ZealPHP\G::instance();
     $g->server['PHP_SELF'] = '/index.php';
     $g->server['SCRIPT_NAME'] = '/index.php';
     $g->server['SCRIPT_FILENAME'] = App::$cwd . '/public/index.php';
@@ -66,67 +132,71 @@ $app->setFallback(function() {
 });
 ```
 
-### Legacy App Mode
+### Legacy App Mode (WordPress, Drupal, etc.)
+
+ONLY enable these for apps that cannot be refactored:
 
 ```php
-App::superglobals(true);        // Enable $_GET, $_POST, $_SESSION, $_COOKIE, $_SERVER
-App::$ignore_php_ext = false;   // Allow .php extensions in URLs
+App::superglobals(true);        // Enable $_GET, $_POST, $_SESSION etc.
+App::$ignore_php_ext = false;   // Allow .php in URLs (/wp-login.php)
 ```
 
-### App Initialization & Server
-
-```php
-$app = App::init('0.0.0.0', 8080);  // Always assign to $app
-// ... define routes ...
-$app->run(['task_worker_num' => 0, 'worker_num' => 4]);
-```
-
-### Redirect
-```php
-$app->route('/old', function() {
-    header('Location: /new');
-    return 301;
-});
-```
+App::includeFile() runs each PHP file in a separate process with full global scope
+isolation — like Apache's prefork MPM. ONLY use for legacy apps.
 
 ### Middleware
+
 ```php
+use ZealPHP\Middleware\CorsMiddleware;
+use ZealPHP\Middleware\ETagMiddleware;
+
 $app->addMiddleware(new CorsMiddleware(['*']));
 $app->addMiddleware(new ETagMiddleware());
 ```
 
-### Static Files
-OpenSwoole's `enable_static_handler` serves CSS, JS, images from `public/` automatically.
-No config needed — equivalent to nginx `location ~* \\.(css|js|png)$`.
+### What OpenSwoole Handles Automatically (DO NOT convert these)
 
-### SSL/HTTP2
+- Static file serving (CSS, JS, images, fonts) — `enable_static_handler` is on by default
+- Directory index (index.php) — built-in implicit routes
+- Gzip compression — `http_compression` is on by default
+- Directory listing prevention — ZealPHP never lists directories
+- PHP file handling — ZealPHP IS the PHP runtime
+
+### What Belongs to a Reverse Proxy (DO NOT convert, just comment)
+
+- SSL termination / HTTPS redirect
+- proxy_pass / reverse proxy
+- Rate limiting
+- ModPagespeed
+- ServerSignature
+- Server tokens
+- IP-based access control
+
+### Server Options (passed to $app->run())
+
 ```php
 $app->run([
-    'ssl_cert_file' => '/path/to/cert.pem',
-    'ssl_key_file' => '/path/to/key.pem',
-    'enable_http2' => true,
+    'task_worker_num' => 0,                    // Task workers (default 0)
+    'worker_num' => 4,                         // HTTP workers
+    'package_max_length' => 512 * 1024 * 1024, // Max request size (replaces upload_max_filesize)
+    'ssl_cert_file' => '/path/cert.pem',       // SSL cert
+    'ssl_key_file' => '/path/key.pem',         // SSL key
+    'enable_http2' => true,                    // HTTP/2 (requires SSL)
 ]);
-```
-
-### CLI Management
-```
-php app.php start -p 9501 -d   # Start daemonized on port 9501
-php app.php stop               # Stop the server
-php app.php status             # Check if running
 ```
 """
 
 
-FEW_SHOT_EXAMPLES = """
+FEW_SHOT_EXAMPLES = r"""
 ## Conversion Examples
 
-### Example 1: WordPress .htaccess → app.php
+### Example 1: WordPress .htaccess → app.php (Legacy CMS)
 
 INPUT:
 ```
 RewriteEngine On
 RewriteBase /
-RewriteRule ^index\\.php$ - [L]
+RewriteRule ^index\.php$ - [L]
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule . /index.php [L]
@@ -136,8 +206,8 @@ OUTPUT:
 ```php
 <?php
 require 'vendor/autoload.php';
-use ZealPHP\\App;
-use ZealPHP\\G;
+use ZealPHP\App;
+use ZealPHP\G;
 
 App::superglobals(true);
 App::$ignore_php_ext = false;
@@ -155,50 +225,68 @@ $app->setFallback(function() {
 $app->run(['task_worker_num' => 0]);
 ```
 
-### Example 2: nginx with API + static caching → app.php
+WHY: WordPress routes everything through index.php. setFallback() replaces the catch-all
+RewriteRule. superglobals(true) + ignore_php_ext = false is required because WordPress
+reads $_GET, $_POST, $_SESSION directly and uses .php URLs like /wp-login.php.
+
+### Example 2: Custom app with URL rewrites → app.php (Modern)
 
 INPUT:
 ```
-server {
-    listen 80;
-    root /var/www/html;
-    location / { try_files $uri $uri/ /index.php?$args; }
-    location ~ \\.php$ { fastcgi_pass unix:/run/php/php-fpm.sock; }
-    location /api/ { proxy_pass http://localhost:3000; }
-    location ~* \\.(css|js|png)$ { expires 30d; }
-}
+RewriteEngine On
+RewriteBase /
+
+RewriteRule ^/?user/([^/]+)?$ "user.php?id=$1" [L,QSA]
+RewriteRule ^/?user/([^/]+)/([^/]+)?$ "user.php?id=$1&tab=$2" [L,QSA]
+RewriteRule ^/?search/([^/]+)?$ "search.php?q=$1" [L,QSA]
+RewriteRule ^/?api/([^/]+)?$ "api.php?action=$1" [L,QSA]
+
+RewriteCond %{THE_REQUEST} ^(.+)\.php([#?][^\ ]*)?\ HTTP/
+RewriteRule ^(.+)\.php$ "/$1" [R=404,L]
+
+RewriteCond %{REQUEST_FILENAME}\.php -f
+RewriteRule ^([^/.]+)$ $1.php [L]
 ```
 
 OUTPUT:
 ```php
 <?php
 require 'vendor/autoload.php';
-use ZealPHP\\App;
-use ZealPHP\\G;
-
-App::superglobals(true);
-App::$ignore_php_ext = false;
+use ZealPHP\App;
 
 $app = App::init('0.0.0.0', 8080);
 
-// Note: location /api/ proxy_pass cannot be replicated in ZealPHP.
-// Use native ZealPHP routes or a reverse proxy in front of ZealPHP.
+// user.php, search.php, api.php go in public/ — auto-served at /user, /search, /api
+// These routes handle the parameterized URL patterns:
 
-// Static files (css, js, png) served automatically by OpenSwoole — no config needed.
-// For cache headers, add custom middleware.
-
-$app->setFallback(function() {
-    $g = G::instance();
-    $g->server['PHP_SELF'] = '/index.php';
-    $g->server['SCRIPT_NAME'] = '/index.php';
-    $g->server['SCRIPT_FILENAME'] = App::$cwd . '/public/index.php';
-    App::includeFile(App::$cwd . '/public/index.php');
+$app->route('/user/{id}', function($id, $request, $response) {
+    // Handle user page with id
 });
+
+$app->route('/user/{id}/{tab}', function($id, $tab, $request, $response) {
+    // Handle user page with id and tab
+});
+
+$app->route('/search/{q}', function($q, $request, $response) {
+    // Handle search
+});
+
+$app->route('/api/{action}', function($action, $request, $response) {
+    // Handle API action
+});
+
+// .php extension blocking + extensionless PHP URLs are handled automatically by ZealPHP.
+// Files in public/ are served without .php extension by default.
 
 $app->run(['task_worker_num' => 0]);
 ```
 
-### Example 3: Redirect-heavy .htaccess → app.php
+WHY: This is NOT a CMS front-controller pattern. Each RewriteRule maps a clean URL to a
+specific PHP file with query params. In ZealPHP, use {param} routes with parameter
+injection. PHP files in public/ are auto-served. No include/require needed.
+No superglobals(true) needed — use modern ZealPHP parameter injection.
+
+### Example 3: Redirect rules → app.php
 
 INPUT:
 ```
@@ -212,7 +300,7 @@ OUTPUT:
 ```php
 <?php
 require 'vendor/autoload.php';
-use ZealPHP\\App;
+use ZealPHP\App;
 
 $app = App::init('0.0.0.0', 8080);
 
@@ -221,19 +309,211 @@ $app->route('/old-page', function() {
     return 301;
 });
 
-$app->patternRoute('/blog/.*', ['methods' => ['GET']], function($response) {
-    $uri = $_SERVER['REQUEST_URI'];
-    $path = preg_replace('#^/blog/#', '/articles/', $uri);
-    header('Location: ' . $path);
+$app->route('/blog/{slug}', function($slug) {
+    header('Location: /articles/' . $slug);
     return 302;
 });
 
-// Note: HTTPS redirect should be handled by a reverse proxy
-// (nginx/Caddy) in front of ZealPHP, or via middleware.
+// HTTPS redirect: handle via reverse proxy (nginx/Caddy) in front of ZealPHP.
 
 $app->run();
 ```
+
+WHY: Redirect rules become route handlers that return the status code. HTTPS redirect is
+a transport concern — belongs to the reverse proxy, not the app server.
+
+### Example 4: Complex .htaccess with mixed directives → app.php
+
+INPUT:
+```
+<IfModule php7_module>
+php_value upload_max_filesize 512M
+php_value post_max_size 512M
+</IfModule>
+
+ServerSignature Off
+Options -Indexes
+
+<IfModule pagespeed_module>
+ModPagespeed off
+</IfModule>
+
+AddDefaultCharset utf-8
+AddCharset utf-8 .atom .css .js .json .rss .vtt .xml
+
+Header set Access-Control-Allow-Origin "*"
+
+<FilesMatch ".(css|jpg|jpeg|png|gif|js|ico|woff|woff2|svg)$">
+    Header set Cache-Control "max-age=2628000, public"
+</FilesMatch>
+
+RewriteEngine on
+RewriteBase /
+
+RewriteRule ^/?user/([^/]+)?$ "user.php?id=$1" [L,QSA]
+RewriteRule ^/?search/([^/]+)?$ "search.php?q=$1" [L,QSA]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^([^/]+)/?$ "profile.php?username=$1" [QSA,L]
+```
+
+OUTPUT:
+```php
+<?php
+require 'vendor/autoload.php';
+use ZealPHP\App;
+use ZealPHP\Middleware\CorsMiddleware;
+
+// upload_max_filesize/post_max_size → use package_max_length in $app->run()
+// ServerSignature, Options -Indexes, ModPagespeed, charset → not needed / reverse proxy
+// Static file cache headers → reverse proxy or custom middleware
+
+$app = App::init('0.0.0.0', 8080);
+
+$app->addMiddleware(new CorsMiddleware(['*']));
+
+$app->route('/user/{id}', function($id, $request, $response) {
+    // Handle user page
+});
+
+$app->route('/search/{q}', function($q, $request, $response) {
+    // Handle search
+});
+
+// Catch-all: unmatched URLs → profile page
+$app->setFallback(function($request) {
+    $g = \ZealPHP\G::instance();
+    $username = trim(parse_url($g->server['REQUEST_URI'] ?? '/', PHP_URL_PATH), '/');
+    // Handle profile for $username
+});
+
+$app->run([
+    'task_worker_num' => 0,
+    'package_max_length' => 512 * 1024 * 1024,
+]);
+```
+
+WHY: Most directives are Apache-specific and don't apply. CORS → CorsMiddleware.
+Only the RewriteRules need conversion. upload_max_filesize → package_max_length in run().
+The catch-all profile rule becomes setFallback(). No include, no require, no superglobals.
+
+### Example 5: nginx CMS config → app.php
+
+INPUT:
+```
+server {
+    listen 80;
+    server_name example.com;
+    root /var/www/html;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+    location ~ \.php$ {
+        fastcgi_pass unix:/run/php/php-fpm.sock;
+        include fastcgi_params;
+    }
+    location ~* \.(css|js|png|jpg|gif|ico)$ {
+        expires 30d;
+    }
+}
+```
+
+OUTPUT:
+```php
+<?php
+require 'vendor/autoload.php';
+use ZealPHP\App;
+use ZealPHP\G;
+
+App::superglobals(true);
+App::$ignore_php_ext = false;
+
+$app = App::init('0.0.0.0', 8080);
+
+// Static files served automatically by OpenSwoole.
+// Cache headers: configure via reverse proxy or custom middleware.
+
+$app->setFallback(function() {
+    $g = G::instance();
+    $g->server['PHP_SELF'] = '/index.php';
+    $g->server['SCRIPT_NAME'] = '/index.php';
+    $g->server['SCRIPT_FILENAME'] = App::$cwd . '/public/index.php';
+    App::includeFile(App::$cwd . '/public/index.php');
+});
+
+$app->run(['task_worker_num' => 0]);
+```
+
+WHY: try_files with /index.php fallback is the CMS front-controller pattern.
+This IS a legacy migration — use superglobals + setFallback + includeFile.
 """
+
+
+CONVERTER_INSTRUCTIONS = """You convert Apache .htaccess and nginx server configs into ZealPHP app.php files.
+
+WORKFLOW:
+1. Call get_zealphp_reference() to get the ZealPHP API reference
+2. Call get_conversion_examples() to see correct conversion examples
+3. Classify the input as LEGACY CMS or MODERN APP (see rules below)
+4. Generate a COMPLETE app.php
+5. Call validate_conversion() with the original and your output to check for issues
+6. If issues found, fix and output the corrected version
+
+CLASSIFICATION RULES — this determines the entire conversion strategy:
+
+LEGACY CMS (WordPress, Drupal, Laravel, Joomla, etc.):
+- Has a front-controller pattern: `RewriteRule . /index.php [L]` or `try_files $uri /index.php`
+- Everything routes through ONE entry PHP file
+- Use: App::superglobals(true), App::$ignore_php_ext = false, setFallback() + includeFile()
+
+MODERN APP (custom app with clean URL rewrites):
+- Has many RewriteRules mapping clean URLs to specific PHP files with query params
+- Each URL pattern maps to a different PHP file
+- Use: $app->route() with {param} syntax, parameter injection, NO include/require
+- PHP files go in public/ and are auto-served — just define the parameterized routes
+- DO NOT use superglobals(true) unless the app truly needs it
+
+CRITICAL RULES:
+
+1. NEVER fabricate API that doesn't exist:
+   - App::init() takes ($host, $port, $cwd) — NEVER pass arrays or config objects
+   - There is NO App::init(['phpSettings' => ...])
+   - There is NO $app->config() or $app->setting()
+
+2. Use {param} syntax, NOT raw regex:
+   - WRONG: $app->route('/user/([^/]+)', function($matches) { $_GET['id'] = $matches[1]; })
+   - RIGHT: $app->route('/user/{id}', function($id) { ... })
+   - Parameters are injected BY NAME via reflection
+
+3. NEVER use include/require in route handlers for modern apps:
+   - WRONG: $app->route('/user/{id}', function($id) { require 'user.php'; })
+   - RIGHT: $app->route('/user/{id}', function($id) { /* handler logic */ })
+   - PHP files in public/ are auto-served by the framework
+
+4. NEVER use exit() or die() — not safe in OpenSwoole coroutine context
+
+5. DROP directives that don't apply — don't convert them to code:
+   - ServerSignature, Options -Indexes → not needed (ZealPHP never exposes these)
+   - AddType, AddCharset, AddDefaultCharset → not needed
+   - ModPagespeed → reverse proxy concern
+   - Static file caching headers → reverse proxy or middleware
+   - Just add a brief comment noting what was dropped and why
+
+6. For CORS (Access-Control-Allow-Origin):
+   - Use: $app->addMiddleware(new CorsMiddleware(['*']))
+
+7. For upload_max_filesize / post_max_size:
+   - Use: package_max_length in $app->run() options
+
+8. BE CONCISE — group related comments, don't repeat per-directive explanations
+
+OUTPUT FORMAT:
+- Output ONLY the PHP code — no markdown fences, no explanations before/after
+- Include: <?php, require, use statements, App::init(), routes, $app->run()
+- If the input is not a valid Apache or nginx config:
+  Output ONLY: // Error: Not a valid Apache .htaccess or nginx server config"""
 
 
 @function_tool
@@ -253,26 +533,56 @@ def validate_conversion(original_config: str, zealphp_code: str) -> str:
     """Validate a conversion by checking for common patterns that need special handling."""
     issues = []
     original_lower = original_config.lower()
+    code_lower = zealphp_code.lower()
 
-    if "rewritecond %{https}" in original_lower or "ssl" in original_lower:
-        if "ssl_cert" not in zealphp_code.lower() and "https" not in zealphp_code.lower():
-            issues.append("SSL/HTTPS config found — add ssl_cert_file/ssl_key_file to $app->run() or note reverse proxy")
-
-    if "proxy_pass" in original_lower or "proxypass" in original_lower:
-        if "proxy" not in zealphp_code.lower():
-            issues.append("Reverse proxy directives found — ZealPHP doesn't proxy; note this in a comment")
-
-    if "auth_basic" in original_lower or "htpasswd" in original_lower:
-        issues.append("Basic auth found — implement as ZealPHP middleware")
-
-    if "rewriterule" in original_lower and "setfallback" not in zealphp_code.lower() and "route" not in zealphp_code.lower():
-        issues.append("RewriteRule found but no setFallback() or route() — conversion may be incomplete")
-
-    if "app::init" not in zealphp_code.lower():
+    # Structural checks
+    if "app::init" not in code_lower:
         issues.append("Missing App::init() — every app.php needs $app = App::init('0.0.0.0', port)")
 
     if "$app->run()" not in zealphp_code and "$app->run([" not in zealphp_code:
         issues.append("Missing $app->run() — server won't start without it")
+
+    if "app::init([" in code_lower or "app::init({" in code_lower:
+        issues.append("App::init() takes ($host, $port, $cwd) — NOT arrays or config objects")
+
+    # Anti-pattern checks
+    if "require __dir__" in code_lower or "require_once __dir__" in code_lower:
+        if "vendor/autoload" not in code_lower or code_lower.count("require") > 1:
+            issues.append("Do not use require/include in route handlers — handlers should contain logic directly")
+
+    if "$matches[" in code_lower:
+        issues.append("Do not use $matches[] — use {param} syntax and named function parameters")
+
+    if "$_get[" in code_lower and "superglobals(true)" not in code_lower:
+        issues.append("Do not assign to $_GET in modern mode — use {param} injection instead")
+
+    if "exit" in code_lower.split("//")[0] or "die(" in code_lower:
+        issues.append("Never use exit()/die() — not safe in OpenSwoole coroutine context")
+
+    # Missing conversion checks
+    if "rewritecond %{https}" in original_lower or "ssl" in original_lower:
+        if "ssl" not in code_lower and "reverse proxy" not in code_lower and "proxy" not in code_lower:
+            issues.append("SSL/HTTPS config found — note reverse proxy or add ssl options to $app->run()")
+
+    if "proxy_pass" in original_lower or "proxypass" in original_lower:
+        if "proxy" not in code_lower:
+            issues.append("Reverse proxy directives found — add comment that a reverse proxy should be used")
+
+    if "auth_basic" in original_lower or "htpasswd" in original_lower:
+        if "middleware" not in code_lower and "auth" not in code_lower:
+            issues.append("Basic auth found — note that this should be implemented as middleware")
+
+    if "rewriterule" in original_lower:
+        if "setfallback" not in code_lower and "route(" not in code_lower:
+            issues.append("RewriteRules found but no setFallback() or route() — conversion may be incomplete")
+
+    if "access-control-allow-origin" in original_lower:
+        if "corsmiddleware" not in code_lower:
+            issues.append("CORS header found — use CorsMiddleware instead of manual headers")
+
+    if "upload_max_filesize" in original_lower or "post_max_size" in original_lower:
+        if "package_max_length" not in code_lower:
+            issues.append("Upload size config found — use package_max_length in $app->run() options")
 
     if not issues:
         return "Conversion looks correct — all directives accounted for."
@@ -281,24 +591,8 @@ def validate_conversion(original_config: str, zealphp_code: str) -> str:
 
 converter = Agent(
     name="config_converter",
-    model="gpt-4.1-mini",
-    instructions="""You convert Apache .htaccess and nginx server configs into ZealPHP app.php files.
-
-WORKFLOW:
-1. Call get_zealphp_reference() to get the ZealPHP API reference
-2. Call get_conversion_examples() to see few-shot examples of correct conversions
-3. Generate a COMPLETE app.php based on the input config
-4. Call validate_conversion() with the original and your output to check for issues
-5. If issues are found, fix them and output the corrected version
-
-RULES:
-- Always output a COMPLETE app.php: <?php, require, use statements, App::init(), routes, $app->run()
-- Always assign App::init() result to $app: `$app = App::init('0.0.0.0', 8080);`
-- For CMS configs (WordPress, Drupal) with front controller rewrites, use App::superglobals(true) + setFallback()
-- For API-only configs, use explicit $app->route() calls without superglobals
-- Static file directives → comment that OpenSwoole handles it automatically
-- Proxy directives → comment that a reverse proxy should be used in front
-- Wrap the output in a PHP code block""",
+    model="gpt-5.4-mini",
+    instructions=CONVERTER_INSTRUCTIONS,
     tools=[get_zealphp_reference, get_conversion_examples, validate_conversion],
 )
 

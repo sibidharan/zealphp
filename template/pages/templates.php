@@ -197,6 +197,72 @@ PHP]); ?>
 </table>
 <p>All three compose in the same <code>yield from App::renderStream(...)</code> pipeline.</p>
 
+<h2>Yield from everywhere</h2>
+<p>Generators work in route handlers, public/ files, API handlers, and template files:</p>
+
+<table class="ztable">
+<tr><th>Location</th><th>How to stream</th><th>Example</th></tr>
+<tr>
+  <td>Route handler</td>
+  <td>Return a Generator directly</td>
+  <td><code>return (function() { yield "chunk"; })();</code></td>
+</tr>
+<tr>
+  <td>Public file</td>
+  <td>Return a Generator from the file</td>
+  <td><code>public/feed.php</code> → <code>&lt;?php return (function() { yield "..."; })();</code></td>
+</tr>
+<tr>
+  <td>API handler</td>
+  <td>Return a Generator from <code>$get</code>/<code>$post</code></td>
+  <td><code>$get = function() { return (function() { yield ...; })(); };</code></td>
+</tr>
+<tr>
+  <td>Template</td>
+  <td>Return a Closure via <code>renderStream()</code></td>
+  <td><code>return function($items) { yield ...; };</code></td>
+</tr>
+</table>
+
+<?php App::render('/components/_code', [
+    'label' => 'public/feed.php — a streaming public page',
+    'code'  => <<<'PHP'
+<?php
+// File: public/feed.php → GET /feed
+// Returns a Generator — framework streams each yield to the browser
+use ZealPHP\App;
+
+return (function() {
+    yield App::renderToString('shell-open', ['title' => 'Live Feed']);
+    yield "<h1>Feed</h1>";
+
+    foreach (fetchFeedItems() as $item) {
+        yield "<article>{$item->title}</article>\n";
+    }
+
+    yield App::renderToString('shell-close');
+})();
+PHP]); ?>
+
+<?php App::render('/components/_code', [
+    'label' => 'api/events/stream.php — a streaming API endpoint',
+    'code'  => <<<'PHP'
+<?php
+// File: api/events/stream.php → GET /api/events/stream
+$stream = function() {
+    return (function() {
+        yield '{"events":[';
+        $first = true;
+        foreach (Event::cursor() as $event) {
+            if (!$first) yield ',';
+            yield json_encode($event);
+            $first = false;
+        }
+        yield ']}';
+    })();
+};
+PHP]); ?>
+
 <h2>PHP template patterns cheat sheet</h2>
 <table class="ztable">
 <tr><th>Pattern</th><th>PHP</th></tr>

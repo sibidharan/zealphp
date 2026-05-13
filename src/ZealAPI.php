@@ -96,6 +96,11 @@ class ZealAPI extends REST
                         return $object;
                     }
 
+                    if ($object instanceof \Generator) {
+                        ob_end_clean();
+                        return $object;
+                    }
+
                     if(is_array($object) or is_object($object)){
                         response_add_header('Content-Type', 'application/json');
                         echo json_encode($object, JSON_PRETTY_PRINT);

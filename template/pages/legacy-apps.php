@@ -207,7 +207,7 @@ PHP]); ?>
 </table>
 
 <h2>AI Config Converter</h2>
-<p>Paste your <code>.htaccess</code> or nginx config — get a working <code>app.php</code> streamed in real-time. Powered by gpt-4.1-mini with the full ZealPHP API reference.</p>
+<p>Paste your <code>.htaccess</code> or nginx config — get a working <code>app.php</code> streamed in real-time. Powered by gpt-5.4-mini with the full ZealPHP API reference.</p>
 
 <div class="converter-split" style="display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin:1.5rem 0;">
   <div style="border-right:1px solid var(--border);">
@@ -233,7 +233,7 @@ PHP]); ?>
     </div>
     <pre id="convert-output" style="min-height:280px; padding:.75rem; margin:0; font-family:var(--font-mono); font-size:.82rem; background:var(--code-bg); color:var(--code-text); overflow:auto; white-space:pre-wrap;"><span style="color:var(--text-muted);">// Output will appear here...</span></pre>
     <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.72rem; color:var(--text-muted);">
-      Rate limit: 5 conversions per 10 minutes · Powered by gpt-4.1-mini · <a href="https://github.com/sibidharan/zealphp/blob/master/examples/agents/config_converter.py" target="_blank">Source</a>
+      Rate limit: 5 conversions per 10 minutes · Powered by gpt-5.4-mini · <a href="https://github.com/sibidharan/zealphp/blob/master/examples/agents/config_converter.py" target="_blank">Source</a>
     </div>
   </div>
 </div>
@@ -292,7 +292,7 @@ function runConvert() {
 
   btn.disabled = true;
   btn.textContent = 'Converting...';
-  status.textContent = 'Streaming from gpt-4.1-mini...';
+  status.textContent = 'Streaming from gpt-5.4-mini...';
   output.textContent = '';
 
   const es = new EventSource('/api/convert?' + new URLSearchParams({_t: Date.now()}));

@@ -591,13 +591,17 @@ class App
      * global scope — required for legacy apps like WordPress that use bare
      * variable assignments and `global` keyword declarations.
      */
-    public static function includeFile(string $path): void
+    public static function includeFile(string $path): mixed
     {
         if (self::$coproc_implicit_request_handler) {
             echo self::cgiInclude($path);
-        } else {
-            include $path;
+            return null;
         }
+        $result = include $path;
+        if ($result instanceof \Generator || $result instanceof \Closure) {
+            return $result;
+        }
+        return null;
     }
 
     private static function cgiInclude(string $path): string
@@ -996,7 +1000,8 @@ HELP;
             $abs_file = self::$cwd."/public/".$file.".php";
             if(file_exists($abs_file)){
                 if ($this->includeCheck($abs_file)){
-                    App::includeFile($abs_file);
+                    $__r = App::includeFile($abs_file);
+                    if ($__r instanceof \Generator) return $__r;
                 } else {
                     echo("<pre>403 Forbidden</pre>");
                     return(403);
@@ -1021,7 +1026,8 @@ HELP;
                     $g->server['PHP_SELF'] = '/'.$file.'.php';
                     $g->server['SCRIPT_NAME'] = '/'.$file.'.php';
                     $g->server['SCRIPT_FILENAME'] = $abs_file;
-                    App::includeFile($abs_file);
+                    $__r = App::includeFile($abs_file);
+                    if ($__r instanceof \Generator) return $__r;
                 } else {
                     echo("<pre>403 Forbidden</pre>");
                     return 403;
@@ -1033,7 +1039,8 @@ HELP;
                         $g->server['PHP_SELF'] = '/'.$file.'/index.php';
                         $g->server['SCRIPT_NAME'] = '/'.$file.'/index.php';
                         $g->server['SCRIPT_FILENAME'] = $abs_file;
-                        App::includeFile($abs_file);
+                        $__r = App::includeFile($abs_file);
+                    if ($__r instanceof \Generator) return $__r;
                     } else {
                         echo("<pre>403 Forbidden</pre>");
                         return 403;
@@ -1063,7 +1070,8 @@ HELP;
                     $g->server['SCRIPT_NAME'] = '/'.$dir.'/'.$uri.'.php';
                     $g->server['SCRIPT_FILENAME'] = $abs_file;
                     // include $abs_file;
-                    App::includeFile($abs_file);
+                    $__r = App::includeFile($abs_file);
+                    if ($__r instanceof \Generator) return $__r;
                 } else {
                     echo("<pre>403 Forbidden</pre>");
                     return(403);
@@ -1075,7 +1083,8 @@ HELP;
                         $g->server['PHP_SELF'] = '/'.$dir.'/'.$uri.'/index.php';
                         $g->server['SCRIPT_NAME'] = '/'.$dir.'/'.$uri.'/index.php';
                         $g->server['SCRIPT_FILENAME'] = $abs_path;
-                        App::includeFile($abs_path);
+                        $__r = App::includeFile($abs_path);
+                        if ($__r instanceof \Generator) return $__r;
                     } else {
                         echo("<pre>403 Forbidden</pre>");
                         return(403);

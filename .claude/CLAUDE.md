@@ -210,6 +210,12 @@ $app->route('/users', fn() => (function() {
 | `void` + `echo` | Output buffer captured via `ob_get_clean()` |
 | `ResponseInterface` | PSR-7 response used directly |
 
+**Yield from everywhere** — Generators work in all contexts:
+- Route handlers: `return (function() { yield ...; })();`
+- Public files: `public/feed.php` returns a Generator → framework streams it
+- API handlers: `$get = function() { return (function() { yield ...; })(); };`
+- Templates via `renderStream()`: `return function($items) { yield ...; };`
+
 `$g->_streaming = true` is set by `stream()`/`sse()` so `ResponseMiddleware` knows to skip `ob_get_clean()`.
 
 ### Legacy App Support (CGI Worker)
