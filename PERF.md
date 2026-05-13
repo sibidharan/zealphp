@@ -1,122 +1,178 @@
 # ZealPHP Performance Benchmarks
 
-Machine: 24-core Linux, PHP 8.3, OpenSwoole 22.1.5, Node.js 24.15.0  
-Tool: Apache Bench (`ab`), 24 workers/cluster forks on both sides.
+Benchmarks are machine-specific. This repo should not publish one global
+requests/sec number without the machine, OS, PHP/OpenSwoole versions, worker
+count, endpoint, command, CSV, and raw tool output beside it.
+
+Use the modular runner below, then update this file with the measured result.
 
 ---
 
-## ZealPHP (before optimisations) vs Node.js
+## Public Claim Guidance
 
-| Test | ZealPHP before | Node.js | Notes |
-|------|---------------|---------|-------|
-| Simple route, c=10 | 12,690 req/s | 11,706 req/s | |
-| Simple route, c=200 | 10,448 req/s | 15,377 req/s | |
-| JSON + session, c=100 | 9,603 req/s | 16,692 req/s | Node has no session overhead |
-| p50 latency | 5 ms | 2 ms | |
-| p75 latency | 6 ms | 3 ms | |
-| p90 latency | 8 ms | 3 ms | |
-| Async IO `/co` (100 clients) | 6.009 s | 6.007 s | Dead heat — both event-loop |
+Safe claims:
+
+| Claim | Why |
+|-------|-----|
+| ZealPHP is built on OpenSwoole's event-driven, coroutine-based HTTP/WebSocket server. | This describes the runtime ZealPHP uses. |
+| ZealPHP is designed for high-concurrency PHP services. | OpenSwoole documents a multi-process, event-driven, asynchronous model for large-scale concurrency. |
+| ZealPHP includes reproducible benchmark scripts through c=1000. | This repo ships `scripts/bench.sh --p1000`. |
+| OpenSwoole benchmark examples show high raw HTTP throughput on stated machines. | Attribute these to OpenSwoole, not ZealPHP, unless reproduced through ZealPHP. |
+
+Avoid claims like "ZealPHP handles 1M concurrent connections" until a ZealPHP
+benchmark proves it with the route, worker settings, OS limits, machine specs,
+CSV, and raw logs included. One million concurrent connections depends on file
+descriptor limits, `max_conn`, memory, networking, benchmark clients, route
+logic, middleware, and payload size.
+
+Useful OpenSwoole references:
+
+- [OpenSwoole docs](https://openswoole.com/docs) describe it as an event-driven,
+  asynchronous, non-blocking coroutine network framework for PHP.
+- [How OpenSwoole works](https://openswoole.com/how-it-works) explains the
+  multi-process/event-driven model, worker processes, and coroutine concurrency.
+- [OpenSwoole HTTP server docs](https://openswoole.com/docs/modules/swoole-http-server-doc)
+  include official HTTP performance examples.
+- [OpenSwoole server configuration](https://openswoole.com/docs/modules/swoole-server/configuration)
+  documents `worker_num`, `max_conn`, and `max_coroutine` limits.
 
 ---
 
-## ZealPHP before vs after optimisations
+## 16-Core Mac Stress Run
 
-| Test | Before | After | Delta |
-|------|--------|-------|-------|
-| Simple route, c=10 | 12,690 req/s | 14,927 req/s | **+17%** |
-| Simple route, c=200 | 10,448 req/s | 9,593 req/s | ≈ same |
-| JSON + session, c=100 | 9,603 req/s | 10,177 req/s | **+6%** |
-| p50 latency | 5 ms | 3 ms | **−40%** |
-| p75 latency | 6 ms | 3 ms | **−50%** |
-| p90 latency | 8 ms | 4 ms | **−50%** |
+Install `wrk` if it is missing:
+
+```bash
+brew install wrk
+```
+
+Run the default c=1000 sweep with 16 HTTP workers:
+
+```bash
+scripts/bench.sh --workers 16 --threads 16 --task-workers 0 --p1000 --duration 30s
+```
+
+`--p1000` is only a project shorthand for a concurrency sweep up to `c=1000`.
+Latency percentiles are still reported as p50, p90, and p99.
+
+The script:
+
+| Area | Default |
+|------|---------|
+| Server | Launches `php app.php` unless `--no-start` is passed |
+| HTTP workers | `ZEALPHP_WORKERS=16` |
+| Task workers | `ZEALPHP_TASK_WORKERS=0` for plain HTTP benchmarking |
+| Advanced limits | `--max-conn`, `--max-coroutine`, `--backlog`, `--reactor-num` when needed |
+| Tool | `wrk` if available, otherwise `ab` |
+| Endpoint | `/raw/bench` |
+| Sweep | `1,10,50,100,200,500,1000` concurrency |
+| Output | `bench/results/zealphp-*.csv` plus raw logs |
+
+Additional useful profiles:
+
+```bash
+# Middleware + coroutine-safe session path
+scripts/bench.sh --workers 16 --threads 16 --task-workers 0 --path /json --p1000
+
+# Compare multiple endpoints in one run
+scripts/bench.sh --workers 16 --threads 16 --task-workers 0 \
+  --paths /raw/bench,/json,/co --concurrency 10,100,500,1000
+
+# Test an already-running server
+scripts/bench.sh --no-start --base-url http://127.0.0.1:8080 --path /raw/bench --p1000
+
+# Explicit OpenSwoole limits for larger connection tests
+scripts/bench.sh --workers 16 --threads 16 --p1000 \
+  --max-conn 65535 --max-coroutine 100000 --backlog 8192
+```
+
+If a route uses `App::getServer()->task()`, run with task workers enabled:
+
+```bash
+scripts/bench.sh --workers 16 --task-workers 4 --path /your-task-route
+```
 
 ---
 
-## Optimisations applied (this commit)
+## Result Template
 
-### Correctness fix — G coroutine isolation (`src/G.php`)
-`G::instance()` was a static singleton shared across all concurrent requests
-in a worker. In coroutine mode, when coroutine A yielded during IO, coroutine B
-could overwrite `$g->session`, `$g->get`, etc. Fixed by using
-`Coroutine::getContext()` — each coroutine now gets its own isolated G,
-automatically freed when the coroutine ends.
+When publishing results, include this block:
+
+| Field | Value |
+|-------|-------|
+| Machine | TBD |
+| OS | TBD |
+| PHP | TBD |
+| OpenSwoole | TBD |
+| Command | `scripts/bench.sh ...` |
+| Endpoint | TBD |
+| HTTP workers | TBD |
+| Task workers | TBD |
+| Tool | `wrk` or `ab` |
+| CSV | `bench/results/...csv` |
+| Raw logs | `bench/results/raw/...txt` |
+
+Summary table:
+
+| Endpoint | c | req/s | avg ms | p50 ms | p90 ms | p99 ms | failures |
+|----------|---|-------|--------|--------|--------|--------|----------|
+| TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+
+---
+
+## Metrics
+
+| Metric | Meaning |
+|--------|---------|
+| `req/s` | Throughput at that concurrency level; higher is better |
+| `avg_ms` | Mean latency reported by the benchmark tool |
+| `p50_ms` | Median latency |
+| `p90_ms` | 90th percentile latency |
+| `p99_ms` | Tail latency; watch this during high-concurrency sweeps |
+| `failures` | Socket errors, non-2xx/3xx responses, or failed ab requests |
+
+Keep raw logs. A single CSV row is not enough to debug saturation, socket
+errors, or tool-level warnings.
+
+---
+
+## Historical Optimisations Already Applied
+
+### G coroutine isolation (`src/G.php`)
+
+`G::instance()` was a static singleton shared across concurrent requests in a
+worker. In coroutine mode, when coroutine A yielded during IO, coroutine B
+could overwrite `$g->session`, `$g->get`, and other request state. It now uses
+`Coroutine::getContext()` so each coroutine gets isolated request state.
 
 ### Reflection cached at route registration (`src/App.php`)
-`new ReflectionFunction($handler)` was being created on every request.
-`buildParamMap()` now runs once at route registration and stores the parameter
-list alongside the route. Per-request dispatch is a plain array loop — zero
-reflection overhead.
+
+`new ReflectionFunction($handler)` used to run on every request. `buildParamMap()`
+now runs at route registration and stores the parameter list with the route.
+Per-request dispatch is a plain array loop.
 
 ### Method-indexed dispatch table (`src/App.php`)
-Route matching was O(n) with an `in_array` method check on every route.
-At the end of `run()`, routes are now grouped by HTTP method into
-`$routes_by_method`. A GET request iterates only GET routes; the method
-check is gone entirely.
+
+Route matching was O(n) with an `in_array` method check on every route. Routes
+are now grouped by HTTP method before request handling.
 
 ### stream_wrapper moved to workerStart (`src/App.php`)
-`stream_wrapper_unregister/register("php")` was called inside
-`ResponseMiddleware::process()` — once per request. Moved to
-`$server->on('workerStart')` so it runs once per worker process at startup.
+
+`stream_wrapper_unregister/register("php")` used to run inside
+`ResponseMiddleware::process()` on every request. It now runs once per worker at
+startup.
 
 ### CoSessionManager uses fresh G per request (`src/Session/CoSessionManager.php`)
-Constructor was caching `G::instance()` at server boot into `$this->g` and
-reusing that stale reference for every subsequent request. `__invoke()` now
-calls `G::instance()` directly, getting the correct per-coroutine instance.
+
+The session manager no longer caches a stale `G::instance()` from server boot.
+It resolves the current per-coroutine instance for every request.
 
 ### Session directory stat cached (`src/Session/utils.php`)
-`is_dir($save_path)` was called on every session start — a filesystem stat
-per request. Replaced with a `static $verified_paths` map; the check runs
-once per worker lifetime per path.
 
----
+The session save path check now runs once per worker lifetime per path instead
+of performing a filesystem stat on every session start.
 
-## Running your own benchmarks
+### App runs in coroutine mode (`app.php`)
 
-Requires `ab` (Apache Bench — ships with `apache2-utils` on Debian/Ubuntu):
-
-```bash
-# Install if missing
-sudo apt install apache2-utils
-
-# Start the server
-php app.php &
-
-# Simple route — adjust -n (total requests) and -c (concurrency) as needed
-ab -n 10000 -c 100 http://localhost:8080/quiz/hello
-
-# Session route
-ab -n 5000 -c 50 http://localhost:8080/json
-
-# Coroutine/async route (each request runs 5 parallel sleeps totalling 3 s)
-time ab -n 50 -c 50 http://localhost:8080/co
-
-# Latency percentiles (look for the "Percentage of requests served within a
-# certain time" table at the bottom of ab output)
-ab -n 5000 -c 50 http://localhost:8080/quiz/hello
-```
-
-Compare against a plain Node.js cluster server on the same machine:
-
-```bash
-node node_bench.js &
-ab -n 10000 -c 100 http://localhost:3000/quiz/hello
-ab -n 10000 -c 100 http://localhost:3000/json
-time ab -n 50 -c 50 http://localhost:3000/co
-```
-
-Key metrics to read from `ab` output:
-
-| Line | Meaning |
-|------|---------|
-| `Requests per second` | Throughput — higher is better |
-| `Time per request (mean)` | Average latency at your concurrency level |
-| `50%` / `90%` / `99%` in the percentile table | p50/p90/p99 latency in ms |
-| `Failed requests` | Non-200 responses or connection errors — should be 0 |
-
----
-
-### App switched to full coroutine mode (`app.php`)
-`App::superglobals(true)` disabled coroutines entirely, making the server
-behave like Apache (one blocking request per worker, OS-process-per-implicit-
-route via `prefork_request_handler`). Changed to `App::superglobals(false)`.
-`sleep()` calls in the `/co` demo changed to `co::sleep()`.
+The demo app uses `App::superglobals(false)`, enabling coroutine mode and
+OpenSwoole hook integration for concurrent IO.

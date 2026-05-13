@@ -70,7 +70,7 @@ $app->ws('/ws/ticker',
 PHP]); ?>
   </div>
   <div class="tab-panel" id="ws-rooms">
-    <p style="font-size:.85rem;margin-bottom:.75rem"><span class="badge badge-ws">WS</span> <code>/ws/rooms?room=general</code> — cross-worker rooms via <code>Store</code> (OpenSwoole\Table). All 24 workers share the same client registry.</p>
+    <p style="font-size:.85rem;margin-bottom:.75rem"><span class="badge badge-ws">WS</span> <code>/ws/rooms?room=general</code> — cross-worker rooms via <code>Store</code> (OpenSwoole\Table). Every worker shares the same client registry.</p>
     <?php App::render('/components/_code', ['code' => <<<'PHP'
 // Shared across all workers — created before run()
 Store::make('ws_rooms', 4096, [

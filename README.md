@@ -17,15 +17,15 @@ A lightweight, high-performance open-source PHP web framework built on **OpenSwo
 | **SSR streaming** | Generator `yield`, `$response->stream()`, `$response->sse()` — like React's `renderToPipeableStream` |
 | **WebSocket** | `App::ws($path, $onMessage, $onOpen, $onClose)` — rooms, auth, binary, heartbeat |
 | **Dynamic routing** | `route()`, `nsRoute()`, `nsPathRoute()`, `patternRoute()` with reflection-based parameter injection |
-| **Middleware** | PSR-15 stack — CORS, ETag/304, gzip/deflate built-in |
-| **HTTP/1.1 compliance** | HEAD, OPTIONS, 301/302/307/308 redirects, Cookie SameSite, ETag, compression |
+| **Middleware** | PSR-15 stack — CORS, ETag/304, and custom middleware in any order |
+| **HTTP/1.1 compliance** | HEAD, OPTIONS, 301/302/307/308 redirects, Cookie SameSite, ETag, OpenSwoole compression |
 | **Shared memory** | `Store` (OpenSwoole\Table) + `Counter` (OpenSwoole\Atomic) — cross-worker state |
 | **Timers** | `App::tick()`, `App::after()`, `App::onWorkerStart()` — per-worker recurring tasks |
 | **ZealAPI** | File-based REST: drop `api/users/get.php` → `/api/users/get` works automatically |
 | **Templating** | Nested `App::render()` / `App::renderToString()` — single `_master.php`, component-based |
 | **Sessions** | All `session_*()` functions overridden via uopz — coroutine-safe, per-request isolation |
 | **Unit tests** | PHPUnit 11 — 42 unit tests + 38 integration tests, all green |
-| **Benchmarks** | 14,927 req/s · p90 = 4 ms · 24 workers (vs Node.js: dead heat on async IO) |
+| **Benchmarks** | OpenSwoole-powered concurrency with a modular `scripts/bench.sh` runner for wrk/ab sweeps through c=1000 |
 
 ---
 
@@ -207,7 +207,7 @@ $clientTable = Store::make('clients', 4096, [
 ]);
 $hitCounter = new Counter(0);
 
-// In any route — all 24 workers see the same data
+// In any route — every forked worker sees the same data
 Store::set('clients', "$fd", ['room' => 'general', 'uid' => 'alice']);
 $hitCounter->increment();
 ```

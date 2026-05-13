@@ -11,9 +11,9 @@
       <a href="https://github.com/sibidharan/zealphp" class="btn btn-outline" target="_blank">GitHub ↗</a>
     </div>
     <div class="bench">
-      <div class="bench-stat"><div class="num">14,927</div><div class="label">Requests / sec</div></div>
-      <div class="bench-stat"><div class="num">4 ms</div><div class="label">p90 latency</div></div>
-      <div class="bench-stat"><div class="num">24</div><div class="label">Concurrent workers</div></div>
+      <div class="bench-stat"><div class="num">wrk</div><div class="label">Benchmark runner</div></div>
+      <div class="bench-stat"><div class="num">1K</div><div class="label">Concurrency sweep</div></div>
+      <div class="bench-stat"><div class="num">env</div><div class="label">Worker count</div></div>
       <div class="bench-stat"><div class="num">0</div><div class="label">Blocking calls</div></div>
     </div>
   </div>
@@ -87,7 +87,7 @@
         ['🧵', 'True coroutines',    'Not fake async with callbacks. Real coroutines with go() + Channel. Write synchronous code that runs concurrently.'],
         ['🔧', 'PHP you already know','Superglobals, sessions, headers — all work via uopz overrides. Migrate existing apps without rewriting everything.'],
         ['📐', 'PSR standards',      'PSR-7 request/response, PSR-15 middleware. Drop in any PSR-15 middleware package.'],
-        ['📊', 'Benchmarked',        '14,927 req/s at p90 = 4ms on a 24-core machine. Outperforms traditional PHP-FPM on concurrent workloads.'],
+        ['📊', 'Benchmarked',        'Built on OpenSwoole for high-concurrency PHP services, with repeatable wrk/ab scripts for publishing ZealPHP-specific results.'],
         ['🔓', 'Open source',        'MIT licensed. Maintained by the community. Built on OpenSwoole, one of PHP\'s most battle-tested async runtimes.'],
       ];
       foreach ($why as [$icon, $title, $body]):

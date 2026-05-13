@@ -11,7 +11,7 @@
 $tickCounter = new Counter(0);
 
 App::onWorkerStart(function($server, $workerId) use ($tickCounter) {
-    // Starts 1 timer per worker — 24 workers = 24 timers, all incrementing
+    // Starts 1 timer per worker; N workers = N timers, all incrementing
     App::tick(2000, function() use ($tickCounter) {
         $tickCounter->increment();
     });
@@ -31,7 +31,7 @@ PHP]); ?>
 $demos = [
   ['timer-counter', 'Counter incremented by tick timers', '/timers/counter',
    <<<'PHP'
-// tick_count = total increments across all 24 workers × 2s intervals
+// tick_count = total increments across all workers and 2s intervals
 App::onWorkerStart(function($server, $workerId) use ($tickCounter) {
     App::tick(2000, fn() => $tickCounter->increment());
 });

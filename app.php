@@ -51,7 +51,19 @@ class ValidationMiddleware implements MiddlewareInterface
 
 App::superglobals(false);
 
-$app = App::init('0.0.0.0', 8080);
+$envInt = static function (string $name, int $default, int $min = 1): int {
+    $value = getenv($name);
+    if ($value === false || $value === '') {
+        return $default;
+    }
+
+    return max($min, (int) $value);
+};
+
+$app = App::init(
+    getenv('ZEALPHP_HOST') ?: '0.0.0.0',
+    $envInt('ZEALPHP_PORT', 8080)
+);
 $app->addMiddleware(new CorsMiddleware());         // outermost — handles preflight, adds Allow-Origin
 $app->addMiddleware(new ETagMiddleware());         // generates ETag, returns 304 on cache hit
 $app->addMiddleware(new AuthenticationMiddleware());
@@ -243,6 +255,30 @@ $app->patternRoute('/raw/(?P<rest>.*)', ['methods' => ['GET']], function($rest) 
 // });
 
 
-$app->run([
-    'task_worker_num' => 8
-]);
+$settings = [
+    'task_worker_num' => $envInt('ZEALPHP_TASK_WORKERS', 8, 0),
+];
+
+$workerNum = getenv('ZEALPHP_WORKERS');
+if ($workerNum !== false && $workerNum !== '') {
+    $settings['worker_num'] = max(1, (int) $workerNum);
+}
+
+foreach ([
+    'ZEALPHP_MAX_CONN'      => 'max_conn',
+    'ZEALPHP_MAX_COROUTINE' => 'max_coroutine',
+    'ZEALPHP_BACKLOG'       => 'backlog',
+    'ZEALPHP_REACTOR_NUM'   => 'reactor_num',
+] as $envName => $settingName) {
+    $settingValue = getenv($envName);
+    if ($settingValue !== false && $settingValue !== '') {
+        $settings[$settingName] = max(1, (int) $settingValue);
+    }
+}
+
+$pidFile = getenv('ZEALPHP_PID_FILE');
+if ($pidFile !== false && $pidFile !== '') {
+    $settings['pid_file'] = $pidFile;
+}
+
+$app->run($settings);

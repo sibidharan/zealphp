@@ -221,7 +221,7 @@ $app->route('/demo/store/set-get', ['methods' => ['GET']], function() {
         'alice'        => $alice,
         'total_rows'   => Store::count('demo_store'),
         'worker_pid'   => getmypid(),
-        'note'         => 'Shared across all 24 workers via OpenSwoole\Table',
+        'note'         => 'Shared across all forked workers via OpenSwoole\Table',
     ];
 });
 

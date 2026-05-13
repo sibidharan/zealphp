@@ -72,7 +72,7 @@ $app->route('/timers/counter', ['methods' => ['GET']], function() use ($requestC
     return [
         'requests_served' => $requestCounter->get(),
         'tick_count'      => $tickCounter->get(),
-        'note'            => 'tick_count increments every 2s per worker (so 24 workers = +24 every 2s)',
+        'note'            => 'tick_count increments every 2s per HTTP worker',
     ];
 });
 

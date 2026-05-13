@@ -15,6 +15,9 @@ composer install
 # Start the dev server — serves the OSS website on :8080
 php app.php
 
+# Start with explicit HTTP worker/task worker counts
+ZEALPHP_WORKERS=16 ZEALPHP_TASK_WORKERS=0 php app.php
+
 # Unit tests (no server needed)
 ./vendor/bin/phpunit tests/Unit/ --testdox
 
@@ -30,6 +33,9 @@ sudo bash setup.sh
 
 # Verify required extensions are loaded
 php -m | grep -E 'openswoole|uopz'
+
+# Local performance sweep (defaults to 16 workers and c=1000)
+scripts/bench.sh --p1000
 ```
 
 ---
