@@ -12,7 +12,9 @@ class RestTest extends TestCase
     {
         parent::setUp();
         App::$cwd = ZEALPHP_ROOT;
-        App::superglobals(false);
+        // Keep PHPUnit in plain superglobal mode so coroutine hooks do not leak
+        // into the integration test process.
+        App::superglobals(true);
         $g = G::instance();
         $g->server = [];
         $g->get = [];

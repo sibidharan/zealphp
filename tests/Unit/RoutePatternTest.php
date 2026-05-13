@@ -13,7 +13,7 @@ class RoutePatternTest extends TestCase
 
     public static function setUpBeforeClass(): void
     {
-        App::superglobals(false);
+        App::superglobals(true);
         self::$app = App::init('0.0.0.0', 19998, ZEALPHP_ROOT);
     }
 

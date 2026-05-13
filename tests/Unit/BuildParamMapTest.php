@@ -18,7 +18,7 @@ class BuildParamMapTest extends TestCase
     {
         // Bootstrap a minimal App instance for reflection tests
         // (no server started)
-        App::superglobals(false);
+        App::superglobals(true);
         self::$app = App::init('0.0.0.0', 19999, ZEALPHP_ROOT);
     }
 
