@@ -206,7 +206,7 @@ document.addEventListener('click', function(e) {
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
       <div class="qs-block">
-        <div style="color:#64748b;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-bottom:.75rem;font-family:var(--font)">Manage with CLI</div>
+        <div style="color:#64748b;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-bottom:.75rem;font-family:var(--font)">Manual CLI (without systemd)</div>
         <div class="qs-line"><span class="qs-cmd"><span class="qs-prompt">$</span> php app.php start -p 8080 -d</span><button class="qs-copy" data-copy="php app.php start -p 8080 -d">copy</button></div>
         <div class="qs-line"><span class="qs-cmd"><span class="qs-prompt">$</span> php app.php status</span><button class="qs-copy" data-copy="php app.php status">copy</button></div>
         <div class="qs-line"><span class="qs-cmd"><span class="qs-prompt">$</span> php app.php stop</span><button class="qs-copy" data-copy="php app.php stop">copy</button></div>

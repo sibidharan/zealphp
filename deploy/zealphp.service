@@ -1,28 +1,39 @@
 [Unit]
-# ZealPHP systemd service
+# ZealPHP systemd service (Type=simple — modern systemd pattern)
+#
 # Install: sudo cp deploy/zealphp.service /etc/systemd/system/zealphp.service
 #          sudo systemctl daemon-reload
 #          sudo systemctl enable --now zealphp
 #
-# Logs:    journalctl -u zealphp -f
+# Logs:    journalctl -u zealphp -f       (stdout/stderr captured automatically)
 # Stop:    sudo systemctl stop zealphp
 # Status:  sudo systemctl status zealphp
+# Restart: sudo systemctl restart zealphp
+#
+# Why not -d?
+#   With Type=simple, systemd itself manages the process lifecycle.
+#   The PHP process stays in the foreground (no daemonize), systemd
+#   captures all output to journald, and Restart=on-failure handles crashes.
+#   No PID file needed — systemd tracks the process by its own PID.
 
 Description=ZealPHP App Server
 After=network.target
 # After=network.target mysql.service  # uncomment if app needs DB
 
 [Service]
-Type=forking
+Type=simple
 User=www-data
 Group=www-data
 
-# Adjust these three to your install:
+# Adjust these two to your install:
 WorkingDirectory=/var/www/zealphp
-ExecStart=/usr/bin/php app.php start -d
-ExecStop=/usr/bin/php app.php stop
+ExecStart=/usr/bin/php app.php
 
-PIDFile=/tmp/zealphp_8080.pid
+# Graceful shutdown — sends SIGTERM, then SIGKILL after 30s
+ExecStop=/bin/kill -TERM $MAINPID
+KillMode=mixed
+TimeoutStopSec=30s
+
 Restart=on-failure
 RestartSec=2s
 
@@ -35,8 +46,13 @@ LimitNOFILE=65535
 
 # Security hardening
 NoNewPrivileges=true
-PrivateTmp=false
-# PrivateTmp=false because PIDFile lives in /tmp and systemd needs to read it
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+# Capture stdout/stderr → journald (default behavior, made explicit)
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
