@@ -194,6 +194,48 @@ document.addEventListener('click', function(e) {
 });
 </script>
 
+<!-- Deploy / CLI -->
+<section class="section" style="background:var(--bg-dark);color:#e2e8f0;padding-top:3rem;padding-bottom:3rem;border-top:1px solid rgba(255,255,255,.05)">
+  <div class="container">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem">
+      <div>
+        <h2 style="color:#fff;margin-bottom:.25rem">Deploy to production</h2>
+        <p style="color:#94a3b8;margin:0">Built-in CLI for daemonization. systemd service template included.</p>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+      <div class="qs-block">
+        <div style="color:#64748b;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-bottom:.75rem;font-family:var(--font)">Manage with CLI</div>
+        <div class="qs-line"><span class="qs-cmd"><span class="qs-prompt">$</span> php app.php start -p 8080 -d</span><button class="qs-copy" data-copy="php app.php start -p 8080 -d">copy</button></div>
+        <div class="qs-line"><span class="qs-cmd"><span class="qs-prompt">$</span> php app.php status</span><button class="qs-copy" data-copy="php app.php status">copy</button></div>
+        <div class="qs-line"><span class="qs-cmd"><span class="qs-prompt">$</span> php app.php stop</span><button class="qs-copy" data-copy="php app.php stop">copy</button></div>
+        <div class="qs-line"><span class="qs-cmd"><span class="qs-prompt">$</span> php app.php --help</span><button class="qs-copy" data-copy="php app.php --help">copy</button></div>
+        <div style="color:#64748b;font-size:.78rem;margin-top:.85rem;font-family:var(--font);line-height:1.6">
+          Flags: <code style="background:rgba(255,255,255,.05);padding:.1rem .35rem;border-radius:3px">-p PORT</code> <code style="background:rgba(255,255,255,.05);padding:.1rem .35rem;border-radius:3px">-d daemonize</code> <code style="background:rgba(255,255,255,.05);padding:.1rem .35rem;border-radius:3px">-w WORKERS</code> <code style="background:rgba(255,255,255,.05);padding:.1rem .35rem;border-radius:3px">-H HOST</code> <code style="background:rgba(255,255,255,.05);padding:.1rem .35rem;border-radius:3px">--pid-file</code>
+        </div>
+      </div>
+
+      <div class="qs-block">
+        <div style="color:#64748b;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-bottom:.75rem;font-family:var(--font)">Run as a service (systemd)</div>
+        <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> sudo cp deploy/zealphp.service /etc/systemd/system/</span><button class="qs-copy" data-copy="sudo cp deploy/zealphp.service /etc/systemd/system/">copy</button></div>
+        <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> sudo systemctl daemon-reload</span><button class="qs-copy" data-copy="sudo systemctl daemon-reload">copy</button></div>
+        <div class="qs-line"><span class="qs-num">3</span><span class="qs-cmd"><span class="qs-prompt">$</span> sudo systemctl enable --now zealphp</span><button class="qs-copy" data-copy="sudo systemctl enable --now zealphp">copy</button></div>
+        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">Auto-starts on boot, restarts on crash, logs to journalctl</span></div>
+        <div style="color:#64748b;font-size:.78rem;margin-top:.85rem;font-family:var(--font);line-height:1.6">
+          Template: <a href="https://github.com/sibidharan/zealphp/blob/master/deploy/zealphp.service" target="_blank" style="color:#818cf8">deploy/zealphp.service</a> · Logs: <code style="background:rgba(255,255,255,.05);padding:.1rem .35rem;border-radius:3px">journalctl -u zealphp -f</code>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+@media (max-width: 768px) {
+  section .container > div[style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
+}
+</style>
+
 <!-- Feature grid -->
 <section class="section">
   <div class="container">

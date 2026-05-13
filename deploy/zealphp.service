@@ -1,0 +1,42 @@
+[Unit]
+# ZealPHP systemd service
+# Install: sudo cp deploy/zealphp.service /etc/systemd/system/zealphp.service
+#          sudo systemctl daemon-reload
+#          sudo systemctl enable --now zealphp
+#
+# Logs:    journalctl -u zealphp -f
+# Stop:    sudo systemctl stop zealphp
+# Status:  sudo systemctl status zealphp
+
+Description=ZealPHP App Server
+After=network.target
+# After=network.target mysql.service  # uncomment if app needs DB
+
+[Service]
+Type=forking
+User=www-data
+Group=www-data
+
+# Adjust these three to your install:
+WorkingDirectory=/var/www/zealphp
+ExecStart=/usr/bin/php app.php start -d
+ExecStop=/usr/bin/php app.php stop
+
+PIDFile=/tmp/zealphp_8080.pid
+Restart=on-failure
+RestartSec=2s
+
+# Resource limits
+LimitNOFILE=65535
+
+# Pass env vars (optional)
+# Environment="ZEALPHP_WORKERS=16"
+# Environment="ZEALPHP_PORT=8080"
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=false
+# PrivateTmp=false because PIDFile lives in /tmp and systemd needs to read it
+
+[Install]
+WantedBy=multi-user.target
