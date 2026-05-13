@@ -70,16 +70,16 @@ $siteUrl = site_url();
       <div class="qs-block">
         <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project:^0.1.1 my-app</span><button class="qs-copy" data-copy="composer create-project sibidharan/zealphp-project:^0.1.1 my-app">copy</button></div>
         <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd my-app && php app.php</span><button class="qs-copy" data-copy="cd my-app && php app.php">copy</button></div>
-        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">Server running at <a href="<?= htmlspecialchars($siteUrl) ?>" target="_blank"><?= htmlspecialchars($siteUrl) ?></a></span></div>
+        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">Server running at <code style="color:#818cf8">http://localhost:8080</code></span></div>
       </div>
-      <div class="qs-note">Includes CLAUDE.md for AI-assisted development. Edit <code>app.php</code> and reload — the server is hot-reloaded.</div>
+      <div class="qs-note">Includes CLAUDE.md for AI-assisted development. Restart with <code>php app.php</code> after editing routes.</div>
     </div>
 
     <div class="qs-panel" data-panel="framework">
       <div class="qs-block">
         <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> git clone https://github.com/sibidharan/zealphp.git</span><button class="qs-copy" data-copy="git clone https://github.com/sibidharan/zealphp.git">copy</button></div>
         <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd zealphp && composer install && php app.php</span><button class="qs-copy" data-copy="cd zealphp && composer install && php app.php">copy</button></div>
-        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">This very site, running locally at <a href="<?= htmlspecialchars($siteUrl) ?>" target="_blank"><?= htmlspecialchars($siteUrl) ?></a></span></div>
+        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">This very site, running locally at <code style="color:#818cf8">http://localhost:8080</code></span></div>
       </div>
       <div class="qs-note">The framework repo IS the OSS website — every page is a live, working example of a feature.</div>
     </div>
@@ -89,7 +89,7 @@ $siteUrl = site_url();
         <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> git clone https://github.com/sibidharan/zealphp-wordpress.git</span><button class="qs-copy" data-copy="git clone https://github.com/sibidharan/zealphp-wordpress.git">copy</button></div>
         <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd zealphp-wordpress && composer install</span><button class="qs-copy" data-copy="cd zealphp-wordpress && composer install">copy</button></div>
         <div class="qs-line"><span class="qs-num">3</span><span class="qs-cmd"><span class="qs-prompt">$</span> php app.php</span><button class="qs-copy" data-copy="php app.php">copy</button></div>
-        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">WordPress on OpenSwoole — admin, login, REST API all working</span></div>
+        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">WordPress at <code style="color:#818cf8">http://localhost:9501</code> — admin, login, REST API all working</span></div>
       </div>
       <div class="qs-note">Zero WordPress modifications. CGI worker provides Apache mod_php compatibility. See <a href="/legacy-apps">Legacy Apps</a>.</div>
     </div>
