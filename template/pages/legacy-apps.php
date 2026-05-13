@@ -21,8 +21,8 @@
 </tr>
 <tr>
   <td><code>App::includeFile()</code></td>
-  <td>Each request runs in a separate PHP process — clean global state, no "Cannot redeclare" errors</td>
-  <td>mod_prefork MPM</td>
+  <td>Runs each PHP file in a separate process at <strong>true global scope</strong> via the CGI worker</td>
+  <td>mod_prefork MPM + CGI</td>
 </tr>
 </table>
 
@@ -40,6 +40,53 @@ $app = App::init('0.0.0.0', 8080);
 $app->run(['task_worker_num' => 0]);
 // That's it — PHP files in public/ are served automatically
 PHP]); ?>
+
+<h2>CGI Worker Architecture</h2>
+<p>The key challenge with running legacy PHP apps on a long-lived server is <strong>global scope</strong>. PHP apps like WordPress use bare variable assignments (<code>$menu = []</code>) and <code>global</code> declarations that assume code runs at the top level of a script — not inside a closure or function.</p>
+
+<p>ZealPHP solves this with <code>src/cgi_worker.php</code> — a standalone PHP script that runs each request in a <strong>fresh PHP process at true global scope</strong> via <code>proc_open</code>:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'CGI worker: how App::includeFile() works internally',
+    'code'  => <<<'TEXT'
+OpenSwoole Worker (long-lived)          CGI Worker (per-request)
+┌─────────────────────────┐             ┌──────────────────────────┐
+│                         │  proc_open  │  php cgi_worker.php      │
+│  Route matched          │ ──────────► │                          │
+│  App::includeFile()     │             │  TRUE global scope:      │
+│                         │   stdin     │  ├─ $_SERVER from context │
+│  Serializes context:    │ ──────────► │  ├─ $_GET, $_POST, etc.  │
+│  ├─ $_SERVER            │  (POST body)│  ├─ $_COOKIE, $_FILES    │
+│  ├─ $_GET, $_POST       │             │  │                       │
+│  ├─ $_COOKIE, $_FILES   │             │  ├─ uopz captures:       │
+│  └─ Request body        │             │  │  header() → array     │
+│                         │   stdout    │  │  setcookie() → array  │
+│  Reads response:        │ ◄────────── │  │  http_response_code() │
+│  ├─ Body from stdout    │             │  │                       │
+│  ├─ Metadata from stderr│   stderr    │  ├─ include file.php     │
+│  │  (status, headers,   │ ◄────────── │  │  ← WordPress/app runs│
+│  │   cookies as JSON)   │             │  │    at global scope    │
+│  │                      │             │  │                       │
+│  └─ Applies to response │             │  └─ Process exits (clean)│
+└─────────────────────────┘             └──────────────────────────┘
+TEXT]); ?>
+
+<h3>Why CGI instead of fork?</h3>
+<p>An earlier approach used <code>OpenSwoole\Process</code> (fork) with closures. While fork is faster, PHP closures create their own variable scope. When WordPress does <code>$_wp_submenu_nopriv = array()</code> at the top of an included file, the variable goes into the closure scope — not <code>$GLOBALS</code>. Functions using <code>global $_wp_submenu_nopriv</code> then see <code>null</code> instead of the array.</p>
+<p>The CGI worker avoids this entirely: the PHP process starts fresh, and <code>include</code> at the top level of the script operates at true global scope.</p>
+
+<h3>What the CGI worker handles</h3>
+<table class="ztable">
+<tr><th>Feature</th><th>How</th></tr>
+<tr><td>All HTTP methods</td><td><code>$_SERVER['REQUEST_METHOD']</code> passed via context; request body piped to stdin (<code>php://input</code>)</td></tr>
+<tr><td><code>header()</code></td><td>Captured via <code>uopz_set_return</code> — stored in array, sent back as JSON metadata</td></tr>
+<tr><td><code>setcookie()</code></td><td>Captured via <code>uopz_set_return</code> — applied to response by parent worker</td></tr>
+<tr><td><code>http_response_code()</code></td><td>Captured — status code returned in metadata</td></tr>
+<tr><td><code>exit()</code> / <code>die()</code></td><td>Terminates the CGI process; <code>register_shutdown_function</code> flushes output and metadata</td></tr>
+<tr><td>Static files</td><td>Served directly by OpenSwoole's <code>enable_static_handler</code> — never reaches PHP</td></tr>
+<tr><td>File uploads</td><td><code>$_FILES</code> passed via context; temp files are on the same filesystem</td></tr>
+<tr><td>Sessions</td><td>PHP's native session handling works in the CGI process (file-based by default)</td></tr>
+</table>
 
 <h2>Replacing .htaccess</h2>
 <p>ZealPHP handles routing natively. Common Apache rewrite rules map directly to ZealPHP features:</p>
@@ -141,36 +188,6 @@ PHP]); ?>
   <li>Visit <code>http://localhost:9501/wp-admin/install.php</code> to complete installation</li>
 </ol>
 
-<h2>How Process Isolation Works</h2>
-<p><code>App::includeFile()</code> runs each PHP file in a separate process via <code>proc_open</code>. This gives every request a clean PHP interpreter — exactly like Apache's prefork MPM.</p>
-
-<?php App::render('/components/_code', [
-    'label' => 'Request lifecycle in superglobals mode',
-    'code'  => <<<'TEXT'
-Browser Request
-    │
-    ▼
-OpenSwoole Worker (long-lived, handles routing)
-    │
-    ├─ Static files (.css, .js, .png) → served by OpenSwoole directly
-    │
-    ├─ Explicit routes ($app->route) → handler runs in worker
-    │
-    └─ PHP files in public/ → App::includeFile()
-         │
-         ├─ Superglobals ON → proc_open('php cgi_worker.php file.php')
-         │   │
-         │   ▼
-         │   New PHP Process (TRUE global scope)
-         │   ├─ $_SERVER, $_GET, $_POST, $_COOKIE set from request
-         │   ├─ header()/setcookie() captured via uopz
-         │   ├─ include file.php ← WordPress runs here
-         │   ├─ Output + response metadata sent back via pipes
-         │   └─ Process exits (clean slate for next request)
-         │
-         └─ Superglobals OFF → direct include (coroutine-safe)
-TEXT]); ?>
-
 <h2>CLI Management</h2>
 <p>ZealPHP includes built-in process management:</p>
 
@@ -187,9 +204,10 @@ BASH, 'lang' => 'bash']); ?>
 
 <h2>Limitations</h2>
 <div class="callout warn">
-<p><strong>Performance:</strong> Each request spawns a new PHP process. This is slower than coroutine mode but necessary for apps that rely on global state. For high-traffic production use, consider converting hot paths to native ZealPHP routes.</p>
+<p><strong>Performance:</strong> Each PHP file request spawns a new process via <code>proc_open</code>. This is slower than coroutine mode but necessary for apps that rely on global state. Static files bypass this entirely (served by OpenSwoole). For high-traffic production use, consider converting hot paths to native ZealPHP routes.</p>
 <p><strong>Persistent connections:</strong> Database connections are per-process and don't persist across requests. Connection pooling requires native ZealPHP integration.</p>
 <p><strong>Streaming:</strong> Legacy apps cannot use ZealPHP's streaming/SSE/WebSocket features from within the CGI process. These require native ZealPHP routes.</p>
+<p><strong>Hybrid approach:</strong> You can mix native ZealPHP routes (coroutine mode, high performance) with legacy PHP file serving (CGI mode) in the same application. Explicit routes defined via <code>$app->route()</code> run directly in the worker — only PHP files in <code>public/</code> go through the CGI worker.</p>
 </div>
 
 </div>
