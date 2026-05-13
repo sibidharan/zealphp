@@ -579,14 +579,14 @@ class App
         } catch (\Throwable $e) {}
         fclose($pipes[0]);
 
-        $body = stream_get_contents($pipes[1]);
-        fclose($pipes[1]);
-        $metaJson = stream_get_contents($pipes[2]);
+        // Protocol: CGI worker sends metadata as a single JSON line on stderr
+        // BEFORE streaming body on stdout. This enables SSE and streaming.
+        $metaLine = fgets($pipes[2]);
         fclose($pipes[2]);
-        proc_close($process);
 
-        if ($metaJson) {
-            $meta = json_decode(trim($metaJson), true);
+        $streaming = false;
+        if ($metaLine) {
+            $meta = json_decode(trim($metaLine), true);
             if ($meta) {
                 response_set_status($meta['status_code'] ?? 200);
                 foreach ($meta['headers'] ?? [] as $pair) {
@@ -604,9 +604,39 @@ class App
                         $g->zealphp_response->rawCookie(...$args);
                     }
                 }
+                // Detect streaming content types (SSE, chunked, event-stream)
+                foreach ($meta['headers'] ?? [] as $pair) {
+                    if (strcasecmp($pair[0], 'Content-Type') === 0 &&
+                        stripos($pair[1], 'text/event-stream') !== false) {
+                        $streaming = true;
+                    }
+                }
             }
         }
 
+        if ($streaming && $g->openswoole_response->isWritable()) {
+            $g->zealphp_response->flush();
+            while (!feof($pipes[1])) {
+                $chunk = fread($pipes[1], 8192);
+                if ($chunk === false || $chunk === '') {
+                    usleep(10000);
+                    continue;
+                }
+                if (!$g->openswoole_response->isWritable()) break;
+                $g->openswoole_response->write($chunk);
+            }
+            fclose($pipes[1]);
+            proc_close($process);
+            if ($g->openswoole_response->isWritable()) {
+                $g->openswoole_response->end();
+            }
+            $g->_streaming = true;
+            return '';
+        }
+
+        $body = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        proc_close($process);
         return $body;
     }
 

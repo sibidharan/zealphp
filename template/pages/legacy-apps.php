@@ -231,7 +231,7 @@ BASH, 'lang' => 'bash']); ?>
 <div class="callout warn">
 <p><strong>Performance:</strong> Each PHP file request spawns a new process via <code>proc_open</code>. This is slower than coroutine mode but necessary for apps that rely on global state. Static files bypass this entirely (served by OpenSwoole). For high-traffic production use, consider converting hot paths to native ZealPHP routes.</p>
 <p><strong>Persistent connections:</strong> Database connections are per-process and don't persist across requests. Connection pooling requires native ZealPHP integration.</p>
-<p><strong>Streaming:</strong> Legacy apps cannot use ZealPHP's streaming/SSE/WebSocket features from within the CGI process. These require native ZealPHP routes.</p>
+<p><strong>Streaming:</strong> SSE works in CGI mode — the worker detects <code>text/event-stream</code> and streams chunks to the client via <code>flush()</code>, just like Apache. WebSocket requires native ZealPHP routes.</p>
 <p><strong>Hybrid approach:</strong> You can mix native ZealPHP routes (coroutine mode, high performance) with legacy PHP file serving (CGI mode) in the same application. Explicit routes defined via <code>$app->route()</code> run directly in the worker — only PHP files in <code>public/</code> go through the CGI worker.</p>
 </div>
 

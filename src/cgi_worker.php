@@ -3,7 +3,10 @@
 //
 // Usage: php cgi_worker.php /path/to/file.php
 // Input:  stdin = POST body, env ZEALPHP_REQUEST_CONTEXT = JSON context
-// Output: stdout = response body, stderr = JSON metadata
+// Output: stdout = response body, stderr = JSON metadata (one line, sent before body)
+//
+// Protocol: metadata is written to stderr FIRST (as a single JSON line),
+// then body streams to stdout. This enables SSE and streaming responses.
 
 $__z_ctx = json_decode(getenv('ZEALPHP_REQUEST_CONTEXT') ?: '{}', true);
 
@@ -19,6 +22,19 @@ $__z_headers = [];
 $__z_cookies = [];
 $__z_rawcookies = [];
 $__z_status = 200;
+$__z_meta_sent = false;
+
+function __z_send_meta() {
+    global $__z_headers, $__z_cookies, $__z_rawcookies, $__z_status, $__z_meta_sent;
+    if ($__z_meta_sent) return;
+    $__z_meta_sent = true;
+    fwrite(STDERR, json_encode([
+        'status_code' => $__z_status,
+        'headers' => $__z_headers,
+        'cookies' => $__z_cookies,
+        'rawcookies' => $__z_rawcookies,
+    ], JSON_UNESCAPED_SLASHES) . "\n");
+}
 
 if (function_exists('uopz_set_return')) {
     uopz_set_return('header', function(string $header, bool $replace = true, int $response_code = 0) {
@@ -89,9 +105,30 @@ if (function_exists('uopz_set_return')) {
         if ($code !== null) $__z_status = (int)$code;
         return $__z_status;
     }, true);
+
+    // flush() — send metadata on first call, then flush ob buffer to stdout
+    uopz_set_return('flush', function() {
+        __z_send_meta();
+        $data = ob_get_clean();
+        if ($data !== false && $data !== '') {
+            fwrite(STDOUT, $data);
+            fflush(STDOUT);
+        }
+        ob_start();
+    }, true);
+
+    // ob_end_flush / ob_flush — same streaming behavior
+    uopz_set_return('ob_end_flush', function() {
+        __z_send_meta();
+        $data = ob_get_clean();
+        if ($data !== false && $data !== '') {
+            fwrite(STDOUT, $data);
+            fflush(STDOUT);
+        }
+        ob_start();
+    }, true);
 }
 
-// Surface PHP warnings/notices in the response body (same as Apache display_errors)
 set_error_handler(function($severity, $message, $file, $line) {
     $label = match($severity) {
         E_WARNING, E_USER_WARNING => 'Warning',
@@ -105,7 +142,7 @@ set_error_handler(function($severity, $message, $file, $line) {
 
 $__z_file = $argv[1] ?? null;
 if (!$__z_file || !file_exists($__z_file)) {
-    fwrite(STDERR, json_encode(['status_code' => 404, 'headers' => [], 'cookies' => [], 'rawcookies' => []]));
+    fwrite(STDERR, json_encode(['status_code' => 404, 'headers' => [], 'cookies' => [], 'rawcookies' => []]) . "\n");
     echo '<pre>404 Not Found</pre>';
     exit(1);
 }
@@ -114,16 +151,13 @@ $__z_cwd = getenv('ZEALPHP_CWD');
 if ($__z_cwd) chdir($__z_cwd);
 
 register_shutdown_function(function() {
-    global $__z_status, $__z_headers, $__z_cookies, $__z_rawcookies;
+    global $__z_meta_sent;
+    __z_send_meta();
     $output = ob_get_clean();
-    if ($output === false) $output = '';
-    fwrite(STDOUT, $output);
-    fwrite(STDERR, json_encode([
-        'status_code' => $__z_status,
-        'headers' => $__z_headers,
-        'cookies' => $__z_cookies,
-        'rawcookies' => $__z_rawcookies ?? [],
-    ], JSON_UNESCAPED_SLASHES));
+    if ($output !== false && $output !== '') {
+        fwrite(STDOUT, $output);
+    }
+    fflush(STDOUT);
 });
 
 ob_start();
