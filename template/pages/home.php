@@ -34,6 +34,12 @@ $siteUrl = site_url();
       <a href="https://www.php.net/" target="_blank" rel="noopener noreferrer">
         <img src="https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square&logo=php&logoColor=white" alt="PHP 8.3 or newer">
       </a>
+      <a href="https://github.com/sibidharan/zealphp/actions/workflows/tests.yml" target="_blank" rel="noopener noreferrer">
+        <img src="https://github.com/sibidharan/zealphp/actions/workflows/tests.yml/badge.svg" alt="GitHub Actions test status">
+      </a>
+      <a href="https://codecov.io/gh/sibidharan/zealphp" target="_blank" rel="noopener noreferrer">
+        <img src="https://codecov.io/gh/sibidharan/zealphp/branch/master/graph/badge.svg" alt="Coverage">
+      </a>
     </div>
     <div class="bench-note">Local benchmark on 4 workers</div>
     <div class="bench">
