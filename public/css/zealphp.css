@@ -105,6 +105,23 @@ p  { max-width: 70ch; }
 .hero h1 span { color: var(--accent); }
 .hero p { font-size: 1.15rem; color: #94a3b8; margin: 1rem auto 2rem; position: relative; }
 .hero .cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; position: relative; }
+.oss-badges {
+  display: flex;
+  justify-content: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+  position: relative;
+}
+.oss-badges a {
+  display: inline-flex;
+  line-height: 0;
+}
+.oss-badges img {
+  display: block;
+  height: 20px;
+  width: auto;
+}
 
 /* ── Buttons ── */
 .btn {

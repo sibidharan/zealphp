@@ -15,6 +15,26 @@ $siteUrl = site_url();
       <a href="/getting-started" class="btn btn-primary">Get Started →</a>
       <a href="https://github.com/sibidharan/zealphp" class="btn btn-outline" target="_blank">GitHub ↗</a>
     </div>
+    <div class="oss-badges" aria-label="Project badges">
+      <a href="https://deepwiki.com/sibidharan/zealphp" target="_blank" rel="noopener noreferrer">
+        <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki">
+      </a>
+      <a href="https://packagist.org/packages/sibidharan/zealphp" target="_blank" rel="noopener noreferrer">
+        <img src="https://img.shields.io/packagist/v/sibidharan/zealphp?style=flat-square" alt="Packagist latest version">
+      </a>
+      <a href="https://packagist.org/packages/sibidharan/zealphp" target="_blank" rel="noopener noreferrer">
+        <img src="https://img.shields.io/packagist/dt/sibidharan/zealphp?style=flat-square" alt="Packagist downloads">
+      </a>
+      <a href="https://packagist.org/packages/sibidharan/zealphp" target="_blank" rel="noopener noreferrer">
+        <img src="https://img.shields.io/packagist/l/sibidharan/zealphp?style=flat-square" alt="MIT license">
+      </a>
+      <a href="https://github.com/sibidharan/zealphp/stargazers" target="_blank" rel="noopener noreferrer">
+        <img src="https://img.shields.io/github/stars/sibidharan/zealphp?style=flat-square&logo=github&logoColor=white" alt="GitHub stars">
+      </a>
+      <a href="https://www.php.net/" target="_blank" rel="noopener noreferrer">
+        <img src="https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square&logo=php&logoColor=white" alt="PHP 8.3 or newer">
+      </a>
+    </div>
     <div class="bench-note">Local benchmark on 4 workers</div>
     <div class="bench">
       <div class="bench-stat"><div class="num">4</div><div class="label">workers</div></div>
