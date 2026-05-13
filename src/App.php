@@ -849,8 +849,13 @@ class App
             try {
                 $serverResponse = App::middleware()->handle($serverRequest);
                 access_log($serverResponse->getStatusCode(), strlen($serverResponse->getBody()));
-                $response->flush();
-                \OpenSwoole\Core\Psr\Response::emit($response->parent, $serverResponse->withHeader('X-Powered-By', 'ZealPHP + OpenSwoole'));
+                // Streaming responses (stream(), sse(), Generator yield) call
+                // $response->parent->end() themselves — skip emit() to avoid the
+                // "http response is unavailable" warning on an already-ended response.
+                if ($response->parent->isWritable()) {
+                    $response->flush();
+                    \OpenSwoole\Core\Psr\Response::emit($response->parent, $serverResponse->withHeader('X-Powered-By', 'ZealPHP + OpenSwoole'));
+                }
             } catch (\Throwable|\OpenSwoole\ExitException $e) {
                 elog(jTraceEx($e), "error");
                 $response->parent->status(500);                    
