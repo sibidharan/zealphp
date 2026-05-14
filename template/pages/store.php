@@ -122,7 +122,8 @@ Cache::flush();                                    // clear everything</code></p
     <ul style="font-size:.9rem;line-height:1.8;color:var(--text-muted)">
       <li><strong>Multi-server shared state</strong> — Cache is per-server only</li>
       <li><strong>Large datasets</strong> — memory tier caps at 4096 rows, 8KB/value</li>
-      <li><strong>Data structures</strong> — sorted sets, streams, pub/sub, Lua</li>
+      <li><strong>Pub/Sub messaging</strong> — no built-in publish/subscribe between workers or servers</li>
+      <li><strong>Data structures</strong> — sorted sets, streams, Lua scripting</li>
       <li><strong>Crash-safe persistence</strong> — Redis AOF/RDB vs best-effort files</li>
       <li><strong>Eviction policies</strong> — no LRU/LFU, full table spills to file</li>
       <li><strong>Transactions</strong> — no MULTI/EXEC, per-row spinlocks only</li>

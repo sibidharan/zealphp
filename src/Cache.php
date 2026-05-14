@@ -24,7 +24,8 @@ namespace ZealPHP;
  * LIMITATIONS — when to use Redis/Valkey instead:
  *   - Multi-server: Cache is per-server. Redis shares state across machines.
  *   - Large datasets: Memory tier caps at maxRows (default 4096), 8KB per value.
- *   - Data structures: No sorted sets, streams, pub/sub, Lua. Flat KV only.
+ *   - Pub/Sub: No built-in publish/subscribe between workers or servers.
+ *   - Data structures: No sorted sets, streams, Lua scripting. Flat KV only.
  *   - Persistence: File tier is best-effort. Redis AOF/RDB is crash-safe.
  *   - Eviction: No LRU/LFU. Full memory tier spills to file-only.
  *   - Transactions: No MULTI/EXEC. Store has per-row spinlocks only.
