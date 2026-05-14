@@ -7,7 +7,7 @@ $active      ??= $page;
 ?>
 <!doctype html>
 <html lang="en">
-<?php App::render('/_head', compact('title', 'description')); ?>
+<?php App::render('/_head', compact('title', 'description', 'page')); ?>
 <body>
 <?php App::render('/_nav', ['active' => $active]); ?>
 <?php App::render('/components/_banner'); ?>

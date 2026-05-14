@@ -7,6 +7,7 @@ $links = [
   'migration'       => ['/migration',     'Migration'],
   'performance'     => ['/performance',   'Benchmarks'],
   'getting-started' => ['/getting-started','Start'],
+  'learn'           => ['/learn',          'Learn'],
   'routing'         => ['/routing',        'Routing'],
   'responses'       => ['/responses',      'Responses'],
   'http'            => ['/http',           'HTTP'],
@@ -31,14 +32,19 @@ $links = [
     <span></span><span></span><span></span>
   </label>
   <nav class="nav-links">
+    <?php $isActive = function(string $key) use ($active): bool {
+      return $key === 'learn'
+        ? ($active === 'learn' || str_starts_with((string)$active, 'learn/'))
+        : $active === $key;
+    }; ?>
     <div class="nav-row nav-row-core">
       <?php foreach (array_slice($links, 0, 10, true) as $key => [$href, $label]): ?>
-        <a href="<?= $href ?>"<?= ($active === $key ? ' class="active"' : '') ?>><?= $label ?></a>
+        <a href="<?= $href ?>"<?= $isActive($key) ? ' class="active"' : '' ?>><?= $label ?></a>
       <?php endforeach; ?>
     </div>
     <div class="nav-row nav-row-features">
       <?php foreach (array_slice($links, 10, null, true) as $key => [$href, $label]): ?>
-        <a href="<?= $href ?>"<?= ($active === $key ? ' class="active"' : '') ?>><?= $label ?></a>
+        <a href="<?= $href ?>"<?= $isActive($key) ? ' class="active"' : '' ?>><?= $label ?></a>
       <?php endforeach; ?>
     </div>
   </nav>
