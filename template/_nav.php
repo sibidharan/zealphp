@@ -5,22 +5,19 @@ $links = [
   'home'            => ['/',              'Home'],
   'getting-started' => ['/getting-started','Start'],
   'routing'         => ['/routing',        'Routing'],
-  'rendering'       => ['/templates',      'Rendering'],
-  'async'           => ['/coroutines',     'Async'],
+  'responses'       => ['/responses',      'Responses'],
+  'http'            => ['/http',           'HTTP'],
+  'templates'       => ['/templates',      'Templates'],
+  'streaming'       => ['/streaming',      'Streaming'],
+  'coroutines'      => ['/coroutines',     'Coroutines'],
+  'websocket'       => ['/ws',             'WebSocket'],
   'middleware'      => ['/middleware',      'Middleware'],
-  'state'           => ['/store',          'State'],
+  'sessions'        => ['/sessions',       'Sessions'],
+  'store'           => ['/store',          'Store & Cache'],
+  'timers'          => ['/timers',         'Timers'],
   'api'             => ['/api',            'ZealAPI'],
   'legacy-apps'     => ['/legacy-apps',    'Legacy Apps'],
 ];
-
-// Map merged keys so child pages highlight the parent nav item
-$activeMap = [
-  'responses' => 'routing', 'http' => 'routing',
-  'templates' => 'rendering', 'streaming' => 'rendering',
-  'coroutines' => 'async', 'websocket' => 'async',
-  'sessions' => 'state', 'store' => 'state', 'timers' => 'state',
-];
-$active = $activeMap[$active] ?? $active;
 ?>
 <header>
 <nav class="topnav">
