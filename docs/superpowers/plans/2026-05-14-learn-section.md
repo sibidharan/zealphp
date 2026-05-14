@@ -2800,6 +2800,194 @@ HTML]); ?>
 
 Commit (handled in M5.5): `feat(learn): lesson 5 routing prose + ZealAPI Try it panel`.
 
+### Task 6.5.7: WebSocket cross-tab notes sync
+
+Demonstrates `App::ws()` + cross-worker fanout. Open `/learn/notes` in two browser tabs (same user). Add a note in tab A → tab B sees it appear within ~100ms, no polling.
+
+**Files:**
+- Modify: `route/learn.php` — add WebSocket handler + broadcast helper, hook into notes CRUD
+- Modify: `public/js/learn.js` — open WebSocket on Notes/AI Chat pages, refresh on message
+
+- [ ] **Step 1: Add a Store table mapping `fd → user_id` and the WebSocket handler to `route/learn.php`**
+
+Append after the rate-limit stores:
+
+```php
+// fd -> user_id mapping for the /ws/learn WebSocket. Worker-shared via Store.
+\ZealPHP\Store::make('learn_ws_clients', 4096, [
+    'user_id' => [\OpenSwoole\Table::TYPE_INT, 8],
+]);
+
+$app->ws('/ws/learn',
+    onMessage: function($server, $frame) {
+        // Echo client pings as keepalive; no other client→server messages used.
+        if (($frame->data ?? '') === 'ping') $server->push($frame->fd, 'pong');
+    },
+    onOpen: function($server, $request) {
+        if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        if (!$userId) { $server->disconnect($request->fd, 1008, 'auth_required'); return; }
+        \ZealPHP\Store::set('learn_ws_clients', (string)$request->fd, ['user_id' => $userId]);
+    },
+    onClose: function($server, $fd) {
+        \ZealPHP\Store::del('learn_ws_clients', (string)$fd);
+    },
+);
+
+/**
+ * Push a JSON message to every WebSocket client whose session belongs to $userId.
+ */
+function learn_ws_broadcast(int $userId, array $payload): void {
+    $server = \ZealPHP\App::getServer();
+    if (!$server) return;
+    $json = json_encode($payload);
+    foreach (\ZealPHP\Store::table('learn_ws_clients') as $fd => $row) {
+        if ((int)($row['user_id'] ?? 0) === $userId) {
+            try { @$server->push((int)$fd, $json); } catch (\Throwable $e) { /* fd closed; cleanup happens via onClose */ }
+        }
+    }
+}
+```
+
+- [ ] **Step 2: Wire broadcasts into the three notes-mutating endpoints**
+
+In the POST `/api/learn/notes` handler, after `learn_notes_create` succeeds and before returning the rendered card:
+
+```php
+    learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'create', 'id' => $id]);
+```
+
+In the POST `/api/learn/notes/{id}` (update) handler, after `learn_notes_update` succeeds:
+
+```php
+    learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'update', 'id' => (int)$id]);
+```
+
+In the DELETE handler, after `learn_notes_delete` succeeds:
+
+```php
+    learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'delete', 'id' => (int)$id]);
+```
+
+Also broadcast from inside the chat handlers whenever `notes_changed` is emitted (since the agent mutating notes is conceptually the same event). Find each `$sse(json_encode([]), 'notes_changed');` (and the equivalent in real mode) and add immediately after:
+
+```php
+    learn_ws_broadcast($userId, ['type' => 'note_changed', 'op' => 'chat']);
+```
+
+- [ ] **Step 3: Add the WebSocket client to `learn.js`**
+
+Append after the chat init code:
+
+```javascript
+  // Cross-tab notes sync via WebSocket. Opens on /learn/notes and /learn/ai-chat.
+  document.addEventListener('DOMContentLoaded', () => {
+    const notesList = document.getElementById('notes-list');
+    if (!notesList) return;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let ws = null;
+    let reconnectDelay = 500;
+    function connect() {
+      try { ws = new WebSocket(proto + '//' + location.host + '/ws/learn'); }
+      catch (e) { return; }
+      ws.addEventListener('open', () => { reconnectDelay = 500; });
+      ws.addEventListener('message', (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'note_changed' && window.htmx) {
+            window.htmx.ajax('GET', '/api/learn/notes', { target: '#notes-list', swap: 'innerHTML' });
+          }
+        } catch (e) { /* ignore */ }
+      });
+      ws.addEventListener('close', () => {
+        // Cap exponential backoff at 10s.
+        reconnectDelay = Math.min(reconnectDelay * 2, 10000);
+        setTimeout(connect, reconnectDelay);
+      });
+      // Keepalive every 25s.
+      setInterval(() => { if (ws && ws.readyState === 1) ws.send('ping'); }, 25000);
+    }
+    connect();
+  });
+```
+
+- [ ] **Step 4: Smoke test with two `wscat` clients (or two Chrome tabs)**
+
+```bash
+php app.php start -p 8090 -d --pid-file /tmp/zealphp/learn_dev.pid
+sleep 2
+# Register a user and stash the cookie.
+curl -s -c /tmp/lc.txt -o /dev/null -H "Content-Type: application/json" \
+  -d '{"username":"wsuser","password":"password123"}' \
+  http://127.0.0.1:8090/api/learn/register
+
+# Quick WebSocket test using a tiny PHP CLI client (no wscat dep).
+php -r '
+$cookies = file_get_contents("/tmp/lc.txt");
+preg_match("/PHPSESSID\s+(\S+)/", $cookies, $m);
+$sid = $m[1] ?? "";
+$h = "GET /ws/learn HTTP/1.1\r\nHost: 127.0.0.1:8090\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nCookie: PHPSESSID=$sid\r\n\r\n";
+$s = stream_socket_client("tcp://127.0.0.1:8090", $errno, $err, 2);
+fwrite($s, $h);
+$resp = fread($s, 1024);
+echo strpos($resp, "101 Switching") !== false ? "ws-upgrade: OK\n" : "ws-upgrade: FAIL\n";
+stream_set_timeout($s, 3);
+sleep(1);
+echo "(awaiting broadcast)\n";
+$msg = fread($s, 4096);
+echo "received: " . bin2hex(substr($msg, 0, 8)) . "...\n";
+fclose($s);
+' &
+WSPID=$!
+
+# After a beat, fire a note create — should arrive on the WebSocket.
+sleep 1
+curl -s -b /tmp/lc.txt -o /dev/null -H "Content-Type: application/json" \
+  -d '{"title":"ws-test","body":""}' http://127.0.0.1:8090/api/learn/notes
+
+wait $WSPID
+php app.php stop -p 8090 --pid-file /tmp/zealphp/learn_dev.pid
+rm -f /tmp/lc.txt storage/learn.db*
+```
+
+Expected: `ws-upgrade: OK`, then `received: ...` with non-empty hex (the broadcast frame).
+
+- [ ] **Step 5: Chrome DevTools verification — two-tab demo**
+
+```bash
+php app.php start -p 8090 -d --pid-file /tmp/zealphp/learn_dev.pid
+sleep 2
+```
+
+1. `mcp__chrome-devtools__new_page` → `/learn/notes`, register `wsdemo`/`password123`.
+2. `mcp__chrome-devtools__new_page` again → `/learn/notes` (second tab, same browser → shares session).
+3. Use the `mcp__chrome-devtools__list_pages` and `select_page` tools to flip between them.
+4. In tab A: fill the note form, submit.
+5. In tab B: take a screenshot **without** any interaction — the new note should already be visible (WebSocket pushed the change, htmx refreshed via the JS listener).
+6. `list_console_messages` on tab B — no errors.
+
+```bash
+php app.php stop -p 8090 --pid-file /tmp/zealphp/learn_dev.pid
+```
+
+- [ ] **Step 6: Lesson 7 deep-dive callout (handled inline)**
+
+When writing Lesson 7's body in M5.7, add:
+
+```php
+<?php App::render('/components/_deepdive', [
+  'title' => 'When htmx isn\'t enough — WebSocket',
+  'body'  => '<p>htmx is great for request/response interactions, but server-pushed events (live updates, multi-tab sync) need a long-lived connection. ZealPHP\'s <code>App::ws()</code> handler is the same shape as a route handler — it just receives <code>$server</code> + <code>$frame</code> instead of <code>$request</code> + <code>$response</code>.</p><p>This very tutorial uses it: open <a href="/learn/notes">Lesson 8</a> in two tabs, add a note in one — the other tab updates without polling. The handler is <code>$app->ws(\'/ws/learn\', ...)</code> in <code>route/learn.php</code>; the client lives in <code>public/js/learn.js</code>.</p>',
+]); ?>
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add route/learn.php public/js/learn.js
+git commit -m "feat(learn): WebSocket cross-tab notes sync (App::ws + cross-worker fanout)"
+```
+
 ---
 
 ## Milestone 7 — Python agent + real-mode SSE proxy
