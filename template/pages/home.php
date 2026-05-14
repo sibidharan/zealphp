@@ -451,34 +451,34 @@ redis_client.set(key, json.dumps(data))</code></pre>
 </section>
 
 <!-- Migrate Your PHP Codebase -->
-<section class="section">
+<section class="section" style="background:var(--bg-dark);color:var(--code-text)">
   <div class="container">
-    <h2 class="section-title">Migrate your PHP codebase to async</h2>
+    <h2 class="section-title" style="color:#fff">Migrate your PHP codebase to async</h2>
     <p class="section-desc">Your existing code works unchanged. <code>session_start()</code>, <code>header()</code>, <code>$_GET</code> — all overridden via uopz to work inside the coroutine runtime.</p>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-top:2rem">
-      <div style="background:var(--bg-alt);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem">
-        <h3 style="color:#ef4444;font-size:1rem;margin-bottom:1rem">Before — 6 services</h3>
-        <ul style="list-style:none;padding:0;margin:0;font-size:.85rem;color:#94a3b8">
-          <li style="padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.05)">Nginx / Apache</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.05)">PHP-FPM (cold start every request)</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.05)">Redis (sessions, cache, pub/sub)</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.05)">Socket.io / Ratchet (WebSocket)</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.05)">Supervisor / cron (background tasks)</li>
+      <div style="background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1.5rem">
+        <h3 style="color:var(--danger);font-size:1rem;margin-bottom:1rem">Before — 6 services</h3>
+        <ul style="list-style:none;padding:0;margin:0;font-size:.85rem;color:var(--text-light)">
+          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Nginx / Apache</li>
+          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">PHP-FPM (cold start every request)</li>
+          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Redis (sessions, cache, pub/sub)</li>
+          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Socket.io / Ratchet (WebSocket)</li>
+          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Supervisor / cron (background tasks)</li>
           <li style="padding:.35rem 0">SSE proxy or polling</li>
         </ul>
       </div>
-      <div style="background:var(--bg-alt);border:1px solid var(--accent);border-radius:var(--radius);padding:1.5rem">
+      <div style="background:var(--code-bg);border:1px solid var(--accent);border-radius:var(--radius);padding:1.5rem">
         <h3 style="color:var(--accent);font-size:1rem;margin-bottom:1rem">After — 1 process</h3>
         <div style="text-align:center;margin-bottom:1rem">
           <code style="font-size:1.1rem;color:var(--accent);background:rgba(245,158,11,.1);padding:.4rem .8rem;border-radius:6px">php app.php</code>
         </div>
-        <ul style="list-style:none;padding:0;margin:0;font-size:.85rem;color:#e2e8f0">
-          <li style="padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.05)">HTTP + WebSocket + SSE server</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.05)">Coroutine-safe sessions (no Redis)</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.05)">Shared memory across workers</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.05)">Task workers (no cron/supervisor)</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.05)">Persistent connections, no cold starts</li>
+        <ul style="list-style:none;padding:0;margin:0;font-size:.85rem;color:var(--code-text)">
+          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">HTTP + WebSocket + SSE server</li>
+          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Coroutine-safe sessions (no Redis)</li>
+          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Shared memory across workers</li>
+          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Task workers (no cron/supervisor)</li>
+          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Persistent connections, no cold starts</li>
           <li style="padding:.35rem 0">WordPress runs unmodified</li>
         </ul>
       </div>
@@ -487,52 +487,52 @@ redis_client.set(key, json.dumps(data))</code></pre>
     <div style="margin-top:2.5rem">
       <h3 style="font-size:1.1rem;margin-bottom:1.25rem;color:#fff">The migration ladder — go at your own pace</h3>
       <div style="display:grid;gap:.75rem">
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.25rem">
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1rem 1.25rem">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:rgba(245,158,11,.15);color:var(--accent);font-size:.78rem;font-weight:700;flex-shrink:0">0</span>
           <div>
-            <div style="font-weight:600;color:#e2e8f0;font-size:.9rem;margin-bottom:.3rem">Drop in your entire app</div>
-            <code style="font-size:.78rem;color:#94a3b8">App::superglobals(true); $app->setFallback(fn() => App::includeFile('index.php'));</code>
-            <div style="color:#64748b;font-size:.78rem;margin-top:.25rem">WordPress, Drupal, any PHP app — runs unmodified on OpenSwoole.</div>
+            <div style="font-weight:600;color:var(--code-text);font-size:.9rem;margin-bottom:.3rem">Drop in your entire app</div>
+            <code style="font-size:.78rem;color:var(--text-light)">App::superglobals(true); $app->setFallback(fn() => App::includeFile('index.php'));</code>
+            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">WordPress, Drupal, any PHP app — runs unmodified on OpenSwoole.</div>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.25rem">
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1rem 1.25rem">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:rgba(245,158,11,.15);color:var(--accent);font-size:.78rem;font-weight:700;flex-shrink:0">1</span>
           <div>
-            <div style="font-weight:600;color:#e2e8f0;font-size:.9rem;margin-bottom:.3rem">Write LAMP-style PHP in <code>public/</code></div>
-            <code style="font-size:.78rem;color:#94a3b8">public/about.php → /about &nbsp;·&nbsp; public/users/list.php → /users/list</code>
-            <div style="color:#64748b;font-size:.78rem;margin-top:.25rem">File-based routing. <code>$_GET</code>, <code>session_start()</code>, <code>echo</code> — everything you know works.</div>
+            <div style="font-weight:600;color:var(--code-text);font-size:.9rem;margin-bottom:.3rem">Write LAMP-style PHP in <code>public/</code></div>
+            <code style="font-size:.78rem;color:var(--text-light)">public/about.php → /about &nbsp;·&nbsp; public/users/list.php → /users/list</code>
+            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">File-based routing. <code>$_GET</code>, <code>session_start()</code>, <code>echo</code> — everything you know works.</div>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.25rem">
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1rem 1.25rem">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:rgba(245,158,11,.15);color:var(--accent);font-size:.78rem;font-weight:700;flex-shrink:0">2</span>
           <div>
-            <div style="font-weight:600;color:#e2e8f0;font-size:.9rem;margin-bottom:.3rem">Add REST APIs with <code>api/</code></div>
-            <code style="font-size:.78rem;color:#94a3b8">api/users/get.php → GET /api/users &nbsp;·&nbsp; api/users/post.php → POST /api/users</code>
-            <div style="color:#64748b;font-size:.78rem;margin-top:.25rem">Drop a PHP file, get a REST endpoint. ZealAPI auto-routes by filename. Zero config.</div>
+            <div style="font-weight:600;color:var(--code-text);font-size:.9rem;margin-bottom:.3rem">Add REST APIs with <code>api/</code></div>
+            <code style="font-size:.78rem;color:var(--text-light)">api/users/get.php → GET /api/users &nbsp;·&nbsp; api/users/post.php → POST /api/users</code>
+            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">Drop a PHP file, get a REST endpoint. ZealAPI auto-routes by filename. Zero config.</div>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.25rem">
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1rem 1.25rem">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:rgba(245,158,11,.15);color:var(--accent);font-size:.78rem;font-weight:700;flex-shrink:0">3</span>
           <div>
-            <div style="font-weight:600;color:#e2e8f0;font-size:.9rem;margin-bottom:.3rem">Use framework routes for new features</div>
-            <code style="font-size:.78rem;color:#94a3b8">$app->route('/ws/chat', ...); $response->sse(...); yield $html;</code>
-            <div style="color:#64748b;font-size:.78rem;margin-top:.25rem">WebSocket, SSE streaming, coroutines — available when you're ready, not forced upfront.</div>
+            <div style="font-weight:600;color:var(--code-text);font-size:.9rem;margin-bottom:.3rem">Use framework routes for new features</div>
+            <code style="font-size:.78rem;color:var(--text-light)">$app->route('/ws/chat', ...); $response->sse(...); yield $html;</code>
+            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">WebSocket, SSE streaming, coroutines — available when you're ready, not forced upfront.</div>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--accent);border-radius:var(--radius);padding:1rem 1.25rem">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:rgba(245,158,11,.25);color:var(--accent);font-size:.78rem;font-weight:700;flex-shrink:0">4</span>
           <div>
             <div style="font-weight:600;color:var(--accent);font-size:.9rem;margin-bottom:.3rem">Full coroutine mode</div>
-            <code style="font-size:.78rem;color:#94a3b8">App::superglobals(false); // thousands of concurrent requests per worker</code>
-            <div style="color:#64748b;font-size:.78rem;margin-top:.25rem">Replace superglobals with <code>G::instance()</code>. Per-coroutine isolation. Go-level concurrency.</div>
+            <code style="font-size:.78rem;color:var(--text-light)">App::superglobals(false); // thousands of concurrent requests per worker</code>
+            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">Replace superglobals with <code>G::instance()</code>. Per-coroutine isolation. Go-level concurrency.</div>
           </div>
         </div>
       </div>
     </div>
 
     <div style="text-align:center;margin-top:1.5rem">
-      <a href="/legacy-apps" class="btn btn-outline" style="font-size:.85rem">Legacy app migration guide →</a>
-      <a href="/why-zealphp" class="btn btn-outline" style="font-size:.85rem;margin-left:.5rem">Why ZealPHP? →</a>
+      <a href="/why-zealphp" class="btn btn-outline" style="font-size:.85rem">Why ZealPHP? →</a>
+      <a href="/legacy-apps" class="btn btn-outline" style="font-size:.85rem;margin-left:.5rem">WordPress on ZealPHP →</a>
     </div>
   </div>
 </section>

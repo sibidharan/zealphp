@@ -1,6 +1,6 @@
-# ZealPHP — Async PHP Framework on OpenSwoole
+# ZealPHP — Coroutine-Native PHP Framework on OpenSwoole
 
-A lightweight, high-performance open-source PHP web framework built on **OpenSwoole**. Brings async coroutines, SSR streaming, WebSocket, and real-time capabilities to PHP — without rewriting your existing code.
+A coroutine-native PHP framework built on **OpenSwoole** for high-concurrency HTTP, WebSocket, streaming, and real-time applications. Upgrade existing PHP codebases to async without rewriting.
 
 [![Latest Stable Version](https://poser.pugx.org/sibidharan/zealphp/v)](https://packagist.org/packages/sibidharan/zealphp) [![Total Downloads](https://poser.pugx.org/sibidharan/zealphp/downloads)](https://packagist.org/packages/sibidharan/zealphp) [![License](https://poser.pugx.org/sibidharan/zealphp/license)](https://packagist.org/packages/sibidharan/zealphp)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sibidharan/zealphp) [![GitHub stars](https://img.shields.io/github/stars/sibidharan/zealphp?style=flat-square&logo=github&logoColor=white)](https://github.com/sibidharan/zealphp/stargazers) [![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square&logo=php&logoColor=white)](https://www.php.net/)
@@ -29,6 +29,21 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **Sessions** | All `session_*()` functions overridden via uopz — coroutine-safe, per-request isolation |
 | **Unit tests** | PHPUnit 11 — 42 unit tests + 38 integration tests, all green |
 | **Benchmarks** | OpenSwoole-powered concurrency with a modular `scripts/bench.sh` runner for wrk/ab sweeps through c=1000 |
+
+---
+
+## Why ZealPHP?
+
+PHP powers 77% of the web, but its request-per-process model makes real-time, streaming, and high-concurrency apps awkward. ZealPHP is **not** another abstraction layer — it's a full-stack coroutine framework:
+
+- **vs ReactPHP / AMPHP** — ZealPHP is an integrated framework (routing, middleware, templates, shared memory), not a library collection. Write `$app->route()` and ship.
+- **vs FrankenPHP / RoadRunner** — Those are Go-based servers. ZealPHP runs native PHP coroutines — `go()`, `Channel`, shared memory via `OpenSwoole\Table` — no Go process in between.
+- **vs Laravel Octane** — Octane wraps Swoole inside Laravel. ZealPHP is framework-agnostic and exposes the full coroutine runtime: SSE, WebSocket, streaming, task workers.
+- **vs raw Swoole/OpenSwoole** — ZealPHP adds routing, PSR-15 middleware, templating, session overrides, and a legacy PHP bridge so you don't wire up `onRequest` handlers manually.
+
+**Legacy PHP bridge:** `session_start()`, `header()`, `$_GET` all work unchanged via uopz overrides. WordPress runs unmodified through the CGI worker.
+
+[Full comparison →](https://php.zeal.ninja/why-zealphp)
 
 ---
 
@@ -93,6 +108,28 @@ $app->ws('/ws/echo',
 
 $app->run();
 ```
+
+---
+
+## Migrate an Existing PHP App
+
+ZealPHP can run your existing PHP codebase on a high-performance async runtime — `session_start()`, `header()`, `$_GET`, `$_POST` all work unchanged:
+
+```php
+<?php
+require_once __DIR__ . '/vendor/autoload.php';
+use ZealPHP\App;
+
+App::superglobals(true);  // legacy mode — $_GET, $_POST, $_SESSION work
+$app = App::init('0.0.0.0', 8080);
+
+// Your existing PHP app becomes the fallback handler
+$app->setFallback(fn() => App::includeFile('index.php'));
+
+$app->run();
+```
+
+Now your WordPress, Drupal, or custom PHP app runs on OpenSwoole — persistent connections, no cold starts, WebSocket and streaming available when you're ready.
 
 ---
 

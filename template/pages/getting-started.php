@@ -36,8 +36,9 @@
       <a href="#prereqs" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">1. Prerequisites</a>
       <a href="#install" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">2. Install</a>
       <a href="#scaffold" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">3. Scaffold</a>
-      <a href="#first-route" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">4. First route</a>
-      <a href="#deploy" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">5. Deploy</a>
+      <a href="#first-page" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">4. First page</a>
+      <a href="#first-route" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">5. Framework routes</a>
+      <a href="#deploy" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">6. Deploy</a>
     </div>
 
     <h2 id="prereqs" style="margin-top:2rem">1. Prerequisites</h2>
@@ -154,9 +155,72 @@ BASH
       </div>
     </div>
 
-    <h2 id="first-route" style="margin-top:2.5rem">4. Your first route</h2>
+    <!-- How it works -->
+    <div style="background:var(--bg-alt);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;margin-top:2rem">
+      <h3 style="margin-bottom:.75rem">How ZealPHP works — the LAMP mental model</h3>
+      <p style="color:var(--text-muted);font-size:.9rem;line-height:1.7;margin-bottom:.75rem">
+        In LAMP, <strong>Apache</strong> was the server and PHP ran inside it. In ZealPHP, <strong>OpenSwoole</strong> is the server and PHP runs inside it. Same idea, different engine.
+      </p>
+      <table class="ztable" style="font-size:.85rem">
+        <tr><th>LAMP</th><th>ZealPHP</th></tr>
+        <tr><td>Apache / Nginx</td><td>OpenSwoole (built into <code>php app.php</code>)</td></tr>
+        <tr><td><code>htdocs/about.php</code> → <code>/about.php</code></td><td><code>public/about.php</code> → <code>/about</code></td></tr>
+        <tr><td><code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code></td><td>Same — all work unchanged</td></tr>
+        <tr><td><code>session_start()</code>, <code>header()</code></td><td>Same — overridden via uopz</td></tr>
+        <tr><td>One process per request</td><td>One process, thousands of concurrent coroutines</td></tr>
+        <tr><td>Restart Apache after config changes</td><td>Restart <code>php app.php</code> after code changes</td></tr>
+        <tr><td>Needs Redis for shared state</td><td>Built-in <code>Store</code> — cross-worker shared memory</td></tr>
+        <tr><td>Needs Socket.io / Ratchet for WebSocket</td><td>Built-in <code>App::ws()</code></td></tr>
+      </table>
+      <p style="color:var(--text-muted);font-size:.85rem;margin-top:.75rem">
+        The difference: your PHP process stays alive between requests. That means persistent connections, shared memory, WebSocket, streaming — all without leaving PHP.
+      </p>
+    </div>
 
-    <p>Open <code>app.php</code> and add a route. ZealPHP returns whatever you give it — see the <a href="/responses">return conventions</a>.</p>
+    <h2 id="first-page" style="margin-top:2.5rem">4. Your first page — just drop a file</h2>
+
+    <p>Create a file in <code>public/</code>. It becomes a route. No framework code needed.</p>
+
+    <?php App::render('/components/_code', [
+      'label' => 'public/hello.php — plain PHP, like you\'ve always written',
+      'code' => <<<'PHP'
+<?php
+session_start();
+$_SESSION['visits'] = ($_SESSION['visits'] ?? 0) + 1;
+?>
+<h1>Hello from ZealPHP</h1>
+<p>You've visited this page <?= $_SESSION['visits'] ?> time(s).</p>
+<p>Query string: <?= htmlspecialchars($_GET['name'] ?? 'world') ?></p>
+PHP
+    ]); ?>
+
+    <p style="margin-top:.75rem">Start the server and visit <code>http://localhost:8080/hello?name=PHP</code>:</p>
+
+    <?php App::render('/components/_code', [
+      'label' => '',
+      'lang' => 'bash',
+      'code' => 'php app.php'
+    ]); ?>
+
+    <p style="margin-top:.75rem">That's it. No <code>$app->route()</code>, no annotations, no config files. Same for APIs — drop a file in <code>api/</code>:</p>
+
+    <?php App::render('/components/_code', [
+      'label' => 'api/users/get.php → GET /api/users',
+      'code' => <<<'PHP'
+<?php
+$get = function() {
+    return ['users' => ['alice', 'bob'], 'count' => 2];
+};
+PHP
+    ]); ?>
+
+    <div class="callout info" style="margin-top:1rem">
+      <strong>This is how you migrate.</strong> Move your existing PHP files into <code>public/</code>. They work immediately. When you need WebSocket, streaming, or coroutines — that's when you use <code>$app->route()</code>. See <a href="/routing">Routing</a> for the full picture.
+    </div>
+
+    <h2 id="first-route" style="margin-top:2.5rem">5. Framework routes — when you need more</h2>
+
+    <p>For URL parameters, WebSocket, streaming, or middleware — use programmatic routes in <code>app.php</code>:</p>
 
     <?php App::render('/components/_code', [
       'label' => 'app.php — minimal app',

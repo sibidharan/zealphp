@@ -5,6 +5,50 @@
 <h1 class="section-title">Routing &amp; Parameter Injection</h1>
 <p class="section-desc">ZealPHP uses reflection to inject route parameters, <code>$request</code>, <code>$response</code>, and <code>$app</code> into handlers by name — no annotations, no containers.</p>
 
+<!-- File-based routing -->
+<h2 style="margin:2rem 0 .5rem">File-based routing — just like LAMP</h2>
+<p style="margin-bottom:1rem">Drop a <code>.php</code> file in <code>public/</code>. It becomes a route. No config, no registration, no framework code needed.</p>
+
+<table class="ztable">
+  <tr><th>File</th><th>URL</th><th>Notes</th></tr>
+  <tr><td><code>public/index.php</code></td><td><code>/</code></td><td>Root route</td></tr>
+  <tr><td><code>public/about.php</code></td><td><code>/about</code></td><td>Filename becomes the path (no <code>.php</code>)</td></tr>
+  <tr><td><code>public/users/list.php</code></td><td><code>/users/list</code></td><td>Subdirectories work</td></tr>
+  <tr><td><code>public/admin/index.php</code></td><td><code>/admin</code></td><td>Directory index</td></tr>
+</table>
+
+<p style="margin:.75rem 0">Inside these files, everything you already know works:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'public/dashboard.php — plain PHP, nothing new',
+    'code'  => <<<'PHP'
+<?php
+session_start();
+if (!$_SESSION['user']) { header('Location: /login'); exit; }
+?>
+<h1>Welcome, <?= htmlspecialchars($_SESSION['user']['name']) ?></h1>
+<p>Your orders: <?= count($_GET['filter'] ?? []) ?> filters active</p>
+PHP
+]); ?>
+
+<div class="callout info" style="margin-top:1rem">
+<strong>This is the migration on-ramp.</strong> Move your existing PHP files into <code>public/</code> and they run on OpenSwoole immediately — <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>$_POST</code>, <code>echo</code> all work unchanged via uopz overrides. No rewrite needed.
+</div>
+
+<p style="margin:1rem 0">Same convention works for APIs — drop files in <code>api/</code>:</p>
+
+<table class="ztable">
+  <tr><th>File</th><th>URL</th><th>HTTP method</th></tr>
+  <tr><td><code>api/users/get.php</code></td><td><code>GET /api/users</code></td><td>Filename = method</td></tr>
+  <tr><td><code>api/users/post.php</code></td><td><code>POST /api/users</code></td><td>Filename = method</td></tr>
+  <tr><td><code>api/orders/get.php</code></td><td><code>GET /api/orders</code></td><td>Directory = resource</td></tr>
+</table>
+
+<p style="margin-top:1rem">Public files support the same return conventions as framework routes — return an <code>array</code> for JSON, a <code>Generator</code> for streaming, an <code>int</code> for a status code, or just <code>echo</code>. See <a href="/responses">Responses</a>.</p>
+
+<h2 style="margin:2.5rem 0 .5rem">Programmatic routes</h2>
+<p style="margin-bottom:1rem">When you need URL parameters, WebSocket, or middleware — use programmatic routes. File-based routing handles the rest.</p>
+
 <!-- Route types -->
 <h2 style="margin:2rem 0 .5rem">Route types</h2>
 <table class="ztable">

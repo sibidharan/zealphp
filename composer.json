@@ -1,14 +1,23 @@
 {
     "name": "sibidharan/zealphp",
-    "description": "A dynamic PHP web development framework built with OpenSwoole.",
-    "homepage": "https://php.zeal.lol",
+    "description": "Coroutine-native PHP framework on OpenSwoole — async HTTP, WebSocket, streaming, and real-time applications.",
+    "homepage": "https://php.zeal.ninja",
     "keywords": [
         "openswoole",
         "framework",
         "php",
         "async",
         "http",
-        "zealphp"
+        "zealphp",
+        "coroutine",
+        "websocket",
+        "streaming",
+        "sse",
+        "real-time",
+        "middleware",
+        "psr-15",
+        "php-framework",
+        "swoole"
     ],
     "type": "library",
     "license": "MIT",
