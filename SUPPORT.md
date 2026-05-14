@@ -24,4 +24,4 @@ For general questions, open an issue on GitHub Issues and tag it with the `quest
 
 ## Commercial Support
 
-For consulting, custom development, or commercial support, contact `sibi.nandhu@gmail.com`.
+For consulting, custom development, or commercial support, contact `sibi@selfmade.ninja`.

@@ -10,7 +10,7 @@
 
 **Do not open a public issue for security vulnerabilities.**
 
-Please report security vulnerabilities by emailing **sibi.nandhu@gmail.com**. Include as much detail as possible:
+Please report security vulnerabilities by emailing **sibi@selfmade.ninja**. Include as much detail as possible:
 
 - Description of the vulnerability
 - Steps to reproduce

@@ -44,5 +44,5 @@ ZealPHP is released under the MIT license, an OSI-approved open-source license.
 
 ## Contact
 
-Sibidharan — sibi.nandhu@gmail.com
+Sibidharan — sibi@selfmade.ninja
 GitHub: https://github.com/sibidharan/zealphp
