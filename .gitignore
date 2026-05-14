@@ -4,3 +4,9 @@
 *.key
 /.sessions/
 /.cache/
+/storage/learn.db
+/storage/learn.db-wal
+/storage/learn.db-shm
+/storage/learn.test.db
+/storage/learn.test.db-wal
+/storage/learn.test.db-shm
