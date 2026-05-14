@@ -38,16 +38,22 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 
 ## Why ZealPHP?
 
-PHP powers 77% of the web, but its request-per-process model makes real-time, streaming, and high-concurrency apps awkward. ZealPHP is **not** another abstraction layer — it's a full-stack coroutine framework:
+**The mission: take your existing PHP code, put it on a long-lived async runtime, and unlock WebSocket, SSE, streaming, coroutines, and shared memory — without rewriting in Node, Go, or Python.**
 
-- **vs ReactPHP / AMPHP** — ZealPHP is an integrated framework (routing, middleware, templates, shared memory), not a library collection. Write `$app->route()` and ship.
-- **vs FrankenPHP / RoadRunner** — Those are Go-based servers. ZealPHP runs native PHP coroutines — `go()`, `Channel`, shared memory via `OpenSwoole\Table` — no Go process in between.
-- **vs Laravel Octane** — Octane wraps Swoole inside Laravel. ZealPHP is framework-agnostic and exposes the full coroutine runtime: SSE, WebSocket, streaming, task workers.
-- **vs raw Swoole/OpenSwoole** — ZealPHP adds routing, PSR-15 middleware, templating, session overrides, and a legacy PHP bridge so you don't wire up `onRequest` handlers manually.
-- **vs PHP-FPM** — FPM is request-per-process: every request boots a fresh interpreter, opens new DB connections, and discards in-memory state. ZealPHP holds workers + shared memory between requests, so SSE/WebSocket/long-poll cost ~0 to keep open and warm caches survive request boundaries.
-- **vs Node.js** — Node's single-threaded event loop forces async-everywhere code (`await`, callbacks). ZealPHP runs PHP coroutines on top of OpenSwoole's reactor, so blocking-looking `$db->query()` calls yield under the hood — your synchronous PHP idioms still compose.
+PHP powers 77% of the web, but the default request-per-process model (PHP-FPM, mod_php) cold-starts an interpreter per request, discards in-memory state, and forces WebSocket/SSE into separate sidecar processes. ZealPHP runs on **OpenSwoole** — a long-lived PHP server with native coroutines — and adds a framework layer that:
 
-**Legacy PHP bridge:** `session_start()`, `header()`, `$_GET` all work unchanged via uopz overrides. Many WordPress sites run via the CGI worker bridge — see the [zealphp-wordpress](https://github.com/sibidharan/zealphp-wordpress) showcase for the current state and known limits.
+1. **Accepts your existing PHP code unchanged.** Drop `.php` files in `public/`. `session_start()`, `header()`, `$_GET` all work via uopz overrides. Many WordPress sites run through the CGI worker bridge — see [zealphp-wordpress](https://github.com/sibidharan/zealphp-wordpress) for the showcase and known limits.
+2. **Adds async primitives when you want them.** `go()`, `Channel`, WebSocket, SSE, shared memory (`Store` / `Counter`), timers, task workers — all framework-native, no extra services.
+3. **Lets you migrate file by file.** Start with fallback routing on day one; opt into coroutine mode when you're ready. No big-bang rewrite.
+
+### vs other ways to make PHP async
+
+- **vs PHP-FPM / mod_php** — FPM cold-starts every request. ZealPHP keeps workers warm; caches survive across requests, SSE/WebSocket cost ~0 to keep open.
+- **vs Laravel Octane** — Octane wraps Swoole inside a Laravel kernel. ZealPHP is framework-agnostic and exposes the runtime primitives directly. If you're on Laravel and want it faster, use Octane.
+- **vs FrankenPHP / RoadRunner** — Go servers fronting PHP. ZealPHP runs native PHP coroutines on OpenSwoole — no Go process in between.
+- **vs ReactPHP / AMPHP** — Library collections you wire together. ZealPHP is the integrated framework on top.
+- **vs raw Swoole / OpenSwoole** — ZealPHP adds routing, PSR-15 middleware, templates, session overrides, and the legacy bridge so you don't write `onRequest` handlers by hand.
+- **vs Node.js** — Node forces `await` / callbacks. ZealPHP coroutines let blocking-looking calls (`$db->query()`) yield under the hood — synchronous PHP idioms still compose.
 
 [Full comparison →](https://php.zeal.ninja/why-zealphp)
 
