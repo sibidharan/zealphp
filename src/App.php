@@ -820,7 +820,12 @@ class App
                 self::cliLogs($flags);
                 exit(0);
             case 'restart':
-                self::cliStop(self::resolvePidFile($flags));
+                $pidFile = self::resolvePidFile($flags);
+                $wasDaemonized = file_exists($pidFile);
+                self::cliStop($pidFile, quiet: true);
+                if ($wasDaemonized && !isset($flags['daemonize'])) {
+                    $flags['daemonize'] = true;
+                }
                 // fall through to start
             default:
                 $pidFile = self::resolvePidFile($flags);
@@ -866,40 +871,42 @@ class App
         return "/tmp/zealphp_{$port}.pid";
     }
 
-    private static function cliStop(string $pidFile): void
+    private static function cliStop(string $pidFile, bool $quiet = false): void
     {
         if (!file_exists($pidFile)) {
-            echo "ZealPHP is not running (no PID file: {$pidFile})\n";
+            if (!$quiet) { echo "ZealPHP is not running (no PID file: {$pidFile})\n"; }
             return;
         }
         $pid = (int)trim(file_get_contents($pidFile));
         if ($pid <= 0 || !@posix_kill($pid, 0)) {
-            echo "ZealPHP is not running (stale PID file)\n";
+            if (!$quiet) { echo "ZealPHP is not running (stale PID file)\n"; }
             @unlink($pidFile);
             return;
         }
-        echo "Stopping ZealPHP (pid {$pid})...\n";
         $pgid = @posix_getpgid($pid);
-        if ($pgid && $pgid !== posix_getpgid(posix_getpid())) {
-            posix_kill(-$pgid, SIGTERM);
-        } else {
-            posix_kill($pid, SIGTERM);
-        }
-        for ($i = 0; $i < 100; $i++) {
+        $killGroup = $pgid && $pgid !== posix_getpgid(posix_getpid());
+        echo "Stopping ZealPHP (pid {$pid})...\n";
+        $killGroup ? posix_kill(-$pgid, SIGTERM) : posix_kill($pid, SIGTERM);
+        // Fast poll first 500ms (10 × 50ms), then slower for up to 3s
+        for ($i = 0; $i < 10; $i++) {
+            usleep(50000);
             if (!@posix_kill($pid, 0)) {
                 @unlink($pidFile);
                 echo "Stopped.\n";
                 return;
             }
+        }
+        for ($i = 0; $i < 25; $i++) {
             usleep(100000);
+            if (!@posix_kill($pid, 0)) {
+                @unlink($pidFile);
+                echo "Stopped.\n";
+                return;
+            }
         }
         echo "Force killing...\n";
-        if ($pgid && $pgid !== posix_getpgid(posix_getpid())) {
-            posix_kill(-$pgid, SIGKILL);
-        } else {
-            posix_kill($pid, SIGKILL);
-        }
-        usleep(200000);
+        $killGroup ? posix_kill(-$pgid, SIGKILL) : posix_kill($pid, SIGKILL);
+        usleep(100000);
         @unlink($pidFile);
     }
 
