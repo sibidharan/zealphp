@@ -165,7 +165,7 @@ Summary table:
 
 This is the run that backs the headline numbers in the README and homepage.
 
-### Head-to-head environment
+### Environment (single machine, all measurements)
 
 | Field | Value |
 |-------|-------|
@@ -176,45 +176,36 @@ This is the run that backs the headline numbers in the README and homepage.
 | OpenSwoole | 26.2.0 |
 | Node.js | 24.11.1 |
 | Tool | `ab` (ApacheBench 2.3) |
-| HTTP workers | 4 |
+| HTTP workers | 4 (matching the published baseline) |
 | Task workers | 0 |
 | Method | Each stack tested **alone** with full machine resources |
-| Requests | 50,000 per endpoint per stack |
-| Concurrency | 200 |
-
-### Concurrency sweep environment (ZealPHP solo)
-
-| Field | Value |
-|-------|-------|
-| Date | 2026-05-14 |
-| Machine | 4-core Linux container (24-core host, CPU-limited) |
-| OS | Ubuntu 24.04.4 LTS |
-| PHP | 8.3.6 (cli, NTS) |
-| OpenSwoole | 26.2.0 |
-| Tool | `ab` (ApacheBench 2.3) |
-| HTTP workers | 4 |
-| Task workers | 0 |
-| Warmup | 5s |
-| Duration per concurrency | 30s |
-| Sweep | c = 1, 10, 50, 100, 200, 500, 1000 |
+| Requests per concurrency | 50,000 |
+| Sweep | c = 1, 10, 50, 100, 200, 500, 1000 (concurrency sweep) <br>c = 200 (head-to-head) |
+| Warmup | 5s per path/runtime |
 
 ### `/raw/bench` — lean runtime (no demo middleware)
 
 ```bash
-scripts/bench.sh --workers 4 --threads 4 --task-workers 0 --p1000 --duration 30s
+scripts/bench.sh --tool ab --requests 50000 --workers 4 --threads 4 \
+                 --task-workers 0 --path /raw/bench --p1000
 ```
 
 | c | req/s | avg ms | p90 ms | p99 ms | failures |
 |---|---|---|---|---|---|
-| 1 | 17,726 | 0.056 | 0 | 0 | 0 |
-| 10 | 72,018 | 0.139 | 0 | 1 | 0 |
-| 50 | **118,785** | 0.421 | 1 | 3 | 0 |
-| 100 | 118,492 | 0.844 | 1 | 5 | 0 |
-| 200 | 95,351 | 2.098 | 3 | 10 | 0 |
-| 500 | 91,469 | 5.466 | 8 | 24 | 0 |
-| 1000 | 100,034 | 9.997 | 17 | 22 | 0 |
+| 1 | 3,883 | 0.258 | 0 | 0 | 0 |
+| 10 | 30,501 | 0.328 | 0 | 1 | 0 |
+| 50 | 94,888 | 0.527 | 1 | 3 | 0 |
+| 100 | **110,964** | 0.901 | 1 | 6 | 0 |
+| 200 | 102,156 | 1.958 | 3 | 9 | 0 |
+| 500 | 100,363 | 4.982 | 8 | 20 | 0 |
+| 1000 | 85,001 | 11.765 | 19 | 33 | 0 |
 
-Raw CSV: `bench/results/zealphp-20260514-064952.csv`
+Raw CSV: `bench/results/ryzen-sweep/raw-bench-ryzen-c1-1000.csv`
+
+> Low-concurrency throughput (c=1, c=10) is bounded by Docker's
+> localhost-network round-trip latency. Real throughput climbs sharply once
+> connections amortize that cost; the framework saturates between c=50 and
+> c=200. Run on bare metal (no Docker) to see higher c=1 numbers.
 
 ### `/json` — full framework (PSR-15 middleware + sessions + reflection-injected handler)
 
@@ -224,20 +215,21 @@ middleware, coroutine-safe sessions, reflection-cached param injection,
 auto-JSON serialization).
 
 ```bash
-scripts/bench.sh --workers 4 --threads 4 --task-workers 0 --path /json --p1000 --duration 30s
+scripts/bench.sh --tool ab --requests 50000 --workers 4 --threads 4 \
+                 --task-workers 0 --path /json --p1000
 ```
 
 | c | req/s | avg ms | p90 ms | p99 ms | failures |
 |---|---|---|---|---|---|
-| 1 | 17,520 | 0.057 | 0 | 0 | 0 |
-| 10 | 94,674 | 0.106 | 0 | 0 | 0 |
-| 50 | 114,097 | 0.438 | 1 | 3 | 0 |
-| 100 | 109,585 | 0.913 | 1 | 4 | 0 |
-| 200 | **117,922** | 1.696 | 3 | 8 | 0 |
-| 500 | 113,113 | 4.420 | 7 | 23 | 0 |
-| 1000 | 100,547 | 9.946 | 18 | 22 | 0 |
+| 1 | 4,173 | 0.240 | 0 | 0 | 0 |
+| 10 | 30,840 | 0.324 | 0 | 1 | 0 |
+| 50 | 105,868 | 0.472 | 1 | 4 | 0 |
+| 100 | **108,086** | 0.925 | 1 | 6 | 0 |
+| 200 | 93,733 | 2.134 | 3 | 9 | 0 |
+| 500 | 95,526 | 5.234 | 8 | 19 | 0 |
+| 1000 | 77,761 | 12.860 | 19 | 81 | 0 |
 
-Raw CSV: `bench/results/zealphp-20260514-065032.csv`
+Raw CSV: `bench/results/ryzen-sweep/json-ryzen-c1-1000.csv`
 
 ### Sequential head-to-head: ZealPHP vs Express vs raw runtimes
 

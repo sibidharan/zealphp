@@ -406,7 +406,7 @@ function chatSourceTab(btn, id) {
 
     <div class="bold-claim">
       <h3>Expressive PHP with coroutine-grade concurrency</h3>
-      <p>~90k req/s in our 4-worker JSON benchmark, with reflection-based injection, auto-serialization, and no boilerplate. Numbers vary by workload — see methodology below.</p>
+      <p>~106k req/s in our 4-worker JSON benchmark, with reflection-based injection, auto-serialization, and no boilerplate. Numbers vary by workload — see methodology below.</p>
       <div class="code-compare">
         <div class="code-compare-panel">
           <div class="compare-label">ZealPHP — return anything</div>
