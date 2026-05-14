@@ -6,8 +6,8 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use OpenSwoole\Core\Psr\Response;
+use ZealPHP\G;
 use function ZealPHP\response_add_header;
-use function ZealPHP\response_set_status;
 
 /**
  * CORS Middleware
@@ -52,25 +52,25 @@ class CorsMiddleware implements MiddlewareInterface
     {
         $origin        = $request->getHeaderLine('Origin');
         $allowedOrigin = $this->resolveOrigin($origin);
+        $g = G::instance();
+        $resp = $g->zealphp_response;
 
-        // CORS preflight — only intercept OPTIONS that have an Origin header
         if ($request->getMethod() === 'OPTIONS' && $origin !== '') {
-            response_set_status(204);
-            response_add_header('Access-Control-Allow-Origin',      $allowedOrigin);
-            response_add_header('Access-Control-Allow-Methods',     implode(', ', $this->methods));
-            response_add_header('Access-Control-Allow-Headers',     implode(', ', $this->headers));
-            response_add_header('Access-Control-Max-Age',           (string)$this->maxAge);
-            response_add_header('Access-Control-Allow-Credentials', $this->credentials ? 'true' : 'false');
-            response_add_header('Vary',                             'Origin');
+            $g->status = 204;
+            $resp->header('Access-Control-Allow-Origin',      $allowedOrigin);
+            $resp->header('Access-Control-Allow-Methods',     implode(', ', $this->methods));
+            $resp->header('Access-Control-Allow-Headers',     implode(', ', $this->headers));
+            $resp->header('Access-Control-Max-Age',           (string)$this->maxAge);
+            $resp->header('Access-Control-Allow-Credentials', $this->credentials ? 'true' : 'false');
+            $resp->header('Vary',                             'Origin');
             return new Response('', 204);
         }
 
         $response = $handler->handle($request);
 
-        // Add CORS headers to every response
-        response_add_header('Access-Control-Allow-Origin',      $allowedOrigin);
-        response_add_header('Access-Control-Allow-Credentials', $this->credentials ? 'true' : 'false');
-        response_add_header('Vary',                             'Origin');
+        $resp->header('Access-Control-Allow-Origin',      $allowedOrigin);
+        $resp->header('Access-Control-Allow-Credentials', $this->credentials ? 'true' : 'false');
+        $resp->header('Vary',                             'Origin');
 
         return $response;
     }

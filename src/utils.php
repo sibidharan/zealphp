@@ -661,8 +661,14 @@ function access_log($status = 200, $length){
         return;
     }
     $g = G::instance();
-    $time = date('d/M/Y:H:i:s');
-    $time .= substr((string)microtime(), 1, 6);
+    static $cachedDate = '';
+    static $cachedSecond = 0;
+    $now = time();
+    if ($now !== $cachedSecond) {
+        $cachedDate = date('d/M/Y:H:i:s');
+        $cachedSecond = $now;
+    }
+    $time = $cachedDate . substr((string)microtime(), 1, 6);
     $remote = $g->server['REMOTE_ADDR'];
     $request = $g->server['REQUEST_METHOD'].' '.$g->server['REQUEST_URI'].' '.$g->server['SERVER_PROTOCOL'];
     $referer = $g->server['HTTP_REFERER'] ?? '-';

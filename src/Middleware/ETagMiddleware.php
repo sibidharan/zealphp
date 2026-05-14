@@ -32,7 +32,6 @@ class ETagMiddleware implements MiddlewareInterface
             return $response;
         }
 
-        // Skip streaming — body was already sent, PSR response body is empty
         $g = G::instance();
         if ($g->_streaming ?? false) {
             return $response;
@@ -43,16 +42,16 @@ class ETagMiddleware implements MiddlewareInterface
             return $response;
         }
 
-        $etag        = 'W/"' . md5($body) . '"';
+        $etag        = 'W/"' . hash('xxh3', $body) . '"';
         $ifNoneMatch = $request->getHeaderLine('If-None-Match');
 
         if ($ifNoneMatch !== '' && $ifNoneMatch === $etag) {
-            response_set_status(304);
-            response_add_header('ETag', $etag);
+            $g->status = 304;
+            $g->zealphp_response->header('ETag', $etag);
             return new Response('', 304);
         }
 
-        response_add_header('ETag', $etag);
+        $g->zealphp_response->header('ETag', $etag);
         return $response;
     }
 }

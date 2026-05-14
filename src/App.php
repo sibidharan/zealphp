@@ -1419,7 +1419,7 @@ class ResponseMiddleware implements MiddlewareInterface
             ob_start();
             $object = call_user_func_array($handler, $invokeArgs);
 
-            // Generator streaming — yield chunks directly to the client
+            // Fast paths — discard output buffer without string copy
             if ($object instanceof \Generator) {
                 ob_end_clean();
                 $g->zealphp_response->flush();
@@ -1434,37 +1434,47 @@ class ResponseMiddleware implements MiddlewareInterface
                 return (new Response('', $g->status ?? 200));
             }
 
-            // stream() / sse() — response body already sent via write()
             if ($g->_streaming ?? false) {
                 ob_end_clean();
                 return (new Response('', $g->status ?? 200));
             }
 
-            if(is_int($object)){
-                $status = (int)$object;
-            } else {
-                $status = $g->status ?? 200;;
+            if (is_int($object)) {
+                ob_end_clean();
+                return (new Response('', (int)$object));
             }
 
-            if($object instanceof ResponseInterface){
+            $status = $g->status ?? 200;
+
+            if ($object instanceof ResponseInterface) {
                 ob_end_clean();
-                $body = $object->getBody();
-                $body->rewind();
-                elog("ResponseMiddleware process() received ResponseInterface > ".$body->getContents());
                 return $object;
             }
 
-            if(is_array($object) or is_object($object)){
-                response_add_header('Content-Type', 'application/json');
-                echo json_encode($object);
-            } else if (is_string($object)){
-                echo $object;
+            if (is_array($object) || is_object($object)) {
+                ob_end_clean();
+                $body = json_encode($object);
+                $g->zealphp_response->header('Content-Type', 'application/json');
+                if ($method === 'HEAD') {
+                    $g->zealphp_response->header('Content-Length', (string)strlen($body));
+                    return (new Response('', $status));
+                }
+                return (new Response($body, $status));
             }
 
+            if (is_string($object)) {
+                ob_end_clean();
+                if ($method === 'HEAD') {
+                    $g->zealphp_response->header('Content-Length', (string)strlen($object));
+                    return (new Response('', $status));
+                }
+                return (new Response($object, $status));
+            }
+
+            // void + echo — only path that needs the buffered output
             $buffer = ob_get_clean();
-            // HEAD — return headers only, body stripped (Content-Length preserved)
             if ($method === 'HEAD') {
-                response_add_header('Content-Length', (string)strlen($buffer));
+                $g->zealphp_response->header('Content-Length', (string)strlen($buffer));
                 return (new Response('', $status));
             }
             return (new Response($buffer, $status));
