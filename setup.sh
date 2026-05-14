@@ -84,6 +84,11 @@ is_root() {
         echo -e "${RED}Please run as root.${RESET}"
         return 1 # Not root
     fi
+    # Suppress interactive apt prompts (tzdata, etc.) — required for
+    # `curl … | sudo bash` and for fresh Docker images where the timezone
+    # dialog would otherwise hang the install.
+    export DEBIAN_FRONTEND=noninteractive
+    export TZ="${TZ:-Etc/UTC}"
     return 0 # Root
 }
 
@@ -119,7 +124,17 @@ print_welcome_message() {
 
 # Function to get user confirmation for the setup
 # Returns 0 if the user chooses to continue, 1 if the user chooses to abort
+#
+# Auto-confirms in non-interactive mode (no TTY on stdin), which is the
+# normal case for `curl -fsSL ... | sudo bash` — stdin is the script
+# stream, not a terminal, so blocking on `read` would deadlock.
+# Set ZEALPHP_NO_PROMPT=1 to force auto-confirm even on a TTY.
 get_confirmation() {
+    if [ "${ZEALPHP_NO_PROMPT:-0}" = "1" ] || ! [ -t 0 ]; then
+        echo -e "${YELLOW}Non-interactive mode: auto-confirming.${RESET}"
+        echo -e "${YELLOW}Set ZEALPHP_NO_PROMPT=0 and run from a TTY to be prompted.${RESET}"
+        return 0
+    fi
     while true; do
         read -rp "Do you want to continue? (y/n): " choice
         case "$choice" in
@@ -163,7 +178,7 @@ install_add_apt_repository() {
 # Function to check PHP is installed and version is compatible or not.
 # If not compatible returns 1 else returns 0
 check_php_version() {
-    local required_version="8.1"
+    local required_version="8.3"
     local current_version=$(php -r "echo PHP_VERSION;" 2>/dev/null)
 
     if [ -z "$current_version" ]; then
@@ -185,7 +200,13 @@ check_php_version() {
 # 3. Abort the setup (due to incompatibility) (returns 1)
 get_php_version_confirmation() {
     echo -e "${YELLOW}PHP version is not compatible.${RESET}"
-    echo -e "${YELLOW}Minimum required PHP version is 7.4.${RESET}"
+    echo -e "${YELLOW}Minimum required PHP version is 8.3 (composer.json: \"php\": \"^8.3\").${RESET}"
+
+    # Non-interactive: default to option 2 (install alongside, safest)
+    if [ "${ZEALPHP_NO_PROMPT:-0}" = "1" ] || ! [ -t 0 ]; then
+        echo -e "${YELLOW}Non-interactive mode: keeping existing PHP and installing 8.3 alongside.${RESET}"
+        return 0
+    fi
 
     echo -e "${YELLOW}Please choose one of the following options:${RESET}"
     echo -e "${YELLOW}1. Remove current PHP version and install PHP 8.3${RESET}"
@@ -536,6 +557,59 @@ macos_setup() {
 if [ "$(uname -s)" = "Darwin" ]; then
     macos_setup || exit 1
     exit 0
+fi
+
+# Detect Linux distribution and bail with helpful guidance on unsupported envs.
+# Without this, the apt flow below on RHEL/Arch/Alpine produced confusing
+# "apt-get: command not found" errors with no hint of where to go next.
+if [ "$(uname -s)" != "Linux" ]; then
+    echo -e "${RED}Unsupported OS: $(uname -s).${RESET}"
+    echo -e "${YELLOW}setup.sh currently supports:${RESET}"
+    echo -e "  - macOS (via Homebrew)"
+    echo -e "  - Linux: Ubuntu / Debian (and apt-based derivatives)"
+    echo -e ""
+    echo -e "For Windows, use WSL2 with Ubuntu and re-run setup.sh inside it."
+    echo -e "Manual install steps: https://php.zeal.ninja/getting-started#install"
+    exit 1
+fi
+
+DISTRO_ID=""
+DISTRO_NAME="$(uname -s)"
+if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    DISTRO_ID="${ID:-}"
+    DISTRO_NAME="${PRETTY_NAME:-$ID}"
+fi
+
+case "$DISTRO_ID" in
+    ubuntu|debian|linuxmint|pop|elementary|kali|raspbian|neon)
+        : # supported via apt
+        ;;
+    "")
+        echo -e "${YELLOW}Could not detect distribution (no /etc/os-release).${RESET}"
+        echo -e "${YELLOW}Assuming Debian/Ubuntu — apt commands will be attempted.${RESET}"
+        ;;
+    *)
+        echo -e "${RED}Unsupported Linux distribution: ${DISTRO_NAME}.${RESET}"
+        echo -e "${YELLOW}setup.sh's automated apt flow runs on Ubuntu, Debian, and their derivatives.${RESET}"
+        echo -e ""
+        echo -e "For ${DISTRO_NAME}, please install the following manually:"
+        echo -e "  ${WHITE}1.${RESET} PHP 8.3+ (cli + dev headers)"
+        echo -e "  ${WHITE}2.${RESET} ${WHITE}ext-openswoole${RESET} via PECL"
+        echo -e "  ${WHITE}3.${RESET} ${WHITE}ext-uopz${RESET} via PECL"
+        echo -e "  ${WHITE}4.${RESET} composer"
+        echo -e ""
+        echo -e "Detailed steps: ${MAGENTA}https://php.zeal.ninja/getting-started#install${RESET}"
+        echo -e "Or use Docker: ${MAGENTA}docker compose up app${RESET} from a cloned checkout."
+        exit 1
+        ;;
+esac
+
+if ! command -v apt-get >/dev/null 2>&1; then
+    echo -e "${RED}apt-get not found on this system, but distribution detected as ${DISTRO_NAME}.${RESET}"
+    echo -e "${YELLOW}setup.sh requires apt-get for the Linux flow. If you're on a minimal image, install it first.${RESET}"
+    exit 1
 fi
 
 is_root || exit 1

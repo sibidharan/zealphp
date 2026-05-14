@@ -5,6 +5,27 @@
     <h1 class="section-title">Getting Started</h1>
     <p class="section-desc">From a fresh machine to a running ZealPHP app — install dependencies, scaffold a project, write your first route, deploy.</p>
 
+    <!-- TL;DR install — surfaced above the architecture diagram so visitors
+         who just want to try it can copy a single line. Full walkthrough
+         (with manual steps, scaffold, first page, deploy) lives below. -->
+    <div class="callout info" style="margin:1.25rem 0 2rem;padding:1.1rem 1.3rem;border-left:4px solid var(--accent)">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem;font-weight:700;color:var(--text)">
+        <span style="font-size:1.1rem">⚡</span>
+        <span>TL;DR — install in one line</span>
+        <span style="margin-left:auto;font-size:.7rem;color:var(--text-muted);font-weight:500">Ubuntu / Debian · macOS · WSL2</span>
+      </div>
+      <div class="qs-block" style="background:#0c0a09;color:#e7e5e4;padding:.8rem 1rem;margin:0">
+        <div class="qs-line" style="display:flex;align-items:center;gap:.5rem;font-family:var(--font-mono);font-size:.92rem">
+          <span class="qs-prompt" style="color:#a8a29e">$</span>
+          <span class="qs-cmd" style="flex:1">curl -fsSL https://php.zeal.ninja/install.sh | sudo bash</span>
+          <button class="qs-copy" data-copy="curl -fsSL https://php.zeal.ninja/install.sh | sudo bash" style="background:rgba(245,158,11,.15);color:var(--accent);border:1px solid rgba(245,158,11,.3);padding:.25rem .6rem;border-radius:4px;font-size:.75rem;cursor:pointer">copy</button>
+        </div>
+      </div>
+      <p style="margin:.65rem 0 0;font-size:.82rem;color:var(--text-muted)">
+        Installs PHP 8.3 + OpenSwoole + uopz + composer. Auto-detects your distro and bails with manual steps if it can't install for you (Fedora, Arch, Alpine, etc.). The detailed walkthrough below covers manual install, Docker, scaffolding, and deploy. <a href="#install" style="color:var(--accent);font-weight:600">Inspect the script first ↓</a>
+      </p>
+    </div>
+
     <!-- One Server. Everything. -->
     <div class="arch-compare" style="margin:2rem 0 2.5rem">
       <div class="arch-box complex">
