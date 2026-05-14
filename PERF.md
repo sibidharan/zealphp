@@ -161,6 +161,77 @@ Summary table:
 
 ---
 
+## v0.2.0 Baseline — 4-core Linux container
+
+This is the run that backs the headline number in the README.
+
+| Field | Value |
+|-------|-------|
+| Date | 2026-05-14 |
+| Machine | 4-core Linux container (24-core host, CPU-limited) |
+| OS | Ubuntu 24.04.4 LTS |
+| PHP | 8.3.6 (cli, NTS) |
+| OpenSwoole | 26.2.0 |
+| Tool | `ab` (ApacheBench 2.3) |
+| HTTP workers | 4 |
+| Task workers | 0 |
+| Warmup | 5s |
+| Duration per concurrency | 30s |
+| Sweep | c = 1, 10, 50, 100, 200, 500, 1000 |
+
+### `/raw/bench` — lean runtime (no demo middleware)
+
+```bash
+scripts/bench.sh --workers 4 --threads 4 --task-workers 0 --p1000 --duration 30s
+```
+
+| c | req/s | avg ms | p90 ms | p99 ms | failures |
+|---|---|---|---|---|---|
+| 1 | 17,726 | 0.056 | 0 | 0 | 0 |
+| 10 | 72,018 | 0.139 | 0 | 1 | 0 |
+| 50 | **118,785** | 0.421 | 1 | 3 | 0 |
+| 100 | 118,492 | 0.844 | 1 | 5 | 0 |
+| 200 | 95,351 | 2.098 | 3 | 10 | 0 |
+| 500 | 91,469 | 5.466 | 8 | 24 | 0 |
+| 1000 | 100,034 | 9.997 | 17 | 22 | 0 |
+
+Raw CSV: `bench/results/zealphp-20260514-064952.csv`
+
+### `/json` — full framework (PSR-15 middleware + sessions + reflection-injected handler)
+
+`/json` returns the per-coroutine session via `G::instance()->session`, so it
+exercises the entire request lifecycle (CORS / ETag / Range / Compression
+middleware, coroutine-safe sessions, reflection-cached param injection,
+auto-JSON serialization).
+
+```bash
+scripts/bench.sh --workers 4 --threads 4 --task-workers 0 --path /json --p1000 --duration 30s
+```
+
+| c | req/s | avg ms | p90 ms | p99 ms | failures |
+|---|---|---|---|---|---|
+| 1 | 17,520 | 0.057 | 0 | 0 | 0 |
+| 10 | 94,674 | 0.106 | 0 | 0 | 0 |
+| 50 | 114,097 | 0.438 | 1 | 3 | 0 |
+| 100 | 109,585 | 0.913 | 1 | 4 | 0 |
+| 200 | **117,922** | 1.696 | 3 | 8 | 0 |
+| 500 | 113,113 | 4.420 | 7 | 23 | 0 |
+| 1000 | 100,547 | 9.946 | 18 | 22 | 0 |
+
+Raw CSV: `bench/results/zealphp-20260514-065032.csv`
+
+### Notes
+
+- Single-machine numbers. Your hardware, OS limits, payload size, and middleware
+  set will move these around. Reproduce locally before quoting.
+- Both endpoints sustain peak throughput at c = 50–200 and degrade gracefully at
+  c = 1000 (latency rises, throughput holds within ~15% of peak, zero errors).
+- 4 workers ≈ 4 cores: this is a deliberate baseline. The framework is multi-process;
+  doubling workers on a wider machine should scale further until the workload
+  saturates I/O or coroutine context-switching.
+
+---
+
 ## Metrics
 
 | Metric | Meaning |
@@ -217,3 +288,41 @@ of performing a filesystem stat on every session start.
 
 The demo app uses `App::superglobals(false)`, enabling coroutine mode and
 OpenSwoole hook integration for concurrent IO.
+
+### v0.2.0 — declared hot properties on G (`src/G.php`)
+
+`G::instance()` was using `__get`/`__set` magic on every property access for
+the request context (`$g->session`, `$g->get`, `$g->server`, etc.). Hot
+properties are now declared on the class so PHP skips the magic method
+dispatch entirely on every read.
+
+### v0.2.0 — lazy PSR-7 ServerRequest (`src/HTTP/LazyServerRequest.php`)
+
+The PSR-7 `ServerRequest` used to be fully hydrated (headers, parsed body,
+uploaded files, query params) at the start of every request. It is now
+constructed lazily — components are populated only when middleware or handlers
+actually access them.
+
+### v0.2.0 — xxh3 ETag + middleware skips G::instance() (`src/Middleware/ETagMiddleware.php`)
+
+`md5()` ETag generation was replaced with `xxh3`, which is ~3-4× faster on
+typical response sizes. The ETag middleware also no longer calls
+`G::instance()` per request — the closure receives `$g` from the upstream
+middleware via the PSR-15 attributes.
+
+### v0.2.0 — skip `ob_get_clean()` for typed returns (`src/App.php`)
+
+Route handlers that return scalars, arrays, objects, or `Generator`s no
+longer pay the output-buffering tax. `ResponseMiddleware` only calls
+`ob_get_clean()` for handlers that use `echo` (the `void` return path).
+
+### v0.2.0 — lazy session start (`src/Session/CoSessionManager.php`)
+
+Session files used to be opened/read at the start of every request, even on
+routes that never touched `$_SESSION`. Sessions now initialise lazily on
+first `$g->session` access.
+
+### v0.2.0 — drop `JSON_PRETTY_PRINT` from default encoder
+
+Auto-JSON serialization in route handlers no longer uses `JSON_PRETTY_PRINT`
+by default — saving ~15% on JSON serialization time for typical payloads.
