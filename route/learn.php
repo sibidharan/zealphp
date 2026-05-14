@@ -208,6 +208,12 @@ $app->route('/api/learn/register', ['methods' => ['POST']], function($request, $
     if (session_status() !== PHP_SESSION_ACTIVE) session_start();
     $_SESSION['user_id'] = $userId;
     $_SESSION['username'] = $creds['username'];
+    // ZealPHP's CoSessionManager only sends Set-Cookie + writes the
+    // session file when the request already had a PHPSESSID cookie.
+    // For a brand-new session we have to emit the cookie AND force
+    // the session file write before the request ends.
+    setcookie('PHPSESSID', session_id(), 0, '/', '', false, true);
+    session_write_close();
     $response->redirect('/learn/notes', 302);
 });
 
@@ -228,6 +234,12 @@ $app->route('/api/learn/login', ['methods' => ['POST']], function($request, $res
     if (session_status() !== PHP_SESSION_ACTIVE) session_start();
     $_SESSION['user_id'] = $userId;
     $_SESSION['username'] = $creds['username'];
+    // ZealPHP's CoSessionManager only sends Set-Cookie + writes the
+    // session file when the request already had a PHPSESSID cookie.
+    // For a brand-new session we have to emit the cookie AND force
+    // the session file write before the request ends.
+    setcookie('PHPSESSID', session_id(), 0, '/', '', false, true);
+    session_write_close();
     $response->redirect('/learn/notes', 302);
 });
 
