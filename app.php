@@ -100,6 +100,13 @@ $app->route('/raw/bench', ['raw' => true], function() {
     return 'You requested: bench';
 });
 
+// One-line installer: curl -fsSL https://php.zeal.ninja/install.sh | sudo bash
+// Streams the repo's setup.sh from the project root with a text/x-shellscript
+// content-type so the browser shows it inline and curl + bash both accept it.
+$app->route('/install.sh', function($response) {
+    $response->sendFile(__DIR__ . '/setup.sh');
+});
+
 $app->route('/bench/template', function() {
     App::render('/bench_page', [
         'title' => 'ZealPHP Benchmark',

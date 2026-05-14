@@ -71,16 +71,34 @@
       <strong>PHP 8.3, 8.4, or 8.5.</strong> OpenSwoole 22.1+ works on PHP 8.3 and 8.4; OpenSwoole 26.2+ (released Feb 2026) added PHP 8.5 support. If you only have one PHP version available, 8.3 is the safest default.
     </div>
 
-    <p>The framework repo ships a <code>setup.sh</code> that handles everything for Ubuntu/Debian:</p>
+    <p>One-line install on Ubuntu/Debian — pipes <code>setup.sh</code> straight from this site, no clone required:</p>
 
     <?php App::render('/components/_code', [
-      'label' => 'One-command install (Ubuntu/Debian)',
+      'label' => 'One-line install (Ubuntu/Debian)',
+      'lang' => 'bash',
+      'code' => <<<'BASH'
+curl -fsSL https://php.zeal.ninja/install.sh | sudo bash
+# Installs: PHP 8.3, OpenSwoole, uopz, composer
+BASH
+    ]); ?>
+
+    <div class="callout info" style="margin-top:.75rem">
+      <strong>Want to inspect before piping to <code>sudo</code>?</strong>
+      <br>
+      <code style="display:block;margin-top:.5rem;padding:.5rem .75rem;background:rgba(0,0,0,.05);border-radius:4px;font-size:.85rem">curl -fsSL https://php.zeal.ninja/install.sh -o install.sh &amp;&amp; less install.sh &amp;&amp; sudo bash install.sh</code>
+      Or fetch from GitHub directly to pin a specific commit:
+      <code style="display:block;margin-top:.5rem;padding:.5rem .75rem;background:rgba(0,0,0,.05);border-radius:4px;font-size:.85rem">curl -fsSL https://raw.githubusercontent.com/sibidharan/zealphp/master/setup.sh | sudo bash</code>
+    </div>
+
+    <p style="margin-top:1.5rem">If you'd rather clone first (e.g. you want to send a PR):</p>
+
+    <?php App::render('/components/_code', [
+      'label' => 'From a cloned checkout',
       'lang' => 'bash',
       'code' => <<<'BASH'
 git clone https://github.com/sibidharan/zealphp.git
 cd zealphp
 sudo bash setup.sh
-# Installs: PHP 8.3, OpenSwoole, uopz, composer
 BASH
     ]); ?>
 
