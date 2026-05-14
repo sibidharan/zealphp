@@ -106,7 +106,13 @@ class ZealAPI extends REST
                         }
                     }
                     ob_start();
-                    $object = $this->$func(...$invokeArgs);;
+                    // Invoke the closure directly. It was Closure::bind'd to
+                    // $this above, so $this inside the closure is still the
+                    // ZealAPI instance. Going through $this->$func(...) instead
+                    // would round-trip through __call, and a typo inside the
+                    // closure (e.g. $this->paramExist vs $this->paramsExists)
+                    // would then proxy back to the same closure → infinite loop.
+                    $object = $handler(...$invokeArgs);
                     if(is_int($object)){
                         $status = (int)$object;
                     } else {
@@ -198,17 +204,50 @@ class ZealAPI extends REST
         $this->response($data, $response_code);
     }
 
-    //TODO: Buggy current-call- hangs if calling nonexisting method inside API.
+    /**
+     * Catch missing-method calls from inside an API handler closure (e.g. a typo
+     * like $this->paramExist instead of $this->paramsExists).
+     *
+     * Previously this proxied to $this->api_rpc — but api_rpc IS the closure
+     * we're currently executing, so the proxy re-invoked it and infinitely
+     * recursed until stack overflow. processApi() now invokes the closure
+     * directly, so __call is only reached on actual typos. Surface the typo
+     * loudly with a "did you mean" hint so developers don't waste time
+     * staring at "method_not_callable" wondering what's wrong.
+     */
     public function __call($method, $args)
     {
-        
-        if (is_callable($this->api_rpc)) {
-            return call_user_func_array($this->api_rpc, $args);
-        } else {
-            $error = ['error'=>'methood_not_callable', 'method'=>$method];
-            // logit($error, "fatal");
-            $this->response($this->json($error), 404);
+        $available = get_class_methods($this);
+        $suggestion = null;
+        $bestDistance = PHP_INT_MAX;
+        foreach ($available as $candidate) {
+            if (str_starts_with($candidate, '__')) continue;
+            $d = levenshtein(strtolower($method), strtolower($candidate));
+            if ($d < $bestDistance) {
+                $bestDistance = $d;
+                $suggestion = $candidate;
+            }
         }
+        // Only suggest when the typo is plausibly close (≤3 edits and ≤40% of name length)
+        $closeEnough = $suggestion !== null
+            && $bestDistance <= 3
+            && $bestDistance <= max(1, (int) floor(strlen($method) * 0.4));
+
+        $error = [
+            'error'  => 'undefined_method',
+            'method' => $method,
+            'hint'   => 'No method ZealPHP\\ZealAPI::' . $method . '() exists. '
+                      . 'Check spelling — common typo: paramExist vs paramsExists.',
+        ];
+        if ($closeEnough) {
+            $error['did_you_mean'] = $suggestion;
+        }
+        elog(
+            "ZealAPI: undefined method \$this->{$method}() called from API handler"
+            . ($closeEnough ? " — did you mean \$this->{$suggestion}()?" : ''),
+            'error'
+        );
+        $this->response($this->json($error), 404);
     }
 
     /*
