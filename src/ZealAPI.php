@@ -18,6 +18,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 class ZealAPI extends REST
 {
     public $data = "";
+    private static array $reflectionCache = [];
 
     private $api_rpc;
     private $auth = null;
@@ -61,12 +62,16 @@ class ZealAPI extends REST
                     }
                     $g->server['PHP_SELF'] = $module.'/'.$request.'.php';
                     $handler = $this->api_rpc;
-                    $reflection = is_array($handler)
-                    ? new \ReflectionMethod($handler[0], $handler[1])
-                    : new \ReflectionFunction($handler);
+                    $cacheKey = $file . ':' . $func;
+                    if (!isset(self::$reflectionCache[$cacheKey])) {
+                        $reflection = is_array($handler)
+                            ? new \ReflectionMethod($handler[0], $handler[1])
+                            : new \ReflectionFunction($handler);
+                        self::$reflectionCache[$cacheKey] = $reflection->getParameters();
+                    }
 
                     $invokeArgs = [];
-                    foreach ($reflection->getParameters() as $param) {
+                    foreach (self::$reflectionCache[$cacheKey] as $param) {
                         $pname = $param->getName();
                         if (isset($params[$pname])) {
                             $invokeArgs[] = $params[$pname];

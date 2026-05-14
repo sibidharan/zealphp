@@ -502,10 +502,17 @@ class App
         $__output = ob_get_clean();
 
         if ($__result instanceof \Closure) {
-            $__ref = new \ReflectionFunction($__result);
+            static $__reflCache = [];
+            if (!isset($__reflCache[$__template_file_path])) {
+                $__ref = new \ReflectionFunction($__result);
+                $__reflCache[$__template_file_path] = array_map(
+                    fn($__p) => ['name' => $__p->getName(), 'default' => $__p->isDefaultValueAvailable() ? $__p->getDefaultValue() : null],
+                    $__ref->getParameters()
+                );
+            }
             $__params = [];
-            foreach ($__ref->getParameters() as $__p) {
-                $__params[] = $__args[$__p->getName()] ?? ($__p->isDefaultValueAvailable() ? $__p->getDefaultValue() : null);
+            foreach ($__reflCache[$__template_file_path] as $__p) {
+                $__params[] = $__args[$__p['name']] ?? $__p['default'];
             }
             $__gen = $__result(...$__params);
             if ($__gen instanceof \Generator) {
@@ -1354,7 +1361,7 @@ class ResponseMiddleware implements MiddlewareInterface
                 $status = $g->status ?? 200;
                 if (is_array($object) or is_object($object)) {
                     response_add_header('Content-Type', 'application/json');
-                    $body = json_encode($object, JSON_PRETTY_PRINT);
+                    $body = json_encode($object);
                 } else if (is_string($object)) {
                     $body = $object;
                 } else {
@@ -1449,7 +1456,7 @@ class ResponseMiddleware implements MiddlewareInterface
 
             if(is_array($object) or is_object($object)){
                 response_add_header('Content-Type', 'application/json');
-                echo json_encode($object, JSON_PRETTY_PRINT);
+                echo json_encode($object);
             } else if (is_string($object)){
                 echo $object;
             }
