@@ -161,9 +161,28 @@ Summary table:
 
 ---
 
-## v0.2.0 Baseline — 4-core Linux container
+## v0.2.0 Baseline — AMD Ryzen 9 7900X
 
-This is the run that backs the headline number in the README.
+This is the run that backs the headline numbers in the README and homepage.
+
+### Head-to-head environment
+
+| Field | Value |
+|-------|-------|
+| Date | 2026-05-14 |
+| Machine | AMD Ryzen 9 7900X (12 cores), 24 GB RAM |
+| OS | Ubuntu 22.04.4 LTS (Docker, native Linux — near-zero overhead) |
+| PHP | 8.3.31 (cli, NTS) |
+| OpenSwoole | 26.2.0 |
+| Node.js | 24.11.1 |
+| Tool | `ab` (ApacheBench 2.3) |
+| HTTP workers | 4 |
+| Task workers | 0 |
+| Method | Each stack tested **alone** with full machine resources |
+| Requests | 50,000 per endpoint per stack |
+| Concurrency | 200 |
+
+### Concurrency sweep environment (ZealPHP solo)
 
 | Field | Value |
 |-------|-------|
@@ -222,9 +241,9 @@ Raw CSV: `bench/results/zealphp-20260514-065032.csv`
 
 ### Sequential head-to-head: ZealPHP vs Express vs raw runtimes
 
-Same machine, same time window (2026-05-14), 4 workers per server, each runtime
-tested **sequentially** (not simultaneously) so each got the full 4 cores while
-being measured. This matches the homepage table.
+AMD Ryzen 9 7900X (12 cores), 24 GB RAM, Ubuntu 22.04, Docker (native Linux —
+near-zero overhead). Each runtime tested **alone** (not simultaneously) so each
+got the full machine while being measured. This matches the homepage table.
 
 ```bash
 ab -n 50000 -c 200 -k -l http://127.0.0.1:<port>/<endpoint>
@@ -232,22 +251,23 @@ ab -n 50000 -c 200 -k -l http://127.0.0.1:<port>/<endpoint>
 
 | Stack | /raw/bench (text) | /json | /bench/template |
 |---|---|---|---|
-| OpenSwoole raw (no framework) | 205,287 | 213,241 | — |
-| Node.js raw http (no framework) | 260,984 | 264,613 | — |
-| **ZealPHP — full PSR-15 middleware** | **70,041** | **67,546** | **51,241** |
-| Express.js — cors + etag + session + ejs | 45,347 | 42,531 | 14,778 (EJS) |
+| OpenSwoole raw (no framework) | 141,670 | 137,535 | — |
+| Node.js raw http (no framework) | 129,091 | 131,513 | — |
+| **ZealPHP — full PSR-15 middleware** | **116,851** | **105,681** | **49,863** |
+| Express.js — cors + etag + session + ejs | 19,994 | 21,741 | 12,470 (EJS) |
 
 Head-to-head (ZealPHP vs Express, full middleware stacks):
-- text: **+54%**
-- json: **+59%**
-- template: **+247%**
+- text: **+484%**
+- json: **+386%**
+- template: **+299%**
 
 Framework overhead (full stack vs raw runtime, both 4 workers):
-- ZealPHP retains 34% of OpenSwoole raw throughput on text, 32% on JSON
-- Express retains 17% of Node raw throughput on text, 16% on JSON
+- ZealPHP retains 82% of OpenSwoole raw throughput on text, 77% on JSON
+- Express retains 15% of Node raw throughput on text, 17% on JSON
 
-ZealPHP delivers ~2× the framework efficiency of Express here. The full
-sustained throughput beats Express across all three endpoint types even
+ZealPHP delivers ~5× the framework efficiency of Express — retaining 82%
+of its raw runtime's throughput vs Express's 15%. The full sustained
+throughput beats Express by 4–5× across all three endpoint types even
 with sessions, CORS, ETag, and reflection-based handler injection active.
 
 ### Notes

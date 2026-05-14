@@ -1,0 +1,13 @@
+FROM zealphp:local
+
+RUN apt-get update && apt-get install -y --no-install-recommends npm \
+    && rm -rf /var/lib/apt/lists/* \
+    && cd /tmp && npm install autocannon express cors express-session session-file-store ejs
+
+COPY node_raw.js node_express.js /tmp/bench/
+COPY run-docker.sh /tmp/bench/run.sh
+COPY run-full.sh /tmp/bench/run-full.sh
+RUN chmod +x /tmp/bench/run.sh /tmp/bench/run-full.sh
+
+WORKDIR /app
+CMD ["/tmp/bench/run.sh"]

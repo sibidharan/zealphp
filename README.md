@@ -28,10 +28,10 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **ZealAPI** | File-based REST: drop `api/users/get.php` → `/api/users/get` works automatically |
 | **Templating** | Nested `App::render()` / `App::renderToString()` — single `_master.php`, component-based |
 | **Sessions** | All `session_*()` functions overridden via uopz — coroutine-safe, per-request isolation |
-| **Unit tests** | PHPUnit 11 — 42 unit tests + 38 integration tests, all green |
+| **Unit tests** | PHPUnit 11 — 130 unit tests + 46 integration tests, all green |
 | **Benchmarks** | OpenSwoole-powered concurrency with a modular `scripts/bench.sh` runner for wrk/ab sweeps through c=1000 |
 
-> **Performance:** ~67K req/s on a JSON route with the full PSR-15 middleware stack (CORS + ETag + sessions + reflection-injected routing) on 4 workers / 4 cores, ~70K on raw text, ~51K on a templated page. Express on the same box with equivalent middleware lands at 42K / 45K / 14.7K. See [PERF.md](PERF.md) for the methodology, full latency sweep, and head-to-head table.
+> **Performance:** ~106K req/s on a JSON route with the full PSR-15 middleware stack (CORS + ETag + sessions + reflection-injected routing) on 4 workers, ~117K on raw text, ~50K on a templated page. Express on the same box with equivalent middleware lands at 22K / 20K / 12K. See [PERF.md](PERF.md) for the methodology, full latency sweep, and head-to-head table.
 > **Stability:** Alpha (v0.2.x). API may change between minor versions until v1.0. Pin to a specific version in production.
 
 ---

@@ -82,9 +82,9 @@ $siteUrl = site_url();
       <a href="https://github.com/sibidharan/zealphp/blob/master/scripts/bench_vs_express.sh" target="_blank" rel="noopener">reproduce locally</a>
     </div>
     <div class="bench">
-      <div class="bench-stat"><div class="num">70k</div><div class="label">req/s text</div><div class="sub">avg 2.9 ms</div></div>
-      <div class="bench-stat"><div class="num">67k</div><div class="label">req/s JSON</div><div class="sub">avg 3.0 ms</div></div>
-      <div class="bench-stat"><div class="num">51k</div><div class="label">req/s template</div><div class="sub">avg 3.9 ms</div></div>
+      <div class="bench-stat"><div class="num">117k</div><div class="label">req/s text</div><div class="sub">avg 1.7 ms</div></div>
+      <div class="bench-stat"><div class="num">106k</div><div class="label">req/s JSON</div><div class="sub">avg 1.9 ms</div></div>
+      <div class="bench-stat"><div class="num">50k</div><div class="label">req/s template</div><div class="sub">avg 4.0 ms</div></div>
       <div class="bench-stat"><div class="num">0</div><div class="label">failures</div><div class="sub">/ 150k reqs</div></div>
     </div>
     <div style="margin-top:1.5rem;position:relative">
@@ -100,14 +100,14 @@ $siteUrl = site_url();
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
           <td style="padding:.35rem .6rem;color:#94a3b8">OpenSwoole raw</td>
-          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">205k</td>
-          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">213k</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">142k</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">138k</td>
           <td style="padding:.35rem .6rem;text-align:right;color:#64748b">—</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
           <td style="padding:.35rem .6rem;color:#94a3b8">Node.js raw http</td>
-          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">260k</td>
-          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">264k</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">129k</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">132k</td>
           <td style="padding:.35rem .6rem;text-align:right;color:#64748b">—</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02)">
@@ -115,15 +115,15 @@ $siteUrl = site_url();
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
           <td style="padding:.4rem .6rem;color:var(--accent);font-weight:700">ZealPHP <span style="color:#64748b;font-weight:400;font-size:.68rem">built-in</span></td>
-          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">70k</td>
-          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">67k</td>
-          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">51k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">117k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">106k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">50k</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
           <td style="padding:.4rem .6rem;color:#e2e8f0">Express.js <span style="color:#64748b;font-size:.68rem">+5 npm pkgs</span></td>
-          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">45k</td>
-          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">42k</td>
-          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">15k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">20k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">22k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">12k</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02)">
           <td colspan="4" style="padding:.35rem .6rem;color:#64748b;font-size:.65rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700">Other PHP frameworks <span style="font-weight:400;text-transform:none;letter-spacing:0">(community benchmarks)</span></td>
