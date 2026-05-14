@@ -38,6 +38,12 @@ class Cache
     private static string $dir = '';
     private static bool $initialized = false;
 
+    private static ?Counter $hitsMem = null;
+    private static ?Counter $hitsFile = null;
+    private static ?Counter $misses = null;
+    private static ?Counter $spillsFile = null;
+    private static ?Counter $spillsFull = null;
+
     /**
      * Initialize the cache. Must be called before $app->run().
      *
@@ -65,6 +71,12 @@ class Cache
             'crc' => [\OpenSwoole\Table::TYPE_INT, 4],
         ]);
 
+        self::$hitsMem = new Counter(0);
+        self::$hitsFile = new Counter(0);
+        self::$misses = new Counter(0);
+        self::$spillsFile = new Counter(0);
+        self::$spillsFull = new Counter(0);
+
         if ($gcIntervalMs > 0) {
             self::registerGc($gcIntervalMs);
         }
@@ -90,6 +102,11 @@ class Cache
                 'ttl' => $expires,
                 'crc' => $crc,
             ]);
+            if (!$inMemory) {
+                self::$spillsFull?->increment();
+            }
+        } else {
+            self::$spillsFile?->increment();
         }
 
         $inFile = self::writeFile($hash, $serialized, $expires);
@@ -109,15 +126,18 @@ class Cache
             if ($row['ttl'] > 0 && $row['ttl'] < $now) {
                 Store::del(self::TABLE, $hash);
             } elseif (crc32($row['val']) === $row['crc']) {
+                self::$hitsMem?->increment();
                 return unserialize($row['val']);
             }
         }
 
         $file = self::readFile($hash);
         if ($file !== null) {
+            self::$hitsFile?->increment();
             return $file;
         }
 
+        self::$misses?->increment();
         return $default;
     }
 
@@ -193,6 +213,37 @@ class Cache
     public static function count(): int
     {
         return Store::count(self::TABLE);
+    }
+
+    /**
+     * Cache performance stats. All counters are cross-worker (atomic).
+     *
+     * Returns: [
+     *   'memory_entries' => int,   // current rows in memory tier
+     *   'hits_memory'    => int,   // get() served from memory
+     *   'hits_file'      => int,   // get() served from file (memory miss)
+     *   'misses'         => int,   // get() found nothing
+     *   'spills_oversize' => int,  // set() skipped memory (value > 8KB)
+     *   'spills_full'    => int,   // set() skipped memory (table full)
+     *   'hit_rate'       => float, // hits / (hits + misses), 0.0–1.0
+     * ]
+     */
+    public static function stats(): array
+    {
+        $hitsMem = self::$hitsMem?->get() ?? 0;
+        $hitsFile = self::$hitsFile?->get() ?? 0;
+        $misses = self::$misses?->get() ?? 0;
+        $total = $hitsMem + $hitsFile + $misses;
+
+        return [
+            'memory_entries'  => Store::count(self::TABLE),
+            'hits_memory'     => $hitsMem,
+            'hits_file'       => $hitsFile,
+            'misses'          => $misses,
+            'spills_oversize' => self::$spillsFile?->get() ?? 0,
+            'spills_full'     => self::$spillsFull?->get() ?? 0,
+            'hit_rate'        => $total > 0 ? round(($hitsMem + $hitsFile) / $total, 4) : 0.0,
+        ];
     }
 
     // -- Private helpers --
@@ -299,6 +350,11 @@ class Cache
             'ttl' => [\OpenSwoole\Table::TYPE_INT, 4],
             'crc' => [\OpenSwoole\Table::TYPE_INT, 4],
         ]);
+        self::$hitsMem = new Counter(0);
+        self::$hitsFile = new Counter(0);
+        self::$misses = new Counter(0);
+        self::$spillsFile = new Counter(0);
+        self::$spillsFull = new Counter(0);
         self::$initialized = true;
     }
 }
