@@ -265,6 +265,114 @@ with sessions, CORS, ETag, and reflection-based handler injection active.
 
 ---
 
+## Reproduce on your own machine
+
+Throughput numbers are hardware- and OS-bound; published figures are a
+starting point, not a contract. Run one of the three harnesses below on
+your own box and quote what you measure.
+
+### Prerequisites
+
+```bash
+# macOS (Homebrew)
+brew install wrk php openswoole composer node          # composer + node may already be present
+pecl install openswoole uopz
+
+# Linux (apt)
+sudo apt install -y wrk apache2-utils php-cli unzip curl
+# OpenSwoole + uopz: see setup.sh in the repo
+
+# Clone and install
+git clone https://github.com/sibidharan/zealphp && cd zealphp && composer install
+```
+
+Confirm extensions are loaded: `php -m | grep -E 'openswoole|uopz'`.
+
+### Three reproduction recipes
+
+| Harness | What it measures | Tool | Tracks variance? |
+|---|---|---|---|
+| `scripts/bench.sh` | ZealPHP alone, concurrency sweep on one or more endpoints | `wrk` if present, else `ab` | No (single long run per concurrency) |
+| `scripts/bench_compare.sh` | ZealPHP vs raw Node `http` server (sequential, same workers) | `wrk` | No |
+| `bench/compare-3way/run.sh` | ZealPHP vs raw Node vs Express, 10 samples, mean ± stddev | `autocannon` | **Yes** |
+
+Pick whichever matches the claim you want to verify.
+
+### Recipe 1 — single-stack sweep (matches the v0.2.0 baseline numbers above)
+
+```bash
+scripts/bench.sh --workers 4 --threads 4 --task-workers 0 \
+                 --paths /raw/bench,/json --p1000 --duration 30s
+# Output: bench/results/zealphp-<timestamp>.csv + bench/results/raw/*.txt
+```
+
+This reproduces the methodology behind §"v0.2.0 Baseline — 4-core Linux container".
+Pin to 4 workers via `--workers 4` so your number can be compared to the
+published numbers; scale workers up to match your physical cores after.
+
+### Recipe 2 — ZealPHP vs raw Node (matches §"Sequential head-to-head")
+
+```bash
+scripts/bench_compare.sh --workers 4 --threads 4 --p1000 --duration 30s
+# Output: bench/results/compare/quad-compare-<timestamp>.csv + summary CSV
+```
+
+Or via Docker so your local PHP/Node versions don't matter:
+
+```bash
+mkdir -p bench/results && docker compose run --rm --build compare
+```
+
+### Recipe 3 — 3-way with sample variance (added in this round)
+
+The CPU on shared/containerised hosts is noisy enough that a single 30-second
+run hides large per-sample swings. `bench/compare-3way/run.sh` runs 10 short
+samples per stack spread over time and reports both mean **and** standard
+deviation so you can see how stable each stack is.
+
+```bash
+cd /tmp && npm install autocannon express      # one-off
+./bench/compare-3way/run.sh                    # ~10 min wall time
+```
+
+Knobs at the top of the script: `WORKERS`, `CONNECTIONS`, `DURATION`,
+`ITERATIONS`, `GAP`, `PATHX`. See [bench/compare-3way/README.md](bench/compare-3way/README.md)
+for the parameter table.
+
+### Reading the result
+
+Two stacks with similar mean throughput can still differ a lot in
+*usefulness* — what you actually care about under bursty load is the
+per-sample stddev and the p99 tail. Recipe 3 prints both:
+
+```
+Stack       req/s mean   req/s sd    avg lat (ms)  p50    p90    p99
+----------- ------------ ----------- ------------- ------ ------ ------
+zeal               87406        9924          1.84   1.30   3.60   9.00
+raw               122056        3278          1.19   1.00   1.90   4.20
+express           122812        7233          1.23   1.00   2.00   4.40
+```
+
+The headline gap between stacks is **mean req/s**; the *quality* signal is
+how much that mean moves between samples (stddev). On the container these
+numbers were captured on, ZealPHP had ~3× the per-sample variance of raw
+Node — almost certainly an artefact of the shared/contended CPU. Run it
+yourself on dedicated hardware and the gap closes; if it doesn't, that's
+a real finding worth reporting in an issue.
+
+### Caveats specific to containers / shared CPU
+
+- Shared cores hide tail latency under noise from neighbour workloads.
+- File-descriptor limits matter at c = 1000+; check `ulimit -n` before benching.
+- Disable access/debug logging during the bench (`ZEALPHP_ACCESS_LOG=0`,
+  `ZEALPHP_DEBUG_LOG=0`), or the disk write path can dominate at high RPS.
+- If you're benching ZealPHP against another framework on the same box,
+  bench **sequentially**, not concurrently — they'll otherwise compete
+  for the same cores and you'll measure the scheduler instead of the
+  framework.
+
+---
+
 ## Metrics
 
 | Metric | Meaning |
