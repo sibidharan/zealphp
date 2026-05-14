@@ -1206,7 +1206,7 @@ HELP;
                 $g->server['SERVER_SOFTWARE'] = 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion();
             }
 
-            $serverRequest  = \OpenSwoole\Core\Psr\ServerRequest::from($request->parent);
+            $serverRequest  = new \ZealPHP\HTTP\LazyServerRequest($request->parent);
 
             try {
                 $serverResponse = App::middleware()->handle($serverRequest);
