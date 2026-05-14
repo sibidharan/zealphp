@@ -63,12 +63,40 @@ $siteUrl = site_url();
       </div>
     </div>
 
-    <div class="bench-note">With full middleware (CORS + ETag + sessions). 4 workers. Benchmarked, not promised.</div>
+    <div class="bench-note">With full middleware (CORS + ETag + sessions). 4 workers. <code>ab -n 50000 -c 200 -k</code></div>
     <div class="bench">
-      <div class="bench-stat"><div class="num">80k</div><div class="label">req/s</div></div>
-      <div class="bench-stat"><div class="num">2.5ms</div><div class="label">avg latency</div></div>
+      <div class="bench-stat"><div class="num">66k</div><div class="label">req/s</div></div>
+      <div class="bench-stat"><div class="num">3ms</div><div class="label">avg latency</div></div>
       <div class="bench-stat"><div class="num">4</div><div class="label">workers</div></div>
       <div class="bench-stat"><div class="num">0</div><div class="label">failures</div></div>
+    </div>
+    <div style="margin-top:1.5rem;position:relative">
+      <table style="margin:0 auto;border-collapse:collapse;font-size:.82rem;max-width:600px;width:100%">
+        <tr style="border-bottom:1px solid rgba(255,255,255,.1)">
+          <th style="text-align:left;padding:.4rem .8rem;color:#94a3b8;font-weight:600">Framework</th>
+          <th style="text-align:left;padding:.4rem .8rem;color:#94a3b8;font-weight:600">Middleware</th>
+          <th style="text-align:right;padding:.4rem .8rem;color:#94a3b8;font-weight:600">req/s</th>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
+          <td style="padding:.4rem .8rem;color:#e2e8f0;font-weight:700">ZealPHP</td>
+          <td style="padding:.4rem .8rem;color:#94a3b8">CORS + ETag + sessions + PSR-7</td>
+          <td style="padding:.4rem .8rem;text-align:right;color:var(--accent);font-weight:700">66k</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
+          <td style="padding:.4rem .8rem;color:#e2e8f0">Express.js</td>
+          <td style="padding:.4rem .8rem;color:#94a3b8">cors + etag + session (file) + json</td>
+          <td style="padding:.4rem .8rem;text-align:right;color:#e2e8f0">112k</td>
+        </tr>
+        <tr>
+          <td style="padding:.4rem .8rem;color:#64748b">Node raw http</td>
+          <td style="padding:.4rem .8rem;color:#64748b">none</td>
+          <td style="padding:.4rem .8rem;text-align:right;color:#64748b">274k</td>
+        </tr>
+      </table>
+      <p style="text-align:center;color:#64748b;font-size:.72rem;margin-top:.75rem">
+        Same machine, 4 workers, c=200. Express drops 59% with middleware. ZealPHP drops 7%.<br>
+        PHP doing 60% of Express — and 33&ndash;130x faster than Laravel / Symfony.
+      </p>
     </div>
   </div>
 </section>
@@ -356,7 +384,7 @@ function chatSourceTab(btn, id) {
     <!-- vs Go -->
     <div class="bold-claim">
       <h3>Go is fast. ZealPHP is fast AND expressive.</h3>
-      <p>80k req/s on 4 workers. But you also get reflection-based injection, auto-serialization, and zero boilerplate.</p>
+      <p>66k req/s on 4 workers. But you also get reflection-based injection, auto-serialization, and zero boilerplate.</p>
       <div class="code-compare">
         <div class="code-compare-panel">
           <div class="compare-label">ZealPHP — return anything</div>
@@ -767,7 +795,7 @@ document.addEventListener('click', function(e) {
         ['🧵', 'True coroutines',          'Not fake async with callbacks. Real coroutines with go() + Channel. Write synchronous-looking code that runs concurrently.'],
         ['🔧', 'PHP you already know',     '80% of developers know PHP. Sessions, headers, superglobals — all work via uopz overrides. Migrate existing apps without rewriting.'],
         ['📐', 'PSR standards',            'PSR-7 request/response, PSR-15 middleware. Drop in any standards-compliant package from the PHP ecosystem.'],
-        ['📊', 'Benchmarked performance',  '80k req/s, 2.5ms avg latency, 0 failures on 4 workers. Local quad-core benchmark sweep. Reproducible — run scripts/bench.sh yourself.'],
+        ['📊', 'Benchmarked performance',  '66k req/s with full middleware, 3ms avg latency, 0 failures on 4 workers. Local quad-core benchmark sweep. Reproducible — run scripts/bench.sh yourself.'],
         ['🔓', 'MIT open source',          'Fully open source. No enterprise tier. No "contact sales." Community-maintained on OpenSwoole, PHP\'s battle-tested async runtime.'],
       ];
       foreach ($why as [$icon, $title, $body]):
