@@ -408,8 +408,8 @@ App::onWorkerStart(function($server, $workerId) use ($hitCounter) {
 2. Run `composer validate` and confirm tests pass.
 3. Tag both `zealphp` and `zealphp-project` with the same version:
    ```bash
-   git tag -a v0.2.0 -m "Release v0.2.0"
-   git push origin master && git push origin v0.2.0
+   git tag -a v0.2.1 -m "Release v0.2.1"
+   git push origin master && git push origin v0.2.1
    ```
 4. Trigger Packagist webhook for both packages.
 

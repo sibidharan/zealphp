@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-05-14
+
+### Added
+- **Apache + mod_php parity** — comprehensive PHP-FPM-equivalent behavior: uopz overrides for session/header/cookie semantics, `public/` file routing with `.htaccess`-style fallback, error handler stack isolation, content negotiation. Six new integration test suites lock it in: `ApacheParityTest`, `ContentNegotiationTest`, `ErrorHandlersIsolationTest`, `ErrorHandlingTest`, `FallbackTest`, `PublicRoutingTest`.
+- **Dedicated `/migration` page** — 5-rung migration ladder (drop-in → LAMP-style → ZealAPI → framework routes → full coroutine mode), before/after stack collapse, dedicated framing of the migration story.
+- **Dedicated `/performance` page** — full Ryzen 9 7900X benchmark detail, methodology, framework-efficiency comparison.
+- **Dedicated `/responses` page** — return convention reference.
+- **One-line install** — `bash <(curl /install.sh)` serves `setup.sh` directly from the framework, hardened for piped execution.
+- **`SecurityTest` unit suite** + PHP 8.4 added to CI matrix.
+- **★ N GitHub** live star count in the sitewide navbar (client-side fetch from `api.github.com`, silent fallback when rate-limited).
+- **Electric hero wordmark** — bigger size, ⚡ glyph, one-time amber lightning sweep on load (pure CSS, respects `prefers-reduced-motion`).
+
+### Changed
+- **UX labels** — "Templates" → "Components", "ZealAPI" → "REST API" in nav and feature cards. URLs `/templates` and `/api` unchanged; class `ZealAPI` still referenced in body copy where it's the actual class name.
+- **Nav structure** — REST API and Legacy Apps promoted to the top row; small vertical padding so the two-row nav breathes.
+- **AI Config Converter** — mode-A delegation, framework detection, broader rewrite coverage (htaccess/nginx → `app.php`).
+- **`/routing` on-ramp claim** — name the superglobals-mode trade-off honestly instead of asserting "no rewrite needed."
+- **`/why-zealphp`** — clarified OpenSwoole 26 + Fibers compatibility (internal `zend_fiber` context backend ≠ AMPHP/Revolt library portability).
+- **Homepage** — 11-badge block removed (duplicated the README), live config converter pulled off the homepage, narrative bridge added between code demo and benchmark numbers.
+- **Alpha banner** — solid amber background with dark text, non-dismissable, DeepWiki CTA inline; sets honest "v0.2.x = alpha" expectations sitewide.
+- **README "Why" section** — leads with the mission, not the problem.
+- **Benchmark numbers updated** — fresh Ryzen 9 7900X isolated runs (117k req/s text, 106k JSON, 50k template, 0 failures at c=200 / `-k` / 4 workers) replace v0.2.0's mixed container+Ryzen numbers.
+
+### Fixed
+- **ZealAPI infinite loop on undefined method** — calling `$this->X()` on a non-existent method used to recurse on `__call` until stack overflow. Now returns 404 with a structured error and a `did_you_mean` hint computed via levenshtein.
+- **ZealAPI route order, 308 redirects, CLI stop, pid-file handling.**
+- **`php app.php restart`** — now prints `Restarted (pid X, port Y)` instead of finishing silently.
+- **Buttons on `.section-dark` backgrounds** — `.btn-primary` was invisible because the section-dark anchor recolor was overriding the button text color. Fixed by scoping the recolor to `a:not(.btn)`.
+- **`/performance` page** was unreadable on the default light theme.
+- **Alpha banner** color combo (solid amber bg + dark text) for readability.
+- **Code-label readability** — killed all-caps, darkened, switched to mono.
+- **PHPStan baseline cleared** — real bugs fixed, stub mismatches suppressed cleanly.
+- **AI streaming hero card** — gap between the card and the bench-method bar (was visually touching).
+
+### Documentation
+- **PERF.md reproduction recipes** — three documented recipes + variance reading guide.
+- **Deployment, WebSocket, Streaming guides** added; macOS install path included.
+- **HN-launch de-hype pass** — neutral copy, methodology disclosure, alpha banner sitewide.
+- **ZealAPI error responses + live `undefined_method` demo** documented on `/api`.
+
 ## [0.2.0] - 2026-05-14
 
 ### Added
