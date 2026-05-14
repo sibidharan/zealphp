@@ -237,3 +237,60 @@ $app->route('/api/learn/logout', ['methods' => ['POST', 'GET']], function($reque
     session_destroy();
     $response->redirect('/learn/notes', 302);
 });
+
+// ── Notes CRUD endpoints ─────────────────────────────────────────────
+$app->route('/api/learn/notes', ['methods' => ['GET']], function($request, $response) {
+    $u = learn_current_user();
+    if (!$u) { http_response_code(401); header('Content-Type: application/json'); return ['error' => 'auth_required']; }
+    $db = learn_db_open();
+    $notes = learn_notes_list($db, $u['user_id']);
+    header('Content-Type: text/html; charset=utf-8');
+    return (function() use ($notes) {
+        if (empty($notes)) { yield '<p class="notes-empty">No notes yet. Add one above.</p>'; return; }
+        foreach ($notes as $n) {
+            yield App::renderToString('/components/_note_card', $n);
+        }
+    })();
+});
+
+$app->route('/api/learn/notes', ['methods' => ['POST']], function($request, $response) {
+    $u = learn_current_user();
+    if (!$u) { http_response_code(401); header('Content-Type: application/json'); return ['error' => 'auth_required']; }
+    $g = G::instance();
+    $ct = $g->server['HTTP_CONTENT_TYPE'] ?? '';
+    if (stripos($ct, 'application/json') !== false) {
+        $body = json_decode($g->zealphp_request->parent->getContent(), true) ?: [];
+    } else {
+        $body = $g->post;
+    }
+    $title = (string)($body['title'] ?? '');
+    $bodyText = (string)($body['body'] ?? '');
+    $db = learn_db_open();
+    $id = learn_notes_create($db, $u['user_id'], $title, $bodyText);
+    if ($id === null) { http_response_code(422); header('Content-Type: application/json'); return ['error' => 'validation_failed']; }
+    $note = learn_notes_read($db, $u['user_id'], $id);
+    header('Content-Type: text/html; charset=utf-8');
+    return App::renderToString('/components/_note_card', $note);
+});
+
+$app->route('/api/learn/notes/{id}', ['methods' => ['POST']], function($request, $response, $id) {
+    $u = learn_current_user();
+    if (!$u) { http_response_code(401); header('Content-Type: application/json'); return ['error' => 'auth_required']; }
+    $g = G::instance();
+    $body = json_decode($g->zealphp_request->parent->getContent(), true) ?: $g->post;
+    $db = learn_db_open();
+    $ok = learn_notes_update($db, $u['user_id'], (int)$id, $body['title'] ?? null, $body['body'] ?? null);
+    if (!$ok) { http_response_code(404); header('Content-Type: application/json'); return ['error' => 'not_found']; }
+    $note = learn_notes_read($db, $u['user_id'], (int)$id);
+    header('Content-Type: text/html; charset=utf-8');
+    return App::renderToString('/components/_note_card', $note);
+});
+
+$app->route('/api/learn/notes/{id}', ['methods' => ['DELETE']], function($request, $response, $id) {
+    $u = learn_current_user();
+    if (!$u) { http_response_code(401); header('Content-Type: application/json'); return ['error' => 'auth_required']; }
+    $db = learn_db_open();
+    $ok = learn_notes_delete($db, $u['user_id'], (int)$id);
+    if (!$ok) { http_response_code(404); return ''; }
+    return '';
+});
