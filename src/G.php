@@ -9,10 +9,28 @@ class G
 {
     private static $instance = null;
 
+    // Declared properties bypass __get/__set — direct pointer access (~2ns vs ~50ns)
+    public array $server = [];
+    public array $get = [];
+    public array $post = [];
+    public array $request = [];
+    public array $cookie = [];
+    public array $files = [];
+    public array $session = [];
+    public array $session_params = [];
+    public ?int $status = null;
+    public ?bool $_streaming = null;
+    public ?bool $_session_started = null;
+    public mixed $zealphp_request = null;
+    public mixed $zealphp_response = null;
+    public mixed $openswoole_request = null;
+    public mixed $openswoole_response = null;
+    public array $response_headers_list = [];
+    public array $response_cookies_list = [];
+    public array $response_rawcookies_list = [];
+
     private function __construct()
     {
-        $this->session_params = [];
-        $this->status = null;
     }
 
     public static function instance()
