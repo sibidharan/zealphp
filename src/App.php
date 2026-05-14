@@ -570,7 +570,7 @@ class App
     {
         $g = G::instance();
         if ($file == null) {
-            return basename($g->server['PHP_SELF'], '.php');
+            return basename($g->server['PHP_SELF'] ?? '', '.php');
         } else {
             return basename($file, '.php');
         }

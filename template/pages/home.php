@@ -13,7 +13,7 @@ $siteUrl = site_url();
       The PHP Runtime for AI Web Apps</p>
     <p>Stream AI responses in 5 lines. WebSocket, SSE, shared memory, task workers —<br>
        one server, one process. Go-level performance, PHP simplicity.</p>
-    <p style="font-size:.95rem;color:#94a3b8;margin-top:.25rem">Upgrade your existing PHP codebase to async — without rewriting a single line.</p>
+    <p style="font-size:.95rem;color:#94a3b8;margin-top:.25rem">Upgrade your existing PHP codebase to async — start without rewriting, migrate at your own pace.</p>
     <div class="cta">
       <a href="/getting-started" class="btn btn-primary">Get Started →</a>
       <a href="https://github.com/sibidharan/zealphp" class="btn btn-outline" target="_blank">GitHub ↗</a>
