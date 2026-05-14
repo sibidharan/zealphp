@@ -158,7 +158,8 @@ $siteUrl = site_url();
       <p style="text-align:center;color:#64748b;font-size:.7rem;margin-top:.75rem">
         Methodology: AMD Ryzen 9 7900X (12 cores, Docker), each server tested sequentially, 4 workers, warmed-up, <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px;color:#94a3b8">ab -n 50000 -c 200 -k -l</code>.
         ZealPHP runs with the full PSR-15 stack (CORS + ETag + Range + sessions + reflection-injected routing). Express runs with cors + etag + express-session + session-file-store + ejs + body-parser.<br>
-        Your results will vary with hardware, payload size, I/O, and tuning. Re-run on your own box before quoting.
+        Your results will vary with hardware, payload size, I/O, and tuning. Re-run on your own box before quoting.<br>
+        <a href="/performance" style="color:var(--accent);font-weight:600;text-decoration:none">Full concurrency sweep, latency percentiles, methodology, and caveats →</a>
       </p>
       <div style="margin-top:1rem;text-align:center">
         <p style="color:#94a3b8;font-size:.75rem;margin-bottom:.5rem">Don't trust our numbers — run it yourself:</p>

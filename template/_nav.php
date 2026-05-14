@@ -4,6 +4,7 @@ $active ??= 'home';
 $links = [
   'home'            => ['/',              'Home'],
   'why-zealphp'     => ['/why-zealphp',   'Why?'],
+  'performance'     => ['/performance',   'Benchmarks'],
   'getting-started' => ['/getting-started','Start'],
   'routing'         => ['/routing',        'Routing'],
   'responses'       => ['/responses',      'Responses'],
