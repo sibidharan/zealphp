@@ -30,11 +30,25 @@ ZealPHP IS the HTTP server. There is no separate web server.
 ### Architecture
 
 - **app.php** — entry point. Defines routes, configures server, calls $app->run().
-- **public/** — web root. PHP files here are auto-served at their base name.
-  `public/hello.php` → served at `/hello`. Static files (CSS, JS, images) served by OpenSwoole.
-  IMPORTANT: auto-serving ONLY handles the base URL. `/hello` works, but `/hello/{id}` does NOT.
-  Any URL with parameters (RewriteRule with capture groups) MUST have an explicit $app->route().
-- **route/** — route definition files. Auto-included at startup via glob.
+- **public/** — the document root (equivalent to Apache's DocumentRoot / htdocs).
+  All PHP files from the old Apache document root MUST be moved into `public/`.
+  Once in `public/`, they are auto-served at their base name: `public/qn.php` → `/qn`.
+  Static files (CSS, JS, images, fonts) in `public/` are served directly by OpenSwoole.
+- **route/** — route definition files for parameterized URL patterns. Auto-included at startup.
+
+### Migration Step: Move Files to public/
+
+When converting from Apache, the FIRST instruction must be:
+"Move all PHP files from your Apache document root into the `public/` folder."
+
+Once files are in `public/`, they are auto-served. You do NOT need routes for base URLs.
+`public/qn.php` is available at `/qn` automatically — no $app->route('/qn', ...) needed.
+
+You ONLY need explicit $app->route() calls for:
+1. Parameterized URLs: `/qn/{id}` (auto-serving can't handle URL params)
+2. Redirect rules: [R=301,L]
+3. Catch-all / fallback rules
+4. Routes that need special HTTP method handling
 
 ### App Initialization
 
@@ -254,37 +268,37 @@ OUTPUT:
 require 'vendor/autoload.php';
 use ZealPHP\App;
 
+// Migration: move user.php, search.php, api.php into the public/ folder.
+// Once in public/, base URLs are auto-served: /user, /search, /api.
+// Only the parameterized URL patterns below need explicit routes.
+
 $app = App::init('0.0.0.0', 8080);
 
-// user.php, search.php, api.php go in public/ — auto-served at /user, /search, /api
-// These routes handle the parameterized URL patterns:
-
-$app->route('/user/{id}', function($id, $request, $response) {
+$app->route('/user/{id}', function($id) {
     // Handle user page with id
 });
 
-$app->route('/user/{id}/{tab}', function($id, $tab, $request, $response) {
+$app->route('/user/{id}/{tab}', function($id, $tab) {
     // Handle user page with id and tab
 });
 
-$app->route('/search/{q}', function($q, $request, $response) {
+$app->route('/search/{q}', function($q) {
     // Handle search
 });
 
-$app->route('/api/{action}', function($action, $request, $response) {
+$app->route('/api/{action}', function($action) {
     // Handle API action
 });
 
-// .php extension blocking + extensionless PHP URLs are handled automatically by ZealPHP.
-// Files in public/ are served without .php extension by default.
+// .php extension blocking + extensionless PHP URLs are built-in.
 
 $app->run(['task_worker_num' => 0]);
 ```
 
 WHY: This is NOT a CMS front-controller pattern. Each RewriteRule maps a clean URL to a
-specific PHP file with query params. In ZealPHP, use {param} routes with parameter
-injection. PHP files in public/ are auto-served. No include/require needed.
-No superglobals(true) needed — use modern ZealPHP parameter injection.
+specific PHP file with query params. PHP files go in public/ (auto-served at base URL).
+Only parameterized URLs (/user/{id}) need explicit routes — the base URLs (/user, /search)
+are handled automatically. No include/require, no superglobals.
 
 ### Example 3: Redirect rules → app.php
 
@@ -365,20 +379,20 @@ require 'vendor/autoload.php';
 use ZealPHP\App;
 use ZealPHP\Middleware\CorsMiddleware;
 
-// upload_max_filesize/post_max_size → use package_max_length in $app->run()
-// ServerSignature, Options -Indexes, ModPagespeed, charset → not needed / reverse proxy
-// Static file cache headers → reverse proxy or custom middleware
+// Migration: move user.php, search.php, profile.php into the public/ folder.
+// Base URLs (/user, /search) are auto-served. Only parameterized patterns need routes.
+// Dropped: ServerSignature, Options, charset, AddType, ModPagespeed, static cache headers.
 
 $app = App::init('0.0.0.0', 8080);
 
 $app->addMiddleware(new CorsMiddleware(['*']));
 
-$app->route('/user/{id}', function($id, $request, $response) {
-    // Handle user page
+$app->route('/user/{id}', function($id) {
+    // Handle user page with id
 });
 
-$app->route('/search/{q}', function($q, $request, $response) {
-    // Handle search
+$app->route('/search/{q}', function($q) {
+    // Handle search with query
 });
 
 // Catch-all: unmatched URLs → profile page
@@ -394,9 +408,9 @@ $app->run([
 ]);
 ```
 
-WHY: Most directives are Apache-specific and don't apply. CORS → CorsMiddleware.
-Only the RewriteRules need conversion. upload_max_filesize → package_max_length in run().
-The catch-all profile rule becomes setFallback(). No include, no require, no superglobals.
+WHY: Most directives are Apache-specific and don't apply. PHP files go in public/ — auto-served
+at base URLs. Only parameterized URLs (/user/{id}) need routes. CORS → CorsMiddleware.
+upload_max_filesize → package_max_length. Catch-all profile rule → setFallback().
 
 ### Example 5: nginx CMS config → app.php
 
@@ -471,11 +485,35 @@ LEGACY CMS (WordPress, Drupal, Laravel, Joomla, etc.):
 MODERN APP (custom app with clean URL rewrites):
 - Has many RewriteRules mapping clean URLs to specific PHP files with query params
 - Each URL pattern maps to a different PHP file
-- Use: $app->route() with {param} syntax, parameter injection, NO include/require
-- PHP files go in public/ and are auto-served — just define the parameterized routes
+- Use: $app->route() with {param} syntax for PARAMETERIZED URLs only
 - DO NOT use superglobals(true) unless the app truly needs it
 
-CRITICAL RULES:
+THE MOST IMPORTANT RULES:
+
+RULE 1 — ALWAYS START WITH THE MIGRATION STEP:
+The output MUST begin with a comment telling the user to move files:
+// Migration: move all PHP files from your Apache document root into the public/ folder.
+// Files in public/ are auto-served: public/qn.php → /qn, public/watch.php → /watch, etc.
+
+RULE 2 — ONLY CREATE ROUTES FOR PARAMETERIZED URLs:
+RewriteRules with capture groups like `^/?qn/([^/]+)?$` need routes because the URL
+has a parameter. But a plain RewriteRule mapping `/qn` → `qn.php` does NOT need a route
+because public/qn.php is auto-served at /qn.
+
+Example: `RewriteRule ^/?qn/([^/]+)?$ "qn.php?id=$1" [L,QSA]`
+→ The route for /qn/{id}: `$app->route('/qn/{id}', function($id) { /* handle */ });`
+→ But /qn itself does NOT need a route — public/qn.php handles it.
+
+RULE 3 — DO NOT CREATE ROUTES FOR THINGS THE FRAMEWORK HANDLES:
+- Base URLs for files in public/ → auto-served, no route needed
+- .php extension blocking → built-in (App::$ignore_php_ext defaults to true)
+- Extensionless URL resolution → built-in
+- Trailing slash removal → not needed in ZealPHP
+- Directory index files → built-in
+
+Only create routes for: parameterized URLs, redirects [R=301], and catch-all fallbacks.
+
+ADDITIONAL RULES:
 
 1. NEVER fabricate API that doesn't exist:
    - App::init() takes ($host, $port, $cwd) — NEVER pass arrays or config objects
@@ -487,27 +525,24 @@ CRITICAL RULES:
    - RIGHT: $app->route('/user/{id}', function($id) { ... })
    - Parameters are injected BY NAME via reflection
 
-3. NEVER use include/require in route handlers for modern apps:
+3. NEVER use include/require in route handlers:
    - WRONG: $app->route('/user/{id}', function($id) { require 'user.php'; })
    - RIGHT: $app->route('/user/{id}', function($id) { /* handler logic */ })
-   - PHP files in public/ are auto-served by the framework
 
 4. NEVER use exit() or die() — not safe in OpenSwoole coroutine context
 
-5. DROP directives that don't apply — don't convert them to code:
-   - ServerSignature, Options -Indexes → not needed (ZealPHP never exposes these)
-   - AddType, AddCharset, AddDefaultCharset → not needed
-   - ModPagespeed → reverse proxy concern
-   - Static file caching headers → reverse proxy or middleware
-   - Just add a brief comment noting what was dropped and why
+5. DROP Apache/nginx directives that don't apply — ONE brief comment for ALL dropped items:
+   - ServerSignature, Options -Indexes, AddType, AddCharset, ModPagespeed, static cache headers
+   - .php extension blocking, extensionless PHP URL resolution → built-in
+   - But NEVER drop RewriteRules with capture groups — those MUST become routes
 
-6. For CORS (Access-Control-Allow-Origin):
-   - Use: $app->addMiddleware(new CorsMiddleware(['*']))
+6. CORS (Access-Control-Allow-Origin) → $app->addMiddleware(new CorsMiddleware(['*']))
 
-7. For upload_max_filesize / post_max_size:
-   - Use: package_max_length in $app->run() options
+7. upload_max_filesize / post_max_size → package_max_length in $app->run()
 
-8. BE CONCISE — group related comments, don't repeat per-directive explanations
+8. Redirect RewriteRules [R=301] → route with header('Location: ...'); return 301;
+
+9. Catch-all profile/fallback rule → $app->setFallback()
 
 OUTPUT FORMAT:
 - Output ONLY the PHP code — no markdown fences, no explanations before/after
@@ -575,6 +610,17 @@ def validate_conversion(original_config: str, zealphp_code: str) -> str:
     if "rewriterule" in original_lower:
         if "setfallback" not in code_lower and "route(" not in code_lower:
             issues.append("RewriteRules found but no setFallback() or route() — conversion may be incomplete")
+
+    # Count RewriteRules with capture groups vs route() calls
+    import re
+    capture_rules = len(re.findall(r'rewriterule\s+\S*\([^)]+\)', original_lower))
+    route_calls = zealphp_code.count("->route(")
+    if capture_rules > 0 and route_calls < capture_rules // 2:
+        issues.append(
+            f"CRITICAL: Found {capture_rules} RewriteRules with capture groups but only "
+            f"{route_calls} route() calls. Every parameterized RewriteRule MUST become a route. "
+            f"Add the missing routes."
+        )
 
     if "access-control-allow-origin" in original_lower:
         if "corsmiddleware" not in code_lower:

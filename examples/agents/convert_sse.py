@@ -18,7 +18,10 @@ ZealPHP is a PHP web framework on OpenSwoole. ZealPHP IS the HTTP server — no 
 
 ## App Structure
 - app.php — entry point. Defines routes, calls $app->run().
-- public/ — web root. PHP files auto-served (hello.php → /hello). Static files served by OpenSwoole.
+- public/ — the document root. Move all PHP files from Apache's document root here.
+  Files are auto-served at base name: public/qn.php → /qn. No route needed for base URLs.
+  Static files (CSS, JS, images, fonts) in public/ are served directly by OpenSwoole.
+  ONLY parameterized URLs like /qn/{id} need explicit $app->route() calls.
 - route/ — route files auto-included at startup.
 
 ## Initialization
@@ -95,13 +98,32 @@ converter = Agent(
 2. Classify: LEGACY CMS (front-controller → setFallback + includeFile + superglobals) vs MODERN APP ({param} routes, no include).
 3. Output ONLY PHP code — no markdown, no explanations.
 
-RULES:
+MOST IMPORTANT RULES:
+
+RULE 1: Always start with a migration comment:
+// Migration: move all PHP files from your Apache document root into the public/ folder.
+// Files in public/ are auto-served: public/qn.php → /qn, public/watch.php → /watch, etc.
+
+RULE 2: Only create routes for PARAMETERIZED URLs (RewriteRules with capture groups).
+Base URLs like /qn are auto-served from public/qn.php — do NOT create routes for those.
+/qn/{id} NEEDS a route because the framework can't auto-serve parameterized paths.
+
+RULE 3: Do NOT create routes for things the framework handles automatically:
+- Base file URLs → auto-served from public/
+- .php extension blocking → built-in
+- Extensionless URL resolution → built-in
+- Trailing slash handling → not needed
+Only create routes for: parameterized URLs, redirects [R=301], catch-all fallbacks.
+
+OTHER RULES:
 - App::init() takes ($host, $port) — NEVER arrays or phpSettings.
 - Use {param} syntax: $app->route('/user/{id}', function($id) { ... })
 - NEVER use $matches[], $_GET assignment, require/include in handlers, or exit()/die().
-- Drop Apache directives that don't apply (ServerSignature, Options, AddType, charset, static caching) — one brief comment.
+- Drop non-route Apache directives (ServerSignature, Options, AddType, charset, static caching) — one brief comment.
 - CORS → CorsMiddleware. Upload size → package_max_length.
 - HTTPS/SSL redirect → comment: reverse proxy concern.
+- Redirect RewriteRules [R=301] → route with header('Location: ...'); return 301;
+- Catch-all fallback rules → $app->setFallback()
 - Always include: <?php, require autoload, use statements, App::init(), routes, $app->run().
 - If not valid config: output ONLY: // Error: Not a valid Apache .htaccess or nginx server config""",
     tools=[get_reference],
