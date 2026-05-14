@@ -32,7 +32,7 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **Benchmarks** | OpenSwoole-powered concurrency with a modular `scripts/bench.sh` runner for wrk/ab sweeps through c=1000 |
 
 > **Performance:** 80K+ req/s with full PSR-15 middleware stack on a 16-core machine. See [PERF.md](PERF.md) for the methodology.
-> **Stability:** Alpha (v0.1.x). API may change between minor versions. Pin to a specific version in production.
+> **Stability:** Alpha (v0.2.x). API may change between minor versions until v1.0. Pin to a specific version in production.
 
 ---
 
@@ -44,6 +44,8 @@ PHP powers 77% of the web, but its request-per-process model makes real-time, st
 - **vs FrankenPHP / RoadRunner** — Those are Go-based servers. ZealPHP runs native PHP coroutines — `go()`, `Channel`, shared memory via `OpenSwoole\Table` — no Go process in between.
 - **vs Laravel Octane** — Octane wraps Swoole inside Laravel. ZealPHP is framework-agnostic and exposes the full coroutine runtime: SSE, WebSocket, streaming, task workers.
 - **vs raw Swoole/OpenSwoole** — ZealPHP adds routing, PSR-15 middleware, templating, session overrides, and a legacy PHP bridge so you don't wire up `onRequest` handlers manually.
+- **vs PHP-FPM** — FPM is request-per-process: every request boots a fresh interpreter, opens new DB connections, and discards in-memory state. ZealPHP holds workers + shared memory between requests, so SSE/WebSocket/long-poll cost ~0 to keep open and warm caches survive request boundaries.
+- **vs Node.js** — Node's single-threaded event loop forces async-everywhere code (`await`, callbacks). ZealPHP runs PHP coroutines on top of OpenSwoole's reactor, so blocking-looking `$db->query()` calls yield under the hood — your synchronous PHP idioms still compose.
 
 **Legacy PHP bridge:** `session_start()`, `header()`, `$_GET` all work unchanged via uopz overrides. WordPress runs unmodified through the CGI worker.
 

@@ -471,7 +471,73 @@ final_message() {
     echo -e "${RED}For more information, visit: https://php.zeal.ninja ${RESET}"
 }
 
+# Function to install ZealPHP dependencies on macOS via Homebrew.
+# Requires Homebrew (brew.sh) to be installed already.
+macos_setup() {
+    set -e
+
+    echo -e "${YELLOW}Detected macOS. Using Homebrew install path.${RESET}"
+
+    if ! command -v brew >/dev/null; then
+        echo -e "${RED}Homebrew not found. Install it from https://brew.sh first, then re-run.${RESET}"
+        return 1
+    fi
+
+    echo -e "${GREEN}Installing PHP 8.3 (or newer) via Homebrew.${RESET}"
+    brew install php pkg-config autoconf composer || {
+        echo -e "${RED}brew install failed. See output above.${RESET}"
+        return 1
+    }
+
+    # Detect the PHP that brew just exposed
+    local php_bin="$(command -v php)"
+    local pecl_bin="$(command -v pecl)"
+    local php_ini_dir
+    php_ini_dir="$($php_bin -i | awk -F'=> ' '/Scan this dir for additional .ini files/ {print $2}' | head -1 | tr -d ' ')"
+
+    echo -e "${YELLOW}PHP binary: ${php_bin}${RESET}"
+    echo -e "${YELLOW}PHP ini dir: ${php_ini_dir}${RESET}"
+
+    if [ -z "$php_ini_dir" ] || [ ! -d "$php_ini_dir" ]; then
+        echo -e "${RED}Could not locate PHP additional ini directory. Aborting.${RESET}"
+        return 1
+    fi
+
+    echo -e "${GREEN}Installing OpenSwoole via PECL.${RESET}"
+    printf "yes\nyes\nyes\nyes\nyes\nyes\nyes\n" | "$pecl_bin" install openswoole || {
+        echo -e "${RED}OpenSwoole PECL install failed.${RESET}"
+        return 1
+    }
+    echo "extension=openswoole.so" > "${php_ini_dir}/zz-openswoole.ini"
+    echo "short_open_tag=On"       >> "${php_ini_dir}/zz-openswoole.ini"
+
+    echo -e "${GREEN}Installing uopz via PECL.${RESET}"
+    "$pecl_bin" install uopz || {
+        echo -e "${RED}uopz PECL install failed.${RESET}"
+        return 1
+    }
+    echo "extension=uopz.so" > "${php_ini_dir}/zz-uopz.ini"
+
+    echo -e "${YELLOW}Verifying extensions.${RESET}"
+    if "$php_bin" -m | grep -qE 'openswoole|uopz'; then
+        echo -e "${GREEN}OpenSwoole and uopz are loaded.${RESET}"
+    else
+        echo -e "${RED}Extensions not loaded — check ${php_ini_dir} for the .ini files.${RESET}"
+        return 1
+    fi
+
+    final_message
+    return 0
+}
+
 # Main Script
+
+# macOS path — Homebrew based, separate from the Debian/Ubuntu apt flow below.
+if [ "$(uname -s)" = "Darwin" ]; then
+    macos_setup || exit 1
+    exit 0
+fi
+
 is_root || exit 1
 
 print_welcome_message
