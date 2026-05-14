@@ -28,6 +28,16 @@ class G
     public array $response_headers_list = [];
     public array $response_cookies_list = [];
     public array $response_rawcookies_list = [];
+    public array $apache_env = [];
+    public array $apache_notes = [];
+    public int $ignore_user_abort_state = 0;
+    public array $error_handlers_stack = [];     // stack of [callable, levels]
+    public array $exception_handlers_stack = []; // stack of callables
+    public array $shutdown_functions = [];       // queue of [callable, args]
+    public ?int $error_reporting_level = null;
+    public ?int $error_status = null;
+    public ?\Throwable $error_exception = null;
+    public int $error_render_depth = 0;
 
     private function __construct()
     {

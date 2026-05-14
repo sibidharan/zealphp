@@ -250,7 +250,39 @@ class Response
             $this->header('Content-Disposition', 'attachment; filename="' . addcslashes($filename, '"\\') . '"');
         }
 
-        $rangeHeader = $this->g->zealphp_request->parent->header['range'] ?? '';
+        // Conditional GET — Apache-style ETag (inode-size-mtime as weak validator)
+        // + If-None-Match / If-Modified-Since handling. Returns 304 on match.
+        $mtime = filemtime($path);
+        $etag = 'W/"' . dechex($mtime) . '-' . dechex($total) . '"';
+        $lastModified = gmdate('D, d M Y H:i:s', $mtime) . ' GMT';
+        $this->header('ETag', $etag);
+        $this->header('Last-Modified', $lastModified);
+
+        $reqHeaders = $this->g->zealphp_request->parent->header ?? [];
+        $ifNoneMatch = $reqHeaders['if-none-match'] ?? '';
+        $ifModifiedSince = $reqHeaders['if-modified-since'] ?? '';
+        $notModified = false;
+        if ($ifNoneMatch !== '') {
+            foreach (array_map('trim', explode(',', $ifNoneMatch)) as $tag) {
+                if ($tag === $etag || $tag === '*' || $tag === ltrim($etag, 'W/')) {
+                    $notModified = true;
+                    break;
+                }
+            }
+        } elseif ($ifModifiedSince !== '') {
+            $since = strtotime($ifModifiedSince);
+            if ($since !== false && $since >= $mtime) {
+                $notModified = true;
+            }
+        }
+        if ($notModified) {
+            $this->status(304);
+            $this->flush();
+            $this->parent->end('');
+            return;
+        }
+
+        $rangeHeader = $reqHeaders['range'] ?? '';
 
         if ($rangeHeader !== '' && preg_match('/^bytes=(\d*)-(\d*)$/', $rangeHeader, $m)) {
             $start = $m[1] !== '' ? (int) $m[1] : null;

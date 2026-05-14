@@ -12,4 +12,5 @@ return array(
     'ec07570ca5a812141189b1fa81503674' => $vendorDir . '/phpunit/phpunit/src/Framework/Assert/Functions.php',
     '30cad1d86aa302cbea0f94edb38a9a00' => $baseDir . '/src/utils.php',
     'e19b310a3e997f884fb8d7a276f6bdea' => $baseDir . '/src/Session/utils.php',
+    '00ceda341dec776300b8abcb264e2716' => $baseDir . '/src/apache_shims.php',
 );

@@ -47,7 +47,8 @@
         },
         "files": [
             "src/utils.php",
-            "src/Session/utils.php"
+            "src/Session/utils.php",
+            "src/apache_shims.php"
         ]
     },
     "autoload-dev": {

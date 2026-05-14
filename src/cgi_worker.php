@@ -23,6 +23,18 @@ $__z_cookies = [];
 $__z_rawcookies = [];
 $__z_status = 200;
 $__z_meta_sent = false;
+$__z_apache_env = [];
+$__z_apache_notes = [];
+$__z_uploaded = [];
+foreach ($_FILES as $entry) {
+    if (!is_array($entry)) continue;
+    $tmp = $entry['tmp_name'] ?? null;
+    if (is_array($tmp)) {
+        foreach ($tmp as $t) { if (is_string($t)) $__z_uploaded[$t] = true; }
+    } elseif (is_string($tmp)) {
+        $__z_uploaded[$tmp] = true;
+    }
+}
 
 function __z_send_meta() {
     global $__z_headers, $__z_cookies, $__z_rawcookies, $__z_status, $__z_meta_sent;
@@ -127,6 +139,108 @@ if (function_exists('uopz_set_return')) {
         }
         ob_start();
     }, true);
+
+    uopz_set_return('ob_flush', function() {
+        __z_send_meta();
+        $data = ob_get_clean();
+        if ($data !== false && $data !== '') {
+            fwrite(STDOUT, $data);
+            fflush(STDOUT);
+        }
+        ob_start();
+    }, true);
+
+    uopz_set_return('ob_implicit_flush', function($enable = true) {
+        // no-op: streaming is driven by flush()/ob_flush() calls explicitly
+    }, true);
+
+    uopz_set_return('is_uploaded_file', function(string $filename) {
+        global $__z_uploaded;
+        return isset($__z_uploaded[$filename]);
+    }, true);
+
+    uopz_set_return('move_uploaded_file', function(string $from, string $to) {
+        global $__z_uploaded;
+        if (!isset($__z_uploaded[$from])) return false;
+        if (@rename($from, $to)) {
+            unset($__z_uploaded[$from]);
+            return true;
+        }
+        if (@copy($from, $to)) {
+            @unlink($from);
+            unset($__z_uploaded[$from]);
+            return true;
+        }
+        return false;
+    }, true);
+}
+
+// Apache mod_php functions are not defined in CLI SAPI; define them globally
+// here for the duration of the subprocess so legacy code runs unchanged.
+if (!function_exists('apache_request_headers')) {
+    function apache_request_headers(): array {
+        $out = [];
+        foreach ($_SERVER as $name => $value) {
+            if (strncmp($name, 'HTTP_', 5) === 0) {
+                $canonical = str_replace(' ', '-', ucwords(str_replace('_', ' ', strtolower(substr($name, 5)))));
+                $out[$canonical] = $value;
+            } elseif ($name === 'CONTENT_TYPE' || $name === 'CONTENT_LENGTH') {
+                $canonical = str_replace(' ', '-', ucwords(str_replace('_', ' ', strtolower($name))));
+                $out[$canonical] = $value;
+            }
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('getallheaders')) {
+    function getallheaders(): array {
+        return apache_request_headers();
+    }
+}
+
+if (!function_exists('apache_response_headers')) {
+    function apache_response_headers(): array {
+        global $__z_headers;
+        $out = [];
+        foreach ($__z_headers as $pair) {
+            $out[$pair[0]] = $pair[1];
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('apache_setenv')) {
+    function apache_setenv(string $variable, string $value, bool $walk_to_top = false): bool {
+        global $__z_apache_env;
+        $__z_apache_env[$variable] = $value;
+        return true;
+    }
+}
+
+if (!function_exists('apache_getenv')) {
+    function apache_getenv(string $variable, bool $walk_to_top = false) {
+        global $__z_apache_env;
+        return $__z_apache_env[$variable] ?? false;
+    }
+}
+
+if (!function_exists('apache_note')) {
+    function apache_note(string $note_name, ?string $note_value = null): string {
+        global $__z_apache_notes;
+        $previous = (string)($__z_apache_notes[$note_name] ?? '');
+        if ($note_value !== null) {
+            $__z_apache_notes[$note_name] = $note_value;
+        }
+        return $previous;
+    }
+}
+
+if (!function_exists('virtual')) {
+    function virtual(string $uri): bool {
+        // No internal-subrequest support — silently return false.
+        return false;
+    }
 }
 
 set_error_handler(function($severity, $message, $file, $line) {

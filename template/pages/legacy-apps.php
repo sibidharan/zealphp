@@ -206,6 +206,32 @@ PHP]); ?>
 <tr><td><code>proxy_pass http://backend;</code></td><td>Use native <code>$app->route()</code> or reverse proxy in front</td></tr>
 </table>
 
+<div class="callout info" style="margin-top:1.5rem">
+<strong>Fallback bodies are preserved.</strong> When the fallback handler <code>echo</code>s or runs <code>App::includeFile()</code>, the output is sent verbatim — no body discard. (Earlier the implicit <code>/{file}</code> route would call <code>invokeFallbackOrNotFound()</code> and return an int, which <code>dispatchRoute</code>'s int branch would discard; <a href="https://github.com/sibidharan/zealphp/blob/master/src/App.php#L840-L851"><code>invokeFallbackOrNotFound()</code></a> now dispatches the fallback as a real route, preserving its body, status, headers, and Generator return.)
+</div>
+
+<h2 style="margin-top:2rem">Custom error pages for legacy apps</h2>
+<p>Mirror <code>.htaccess</code>'s <code>ErrorDocument 404 /custom-404.php</code> directive with <code>App::setErrorHandler()</code>:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Apache ErrorDocument equivalent',
+    'code'  => <<<'PHP'
+$app->setErrorHandler(404, function($status) {
+    // Hand 404s to WordPress so it can render its own theme template.
+    App::includeFile(App::$cwd . '/public/wp/index.php');
+});
+
+$app->setErrorHandler(500, function($exception) {
+    // Send a JSON envelope to API clients, HTML to browsers.
+    if (str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json')) {
+        return ['error' => 'Internal Server Error', 'trace_id' => uniqid()];
+    }
+    App::render('error/500', ['exception' => $exception]);
+});
+PHP]); ?>
+
+<p style="margin-top:.5rem">Handlers receive <code>$status</code>, <code>$exception</code>, <code>$request</code>, <code>$response</code> by param injection — same machinery as regular routes. Return shapes: string for HTML, array for JSON, Generator for streaming, void+echo for buffered output. See <a href="/responses">Responses</a> for details and the <a href="https://github.com/sibidharan/zealphp/blob/master/docs/error-handling.md"><code>docs/error-handling.md</code></a> deep dive.</p>
+
 <h2>AI Config Converter</h2>
 <p>Paste your <code>.htaccess</code> or nginx config — get a working <code>app.php</code> streamed in real-time. Powered by gpt-5.4-mini with the full ZealPHP API reference.</p>
 

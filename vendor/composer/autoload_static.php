@@ -13,6 +13,7 @@ class ComposerStaticInit1b6fbb16024c07a28729efcdf1b64e92
         'ec07570ca5a812141189b1fa81503674' => __DIR__ . '/..' . '/phpunit/phpunit/src/Framework/Assert/Functions.php',
         '30cad1d86aa302cbea0f94edb38a9a00' => __DIR__ . '/../..' . '/src/utils.php',
         'e19b310a3e997f884fb8d7a276f6bdea' => __DIR__ . '/../..' . '/src/Session/utils.php',
+        '00ceda341dec776300b8abcb264e2716' => __DIR__ . '/../..' . '/src/apache_shims.php',
     );
 
     public static $prefixLengthsPsr4 = array (

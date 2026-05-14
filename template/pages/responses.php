@@ -159,5 +159,96 @@ $app->route('/api/created', function() {
 });
 PHP]); ?>
 
+<h2 style="margin-top:2.5rem">Custom error pages — Apache <code>ErrorDocument</code></h2>
+<p>Register a handler for any 4xx/5xx status. Fires whenever the framework or a route emits that status. Return values follow the same conventions as regular routes — <code>string</code> for HTML, <code>array</code> for JSON, <code>Generator</code> for streaming, void+echo for output buffer capture.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Status-specific + catch-all handlers',
+    'code'  => <<<'PHP'
+use ZealPHP\App;
+
+$app = App::instance();
+
+// Status-specific
+$app->setErrorHandler(404, function($status) {
+    return App::renderToString('error/404', ['status' => $status]);
+});
+
+$app->setErrorHandler(500, function($exception) {
+    return [
+        'error'    => 'Internal Server Error',
+        'trace_id' => uniqid('e_'),
+    ];
+});
+
+// Catch-all — fires when no status-specific handler matches
+$app->setErrorHandler(function($status, $exception) {
+    http_response_code($status);
+    echo "<pre>Error $status</pre>";
+});
+PHP]); ?>
+
+<table class="ztable" style="margin-top:1rem">
+<tr><th>Param</th><th>Value</th></tr>
+<tr><td><code>$status</code></td><td>The HTTP status being rendered (<code>int</code>).</td></tr>
+<tr><td><code>$exception</code></td><td>The caught <code>\Throwable</code> for 500-from-throw paths; <code>null</code> otherwise.</td></tr>
+<tr><td><code>$request</code> / <code>$response</code></td><td>Wrappers around the OpenSwoole request/response.</td></tr>
+</table>
+
+<p style="margin-top:1rem">A handler that itself throws is caught — the framework falls through to the default body for the <strong>original</strong> status (not 500). Recursion is guarded by <code>G-&gt;error_render_depth</code>.</p>
+
+<p style="margin-top:.5rem">Sites where the handler fires:</p>
+<ul style="margin-left:1.2rem">
+  <li><code>return 404;</code> from any route handler (or 4xx/5xx int return).</li>
+  <li>Uncaught <code>\Throwable</code> from a route handler — 500.</li>
+  <li><code>exit(1)</code> / <code>die(1)</code> — 500.</li>
+  <li>URL-encoded traversal — 400.</li>
+  <li>Dotfile requests, <code>.php</code> direct access, includeCheck rejection — 403.</li>
+  <li>Unmatched URL with no fallback — 404.</li>
+</ul>
+
+<h2 style="margin-top:2.5rem">Default error pages — content negotiation</h2>
+<p>When no custom handler is registered, the framework emits HTML by default and JSON when the client sends <code>Accept: application/json</code>:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'JSON envelope',
+    'code'  => <<<'JSON'
+{
+  "error": {
+    "status": 500,
+    "message": "Internal Server Error",
+    "trace": "RuntimeException: boom at ...\n at App.{closure}(...)"
+  }
+}
+JSON]); ?>
+
+<p style="margin-top:1rem"><code>trace</code> is populated only when <code>App::$display_errors</code> is true. Custom handlers override negotiation entirely — user intent trumps <code>Accept</code>.</p>
+
+<h2 style="margin-top:2.5rem">Per-coroutine error handlers</h2>
+<p><code>set_error_handler</code>, <code>set_exception_handler</code>, <code>register_shutdown_function</code>, and <code>error_reporting()</code> are process-global in vanilla PHP — one coroutine's call would catch every other's errors. ZealPHP isolates them per request via <code>G</code>:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Per-coroutine handler — fires only for THIS request',
+    'code'  => <<<'PHP'
+$app->route('/process', function() {
+    register_shutdown_function(function() {
+        zlog('request finished', 'info');
+    });
+
+    set_error_handler(function($severity, $msg, $file, $line) {
+        // captures warnings/notices in THIS coroutine only
+        return true;
+    }, E_WARNING | E_NOTICE);
+
+    // ... handler body ...
+});
+PHP]); ?>
+
+<p style="margin-top:1rem">A native process-level handler installed at boot delegates to the active coroutine's <code>G</code> stack. <code>register_shutdown_function</code>'s queue is drained AFTER the route returns and BEFORE the PSR response is emitted — so shutdown functions can still <code>echo</code> or call <code>http_response_code()</code> and have those land in the wire response.</p>
+
+<div class="callout info" style="margin-top:1rem">
+For the full mechanism (boot-order trick, exception-handler integration in <code>dispatchRoute</code>'s catch, recursion guard, source-line references), see <a href="https://github.com/sibidharan/zealphp/blob/master/docs/error-handling.md"><code>docs/error-handling.md</code></a>.
+</div>
+
 </div>
 </section>

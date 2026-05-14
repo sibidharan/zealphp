@@ -367,4 +367,14 @@ if ($serverLogFile !== false && trim((string) $serverLogFile) !== '') {
     $settings['log_file'] = $serverLogFile;
 }
 
+// Test fixture support: error-handling tests use a Store table for cross-coroutine
+// signaling. Created only when the fixture is present so demo deployments stay clean.
+if (file_exists(__DIR__ . '/route/_error_test.php')) {
+    Store::make('error_test', 16, [
+        'handler_fired'  => [\OpenSwoole\Table::TYPE_INT, 1],
+        'handler_cid'    => [\OpenSwoole\Table::TYPE_INT, 8],
+        'shutdown_count' => [\OpenSwoole\Table::TYPE_INT, 1],
+    ]);
+}
+
 $app->run($settings);

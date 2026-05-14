@@ -32,7 +32,7 @@ PHP
 ]); ?>
 
 <div class="callout info" style="margin-top:1rem">
-<strong>This is the migration on-ramp.</strong> Move your existing PHP files into <code>public/</code> and they run on OpenSwoole immediately — <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>$_POST</code>, <code>echo</code> all work unchanged via uopz overrides. No rewrite needed.
+<strong>This is the migration on-ramp.</strong> Drop your existing PHP files into <code>public/</code> and they run on OpenSwoole immediately — <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>$_POST</code>, <code>echo</code> all work unchanged via uopz overrides. <strong>Caveat:</strong> this needs <code>App::superglobals(true)</code>, where state is shared per worker — fine to get running, <em>not</em> per-coroutine isolated. For full async (thousands of concurrent requests per worker), the recommended endpoint is coroutine mode — swap <code>$_GET</code> / <code>$_SESSION</code> / etc. for <code>G::instance()-&gt;get</code> / <code>-&gt;session</code>. See the <a href="/migration">migration ladder</a> for the path.
 </div>
 
 <p style="margin:1rem 0">Same convention works for APIs — drop files in <code>api/</code>:</p>
@@ -155,6 +155,57 @@ foreach ($routeTypes as [$id, $title, $url, $code]) {
 
 <div class="callout info">
 <strong>Override implicit routes</strong> by placing a file in <code>route/</code>. For example, to customize <code>/admin/users</code> instead of letting it auto-resolve to <code>public/admin/users.php</code>, define an explicit route in <code>route/admin.php</code> — it loads first and takes precedence.
+</div>
+
+<h2 style="margin-top:2.5rem">Apache parity in public/ routing</h2>
+<p style="margin-bottom:1rem">The implicit <code>public/</code> routes mirror Apache+mod_php's default DocumentRoot behavior — including the subtle directives most developers don't think about until something breaks. Each is on by default and toggleable via a static flag on <code>App</code>:</p>
+
+<table class="ztable">
+<tr><th>Apache directive</th><th>ZealPHP behavior</th><th>Flag</th></tr>
+<tr>
+  <td><code>DirectorySlash On</code></td>
+  <td><code>/docs</code> → <code>301 /docs/</code> when <code>docs</code> is a directory under <code>public/</code></td>
+  <td><code>App::$directory_slash = true</code></td>
+</tr>
+<tr>
+  <td><code>DirectoryIndex index.php index.html index.htm</code></td>
+  <td>Walks the list in order; HTML/HTM served via <code>$response-&gt;sendFile()</code> so Range and ETag still work</td>
+  <td><code>App::$directory_index</code> (array)</td>
+</tr>
+<tr>
+  <td><code>AcceptPathInfo On</code></td>
+  <td><code>/api.php/users/42</code> → <code>SCRIPT_NAME=/api.php</code>, <code>PATH_INFO=/users/42</code>; rewrites <code>REQUEST_URI</code> to just the script</td>
+  <td><code>App::$path_info = true</code></td>
+</tr>
+<tr>
+  <td><code>&lt;FilesMatch "^\.&gt;"</code> deny</td>
+  <td>Any URL with a dotfile component (<code>.env</code>, <code>.git/config</code>) returns 403. <code>.well-known/</code> is allow-listed per RFC 8615.</td>
+  <td><code>App::$block_dotfiles = true</code></td>
+</tr>
+<tr>
+  <td>URL traversal rejection</td>
+  <td><code>%2e%2e</code>, <code>\0</code>, backslash decoded and matched BEFORE route lookup → 400</td>
+  <td>always on</td>
+</tr>
+<tr>
+  <td>Static-handler URL whitelist</td>
+  <td>OpenSwoole's built-in static handler restricted to <code>/css /js /img /fonts /assets /static /favicon.ico /robots.txt</code> by default. Anything outside falls through to PHP routing.</td>
+  <td><code>App::$static_handler_locations</code></td>
+</tr>
+<tr>
+  <td><code>ErrorDocument N /path</code></td>
+  <td><code>App::instance()-&gt;setErrorHandler(404, $cb)</code> registers a per-status custom page; catch-all variant: <code>setErrorHandler($cb)</code>. See <a href="/responses">Responses</a>.</td>
+  <td><code>App::$error_handlers</code> (private)</td>
+</tr>
+<tr>
+  <td><code>FileETag</code> / <code>If-None-Match</code> / <code>If-Modified-Since</code></td>
+  <td><code>$response-&gt;sendFile()</code> emits weak ETag (<code>W/"mtime-size"</code>) and <code>Last-Modified</code>; matches return 304. Range request honored on the same path.</td>
+  <td>always on for <code>sendFile()</code></td>
+</tr>
+</table>
+
+<div class="callout info" style="margin-top:1rem">
+<strong>For ETag on static assets too</strong>, disable OpenSwoole's built-in static handler (<code>enable_static_handler =&gt; false</code> in <code>$app-&gt;run()</code> settings) and add a wildcard route that calls <code>$response-&gt;sendFile()</code>. The built-in handler emits <code>Last-Modified</code> only — no ETag, no Range. The trade-off is a small per-request PHP hop. See the <a href="https://github.com/sibidharan/zealphp/blob/master/docs/apache-parity.md">Apache parity deep dive</a> in <code>docs/</code>.
 </div>
 
 <h2 style="margin-top:2.5rem">Pattern routes with named regex groups</h2>

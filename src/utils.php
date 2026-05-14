@@ -760,14 +760,37 @@ function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "",
 }
 
 function header($header, $replace = true, $http_response_code = null) {
-    // elog("Setting header: $header");
-    $header = explode(':', $header, 2);
-    if (count($header) < 2) {
+    // Apache mod_php form 1: status line — header("HTTP/1.1 404 Not Found");
+    if (stripos($header, 'HTTP/') === 0) {
+        if (preg_match('/\s(\d{3})/', $header, $m)) {
+            response_set_status((int)$m[1]);
+        }
+        return;
+    }
+    // Apache mod_php form 2: Status: 404 — variant used by some CGI tooling
+    if (stripos($header, 'Status:') === 0) {
+        if (preg_match('/(\d{3})/', $header, $m)) {
+            response_set_status((int)$m[1]);
+        }
+        return;
+    }
+    $parts = explode(':', $header, 2);
+    if (count($parts) < 2) {
         return false;
     }
-    $name = trim($header[0]);
-    $value = trim($header[1]);
+    $name = trim($parts[0]);
+    $value = trim($parts[1]);
+    if ($replace) {
+        $g = G::instance();
+        $g->response_headers_list = array_values(array_filter(
+            $g->response_headers_list,
+            static fn($pair) => strcasecmp($pair[0], $name) !== 0
+        ));
+    }
     response_add_header($name, $value);
+    if ($http_response_code !== null && (int)$http_response_code > 0) {
+        response_set_status((int)$http_response_code);
+    }
 }
 
 
@@ -808,5 +831,329 @@ function headers_list() {
 * @return bool Returns true if headers have already been sent, false otherwise.
 */
 function headers_sent(&$file = null, &$line = null) {
+   $g = G::instance();
+   if (isset($g->openswoole_response) && $g->openswoole_response !== null) {
+       return !$g->openswoole_response->isWritable();
+   }
    return false;
+}
+
+/**
+ * Remove a previously set response header. With no argument, clears all.
+ */
+function header_remove(?string $name = null): void
+{
+    $g = G::instance();
+    if ($name === null) {
+        $g->response_headers_list = [];
+        return;
+    }
+    $g->response_headers_list = array_values(array_filter(
+        $g->response_headers_list,
+        static fn($pair) => strcasecmp($pair[0], $name) !== 0
+    ));
+}
+
+/**
+ * Force the current output buffer to the client. In main-worker mode, this
+ * switches the response into streaming mode (headers flushed, body chunks
+ * written via OpenSwoole). Subsequent echo+flush calls stream incrementally.
+ */
+function flush(): void
+{
+    $g = G::instance();
+    if (!isset($g->openswoole_response) || $g->openswoole_response === null) {
+        return;
+    }
+    if (!$g->openswoole_response->isWritable()) {
+        return;
+    }
+    if (!($g->_streaming ?? false)) {
+        $g->_streaming = true;
+        if (isset($g->zealphp_response) && $g->zealphp_response !== null) {
+            $g->zealphp_response->flush();
+        }
+    }
+    if (ob_get_level() > 0) {
+        $data = ob_get_clean();
+        if ($data !== false && $data !== '') {
+            $g->openswoole_response->write($data);
+        }
+        ob_start();
+    }
+}
+
+function ob_flush(): void
+{
+    \ZealPHP\flush();
+}
+
+function ob_end_flush(): void
+{
+    \ZealPHP\flush();
+    if (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+}
+
+/**
+ * Apache mod_php toggles implicit flush on/off. ZealPHP buffers per request
+ * by default; we accept the call as a no-op rather than crashing legacy code.
+ */
+function ob_implicit_flush($enable = true): void
+{
+    // no-op
+}
+
+/**
+ * Apache mod_php getallheaders() / apache_request_headers() — return all
+ * inbound request headers with canonical (Hyphen-Capitalized) case.
+ */
+function apache_request_headers(): array
+{
+    $g = G::instance();
+    $out = [];
+    $raw = [];
+    if (isset($g->zealphp_request) && $g->zealphp_request !== null) {
+        $raw = $g->zealphp_request->parent->header ?? [];
+    }
+    foreach ($raw as $name => $value) {
+        $canonical = str_replace(' ', '-', ucwords(str_replace('-', ' ', strtolower((string)$name))));
+        $out[$canonical] = is_array($value) ? implode(', ', $value) : (string)$value;
+    }
+    return $out;
+}
+
+function getallheaders(): array
+{
+    return apache_request_headers();
+}
+
+/**
+ * Apache mod_php apache_response_headers() — currently set outbound headers.
+ */
+function apache_response_headers(): array
+{
+    $g = G::instance();
+    $out = [];
+    foreach ($g->response_headers_list as $pair) {
+        $out[$pair[0]] = $pair[1];
+    }
+    return $out;
+}
+
+/**
+ * Apache mod_php per-request env table. Stored in G; lifetime = one request.
+ */
+function apache_setenv(string $variable, string $value, bool $walk_to_top = false): bool
+{
+    $g = G::instance();
+    $env = $g->apache_env;
+    $env[$variable] = $value;
+    $g->apache_env = $env;
+    return true;
+}
+
+function apache_getenv(string $variable, bool $walk_to_top = false)
+{
+    $g = G::instance();
+    return $g->apache_env[$variable] ?? false;
+}
+
+/**
+ * Apache mod_php apache_note() — per-request note table. Returns previous value.
+ */
+function apache_note(string $note_name, ?string $note_value = null): string
+{
+    $g = G::instance();
+    $notes = $g->apache_notes;
+    $previous = (string)($notes[$note_name] ?? '');
+    if ($note_value !== null) {
+        $notes[$note_name] = $note_value;
+        $g->apache_notes = $notes;
+    }
+    return $previous;
+}
+
+/**
+ * Apache mod_php virtual() — performs an internal subrequest. Not supported
+ * in ZealPHP's single-process model; we log once and return false rather than
+ * crashing legacy code.
+ */
+function virtual(string $uri): bool
+{
+    elog("virtual() is not supported in ZealPHP — ignored: $uri", 'warn');
+    return false;
+}
+
+/**
+ * set_time_limit() — OpenSwoole has its own coroutine/worker timeouts and
+ * native PHP execution-time limit is irrelevant here. Treated as no-op success.
+ */
+function set_time_limit(int $seconds): bool
+{
+    return true;
+}
+
+/**
+ * ignore_user_abort() — Apache mod_php controls whether the script keeps
+ * running after the client disconnects. Tracked in G; with OpenSwoole the
+ * coroutine continues regardless, but we honor the API contract.
+ */
+function ignore_user_abort($enable = null): int
+{
+    $g = G::instance();
+    $previous = $g->ignore_user_abort_state;
+    if ($enable !== null) {
+        $g->ignore_user_abort_state = $enable ? 1 : 0;
+    }
+    return $previous;
+}
+
+function connection_status(): int
+{
+    $g = G::instance();
+    if (isset($g->openswoole_response) && $g->openswoole_response !== null
+        && !$g->openswoole_response->isWritable()) {
+        return 1; // CONNECTION_ABORTED
+    }
+    return 0; // CONNECTION_NORMAL
+}
+
+function connection_aborted(): int
+{
+    $g = G::instance();
+    if (isset($g->openswoole_response) && $g->openswoole_response !== null
+        && !$g->openswoole_response->isWritable()) {
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Apache's URL-rewrite output handler — not used in ZealPHP. No-op.
+ */
+function output_add_rewrite_var(string $name, string $value): bool
+{
+    return false;
+}
+
+function output_reset_rewrite_vars(): bool
+{
+    return true;
+}
+
+/**
+ * is_uploaded_file() — verifies that $filename is one of the temp paths
+ * registered in this request's $_FILES. Rejects forged paths from user input.
+ */
+function is_uploaded_file(string $filename): bool
+{
+    $g = G::instance();
+    foreach ($g->files ?? [] as $entry) {
+        if (!is_array($entry)) continue;
+        $tmp = $entry['tmp_name'] ?? null;
+        if (is_array($tmp)) {
+            if (in_array($filename, $tmp, true)) return true;
+        } elseif (is_string($tmp) && $tmp === $filename) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * move_uploaded_file() — equivalent of Apache+mod_php behavior, gated by
+ * is_uploaded_file() and falling back to copy+unlink across filesystems.
+ */
+function move_uploaded_file(string $from, string $to): bool
+{
+    if (!is_uploaded_file($from)) {
+        return false;
+    }
+    if (@rename($from, $to)) {
+        return true;
+    }
+    if (@copy($from, $to)) {
+        @unlink($from);
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Per-coroutine set_error_handler override. The native PHP handler is
+ * installed at boot and delegates to G's per-coroutine stack — this override
+ * just records the user-space registration without touching the engine.
+ */
+function set_error_handler(?callable $callback, int $error_levels = E_ALL): ?callable
+{
+    $g = G::instance();
+    $stack = $g->error_handlers_stack;
+    $prev = !empty($stack) ? $stack[count($stack) - 1][0] : null;
+    if ($callback === null) {
+        array_pop($stack);
+    } else {
+        $stack[] = [$callback, $error_levels];
+    }
+    $g->error_handlers_stack = $stack;
+    return $prev;
+}
+
+function restore_error_handler(): bool
+{
+    $g = G::instance();
+    $stack = $g->error_handlers_stack;
+    array_pop($stack);
+    $g->error_handlers_stack = $stack;
+    return true;
+}
+
+function set_exception_handler(?callable $callback): ?callable
+{
+    $g = G::instance();
+    $stack = $g->exception_handlers_stack;
+    $prev = !empty($stack) ? $stack[count($stack) - 1] : null;
+    if ($callback === null) {
+        array_pop($stack);
+    } else {
+        $stack[] = $callback;
+    }
+    $g->exception_handlers_stack = $stack;
+    return $prev;
+}
+
+function restore_exception_handler(): bool
+{
+    $g = G::instance();
+    $stack = $g->exception_handlers_stack;
+    array_pop($stack);
+    $g->exception_handlers_stack = $stack;
+    return true;
+}
+
+/**
+ * Per-request shutdown function — fires after the route handler returns and
+ * before the PSR response is emitted, so the function can still call
+ * echo/header/http_response_code and have those land in the response.
+ */
+function register_shutdown_function(callable $callback, mixed ...$args): void
+{
+    $g = G::instance();
+    $list = $g->shutdown_functions;
+    $list[] = [$callback, $args];
+    $g->shutdown_functions = $list;
+}
+
+/**
+ * Per-coroutine error_reporting. Falls back to the level captured at App boot.
+ */
+function error_reporting(?int $error_level = null): int
+{
+    $g = G::instance();
+    $current = $g->error_reporting_level ?? \ZealPHP\App::$initial_error_reporting;
+    if ($error_level !== null) {
+        $g->error_reporting_level = $error_level;
+    }
+    return $current;
 }

@@ -164,6 +164,41 @@ foreach ($rungs as $r):
   At rungs 3 and 4, you opt into the coroutine model where it pays off.
 </p>
 
+<h2 style="margin-top:3rem">Apache+mod_php parity reference</h2>
+<p>What ZealPHP emulates so legacy apps run unchanged. Most of this is invisible — these rows exist to answer "does X work?" without a code-dive.</p>
+
+<h3 style="margin-top:1.5rem;font-size:1.05rem">Function overrides (via uopz)</h3>
+<table class="ztable">
+  <tr><th>Apache+mod_php function</th><th>ZealPHP behavior</th></tr>
+  <tr><td><code>header()</code>, <code>header_remove()</code>, <code>headers_list()</code>, <code>headers_sent()</code></td><td>Per-request via <code>G-&gt;response_headers_list</code>. Supports <code>header("HTTP/1.1 404 Not Found")</code> status-line form and the optional <code>$http_response_code</code> param.</td></tr>
+  <tr><td><code>setcookie()</code>, <code>setrawcookie()</code></td><td>Per-request via <code>G-&gt;response_cookies_list</code> / <code>response_rawcookies_list</code>. <code>setrawcookie</code> preserves the raw value (no urlencoding).</td></tr>
+  <tr><td><code>http_response_code()</code></td><td>Per-request via <code>G-&gt;status</code>.</td></tr>
+  <tr><td><code>flush()</code>, <code>ob_flush()</code>, <code>ob_end_flush()</code></td><td>Switch the response into streaming mode — buffer pushed to OpenSwoole's <code>$response-&gt;write()</code>, flips <code>G-&gt;_streaming = true</code>.</td></tr>
+  <tr><td><code>apache_request_headers()</code>, <code>getallheaders()</code></td><td>Return canonical (hyphen-capitalized) request headers from the OpenSwoole request.</td></tr>
+  <tr><td><code>apache_response_headers()</code></td><td>Returns currently-set outbound headers.</td></tr>
+  <tr><td><code>apache_setenv()</code>, <code>apache_getenv()</code>, <code>apache_note()</code></td><td>Per-request scratch tables in <code>G-&gt;apache_env</code> / <code>apache_notes</code>.</td></tr>
+  <tr><td><code>virtual()</code></td><td>Returns <code>false</code> — internal subrequests aren't supported in this model.</td></tr>
+  <tr><td><code>set_time_limit()</code></td><td>No-op success. OpenSwoole owns the worker/coroutine timeout.</td></tr>
+  <tr><td><code>ignore_user_abort()</code>, <code>connection_status()</code>, <code>connection_aborted()</code></td><td>Per-request; reads <code>$response-&gt;isWritable()</code> for connection state.</td></tr>
+  <tr><td><code>is_uploaded_file()</code>, <code>move_uploaded_file()</code></td><td>Whitelist of <code>$_FILES['*']['tmp_name']</code> — same security guarantees as mod_php.</td></tr>
+  <tr><td><code>session_*()</code> (18 functions)</td><td>Coroutine-safe session lifecycle via <code>CoSessionManager</code>; files in <code>/var/lib/php/sessions</code>.</td></tr>
+  <tr><td><code>set_error_handler()</code>, <code>set_exception_handler()</code>, <code>register_shutdown_function()</code>, <code>error_reporting()</code></td><td>Per-coroutine via <code>G</code> stacks. A native dispatcher installed at boot delegates to the active coroutine's handler stack — isolated despite PHP's process-global semantics. See <a href="/responses">Responses</a>.</td></tr>
+</table>
+
+<h3 style="margin-top:1.5rem;font-size:1.05rem"><code>public/</code> routing (DocumentRoot behavior)</h3>
+<table class="ztable">
+  <tr><th>Apache directive</th><th>ZealPHP</th></tr>
+  <tr><td><code>DirectoryIndex index.php index.html index.htm</code></td><td>Same fallback order via <code>App::$directory_index</code>. HTML/HTM served via <code>$response-&gt;sendFile()</code> with ETag + Range.</td></tr>
+  <tr><td><code>DirectorySlash On</code></td><td><code>/foo</code> → 301 <code>/foo/</code> when <code>foo</code> is a directory.</td></tr>
+  <tr><td><code>AcceptPathInfo On</code></td><td><code>/script.php/extra</code> exposes <code>PATH_INFO=/extra</code>; rewrites <code>REQUEST_URI</code>.</td></tr>
+  <tr><td><code>&lt;FilesMatch "^\.&gt;"</code> deny</td><td>Dotfile URLs return 403 (<code>.well-known/</code> allow-listed per RFC 8615).</td></tr>
+  <tr><td><code>RewriteRule . /index.php [L]</code></td><td><code>App::setFallback(fn() => App::includeFile(...))</code>. Body, status, headers, Generator return all preserved.</td></tr>
+  <tr><td><code>ErrorDocument 404 /custom.php</code></td><td><code>App::setErrorHandler(404, $cb)</code>. Catch-all variant: <code>setErrorHandler($cb)</code>. Handlers fire for every 4xx/5xx site in the framework.</td></tr>
+  <tr><td><code>FileETag</code> / conditional GET</td><td><code>$response-&gt;sendFile()</code> emits weak ETag + <code>Last-Modified</code>; honors <code>If-None-Match</code> and <code>If-Modified-Since</code> → 304.</td></tr>
+</table>
+
+<p style="margin-top:1rem">Deeper detail (boot-order tricks, recursion guards, per-coroutine isolation mechanism, source-line references): <a href="https://github.com/sibidharan/zealphp/blob/master/docs/apache-parity.md"><code>docs/apache-parity.md</code></a> and <a href="https://github.com/sibidharan/zealphp/blob/master/docs/error-handling.md"><code>docs/error-handling.md</code></a>.</p>
+
 <!-- ────────────────────────────────────────────────────────────── -->
 <!-- 4. When migration is a good fit (and when it isn't)            -->
 <!-- ────────────────────────────────────────────────────────────── -->
@@ -194,11 +229,167 @@ foreach ($rungs as $r):
   </div>
 </div>
 
+</div>
+</section>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<!-- 4.5. Live config converter                                     -->
+<!-- ────────────────────────────────────────────────────────────── -->
+
+<section class="section">
+<div class="container" style="max-width:960px">
+<h2 class="section-title">Convert your existing config</h2>
+<p class="section-desc">Paste your Apache <code>.htaccess</code> or nginx config — AI converts it to a working <code>app.php</code> in real-time. The same engine that bridges the migration ladder above.</p>
+
+<div class="converter-split" style="display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin:1.5rem 0;">
+  <div style="border-right:1px solid var(--border);">
+    <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
+      <span>Apache / nginx config</span>
+      <select id="convert-preset" style="font-size:.75rem; padding:.2rem .4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg);">
+        <option value="">— paste your own —</option>
+        <option value="wordpress">WordPress .htaccess</option>
+        <option value="nginx-cms">nginx CMS</option>
+        <option value="redirects">Redirect rules</option>
+      </select>
+    </div>
+    <textarea id="convert-input" style="width:100%; min-height:280px; border:none; padding:.75rem; font-family:var(--font-mono); font-size:.82rem; background:var(--code-bg); color:var(--code-text); resize:vertical; outline:none;" placeholder="Paste your .htaccess or nginx server { } config here..."></textarea>
+    <div style="padding:.5rem .75rem; background:var(--bg-alt); display:flex; align-items:center; gap:.5rem;">
+      <button id="convert-btn" onclick="runConvert()" style="padding:.4rem 1.2rem; background:var(--accent); color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:.82rem; font-weight:600;">Convert →</button>
+      <span id="convert-status" style="font-size:.75rem; color:var(--text-muted);"></span>
+    </div>
+  </div>
+  <div>
+    <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
+      <span>ZealPHP app.php</span>
+      <button onclick="copyOutput()" style="font-size:.72rem; padding:.15rem .5rem; border:1px solid var(--border); border-radius:4px; background:var(--bg); cursor:pointer; color:var(--text-muted);">Copy</button>
+    </div>
+    <pre id="convert-output" style="min-height:280px; padding:.75rem; margin:0; font-family:var(--font-mono); font-size:.82rem; background:var(--code-bg); color:var(--code-text); overflow:auto; white-space:pre-wrap;"><span style="color:var(--text-muted);">// Output will appear here...</span></pre>
+    <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.72rem; color:var(--text-muted);">
+      Rate limit: 5 conversions per 10 minutes · Powered by gpt-5.4-mini · <a href="https://github.com/sibidharan/zealphp/blob/master/examples/agents/config_converter.py" target="_blank">Source</a> · <a href="/legacy-apps">More on legacy apps →</a>
+    </div>
+  </div>
+</div>
+
+<style>
+@media (max-width:768px) { .converter-split { grid-template-columns:1fr !important; } }
+</style>
+
+<script>
+(function() {
+  const PRESETS = {
+    wordpress: `# BEGIN WordPress
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+RewriteRule ^index\\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+# END WordPress`,
+    'nginx-cms': `server {
+    listen 80;
+    server_name example.com;
+    root /var/www/html;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+    location ~ \\.php$ {
+        fastcgi_pass unix:/run/php/php-fpm.sock;
+        include fastcgi_params;
+    }
+    location ~* \\.(css|js|png|jpg|gif|ico)$ {
+        expires 30d;
+    }
+}`,
+    redirects: `RewriteEngine On
+RewriteRule ^old-page$ /new-page [R=301,L]
+RewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]
+RewriteRule ^docs$ https://docs.example.com [R=301,L]`
+  };
+
+  document.getElementById('convert-preset').addEventListener('change', function() {
+    if (this.value && PRESETS[this.value]) {
+      document.getElementById('convert-input').value = PRESETS[this.value];
+    }
+  });
+
+  window.runConvert = function() {
+    const input = document.getElementById('convert-input').value.trim();
+    const output = document.getElementById('convert-output');
+    const status = document.getElementById('convert-status');
+    const btn = document.getElementById('convert-btn');
+
+    if (!input) { status.textContent = 'Paste a config first'; return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Converting...';
+    status.textContent = 'Streaming from gpt-5.4-mini...';
+    output.textContent = '';
+
+    fetch('/api/convert', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({config: input})
+    }).then(response => {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      function read() {
+        reader.read().then(({done, value}) => {
+          if (done) {
+            btn.disabled = false;
+            btn.textContent = 'Convert →';
+            status.textContent = 'Done';
+            return;
+          }
+          buffer += decoder.decode(value, {stream: true});
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const text = line.slice(6);
+              if (text === '[DONE]') continue;
+              output.textContent += text + '\n';
+            }
+          }
+          output.scrollTop = output.scrollHeight;
+          read();
+        });
+      }
+      read();
+    }).catch(err => {
+      output.textContent = '// Error: ' + err.message;
+      btn.disabled = false;
+      btn.textContent = 'Convert →';
+      status.textContent = 'Failed';
+    });
+  };
+
+  window.copyOutput = function() {
+    const text = document.getElementById('convert-output').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = event.target;
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 1500);
+    });
+  };
+})();
+</script>
+
+</div>
+</section>
+
 <!-- ────────────────────────────────────────────────────────────── -->
 <!-- 5. Closing CTAs                                                -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<div style="text-align:center;margin-top:3rem">
+<section class="section section-dark">
+<div class="container" style="max-width:960px">
+
+<div style="text-align:center">
   <a href="/getting-started" class="btn btn-primary">Start the migration →</a>
   <a href="/legacy-apps" class="btn btn-outline" style="margin-left:.5rem">Legacy apps (WordPress) →</a>
   <a href="/why-zealphp" class="btn btn-outline" style="margin-left:.5rem">Why ZealPHP →</a>
