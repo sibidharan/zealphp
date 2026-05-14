@@ -833,9 +833,44 @@ class App
             case 'restart':
                 $pidFile = self::resolvePidFile($flags);
                 $wasDaemonized = file_exists($pidFile);
+                echo "Restarting ZealPHP...\n";
                 self::cliStop($pidFile, quiet: true);
                 if ($wasDaemonized && !isset($flags['daemonize'])) {
                     $flags['daemonize'] = true;
+                }
+                // Fork a watcher child whose only job is to poll for the new
+                // PID file and print "Restarted (pid X, port Y)". The actual
+                // start happens in the original process (parent of the fork),
+                // which falls through and eventually calls $server->start() —
+                // that daemonizes internally, so we can't print success from
+                // there. The watcher gives the user clear confirmation that
+                // the new server came up.
+                if (function_exists('pcntl_fork')) {
+                    $port = $flags['port'] ?? (self::$instance ? self::$instance->port : 8080);
+                    $watcherPid = pcntl_fork();
+                    if ($watcherPid === 0) {
+                        // Detach so the watcher survives independently and
+                        // doesn't show up in the parent's process group.
+                        if (function_exists('posix_setsid')) { @posix_setsid(); }
+                        $newPid = 0;
+                        for ($i = 0; $i < 50; $i++) {   // poll up to 5s
+                            usleep(100000);
+                            if (file_exists($pidFile)) {
+                                $candidate = (int)trim(@file_get_contents($pidFile) ?: '');
+                                if ($candidate > 0 && @posix_kill($candidate, 0)) {
+                                    $newPid = $candidate;
+                                    break;
+                                }
+                            }
+                        }
+                        if ($newPid > 0) {
+                            echo "Restarted (pid {$newPid}, port {$port}).\n";
+                        } else {
+                            echo "Restarted but could not confirm — check `php app.php status`.\n";
+                        }
+                        exit(0);
+                    }
+                    // parent (original CLI process) continues to start the server
                 }
                 // fall through to start
             default:
@@ -884,19 +919,23 @@ class App
 
     private static function cliStop(string $pidFile, bool $quiet = false): void
     {
+        $say = function (string $msg) use ($quiet): void {
+            if (!$quiet) { echo $msg; }
+        };
+
         if (!file_exists($pidFile)) {
-            if (!$quiet) { echo "ZealPHP is not running (no PID file: {$pidFile})\n"; }
+            $say("ZealPHP is not running (no PID file: {$pidFile})\n");
             return;
         }
         $pid = (int)trim(file_get_contents($pidFile));
         if ($pid <= 0 || !@posix_kill($pid, 0)) {
-            if (!$quiet) { echo "ZealPHP is not running (stale PID file)\n"; }
+            $say("ZealPHP is not running (stale PID file)\n");
             @unlink($pidFile);
             return;
         }
         $pgid = @posix_getpgid($pid);
         $killGroup = $pgid && $pgid !== posix_getpgid(posix_getpid());
-        echo "Stopping ZealPHP (pid {$pid})...\n";
+        $say("Stopping ZealPHP (pid {$pid})...\n");
         $killGroup ? posix_kill(-$pgid, SIGTERM) : posix_kill($pid, SIGTERM);
         // OpenSwoole graceful shutdown (workers finish current requests, master
         // tears down listeners) typically takes 5-7 seconds. Poll for up to 10s
@@ -905,7 +944,7 @@ class App
             usleep(50000);
             if (!@posix_kill($pid, 0)) {
                 @unlink($pidFile);
-                echo "Stopped.\n";
+                $say("Stopped.\n");
                 return;
             }
         }
@@ -913,11 +952,11 @@ class App
             usleep(100000);
             if (!@posix_kill($pid, 0)) {
                 @unlink($pidFile);
-                echo "Stopped.\n";
+                $say("Stopped.\n");
                 return;
             }
         }
-        echo "Graceful shutdown timed out, force killing...\n";
+        $say("Graceful shutdown timed out, force killing...\n");
         $killGroup ? posix_kill(-$pgid, SIGKILL) : posix_kill($pid, SIGKILL);
         usleep(100000);
         @unlink($pidFile);
