@@ -10,7 +10,9 @@ $links = [
   'routing'         => ['/routing',        'Routing'],
   'responses'       => ['/responses',      'Responses'],
   'http'            => ['/http',           'HTTP'],
-  'templates'       => ['/templates',      'Templates'],
+  'api'             => ['/api',            'REST API'],
+  'legacy-apps'     => ['/legacy-apps',    'Legacy Apps'],
+  'templates'       => ['/templates',      'Components'],
   'streaming'       => ['/streaming',      'Streaming'],
   'coroutines'      => ['/coroutines',     'Coroutines'],
   'websocket'       => ['/ws',             'WebSocket'],
@@ -18,8 +20,6 @@ $links = [
   'sessions'        => ['/sessions',       'Sessions'],
   'store'           => ['/store',          'Store & Cache'],
   'timers'          => ['/timers',         'Timers'],
-  'api'             => ['/api',            'ZealAPI'],
-  'legacy-apps'     => ['/legacy-apps',    'Legacy Apps'],
   'deployment'      => ['/deployment',     'Deploy'],
 ];
 ?>
@@ -32,19 +32,38 @@ $links = [
   </label>
   <nav class="nav-links">
     <div class="nav-row nav-row-core">
-      <?php foreach (array_slice($links, 0, 8, true) as $key => [$href, $label]): ?>
+      <?php foreach (array_slice($links, 0, 10, true) as $key => [$href, $label]): ?>
         <a href="<?= $href ?>"<?= ($active === $key ? ' class="active"' : '') ?>><?= $label ?></a>
       <?php endforeach; ?>
     </div>
     <div class="nav-row nav-row-features">
-      <?php foreach (array_slice($links, 8, null, true) as $key => [$href, $label]): ?>
+      <?php foreach (array_slice($links, 10, null, true) as $key => [$href, $label]): ?>
         <a href="<?= $href ?>"<?= ($active === $key ? ' class="active"' : '') ?>><?= $label ?></a>
       <?php endforeach; ?>
     </div>
   </nav>
   <div class="actions">
     <a href="https://deepwiki.com/sibidharan/zealphp" target="_blank">DeepWiki ↗</a>
-    <a href="https://github.com/sibidharan/zealphp" target="_blank">GitHub ↗</a>
+    <a id="gh-star-link" href="https://github.com/sibidharan/zealphp" target="_blank" rel="noopener"
+       style="display:inline-flex;align-items:center;gap:.35rem">
+      <span style="color:#fbbf24">★</span>
+      <span id="gh-star-count" style="color:#fbbf24;font-variant-numeric:tabular-nums;font-weight:600"></span>
+      <span>GitHub ↗</span>
+    </a>
   </div>
 </nav>
 </header>
+<script>
+(function() {
+  fetch('https://api.github.com/repos/sibidharan/zealphp', { headers: { 'Accept': 'application/vnd.github+json' } })
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(d => {
+      const n = d.stargazers_count;
+      if (typeof n !== 'number') return;
+      const fmt = n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n);
+      const el = document.getElementById('gh-star-count');
+      if (el) el.textContent = fmt;
+    })
+    .catch(() => { /* silent fallback: link still shows "GitHub ↗" */ });
+})();
+</script>

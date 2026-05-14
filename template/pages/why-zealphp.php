@@ -206,8 +206,12 @@
             <li style="padding:.3rem 0">Already invested in Laravel ecosystem</li>
             <li style="padding:.3rem 0">Need shared hosting (requires CLI access)</li>
             <li style="padding:.3rem 0">Building a custom protocol server</li>
-            <li style="padding:.3rem 0">Want Fiber-based async (no ext dependency)</li>
+            <li style="padding:.3rem 0">Committed to AMPHP / Revolt / ReactPHP — Fiber libraries that drive Revolt's event loop, a separate scheduler from OpenSwoole's reactor (an app picks one)</li>
           </ul>
+          <p style="margin-top:.85rem;color:var(--text-muted);font-size:.78rem;line-height:1.55">
+            <strong style="color:#cbd5e1">Note:</strong>
+            <a href="https://openswoole.com/article/openswoole-26-2-released" target="_blank" rel="noopener" style="color:var(--accent)">OpenSwoole 26.2</a> uses PHP's <code>zend_fiber</code> API as its coroutine-context backend (better Xdebug interop) — but Fiber-driven libraries like AMPHP / Revolt still run on a separate scheduler from Swoole's reactor.
+          </p>
         </div>
       </div>
     </div>

@@ -156,8 +156,8 @@ p  { max-width: 70ch; }
 .section.section-dark h3 { color: #fafaf9; }
 .section.section-dark p,
 .section.section-dark li { color: #d6d3d1; }
-.section.section-dark a { color: var(--accent); }
-.section.section-dark a:hover { text-decoration: underline; }
+.section.section-dark a:not(.btn) { color: var(--accent); }
+.section.section-dark a:not(.btn):hover { text-decoration: underline; }
 .section.section-dark code {
   background: rgba(245,158,11,.08);
   color: #fde68a;

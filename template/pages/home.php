@@ -20,48 +20,11 @@ $siteUrl = site_url();
     <div class="cta">
       <a href="/getting-started" class="btn btn-primary">Get Started →</a>
       <a href="/why-zealphp" class="btn btn-outline">Why ZealPHP? →</a>
-      <a href="https://github.com/sibidharan/zealphp" class="btn btn-outline" target="_blank" rel="noopener">GitHub ↗</a>
       <a href="https://deepwiki.com/sibidharan/zealphp" class="btn btn-outline" target="_blank" rel="noopener">Ask DeepWiki ↗</a>
     </div>
     <p style="font-size:.78rem;color:#a8a29e;margin-top:.5rem">
       <a href="/why-zealphp" style="color:#fde68a;text-decoration:none">Why?</a> covers the problem PHP-FPM can't solve, where ZealPHP fits vs Laravel Octane / FrankenPHP / RoadRunner, and when it's the wrong choice.
     </p>
-    <div class="oss-badges" aria-label="Project badges">
-      <a href="https://deepwiki.com/sibidharan/zealphp" target="_blank" rel="noopener noreferrer">
-        <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki">
-      </a>
-      <a href="https://packagist.org/packages/sibidharan/zealphp" target="_blank" rel="noopener noreferrer">
-        <img src="https://img.shields.io/packagist/v/sibidharan/zealphp?style=flat-square" alt="Packagist latest version">
-      </a>
-      <a href="https://packagist.org/packages/sibidharan/zealphp" target="_blank" rel="noopener noreferrer">
-        <img src="https://img.shields.io/packagist/dt/sibidharan/zealphp?style=flat-square" alt="Packagist downloads">
-      </a>
-      <a href="https://packagist.org/packages/sibidharan/zealphp" target="_blank" rel="noopener noreferrer">
-        <img src="https://img.shields.io/packagist/l/sibidharan/zealphp?style=flat-square" alt="MIT license">
-      </a>
-      <a href="https://github.com/sibidharan/zealphp/stargazers" target="_blank" rel="noopener noreferrer">
-        <img src="https://img.shields.io/github/stars/sibidharan/zealphp?style=flat-square&logo=github&logoColor=white" alt="GitHub stars">
-      </a>
-      <a href="https://www.php.net/" target="_blank" rel="noopener noreferrer">
-        <img src="https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square&logo=php&logoColor=white" alt="PHP 8.3+">
-      </a>
-      <a href="https://github.com/sibidharan/zealphp/actions/workflows/tests.yml" target="_blank" rel="noopener noreferrer">
-        <img src="https://github.com/sibidharan/zealphp/actions/workflows/tests.yml/badge.svg" alt="GitHub Actions test status">
-      </a>
-      <a href="https://codecov.io/gh/sibidharan/zealphp" target="_blank" rel="noopener noreferrer">
-        <img src="https://codecov.io/gh/sibidharan/zealphp/branch/master/graph/badge.svg" alt="Coverage">
-      </a>
-      <a href="https://github.com/sibidharan/zealphp/blob/master/phpstan.neon" target="_blank" rel="noopener noreferrer">
-        <img src="https://img.shields.io/badge/PHPStan-level%201-brightgreen?style=flat-square&logo=php&logoColor=white" alt="PHPStan level 1">
-      </a>
-      <a href="https://github.com/sibidharan/zealphp/blob/master/CODE_OF_CONDUCT.md" target="_blank" rel="noopener noreferrer">
-        <img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa?style=flat-square" alt="Contributor Covenant 2.1">
-      </a>
-      <a href="https://github.com/sponsors/sibidharan" target="_blank" rel="noopener noreferrer">
-        <img src="https://img.shields.io/github/sponsors/sibidharan?style=flat-square&logo=github&logoColor=white&label=Sponsor" alt="GitHub Sponsors">
-      </a>
-    </div>
-
     <!-- Streaming code demo -->
     <div class="hero-demo">
       <div class="hero-demo-code">
@@ -80,6 +43,10 @@ $siteUrl = site_url();
         <div id="hero-stream-output"></div>
       </div>
     </div>
+
+    <p style="text-align:center;color:#a8a29e;font-size:.92rem;margin:1.75rem auto 0;max-width:640px;position:relative">
+      And it's fast — here's the throughput on 4 workers, full middleware stack:
+    </p>
 
     <div class="bench-method">
       <strong>Method</strong> &nbsp;|&nbsp;
@@ -662,8 +629,8 @@ document.addEventListener('click', function(e) {
         ['🗃️', 'Store',      'Share AI conversation state across workers. Cross-worker shared memory — no Redis needed.',             '/store',      'OpenSwoole\\Table'],
         ['⏱️', 'Timers',     'Schedule recurring AI tasks. Polling, cleanup, model warmup, health checks.',                           '/timers',     'tick() · after()'],
         ['🌐', 'HTTP',        'Full HTTP/1.1 compliance. HEAD, OPTIONS, Range, redirects, CORS, ETag, gzip — all built-in.',           '/http',       'HTTP/1.1'],
-        ['📝', 'Templates',   'SSR streaming templates. Compose views with yield from. renderStream() for progressive HTML.',         '/templates',  'renderStream()'],
-        ['🔗', 'ZealAPI',     'Drop a PHP file in api/. It becomes a route. File-based REST — the simplest API pattern.',             '/api',        'file-based'],
+        ['📝', 'Components',  'SSR streaming components. Compose views with yield from. renderStream() for progressive HTML.',         '/templates',  'renderStream()'],
+        ['🔗', 'REST API',    'Drop a PHP file in api/. It becomes a route. File-based REST — the simplest API pattern.',             '/api',        'file-based'],
         ['🏗️', 'Legacy Apps','Run WordPress unmodified. CGI worker provides true global scope. Apache mod_php compatibility.',        '/legacy-apps','WordPress'],
       ];
       foreach ($features as [$icon, $title, $body, $href, $badge]) {
@@ -722,84 +689,4 @@ document.addEventListener('click', function(e) {
     </table>
   </div>
 </section>
-
-<!-- Live converter -->
-<section class="section">
-  <div class="container">
-    <h2 class="section-title">Try it — convert your config to ZealPHP</h2>
-    <p class="section-desc">Paste Apache <code>.htaccess</code> or nginx config. AI converts it to <code>app.php</code> in real-time.</p>
-    <div class="converter-split" style="display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin-top:1.5rem;">
-      <div style="border-right:1px solid var(--border); display:flex; flex-direction:column;">
-        <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
-          <span>Input</span>
-          <select id="hp-preset" style="font-size:.75rem; padding:.2rem .4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg);">
-            <option value="wordpress">WordPress .htaccess</option>
-            <option value="nginx-cms">nginx CMS</option>
-            <option value="redirects">Redirect rules</option>
-            <option value="">— paste your own —</option>
-          </select>
-        </div>
-        <textarea id="hp-input" style="flex:1; min-height:220px; border:none; padding:.75rem; font-family:var(--font-mono); font-size:.8rem; background:var(--code-bg); color:var(--code-text); resize:none; outline:none;"></textarea>
-        <div style="padding:.4rem .75rem; background:var(--bg-alt); display:flex; align-items:center; gap:.5rem;">
-          <button id="hp-btn" onclick="hpConvert()" style="padding:.35rem 1rem; background:var(--accent); color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:.8rem; font-weight:600;">Convert →</button>
-          <span id="hp-status" style="font-size:.73rem; color:var(--text-muted);"></span>
-        </div>
-      </div>
-      <div style="display:flex; flex-direction:column;">
-        <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted);">ZealPHP app.php</div>
-        <pre id="hp-output" style="flex:1; min-height:220px; max-height:320px; overflow:auto; padding:.75rem; margin:0; font-family:var(--font-mono); font-size:.8rem; background:var(--code-bg); color:var(--code-text); white-space:pre-wrap;"><span style="color:var(--text-muted);">// Click Convert to generate...</span></pre>
-        <div style="padding:.4rem .75rem; background:var(--bg-alt); font-size:.7rem; color:var(--text-muted);">Powered by gpt-4.1-mini · Cached for 1hr · <a href="/legacy-apps">Full docs →</a></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<script>
-(function(){
-  const HP = {
-    wordpress: "# BEGIN WordPress\n<IfModule mod_rewrite.c>\nRewriteEngine On\nRewriteBase /\nRewriteRule ^index\\.php$ - [L]\nRewriteCond %{REQUEST_FILENAME} !-f\nRewriteCond %{REQUEST_FILENAME} !-d\nRewriteRule . /index.php [L]\n</IfModule>\n# END WordPress",
-    'nginx-cms': "server {\n    listen 80;\n    server_name example.com;\n    root /var/www/html;\n\n    location / {\n        try_files $uri $uri/ /index.php?$args;\n    }\n    location ~ \\.php$ {\n        fastcgi_pass unix:/run/php/php-fpm.sock;\n    }\n    location ~* \\.(css|js|png)$ {\n        expires 30d;\n    }\n}",
-    redirects: "RewriteEngine On\nRewriteRule ^old-page$ /new-page [R=301,L]\nRewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]\nRewriteRule ^docs$ https://docs.example.com [R=301,L]"
-  };
-  const presetEl = document.getElementById('hp-preset');
-  const inputEl = document.getElementById('hp-input');
-  presetEl.addEventListener('change', function() {
-    if (this.value && HP[this.value]) inputEl.value = HP[this.value];
-    else inputEl.value = '';
-  });
-  if (presetEl.value && HP[presetEl.value]) inputEl.value = HP[presetEl.value];
-  window.hpConvert = function() {
-    const input = inputEl.value.trim();
-    const output = document.getElementById('hp-output');
-    const status = document.getElementById('hp-status');
-    const btn = document.getElementById('hp-btn');
-    if (!input) { status.textContent = 'Paste a config first'; return; }
-    btn.disabled = true; btn.textContent = 'Converting...';
-    status.textContent = 'Streaming...'; output.textContent = '';
-    fetch('/api/convert', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({config: input})
-    }).then(function(r) {
-      const reader = r.body.getReader(), dec = new TextDecoder();
-      let buf = '';
-      function read() {
-        reader.read().then(function(result) {
-          if (result.done) { btn.disabled = false; btn.textContent = 'Convert →'; status.textContent = 'Done'; return; }
-          buf += dec.decode(result.value, {stream: true});
-          const lines = buf.split('\n'); buf = lines.pop();
-          for (const l of lines) {
-            if (l.startsWith('data: ') && !l.includes('[DONE]')) output.textContent += l.slice(6) + '\n';
-          }
-          output.scrollTop = output.scrollHeight;
-          read();
-        });
-      }
-      read();
-    }).catch(function(e) {
-      output.textContent = '// Error: ' + e.message;
-      btn.disabled = false; btn.textContent = 'Convert →'; status.textContent = 'Failed';
-    });
-  };
-})();
-</script>
 

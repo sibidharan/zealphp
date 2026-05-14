@@ -1,10 +1,10 @@
 <?php use ZealPHP\App; ?>
 <section class="section">
 <div class="container">
-<h1 class="section-title">Templates & Views</h1>
-<p class="section-desc">No Blade. No Twig. No Mustache. <strong>PHP IS the template engine.</strong> ZealPHP templates are plain <code>.php</code> files — loops, conditionals, expressions, classes, everything you know works. Zero learning curve, full language power.</p>
+<h1 class="section-title">Components & Views</h1>
+<p class="section-desc">No Blade. No Twig. No Mustache. <strong>PHP IS the component engine.</strong> ZealPHP components are plain <code>.php</code> files — loops, conditionals, expressions, classes, everything you know works. Zero learning curve, full language power.</p>
 
-<h2>Pass data, render a template</h2>
+<h2>Pass data, render a component</h2>
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.5rem 0">
 <div>
@@ -48,10 +48,10 @@ PHP]); ?>
 </div>
 </div>
 
-<p>Every key in the <code>$args</code> array becomes a local variable in the template via <code>extract()</code>. No magic syntax — just PHP.</p>
+<p>Every key in the <code>$args</code> array becomes a local variable in the component via <code>extract()</code>. No magic syntax — just PHP.</p>
 
 <h2>Layouts & composition</h2>
-<p>Templates can render other templates. Build a layout system with a single master template and components:</p>
+<p>Components can render other components. Build a layout system with a single master layout composing smaller components:</p>
 
 <?php App::render('/components/_code', [
     'label' => 'public/about.php — page entry (3 lines)',
@@ -284,11 +284,11 @@ PHP]); ?>
 
 <h2>Why PHP over Blade/Twig/Mustache?</h2>
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-top:1rem">
-  <div class="card" style="padding:1rem"><strong>Zero learning curve</strong><br>No new syntax. If you know PHP, you know the template engine.</div>
+  <div class="card" style="padding:1rem"><strong>Zero learning curve</strong><br>No new syntax. If you know PHP, you know the component engine.</div>
   <div class="card" style="padding:1rem"><strong>Full language power</strong><br>Classes, closures, exceptions, generators — not a subset.</div>
-  <div class="card" style="padding:1rem"><strong>No compile step</strong><br>No cache directory. Templates are interpreted directly.</div>
+  <div class="card" style="padding:1rem"><strong>No compile step</strong><br>No cache directory. Components are interpreted directly.</div>
   <div class="card" style="padding:1rem"><strong>IDE support</strong><br>Autocompletion, type checking, refactoring — all free.</div>
-  <div class="card" style="padding:1rem"><strong>SSR streaming</strong><br>Templates can <code>yield</code>. Progressive rendering built in.</div>
+  <div class="card" style="padding:1rem"><strong>SSR streaming</strong><br>Components can <code>yield</code>. Progressive rendering built in.</div>
   <div class="card" style="padding:1rem"><strong>Composable</strong><br>Render inside render. No "extends", no "blocks" — just function calls.</div>
 </div>
 

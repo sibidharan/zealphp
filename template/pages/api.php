@@ -1,8 +1,8 @@
 <?php use ZealPHP\App; ?>
 <section class="section">
 <div class="container">
-<h1 class="section-title">ZealAPI — File-Based REST</h1>
-<p class="section-desc">Drop a PHP file in <code>api/</code> and it becomes an endpoint automatically. The file defines a closure named after the HTTP method. <code>$this</code> inside the closure is the ZealAPI instance.</p>
+<h1 class="section-title">REST API — File-Based</h1>
+<p class="section-desc">Drop a PHP file in <code>api/</code> and it becomes a REST endpoint automatically. The file defines a closure named after the HTTP method. <code>$this</code> inside the closure is the <code>ZealAPI</code> instance (that's the class powering this — keep reading).</p>
 
 <h2>How it works</h2>
 
