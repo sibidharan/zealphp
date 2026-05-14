@@ -52,6 +52,7 @@ PHP]); ?>
   <tr><td><code>status()</code></td><td><code>status(int $code)</code></td><td>Sets HTTP status code</td></tr>
   <tr><td><code>stream()</code></td><td><code>stream(callable $fn)</code></td><td>Flush headers immediately, stream body via $write() closure</td></tr>
   <tr><td><code>sse()</code></td><td><code>sse(callable $fn)</code></td><td>Server-Sent Events — sets event-stream headers, $emit() closure</td></tr>
+  <tr><td><code>sendFile()</code></td><td><code>sendFile($path, $filename='')</code></td><td>Zero-copy file serving with Range support; sets Content-Disposition when filename given</td></tr>
   <tr><td><code>end()</code></td><td><code>end(?string $data)</code></td><td>Send final body and close connection</td></tr>
 </table>
 

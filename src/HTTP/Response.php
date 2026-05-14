@@ -161,6 +161,87 @@ class Response
         });
     }
 
+    /**
+     * Serve a file with Range request support using OpenSwoole's zero-copy sendfile.
+     *
+     * @param string $path     Absolute path to the file
+     * @param string $filename Optional download filename (triggers Content-Disposition: attachment)
+     */
+    public function sendFile(string $path, string $filename = ''): void
+    {
+        if (!file_exists($path) || !is_readable($path)) {
+            $this->status(404);
+            $this->g->_streaming = true;
+            $this->flush();
+            $this->parent->end('File not found');
+            return;
+        }
+
+        $this->g->_streaming = true;
+        $total = filesize($path);
+        $mime = mime_content_type($path) ?: 'application/octet-stream';
+        if ($mime === 'text/plain' || $mime === 'application/octet-stream') {
+            $mime = match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
+                'css'  => 'text/css',
+                'js'   => 'application/javascript',
+                'json' => 'application/json',
+                'svg'  => 'image/svg+xml',
+                'xml'  => 'application/xml',
+                'woff' => 'font/woff',
+                'woff2'=> 'font/woff2',
+                'ttf'  => 'font/ttf',
+                'otf'  => 'font/otf',
+                'webp' => 'image/webp',
+                'avif' => 'image/avif',
+                'mp4'  => 'video/mp4',
+                'webm' => 'video/webm',
+                default => $mime,
+            };
+        }
+
+        $this->header('Content-Type', $mime);
+        $this->header('Accept-Ranges', 'bytes');
+
+        if ($filename !== '') {
+            $this->header('Content-Disposition', 'attachment; filename="' . addcslashes($filename, '"\\') . '"');
+        }
+
+        $rangeHeader = $this->g->zealphp_request->parent->header['range'] ?? '';
+
+        if ($rangeHeader !== '' && preg_match('/^bytes=(\d*)-(\d*)$/', $rangeHeader, $m)) {
+            $start = $m[1] !== '' ? (int) $m[1] : null;
+            $end   = $m[2] !== '' ? (int) $m[2] : null;
+
+            if ($start === null && $end !== null) {
+                $start = max(0, $total - $end);
+                $end = $total - 1;
+            } elseif ($start !== null && $end === null) {
+                $end = $total - 1;
+            }
+
+            if ($start === null || $start >= $total || $start > $end) {
+                $this->status(416);
+                $this->header('Content-Range', "bytes */{$total}");
+                $this->flush();
+                $this->parent->end('');
+                return;
+            }
+
+            $end = min($end, $total - 1);
+            $length = $end - $start + 1;
+
+            $this->status(206);
+            $this->header('Content-Range', "bytes {$start}-{$end}/{$total}");
+            $this->header('Content-Length', (string) $length);
+            $this->flush();
+            $this->parent->sendfile($path, $start, $length);
+        } else {
+            $this->header('Content-Length', (string) $total);
+            $this->flush();
+            $this->parent->sendfile($path, 0, $total);
+        }
+    }
+
     public function flush(): bool
     {
         if ($this->parent->isWritable()) {

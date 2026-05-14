@@ -141,6 +141,7 @@ Reflection is cached per route at registration time — zero reflection overhead
 - `CorsMiddleware` — CORS preflight (OPTIONS + Origin) + `Access-Control-*` headers on every response
 - `ETagMiddleware` — `W/"md5"` ETag on GET, returns 304 on `If-None-Match` match
 - `CompressionMiddleware` — reference gzip/deflate implementation for apps that disable OpenSwoole `http_compression`; the demo app does not register it
+- `RangeMiddleware` — RFC 7233 Range requests: `Accept-Ranges: bytes`, 206 single/multi-range, 416 unsatisfiable, `If-Range` ETag support
 
 ### HTTP Protocol Features
 
@@ -151,6 +152,7 @@ Reflection is cached per route at registration time — zero reflection overhead
 | Redirects 301/307/308 | `$response->redirect($url, $status)` |
 | Cookie SameSite | `setcookie()` override accepts `$samesite` param |
 | Gzip compression | OpenSwoole `http_compression` is enabled by default in `App::run()`; do not also register `CompressionMiddleware` |
+| Range requests | `RangeMiddleware` for buffered responses (single + multi-range, RFC 7233); `$response->sendFile()` for zero-copy file serving with Range; streaming paths send `Accept-Ranges: none` |
 | HTTP/2 | Pass `'enable_http2' => true` to `$app->run()` (requires TLS) |
 
 ### SSR Streaming
@@ -371,10 +373,11 @@ All ZealPHP usage examples live as first-class project files:
 | `Session/SessionManager.php` | Traditional session lifecycle (superglobals ON) |
 | `IOStreamWrapper.php` | `php://` stream wrapper that redirects `php://input` to request body |
 | `HTTP/Request.php` | Thin wrapper around `OpenSwoole\Http\Request` |
-| `HTTP/Response.php` | Thin wrapper around `OpenSwoole\Http\Response`; adds `stream()`, `sse()`, `redirect()`, `flush()` |
+| `HTTP/Response.php` | Thin wrapper around `OpenSwoole\Http\Response`; adds `stream()`, `sse()`, `sendFile()`, `redirect()`, `flush()` |
 | `Middleware/CorsMiddleware.php` | CORS preflight + `Access-Control-*` headers |
 | `Middleware/ETagMiddleware.php` | ETag generation + 304 Not Modified |
 | `Middleware/CompressionMiddleware.php` | Reference gzip/deflate middleware; only use when OpenSwoole `http_compression` is disabled |
+| `Middleware/RangeMiddleware.php` | RFC 7233 Range requests: Accept-Ranges, 206 single/multi-range, 416, If-Range ETag support |
 | `deploy/zealphp.service` | systemd service template (Type=simple, no -d) |
 
 ---

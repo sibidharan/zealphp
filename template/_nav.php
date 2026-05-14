@@ -28,9 +28,16 @@ $links = [
     <span></span><span></span><span></span>
   </label>
   <nav class="nav-links">
-    <?php foreach ($links as $key => [$href, $label]): ?>
-      <a href="<?= $href ?>"<?= ($active === $key ? ' class="active"' : '') ?>><?= $label ?></a>
-    <?php endforeach; ?>
+    <div class="nav-row nav-row-core">
+      <?php foreach (array_slice($links, 0, 8, true) as $key => [$href, $label]): ?>
+        <a href="<?= $href ?>"<?= ($active === $key ? ' class="active"' : '') ?>><?= $label ?></a>
+      <?php endforeach; ?>
+    </div>
+    <div class="nav-row nav-row-features">
+      <?php foreach (array_slice($links, 8, null, true) as $key => [$href, $label]): ?>
+        <a href="<?= $href ?>"<?= ($active === $key ? ' class="active"' : '') ?>><?= $label ?></a>
+      <?php endforeach; ?>
+    </div>
   </nav>
   <div class="actions">
     <a href="https://deepwiki.com/sibidharan/zealphp" target="_blank">DeepWiki ↗</a>

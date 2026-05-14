@@ -88,3 +88,21 @@ $app->route('/http/cookie-test', ['methods' => ['GET']], function($response) {
     echo '<h2>Cookies set ✓</h2>';
     echo '<p>Check response headers for Set-Cookie with SameSite attribute.</p>';
 });
+
+// ---------------------------------------------------------------------------
+// 8. Range requests — single + multi-range via RangeMiddleware
+//    curl -H 'Range: bytes=0-9' http://localhost:8080/http/range-test
+// ---------------------------------------------------------------------------
+$app->route('/http/range-test', ['methods' => ['GET']], function() {
+    header('Content-Type: text/plain');
+    echo str_repeat('abcdefghij', 100); // 1000 bytes of predictable content
+});
+
+// ---------------------------------------------------------------------------
+// 9. sendFile — zero-copy file serving with Range
+//    curl http://localhost:8080/http/sendfile-test
+//    curl -H 'Range: bytes=0-99' http://localhost:8080/http/sendfile-test
+// ---------------------------------------------------------------------------
+$app->route('/http/sendfile-test', ['methods' => ['GET']], function($response) {
+    $response->sendFile(__DIR__ . '/../public/css/zealphp.css');
+});

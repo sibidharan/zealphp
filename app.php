@@ -22,6 +22,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 use ZealPHP\Middleware\CorsMiddleware;
 use ZealPHP\Middleware\CompressionMiddleware;
 use ZealPHP\Middleware\ETagMiddleware;
+use ZealPHP\Middleware\RangeMiddleware;
 use ZealPHP\Store;
 use ZealPHP\Counter;
 
@@ -74,6 +75,7 @@ $app = App::init(
 if (!$benchMode) {
     $app->addMiddleware(new CorsMiddleware());         // outermost — handles preflight, adds Allow-Origin
     $app->addMiddleware(new ETagMiddleware());         // generates ETag, returns 304 on cache hit
+    $app->addMiddleware(new RangeMiddleware());       // Range / 206 Partial Content (RFC 7233)
     if ($compressionMiddleware) {
         $app->addMiddleware(new CompressionMiddleware());
     }

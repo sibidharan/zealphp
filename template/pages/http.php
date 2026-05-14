@@ -19,7 +19,7 @@ $siteUrl = site_url();
   <tr><td>Redirects 301/302/307/308</td><td>✅ Built-in</td><td><code>$response->redirect($url, $status)</code></td></tr>
   <tr><td>Cookie SameSite</td><td>✅ Built-in</td><td><code>setcookie($name, $value, ..., $samesite)</code></td></tr>
   <tr><td>HTTP/2</td><td>⚙️ Configure</td><td>Pass <code>'enable_http2' => true</code> to <code>$app->run()</code> (requires TLS)</td></tr>
-  <tr><td>Range requests</td><td>⏳ Planned</td><td>Use OpenSwoole static handler for files</td></tr>
+  <tr><td>Range requests</td><td>✅ Middleware</td><td>RangeMiddleware handles single + multi-range (RFC 7233); <code>$response-&gt;sendFile()</code> for zero-copy file serving</td></tr>
 </table>
 
 <?php
@@ -55,6 +55,33 @@ $app->route('/http/redirect/{code}', function($code, $response) {
 header('Location: https://example.com');
 // ZealPHP detects Location: → sets status 302 automatically
 PHP],
+  ['http-range',   'Range — 206 Partial Content',             'GET',     '/http/range-test',
+   str_replace('__SITE_URL__', $siteUrl, <<<'PHP'
+// Any buffered response supports Range via RangeMiddleware:
+$app->route('/http/range-test', function() {
+    echo str_repeat('abcdefghij', 100);  // 1000 bytes
+});
+
+// curl -H 'Range: bytes=0-9' __SITE_URL__/http/range-test
+// → HTTP/1.1 206 Partial Content
+// → Content-Range: bytes 0-9/1000
+// → abcdefghij
+PHP)],
+  ['http-sendfile', 'sendFile() — zero-copy file download',   'GET',     '/http/sendfile-test',
+   str_replace('__SITE_URL__', $siteUrl, <<<'PHP'
+// Serve files with zero-copy + automatic Range support:
+$app->route('/download/{file}', function($file, $response) {
+    $path = "/var/data/{$file}";
+    $response->sendFile($path, $file);
+});
+
+// curl __SITE_URL__/http/sendfile-test
+// → Content-Type: text/css
+// → Accept-Ranges: bytes
+//
+// curl -H 'Range: bytes=0-99' __SITE_URL__/http/sendfile-test
+// → HTTP/1.1 206 Partial Content
+PHP)],
 ];
 foreach ($demos as [$id, $title, $method, $url, $code]) {
     App::render('/components/_demo', ['id' => $id, 'title' => $title, 'url' => $url, 'code' => $code, 'method' => $method]);

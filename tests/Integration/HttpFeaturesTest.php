@@ -79,4 +79,69 @@ class HttpFeaturesTest extends TestCase
         $r = $this->get('/demo/middleware/cors', ['Origin' => 'http://example.com']);
         $this->assertHeader('access-control-allow-origin', '*', $r);
     }
+
+    public function testRangeSingleReturns206(): void
+    {
+        $r = $this->get('/http/range-test', ['Range' => 'bytes=0-9']);
+        $this->assertStatus(206, $r);
+        $this->assertSame('abcdefghij', $r['body']);
+        $this->assertHeader('content-range', 'bytes 0-9/1000', $r);
+        $this->assertHeader('accept-ranges', 'bytes', $r);
+    }
+
+    public function testRangeSuffixReturns206(): void
+    {
+        $r = $this->get('/http/range-test', ['Range' => 'bytes=-10']);
+        $this->assertStatus(206, $r);
+        $this->assertSame('abcdefghij', $r['body']);
+        $this->assertHeader('content-range', 'bytes 990-999/1000', $r);
+    }
+
+    public function testRangeUnsatisfiableReturns416(): void
+    {
+        $r = $this->get('/http/range-test', ['Range' => 'bytes=5000-6000']);
+        $this->assertStatus(416, $r);
+        $this->assertHeader('content-range', 'bytes */1000', $r);
+    }
+
+    public function testRangeMultiReturnsMultipart(): void
+    {
+        $r = $this->get('/http/range-test', ['Range' => 'bytes=0-4,10-14']);
+        $this->assertStatus(206, $r);
+        $this->assertHeader('content-type', 'multipart/byteranges', $r);
+        $this->assertStringContainsString('bytes 0-4/1000', $r['body']);
+        $this->assertStringContainsString('abcde', $r['body']);
+        $this->assertStringContainsString('bytes 10-14/1000', $r['body']);
+    }
+
+    public function testNoRangeHeaderAddsAcceptRanges(): void
+    {
+        $r = $this->get('/http/range-test');
+        $this->assertStatus(200, $r);
+        $this->assertHeader('accept-ranges', 'bytes', $r);
+    }
+
+    public function testSendFileServesFile(): void
+    {
+        $r = $this->get('/http/sendfile-test');
+        $this->assertStatus(200, $r);
+        $this->assertHeader('content-type', 'text/css', $r);
+        $this->assertHeader('accept-ranges', 'bytes', $r);
+        $this->assertNotEmpty($r['body']);
+    }
+
+    public function testSendFileRangeReturns206(): void
+    {
+        $r = $this->get('/http/sendfile-test', ['Range' => 'bytes=0-99']);
+        $this->assertStatus(206, $r);
+        $this->assertHeader('content-range', 'bytes 0-99/', $r);
+        $this->assertSame(100, strlen($r['body']));
+    }
+
+    public function testStreamingResponseSetsAcceptRangesNone(): void
+    {
+        $r = $this->get('/stream/ssr');
+        $this->assertStatus(200, $r);
+        $this->assertHeader('accept-ranges', 'none', $r);
+    }
 }

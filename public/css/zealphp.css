@@ -69,18 +69,20 @@ p  { max-width: 70ch; }
   white-space: nowrap;
 }
 .topnav .logo span { color: var(--accent); }
-.nav-links { display: flex; gap: .1rem; flex: 1; align-items: center; flex-wrap: wrap; }
-.nav-links > a {
+.nav-links { display: flex; flex-direction: column; flex: 1; gap: 0; }
+.nav-row { display: flex; gap: .1rem; align-items: center; flex-wrap: wrap; }
+.nav-row-features { border-top: 1px solid rgba(245,158,11,.06); padding-top: .15rem; margin-top: .15rem; }
+.nav-row a {
   color: #a8a29e; font-size: .75rem; font-weight: 500;
   padding: .35rem .55rem; border-radius: 5px;
   transition: color .15s, background .15s;
   white-space: nowrap;
 }
-.nav-links > a:hover {
+.nav-row a:hover {
   color: var(--accent); text-decoration: none;
   background: rgba(245,158,11,.08);
 }
-.nav-links > a.active {
+.nav-row a.active {
   color: var(--accent); text-decoration: none;
   background: rgba(245,158,11,.1);
 }
@@ -422,11 +424,13 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   .nav-toggle-input:checked ~ .nav-toggle-btn span:nth-child(2) { opacity: 0; }
   .nav-toggle-input:checked ~ .nav-toggle-btn span:nth-child(3) { transform: rotate(-45deg) translate(4px, -4px); }
   .nav-links {
-    display: none !important; flex-direction: column; width: 100%;
-    order: 3; padding: .5rem 0;
+    display: none; flex-direction: column; width: 100%;
+    padding: .5rem 0; order: 3;
   }
   .nav-toggle-input:checked ~ .nav-links { display: flex !important; }
-  .nav-links > a { padding: .6rem 1rem; font-size: .85rem; }
+  .nav-row { flex-direction: column; gap: 0; }
+  .nav-row-features { border-top: none; padding-top: 0; margin-top: 0; }
+  .nav-links a { padding: .6rem 1rem; font-size: .85rem; }
   .topnav .actions { order: 1; margin-left: auto; }
 }
 
@@ -692,12 +696,17 @@ pre:hover > .code-copy { opacity: 1; }
   margin: 0 !important; border-radius: 0 !important;
 }
 .chat-typing {
-  display: inline-block; width: 6px; height: 14px;
-  background: var(--accent); border-radius: 2px;
-  animation: blink .6s infinite alternate;
-  vertical-align: middle; margin-left: 2px;
+  display: inline-flex; gap: 4px; align-items: center;
+  padding: 4px 0;
 }
-@keyframes blink { from { opacity: 1; } to { opacity: .3; } }
+.chat-typing span {
+  display: inline-block; width: 6px; height: 6px;
+  background: var(--accent); border-radius: 50%;
+  animation: chat-dot .8s infinite ease-in-out;
+}
+.chat-typing span:nth-child(2) { animation-delay: .15s; }
+.chat-typing span:nth-child(3) { animation-delay: .3s; }
+@keyframes chat-dot { 0%, 60%, 100% { opacity: .3; transform: scale(.8); } 30% { opacity: 1; transform: scale(1); } }
 
 /* ── Bold Claims ── */
 .bold-claim {

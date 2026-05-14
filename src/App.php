@@ -1546,6 +1546,7 @@ class ResponseMiddleware implements MiddlewareInterface
             }
 
             if ($object instanceof \Generator) {
+                $g->zealphp_response->header('Accept-Ranges', 'none');
                 $g->zealphp_response->flush();
                 foreach ($object as $chunk) {
                     if (!$g->openswoole_response->isWritable()) break;
@@ -1630,6 +1631,7 @@ class ResponseMiddleware implements MiddlewareInterface
             // Fast paths — discard output buffer without string copy
             if ($object instanceof \Generator) {
                 ob_end_clean();
+                $g->zealphp_response->header('Accept-Ranges', 'none');
                 $g->zealphp_response->flush();
                 foreach ($object as $chunk) {
                     if (!$g->openswoole_response->isWritable()) break;

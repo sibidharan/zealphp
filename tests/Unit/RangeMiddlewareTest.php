@@ -82,6 +82,49 @@ class RangeMiddlewareTest extends TestCase
         $this->assertSame(self::BODY, (string) $response->getBody());
     }
 
+    public function testMultiRangeReturns206WithMultipartBody(): void
+    {
+        $response = $this->processRange('bytes=0-4,14-17');
+
+        $this->assertSame(206, $response->getStatusCode());
+        $ct = $response->getHeaderLine('Content-Type');
+        $this->assertStringContainsString('multipart/byteranges', $ct);
+        $this->assertStringContainsString('boundary=', $ct);
+
+        $body = (string) $response->getBody();
+        $this->assertStringContainsString('bytes 0-4/54', $body);
+        $this->assertStringContainsString('Hello', $body);
+        $this->assertStringContainsString('bytes 14-17/54', $body);
+        $this->assertStringContainsString('This', $body);
+    }
+
+    public function testIfRangeMismatchIgnoresRange(): void
+    {
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+
+        $middleware = new RangeMiddleware();
+        $request = new ServerRequest('/', 'GET', '', [
+            'range' => 'bytes=0-4',
+            'if-range' => 'W/"stale-etag"',
+        ]);
+
+        $body = self::BODY;
+        $handler = new class($body) implements RequestHandlerInterface {
+            public function __construct(private string $body) {}
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return (new Response($this->body, 200))
+                    ->withHeader('ETag', 'W/"fresh-etag"');
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(self::BODY, (string) $response->getBody());
+    }
+
     private function processRange(
         ?string $rangeHeader,
         int $status = 200,

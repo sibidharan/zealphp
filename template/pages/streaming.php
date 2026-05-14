@@ -174,6 +174,10 @@ PHP]); ?>
 <strong>Why PHP for streaming?</strong> Unlike Blade/Twig which require a compile step and can't yield, ZealPHP templates are raw PHP — <code>yield</code> is a native language feature. Templates declare their dependencies as function parameters, the framework injects them, and each yield flushes to the client. No special template syntax, no streaming adapter — just PHP generators.
 </div>
 
+<div class="callout info" style="margin-top:1.5rem">
+<strong>Range requests and streaming.</strong> Streaming responses (<code>Generator</code>, <code>stream()</code>, <code>sse()</code>) automatically send <code>Accept-Ranges: none</code> — the total size is unknown, so byte-range serving doesn't apply. Buffered responses get full Range support via <code>RangeMiddleware</code>.
+</div>
+
 </div>
 </section>
 

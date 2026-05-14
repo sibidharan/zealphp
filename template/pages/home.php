@@ -284,12 +284,11 @@ function chatSourceTab(btn, id) {
     // Add assistant placeholder
     const assistantDiv = document.createElement('div');
     assistantDiv.className = 'chat-msg assistant';
-    assistantDiv.innerHTML = '<div class="chat-msg-bubble"><span class="chat-typing"></span></div>';
+    assistantDiv.innerHTML = '<div class="chat-msg-bubble"><span class="chat-typing"><span></span><span></span><span></span></span></div>';
     messages.appendChild(assistantDiv);
     messages.scrollTop = messages.scrollHeight;
 
     const bubble = assistantDiv.querySelector('.chat-msg-bubble');
-    bubble.innerHTML = '';
 
     // SSE via fetch — accumulate HTML and render via innerHTML
     let rawHtml = '';
@@ -315,6 +314,7 @@ function chatSourceTab(btn, id) {
                 const data = JSON.parse(line.slice(6));
                 if (data.thread_id) { threadId = data.thread_id; localStorage.setItem('zealphp_chat_thread', threadId); }
                 if (data.token) {
+                  if (!rawHtml) bubble.querySelector('.chat-typing')?.remove();
                   rawHtml += data.token;
                   bubble.innerHTML = rawHtml;
                   messages.scrollTop = messages.scrollHeight;
@@ -698,7 +698,7 @@ document.addEventListener('click', function(e) {
         ['🗄️', 'Sessions',   'Coroutine-safe sessions. Your existing session_start() code just works via uopz.',                     '/sessions',   'drop-in'],
         ['🗃️', 'Store',      'Share AI conversation state across workers. Cross-worker shared memory — no Redis needed.',             '/store',      'OpenSwoole\\Table'],
         ['⏱️', 'Timers',     'Schedule recurring AI tasks. Polling, cleanup, model warmup, health checks.',                           '/timers',     'tick() · after()'],
-        ['🌐', 'HTTP',        'Full HTTP/1.1 compliance. HEAD, OPTIONS, redirects, CORS, ETag, gzip — all built-in.',                 '/http',       'HTTP/1.1'],
+        ['🌐', 'HTTP',        'Full HTTP/1.1 compliance. HEAD, OPTIONS, Range, redirects, CORS, ETag, gzip — all built-in.',           '/http',       'HTTP/1.1'],
         ['📝', 'Templates',   'SSR streaming templates. Compose views with yield from. renderStream() for progressive HTML.',         '/templates',  'renderStream()'],
         ['🔗', 'ZealAPI',     'Drop a PHP file in api/. It becomes a route. File-based REST — the simplest API pattern.',             '/api',        'file-based'],
         ['🏗️', 'Legacy Apps','Run WordPress unmodified. CGI worker provides true global scope. Apache mod_php compatibility.',        '/legacy-apps','WordPress'],
