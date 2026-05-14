@@ -31,7 +31,6 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1200);
       });
     });
-    pre.style.position = 'relative';
     pre.appendChild(btn);
   });
 
