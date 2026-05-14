@@ -161,6 +161,44 @@ html.alpha-banner-dismissed .alpha-banner { display: none; }
 .section-title { font-size: 1.6rem; font-weight: 800; margin-bottom: .4rem; }
 .section-desc  { color: var(--text-muted); max-width: 60ch; margin-bottom: 2rem; }
 
+/* ── Dark-themed section (matches the home hero aesthetic, used by /performance) ── */
+.section.section-dark {
+  background: linear-gradient(180deg, #0c0a09 0%, #1c1917 100%);
+  color: #e7e5e4;
+}
+.section.section-dark .section-title { color: #fff; }
+.section.section-dark .section-desc { color: #a8a29e; }
+.section.section-dark h2 { color: #fff; }
+.section.section-dark h3 { color: #fafaf9; }
+.section.section-dark p,
+.section.section-dark li { color: #d6d3d1; }
+.section.section-dark a { color: var(--accent); }
+.section.section-dark a:hover { text-decoration: underline; }
+.section.section-dark code {
+  background: rgba(245,158,11,.08);
+  color: #fde68a;
+  padding: .1rem .3rem;
+  border-radius: 3px;
+}
+.section.section-dark .ztable {
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(245,158,11,.12);
+}
+.section.section-dark .ztable th {
+  background: rgba(245,158,11,.06);
+  color: #fafaf9;
+  border-bottom: 1px solid rgba(245,158,11,.18);
+}
+.section.section-dark .ztable td {
+  color: #e7e5e4;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.section.section-dark .qs-block {
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(245,158,11,.14);
+}
+.section.section-dark .qs-block h3 { color: var(--accent); }
+
 /* ── Hero ── */
 .hero {
   background: linear-gradient(135deg, #0c0a09 0%, #1c1917 50%, #292524 100%);

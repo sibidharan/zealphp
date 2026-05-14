@@ -1,6 +1,6 @@
 <?php use ZealPHP\App; ?>
 
-<section class="section">
+<section class="section section-dark">
 <div class="container" style="max-width:900px">
 
 <h1 class="section-title">Benchmarks</h1>
