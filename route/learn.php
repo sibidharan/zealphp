@@ -337,3 +337,119 @@ $app->route('/api/learn/demo/render-stream', ['methods' => ['GET']], function() 
         yield "</section>";
     })();
 });
+
+// ── Chat status (will be replaced by ZealAPI file in M6.5) ───────────
+$app->route('/api/learn/chat/status', ['methods' => ['GET']], function() {
+    $key = (string)(getenv('OPENAI_API_KEY') ?: '');
+    header('Content-Type: application/json');
+    return [
+        'ai_enabled' => $key !== '',
+        'mock_mode'  => $key === '',
+        'model'      => $key !== '' ? (getenv('ZEALPHP_LEARN_AI_MODEL') ?: 'gpt-4.1-mini') : 'mock-rules-v1',
+    ];
+});
+
+// ── Chat rate limit ─────────────────────────────────────────────────
+\ZealPHP\Store::make('learn_chat_rl', 1024, [
+    'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],
+    'count' => [\OpenSwoole\Table::TYPE_INT, 4],
+    'reset' => [\OpenSwoole\Table::TYPE_INT, 4],
+]);
+
+$app->route('/api/learn/chat', ['methods' => ['POST']], function($request, $response) {
+    $u = learn_current_user();
+    if (!$u) { http_response_code(401); header('Content-Type: application/json'); return ['error' => 'auth_required']; }
+    $g = G::instance();
+    $ip = $g->server['REMOTE_ADDR'] ?? 'unknown';
+    $limit = (int)(getenv('ZEALPHP_LEARN_RATE_LIMIT') ?: 30);
+    if (!learn_rate_limit('learn_chat_rl', $ip, $limit, 3600)) {
+        $response->sse(function($emit) {
+            $emit(json_encode(['error' => 'rate_limit']), 'error');
+            $emit(json_encode(['done' => true]), 'done');
+        });
+        return;
+    }
+    $body = json_decode($g->zealphp_request->parent->getContent(), true) ?: [];
+    $message  = trim((string)($body['message'] ?? ''));
+    $threadId = (string)($body['thread_id'] ?? bin2hex(random_bytes(8)));
+    if ($message === '' || strlen($message) > 2000) {
+        $response->sse(function($emit) use ($threadId) {
+            $emit(json_encode(['thread_id' => $threadId]), 'thread');
+            $emit(json_encode(['error' => 'invalid_message']), 'error');
+            $emit(json_encode(['done' => true]), 'done');
+        });
+        return;
+    }
+    $key = (string)(getenv('OPENAI_API_KEY') ?: '');
+    if ($key === '') learn_chat_mock($response, $u, $message, $threadId);
+    else learn_chat_real($response, $u, $message, $threadId, $key);
+});
+
+function learn_chat_mock($response, array $user, string $message, string $threadId): void {
+    $db = learn_db_open();
+    $userId = $user['user_id'];
+    $msgLower = strtolower($message);
+
+    $response->sse(function($emit) use ($db, $userId, $message, $msgLower, $threadId) {
+        $emit(json_encode(['thread_id' => $threadId]), 'thread');
+
+        if (preg_match('/(list|show all|what\'?s in)/i', $msgLower)) {
+            $emit(json_encode(['id' => 'm1', 'name' => 'list_notes', 'phase' => 'start']), 'tool_call');
+            usleep(120000);
+            $notes = learn_notes_list($db, $userId);
+            $emit(json_encode(['id' => 'm1', 'status' => 'ok', 'result_preview' => count($notes) . ' notes']), 'tool_done');
+            if (empty($notes)) {
+                $emit(json_encode(['token' => '<p>No notes yet. Try "create a note titled buy milk".</p>']), 'token');
+            } else {
+                $html = '<ul>' . implode('', array_map(fn($n) => '<li>' . htmlspecialchars($n['title']) . ' — id ' . (int)$n['id'] . '</li>', $notes)) . '</ul>';
+                $emit(json_encode(['token' => '<p>Here are your notes:</p>' . $html]), 'token');
+            }
+        } elseif (preg_match('/(create|add)(\s+a)?\s+note(\s+(titled|called|saying))?\s+["\']?(.+?)["\']?$/i', $message, $m)) {
+            $title = trim($m[5] ?? 'untitled');
+            $emit(json_encode(['token' => '<p>Got it, creating that note.</p>']), 'token');
+            $emit(json_encode(['id' => 'm2', 'name' => 'create_note', 'phase' => 'start']), 'tool_call');
+            $json = json_encode(['title' => $title, 'body' => '']);
+            foreach (str_split($json, 12) as $chunk) {
+                $emit(json_encode(['id' => 'm2', 'delta' => $chunk]), 'tool_args');
+                usleep(40000);
+            }
+            $newId = learn_notes_create($db, $userId, $title, '');
+            $emit(json_encode(['id' => 'm2', 'status' => $newId ? 'ok' : 'error', 'result_preview' => $newId ? "id: $newId" : 'failed']), 'tool_done');
+            $emit(json_encode([]), 'notes_changed');
+            $emit(json_encode(['token' => "<p>Created note <strong>" . htmlspecialchars($title) . "</strong>.</p>"]), 'token');
+        } elseif (preg_match('/delete\s+(?:note\s+)?["\']?(.+?)["\']?$/i', $message, $m)) {
+            $needle = trim($m[1]);
+            $notes = learn_notes_list($db, $userId);
+            $hit = null;
+            foreach ($notes as $n) if (stripos($n['title'], $needle) !== false) { $hit = $n; break; }
+            if (!$hit) {
+                $emit(json_encode(['token' => "<p>I couldn't find a note matching <em>" . htmlspecialchars($needle) . "</em>.</p>"]), 'token');
+            } else {
+                $emit(json_encode(['id' => 'm3', 'name' => 'delete_note', 'phase' => 'start']), 'tool_call');
+                learn_notes_delete($db, $userId, (int)$hit['id']);
+                $emit(json_encode(['id' => 'm3', 'status' => 'ok', 'result_preview' => 'deleted id ' . $hit['id']]), 'tool_done');
+                $emit(json_encode([]), 'notes_changed');
+                $emit(json_encode(['token' => "<p>Deleted note <strong>" . htmlspecialchars($hit['title']) . "</strong>.</p>"]), 'token');
+            }
+        } elseif (preg_match('/(search|find)\s+(.+)/i', $message, $m)) {
+            $q = trim($m[2]);
+            $emit(json_encode(['id' => 'm4', 'name' => 'search_notes', 'phase' => 'start']), 'tool_call');
+            $hits = learn_notes_search($db, $userId, $q);
+            $emit(json_encode(['id' => 'm4', 'status' => 'ok', 'result_preview' => count($hits) . ' hits']), 'tool_done');
+            if (empty($hits)) $emit(json_encode(['token' => "<p>No notes match <em>" . htmlspecialchars($q) . "</em>.</p>"]), 'token');
+            else $emit(json_encode(['token' => '<ul>' . implode('', array_map(fn($n) => '<li>' . htmlspecialchars($n['title']) . '</li>', $hits)) . '</ul>']), 'token');
+        } else {
+            $emit(json_encode(['token' => '<p>Mock mode is active — set <code>OPENAI_API_KEY</code> for the real model. Try: <em>create a note titled buy milk</em>, <em>list notes</em>, <em>delete buy milk</em>, <em>search groceries</em>.</p>']), 'token');
+        }
+        $emit(json_encode(['done' => true]), 'done');
+    });
+}
+
+function learn_chat_real($response, array $user, string $message, string $threadId, string $apiKey): void {
+    // Filled in by Milestone 7.
+    $response->sse(function($emit) use ($threadId) {
+        $emit(json_encode(['thread_id' => $threadId]), 'thread');
+        $emit(json_encode(['token' => '<p>Real AI not wired yet (Milestone 7).</p>']), 'token');
+        $emit(json_encode(['done' => true]), 'done');
+    });
+}
