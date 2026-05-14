@@ -615,12 +615,12 @@ document.addEventListener('click', function(e) {
 <!-- Build your first AI app -->
 <section class="section" style="background:var(--bg-dark);color:#e2e8f0;padding:3rem 0">
   <div class="container" style="text-align:center">
-    <h2 style="color:#fff;margin-bottom:.5rem">Build your first AI chat in 60 seconds</h2>
+    <h2 style="color:#fff;margin-bottom:.5rem">From zero to running server in 60 seconds</h2>
     <p style="color:#94a3b8;margin-bottom:1.5rem">Includes CLAUDE.md — your AI copilot understands ZealPHP out of the box.</p>
     <div class="qs-block" style="max-width:600px;margin:0 auto 1.5rem;text-align:left">
-      <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project my-ai-app</span></div>
-      <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd my-ai-app && php app.php</span></div>
-      <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">AI-ready server at <code style="color:#818cf8">http://localhost:8080</code></span></div>
+      <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project my-app</span></div>
+      <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd my-app && php app.php</span></div>
+      <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">Server running at <code style="color:#818cf8">http://localhost:8080</code></span></div>
     </div>
     <a href="/getting-started" class="btn btn-primary" style="font-size:1rem;padding:.75rem 2rem">Get started →</a>
   </div>
