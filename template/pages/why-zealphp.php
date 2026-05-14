@@ -226,9 +226,9 @@
         <a href="https://github.com/sibidharan/zealphp/blob/master/scripts/bench_vs_express.sh" target="_blank" rel="noopener">reproduce locally</a>
       </div>
       <div class="bench" style="margin-top:1rem">
-        <div class="bench-stat"><div class="num">95k</div><div class="label">req/s text</div></div>
-        <div class="bench-stat"><div class="num">90k</div><div class="label">req/s JSON</div></div>
-        <div class="bench-stat"><div class="num">65k</div><div class="label">req/s template</div></div>
+        <div class="bench-stat"><div class="num">70k</div><div class="label">req/s text</div></div>
+        <div class="bench-stat"><div class="num">67k</div><div class="label">req/s JSON</div></div>
+        <div class="bench-stat"><div class="num">51k</div><div class="label">req/s template</div></div>
         <div class="bench-stat"><div class="num">0</div><div class="label">failures</div></div>
       </div>
       <p style="color:var(--text-muted);font-size:.82rem;margin-top:1rem">

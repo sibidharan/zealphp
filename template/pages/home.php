@@ -82,9 +82,9 @@ $siteUrl = site_url();
       <a href="https://github.com/sibidharan/zealphp/blob/master/scripts/bench_vs_express.sh" target="_blank" rel="noopener">reproduce locally</a>
     </div>
     <div class="bench">
-      <div class="bench-stat"><div class="num">95k</div><div class="label">req/s text</div></div>
-      <div class="bench-stat"><div class="num">90k</div><div class="label">req/s JSON</div></div>
-      <div class="bench-stat"><div class="num">65k</div><div class="label">req/s template</div></div>
+      <div class="bench-stat"><div class="num">70k</div><div class="label">req/s text</div></div>
+      <div class="bench-stat"><div class="num">67k</div><div class="label">req/s JSON</div></div>
+      <div class="bench-stat"><div class="num">51k</div><div class="label">req/s template</div></div>
       <div class="bench-stat"><div class="num">0</div><div class="label">failures</div></div>
     </div>
     <div style="margin-top:1.5rem;position:relative">
@@ -100,14 +100,14 @@ $siteUrl = site_url();
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
           <td style="padding:.35rem .6rem;color:#94a3b8">OpenSwoole raw</td>
-          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">298k</td>
-          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">258k</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">205k</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">213k</td>
           <td style="padding:.35rem .6rem;text-align:right;color:#64748b">—</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
           <td style="padding:.35rem .6rem;color:#94a3b8">Node.js raw http</td>
-          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">222k</td>
-          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">281k</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">260k</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">264k</td>
           <td style="padding:.35rem .6rem;text-align:right;color:#64748b">—</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02)">
@@ -115,15 +115,15 @@ $siteUrl = site_url();
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
           <td style="padding:.4rem .6rem;color:var(--accent);font-weight:700">ZealPHP <span style="color:#64748b;font-weight:400;font-size:.68rem">built-in</span></td>
-          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">95k</td>
-          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">90k</td>
-          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">65k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">70k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">67k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">51k</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
           <td style="padding:.4rem .6rem;color:#e2e8f0">Express.js <span style="color:#64748b;font-size:.68rem">+5 npm pkgs</span></td>
-          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">87k</td>
-          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">105k</td>
-          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">36k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">45k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">42k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">15k</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02)">
           <td colspan="4" style="padding:.35rem .6rem;color:#64748b;font-size:.65rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700">Other PHP frameworks <span style="font-weight:400;text-transform:none;letter-spacing:0">(community benchmarks)</span></td>
@@ -142,9 +142,9 @@ $siteUrl = site_url();
         </tr>
       </table>
       <p style="text-align:center;color:#64748b;font-size:.7rem;margin-top:.75rem">
-        Methodology: same machine, 4 workers per server, warmed-up, <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px;color:#94a3b8">ab -n 50000 -c 200 -k</code>.
-        On this workload, ZealPHP outperforms Express on text and template responses; Express comes out ahead on JSON (V8 JSON.stringify is hard to beat).<br>
-        ZealPHP needs no npm packages here. Express needs cors + ejs + express-session + session-file-store + body-parser. Your results will vary with payload size, I/O, and tuning.
+        Methodology: 4-core Linux container, each server tested sequentially, 4 workers, warmed-up, <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px;color:#94a3b8">ab -n 50000 -c 200 -k -l</code>.
+        ZealPHP runs with the full PSR-15 stack (CORS + ETag + Range + sessions + reflection-injected routing). Express runs with cors + etag + express-session + session-file-store + ejs + body-parser.<br>
+        Your results will vary with hardware, payload size, I/O, and tuning. Re-run on your own box before quoting.
       </p>
       <div style="margin-top:1rem;text-align:center">
         <p style="color:#94a3b8;font-size:.75rem;margin-bottom:.5rem">Don't trust our numbers — run it yourself:</p>

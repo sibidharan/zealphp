@@ -31,7 +31,7 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **Unit tests** | PHPUnit 11 — 42 unit tests + 38 integration tests, all green |
 | **Benchmarks** | OpenSwoole-powered concurrency with a modular `scripts/bench.sh` runner for wrk/ab sweeps through c=1000 |
 
-> **Performance:** ~118K req/s peak with the full PSR-15 middleware stack on 4 workers / 4 cores (Ubuntu 24.04, PHP 8.3, OpenSwoole 26.2.0, zero failures). See [PERF.md](PERF.md) for the methodology, the full latency sweep, and the raw CSV.
+> **Performance:** ~67K req/s on a JSON route with the full PSR-15 middleware stack (CORS + ETag + sessions + reflection-injected routing) on 4 workers / 4 cores, ~70K on raw text, ~51K on a templated page. Express on the same box with equivalent middleware lands at 42K / 45K / 14.7K. See [PERF.md](PERF.md) for the methodology, full latency sweep, and head-to-head table.
 > **Stability:** Alpha (v0.2.x). API may change between minor versions until v1.0. Pin to a specific version in production.
 
 ---

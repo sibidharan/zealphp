@@ -220,6 +220,36 @@ scripts/bench.sh --workers 4 --threads 4 --task-workers 0 --path /json --p1000 -
 
 Raw CSV: `bench/results/zealphp-20260514-065032.csv`
 
+### Sequential head-to-head: ZealPHP vs Express vs raw runtimes
+
+Same machine, same time window (2026-05-14), 4 workers per server, each runtime
+tested **sequentially** (not simultaneously) so each got the full 4 cores while
+being measured. This matches the homepage table.
+
+```bash
+ab -n 50000 -c 200 -k -l http://127.0.0.1:<port>/<endpoint>
+```
+
+| Stack | /raw/bench (text) | /json | /bench/template |
+|---|---|---|---|
+| OpenSwoole raw (no framework) | 205,287 | 213,241 | — |
+| Node.js raw http (no framework) | 260,984 | 264,613 | — |
+| **ZealPHP — full PSR-15 middleware** | **70,041** | **67,546** | **51,241** |
+| Express.js — cors + etag + session + ejs | 45,347 | 42,531 | 14,778 (EJS) |
+
+Head-to-head (ZealPHP vs Express, full middleware stacks):
+- text: **+54%**
+- json: **+59%**
+- template: **+247%**
+
+Framework overhead (full stack vs raw runtime, both 4 workers):
+- ZealPHP retains 34% of OpenSwoole raw throughput on text, 32% on JSON
+- Express retains 17% of Node raw throughput on text, 16% on JSON
+
+ZealPHP delivers ~2× the framework efficiency of Express here. The full
+sustained throughput beats Express across all three endpoint types even
+with sessions, CORS, ETag, and reflection-based handler injection active.
+
 ### Notes
 
 - Single-machine numbers. Your hardware, OS limits, payload size, and middleware
@@ -229,6 +259,9 @@ Raw CSV: `bench/results/zealphp-20260514-065032.csv`
 - 4 workers ≈ 4 cores: this is a deliberate baseline. The framework is multi-process;
   doubling workers on a wider machine should scale further until the workload
   saturates I/O or coroutine context-switching.
+- The duration-based sweep (top of this section) and the request-count head-to-head
+  use different ab modes (`-t 30s` vs `-n 50000`) and therefore land on different
+  numbers — both are real; pick the methodology that matches your reproduction.
 
 ---
 
