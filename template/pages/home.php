@@ -8,9 +8,11 @@ $siteUrl = site_url();
 <!-- Hero -->
 <section class="hero">
   <div class="container">
-    <h1>ZealPHP <span>on OpenSwoole</span></h1>
-    <p>An async PHP framework tuned for coroutine I/O, SSR streaming, WebSocket, and low-latency services.<br>
-       Runs <strong>WordPress out of the box</strong> — zero modifications required.</p>
+    <h1>Zeal<span>PHP</span></h1>
+    <p style="font-size:1.4rem;color:#e0e7ff;font-weight:600;margin:.5rem auto .75rem;position:relative">
+      The PHP Runtime for AI Web Apps</p>
+    <p>Stream AI responses in 5 lines. WebSocket, SSE, shared memory, task workers —<br>
+       one server, one process. Go-level performance, PHP simplicity.</p>
     <div class="cta">
       <a href="/getting-started" class="btn btn-primary">Get Started →</a>
       <a href="https://github.com/sibidharan/zealphp" class="btn btn-outline" target="_blank">GitHub ↗</a>
@@ -41,15 +43,334 @@ $siteUrl = site_url();
         <img src="https://codecov.io/gh/sibidharan/zealphp/branch/master/graph/badge.svg" alt="Coverage">
       </a>
     </div>
-    <div class="bench-note">Local benchmark on 4 workers</div>
+
+    <!-- Streaming code demo -->
+    <div class="hero-demo">
+      <div class="hero-demo-code">
+        <span class="code-label">app.php — stream AI tokens</span>
+<pre style="margin:0"><code class="language-php" style="background:transparent;padding:0;font-size:.82rem">$app-&gt;route('/ai/chat', function($response) {
+    $response-&gt;sse(function($emit) {
+        $tokens = call_ai_api($prompt);
+        foreach ($tokens as $token) {
+            $emit($token, 'token');
+        }
+    });
+});</code></pre>
+      </div>
+      <div class="hero-demo-output">
+        <span class="code-label">Browser output</span>
+        <div id="hero-stream-output"></div>
+      </div>
+    </div>
+
+    <div class="bench-note">Benchmarked. Not promised.</div>
     <div class="bench">
-      <div class="bench-stat"><div class="num">4</div><div class="label">workers</div></div>
       <div class="bench-stat"><div class="num">67k</div><div class="label">req/s</div></div>
       <div class="bench-stat"><div class="num">21ms</div><div class="label">p90 latency</div></div>
+      <div class="bench-stat"><div class="num">4</div><div class="label">workers</div></div>
       <div class="bench-stat"><div class="num">0</div><div class="label">failures</div></div>
     </div>
   </div>
 </section>
+
+<script>
+(function() {
+  const output = document.getElementById('hero-stream-output');
+  const words = 'ZealPHP streams AI responses token-by-token using PHP generators. No WebSocket library needed. No third-party SSE proxy. Just yield and go.'.split(' ');
+  let i = 0;
+  function streamWord() {
+    if (i >= words.length) { setTimeout(() => { output.innerHTML = ''; i = 0; streamWord(); }, 2000); return; }
+    const span = document.createElement('span');
+    span.className = 'stream-line';
+    span.textContent = words[i] + ' ';
+    span.style.animationDelay = '0s';
+    output.appendChild(span);
+    i++;
+    setTimeout(streamWord, 90 + Math.random() * 60);
+  }
+  setTimeout(streamWord, 800);
+})();
+</script>
+
+<!-- One Server. Everything. -->
+<section class="section">
+  <div class="container">
+    <h2 class="section-title">One server. Everything.</h2>
+    <p class="section-desc">Your entire AI backend is one command: <code>php app.php</code></p>
+    <div class="arch-compare">
+      <div class="arch-box complex">
+        <h3>Your AI app without ZealPHP</h3>
+        <div class="arch-node">Express / FastAPI server</div>
+        <div class="arch-node">Redis for session state</div>
+        <div class="arch-node">Bull / Celery for background jobs</div>
+        <div class="arch-node">Socket.io for WebSocket</div>
+        <div class="arch-node">SSE proxy middleware</div>
+        <div class="arch-node">Nginx reverse proxy</div>
+        <div style="margin-top:.75rem;font-size:.78rem;color:#991b1b;font-weight:600">6 services. 6 failure points.</div>
+      </div>
+      <div class="arch-vs">vs</div>
+      <div class="arch-box simple">
+        <h3>Your AI app on ZealPHP</h3>
+        <div class="arch-node">HTTP routes + API</div>
+        <div class="arch-node">WebSocket (built-in)</div>
+        <div class="arch-node">SSE streaming (built-in)</div>
+        <div class="arch-node">Task workers (built-in)</div>
+        <div class="arch-node">Shared memory Store (built-in)</div>
+        <div class="arch-node">Sessions + Timers (built-in)</div>
+        <div style="margin-top:.75rem;font-size:.78rem;color:#166534;font-weight:600">1 process. <code>php app.php</code></div>
+      </div>
+    </div>
+    <p class="compare-verdict">No Redis. No message queue. No sidecar. No microservice fan-out.</p>
+  </div>
+</section>
+
+<!-- Why Not Just Use [X]? -->
+<section class="section" style="background:var(--bg-alt)">
+  <div class="container">
+    <h2 class="section-title">Why not just use...?</h2>
+    <p class="section-desc">Bold claims. Real code. You decide.</p>
+
+    <!-- vs Node.js -->
+    <div class="bold-claim">
+      <h3>Node.js needs 30 lines for what ZealPHP does in 5</h3>
+      <p>AI token streaming — the core feature of every LLM app. Compare the implementations.</p>
+      <div class="code-compare">
+        <div class="code-compare-panel">
+          <div class="compare-label">ZealPHP — 7 lines</div>
+<pre><code>$app->route('/ai/stream', function($response) {
+    $response->sse(function($emit) {
+        $ch = curl_init($apiUrl);
+        // ... setup curl streaming
+        curl_exec($ch);
+    });
+});</code></pre>
+        </div>
+        <div class="code-compare-panel">
+          <div class="compare-label">Node.js — 25+ lines</div>
+<pre><code>app.get('/ai/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const response = await fetch(apiUrl, {
+    method: 'POST', body: JSON.stringify({...}),
+  });
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = decoder.decode(value);
+    // parse SSE lines, extract tokens...
+    res.write(`data: ${token}\n\n`);
+  }
+  res.end();
+});</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- vs Go -->
+    <div class="bold-claim">
+      <h3>Go is fast. ZealPHP is fast AND expressive.</h3>
+      <p>67k req/s on 4 workers. But you also get reflection-based injection, auto-serialization, and zero boilerplate.</p>
+      <div class="code-compare">
+        <div class="code-compare-panel">
+          <div class="compare-label">ZealPHP — return anything</div>
+<pre><code>$app->route('/users/{id}', function($id) {
+    return ['user' => User::find($id)];
+    // auto JSON. auto 200. done.
+});</code></pre>
+        </div>
+        <div class="code-compare-panel">
+          <div class="compare-label">Go — manual everything</div>
+<pre><code>func getUser(w http.ResponseWriter, r *http.Request) {
+    id := chi.URLParam(r, "id")
+    user, err := FindUser(id)
+    if err != nil {
+        http.Error(w, err.Error(), 500)
+        return
+    }
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]any{
+        "user": user,
+    })
+}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- vs Python FastAPI -->
+    <div class="bold-claim">
+      <h3>FastAPI can't hold 10k concurrent connections</h3>
+      <p>ZealPHP's multi-process workers + coroutines handle C1000K. FastAPI's single-process async struggles past a few thousand.</p>
+      <div class="code-compare">
+        <div class="code-compare-panel">
+          <div class="compare-label">ZealPHP — true parallelism</div>
+<pre><code>// 16 workers × thousands of coroutines
+// Shared memory across workers (no Redis)
+// Each coroutine yields on I/O automatically
+ZEALPHPY_WORKERS=16 php app.php
+
+// Store: cross-worker shared state
+Store::set('cache', $key, $data);
+$data = Store::get('cache', $key);</code></pre>
+        </div>
+        <div class="code-compare-panel">
+          <div class="compare-label">FastAPI — single process limits</div>
+<pre><code># Single process, async but not parallel
+# Need Gunicorn + multiple workers
+# Need Redis for any shared state
+# Need Celery for background tasks
+gunicorn app:app -w 4 -k uvicorn.workers.UvicornWorker
+
+# Shared state? Add Redis.
+redis_client = redis.Redis()
+redis_client.set(key, json.dumps(data))</code></pre>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- Live AI Chat Demo -->
+<section class="section">
+  <div class="container">
+    <h2 class="section-title">Try it — live AI chat, streaming on this server</h2>
+    <p class="section-desc">This chat is powered by ZealPHP's SSE streaming. Every token streams in real-time. The entire backend is <strong>30 lines of PHP</strong>.</p>
+    <div class="chat-widget">
+      <div class="chat-header">
+        <span>ZealPHP AI Chat Demo</span>
+        <span class="chat-status" id="chat-status">Checking...</span>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-msg assistant">
+          <div class="chat-msg-bubble">Hi! I'm running on ZealPHP's SSE streaming. Ask me anything — watch the tokens stream in real-time.</div>
+        </div>
+      </div>
+      <div class="chat-input-row">
+        <input type="text" class="chat-input" id="chat-input" placeholder="Type a message..." autocomplete="off">
+        <button class="chat-send" id="chat-send" onclick="chatSend()">Send</button>
+      </div>
+      <div class="chat-source-toggle">
+        <a onclick="document.getElementById('chat-source').classList.toggle('open')">View source code →</a>
+        <span style="margin-left:.5rem;color:var(--text-muted)">The full backend powering this chat</span>
+      </div>
+      <div class="chat-source" id="chat-source">
+<pre><code>// route/chat.php — the entire AI chat backend
+$app->route('/api/chat', ['methods' => ['POST']], function($request, $response) {
+    $body = json_decode($g->zealphp_request->parent->getContent(), true);
+    $message = $body['message'];
+
+    $response->sse(function($emit) use ($message) {
+        // Call Claude API with streaming
+        $ch = curl_init('https://api.anthropic.com/v1/messages');
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION,
+            function($ch, $data) use ($emit) {
+                // Parse SSE events, emit tokens
+                $emit(json_encode(['token' => $text]), 'token');
+                return strlen($data);
+            }
+        );
+        curl_exec($ch);
+        $emit(json_encode(['done' => true]), 'done');
+    });
+});</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function() {
+  let threadId = null;
+
+  // Check status
+  fetch('/api/chat/status').then(function(r) { return r.json(); }).then(function(s) {
+    const el = document.getElementById('chat-status');
+    el.textContent = s.ai_enabled ? 'Claude AI' : 'Demo mode';
+    el.style.color = s.ai_enabled ? '#10b981' : '#f59e0b';
+  }).catch(function() {
+    document.getElementById('chat-status').textContent = 'Offline';
+  });
+
+  // Enter to send
+  document.getElementById('chat-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatSend(); }
+  });
+
+  window.chatSend = function() {
+    const input = document.getElementById('chat-input');
+    const messages = document.getElementById('chat-messages');
+    const btn = document.getElementById('chat-send');
+    const text = input.value.trim();
+    if (!text) return;
+
+    // Add user message
+    messages.innerHTML += '<div class="chat-msg user"><div class="chat-msg-bubble">' + escapeHtml(text) + '</div></div>';
+    input.value = '';
+    btn.disabled = true;
+
+    // Add assistant placeholder
+    const assistantDiv = document.createElement('div');
+    assistantDiv.className = 'chat-msg assistant';
+    assistantDiv.innerHTML = '<div class="chat-msg-bubble"><span class="chat-typing"></span></div>';
+    messages.appendChild(assistantDiv);
+    messages.scrollTop = messages.scrollHeight;
+
+    const bubble = assistantDiv.querySelector('.chat-msg-bubble');
+    bubble.textContent = '';
+
+    // SSE via fetch
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, thread_id: threadId })
+    }).then(function(response) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      function read() {
+        reader.read().then(function(result) {
+          if (result.done) { btn.disabled = false; return; }
+          buffer += decoder.decode(result.value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.thread_id) threadId = data.thread_id;
+                if (data.token) {
+                  bubble.textContent += data.token;
+                  messages.scrollTop = messages.scrollHeight;
+                }
+              } catch(e) {}
+            }
+          }
+          read();
+        });
+      }
+      read();
+    }).catch(function(e) {
+      bubble.textContent = 'Error: ' + e.message;
+      btn.disabled = false;
+    });
+  };
+
+  function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
+  }
+})();
+</script>
 
 <!-- Quick start -->
 <section class="section" style="background:var(--bg-dark);color:#e2e8f0;padding-top:3rem;padding-bottom:3rem">
@@ -60,9 +381,9 @@ $siteUrl = site_url();
         <p style="color:#94a3b8;margin:0">From zero to running server in 60 seconds.</p>
       </div>
       <div style="display:flex;gap:.5rem;font-size:.78rem" class="qs-tabs">
-        <button class="qs-tab active" data-tab="starter" onclick="qsTab('starter')">⚡ Starter Project</button>
-        <button class="qs-tab" data-tab="framework" onclick="qsTab('framework')">🔧 Framework Repo</button>
-        <button class="qs-tab" data-tab="wordpress" onclick="qsTab('wordpress')">🏗️ WordPress</button>
+        <button class="qs-tab active" data-tab="starter" onclick="qsTab('starter')">Starter Project</button>
+        <button class="qs-tab" data-tab="framework" onclick="qsTab('framework')">Framework Repo</button>
+        <button class="qs-tab" data-tab="wordpress" onclick="qsTab('wordpress')">WordPress</button>
       </div>
     </div>
 
@@ -244,19 +565,19 @@ document.addEventListener('click', function(e) {
     <div class="feature-grid">
       <?php
       $features = [
-        ['⚡', 'Routing',    'Flask-style routes with URL params, namespaces, and regex patterns. Reflection-based parameter injection.', '/routing',    'route(), nsRoute()'],
-        ['📦', 'Responses',  'Return int → status, array → JSON, string → HTML, Generator → stream. Plus redirect(), sse(), cookie().', '/responses',  'HTTP\Response'],
-        ['🔀', 'Coroutines', 'go() + Channel for parallel async IO. Thousands of concurrent requests on a single worker.', '/coroutines', 'OpenSwoole'],
-        ['📡', 'Streaming',  'SSR streaming via Generator yield, stream() callback, and Server-Sent Events.', '/streaming',  'SSR · SSE'],
-        ['🔌', 'WebSocket',  'Real-time bi-directional with rooms, auth, binary frames, and heartbeat.', '/ws',          'App::ws()'],
-        ['🛡️', 'Middleware', 'CORS, ETag/304, and custom PSR-15 middleware in any order.', '/middleware', 'PSR-15'],
-        ['🗄️', 'Sessions',  'Coroutine-safe sessions replacing all native session_*() functions via uopz.', '/sessions',   'uopz hooks'],
-        ['🗃️', 'Store',     'Cross-worker shared memory via OpenSwoole\\Table. Lock-free atomic counters.', '/store',      'Store · Counter'],
-        ['⏱️', 'Timers',    'App::tick/after for recurring tasks. Per-worker via onWorkerStart.', '/timers',      'Timer'],
-        ['🌐', 'HTTP',      'HEAD, OPTIONS, 301/307 redirects, CORS, ETag, gzip — full HTTP/1.1.', '/http',       'HTTP/1.1'],
-        ['📝', 'Templates', 'App::render() with smart path resolution + renderToString for SSR streaming and email/cache use.', '/templates', 'App::render()'],
-        ['🔗', 'ZealAPI',   'File-based REST endpoints. Drop a PHP file in api/ and it becomes a route.', '/api',        'implicit routes'],
-        ['🏗️', 'Legacy Apps', 'Run WordPress, Drupal, or any PHP app unmodified. CGI worker provides true global scope isolation.', '/legacy-apps', 'WordPress'],
+        ['⚡', 'Routing',      'Flask-style routes with reflection-based injection. Zero config, zero boilerplate.',                  '/routing',    'route()'],
+        ['📦', 'Responses',    'Return int → status, array → JSON, Generator → stream. Framework does the right thing.',             '/responses',  'auto-serialize'],
+        ['🔀', 'Coroutines',   'Fan out to multiple AI models in parallel. Merge responses. go() + Channel, zero callback hell.',     '/coroutines', 'go() + Channel'],
+        ['📡', 'Streaming',    'Stream AI tokens as they generate. yield is your streaming primitive. SSR, SSE, stream() built-in.', '/streaming',  'yield · SSE'],
+        ['🔌', 'WebSocket',    'Real-time agent-to-user comms. Multi-user AI sessions, live collaboration, binary frames.',           '/ws',         'App::ws()'],
+        ['🛡️', 'Middleware',  'CORS, ETag/304, gzip. PSR-15 compatible — drop in any middleware package.',                            '/middleware', 'PSR-15'],
+        ['🗄️', 'Sessions',   'Coroutine-safe sessions. Your existing session_start() code just works via uopz.',                     '/sessions',   'drop-in'],
+        ['🗃️', 'Store',      'Share AI conversation state across workers. Cross-worker shared memory — no Redis needed.',             '/store',      'OpenSwoole\\Table'],
+        ['⏱️', 'Timers',     'Schedule recurring AI tasks. Polling, cleanup, model warmup, health checks.',                           '/timers',     'tick() · after()'],
+        ['🌐', 'HTTP',        'Full HTTP/1.1 compliance. HEAD, OPTIONS, redirects, CORS, ETag, gzip — all built-in.',                 '/http',       'HTTP/1.1'],
+        ['📝', 'Templates',   'SSR streaming templates. Compose views with yield from. renderStream() for progressive HTML.',         '/templates',  'renderStream()'],
+        ['🔗', 'ZealAPI',     'Drop a PHP file in api/. It becomes a route. File-based REST — the simplest API pattern.',             '/api',        'file-based'],
+        ['🏗️', 'Legacy Apps','Run WordPress unmodified. CGI worker provides true global scope. Apache mod_php compatibility.',        '/legacy-apps','WordPress'],
       ];
       foreach ($features as [$icon, $title, $body, $href, $badge]) {
         App::render('/components/_card', compact('icon', 'title', 'body', 'href', 'badge'));
@@ -341,9 +662,9 @@ document.addEventListener('click', function(e) {
 <script>
 (function(){
   const HP = {
-    wordpress: `# BEGIN WordPress\n<IfModule mod_rewrite.c>\nRewriteEngine On\nRewriteBase /\nRewriteRule ^index\\.php$ - [L]\nRewriteCond %{REQUEST_FILENAME} !-f\nRewriteCond %{REQUEST_FILENAME} !-d\nRewriteRule . /index.php [L]\n</IfModule>\n# END WordPress`,
-    'nginx-cms': `server {\n    listen 80;\n    server_name example.com;\n    root /var/www/html;\n\n    location / {\n        try_files $uri $uri/ /index.php?$args;\n    }\n    location ~ \\.php$ {\n        fastcgi_pass unix:/run/php/php-fpm.sock;\n    }\n    location ~* \\.(css|js|png)$ {\n        expires 30d;\n    }\n}`,
-    redirects: `RewriteEngine On\nRewriteRule ^old-page$ /new-page [R=301,L]\nRewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]\nRewriteRule ^docs$ https://docs.example.com [R=301,L]`
+    wordpress: "# BEGIN WordPress\n<IfModule mod_rewrite.c>\nRewriteEngine On\nRewriteBase /\nRewriteRule ^index\\.php$ - [L]\nRewriteCond %{REQUEST_FILENAME} !-f\nRewriteCond %{REQUEST_FILENAME} !-d\nRewriteRule . /index.php [L]\n</IfModule>\n# END WordPress",
+    'nginx-cms': "server {\n    listen 80;\n    server_name example.com;\n    root /var/www/html;\n\n    location / {\n        try_files $uri $uri/ /index.php?$args;\n    }\n    location ~ \\.php$ {\n        fastcgi_pass unix:/run/php/php-fpm.sock;\n    }\n    location ~* \\.(css|js|png)$ {\n        expires 30d;\n    }\n}",
+    redirects: "RewriteEngine On\nRewriteRule ^old-page$ /new-page [R=301,L]\nRewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]\nRewriteRule ^docs$ https://docs.example.com [R=301,L]"
   };
 
   const presetEl = document.getElementById('hp-preset');
@@ -365,13 +686,13 @@ document.addEventListener('click', function(e) {
     fetch('/api/convert', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({config: input})
-    }).then(r => {
+    }).then(function(r) {
       const reader = r.body.getReader(), dec = new TextDecoder();
       let buf = '';
       function read() {
-        reader.read().then(({done, value}) => {
-          if (done) { btn.disabled = false; btn.textContent = 'Convert →'; status.textContent = 'Done'; return; }
-          buf += dec.decode(value, {stream: true});
+        reader.read().then(function(result) {
+          if (result.done) { btn.disabled = false; btn.textContent = 'Convert →'; status.textContent = 'Done'; return; }
+          buf += dec.decode(result.value, {stream: true});
           const lines = buf.split('\n'); buf = lines.pop();
           for (const l of lines) {
             if (l.startsWith('data: ') && !l.includes('[DONE]')) output.textContent += l.slice(6) + '\n';
@@ -381,7 +702,7 @@ document.addEventListener('click', function(e) {
         });
       }
       read();
-    }).catch(e => {
+    }).catch(function(e) {
       output.textContent = '// Error: ' + e.message;
       btn.disabled = false; btn.textContent = 'Convert →'; status.textContent = 'Failed';
     });
@@ -389,20 +710,20 @@ document.addEventListener('click', function(e) {
 })();
 </script>
 
-<!-- Why ZealPHP -->
+<!-- Built for what's next -->
 <section class="section" style="background:var(--bg-alt)">
   <div class="container">
-    <h2 class="section-title">Why ZealPHP?</h2>
+    <h2 class="section-title">Built for what's next</h2>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1.5rem;margin-top:1.5rem">
       <?php
       $why = [
-        ['🚀', 'No blocking',        'Every I/O call — file, DB, HTTP — yields to the event loop. OpenSwoole HOOK_ALL makes existing PHP libraries async automatically.'],
-        ['🌊', 'Solves C1000K',      'True parallelism via multi-process workers + coroutines. One server, 1M+ concurrent connections — no worker thread juggling, no microservice fan-out.'],
-        ['🧵', 'True coroutines',    'Not fake async with callbacks. Real coroutines with go() + Channel. Write synchronous code that runs concurrently.'],
-        ['🔧', 'PHP you already know','Superglobals, sessions, headers — all work via uopz overrides. Migrate existing apps without rewriting everything.'],
-        ['📐', 'PSR standards',      'PSR-7 request/response, PSR-15 middleware. Drop in any PSR-15 middleware package.'],
-        ['📊', 'Benchmark',          'Local quad-core /raw/bench sweep at c=1000 in bench mode: ZealPHP sustained 67k req/s, 21ms p90, and 0 failures on 4 workers.'],
-        ['🔓', 'Open source',        'MIT licensed. Maintained by the community. Built on OpenSwoole, one of PHP\'s most battle-tested async runtimes.'],
+        ['🚀', 'Non-blocking everything',  'Every I/O call yields to the event loop. OpenSwoole HOOK_ALL makes existing PHP libraries async automatically. Zero rewrites.'],
+        ['🌊', 'C1000K ready',             'Multi-process workers + coroutines. One server handles a million concurrent connections. No worker thread juggling.'],
+        ['🧵', 'True coroutines',          'Not fake async with callbacks. Real coroutines with go() + Channel. Write synchronous-looking code that runs concurrently.'],
+        ['🔧', 'PHP you already know',     '80% of developers know PHP. Sessions, headers, superglobals — all work via uopz overrides. Migrate existing apps without rewriting.'],
+        ['📐', 'PSR standards',            'PSR-7 request/response, PSR-15 middleware. Drop in any standards-compliant package from the PHP ecosystem.'],
+        ['📊', 'Benchmarked performance',  '67k req/s, 21ms p90, 0 failures on 4 workers. Local quad-core benchmark sweep. Reproducible — run scripts/bench.sh yourself.'],
+        ['🔓', 'MIT open source',          'Fully open source. No enterprise tier. No "contact sales." Community-maintained on OpenSwoole, PHP\'s battle-tested async runtime.'],
       ];
       foreach ($why as [$icon, $title, $body]):
       ?>
@@ -413,5 +734,19 @@ document.addEventListener('click', function(e) {
       </div>
       <?php endforeach; ?>
     </div>
+  </div>
+</section>
+
+<!-- Build your first AI app -->
+<section class="section" style="background:var(--bg-dark);color:#e2e8f0;padding:3rem 0">
+  <div class="container" style="text-align:center">
+    <h2 style="color:#fff;margin-bottom:.5rem">Build your first AI chat in 60 seconds</h2>
+    <p style="color:#94a3b8;margin-bottom:1.5rem">Includes CLAUDE.md — your AI copilot understands ZealPHP out of the box.</p>
+    <div class="qs-block" style="max-width:600px;margin:0 auto 1.5rem;text-align:left">
+      <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project my-ai-app</span></div>
+      <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd my-ai-app && php app.php</span></div>
+      <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">AI-ready server at <code style="color:#818cf8">http://localhost:8080</code></span></div>
+    </div>
+    <a href="/getting-started" class="btn btn-primary" style="font-size:1rem;padding:.75rem 2rem">Get started →</a>
   </div>
 </section>

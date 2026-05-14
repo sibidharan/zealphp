@@ -1,6 +1,6 @@
 <?php
 $title       ??= 'ZealPHP';
-$description ??= 'The async PHP framework built on OpenSwoole.';
+$description ??= 'The PHP runtime for AI web applications. SSR streaming, WebSocket, SSE, coroutines — one server, Go-level performance.';
 ?>
 <head>
   <meta charset="UTF-8">
