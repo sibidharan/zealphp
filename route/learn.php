@@ -75,6 +75,71 @@ if (!function_exists('learn_login_user')) {
     }
 }
 
+if (!function_exists('learn_notes_create')) {
+    function learn_notes_create(\PDO $db, int $userId, string $title, string $body): ?int {
+        $title = trim($title);
+        if ($title === '' || mb_strlen($title) > 200) return null;
+        if (strlen($body) > 4096) return null;
+        $max = (int)(getenv('ZEALPHP_LEARN_MAX_NOTES') ?: 256);
+        $cnt = $db->prepare('SELECT COUNT(*) FROM notes WHERE user_id = ?');
+        $cnt->execute([$userId]);
+        if ((int)$cnt->fetchColumn() >= $max) return null;
+        $now = time();
+        $stmt = $db->prepare('INSERT INTO notes (user_id, title, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?)');
+        $stmt->execute([$userId, $title, $body, $now, $now]);
+        return (int)$db->lastInsertId();
+    }
+}
+
+if (!function_exists('learn_notes_list')) {
+    function learn_notes_list(\PDO $db, int $userId): array {
+        $stmt = $db->prepare('SELECT id, title, body, created_at, updated_at FROM notes WHERE user_id = ? ORDER BY updated_at DESC');
+        $stmt->execute([$userId]);
+        return $stmt->fetchAll();
+    }
+}
+
+if (!function_exists('learn_notes_read')) {
+    function learn_notes_read(\PDO $db, int $userId, int $noteId): ?array {
+        $stmt = $db->prepare('SELECT id, title, body, created_at, updated_at FROM notes WHERE id = ? AND user_id = ?');
+        $stmt->execute([$noteId, $userId]);
+        $r = $stmt->fetch();
+        return $r ?: null;
+    }
+}
+
+if (!function_exists('learn_notes_update')) {
+    function learn_notes_update(\PDO $db, int $userId, int $noteId, ?string $title, ?string $body): bool {
+        $existing = learn_notes_read($db, $userId, $noteId);
+        if (!$existing) return false;
+        $newTitle = $title ?? $existing['title'];
+        $newBody  = $body  ?? $existing['body'];
+        $newTitle = trim($newTitle);
+        if ($newTitle === '' || mb_strlen($newTitle) > 200) return false;
+        if (strlen($newBody) > 4096) return false;
+        $stmt = $db->prepare('UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE id = ? AND user_id = ?');
+        $stmt->execute([$newTitle, $newBody, time(), $noteId, $userId]);
+        return $stmt->rowCount() > 0;
+    }
+}
+
+if (!function_exists('learn_notes_delete')) {
+    function learn_notes_delete(\PDO $db, int $userId, int $noteId): bool {
+        $stmt = $db->prepare('DELETE FROM notes WHERE id = ? AND user_id = ?');
+        $stmt->execute([$noteId, $userId]);
+        return $stmt->rowCount() > 0;
+    }
+}
+
+if (!function_exists('learn_notes_search')) {
+    function learn_notes_search(\PDO $db, int $userId, string $query, int $limit = 10): array {
+        $q = '%' . $query . '%';
+        $stmt = $db->prepare('SELECT id, title, body, updated_at FROM notes WHERE user_id = ? AND (title LIKE ? OR body LIKE ?) ORDER BY updated_at DESC LIMIT ?');
+        $stmt->execute([$userId, $q, $q, $limit]);
+        return $stmt->fetchAll();
+    }
+}
+
 // ── Endpoint registrations (skipped in unit-test context) ────────────
 if (defined('ZEALPHP_LEARN_TESTING') || !class_exists('ZealPHP\\App', false)) return;
 
