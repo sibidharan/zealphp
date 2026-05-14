@@ -4,7 +4,7 @@ A coroutine-native PHP framework built on **OpenSwoole** for high-concurrency HT
 
 [![Latest Stable Version](https://poser.pugx.org/sibidharan/zealphp/v)](https://packagist.org/packages/sibidharan/zealphp) [![Total Downloads](https://poser.pugx.org/sibidharan/zealphp/downloads)](https://packagist.org/packages/sibidharan/zealphp) [![License](https://poser.pugx.org/sibidharan/zealphp/license)](https://packagist.org/packages/sibidharan/zealphp)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sibidharan/zealphp) [![GitHub stars](https://img.shields.io/github/stars/sibidharan/zealphp?style=flat-square&logo=github&logoColor=white)](https://github.com/sibidharan/zealphp/stargazers) [![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square&logo=php&logoColor=white)](https://www.php.net/)
-[![Tests](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml/badge.svg)](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml) [![Coverage](https://codecov.io/gh/sibidharan/zealphp/branch/master/graph/badge.svg)](https://codecov.io/gh/sibidharan/zealphp)
+[![Tests](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml/badge.svg)](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml) [![Coverage](https://codecov.io/gh/sibidharan/zealphp/branch/master/graph/badge.svg)](https://codecov.io/gh/sibidharan/zealphp) [![Stability: Alpha](https://img.shields.io/badge/stability-alpha-orange?style=flat-square)](https://github.com/sibidharan/zealphp/releases)
 
 **Homepage:** [https://php.zeal.ninja](https://php.zeal.ninja)  
 Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` if you want the rendered example URLs to point somewhere else.
@@ -30,6 +30,9 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **Unit tests** | PHPUnit 11 — 42 unit tests + 38 integration tests, all green |
 | **Benchmarks** | OpenSwoole-powered concurrency with a modular `scripts/bench.sh` runner for wrk/ab sweeps through c=1000 |
 
+> **Performance:** 80K+ req/s with full PSR-15 middleware stack on a 16-core machine. See [PERF.md](PERF.md) for the methodology.
+> **Stability:** Alpha (v0.1.x). API may change between minor versions. Pin to a specific version in production.
+
 ---
 
 ## Why ZealPHP?
@@ -48,6 +51,17 @@ PHP powers 77% of the web, but its request-per-process model makes real-time, st
 ---
 
 ## Quick Start
+
+### Docker (fastest path — no system setup)
+
+```bash
+git clone https://github.com/sibidharan/zealphp.git
+cd zealphp
+docker compose up app
+# → http://localhost:8080
+```
+
+### Composer (requires PHP 8.3+, OpenSwoole, uopz)
 
 ```bash
 # New project
@@ -108,6 +122,47 @@ $app->ws('/ws/echo',
 
 $app->run();
 ```
+
+---
+
+## Architecture
+
+```
+                ┌──────────────────────────────────────────┐
+   HTTP/WS ───▶ │  OpenSwoole Server (WebSocket\Server)    │
+                └────────────────────┬─────────────────────┘
+                                     │
+                ┌────────────────────▼─────────────────────┐
+                │  CoSessionManager (onRequest handler)    │
+                │  · creates G singleton per coroutine     │
+                │  · populates $g->get/post/cookie/server  │
+                └────────────────────┬─────────────────────┘
+                                     │
+                ┌────────────────────▼─────────────────────┐
+                │  PSR-15 Middleware Stack                 │
+                │  CORS → ETag → Compression → Range → ... │
+                └────────────────────┬─────────────────────┘
+                                     │
+                ┌────────────────────▼─────────────────────┐
+                │  ResponseMiddleware (innermost)          │
+                │  · matches route + injects params        │
+                │  · invokes handler                       │
+                │  · resolves int/array/string/Generator   │
+                └────────────────────┬─────────────────────┘
+                                     │
+            ┌────────────────────────┼────────────────────────┐
+            ▼                        ▼                        ▼
+     Closure handler         ZealAPI (api/*.php)      Legacy fallback
+                                                       (CGI worker)
+
+  Cross-worker primitives: Store (OpenSwoole\Table) + Counter (Atomic) + Cache
+  Per-request state:       G::instance() — coroutine-local context
+  uopz overrides:          header() · session_start() · setcookie() · $_GET
+```
+
+The uopz function overrides are the framework's load-bearing trick: legacy PHP code calls `session_start()` or `header()` unchanged, but the calls route to per-coroutine state instead of mutating process globals. This lets unmodified WordPress and other legacy apps run on OpenSwoole's coroutine runtime.
+
+More detail in [docs/runtime-architecture.md](docs/runtime-architecture.md).
 
 ---
 
