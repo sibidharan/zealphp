@@ -141,6 +141,37 @@ foreach ($demos as [$id, $title, $url, $code]) {
 }
 ?>
 
+<h2 style="margin-top:2.5rem">Error responses</h2>
+<p style="margin-bottom:1rem">All ZealAPI failures emit JSON with an <code>error</code> key and an HTTP status code. Use the <code>error</code> string to branch in client code; the <code>hint</code> is for humans.</p>
+
+<table class="ztable">
+<tr><th>Status</th><th>error</th><th>When</th></tr>
+<tr><td><code>400</code></td><td><code>invalid_module</code></td><td>Path component fails the strict <code>[a-zA-Z0-9_/-]</code> regex (prevents traversal)</td></tr>
+<tr><td><code>400</code></td><td><code>invalid_request</code></td><td>Method name contains characters other than <code>[a-zA-Z0-9_\-]</code></td></tr>
+<tr><td><code>404</code></td><td><code>method_not_found</code></td><td>Handler file missing, or the expected closure variable name does not exist in the file</td></tr>
+<tr><td><code>404</code></td><td><code>undefined_method</code></td><td>Handler called <code>$this-&gt;X()</code> but <code>X</code> is not a method on <code>ZealAPI/REST</code></td></tr>
+<tr><td><code>500</code></td><td>—</td><td>Uncaught throwable inside the handler — stack trace is logged via <code>elog()</code></td></tr>
+</table>
+
+<h3 style="margin-top:1.5rem">Typo detection — <code>undefined_method</code></h3>
+<p style="margin-bottom:1rem">When you call a method that doesn't exist on <code>$this</code> from inside a handler, ZealAPI no longer hangs (it used to recurse on <code>__call</code> until stack overflow). It returns 404 with a structured error and, when the typo is close to a real method, a <code>did_you_mean</code> hint computed via levenshtein.</p>
+
+<?php App::render('/components/_demo', [
+    'id'    => 'api-undefined-method',
+    'title' => 'GET /api/bug/bad — handler typos $this-&gt;paramExist (real method is paramsExists)',
+    'url'   => '/api/bug/bad',
+    'code'  => <<<'PHP'
+// api/bug/bad.php
+$bad = function() {
+    if ($this->paramExist(['id'])) {   // ← typo
+        return ['id' => $_GET['id'] ?? 'n/a'];
+    }
+};
+PHP,
+]); ?>
+
+<p style="margin-top:.75rem;color:#94a3b8">If the typo is too far from any real method (more than 3 edits, or above 40% of the name length), the <code>did_you_mean</code> field is omitted to avoid misleading suggestions — only the <code>error</code>, <code>method</code>, and a generic hint are returned.</p>
+
 <h2>Implicit public/ file serving</h2>
 <p>Files in <code>public/</code> are served automatically — no route definition needed:</p>
 
