@@ -71,7 +71,7 @@ p  { max-width: 70ch; }
 .topnav .logo span { color: var(--accent); }
 .nav-links { display: flex; flex-direction: column; flex: 1; gap: 0; }
 .nav-row { display: flex; gap: .1rem; align-items: center; flex-wrap: wrap; }
-.nav-row-features { border-top: 1px solid rgba(245,158,11,.06); padding-top: .15rem; margin-top: .15rem; }
+.nav-row-features { border-top: 1px solid rgba(245,158,11,.06); padding: .15rem 0; margin-top: .15rem; }
 .nav-row a {
   color: #a8a29e; font-size: .75rem; font-weight: 500;
   padding: .35rem .55rem; border-radius: 5px;

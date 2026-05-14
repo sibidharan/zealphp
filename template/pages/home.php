@@ -43,6 +43,15 @@ $siteUrl = site_url();
       <a href="https://codecov.io/gh/sibidharan/zealphp" target="_blank" rel="noopener noreferrer">
         <img src="https://codecov.io/gh/sibidharan/zealphp/branch/master/graph/badge.svg" alt="Coverage">
       </a>
+      <a href="https://github.com/sibidharan/zealphp/blob/master/phpstan.neon" target="_blank" rel="noopener noreferrer">
+        <img src="https://img.shields.io/badge/PHPStan-level%201-brightgreen?style=flat-square&logo=php&logoColor=white" alt="PHPStan level 1">
+      </a>
+      <a href="https://github.com/sibidharan/zealphp/blob/master/CODE_OF_CONDUCT.md" target="_blank" rel="noopener noreferrer">
+        <img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa?style=flat-square" alt="Contributor Covenant 2.1">
+      </a>
+      <a href="https://github.com/sponsors/sibidharan" target="_blank" rel="noopener noreferrer">
+        <img src="https://img.shields.io/github/sponsors/sibidharan?style=flat-square&logo=github&logoColor=white&label=Sponsor" alt="GitHub Sponsors">
+      </a>
     </div>
 
     <!-- Streaming code demo -->
