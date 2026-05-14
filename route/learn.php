@@ -294,3 +294,46 @@ $app->route('/api/learn/notes/{id}', ['methods' => ['DELETE']], function($reques
     if (!$ok) { http_response_code(404); return ''; }
     return '';
 });
+
+// ── Lesson 7 counter (htmx demo) ─────────────────────────────────────
+$app->route('/api/learn/demo/incr', ['methods' => ['POST', 'GET']], function($request, $response) {
+    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+    $_SESSION['demo_counter'] = (int)($_SESSION['demo_counter'] ?? 0) + 1;
+    header('Content-Type: text/html; charset=utf-8');
+    return App::renderToString('/components/_counter_button', ['n' => $_SESSION['demo_counter']]);
+});
+
+// ── Lesson 4 render-method demos ─────────────────────────────────────
+// All three produce visually-similar output. The teaching is in the
+// HTTP behavior: render() / renderToString() return all at once,
+// renderStream() flushes chunks as the Generator yields.
+
+$app->route('/api/learn/demo/render', ['methods' => ['GET']], function() {
+    header('Content-Type: text/html; charset=utf-8');
+    header('X-Render-Method: App::render');
+    App::render('/components/_demo_clock', ['label' => 'render() — echoed', 'now' => microtime(true)]);
+});
+
+$app->route('/api/learn/demo/render-to-string', ['methods' => ['GET']], function() {
+    header('Content-Type: text/html; charset=utf-8');
+    header('X-Render-Method: App::renderToString');
+    $card = App::renderToString('/components/_demo_clock', [
+        'label' => 'renderToString() — composed',
+        'now'   => microtime(true),
+    ]);
+    return "<section class=\"render-demo\"><h4>Composed wrapper</h4>{$card}</section>";
+});
+
+$app->route('/api/learn/demo/render-stream', ['methods' => ['GET']], function() {
+    return (function() {
+        yield "<section class=\"render-demo\"><h4>Streamed rows</h4>";
+        for ($i = 1; $i <= 5; $i++) {
+            usleep(250000);
+            yield from App::renderStream('/components/_demo_clock', [
+                'label' => "renderStream() — row {$i}",
+                'now'   => microtime(true),
+            ]);
+        }
+        yield "</section>";
+    })();
+});
