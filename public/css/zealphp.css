@@ -142,7 +142,7 @@ html.alpha-banner-dismissed .alpha-banner { display: none; }
   border: 1px solid rgba(245,158,11,.22);
   border-radius: 6px;
   padding: .55rem .85rem;
-  margin: 0 auto 1.75rem;
+  margin: 2.5rem auto 1.75rem;
   max-width: 700px;
 }
 .bench-method strong { color: var(--accent); font-family: inherit; }
