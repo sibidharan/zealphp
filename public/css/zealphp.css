@@ -60,7 +60,7 @@ p  { max-width: 70ch; }
   background: var(--nav-bg);
   border-bottom: 1px solid rgba(245,158,11,.08);
   display: flex; align-items: center; gap: 0;
-  padding: 0 1.5rem; min-height: 48px;
+  padding: .5rem 1.5rem; min-height: 48px;
 }
 .topnav .logo {
   font-size: 1.1rem; font-weight: 800; color: #fff;
@@ -182,6 +182,10 @@ p  { max-width: 70ch; }
   border: 1px solid rgba(245,158,11,.14);
 }
 .section.section-dark .qs-block h3 { color: var(--accent); }
+.section.section-dark .code-label {
+  background: rgba(245,158,11,.12);
+  color: #fde68a;
+}
 
 /* ── Hero ── */
 .hero {
@@ -201,10 +205,70 @@ p  { max-width: 70ch; }
   opacity: .4;
   pointer-events: none;
 }
-.hero h1 { font-size: clamp(2rem, 5vw, 3.5rem); color: #fff; position: relative; letter-spacing: -.04em; }
+.hero h1 {
+  font-size: clamp(2.5rem, 6.5vw, 4.5rem);
+  color: #fff; position: relative; letter-spacing: -.04em;
+  filter: drop-shadow(0 0 14px rgba(245, 158, 11, 0.22));
+}
 .hero h1 span { color: var(--accent); }
 .hero p { font-size: 1.15rem; color: #a8a29e; margin: 1rem auto 2rem; position: relative; }
 .hero .cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; position: relative; }
+
+/* ── Hero wordmark (electric) ── */
+.zeal-mark {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+}
+.zeal-bolt {
+  font-size: 1.25rem;
+  color: var(--accent);
+  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.45));
+  margin-bottom: 0.35rem;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.92);
+  animation: zeal-bolt-in 0.5s ease-out 0.15s 1 forwards;
+}
+@keyframes zeal-bolt-in {
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.hero h1::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.85) 47%,
+    rgba(251, 191, 36, 0.95) 50%,
+    rgba(255, 255, 255, 0.85) 53%,
+    transparent 70%
+  );
+  background-size: 250% 100%;
+  background-position: 150% 0;
+  -webkit-background-clip: text;
+          background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -.04em;
+  font-weight: 800;
+  pointer-events: none;
+  animation: zeal-sweep 1.6s cubic-bezier(.4, 0, .2, 1) 0.4s 1 forwards;
+}
+@keyframes zeal-sweep {
+  0%   { background-position: 150% 0; }
+  100% { background-position: -50% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero h1::after { display: none; }
+  .zeal-bolt {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+}
 .oss-badges {
   display: flex;
   justify-content: center;
@@ -326,9 +390,9 @@ p  { max-width: 70ch; }
 .code-block pre { margin: 0; }
 .code-block code { font-family: var(--font-mono); font-size: .82rem; line-height: 1.6; color: var(--code-text); }
 .code-label {
-  background: rgba(245,158,11,.06); color: #a8a29e; font-size: .72rem;
-  padding: .2rem .6rem; border-radius: 4px 4px 0 0; font-family: var(--font);
-  display: inline-block; margin-bottom: -.1rem; text-transform: uppercase; letter-spacing: .05em;
+  background: rgba(245,158,11,.08); color: #44403c; font-size: .76rem;
+  padding: .25rem .7rem; border-radius: 4px 4px 0 0; font-family: var(--font-mono);
+  display: inline-block; margin-bottom: -.1rem; font-weight: 500;
 }
 
 /* ── HTTP method badges ── */
@@ -549,9 +613,9 @@ pre:hover > .code-copy { opacity: 1; }
 }
 .hero-demo-code .code-label {
   display: block; margin-bottom: .75rem;
-  font-family: var(--font); font-size: .68rem;
-  text-transform: uppercase; letter-spacing: .06em;
-  color: #78716c; font-weight: 700;
+  font-family: var(--font-mono); font-size: .76rem;
+  color: #a8a29e; font-weight: 500;
+  background: transparent; padding: 0;
 }
 .hero-demo-output {
   background: #1c1917; padding: 1.5rem;
@@ -561,9 +625,9 @@ pre:hover > .code-copy { opacity: 1; }
 }
 .hero-demo-output .code-label {
   display: block; margin-bottom: .75rem;
-  font-family: var(--font); font-size: .68rem;
-  text-transform: uppercase; letter-spacing: .06em;
-  color: #78716c; font-weight: 700;
+  font-family: var(--font-mono); font-size: .76rem;
+  color: #a8a29e; font-weight: 500;
+  background: transparent; padding: 0;
 }
 .hero-demo-output .stream-line {
   opacity: 0; animation: streamIn .3s forwards;
