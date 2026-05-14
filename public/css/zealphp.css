@@ -137,12 +137,13 @@ html.alpha-banner-dismissed .alpha-banner { display: none; }
 /* ── Benchmark methodology line ── */
 .bench-method {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: .72rem; color: var(--text-muted, #94a3b8);
-  background: rgba(245,158,11,.04);
-  border: 1px solid rgba(245,158,11,.15);
+  font-size: .72rem; color: #cbd5e1;
+  background: rgba(15,23,42,.55);
+  border: 1px solid rgba(245,158,11,.22);
   border-radius: 6px;
-  padding: .5rem .75rem;
-  margin-bottom: 1rem;
+  padding: .55rem .85rem;
+  margin: 0 auto 1.75rem;
+  max-width: 700px;
 }
 .bench-method strong { color: var(--accent); font-family: inherit; }
 .bench-method a { color: var(--accent); text-decoration: none; }
@@ -229,8 +230,9 @@ html.alpha-banner-dismissed .alpha-banner { display: none; }
   border: 1px solid rgba(245,158,11,.08);
 }
 .bench-stat { text-align: center; }
-.bench-stat .num { font-size: 1.8rem; font-weight: 800; color: var(--accent); }
+.bench-stat .num { font-size: 1.8rem; font-weight: 800; color: var(--accent); line-height: 1; }
 .bench-stat .label { font-size: .78rem; color: #78716c; margin-top: .15rem; }
+.bench-stat .sub { font-size: .66rem; color: #64748b; margin-top: .25rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 /* ── Feature grid ── */
 .feature-grid {
