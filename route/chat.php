@@ -1,12 +1,6 @@
 <?php
 use ZealPHP\App;
 use ZealPHP\G;
-use ZealPHP\Store;
-
-Store::make('chat_threads', 256, [
-    'messages' => [\OpenSwoole\Table::TYPE_STRING, 16384],
-    'updated'  => [\OpenSwoole\Table::TYPE_INT, 4],
-]);
 
 $app = App::instance();
 
@@ -31,8 +25,8 @@ $app->route('/api/chat', ['methods' => ['POST']], function($request, $response) 
             $fallback = "I'm a demo running on ZealPHP's SSE streaming. "
                 . "This response is being streamed token-by-token using `\$response->sse()`. "
                 . "To enable real AI responses, set the `OPENAI_API_KEY` environment variable. "
-                . "The backend uses the OpenAI Agents SDK with tool use and streaming — "
-                . "the same mechanism that powers ChatGPT-style streaming UIs. "
+                . "The backend uses the OpenAI Agents SDK with SQLiteSession for conversation threads — "
+                . "the SDK remembers your entire conversation automatically. "
                 . "ZealPHP makes this a 5-line feature, not a 50-line infrastructure project.";
             foreach (explode(' ', $fallback) as $word) {
                 usleep(60000);
@@ -43,24 +37,12 @@ $app->route('/api/chat', ['methods' => ['POST']], function($request, $response) 
         return;
     }
 
-    // Build messages array with thread history
-    $history = [];
-    $existing = Store::get('chat_threads', $threadId);
-    if ($existing) {
-        $history = json_decode($existing['messages'], true) ?: [];
-    }
-
-    // Keep only last 10 messages to fit Store column size
-    if (count($history) > 10) {
-        $history = array_slice($history, -10);
-    }
-
-    $response->sse(function($emit) use ($apiKey, $message, $history, $threadId) {
-        $emit(json_encode(['thread_id' => $threadId]), 'thread');
-
+    // Agents SDK handles conversation history via SQLiteSession —
+    // we just pass the message and thread_id, the SDK does the rest.
+    $response->sse(function($emit) use ($apiKey, $message, $threadId) {
         $payload = json_encode([
             'message' => $message,
-            'history' => $history,
+            'thread_id' => $threadId,
         ]);
         $b64 = base64_encode($payload);
         $agent = App::$cwd . '/examples/agents/chat_agent.py';
@@ -82,7 +64,6 @@ $app->route('/api/chat', ['methods' => ['POST']], function($request, $response) 
 
         stream_set_blocking($pipes[1], false);
         $buffer = '';
-        $fullResponse = '';
 
         while (!feof($pipes[1])) {
             $chunk = fread($pipes[1], 4096);
@@ -102,19 +83,10 @@ $app->route('/api/chat', ['methods' => ['POST']], function($request, $response) 
                     $data = json_decode($jsonStr, true);
                     if ($data) {
                         if (isset($data['token'])) {
-                            $fullResponse .= $data['token'];
                             $emit($jsonStr, 'token');
+                        } elseif (isset($data['thread_id'])) {
+                            $emit($jsonStr, 'thread');
                         } elseif (isset($data['done'])) {
-                            // Save thread before emitting done
-                            $history[] = ['role' => 'user', 'content' => $message];
-                            $history[] = ['role' => 'assistant', 'content' => $fullResponse];
-                            if (count($history) > 10) {
-                                $history = array_slice($history, -10);
-                            }
-                            Store::set('chat_threads', $threadId, [
-                                'messages' => json_encode($history),
-                                'updated'  => time(),
-                            ]);
                             $emit(json_encode(['done' => true]), 'done');
                         } elseif (isset($data['error'])) {
                             $emit($jsonStr, 'error');
@@ -135,5 +107,6 @@ $app->route('/api/chat/status', function() {
         'available' => true,
         'ai_enabled' => (bool)getenv('OPENAI_API_KEY'),
         'model' => getenv('OPENAI_API_KEY') ? 'gpt-4.1-mini (Agents SDK)' : 'demo-fallback',
+        'sessions' => 'SQLiteSession',
     ];
 });

@@ -7,23 +7,25 @@
 ZealPHP AI Chat Agent
 =====================
 SSE-streaming chat agent for the ZealPHP homepage demo.
-Uses OpenAI Agents SDK with streaming, tool use, and multi-agent handoff.
+Uses OpenAI Agents SDK with streaming, tool use, and SQLiteSession
+for persistent conversation threads.
 
 Called by ZealPHP's route/chat.php via proc_open. Reads JSON from argv[1]
 (base64-encoded), streams SSE-formatted events to stdout.
 
-Input JSON: {"message": "...", "history": [...]}
+Input JSON: {"message": "...", "thread_id": "..."}
 Output: SSE events (event: token/thread/done, data: JSON)
 
 Usage:
-    echo '{"message":"hello"}' | base64 | xargs uv run examples/agents/chat_agent.py
+    echo '{"message":"hello","thread_id":"abc123"}' | base64 | xargs uv run examples/agents/chat_agent.py
 """
 
 import asyncio
 import json
 import sys
 import base64
-from agents import Agent, Runner, function_tool
+import os
+from agents import Agent, Runner, SQLiteSession, function_tool
 
 
 @function_tool
@@ -169,6 +171,11 @@ This conversation is being streamed token-by-token to demonstrate ZealPHP's SSE 
 )
 
 
+SESSIONS_DIR = os.path.join(os.path.dirname(__file__), "../../.sessions")
+os.makedirs(SESSIONS_DIR, exist_ok=True)
+DB_PATH = os.path.join(SESSIONS_DIR, "chat_threads.db")
+
+
 async def main():
     if len(sys.argv) > 1:
         raw = base64.b64decode(sys.argv[1]).decode("utf-8")
@@ -184,7 +191,7 @@ async def main():
         return
 
     message = payload.get("message", "").strip()
-    history = payload.get("history", [])
+    thread_id = payload.get("thread_id", "default")
 
     if not message:
         print("event: error")
@@ -192,18 +199,13 @@ async def main():
         print()
         return
 
-    input_items = []
-    for msg in history:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        if role == "user":
-            input_items.append({"role": "user", "content": content})
-        elif role == "assistant":
-            input_items.append({"role": "assistant", "content": content})
+    print("event: thread")
+    print(f"data: {json.dumps({'thread_id': thread_id})}")
+    print(flush=True)
 
-    input_items.append({"role": "user", "content": message})
+    session = SQLiteSession(db_path=DB_PATH, session_id=thread_id)
 
-    result = Runner.run_streamed(zealphp_assistant, input=input_items)
+    result = Runner.run_streamed(zealphp_assistant, input=message, session=session)
 
     async for event in result.stream_events():
         if event.type == "raw_response_event":
