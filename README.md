@@ -31,7 +31,7 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **Unit tests** | PHPUnit 11 — 130 unit tests + 46 integration tests, all green |
 | **Benchmarks** | OpenSwoole-powered concurrency with a modular `scripts/bench.sh` runner for wrk/ab sweeps through c=1000 |
 
-> **Performance:** ~106K req/s on a JSON route with the full PSR-15 middleware stack (CORS + ETag + sessions + reflection-injected routing) on 4 workers, ~117K on raw text, ~50K on a templated page. Express on the same box with equivalent middleware lands at 22K / 20K / 12K. See [PERF.md](PERF.md) for the methodology, full latency sweep, and head-to-head table.
+> **Performance:** 117K req/s text · 106K JSON · 50K templated — full PSR-15 stack (CORS + ETag + sessions + reflection-injected routing), 4 workers, AMD Ryzen 9 7900X. **Express on the same box: 20K / 22K / 12K — a 5× gap.** The why: ZealPHP retains **82%** of OpenSwoole's raw throughput with full middleware loaded; Express retains **15%** of raw Node's. That's a framework-efficiency story, not a raw-runtime one. Reproduce: `./scripts/bench_vs_express.sh`. See [PERF.md](PERF.md) for environment, latency sweep, and head-to-head.
 > **Stability:** Alpha (v0.2.x). API may change between minor versions until v1.0. Pin to a specific version in production.
 
 ---

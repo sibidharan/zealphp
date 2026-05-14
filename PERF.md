@@ -318,7 +318,7 @@ scripts/bench.sh --workers 4 --threads 4 --task-workers 0 \
 # Output: bench/results/zealphp-<timestamp>.csv + bench/results/raw/*.txt
 ```
 
-This reproduces the methodology behind §"v0.2.0 Baseline — 4-core Linux container".
+This reproduces the methodology behind §"v0.2.0 Baseline — AMD Ryzen 9 7900X".
 Pin to 4 workers via `--workers 4` so your number can be compared to the
 published numbers; scale workers up to match your physical cores after.
 

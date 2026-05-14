@@ -141,8 +141,16 @@ $siteUrl = site_url();
           <td colspan="3" style="padding:.3rem .6rem;text-align:right;color:#94a3b8;font-weight:500;font-size:.75rem">~500 req/s</td>
         </tr>
       </table>
+      <div style="text-align:center;margin-top:1.25rem;padding:.85rem 1rem;background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.2);border-radius:8px;max-width:760px;margin-left:auto;margin-right:auto">
+        <p style="margin:0;color:#e7e5e4;font-size:.85rem;line-height:1.55">
+          <strong style="color:var(--accent)">Framework efficiency</strong> — with full middleware loaded,
+          <strong style="color:var(--accent)">ZealPHP retains 82%</strong> of OpenSwoole's raw throughput;
+          <strong style="color:#e2e8f0">Express retains 15%</strong> of raw Node's. That's where the
+          <strong style="color:var(--accent)">5× gap</strong> comes from.
+        </p>
+      </div>
       <p style="text-align:center;color:#64748b;font-size:.7rem;margin-top:.75rem">
-        Methodology: 4-core Linux container, each server tested sequentially, 4 workers, warmed-up, <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px;color:#94a3b8">ab -n 50000 -c 200 -k -l</code>.
+        Methodology: AMD Ryzen 9 7900X (12 cores, Docker), each server tested sequentially, 4 workers, warmed-up, <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px;color:#94a3b8">ab -n 50000 -c 200 -k -l</code>.
         ZealPHP runs with the full PSR-15 stack (CORS + ETag + Range + sessions + reflection-injected routing). Express runs with cors + etag + express-session + session-file-store + ejs + body-parser.<br>
         Your results will vary with hardware, payload size, I/O, and tuning. Re-run on your own box before quoting.
       </p>
