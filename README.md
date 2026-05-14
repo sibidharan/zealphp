@@ -31,7 +31,11 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **Unit tests** | PHPUnit 11 — 130 unit tests + 46 integration tests, all green |
 | **Benchmarks** | OpenSwoole-powered concurrency with a modular `scripts/bench.sh` runner for wrk/ab sweeps through c=1000 |
 
-> **Performance:** 117K req/s text · 106K JSON · 50K templated — full PSR-15 stack (CORS + ETag + sessions + reflection-injected routing), 4 workers, AMD Ryzen 9 7900X. **Express on the same box: 20K / 22K / 12K — a 5× gap.** The why: ZealPHP retains **82%** of OpenSwoole's raw throughput with full middleware loaded; Express retains **15%** of raw Node's. That's a framework-efficiency story, not a raw-runtime one. Reproduce: `./scripts/bench_vs_express.sh`. See [PERF.md](PERF.md) for environment, latency sweep, and head-to-head.
+> **Performance:** 117K req/s text · 106K JSON · 50K templated — full PSR-15 stack (CORS + ETag + sessions + reflection-injected routing), 4 workers, AMD Ryzen 9 7900X. **Express on the same box: 20K / 22K / 12K — a 5× gap.**
+>
+> Two surprises in the methodology. **(1)** Raw OpenSwoole hits 142K text / 138K JSON — **+10% over raw Node http (129K / 132K)**, before any framework loads. **(2)** ZealPHP with full PSR-15 middleware still hits **91% of bare Node http's throughput on text, 80% on JSON**. That's because ZealPHP retains **82%** of its runtime's raw throughput; Express retains **15%** of Node's. The 5× gap is a framework-efficiency story, not a raw-runtime one.
+>
+> Reproduce: `./scripts/bench_vs_express.sh`. See [PERF.md](PERF.md) for environment, latency sweep, and head-to-head.
 > **Stability:** Alpha (v0.2.x). API may change between minor versions until v1.0. Pin to a specific version in production.
 
 ---

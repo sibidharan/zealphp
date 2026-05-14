@@ -142,11 +142,17 @@ $siteUrl = site_url();
         </tr>
       </table>
       <div style="text-align:center;margin-top:1.25rem;padding:.85rem 1rem;background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.2);border-radius:8px;max-width:760px;margin-left:auto;margin-right:auto">
+        <p style="margin:0 0 .55rem 0;color:#e7e5e4;font-size:.85rem;line-height:1.55">
+          <strong style="color:var(--accent)">The runtime is already faster.</strong>
+          OpenSwoole's bare HTTP server hits <strong style="color:var(--accent)">142k req/s text · 138k JSON</strong>
+          — versus Node's <strong style="color:#e2e8f0">129k · 132k</strong>.
+          <strong style="color:var(--accent)">+10% on text, +5% on JSON</strong>, before any framework loads.
+        </p>
         <p style="margin:0;color:#e7e5e4;font-size:.85rem;line-height:1.55">
-          <strong style="color:var(--accent)">Framework efficiency</strong> — with full middleware loaded,
-          <strong style="color:var(--accent)">ZealPHP retains 82%</strong> of OpenSwoole's raw throughput;
-          <strong style="color:#e2e8f0">Express retains 15%</strong> of raw Node's. That's where the
-          <strong style="color:var(--accent)">5× gap</strong> comes from.
+          <strong style="color:var(--accent)">ZealPHP keeps 82%</strong> of that with full PSR-15 middleware on top.
+          <strong style="color:#e2e8f0">Express keeps 15%</strong> of raw Node's.
+          End result — ZealPHP with full middleware reaches
+          <strong style="color:var(--accent)">91% of bare Node http's throughput</strong>.
         </p>
       </div>
       <p style="text-align:center;color:#64748b;font-size:.7rem;margin-top:.75rem">
