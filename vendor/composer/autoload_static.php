@@ -9,6 +9,7 @@ class ComposerStaticInit1b6fbb16024c07a28729efcdf1b64e92
     public static $files = array (
         '6124b4c8570aa390c21fafd04a26c69f' => __DIR__ . '/..' . '/myclabs/deep-copy/src/DeepCopy/deep_copy.php',
         '0f5c2e42cd57cee173a4e5751046ee6b' => __DIR__ . '/..' . '/openswoole/core/src/Coroutine/functions.php',
+        '9b38cf48e83f5d8f60375221cd213eee' => __DIR__ . '/..' . '/phpstan/phpstan/bootstrap.php',
         'ec07570ca5a812141189b1fa81503674' => __DIR__ . '/..' . '/phpunit/phpunit/src/Framework/Assert/Functions.php',
         '30cad1d86aa302cbea0f94edb38a9a00' => __DIR__ . '/../..' . '/src/utils.php',
         'e19b310a3e997f884fb8d7a276f6bdea' => __DIR__ . '/../..' . '/src/Session/utils.php',
