@@ -63,10 +63,10 @@ $siteUrl = site_url();
       </div>
     </div>
 
-    <div class="bench-note">Benchmarked. Not promised.</div>
+    <div class="bench-note">With full middleware (CORS + ETag + sessions). 4 workers. Benchmarked, not promised.</div>
     <div class="bench">
-      <div class="bench-stat"><div class="num">67k</div><div class="label">req/s</div></div>
-      <div class="bench-stat"><div class="num">21ms</div><div class="label">p90 latency</div></div>
+      <div class="bench-stat"><div class="num">80k</div><div class="label">req/s</div></div>
+      <div class="bench-stat"><div class="num">2.5ms</div><div class="label">avg latency</div></div>
       <div class="bench-stat"><div class="num">4</div><div class="label">workers</div></div>
       <div class="bench-stat"><div class="num">0</div><div class="label">failures</div></div>
     </div>
@@ -89,6 +89,186 @@ $siteUrl = site_url();
     setTimeout(streamWord, 90 + Math.random() * 60);
   }
   setTimeout(streamWord, 800);
+})();
+</script>
+
+<!-- Live AI Chat Demo -->
+<section class="section">
+  <div class="container">
+    <h2 class="section-title">Try it — live AI chat, streaming on this server</h2>
+    <p class="section-desc">Powered by the <strong>OpenAI Agents SDK</strong> + ZealPHP SSE streaming. Multi-agent with tool use, streamed token-by-token.</p>
+    <div class="chat-widget">
+      <div class="chat-header">
+        <span>ZealPHP AI Chat Demo</span>
+        <span class="chat-status" id="chat-status">Checking...</span>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-msg assistant">
+          <div class="chat-msg-bubble">Hi! I'm running on ZealPHP's SSE streaming. Ask me anything — watch the tokens stream in real-time.</div>
+        </div>
+      </div>
+      <div class="chat-input-row">
+        <input type="text" class="chat-input" id="chat-input" placeholder="Type a message..." autocomplete="off">
+        <button class="chat-send" id="chat-send" onclick="chatSend()">Send</button>
+      </div>
+      <div class="chat-source-toggle">
+        <a onclick="document.getElementById('chat-source').classList.toggle('open')">View source code →</a>
+        <span style="margin-left:.5rem;color:var(--text-muted)">The full backend powering this chat</span>
+      </div>
+      <div class="chat-source" id="chat-source">
+        <div class="chat-source-tabs">
+          <button class="chat-source-tab active" onclick="chatSourceTab(this, 'chat-src-python')">Python — Agent</button>
+          <button class="chat-source-tab" onclick="chatSourceTab(this, 'chat-src-php')">PHP — SSE Proxy</button>
+        </div>
+<pre class="chat-src-panel" id="chat-src-python"><code># examples/agents/chat_agent.py
+from agents import Agent, Runner, function_tool, SQLiteSession
+
+@function_tool
+def get_zealphp_reference(query: str) -> str:
+    """Look up ZealPHP docs — routing, streaming, store, etc."""
+    return match_sections(reference, query)
+
+agent = Agent(
+    name="ZealPHP Assistant",
+    model="gpt-4.1-mini",
+    instructions="You are a ZealPHP expert. Output raw HTML.",
+    tools=[get_zealphp_reference],
+)
+
+# Persistent conversation threads via SQLiteSession
+session = SQLiteSession(db_path=DB_PATH, session_id=thread_id)
+
+# Stream tokens as SSE events to stdout
+result = Runner.run_streamed(agent, input=message, session=session)
+async for event in result.stream_events():
+    if event.data.type == "response.output_text.delta":
+        print(f"data: {json.dumps({'token': event.data.delta})}")</code></pre>
+<pre class="chat-src-panel" id="chat-src-php" style="display:none"><code>// route/chat.php
+$app->route('/api/chat', ['methods' => ['POST']],
+  function($request, $response) {
+    $g = G::instance();
+    $input = json_decode(
+        $g->zealphp_request->parent->getContent(), true
+    );
+
+    // SSE stream — proxy Python agent's stdout
+    $response->sse(function($emit) use ($input) {
+        $cmd = 'uv run chat_agent.py '
+             . base64_encode(json_encode($input));
+        $process = proc_open($cmd, [
+            0 => ['pipe','r'],
+            1 => ['pipe','w'],
+            2 => ['pipe','w'],
+        ], $pipes);
+
+        while (!feof($pipes[1])) {
+            $line = fgets($pipes[1]);
+            if (str_starts_with($line, 'data: '))
+                $emit(substr($line, 6), 'token');
+        }
+        proc_close($process);
+    });
+});</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+function chatSourceTab(btn, id) {
+  btn.parentElement.querySelectorAll('.chat-source-tab').forEach(function(t) { t.classList.remove('active'); });
+  btn.classList.add('active');
+  btn.closest('.chat-source').querySelectorAll('.chat-src-panel').forEach(function(p) { p.style.display = 'none'; });
+  document.getElementById(id).style.display = '';
+}
+</script>
+
+<script>
+(function() {
+  let threadId = localStorage.getItem('zealphp_chat_thread');
+
+  // Check status
+  fetch('/api/chat/status').then(function(r) { return r.json(); }).then(function(s) {
+    const el = document.getElementById('chat-status');
+    el.textContent = s.ai_enabled ? 'Agents SDK' : 'Demo mode';
+    el.style.color = s.ai_enabled ? '#10b981' : '#f59e0b';
+  }).catch(function() {
+    document.getElementById('chat-status').textContent = 'Offline';
+  });
+
+  // Enter to send
+  document.getElementById('chat-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatSend(); }
+  });
+
+  window.chatSend = function() {
+    const input = document.getElementById('chat-input');
+    const messages = document.getElementById('chat-messages');
+    const btn = document.getElementById('chat-send');
+    const text = input.value.trim();
+    if (!text) return;
+
+    // Add user message
+    messages.innerHTML += '<div class="chat-msg user"><div class="chat-msg-bubble">' + escapeHtml(text) + '</div></div>';
+    input.value = '';
+    btn.disabled = true;
+
+    // Add assistant placeholder
+    const assistantDiv = document.createElement('div');
+    assistantDiv.className = 'chat-msg assistant';
+    assistantDiv.innerHTML = '<div class="chat-msg-bubble"><span class="chat-typing"></span></div>';
+    messages.appendChild(assistantDiv);
+    messages.scrollTop = messages.scrollHeight;
+
+    const bubble = assistantDiv.querySelector('.chat-msg-bubble');
+    bubble.innerHTML = '';
+
+    // SSE via fetch — accumulate HTML and render via innerHTML
+    let rawHtml = '';
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, thread_id: threadId })
+    }).then(function(response) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      function read() {
+        reader.read().then(function(result) {
+          if (result.done) { btn.disabled = false; return; }
+          buffer += decoder.decode(result.value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.thread_id) { threadId = data.thread_id; localStorage.setItem('zealphp_chat_thread', threadId); }
+                if (data.token) {
+                  rawHtml += data.token;
+                  bubble.innerHTML = rawHtml;
+                  messages.scrollTop = messages.scrollHeight;
+                }
+              } catch(e) {}
+            }
+          }
+          read();
+        });
+      }
+      read();
+    }).catch(function(e) {
+      bubble.textContent = 'Error: ' + e.message;
+      btn.disabled = false;
+    });
+  };
+
+  function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
+  }
 })();
 </script>
 
@@ -176,7 +356,7 @@ $siteUrl = site_url();
     <!-- vs Go -->
     <div class="bold-claim">
       <h3>Go is fast. ZealPHP is fast AND expressive.</h3>
-      <p>67k req/s on 4 workers. But you also get reflection-based injection, auto-serialization, and zero boilerplate.</p>
+      <p>80k req/s on 4 workers. But you also get reflection-based injection, auto-serialization, and zero boilerplate.</p>
       <div class="code-compare">
         <div class="code-compare-panel">
           <div class="compare-label">ZealPHP — return anything</div>
@@ -236,145 +416,6 @@ redis_client.set(key, json.dumps(data))</code></pre>
 
   </div>
 </section>
-
-<!-- Live AI Chat Demo -->
-<section class="section">
-  <div class="container">
-    <h2 class="section-title">Try it — live AI chat, streaming on this server</h2>
-    <p class="section-desc">Powered by the <strong>OpenAI Agents SDK</strong> + ZealPHP SSE streaming. Multi-agent with tool use, streamed token-by-token.</p>
-    <div class="chat-widget">
-      <div class="chat-header">
-        <span>ZealPHP AI Chat Demo</span>
-        <span class="chat-status" id="chat-status">Checking...</span>
-      </div>
-      <div class="chat-messages" id="chat-messages">
-        <div class="chat-msg assistant">
-          <div class="chat-msg-bubble">Hi! I'm running on ZealPHP's SSE streaming. Ask me anything — watch the tokens stream in real-time.</div>
-        </div>
-      </div>
-      <div class="chat-input-row">
-        <input type="text" class="chat-input" id="chat-input" placeholder="Type a message..." autocomplete="off">
-        <button class="chat-send" id="chat-send" onclick="chatSend()">Send</button>
-      </div>
-      <div class="chat-source-toggle">
-        <a onclick="document.getElementById('chat-source').classList.toggle('open')">View source code →</a>
-        <span style="margin-left:.5rem;color:var(--text-muted)">The full backend powering this chat</span>
-      </div>
-      <div class="chat-source" id="chat-source">
-<pre><code># examples/agents/chat_agent.py — OpenAI Agents SDK
-from agents import Agent, Runner, function_tool
-
-@function_tool
-def get_zealphp_features(topic: str) -> str:
-    """Look up ZealPHP framework features."""
-    return features[topic]
-
-agent = Agent(
-    name="ZealPHP Assistant",
-    model="gpt-4.1-mini",
-    instructions="You are a ZealPHP expert...",
-    tools=[get_zealphp_features, generate_code_example],
-)
-
-# Streaming — each token emitted as SSE
-result = Runner.run_streamed(agent, input=messages)
-async for event in result.stream_events():
-    if event.data.type == "response.output_text.delta":
-        emit_sse(event.data.delta)
-
-# ZealPHP proxies the stream via $response->sse()
-# Thread history stored in cross-worker Store</code></pre>
-      </div>
-    </div>
-  </div>
-</section>
-
-<script>
-(function() {
-  let threadId = null;
-
-  // Check status
-  fetch('/api/chat/status').then(function(r) { return r.json(); }).then(function(s) {
-    const el = document.getElementById('chat-status');
-    el.textContent = s.ai_enabled ? 'Agents SDK' : 'Demo mode';
-    el.style.color = s.ai_enabled ? '#10b981' : '#f59e0b';
-  }).catch(function() {
-    document.getElementById('chat-status').textContent = 'Offline';
-  });
-
-  // Enter to send
-  document.getElementById('chat-input').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatSend(); }
-  });
-
-  window.chatSend = function() {
-    const input = document.getElementById('chat-input');
-    const messages = document.getElementById('chat-messages');
-    const btn = document.getElementById('chat-send');
-    const text = input.value.trim();
-    if (!text) return;
-
-    // Add user message
-    messages.innerHTML += '<div class="chat-msg user"><div class="chat-msg-bubble">' + escapeHtml(text) + '</div></div>';
-    input.value = '';
-    btn.disabled = true;
-
-    // Add assistant placeholder
-    const assistantDiv = document.createElement('div');
-    assistantDiv.className = 'chat-msg assistant';
-    assistantDiv.innerHTML = '<div class="chat-msg-bubble"><span class="chat-typing"></span></div>';
-    messages.appendChild(assistantDiv);
-    messages.scrollTop = messages.scrollHeight;
-
-    const bubble = assistantDiv.querySelector('.chat-msg-bubble');
-    bubble.textContent = '';
-
-    // SSE via fetch
-    fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, thread_id: threadId })
-    }).then(function(response) {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      function read() {
-        reader.read().then(function(result) {
-          if (result.done) { btn.disabled = false; return; }
-          buffer += decoder.decode(result.value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop();
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.thread_id) threadId = data.thread_id;
-                if (data.token) {
-                  bubble.textContent += data.token;
-                  messages.scrollTop = messages.scrollHeight;
-                }
-              } catch(e) {}
-            }
-          }
-          read();
-        });
-      }
-      read();
-    }).catch(function(e) {
-      bubble.textContent = 'Error: ' + e.message;
-      btn.disabled = false;
-    });
-  };
-
-  function escapeHtml(text) {
-    const d = document.createElement('div');
-    d.textContent = text;
-    return d.innerHTML;
-  }
-})();
-</script>
 
 <!-- Quick start -->
 <section class="section" style="background:var(--bg-dark);color:#e2e8f0;padding-top:3rem;padding-bottom:3rem">
@@ -726,7 +767,7 @@ document.addEventListener('click', function(e) {
         ['🧵', 'True coroutines',          'Not fake async with callbacks. Real coroutines with go() + Channel. Write synchronous-looking code that runs concurrently.'],
         ['🔧', 'PHP you already know',     '80% of developers know PHP. Sessions, headers, superglobals — all work via uopz overrides. Migrate existing apps without rewriting.'],
         ['📐', 'PSR standards',            'PSR-7 request/response, PSR-15 middleware. Drop in any standards-compliant package from the PHP ecosystem.'],
-        ['📊', 'Benchmarked performance',  '67k req/s, 21ms p90, 0 failures on 4 workers. Local quad-core benchmark sweep. Reproducible — run scripts/bench.sh yourself.'],
+        ['📊', 'Benchmarked performance',  '80k req/s, 2.5ms avg latency, 0 failures on 4 workers. Local quad-core benchmark sweep. Reproducible — run scripts/bench.sh yourself.'],
         ['🔓', 'MIT open source',          'Fully open source. No enterprise tier. No "contact sales." Community-maintained on OpenSwoole, PHP\'s battle-tested async runtime.'],
       ];
       foreach ($why as [$icon, $title, $body]):
