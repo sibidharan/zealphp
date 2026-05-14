@@ -17,7 +17,23 @@ $active      ??= $page;
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+  document.querySelectorAll('pre code').forEach(el => {
+    hljs.highlightElement(el);
+    const pre = el.closest('pre');
+    if (!pre || pre.querySelector('.code-copy')) return;
+    const btn = document.createElement('button');
+    btn.className = 'code-copy';
+    btn.textContent = 'copy';
+    btn.addEventListener('click', () => {
+      navigator.clipboard.writeText(el.textContent).then(() => {
+        btn.textContent = 'copied!';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1200);
+      });
+    });
+    pre.style.position = 'relative';
+    pre.appendChild(btn);
+  });
 
   // Generic demo panel runner
   document.querySelectorAll('[data-demo-url]').forEach(btn => {

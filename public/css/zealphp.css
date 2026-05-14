@@ -428,6 +428,19 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   .topnav .actions { order: 1; margin-left: auto; }
 }
 
+/* ── Code copy button ── */
+.code-copy {
+  position: absolute; top: .5rem; right: .5rem;
+  background: rgba(255,255,255,.08); color: #a8a29e;
+  border: 1px solid rgba(255,255,255,.1); border-radius: 4px;
+  padding: .15rem .5rem; font-size: .65rem; font-family: var(--font);
+  cursor: pointer; transition: all .15s; opacity: 0;
+  z-index: 2;
+}
+pre:hover .code-copy { opacity: 1; }
+.code-copy:hover { color: #e7e5e4; border-color: rgba(255,255,255,.25); background: rgba(255,255,255,.12); }
+.code-copy.copied { color: var(--success); border-color: var(--success); }
+
 /* ── Highlight.js overrides ── */
 .hljs { background: transparent !important; padding: 0 !important; }
 
