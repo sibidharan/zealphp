@@ -241,7 +241,7 @@ redis_client.set(key, json.dumps(data))</code></pre>
 <section class="section">
   <div class="container">
     <h2 class="section-title">Try it — live AI chat, streaming on this server</h2>
-    <p class="section-desc">This chat is powered by ZealPHP's SSE streaming. Every token streams in real-time. The entire backend is <strong>30 lines of PHP</strong>.</p>
+    <p class="section-desc">Powered by the <strong>OpenAI Agents SDK</strong> + ZealPHP SSE streaming. Multi-agent with tool use, streamed token-by-token.</p>
     <div class="chat-widget">
       <div class="chat-header">
         <span>ZealPHP AI Chat Demo</span>
@@ -261,25 +261,29 @@ redis_client.set(key, json.dumps(data))</code></pre>
         <span style="margin-left:.5rem;color:var(--text-muted)">The full backend powering this chat</span>
       </div>
       <div class="chat-source" id="chat-source">
-<pre><code>// route/chat.php — the entire AI chat backend
-$app->route('/api/chat', ['methods' => ['POST']], function($request, $response) {
-    $body = json_decode($g->zealphp_request->parent->getContent(), true);
-    $message = $body['message'];
+<pre><code># examples/agents/chat_agent.py — OpenAI Agents SDK
+from agents import Agent, Runner, function_tool
 
-    $response->sse(function($emit) use ($message) {
-        // Call Claude API with streaming
-        $ch = curl_init('https://api.anthropic.com/v1/messages');
-        curl_setopt($ch, CURLOPT_WRITEFUNCTION,
-            function($ch, $data) use ($emit) {
-                // Parse SSE events, emit tokens
-                $emit(json_encode(['token' => $text]), 'token');
-                return strlen($data);
-            }
-        );
-        curl_exec($ch);
-        $emit(json_encode(['done' => true]), 'done');
-    });
-});</code></pre>
+@function_tool
+def get_zealphp_features(topic: str) -> str:
+    """Look up ZealPHP framework features."""
+    return features[topic]
+
+agent = Agent(
+    name="ZealPHP Assistant",
+    model="gpt-4.1-mini",
+    instructions="You are a ZealPHP expert...",
+    tools=[get_zealphp_features, generate_code_example],
+)
+
+# Streaming — each token emitted as SSE
+result = Runner.run_streamed(agent, input=messages)
+async for event in result.stream_events():
+    if event.data.type == "response.output_text.delta":
+        emit_sse(event.data.delta)
+
+# ZealPHP proxies the stream via $response->sse()
+# Thread history stored in cross-worker Store</code></pre>
       </div>
     </div>
   </div>
@@ -292,7 +296,7 @@ $app->route('/api/chat', ['methods' => ['POST']], function($request, $response) 
   // Check status
   fetch('/api/chat/status').then(function(r) { return r.json(); }).then(function(s) {
     const el = document.getElementById('chat-status');
-    el.textContent = s.ai_enabled ? 'Claude AI' : 'Demo mode';
+    el.textContent = s.ai_enabled ? 'Agents SDK' : 'Demo mode';
     el.style.color = s.ai_enabled ? '#10b981' : '#f59e0b';
   }).catch(function() {
     document.getElementById('chat-status').textContent = 'Offline';
