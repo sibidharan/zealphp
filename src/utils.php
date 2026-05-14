@@ -647,10 +647,10 @@ function uniqidReal($length = 13)
 /**
  * Logs access details with the given status and length.
  *
- * @param int $status The HTTP status code to log. Default is 200.
+ * @param int $status The HTTP status code to log.
  * @param int $length The length of the response content.
  */
-function access_log($status = 200, $length){
+function access_log(int $status = 200, int $length = 0){
     if (!access_logging_enabled()) {
         return;
     }

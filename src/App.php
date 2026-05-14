@@ -621,7 +621,7 @@ class App
             'post'   => $g->post ?? [],
             'cookie' => $g->cookie ?? [],
             'files'  => $g->files ?? [],
-            'env'    => $g->env ?? $_ENV ?? [],
+            'env'    => $g->env ?? $_ENV,
         ], JSON_UNESCAPED_SLASHES);
 
         $env = [];
@@ -1390,7 +1390,7 @@ HELP;
             self::$middleware_stack = self::$middleware_stack->add($middleware);
         }
 
-        $server->on("request",new $SessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) use ($server) {
+        $server->on("request",new $SessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) {
             $g = G::instance();
             static $serverSoftware = null;
             if ($serverSoftware === null) {

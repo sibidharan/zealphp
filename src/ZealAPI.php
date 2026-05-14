@@ -54,10 +54,10 @@ class ZealAPI extends REST
             return;
         }
 
-        if (!isset($module) and (int)method_exists($this, $func) > 0) {
+        if ($module === '' && method_exists($this, $func)) {
             $this->$func();
         } else {
-            if (isset($module)) {
+            if ($module !== '') {
                 $dir = $this->cwd.'/api'.$module;
                 $g->server['DOCUMENT_ROOT'] = App::$cwd . '/api';
                 $file = $dir.'/'.$request.'.php';
@@ -91,9 +91,7 @@ class ZealAPI extends REST
                     $invokeArgs = [];
                     foreach (self::$reflectionCache[$cacheKey] as $param) {
                         $pname = $param->getName();
-                        if (isset($params[$pname])) {
-                            $invokeArgs[] = $params[$pname];
-                        } else if ($pname == 'app'){
+                        if ($pname == 'app'){
                             $invokeArgs[] = $this;
                         } else if ($pname == 'request'){
                             $invokeArgs[] = $this->request;
@@ -102,8 +100,8 @@ class ZealAPI extends REST
                         } else if ($pname == 'server'){
                             $invokeArgs[] = App::$server;
                         } else {
-                            $invokeArgs[] = $param->isDefaultValueAvailable() 
-                                ? $param->getDefaultValue() 
+                            $invokeArgs[] = $param->isDefaultValueAvailable()
+                                ? $param->getDefaultValue()
                                 : null;
                         }
                     }

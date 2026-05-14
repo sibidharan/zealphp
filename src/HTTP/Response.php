@@ -8,6 +8,7 @@ class Response
 {
     public \OpenSwoole\Http\Response $parent;
     private \ZealPHP\G $g;
+    private ?int $statusCode = null;
     public function __construct(\OpenSwoole\Http\Response $response)
     {
         $this->parent = $response;
