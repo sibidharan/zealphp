@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://php.zeal.ninja
+    about: Check the documentation before opening an issue.
+  - name: Security Vulnerabilities
+    url: https://github.com/sibidharan/zealphp/security/policy
+    about: Do not open public issues for security problems. See SECURITY.md.

@@ -1,0 +1,65 @@
+name: "Bug Report"
+description: "Report a defect in ZealPHP"
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the defect clearly.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide a minimal, reproducible example.
+      placeholder: |
+        1. Create a route with `$app->route('/foo', fn() => ...)`
+        2. Run `php app.php`
+        3. Request `http://localhost:8080/foo`
+        4. Observe the error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: dropdown
+    id: php_version
+    attributes:
+      label: PHP Version
+      options:
+        - "8.3"
+        - "8.4"
+        - "8.5"
+    validations:
+      required: true
+  - type: input
+    id: openswoole_version
+    attributes:
+      label: OpenSwoole version
+      placeholder: "22.1.5 or 26.2.0"
+  - type: input
+    id: zealphp_version
+    attributes:
+      label: ZealPHP version
+      placeholder: "v0.1.1"
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Ubuntu
+        - Debian
+        - Alpine
+        - macOS
+        - Other
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Logs, screenshots, or any other context.
