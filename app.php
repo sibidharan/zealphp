@@ -66,9 +66,10 @@ $envInt = static function (string $name, int $default, int $min = 1): int {
     return max($min, (int) $value);
 };
 
+$appPort = $envInt('ZEALPHP_PORT', 8080);
 $app = App::init(
     getenv('ZEALPHP_HOST') ?: '0.0.0.0',
-    $envInt('ZEALPHP_PORT', 8080)
+    $appPort
 );
 if (!$benchMode) {
     $app->addMiddleware(new CorsMiddleware());         // outermost — handles preflight, adds Allow-Origin
@@ -95,6 +96,19 @@ $app->route('/json', function($request) {
 
 $app->route('/raw/bench', ['raw' => true], function() {
     return 'You requested: bench';
+});
+
+$app->route('/bench/template', function() {
+    App::render('/bench_page', [
+        'title' => 'ZealPHP Benchmark',
+        'items' => [
+            ['name' => 'Routing', 'desc' => 'Flask-style routes'],
+            ['name' => 'Streaming', 'desc' => 'SSR via yield'],
+            ['name' => 'WebSocket', 'desc' => 'Built-in real-time'],
+            ['name' => 'Store', 'desc' => 'Shared memory'],
+            ['name' => 'Coroutines', 'desc' => 'go() + Channel'],
+        ],
+    ]);
 });
 
 $app->route('/stream_test',[
@@ -302,7 +316,7 @@ if ($pidFile === false || trim((string) $pidFile) === '') {
     if ($logDir === false || trim((string) $logDir) === '') {
         $logDir = '/tmp/zealphp';
     }
-    $pidFile = rtrim(trim((string) $logDir), '/') . '/zealphp.pid';
+    $pidFile = rtrim(trim((string) $logDir), '/') . '/zealphp_' . $appPort . '.pid';
 }
 $pidFile = trim((string) $pidFile);
 if ($pidFile !== '') {

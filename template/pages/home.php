@@ -63,58 +63,71 @@ $siteUrl = site_url();
       </div>
     </div>
 
-    <div class="bench-note">With full middleware (CORS + ETag + sessions). 4 workers. <code>ab -n 50000 -c 200 -k</code></div>
+    <div class="bench-note">Full middleware (CORS + ETag + sessions + PSR-7). 4 workers. <code>ab -n 50000 -c 200 -k</code>. Zero npm packages needed.</div>
     <div class="bench">
-      <div class="bench-stat"><div class="num">66k</div><div class="label">req/s</div></div>
-      <div class="bench-stat"><div class="num">3ms</div><div class="label">avg latency</div></div>
-      <div class="bench-stat"><div class="num">4</div><div class="label">workers</div></div>
+      <div class="bench-stat"><div class="num">95k</div><div class="label">req/s text</div></div>
+      <div class="bench-stat"><div class="num">90k</div><div class="label">req/s JSON</div></div>
+      <div class="bench-stat"><div class="num">65k</div><div class="label">req/s template</div></div>
       <div class="bench-stat"><div class="num">0</div><div class="label">failures</div></div>
     </div>
     <div style="margin-top:1.5rem;position:relative">
-      <table style="margin:0 auto;border-collapse:collapse;font-size:.82rem;max-width:660px;width:100%">
+      <table style="margin:0 auto;border-collapse:collapse;font-size:.78rem;max-width:740px;width:100%">
         <tr style="border-bottom:1px solid rgba(255,255,255,.1)">
-          <th style="text-align:left;padding:.4rem .8rem;color:#94a3b8;font-weight:600">Framework</th>
-          <th style="text-align:right;padding:.4rem .8rem;color:#94a3b8;font-weight:600">req/s</th>
-          <th style="text-align:right;padding:.4rem .8rem;color:#94a3b8;font-weight:600">vs ZealPHP</th>
-        </tr>
-        <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
-          <td style="padding:.4rem .8rem;color:var(--accent);font-weight:700">ZealPHP <span style="color:#94a3b8;font-weight:400;font-size:.72rem">CORS + ETag + sessions</span></td>
-          <td style="padding:.4rem .8rem;text-align:right;color:var(--accent);font-weight:700">66,000</td>
-          <td style="padding:.4rem .8rem;text-align:right;color:var(--accent);font-weight:700">1x</td>
-        </tr>
-        <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
-          <td style="padding:.4rem .8rem;color:#e2e8f0">OpenSwoole raw <span style="color:#64748b;font-size:.72rem">no framework</span></td>
-          <td style="padding:.4rem .8rem;text-align:right;color:#e2e8f0">250,000</td>
-          <td style="padding:.4rem .8rem;text-align:right;color:#64748b">3.8x</td>
-        </tr>
-        <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
-          <td style="padding:.4rem .8rem;color:#e2e8f0">Express.js <span style="color:#64748b;font-size:.72rem">cors + etag + session</span></td>
-          <td style="padding:.4rem .8rem;text-align:right;color:#e2e8f0">112,000</td>
-          <td style="padding:.4rem .8rem;text-align:right;color:#64748b">1.7x</td>
+          <th style="text-align:left;padding:.4rem .6rem;color:#94a3b8;font-weight:600">Framework</th>
+          <th style="text-align:right;padding:.4rem .6rem;color:#94a3b8;font-weight:600">Raw text</th>
+          <th style="text-align:right;padding:.4rem .6rem;color:#94a3b8;font-weight:600">JSON API</th>
+          <th style="text-align:right;padding:.4rem .6rem;color:#94a3b8;font-weight:600">Template</th>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02)">
-          <td colspan="3" style="padding:.5rem .8rem;color:#64748b;font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700">Other PHP frameworks <span style="font-weight:400;text-transform:none;letter-spacing:0">(community benchmarks, similar hardware)</span></td>
+          <td colspan="4" style="padding:.35rem .6rem;color:#64748b;font-size:.65rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700">Runtime (no framework, no middleware)</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
-          <td style="padding:.35rem .8rem;color:#94a3b8">Slim 4 <span style="color:#64748b;font-size:.72rem">micro-framework</span></td>
-          <td style="padding:.35rem .8rem;text-align:right;color:#94a3b8">~4,000</td>
-          <td style="padding:.35rem .8rem;text-align:right;color:#10b981;font-weight:600">16x slower</td>
+          <td style="padding:.35rem .6rem;color:#94a3b8">OpenSwoole raw</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">298k</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">258k</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#64748b">—</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
-          <td style="padding:.35rem .8rem;color:#94a3b8">Symfony 7 <span style="color:#64748b;font-size:.72rem">full stack</span></td>
-          <td style="padding:.35rem .8rem;text-align:right;color:#94a3b8">~2,000</td>
-          <td style="padding:.35rem .8rem;text-align:right;color:#10b981;font-weight:600">33x slower</td>
+          <td style="padding:.35rem .6rem;color:#94a3b8">Node.js raw http</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">222k</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#94a3b8">281k</td>
+          <td style="padding:.35rem .6rem;text-align:right;color:#64748b">—</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02)">
+          <td colspan="4" style="padding:.35rem .6rem;color:#64748b;font-size:.65rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700">Full framework (CORS + ETag + sessions + routing + templates)</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
-          <td style="padding:.35rem .8rem;color:#94a3b8">Laravel 11 <span style="color:#64748b;font-size:.72rem">full stack</span></td>
-          <td style="padding:.35rem .8rem;text-align:right;color:#94a3b8">~500</td>
-          <td style="padding:.35rem .8rem;text-align:right;color:#10b981;font-weight:600">130x slower</td>
+          <td style="padding:.4rem .6rem;color:var(--accent);font-weight:700">ZealPHP <span style="color:#64748b;font-weight:400;font-size:.68rem">built-in</span></td>
+          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">95k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">90k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:var(--accent);font-weight:700">65k</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
+          <td style="padding:.4rem .6rem;color:#e2e8f0">Express.js <span style="color:#64748b;font-size:.68rem">+5 npm pkgs</span></td>
+          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">87k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">105k</td>
+          <td style="padding:.4rem .6rem;text-align:right;color:#e2e8f0">36k</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02)">
+          <td colspan="4" style="padding:.35rem .6rem;color:#64748b;font-size:.65rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700">Other PHP frameworks <span style="font-weight:400;text-transform:none;letter-spacing:0">(community benchmarks)</span></td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
+          <td style="padding:.3rem .6rem;color:#64748b">Slim 4</td>
+          <td colspan="3" style="padding:.3rem .6rem;text-align:right;color:#10b981;font-weight:600;font-size:.75rem">~4k — 22x slower</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
+          <td style="padding:.3rem .6rem;color:#64748b">Symfony 7</td>
+          <td colspan="3" style="padding:.3rem .6rem;text-align:right;color:#10b981;font-weight:600;font-size:.75rem">~2k — 45x slower</td>
+        </tr>
+        <tr>
+          <td style="padding:.3rem .6rem;color:#64748b">Laravel 11</td>
+          <td colspan="3" style="padding:.3rem .6rem;text-align:right;color:#10b981;font-weight:600;font-size:.75rem">~500 — 180x slower</td>
         </tr>
       </table>
-      <p style="text-align:center;color:#64748b;font-size:.72rem;margin-top:.75rem">
-        ZealPHP + Express benchmarked on same machine, 4 workers, <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px;color:#94a3b8">ab -n 50000 -c 200 -k</code>.<br>
-        PHP framework numbers from community benchmarks on comparable hardware.<br>
-        OpenSwoole is ZealPHP's runtime — the gap is ZealPHP's framework overhead (routing, middleware, PSR-7).
+      <p style="text-align:center;color:#64748b;font-size:.7rem;margin-top:.75rem">
+        Same machine, 4 workers, <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px;color:#94a3b8">ab -n 50000 -c 200 -k</code>.
+        ZealPHP beats Express on text and templates — Express wins on JSON (V8 JSON.stringify).<br>
+        ZealPHP needs zero npm packages. Express needs cors + ejs + express-session + session-file-store + body-parser.
       </p>
     </div>
   </div>
@@ -403,7 +416,7 @@ function chatSourceTab(btn, id) {
     <!-- vs Go -->
     <div class="bold-claim">
       <h3>Go is fast. ZealPHP is fast AND expressive.</h3>
-      <p>66k req/s on 4 workers. But you also get reflection-based injection, auto-serialization, and zero boilerplate.</p>
+      <p>90k req/s on 4 workers. But you also get reflection-based injection, auto-serialization, and zero boilerplate.</p>
       <div class="code-compare">
         <div class="code-compare-panel">
           <div class="compare-label">ZealPHP — return anything</div>
@@ -814,7 +827,7 @@ document.addEventListener('click', function(e) {
         ['🧵', 'True coroutines',          'Not fake async with callbacks. Real coroutines with go() + Channel. Write synchronous-looking code that runs concurrently.'],
         ['🔧', 'PHP you already know',     '80% of developers know PHP. Sessions, headers, superglobals — all work via uopz overrides. Migrate existing apps without rewriting.'],
         ['📐', 'PSR standards',            'PSR-7 request/response, PSR-15 middleware. Drop in any standards-compliant package from the PHP ecosystem.'],
-        ['📊', 'Benchmarked performance',  '66k req/s with full middleware, 3ms avg latency, 0 failures on 4 workers. Local quad-core benchmark sweep. Reproducible — run scripts/bench.sh yourself.'],
+        ['📊', 'Benchmarked performance',  '90k req/s with full middleware, 0 failures on 4 workers. Beats Express on text and templates.. Local quad-core benchmark sweep. Reproducible — run scripts/bench.sh yourself.'],
         ['🔓', 'MIT open source',          'Fully open source. No enterprise tier. No "contact sales." Community-maintained on OpenSwoole, PHP\'s battle-tested async runtime.'],
       ];
       foreach ($why as [$icon, $title, $body]):
