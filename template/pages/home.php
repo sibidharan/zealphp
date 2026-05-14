@@ -478,88 +478,32 @@ redis_client.set(key, json.dumps(data))</code></pre>
 
 <!-- Migrate Your PHP Codebase -->
 <section class="section" style="background:var(--bg-dark);color:var(--code-text)">
-  <div class="container">
-    <h2 class="section-title" style="color:#fff">Migrate your PHP codebase to async</h2>
-    <p class="section-desc">Your existing code works unchanged. <code>session_start()</code>, <code>header()</code>, <code>$_GET</code> — all overridden via uopz to work inside the coroutine runtime.</p>
+  <div class="container" style="max-width:860px">
+    <h2 class="section-title" style="color:#fff">Bring your PHP codebase along</h2>
+    <p class="section-desc" style="color:var(--text-light)">
+      <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>echo</code> —
+      overridden via uopz so existing code runs unchanged inside the coroutine runtime.
+      Move at your own pace: drop your whole app in, or rewrite endpoint-by-endpoint.
+    </p>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-top:2rem">
-      <div style="background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1.5rem">
-        <h3 style="color:var(--danger);font-size:1rem;margin-bottom:1rem">Before — several runtime services</h3>
-        <ul style="list-style:none;padding:0;margin:0;font-size:.85rem;color:var(--text-light)">
-          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Nginx / Apache</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">PHP-FPM (cold start every request)</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Redis (sessions, cache, pub/sub)</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Socket.io / Ratchet (WebSocket)</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Supervisor / cron (background tasks)</li>
-          <li style="padding:.35rem 0">SSE proxy or polling</li>
-        </ul>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-top:1.5rem">
+      <div style="background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1.25rem">
+        <h3 style="color:var(--danger);font-size:.95rem;margin-bottom:.75rem">Today: Nginx + PHP-FPM + Redis + Socket.io + cron + …</h3>
+        <p style="font-size:.85rem;color:var(--text-light);margin:0">6 services, 6 failure points, 6 sets of config.</p>
       </div>
-      <div style="background:var(--code-bg);border:1px solid var(--accent);border-radius:var(--radius);padding:1.5rem">
-        <h3 style="color:var(--accent);font-size:1rem;margin-bottom:1rem">After — 1 process</h3>
-        <div style="text-align:center;margin-bottom:1rem">
-          <code style="font-size:1.1rem;color:var(--accent);background:rgba(245,158,11,.1);padding:.4rem .8rem;border-radius:6px">php app.php</code>
-        </div>
-        <ul style="list-style:none;padding:0;margin:0;font-size:.85rem;color:var(--code-text)">
-          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">HTTP + WebSocket + SSE server</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Coroutine-safe sessions (no Redis)</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Shared memory across workers</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Task workers (no cron/supervisor)</li>
-          <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Persistent connections, no cold starts</li>
-          <li style="padding:.35rem 0">Many WordPress sites run via the CGI worker bridge — see the <a href="https://github.com/sibidharan/zealphp-wordpress" target="_blank" rel="noopener" style="color:var(--accent)">showcase repo</a></li>
-        </ul>
-        <p style="font-size:.78rem;color:var(--text-muted);margin-top:.75rem">Depending on the app, ZealPHP can collapse several of these into a single OpenSwoole process. Not all stacks fit.</p>
+      <div style="background:var(--code-bg);border:1px solid var(--accent);border-radius:var(--radius);padding:1.25rem">
+        <h3 style="color:var(--accent);font-size:.95rem;margin-bottom:.75rem">On ZealPHP: <code style="font-size:1rem">php app.php</code></h3>
+        <p style="font-size:.85rem;color:var(--code-text);margin:0">HTTP + WebSocket + SSE + sessions + shared memory + task workers — one process.</p>
       </div>
     </div>
 
-    <div style="margin-top:2.5rem">
-      <h3 style="font-size:1.1rem;margin-bottom:1.25rem;color:#fff">The migration ladder — go at your own pace</h3>
-      <div style="display:grid;gap:.75rem">
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1rem 1.25rem">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:rgba(245,158,11,.15);color:var(--accent);font-size:.78rem;font-weight:700;flex-shrink:0">0</span>
-          <div>
-            <div style="font-weight:600;color:var(--code-text);font-size:.9rem;margin-bottom:.3rem">Drop in your entire app</div>
-            <code style="font-size:.78rem;color:var(--text-light)">App::superglobals(true); $app->setFallback(fn() => App::includeFile('index.php'));</code>
-            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">Most existing PHP apps — WordPress, Drupal, custom — run unchanged on OpenSwoole through the CGI worker bridge.</div>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1rem 1.25rem">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:rgba(245,158,11,.15);color:var(--accent);font-size:.78rem;font-weight:700;flex-shrink:0">1</span>
-          <div>
-            <div style="font-weight:600;color:var(--code-text);font-size:.9rem;margin-bottom:.3rem">Write LAMP-style PHP in <code>public/</code></div>
-            <code style="font-size:.78rem;color:var(--text-light)">public/about.php → /about &nbsp;·&nbsp; public/users/list.php → /users/list</code>
-            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">File-based routing. <code>$_GET</code>, <code>session_start()</code>, <code>echo</code> — everything you know works.</div>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1rem 1.25rem">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:rgba(245,158,11,.15);color:var(--accent);font-size:.78rem;font-weight:700;flex-shrink:0">2</span>
-          <div>
-            <div style="font-weight:600;color:var(--code-text);font-size:.9rem;margin-bottom:.3rem">Add REST APIs with <code>api/</code></div>
-            <code style="font-size:.78rem;color:var(--text-light)">api/users/get.php → GET /api/users &nbsp;·&nbsp; api/users/post.php → POST /api/users</code>
-            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">Drop a PHP file, get a REST endpoint. ZealAPI auto-routes by filename. Zero config.</div>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1rem 1.25rem">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:rgba(245,158,11,.15);color:var(--accent);font-size:.78rem;font-weight:700;flex-shrink:0">3</span>
-          <div>
-            <div style="font-weight:600;color:var(--code-text);font-size:.9rem;margin-bottom:.3rem">Use framework routes for new features</div>
-            <code style="font-size:.78rem;color:var(--text-light)">$app->route('/ws/chat', ...); $response->sse(...); yield $html;</code>
-            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">WebSocket, SSE streaming, coroutines — available when you're ready, not forced upfront.</div>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--accent);border-radius:var(--radius);padding:1rem 1.25rem">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:rgba(245,158,11,.25);color:var(--accent);font-size:.78rem;font-weight:700;flex-shrink:0">4</span>
-          <div>
-            <div style="font-weight:600;color:var(--accent);font-size:.9rem;margin-bottom:.3rem">Full coroutine mode</div>
-            <code style="font-size:.78rem;color:var(--text-light)">App::superglobals(false); // thousands of concurrent requests per worker</code>
-            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">Replace superglobals with <code>G::instance()</code>. Per-coroutine isolation. Each worker handles many concurrent requests without blocking.</div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <p style="margin-top:1.5rem;color:var(--text-light);font-size:.92rem;line-height:1.65">
+      The migration ladder has 5 rungs (0 → 4). Rung 0 is "drop in your existing app, run <code>php app.php</code>." Rung 4 is full coroutine mode — <a href="/performance" style="color:var(--accent)">117k req/s on 4 workers</a>. Most teams stay on rungs 1–3 indefinitely; the upgrade path is opt-in, not forced.
+    </p>
 
-    <div style="text-align:center;margin-top:1.5rem">
-      <a href="/why-zealphp" class="btn btn-outline" style="font-size:.85rem">Why ZealPHP? →</a>
-      <a href="/legacy-apps" class="btn btn-outline" style="font-size:.85rem;margin-left:.5rem">WordPress on ZealPHP →</a>
+    <div style="text-align:center;margin-top:1.75rem">
+      <a href="/migration" class="btn btn-primary">See the full migration path →</a>
+      <a href="/legacy-apps" class="btn btn-outline" style="margin-left:.5rem">WordPress on ZealPHP →</a>
     </div>
   </div>
 </section>
@@ -567,10 +511,31 @@ redis_client.set(key, json.dumps(data))</code></pre>
 <!-- Quick start -->
 <section class="section" style="background:var(--bg-dark);color:#e2e8f0;padding-top:3rem;padding-bottom:3rem">
   <div class="container">
+
+    <!-- TL;DR install — fresh-box one-liner before the scaffold/clone/wordpress tabs.
+         Surfaces the curl|bash path for visitors who haven't installed PHP/OpenSwoole
+         at all yet; the tabbed scaffold below assumes those deps already exist. -->
+    <div style="background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.22);border-radius:8px;padding:1rem 1.25rem;margin-bottom:2rem;max-width:760px;margin-left:auto;margin-right:auto">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem">
+        <span style="font-size:1.1rem">⚡</span>
+        <strong style="color:#fff">Fresh machine? One line installs PHP 8.3 + OpenSwoole + uopz + composer:</strong>
+      </div>
+      <div class="qs-block" style="background:#0c0a09;padding:.65rem .85rem;margin:0;border:none">
+        <div class="qs-line" style="display:flex;align-items:center;gap:.5rem;font-family:var(--font-mono);font-size:.88rem">
+          <span style="color:#a8a29e">$</span>
+          <span style="flex:1;color:#e7e5e4">curl -fsSL https://php.zeal.ninja/install.sh | sudo bash</span>
+          <button class="qs-copy" data-copy="curl -fsSL https://php.zeal.ninja/install.sh | sudo bash" style="background:rgba(245,158,11,.18);color:var(--accent);border:1px solid rgba(245,158,11,.32);padding:.2rem .55rem;border-radius:4px;font-size:.72rem;cursor:pointer">copy</button>
+        </div>
+      </div>
+      <p style="margin:.55rem 0 0;font-size:.78rem;color:#94a3b8">
+        Ubuntu/Debian/WSL2 · macOS · auto-detects unsupported distros and prints manual steps · <a href="/getting-started#install" style="color:var(--accent)">inspect first</a>
+      </p>
+    </div>
+
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem">
       <div>
         <h2 style="color:#fff;margin-bottom:.25rem">Quick Start</h2>
-        <p style="color:#94a3b8;margin:0">From zero to running server in 60 seconds.</p>
+        <p style="color:#94a3b8;margin:0">PHP installed? From zero to running server in 60 seconds.</p>
       </div>
       <div style="display:flex;gap:.5rem;font-size:.78rem" class="qs-tabs">
         <button class="qs-tab active" data-tab="starter" onclick="qsTab('starter')">Starter Project</button>
