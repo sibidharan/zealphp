@@ -17,7 +17,8 @@ $siteUrl = site_url();
     <div class="cta">
       <a href="/getting-started" class="btn btn-primary">Get Started →</a>
       <a href="/why-zealphp" class="btn btn-outline">Why ZealPHP? →</a>
-      <a href="https://github.com/sibidharan/zealphp" class="btn btn-outline" target="_blank">GitHub ↗</a>
+      <a href="https://github.com/sibidharan/zealphp" class="btn btn-outline" target="_blank" rel="noopener">GitHub ↗</a>
+      <a href="https://deepwiki.com/sibidharan/zealphp" class="btn btn-outline" target="_blank" rel="noopener">Ask DeepWiki ↗</a>
     </div>
     <p style="font-size:.78rem;color:#a8a29e;margin-top:.5rem">
       <a href="/why-zealphp" style="color:#fde68a;text-decoration:none">Why?</a> covers the problem PHP-FPM can't solve, where ZealPHP fits vs Laravel Octane / FrankenPHP / RoadRunner, and when it's the wrong choice.

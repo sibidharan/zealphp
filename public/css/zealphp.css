@@ -114,22 +114,6 @@ p  { max-width: 70ch; }
 .alpha-banner-text { flex: 1; }
 .alpha-banner a { color: #422006; text-decoration: underline; font-weight: 800; }
 .alpha-banner a:hover { color: #1a1a1a; }
-.alpha-banner-dismiss {
-  flex-shrink: 0;
-  background: transparent; color: #422006;
-  border: 1px solid #78350f;
-  border-radius: 4px;
-  padding: .05rem .45rem;
-  font-size: 1rem; line-height: 1;
-  cursor: pointer;
-  font-family: inherit; font-weight: 700;
-  transition: background .15s, color .15s;
-}
-.alpha-banner-dismiss:hover {
-  background: #422006;
-  color: #fbbf24;
-}
-html.alpha-banner-dismissed .alpha-banner { display: none; }
 @media (max-width: 720px) {
   .alpha-banner { font-size: .76rem; padding: .5rem .75rem; gap: .5rem; }
 }
