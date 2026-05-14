@@ -447,6 +447,11 @@ pre { position: relative; }
 pre:hover > .code-copy { opacity: 1; }
 .code-copy:hover { color: #e7e5e4; border-color: rgba(255,255,255,.25); background: rgba(0,0,0,.6); }
 .code-copy.copied { color: var(--success); border-color: var(--success); }
+.code-compare-panel .code-copy {
+  background: rgba(0,0,0,.06); color: #78716c;
+  border-color: rgba(0,0,0,.12);
+}
+.code-compare-panel .code-copy:hover { background: rgba(0,0,0,.12); color: #1c1917; border-color: rgba(0,0,0,.2); }
 
 /* ── Highlight.js overrides ── */
 .hljs { background: transparent !important; padding: 0 !important; }
