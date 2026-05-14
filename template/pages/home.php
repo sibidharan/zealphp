@@ -155,19 +155,9 @@ $siteUrl = site_url();
           <strong style="color:var(--accent)">91% of bare Node http's throughput</strong>.
         </p>
       </div>
-      <p style="text-align:center;color:#64748b;font-size:.7rem;margin-top:.75rem">
-        Methodology: AMD Ryzen 9 7900X (12 cores, Docker), each server tested sequentially, 4 workers, warmed-up, <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px;color:#94a3b8">ab -n 50000 -c 200 -k -l</code>.
-        ZealPHP runs with the full PSR-15 stack (CORS + ETag + Range + sessions + reflection-injected routing). Express runs with cors + etag + express-session + session-file-store + ejs + body-parser.<br>
-        Your results will vary with hardware, payload size, I/O, and tuning. Re-run on your own box before quoting.<br>
-        <a href="/performance" style="color:var(--accent);font-weight:600;text-decoration:none">Full concurrency sweep, latency percentiles, methodology, and caveats →</a>
+      <p style="text-align:center;color:#94a3b8;font-size:.85rem;margin-top:1.25rem">
+        <a href="/performance" style="color:var(--accent);font-weight:600;text-decoration:none">Concurrency sweep, latency percentiles, methodology, reproduction recipes &amp; caveats →</a>
       </p>
-      <div style="margin-top:1rem;text-align:center">
-        <p style="color:#94a3b8;font-size:.75rem;margin-bottom:.5rem">Don't trust our numbers — run it yourself:</p>
-        <div class="qs-block" style="max-width:520px;margin:0 auto;text-align:left;padding:.75rem 1rem">
-          <div class="qs-line"><span class="qs-cmd"><span class="qs-prompt">$</span> scripts/bench_vs_express.sh</span><button class="qs-copy" data-copy="scripts/bench_vs_express.sh">copy</button></div>
-        </div>
-        <p style="color:#64748b;font-size:.68rem;margin-top:.4rem">Starts ZealPHP + Express + Node raw + OpenSwoole raw, benchmarks all 3 workloads, cleans up. <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px;color:#94a3b8">WORKERS=8 CONCURRENCY=500</code> to customize.</p>
-      </div>
     </div>
   </div>
 </section>
