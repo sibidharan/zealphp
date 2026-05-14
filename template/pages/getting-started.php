@@ -44,8 +44,8 @@
     <h2 id="prereqs" style="margin-top:2rem">1. Prerequisites</h2>
     <table class="ztable">
       <tr><th>Package</th><th>Version</th><th>Why</th></tr>
-      <tr><td><code>PHP</code></td><td>8.3.x</td><td>OpenSwoole does not support PHP 8.4 yet — stay on 8.3</td></tr>
-      <tr><td><code>OpenSwoole</code></td><td>25.0+</td><td>Async runtime, HTTP/WebSocket server, coroutines</td></tr>
+      <tr><td><code>PHP</code></td><td>8.3+</td><td>Tested on 8.3 and 8.4; OpenSwoole 26.2+ adds PHP 8.5 support</td></tr>
+      <tr><td><code>OpenSwoole</code></td><td>22.1+</td><td>Async runtime, HTTP/WebSocket server, coroutines (26.2+ for PHP 8.5)</td></tr>
       <tr><td><code>uopz</code></td><td>any</td><td>Overrides <code>header()</code>, <code>setcookie()</code>, <code>session_*</code> at runtime</td></tr>
       <tr><td><code>composer</code></td><td>2.x</td><td>Dependency management</td></tr>
       <tr><td><code>uv</code> (optional)</td><td>any</td><td>Only for AI agent examples (Python)</td></tr>
@@ -53,8 +53,8 @@
 
     <h2 id="install" style="margin-top:2.5rem">2. Install</h2>
 
-    <div class="callout warn" style="margin-bottom:1rem">
-      <strong>PHP 8.3 only.</strong> OpenSwoole does not currently support PHP 8.4. If your system has PHP 8.4 installed, install PHP 8.3 alongside it and use that for ZealPHP.
+    <div class="callout info" style="margin-bottom:1rem">
+      <strong>PHP 8.3, 8.4, or 8.5.</strong> OpenSwoole 22.1+ works on PHP 8.3 and 8.4; OpenSwoole 26.2+ (released Feb 2026) added PHP 8.5 support. If you only have one PHP version available, 8.3 is the safest default.
     </div>
 
     <p>The framework repo ships a <code>setup.sh</code> that handles everything for Ubuntu/Debian:</p>
@@ -119,7 +119,7 @@ BASH
           'lang' => 'bash',
           'code' => <<<'BASH'
 composer create-project \
-  sibidharan/zealphp-project:^0.1.1 \
+  sibidharan/zealphp-project:^0.2.0 \
   my-app
 cd my-app && php app.php
 BASH

@@ -2,7 +2,7 @@
   <div class="footer-inner">
     <div>
       <div class="footer-brand">Zeal<span>PHP</span></div>
-      <div class="footer-copy">MIT License · Built on OpenSwoole · PHP 8.3.x</div>
+      <div class="footer-copy">MIT License · Built on OpenSwoole · PHP 8.3+</div>
     </div>
     <div class="footer-links">
       <a href="https://github.com/sibidharan/zealphp" target="_blank">GitHub</a>
