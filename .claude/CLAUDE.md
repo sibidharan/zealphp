@@ -382,12 +382,106 @@ All ZealPHP usage examples live as first-class project files:
 
 ---
 
-## Scaffold Project (`~/zealphp-project`)
+## Companion repos — keep in sync
 
-The starter project at `~/zealphp-project` (repo: `sibidharan/zealphp-project`) is the template used by `composer create-project`. **Keep it in sync with this main repo:**
+ZealPHP has two companion repos that must stay aligned with framework releases:
 
-- When adding new framework features (new methods, new patterns), update `~/zealphp-project/.claude/CLAUDE.md` with the latest API reference.
-- When adding deploy artifacts (service files, configs), copy them to `~/zealphp-project/deploy/`.
-- After syncing, commit, force-update the `v0.1.1` tag, and push: `git tag -f v0.1.1 && git push origin main && git push origin -f v0.1.1`
+| Repo | Composer name | Role |
+|---|---|---|
+| **Scaffold** | `sibidharan/zealphp-project` | Template for `composer create-project`; ships `vendor/` checked in |
+| **WordPress showcase** | `sibidharan/zealphp-wordpress` | Demonstrates unmodified WordPress on ZealPHP |
 
-The starter project's `.claude/CLAUDE.md` should always reflect the latest ZealPHP API so AI tools can assist developers immediately after scaffolding.
+**Path discovery — never hardcode `~/zealphp-project`.** Different devs lay out their workspaces differently. Find each companion in this order, stop at the first hit:
+
+1. Env vars: `$ZEALPHP_PROJECT_DIR`, `$ZEALPHP_WORDPRESS_DIR`
+2. Sibling of main repo: `../zealphp-project`, `../zealphp-wordpress`
+3. Parent's siblings: `../../zealphp-project`, `../../zealphp-wordpress`
+4. Ask the user. If a companion isn't accessible, surface that in the release summary and skip cleanly — don't fail the whole release.
+
+**Ongoing sync (independent of releases):** when adding new framework APIs, update the scaffold's `.claude/CLAUDE.md` so AI tools assisting devs after `composer create-project` see the latest API. When adding deploy artifacts (systemd units, configs), copy to the scaffold's `deploy/`.
+
+---
+
+## Releasing a new version
+
+**Trigger phrases:** *"pump to vX.Y.Z"*, *"bump version"*, *"release vX.Y.Z"*, *"tag vX.Y.Z"*. Treat any of these as a multi-repo coordinated release — touch **every** user-visible reference to the previous version, in **every** locally-accessible companion repo. Don't leave caret refs (`^X.Y.Z`) alone "because semver handles it"; the displayed version is marketing copy and must reflect the latest release.
+
+### Pre-flight (gate the release)
+
+1. Working tree clean in every repo you'll touch — do **not** auto-stash; surface dirty trees to the user and stop on that repo.
+2. Tests pass in the main repo: `./vendor/bin/phpunit tests/Unit/` + integration tests with server up.
+3. The new tag doesn't already exist: `git tag --list 'vX.Y.Z'`.
+
+### Main repo — bump every reference
+
+Use `grep -rn '\bvX\.Y\.Z-1\b' --include='*.md' --include='*.php' .` (with the *previous* version) to confirm none missed. Bump these files:
+
+| File | What to bump |
+|---|---|
+| `CHANGELOG.md` | Insert new `[X.Y.Z] - YYYY-MM-DD` section above the previous one. Categorize Added / Changed / Fixed / Documentation (Keep a Changelog format) |
+| `README.md` | `composer create-project` example + the "How to release" tag command example |
+| `template/pages/getting-started.php` | `composer create-project` snippet |
+| `template/pages/home.php` | Quick Start panel install command — bump in **both** the span text and the `data-copy` attribute |
+| `template/pages/deployment.php` | Docker compose image tag |
+| `docs/deployment.md` | Docker `build -t` and `image:` examples |
+
+**Do NOT touch** (release-history artifacts, must remain accurate to their era):
+
+- Previous `[X.Y.Z]` sections in `CHANGELOG.md`
+- `PERF.md` "vX.Y.Z Baseline" / "vX.Y.Z — landed-in-this-version" optimization notes
+- Test/code comments referencing when a behavior was introduced (e.g. `tests/Unit/SecurityTest.php` comments)
+- `vendor/` (third-party version-string coincidences)
+
+### Commit, tag, push (main repo)
+
+```bash
+git add -A <bumped files>
+git commit -m "chore: release vX.Y.Z — <one-line summary>"
+git tag -a vX.Y.Z -m "Release vX.Y.Z
+
+<bullet-point highlights of headline changes>"
+
+# Push to EVERY configured remote — check `git remote -v`. Typical layout:
+#   origin    → private mirror (push first)
+#   origin1   → public GitHub (push second — triggers Packagist webhook)
+for remote in $(git remote); do
+  git push $remote master && git push $remote vX.Y.Z
+done
+```
+
+Verify Packagist picked up the tag: `curl -sS https://repo.packagist.org/p2/sibidharan/zealphp.json | python3 -c "import json,sys; print(json.load(sys.stdin)['packages']['sibidharan/zealphp'][0]['version'])"` should return `vX.Y.Z`.
+
+### Scaffold sync (after main tag is live on Packagist)
+
+```bash
+cd <scaffold-path>                            # discovered via the env-var/sibling chain above
+# Edit composer.json: "sibidharan/zealphp": "^X.Y.Z" (bump floor, not just caret)
+composer update sibidharan/zealphp --with-dependencies
+git add composer.json composer.lock vendor/
+git commit -m "chore: refresh composer.lock + vendor for ZealPHP vX.Y.Z"
+git tag -a vX.Y.Z -m "Release vX.Y.Z — tracks sibidharan/zealphp vX.Y.Z"
+for remote in $(git remote); do
+  git push $remote main && git push $remote vX.Y.Z
+done
+```
+
+The scaffold ships `vendor/` checked in so `composer create-project` is a single round-trip — that's why we refresh it on every release.
+
+### WordPress sync
+
+Usually a no-op for patch releases. WordPress's `composer.json` typically pins `"sibidharan/zealphp": "^X.Y"`, which auto-picks up `X.Y.Z+1` on next `composer update`.
+
+If working tree is dirty: skip cleanly and surface to the user. If you decide to bump the floor explicitly (e.g., users should be on at least this patch): same flow as scaffold.
+
+### Force-tag vs new patch tag
+
+| Scenario | Action |
+|---|---|
+| Cosmetic-only follow-up *to a just-pushed tag*, no installed-behavior change (e.g., display-version typo in docs) | `git tag -f vX.Y.Z <new-sha> && git push -f <remote> vX.Y.Z`. Note in annotated message that it's a re-tag |
+| Anything that changes installed behavior (code, vendored docs that ship inside the scaffold, etc.) | Cut a new patch tag `vX.Y.Z+1` instead. Force-pushing breaks downloaders who already have the tag cached |
+
+### Final verification
+
+1. `composer create-project sibidharan/zealphp-project temp-test` in a scratch dir installs cleanly with the new version.
+2. Live website spot-check: install command, Docker tag, hero version all match the new release.
+3. Packagist `p2` JSON returns the new tag for both packages.
