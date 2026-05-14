@@ -99,39 +99,39 @@ p  { max-width: 70ch; }
 /* ── Alpha banner (sitewide maturity strip) ── */
 .alpha-banner {
   display: flex; align-items: center; gap: .75rem;
-  padding: .6rem 1.5rem; font-size: .82rem; font-weight: 500;
-  background: linear-gradient(90deg, rgba(245,158,11,.22), rgba(245,158,11,.14));
-  color: #fef3c7;
-  border-bottom: 1px solid rgba(245,158,11,.4);
+  padding: .6rem 1.5rem; font-size: .85rem; font-weight: 600;
+  background: #fbbf24;
+  color: #422006;
+  border-bottom: 1px solid #78350f;
 }
 .alpha-banner-tag {
-  background: var(--accent); color: #1a1a1a;
+  background: #422006; color: #fbbf24;
   padding: .15rem .55rem; border-radius: 4px;
   font-weight: 800; font-size: .72rem; letter-spacing: .05em;
   text-transform: uppercase;
   flex-shrink: 0;
 }
 .alpha-banner-text { flex: 1; }
-.alpha-banner a { color: #fbbf24; text-decoration: underline; font-weight: 600; }
-.alpha-banner a:hover { color: #fde68a; }
+.alpha-banner a { color: #422006; text-decoration: underline; font-weight: 800; }
+.alpha-banner a:hover { color: #1a1a1a; }
 .alpha-banner-dismiss {
   flex-shrink: 0;
-  background: transparent; color: #fef3c7;
-  border: 1px solid rgba(245,158,11,.4);
+  background: transparent; color: #422006;
+  border: 1px solid #78350f;
   border-radius: 4px;
   padding: .05rem .45rem;
   font-size: 1rem; line-height: 1;
   cursor: pointer;
-  font-family: inherit;
+  font-family: inherit; font-weight: 700;
   transition: background .15s, color .15s;
 }
 .alpha-banner-dismiss:hover {
-  background: rgba(245,158,11,.25);
-  color: #fff;
+  background: #422006;
+  color: #fbbf24;
 }
 html.alpha-banner-dismissed .alpha-banner { display: none; }
 @media (max-width: 720px) {
-  .alpha-banner { font-size: .74rem; padding: .5rem .75rem; gap: .5rem; }
+  .alpha-banner { font-size: .76rem; padding: .5rem .75rem; gap: .5rem; }
 }
 
 /* ── Benchmark methodology line ── */
