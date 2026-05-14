@@ -71,31 +71,50 @@ $siteUrl = site_url();
       <div class="bench-stat"><div class="num">0</div><div class="label">failures</div></div>
     </div>
     <div style="margin-top:1.5rem;position:relative">
-      <table style="margin:0 auto;border-collapse:collapse;font-size:.82rem;max-width:600px;width:100%">
+      <table style="margin:0 auto;border-collapse:collapse;font-size:.82rem;max-width:660px;width:100%">
         <tr style="border-bottom:1px solid rgba(255,255,255,.1)">
           <th style="text-align:left;padding:.4rem .8rem;color:#94a3b8;font-weight:600">Framework</th>
-          <th style="text-align:left;padding:.4rem .8rem;color:#94a3b8;font-weight:600">Middleware</th>
           <th style="text-align:right;padding:.4rem .8rem;color:#94a3b8;font-weight:600">req/s</th>
+          <th style="text-align:right;padding:.4rem .8rem;color:#94a3b8;font-weight:600">vs ZealPHP</th>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
-          <td style="padding:.4rem .8rem;color:#e2e8f0;font-weight:700">ZealPHP</td>
-          <td style="padding:.4rem .8rem;color:#94a3b8">CORS + ETag + sessions + PSR-7</td>
-          <td style="padding:.4rem .8rem;text-align:right;color:var(--accent);font-weight:700">66k</td>
+          <td style="padding:.4rem .8rem;color:var(--accent);font-weight:700">ZealPHP <span style="color:#94a3b8;font-weight:400;font-size:.72rem">CORS + ETag + sessions</span></td>
+          <td style="padding:.4rem .8rem;text-align:right;color:var(--accent);font-weight:700">66,000</td>
+          <td style="padding:.4rem .8rem;text-align:right;color:var(--accent);font-weight:700">1x</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
-          <td style="padding:.4rem .8rem;color:#e2e8f0">Express.js</td>
-          <td style="padding:.4rem .8rem;color:#94a3b8">cors + etag + session (file) + json</td>
-          <td style="padding:.4rem .8rem;text-align:right;color:#e2e8f0">112k</td>
+          <td style="padding:.4rem .8rem;color:#e2e8f0">OpenSwoole raw <span style="color:#64748b;font-size:.72rem">no framework</span></td>
+          <td style="padding:.4rem .8rem;text-align:right;color:#e2e8f0">250,000</td>
+          <td style="padding:.4rem .8rem;text-align:right;color:#64748b">3.8x</td>
         </tr>
-        <tr>
-          <td style="padding:.4rem .8rem;color:#64748b">Node raw http</td>
-          <td style="padding:.4rem .8rem;color:#64748b">none</td>
-          <td style="padding:.4rem .8rem;text-align:right;color:#64748b">274k</td>
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
+          <td style="padding:.4rem .8rem;color:#e2e8f0">Express.js <span style="color:#64748b;font-size:.72rem">cors + etag + session</span></td>
+          <td style="padding:.4rem .8rem;text-align:right;color:#e2e8f0">112,000</td>
+          <td style="padding:.4rem .8rem;text-align:right;color:#64748b">1.7x</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02)">
+          <td colspan="3" style="padding:.5rem .8rem;color:#64748b;font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700">Other PHP frameworks <span style="font-weight:400;text-transform:none;letter-spacing:0">(community benchmarks, similar hardware)</span></td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
+          <td style="padding:.35rem .8rem;color:#94a3b8">Slim 4 <span style="color:#64748b;font-size:.72rem">micro-framework</span></td>
+          <td style="padding:.35rem .8rem;text-align:right;color:#94a3b8">~4,000</td>
+          <td style="padding:.35rem .8rem;text-align:right;color:#10b981;font-weight:600">16x slower</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
+          <td style="padding:.35rem .8rem;color:#94a3b8">Symfony 7 <span style="color:#64748b;font-size:.72rem">full stack</span></td>
+          <td style="padding:.35rem .8rem;text-align:right;color:#94a3b8">~2,000</td>
+          <td style="padding:.35rem .8rem;text-align:right;color:#10b981;font-weight:600">33x slower</td>
+        </tr>
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
+          <td style="padding:.35rem .8rem;color:#94a3b8">Laravel 11 <span style="color:#64748b;font-size:.72rem">full stack</span></td>
+          <td style="padding:.35rem .8rem;text-align:right;color:#94a3b8">~500</td>
+          <td style="padding:.35rem .8rem;text-align:right;color:#10b981;font-weight:600">130x slower</td>
         </tr>
       </table>
       <p style="text-align:center;color:#64748b;font-size:.72rem;margin-top:.75rem">
-        Same machine, 4 workers, c=200. Express drops 59% with middleware. ZealPHP drops 7%.<br>
-        PHP doing 60% of Express — and 33&ndash;130x faster than Laravel / Symfony.
+        ZealPHP + Express benchmarked on same machine, 4 workers, <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px;color:#94a3b8">ab -n 50000 -c 200 -k</code>.<br>
+        PHP framework numbers from community benchmarks on comparable hardware.<br>
+        OpenSwoole is ZealPHP's runtime — the gap is ZealPHP's framework overhead (routing, middleware, PSR-7).
       </p>
     </div>
   </div>
