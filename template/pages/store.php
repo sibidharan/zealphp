@@ -72,5 +72,63 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <tr><td><code>Store::count($table)</code></td><td>int</td></tr>
   <tr><td><code>Store::table($name)</code></td><td>OpenSwoole\Table (iterate with foreach)</td></tr>
 </table>
+
+<h2 style="margin:2.5rem 0 .5rem">Cache — general-purpose key-value with TTL</h2>
+<p style="color:var(--text-muted);margin-bottom:1.5rem">Tiered cache built on Store. Memory tier (fast, cross-worker) + file tier (persistent, survives restarts). No Redis needed for most apps.</p>
+
+<div class="code-block">
+<pre><code class="language-php">// Before $app->run():
+Cache::init();
+
+// Anywhere (any worker):
+Cache::set('user:42', $profileArray, ttl: 300);   // any PHP value, auto-serialized
+$profile = Cache::get('user:42');                  // memory first, file fallback
+Cache::has('user:42');                             // TTL-aware existence check
+Cache::del('user:42');                             // removes from both tiers
+Cache::flush();                                    // clear everything</code></pre>
+</div>
+
+<table class="ztable" style="margin-top:1rem">
+  <tr><th>Method</th><th>Returns</th><th>Notes</th></tr>
+  <tr><td><code>Cache::init($maxRows?, $cacheDir?, $gcIntervalMs?)</code></td><td>void</td><td>Call before <code>$app->run()</code>. Defaults: 4096 rows, <code>.cache/</code>, 60s GC</td></tr>
+  <tr><td><code>Cache::set($key, $value, ttl: $seconds)</code></td><td>bool</td><td>Write-through to both tiers. <code>ttl: 0</code> = no expiry</td></tr>
+  <tr><td><code>Cache::get($key, $default?)</code></td><td>mixed</td><td>Memory first, file fallback. Returns <code>$default</code> on miss</td></tr>
+  <tr><td><code>Cache::del($key)</code></td><td>bool</td><td>Removes from both tiers</td></tr>
+  <tr><td><code>Cache::has($key)</code></td><td>bool</td><td>Checks without deserializing. Respects TTL</td></tr>
+  <tr><td><code>Cache::flush()</code></td><td>void</td><td>Clears all entries from both tiers</td></tr>
+  <tr><td><code>Cache::count()</code></td><td>int</td><td>Memory tier count only</td></tr>
+</table>
+
+<div class="callout info" style="margin-top:1.5rem">
+  <strong>How it works:</strong> Values are serialized and written to both tiers. Memory tier uses Store (OpenSwoole\Table) — 8KB max per value, values larger than 8KB automatically spill to file-only. File tier writes to <code>.cache/{hash}.cache</code> with TTL header. Expired entries are cleaned lazily on read + a periodic GC sweep every 60s on worker 0.
+</div>
+
+<h2 style="margin:2.5rem 0 .5rem">When to use Redis / Valkey</h2>
+<p style="color:var(--text-muted);margin-bottom:1rem">Store and Cache cover most single-server apps. Here's when you'll need an external cache.</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:1.5rem">
+  <div>
+    <h3 style="color:var(--success);margin-bottom:.75rem">Built-in Cache is great for</h3>
+    <ul style="font-size:.9rem;line-height:1.8;color:var(--text-muted)">
+      <li>Single-server deployments (most apps)</li>
+      <li>Caching API responses, config, computed values</li>
+      <li>Rate limiting and request counting</li>
+      <li>Session-adjacent data (preferences, feature flags)</li>
+      <li>Apps with &lt; 100k cache entries</li>
+    </ul>
+  </div>
+  <div>
+    <h3 style="color:var(--danger);margin-bottom:.75rem">Move to Redis / Valkey when you need</h3>
+    <ul style="font-size:.9rem;line-height:1.8;color:var(--text-muted)">
+      <li><strong>Multi-server shared state</strong> — Cache is per-server only</li>
+      <li><strong>Large datasets</strong> — memory tier caps at 4096 rows, 8KB/value</li>
+      <li><strong>Data structures</strong> — sorted sets, streams, pub/sub, Lua</li>
+      <li><strong>Crash-safe persistence</strong> — Redis AOF/RDB vs best-effort files</li>
+      <li><strong>Eviction policies</strong> — no LRU/LFU, full table spills to file</li>
+      <li><strong>Transactions</strong> — no MULTI/EXEC, per-row spinlocks only</li>
+    </ul>
+  </div>
+</div>
+
 </div>
 </section>
