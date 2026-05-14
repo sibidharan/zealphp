@@ -1,0 +1,8 @@
+timestamp,tool,base_url,path,workers,task_workers,max_conn,max_coroutine,backlog,reactor_num,threads,concurrency,duration,requests,rps,avg_ms,p50_ms,p90_ms,p99_ms,failures,raw_log
+2026-05-14T16:40:37Z,ab,"http://127.0.0.1:8080","/raw/bench",4,0,,,,,4,1,30s,50000,3883.31,0.258,0.000,0.000,0.000,0,"/app/bench/results/raw/20260514-164024_raw_bench-c1.txt"
+2026-05-14T16:40:39Z,ab,"http://127.0.0.1:8080","/raw/bench",4,0,,,,,4,10,30s,50000,30501.46,0.328,0.000,0.000,1.000,0,"/app/bench/results/raw/20260514-164024_raw_bench-c10.txt"
+2026-05-14T16:40:39Z,ab,"http://127.0.0.1:8080","/raw/bench",4,0,,,,,4,50,30s,50000,94888.00,0.527,0.000,1.000,3.000,0,"/app/bench/results/raw/20260514-164024_raw_bench-c50.txt"
+2026-05-14T16:40:40Z,ab,"http://127.0.0.1:8080","/raw/bench",4,0,,,,,4,100,30s,50000,110964.15,0.901,1.000,1.000,6.000,0,"/app/bench/results/raw/20260514-164024_raw_bench-c100.txt"
+2026-05-14T16:40:40Z,ab,"http://127.0.0.1:8080","/raw/bench",4,0,,,,,4,200,30s,50000,102155.90,1.958,2.000,3.000,9.000,0,"/app/bench/results/raw/20260514-164024_raw_bench-c200.txt"
+2026-05-14T16:40:41Z,ab,"http://127.0.0.1:8080","/raw/bench",4,0,,,,,4,500,30s,50000,100363.11,4.982,4.000,8.000,20.000,0,"/app/bench/results/raw/20260514-164024_raw_bench-c500.txt"
+2026-05-14T16:40:41Z,ab,"http://127.0.0.1:8080","/raw/bench",4,0,,,,,4,1000,30s,50000,85001.05,11.765,9.000,19.000,33.000,0,"/app/bench/results/raw/20260514-164024_raw_bench-c1000.txt"

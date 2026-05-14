@@ -1,0 +1,8 @@
+timestamp,tool,base_url,path,workers,task_workers,max_conn,max_coroutine,backlog,reactor_num,threads,concurrency,duration,requests,rps,avg_ms,p50_ms,p90_ms,p99_ms,failures,raw_log
+2026-05-14T16:40:57Z,ab,"http://127.0.0.1:8080","/json",4,0,,,,,4,1,30s,50000,4172.81,0.240,0.000,0.000,0.000,0,"/app/bench/results/raw/20260514-164045_json-c1.txt"
+2026-05-14T16:40:58Z,ab,"http://127.0.0.1:8080","/json",4,0,,,,,4,10,30s,50000,30839.83,0.324,0.000,0.000,1.000,0,"/app/bench/results/raw/20260514-164045_json-c10.txt"
+2026-05-14T16:40:59Z,ab,"http://127.0.0.1:8080","/json",4,0,,,,,4,50,30s,50000,105868.28,0.472,0.000,1.000,4.000,0,"/app/bench/results/raw/20260514-164045_json-c50.txt"
+2026-05-14T16:40:59Z,ab,"http://127.0.0.1:8080","/json",4,0,,,,,4,100,30s,50000,108086.37,0.925,1.000,1.000,6.000,0,"/app/bench/results/raw/20260514-164045_json-c100.txt"
+2026-05-14T16:41:00Z,ab,"http://127.0.0.1:8080","/json",4,0,,,,,4,200,30s,50000,93732.84,2.134,2.000,3.000,9.000,0,"/app/bench/results/raw/20260514-164045_json-c200.txt"
+2026-05-14T16:41:01Z,ab,"http://127.0.0.1:8080","/json",4,0,,,,,4,500,30s,50000,95525.58,5.234,4.000,8.000,19.000,0,"/app/bench/results/raw/20260514-164045_json-c500.txt"
+2026-05-14T16:41:01Z,ab,"http://127.0.0.1:8080","/json",4,0,,,,,4,1000,30s,50000,77760.98,12.860,9.000,19.000,81.000,0,"/app/bench/results/raw/20260514-164045_json-c1000.txt"
