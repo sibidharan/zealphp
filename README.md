@@ -78,7 +78,7 @@ docker compose up app
 
 ```bash
 # New project
-composer create-project sibidharan/zealphp-project:^0.2.0 my-project
+composer create-project sibidharan/zealphp-project:^0.2.1 my-project
 cd my-project
 php app.php
 # → https://php.zeal.ninja
