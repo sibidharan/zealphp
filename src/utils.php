@@ -500,14 +500,11 @@ function elog($message, $tag = "*", $limit = 1){
     if($tag == "wordpress"){
         return;
     }
-    $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, $limit);
-    $caller = array_shift($bt);
-    $date = date('d-m-Y H:i:s');
-    # add microseconds or nano seconds down to 6 decimal places
-    $date .= substr((string)microtime(), 1, 6);
+    $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, $limit);
+    $caller = $bt[0];
+    $date = date('d-m-Y H:i:s') . substr((string)microtime(), 1, 6);
     $relative_path = str_replace(App::$cwd, '', $caller['file']);
-    log_write("┌[$tag] $date $relative_path:$caller[line]
-└❯ $message \n");
+    log_write("┌[$tag] $date $relative_path:$caller[line]\n└❯ $message \n");
 }
 
 /**
@@ -520,6 +517,8 @@ function elog($message, $tag = "*", $limit = 1){
  */
 function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
 {
+    static $validTags = ['system' => 1, 'fatal' => 1, 'error' => 1, 'warning' => 1, 'info' => 1, 'debug' => 1];
+
     if (!debug_logging_enabled()) {
         return;
     }
@@ -530,39 +529,34 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
         return;
     }
 
-    // if(get_class(Session::getUser()) == "User") {
-    //     $user = Session::getUser()->getUsername();
-    // } else {
-    //     $user = 'worker';
-    // }
+    if (!isset($validTags[$tag])) {
+        return;
+    }
 
     if (!isset($_SERVER['REQUEST_URI'])) {
         $_SERVER['REQUEST_URI'] = 'cli';
     }
 
-    $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
-    $caller = array_shift($bt);
+    $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1);
+    $caller = $bt[0];
     $g = G::instance();
-    if ((in_array($tag, ["system", "fatal", "error", "warning", "info", "debug"]))) {
-        $date = date('l jS F Y h:i:s A');
-        //$date = date('h:i:s A');
-        if (is_object($log)) {
-            $log = purify_array($log);
-        }
-        if (is_array($log)) {
-            $log = json_encode($log, JSON_PRETTY_PRINT);
-        }
-        $unique_req_id = $g->session['UNIQUE_REQUEST_ID'];
-        $request_uri = $g->server['REQUEST_URI'];
-        log_write(
-            '[*] #' . $tag . ' [' . $date . '] ' . " Request ID: $unique_req_id\n" .
-                '    URL: ' . $request_uri . " \n" .
-                '    Caller: ' . $caller['file'] . ':' . $caller['line'] . "\n" .
-                '    Timer: ' . get_current_render_time() . ' sec' . " \n" .
-                "    Message: \n" . indent($log) . "\n\n",
-            'zlog'
-        );
+    $date = date('Y-m-d H:i:s');
+    if (is_object($log)) {
+        $log = purify_array($log);
     }
+    if (is_array($log)) {
+        $log = json_encode($log);
+    }
+    $unique_req_id = $g->session['UNIQUE_REQUEST_ID'];
+    $request_uri = $g->server['REQUEST_URI'];
+    log_write(
+        "[*] #{$tag} [{$date}] Request ID: {$unique_req_id}\n" .
+            "    URL: {$request_uri}\n" .
+            "    Caller: {$caller['file']}:{$caller['line']}\n" .
+            "    Timer: " . get_current_render_time() . " sec\n" .
+            "    Message:\n" . indent($log) . "\n\n",
+        'zlog'
+    );
 }
 
 

@@ -14,15 +14,13 @@ ZealPHP positions itself as a modern PHP framework that blends the productivity 
 
 ZealPHP integrates with the following PSR specifications:
 
-- **PSR-3 (Logging)** – While a full PSR-3 logger is not yet bundled, the logging utilities are designed to be wrapped by Monolog or similar adapters.
+- **PSR-3 (Logging)** – `ZealPHP\Log\Logger` extends `Psr\Log\AbstractLogger` with level filtering, message interpolation, and exception context. Routes output through the existing `log_write()` infrastructure. Accepts any `$minLevel` to suppress lower-severity messages.
 - **PSR-4 (Autoloading)** – Implementation via Composer; required for IDE autocompletion and package interoperability.
 - **PSR-7 (HTTP Messages)** – `OpenSwoole\Core\Psr\ServerRequest` and `OpenSwoole\Core\Psr\Response` underlie ZealPHP’s request/response lifecycle. Handlers can return any PSR-7-compatible response.
 - **PSR-15 (HTTP Server Request Handlers)** – Middleware pipeline is built upon PSR-15, allowing third-party middleware to slot in without modification.
-
-Future compliance targets:
-
-- **PSR-6/16 (Caching)** – Provide cache abstractions backed by Redis or memory stores suitable for coroutine environments.
-- **PSR-18 (HTTP Client)** – Offer optional adapters that leverage OpenSwoole coroutine clients.
+- **PSR-16 (Simple Cache)** – `ZealPHP\Cache\SimpleCacheAdapter` wraps the static `Cache` class with full `CacheInterface` compliance, including `getMultiple`/`setMultiple`/`deleteMultiple`, `DateInterval` TTL support, and key validation.
+- **PSR-17 (HTTP Factories)** – Six factory classes in `ZealPHP\HTTP\Factory\` (`RequestFactory`, `ResponseFactory`, `StreamFactory`, `UriFactory`, `ServerRequestFactory`, `UploadedFileFactory`) wrap OpenSwoole’s PSR-7 implementations.
+- **PSR-18 (HTTP Client)** – `ZealPHP\HTTP\Client` implements `ClientInterface` using curl. Automatically coroutine-aware via OpenSwoole’s runtime hooks. Configurable timeout, SSL verification, and redirect following.
 
 ## Documentation Expectations
 

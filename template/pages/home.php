@@ -485,6 +485,133 @@ document.addEventListener('click', function(e) {
 </script>
 
 
+<!-- Feature grid -->
+<section class="section">
+  <div class="container">
+    <h2 class="section-title">Everything you need</h2>
+    <p class="section-desc">Every feature is a live running example — click any card to explore.</p>
+    <div class="feature-grid">
+      <?php
+      $features = [
+        ['⚡', 'Routing',      'Flask-style routes with reflection-based injection. Zero config, zero boilerplate.',                  '/routing',    'route()'],
+        ['📦', 'Responses',    'Return int → status, array → JSON, Generator → stream. Framework does the right thing.',             '/responses',  'auto-serialize'],
+        ['🔀', 'Coroutines',   'Fan out to multiple AI models in parallel. Merge responses. go() + Channel, zero callback hell.',     '/coroutines', 'go() + Channel'],
+        ['📡', 'Streaming',    'Stream AI tokens as they generate. yield is your streaming primitive. SSR, SSE, stream() built-in.', '/streaming',  'yield · SSE'],
+        ['🔌', 'WebSocket',    'Real-time agent-to-user comms. Multi-user AI sessions, live collaboration, binary frames.',           '/ws',         'App::ws()'],
+        ['🛡️', 'Middleware',  'CORS, ETag/304, gzip. PSR-15 compatible — drop in any middleware package.',                            '/middleware', 'PSR-15'],
+        ['🗄️', 'Sessions',   'Coroutine-safe sessions. Your existing session_start() code just works via uopz.',                     '/sessions',   'drop-in'],
+        ['🗃️', 'Store',      'Share AI conversation state across workers. Cross-worker shared memory — no Redis needed.',             '/store',      'OpenSwoole\\Table'],
+        ['⏱️', 'Timers',     'Schedule recurring AI tasks. Polling, cleanup, model warmup, health checks.',                           '/timers',     'tick() · after()'],
+        ['🌐', 'HTTP',        'Full HTTP/1.1 compliance. HEAD, OPTIONS, redirects, CORS, ETag, gzip — all built-in.',                 '/http',       'HTTP/1.1'],
+        ['📝', 'Templates',   'SSR streaming templates. Compose views with yield from. renderStream() for progressive HTML.',         '/templates',  'renderStream()'],
+        ['🔗', 'ZealAPI',     'Drop a PHP file in api/. It becomes a route. File-based REST — the simplest API pattern.',             '/api',        'file-based'],
+        ['🏗️', 'Legacy Apps','Run WordPress unmodified. CGI worker provides true global scope. Apache mod_php compatibility.',        '/legacy-apps','WordPress'],
+      ];
+      foreach ($features as [$icon, $title, $body, $href, $badge]) {
+        App::render('/components/_card', compact('icon', 'title', 'body', 'href', 'badge'));
+      }
+      ?>
+    </div>
+  </div>
+</section>
+
+<!-- Return conventions -->
+<section class="section" style="background:var(--bg-alt)">
+  <div class="container">
+    <h2 class="section-title">Return anything, get the right response</h2>
+    <p class="section-desc">ZealPHP inspects your return type and does the right thing — no boilerplate.</p>
+    <table class="ztable" style="margin-top:1.5rem">
+      <tr><th style="width:30%">Return</th><th style="width:35%">Result</th><th>Example</th></tr>
+      <tr><td><code>int</code></td><td>HTTP status code</td><td><code>return 404;</code> <code>return 201;</code></td></tr>
+      <tr><td><code>array</code> / <code>object</code></td><td>Auto-serialized as JSON</td><td><code>return ['users' => $list];</code></td></tr>
+      <tr><td><code>string</code></td><td>HTML body</td><td><code>return '&lt;h1&gt;Hello&lt;/h1&gt;';</code></td></tr>
+      <tr><td><code>Generator</code></td><td>SSR streaming (each yield sent immediately)</td><td><code>yield '&lt;head&gt;'; yield $body;</code></td></tr>
+      <tr><td><code>void</code> + <code>echo</code></td><td>Buffered output via <code>ob_get_clean()</code></td><td><code>echo "Hello"; echo " World";</code></td></tr>
+      <tr><td><code>ResponseInterface</code></td><td>PSR-7 response used directly</td><td><code>return new Response(...);</code></td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- Live converter -->
+<section class="section">
+  <div class="container">
+    <h2 class="section-title">Try it — convert your config to ZealPHP</h2>
+    <p class="section-desc">Paste Apache <code>.htaccess</code> or nginx config. AI converts it to <code>app.php</code> in real-time.</p>
+    <div class="converter-split" style="display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin-top:1.5rem;">
+      <div style="border-right:1px solid var(--border); display:flex; flex-direction:column;">
+        <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
+          <span>Input</span>
+          <select id="hp-preset" style="font-size:.75rem; padding:.2rem .4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg);">
+            <option value="wordpress">WordPress .htaccess</option>
+            <option value="nginx-cms">nginx CMS</option>
+            <option value="redirects">Redirect rules</option>
+            <option value="">— paste your own —</option>
+          </select>
+        </div>
+        <textarea id="hp-input" style="flex:1; min-height:220px; border:none; padding:.75rem; font-family:var(--font-mono); font-size:.8rem; background:var(--code-bg); color:var(--code-text); resize:none; outline:none;"></textarea>
+        <div style="padding:.4rem .75rem; background:var(--bg-alt); display:flex; align-items:center; gap:.5rem;">
+          <button id="hp-btn" onclick="hpConvert()" style="padding:.35rem 1rem; background:var(--accent); color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:.8rem; font-weight:600;">Convert →</button>
+          <span id="hp-status" style="font-size:.73rem; color:var(--text-muted);"></span>
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column;">
+        <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted);">ZealPHP app.php</div>
+        <pre id="hp-output" style="flex:1; min-height:220px; max-height:320px; overflow:auto; padding:.75rem; margin:0; font-family:var(--font-mono); font-size:.8rem; background:var(--code-bg); color:var(--code-text); white-space:pre-wrap;"><span style="color:var(--text-muted);">// Click Convert to generate...</span></pre>
+        <div style="padding:.4rem .75rem; background:var(--bg-alt); font-size:.7rem; color:var(--text-muted);">Powered by gpt-4.1-mini · Cached for 1hr · <a href="/legacy-apps">Full docs →</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+  const HP = {
+    wordpress: "# BEGIN WordPress\n<IfModule mod_rewrite.c>\nRewriteEngine On\nRewriteBase /\nRewriteRule ^index\\.php$ - [L]\nRewriteCond %{REQUEST_FILENAME} !-f\nRewriteCond %{REQUEST_FILENAME} !-d\nRewriteRule . /index.php [L]\n</IfModule>\n# END WordPress",
+    'nginx-cms': "server {\n    listen 80;\n    server_name example.com;\n    root /var/www/html;\n\n    location / {\n        try_files $uri $uri/ /index.php?$args;\n    }\n    location ~ \\.php$ {\n        fastcgi_pass unix:/run/php/php-fpm.sock;\n    }\n    location ~* \\.(css|js|png)$ {\n        expires 30d;\n    }\n}",
+    redirects: "RewriteEngine On\nRewriteRule ^old-page$ /new-page [R=301,L]\nRewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]\nRewriteRule ^docs$ https://docs.example.com [R=301,L]"
+  };
+  const presetEl = document.getElementById('hp-preset');
+  const inputEl = document.getElementById('hp-input');
+  presetEl.addEventListener('change', function() {
+    if (this.value && HP[this.value]) inputEl.value = HP[this.value];
+    else inputEl.value = '';
+  });
+  if (presetEl.value && HP[presetEl.value]) inputEl.value = HP[presetEl.value];
+  window.hpConvert = function() {
+    const input = inputEl.value.trim();
+    const output = document.getElementById('hp-output');
+    const status = document.getElementById('hp-status');
+    const btn = document.getElementById('hp-btn');
+    if (!input) { status.textContent = 'Paste a config first'; return; }
+    btn.disabled = true; btn.textContent = 'Converting...';
+    status.textContent = 'Streaming...'; output.textContent = '';
+    fetch('/api/convert', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({config: input})
+    }).then(function(r) {
+      const reader = r.body.getReader(), dec = new TextDecoder();
+      let buf = '';
+      function read() {
+        reader.read().then(function(result) {
+          if (result.done) { btn.disabled = false; btn.textContent = 'Convert →'; status.textContent = 'Done'; return; }
+          buf += dec.decode(result.value, {stream: true});
+          const lines = buf.split('\n'); buf = lines.pop();
+          for (const l of lines) {
+            if (l.startsWith('data: ') && !l.includes('[DONE]')) output.textContent += l.slice(6) + '\n';
+          }
+          output.scrollTop = output.scrollHeight;
+          read();
+        });
+      }
+      read();
+    }).catch(function(e) {
+      output.textContent = '// Error: ' + e.message;
+      btn.disabled = false; btn.textContent = 'Convert →'; status.textContent = 'Failed';
+    });
+  };
+})();
+</script>
+
 <!-- Build your first AI app -->
 <section class="section" style="background:var(--bg-dark);color:#e2e8f0;padding:3rem 0">
   <div class="container" style="text-align:center">

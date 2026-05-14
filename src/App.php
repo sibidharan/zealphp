@@ -774,17 +774,23 @@ class App
                 exit(0);
             }
             if ($arg === '-p' || $arg === '--port') {
-                $flags['port'] = (int)($argv[++$i] ?? 8080);
+                if ($i + 1 >= count($argv)) { echo "Error: {$arg} requires a value\n"; exit(1); }
+                $flags['port'] = (int)$argv[++$i];
+                if ($flags['port'] < 1 || $flags['port'] > 65535) { echo "Error: port must be between 1 and 65535\n"; exit(1); }
             } elseif ($arg === '-H' || $arg === '--host') {
-                $flags['host'] = $argv[++$i] ?? '0.0.0.0';
+                if ($i + 1 >= count($argv)) { echo "Error: {$arg} requires a value\n"; exit(1); }
+                $flags['host'] = $argv[++$i];
             } elseif ($arg === '-w' || $arg === '--workers') {
-                $flags['worker_num'] = max(1, (int)($argv[++$i] ?? 4));
+                if ($i + 1 >= count($argv)) { echo "Error: {$arg} requires a value\n"; exit(1); }
+                $flags['worker_num'] = max(1, (int)$argv[++$i]);
             } elseif ($arg === '-d' || $arg === '--daemonize') {
                 $flags['daemonize'] = true;
             } elseif ($arg === '--task-workers') {
-                $flags['task_worker_num'] = max(0, (int)($argv[++$i] ?? 0));
+                if ($i + 1 >= count($argv)) { echo "Error: {$arg} requires a value\n"; exit(1); }
+                $flags['task_worker_num'] = max(0, (int)$argv[++$i]);
             } elseif ($arg === '--pid-file') {
-                $flags['pid_file'] = $argv[++$i] ?? null;
+                if ($i + 1 >= count($argv)) { echo "Error: {$arg} requires a value\n"; exit(1); }
+                $flags['pid_file'] = $argv[++$i];
             } elseif ($arg === '--access') {
                 $flags['log_access'] = true;
             } elseif ($arg === '--debug') {
@@ -793,13 +799,19 @@ class App
                 $flags['log_server'] = true;
             } elseif ($arg === '--zlog') {
                 $flags['log_zlog'] = true;
+            } elseif (str_starts_with($arg, '-')) {
+                echo "Warning: unknown flag '{$arg}' (ignored)\n";
             }
             $i++;
         }
 
         switch ($command) {
             case 'stop':
-                self::cliStop(self::resolvePidFile($flags));
+                if (isset($flags['port']) || !empty($flags['pid_file'])) {
+                    self::cliStop(self::resolvePidFile($flags));
+                } else {
+                    self::cliStopAuto();
+                }
                 exit(0);
             case 'status':
                 self::cliStatus($flags);
@@ -891,6 +903,38 @@ class App
         @unlink($pidFile);
     }
 
+    private static function cliStopAuto(): void
+    {
+        $logDir = getenv('ZEALPHP_LOG_DIR');
+        if ($logDir === false || trim((string)$logDir) === '') {
+            $logDir = is_dir('/tmp/zealphp') ? '/tmp/zealphp' : '/tmp';
+        }
+        $pidFiles = glob(rtrim(trim((string)$logDir), '/') . '/zealphp_*.pid');
+        $running = [];
+        foreach ($pidFiles as $f) {
+            $pid = (int)trim(file_get_contents($f));
+            if ($pid > 0 && @posix_kill($pid, 0)) {
+                $port = preg_match('/zealphp_(\d+)\.pid$/', $f, $m) ? $m[1] : '?';
+                $running[] = ['file' => $f, 'pid' => $pid, 'port' => $port];
+            } else {
+                @unlink($f);
+            }
+        }
+        if (empty($running)) {
+            echo "No ZealPHP instances running\n";
+            return;
+        }
+        if (count($running) === 1) {
+            self::cliStop($running[0]['file']);
+            return;
+        }
+        echo "Multiple ZealPHP instances running:\n";
+        foreach ($running as $r) {
+            echo "  pid {$r['pid']}, port {$r['port']}\n";
+        }
+        echo "Use 'php app.php stop -p PORT' to stop a specific instance\n";
+    }
+
     private static function cliStatus(array $flags): void
     {
         if (isset($flags['port'])) {
@@ -953,6 +997,9 @@ class App
 
     private static function cliLogs(array $flags): void
     {
+        if (isset($flags['port'])) {
+            echo "Note: log files are shared across all ports. -p flag ignored.\n";
+        }
         $hasFilter = isset($flags['log_access']) || isset($flags['log_debug'])
                   || isset($flags['log_server']) || isset($flags['log_zlog']);
 
@@ -1085,6 +1132,13 @@ HELP;
         if (isset($cliOverrides['_port'])) {
             $this->port = (int)$cliOverrides['_port'];
             unset($cliOverrides['_port']);
+            if (is_array($settings) && isset($settings['pid_file'])) {
+                $settings['pid_file'] = preg_replace(
+                    '/zealphp_\d+\.pid$/',
+                    "zealphp_{$this->port}.pid",
+                    $settings['pid_file']
+                );
+            }
         }
         if (!empty($cliOverrides)) {
             $settings = array_merge($settings ?? [], $cliOverrides);

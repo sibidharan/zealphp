@@ -229,15 +229,30 @@ $app->route('/users', fn() => (function() {
 ### CLI Management
 
 ```
-php app.php start -p 8080 -d   # Start daemonized
-php app.php stop               # Stop via PID file
-php app.php status             # Check if running
-php app.php --help             # All options
+php app.php                        # Start with defaults (port 8080)
+php app.php start -p 9501 -d      # Start daemonized on port 9501
+php app.php stop                   # Stop default server (port 8080)
+php app.php stop -p 9501          # Stop server on port 9501
+php app.php restart                # Stop + restart
+php app.php status                 # Check if running (shows pid + port)
+php app.php status -p 9501        # Check server on port 9501
+php app.php logs                   # Tail all log files (Ctrl+C to stop)
+php app.php logs --access          # Tail only access.log
+php app.php logs --access --debug  # Tail access + debug logs
+php app.php --help                 # All options
 ```
 
 Flags: `-p PORT`, `-H HOST`, `-w WORKERS`, `-d` (daemonize), `--task-workers N`, `--pid-file PATH`
 
-PID files are per-port: `/tmp/zealphp_{port}.pid`
+Log filters: `--access`, `--debug`, `--server`, `--zlog` (use with `logs` command, combine to tail specific logs)
+
+PID files: `/tmp/zealphp/zealphp_{port}.pid` — one per port, supports multiple apps on different ports. Use `-p` with `stop`/`status`/`restart` to target a specific instance.
+
+Duplicate-start detection: if a server is already running on the same port, `start` (or bare `php app.php`) prints the PID and exits cleanly instead of crashing.
+
+Log files default to `/tmp/zealphp/` — `access.log`, `debug.log`, `zlog.log`, `server.log`. All configurable via `ZEALPHP_*` env vars. Logging is fully async via coroutine channels (zero request impact).
+
+The shell script `scripts/zealphp.sh` is an optional higher-level wrapper. All commands work directly via `php app.php`.
 
 ### WebSocket
 

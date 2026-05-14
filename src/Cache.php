@@ -157,6 +157,14 @@ class Cache
     }
 
     /**
+     * Alias for del() — PSR-16 naming convention.
+     */
+    public static function delete(string $key): bool
+    {
+        return self::del($key);
+    }
+
+    /**
      * Check existence without deserializing. Respects TTL.
      */
     public static function has(string $key): bool
@@ -205,6 +213,15 @@ class Cache
         foreach (glob(self::$dir . '/*.cache') as $file) {
             @unlink($file);
         }
+    }
+
+    /**
+     * Alias for flush() — PSR-16 naming convention. Returns true.
+     */
+    public static function clear(): bool
+    {
+        self::flush();
+        return true;
     }
 
     /**
