@@ -1,0 +1,51 @@
+parameters:
+	ignoreErrors:
+		-
+			message: "#^Anonymous function has an unused use \\$server\\.$#"
+			count: 1
+			path: src/App.php
+
+		-
+			message: "#^Static method OpenSwoole\\\\Timer\\:\\:clear\\(\\) invoked with 1 parameter, 0 required\\.$#"
+			count: 1
+			path: src/App.php
+
+		-
+			message: "#^Variable \\$_ENV on left side of \\?\\? always exists and is not nullable\\.$#"
+			count: 1
+			path: src/App.php
+
+		-
+			message: "#^Access to an undefined property ZealPHP\\\\HTTP\\\\Response\\:\\:\\$statusCode\\.$#"
+			count: 1
+			path: src/HTTP/Response.php
+
+		-
+			message: "#^Constructor of class ZealPHP\\\\REST has an unused parameter \\$request\\.$#"
+			count: 1
+			path: src/REST.php
+
+		-
+			message: "#^Constructor of class ZealPHP\\\\REST has an unused parameter \\$response\\.$#"
+			count: 1
+			path: src/REST.php
+
+		-
+			message: "#^Undefined variable\\: \\$params$#"
+			count: 1
+			path: src/ZealAPI.php
+
+		-
+			message: "#^Variable \\$module in isset\\(\\) always exists and is not nullable\\.$#"
+			count: 1
+			path: src/ZealAPI.php
+
+		-
+			message: "#^Variable \\$params in isset\\(\\) is never defined\\.$#"
+			count: 1
+			path: src/ZealAPI.php
+
+		-
+			message: "#^Deprecated in PHP 8\\.0\\: Required parameter \\$length follows optional parameter \\$status\\.$#"
+			count: 1
+			path: src/utils.php
