@@ -71,18 +71,16 @@ p  { max-width: 70ch; }
 .nav-links > a {
   color: #a8a29e; font-size: .75rem; font-weight: 500;
   padding: .35rem .55rem; border-radius: 5px;
-  transition: color .15s, border-color .2s;
+  transition: color .15s, background .15s;
   white-space: nowrap;
-  border-bottom: 2px solid transparent;
 }
 .nav-links > a:hover {
   color: var(--accent); text-decoration: none;
-  border-bottom-color: rgba(245,158,11,.3);
+  background: rgba(245,158,11,.08);
 }
 .nav-links > a.active {
   color: var(--accent); text-decoration: none;
-  border-bottom-color: var(--accent);
-  background: none;
+  background: rgba(245,158,11,.1);
 }
 /* ── Mobile hamburger toggle ── */
 .nav-toggle-input { display: none; }
