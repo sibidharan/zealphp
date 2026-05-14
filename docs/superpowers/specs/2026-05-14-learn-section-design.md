@@ -16,12 +16,12 @@ PHP developers (juniors → senior), and full-stack devs who default to React + 
 
 ## Non-Goals (v1)
 
-- A full multi-user authentication system. The vault model is intentionally a single secret, no email, no password recovery.
+- Email/password-recovery flows or third-party (OAuth, SSO) login. Auth is intentionally minimal: username + password only, no recovery — lose the password, make a new account.
 - Mobile-app companion or PWA install flow.
 - i18n / multi-language lesson content.
-- Storing notes in a real database (Postgres, SQLite). v1 is JSON-file per vault, locked via `flock`. Lesson 7 explicitly calls this out as a teaching choice, not a production recommendation.
+- A heavyweight database. v1 uses a single SQLite file (`storage/learn.db`) opened in WAL mode. Postgres/MySQL are explicitly out of scope; the Deployment lesson links to ZealPHP's general docs for those.
 - Backporting the new tool-call timeline UI to the existing home-page chat. The home chat keeps its text-only behavior; the learn chat is the showcase of the richer protocol.
-- Tests in the extracted companion repo. The in-repo learn app gets PHPUnit coverage for the Notes/vault API; companion-repo testing is a follow-up.
+- Tests in the extracted companion repo. The in-repo learn app gets PHPUnit coverage for the auth + Notes API; companion-repo testing is a follow-up.
 
 ---
 
@@ -82,7 +82,7 @@ template/
 examples/agents/
   notes_agent.py                         # uv-shebanged, 5 function tools
 storage/
-  learn-notes/                           # per-vault JSON: {sha256-hex}.json (gitignored except .gitkeep)
+  learn.db                               # single SQLite file (users + notes tables, WAL mode); gitignored
 docs/
   learn-app.md                           # internal dev notes; source for the companion-repo README
 .env.example                             # OPENAI_API_KEY, ZEALPHP_LEARN_AI_MODEL
@@ -102,14 +102,17 @@ scripts/
 - `_head.php` gains a conditional: if `str_starts_with($page ?? '', 'learn')`, append `<link rel="stylesheet" href="/css/learn.css">`. Same for the htmx CDN script tag and `/js/learn.js`. Non-learn pages remain untouched.
 - htmx is loaded from `https://unpkg.com/htmx.org@1.9.12` (pinned). No bundler.
 
-### Vault model (recurring concept)
+### Auth model (recurring concept)
 
-Lessons 6 (Sessions), 8 (Notes), and 9 (AI Chat) all use the same vault construct.
+Lessons 6 (Sessions & Auth), 8 (Notes), and 9 (AI Chat) all rely on the same minimal auth construct.
 
-- User enters a "vault secret" on `/learn/notes`. The raw secret is **never persisted**. We compute `$hash = hash('sha256', $secret)` and store it in `$_SESSION['vault']`. The notes JSON file is keyed by hash: `storage/learn-notes/{hash}.json`.
-- Anyone who knows the same secret accesses the same vault. There is no recovery — losing the secret means a new vault. This is intentional and explained on the page.
-- A vault has at most 256 notes (cheap guard to keep the file readable for a tutorial demo). Each note has a max body of 4 KB. Exceeding either limit returns 422.
-- `POST /api/learn/vault/lock` clears `$_SESSION['vault']` and redirects back to `/learn/notes`, which re-shows the unlock form.
+- Users register with a `username` + `password` on `/learn/notes` (or via `/learn/sessions` if unauthenticated and routed there). Password stored as `password_hash($password, PASSWORD_DEFAULT)` in SQLite.
+- On successful login, `$_SESSION['user_id'] = $user['id']` and `$_SESSION['username'] = $user['username']`. Every subsequent `/api/learn/*` (except register/login) requires an authenticated session.
+- No email, no password reset, no second-factor. Lose the password → make a new account. This is **deliberate** and explicitly explained in Lesson 6 as a teaching simplification, not a production recommendation.
+- A user has at most 256 notes (cheap guard for a tutorial demo). Each note has a max title 200 chars, max body 4 KB. Exceeding either limit returns 422.
+- `POST /api/learn/logout` calls `session_destroy()` and redirects back to `/learn/notes`, which re-shows the login form.
+- Login attempts are rate-limited via `Store::make('learn_login_rl', ...)`: 10 attempts per IP per 5 minutes.
+- All user data is scoped by `user_id` at the DB level. Two users with two accounts see entirely separate note sets — the same `notes` table, just different `WHERE user_id = ?` clauses.
 
 ---
 
@@ -152,10 +155,10 @@ Each lesson page includes:
 | 3 | `first-page` | `public/index.php` echoing HTML, then upgrade to `App::render('_master', [...])`. Implicit public routing rule. | "Try it" iframe loading a tiny first-page route |
 | 4 | `components` | Reusable PHP templates; side-by-side React vs. PHP equivalent; the three render methods table with file links. | "Try it" panel: card with `$variant` prop changed via htmx swapping |
 | 5 | `routing` | Implicit (public/), implicit (api/), explicit (`$app->route`), namespaced (`nsRoute`, `nsPathRoute`), dynamic params. | Live link panel hitting existing `/demo/inject/*` |
-| 6 | `sessions` | `session_start()`, `$_SESSION`, coroutine-safe sessions. Introduces the vault concept and shows the exact code that powers it. | "Try it" panel: shows your `session_id()`, lets you set/get a `$_SESSION` value |
+| 6 | `sessions` | `session_start()`, `$_SESSION`, coroutine-safe sessions. **Builds the auth flow live** — register → login → logout — backed by SQLite + `password_hash`/`password_verify`. The code on this page is the exact code that powers Lessons 8 and 9's auth gate. | "Try it" panel: register a username/password, see your `$_SESSION` populate, click logout, watch the session clear |
 | 7 | `htmx` | `hx-get`, `hx-post`, `hx-target`, `hx-swap`. Progressive enhancement explained. | "Try it" panel: counter button rendering via `renderToString('_counter_button')` |
-| 8 | `notes` | Full Notes app on this page. Vault gate at top. Add, list, edit, delete with htmx. Source-code panels below each interaction explain the PHP that just handled it. | **The Notes app itself** |
-| 9 | `ai-chat` | Chat box on this page (vault-required). Agent has access to your vault and tools to modify it. Tool calls render as timeline cards. Two-column: notes list left, chat right. Short "How this works" panel. | **The chat itself** |
+| 8 | `notes` | Full Notes app on this page. Login gate at top. Add, list, edit, delete with htmx — every action backed by PDO + SQLite. Source-code panels below each interaction show the exact SQL + PHP that just ran. Introduces PDO, prepared statements, and the `notes` table schema. | **The Notes app itself** |
+| 9 | `ai-chat` | Chat box on this page (auth-required). The agent gets your username + note count + recent note titles injected into its system prompt at the start of every turn, and has six tools to read/write/search your notes in SQLite. Tool calls render as timeline cards. Two-column: notes list left, chat right. Short "How this works" panel. | **The chat itself** |
 | 10 | `async` | Where OpenSwoole helps. `go() + Channel` example. Live timing panel: parallel vs. sequential. | Live timing panel |
 | 11 | `deployment` | `php app.php start -d`, systemd, Nginx reverse proxy, env vars, Docker. | None |
 | 12 | `philosophy` | "Plain PHP scales further than you think" / "JavaScript where it helps, not as a tax" / "Server-first is simpler". CTA to `zealphp-learn`. | None |
@@ -170,81 +173,100 @@ Hard-coded array of lesson groups. Renders a sticky `<aside>` on desktop (≥102
 
 ### Endpoints (`route/learn.php`)
 
-All endpoints validate `$hash = $_SESSION['vault'] ?? null` and return 401 + a clear JSON `{error: "vault_locked"}` if absent (except `POST /api/learn/vault`).
+All endpoints (except `register`/`login`) validate `$userId = $_SESSION['user_id'] ?? null` and return 401 + JSON `{error: "auth_required"}` if absent.
 
 | Method | Path | Behavior | Render |
 |---|---|---|---|
-| `POST` | `/api/learn/vault` | Reads `secret` from body. Validates 1 ≤ len(secret) ≤ 256. Sets `$_SESSION['vault'] = hash('sha256', $secret)`. Redirects 302 to `/learn/notes`. | — |
-| `POST` | `/api/learn/vault/lock` | `unset($_SESSION['vault'])`. Redirects 302 to `/learn/notes`. | — |
-| `GET` | `/api/learn/notes` | HTML fragment: notes list. Used by htmx to refresh after vault changes. | `App::renderStream('/components/_note_card', $note)` per note via Generator, yielding chunks as soon as each is rendered |
-| `POST` | `/api/learn/notes` | Body: `{title, body}`. Creates note. Returns HTML for the new note's `<article>`. htmx swaps it into `#notes-list` via `hx-swap="afterbegin"`. | `App::renderToString('/components/_note_card', $note)` |
-| `POST` | `/api/learn/notes/{id}` | Body: `{title?, body?}`. Updates note. Returns the note's `<article>`. | `renderToString` |
-| `DELETE` | `/api/learn/notes/{id}` | Deletes note. Returns empty 200. htmx `hx-swap="outerHTML"` on the article removes it from the DOM. | — |
-| `POST` | `/api/learn/chat` | SSE stream — see C.3. | `$response->sse(...)` |
+| `POST` | `/api/learn/register` | Body: `{username, password}`. Validates 3 ≤ len(username) ≤ 64 (alphanumeric + underscore), 8 ≤ len(password) ≤ 256. Inserts `users` row with `password_hash($password, PASSWORD_DEFAULT)`. Logs the user in (sets `$_SESSION['user_id']`/`username`). Redirects 302 to `/learn/notes`. Returns 409 on duplicate username. | — |
+| `POST` | `/api/learn/login` | Body: `{username, password}`. Verifies via `password_verify`. On success sets `$_SESSION['user_id']`/`username`, redirects 302 to `/learn/notes`. On failure returns 401, increments login rate-limit counter. | — |
+| `POST` | `/api/learn/logout` | `session_destroy()`. Redirects 302 to `/learn/notes`. | — |
+| `GET` | `/api/learn/notes` | HTML fragment: the current user's notes. Used by htmx to refresh after a chat tool call mutates. | `App::renderStream('/components/_note_card', $note)` per note via Generator, yielding each chunk as soon as the row is fetched |
+| `POST` | `/api/learn/notes` | Body: `{title, body}`. Inserts a note with `user_id = $_SESSION['user_id']`. Returns the new note's `<article>` HTML. htmx swaps it into `#notes-list` via `hx-swap="afterbegin"`. | `App::renderToString('/components/_note_card', $note)` |
+| `POST` | `/api/learn/notes/{id}` | Body: `{title?, body?}`. Updates note **scoped to current user** (`WHERE id = ? AND user_id = ?`). 404 if not owned. Returns updated `<article>`. | `renderToString` |
+| `DELETE` | `/api/learn/notes/{id}` | Deletes the note scoped to current user. Empty 200. htmx `hx-swap="outerHTML"` on the article removes it from the DOM. | — |
+| `POST` | `/api/learn/chat` | SSE stream — see C.3. Auth-required. | `$response->sse(...)` |
 | `GET` | `/api/learn/chat/status` | JSON `{ai_enabled, mock_mode, model}`. | — |
-| `GET` | `/api/learn/demo/incr` | Counter demo for Lesson 7. Increments a session-scoped int and returns the rendered button. | `renderToString('/components/_counter_button')` |
+| `GET` | `/api/learn/demo/incr` | Counter demo for Lesson 7. Increments a session-scoped int (`$_SESSION['demo_counter']`) and returns the rendered button. Does NOT require auth — it's the htmx primer. | `renderToString('/components/_counter_button')` |
 
-### Storage format
+### Storage — SQLite schema
 
-`storage/learn-notes/{hash}.json`:
+Single file: `storage/learn.db`. Opened in WAL mode by both PHP (PDO) and Python (`sqlite3`). Both processes safely concurrent; SQLite handles its own locking under WAL.
 
-```json
-{
-  "version": 1,
-  "notes": [
-    {
-      "id": "9f3e8c2a-...",
-      "title": "Buy milk",
-      "body": "Whole, not skim",
-      "created_at": 1747200000,
-      "updated_at": 1747200000
-    }
-  ]
-}
+```sql
+CREATE TABLE IF NOT EXISTS users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  username      TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at    INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notes (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notes_user_updated ON notes(user_id, updated_at DESC);
+
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
 ```
 
-- `flock($fp, LOCK_EX)` on writes (both PHP and Python — Python uses `fcntl.flock(fp, fcntl.LOCK_EX)`, which is `flock`-compatible).
-- `flock($fp, LOCK_SH)` on reads.
-- Max 256 notes per vault. Max title 200 chars. Max body 4096 bytes.
+- Bootstrap: an `learn_db()` helper function declared inside `route/learn.php` opens the DB once per worker, runs `CREATE TABLE IF NOT EXISTS` + `PRAGMA` statements, caches the PDO instance in a `static` so subsequent calls in the same worker reuse it. Schema migrations are idempotent (no migration tool needed for v1). Per-request the helper is called from each endpoint that needs the DB. Keeping the helper inline (vs. a new `src/learn/db.php`) matches existing route-file conventions and keeps the extraction allowlist simple.
+- Rate limits stay in OpenSwoole `Store` (in-memory, no persistence needed across restarts). This is deliberate — the Notes lesson teaches PDO; Lesson 10 (Async) can revisit `Store` if useful. Both primitives, demonstrated where each shines.
+- Max 256 notes per user (enforced in the insert path). Max title 200 chars. Max body 4096 bytes. Exceeding any returns 422.
 
 ### Python agent (`examples/agents/notes_agent.py`)
 
-uv-shebang style identical to `examples/agents/chat_agent.py`. Receives `{message, thread_id, vault_path}` as base64 argv[1]. Module-global `VAULT_PATH` set from `vault_path`. SQLiteSession per `thread_id` for memory across turns.
+uv-shebang style identical to `examples/agents/chat_agent.py`. Receives `{message, thread_id, db_path, user_id, user_profile}` as base64 argv[1]. Module-globals `DB_PATH` and `USER_ID` set on startup. SQLiteSession per `thread_id` for memory across turns. **All tools and queries are scoped to `USER_ID` server-side** — the agent literally cannot reference other users' notes; tools never accept a `user_id` parameter from the model.
 
-**Tools** (all `@function_tool`):
+`user_profile` is a small dict built by PHP at request time: `{username, note_count, recent_note_titles: [up to 5 most-recent titles]}`. Injected verbatim into the system prompt at agent startup — see below.
+
+**Tools** (all `@function_tool`, six in total):
 
 ```python
 @function_tool
 def list_notes() -> str:
-    """List all notes in the user's vault, with id, title, and created date."""
+    """List all of the user's notes with id, title, and date."""
 
 @function_tool
-def read_note(note_id: str) -> str:
+def read_note(note_id: int) -> str:
     """Read a single note's full content given its id."""
 
 @function_tool
+def search_notes(query: str) -> str:
+    """Search the user's notes for matches in title or body (SQL LIKE).
+    Returns up to 10 hits with id, title, and a snippet."""
+
+@function_tool
 def create_note(title: str, body: str) -> str:
-    """Create a new note in the user's vault. Returns the new note's id."""
+    """Create a new note for the user. Returns the new note's id."""
 
 @function_tool
-def update_note(note_id: str, title: str | None = None, body: str | None = None) -> str:
-    """Update an existing note's title or body."""
+def update_note(note_id: int, title: str | None = None, body: str | None = None) -> str:
+    """Update an existing note's title or body. Must belong to the user."""
 
 @function_tool
-def delete_note(note_id: str) -> str:
-    """Delete a note permanently."""
+def delete_note(note_id: int) -> str:
+    """Delete a note permanently. Must belong to the user."""
 ```
 
-All tools open `VAULT_PATH`, acquire `LOCK_EX`, mutate, release. Title/body limits enforced server-side in the tool function — exceeding returns an error string the agent surfaces to the user. Invalid `note_id` returns "Note not found."
+All tools open `DB_PATH` via Python's `sqlite3` stdlib, run `WHERE user_id = ?` on every query, and return strings the model surfaces to the user. Title/body limits enforced in-tool. Tools that don't find a row return "Note not found." Invalid argument types caught by the SDK's Pydantic validation. Connection is opened once per agent process, configured with `PRAGMA journal_mode = WAL`, `PRAGMA foreign_keys = ON`, and `PRAGMA busy_timeout = 2000`.
 
-**System prompt** (mirrors `chat_agent.py` HTML-only rule):
+**System prompt** (mirrors `chat_agent.py` HTML-only rule, plus user profile injection):
 
 ```
-You are the user's personal notes assistant. They keep a private vault of notes.
+You are {username}'s personal notes assistant. They currently have {note_count}
+notes. Their most recent notes are:
+  - {title 1}
+  - {title 2}
+  ...
 
-Use your tools to list, read, create, update, or delete notes as the user requests.
-Always confirm destructive actions in your reply
-  (e.g., "I deleted the 'Buy milk' note.").
+Use your tools to list, search, read, create, update, or delete notes as
+requested. Always confirm destructive actions in your reply
+(e.g., "I deleted the 'Buy milk' note.").
 When showing a list of notes, format as <ul><li>title — id</li></ul>.
 Be concise.
 
@@ -255,6 +277,8 @@ OUTPUT FORMAT — raw HTML, NOT markdown.
 - Do not wrap the entire response in a container div
 ```
 
+The `{username}` / `{note_count}` / `{recent titles}` placeholders are filled by PHP before passing the payload to Python (so SQL runs in the same process that already has the PDO connection, avoiding a redundant Python query for trivial data).
+
 ### SSE wire protocol
 
 ```
@@ -264,7 +288,7 @@ event: tool_call     data: {"id": "call_1", "name": "create_note", "phase": "sta
 event: tool_args     data: {"id": "call_1", "delta": "{\"title\":\"Buy"}
 event: tool_args     data: {"id": "call_1", "delta": " milk\"}"}
 event: tool_done     data: {"id": "call_1", "status": "ok", "result_preview": "id: 9f3e..."}
-event: vault_changed data: {}
+event: notes_changed data: {}
 event: token         data: {"token": "<p>Created!</p>"}
 event: done          data: {"done": true}
 event: error         data: {"error": "rate_limit"}
@@ -280,13 +304,13 @@ event: error         data: {"error": "rate_limit"}
 | `raw_response_event` / `response.function_call_arguments.done` | (suppressed; `tool_done` will follow) |
 | `run_item_stream_event` / `tool_call_output_item` | `tool_done` (status `ok`, result truncated to 200 chars in `result_preview`) |
 
-Python also emits a `vault_changed` event after any `tool_done` for `create_note` / `update_note` / `delete_note`. PHP redundantly checks for the same tool names in the proxy and emits `vault_changed` itself if Python didn't — belt-and-suspenders.
+Python also emits a `notes_changed` event after any `tool_done` for `create_note` / `update_note` / `delete_note`. PHP redundantly checks for the same tool names in the proxy and emits `notes_changed` itself if Python didn't — belt-and-suspenders.
 
 **PHP side — proxy structure** (in `route/learn.php`, almost identical to `route/chat.php`):
 
 - `proc_open` `uv run examples/agents/notes_agent.py <b64-payload>`. Env: `OPENAI_API_KEY` passed through, `OPENAI_MODEL` from `ZEALPHP_LEARN_AI_MODEL` or default `gpt-4.1-mini`.
 - Read stdout line by line. For each `event: X\ndata: Y\n\n` block, re-emit via `$emit($data, $event)`.
-- On `tool_done` for a vault-mutating tool, also `$emit('{}', 'vault_changed')` if not already emitted.
+- On `tool_done` for a notes-mutating tool (`create_note` / `update_note` / `delete_note`), also `$emit('{}', 'notes_changed')` if Python hasn't already emitted it.
 - Rate limit: 30 chat turns per IP per hour (vs. 60 for `/api/chat`), via `Store::make('learn_chat_rl', ...)`. Surfaces as `event: error` `data: {"error": "rate_limit", "retry_after": <s>}`.
 
 ### Frontend chat timeline (`public/js/learn.js`)
@@ -320,19 +344,20 @@ The assistant bubble is a container of "items" — text fragments interleaved wi
 - `tool_call` (phase start) → close any open text item; create a new `tool` item with `data-id`, status `running`, empty args/result.
 - `tool_args` → append `delta` to the matching tool card's `<pre class="tool-args">`.
 - `tool_done` → set `data-status` on the tool card, populate `<pre class="tool-result">`, update header label.
-- `vault_changed` → `htmx.ajax('GET', '/api/learn/notes', '#notes-list')`.
+- `notes_changed` → `htmx.ajax('GET', '/api/learn/notes', '#notes-list')`.
 - `done` → re-enable chat input.
 - `error` → render an error banner inside the assistant bubble; re-enable input.
 
-Thread persistence: `localStorage.setItem('zealphp_learn_thread', threadId)`. On lock-vault, also clear this so a new vault gets a fresh thread.
+Thread persistence: `localStorage.setItem('zealphp_learn_thread', threadId)`. On logout, also clear this so re-login (or a different user on the same browser) gets a fresh thread.
 
 ### Mock mode (no OPENAI_API_KEY)
 
-PHP-only, no Python invoked. `route/learn.php`'s chat handler detects the missing key and serves a rule-based SSE stream that **actually mutates the vault**. Parses the user's message for keywords:
+PHP-only, no Python invoked. `route/learn.php`'s chat handler detects the missing key and serves a rule-based SSE stream that **actually mutates the current user's notes in SQLite**. Same `WHERE user_id = ?` scoping as real mode — the mock can't act on other users' notes. Parses the user's message for keywords:
 
 - "list" / "show all" → emits `tool_call list_notes` → `tool_done` with synthesized result → `token` with the rendered list HTML.
-- "create" / "add" → emits `token` "Got it, creating that…", then `tool_call create_note` with streamed JSON args extracted from the message via regex `create (?:a )?note (?:titled |called |saying )?["']?(.+?)["']?$`, then `tool_done`, then `vault_changed`, then `token` confirmation.
-- "delete" → similar with `delete_note` matching by title fuzzy-equality.
+- "search" / "find" → `tool_call search_notes` → simple SQL `LIKE` against the user's rows → `tool_done` → `token` summary.
+- "create" / "add" → `token` "Got it, creating that…", then `tool_call create_note` with streamed JSON args extracted from the message via regex `create (?:a )?note (?:titled |called |saying )?["']?(.+?)["']?$`, then `tool_done`, then `notes_changed`, then `token` confirmation.
+- "delete" → similar with `delete_note` matching by title fuzzy-equality (scoped to user).
 - "read" / "what's in" → `read_note` for the first match.
 - Anything else → `token` only: a generic "Mock mode is active — set `OPENAI_API_KEY` to enable real AI. Try: 'create a note titled buy milk'."
 
@@ -342,11 +367,11 @@ Status response: `{ai_enabled: false, mock_mode: true, model: "mock-rules-v1"}`.
 
 Inside `template/pages/learn/ai-chat.php`, content area is a CSS grid:
 
-- Left column (40%): `<div id="notes-list">` with the current vault's notes (htmx-refreshable).
+- Left column (40%): `<div id="notes-list">` with the current user's notes (htmx-refreshable).
 - Right column (60%): chat box (messages + input).
 - Below: "How this works" `<details>` block — 4 short lines, links to `route/learn.php` and `examples/agents/notes_agent.py`. No SDK explanation; the streaming tool cards are the documentation.
 
-Vault unlock form sits above both columns if locked.
+Login/register form sits above both columns if the session is unauthenticated.
 
 ---
 
@@ -399,7 +424,7 @@ zealphp-learn/
   composer.lock
   vendor/                              # checked in, like sibidharan/zealphp-project
   .env.example
-  .gitignore                           # ignores storage/learn-notes/*.json, .sessions/*.db
+  .gitignore                           # ignores storage/learn.db*, .sessions/*.db
   README.md                            # extraction-specific
   LICENSE                              # mirror upstream
   CHANGELOG.md                         # starts at vX.Y.Z
@@ -422,7 +447,7 @@ zealphp-learn/
   examples/agents/
     notes_agent.py
   storage/
-    learn-notes/.gitkeep
+    .gitkeep                             # learn.db is created at first run
     .sessions/.gitkeep
   scripts/
     setup.sh                           # copy of main-repo setup.sh
@@ -448,7 +473,7 @@ No glob over `route/*.php`, no WebSocket, no CGI worker.
 
 ### Slimmed `_master.php` (companion)
 
-Drops the main-site top nav (`_nav.php` not included). New top bar: `ZealPHP Learn` logo, "Lock vault" link (when unlocked), GitHub link. Sidebar rendered the same way as in the main repo (by each lesson page).
+Drops the main-site top nav (`_nav.php` not included). New top bar: `ZealPHP Learn` logo, the logged-in username + "Logout" link (when authenticated), GitHub link. Sidebar rendered the same way as in the main repo (by each lesson page).
 
 ### Sync cadence — per release
 
@@ -475,12 +500,15 @@ CLAUDE.md's "Companion repos — keep in sync" table gains a third row for `sibi
 
 ### Security
 
-- Vault secret never persisted plaintext. Only `hash('sha256', $secret)` is stored in `$_SESSION` and used as a filename.
-- Notes file path is `storage/learn-notes/{hash}.json` where `{hash}` is the hex output of sha256 — 64 hex chars, no path-traversal risk.
-- `POST /api/learn/vault` rate-limit: 10 attempts per IP per minute, via `Store::make('learn_vault_rl', ...)`. Prevents brute-force discovery of existing vault secrets.
+- Passwords stored as `password_hash($password, PASSWORD_DEFAULT)` (bcrypt at time of writing; PHP rotates as the default evolves). Verified via `password_verify`. Raw passwords never logged.
+- `POST /api/learn/login` rate limit: 10 attempts per IP per 5 minutes, via `Store::make('learn_login_rl', ...)`. After threshold, login returns 429 with `Retry-After`.
+- `POST /api/learn/register` rate limit: 5 attempts per IP per 5 minutes, via `Store::make('learn_register_rl', ...)`. Prevents username-enumeration sprays.
+- All notes queries use prepared statements with bound `:user_id` from `$_SESSION` — never from a client-provided field. Two users with two accounts cannot read or write each other's notes.
+- The Python agent is invoked with the user's `USER_ID` set server-side, baked into the base64 payload. The agent's tools take note ids but never a user id from the model; the SQL `WHERE user_id = ?` always uses the server-injected value.
 - `OPENAI_API_KEY` only read from env. Never logged. The status endpoint exposes only whether it's present (`ai_enabled: bool`), not the value.
-- Python agent escaped via `escapeshellarg` for both the script path and the base64 payload (matches `route/chat.php`).
-- htmx CSRF: vault, notes, and chat POSTs require `$_SESSION['vault']` to be set, which serves as soft CSRF (an attacker with no session can't act). For Lesson 7's counter demo we accept the soft guarantee — it's a tutorial.
+- Python agent shell invocation uses `escapeshellarg` for both the script path and the base64 payload (matches `route/chat.php`).
+- htmx CSRF: notes and chat POSTs require `$_SESSION['user_id']`, which serves as soft CSRF (an unauthenticated attacker can't act). For Lesson 7's counter demo we accept the soft guarantee — it's a tutorial and the endpoint is read-modify-write on `$_SESSION['demo_counter']` only, no DB writes.
+- SQLite WAL files (`learn.db-wal`, `learn.db-shm`) gitignored alongside the main DB.
 
 ### Performance
 
@@ -490,7 +518,7 @@ CLAUDE.md's "Companion repos — keep in sync" table gains a third row for `sibi
 
 ### Error handling
 
-- All `/api/learn/*` endpoints return JSON `{error: "<machine_code>"}` with HTTP status matching the failure (401 vault_locked, 422 validation_failed, 429 rate_limit, 500 internal_error).
+- All `/api/learn/*` endpoints return JSON `{error: "<machine_code>"}` with HTTP status matching the failure (401 auth_required, 409 username_taken, 422 validation_failed, 429 rate_limit, 500 internal_error).
 - htmx-handler endpoints that return HTML fragments use `text/html` content type so htmx swaps work; JSON errors use `application/json` and an `hx-reswap="innerHTML"` hint header so htmx can choose to swap an error block.
 - The chat SSE stream surfaces errors via `event: error` and always emits `event: done` to close the stream cleanly.
 - Python agent crashes: PHP detects non-zero exit code or empty stdout and emits `event: error` `data: {"error": "agent_unavailable"}`.
@@ -503,6 +531,7 @@ CLAUDE.md's "Companion repos — keep in sync" table gains a third row for `sibi
 | `ZEALPHP_LEARN_AI_MODEL` | No | `gpt-4.1-mini` | `notes_agent.py` |
 | `ZEALPHP_LEARN_RATE_LIMIT` | No | `30` | `route/learn.php` (chat turns/hour/IP) |
 | `ZEALPHP_LEARN_MAX_NOTES` | No | `256` | `route/learn.php`, `notes_agent.py` |
+| `ZEALPHP_LEARN_DB_PATH` | No | `storage/learn.db` | `route/learn.php`, `notes_agent.py` (resolved relative to repo root if not absolute) |
 
 Documented in `.env.example` at the repo root (which is gitignored for actual values).
 
@@ -512,20 +541,26 @@ Documented in `.env.example` at the repo root (which is gitignored for actual va
 
 ### In-repo (sibidharan/zealphp)
 
-**Unit tests** — `tests/Unit/LearnVaultTest.php`:
-- Hash-key derivation is deterministic for the same secret.
-- Secret length validation (1 ≤ len ≤ 256).
-- Note title/body limits.
+**Unit tests** — `tests/Unit/LearnAuthTest.php` + `tests/Unit/LearnNotesRepoTest.php`:
+- Username + password validation rules (length, allowed characters).
+- `password_hash` / `password_verify` round-trip through the auth helper.
+- Schema bootstrap is idempotent: running migrations twice doesn't error.
+- Notes repo: insert/select/update/delete all enforce `WHERE user_id = ?`.
+- Title/body limit enforcement.
 
 **Integration tests** — `tests/Integration/LearnApiTest.php` (requires server up, just like other Integration tests):
-- 401 from notes endpoints without vault session.
-- `POST /api/learn/vault` sets session and 302s.
-- Notes CRUD round-trips: create, list, update, delete.
-- Two different vault secrets → two isolated note sets.
-- Vault lock clears the session.
+- 401 from notes/chat endpoints without an authenticated session.
+- `POST /api/learn/register` creates a user and sets the session.
+- `POST /api/learn/login` validates credentials, 401 on wrong password.
+- Duplicate registration returns 409.
+- Notes CRUD round-trips for a logged-in user: create, list, update, delete.
+- **User isolation:** Two registered users see entirely separate note lists; user A cannot read/update/delete user B's notes (404 attempts).
+- `POST /api/learn/logout` clears the session.
 - `GET /api/learn/chat/status` returns expected shape.
-- `POST /api/learn/chat` in mock mode emits `tool_call` and `tool_done` SSE events.
+- `POST /api/learn/chat` in mock mode emits `tool_call` and `tool_done` SSE events, and `create_note` via mock results in a new row owned by the logged-in user.
 - Lesson page HTTP 200 for all 12 lesson URLs.
+
+Each test starts from a fresh `storage/learn.test.db` (separate path, set via `ZEALPHP_LEARN_DB_PATH` for the test process). Test teardown deletes it.
 
 **No tests** for the Python agent in v1. (The real-API path is non-deterministic; the SDK is well-tested upstream.) A follow-up could add a stub-LLM Python test harness.
 
@@ -539,7 +574,7 @@ No tests in v1 extraction. Follow-up.
 
 1. **Python agent process start overhead.** Each chat turn spawns `uv run`. uv caches deps so subsequent runs are fast (~200ms cold), but it's still a per-turn process spawn. Acceptable for a tutorial; addressed in Lesson 10 if asked.
 
-2. **`flock` cross-process semantics.** PHP `flock` and Python `fcntl.flock` agree on POSIX hosts. macOS dev: same. Windows: not a target. Documented in `docs/learn-app.md`.
+2. **SQLite WAL cross-process semantics.** PHP (PDO SQLite) and Python (`sqlite3` stdlib) both honor SQLite's locking under WAL. `busy_timeout = 2000` on both sides covers the rare contention window during a long agent run. Documented in `docs/learn-app.md`.
 
 3. **htmx + SSE.** htmx has an `hx-ext="sse"` extension but it doesn't fit our use case (we POST then read the SSE response, vs. opening a long-lived `EventSource`). The chat handler uses raw `fetch` + ReadableStream — same as the home chat. htmx handles all the non-chat interactivity. This is explicitly explained in Lesson 7 with a callout.
 
@@ -557,20 +592,21 @@ A v1 ship is considered done when:
 
 1. Every URL in the route table below returns 200 (or the expected non-200) from a clean checkout with `php app.php` running.
 2. All 12 lesson pages render with no PHP warnings/errors.
-3. Lesson 8 vault flow works: enter a secret → see empty notes list → add a note → see it appear → delete it → see it gone.
-4. Lesson 9 chat works in mock mode (no API key): user message "create a note titled buy milk" results in a `tool_call` card streaming in the chat AND the notes list refreshing to show the new note.
-5. Lesson 9 chat works in real mode (with `OPENAI_API_KEY`): same demo behavior, plus the model can answer questions about existing notes.
-6. The top-nav `Learn` link highlights as active on every `/learn/*` URL.
-7. The sidebar highlights the correct lesson item on every `/learn/<slug>`.
-8. Mobile (≤640px wide): sidebar collapses to a drawer, lesson content is readable, chat + notes layout reflows to single column.
-9. `./vendor/bin/phpunit tests/Unit/LearnVaultTest.php` and `tests/Integration/LearnApiTest.php` pass.
-10. `scripts/extract-learn-repo.sh` produces a clean target tree that, after `composer install`, runs `php app.php` and serves the same Learn experience standalone.
+3. Lesson 8 auth + notes flow works: register `alice`/`pw12345678` → see empty notes list → add a note → see it appear → delete it → see it gone → logout → log back in → notes still there.
+4. **User isolation verified end-to-end:** register `alice` and `bob` in two private browsing windows. alice creates a note. bob refreshes his notes list and sees nothing.
+5. Lesson 9 chat works in mock mode (no API key) while logged in: user message "create a note titled buy milk" results in a `tool_call` card streaming in the chat AND the notes list refreshing to show the new note for the current user only.
+6. Lesson 9 chat works in real mode (with `OPENAI_API_KEY`): same as #5, plus the agent can answer questions like "what notes do I have about groceries?" using its `search_notes` tool, and the username is visible in the agent's responses.
+7. The top-nav `Learn` link highlights as active on every `/learn/*` URL.
+8. The sidebar highlights the correct lesson item on every `/learn/<slug>`.
+9. Mobile (≤640px wide): sidebar collapses to a drawer, lesson content is readable, chat + notes layout reflows to single column.
+10. `./vendor/bin/phpunit tests/Unit/LearnAuthTest.php tests/Unit/LearnNotesRepoTest.php` and `tests/Integration/LearnApiTest.php` pass.
+11. `scripts/extract-learn-repo.sh` produces a clean target tree that, after `composer install`, runs `php app.php` and serves the same Learn experience standalone.
 
 ### Route table for acceptance check
 
 Pages (must 200): `/learn`, `/learn/create-app`, `/learn/first-page`, `/learn/components`, `/learn/routing`, `/learn/sessions`, `/learn/htmx`, `/learn/notes`, `/learn/ai-chat`, `/learn/async`, `/learn/deployment`, `/learn/philosophy`.
 
-API: `POST /api/learn/vault`, `POST /api/learn/vault/lock`, `GET /api/learn/notes`, `POST /api/learn/notes`, `POST /api/learn/notes/{id}`, `DELETE /api/learn/notes/{id}`, `POST /api/learn/chat`, `GET /api/learn/chat/status`, `GET /api/learn/demo/incr`.
+API: `POST /api/learn/register`, `POST /api/learn/login`, `POST /api/learn/logout`, `GET /api/learn/notes`, `POST /api/learn/notes`, `POST /api/learn/notes/{id}`, `DELETE /api/learn/notes/{id}`, `POST /api/learn/chat`, `GET /api/learn/chat/status`, `GET /api/learn/demo/incr`.
 
 ---
 
@@ -580,12 +616,13 @@ The implementation plan (next document) will sequence work so that each mileston
 
 1. Sidebar shell + lesson scaffolding + 12 placeholder lesson pages (so navigation works end-to-end).
 2. Lesson components (`_callout`, `_lesson_header`, `_youwilllearn`, `_deepdive`, `_tryit`).
-3. Vault flow + Notes API (PHP only, no AI yet). Lesson 8 becomes interactive.
-4. htmx wiring for Notes + Lesson 7 counter.
-5. Lesson content for Lessons 1-7 (write the actual prose + code blocks).
-6. Mock-mode chat endpoint + frontend timeline UI. Lesson 9 becomes interactive in mock mode.
-7. Python `notes_agent.py` + real-mode SSE proxy.
-8. Lesson 9, 10, 11, 12 content.
-9. PHPUnit tests.
-10. Extraction script + standalone `_master.php` / `app.php` generation.
-11. First companion-repo extraction + push (per next release).
+3. SQLite bootstrap helper (open + WAL + schema-if-not-exists) + auth endpoints (`register`/`login`/`logout`) + Lesson 6 interactive auth demo.
+4. Notes API (PDO-backed CRUD, all `user_id`-scoped). Lesson 8 becomes interactive.
+5. htmx wiring for Notes + Lesson 7 counter.
+6. Lesson content for Lessons 1-7 (write the actual prose + code blocks).
+7. Mock-mode chat endpoint + frontend timeline UI. Lesson 9 becomes interactive in mock mode.
+8. Python `notes_agent.py` (six tools, sqlite3 + WAL, profile injection) + real-mode SSE proxy.
+9. Lesson 9, 10, 11, 12 content.
+10. PHPUnit tests (auth + notes-repo unit + integration covering user isolation).
+11. Extraction script + standalone `_master.php` / `app.php` generation.
+12. First companion-repo extraction + push (per next release).
