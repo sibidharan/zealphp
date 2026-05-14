@@ -8,7 +8,10 @@ $siteUrl = site_url();
 <!-- Hero -->
 <section class="hero">
   <div class="container">
-    <h1>Zeal<span>PHP</span></h1>
+    <div class="zeal-mark">
+      <span class="zeal-bolt" aria-hidden="true">⚡</span>
+      <h1 data-text="ZealPHP">Zeal<span>PHP</span></h1>
+    </div>
     <p style="font-size:1.4rem;color:#fef3c7;font-weight:600;margin:.5rem auto .75rem;position:relative">
       The PHP Runtime for AI Web Apps</p>
     <p>Stream AI responses in 5 lines. WebSocket, SSE, shared memory, task workers —<br>
@@ -476,38 +479,6 @@ redis_client.set(key, json.dumps(data))</code></pre>
   </div>
 </section>
 
-<!-- Migrate Your PHP Codebase -->
-<section class="section" style="background:var(--bg-dark);color:var(--code-text)">
-  <div class="container" style="max-width:860px">
-    <h2 class="section-title" style="color:#fff">Bring your PHP codebase along</h2>
-    <p class="section-desc" style="color:var(--text-light)">
-      <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>echo</code> —
-      overridden via uopz so existing code runs unchanged inside the coroutine runtime.
-      Move at your own pace: drop your whole app in, or rewrite endpoint-by-endpoint.
-    </p>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-top:1.5rem">
-      <div style="background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1.25rem">
-        <h3 style="color:var(--danger);font-size:.95rem;margin-bottom:.75rem">Today: Nginx + PHP-FPM + Redis + Socket.io + cron + …</h3>
-        <p style="font-size:.85rem;color:var(--text-light);margin:0">6 services, 6 failure points, 6 sets of config.</p>
-      </div>
-      <div style="background:var(--code-bg);border:1px solid var(--accent);border-radius:var(--radius);padding:1.25rem">
-        <h3 style="color:var(--accent);font-size:.95rem;margin-bottom:.75rem">On ZealPHP: <code style="font-size:1rem">php app.php</code></h3>
-        <p style="font-size:.85rem;color:var(--code-text);margin:0">HTTP + WebSocket + SSE + sessions + shared memory + task workers — one process.</p>
-      </div>
-    </div>
-
-    <p style="margin-top:1.5rem;color:var(--text-light);font-size:.92rem;line-height:1.65">
-      The migration ladder has 5 rungs (0 → 4). Rung 0 is "drop in your existing app, run <code>php app.php</code>." Rung 4 is full coroutine mode — <a href="/performance" style="color:var(--accent)">117k req/s on 4 workers</a>. Most teams stay on rungs 1–3 indefinitely; the upgrade path is opt-in, not forced.
-    </p>
-
-    <div style="text-align:center;margin-top:1.75rem">
-      <a href="/migration" class="btn btn-primary">See the full migration path →</a>
-      <a href="/legacy-apps" class="btn btn-outline" style="margin-left:.5rem">WordPress on ZealPHP →</a>
-    </div>
-  </div>
-</section>
-
 <!-- Quick start -->
 <section class="section" style="background:var(--bg-dark);color:#e2e8f0;padding-top:3rem;padding-bottom:3rem">
   <div class="container">
@@ -699,6 +670,38 @@ document.addEventListener('click', function(e) {
         App::render('/components/_card', compact('icon', 'title', 'body', 'href', 'badge'));
       }
       ?>
+    </div>
+  </div>
+</section>
+
+<!-- Migrate Your PHP Codebase -->
+<section class="section" style="background:var(--bg-dark);color:var(--code-text)">
+  <div class="container" style="max-width:860px">
+    <h2 class="section-title" style="color:#fff">Bring your PHP codebase along</h2>
+    <p class="section-desc" style="color:var(--text-light)">
+      <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>echo</code> —
+      overridden via uopz so existing code runs unchanged inside the coroutine runtime.
+      Move at your own pace: drop your whole app in, or rewrite endpoint-by-endpoint.
+    </p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-top:1.5rem">
+      <div style="background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1.25rem">
+        <h3 style="color:var(--danger);font-size:.95rem;margin-bottom:.75rem">Today: Nginx + PHP-FPM + Redis + Socket.io + cron + …</h3>
+        <p style="font-size:.85rem;color:var(--text-light);margin:0">6 services, 6 failure points, 6 sets of config.</p>
+      </div>
+      <div style="background:var(--code-bg);border:1px solid var(--accent);border-radius:var(--radius);padding:1.25rem">
+        <h3 style="color:var(--accent);font-size:.95rem;margin-bottom:.75rem">On ZealPHP: <code style="font-size:1rem">php app.php</code></h3>
+        <p style="font-size:.85rem;color:var(--code-text);margin:0">HTTP + WebSocket + SSE + sessions + shared memory + task workers — one process.</p>
+      </div>
+    </div>
+
+    <p style="margin-top:1.5rem;color:var(--text-light);font-size:.92rem;line-height:1.65">
+      The migration ladder has 5 rungs (0 → 4). Rung 0 is "drop in your existing app, run <code>php app.php</code>." Rung 4 is full coroutine mode — <a href="/performance" style="color:var(--accent)">117k req/s on 4 workers</a>. Most teams stay on rungs 1–3 indefinitely; the upgrade path is opt-in, not forced.
+    </p>
+
+    <div style="text-align:center;margin-top:1.75rem">
+      <a href="/migration" class="btn btn-primary">See the full migration path →</a>
+      <a href="/legacy-apps" class="btn btn-outline" style="margin-left:.5rem">WordPress on ZealPHP →</a>
     </div>
   </div>
 </section>
