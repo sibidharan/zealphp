@@ -514,9 +514,19 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .code-compare-panel:first-child .compare-label { color: #166534; }
 .code-compare-panel:last-child .compare-label { color: #991b1b; }
 .code-compare-panel pre {
-  margin: 0; font-size: .78rem; line-height: 1.6;
+  margin: 0; font-size: .78rem; line-height: 1.6; color: #1e293b;
 }
-.code-compare-panel code { font-family: var(--font-mono); }
+.code-compare-panel code { font-family: var(--font-mono); color: #1e293b; }
+.code-compare-panel .hljs { background: transparent !important; color: #1e293b !important; }
+.code-compare-panel .hljs-keyword,
+.code-compare-panel .hljs-built_in { color: #7c3aed; }
+.code-compare-panel .hljs-string { color: #059669; }
+.code-compare-panel .hljs-comment { color: #64748b; }
+.code-compare-panel .hljs-function,
+.code-compare-panel .hljs-title { color: #2563eb; }
+.code-compare-panel .hljs-variable,
+.code-compare-panel .hljs-attr { color: #c2410c; }
+.code-compare-panel .hljs-number { color: #0891b2; }
 .compare-verdict {
   font-size: .88rem; font-weight: 600; margin-top: 1rem;
   padding: .75rem 1rem; border-radius: 6px;
