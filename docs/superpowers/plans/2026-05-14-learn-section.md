@@ -1589,6 +1589,165 @@ git add template/pages/learn/notes.php
 git commit -m "feat(learn): Lesson 8 — interactive Notes app page with auth gate + htmx"
 ```
 
+### Task 4.3: Three render-method demo endpoints (for Lesson 4)
+
+Three small API endpoints, each demonstrating one of ZealPHP's render methods. Each is callable as plain HTTP so the Components lesson can embed them in "Try it" panels — and so curl + Chrome DevTools can show the difference (especially `renderStream`'s incremental flush).
+
+**Files:**
+- Create: `template/components/_demo_clock.php`
+- Modify: `route/learn.php` — append three endpoints
+
+- [ ] **Step 1: Write the demo template**
+
+A tiny template that takes a `$label` and a `$now` timestamp and renders one row. We reuse it across all three endpoints so the *output* is identical and the only difference is *how it was produced*.
+
+```php
+<?php
+$label ??= 'row';
+$now   ??= microtime(true);
+?>
+<div class="render-demo-row" data-label="<?= htmlspecialchars($label) ?>">
+  <strong><?= htmlspecialchars($label) ?></strong>
+  <time><?= number_format($now - (int)$now, 4) ?>s</time>
+</div>
+```
+
+- [ ] **Step 2: Append the three endpoints to `route/learn.php`**
+
+```php
+// ── Lesson 4 render-method demos ─────────────────────────────────────
+// All three produce visually-similar output. The teaching is in the
+// HTTP behavior: render() / renderToString() return all at once,
+// renderStream() flushes chunks as the Generator yields.
+
+$app->route('/api/learn/demo/render', ['methods' => ['GET']], function() {
+    header('Content-Type: text/html; charset=utf-8');
+    header('X-Render-Method: App::render');
+    // App::render echoes directly inside the handler. The output buffer
+    // is captured by ResponseMiddleware and returned to the client.
+    App::render('/components/_demo_clock', ['label' => 'render() — echoed', 'now' => microtime(true)]);
+});
+
+$app->route('/api/learn/demo/render-to-string', ['methods' => ['GET']], function() {
+    header('Content-Type: text/html; charset=utf-8');
+    header('X-Render-Method: App::renderToString');
+    // renderToString returns the rendered HTML so we can compose it
+    // into a larger response. Useful for htmx fragments and email bodies.
+    $card = App::renderToString('/components/_demo_clock', [
+        'label' => 'renderToString() — composed',
+        'now'   => microtime(true),
+    ]);
+    return "<section class=\"render-demo\"><h4>Composed wrapper</h4>{$card}</section>";
+});
+
+$app->route('/api/learn/demo/render-stream', ['methods' => ['GET']], function($request, $response) {
+    header('Content-Type: text/html; charset=utf-8');
+    header('X-Render-Method: App::renderStream');
+    // renderStream returns a Generator. Each `yield` is flushed to the
+    // client immediately. Sleep between yields so the streaming is visible.
+    return (function() {
+        yield "<section class=\"render-demo\"><h4>Streamed rows</h4>";
+        for ($i = 1; $i <= 5; $i++) {
+            \OpenSwoole\Coroutine::sleep(0.25);
+            yield from App::renderStream('/components/_demo_clock', [
+                'label' => "renderStream() — row {$i}",
+                'now'   => microtime(true),
+            ]);
+        }
+        yield "</section>";
+    })();
+});
+```
+
+- [ ] **Step 3: Smoke-test with curl — confirm streaming behaviour**
+
+```bash
+php app.php start -p 8090 -d --pid-file /tmp/zealphp/learn_dev.pid
+sleep 2
+
+echo "--- render (single-shot) ---"
+curl -s -D - http://127.0.0.1:8090/api/learn/demo/render | head -8
+
+echo "--- renderToString (single-shot, wrapped) ---"
+curl -s -D - http://127.0.0.1:8090/api/learn/demo/render-to-string | head -8
+
+echo "--- renderStream (5 chunks over ~1.25s) ---"
+# -N disables buffering so we can SEE chunks arriving over time.
+time curl -sN http://127.0.0.1:8090/api/learn/demo/render-stream
+
+php app.php stop -p 8090 --pid-file /tmp/zealphp/learn_dev.pid
+```
+
+Expected:
+- First two responses return the full HTML in milliseconds; `X-Render-Method` header is set on each.
+- The third response takes ~1.25 seconds total (5 × 0.25s sleeps), and with `-N` you can visibly watch rows arrive one at a time.
+
+- [ ] **Step 4: Chrome DevTools verification**
+
+Open `http://127.0.0.1:8090/api/learn/demo/render-stream` directly in the browser. Take a screenshot using `mcp__chrome-devtools__take_screenshot` while the page is loading — the partial response should be visible (some rows rendered, more still streaming). Then take another screenshot after load completes. Inspect with `mcp__chrome-devtools__list_network_requests` and select the `render-stream` request; check the timing tab for a long "content download" phase (~1.25s) — that's the streaming.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add template/components/_demo_clock.php route/learn.php
+git commit -m "feat(learn): three render-method demo APIs for Lesson 4 (Components)"
+```
+
+### Task 4.4: Wire the render demos into Lesson 4 content (Components)
+
+This task partially overlaps with M5.4 (Lesson 4 prose). Doing the interactive panel here keeps M5.4 focused on pure prose.
+
+**Files:**
+- Modify: `template/pages/learn/components.php`
+
+- [ ] **Step 1: Add three "Try it" panels to the Components lesson body**
+
+Add this block to the lesson body (the prose comes in M5.4; this just lands the three live panels):
+
+```php
+<h2>Three render methods, three demos</h2>
+<p>Same template, three different APIs. The output is visually similar — the difference is in how the HTTP response is produced. Click each button to see the response in your browser, or run the curl commands shown beneath.</p>
+
+<?php App::render('/components/_tryit', ['title' => 'App::render() — direct echo', 'body' => <<<HTML
+  <p><code>App::render(\$tpl, \$args)</code> echoes the template's HTML. ZealPHP captures the output buffer and returns it as the response body.</p>
+  <p><a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open /api/learn/demo/render →</a></p>
+  <pre><code>curl http://localhost:8090/api/learn/demo/render</code></pre>
+HTML]); ?>
+
+<?php App::render('/components/_tryit', ['title' => 'App::renderToString() — composable HTML', 'body' => <<<HTML
+  <p><code>App::renderToString(\$tpl, \$args)</code> returns the HTML as a string so you can wrap it, cache it, email it, or stream it inside an SSE event.</p>
+  <p><a class="lesson-chip" href="/api/learn/demo/render-to-string" target="_blank">Open /api/learn/demo/render-to-string →</a></p>
+  <pre><code>curl http://localhost:8090/api/learn/demo/render-to-string</code></pre>
+HTML]); ?>
+
+<?php App::render('/components/_tryit', ['title' => 'App::renderStream() — chunked SSR', 'body' => <<<HTML
+  <p><code>App::renderStream(\$tpl, \$args)</code> returns a Generator. Each <code>yield</code> is flushed immediately — perfect for SSR shells, long lists, or AI token streams. The demo below sleeps 0.25s between rows so the streaming is visible.</p>
+  <p><a class="lesson-chip" href="/api/learn/demo/render-stream" target="_blank">Open /api/learn/demo/render-stream →</a></p>
+  <pre><code>curl -N http://localhost:8090/api/learn/demo/render-stream
+# -N disables curl's output buffering so you can watch the rows arrive.</code></pre>
+HTML]); ?>
+```
+
+- [ ] **Step 2: Visual verification**
+
+```bash
+php app.php start -p 8090 -d --pid-file /tmp/zealphp/learn_dev.pid
+sleep 2
+```
+
+Navigate to `http://127.0.0.1:8090/learn/components` in Chrome DevTools, take a screenshot. Confirm all three "Try it" panels render with their headings and the open-link chips. Click each "Open …" link in a new tab and confirm the demos work end-to-end (third one visibly streams).
+
+```bash
+php app.php stop -p 8090 --pid-file /tmp/zealphp/learn_dev.pid
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add template/pages/learn/components.php
+git commit -m "feat(learn): Lesson 4 — embed three render-method demos in Components page"
+```
+
 ---
 
 ## Milestone 5 — Lesson content (1–7)
@@ -1629,15 +1788,15 @@ Commit: `feat(learn): lesson 3 first-page content`.
 
 ### Task 5.4: Lesson 4 — Components
 
-Sections:
-1. PHP templates as components.
-2. The three render methods — table with file links:
-   - `App::render($tpl, $args)` → `void`/echoes — for direct output in route handlers
-   - `App::renderToString($tpl, $args)` → `string` — for composing fragments, htmx responses
-   - `App::renderStream($tpl, $args)` → `Generator` — for SSR streaming
-3. Side-by-side: a React functional component vs. a PHP template.
+Tasks 4.3 + 4.4 already landed three "Try it" panels for the render methods. This task adds the surrounding prose.
 
-Commit: `feat(learn): lesson 4 components content`.
+Sections to add **above** the three render-method panels (which are already on the page from M4.4):
+1. PHP templates as components — what they are, how `App::render` resolves `/components/_card` to `template/components/_card.php`.
+2. Side-by-side: a React functional component vs. a PHP template — same outcome, simpler primitives.
+3. The three render methods — short table with file links pointing at `src/App.php`. Then the "Three render methods, three demos" section already present.
+4. `_deepdive` on parameter injection (reflection-cached at registration; zero overhead per request).
+
+Commit: `feat(learn): lesson 4 components prose around render demos`.
 
 ### Task 5.5: Lesson 5 — Routing
 
