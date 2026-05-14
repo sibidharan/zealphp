@@ -75,7 +75,100 @@ if (!function_exists('learn_login_user')) {
     }
 }
 
-// Endpoint registrations (added in Task 2.3, 3.x, 6.x). Skipped when unit-testing.
-if (class_exists('ZealPHP\\App', false) && !defined('ZEALPHP_LEARN_TESTING') && \ZealPHP\App::instance()) {
-    // Filled in below in later tasks.
+// ── Endpoint registrations (skipped in unit-test context) ────────────
+if (defined('ZEALPHP_LEARN_TESTING') || !class_exists('ZealPHP\\App', false)) return;
+
+$app = App::instance();
+
+\ZealPHP\Store::make('learn_login_rl', 1024, [
+    'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],
+    'count' => [\OpenSwoole\Table::TYPE_INT, 4],
+    'reset' => [\OpenSwoole\Table::TYPE_INT, 4],
+]);
+\ZealPHP\Store::make('learn_register_rl', 1024, [
+    'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],
+    'count' => [\OpenSwoole\Table::TYPE_INT, 4],
+    'reset' => [\OpenSwoole\Table::TYPE_INT, 4],
+]);
+
+function learn_rate_limit(string $table, string $ip, int $limit, int $window): bool {
+    $now = time();
+    $existing = \ZealPHP\Store::get($table, $ip);
+    if ($existing && $now < $existing['reset']) {
+        if ($existing['count'] >= $limit) return false;
+        \ZealPHP\Store::incr($table, $ip, 'count', 1);
+        return true;
+    }
+    \ZealPHP\Store::set($table, $ip, ['ip' => $ip, 'count' => 1, 'reset' => $now + $window]);
+    return true;
 }
+
+function learn_read_credentials($g): ?array {
+    $ct = $g->server['HTTP_CONTENT_TYPE'] ?? $g->server['CONTENT_TYPE'] ?? '';
+    if (stripos($ct, 'application/json') !== false) {
+        $body = json_decode($g->zealphp_request->parent->getContent(), true);
+        if (!is_array($body)) return null;
+        $u = (string)($body['username'] ?? '');
+        $p = (string)($body['password'] ?? '');
+    } else {
+        $u = (string)($g->post['username'] ?? '');
+        $p = (string)($g->post['password'] ?? '');
+    }
+    if ($u === '' || $p === '') return null;
+    return ['username' => $u, 'password' => $p];
+}
+
+function learn_current_user(): ?array {
+    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+    if (empty($_SESSION['user_id'])) return null;
+    return ['user_id' => (int)$_SESSION['user_id'], 'username' => (string)($_SESSION['username'] ?? '')];
+}
+
+$app->route('/api/learn/register', ['methods' => ['POST']], function($request, $response) {
+    $g = G::instance();
+    $ip = $g->server['REMOTE_ADDR'] ?? 'unknown';
+    if (!learn_rate_limit('learn_register_rl', $ip, 5, 300)) {
+        http_response_code(429); header('Content-Type: application/json');
+        return ['error' => 'rate_limit'];
+    }
+    $creds = learn_read_credentials($g);
+    if (!$creds) { http_response_code(422); header('Content-Type: application/json'); return ['error' => 'validation_failed']; }
+    if (!learn_validate_username($creds['username'])) { http_response_code(422); header('Content-Type: application/json'); return ['error' => 'invalid_username']; }
+    if (!learn_validate_password($creds['password'])) { http_response_code(422); header('Content-Type: application/json'); return ['error' => 'invalid_password']; }
+
+    $db = learn_db_open();
+    $userId = learn_register_user($db, $creds['username'], $creds['password']);
+    if ($userId === null) { http_response_code(409); header('Content-Type: application/json'); return ['error' => 'username_taken']; }
+
+    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+    $_SESSION['user_id'] = $userId;
+    $_SESSION['username'] = $creds['username'];
+    $response->redirect('/learn/notes', 302);
+});
+
+$app->route('/api/learn/login', ['methods' => ['POST']], function($request, $response) {
+    $g = G::instance();
+    $ip = $g->server['REMOTE_ADDR'] ?? 'unknown';
+    if (!learn_rate_limit('learn_login_rl', $ip, 10, 300)) {
+        http_response_code(429); header('Content-Type: application/json');
+        return ['error' => 'rate_limit'];
+    }
+    $creds = learn_read_credentials($g);
+    if (!$creds) { http_response_code(422); header('Content-Type: application/json'); return ['error' => 'validation_failed']; }
+
+    $db = learn_db_open();
+    $userId = learn_login_user($db, $creds['username'], $creds['password']);
+    if ($userId === null) { http_response_code(401); header('Content-Type: application/json'); return ['error' => 'invalid_credentials']; }
+
+    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+    $_SESSION['user_id'] = $userId;
+    $_SESSION['username'] = $creds['username'];
+    $response->redirect('/learn/notes', 302);
+});
+
+$app->route('/api/learn/logout', ['methods' => ['POST', 'GET']], function($request, $response) {
+    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+    $_SESSION = [];
+    session_destroy();
+    $response->redirect('/learn/notes', 302);
+});
