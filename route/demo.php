@@ -83,8 +83,8 @@ $app->route('/demo/inject/url/{id}', ['methods' => ['GET']], function($id) {
 $app->route('/demo/inject/url-request/{id}', ['methods' => ['GET']], function($id, $request) {
     return [
         'id'     => $id,
-        'method' => $request->server['REQUEST_METHOD'] ?? 'GET',
-        'uri'    => $request->server['REQUEST_URI']    ?? '',
+        'method' => $request->server['request_method'] ?? 'GET',
+        'uri'    => $request->server['request_uri']    ?? '',
         'injected' => ['id', 'request'],
     ];
 });
@@ -101,8 +101,8 @@ $app->route('/demo/inject/url-response/{id}', ['methods' => ['GET']], function($
 
 $app->route('/demo/inject/request-only', ['methods' => ['GET']], function($request) {
     return [
-        'method'   => $request->server['REQUEST_METHOD'] ?? 'GET',
-        'uri'      => $request->server['REQUEST_URI']    ?? '',
+        'method'   => $request->server['request_method'] ?? 'GET',
+        'uri'      => $request->server['request_uri']    ?? '',
         'injected' => ['request'],
     ];
 });
@@ -111,7 +111,7 @@ $app->route('/demo/inject/all/{id}', ['methods' => ['GET']], function($id, $requ
     $response->header('X-Full-Inject', 'yes');
     return [
         'id'             => $id,
-        'method'         => $request->server['REQUEST_METHOD'] ?? 'GET',
+        'method'         => $request->server['request_method'] ?? 'GET',
         'response_class' => get_class($response),
         'injected'       => ['id', 'request', 'response'],
     ];

@@ -75,7 +75,7 @@ PHP],
   ['inject-2', 'URL param + $request',          '/demo/inject/url-request/99',
    <<<'PHP'
 $app->route('/users/{id}', function($id, $request) {
-    return ['id' => $id, 'method' => $request->server['REQUEST_METHOD']];
+    return ['id' => $id, 'method' => $request->server['request_method']];
 });
 PHP],
   ['inject-3', 'URL param + $response',         '/demo/inject/url-response/7',
@@ -88,15 +88,15 @@ PHP],
   ['inject-4', '$request only',                  '/demo/inject/request-only',
    <<<'PHP'
 $app->route('/info', function($request) {
-    return ['method' => $request->server['REQUEST_METHOD'],
-            'uri'    => $request->server['REQUEST_URI']];
+    return ['method' => $request->server['request_method'],
+            'uri'    => $request->server['request_uri']];
 });
 PHP],
   ['inject-5', 'All: $id + $request + $response','/demo/inject/all/123',
    <<<'PHP'
 $app->route('/full/{id}', function($id, $request, $response) {
     $response->header('X-Injected', 'yes');
-    return ['id' => $id, 'method' => $request->server['REQUEST_METHOD'],
+    return ['id' => $id, 'method' => $request->server['request_method'],
             'response_class' => get_class($response)];
 });
 PHP],

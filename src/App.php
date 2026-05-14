@@ -898,8 +898,10 @@ class App
         $killGroup = $pgid && $pgid !== posix_getpgid(posix_getpid());
         echo "Stopping ZealPHP (pid {$pid})...\n";
         $killGroup ? posix_kill(-$pgid, SIGTERM) : posix_kill($pid, SIGTERM);
-        // Fast poll first 500ms (10 × 50ms), then slower for up to 3s
-        for ($i = 0; $i < 10; $i++) {
+        // OpenSwoole graceful shutdown (workers finish current requests, master
+        // tears down listeners) typically takes 5-7 seconds. Poll for up to 10s
+        // before falling back to SIGKILL.
+        for ($i = 0; $i < 10; $i++) {       // first 500ms: fast poll
             usleep(50000);
             if (!@posix_kill($pid, 0)) {
                 @unlink($pidFile);
@@ -907,7 +909,7 @@ class App
                 return;
             }
         }
-        for ($i = 0; $i < 25; $i++) {
+        for ($i = 0; $i < 95; $i++) {       // next 9.5s: slower poll
             usleep(100000);
             if (!@posix_kill($pid, 0)) {
                 @unlink($pidFile);
@@ -915,7 +917,7 @@ class App
                 return;
             }
         }
-        echo "Force killing...\n";
+        echo "Graceful shutdown timed out, force killing...\n";
         $killGroup ? posix_kill(-$pgid, SIGKILL) : posix_kill($pid, SIGKILL);
         usleep(100000);
         @unlink($pidFile);
@@ -1167,6 +1169,11 @@ HELP;
             co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
             \OpenSwoole\Runtime::enableCoroutine(\OpenSwoole\Runtime::HOOK_ALL);
         }
+        // Use the same path resolution as the stop/status CLI commands so that
+        // `php app.php stop` finds the PID file the server just wrote. Without
+        // this, the server writes /tmp/zealphp_PORT.pid (flat) but stop looks
+        // under /tmp/zealphp/zealphp_PORT.pid (subdir) — they disagree.
+        $defaultPidFile = self::resolvePidFile(['port' => $this->port]);
         $default_settings = [
             'enable_static_handler' => true,
             'document_root' => self::$cwd . '/public',
@@ -1174,7 +1181,7 @@ HELP;
             // Runtime compression is owned by OpenSwoole. Do not also register
             // CompressionMiddleware unless this setting is disabled.
             'http_compression' => true,
-            'pid_file' => "/tmp/zealphp_{$this->port}.pid",
+            'pid_file' => $defaultPidFile,
             'task_worker_num' => 0,
             'task_enable_coroutine' => true,
             // Suppress NOTICE-level messages from OpenSwoole internals (e.g. ERRNO 1005
@@ -1210,25 +1217,29 @@ HELP;
             include $route_file;
         }
 
-        # Implicit route for including APIs
-        $this->nsPathRoute('api', "{rquest}", [
-            'methods' => ['GET', 'POST', 'PUT', 'DELETE']
-        ], function($rquest, $response, $request){
-            $api = new ZealAPI($request, $response, self::$cwd);
-            try {
-                return $api->processApi("", $rquest);
-            } catch (\Exception $e){
-                $api->die($e);
-            }
-        });
-
-        
+        # Implicit route for including APIs.
+        # The two-segment route is registered FIRST so that /api/users/list
+        # matches with module=users, request=list (a single segment passing
+        # the security regex), instead of being captured by the one-segment
+        # catch-all as request="users/list" — which contains a slash and
+        # would fail validation with a misleading "invalid_request" error.
         $this->nsPathRoute('api', "{module}/{rquest}", [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE']
         ], function($module, $rquest, $response, $request){
             $api = new ZealAPI($request, $response, self::$cwd);
             try {
                 return $api->processApi($module, $rquest);
+            } catch (\Exception $e){
+                $api->die($e);
+            }
+        });
+
+        $this->nsPathRoute('api', "{rquest}", [
+            'methods' => ['GET', 'POST', 'PUT', 'DELETE']
+        ], function($rquest, $response, $request){
+            $api = new ZealAPI($request, $response, self::$cwd);
+            try {
+                return $api->processApi("", $rquest);
             } catch (\Exception $e){
                 $api->die($e);
             }

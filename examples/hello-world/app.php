@@ -15,7 +15,7 @@ $app->route('/hello/{name}', function($name) {
 // HTML route with request injection
 $app->route('/greet/{name}', function($name, $request) {
     return "<h1>Hello, " . htmlspecialchars($name) . "!</h1>
-            <p>Method: {$request->server['REQUEST_METHOD']}</p>";
+            <p>Method: {$request->server['request_method']}</p>";
 });
 
 // Simple homepage

@@ -105,7 +105,37 @@ class Response
 
         $this->g->status = $status;
         $this->g->response_headers_list[] = ['Location', $url];
+
+        // OpenSwoole's PSR-7 emit() drops reason phrases, which makes its
+        // internal status table the source of truth — and that table omits 308.
+        // Calling status() without a reason silently downgrades 308 → 200.
+        // Workaround: emit the redirect inline (with explicit reason) and mark
+        // the response as streaming so the PSR-7 layer's empty-body emit doesn't
+        // overwrite what we just wrote.
+        if ($this->parent->isWritable()) {
+            $reason = self::REDIRECT_REASONS[$status] ?? '';
+            $this->g->_streaming = true;
+            $this->parent->status($status, $reason);
+            foreach ($this->g->response_headers_list as [$k, $v]) {
+                $this->parent->header($k, $v);
+            }
+            foreach ($this->g->response_cookies_list as $cookie) {
+                $this->parent->cookie(...$cookie);
+            }
+            foreach ($this->g->response_rawcookies_list as $cookie) {
+                $this->parent->rawCookie(...$cookie);
+            }
+            $this->parent->end();
+        }
     }
+
+    private const REDIRECT_REASONS = [
+        301 => 'Moved Permanently',
+        302 => 'Found',
+        303 => 'See Other',
+        307 => 'Temporary Redirect',
+        308 => 'Permanent Redirect',
+    ];
 
     public function cookie(string $key, string $value = '', int $expire = 0, string $path = '/', string $domain = '', bool $secure = false, bool $httponly = false, string $samesite = '', string $priority = ''): bool
     {
