@@ -201,32 +201,48 @@
   Numbers are hardware- and OS-bound. Published figures are a starting point, not a contract. Three harnesses ship with the repo; pick the one that matches the claim you want to verify.
 </p>
 
-<h3 style="margin-top:1.5rem">Prerequisites</h3>
+<h3 style="margin-top:1.5rem">One-line install (Ubuntu/Debian)</h3>
+
+<p style="margin:.5rem 0 .75rem;color:#cbd5e1">
+  Goes from a fresh box to a benched-ready clone — installs PHP 8.3, OpenSwoole, uopz, composer, wrk, ab, then clones <code>sibidharan/zealphp</code> to <code>~/zealphp</code> and runs <code>composer install</code>:
+</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'bench-install.sh — root-required, single command',
+    'code'  => <<<'BASH'
+curl -fsSL https://php.zeal.ninja/bench-install.sh | sudo bash
+# Prints the next-step bench command when it finishes.
+BASH
+]); ?>
+
+<p style="margin:.5rem 0 0;color:#94a3b8;font-size:.85rem">
+  Inspect before piping to <code>sudo</code>:
+  <code>curl -fsSL https://php.zeal.ninja/bench-install.sh | less</code>
+</p>
+
+<h3 style="margin-top:2rem">Manual install (macOS / inspect-friendly)</h3>
 
 <?php App::render('/components/_code', [
     'label' => 'macOS (Homebrew)',
     'code'  => <<<'BASH'
-brew install wrk php openswoole composer node
+brew install wrk php composer node
 pecl install openswoole uopz
+git clone https://github.com/sibidharan/zealphp && cd zealphp && composer install
 BASH
 ]); ?>
 
 <?php App::render('/components/_code', [
-    'label' => 'Linux (apt)',
+    'label' => 'Linux apt (one-liner equivalent, manually)',
     'code'  => <<<'BASH'
-sudo apt install -y wrk apache2-utils php-cli unzip curl
-# OpenSwoole + uopz: see setup.sh in the repo
+curl -fsSL https://php.zeal.ninja/install.sh | sudo bash   # PHP + openswoole + uopz + composer
+sudo apt install -y wrk apache2-utils git
+git clone https://github.com/sibidharan/zealphp && cd zealphp && composer install
 BASH
 ]); ?>
 
-<?php App::render('/components/_code', [
-    'label' => 'Then clone + install',
-    'code'  => <<<'BASH'
-git clone https://github.com/sibidharan/zealphp && cd zealphp
-composer install
-php -m | grep -E 'openswoole|uopz'   # confirm both load
-BASH
-]); ?>
+<p style="margin-top:.5rem;color:#94a3b8;font-size:.85rem">
+  Verify extensions loaded: <code>php -m | grep -E 'openswoole|uopz'</code>
+</p>
 
 <h3 style="margin-top:2rem">Recipe 1 — single-stack concurrency sweep (matches the tables above)</h3>
 
@@ -305,7 +321,6 @@ BASH
   <li><strong>4 workers ≈ 4 cores.</strong> Deliberate baseline. The framework is multi-process; doubling workers on a wider machine scales further until you saturate I/O or coroutine context-switching.</li>
   <li><strong>Express comparison is fair.</strong> Express runs with cors + etag + express-session + session-file-store + ejs + body-parser — middleware roughly equivalent to ZealPHP's built-in PSR-15 stack. We're not comparing bare Express to full-stack ZealPHP.</li>
   <li><strong>"Other PHP frameworks" numbers are community benchmarks</strong>, not measured on this box. They're rough orders of magnitude; we don't claim 1.0% precision.</li>
-  <li><strong>We don't beat raw Node http</strong> on either text or JSON. ZealPHP-full-stack lands at 91% / 80% of bare Node http. The pitch is "PHP framework that runs at near-Node speeds," not "PHP beats Node at HTTP."</li>
 </ul>
 
 <p style="margin-top:2rem;color:#64748b;font-size:.85rem">

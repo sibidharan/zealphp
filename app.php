@@ -107,6 +107,13 @@ $app->route('/install.sh', function($response) {
     $response->sendFile(__DIR__ . '/setup.sh');
 });
 
+// Bench-environment installer: curl -fsSL https://php.zeal.ninja/bench-install.sh | sudo bash
+// Wraps setup.sh + installs wrk/ab + clones the repo + composer install,
+// leaving the machine ready to run scripts/bench.sh.
+$app->route('/bench-install.sh', function($response) {
+    $response->sendFile(__DIR__ . '/bench-install.sh');
+});
+
 $app->route('/bench/template', function() {
     App::render('/bench_page', [
         'title' => 'ZealPHP Benchmark',

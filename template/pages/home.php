@@ -16,8 +16,12 @@ $siteUrl = site_url();
     <p style="font-size:.95rem;color:#94a3b8;margin-top:.25rem">Upgrade your existing PHP codebase to async — start without rewriting, migrate at your own pace.</p>
     <div class="cta">
       <a href="/getting-started" class="btn btn-primary">Get Started →</a>
+      <a href="/why-zealphp" class="btn btn-outline">Why ZealPHP? →</a>
       <a href="https://github.com/sibidharan/zealphp" class="btn btn-outline" target="_blank">GitHub ↗</a>
     </div>
+    <p style="font-size:.78rem;color:#a8a29e;margin-top:.5rem">
+      <a href="/why-zealphp" style="color:#fde68a;text-decoration:none">Why?</a> covers the problem PHP-FPM can't solve, where ZealPHP fits vs Laravel Octane / FrankenPHP / RoadRunner, and when it's the wrong choice.
+    </p>
     <div class="oss-badges" aria-label="Project badges">
       <a href="https://deepwiki.com/sibidharan/zealphp" target="_blank" rel="noopener noreferrer">
         <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki">
