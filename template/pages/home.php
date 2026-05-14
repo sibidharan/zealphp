@@ -339,7 +339,115 @@ function chatSourceTab(btn, id) {
 })();
 </script>
 
+<!-- Why Not Just Use [X]? -->
+<section class="section" style="background:var(--bg-alt)">
+  <div class="container">
+    <h2 class="section-title">Why not just use...?</h2>
+    <p class="section-desc">Bold claims. Real code. You decide.</p>
 
+    <div class="bold-claim">
+      <h3>Node.js needs 30 lines for what ZealPHP does in 5</h3>
+      <p>AI token streaming — the core feature of every LLM app. Compare the implementations.</p>
+      <div class="code-compare">
+        <div class="code-compare-panel">
+          <div class="compare-label">ZealPHP — 7 lines</div>
+<pre><code>$app->route('/ai/stream', function($response) {
+    $response->sse(function($emit) {
+        $ch = curl_init($apiUrl);
+        // ... setup curl streaming
+        curl_exec($ch);
+    });
+});</code></pre>
+        </div>
+        <div class="code-compare-panel">
+          <div class="compare-label">Node.js — 25+ lines</div>
+<pre><code>app.get('/ai/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const response = await fetch(apiUrl, {
+    method: 'POST', body: JSON.stringify({...}),
+  });
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = decoder.decode(value);
+    // parse SSE lines, extract tokens...
+    res.write(`data: ${token}\n\n`);
+  }
+  res.end();
+});</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="bold-claim">
+      <h3>Go is fast. ZealPHP is fast AND expressive.</h3>
+      <p>90k req/s on 4 workers. But you also get reflection-based injection, auto-serialization, and zero boilerplate.</p>
+      <div class="code-compare">
+        <div class="code-compare-panel">
+          <div class="compare-label">ZealPHP — return anything</div>
+<pre><code>$app->route('/users/{id}', function($id) {
+    return ['user' => User::find($id)];
+    // auto JSON. auto 200. done.
+});</code></pre>
+        </div>
+        <div class="code-compare-panel">
+          <div class="compare-label">Go — manual everything</div>
+<pre><code>func getUser(w http.ResponseWriter, r *http.Request) {
+    id := chi.URLParam(r, "id")
+    user, err := FindUser(id)
+    if err != nil {
+        http.Error(w, err.Error(), 500)
+        return
+    }
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]any{
+        "user": user,
+    })
+}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="bold-claim">
+      <h3>FastAPI can't hold 10k concurrent connections</h3>
+      <p>ZealPHP's multi-process workers + coroutines handle C1000K. FastAPI's single-process async struggles past a few thousand.</p>
+      <div class="code-compare">
+        <div class="code-compare-panel">
+          <div class="compare-label">ZealPHP — true parallelism</div>
+<pre><code>// 16 workers × thousands of coroutines
+// Shared memory across workers (no Redis)
+// Each coroutine yields on I/O automatically
+ZEALPHP_WORKERS=16 php app.php
+
+// Store: cross-worker shared state
+Store::set('cache', $key, $data);
+$data = Store::get('cache', $key);</code></pre>
+        </div>
+        <div class="code-compare-panel">
+          <div class="compare-label">FastAPI — single process limits</div>
+<pre><code># Single process, async but not parallel
+# Need Gunicorn + multiple workers
+# Need Redis for any shared state
+# Need Celery for background tasks
+gunicorn app:app -w 4 -k uvicorn.workers.UvicornWorker
+
+# Shared state? Add Redis.
+redis_client = redis.Redis()
+redis_client.set(key, json.dumps(data))</code></pre>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
 
 <!-- Quick start -->
 <section class="section" style="background:var(--bg-dark);color:#e2e8f0;padding-top:3rem;padding-bottom:3rem">

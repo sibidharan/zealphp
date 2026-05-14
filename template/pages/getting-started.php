@@ -5,6 +5,32 @@
     <h1 class="section-title">Getting Started</h1>
     <p class="section-desc">From a fresh machine to a running ZealPHP app — install dependencies, scaffold a project, write your first route, deploy.</p>
 
+    <!-- One Server. Everything. -->
+    <div class="arch-compare" style="margin:2rem 0 2.5rem">
+      <div class="arch-box complex">
+        <h3>Your AI app without ZealPHP</h3>
+        <div class="arch-node">Express / FastAPI server</div>
+        <div class="arch-node">Redis for session state</div>
+        <div class="arch-node">Bull / Celery for background jobs</div>
+        <div class="arch-node">Socket.io for WebSocket</div>
+        <div class="arch-node">SSE proxy middleware</div>
+        <div class="arch-node">Nginx reverse proxy</div>
+        <div style="margin-top:.75rem;font-size:.78rem;color:#991b1b;font-weight:600">6 services. 6 failure points.</div>
+      </div>
+      <div class="arch-vs">vs</div>
+      <div class="arch-box simple">
+        <h3>Your AI app on ZealPHP</h3>
+        <div class="arch-node">HTTP routes + API</div>
+        <div class="arch-node">WebSocket (built-in)</div>
+        <div class="arch-node">SSE streaming (built-in)</div>
+        <div class="arch-node">Task workers (built-in)</div>
+        <div class="arch-node">Shared memory Store (built-in)</div>
+        <div class="arch-node">Sessions + Timers (built-in)</div>
+        <div style="margin-top:.75rem;font-size:.78rem;color:#166534;font-weight:600">1 process. <code>php app.php</code></div>
+      </div>
+    </div>
+    <p class="compare-verdict">No Redis. No message queue. No sidecar. No microservice fan-out.</p>
+
     <!-- Step nav -->
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:1.5rem 0;font-size:.82rem">
       <a href="#prereqs" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">1. Prerequisites</a>
