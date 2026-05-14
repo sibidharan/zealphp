@@ -764,7 +764,7 @@ class App
         $i = 0;
         while ($i < count($argv)) {
             $arg = $argv[$i];
-            if ($arg === 'start' || $arg === 'stop' || $arg === 'status') {
+            if (in_array($arg, ['start', 'stop', 'status', 'restart', 'logs'], true)) {
                 $command = $arg;
                 $i++;
                 continue;
@@ -785,6 +785,14 @@ class App
                 $flags['task_worker_num'] = max(0, (int)($argv[++$i] ?? 0));
             } elseif ($arg === '--pid-file') {
                 $flags['pid_file'] = $argv[++$i] ?? null;
+            } elseif ($arg === '--access') {
+                $flags['log_access'] = true;
+            } elseif ($arg === '--debug') {
+                $flags['log_debug'] = true;
+            } elseif ($arg === '--server') {
+                $flags['log_server'] = true;
+            } elseif ($arg === '--zlog') {
+                $flags['log_zlog'] = true;
             }
             $i++;
         }
@@ -794,9 +802,27 @@ class App
                 self::cliStop(self::resolvePidFile($flags));
                 exit(0);
             case 'status':
-                self::cliStatus(self::resolvePidFile($flags));
+                self::cliStatus($flags);
                 exit(0);
+            case 'logs':
+                self::cliLogs($flags);
+                exit(0);
+            case 'restart':
+                self::cliStop(self::resolvePidFile($flags));
+                // fall through to start
             default:
+                $pidFile = self::resolvePidFile($flags);
+                if ($command === 'start' && file_exists($pidFile)) {
+                    $pid = (int)trim(file_get_contents($pidFile));
+                    if ($pid > 0 && @posix_kill($pid, 0)) {
+                        $port = $flags['port'] ?? (self::$instance ? self::$instance->port : 8080);
+                        echo "ZealPHP is already running (pid {$pid}, port {$port})\n";
+                        echo "Use 'php app.php stop' to stop, or 'php app.php restart' to restart\n";
+                        exit(0);
+                    }
+                    @unlink($pidFile);
+                }
+
                 $overrides = [];
                 if (isset($flags['host'])) { $overrides['_host'] = $flags['host']; }
                 if (isset($flags['port'])) { $overrides['_port'] = $flags['port']; }
@@ -813,7 +839,18 @@ class App
         if (!empty($flags['pid_file'])) {
             return $flags['pid_file'];
         }
+        $envPid = getenv('ZEALPHP_PID_FILE');
+        if ($envPid !== false && trim((string)$envPid) !== '') {
+            return trim((string)$envPid);
+        }
         $port = $flags['port'] ?? (self::$instance ? self::$instance->port : 8080);
+        $logDir = getenv('ZEALPHP_LOG_DIR');
+        if ($logDir !== false && trim((string)$logDir) !== '') {
+            return rtrim(trim((string)$logDir), '/') . "/zealphp_{$port}.pid";
+        }
+        if (is_dir('/tmp/zealphp')) {
+            return "/tmp/zealphp/zealphp_{$port}.pid";
+        }
         return "/tmp/zealphp_{$port}.pid";
     }
 
@@ -824,40 +861,160 @@ class App
             return;
         }
         $pid = (int)trim(file_get_contents($pidFile));
-        if ($pid <= 0 || !posix_kill($pid, 0)) {
+        if ($pid <= 0 || !@posix_kill($pid, 0)) {
             echo "ZealPHP is not running (stale PID file)\n";
             @unlink($pidFile);
             return;
         }
         echo "Stopping ZealPHP (pid {$pid})...\n";
-        posix_kill($pid, SIGTERM);
+        $pgid = @posix_getpgid($pid);
+        if ($pgid && $pgid !== posix_getpgid(posix_getpid())) {
+            posix_kill(-$pgid, SIGTERM);
+        } else {
+            posix_kill($pid, SIGTERM);
+        }
         for ($i = 0; $i < 100; $i++) {
-            if (!posix_kill($pid, 0)) {
+            if (!@posix_kill($pid, 0)) {
+                @unlink($pidFile);
                 echo "Stopped.\n";
                 return;
             }
             usleep(100000);
         }
         echo "Force killing...\n";
-        posix_kill($pid, SIGKILL);
+        if ($pgid && $pgid !== posix_getpgid(posix_getpid())) {
+            posix_kill(-$pgid, SIGKILL);
+        } else {
+            posix_kill($pid, SIGKILL);
+        }
         usleep(200000);
         @unlink($pidFile);
     }
 
-    private static function cliStatus(string $pidFile): void
+    private static function cliStatus(array $flags): void
+    {
+        if (isset($flags['port'])) {
+            $pidFile = self::resolvePidFile($flags);
+            self::cliStatusOne($pidFile);
+            return;
+        }
+
+        $logDir = getenv('ZEALPHP_LOG_DIR');
+        if ($logDir === false || trim((string)$logDir) === '') {
+            $logDir = is_dir('/tmp/zealphp') ? '/tmp/zealphp' : '/tmp';
+        }
+        $pidFiles = glob(rtrim(trim((string)$logDir), '/') . '/zealphp_*.pid');
+        if (empty($pidFiles)) {
+            echo "No ZealPHP instances running\n";
+            exit(1);
+        }
+
+        $found = 0;
+        foreach ($pidFiles as $pidFile) {
+            $pid = (int)trim(file_get_contents($pidFile));
+            if ($pid <= 0 || !@posix_kill($pid, 0)) {
+                @unlink($pidFile);
+                continue;
+            }
+            $port = '?';
+            if (preg_match('/zealphp_(\d+)\.pid$/', $pidFile, $m)) {
+                $port = $m[1];
+            }
+            echo "ZealPHP is running (pid {$pid}, port {$port})\n";
+            $found++;
+        }
+
+        if ($found === 0) {
+            echo "No ZealPHP instances running\n";
+            exit(1);
+        }
+        exit(0);
+    }
+
+    private static function cliStatusOne(string $pidFile): void
     {
         if (!file_exists($pidFile)) {
             echo "ZealPHP is not running\n";
             exit(1);
         }
         $pid = (int)trim(file_get_contents($pidFile));
-        if ($pid <= 0 || !posix_kill($pid, 0)) {
+        if ($pid <= 0 || !@posix_kill($pid, 0)) {
             echo "ZealPHP is not running (stale PID file)\n";
             @unlink($pidFile);
             exit(1);
         }
-        echo "ZealPHP is running (pid {$pid})\n";
+        $port = '?';
+        if (preg_match('/zealphp_(\d+)\.pid$/', $pidFile, $m)) {
+            $port = $m[1];
+        }
+        echo "ZealPHP is running (pid {$pid}, port {$port})\n";
         exit(0);
+    }
+
+    private static function cliLogs(array $flags): void
+    {
+        $hasFilter = isset($flags['log_access']) || isset($flags['log_debug'])
+                  || isset($flags['log_server']) || isset($flags['log_zlog']);
+
+        $files = [];
+
+        if (!$hasFilter || isset($flags['log_access'])) {
+            $path = \ZealPHP\log_file_for('access');
+            if ($path !== null) {
+                $files[] = $path;
+            }
+        }
+        if (!$hasFilter || isset($flags['log_debug'])) {
+            $path = \ZealPHP\log_file_for('debug');
+            if ($path !== null) {
+                $files[] = $path;
+            }
+        }
+        if (!$hasFilter || isset($flags['log_zlog'])) {
+            $path = \ZealPHP\log_file_for('zlog');
+            if ($path !== null) {
+                $files[] = $path;
+            }
+        }
+        if (!$hasFilter || isset($flags['log_server'])) {
+            $serverLog = getenv('ZEALPHP_SERVER_LOG_FILE');
+            if ($serverLog === false || trim((string)$serverLog) === '') {
+                $dir = \ZealPHP\resolve_log_dir();
+                if ($dir !== null) {
+                    $serverLog = $dir . '/server.log';
+                }
+            }
+            if ($serverLog !== null && trim((string)$serverLog) !== '') {
+                $files[] = trim((string)$serverLog);
+            }
+        }
+
+        if (empty($files)) {
+            echo "No log files found. Check ZEALPHP_LOG_DIR or run the server first.\n";
+            exit(1);
+        }
+
+        foreach ($files as $file) {
+            if (!file_exists($file)) {
+                $dir = dirname($file);
+                if (!is_dir($dir)) {
+                    @mkdir($dir, 0775, true);
+                }
+                @touch($file);
+            }
+        }
+
+        echo "Tailing log files (Ctrl+C to stop):\n";
+        foreach ($files as $file) {
+            echo "  {$file}\n";
+        }
+        echo "\n";
+
+        $cmd = 'tail -F';
+        foreach ($files as $file) {
+            $cmd .= ' ' . escapeshellarg($file);
+        }
+        passthru($cmd);
     }
 
     private static function cliHelp(): void
@@ -868,7 +1025,9 @@ Usage: php app.php [command] [options]
 Commands:
   start    Start the server (default)
   stop     Stop a running server
+  restart  Stop and restart the server
   status   Check if server is running
+  logs     Tail log files (Ctrl+C to stop)
 
 Options:
   -p, --port N         Listen port (default: from App::init)
@@ -879,11 +1038,25 @@ Options:
   --pid-file PATH      Custom PID file path
   -h, --help           Show this help message
 
+Log filters (use with 'logs' command):
+  --access             Only tail access.log
+  --debug              Only tail debug.log
+  --server             Only tail server.log
+  --zlog               Only tail zlog.log
+
 Examples:
-  php app.php                     Start with defaults
-  php app.php start -p 9501 -d   Start daemonized on port 9501
-  php app.php stop               Stop the running server
-  php app.php status             Check if server is running
+  php app.php                        Start with defaults
+  php app.php start -p 9501 -d      Start daemonized on port 9501
+  php app.php stop                   Stop the default (port 8080) server
+  php app.php stop -p 9501          Stop the server on port 9501
+  php app.php restart -p 9501       Restart on port 9501
+  php app.php status                 Check if default server is running
+  php app.php status -p 9501        Check server on port 9501
+  php app.php logs                   Tail all log files
+  php app.php logs --access          Tail only access log
+  php app.php logs --access --debug  Tail access + debug logs
+
+PID files: /tmp/zealphp/zealphp_{port}.pid (one per port, supports multiple apps)
 
 HELP;
     }
@@ -937,8 +1110,17 @@ HELP;
             // Pass 'log_level' => 0 in $app->run() settings to restore full debug output.
             'log_level' => 4,  // 0=DEBUG 1=TRACE 2=INFO 3=NOTICE 4=WARNING 5=ERROR 6=NONE
         ];
-        // elog("Initializing ZealPHP server at http://{$this->host}:{$this->port}");
-        // WebSocket\Server extends HTTP\Server — all HTTP routes still work
+        $pidFile = $settings['pid_file'] ?? $default_settings['pid_file'];
+        if (file_exists($pidFile)) {
+            $existingPid = (int)trim(file_get_contents($pidFile));
+            if ($existingPid > 0 && @posix_kill($existingPid, 0)) {
+                echo "ZealPHP is already running (pid {$existingPid}, port {$this->port})\n";
+                echo "Use 'php app.php stop' to stop, or 'php app.php restart' to restart\n";
+                exit(0);
+            }
+            @unlink($pidFile);
+        }
+
         self::$server = $server = new \OpenSwoole\WebSocket\Server($this->host, $this->port);
         if ($settings == null){
             $effective_settings = $default_settings;
@@ -1138,86 +1320,51 @@ HELP;
 
         $server->on("request",new $SessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) use ($server) {
             $g = G::instance();
-            $g->status = 200; //Unless changed by the handler
-            // $_GET alternative
+            static $serverSoftware = null;
+            if ($serverSoftware === null) {
+                $serverSoftware = 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion();
+            }
+
+            $g->status = 200;
             $g->get = $request->get ?? [];
-            // $_POST alternative
             $g->post = $request->post ?? [];
-
-            //$_REQUEST alternative
-            $g->request = array_merge($g->get, $g->post);
-
-            // $_COOKIE alternative
+            $g->request = $g->get + $g->post;
             $g->cookie = $request->cookie ?? [];
+            $g->files = $request->files ?? [];
 
-            // $_FILES alternative
-            $g->files = [];
-            if (!empty($request->files)) {
-                $g->files = $request->files;
-            }
-
-            // $_SERVER alternative
-            $g->server = [];
-            if (!empty($request->server)) {
-                foreach ($request->server as $key => $value) {
-                    $g->server[strtoupper($key)] = $value;
-                }
-            }
-            // Headers go into $_SERVER as HTTP_ variables
-            if (!empty($request->header)) {
+            // Build $_SERVER — use array_change_key_case instead of foreach+strtoupper
+            $srv = $request->server ? array_change_key_case($request->server, CASE_UPPER) : [];
+            if ($request->header) {
                 foreach ($request->header as $key => $value) {
-                    $headerKey = 'HTTP_' . str_replace('-', '_', strtoupper($key));
-                    $g->server[$headerKey] = $value;
+                    $srv['HTTP_' . strtr(strtoupper($key), '-', '_')] = $value;
                 }
             }
+            $srv += [
+                'REQUEST_METHOD' => 'GET',
+                'REQUEST_URI' => '/',
+                'SCRIPT_NAME' => '/app.php',
+                'SERVER_NAME' => $srv['HTTP_HOST'] ?? site_host(),
+                'DOCUMENT_ROOT' => self::$cwd . '/public',
+                'PHP_SELF' => App::$default_php_self,
+                'SERVER_SOFTWARE' => $serverSoftware,
+            ];
+            $srv['SCRIPT_FILENAME'] ??= $srv['DOCUMENT_ROOT'] . $srv['PHP_SELF'];
 
-
-            // Common server vars typically set by web servers:
-            if (!isset($g->server['REQUEST_METHOD'])) {
-                $g->server['REQUEST_METHOD'] = 'GET';
+            if ($srv['REQUEST_METHOD'] === 'POST' && isset($srv['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
+                $srv['REQUEST_METHOD'] = $srv['HTTP_X_HTTP_METHOD_OVERRIDE'];
             }
-
-            // Check if X-HTTP-Method-Override header is present
-            if ($g->server['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
-                $g->server['REQUEST_METHOD'] = $g->server['HTTP_X_HTTP_METHOD_OVERRIDE'];
-            }
-
-            if (!isset($g->server['REQUEST_URI'])) {
-                $g->server['REQUEST_URI'] = '/';
-            }
-            if (!isset($g->server['SCRIPT_NAME'])) {
-                $g->server['SCRIPT_NAME'] = '/app.php';
-            }
-            if (!isset($g->server['SERVER_NAME'])) {
-                $g->server['SERVER_NAME'] = $g->server['HTTP_HOST'] ?? site_host();
-            }
-            if (!isset($g->server['DOCUMENT_ROOT'])) {
-                $g->server['DOCUMENT_ROOT'] = self::$cwd . '/public';
-            }
-            if (!isset($g->server['PHP_SELF'])) {
-                $g->server['PHP_SELF'] = App::$default_php_self;
-            }
-
-            if (!isset($g->server['SCRIPT_FILENAME'])) {
-                $g->server['SCRIPT_FILENAME'] = $g->server['DOCUMENT_ROOT'] . $g->server['PHP_SELF'];
-            }
-
-            if (!isset($g->server['SERVER_SOFTWARE'])) {
-                $g->server['SERVER_SOFTWARE'] = 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion();
-            }
+            $g->server = $srv;
 
             $serverRequest  = new \ZealPHP\HTTP\LazyServerRequest($request->parent);
 
             try {
                 $serverResponse = App::middleware()->handle($serverRequest);
-                access_log($serverResponse->getStatusCode(), strlen($serverResponse->getBody()));
-                // Streaming responses (stream(), sse(), Generator yield) call
-                // $response->parent->end() themselves — skip emit() to avoid the
-                // "http response is unavailable" warning on an already-ended response.
                 if ($response->parent->isWritable()) {
                     $response->flush();
-                    \OpenSwoole\Core\Psr\Response::emit($response->parent, $serverResponse->withHeader('X-Powered-By', 'ZealPHP + OpenSwoole'));
+                    $response->parent->header('X-Powered-By', 'ZealPHP + OpenSwoole');
+                    \OpenSwoole\Core\Psr\Response::emit($response->parent, $serverResponse);
                 }
+                access_log($serverResponse->getStatusCode(), 0);
             } catch (\Throwable|\OpenSwoole\ExitException $e) {
                 elog(jTraceEx($e), "error");
                 $response->parent->status(500);                    

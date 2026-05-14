@@ -7,13 +7,14 @@ use function ZealPHP\response_set_status;
 class Response
 {
     public \OpenSwoole\Http\Response $parent;
+    private \ZealPHP\G $g;
     public function __construct(\OpenSwoole\Http\Response $response)
     {
         $this->parent = $response;
-        $g = \ZealPHP\G::instance();
-        $g->response_headers_list = [];
-        $g->response_cookies_list = [];
-        $g->response_rawcookies_list = [];
+        $this->g = \ZealPHP\G::instance();
+        $this->g->response_headers_list = [];
+        $this->g->response_cookies_list = [];
+        $this->g->response_rawcookies_list = [];
     }
 
     // Magic method to forward method calls to the parent
@@ -58,8 +59,7 @@ class Response
     public function status(int $statusCode, string $reason = ''): bool
     {
         $this->statusCode = $statusCode;
-        $g = \ZealPHP\G::instance();
-        $g->status = $statusCode;
+        $this->g->status = $statusCode;
         return $this->parent->status($statusCode, $reason);
     }
 
@@ -73,11 +73,9 @@ class Response
     // You can override methods if necessary or add more custom methods
     public function header(string $key, string $value): bool
     {
-        $g = \ZealPHP\G::instance();
-        $g->response_headers_list[] = [$key, $value];
-        // Only auto-set 302 when no explicit status has been chosen yet
-        if (strtolower($key) === 'location' && $value && ($g->status === 200 || $g->status === null)) {
-            $g->status = 302;
+        $this->g->response_headers_list[] = [$key, $value];
+        if (strtolower($key) === 'location' && $value && ($this->g->status === 200 || $this->g->status === null)) {
+            $this->g->status = 302;
         }
         return true;
     }
@@ -91,22 +89,19 @@ class Response
      */
     public function redirect(string $url, int $status = 302): void
     {
-        $g = \ZealPHP\G::instance();
-        $g->status = $status;
-        $g->response_headers_list[] = ['Location', $url];
+        $this->g->status = $status;
+        $this->g->response_headers_list[] = ['Location', $url];
     }
 
     public function cookie(string $key, string $value = '', int $expire = 0, string $path = '/', string $domain = '', bool $secure = false, bool $httponly = false, string $samesite = '', string $priority = ''): bool
     {
-        $g = \ZealPHP\G::instance();
-        $g->response_cookies_list[] = [$key, $value, $expire, $path, $domain, $secure, $httponly, $samesite, $priority];
+        $this->g->response_cookies_list[] = [$key, $value, $expire, $path, $domain, $secure, $httponly, $samesite, $priority];
         return true;
     }
 
     public function rawCookie(string $key, string $value = '', int $expire = 0, string $path = '/', string $domain = '', bool $secure = false, bool $httponly = false, string $samesite = '', string $priority = ''): bool
     {
-        $g = \ZealPHP\G::instance();
-        $g->response_rawcookies_list[] = [$key, $value, $expire, $path, $domain, $secure, $httponly, $samesite, $priority];
+        $this->g->response_rawcookies_list[] = [$key, $value, $expire, $path, $domain, $secure, $httponly, $samesite, $priority];
         return true;
     }
 
@@ -125,8 +120,7 @@ class Response
      */
     public function stream(callable $fn): void
     {
-        $g = \ZealPHP\G::instance();
-        $g->_streaming = true;
+        $this->g->_streaming = true;
         $this->flush();
         // Guard each write: if the client disconnected, write() would return false
         // and OpenSwoole would emit ERRNO 1005 notices — return false silently instead.
@@ -169,24 +163,22 @@ class Response
 
     public function flush(): bool
     {
-        if($this->parent->isWritable()){
-            $g = \ZealPHP\G::instance();
-            foreach ($g->response_headers_list as $header) {
+        if ($this->parent->isWritable()) {
+            foreach ($this->g->response_headers_list as $header) {
                 $this->parent->header(...$header);
             }
-            foreach ($g->response_cookies_list as $cookie) {
+            foreach ($this->g->response_cookies_list as $cookie) {
                 $this->parent->cookie(...$cookie);
             }
-            foreach ($g->response_rawcookies_list as $cookie) {
+            foreach ($this->g->response_rawcookies_list as $cookie) {
                 $this->parent->rawCookie(...$cookie);
             }
-            $g->response_headers_list = [];
-            $g->response_cookies_list = [];
-            $g->response_rawcookies_list = [];
-            $g->status = null;
+            $this->g->response_headers_list = [];
+            $this->g->response_cookies_list = [];
+            $this->g->response_rawcookies_list = [];
+            $this->g->status = null;
             return true;
-        } else {
-            return false;
         }
+        return false;
     }
 }
