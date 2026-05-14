@@ -1,0 +1,162 @@
+/* /learn — layout, sidebar, lesson components, chat, notes */
+
+.learn-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 2.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+@media (max-width: 900px) {
+  .learn-layout { grid-template-columns: 1fr; padding: 1rem; }
+}
+
+/* Sidebar */
+.learn-sidebar-toggle-input { display: none; }
+.learn-sidebar-toggle-btn {
+  display: none; padding: .5rem .8rem; border: 1px solid #d6d3d1; border-radius: 6px;
+  font-size: .85rem; cursor: pointer; background: #fff; margin-bottom: .75rem;
+}
+@media (max-width: 900px) { .learn-sidebar-toggle-btn { display: inline-block; } }
+
+.learn-sidebar { position: sticky; top: 1.5rem; align-self: start; max-height: calc(100vh - 3rem); overflow-y: auto; }
+@media (max-width: 900px) {
+  .learn-sidebar { display: none; position: static; }
+  .learn-sidebar-toggle-input:checked ~ .learn-sidebar { display: block; }
+}
+.learn-sidebar-inner { padding-right: .5rem; }
+.learn-sidebar-group + .learn-sidebar-group { margin-top: 1.25rem; }
+.learn-sidebar-group-title { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: #78716c; margin: 0 0 .55rem; font-weight: 700; }
+.learn-sidebar-list { list-style: decimal; padding-left: 1.2rem; margin: 0; }
+.learn-sidebar-list li { margin: .25rem 0; font-size: .88rem; }
+.learn-sidebar-list li a { color: #1c1917; text-decoration: none; display: block; padding: .15rem .3rem; border-radius: 4px; }
+.learn-sidebar-list li a:hover { background: #f5f5f4; }
+.learn-sidebar-list li.active a { color: var(--accent, #f59e0b); font-weight: 600; background: #fffbeb; }
+
+/* Lesson header */
+.lesson-header { margin-bottom: 2rem; }
+.lesson-crumb { font-size: .78rem; color: #78716c; margin-bottom: .35rem; }
+.lesson-crumb a { color: var(--accent, #f59e0b); text-decoration: none; }
+.lesson-title { font-size: 2.25rem; font-weight: 800; letter-spacing: -.03em; line-height: 1.15; margin: 0 0 .25rem; }
+.lesson-subtitle { color: #57534e; font-size: 1.05rem; margin: 0 0 1rem; }
+.lesson-chips { display: flex; gap: .6rem; margin-top: .75rem; }
+.lesson-chip { display: inline-block; padding: .35rem .8rem; border: 1px solid #e7e5e4; border-radius: 999px; font-size: .82rem; color: #44403c; text-decoration: none; background: #fff; }
+.lesson-chip:hover { border-color: var(--accent, #f59e0b); color: var(--accent, #f59e0b); }
+.lesson-chip-next { margin-left: auto; }
+
+/* You will learn */
+.youwilllearn { background: #fffbeb; border-left: 4px solid var(--accent, #f59e0b); padding: 1rem 1.2rem; border-radius: 0 6px 6px 0; margin: 1.25rem 0; }
+.youwilllearn h3 { margin: 0 0 .5rem; font-size: .92rem; text-transform: uppercase; letter-spacing: .05em; color: #92400e; }
+.youwilllearn ul { margin: 0; padding-left: 1.25rem; }
+.youwilllearn li { margin: .25rem 0; font-size: .92rem; }
+
+/* Callout */
+.callout { margin: 1rem 0; padding: .9rem 1.1rem; border-radius: 6px; border-left: 4px solid #e7e5e4; background: #fafaf9; font-size: .92rem; }
+.callout-info { border-left-color: #2563eb; background: #eff6ff; }
+.callout-warn { border-left-color: #d97706; background: #fffbeb; }
+.callout-success { border-left-color: #059669; background: #ecfdf5; }
+.callout-deep { border-left-color: #7c3aed; background: #f5f3ff; }
+.callout-head { font-weight: 600; margin-bottom: .35rem; }
+.callout-icon { margin-right: .3rem; }
+
+/* Deep dive */
+.deepdive { margin: 1.25rem 0; border: 1px solid #e7e5e4; border-radius: 6px; padding: .75rem 1rem; background: #fff; }
+.deepdive summary { cursor: pointer; font-weight: 600; font-size: .92rem; color: #44403c; user-select: none; }
+.deepdive[open] summary { margin-bottom: .65rem; }
+.deepdive-icon { margin-right: .35rem; }
+
+/* Try it */
+.tryit { margin: 1.25rem 0; border: 2px solid var(--accent, #f59e0b); border-radius: 8px; overflow: hidden; }
+.tryit-head { padding: .55rem .9rem; background: #fffbeb; font-weight: 600; font-size: .88rem; color: #92400e; border-bottom: 1px solid #fde68a; }
+.tryit-icon { margin-right: .35rem; }
+.tryit-body { padding: 1rem; }
+
+/* Lesson body */
+.lesson-content { min-width: 0; }
+.lesson-content h2 { margin-top: 2.25rem; font-size: 1.55rem; font-weight: 700; letter-spacing: -.02em; }
+.lesson-content h3 { margin-top: 1.5rem; font-size: 1.15rem; font-weight: 700; }
+.lesson-content p { line-height: 1.65; color: #292524; }
+.lesson-content code { background: #f5f5f4; padding: .1rem .35rem; border-radius: 3px; font-size: .92em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.lesson-content pre { background: #1c1917; color: #f5f5f4; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: .85rem; }
+.lesson-content pre code { background: transparent; padding: 0; color: inherit; }
+
+/* Notes app */
+.notes-app { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+.notes-list { display: flex; flex-direction: column; gap: .75rem; }
+.note { border: 1px solid #e7e5e4; border-radius: 6px; padding: .85rem 1rem; background: #fff; }
+.note-title { margin: 0 0 .35rem; font-size: 1rem; font-weight: 600; }
+.note-body { margin: 0; color: #44403c; font-size: .92rem; white-space: pre-wrap; }
+.note-meta { font-size: .72rem; color: #78716c; margin-top: .5rem; display: flex; gap: .5rem; align-items: center; }
+.note-meta button { background: transparent; border: 1px solid #e7e5e4; color: #b91c1c; padding: .15rem .55rem; border-radius: 4px; font-size: .72rem; cursor: pointer; }
+.note-meta button:hover { background: #fef2f2; border-color: #fecaca; }
+
+.note-form { display: grid; gap: .55rem; margin: 0 0 1rem; }
+.note-form input, .note-form textarea {
+  font: inherit; padding: .55rem .7rem; border: 1px solid #d6d3d1; border-radius: 6px; background: #fff;
+}
+.note-form textarea { min-height: 80px; resize: vertical; }
+.note-form button { padding: .55rem 1rem; border: 0; border-radius: 6px; background: var(--accent, #f59e0b); color: #fff; font-weight: 600; cursor: pointer; }
+
+/* Auth */
+.auth-card { max-width: 420px; margin: 1.5rem 0; padding: 1.5rem; border: 1px solid #e7e5e4; border-radius: 8px; background: #fff; }
+.auth-card h2 { margin: 0 0 .25rem; font-size: 1.25rem; }
+.auth-card p { color: #78716c; margin: 0 0 1rem; font-size: .9rem; }
+.auth-card form { display: grid; gap: .55rem; }
+.auth-card input { padding: .55rem .7rem; border: 1px solid #d6d3d1; border-radius: 6px; font: inherit; }
+.auth-card button { padding: .55rem 1rem; border: 0; border-radius: 6px; background: var(--accent, #f59e0b); color: #fff; font-weight: 600; cursor: pointer; }
+.auth-card .auth-toggle { background: transparent; color: var(--accent, #f59e0b); border: 1px solid var(--accent, #f59e0b); }
+.auth-error { color: #b91c1c; font-size: .85rem; margin-top: .5rem; }
+
+/* Chat */
+.chat { display: grid; grid-template-columns: 40% 60%; gap: 1rem; align-items: start; }
+@media (max-width: 760px) { .chat { grid-template-columns: 1fr; } }
+.chat-box { border: 1px solid #e7e5e4; border-radius: 8px; display: flex; flex-direction: column; background: #fff; height: 540px; }
+.chat-head { padding: .65rem 1rem; border-bottom: 1px solid #f5f5f4; display: flex; align-items: center; gap: .5rem; font-size: .85rem; }
+.chat-mode { font-size: .7rem; padding: .15rem .5rem; border-radius: 999px; background: #f5f5f4; color: #57534e; }
+.chat-new { margin-left: auto; font-size: .72rem; padding: .2rem .6rem; border: 1px solid #d6d3d1; background: #fff; border-radius: 4px; cursor: pointer; }
+.chat-new:hover { background: #f5f5f4; }
+.chat-history, .chat-messages { padding: 1rem; display: flex; flex-direction: column; gap: .75rem; }
+.chat-history { border-bottom: 1px dashed #e7e5e4; }
+.chat-messages { flex: 1; overflow-y: auto; }
+.chat-msg { max-width: 88%; }
+.chat-msg.user { align-self: flex-end; }
+.chat-msg.assistant { align-self: flex-start; }
+.chat-bubble { padding: .65rem .9rem; border-radius: 12px; font-size: .92rem; line-height: 1.55; }
+.chat-msg.user .chat-bubble { background: var(--accent, #f59e0b); color: #fff; border-bottom-right-radius: 4px; }
+.chat-msg.assistant .chat-bubble { background: #f5f5f4; color: #1c1917; border-bottom-left-radius: 4px; }
+.chat-item { margin: .35rem 0; }
+.chat-item.text p { margin: .25rem 0; }
+.chat-item.tool { border: 1px solid #e7e5e4; border-radius: 6px; padding: .55rem .7rem; background: #fff; font-size: .82rem; }
+.chat-item.tool[data-status="running"] .tool-status::before { content: "…"; animation: chat-pulse 1.2s infinite; }
+.chat-item.tool[data-status="ok"] { border-color: #bbf7d0; background: #f0fdf4; }
+.chat-item.tool[data-status="error"] { border-color: #fecaca; background: #fef2f2; }
+.tool-head { display: flex; align-items: center; gap: .5rem; }
+.tool-name { font-family: ui-monospace, monospace; font-weight: 600; }
+.tool-status { margin-left: auto; font-size: .7rem; color: #78716c; }
+.tool-detail { margin-top: .4rem; }
+.tool-detail summary { cursor: pointer; font-size: .72rem; color: #57534e; }
+.tool-args, .tool-result { margin: .35rem 0 0; padding: .35rem .55rem; background: #fafaf9; border-radius: 4px; font-size: .72rem; white-space: pre-wrap; word-break: break-all; }
+
+@keyframes chat-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+.chat-form { display: flex; gap: .5rem; padding: .65rem; border-top: 1px solid #f5f5f4; }
+.chat-form input { flex: 1; padding: .55rem .7rem; border: 1px solid #d6d3d1; border-radius: 6px; font: inherit; }
+.chat-form button { padding: .55rem 1rem; border: 0; border-radius: 6px; background: var(--accent, #f59e0b); color: #fff; font-weight: 600; cursor: pointer; }
+.chat-form button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Render-method demos */
+.render-demo { margin: .75rem 0; padding: .8rem 1rem; background: #fafaf9; border-radius: 6px; border: 1px solid #e7e5e4; }
+.render-demo h4 { margin: 0 0 .55rem; font-size: .85rem; }
+.render-demo-row { display: flex; gap: .75rem; padding: .4rem .6rem; background: #fff; border-radius: 4px; margin: .35rem 0; font-family: ui-monospace, monospace; font-size: .8rem; align-items: center; }
+.render-demo-row strong { font-family: inherit; }
+.render-demo-row time { color: #78716c; }
+
+/* Counter button (Lesson 7 try it) */
+.counter-btn { padding: .55rem 1rem; border: 1px solid var(--accent, #f59e0b); background: #fff; color: var(--accent, #f59e0b); border-radius: 6px; font-weight: 600; cursor: pointer; font-size: .92rem; }
+.counter-btn:hover { background: #fffbeb; }
+.counter-btn strong { color: #1c1917; font-size: 1.1em; }
+
+/* Empty states */
+.notes-empty, .chat-empty { color: #78716c; font-style: italic; font-size: .9rem; }
