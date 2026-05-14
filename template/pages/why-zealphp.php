@@ -49,7 +49,7 @@
             Drop <code>.php</code> files in <code>public/</code> and they route automatically — just like Apache.
             <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>echo</code>
             all work unchanged via uopz. Drop files in <code>api/</code> and they become REST endpoints.
-            WordPress runs unmodified through the CGI worker. Migrate at your own pace — file by file, feature by feature.
+            Many existing PHP apps — including WordPress sites — run unchanged through the CGI worker bridge. Migrate at your own pace — file by file, feature by feature.
           </p>
         </div>
         <div style="background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1.25rem">
@@ -147,6 +147,16 @@
     </div>
 
     <div style="margin-top:2.5rem">
+      <h2 id="vs-octane" style="font-size:1.3rem;margin-bottom:1rem;color:#fff">ZealPHP vs Laravel Octane</h2>
+      <p style="color:var(--text-light);font-size:.88rem;line-height:1.6;margin-bottom:1rem">Two different problems:</p>
+      <ul style="color:var(--text-light);font-size:.88rem;line-height:1.6;padding-left:1.25rem;margin-bottom:1rem">
+        <li style="margin-bottom:.5rem"><strong style="color:#fff">Laravel Octane</strong> accelerates an existing Laravel application by serving it from a long-running Swoole / RoadRunner / FrankenPHP worker. If you're on Laravel and want it faster, use Octane.</li>
+        <li><strong style="color:#fff">ZealPHP</strong> is a framework-agnostic layer over OpenSwoole. Routing, middleware, WebSocket, SSE, shared memory, timers, and the legacy PHP bridge are exposed as first-class primitives — no Laravel kernel in between.</li>
+      </ul>
+      <p style="color:var(--text-light);font-size:.88rem;line-height:1.6">If you have a Laravel app, Octane is the right tool. If you're starting fresh, migrating non-Laravel PHP, or need lower-level coroutine primitives, ZealPHP is built for that.</p>
+    </div>
+
+    <div style="margin-top:2.5rem">
       <h2 style="font-size:1.3rem;margin-bottom:1rem;color:#fff">The migration ladder</h2>
       <p style="color:var(--text-light);font-size:.88rem;line-height:1.6;margin-bottom:1rem">
         You don't have to learn a framework to start. Drop files in a folder. Upgrade when you need to.
@@ -205,9 +215,16 @@
     <div style="margin-top:2.5rem">
       <h2 style="font-size:1.3rem;margin-bottom:1rem;color:#fff">Benchmarks</h2>
       <p style="color:var(--text-light);font-size:.88rem;line-height:1.6">
-        All benchmarks run with full middleware stack (CORS + ETag + sessions + PSR-7 routing),
-        4 workers, <code>ab -n 50000 -c 200 -k</code>. Same machine, same conditions.
+        Numbers below are from one benchmark setup on a single machine. Real-world performance depends on payload size, I/O, OS limits, and tuning. Reproduce them yourself before you trust them.
       </p>
+      <div class="bench-method" style="margin-top:1rem">
+        <strong>Method</strong> &nbsp;|&nbsp;
+        4 workers, full middleware (CORS + ETag + sessions + PSR-7 routing), <code style="background:rgba(255,255,255,.05);padding:.1rem .25rem;border-radius:3px">ab -n 50000 -c 200 -k</code>
+        &nbsp;|&nbsp;
+        <a href="https://github.com/sibidharan/zealphp/blob/master/PERF.md" target="_blank" rel="noopener">PERF.md</a>
+        &nbsp;|&nbsp;
+        <a href="https://github.com/sibidharan/zealphp/blob/master/scripts/bench_vs_express.sh" target="_blank" rel="noopener">reproduce locally</a>
+      </div>
       <div class="bench" style="margin-top:1rem">
         <div class="bench-stat"><div class="num">95k</div><div class="label">req/s text</div></div>
         <div class="bench-stat"><div class="num">90k</div><div class="label">req/s JSON</div></div>

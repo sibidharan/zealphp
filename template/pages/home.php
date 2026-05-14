@@ -12,7 +12,7 @@ $siteUrl = site_url();
     <p style="font-size:1.4rem;color:#fef3c7;font-weight:600;margin:.5rem auto .75rem;position:relative">
       The PHP Runtime for AI Web Apps</p>
     <p>Stream AI responses in 5 lines. WebSocket, SSE, shared memory, task workers —<br>
-       one server, one process. Go-level performance, PHP simplicity.</p>
+       one server, one process. Coroutine-native concurrency with PHP's developer experience.</p>
     <p style="font-size:.95rem;color:#94a3b8;margin-top:.25rem">Upgrade your existing PHP codebase to async — start without rewriting, migrate at your own pace.</p>
     <div class="cta">
       <a href="/getting-started" class="btn btn-primary">Get Started →</a>
@@ -73,7 +73,14 @@ $siteUrl = site_url();
       </div>
     </div>
 
-    <div class="bench-note">With full middleware stack. 4 workers.</div>
+    <div class="bench-method">
+      <strong>Method</strong> &nbsp;|&nbsp;
+      4 workers, full middleware stack, <code style="background:rgba(255,255,255,.05);padding:.1rem .25rem;border-radius:3px">ab -n 50000 -c 200 -k</code>, same machine, no DB
+      &nbsp;|&nbsp;
+      <a href="https://github.com/sibidharan/zealphp/blob/master/PERF.md" target="_blank" rel="noopener">PERF.md</a>
+      &nbsp;|&nbsp;
+      <a href="https://github.com/sibidharan/zealphp/blob/master/scripts/bench_vs_express.sh" target="_blank" rel="noopener">reproduce locally</a>
+    </div>
     <div class="bench">
       <div class="bench-stat"><div class="num">95k</div><div class="label">req/s text</div></div>
       <div class="bench-stat"><div class="num">90k</div><div class="label">req/s JSON</div></div>
@@ -123,21 +130,21 @@ $siteUrl = site_url();
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
           <td style="padding:.3rem .6rem;color:#64748b">Slim 4</td>
-          <td colspan="3" style="padding:.3rem .6rem;text-align:right;color:#10b981;font-weight:600;font-size:.75rem">~4k — 22x slower</td>
+          <td colspan="3" style="padding:.3rem .6rem;text-align:right;color:#94a3b8;font-weight:500;font-size:.75rem">~4k req/s</td>
         </tr>
         <tr style="border-bottom:1px solid rgba(255,255,255,.06)">
           <td style="padding:.3rem .6rem;color:#64748b">Symfony 7</td>
-          <td colspan="3" style="padding:.3rem .6rem;text-align:right;color:#10b981;font-weight:600;font-size:.75rem">~2k — 45x slower</td>
+          <td colspan="3" style="padding:.3rem .6rem;text-align:right;color:#94a3b8;font-weight:500;font-size:.75rem">~2k req/s</td>
         </tr>
         <tr>
           <td style="padding:.3rem .6rem;color:#64748b">Laravel 11</td>
-          <td colspan="3" style="padding:.3rem .6rem;text-align:right;color:#10b981;font-weight:600;font-size:.75rem">~500 — 180x slower</td>
+          <td colspan="3" style="padding:.3rem .6rem;text-align:right;color:#94a3b8;font-weight:500;font-size:.75rem">~500 req/s</td>
         </tr>
       </table>
       <p style="text-align:center;color:#64748b;font-size:.7rem;margin-top:.75rem">
-        Same machine, 4 workers, <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px;color:#94a3b8">ab -n 50000 -c 200 -k</code>.
-        ZealPHP beats Express on text and templates — Express wins on JSON (V8 JSON.stringify).<br>
-        ZealPHP needs zero npm packages. Express needs cors + ejs + express-session + session-file-store + body-parser.
+        Methodology: same machine, 4 workers per server, warmed-up, <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px;color:#94a3b8">ab -n 50000 -c 200 -k</code>.
+        On this workload, ZealPHP outperforms Express on text and template responses; Express comes out ahead on JSON (V8 JSON.stringify is hard to beat).<br>
+        ZealPHP needs no npm packages here. Express needs cors + ejs + express-session + session-file-store + body-parser. Your results will vary with payload size, I/O, and tuning.
       </p>
       <div style="margin-top:1rem;text-align:center">
         <p style="color:#94a3b8;font-size:.75rem;margin-bottom:.5rem">Don't trust our numbers — run it yourself:</p>
@@ -398,8 +405,8 @@ function chatSourceTab(btn, id) {
     </div>
 
     <div class="bold-claim">
-      <h3>Go is fast. ZealPHP is fast AND expressive.</h3>
-      <p>90k req/s on 4 workers. But you also get reflection-based injection, auto-serialization, and zero boilerplate.</p>
+      <h3>Expressive PHP with coroutine-grade concurrency</h3>
+      <p>~90k req/s in our 4-worker JSON benchmark, with reflection-based injection, auto-serialization, and no boilerplate. Numbers vary by workload — see methodology below.</p>
       <div class="code-compare">
         <div class="code-compare-panel">
           <div class="compare-label">ZealPHP — return anything</div>
@@ -427,8 +434,8 @@ function chatSourceTab(btn, id) {
     </div>
 
     <div class="bold-claim">
-      <h3>FastAPI can't hold 10k concurrent connections</h3>
-      <p>ZealPHP's multi-process workers + coroutines handle C1000K. FastAPI's single-process async struggles past a few thousand.</p>
+      <h3>Multi-process workers, coroutines per worker</h3>
+      <p>ZealPHP inherits OpenSwoole's architecture: <code>N</code> worker processes, each running thousands of coroutines on a single reactor loop. <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> is the runtime; ZealPHP is the framework layer. Real connection counts depend on workload, OS limits, and tuning — measure for your case.</p>
       <div class="code-compare">
         <div class="code-compare-panel">
           <div class="compare-label">ZealPHP — true parallelism</div>
@@ -467,7 +474,7 @@ redis_client.set(key, json.dumps(data))</code></pre>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-top:2rem">
       <div style="background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1.5rem">
-        <h3 style="color:var(--danger);font-size:1rem;margin-bottom:1rem">Before — 6 services</h3>
+        <h3 style="color:var(--danger);font-size:1rem;margin-bottom:1rem">Before — several runtime services</h3>
         <ul style="list-style:none;padding:0;margin:0;font-size:.85rem;color:var(--text-light)">
           <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Nginx / Apache</li>
           <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">PHP-FPM (cold start every request)</li>
@@ -488,8 +495,9 @@ redis_client.set(key, json.dumps(data))</code></pre>
           <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Shared memory across workers</li>
           <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Task workers (no cron/supervisor)</li>
           <li style="padding:.35rem 0;border-bottom:1px solid var(--border-dark)">Persistent connections, no cold starts</li>
-          <li style="padding:.35rem 0">WordPress runs unmodified</li>
+          <li style="padding:.35rem 0">Many WordPress sites run via the CGI worker bridge — see the <a href="https://github.com/sibidharan/zealphp-wordpress" target="_blank" rel="noopener" style="color:var(--accent)">showcase repo</a></li>
         </ul>
+        <p style="font-size:.78rem;color:var(--text-muted);margin-top:.75rem">Depending on the app, ZealPHP can collapse several of these into a single OpenSwoole process. Not all stacks fit.</p>
       </div>
     </div>
 
@@ -501,7 +509,7 @@ redis_client.set(key, json.dumps(data))</code></pre>
           <div>
             <div style="font-weight:600;color:var(--code-text);font-size:.9rem;margin-bottom:.3rem">Drop in your entire app</div>
             <code style="font-size:.78rem;color:var(--text-light)">App::superglobals(true); $app->setFallback(fn() => App::includeFile('index.php'));</code>
-            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">WordPress, Drupal, any PHP app — runs unmodified on OpenSwoole.</div>
+            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">Most existing PHP apps — WordPress, Drupal, custom — run unchanged on OpenSwoole through the CGI worker bridge.</div>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;background:var(--code-bg);border:1px solid var(--border-dark);border-radius:var(--radius);padding:1rem 1.25rem">
@@ -533,7 +541,7 @@ redis_client.set(key, json.dumps(data))</code></pre>
           <div>
             <div style="font-weight:600;color:var(--accent);font-size:.9rem;margin-bottom:.3rem">Full coroutine mode</div>
             <code style="font-size:.78rem;color:var(--text-light)">App::superglobals(false); // thousands of concurrent requests per worker</code>
-            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">Replace superglobals with <code>G::instance()</code>. Per-coroutine isolation. Go-level concurrency.</div>
+            <div style="color:var(--text-muted);font-size:.78rem;margin-top:.25rem">Replace superglobals with <code>G::instance()</code>. Per-coroutine isolation. Each worker handles many concurrent requests without blocking.</div>
           </div>
         </div>
       </div>

@@ -10,6 +10,7 @@ $active      ??= $page;
 <?php App::render('/_head', compact('title', 'description')); ?>
 <body>
 <?php App::render('/_nav', ['active' => $active]); ?>
+<?php App::render('/components/_banner'); ?>
 <main class="page-body">
 <?php App::render("/pages/$page", compact('title', 'description', 'page', 'active')); ?>
 </main>

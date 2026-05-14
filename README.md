@@ -47,7 +47,7 @@ PHP powers 77% of the web, but its request-per-process model makes real-time, st
 - **vs PHP-FPM** — FPM is request-per-process: every request boots a fresh interpreter, opens new DB connections, and discards in-memory state. ZealPHP holds workers + shared memory between requests, so SSE/WebSocket/long-poll cost ~0 to keep open and warm caches survive request boundaries.
 - **vs Node.js** — Node's single-threaded event loop forces async-everywhere code (`await`, callbacks). ZealPHP runs PHP coroutines on top of OpenSwoole's reactor, so blocking-looking `$db->query()` calls yield under the hood — your synchronous PHP idioms still compose.
 
-**Legacy PHP bridge:** `session_start()`, `header()`, `$_GET` all work unchanged via uopz overrides. WordPress runs unmodified through the CGI worker.
+**Legacy PHP bridge:** `session_start()`, `header()`, `$_GET` all work unchanged via uopz overrides. Many WordPress sites run via the CGI worker bridge — see the [zealphp-wordpress](https://github.com/sibidharan/zealphp-wordpress) showcase for the current state and known limits.
 
 [Full comparison →](https://php.zeal.ninja/why-zealphp)
 
@@ -193,24 +193,27 @@ Now your WordPress, Drupal, or custom PHP app runs on OpenSwoole — persistent 
 
 ## Background Run
 
-Use the helper when you want ZealPHP detached from the terminal:
+Run ZealPHP detached from the terminal:
 
 ```bash
-scripts/zealphp.sh start
-scripts/zealphp.sh restart
-scripts/zealphp.sh status
-scripts/zealphp.sh logs
-scripts/zealphp.sh stop
+php app.php start -d        # daemonize
+php app.php restart
+php app.php status
+php app.php logs
+php app.php stop
 ```
 
-It writes the PID file to `/tmp/zealphp/zealphp.pid` by default, stores the
-server log in `/tmp/zealphp/server.log`, and tails `server.log`,
-`access.log`, `debug.log`, and `zlog.log` from the same directory. If a server
-is already running, the start command asks before killing and restarting it.
-`restart` stops the whole live server group, then starts it again with the same
-defaults without prompting.
+PID file lives at `/tmp/zealphp/zealphp_{port}.pid` (one per port — multiple
+apps on different ports are supported). Logs go to `/tmp/zealphp/`:
+`server.log`, `access.log`, `debug.log`, `zlog.log`. `php app.php logs` tails
+all four; add `--access`, `--debug`, `--server`, or `--zlog` to filter.
 
-Use `scripts/zealphp.sh foreground` if you want the attached mode back.
+If a server is already running on the same port, `start` prints the existing
+PID and exits cleanly instead of crashing. `restart` stops then starts using
+the same defaults. Target a specific instance with `-p PORT` on
+`stop`/`status`/`restart`.
+
+`scripts/zealphp.sh` is an optional shell wrapper around the same commands.
 
 ---
 

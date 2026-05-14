@@ -1,6 +1,6 @@
 <?php
 $title       ??= 'ZealPHP';
-$description ??= 'The PHP runtime for AI web applications. Upgrade existing PHP codebases to async — SSR streaming, WebSocket, SSE, coroutines, shared memory. One server, Go-level performance.';
+$description ??= 'The PHP runtime for AI web applications. Upgrade existing PHP codebases to async — SSR streaming, WebSocket, SSE, coroutines, shared memory. One server, coroutine-native concurrency.';
 ?>
 <head>
   <meta charset="UTF-8">

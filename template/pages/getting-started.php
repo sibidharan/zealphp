@@ -34,11 +34,12 @@
     <!-- Step nav -->
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:1.5rem 0;font-size:.82rem">
       <a href="#prereqs" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">1. Prerequisites</a>
-      <a href="#install" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">2. Install</a>
-      <a href="#scaffold" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">3. Scaffold</a>
-      <a href="#first-page" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">4. First page</a>
-      <a href="#first-route" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">5. Framework routes</a>
-      <a href="#deploy" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">6. Deploy</a>
+      <a href="#known-risks" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">2. Known risks</a>
+      <a href="#install" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">3. Install</a>
+      <a href="#scaffold" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">4. Scaffold</a>
+      <a href="#first-page" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">5. First page</a>
+      <a href="#first-route" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">6. Framework routes</a>
+      <a href="#deploy" style="padding:.4rem .8rem;background:var(--bg-alt);border:1px solid var(--border);border-radius:5px;color:var(--text);text-decoration:none">7. Deploy</a>
     </div>
 
     <h2 id="prereqs" style="margin-top:2rem">1. Prerequisites</h2>
@@ -51,7 +52,20 @@
       <tr><td><code>uv</code> (optional)</td><td>any</td><td>Only for AI agent examples (Python)</td></tr>
     </table>
 
-    <h2 id="install" style="margin-top:2.5rem">2. Install</h2>
+    <h2 id="known-risks" style="margin-top:2.5rem">2. Before you ship: known risks</h2>
+    <div class="callout warn">
+      <strong>ZealPHP runs as a long-lived process.</strong> This changes the rules from PHP-FPM:
+      <ul style="margin:.5rem 0 0;padding-left:1.25rem">
+        <li style="margin-bottom:.35rem"><strong>Global state leaks</strong> — code written for request-per-process may accidentally retain state across requests. Audit your superglobals and <code>static</code> variables.</li>
+        <li style="margin-bottom:.35rem"><strong>Coroutine safety</strong> — references to <code>G::instance()</code> must not be held across <code>yield</code> points; each coroutine has its own context.</li>
+        <li style="margin-bottom:.35rem"><strong>uopz compatibility bridge is experimental</strong> — <code>session_start()</code>, <code>header()</code>, etc. are virtualized via <a href="https://pecl.php.net/package/uopz" target="_blank" rel="noopener">uopz</a>. Edge cases exist; report them.</li>
+        <li style="margin-bottom:.35rem"><strong>Memory growth</strong> — workers stay alive between requests; profile for leaks under sustained load.</li>
+        <li><strong>API stability</strong> — v0.2.x; breaking changes possible until v1.0. Pin a version in <code>composer.json</code>.</li>
+      </ul>
+      <p style="margin:.5rem 0 0">Report issues at <a href="https://github.com/sibidharan/zealphp/issues" target="_blank" rel="noopener">GitHub Issues</a>. Security disclosures: see <a href="https://github.com/sibidharan/zealphp/blob/master/SECURITY.md" target="_blank" rel="noopener">SECURITY.md</a>.</p>
+    </div>
+
+    <h2 id="install" style="margin-top:2.5rem">3. Install</h2>
 
     <div class="callout info" style="margin-bottom:1rem">
       <strong>PHP 8.3, 8.4, or 8.5.</strong> OpenSwoole 22.1+ works on PHP 8.3 and 8.4; OpenSwoole 26.2+ (released Feb 2026) added PHP 8.5 support. If you only have one PHP version available, 8.3 is the safest default.
@@ -106,7 +120,7 @@ BASH
       Run <code>docker compose up</code> from the cloned repo to get a fully configured container.
     </div>
 
-    <h2 id="scaffold" style="margin-top:2.5rem">3. Scaffold a project</h2>
+    <h2 id="scaffold" style="margin-top:2.5rem">4. Scaffold a project</h2>
 
     <p>Three paths depending on what you're building:</p>
 
@@ -177,7 +191,7 @@ BASH
       </p>
     </div>
 
-    <h2 id="first-page" style="margin-top:2.5rem">4. Your first page — just drop a file</h2>
+    <h2 id="first-page" style="margin-top:2.5rem">5. Your first page — just drop a file</h2>
 
     <p>Create a file in <code>public/</code>. It becomes a route. No framework code needed.</p>
 
@@ -218,7 +232,7 @@ PHP
       <strong>This is how you migrate.</strong> Move your existing PHP files into <code>public/</code>. They work immediately. When you need WebSocket, streaming, or coroutines — that's when you use <code>$app->route()</code>. See <a href="/routing">Routing</a> for the full picture.
     </div>
 
-    <h2 id="first-route" style="margin-top:2.5rem">5. Framework routes — when you need more</h2>
+    <h2 id="first-route" style="margin-top:2.5rem">6. Framework routes — when you need more</h2>
 
     <p>For URL parameters, WebSocket, streaming, or middleware — use programmatic routes in <code>app.php</code>:</p>
 
@@ -272,7 +286,7 @@ PHP
       <a href="/routing">Routing</a> · <a href="/responses">Response types</a> · <a href="/coroutines">Coroutines</a> · <a href="/streaming">Streaming</a> · <a href="/ws">WebSocket</a> · <a href="/middleware">Middleware</a> · <a href="/api">File-based REST API</a>
     </div>
 
-    <h2 id="deploy" style="margin-top:2.5rem">5. Deploy</h2>
+    <h2 id="deploy" style="margin-top:2.5rem">7. Deploy</h2>
 
     <p>ZealPHP includes built-in CLI management. For production, use the bundled systemd service:</p>
 
