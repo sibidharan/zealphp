@@ -2271,6 +2271,537 @@ git commit -m "feat(learn): Lesson 9 AI Chat page layout (functional in mock mod
 
 ---
 
+## Milestone 6.5 — Chat history + ZealAPI file-based endpoints
+
+Two framework primitives still missing from the demo: **persistent chat history** (so a conversation survives page reload) and **ZealAPI file-based routing** (handlers as `api/<path>/<verb>.php` files). Combining them gives one of the strongest teaching moments in the whole tutorial.
+
+### Task 6.5.1: Add `chat_history` table + repo helpers (TDD)
+
+**Files:**
+- Modify: `route/learn.php` — add table in `learn_db_open`, add three helpers
+- Modify: `tests/Unit/LearnNotesRepoTest.php` — add three new tests
+
+- [ ] **Step 1: Add failing tests**
+
+Append to `tests/Unit/LearnNotesRepoTest.php`:
+
+```php
+    public function test_chat_history_append_and_fetch(): void
+    {
+        $items = [['type' => 'text', 'html' => '<p>hi</p>']];
+        $id = \learn_chat_history_append($this->db, $this->aliceId, 't1', 'user', $items);
+        $this->assertIsInt($id);
+        $rows = \learn_chat_history_for_thread($this->db, $this->aliceId, 't1');
+        $this->assertCount(1, $rows);
+        $this->assertSame('user', $rows[0]['role']);
+        $this->assertSame($items, json_decode($rows[0]['items_json'], true));
+    }
+
+    public function test_chat_history_user_isolation(): void
+    {
+        \learn_chat_history_append($this->db, $this->aliceId, 't1', 'user', [['type' => 'text', 'html' => 'alice']]);
+        \learn_chat_history_append($this->db, $this->bobId,   't1', 'user', [['type' => 'text', 'html' => 'bob']]);
+        $aliceRows = \learn_chat_history_for_thread($this->db, $this->aliceId, 't1');
+        $this->assertCount(1, $aliceRows);
+        $this->assertStringContainsString('alice', $aliceRows[0]['items_json']);
+    }
+
+    public function test_chat_history_thread_list(): void
+    {
+        \learn_chat_history_append($this->db, $this->aliceId, 't1', 'user', [['type' => 'text', 'html' => 'a']]);
+        \learn_chat_history_append($this->db, $this->aliceId, 't2', 'user', [['type' => 'text', 'html' => 'b']]);
+        $threads = \learn_chat_history_threads($this->db, $this->aliceId);
+        $this->assertCount(2, $threads);
+        $this->assertContains('t1', array_column($threads, 'thread_id'));
+    }
+```
+
+- [ ] **Step 2: Run tests, confirm fail**
+
+```bash
+./vendor/bin/phpunit tests/Unit/LearnNotesRepoTest.php
+```
+
+Expected: three new tests fail with `undefined function learn_chat_history_*`.
+
+- [ ] **Step 3: Add the schema row to `learn_db_open`**
+
+Inside `learn_db_open`, append after the existing `notes` table creation:
+
+```php
+$pdo->query("CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, thread_id TEXT NOT NULL, role TEXT NOT NULL, items_json TEXT NOT NULL, created_at INTEGER NOT NULL)");
+$pdo->query("CREATE INDEX IF NOT EXISTS idx_chat_user_thread_time ON chat_history(user_id, thread_id, created_at)");
+```
+
+- [ ] **Step 4: Add the three repo helpers**
+
+Add after `learn_notes_search`:
+
+```php
+if (!function_exists('learn_chat_history_append')) {
+    function learn_chat_history_append(\PDO $db, int $userId, string $threadId, string $role, array $items): int {
+        $stmt = $db->prepare('INSERT INTO chat_history (user_id, thread_id, role, items_json, created_at) VALUES (?, ?, ?, ?, ?)');
+        $stmt->execute([$userId, $threadId, $role, json_encode($items, JSON_UNESCAPED_UNICODE), time()]);
+        return (int)$db->lastInsertId();
+    }
+}
+
+if (!function_exists('learn_chat_history_for_thread')) {
+    function learn_chat_history_for_thread(\PDO $db, int $userId, string $threadId): array {
+        $stmt = $db->prepare('SELECT id, role, items_json, created_at FROM chat_history WHERE user_id = ? AND thread_id = ? ORDER BY created_at ASC, id ASC');
+        $stmt->execute([$userId, $threadId]);
+        return $stmt->fetchAll();
+    }
+}
+
+if (!function_exists('learn_chat_history_threads')) {
+    function learn_chat_history_threads(\PDO $db, int $userId, int $limit = 10): array {
+        $stmt = $db->prepare('SELECT thread_id, MAX(created_at) AS last_at, COUNT(*) AS turns FROM chat_history WHERE user_id = ? GROUP BY thread_id ORDER BY last_at DESC LIMIT ?');
+        $stmt->execute([$userId, $limit]);
+        return $stmt->fetchAll();
+    }
+}
+```
+
+- [ ] **Step 5: Run tests, confirm pass**
+
+```bash
+./vendor/bin/phpunit tests/Unit/LearnNotesRepoTest.php --testdox
+```
+
+Expected: all 10 tests pass (7 original + 3 new).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add tests/Unit/LearnNotesRepoTest.php route/learn.php
+git commit -m "feat(learn): chat_history table + repo helpers (TDD: 3 new tests pass)"
+```
+
+### Task 6.5.2: Persist user + assistant turns from chat handlers
+
+The mock chat handler builds the SSE timeline in PHP; the real chat handler proxies Python's events. Both need to capture turn data and persist on `done`.
+
+**Files:**
+- Modify: `route/learn.php` — wrap `$emit` callable in mock + real chat helpers
+
+- [ ] **Step 1: Replace `learn_chat_mock` with a version that accumulates items**
+
+Use the same SSE shape as before, but route every `$emit` through an `accumulator` that maintains an `items` array. After the final `done` event, call `learn_chat_history_append` twice (user role then assistant role).
+
+The diff is conceptually: wrap each `$emit(json, 'event')` call to also push into `$items` based on the event type. Detailed implementation:
+
+```php
+function learn_chat_mock($response, array $user, string $message, string $threadId): void {
+    $db = learn_db_open();
+    $userId = $user['user_id'];
+
+    // Persist the user turn immediately so a refresh shows it even if the assistant fails.
+    learn_chat_history_append($db, $userId, $threadId, 'user', [['type' => 'text', 'html' => '<p>' . htmlspecialchars($message) . '</p>']]);
+
+    $msgLower = strtolower($message);
+
+    $response->sse(function($emit) use ($db, $userId, $message, $msgLower, $threadId) {
+        // Accumulator-emit wrapper: forwards to the real $emit and tracks items.
+        $items = [];
+        $textBuf = '';
+        $flushText = function() use (&$items, &$textBuf) {
+            if ($textBuf !== '') { $items[] = ['type' => 'text', 'html' => $textBuf]; $textBuf = ''; }
+        };
+        $sse = function(string $data, string $event) use ($emit, &$items, &$textBuf, $flushText) {
+            $emit($data, $event);
+            $payload = json_decode($data, true) ?: [];
+            if ($event === 'token') {
+                $textBuf .= (string)($payload['token'] ?? '');
+            } elseif ($event === 'tool_call') {
+                $flushText();
+                $items[] = ['type' => 'tool', 'id' => $payload['id'] ?? '?', 'name' => $payload['name'] ?? '?', 'status' => 'running', 'args' => '', 'result' => ''];
+            } elseif ($event === 'tool_args') {
+                foreach ($items as &$it) if ($it['type'] === 'tool' && $it['id'] === ($payload['id'] ?? '')) { $it['args'] .= (string)($payload['delta'] ?? ''); break; }
+            } elseif ($event === 'tool_done') {
+                foreach ($items as &$it) if ($it['type'] === 'tool' && $it['id'] === ($payload['id'] ?? '')) { $it['status'] = $payload['status'] ?? 'ok'; $it['result'] = (string)($payload['result_preview'] ?? ''); break; }
+            }
+        };
+
+        $sse(json_encode(['thread_id' => $threadId]), 'thread');
+
+        if (preg_match('/(list|show all|what\'?s in)/i', $msgLower)) {
+            $sse(json_encode(['id' => 'm1', 'name' => 'list_notes', 'phase' => 'start']), 'tool_call');
+            usleep(120000);
+            $notes = learn_notes_list($db, $userId);
+            $sse(json_encode(['id' => 'm1', 'status' => 'ok', 'result_preview' => count($notes) . ' notes']), 'tool_done');
+            if (empty($notes)) {
+                $sse(json_encode(['token' => '<p>No notes yet. Try "create a note titled buy milk".</p>']), 'token');
+            } else {
+                $html = '<ul>' . implode('', array_map(fn($n) => '<li>' . htmlspecialchars($n['title']) . ' — id ' . (int)$n['id'] . '</li>', $notes)) . '</ul>';
+                $sse(json_encode(['token' => '<p>Here are your notes:</p>' . $html]), 'token');
+            }
+        } elseif (preg_match('/(create|add)(\s+a)?\s+note(\s+(titled|called|saying))?\s+["\']?(.+?)["\']?$/i', $message, $m)) {
+            $title = trim($m[5] ?? 'untitled');
+            $sse(json_encode(['token' => '<p>Got it, creating that note.</p>']), 'token');
+            $sse(json_encode(['id' => 'm2', 'name' => 'create_note', 'phase' => 'start']), 'tool_call');
+            $json = json_encode(['title' => $title, 'body' => '']);
+            foreach (str_split($json, 12) as $chunk) {
+                $sse(json_encode(['id' => 'm2', 'delta' => $chunk]), 'tool_args');
+                usleep(40000);
+            }
+            $newId = learn_notes_create($db, $userId, $title, '');
+            $sse(json_encode(['id' => 'm2', 'status' => $newId ? 'ok' : 'error', 'result_preview' => $newId ? "id: $newId" : 'failed']), 'tool_done');
+            $sse(json_encode([]), 'notes_changed');
+            $sse(json_encode(['token' => "<p>Created note <strong>" . htmlspecialchars($title) . "</strong>.</p>"]), 'token');
+        } elseif (preg_match('/delete\s+(?:note\s+)?["\']?(.+?)["\']?$/i', $message, $m)) {
+            $needle = trim($m[1]);
+            $notes = learn_notes_list($db, $userId);
+            $hit = null;
+            foreach ($notes as $n) if (stripos($n['title'], $needle) !== false) { $hit = $n; break; }
+            if (!$hit) {
+                $sse(json_encode(['token' => "<p>I couldn't find a note matching <em>" . htmlspecialchars($needle) . "</em>.</p>"]), 'token');
+            } else {
+                $sse(json_encode(['id' => 'm3', 'name' => 'delete_note', 'phase' => 'start']), 'tool_call');
+                learn_notes_delete($db, $userId, (int)$hit['id']);
+                $sse(json_encode(['id' => 'm3', 'status' => 'ok', 'result_preview' => 'deleted id ' . $hit['id']]), 'tool_done');
+                $sse(json_encode([]), 'notes_changed');
+                $sse(json_encode(['token' => "<p>Deleted note <strong>" . htmlspecialchars($hit['title']) . "</strong>.</p>"]), 'token');
+            }
+        } elseif (preg_match('/(search|find)\s+(.+)/i', $message, $m)) {
+            $q = trim($m[2]);
+            $sse(json_encode(['id' => 'm4', 'name' => 'search_notes', 'phase' => 'start']), 'tool_call');
+            $hits = learn_notes_search($db, $userId, $q);
+            $sse(json_encode(['id' => 'm4', 'status' => 'ok', 'result_preview' => count($hits) . ' hits']), 'tool_done');
+            if (empty($hits)) $sse(json_encode(['token' => "<p>No notes match <em>" . htmlspecialchars($q) . "</em>.</p>"]), 'token');
+            else $sse(json_encode(['token' => '<ul>' . implode('', array_map(fn($n) => '<li>' . htmlspecialchars($n['title']) . '</li>', $hits)) . '</ul>']), 'token');
+        } else {
+            $sse(json_encode(['token' => '<p>Mock mode is active — set <code>OPENAI_API_KEY</code> for the real model.</p>']), 'token');
+        }
+
+        $flushText();
+        learn_chat_history_append($db, $userId, $threadId, 'assistant', $items);
+        $emit(json_encode(['done' => true]), 'done');
+    });
+}
+```
+
+- [ ] **Step 2: Mirror the same accumulator pattern in `learn_chat_real` (M7.2)**
+
+Note: this task overlaps with M7. When you reach Task 7.2, the SSE proxy loop also accumulates items via the same `$sse` wrapper before re-emitting Python's events, then calls `learn_chat_history_append` on `done`. The structure is the same wrapper; the body of the helper reads from `proc_open` output instead of generating events directly.
+
+- [ ] **Step 3: Smoke test that history is being written**
+
+```bash
+php app.php start -p 8090 -d --pid-file /tmp/zealphp/learn_dev.pid
+sleep 2
+curl -s -c /tmp/lc.txt -o /dev/null -H "Content-Type: application/json" \
+  -d '{"username":"hist","password":"password123"}' \
+  http://127.0.0.1:8090/api/learn/register
+curl -s -b /tmp/lc.txt -N -H "Content-Type: application/json" \
+  -d '{"message":"list my notes","thread_id":"history-test"}' \
+  http://127.0.0.1:8090/api/learn/chat > /dev/null
+sqlite3 storage/learn.db "SELECT role, substr(items_json, 1, 60) FROM chat_history WHERE thread_id = 'history-test' ORDER BY id"
+php app.php stop -p 8090 --pid-file /tmp/zealphp/learn_dev.pid
+rm -f /tmp/lc.txt storage/learn.db storage/learn.db-wal storage/learn.db-shm
+```
+
+Expected: two rows — one `user`, one `assistant`, with items_json containing text + tool entries.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add route/learn.php
+git commit -m "feat(learn): persist chat turns to SQLite for both user and assistant"
+```
+
+### Task 6.5.3: Move `/api/learn/chat/status` to a ZealAPI file
+
+**Files:**
+- Create: `api/learn/chat/status.php`
+- Modify: `route/learn.php` — remove the explicit-route registration
+
+- [ ] **Step 1: Write the ZealAPI file**
+
+Write `/var/labsstorage/home/sibidharan/zealphp/api/learn/chat/status.php`:
+
+```php
+<?php
+// ZealAPI file: GET /api/learn/chat/status maps to api/learn/chat/status.php.
+// The variable name MUST match basename($file, '.php') — here: $status.
+// $this is the ZealAPI instance; we can call $this->response(), $this->json(), etc.
+${basename(__FILE__, '.php')} = function () {
+    $key = (string)(getenv('OPENAI_API_KEY') ?: '');
+    $this->response($this->json([
+        'ai_enabled' => $key !== '',
+        'mock_mode'  => $key === '',
+        'model'      => $key !== '' ? (getenv('ZEALPHP_LEARN_AI_MODEL') ?: 'gpt-4.1-mini') : 'mock-rules-v1',
+    ]), 200);
+};
+```
+
+- [ ] **Step 2: Remove the explicit route in `route/learn.php`**
+
+Find and delete this block:
+
+```php
+$app->route('/api/learn/chat/status', ['methods' => ['GET']], function() {
+    $key = (string)(getenv('OPENAI_API_KEY') ?: '');
+    header('Content-Type: application/json');
+    return [
+        'ai_enabled' => $key !== '',
+        'mock_mode'  => $key === '',
+        'model'      => $key !== '' ? (getenv('ZEALPHP_LEARN_AI_MODEL') ?: 'gpt-4.1-mini') : 'mock-rules-v1',
+    ];
+});
+```
+
+- [ ] **Step 3: Verify the endpoint still works (now resolved via ZealAPI)**
+
+```bash
+php app.php start -p 8090 -d --pid-file /tmp/zealphp/learn_dev.pid
+sleep 2
+curl -s http://127.0.0.1:8090/api/learn/chat/status | python3 -m json.tool
+php app.php stop -p 8090 --pid-file /tmp/zealphp/learn_dev.pid
+```
+
+Expected: same JSON shape as before — `ai_enabled`, `mock_mode`, `model`.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add api/learn/chat/status.php route/learn.php
+git commit -m "feat(learn): chat/status as ZealAPI file (file-based routing demo)"
+```
+
+### Task 6.5.4: ZealAPI history endpoint with `App::renderStream`
+
+**Files:**
+- Create: `api/learn/chat/history.php`
+- Create: `template/components/_chat_history_bubble.php`
+
+- [ ] **Step 1: Write the history bubble component**
+
+Write `/var/labsstorage/home/sibidharan/zealphp/template/components/_chat_history_bubble.php`:
+
+```php
+<?php
+$role  = ($role ?? 'assistant') === 'user' ? 'user' : 'assistant';
+$items = $items ?? [];
+?>
+<div class="chat-msg <?= $role ?>">
+  <div class="chat-bubble">
+    <?php foreach ($items as $item): ?>
+      <?php if (($item['type'] ?? '') === 'text'): ?>
+        <div class="chat-item text"><?= $item['html'] ?? '' ?></div>
+      <?php elseif (($item['type'] ?? '') === 'tool'): ?>
+        <div class="chat-item tool" data-id="<?= htmlspecialchars($item['id'] ?? '') ?>" data-status="<?= htmlspecialchars($item['status'] ?? 'ok') ?>">
+          <div class="tool-head">
+            <span class="tool-icon">⚙</span>
+            <span class="tool-name"><?= htmlspecialchars($item['name'] ?? '') ?></span>
+            <span class="tool-status"><?= ($item['status'] ?? '') === 'error' ? 'failed' : 'done' ?></span>
+          </div>
+          <details class="tool-detail">
+            <summary>args + result</summary>
+            <pre class="tool-args"><?= htmlspecialchars($item['args'] ?? '') ?></pre>
+            <?php if (!empty($item['result'])): ?>
+              <pre class="tool-result"><?= htmlspecialchars($item['result']) ?></pre>
+            <?php endif; ?>
+          </details>
+        </div>
+      <?php endif; ?>
+    <?php endforeach; ?>
+  </div>
+</div>
+```
+
+- [ ] **Step 2: Write the ZealAPI history file**
+
+Write `/var/labsstorage/home/sibidharan/zealphp/api/learn/chat/history.php`:
+
+```php
+<?php
+// ZealAPI file: GET /api/learn/chat/history?thread_id=XYZ
+// Streams each historical message as an HTML fragment via App::renderStream.
+
+use ZealPHP\App;
+use ZealPHP\G;
+
+require_once App::$cwd . '/route/learn.php';
+
+${basename(__FILE__, '.php')} = function () {
+    $u = learn_current_user();
+    if (!$u) {
+        $this->response($this->json(['error' => 'auth_required']), 401);
+        return;
+    }
+    $g = G::instance();
+    $threadId = (string)($g->get['thread_id'] ?? '');
+    if ($threadId === '') {
+        $this->response($this->json(['error' => 'thread_id required']), 422);
+        return;
+    }
+
+    $db = learn_db_open();
+    $rows = learn_chat_history_for_thread($db, $u['user_id'], $threadId);
+
+    header('Content-Type: text/html; charset=utf-8');
+    return (function() use ($rows) {
+        if (empty($rows)) {
+            yield '<p class="chat-empty">No history yet — start a new conversation.</p>';
+            return;
+        }
+        foreach ($rows as $row) {
+            yield from App::renderStream('/components/_chat_history_bubble', [
+                'role'  => $row['role'],
+                'items' => json_decode($row['items_json'], true) ?: [],
+            ]);
+        }
+    })();
+};
+```
+
+- [ ] **Step 3: Smoke-test the ZealAPI history endpoint**
+
+```bash
+php app.php start -p 8090 -d --pid-file /tmp/zealphp/learn_dev.pid
+sleep 2
+# Register + chat to populate history
+curl -s -c /tmp/lc.txt -o /dev/null -H "Content-Type: application/json" \
+  -d '{"username":"hist2","password":"password123"}' \
+  http://127.0.0.1:8090/api/learn/register
+curl -s -b /tmp/lc.txt -N -H "Content-Type: application/json" \
+  -d '{"message":"create a note titled buy milk","thread_id":"hh"}' \
+  http://127.0.0.1:8090/api/learn/chat > /dev/null
+
+# Unauth → 401
+curl -s -o /dev/null -w "unauth: %{http_code}\n" \
+  'http://127.0.0.1:8090/api/learn/chat/history?thread_id=hh'
+
+# Authed → HTML stream
+curl -s -b /tmp/lc.txt 'http://127.0.0.1:8090/api/learn/chat/history?thread_id=hh' | head -20
+
+php app.php stop -p 8090 --pid-file /tmp/zealphp/learn_dev.pid
+rm -f /tmp/lc.txt storage/learn.db*
+```
+
+Expected: `unauth: 401`, then HTML containing `class="chat-msg user"` and `class="chat-msg assistant"` with the tool card from the create-note turn.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add api/learn/chat/history.php template/components/_chat_history_bubble.php
+git commit -m "feat(learn): /api/learn/chat/history ZealAPI file with renderStream"
+```
+
+### Task 6.5.5: Wire chat history loader into Lesson 9
+
+**Files:**
+- Modify: `template/pages/learn/ai-chat.php`
+- Modify: `public/js/learn.js`
+
+- [ ] **Step 1: Add a history-loader div above the messages container**
+
+In `template/pages/learn/ai-chat.php`, replace the `<div id="learn-chat" class="chat-box">` block with:
+
+```php
+<div id="learn-chat" class="chat-box" data-thread-id="">
+  <div class="chat-head">
+    Notes assistant
+    <span class="chat-mode">…</span>
+    <button type="button" class="chat-new" title="Start a fresh conversation">New thread</button>
+  </div>
+  <div class="chat-history" hidden></div>
+  <div class="chat-messages"></div>
+  <form class="chat-form" autocomplete="off">
+    <input type="text" name="message" placeholder="Ask anything about your notes…" required>
+    <button type="submit">Send</button>
+  </form>
+</div>
+```
+
+- [ ] **Step 2: Add history loader logic to `learn.js`**
+
+Insert at the top of `initChat`, just after the `chatRoot` variables are declared:
+
+```javascript
+    const history  = root.querySelector('.chat-history');
+    const newBtn   = root.querySelector('.chat-new');
+    let threadId = localStorage.getItem('zealphp_learn_thread') || cryptoRandomId();
+    localStorage.setItem('zealphp_learn_thread', threadId);
+    root.dataset.threadId = threadId;
+
+    // Load history for this thread (renders into .chat-history via ZealAPI's renderStream).
+    function loadHistory() {
+      history.textContent = '';
+      history.hidden = false;
+      fetch('/api/learn/chat/history?thread_id=' + encodeURIComponent(threadId))
+        .then(r => r.ok ? r.text() : '')
+        .then(html => {
+          if (!html) { history.hidden = true; return; }
+          history.appendChild(htmlFragment(html));
+        });
+    }
+    loadHistory();
+
+    if (newBtn) newBtn.addEventListener('click', () => {
+      threadId = cryptoRandomId();
+      localStorage.setItem('zealphp_learn_thread', threadId);
+      root.dataset.threadId = threadId;
+      history.textContent = '';
+      messages.textContent = '';
+      loadHistory();
+    });
+```
+
+Also remove the duplicate `threadId` line further down (the original one that's now superseded by the block above).
+
+- [ ] **Step 3: Chrome DevTools verification**
+
+```bash
+php app.php start -p 8090 -d --pid-file /tmp/zealphp/learn_dev.pid
+sleep 2
+```
+
+1. Register `irene`/`password123` from `/learn/notes`.
+2. Navigate to `/learn/ai-chat`. Send 2-3 chat messages. Screenshot.
+3. **Reload the page (F5).** Screenshot — history should re-render with the same bubbles + tool cards.
+4. Click "New thread". Verify history clears and a new thread_id appears in localStorage.
+5. `list_console_messages` — zero errors.
+
+```bash
+php app.php stop -p 8090 --pid-file /tmp/zealphp/learn_dev.pid
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add template/pages/learn/ai-chat.php public/js/learn.js
+git commit -m "feat(learn): Lesson 9 loads chat history on mount via ZealAPI + renderStream"
+```
+
+### Task 6.5.6: Lesson 5 "Try it" panel pointing at the ZealAPI file
+
+**Files:**
+- Modify: `template/pages/learn/routing.php`
+
+When writing Lesson 5's body in M5.5, add a "Try it now" panel that explicitly demonstrates the file-based pattern by linking to `/api/learn/chat/status` (no path params needed) and showing the file contents inline.
+
+```php
+<?php App::render('/components/_tryit', ['title' => 'ZealAPI in action', 'body' => <<<HTML
+  <p>A real ZealAPI handler shipping in this codebase. URL <code>GET /api/learn/chat/status</code> maps to the file <code>api/learn/chat/status.php</code>:</p>
+  <pre><code>// api/learn/chat/status.php
+\${basename(__FILE__, '.php')} = function () {
+    \$key = (string)(getenv('OPENAI_API_KEY') ?: '');
+    \$this->response(\$this->json([
+        'ai_enabled' => \$key !== '',
+        'mock_mode'  => \$key === '',
+    ]), 200);
+};</code></pre>
+  <p><a class="lesson-chip" href="/api/learn/chat/status" target="_blank">Call /api/learn/chat/status →</a></p>
+  <p>The variable name (<code>\$status</code>) must match the file's basename. Inside the closure, <code>\$this</code> is the ZealAPI instance.</p>
+HTML]); ?>
+```
+
+Commit (handled in M5.5): `feat(learn): lesson 5 routing prose + ZealAPI Try it panel`.
+
+---
+
 ## Milestone 7 — Python agent + real-mode SSE proxy
 
 ### Task 7.1: Python notes agent
@@ -2433,6 +2964,10 @@ function learn_chat_real($response, array $user, string $message, string $thread
     $db = learn_db_open();
     $notes = learn_notes_list($db, $user['user_id']);
     $recent = array_slice(array_map(fn($n) => $n['title'], $notes), 0, 5);
+
+    // Persist the user turn immediately (mirrors learn_chat_mock — see M6.5.2).
+    learn_chat_history_append($db, $user['user_id'], $threadId, 'user', [['type' => 'text', 'html' => '<p>' . htmlspecialchars($message) . '</p>']]);
+
     $payload = [
         'message'   => $message,
         'thread_id' => $threadId,
@@ -2447,7 +2982,7 @@ function learn_chat_real($response, array $user, string $message, string $thread
     $b64 = base64_encode(json_encode($payload));
     $agentPath = (defined('ZEALPHP_ROOT') ? ZEALPHP_ROOT : __DIR__ . '/..') . '/examples/agents/notes_agent.py';
 
-    $response->sse(function($emit) use ($apiKey, $b64, $agentPath, $threadId) {
+    $response->sse(function($emit) use ($apiKey, $b64, $agentPath, $threadId, $db, $user) {
         $env = $_ENV ?? [];
         $env['OPENAI_API_KEY'] = $apiKey;
         $env['ZEALPHP_LEARN_AI_MODEL'] = (string)(getenv('ZEALPHP_LEARN_AI_MODEL') ?: 'gpt-4.1-mini');
@@ -2462,6 +2997,25 @@ function learn_chat_real($response, array $user, string $message, string $thread
         }
         fclose($pipes[0]);
         stream_set_blocking($pipes[1], false);
+
+        // Accumulator — same shape as learn_chat_mock — so the assistant turn is persisted.
+        $items = []; $textBuf = '';
+        $flush = function() use (&$items, &$textBuf) { if ($textBuf !== '') { $items[] = ['type' => 'text', 'html' => $textBuf]; $textBuf = ''; } };
+        $reemit = function(string $data, string $event) use ($emit, &$items, &$textBuf, $flush) {
+            $emit($data, $event);
+            $payload = json_decode($data, true) ?: [];
+            if ($event === 'token') {
+                $textBuf .= (string)($payload['token'] ?? '');
+            } elseif ($event === 'tool_call') {
+                $flush();
+                $items[] = ['type' => 'tool', 'id' => $payload['id'] ?? '?', 'name' => $payload['name'] ?? '?', 'status' => 'running', 'args' => '', 'result' => ''];
+            } elseif ($event === 'tool_args') {
+                foreach ($items as &$it) if ($it['type'] === 'tool' && $it['id'] === ($payload['id'] ?? '')) { $it['args'] .= (string)($payload['delta'] ?? ''); break; }
+            } elseif ($event === 'tool_done') {
+                foreach ($items as &$it) if ($it['type'] === 'tool' && $it['id'] === ($payload['id'] ?? '')) { $it['status'] = $payload['status'] ?? 'ok'; $it['result'] = (string)($payload['result_preview'] ?? ''); break; }
+            }
+        };
+
         $buffer = ''; $currentEvent = null;
         while (!feof($pipes[1])) {
             $chunk = fread($pipes[1], 4096);
@@ -2472,10 +3026,13 @@ function learn_chat_real($response, array $user, string $message, string $thread
                 $buffer = substr($buffer, $pos + 1);
                 $line = rtrim($line, "\r");
                 if (str_starts_with($line, 'event: ')) $currentEvent = trim(substr($line, 7));
-                elseif (str_starts_with($line, 'data: ')) $emit(substr($line, 6), $currentEvent ?: 'token');
+                elseif (str_starts_with($line, 'data: ')) $reemit(substr($line, 6), $currentEvent ?: 'token');
             }
         }
         fclose($pipes[1]); fclose($pipes[2]); proc_close($proc);
+
+        $flush();
+        learn_chat_history_append($db, $user['user_id'], $threadId, 'assistant', $items);
     });
 }
 ```
@@ -2992,6 +3549,8 @@ Then in this session, walk through the entire learn experience using Chrome DevT
 - [ ] **G. Notes lesson (8)** — already logged in. Add three notes. Screenshot. Delete one. Verify htmx swaps in/out without full page reload.
 
 - [ ] **H. AI Chat lesson (9), mock mode** — send "list my notes". Verify tool-card streams in, then list HTML. Send "create a note titled buy bread" — verify tool_call card with streaming args, then notes panel auto-refreshes.
+
+- [ ] **H2. Chat history persistence** — reload the AI Chat page (F5). Verify both previous chat turns reappear via the history loader (`/api/learn/chat/history?thread_id=...` ZealAPI endpoint with `App::renderStream`). Check Network tab to confirm the history request fires on mount. Click "New thread" and verify the messages clear + a fresh thread_id appears in localStorage.
 
 - [ ] **I. Async lesson (10)** — click the parallel/sequential timing buttons. Verify ms displayed.
 
