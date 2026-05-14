@@ -625,8 +625,19 @@ class App
         ], JSON_UNESCAPED_SLASHES);
 
         $env = [];
+        $allowedPrefixes = ['HTTP_', 'REQUEST_', 'SERVER_', 'SCRIPT_', 'DOCUMENT_', 'CONTENT_', 'REMOTE_', 'QUERY_', 'PATH_'];
         foreach ($g->server ?? [] as $k => $v) {
-            if (is_string($v)) $env[$k] = $v;
+            if (!is_string($v)) continue;
+            if ($k === 'HTTPS') {
+                $env[$k] = $v;
+                continue;
+            }
+            foreach ($allowedPrefixes as $prefix) {
+                if (str_starts_with($k, $prefix)) {
+                    $env[$k] = $v;
+                    break;
+                }
+            }
         }
         $env['ZEALPHP_REQUEST_CONTEXT'] = $ctx;
         $env['ZEALPHP_CWD'] = self::$cwd;

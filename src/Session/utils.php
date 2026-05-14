@@ -18,12 +18,21 @@ function zeal_session_start()
         $g->session_params['name'] = 'PHPSESSID';
     }
     if (!isset($g->session_params['cookie_params'])) {
+        $isHttps = (
+            ($g->server['HTTPS'] ?? '') === 'on' ||
+            ($g->server['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https' ||
+            ($g->server['SERVER_PORT'] ?? '') === '443'
+        );
+        $envSecure = getenv('ZEALPHP_SESSION_SECURE');
+        $secure = ($envSecure !== false) ? filter_var($envSecure, FILTER_VALIDATE_BOOLEAN) : $isHttps;
+
         $g->session_params['cookie_params'] = [
             'lifetime' => 0,
             'path' => '/',
             'domain' => '',
-            'secure' => false,
-            'httponly' => false,
+            'secure' => $secure,
+            'httponly' => true,
+            'samesite' => 'Lax',
         ];
     }
 
@@ -32,7 +41,7 @@ function zeal_session_start()
     $save_path = $g->session_params['save_path'];
     if (!isset($verified_paths[$save_path])) {
         if (!is_dir($save_path)) {
-            mkdir($save_path, 0777, true);
+            mkdir($save_path, 0700, true);
         }
         $verified_paths[$save_path] = true;
     }
@@ -44,7 +53,7 @@ function zeal_session_start()
     $session_data = [];
     $session_file = $g->session_params['save_path'] . '/sess_' . $session_id;
     if (file_exists($session_file)) {
-        $session_data = unserialize(file_get_contents($session_file));
+        $session_data = unserialize(file_get_contents($session_file), ['allowed_classes' => false]);
     }
 
     // Populate $g->session
@@ -172,7 +181,7 @@ function zeal_session_regenerate_id($delete_old_session = false)
     $old_session_id = zeal_session_id();
 
     // Generate new session ID
-    $new_session_id = uniqid('', true);
+    $new_session_id = bin2hex(random_bytes(32));
     zeal_session_id($new_session_id);
 
     // Rename session file if keeping old session data
@@ -201,7 +210,8 @@ function zeal_session_get_cookie_params()
         'path' => '/',
         'domain' => '',
         'secure' => false,
-        'httponly' => false,
+        'httponly' => true,
+        'samesite' => 'Lax',
     ];
 }
 
@@ -255,7 +265,7 @@ function zeal_session_abort()
         // Read session data from file
         $session_file = $g->session_params['save_path'] . '/sess_' . $session_id;
         if (file_exists($session_file)) {
-            $session_data = unserialize(file_get_contents($session_file));
+            $session_data = unserialize(file_get_contents($session_file), ['allowed_classes' => false]);
             $g->session = $session_data;
         } else {
             unset($g->session);
@@ -272,7 +282,7 @@ function zeal_session_encode()
 
 function zeal_session_decode($data)
 {
-    G::instance()->session = unserialize($data);
+    G::instance()->session = unserialize($data, ['allowed_classes' => false]);
 }
 
 function zeal_session_create_id($prefix = '')

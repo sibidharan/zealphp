@@ -127,7 +127,7 @@ class Cache
                 Store::del(self::TABLE, $hash);
             } elseif (crc32($row['val']) === $row['crc']) {
                 self::$hitsMem?->increment();
-                return unserialize($row['val']);
+                return unserialize($row['val'], ['allowed_classes' => false]);
             }
         }
 
@@ -301,7 +301,7 @@ class Cache
         }
 
         $serialized = substr($content, $nlPos + 1);
-        return unserialize($serialized);
+        return unserialize($serialized, ['allowed_classes' => false]);
     }
 
     private static function registerGc(int $intervalMs): void

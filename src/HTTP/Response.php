@@ -89,6 +89,19 @@ class Response
      */
     public function redirect(string $url, int $status = 302): void
     {
+        if (preg_match('#^(javascript|data|vbscript):#i', $url)) {
+            throw new \InvalidArgumentException('Unsafe redirect URL scheme');
+        }
+
+        if (preg_match('#^//#', $url)) {
+            \ZealPHP\elog('[security] Protocol-relative redirect detected: ' . $url, 'warn');
+        } elseif (isset(parse_url($url)['host'])) {
+            $requestHost = $this->g->server['HTTP_HOST'] ?? $this->g->server['SERVER_NAME'] ?? '';
+            if ($requestHost !== '' && parse_url($url, PHP_URL_HOST) !== $requestHost) {
+                \ZealPHP\elog('[security] Cross-origin redirect: ' . $url, 'warn');
+            }
+        }
+
         $this->g->status = $status;
         $this->g->response_headers_list[] = ['Location', $url];
     }

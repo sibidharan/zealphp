@@ -17,7 +17,7 @@ class FileSessionHandler implements \SessionHandlerInterface
 
         $this->savePath = $savePath ?: '/var/lib/php/sessions';
         if (!is_dir($savePath)) {
-            mkdir($savePath, 0777, true);
+            mkdir($savePath, 0700, true);
         }
         $this->savePath = $savePath;
         return true;

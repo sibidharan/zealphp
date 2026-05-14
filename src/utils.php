@@ -356,7 +356,7 @@ function prefork_request_handler($taskLogic, $wait = true)
     }
     Process::wait($wait);
     $g = G::instance();
-    $response_metadata = unserialize($worker->pop(65535));
+    $response_metadata = unserialize($worker->pop(65535), ['allowed_classes' => [\Exception::class, \Error::class, \TypeError::class, \RuntimeException::class]]);
     // elog("coprocess resposnse metadata: ".var_export($response_metadata, true));
     $worker->freeQueue();
     if($response_metadata){
