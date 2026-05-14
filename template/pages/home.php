@@ -9,7 +9,7 @@ $siteUrl = site_url();
 <section class="hero">
   <div class="container">
     <h1>Zeal<span>PHP</span></h1>
-    <p style="font-size:1.4rem;color:#e0e7ff;font-weight:600;margin:.5rem auto .75rem;position:relative">
+    <p style="font-size:1.4rem;color:#fef3c7;font-weight:600;margin:.5rem auto .75rem;position:relative">
       The PHP Runtime for AI Web Apps</p>
     <p>Stream AI responses in 5 lines. WebSocket, SSE, shared memory, task workers —<br>
        one server, one process. Go-level performance, PHP simplicity.</p>
@@ -468,7 +468,7 @@ redis_client.set(key, json.dumps(data))</code></pre>
       <div class="qs-block">
         <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project:^0.1.1 my-app</span><button class="qs-copy" data-copy="composer create-project sibidharan/zealphp-project:^0.1.1 my-app">copy</button></div>
         <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd my-app && php app.php</span><button class="qs-copy" data-copy="cd my-app && php app.php">copy</button></div>
-        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">Server running at <code style="color:#818cf8">http://localhost:8080</code></span></div>
+        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">Server running at <code style="color:#fbbf24">http://localhost:8080</code></span></div>
       </div>
       <div class="qs-note">Includes CLAUDE.md for AI-assisted development. Restart with <code>php app.php</code> after editing routes.</div>
     </div>
@@ -477,7 +477,7 @@ redis_client.set(key, json.dumps(data))</code></pre>
       <div class="qs-block">
         <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> git clone https://github.com/sibidharan/zealphp.git</span><button class="qs-copy" data-copy="git clone https://github.com/sibidharan/zealphp.git">copy</button></div>
         <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd zealphp && composer install && php app.php</span><button class="qs-copy" data-copy="cd zealphp && composer install && php app.php">copy</button></div>
-        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">This very site, running locally at <code style="color:#818cf8">http://localhost:8080</code></span></div>
+        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">This very site, running locally at <code style="color:#fbbf24">http://localhost:8080</code></span></div>
       </div>
       <div class="qs-note">The framework repo IS the OSS website — every page is a live, working example of a feature.</div>
     </div>
@@ -487,7 +487,7 @@ redis_client.set(key, json.dumps(data))</code></pre>
         <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> git clone https://github.com/sibidharan/zealphp-wordpress.git</span><button class="qs-copy" data-copy="git clone https://github.com/sibidharan/zealphp-wordpress.git">copy</button></div>
         <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd zealphp-wordpress && composer install</span><button class="qs-copy" data-copy="cd zealphp-wordpress && composer install">copy</button></div>
         <div class="qs-line"><span class="qs-num">3</span><span class="qs-cmd"><span class="qs-prompt">$</span> php app.php</span><button class="qs-copy" data-copy="php app.php">copy</button></div>
-        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">WordPress at <code style="color:#818cf8">http://localhost:9501</code> — admin, login, REST API all working</span></div>
+        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">WordPress at <code style="color:#fbbf24">http://localhost:9501</code> — admin, login, REST API all working</span></div>
       </div>
       <div class="qs-note">Zero WordPress modifications. CGI worker provides Apache mod_php compatibility. See <a href="/legacy-apps">Legacy Apps</a>.</div>
     </div>
@@ -728,7 +728,7 @@ document.addEventListener('click', function(e) {
     <div class="qs-block" style="max-width:600px;margin:0 auto 1.5rem;text-align:left">
       <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project my-app</span></div>
       <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd my-app && php app.php</span></div>
-      <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">Server running at <code style="color:#818cf8">http://localhost:8080</code></span></div>
+      <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">Server running at <code style="color:#fbbf24">http://localhost:8080</code></span></div>
     </div>
     <a href="/getting-started" class="btn btn-primary" style="font-size:1rem;padding:.75rem 2rem">Get started →</a>
   </div>

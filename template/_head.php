@@ -11,7 +11,7 @@ $description ??= 'The PHP runtime for AI web applications. SSR streaming, WebSoc
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <style>
-    /* Fira Code subset via Google Fonts */
-    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap');
+    /* Instrument Sans — display / heading font */
+    @import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap');
   </style>
 </head>
