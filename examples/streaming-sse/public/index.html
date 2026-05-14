@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZealPHP Streaming SSE</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #0f0f1a; color: #e0e0e0; min-height: 100vh; padding: 2rem; max-width: 700px; margin: 0 auto; }
+  h1 { color: #a0a0ff; margin-bottom: 0.5rem; }
+  p.sub { color: #888; margin-bottom: 1.5rem; }
+  .controls { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; }
+  button { padding: 0.6rem 1.2rem; border: none; border-radius: 8px; font-size: 0.95rem; cursor: pointer; }
+  #connect-btn { background: #4040aa; color: #fff; }
+  #connect-btn:hover { background: #5050cc; }
+  #connect-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  #clear-btn { background: #2a2a3a; color: #aaa; }
+  #clear-btn:hover { background: #3a3a4a; }
+  #status { font-size: 0.85rem; padding: 4px 12px; border-radius: 12px; background: #3a1a1a; color: #ff6060; align-self: center; }
+  #status.connected { background: #1a3a1a; color: #60ff60; }
+  #events { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem; min-height: 300px; max-height: 500px; overflow-y: auto; }
+  .event { padding: 0.5rem 0.75rem; border-radius: 6px; margin-bottom: 0.4rem; font-family: monospace; font-size: 0.9rem; }
+  .event.open { background: #1a3a1a; color: #60ff60; }
+  .event.tick { background: #1e2a3a; color: #c0d0ff; }
+  .event.done { background: #3a3a1a; color: #ffdd60; }
+  .event .time { color: #666; font-size: 0.8rem; margin-left: 0.5rem; }
+  a { color: #8080ff; }
+</style>
+</head>
+<body>
+
+<h1>Streaming SSE</h1>
+<p class="sub">Server-Sent Events from ZealPHP. Also try <a href="/stream">/stream</a> for generator SSR.</p>
+
+<div class="controls">
+  <button id="connect-btn">Connect</button>
+  <button id="clear-btn">Clear</button>
+  <span id="status">disconnected</span>
+</div>
+
+<div id="events"></div>
+
+<script>
+(function() {
+  var events = document.getElementById('events');
+  var connectBtn = document.getElementById('connect-btn');
+  var clearBtn = document.getElementById('clear-btn');
+  var status = document.getElementById('status');
+  var es = null;
+
+  function addEvent(text, cls) {
+    var div = document.createElement('div');
+    div.className = 'event ' + cls;
+    var label = document.createTextNode(text + ' ');
+    div.appendChild(label);
+    var timeSpan = document.createElement('span');
+    timeSpan.className = 'time';
+    timeSpan.textContent = new Date().toLocaleTimeString();
+    div.appendChild(timeSpan);
+    events.appendChild(div);
+    events.scrollTop = events.scrollHeight;
+  }
+
+  function connect() {
+    if (es) { es.close(); }
+    connectBtn.disabled = true;
+    status.textContent = 'connecting...';
+    status.className = '';
+
+    es = new EventSource('/events');
+
+    es.addEventListener('open', function() {
+      status.textContent = 'connected';
+      status.className = 'connected';
+    });
+
+    es.addEventListener('open', function(e) {
+      if (e.data) {
+        var data = JSON.parse(e.data);
+        addEvent('Connected: ' + data.message, 'open');
+      }
+    });
+
+    es.addEventListener('tick', function(e) {
+      var data = JSON.parse(e.data);
+      addEvent('Tick ' + data.tick + ': ' + data.message + ' [' + data.time + ']', 'tick');
+    });
+
+    es.addEventListener('done', function(e) {
+      var data = JSON.parse(e.data);
+      addEvent('Done: ' + data.message, 'done');
+      es.close();
+      status.textContent = 'completed';
+      status.className = '';
+      connectBtn.disabled = false;
+    });
+
+    es.onerror = function() {
+      status.textContent = 'disconnected';
+      status.className = '';
+      connectBtn.disabled = false;
+      es.close();
+      es = null;
+    };
+  }
+
+  connectBtn.addEventListener('click', connect);
+  clearBtn.addEventListener('click', function() {
+    events.textContent = '';
+  });
+})();
+</script>
+</body>
+</html>
