@@ -1,0 +1,286 @@
+ZealPHP Framework — Complete Reference
+=======================================
+
+ZealPHP is an async PHP framework built on OpenSwoole. One server handles HTTP, WebSocket, SSE, task workers, and sessions. It's the PHP runtime for AI web apps.
+
+## Installation
+
+    composer create-project sibidharan/zealphp-project:^0.1.1 my-app
+    cd my-app && php app.php
+
+Requires PHP 8.3+, OpenSwoole extension, uopz extension.
+System deps: sudo bash setup.sh
+
+## Routing
+
+Flask-style routes with reflection-based parameter injection:
+
+    $app->route('/user/{id}', function($id) {
+        return ['id' => $id, 'name' => 'Alice'];
+    });
+
+    // Multiple methods
+    $app->route('/data', ['methods' => ['GET','POST']], function($request) {
+        return $request->get['q'] ?? 'no query';
+    });
+
+Parameter injection by name — $request, $response, $app, {param} names, or defaults:
+
+    $app->route('/page/{slug}', function($slug, $request, $response, $title = 'Default') {
+        // $slug from URL, $request/$response injected, $title uses default
+    });
+
+Route types:
+- $app->route('/path', $handler) — exact match
+- $app->nsRoute('admin', '/dashboard', $handler) — namespaced: /admin/dashboard
+- $app->nsPathRoute('api', $handler) — catch-all: /api/* delegates to ZealAPI
+- $app->patternRoute('#^/files/(.+)$#', $handler) — regex
+
+## Return Values
+
+    return 404;              // HTTP status code
+    return ['key' => 'val']; // JSON (auto Content-Type)
+    return 'Hello';          // HTML string
+    return $generator;       // SSR streaming
+
+    // void + echo = output buffer captured
+    echo '<h1>Hello</h1>';
+
+## SSR Streaming (4 patterns)
+
+1. Generator yield — each yield sent immediately:
+
+    $app->route('/stream', function() {
+        return (function() {
+            yield '<html><body>';
+            yield '<h1>Loading...</h1>';
+            co::sleep(1);
+            yield '<p>Done!</p>';
+            yield '</body></html>';
+        })();
+    });
+
+2. App::renderStream() — streaming templates with param injection:
+
+    // template/users/list.php
+    <?php return function($users) {
+        yield '<ul>';
+        foreach ($users as $u) yield "<li>{$u->name}</li>";
+        yield '</ul>';
+    };
+
+    // Route — compose streams
+    $app->route('/users', fn() => (function() {
+        yield from App::renderStream('header', ['title' => 'Users']);
+        yield from App::renderStream('users/list', ['users' => $allUsers]);
+        yield from App::renderStream('footer');
+    })());
+
+3. $response->stream($fn) — fine-grained control:
+
+    $app->route('/download', function($response) {
+        $response->stream(function($write) {
+            $write('chunk 1');
+            co::sleep(1);
+            $write('chunk 2');
+        });
+    });
+
+4. $response->sse($fn) — Server-Sent Events:
+
+    $app->route('/events', function($response) {
+        $response->sse(function($emit) {
+            for ($i = 1; $i <= 5; $i++) {
+                co::sleep(1);
+                $emit(json_encode(['tick' => $i]), 'update');
+            }
+            $emit(json_encode(['done' => true]), 'complete');
+        });
+    });
+
+## Templates
+
+    App::render('page', ['title' => 'Hello']);           // echoes
+    $html = App::renderToString('page', ['title' => 'Hello']); // returns string
+    $gen = App::renderStream('page', ['title' => 'Hello']);     // returns Generator
+
+Template files in template/ directory. _master.php is the layout.
+Streaming templates return a Closure: return function($var) { yield ...; };
+
+## WebSocket
+
+    $app->ws('/chat',
+        function($server, $frame) {           // onMessage
+            $server->push($frame->fd, 'Echo: ' . $frame->data);
+        },
+        function($server, $request) {         // onOpen
+            $server->push($request->fd, 'Welcome!');
+        },
+        function($server, $fd) {              // onClose
+            echo "Client {$fd} left\n";
+        }
+    );
+
+Auto-drops PING/PONG/CONTINUATION frames. Sends CLOSE 1001 on shutdown.
+
+## Store (Cross-Worker Shared Memory)
+
+    // Before $app->run() — shared on fork
+    Store::make('sessions', 1024, [
+        'user'  => [\OpenSwoole\Table::TYPE_STRING, 64],
+        'count' => [\OpenSwoole\Table::TYPE_INT, 4],
+    ]);
+
+    // In any worker
+    Store::set('sessions', 'key123', ['user' => 'Alice', 'count' => 1]);
+    $row = Store::get('sessions', 'key123');
+    Store::incr('sessions', 'key123', 'count', 1);
+    Store::del('sessions', 'key123');
+    Store::exists('sessions', 'key123');
+    $total = Store::count('sessions');
+
+## Counter (Lock-Free Atomic Integer)
+
+    Counter::make('visitors');
+    Counter::increment('visitors');
+    Counter::decrement('visitors');
+    $val = Counter::get('visitors');
+    Counter::compareAndSet('visitors', $expected, $new);
+
+## Coroutines
+
+    use function OpenSwoole\Core\Coroutine\run;
+    use OpenSwoole\Coroutine as co;
+    use OpenSwoole\Coroutine\Channel;
+
+    // Parallel execution
+    $app->route('/parallel', function() {
+        $ch = new Channel(2);
+        go(function() use ($ch) {
+            co::sleep(1);
+            $ch->push(['api1' => 'result']);
+        });
+        go(function() use ($ch) {
+            co::sleep(1);
+            $ch->push(['api2' => 'result']);
+        });
+        return ['r1' => $ch->pop(), 'r2' => $ch->pop()]; // ~1s total, not 2s
+    });
+
+HOOK_ALL makes MySQL, Redis, file I/O, curl all async automatically.
+
+## Middleware (PSR-15)
+
+    use ZealPHP\Middleware\CorsMiddleware;
+    use ZealPHP\Middleware\ETagMiddleware;
+
+    $app->addMiddleware(new CorsMiddleware(['*'], ['GET','POST','OPTIONS']));
+    $app->addMiddleware(new ETagMiddleware());
+
+Last-added runs first (outermost). ResponseMiddleware always innermost.
+
+Built-in:
+- CorsMiddleware — CORS preflight + Access-Control-* headers
+- ETagMiddleware — W/"md5" ETag + 304 Not Modified
+- CompressionMiddleware — gzip/deflate (only if OpenSwoole http_compression disabled)
+
+## Sessions
+
+    session_start();
+    $_SESSION['user'] = 'Alice';    // works in superglobals mode
+    $g->session['user'] = 'Alice';  // works in coroutine mode
+
+File-backed, coroutine-safe. session_*() functions overridden via uopz.
+
+## ZealAPI (File-Based REST)
+
+    // api/users/get.php — becomes GET /api/users
+    $get = function() {
+        return ['users' => [...]];
+    };
+
+    // api/users/post.php — becomes POST /api/users
+    $post = function() {
+        $body = json_decode(file_get_contents('php://input'), true);
+        return ['created' => true];
+    };
+
+Variable name must match basename. Auto-bound as closure with $this = ZealAPI instance.
+
+## Timers
+
+    // Inside onWorkerStart or request handler
+    App::tick(5000, function() {
+        echo "Every 5 seconds\n";
+    });
+
+    App::after(10000, function() {
+        echo "Once after 10 seconds\n";
+    });
+
+## Task Workers
+
+    // task/backup.php
+    App::getServer()->task(['handler' => '/task/backup', 'args' => [...]]);
+
+## HTTP Features
+
+    $response->redirect('/new-url', 301);    // 301, 302, 307, 308
+    header('X-Custom: value');               // works via uopz override
+    setcookie('name', 'value', 0, '/', '', false, true, 'Lax');
+    http_response_code(201);
+
+HEAD auto-mapped to GET (body stripped). OPTIONS returns 204 + Allow header.
+OpenSwoole http_compression enabled by default (gzip).
+
+## Legacy App Support
+
+    App::superglobals(true);   // enables $_GET, $_POST, $_SESSION
+    App::setFallback(function() {
+        include 'wordpress/index.php';  // catch-all for unmatched routes
+    });
+
+CGI worker runs PHP files in separate process for true global scope isolation.
+WordPress, Drupal, any PHP app runs unmodified.
+
+## CLI
+
+    php app.php start -p 8080 -d    # daemonized
+    php app.php stop                # stop via PID file
+    php app.php status              # check running
+
+Env vars: ZEALPHP_WORKERS=16, ZEALPHP_TASK_WORKERS=4
+
+## Performance
+
+67,000 req/s on 4 workers (local quad-core). 21ms p90 latency. 0 failures.
+Multi-process workers + coroutines for true parallelism.
+Shared memory via Store — no Redis needed for simple state.
+
+## G Class (Per-Request State)
+
+    $g = G::instance();
+    $g->get          // query params
+    $g->post         // POST body
+    $g->cookie       // cookies
+    $g->session      // session data
+    $g->server       // server vars (REMOTE_ADDR, etc.)
+    $g->files        // uploaded files
+    $g->zealphp_request   // ZealPHP\HTTP\Request
+    $g->zealphp_response  // ZealPHP\HTTP\Response
+
+Coroutine mode (recommended): per-coroutine isolation via Coroutine::getContext().
+Superglobals mode: process-wide singleton proxying to $GLOBALS.
+
+## IOStreamWrapper
+
+php://input reads from $g->zealphp_request->parent->getContent() instead of PHP's built-in.
+Registered once per worker. Other php:// streams delegated to original wrapper.
+
+## Key Architecture Points
+
+- OpenSwoole WebSocket\Server (extends HTTP\Server — all HTTP routes work)
+- uopz overrides: header(), setcookie(), session_start(), etc. redirected to per-request objects
+- Route reflection cached at registration — zero per-request overhead
+- Middleware stack reversed: last-added = outermost
+- Generators work everywhere: routes, public files, API handlers, templates

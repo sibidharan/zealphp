@@ -1,6 +1,13 @@
 <?php
 use ZealPHP\App;
 use ZealPHP\G;
+use ZealPHP\Store;
+
+Store::make('chat_ratelimit', 512, [
+    'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],
+    'count' => [\OpenSwoole\Table::TYPE_INT, 4],
+    'reset' => [\OpenSwoole\Table::TYPE_INT, 4],
+]);
 
 $app = App::instance();
 
@@ -18,16 +25,47 @@ $app->route('/api/chat', ['methods' => ['POST']], function($request, $response) 
         return ['error' => 'Message required (max 2000 chars)'];
     }
 
+    $ip = $g->server['REMOTE_ADDR'] ?? 'unknown';
+    $now = time();
+    $window = 3600;
+    $limit = 60;
+
+    $existing = Store::get('chat_ratelimit', $ip);
+    if ($existing) {
+        if ($now < $existing['reset']) {
+            if ($existing['count'] >= $limit) {
+                $response->sse(function($emit) use ($threadId, $existing, $now) {
+                    $emit(json_encode(['thread_id' => $threadId]), 'thread');
+                    $mins = ceil(($existing['reset'] - $now) / 60);
+                    $emit(json_encode(['token' => "<p>Rate limit reached (60 questions/hour). Try again in ~{$mins} minutes.</p>"]), 'token');
+                    $emit(json_encode(['done' => true]), 'done');
+                });
+                return;
+            }
+            Store::incr('chat_ratelimit', $ip, 'count', 1);
+        } else {
+            Store::set('chat_ratelimit', $ip, [
+                'ip' => $ip, 'count' => 1, 'reset' => $now + $window,
+            ]);
+        }
+    } else {
+        Store::set('chat_ratelimit', $ip, [
+            'ip' => $ip, 'count' => 1, 'reset' => $now + $window,
+        ]);
+    }
+
     $apiKey = getenv('OPENAI_API_KEY');
     if (!$apiKey) {
         $response->sse(function($emit) use ($threadId, $message) {
             $emit(json_encode(['thread_id' => $threadId]), 'thread');
-            $fallback = "I'm a demo running on ZealPHP's SSE streaming. "
-                . "This response is being streamed token-by-token using `\$response->sse()`. "
-                . "To enable real AI responses, set the `OPENAI_API_KEY` environment variable. "
-                . "The backend uses the OpenAI Agents SDK with SQLiteSession for conversation threads — "
-                . "the SDK remembers your entire conversation automatically. "
-                . "ZealPHP makes this a 5-line feature, not a 50-line infrastructure project.";
+            $fallback = "<p>I'm a demo running on ZealPHP's SSE streaming. "
+                . "This response is being streamed token-by-token using "
+                . "<code>\$response->sse()</code>.</p>"
+                . "<p>To enable real AI responses, set the <code>OPENAI_API_KEY</code> "
+                . "environment variable. The backend uses the <strong>OpenAI Agents SDK</strong> "
+                . "with <code>SQLiteSession</code> for conversation threads — "
+                . "the SDK remembers your entire conversation automatically.</p>"
+                . "<p>ZealPHP makes this a 5-line feature, not a 50-line infrastructure project.</p>";
             foreach (explode(' ', $fallback) as $word) {
                 usleep(60000);
                 $emit(json_encode(['token' => $word . ' ']), 'token');

@@ -28,123 +28,35 @@ import os
 from agents import Agent, Runner, SQLiteSession, function_tool
 
 
-@function_tool
-def get_zealphp_features(topic: str) -> str:
-    """Get detailed information about a ZealPHP framework feature.
-
-    Args:
-        topic: Feature to look up (routing, streaming, websocket, store, coroutines, middleware, templates, legacy, api, performance)
-    """
-    features = {
-        "routing": (
-            "Flask-style routes: $app->route('/user/{id}', function($id) { ... }). "
-            "Parameters injected by name via reflection — zero config. "
-            "nsRoute for namespaced groups, nsPathRoute for catch-all, patternRoute for regex. "
-            "Reflection is cached at registration — zero overhead per request."
-        ),
-        "streaming": (
-            "Four streaming patterns: "
-            "1) Generator yield — return a Generator, each yield sent immediately for SSR. "
-            "2) App::renderStream() — streaming templates with parameter injection. "
-            "3) $response->stream($fn) — fine-grained control with $write() closure. "
-            "4) $response->sse($fn) — Server-Sent Events with $emit($data, $event, $id). "
-            "All coroutine-safe. Generators work in routes, public files, API handlers, and templates."
-        ),
-        "websocket": (
-            "App::ws('/path', $onMessage, $onOpen, $onClose). Built on OpenSwoole WebSocket\\Server "
-            "(backward-compatible — all HTTP routes still work). Per-worker fd tracking. "
-            "Auto-drops PING/PONG/CONTINUATION frames. Sends CLOSE 1001 on shutdown."
-        ),
-        "store": (
-            "Store — OpenSwoole\\Table wrapper for cross-worker shared memory. "
-            "Must be created before $app->run(). Store::make('name', maxRows, columns). "
-            "Store::set/get/del/exists/incr/decr/count. Lock-free, shared across all workers. "
-            "Counter — OpenSwoole\\Atomic wrapper for lock-free cross-worker integers."
-        ),
-        "coroutines": (
-            "OpenSwoole coroutines with go() + Channel. HOOK_ALL makes existing PHP libraries "
-            "async automatically — no rewrites needed. Thousands of concurrent requests per worker. "
-            "Write synchronous-looking code that runs concurrently. C1000K capable."
-        ),
-        "middleware": (
-            "PSR-15 middleware stack. Built-in: CorsMiddleware (CORS preflight + headers), "
-            "ETagMiddleware (W/\"md5\" + 304), CompressionMiddleware (gzip/deflate reference). "
-            "Last-added runs first (outermost). ResponseMiddleware always innermost."
-        ),
-        "templates": (
-            "App::render($tpl, $args) for direct output, App::renderToString() for HTML as value, "
-            "App::renderStream() returns a Generator for SSR streaming. "
-            "Streaming templates: return function($var) { yield ...; }; — params injected by name."
-        ),
-        "legacy": (
-            "Run WordPress, Drupal, or any PHP app unmodified. CGI worker (proc_open) provides "
-            "true global scope isolation. App::superglobals(true) enables $_GET/$_POST/$_SESSION. "
-            "App::setFallback() replaces Apache's .htaccess RewriteRule."
-        ),
-        "api": (
-            "ZealAPI — file-based REST. Drop a PHP file in api/ and it becomes a route. "
-            "api/users/get.php defines $get = function(...) — variable name matches filename. "
-            "Auto-bound as closure with $this set to ZealAPI instance."
-        ),
-        "performance": (
-            "67k req/s on 4 workers (local quad-core benchmark). 21ms p90 latency. 0 failures. "
-            "Multi-process workers + coroutines for true parallelism. Shared memory via Store "
-            "(no Redis needed). Reproducible — run scripts/bench.sh yourself."
-        ),
-    }
-    key = topic.lower().strip()
-    if key in features:
-        return features[key]
-    return f"Available topics: {', '.join(features.keys())}. Ask about one of these."
+REFERENCE_PATH = os.path.join(os.path.dirname(__file__), "zealphp_reference.txt")
 
 
 @function_tool
-def generate_code_example(description: str) -> str:
-    """Generate a ZealPHP code example based on a description.
+def get_zealphp_reference(query: str) -> str:
+    """Look up ZealPHP framework documentation. Returns relevant sections from the complete reference.
 
     Args:
-        description: What the code should do (e.g., 'SSE streaming endpoint', 'JSON API with auth')
+        query: What to look up (e.g., 'routing', 'sse streaming', 'websocket', 'store', 'coroutines', 'middleware', 'templates', 'legacy apps', 'api', 'performance', 'sessions', 'timers', 'cli')
     """
-    examples = {
-        "sse": '''$app->route('/events', function($response) {
-    $response->sse(function($emit) {
-        for ($i = 1; $i <= 5; $i++) {
-            co::sleep(1);
-            $emit(json_encode(['tick' => $i]), 'update');
-        }
-        $emit(json_encode(['done' => true]), 'complete');
-    });
-});''',
-        "json": '''$app->route('/api/users/{id}', function($id) {
-    $user = ['id' => $id, 'name' => 'Alice'];
-    return $user; // auto JSON serialized
-});''',
-        "stream": '''$app->route('/stream', function() {
-    return (function() {
-        yield "<html><body>";
-        yield "<h1>Streaming...</h1>";
-        co::sleep(1); // simulate async work
-        yield "<p>Done!</p>";
-        yield "</body></html>";
-    })();
-});''',
-        "websocket": '''$app->ws('/chat',
-    function($server, $frame) {
-        $server->push($frame->fd, "Echo: " . $frame->data);
-    },
-    function($server, $request) {
-        $server->push($request->fd, "Welcome!");
-    }
-);''',
-    }
-    desc_lower = description.lower()
-    for key, code in examples.items():
-        if key in desc_lower:
-            return code
-    return f'''$app->route('/example', function($request, $response) {{
-    // {description}
-    return ['status' => 'ok'];
-}});'''
+    try:
+        with open(REFERENCE_PATH, "r") as f:
+            content = f.read()
+    except FileNotFoundError:
+        return "Reference file not found."
+
+    sections = content.split("\n## ")
+    query_lower = query.lower().strip()
+
+    matched = []
+    for section in sections:
+        heading = section.split("\n")[0].lower()
+        body = section.lower()
+        if query_lower in heading or query_lower in body:
+            matched.append("## " + section if not section.startswith("ZealPHP") else section)
+
+    if matched:
+        return "\n".join(matched[:3])
+    return content[:3000]
 
 
 zealphp_assistant = Agent(
@@ -161,13 +73,23 @@ Key selling points:
 - Runs WordPress unmodified via CGI worker
 - PSR-15 middleware, reflection-based parameter injection
 
-Use get_zealphp_features() to look up specific features when asked.
-Use generate_code_example() to create code snippets when asked for examples.
+Use get_zealphp_reference() to look up features, code examples, and API details. Always call it before answering ZealPHP questions — it has the complete, accurate reference.
 
-Keep responses concise (2-4 sentences). Use markdown for code snippets.
+IMPORTANT — Output format:
+You MUST output raw HTML, NOT markdown. Your response is streamed directly into an HTML chat bubble via innerHTML.
+- Use <code> for inline code references
+- Use <pre><code> for multi-line code blocks
+- Use <p> for paragraphs (do NOT wrap your entire response in a single <p>)
+- Use <strong> for bold, <em> for italic
+- Use <ul>/<ol> with <li> for lists
+- Use <br> for line breaks within a paragraph
+- Do NOT use markdown syntax (no backticks, no #, no *, no -)
+- Do NOT wrap the entire response in a container div
+- Keep responses concise (2-4 sentences unless a code example is requested).
+
 If the question is not about ZealPHP, answer helpfully but briefly.
 This conversation is being streamed token-by-token to demonstrate ZealPHP's SSE capabilities.""",
-    tools=[get_zealphp_features, generate_code_example],
+    tools=[get_zealphp_reference],
 )
 
 
