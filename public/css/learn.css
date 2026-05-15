@@ -137,21 +137,16 @@
 .chat-new { margin-left: auto; font-size: .72rem; padding: .2rem .6rem; border: 1px solid #d6d3d1; background: #fff; border-radius: 4px; cursor: pointer; }
 .chat-new:hover { background: #f5f5f4; }
 
-/* Single scrollable conversation stream (history + live messages) */
+/* Single scrollable conversation stream */
 .chat-scroll {
   flex: 1; min-height: 0;
   overflow-y: auto; overscroll-behavior: contain;
-  display: flex; flex-direction: column;
+  padding: .75rem 1rem;
+  display: flex; flex-direction: column; gap: .6rem;
 }
-.chat-history { padding: .75rem 1rem 0; display: flex; flex-direction: column; gap: .6rem; }
+.chat-history, .chat-messages { display: flex; flex-direction: column; gap: .6rem; }
 .chat-history:empty { display: none; }
-.chat-history:not(:empty) { border-bottom: 1px dashed #e7e5e4; padding-bottom: .5rem; }
-.chat-messages {
-  padding: .75rem 1rem; display: flex; flex-direction: column; gap: .6rem;
-  flex: 1;
-}
-
-/* No spacer — messages stack from top, scroll container handles overflow */
+.chat-history:not(:empty) { border-bottom: 1px dashed #d6d3d1; padding-bottom: .6rem; }
 
 /* Bubbles */
 .chat-msg { max-width: 85%; }
