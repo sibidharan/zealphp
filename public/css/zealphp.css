@@ -622,6 +622,7 @@ pre:hover > .code-copy { opacity: 1; }
   font-family: var(--font); font-size: .88rem;
   color: #e7e5e4; display: flex; flex-direction: column;
   justify-content: flex-start;
+  height: 220px; overflow-y: auto;
 }
 .hero-demo-output .code-label {
   display: block; margin-bottom: .75rem;
