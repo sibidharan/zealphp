@@ -35,7 +35,7 @@
 
 /* ── Reset ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { scroll-behavior: smooth; scrollbar-gutter: stable; }
+html { scrollbar-gutter: stable; }
 body {
   font-family: var(--font); color: var(--text); background: var(--bg);
   line-height: 1.65;

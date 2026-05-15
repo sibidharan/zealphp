@@ -12,13 +12,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', initLearn);
-  document.addEventListener('htmx:afterSwap', (e) => {
-    initLearn();
-    const layout = document.querySelector('.learn-layout');
-    if (layout && e.detail.target.classList?.contains('learn-layout')) {
-      layout.scrollIntoView({ behavior: 'instant', block: 'start' });
-    }
-  });
+  document.addEventListener('htmx:afterSwap', initLearn);
 
   function htmlFragment(html) {
     return document.createRange().createContextualFragment(html);

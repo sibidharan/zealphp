@@ -1,6 +1,6 @@
 /* /learn — layout, sidebar, lesson components, chat, notes */
 
-/* scroll handled by JS in learn.js (htmx:afterSwap) for instant jump */
+/* scroll: global smooth removed from zealphp.css; htmx show: is now instant */
 
 .learn-layout {
   display: grid;
