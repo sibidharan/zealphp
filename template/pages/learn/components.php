@@ -117,8 +117,17 @@ App::render('/_master', ['title' =&gt; 'About', 'page' =&gt; 'about']);</code></
 HTML]); ?>
 
     <?php App::render('/components/_deepdive', [
-      'title' => 'Two more render methods (you\'ll learn them later)',
-      'body'  => '<p><code>App::render()</code> echoes directly. But sometimes you need the HTML as a string &mdash; to return it from an API, cache it, or embed it in another response. That\'s <code>App::renderToString()</code>, which you\'ll use in <a href="/learn/notes">Lesson 8 (Personal Notes)</a> for htmx fragment responses.</p><p>There\'s also <code>App::renderStream()</code> for streaming HTML chunks &mdash; you\'ll see it in <a href="/learn/ai-chat">Lesson 9 (AI Chat)</a>. For now, <code>App::render()</code> handles everything.</p>',
+      'title' => 'Preview: two more render methods',
+      'body'  => '<p>You\'ll learn these in later lessons, but you can preview them now:</p>
+<table style="width:100%;border-collapse:collapse;margin:.75rem 0;font-size:.88rem">
+  <thead><tr style="border-bottom:2px solid #e7e5e4;text-align:left"><th style="padding:.5rem">Method</th><th>Returns</th><th>Use when</th><th></th></tr></thead>
+  <tbody>
+    <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.5rem"><code>render()</code></td><td>void (echoes)</td><td>Direct output &mdash; this lesson</td><td><a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open &rarr;</a></td></tr>
+    <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.5rem"><code>renderToString()</code></td><td>string</td><td>htmx fragments &mdash; <a href="/learn/notes">Lesson 8</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-to-string" target="_blank">Open &rarr;</a></td></tr>
+    <tr><td style="padding:.5rem"><code>renderStream()</code></td><td>Generator</td><td>SSR streaming &mdash; <a href="/learn/ai-chat">Lesson 9</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-stream" target="_blank">Open &rarr;</a></td></tr>
+  </tbody>
+</table>
+<p>The streaming demo is the most visual &mdash; watch 12 rows arrive one by one over ~2 seconds. Each <code>yield</code> flushes a chunk to the browser immediately.</p>',
     ]); ?>
 
     <?php App::render('/components/_concept_check', [

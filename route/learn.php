@@ -208,13 +208,13 @@ $app->route('/api/learn/demo/render-stream', ['methods' => ['GET']], function ()
   <style>body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1c1917; } nav { margin-bottom: 1rem; font-size: .85rem; } nav a { color: #f59e0b; text-decoration: none; margin-right: 1rem; }</style>
 </head>
 <body>
-  <nav><a href="/learn/components">← Back to Lesson 4</a> · <strong>App::renderStream() demo</strong> · streaming 5 rows over ~1.25s</nav>
+  <nav><a href="/learn/components">← Back to Lesson 4</a> · <strong>App::renderStream() demo</strong> · streaming 12 rows over ~1.8s</nav>
   <section class="render-demo"><h4>Streamed rows</h4>
 HTML;
-        for ($i = 1; $i <= 5; $i++) {
-            usleep(250000);
+        for ($i = 1; $i <= 12; $i++) {
+            usleep(150000);
             yield from App::renderStream('/components/_demo_clock', [
-                'label' => "renderStream() — row {$i}",
+                'label' => "renderStream() — row {$i}/12",
                 'now'   => microtime(true),
             ]);
         }
