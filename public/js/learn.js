@@ -335,8 +335,10 @@
     inner.className = 'mermaid-viewer-inner';
     var clone = svg.cloneNode(true);
     clone.removeAttribute('style');
-    clone.setAttribute('width', svg.getBoundingClientRect().width * 1.5);
-    clone.setAttribute('height', svg.getBoundingClientRect().height * 1.5);
+    var origW = svg.getBoundingClientRect().width || parseFloat(svg.getAttribute('width')) || 400;
+    var origH = svg.getBoundingClientRect().height || parseFloat(svg.getAttribute('height')) || 300;
+    clone.setAttribute('width', origW);
+    clone.setAttribute('height', origH);
     clone.style.background = '#ffffff';
     clone.style.borderRadius = '8px';
     inner.appendChild(clone);
@@ -359,9 +361,12 @@
       inner.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
     }
 
-    var rect = clone.getBoundingClientRect();
-    tx = (window.innerWidth - rect.width) / 2;
-    ty = (window.innerHeight - rect.height) / 2;
+    var pad = 80;
+    var fitScaleX = (window.innerWidth - pad * 2) / origW;
+    var fitScaleY = (window.innerHeight - pad * 2) / origH;
+    scale = Math.min(fitScaleX, fitScaleY, 4);
+    tx = (window.innerWidth - origW * scale) / 2;
+    ty = (window.innerHeight - origH * scale) / 2;
     applyTransform();
 
     overlay.addEventListener('wheel', function (e) {
