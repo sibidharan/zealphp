@@ -81,8 +81,7 @@ class CoSessionManager
         $hasSessionParam = !$this->useOnlyCookies && isset($request->get[$sessionName]);
 
         // Lazy session: only start if client already has a session cookie/param.
-        // New sessions are started on-demand when handler first accesses $g->session
-        // via session_start() call in user code.
+        // For new visitors, use SessionStartMiddleware to eagerly start sessions.
         if ($hasSessionCookie || $hasSessionParam) {
             $sessionId = $hasSessionCookie ? $request->cookie[$sessionName] : $request->get[$sessionName];
             zeal_session_id($sessionId);

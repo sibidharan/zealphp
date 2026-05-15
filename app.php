@@ -28,6 +28,7 @@ use ZealPHP\Middleware\CorsMiddleware;
 use ZealPHP\Middleware\CompressionMiddleware;
 use ZealPHP\Middleware\ETagMiddleware;
 use ZealPHP\Middleware\RangeMiddleware;
+use ZealPHP\Middleware\SessionStartMiddleware;
 use ZealPHP\Store;
 use ZealPHP\Counter;
 
@@ -81,6 +82,7 @@ if (!$benchMode) {
     $app->addMiddleware(new CorsMiddleware());         // outermost — handles preflight, adds Allow-Origin
     $app->addMiddleware(new ETagMiddleware());         // generates ETag, returns 304 on cache hit
     $app->addMiddleware(new RangeMiddleware());       // Range / 206 Partial Content (RFC 7233)
+    $app->addMiddleware(new SessionStartMiddleware()); // eager session start for new visitors
     if ($compressionMiddleware) {
         $app->addMiddleware(new CompressionMiddleware());
     }

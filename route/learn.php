@@ -127,8 +127,7 @@ $app->route('/api/learn/demo/greeting', ['methods' => ['GET']], function () {
 
 // ── Render method demos (Lesson 4) ──────────────────────────────────
 
-$app->route('/api/learn/demo/incr', ['methods' => ['POST', 'GET']], function ($request, $response) {
-    session_start();
+$app->route('/api/learn/demo/incr', ['methods' => ['POST', 'GET']], function () {
     $g = G::instance();
     $g->session['demo_counter'] = (int) ($g->session['demo_counter'] ?? 0) + 1;
     header('Content-Type: text/html; charset=utf-8');
