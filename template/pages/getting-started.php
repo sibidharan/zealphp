@@ -387,5 +387,10 @@ BASH
       <strong>Permission denied on port 80?</strong> Use a port above 1024, or run with <code>setcap</code> / behind a reverse proxy.
     </div>
 
+    <div style="margin:2.5rem 0 0;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+      <a href="/learn" class="btn-cta">Learn by Building &rarr;</a>
+      <span style="font-size:.85rem;color:var(--text-muted)">Everything verified? Build a Notes + AI Chat app over 14 lessons &mdash; htmx, SQLite, and SSE streaming.</span>
+    </div>
+
   </div>
 </section>
