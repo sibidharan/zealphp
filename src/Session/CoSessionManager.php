@@ -69,10 +69,11 @@ class CoSessionManager
             return;
         }
 
-        if(isset($g->session) and isset($g->session['__start_time'])) {
+        // $g->session is a declared typed property with default [] — always
+        // "set". Only check for residue from a prior request in this worker.
+        if (isset($g->session['__start_time'])) {
             elog('[warn] Session leak detected');
         }
-        unset($g->session);
         $g->session = [];
         $g->_session_started = false;
 

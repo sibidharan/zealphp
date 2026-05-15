@@ -135,9 +135,8 @@ class SecurityTest extends TestCase
     {
         $response = $this->makeResponse();
         $response->redirect('/dashboard');
-        $g = \ZealPHP\G::instance();
-        $this->assertSame(302, $g->status);
-        $this->assertContains(['Location', '/dashboard'], $g->response_headers_list);
+        $this->assertSame(302, \ZealPHP\G::instance()->status);
+        $this->assertContains(['Location', '/dashboard'], $response->headersList);
     }
 
     public function testRedirectAcceptsSameOriginUrl(): void
@@ -145,8 +144,7 @@ class SecurityTest extends TestCase
         $response = $this->makeResponse();
         \ZealPHP\G::instance()->server = ['HTTP_HOST' => 'example.test'];
         $response->redirect('https://example.test/account');
-        $g = \ZealPHP\G::instance();
-        $this->assertSame(302, $g->status);
+        $this->assertSame(302, \ZealPHP\G::instance()->status);
     }
 
     public function testRedirectAcceptsCrossOriginButLogsWarning(): void
@@ -155,9 +153,8 @@ class SecurityTest extends TestCase
         $response = $this->makeResponse();
         \ZealPHP\G::instance()->server = ['HTTP_HOST' => 'example.test'];
         $response->redirect('https://oauth.provider.test/authorize');
-        $g = \ZealPHP\G::instance();
-        $this->assertSame(302, $g->status);
-        $this->assertContains(['Location', 'https://oauth.provider.test/authorize'], $g->response_headers_list);
+        $this->assertSame(302, \ZealPHP\G::instance()->status);
+        $this->assertContains(['Location', 'https://oauth.provider.test/authorize'], $response->headersList);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -172,38 +169,33 @@ class SecurityTest extends TestCase
     public function testResponseHeaderRejectsCRLFInValue(): void
     {
         $response = $this->makeResponse();
-        $g = \ZealPHP\G::instance();
         $result = @$response->header('X-Custom', "value\r\nSet-Cookie: pwned=1");
         $this->assertFalse($result, 'Response::header() should reject CRLF-containing value');
-        $this->assertEmpty($g->response_headers_list, 'No header should be added when CRLF detected');
+        $this->assertEmpty($response->headersList, 'No header should be added when CRLF detected');
     }
 
     public function testResponseHeaderRejectsNullByteInValue(): void
     {
         $response = $this->makeResponse();
-        $g = \ZealPHP\G::instance();
         $result = @$response->header('X-Custom', "value\0evil");
         $this->assertFalse($result);
-        $this->assertEmpty($g->response_headers_list);
+        $this->assertEmpty($response->headersList);
     }
 
     public function testResponseHeaderRejectsColonOrSpaceInName(): void
     {
         $response = $this->makeResponse();
-        $g = \ZealPHP\G::instance();
         $result = @$response->header("X-Foo: Bar\r\nX-Evil", 'value');
         $this->assertFalse($result);
-        $this->assertEmpty($g->response_headers_list);
+        $this->assertEmpty($response->headersList);
     }
 
     public function testHeaderOverrideRejectsCRLF(): void
     {
-        \ZealPHP\G::instance()->response_headers_list = [];
-        $this->makeResponse(); // attach Response so header() has somewhere to write
+        $response = $this->makeResponse();
         $result = @\ZealPHP\header("X-Custom: value\r\nSet-Cookie: pwned=1");
         $this->assertFalse($result, 'header() should reject CRLF in input');
-        $g = \ZealPHP\G::instance();
-        $this->assertEmpty($g->response_headers_list, 'No header should be added when CRLF detected');
+        $this->assertEmpty($response->headersList, 'No header should be added when CRLF detected');
     }
 
     public function testRedirectThrowsOnCRLFInUrl(): void
@@ -269,10 +261,10 @@ class SecurityTest extends TestCase
         $osResponse = new \OpenSwoole\Http\Response();
         $g = \ZealPHP\G::instance();
         $g->status = null;
-        $g->response_headers_list = [];
-        $g->response_cookies_list = [];
-        $g->response_rawcookies_list = [];
         $g->server = $g->server ?? [];
-        return new \ZealPHP\HTTP\Response($osResponse);
+        $response = new \ZealPHP\HTTP\Response($osResponse);
+        // header() / setcookie() shims need a Response attached to G.
+        $g->zealphp_response = $response;
+        return $response;
     }
 }

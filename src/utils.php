@@ -284,101 +284,6 @@ function log_write(string $message, string $kind = 'debug'): void
 }
 
 /**
- * Handles a request using a preforking model.
- *
- * @param callable $taskLogic The logic to be executed in the preforked process.
- * @param bool $wait Optional. Whether to wait for the task to complete. Default is true.
- */
-function prefork_request_handler($taskLogic, $wait = true)
-{
-    $worker = new Process(function ($worker) use ($taskLogic) {
-        stream_wrapper_unregister("php");
-        stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class);
-        $g = G::instance();
-        elog("prefork_request_handler enter response_header_list: ".var_export($g->response_headers_list, true));
-        try {
-            $g->response_headers_list = [];
-            $g->status = 200;
-            ob_start();
-            $taskLogic($worker);
-            $data = ob_get_clean();
-            $worker->write(empty($data) ? 'EOF' : $data);
-            $response_code = http_response_code();
-            $worker->push(serialize([
-                'status_code' => $response_code ? $response_code : 200,
-                'headers' => $g->response_headers_list,
-                'cookies' => $g->response_cookies_list,
-                'rawcookies' => $g->response_rawcookies_list,
-                'exit_code' => 0,
-                'length' => strlen($data),
-                'exited' => false,
-                'finished' => true
-            ]));
-            // elog("prefork_request_handler exit response_header_list: ".var_export($g->response_headers_list, true));
-            $worker->exit(0);
-        } catch (Throwable $e) {
-            $data = ob_get_clean();
-            $worker->write(empty($data) ? 'EOF' : $data);
-            $exit_code = $e instanceof \OpenSwoole\ExitException;
-            $response_code = http_response_code();
-            if(!$response_code){
-                $response_code = $exit_code ? 200 : 500;
-            }
-            $worker->push(serialize([
-                'status_code' => $response_code,
-                'headers' => $g->response_headers_list,
-                'cookies' => $g->response_cookies_list,
-                'rawcookies' => $g->response_rawcookies_list,
-                'exited' => $exit_code,
-                'length' => strlen($data),
-                'error' => $e
-            ]));
-            // elog("coprocess error: ".var_export($e, true));
-            // elog("prefork_request_handler exit response_header_list: ".var_export($g->response_headers_list, true));
-            $worker->exit(0);
-        }
-    }, false, SOCK_STREAM, true);
-
-    // Start the worker
-    $worker->useQueue(0, 2);
-    $worker->start();
-    $recv = $data = $worker->read();
-    #TODO: test if this logic works
-    while (strlen($recv) == 8192) {
-        $recv = $worker->read();
-        if ($recv === '' || $recv === false) {
-            break;
-        }
-        $data .= $recv;
-    }
-    if($data == 'EOF'){
-        $data   = '';
-    }
-    Process::wait($wait);
-    $g = G::instance();
-    $response_metadata = unserialize($worker->pop(65535), ['allowed_classes' => [\Exception::class, \Error::class, \TypeError::class, \RuntimeException::class]]);
-    // elog("coprocess resposnse metadata: ".var_export($response_metadata, true));
-    $worker->freeQueue();
-    if($response_metadata){
-        response_set_status($response_metadata['status_code'] ?? 200);
-        foreach($response_metadata['headers'] as $pair){
-            $g->zealphp_response->header(...$pair);
-        }
-        foreach($response_metadata['cookies'] as $pair){
-            $g->zealphp_response->cookie(...$pair);
-        }
-        foreach($response_metadata['rawcookies'] as $pair){
-            $g->zealphp_response->rawCookie(...$pair);
-        }
-        if (isset($response_metadata['exited']) and isset($response_metadata['error']) and !$response_metadata['exited'] and $response_metadata['error']) {
-            response_set_status(500);
-            throw $response_metadata['error'];
-        }
-    }
-    return $data;
-}
-
-/**
  * Executes a task logic in a separate process.
  *
  * @param callable $taskLogic The logic to be executed in the separate process.
@@ -707,8 +612,8 @@ function response_set_status(int $status)
  */
 function response_headers_list()
 {
-    $g = G::instance();
-    return $g->response_headers_list;
+    $response = G::instance()->zealphp_response;
+    return $response === null ? [] : $response->headersList;
 }
 
 /**
@@ -816,11 +721,13 @@ function header($header, $replace = true, $http_response_code = null) {
     $name = trim($parts[0]);
     $value = trim($parts[1]);
     if ($replace) {
-        $g = G::instance();
-        $g->response_headers_list = array_values(array_filter(
-            $g->response_headers_list,
-            static fn($pair) => strcasecmp($pair[0], $name) !== 0
-        ));
+        $response = G::instance()->zealphp_response;
+        if ($response !== null) {
+            $response->headersList = array_values(array_filter(
+                $response->headersList,
+                static fn($pair) => strcasecmp($pair[0], $name) !== 0
+            ));
+        }
     }
     response_add_header($name, $value);
     if ($http_response_code !== null && (int)$http_response_code > 0) {
@@ -878,13 +785,16 @@ function headers_sent(&$file = null, &$line = null) {
  */
 function header_remove(?string $name = null): void
 {
-    $g = G::instance();
-    if ($name === null) {
-        $g->response_headers_list = [];
+    $response = G::instance()->zealphp_response;
+    if ($response === null) {
         return;
     }
-    $g->response_headers_list = array_values(array_filter(
-        $g->response_headers_list,
+    if ($name === null) {
+        $response->headersList = [];
+        return;
+    }
+    $response->headersList = array_values(array_filter(
+        $response->headersList,
         static fn($pair) => strcasecmp($pair[0], $name) !== 0
     ));
 }
@@ -969,30 +879,36 @@ function getallheaders(): array
  */
 function apache_response_headers(): array
 {
-    $g = G::instance();
+    $response = G::instance()->zealphp_response;
+    if ($response === null) {
+        return [];
+    }
     $out = [];
-    foreach ($g->response_headers_list as $pair) {
+    foreach ($response->headersList as $pair) {
         $out[$pair[0]] = $pair[1];
     }
     return $out;
 }
 
 /**
- * Apache mod_php per-request env table. Stored in G; lifetime = one request.
+ * Apache mod_php per-request env table. Backed by Legacy\ApacheContext on
+ * G; lifetime = one request. Lazy — only allocated if legacy code calls
+ * apache_setenv/getenv/note.
  */
 function apache_setenv(string $variable, string $value, bool $walk_to_top = false): bool
 {
     $g = G::instance();
-    $env = $g->apache_env;
-    $env[$variable] = $value;
-    $g->apache_env = $env;
+    if ($g->apacheContext === null) {
+        $g->apacheContext = new \ZealPHP\Legacy\ApacheContext();
+    }
+    $g->apacheContext->env[$variable] = $value;
     return true;
 }
 
 function apache_getenv(string $variable, bool $walk_to_top = false)
 {
-    $g = G::instance();
-    return $g->apache_env[$variable] ?? false;
+    $ctx = G::instance()->apacheContext;
+    return $ctx === null ? false : ($ctx->env[$variable] ?? false);
 }
 
 /**
@@ -1001,11 +917,12 @@ function apache_getenv(string $variable, bool $walk_to_top = false)
 function apache_note(string $note_name, ?string $note_value = null): string
 {
     $g = G::instance();
-    $notes = $g->apache_notes;
-    $previous = (string)($notes[$note_name] ?? '');
+    $previous = (string)($g->apacheContext->notes[$note_name] ?? '');
     if ($note_value !== null) {
-        $notes[$note_name] = $note_value;
-        $g->apache_notes = $notes;
+        if ($g->apacheContext === null) {
+            $g->apacheContext = new \ZealPHP\Legacy\ApacheContext();
+        }
+        $g->apacheContext->notes[$note_name] = $note_value;
     }
     return $previous;
 }

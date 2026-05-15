@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-05-15
+
+### Changed
+- **`G` renamed to `RequestContext`** — `\ZealPHP\RequestContext` is now the canonical name for what was previously `\ZealPHP\G`. The old name `\ZealPHP\G` remains available via `class_alias` for backward compatibility; existing code that references `G::instance()` or types against `\ZealPHP\G` keeps working unchanged. Source-level rename addresses the long-standing critique that the single-letter name signaled nothing about purpose.
+- **Response state moved off `G` onto `Response`.** `$g->response_headers_list`, `$g->response_cookies_list`, and `$g->response_rawcookies_list` no longer exist on `G`. They live on the Response object as `$response->headersList`, `$response->cookiesList`, and `$response->rawCookiesList`. Framework internals updated. **External code that read these properties directly must migrate to `$g->zealphp_response->headersList` etc.** — the uopz `header()` / `setcookie()` overrides and the `header_remove()` / `response_headers_list()` / `apache_response_headers()` helpers continue to work unchanged.
+- **Legacy Apache shim state moved off `G` onto `ZealPHP\Legacy\ApacheContext`.** `$g->apache_env` and `$g->apache_notes` no longer exist on `G`. The `apache_setenv()` / `apache_getenv()` / `apache_note()` shim functions now lazy-allocate `$g->apacheContext` (a `ZealPHP\Legacy\ApacheContext` instance) and read/write its `env` and `notes` arrays. Only matters for legacy code running through the CGI bridge.
+
+### Removed
+- **`#[AllowDynamicProperties]` attribute on `RequestContext`** — the three previously-dynamic properties (`cache_expire`, `cache_limiter`, `session_module_name`) are now declared as typed properties. Undeclared writes in coroutine mode now throw `BadMethodCallException` (catches typos like `$g->zealphp_reqeust = ...` that previously silently created a dynamic property). Superglobals mode keeps the `$GLOBALS[$key]` bridge for legacy compatibility.
+- **`prefork_request_handler()` deleted** — predecessor to the CGI bridge (`App::includeFile()` / `src/cgi_worker.php`), unused since the bridge landed. Zero callers in framework, scaffold, or any documented user code. The CGI bridge is now the sole "run unmodified legacy PHP in a child process" path.
+
+### Fixed
+- **Return-by-reference autovivification on coroutine-mode `__get`.** `&$g->nonexistent` used to create a dynamic property on first read; now returns a reference to a local null without mutating state. Bounded blast (per-coroutine context) but the behavior was a footgun.
+- **`debug_backtrace()` removed from `RequestContext::instance()`.** Was firing on first-instance creation per worker in superglobals mode, emitting an `elog` line with the call site. Cosmetic dev tracing, not a hot path, but unnecessary in production.
+- **Redundant `isset($g->session)` check in `CoSessionManager`.** `session` is a declared typed property with default `[]` — always set. The outer `isset` was always true; only the inner `isset($g->session['__start_time'])` carried information.
+
 ## [0.2.5] - 2026-05-15
 
 ### Security

@@ -176,7 +176,7 @@ foreach ($rungs as $r):
   <tr><td><code>flush()</code>, <code>ob_flush()</code>, <code>ob_end_flush()</code></td><td>Switch the response into streaming mode — buffer pushed to OpenSwoole's <code>$response-&gt;write()</code>, flips <code>G-&gt;_streaming = true</code>.</td></tr>
   <tr><td><code>apache_request_headers()</code>, <code>getallheaders()</code></td><td>Return canonical (hyphen-capitalized) request headers from the OpenSwoole request.</td></tr>
   <tr><td><code>apache_response_headers()</code></td><td>Returns currently-set outbound headers.</td></tr>
-  <tr><td><code>apache_setenv()</code>, <code>apache_getenv()</code>, <code>apache_note()</code></td><td>Per-request scratch tables in <code>G-&gt;apache_env</code> / <code>apache_notes</code>.</td></tr>
+  <tr><td><code>apache_setenv()</code>, <code>apache_getenv()</code>, <code>apache_note()</code></td><td>Per-request scratch tables in <code>G-&gt;apacheContext</code> (<code>ZealPHP\Legacy\ApacheContext</code>, lazy-allocated).</td></tr>
   <tr><td><code>virtual()</code></td><td>Returns <code>false</code> — internal subrequests aren't supported in this model.</td></tr>
   <tr><td><code>set_time_limit()</code></td><td>No-op success. OpenSwoole owns the worker/coroutine timeout.</td></tr>
   <tr><td><code>ignore_user_abort()</code>, <code>connection_status()</code>, <code>connection_aborted()</code></td><td>Per-request; reads <code>$response-&gt;isWritable()</code> for connection state.</td></tr>

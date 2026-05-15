@@ -9,13 +9,22 @@ class Response
     public \OpenSwoole\Http\Response $parent;
     private \ZealPHP\G $g;
     private ?int $statusCode = null;
+
+    /**
+     * Outbound headers / cookies pending emission. Stored on the Response
+     * (not G) so the per-request response state lives with the object that
+     * owns it. Each entry in $headersList is [string $name, string $value];
+     * $cookiesList / $rawCookiesList are arrays of cookie() / rawCookie()
+     * argument tuples.
+     */
+    public array $headersList = [];
+    public array $cookiesList = [];
+    public array $rawCookiesList = [];
+
     public function __construct(\OpenSwoole\Http\Response $response)
     {
         $this->parent = $response;
         $this->g = \ZealPHP\G::instance();
-        $this->g->response_headers_list = [];
-        $this->g->response_cookies_list = [];
-        $this->g->response_rawcookies_list = [];
     }
 
     // Magic method to forward method calls to the parent
@@ -82,7 +91,7 @@ class Response
             trigger_error('Header injection blocked: control characters in name or value', E_USER_WARNING);
             return false;
         }
-        $this->g->response_headers_list[] = [$key, $value];
+        $this->headersList[] = [$key, $value];
         if (strtolower($key) === 'location' && $value && ($this->g->status === 200 || $this->g->status === null)) {
             $this->g->status = 302;
         }
@@ -115,7 +124,7 @@ class Response
         }
 
         $this->g->status = $status;
-        $this->g->response_headers_list[] = ['Location', $url];
+        $this->headersList[] = ['Location', $url];
 
         // OpenSwoole's PSR-7 emit() drops reason phrases, which makes its
         // internal status table the source of truth — and that table omits 308.
@@ -127,13 +136,13 @@ class Response
             $reason = self::REDIRECT_REASONS[$status] ?? '';
             $this->g->_streaming = true;
             $this->parent->status($status, $reason);
-            foreach ($this->g->response_headers_list as [$k, $v]) {
+            foreach ($this->headersList as [$k, $v]) {
                 $this->parent->header($k, $v);
             }
-            foreach ($this->g->response_cookies_list as $cookie) {
+            foreach ($this->cookiesList as $cookie) {
                 $this->parent->cookie(...$cookie);
             }
-            foreach ($this->g->response_rawcookies_list as $cookie) {
+            foreach ($this->rawCookiesList as $cookie) {
                 $this->parent->rawCookie(...$cookie);
             }
             $this->parent->end();
@@ -150,13 +159,13 @@ class Response
 
     public function cookie(string $key, string $value = '', int $expire = 0, string $path = '/', string $domain = '', bool $secure = false, bool $httponly = false, string $samesite = '', string $priority = ''): bool
     {
-        $this->g->response_cookies_list[] = [$key, $value, $expire, $path, $domain, $secure, $httponly, $samesite, $priority];
+        $this->cookiesList[] = [$key, $value, $expire, $path, $domain, $secure, $httponly, $samesite, $priority];
         return true;
     }
 
     public function rawCookie(string $key, string $value = '', int $expire = 0, string $path = '/', string $domain = '', bool $secure = false, bool $httponly = false, string $samesite = '', string $priority = ''): bool
     {
-        $this->g->response_rawcookies_list[] = [$key, $value, $expire, $path, $domain, $secure, $httponly, $samesite, $priority];
+        $this->rawCookiesList[] = [$key, $value, $expire, $path, $domain, $secure, $httponly, $samesite, $priority];
         return true;
     }
 
@@ -332,18 +341,18 @@ class Response
     public function flush(): bool
     {
         if ($this->parent->isWritable()) {
-            foreach ($this->g->response_headers_list as $header) {
+            foreach ($this->headersList as $header) {
                 $this->parent->header(...$header);
             }
-            foreach ($this->g->response_cookies_list as $cookie) {
+            foreach ($this->cookiesList as $cookie) {
                 $this->parent->cookie(...$cookie);
             }
-            foreach ($this->g->response_rawcookies_list as $cookie) {
+            foreach ($this->rawCookiesList as $cookie) {
                 $this->parent->rawCookie(...$cookie);
             }
-            $this->g->response_headers_list = [];
-            $this->g->response_cookies_list = [];
-            $this->g->response_rawcookies_list = [];
+            $this->headersList = [];
+            $this->cookiesList = [];
+            $this->rawCookiesList = [];
             $this->g->status = null;
             return true;
         }
