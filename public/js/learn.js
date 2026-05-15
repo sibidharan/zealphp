@@ -90,13 +90,20 @@
   function streamChat(message, threadId, messages, done) {
     const wrap = makeEl('div', 'chat-msg assistant');
     const bubble = makeEl('div', 'chat-bubble');
+    const typing = makeEl('div', 'chat-typing');
+    typing.append(makeEl('span'), makeEl('span'), makeEl('span'));
+    bubble.appendChild(typing);
     wrap.appendChild(bubble);
     messages.appendChild(wrap);
-    messages.scrollTop = messages.scrollHeight;
+    const scroll = messages.closest('.chat-scroll');
+    if (scroll) scroll.scrollTop = scroll.scrollHeight;
 
     let lastItem = null;
     let textHtmlBuf = '';
+    let typingRemoved = false;
+    const removeTyping = () => { if (!typingRemoved) { typing.remove(); typingRemoved = true; } };
     const ensureText = () => {
+      removeTyping();
       if (lastItem && lastItem.classList.contains('text')) return lastItem;
       textHtmlBuf = '';
       lastItem = makeEl('div', 'chat-item text');
@@ -155,6 +162,7 @@
           range.deleteContents();
           t.appendChild(document.createRange().createContextualFragment(textHtmlBuf));
         } else if (ev === 'tool_call') {
+          removeTyping();
           textHtmlBuf = '';
           const card = makeEl('div', 'chat-item tool');
           card.dataset.id = data.id;
