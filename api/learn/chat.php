@@ -190,9 +190,19 @@ function learn_chat_real($response, array $user, string $message, string $thread
 
         $buffer = '';
         $currentEvent = null;
+        $lastData = microtime(true);
+        $timeout = 30;
         while (!feof($pipes[1])) {
             $chunk = fread($pipes[1], 4096);
-            if ($chunk === false || $chunk === '') { usleep(40000); continue; }
+            if ($chunk === false || $chunk === '') {
+                if (microtime(true) - $lastData > $timeout) {
+                    $emit(json_encode(['error' => 'agent_timeout']), 'error');
+                    break;
+                }
+                usleep(40000);
+                continue;
+            }
+            $lastData = microtime(true);
             $buffer .= $chunk;
             while (($pos = strpos($buffer, "\n")) !== false) {
                 $line = substr($buffer, 0, $pos);

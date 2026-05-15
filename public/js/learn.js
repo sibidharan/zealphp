@@ -116,12 +116,24 @@
       return lastItem;
     };
 
+    let gotData = false;
+    const timeoutId = setTimeout(() => {
+      if (!gotData) {
+        removeTyping();
+        bubble.appendChild(makeEl('p', null, 'Response timed out. Try again.'));
+        bubble.lastChild.style.color = '#b91c1c';
+        done();
+      }
+    }, 30000);
+
     fetch('/api/learn/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, thread_id: threadId }),
     }).then(resp => {
       if (resp.status === 401) {
+        clearTimeout(timeoutId);
+        removeTyping();
         bubble.appendChild(makeEl('p', null, 'Please log in first.'));
         done();
         return;
@@ -133,7 +145,8 @@
 
       function read() {
         reader.read().then(({ value, done: streamDone }) => {
-          if (streamDone) { done(); return; }
+          if (streamDone) { clearTimeout(timeoutId); done(); return; }
+          if (!gotData) { gotData = true; clearTimeout(timeoutId); }
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
           buffer = lines.pop();
