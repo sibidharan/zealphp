@@ -55,13 +55,25 @@ data: {"done":true}</code></pre>
 });</code></pre>
 
     <h2>The architecture</h2>
-    <p>Four stages, each a few lines of code:</p>
-    <ol>
-      <li>Browser <strong>POSTs</strong> to <code>/api/learn/chat</code></li>
-      <li>PHP <strong>spawns</strong> a Python subprocess via <code>proc_open</code></li>
-      <li>Python <strong>streams</strong> events (tokens, tool calls, results) to stdout</li>
-      <li>PHP <strong>re-emits</strong> each line as SSE &mdash; browser renders live</li>
-    </ol>
+    <pre class="mermaid">sequenceDiagram
+    participant B as Browser
+    participant PHP as ZealPHP
+    participant PY as Python Agent
+    participant AI as OpenAI API
+    participant API as Notes API
+    B->>PHP: POST /api/learn/chat
+    PHP->>PY: proc_open (spawn)
+    PY->>AI: Runner.run_streamed()
+    AI-->>PY: token deltas
+    PY-->>PHP: SSE: event: token
+    PHP-->>B: SSE: token (streamed live)
+    AI->>PY: tool_call: create_note
+    PY->>API: POST /api/learn/notes
+    API-->>PY: {"id": 42}
+    Note over API: WS::broadcast()
+    API-->>B: WebSocket: note_changed
+    PY-->>PHP: SSE: tool_done
+    PHP-->>B: SSE: tool_done + notes_changed</pre>
 
     <?php if (!$user): ?>
       <?php App::render('/components/_callout', [
@@ -99,6 +111,12 @@ data: {"done":true}</code></pre>
           </div>
         </div>
       </section>
+
+      <?php App::render('/components/_callout', [
+        'variant' => 'success',
+        'title'   => 'Watch the Event Log',
+        'body'    => '<p>Try: <em>"create a note titled shopping list"</em>. Watch the Event Log below the chat &mdash; you\'ll see <span style="background:#3b82f6;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.75rem;font-weight:700">SSE</span> events (tool_call, tool_done, notes_changed) stream in as the AI works. Then check the notes panel on the left &mdash; the new note appears with a green glow, pushed via <span style="background:#a855f7;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.75rem;font-weight:700">WS</span> broadcast. Open a second tab to see cross-tab sync.</p>',
+      ]); ?>
     <?php endif; ?>
 
     <h2>Tool calls</h2>

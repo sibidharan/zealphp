@@ -45,20 +45,32 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
       'id' => 'arch',
       'before_label' => 'Traditional PHP',
       'after_label'  => 'ZealPHP',
-      'before' => '<pre><code>Browser → Nginx → php-fpm → your code
-                          ↓
-                     Redis (sessions)
-                     Queue worker (jobs)
-                     Node.js (WebSocket)
-                     Supervisor (process mgmt)
-
-6 processes. 4 config files. 3 languages.</code></pre>',
-      'after' => '<pre><code>Browser → php app.php → your code
-
-1 process. 0 config files. 1 language.
-
-HTTP, WebSocket, SSE, sessions, shared memory,
-background tasks — all built in.</code></pre>',
+      'before' => '<pre class="mermaid">graph TD
+    B[Browser] --> N[Nginx]
+    N --> F[php-fpm]
+    F --> C[Your Code]
+    C --> R[(Redis)]
+    C --> Q[Queue Worker]
+    C --> WS[Node.js WebSocket]
+    C --> S[Supervisor]
+    style R fill:#fef2f2,stroke:#f87171
+    style Q fill:#fef2f2,stroke:#f87171
+    style WS fill:#fef2f2,stroke:#f87171
+    style S fill:#fef2f2,stroke:#f87171</pre><p style="text-align:center;color:#78716c;font-size:.82rem">6 processes &middot; 4 config files &middot; 3 languages</p>',
+      'after' => '<pre class="mermaid">graph TD
+    B[Browser] --> Z["php app.php"]
+    Z --> C[Your Code]
+    Z --> H[HTTP + SSE]
+    Z --> W[WebSocket]
+    Z --> SE[Sessions]
+    Z --> SM[Shared Memory]
+    Z --> T[Task Workers]
+    style Z fill:#fffbeb,stroke:#f59e0b,stroke-width:2px
+    style H fill:#ecfdf5,stroke:#059669
+    style W fill:#ecfdf5,stroke:#059669
+    style SE fill:#ecfdf5,stroke:#059669
+    style SM fill:#ecfdf5,stroke:#059669
+    style T fill:#ecfdf5,stroke:#059669</pre><p style="text-align:center;color:#78716c;font-size:.82rem">1 process &middot; 0 config files &middot; 1 language</p>',
     ]); ?>
 
     <h2>The mental model</h2>

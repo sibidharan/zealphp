@@ -28,6 +28,25 @@
       client explicitly asking "did anything change?"
     </p>
 
+    <pre class="mermaid">graph LR
+    subgraph "Tab A"
+      A1[Create note] -->|htmx POST| API
+    end
+    API -->|WS::broadcast| WS[WebSocket Server]
+    subgraph "Tab B"
+      WS -->|push| B1[note_changed]
+      B1 -->|htmx.ajax| B2[Refresh notes list]
+      B2 --> B3["Green glow ✓"]
+    end
+    subgraph "Tab A"
+      WS -->|push| A2[note_changed]
+      A2 --> A3["Already in DOM — highlight ✓"]
+    end
+    style API fill:#fffbeb,stroke:#f59e0b
+    style WS fill:#f5f3ff,stroke:#a855f7
+    style B3 fill:#ecfdf5,stroke:#059669
+    style A3 fill:#ecfdf5,stroke:#059669</pre>
+
     <h2>The mental model</h2>
     <p>
       In Lesson 9, you used SSE to stream AI tokens. SSE is like a <strong>one-way phone call</strong>
@@ -91,7 +110,7 @@ public static function broadcast(int $userId, array $payload): void
 
     <?php App::render('/components/_tryit', [
       'title' => 'Try it now',
-      'body'  => '<p>Open <a href="/learn/notes" target="_blank">your notes</a> in two browser tabs. Create a note in one tab. The other tab updates instantly &mdash; no polling, no page reload. That\'s WebSocket broadcasting in action.</p>',
+      'body'  => '<p>Open <a href="/learn/notes" target="_blank">your notes</a> in two browser tabs. Create a note in one tab &mdash; the other tab updates instantly with a green glow. Delete a note &mdash; it fades out in both tabs. Then visit <a href="/learn/ai-chat" target="_blank">AI Chat</a> and ask the agent to create a note: watch the Event Log show <span style="background:#3b82f6;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.72rem;font-weight:700">SSE</span> tool events, then the notes panel updates via <span style="background:#a855f7;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.72rem;font-weight:700">WS</span> broadcast.</p>',
     ]); ?>
 
     <h2>The client</h2>

@@ -86,6 +86,7 @@
 .lesson-content code { background: #f5f5f4; padding: .1rem .35rem; border-radius: 3px; font-size: .92em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .lesson-content pre { background: #1c1917; color: #f5f5f4; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: .85rem; }
 .lesson-content pre code { background: transparent; padding: 0; color: inherit; }
+.lesson-content pre.mermaid { background: #fff; color: #1c1917; border: 1px solid #e7e5e4; padding: 1.5rem 1rem; text-align: center; }
 
 /* Notes user bar */
 .notes-user-bar {

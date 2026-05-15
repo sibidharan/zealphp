@@ -76,7 +76,30 @@ $active = $active ?? 'learn/notes';
       </section>
     <?php endif; ?>
 
+    <?php App::render('/components/_callout', [
+      'variant' => 'success',
+      'title'   => 'Watch what happens',
+      'body'    => '<p><strong>Create a note</strong> above and watch: the card slides in with a green glow. Now <strong>open this page in a second tab</strong>, delete a note in one &mdash; the other tab updates instantly (via WebSocket). On the <a href="/learn/ai-chat">AI Chat page</a>, the Event Log terminal shows every SSE and WebSocket event as it flows.</p>',
+    ]); ?>
+
     <h2>The architecture</h2>
+    <pre class="mermaid">sequenceDiagram
+    participant B as Browser
+    participant H as htmx
+    participant API as /api/learn/notes
+    participant N as Notes.php
+    participant DB as SQLite
+    participant WS as WebSocket
+    B->>H: Submit form
+    H->>API: POST /api/learn/notes
+    API->>N: Notes::create($db, $userId, ...)
+    N->>DB: INSERT INTO notes
+    DB-->>N: id = 42
+    N-->>API: note row
+    API->>WS: broadcast(note_changed)
+    WS-->>B: push to all tabs
+    API-->>H: HTML card fragment
+    H-->>B: afterbegin swap (green glow)</pre>
     <p>Three layers, each with one job:</p>
     <ol>
       <li><strong><code>src/Learn/Notes.php</code></strong> &mdash; Business logic. SQL queries scoped by <code>user_id</code>.</li>
