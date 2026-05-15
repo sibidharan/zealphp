@@ -3,6 +3,11 @@
 require_once __DIR__ . '/vendor/autoload.php';
 
 date_default_timezone_set('Asia/Kolkata');
+
+if (!defined('ZEALPHP_ASSET_VERSION')) {
+    $gitDesc = trim((string) @`git describe --long 2>/dev/null`);
+    define('ZEALPHP_ASSET_VERSION', $gitDesc ?: (string) time());
+}
 use OpenSwoole\Core\Psr\Response;
 use OpenSwoole\Coroutine as co;
 use OpenSwoole\Coroutine\Channel;
