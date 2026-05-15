@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 12,
+      'number'   => 13,
       'title'    => 'Async & Coroutines',
       'subtitle' => 'Run I/O in parallel. One API, two functions, 3x speedup.',
       'prev'     => ['slug' => 'learn/routing', 'title' => 'Routes & APIs'],

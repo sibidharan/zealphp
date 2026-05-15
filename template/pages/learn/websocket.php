@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 10,
+      'number'   => 11,
       'title'    => 'Real-Time Sync',
       'subtitle' => 'WebSocket &mdash; persistent connections for when the server needs to talk first.',
       'prev'     => ['slug' => 'learn/ai-chat', 'title' => 'AI Chat'],

@@ -7,10 +7,11 @@ $groups = [
     ['learn/first-page',   'Your First Page'],
   ],
   'Interactivity' => [
-    ['learn/components',   'Layouts & Components'],
-    ['learn/htmx',         'Forms & htmx'],
-    ['learn/sessions',     'Sessions'],
-    ['learn/auth',         'User Accounts'],
+    ['learn/components',    'Layouts & Components'],
+    ['learn/react-vs-php',  'React vs PHP'],
+    ['learn/htmx',          'Forms & htmx'],
+    ['learn/sessions',      'Sessions'],
+    ['learn/auth',          'User Accounts'],
   ],
   'Build the App' => [
     ['learn/notes',        'Personal Notes'],

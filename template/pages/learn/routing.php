@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 11,
+      'number'   => 12,
       'title'    => 'Routes & APIs',
       'subtitle' => 'Four routing patterns. Pick the one that fits your use case.',
       'prev'     => ['slug' => 'learn/websocket', 'title' => 'Real-Time Sync'],

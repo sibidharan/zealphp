@@ -6,10 +6,10 @@ $g = \ZealPHP\G::instance();
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 5,
+      'number'   => 6,
       'title'    => 'Forms & htmx',
       'subtitle' => 'Interactivity without a JavaScript framework. One attribute changes everything.',
-      'prev'     => ['slug' => 'learn/components', 'title' => 'Layouts & Components'],
+      'prev'     => ['slug' => 'learn/react-vs-php', 'title' => 'React vs PHP'],
       'next'     => ['slug' => 'learn/sessions', 'title' => 'Sessions'],
     ]); ?>
 

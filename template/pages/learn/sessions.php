@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 6,
+      'number'   => 7,
       'title'    => 'Sessions',
       'subtitle' => 'HTTP has no memory. Sessions fix that. But async PHP changes the rules.',
       'prev'     => ['slug' => 'learn/htmx', 'title' => 'Forms & htmx'],
