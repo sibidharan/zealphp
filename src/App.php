@@ -1836,9 +1836,28 @@ HELP;
             $path  = $request->server['path_info'] ?? '/';
             $wsFdMap[$request->fd] = $path;
             $g     = G::instance();
+
+            // Initialize session from the upgrade request's cookie so
+            // WebSocket onOpen handlers can read $g->session just like
+            // HTTP handlers do via CoSessionManager.
+            $sessionName = function_exists('ZealPHP\\Session\\zeal_session_name')
+                ? \ZealPHP\Session\zeal_session_name()
+                : 'PHPSESSID';
+            if (isset($request->cookie[$sessionName])) {
+                $g->cookie[$sessionName] = $request->cookie[$sessionName];
+                \ZealPHP\Session\zeal_session_id($request->cookie[$sessionName]);
+                \ZealPHP\Session\zeal_session_start();
+                $g->_session_started = true;
+            }
+
             $route = App::instance()->wsRoutes()[$path] ?? null;
             if ($route && $route['open']) {
                 ($route['open'])($server, $request, $g);
+            }
+
+            // Write-close the session after onOpen so the file isn't locked
+            if ($g->_session_started ?? false) {
+                \ZealPHP\Session\zeal_session_write_close();
             }
         });
 
