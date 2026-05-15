@@ -122,7 +122,7 @@ data: {"done":true}</code></pre>
     <h2>Tool calls</h2>
     <p>
       The AI doesn't just generate text. It can <strong>call functions</strong> that interact with your
-      data. The Python agent defines six tools: <code>list_notes</code>, <code>read_note</code>,
+      data. The <a href="https://github.com/sibidharan/zealphp/blob/master/examples/agents/notes_agent.py" target="_blank">Python agent</a> defines six tools: <code>list_notes</code>, <code>read_note</code>,
       <code>search_notes</code>, <code>create_note</code>, <code>update_note</code>, <code>delete_note</code>.
     </p>
     <p>

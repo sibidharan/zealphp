@@ -91,7 +91,7 @@
 
     <h2>Broadcasting</h2>
     <p>WebSocket connections live on individual workers. To broadcast to all of a user's tabs, iterate a shared <code>Store</code> table that maps <code>fd &rarr; user_id</code>:</p>
-    <pre><code class="language-php">// src/Learn/WS.php
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/WS.php" style="color:#f59e0b">src/Learn/WS.php</a>
 public static function broadcast(int $userId, array $payload): void
 {
     $server = App::getServer();

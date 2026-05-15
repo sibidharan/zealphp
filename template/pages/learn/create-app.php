@@ -40,7 +40,7 @@
     <h2>Step 2: Scaffold a project</h2>
     <pre><code class="language-bash">composer create-project sibidharan/zealphp-project my-app
 cd my-app</code></pre>
-    <p>This creates a starter project with the right folder structure, a minimal <code>app.php</code>,
+    <p>This creates a starter project with the right folder structure, a minimal <a href="https://github.com/sibidharan/zealphp/blob/master/app.php" target="_blank"><code>app.php</code></a>,
       and all dependencies pre-installed (the scaffold ships <code>vendor/</code> so you can run immediately).</p>
 
     <h2>Step 3: Start the server</h2>

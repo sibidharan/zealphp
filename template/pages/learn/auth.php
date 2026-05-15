@@ -33,7 +33,7 @@ $active = $active ?? 'learn/auth';
       No server to install, no credentials to configure. PHP includes PDO (PHP Data Objects) for talking
       to databases.
     </p>
-    <pre><code class="language-php">// src/Learn/DB.php — open the database and create tables
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/DB.php" style="color:#f59e0b">src/Learn/DB.php</a> — open the database and create tables
 $pdo = new \PDO('sqlite:' . __DIR__ . '/../../storage/learn.db');
 $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
 $pdo->query('PRAGMA journal_mode = WAL');
@@ -56,7 +56,7 @@ $pdo->query("CREATE TABLE IF NOT EXISTS users (
       generates a one-way hash that can't be reversed. Even if someone steals your database, they can't
       read the passwords.
     </p>
-    <pre><code class="language-php">// src/Learn/Auth.php — register
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Auth.php" style="color:#f59e0b">src/Learn/Auth.php</a> — register
 public static function register(\PDO $db, string $username, string $password): ?int
 {
     $hash = password_hash($password, PASSWORD_DEFAULT);
@@ -73,7 +73,7 @@ public static function register(\PDO $db, string $username, string $password): ?
     </p>
 
     <h2>Step 3: Log in</h2>
-    <pre><code class="language-php">// src/Learn/Auth.php — login
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Auth.php#L30" style="color:#f59e0b">src/Learn/Auth.php</a> — login
 public static function login(\PDO $db, string $username, string $password): ?int
 {
     $stmt = $db->prepare('SELECT id, password_hash FROM users WHERE username = ?');
@@ -107,10 +107,10 @@ if (!$user) {
 
     <h2>Architecture: proper OOP</h2>
     <p>
-      Notice how the auth logic lives in <code>src/Learn/Auth.php</code> &mdash; a proper class, autoloaded
-      via Composer. The API endpoint (<code>api/learn/register.php</code>) is a thin wrapper:
+      Notice how the auth logic lives in <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Auth.php" target="_blank"><code>src/Learn/Auth.php</code></a> &mdash; a proper class, autoloaded
+      via Composer. The API endpoint (<a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/register.php" target="_blank"><code>api/learn/register.php</code></a>) is a thin wrapper:
     </p>
-    <pre><code class="language-php">// api/learn/register.php — thin endpoint
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/register.php" style="color:#f59e0b">api/learn/register.php</a> — thin endpoint
 $register = function () {
     $creds = Auth::readCredentials($this);
     $userId = Auth::register(DB::open(), $creds['username'], $creds['password']);

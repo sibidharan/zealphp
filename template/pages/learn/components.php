@@ -26,7 +26,7 @@
     <p>That's not sustainable. You need a <strong>layout</strong>.</p>
 
     <h2>Step 1: Create a master layout</h2>
-    <p>A layout is just a PHP template that wraps your page content. Create <code>template/_master.php</code>:</p>
+    <p>A layout is just a PHP template that wraps your page content. Create <a href="https://github.com/sibidharan/zealphp/blob/master/template/_master.php" target="_blank"><code>template/_master.php</code></a>:</p>
     <pre><code class="language-php">&lt;!doctype html&gt;
 &lt;html lang="en"&gt;
 &lt;head&gt;

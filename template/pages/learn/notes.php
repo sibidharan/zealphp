@@ -104,14 +104,14 @@ $active = $active ?? 'learn/notes';
     H-->>B: afterbegin swap (green glow)</pre>
     <p>Three layers, each with one job:</p>
     <ol>
-      <li><strong><code>src/Learn/Notes.php</code></strong> &mdash; Business logic. SQL queries scoped by <code>user_id</code>.</li>
-      <li><strong><code>api/learn/notes.php</code></strong> &mdash; Endpoint. Reads the request, calls the class, returns HTML.</li>
+      <li><strong><a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Notes.php" target="_blank"><code>src/Learn/Notes.php</code></a></strong> &mdash; Business logic. SQL queries scoped by <code>user_id</code>.</li>
+      <li><strong><a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/notes.php" target="_blank"><code>api/learn/notes.php</code></a></strong> &mdash; Endpoint. Reads the request, calls the class, returns HTML.</li>
       <li><strong>Template + htmx</strong> &mdash; UI. The form and list, wired with four htmx attributes.</li>
     </ol>
 
     <h3>The data layer</h3>
     <p>Every method takes a <code>$userId</code> parameter. The user can never read or modify another user's notes:</p>
-    <pre><code class="language-php">// src/Learn/Notes.php
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Notes.php" style="color:#f59e0b">src/Learn/Notes.php</a>
 class Notes
 {
     public static function create(\PDO $db, int $userId, string $title, string $body): ?int
@@ -141,7 +141,7 @@ class Notes
       expects HTML back as the <em>response body</em>. You need the HTML as a string, not echoed to
       the page. That's <code>App::renderToString()</code>:
     </p>
-    <pre><code class="language-php">// api/learn/notes.php — return the rendered note card
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/notes.php" style="color:#f59e0b">api/learn/notes.php</a> — return the rendered note card
 $note = Notes::read($db, $userId, $id);
 $html = App::renderToString('/components/_note_card', $note);
 $this->response($html, 200);</code></pre>
@@ -173,7 +173,7 @@ $this->response($html, 200);</code></pre>
     <p><code>hx-swap="outerHTML"</code> replaces the entire note card with the empty response &mdash; effectively removing it.</p>
 
     <h3>Component reuse</h3>
-    <p>The <code>_note_card</code> component is used in three places: the notes list (GET), the create response (POST), and the chat history bubbles (Lesson 9). Same file, three contexts &mdash; that's the power of server-rendered components.</p>
+    <p>The <a href="https://github.com/sibidharan/zealphp/blob/master/template/components/_note_card.php" target="_blank"><code>_note_card</code></a> component is used in three places: the notes list (GET), the create response (POST), and the chat history bubbles (Lesson 9). Same file, three contexts &mdash; that's the power of server-rendered components.</p>
 
     <?php App::render('/components/_deepdive', [
       'title' => 'Cross-tab sync via WebSocket',
