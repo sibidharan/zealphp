@@ -450,6 +450,26 @@ HTML;
     })();
 });
 
+// ── Lesson 10: parallel vs sequential timing demo ────────────────────
+$app->route('/api/learn/demo/timing', ['methods' => ['GET']], function() {
+    $g = G::instance();
+    $mode = $g->get['mode'] ?? 'parallel';
+    $work = function() { usleep(100000); };
+    $start = microtime(true);
+    if ($mode === 'sequential') {
+        $work(); $work(); $work();
+    } else {
+        $ch = new \OpenSwoole\Coroutine\Channel(3);
+        for ($i = 0; $i < 3; $i++) {
+            go(function() use ($work, $ch) { $work(); $ch->push(true); });
+        }
+        for ($i = 0; $i < 3; $i++) $ch->pop();
+    }
+    $elapsed = (int)round((microtime(true) - $start) * 1000);
+    header('Content-Type: application/json');
+    return ['mode' => $mode, 'elapsed_ms' => $elapsed];
+});
+
 // ── Chat status now lives at api/learn/chat_status.php (ZealAPI file)
 // ── Chat rate limit ─────────────────────────────────────────────────
 \ZealPHP\Store::make('learn_chat_rl', 1024, [
