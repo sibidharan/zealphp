@@ -5,6 +5,7 @@ use ZealPHP\Learn\DB;
 use ZealPHP\Learn\Auth;
 use ZealPHP\Learn\Notes;
 use ZealPHP\Learn\ChatHistory;
+use ZealPHP\Learn\WS;
 
 ${basename(__FILE__, '.php')} = function ($request, $response) {
     $u = Auth::currentUser();
@@ -92,6 +93,7 @@ function learn_chat_mock($response, array $user, string $message, string $thread
             $newId = Notes::create($db, $userId, $title, '');
             $sse(json_encode(['id' => 'm2', 'status' => $newId ? 'ok' : 'error', 'result_preview' => $newId ? "id: $newId" : 'failed']), 'tool_done');
             $sse(json_encode([]), 'notes_changed');
+            WS::broadcast($userId, ['type' => 'note_changed', 'op' => 'create', 'id' => $newId]);
             $sse(json_encode(['token' => "<p>Created note <strong>" . htmlspecialchars($title) . "</strong>.</p>"]), 'token');
         } elseif (preg_match('/delete\s+(?:note\s+)?["\']?(.+?)["\']?$/i', $message, $m)) {
             $needle = trim($m[1]);
@@ -105,6 +107,7 @@ function learn_chat_mock($response, array $user, string $message, string $thread
                 Notes::delete($db, $userId, (int) $hit['id']);
                 $sse(json_encode(['id' => 'm3', 'status' => 'ok', 'result_preview' => 'deleted id ' . $hit['id']]), 'tool_done');
                 $sse(json_encode([]), 'notes_changed');
+                WS::broadcast($userId, ['type' => 'note_changed', 'op' => 'delete', 'id' => (int) $hit['id']]);
                 $sse(json_encode(['token' => "<p>Deleted note <strong>" . htmlspecialchars($hit['title']) . "</strong>.</p>"]), 'token');
             }
         } elseif (preg_match('/(search|find)\s+(.+)/i', $message, $m)) {

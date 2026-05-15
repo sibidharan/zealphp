@@ -50,16 +50,11 @@ $app->ws('/ws/learn',
     },
 );
 
+// Broadcast helper is now in src/Learn/WS.php (autoloaded).
+// Keep a thin wrapper for backward compat with any inline references.
 function learn_ws_broadcast(int $userId, array $payload): void
 {
-    $server = App::getServer();
-    if (!$server) return;
-    $json = json_encode($payload);
-    foreach (\ZealPHP\Store::table('learn_ws_clients') as $fd => $row) {
-        if ((int) ($row['user_id'] ?? 0) === $userId) {
-            try { @$server->push((int) $fd, $json); } catch (\Throwable $e) {}
-        }
-    }
+    \ZealPHP\Learn\WS::broadcast($userId, $payload);
 }
 
 // ── Notes routes with path params (can't be ZealAPI files) ───────────

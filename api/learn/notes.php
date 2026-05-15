@@ -4,6 +4,7 @@ use ZealPHP\G;
 use ZealPHP\Learn\DB;
 use ZealPHP\Learn\Auth;
 use ZealPHP\Learn\Notes;
+use ZealPHP\Learn\WS;
 
 ${basename(__FILE__, '.php')} = function () {
     $u = Auth::currentUser();
@@ -23,7 +24,7 @@ ${basename(__FILE__, '.php')} = function () {
         $bodyText = (string) ($body['body'] ?? '');
         $id = Notes::create($db, $u['user_id'], $title, $bodyText);
         if ($id === null) { $this->response($this->json(['error' => 'validation_failed']), 422); return; }
-        if (function_exists('learn_ws_broadcast')) learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'create', 'id' => $id]);
+        WS::broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'create', 'id' => $id]);
         $note = Notes::read($db, $u['user_id'], $id);
         header('Content-Type: text/html; charset=utf-8');
         $this->response(App::renderToString('/components/_note_card', $note), 200);
