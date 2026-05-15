@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-05-15
+
+### Added
+- **`max_request=100000` default** — worker recycling now enabled out of the box, bounding memory growth from long-running PHP workers (static caches, closure captures, leaky extensions). After 100k requests a worker exits cleanly and is respawned with a fresh PHP arena. Override via `ZEALPHP_MAX_REQUEST` env var or `$app->run(['max_request' => N])`. Set `0` to disable.
+- **`ZEALPHP_MAX_REQUEST` env var** — documented in both `docs/deployment.md` and `template/pages/deployment.php`.
+
+### Changed
+- **Scaffold (`sibidharan/zealphp-project`) defaults to coroutine mode** — `composer create-project` now ships `app.php` with `App::superglobals(false)` explicitly set. Aligns the scaffold's default with the documented "recommended for new projects" stance. Per-request state is isolated via `Coroutine::getContext()`, eliminating the worker-state-leak class of issues for greenfield apps. Framework default (`App::$superglobals = true`) is **unchanged** for backward compatibility with existing apps; flip to `App::superglobals(true)` only when migrating unmodified legacy code that needs `$_GET`/`$_POST`/`$_SESSION` access.
+
 ## [0.2.3] - 2026-05-15
 
 ### Added

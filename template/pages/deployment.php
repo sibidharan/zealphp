@@ -34,6 +34,7 @@ BASH
   <tr><td><code>ZEALPHP_PORT</code></td><td><code>8080</code></td><td>Listen port</td></tr>
   <tr><td><code>ZEALPHP_WORKERS</code></td><td>CPU count</td><td>HTTP worker processes</td></tr>
   <tr><td><code>ZEALPHP_TASK_WORKERS</code></td><td><code>0</code></td><td>Background task workers</td></tr>
+  <tr><td><code>ZEALPHP_MAX_REQUEST</code></td><td><code>100000</code></td><td>Requests per worker before clean recycle. Bounds memory growth in long-running workers; set <code>0</code> to disable.</td></tr>
   <tr><td><code>ZEALPHP_SESSION_SECURE</code></td><td>auto-detect</td><td>Force <code>Secure</code> cookie flag (<code>1</code>/<code>0</code>). Auto-detects HTTPS via <code>HTTPS</code>, <code>HTTP_X_FORWARDED_PROTO</code>, or <code>SERVER_PORT=443</code> headers.</td></tr>
   <tr><td><code>ZEALPHP_COMPRESSION_MIDDLEWARE</code></td><td><code>0</code></td><td>Enable the reference PHP compression middleware (only if OpenSwoole's native <code>http_compression</code> is disabled).</td></tr>
   <tr><td><code>ZEALPHP_HTTP_COMPRESSION</code></td><td><code>1</code></td><td>Enable OpenSwoole native HTTP compression.</td></tr>

@@ -1501,6 +1501,12 @@ HELP;
             // CompressionMiddleware unless this setting is disabled.
             'http_compression' => true,
             'pid_file' => $defaultPidFile,
+            // Worker recycling — bounds memory growth from leaks accumulated
+            // in long-running workers (static caches, closure captures, leaky
+            // extensions). After this many requests a worker exits cleanly and
+            // is respawned with a fresh PHP arena. Set 0 to disable. Override
+            // via ZEALPHP_MAX_REQUEST env var or $app->run(['max_request' => N]).
+            'max_request' => (int)(getenv('ZEALPHP_MAX_REQUEST') ?: 100000),
             'task_worker_num' => 0,
             'task_enable_coroutine' => true,
             // Suppress NOTICE-level messages from OpenSwoole internals (e.g. ERRNO 1005

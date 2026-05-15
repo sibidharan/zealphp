@@ -111,6 +111,7 @@ systemd unit (`Environment="..."`), Docker `-e` flags, or shell.
 | `ZEALPHP_PORT` | int | `8080` | TCP port |
 | `ZEALPHP_WORKERS` | int | auto (CPU cores) | HTTP worker process count |
 | `ZEALPHP_TASK_WORKERS` | int | `8` | Async task worker count (set `0` to disable) |
+| `ZEALPHP_MAX_REQUEST` | int | `100000` | Requests per worker before clean recycle. Bounds memory growth from long-running PHP. Set `0` to disable. |
 | `ZEALPHP_MAX_CONN` | int | OpenSwoole default | `max_conn` server setting |
 | `ZEALPHP_MAX_COROUTINE` | int | OpenSwoole default | `max_coroutine` server setting |
 | `ZEALPHP_BACKLOG` | int | OpenSwoole default | TCP listen backlog |
@@ -218,7 +219,7 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.2.3 .
+docker build -t zealphp:0.2.4 .
 ```
 
 The shipped `Dockerfile` is PHP 8.3-cli on `bookworm` with OpenSwoole and
@@ -229,7 +230,7 @@ build args:
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
     --build-arg UOPZ_VERSION=7.1.2 \
-    -t zealphp:0.2.3 .
+    -t zealphp:0.2.4 .
 ```
 
 ### Run (single container)
@@ -241,7 +242,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.2.3
+    zealphp:0.2.4
 ```
 
 ### Production compose
@@ -252,7 +253,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.2.3
+    image: registry.example.com/zealphp-app:0.2.4
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
