@@ -86,7 +86,19 @@
 .lesson-content code { background: #f5f5f4; padding: .1rem .35rem; border-radius: 3px; font-size: .92em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .lesson-content pre { background: #1c1917; color: #f5f5f4; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: .85rem; }
 .lesson-content pre code { background: transparent; padding: 0; color: inherit; }
-.lesson-content pre.mermaid { background: #fff; color: #1c1917; border: 1px solid #e7e5e4; padding: 1.5rem 1rem; text-align: center; }
+.lesson-content pre.mermaid { background: #fff; color: #1c1917; border: 1px solid #e7e5e4; padding: 1.5rem 1rem; text-align: center; cursor: zoom-in; position: relative; }
+.lesson-content pre.mermaid:hover { border-color: #f59e0b; }
+.lesson-content pre.mermaid::after { content: "Click to expand"; position: absolute; top: .5rem; right: .65rem; font-size: .65rem; color: #a8a29e; background: #fff; padding: .1rem .4rem; border-radius: 3px; opacity: 0; transition: opacity .15s; pointer-events: none; }
+.lesson-content pre.mermaid:hover::after { opacity: 1; }
+
+/* Mermaid pop-out viewer */
+.mermaid-viewer { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; cursor: grab; }
+.mermaid-viewer:active { cursor: grabbing; }
+.mermaid-viewer-inner { transform-origin: 0 0; will-change: transform; }
+.mermaid-viewer-inner svg { max-width: none !important; max-height: none !important; filter: drop-shadow(0 4px 24px rgba(0,0,0,.3)); }
+.mermaid-viewer-close { position: fixed; top: 1rem; right: 1.5rem; z-index: 10000; background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3); color: #fff; width: 2.5rem; height: 2.5rem; border-radius: 50%; font-size: 1.2rem; cursor: pointer; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+.mermaid-viewer-close:hover { background: rgba(255,255,255,.3); }
+.mermaid-viewer-hint { position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%); z-index: 10000; color: rgba(255,255,255,.6); font-size: .75rem; pointer-events: none; }
 
 /* Notes user bar */
 .notes-user-bar {

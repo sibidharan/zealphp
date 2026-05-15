@@ -10,6 +10,7 @@
     }
     initWebSocket();
     initNoteFormHighlight();
+    initMermaidViewer();
   }
 
   document.addEventListener('DOMContentLoaded', initLearn);
@@ -311,6 +312,91 @@
   }
 
   function initNoteFormHighlight() {}
+
+  function initMermaidViewer() {
+    document.querySelectorAll('pre.mermaid').forEach(function (pre) {
+      if (pre.dataset.viewerInit) return;
+      pre.dataset.viewerInit = '1';
+      pre.addEventListener('click', function () {
+        var svg = pre.querySelector('svg');
+        if (!svg) return;
+        openMermaidViewer(svg);
+      });
+    });
+  }
+
+  function openMermaidViewer(svg) {
+    var scale = 1, tx = 0, ty = 0, dragging = false, lastX = 0, lastY = 0;
+
+    var overlay = document.createElement('div');
+    overlay.className = 'mermaid-viewer';
+
+    var inner = document.createElement('div');
+    inner.className = 'mermaid-viewer-inner';
+    var clone = svg.cloneNode(true);
+    clone.removeAttribute('style');
+    clone.setAttribute('width', svg.getBoundingClientRect().width * 1.5);
+    clone.setAttribute('height', svg.getBoundingClientRect().height * 1.5);
+    clone.style.background = '#ffffff';
+    clone.style.borderRadius = '8px';
+    inner.appendChild(clone);
+    overlay.appendChild(inner);
+
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'mermaid-viewer-close';
+    closeBtn.textContent = '✕';
+    overlay.appendChild(closeBtn);
+
+    var hint = document.createElement('div');
+    hint.className = 'mermaid-viewer-hint';
+    hint.textContent = 'Scroll to zoom · Drag to pan · Esc to close';
+    overlay.appendChild(hint);
+
+    document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
+
+    function applyTransform() {
+      inner.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
+    }
+
+    var rect = clone.getBoundingClientRect();
+    tx = (window.innerWidth - rect.width) / 2;
+    ty = (window.innerHeight - rect.height) / 2;
+    applyTransform();
+
+    overlay.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      var delta = e.deltaY > 0 ? 0.9 : 1.1;
+      var mx = e.clientX, my = e.clientY;
+      tx = mx - (mx - tx) * delta;
+      ty = my - (my - ty) * delta;
+      scale *= delta;
+      scale = Math.max(0.2, Math.min(scale, 8));
+      applyTransform();
+    }, { passive: false });
+
+    overlay.addEventListener('mousedown', function (e) {
+      if (e.target === closeBtn) return;
+      dragging = true; lastX = e.clientX; lastY = e.clientY;
+    });
+    overlay.addEventListener('mousemove', function (e) {
+      if (!dragging) return;
+      tx += e.clientX - lastX; ty += e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      applyTransform();
+    });
+    overlay.addEventListener('mouseup', function () { dragging = false; });
+
+    function close() {
+      document.body.removeChild(overlay);
+      document.body.style.overflow = '';
+    }
+    closeBtn.addEventListener('click', close);
+    overlay.addEventListener('dblclick', close);
+    document.addEventListener('keydown', function onKey(e) {
+      if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
+    });
+  }
 
   function initWebSocket() {
     if (wsConnected) return;
