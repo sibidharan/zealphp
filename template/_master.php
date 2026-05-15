@@ -8,7 +8,7 @@ $active      ??= $page;
 <!doctype html>
 <html lang="en">
 <?php App::render('/_head', compact('title', 'description', 'page')); ?>
-<body>
+<body hx-boost="true">
 <?php App::render('/_nav', ['active' => $active]); ?>
 <?php App::render('/components/_banner'); ?>
 <main class="page-body">
@@ -17,8 +17,9 @@ $active      ??= $page;
 <?php App::render('/_footer'); ?>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script>
-document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('pre code').forEach(el => {
+function initPageScripts(root) {
+  (root || document).querySelectorAll('pre code').forEach(el => {
+    if (el.dataset.highlighted) return;
     hljs.highlightElement(el);
     const pre = el.closest('pre');
     if (!pre || pre.querySelector('.code-copy')) return;
@@ -70,7 +71,9 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById(btn.dataset.tab)?.classList.add('active');
     });
   });
-});
+}
+document.addEventListener('DOMContentLoaded', () => initPageScripts());
+document.addEventListener('htmx:afterSwap', (e) => initPageScripts(e.detail.target));
 </script>
 </body>
 </html>

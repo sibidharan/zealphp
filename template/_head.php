@@ -14,9 +14,9 @@ $description ??= 'The PHP runtime for AI web applications. Upgrade existing PHP 
     /* Instrument Sans — display / heading font */
     @import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap');
   </style>
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
   <?php if (str_starts_with((string)($page ?? ''), 'learn')): ?>
     <link rel="stylesheet" href="/css/learn.css">
-    <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
     <script src="/js/learn.js" defer></script>
   <?php endif; ?>
 </head>
