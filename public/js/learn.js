@@ -87,8 +87,10 @@
     messages.scrollTop = messages.scrollHeight;
 
     let lastItem = null;
+    let textHtmlBuf = '';
     const ensureText = () => {
       if (lastItem && lastItem.classList.contains('text')) return lastItem;
+      textHtmlBuf = '';
       lastItem = makeEl('div', 'chat-item text');
       bubble.appendChild(lastItem);
       return lastItem;
@@ -132,8 +134,19 @@
       function handleEvent(ev, data) {
         if (ev === 'token') {
           const t = ensureText();
-          t.appendChild(htmlFragment(data.token || ''));
+          textHtmlBuf += (data.token || '');
+          const tmpl = document.createElement('template');
+          tmpl.content.textContent = '';
+          // Re-render the full accumulated HTML on each token so partial
+          // tags (e.g. "<str" from character-by-character streaming) don't
+          // break the DOM. The browser's HTML parser handles incomplete tags
+          // gracefully when given the full buffer each time.
+          const range = document.createRange();
+          range.selectNodeContents(t);
+          range.deleteContents();
+          t.appendChild(document.createRange().createContextualFragment(textHtmlBuf));
         } else if (ev === 'tool_call') {
+          textHtmlBuf = '';
           const card = makeEl('div', 'chat-item tool');
           card.dataset.id = data.id;
           card.dataset.status = 'running';
