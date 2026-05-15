@@ -49,7 +49,11 @@ $active = $active ?? 'learn/notes';
         </details>
       </section>
     <?php else: ?>
-      <p>Logged in as <strong><?= htmlspecialchars($user['username']) ?></strong> &middot; <a href="/api/learn/logout">Log out</a></p>
+      <div class="notes-user-bar">
+        <span class="notes-user-avatar"><?= strtoupper(substr($user['username'], 0, 1)) ?></span>
+        <span class="notes-user-name"><?= htmlspecialchars($user['username']) ?></span>
+        <a href="/api/learn/logout" class="notes-user-logout">Log out</a>
+      </div>
 
       <section class="notes-app">
         <form class="note-form"
@@ -58,7 +62,7 @@ $active = $active ?? 'learn/notes';
               hx-swap="afterbegin"
               hx-on::after-request="this.reset()">
           <input type="text" name="title" placeholder="Note title" required maxlength="200">
-          <textarea name="body" placeholder="Body (any text)" maxlength="4096"></textarea>
+          <textarea name="body" placeholder="What's on your mind?" maxlength="4096"></textarea>
           <button type="submit">Add note</button>
         </form>
 

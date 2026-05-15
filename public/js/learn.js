@@ -182,6 +182,7 @@
           range.deleteContents();
           t.appendChild(document.createRange().createContextualFragment(textHtmlBuf));
         } else if (ev === 'tool_call') {
+          eventLog('sse', 'tool_call', data.name || '');
           removeTyping();
           textHtmlBuf = '';
           const card = makeEl('div', 'chat-item tool');
@@ -214,8 +215,10 @@
               r.hidden = false;
             }
           }
+          eventLog('sse', 'tool_done', (data.status || 'ok') + (data.result_preview ? ' — ' + data.result_preview.substring(0, 40) : ''));
           lastItem = null;
         } else if (ev === 'notes_changed') {
+          eventLog('sse', 'notes_changed', '→ refreshing notes via htmx');
           if (window.htmx) window.htmx.ajax('GET', '/api/learn/notes', { target: '#notes-list', swap: 'innerHTML' });
         } else if (ev === 'error') {
           removeTyping();
@@ -242,16 +245,34 @@
 
   // Cross-tab notes sync via WebSocket — opens on /learn/notes and /learn/ai-chat.
   let wsConnected = false;
-  function wsLog(msg) {
-    if (!msg.type || msg.type === 'heartbeat' || msg.type === 'pong') return;
+  function eventLog(channel, event, detail) {
     const log = document.getElementById('ws-log');
     if (!log) return;
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
-    const op = msg.op ? ` (${msg.op}${msg.id ? ', id: ' + msg.id : ''})` : '';
     const line = document.createElement('div');
-    line.textContent = `[${time}] ${msg.type}${op}`;
+    line.className = 'event-log-line event-log-' + channel;
+
+    const ts = makeEl('span', 'event-log-time', time);
+    const tag = makeEl('span', 'event-log-tag event-log-tag-' + channel, channel === 'ws' ? 'WS' : 'SSE');
+    const ev = makeEl('span', 'event-log-event', event);
+    line.appendChild(ts);
+    line.append(' ');
+    line.appendChild(tag);
+    line.append(' ');
+    line.appendChild(ev);
+    if (detail) {
+      line.append(' ');
+      line.appendChild(makeEl('span', 'event-log-detail', detail));
+    }
     log.appendChild(line);
     log.scrollTop = log.scrollHeight;
+  }
+
+  function wsLog(msg) {
+    if (!msg.type || msg.type === 'heartbeat' || msg.type === 'pong') return;
+    const op = msg.op ? msg.op : '';
+    const id = msg.id ? '#' + msg.id : '';
+    eventLog('ws', msg.type, [op, id].filter(Boolean).join(' '));
   }
 
   function initWebSocket() {

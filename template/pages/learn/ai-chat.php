@@ -76,10 +76,10 @@ data: {"done":true}</code></pre>
           <div id="notes-list" class="notes-list" hx-get="/api/learn/notes" hx-trigger="load" hx-swap="innerHTML">
             <p class="notes-empty">Loading&hellip;</p>
           </div>
-          <details class="ws-log-wrap">
-            <summary>WebSocket log</summary>
-            <div id="ws-log" class="ws-log"></div>
-          </details>
+          <div class="event-log-wrap">
+            <h4 class="event-log-title">Event log</h4>
+            <div id="ws-log" class="event-log"></div>
+          </div>
         </div>
         <div id="learn-chat" class="chat-box" data-thread-id="">
           <div class="chat-head">
