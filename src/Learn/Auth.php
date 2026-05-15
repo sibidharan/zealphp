@@ -42,10 +42,16 @@ class Auth
     {
         $g = G::instance();
         if (!empty($g->session['user_id'])) {
-            return [
-                'user_id'  => (int) $g->session['user_id'],
-                'username' => (string) ($g->session['username'] ?? ''),
-            ];
+            $userId = (int) $g->session['user_id'];
+            $db = DB::open();
+            $stmt = $db->prepare('SELECT id, username FROM users WHERE id = ?');
+            $stmt->execute([$userId]);
+            $row = $stmt->fetch();
+            if (!$row) {
+                unset($g->session['user_id'], $g->session['username']);
+                return null;
+            }
+            return ['user_id' => (int) $row['id'], 'username' => (string) $row['username']];
         }
         return null;
     }
