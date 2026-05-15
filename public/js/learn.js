@@ -187,4 +187,32 @@
     (window.crypto || window.msCrypto).getRandomValues(a);
     return Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
   }
+
+  // Cross-tab notes sync via WebSocket — opens on /learn/notes and /learn/ai-chat.
+  document.addEventListener('DOMContentLoaded', () => {
+    const notesList = document.getElementById('notes-list');
+    if (!notesList) return;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let ws = null;
+    let reconnectDelay = 500;
+    function connect() {
+      try { ws = new WebSocket(proto + '//' + location.host + '/ws/learn'); }
+      catch (e) { return; }
+      ws.addEventListener('open', () => { reconnectDelay = 500; });
+      ws.addEventListener('message', (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'note_changed' && window.htmx) {
+            window.htmx.ajax('GET', '/api/learn/notes', { target: '#notes-list', swap: 'innerHTML' });
+          }
+        } catch (e) { /* ignore */ }
+      });
+      ws.addEventListener('close', () => {
+        reconnectDelay = Math.min(reconnectDelay * 2, 10000);
+        setTimeout(connect, reconnectDelay);
+      });
+    }
+    connect();
+    setInterval(() => { if (ws && ws.readyState === 1) ws.send('ping'); }, 25000);
+  });
 })();

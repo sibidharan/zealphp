@@ -171,6 +171,37 @@ if (defined('ZEALPHP_LEARN_TESTING') || !class_exists('ZealPHP\\App', false)) re
 
 $app = App::instance();
 
+// ── WebSocket cross-tab notes sync (fd → user_id mapping) ────────────
+\ZealPHP\Store::make('learn_ws_clients', 4096, [
+    'user_id' => [\OpenSwoole\Table::TYPE_INT, 8],
+]);
+
+$app->ws('/ws/learn',
+    onMessage: function($server, $frame) {
+        if (($frame->data ?? '') === 'ping') $server->push($frame->fd, 'pong');
+    },
+    onOpen: function($server, $request) {
+        if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        if (!$userId) { $server->disconnect($request->fd, 1008, 'auth_required'); return; }
+        \ZealPHP\Store::set('learn_ws_clients', (string)$request->fd, ['user_id' => $userId]);
+    },
+    onClose: function($server, $fd) {
+        \ZealPHP\Store::del('learn_ws_clients', (string)$fd);
+    },
+);
+
+function learn_ws_broadcast(int $userId, array $payload): void {
+    $server = \ZealPHP\App::getServer();
+    if (!$server) return;
+    $json = json_encode($payload);
+    foreach (\ZealPHP\Store::table('learn_ws_clients') as $fd => $row) {
+        if ((int)($row['user_id'] ?? 0) === $userId) {
+            try { @$server->push((int)$fd, $json); } catch (\Throwable $e) {}
+        }
+    }
+}
+
 \ZealPHP\Store::make('learn_login_rl', 1024, [
     'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],
     'count' => [\OpenSwoole\Table::TYPE_INT, 4],
@@ -306,6 +337,7 @@ $app->route('/api/learn/notes', ['methods' => ['POST']], function($request, $res
     $db = learn_db_open();
     $id = learn_notes_create($db, $u['user_id'], $title, $bodyText);
     if ($id === null) { http_response_code(422); header('Content-Type: application/json'); return ['error' => 'validation_failed']; }
+    learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'create', 'id' => $id]);
     $note = learn_notes_read($db, $u['user_id'], $id);
     header('Content-Type: text/html; charset=utf-8');
     return App::renderToString('/components/_note_card', $note);
@@ -319,6 +351,7 @@ $app->route('/api/learn/notes/{id}', ['methods' => ['POST']], function($request,
     $db = learn_db_open();
     $ok = learn_notes_update($db, $u['user_id'], (int)$id, $body['title'] ?? null, $body['body'] ?? null);
     if (!$ok) { http_response_code(404); header('Content-Type: application/json'); return ['error' => 'not_found']; }
+    learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'update', 'id' => (int)$id]);
     $note = learn_notes_read($db, $u['user_id'], (int)$id);
     header('Content-Type: text/html; charset=utf-8');
     return App::renderToString('/components/_note_card', $note);
@@ -330,6 +363,7 @@ $app->route('/api/learn/notes/{id}', ['methods' => ['DELETE']], function($reques
     $db = learn_db_open();
     $ok = learn_notes_delete($db, $u['user_id'], (int)$id);
     if (!$ok) { http_response_code(404); return ''; }
+    learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'delete', 'id' => (int)$id]);
     return '';
 });
 
