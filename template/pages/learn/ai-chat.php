@@ -39,8 +39,10 @@ $active = $active ?? 'learn/ai-chat';
             <span class="chat-mode">…</span>
             <button type="button" class="chat-new" title="Start a fresh conversation">New thread</button>
           </div>
-          <div class="chat-history" hidden></div>
-          <div class="chat-messages"></div>
+          <div class="chat-scroll">
+            <div class="chat-history"></div>
+            <div class="chat-messages"></div>
+          </div>
           <form class="chat-form" autocomplete="off" hx-boost="false">
             <input type="text" name="message" placeholder="Ask anything about your notes…" required>
             <button type="submit">Send</button>

@@ -41,14 +41,15 @@
     function loadHistory() {
       if (!historyEl) return;
       historyEl.textContent = '';
-      historyEl.hidden = false;
       fetch('/api/learn/chat_history?thread_id=' + encodeURIComponent(threadId))
         .then(r => r.ok ? r.text() : '')
         .then(html => {
-          if (!html || html.includes('chat-empty')) { historyEl.hidden = true; return; }
+          if (!html || html.includes('chat-empty')) return;
           historyEl.appendChild(htmlFragment(html));
+          const scroll = root.querySelector('.chat-scroll');
+          if (scroll) scroll.scrollTop = scroll.scrollHeight;
         })
-        .catch(() => { historyEl.hidden = true; });
+        .catch(() => {});
     }
     loadHistory();
 
@@ -56,7 +57,7 @@
       threadId = cryptoRandomId();
       localStorage.setItem('zealphp_learn_thread', threadId);
       root.dataset.threadId = threadId;
-      if (historyEl) { historyEl.textContent = ''; historyEl.hidden = true; }
+      if (historyEl) historyEl.textContent = '';
       messages.textContent = '';
     });
 
@@ -132,7 +133,8 @@
               catch (e) { /* ignore */ }
             }
           }
-          messages.scrollTop = messages.scrollHeight;
+          const scroll = messages.closest('.chat-scroll');
+          if (scroll) scroll.scrollTop = scroll.scrollHeight;
           read();
         }).catch(() => done());
       }
