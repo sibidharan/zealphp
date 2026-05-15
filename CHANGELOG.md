@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-05-15
+
+### Fixed
+- **`setrawcookie()` was over-strict** — v0.2.5's CRLF/NUL injection guard incorrectly rejected `,`, `;`, ` `, `\t`, `\013`, `\014` in raw cookie values. PHP native `setrawcookie` only rejects `\r\n\0` in the value (the response-splitting vector); the rest are legal cookie-octets that callers explicitly use the "raw" variant to pass through unchanged. The filter is now relaxed to match PHP's actual behavior. Caught by the existing `tests/Integration/ApacheParityTest::testSetRawCookieDoesNotUrlEncode` regression test (which was failing under v0.2.5/v0.2.6).
+
 ## [0.2.6] - 2026-05-15
 
 ### Changed

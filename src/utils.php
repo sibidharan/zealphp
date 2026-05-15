@@ -658,17 +658,20 @@ function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $s
  * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
  */
 function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false) {
-    // setrawcookie() skips URL-encoding on $value but still must reject control
-    // chars in name/value/path/domain that would enable Set-Cookie header
-    // injection. Name char rules match PHP native setrawcookie.
+    // setrawcookie() skips URL-encoding on $value, which is the whole point —
+    // it's "raw" so callers can pass already-encoded values verbatim. Match
+    // PHP native behavior: reject the name char-class, but only reject
+    // CRLF/NUL in the value/path/domain (the response-splitting vector).
+    // Do NOT reject space/comma/semicolon in the value — PHP allows them
+    // (test fixture: setrawcookie('rawck', 'a b+c/d')).
     if (strpbrk((string)$name, "=,; \t\r\n\013\014\0") !== false) {
         trigger_error("Cookie names cannot contain any of the following '=,; \\t\\r\\n\\013\\014'", E_USER_WARNING);
         return false;
     }
-    if (strpbrk((string)$value, ",; \t\r\n\013\014\0") !== false
+    if (strpbrk((string)$value, "\r\n\0") !== false
         || strpbrk((string)$path, "\r\n\0") !== false
         || strpbrk((string)$domain, "\r\n\0") !== false) {
-        trigger_error('Raw cookie value/path/domain contains invalid characters', E_USER_WARNING);
+        trigger_error('Raw cookie value/path/domain contains control characters', E_USER_WARNING);
         return false;
     }
     $cookie = "$name=$value";
