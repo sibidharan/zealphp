@@ -95,11 +95,13 @@ $app->route('/api/learn/notes/{id}', ['methods' => ['POST']], function ($request
 $app->route('/api/learn/notes/{id}', ['methods' => ['DELETE']], function ($request, $response, $id) {
     $u = Auth::currentUser();
     if (!$u) { http_response_code(401); return ['error' => 'auth_required']; }
+    $g = G::instance();
     $db = DB::open();
     $ok = Notes::delete($db, $u['user_id'], (int) $id);
     if (!$ok) { http_response_code(404); return ['error' => 'not_found']; }
     learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'delete', 'id' => (int) $id]);
-    return ['ok' => true];
+    $wantsJson = stripos($g->server['HTTP_ACCEPT'] ?? '', 'application/json') !== false;
+    return $wantsJson ? ['ok' => true] : '';
 });
 
 // ── Demo endpoints ───────────────────────────────────────────────────
