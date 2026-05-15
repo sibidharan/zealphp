@@ -34,7 +34,7 @@ $groups = [
               <a href="/<?= $slug ?>"
                  hx-get="/api/learn/page?slug=<?= urlencode($slug) ?>"
                  hx-target=".learn-layout"
-                 hx-swap="outerHTML show:.lesson-header:top"
+                 hx-swap="outerHTML"
                  hx-push-url="/<?= $slug ?>"><?= htmlspecialchars($label) ?></a>
             </li>
             <?php $i++; endforeach; ?>
