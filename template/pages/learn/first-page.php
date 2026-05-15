@@ -5,62 +5,114 @@
     <?php App::render('/components/_lesson_header', [
       'number'   => 3,
       'title'    => 'Your First Page',
-      'subtitle' => 'Implicit public routing — drop a PHP file in public/, get a URL for free.',
+      'subtitle' => 'Drop a file, get a URL. The filesystem is the router.',
       'prev'     => ['slug' => 'learn/create-app', 'title' => 'Create a ZealPHP App'],
-      'next'     => ['slug' => 'learn/components', 'title' => 'Components'],
+      'next'     => ['slug' => 'learn/components', 'title' => 'Layouts & Components'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
-      'Drop a PHP file in public/ and ZealPHP serves it at /filename',
-      'Echo plain HTML or call App::render to use a layout template',
-      'Pass data from the entry file to its template via render args',
+      'Create a page by adding a file to public/',
+      'How implicit routing maps files to URLs',
+      'Add dynamic content with PHP',
+      'Handle query parameters',
     ]]); ?>
 
-    <h2>The simplest possible page</h2>
-    <p>Create <code>public/hello.php</code>:</p>
-    <pre><code>&lt;?php
-echo '&lt;h1&gt;Hello from ZealPHP&lt;/h1&gt;';
-echo '&lt;p&gt;The current time is ' . date('H:i:s') . '&lt;/p&gt;';</code></pre>
-    <p>Restart the server (or just save — the worker reloads on demand) and hit <code>http://localhost:8080/hello</code>. That's it. No route registration, no URL config. The file's name is the URL.</p>
+    <h2>The problem</h2>
+    <p>
+      In most frameworks, adding a new page means editing a routing table, creating a controller,
+      registering it somewhere, and maybe writing a view. That's a lot of ceremony for "show some HTML."
+    </p>
+    <p>
+      ZealPHP takes a different approach: <strong>the filesystem is the router</strong>.
+    </p>
 
-    <?php App::render('/components/_callout', [
-      'variant' => 'info',
-      'title'   => 'The implicit public-file rule',
-      'body'    => '<p><code>public/&lt;name&gt;.php</code> &rarr; <code>GET /&lt;name&gt;</code>. Subdirectories work too: <code>public/blog/post.php</code> &rarr; <code>GET /blog/post</code>. Lesson 5 covers nested routes in depth.</p>',
+    <h2>Step 1: Create a file</h2>
+    <p>Create a file at <code>public/greeting.php</code>:</p>
+    <pre><code class="language-php">&lt;?php
+echo "&lt;h1&gt;Hello, World!&lt;/h1&gt;";
+echo "&lt;p&gt;This page was served by ZealPHP.&lt;/p&gt;";</code></pre>
+
+    <h2>Step 2: Visit the URL</h2>
+    <p>Open <code>http://localhost:8080/greeting</code> in your browser. That's it &mdash; no routing
+      config, no controller registration. ZealPHP saw a file at <code>public/greeting.php</code> and
+      mapped it to <code>GET /greeting</code> automatically.</p>
+
+    <h2>How implicit routing works</h2>
+    <p>
+      Think of the <code>public/</code> folder as a <strong>filing cabinet</strong>. Folders are drawers,
+      files are documents. The URL is the path you'd describe to find a document:
+    </p>
+    <pre><code>public/index.php       &rarr; GET /
+public/about.php       &rarr; GET /about
+public/blog/post.php   &rarr; GET /blog/post
+public/css/site.css    &rarr; GET /css/site.css  (static files too)</code></pre>
+    <p>
+      No configuration. No routing table. The file's location <em>is</em> its URL. If you rename
+      the file, the URL changes. If you delete the file, the URL returns 404.
+    </p>
+
+    <h2>Adding dynamic content</h2>
+    <p>These are PHP files, so you can use any PHP you want. Let's make the greeting personal:</p>
+    <pre><code class="language-php">&lt;?php
+$name = htmlspecialchars($_GET['name'] ?? 'World');
+echo "&lt;h1&gt;Hello, {$name}!&lt;/h1&gt;";
+echo "&lt;p&gt;The time is " . date('H:i:s') . "&lt;/p&gt;";</code></pre>
+    <p>Visit <code>/greeting?name=Alice</code> and the page greets Alice by name.</p>
+
+    <?php App::render('/components/_tryit', [
+      'title' => 'See it live',
+      'body'  => '<p>This very site uses implicit routing. The page you\'re reading right now is served from <code>public/learn.php</code>. Every page in the docs &mdash; <a href="/routing">/routing</a>, <a href="/streaming">/streaming</a>, <a href="/websocket">/websocket</a> &mdash; is a file in <code>public/</code>.</p>
+<p>Try it: <a href="/api/learn/demo/greeting?name=ZealPHP" target="_blank">Open the greeting demo &rarr;</a></p>',
     ]); ?>
 
-    <h2>Add a layout</h2>
-    <p>Every interesting site has a shared header, footer, nav. Use <code>App::render('_master', [...])</code> to inject your page into a layout template:</p>
-    <pre><code>&lt;?php use ZealPHP\App;
-App::render('/_master', [
-    'title' =&gt; 'Hello',
-    'page'  =&gt; 'hello',
-]);</code></pre>
-    <p>This page you're reading is exactly five lines of PHP that call <code>App::render('/_master', [...])</code>. The <code>'page'</code> argument tells the master template which file under <code>template/pages/</code> to render as the body.</p>
+    <h2>What about messy URLs?</h2>
+    <p>
+      "But I don't want <code>.php</code> in my URLs!" &mdash; you won't see them. ZealPHP strips the
+      extension automatically. <code>public/about.php</code> responds at <code>/about</code>, not
+      <code>/about.php</code>. Requesting <code>/about.php</code> directly returns 403.
+    </p>
 
-    <?php App::render('/components/_callout', [
-      'variant' => 'deep',
-      'title'   => 'Why the leading slash?',
-      'body'    => '<p><code>/_master</code> tells <code>App::render</code> to look in <code>template/_master.php</code>. Without the slash, the framework first checks <code>template/&lt;current-page-basename&gt;/_master.php</code> — useful for page-local components, but here we want the global layout. The Components lesson covers this in detail.</p>',
+    <h2>Using a layout</h2>
+    <p>
+      Right now, your page outputs raw HTML with no <code>&lt;head&gt;</code>, no stylesheet, no navigation.
+      Every real page needs a shared layout. The next lesson teaches you how to wrap pages in a layout
+      template using <code>App::render()</code>.
+    </p>
+    <p>Here's a preview &mdash; this is how most pages in ZealPHP apps look:</p>
+    <pre><code class="language-php">&lt;?php use ZealPHP\App;
+App::render('/_master', [
+    'title' =&gt; 'About',
+    'page'  =&gt; 'about',
+]);</code></pre>
+    <p>That's the entire file. Three lines. The master template handles the HTML shell, nav,
+      footer, and CSS &mdash; your page template only has the content.</p>
+
+    <?php App::render('/components/_concept_check', [
+      'id'       => 'routing1',
+      'question' => 'If you create a file at public/blog/post.php, what URL will serve it?',
+      'correct'  => 'b',
+      'explain'  => 'ZealPHP maps the file path (minus public/ and .php) to the URL. So public/blog/post.php &rarr; /blog/post.',
+      'options'  => [
+        'a' => '/blog/post.php',
+        'b' => '/blog/post',
+        'c' => '/public/blog/post',
+      ],
     ]); ?>
 
-    <h2>Pass data to the template</h2>
-    <p>The second argument to <code>App::render</code> is an array of variables that the template can read by name:</p>
-    <pre><code>// public/about.php
-App::render('/_master', [
-    'title'   =&gt; 'About',
-    'page'    =&gt; 'about',
-    'author'  =&gt; 'Alice',
-    'updated' =&gt; '2026-05-15',
-]);</code></pre>
-    <pre><code>&lt;!-- template/pages/about.php --&gt;
-&lt;h1&gt;About&lt;/h1&gt;
-&lt;p&gt;By &lt;?= htmlspecialchars($author) ?&gt; — last updated &lt;?= $updated ?&gt;&lt;/p&gt;</code></pre>
-    <p>Variables are extracted into the template's scope. No props object, no React-like wrapper — just PHP variables.</p>
+    <?php App::render('/components/_keytakeaways', ['items' => [
+      'Files in <code>public/</code> automatically become URLs &mdash; no routing config needed',
+      'The URL mirrors the file path: <code>public/blog/post.php</code> &rarr; <code>/blog/post</code>',
+      'Use <code>$_GET</code> for query parameters, standard PHP for dynamic content',
+      '<code>.php</code> extensions are stripped &mdash; clean URLs by default',
+    ]]); ?>
 
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/create-app">← Create a ZealPHP App</a>
-      <a class="lesson-chip lesson-chip-next" href="/learn/components">Components →</a>
+      <a class="lesson-chip lesson-chip-prev" href="/learn/create-app"
+         hx-get="/api/learn/page?slug=learn/create-app" hx-target=".learn-layout"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/create-app">&larr; Create a ZealPHP App</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/components"
+         hx-get="/api/learn/page?slug=learn/components" hx-target=".learn-layout"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/components">Layouts &amp; Components &rarr;</a>
     </div>
   </article>
 </div>

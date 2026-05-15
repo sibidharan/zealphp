@@ -201,3 +201,71 @@
 .lesson-cta { margin: 2rem 0; text-align: center; }
 .btn-cta { display: inline-block; padding: .75rem 1.5rem; background: var(--accent, #f59e0b); color: #fff; border-radius: 8px; font-weight: 700; text-decoration: none; font-size: 1.05rem; }
 .btn-cta:hover { filter: brightness(1.1); text-decoration: none; }
+
+/* Concept check — inline quiz */
+.concept-check {
+  margin: 1.5rem 0; padding: 1.2rem 1.4rem;
+  border: 2px solid #c7d2fe; border-radius: 10px; background: #eef2ff;
+}
+.concept-check-q {
+  font-weight: 700; font-size: 1.05rem; margin: 0 0 .85rem; color: #1e1b4b;
+  line-height: 1.5;
+}
+.concept-check-q::before { content: "Quiz: "; font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: #6366f1; display: block; margin-bottom: .25rem; font-weight: 600; }
+.concept-check-form { display: flex; flex-direction: column; gap: .5rem; counter-reset: opt-counter; }
+.concept-check-opt {
+  text-align: left; padding: .7rem 1rem .7rem .75rem; border: 2px solid #e0e7ff; border-radius: 8px;
+  background: #fff; font: inherit; font-size: .9rem; cursor: pointer; color: #334155;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+  display: flex; align-items: center; gap: .6rem; line-height: 1.4;
+}
+.concept-check-opt::before {
+  content: counter(opt-counter, upper-alpha); counter-increment: opt-counter;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.65rem; height: 1.65rem; flex-shrink: 0;
+  border-radius: 50%; background: #e0e7ff; color: #4338ca;
+  font-weight: 700; font-size: .78rem;
+}
+.concept-check-opt:hover {
+  border-color: #818cf8; background: #eef2ff; box-shadow: 0 1px 4px rgba(99,102,241,.15);
+}
+.concept-check-opt:hover::before { background: #818cf8; color: #fff; }
+.concept-check-opt:active { transform: scale(.99); }
+
+/* WebSocket event log */
+.ws-log-wrap { margin-top: .75rem; font-size: .78rem; }
+.ws-log-wrap summary { cursor: pointer; color: #78716c; font-weight: 500; user-select: none; }
+.ws-log {
+  margin-top: .4rem; padding: .55rem .7rem; max-height: 120px; overflow-y: auto;
+  background: #1c1917; color: #a3e635; border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem; line-height: 1.6;
+}
+.ws-log:empty::after { content: "Waiting for events\2026"; color: #78716c; font-style: italic; }
+
+/* Before / After toggle */
+.before-after { margin: 1.25rem 0; border: 1px solid #e7e5e4; border-radius: 8px; overflow: hidden; }
+.ba-tabs { display: flex; border-bottom: 1px solid #e7e5e4; background: #fafaf9; }
+.ba-tab {
+  flex: 1; padding: .55rem 1rem; border: none; background: transparent;
+  font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; color: #78716c;
+  border-bottom: 2px solid transparent; transition: color .15s, border-color .15s;
+}
+.ba-tab.active { color: var(--accent, #f59e0b); border-bottom-color: var(--accent, #f59e0b); background: #fff; }
+.ba-tab:hover:not(.active) { color: #44403c; }
+.ba-panel { padding: 1rem; }
+.ba-panel.hidden { display: none; }
+
+/* Key takeaways */
+.key-takeaways { margin: 2rem 0 1.5rem; padding: 1rem 1.2rem; border-left: 4px solid #059669; background: #ecfdf5; border-radius: 0 6px 6px 0; }
+.key-takeaways h3 { margin: 0 0 .5rem; font-size: .92rem; text-transform: uppercase; letter-spacing: .05em; color: #065f46; }
+.key-takeaways ul { margin: 0; padding-left: 1.25rem; }
+.key-takeaways li { margin: .25rem 0; font-size: .92rem; color: #064e3b; }
+
+/* Challenge */
+.challenge { margin: 1.5rem 0; padding: 1.1rem 1.2rem; border: 2px dashed #d97706; border-radius: 8px; background: #fffbeb; }
+.challenge h3 { margin: 0 0 .5rem; font-size: 1rem; color: #92400e; }
+.challenge-body { font-size: .92rem; color: #451a03; }
+.challenge-body p { margin: .35rem 0; }
+.challenge-hint { margin-top: .65rem; }
+.challenge-hint summary { cursor: pointer; font-size: .85rem; color: #78716c; font-weight: 500; }
+.challenge-hint p { margin: .35rem 0 0; font-size: .85rem; color: #57534e; }

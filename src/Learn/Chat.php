@@ -102,12 +102,14 @@ class Chat
 
         ChatHistory::append($db, $user['user_id'], $threadId, 'user', [['type' => 'text', 'html' => '<p>' . htmlspecialchars($message) . '</p>']]);
 
+        $g = G::instance();
         $payload = [
-            'message'   => $message,
-            'thread_id' => $threadId,
-            'db_path'   => DB::path(),
-            'user_id'   => $user['user_id'],
-            'profile'   => [
+            'message'    => $message,
+            'thread_id'  => $threadId,
+            'session_id' => session_id(),
+            'api_base'   => 'http://127.0.0.1:' . ($g->server['SERVER_PORT'] ?? '8080'),
+            'user_id'    => $user['user_id'],
+            'profile'    => [
                 'username'           => $user['username'],
                 'note_count'         => count($notes),
                 'recent_note_titles' => $recent,

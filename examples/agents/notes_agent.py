@@ -3,132 +3,132 @@
 # requires-python = ">=3.10"
 # dependencies = ["openai-agents"]
 # ///
-"""ZealPHP Learn notes agent — 6 tools, scoped to USER_ID, streams SSE events.
+"""ZealPHP Learn notes agent — 6 tools, calls ZealPHP API via HTTP.
 
-Called by ZealPHP's route/learn.php via proc_open. Reads JSON from argv[1]
+Called by ZealPHP's Chat.php via proc_open. Reads JSON from argv[1]
 (base64-encoded), streams SSE-formatted events to stdout.
 
-Input JSON: {"message": "...", "thread_id": "...", "db_path": "...", "user_id": N, "profile": {...}}
+The agent authenticates as the user by sending their PHPSESSID cookie
+with every API call. This means note changes go through the same API
+endpoints as the frontend — triggering WebSocket broadcasts for live
+cross-tab updates.
+
+Input JSON: {"message": "...", "thread_id": "...", "session_id": "...", "api_base": "...", "user_id": N, "profile": {...}}
 Output: SSE events (event: token/tool_call/tool_args/tool_done/notes_changed/done, data: JSON)
 """
 import asyncio
 import base64
 import json
 import os
-import sqlite3
 import sys
-import time
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass
 
-from agents import Agent, Runner, SQLiteSession, function_tool
+from agents import Agent, Runner, RunContextWrapper, SQLiteSession, function_tool
 
-DB_PATH = None
-USER_ID = None
 MAX_NOTES = int(os.environ.get("ZEALPHP_LEARN_MAX_NOTES", "256"))
 
 
-def _db():
-    c = sqlite3.connect(DB_PATH, timeout=2.0)
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA journal_mode = WAL")
-    c.execute("PRAGMA foreign_keys = ON")
-    return c
+@dataclass
+class AgentContext:
+    api_base: str
+    session_id: str
+    user_id: int
+
+
+def _api(ctx: AgentContext, method: str, path: str, data=None):
+    url = f"{ctx.api_base}{path}"
+    body = json.dumps(data).encode() if data else None
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Cookie": f"PHPSESSID={ctx.session_id}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            text = resp.read().decode()
+            return json.loads(text) if text.strip() else {}
+    except urllib.error.HTTPError as e:
+        return {"error": f"HTTP {e.code}", "detail": e.read().decode()[:200]}
 
 
 @function_tool
-def list_notes() -> str:
+def list_notes(context: RunContextWrapper[AgentContext]) -> str:
     """List all of the user's notes with id, title, and date."""
-    with _db() as c:
-        rows = c.execute(
-            "SELECT id, title, updated_at FROM notes WHERE user_id=? ORDER BY updated_at DESC",
-            (USER_ID,),
-        ).fetchall()
-    if not rows:
+    notes = _api(context.context, "GET", "/api/learn/notes")
+    if isinstance(notes, dict) and "error" in notes:
+        return f"Error: {notes['error']}"
+    if not notes:
         return "(no notes)"
-    return "\n".join(f"id={r['id']} title={r['title']!r}" for r in rows)
+    return "\n".join(f"id={n['id']} title={n['title']!r}" for n in notes)
 
 
 @function_tool
-def read_note(note_id: int) -> str:
+def read_note(context: RunContextWrapper[AgentContext], note_id: int) -> str:
     """Read a single note's full content given its id."""
-    with _db() as c:
-        r = c.execute(
-            "SELECT id, title, body FROM notes WHERE id=? AND user_id=?",
-            (note_id, USER_ID),
-        ).fetchone()
-    return f"id={r['id']} title={r['title']!r}\n\n{r['body']}" if r else "Note not found."
+    n = _api(context.context, "GET", f"/api/learn/notes/{note_id}")
+    if isinstance(n, dict) and "error" in n:
+        return "Note not found."
+    return f"id={n['id']} title={n['title']!r}\n\n{n.get('body', '')}"
 
 
 @function_tool
-def search_notes(query: str) -> str:
-    """Search the user's notes for matches in title or body (SQL LIKE). Up to 10 hits."""
-    q = f"%{query}%"
-    with _db() as c:
-        rows = c.execute(
-            "SELECT id, title, substr(body, 1, 80) AS snip FROM notes WHERE user_id=? AND (title LIKE ? OR body LIKE ?) ORDER BY updated_at DESC LIMIT 10",
-            (USER_ID, q, q),
-        ).fetchall()
+def search_notes(context: RunContextWrapper[AgentContext], query: str) -> str:
+    """Search the user's notes for matches in title or body. Up to 10 hits."""
+    q = urllib.parse.quote(query)
+    rows = _api(context.context, "GET", f"/api/learn/notes/search?q={q}")
+    if isinstance(rows, dict) and "error" in rows:
+        return f"Error: {rows['error']}"
     if not rows:
         return f"(no matches for {query!r})"
     return "\n".join(f"id={r['id']} title={r['title']!r}" for r in rows)
 
 
 @function_tool
-def create_note(title: str, body: str) -> str:
+def create_note(
+    context: RunContextWrapper[AgentContext], title: str, body: str
+) -> str:
     """Create a new note for the user. Returns the new note's id."""
-    title = title.strip()
-    if not title or len(title) > 200:
-        return "Error: title must be 1-200 chars."
-    if len(body) > 4096:
-        return "Error: body must be <= 4096 chars."
-    now = int(time.time())
-    with _db() as c:
-        count = c.execute(
-            "SELECT COUNT(*) FROM notes WHERE user_id=?", (USER_ID,)
-        ).fetchone()[0]
-        if count >= MAX_NOTES:
-            return f"Error: note limit ({MAX_NOTES}) reached."
-        cur = c.execute(
-            "INSERT INTO notes (user_id, title, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (USER_ID, title, body, now, now),
-        )
-        return f"Created note id={cur.lastrowid}."
+    result = _api(
+        context.context, "POST", "/api/learn/notes", {"title": title, "body": body}
+    )
+    if isinstance(result, dict) and "error" in result:
+        return f"Error: {result['error']}"
+    return f"Created note id={result.get('id', '?')}."
 
 
 @function_tool
 def update_note(
-    note_id: int, title: str | None = None, body: str | None = None
+    context: RunContextWrapper[AgentContext],
+    note_id: int,
+    title: str | None = None,
+    body: str | None = None,
 ) -> str:
     """Update an existing note's title or body. Must belong to the user."""
-    with _db() as c:
-        existing = c.execute(
-            "SELECT title, body FROM notes WHERE id=? AND user_id=?",
-            (note_id, USER_ID),
-        ).fetchone()
-        if not existing:
-            return "Note not found."
-        new_title = (title if title is not None else existing["title"]).strip()
-        new_body = body if body is not None else existing["body"]
-        if not new_title or len(new_title) > 200:
-            return "Error: title must be 1-200 chars."
-        if len(new_body) > 4096:
-            return "Error: body too long."
-        c.execute(
-            "UPDATE notes SET title=?, body=?, updated_at=? WHERE id=? AND user_id=?",
-            (new_title, new_body, int(time.time()), note_id, USER_ID),
-        )
-        return f"Updated note id={note_id}."
+    data = {}
+    if title is not None:
+        data["title"] = title
+    if body is not None:
+        data["body"] = body
+    result = _api(context.context, "POST", f"/api/learn/notes/{note_id}", data)
+    if isinstance(result, dict) and "error" in result:
+        return f"Error: {result['error']}"
+    return f"Updated note id={note_id}."
 
 
 @function_tool
-def delete_note(note_id: int) -> str:
+def delete_note(context: RunContextWrapper[AgentContext], note_id: int) -> str:
     """Delete a note permanently. Must belong to the user."""
-    with _db() as c:
-        cur = c.execute(
-            "DELETE FROM notes WHERE id=? AND user_id=?", (note_id, USER_ID)
-        )
-        return (
-            f"Deleted note id={note_id}." if cur.rowcount else "Note not found."
-        )
+    result = _api(context.context, "DELETE", f"/api/learn/notes/{note_id}")
+    if isinstance(result, dict) and "error" in result:
+        return "Note not found."
+    return f"Deleted note id={note_id}."
 
 
 def build_agent(profile: dict) -> Agent:
@@ -149,7 +149,14 @@ def build_agent(profile: dict) -> Agent:
         name="ZealPHP Notes",
         model=model,
         instructions=sys_prompt,
-        tools=[list_notes, read_note, search_notes, create_note, update_note, delete_note],
+        tools=[
+            list_notes,
+            read_note,
+            search_notes,
+            create_note,
+            update_note,
+            delete_note,
+        ],
     )
 
 
@@ -160,15 +167,17 @@ def emit(event: str, data: dict) -> None:
 
 
 async def main():
-    global DB_PATH, USER_ID
-
     payload = json.loads(base64.b64decode(sys.argv[1]).decode())
-    DB_PATH = payload["db_path"]
-    USER_ID = int(payload["user_id"])
     thread_id = payload.get("thread_id", "default")
     profile = payload.get("profile", {
         "username": "user", "note_count": 0, "recent_note_titles": []
     })
+
+    ctx = AgentContext(
+        api_base=payload["api_base"],
+        session_id=payload["session_id"],
+        user_id=int(payload["user_id"]),
+    )
 
     emit("thread", {"thread_id": thread_id})
 
@@ -180,7 +189,7 @@ async def main():
     )
 
     agent = build_agent(profile)
-    result = Runner.run_streamed(agent, input=payload["message"], session=session)
+    result = Runner.run_streamed(agent, input=payload["message"], session=session, context=ctx)
 
     tool_names = {}
     async for ev in result.stream_events():

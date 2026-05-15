@@ -58,31 +58,74 @@ function learn_ws_broadcast(int $userId, array $payload): void
 }
 
 // ── Notes routes with path params (can't be ZealAPI files) ───────────
+
+$app->route('/api/learn/notes/search', ['methods' => ['GET']], function () {
+    $u = Auth::currentUser();
+    if (!$u) { http_response_code(401); return ['error' => 'auth_required']; }
+    $g = G::instance();
+    $q = trim((string) ($g->get['q'] ?? ''));
+    if ($q === '') return [];
+    return Notes::search(DB::open(), $u['user_id'], $q);
+});
+
+$app->route('/api/learn/notes/{id}', ['methods' => ['GET']], function ($request, $response, $id) {
+    $u = Auth::currentUser();
+    if (!$u) { http_response_code(401); return ['error' => 'auth_required']; }
+    $note = Notes::read(DB::open(), $u['user_id'], (int) $id);
+    if (!$note) { http_response_code(404); return ['error' => 'not_found']; }
+    return $note;
+});
+
 $app->route('/api/learn/notes/{id}', ['methods' => ['POST']], function ($request, $response, $id) {
     $u = Auth::currentUser();
     if (!$u) { http_response_code(401); header('Content-Type: application/json'); return ['error' => 'auth_required']; }
     $g = G::instance();
+    $wantsJson = stripos($g->server['HTTP_ACCEPT'] ?? '', 'application/json') !== false;
     $body = json_decode($g->zealphp_request->parent->getContent(), true) ?: $g->post;
     $db = DB::open();
     $ok = Notes::update($db, $u['user_id'], (int) $id, $body['title'] ?? null, $body['body'] ?? null);
-    if (!$ok) { http_response_code(404); header('Content-Type: application/json'); return ['error' => 'not_found']; }
+    if (!$ok) { http_response_code(404); return ['error' => 'not_found']; }
     learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'update', 'id' => (int) $id]);
     $note = Notes::read($db, $u['user_id'], (int) $id);
+    if ($wantsJson) return $note;
     header('Content-Type: text/html; charset=utf-8');
     return App::renderToString('/components/_note_card', $note);
 });
 
 $app->route('/api/learn/notes/{id}', ['methods' => ['DELETE']], function ($request, $response, $id) {
     $u = Auth::currentUser();
-    if (!$u) { http_response_code(401); header('Content-Type: application/json'); return ['error' => 'auth_required']; }
+    if (!$u) { http_response_code(401); return ['error' => 'auth_required']; }
     $db = DB::open();
     $ok = Notes::delete($db, $u['user_id'], (int) $id);
-    if (!$ok) { http_response_code(404); return ''; }
+    if (!$ok) { http_response_code(404); return ['error' => 'not_found']; }
     learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'delete', 'id' => (int) $id]);
-    return '';
+    return ['ok' => true];
 });
 
-// ── Demo endpoints (Lesson 4, 7, 10) ─────────────────────────────────
+// ── Demo endpoints ───────────────────────────────────────────────────
+
+$app->route('/api/learn/demo/check', ['methods' => ['POST']], function () {
+    $g = G::instance();
+    $answer  = trim((string) ($g->post['answer'] ?? ''));
+    $correct = trim((string) ($g->post['correct'] ?? ''));
+    $explain = trim((string) ($g->post['explain'] ?? ''));
+    $isRight = $answer === $correct;
+    header('Content-Type: text/html; charset=utf-8');
+    return App::renderToString('/components/_callout', [
+        'variant' => $isRight ? 'success' : 'warn',
+        'title'   => $isRight ? 'Correct!' : 'Not quite',
+        'body'    => '<p>' . htmlspecialchars($explain) . '</p>',
+    ]);
+});
+
+$app->route('/api/learn/demo/greeting', ['methods' => ['GET']], function () {
+    $g = G::instance();
+    $name = htmlspecialchars(trim((string) ($g->get['name'] ?? 'World')));
+    header('Content-Type: text/html; charset=utf-8');
+    return learn_demo_shell('Greeting Demo', '<h2>Hello, ' . $name . '!</h2><p>This page was rendered by ZealPHP at ' . date('H:i:s') . '.</p>');
+});
+
+// ── Render method demos (Lesson 4) ──────────────────────────────────
 
 $app->route('/api/learn/demo/incr', ['methods' => ['POST', 'GET']], function ($request, $response) {
     session_start();

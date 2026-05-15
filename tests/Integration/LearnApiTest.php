@@ -87,7 +87,7 @@ class LearnApiTest extends TestCase
     public function test_all_lesson_pages_return_200(): void
     {
         $slugs = ['', '/create-app', '/first-page', '/components', '/routing', '/sessions',
-                   '/htmx', '/notes', '/ai-chat', '/websocket', '/async', '/deployment', '/philosophy'];
+                   '/auth', '/htmx', '/notes', '/ai-chat', '/websocket', '/async', '/deployment'];
         foreach ($slugs as $s) {
             $r = $this->http('GET', '/learn' . $s);
             $this->assertSame(200, $r['status'], "/learn$s did not return 200");

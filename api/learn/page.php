@@ -11,8 +11,8 @@ ${basename(__FILE__, '.php')} = function () {
     $slug = trim((string) ($g->get['slug'] ?? ''));
 
     $allowed = ['learn', 'learn/create-app', 'learn/first-page', 'learn/components',
-        'learn/routing', 'learn/sessions', 'learn/htmx', 'learn/notes',
-        'learn/ai-chat', 'learn/websocket', 'learn/async', 'learn/deployment', 'learn/philosophy'];
+        'learn/routing', 'learn/sessions', 'learn/auth', 'learn/htmx', 'learn/notes',
+        'learn/ai-chat', 'learn/websocket', 'learn/async', 'learn/deployment'];
 
     if ($slug === '') $slug = 'learn';
     if (!in_array($slug, $allowed, true)) {

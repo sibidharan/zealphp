@@ -12,6 +12,7 @@ ${basename(__FILE__, '.php')} = function () {
     $g = G::instance();
     $method = strtoupper($g->server['REQUEST_METHOD'] ?? 'GET');
     $db = DB::open();
+    $wantsJson = stripos($g->server['HTTP_ACCEPT'] ?? '', 'application/json') !== false;
 
     if ($method === 'POST') {
         $ct = $g->server['HTTP_CONTENT_TYPE'] ?? '';
@@ -26,13 +27,21 @@ ${basename(__FILE__, '.php')} = function () {
         if ($id === null) { $this->response($this->json(['error' => 'validation_failed']), 422); return; }
         WS::broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'create', 'id' => $id]);
         $note = Notes::read($db, $u['user_id'], $id);
-        header('Content-Type: text/html; charset=utf-8');
-        $this->response(App::renderToString('/components/_note_card', $note), 200);
+        if ($wantsJson) {
+            $this->response($this->json($note), 200);
+        } else {
+            header('Content-Type: text/html; charset=utf-8');
+            $this->response(App::renderToString('/components/_note_card', $note), 200);
+        }
         return;
     }
 
     // GET — list notes
     $notesList = Notes::list($db, $u['user_id']);
+    if ($wantsJson) {
+        $this->response($this->json($notesList), 200);
+        return;
+    }
     header('Content-Type: text/html; charset=utf-8');
     if (empty($notesList)) {
         $this->response('<p class="notes-empty">No notes yet. Add one above.</p>', 200);

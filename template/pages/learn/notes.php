@@ -6,26 +6,37 @@ $active = $active ?? 'learn/notes';
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number' => 8, 'title' => 'Build Personal Notes',
-      'subtitle' => 'A real app — register, log in, save notes. Backed by SQLite, wired with htmx.',
-      'prev' => ['slug' => 'learn/htmx', 'title' => 'Add htmx'],
-      'next' => ['slug' => 'learn/ai-chat', 'title' => 'Add AI Chat'],
+      'number' => 8, 'title' => 'Personal Notes',
+      'subtitle' => 'Everything comes together. Auth, htmx, SQLite, components — a real app.',
+      'prev' => ['slug' => 'learn/auth', 'title' => 'User Accounts'],
+      'next' => ['slug' => 'learn/ai-chat', 'title' => 'AI Chat'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
-      'Open a SQLite database with PDO from a ZealPHP route',
-      'Insert / select / update / delete notes scoped to the logged-in user',
-      'Use htmx to add and remove notes without page reloads',
-      'Use App::renderToString to build server-rendered HTML fragments for htmx',
+      'Build a full CRUD app with SQLite and htmx',
+      'Return HTML fragments from API endpoints with App::renderToString()',
+      'Wire htmx to add, list, and delete notes without page reloads',
+      'Reuse components across different contexts (list, create, chat history)',
     ]]); ?>
+
+    <h2>The problem</h2>
+    <p>
+      You have users who can log in. Now they want to <strong>store things</strong> &mdash; each user
+      seeing only their own notes, adding new ones, deleting old ones. No page reloads. This is the
+      lesson where everything you've learned comes together.
+    </p>
+    <p>
+      Every data-driven app follows the <strong>CRUD loop</strong>: Create, Read, Update, Delete.
+      Build this once, and you can build any data app &mdash; a todo list, a blog, an inventory system.
+    </p>
 
     <?php if (!$user): ?>
       <section class="auth-card">
         <h2>Sign in to your vault</h2>
-        <p>No email needed — just pick a username and password. Lost the password? Make a new account.</p>
+        <p>No email needed &mdash; just pick a username and password. Lost the password? Make a new account.</p>
         <form method="post" action="/api/learn/login">
           <input type="text" name="username" placeholder="username" autocomplete="username" required minlength="3" maxlength="64">
-          <input type="password" name="password" placeholder="password (≥ 8 chars)" autocomplete="current-password" required minlength="8">
+          <input type="password" name="password" placeholder="password (8+ chars)" autocomplete="current-password" required minlength="8">
           <button type="submit">Log in</button>
         </form>
         <details style="margin-top:1rem">
@@ -38,7 +49,7 @@ $active = $active ?? 'learn/notes';
         </details>
       </section>
     <?php else: ?>
-      <p>Logged in as <strong><?= htmlspecialchars($user['username']) ?></strong> · <a href="/api/learn/logout">Log out</a></p>
+      <p>Logged in as <strong><?= htmlspecialchars($user['username']) ?></strong> &middot; <a href="/api/learn/logout">Log out</a></p>
 
       <section class="notes-app">
         <form class="note-form"
@@ -55,29 +66,31 @@ $active = $active ?? 'learn/notes';
              hx-get="/api/learn/notes"
              hx-trigger="load"
              hx-swap="innerHTML">
-          <p class="notes-empty">Loading…</p>
+          <p class="notes-empty">Loading&hellip;</p>
         </div>
       </section>
     <?php endif; ?>
 
-    <h2>How this works</h2>
+    <h2>The architecture</h2>
+    <p>Three layers, each with one job:</p>
+    <ol>
+      <li><strong><code>src/Learn/Notes.php</code></strong> &mdash; Business logic. SQL queries scoped by <code>user_id</code>.</li>
+      <li><strong><code>api/learn/notes.php</code></strong> &mdash; Endpoint. Reads the request, calls the class, returns HTML.</li>
+      <li><strong>Template + htmx</strong> &mdash; UI. The form and list, wired with four htmx attributes.</li>
+    </ol>
 
-    <h3>The database layer</h3>
-    <p>Business logic lives in <code>src/Learn/Notes.php</code> — a plain PHP class autoloaded via Composer. Each method takes a <code>PDO</code> connection and a <code>$userId</code>, ensuring every query is scoped to the logged-in user:</p>
+    <h3>The data layer</h3>
+    <p>Every method takes a <code>$userId</code> parameter. The user can never read or modify another user's notes:</p>
     <pre><code class="language-php">// src/Learn/Notes.php
 class Notes
 {
     public static function create(\PDO $db, int $userId, string $title, string $body): ?int
     {
-        $title = trim($title);
-        if ($title === '' || mb_strlen($title) > 200) return null;
-        if (strlen($body) > 4096) return null;
-        $now = time();
         $stmt = $db->prepare(
             'INSERT INTO notes (user_id, title, body, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?)'
         );
-        $stmt->execute([$userId, $title, $body, $now, $now]);
+        $stmt->execute([$userId, trim($title), $body, time(), time()]);
         return (int) $db->lastInsertId();
     }
 
@@ -91,39 +104,23 @@ class Notes
         return $stmt->fetchAll();
     }
 }</code></pre>
-    <p>Every method uses prepared statements with bound <code>$userId</code> — the user can never read or modify another user's notes.</p>
 
-    <h3>The API endpoint (ZealAPI file)</h3>
-    <p>The notes endpoint lives at <code>api/learn/notes.php</code>. The closure variable name <code>$notes</code> matches the filename. Inside, it checks auth, reads the HTTP method, and delegates to the <code>Notes</code> class:</p>
-    <pre><code class="language-php">// api/learn/notes.php
-$notes = function () {
-    $u = Auth::currentUser();
-    if (!$u) { $this->response($this->json(['error' => 'auth_required']), 401); return; }
-    $g = G::instance();
-    $method = strtoupper($g->server['REQUEST_METHOD'] ?? 'GET');
-    $db = DB::open();
-
-    if ($method === 'POST') {
-        // Create a note and return the rendered card HTML
-        $id = Notes::create($db, $u['user_id'], $title, $bodyText);
-        $note = Notes::read($db, $u['user_id'], $id);
-        $this->response(App::renderToString('/components/_note_card', $note), 200);
-        return;
-    }
-
-    // GET — list all notes as rendered HTML cards
-    $notesList = Notes::list($db, $u['user_id']);
-    $html = '';
-    foreach ($notesList as $n) {
-        $html .= App::renderToString('/components/_note_card', $n);
-    }
-    $this->response($html, 200);
-};</code></pre>
+    <h3>Introducing <code>App::renderToString()</code></h3>
+    <p>
+      In Lesson 4, you learned <code>App::render()</code> which echoes HTML. But htmx sent a POST and
+      expects HTML back as the <em>response body</em>. You need the HTML as a string, not echoed to
+      the page. That's <code>App::renderToString()</code>:
+    </p>
+    <pre><code class="language-php">// api/learn/notes.php — return the rendered note card
+$note = Notes::read($db, $userId, $id);
+$html = App::renderToString('/components/_note_card', $note);
+$this->response($html, 200);</code></pre>
+    <p>Same component, same template file &mdash; but now you get the HTML as a string to return from your API.</p>
 
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'Why return HTML, not JSON?',
-      'body'    => '<p>htmx expects HTML fragments. The server renders the note card via <code>App::renderToString(\'/components/_note_card\', $note)</code> and returns it directly. htmx swaps it into the DOM. No client-side template, no JSON parsing, no React state management.</p>',
+      'body'    => '<p>htmx expects HTML fragments. The server renders the note card and returns it directly. htmx swaps it into the DOM. No client-side template. No JSON parsing. No React state management. The server is the single source of truth.</p>',
     ]); ?>
 
     <h3>The htmx wiring</h3>
@@ -133,39 +130,40 @@ $notes = function () {
       hx-swap="afterbegin"
       hx-on::after-request="this.reset()"&gt;</code></pre>
     <ul>
-      <li><code>hx-post</code> — sends the form data as a POST request</li>
-      <li><code>hx-target</code> — which DOM element to update with the response</li>
-      <li><code>hx-swap="afterbegin"</code> — insert the new note as the first child (top of list)</li>
-      <li><code>hx-on::after-request</code> — clear the form after successful submit</li>
+      <li><code>hx-post</code> &mdash; sends the form data as POST</li>
+      <li><code>hx-target</code> &mdash; which DOM element receives the response</li>
+      <li><code>hx-swap="afterbegin"</code> &mdash; insert the new note as the first child (top of list)</li>
+      <li><code>hx-on::after-request</code> &mdash; clear the form after success</li>
     </ul>
-    <p>The delete button on each note uses a similar pattern:</p>
+    <p>Delete uses a similar pattern:</p>
     <pre><code class="language-html">&lt;button hx-delete="/api/learn/notes/&lt;?= $id ?&gt;"
         hx-target="#note-&lt;?= $id ?&gt;"
         hx-swap="outerHTML"
         hx-confirm="Delete this note?"&gt;Delete&lt;/button&gt;</code></pre>
-    <p><code>hx-swap="outerHTML"</code> replaces the entire note card with the empty response — effectively removing it from the page.</p>
+    <p><code>hx-swap="outerHTML"</code> replaces the entire note card with the empty response &mdash; effectively removing it.</p>
 
-    <h3>The note card component</h3>
-    <p>Each note renders via a reusable template at <code>template/components/_note_card.php</code>:</p>
-    <pre><code class="language-php">// template/components/_note_card.php
-&lt;article class="note" id="note-&lt;?= $id ?&gt;" data-id="&lt;?= $id ?&gt;"&gt;
-  &lt;h4 class="note-title"&gt;&lt;?= htmlspecialchars($title) ?&gt;&lt;/h4&gt;
-  &lt;p class="note-body"&gt;&lt;?= nl2br(htmlspecialchars($body)) ?&gt;&lt;/p&gt;
-  &lt;div class="note-meta"&gt;
-    &lt;span&gt;Updated &lt;?= date('Y-m-d H:i', $updated_at) ?&gt;&lt;/span&gt;
-    &lt;button hx-delete="..." hx-confirm="Delete?"&gt;Delete&lt;/button&gt;
-  &lt;/div&gt;
-&lt;/article&gt;</code></pre>
-    <p>This component is used in three places: the notes list (GET), the create response (POST), and the chat history bubbles. Same file, three contexts — that's the power of server-rendered components.</p>
+    <h3>Component reuse</h3>
+    <p>The <code>_note_card</code> component is used in three places: the notes list (GET), the create response (POST), and the chat history bubbles (Lesson 9). Same file, three contexts &mdash; that's the power of server-rendered components.</p>
 
     <?php App::render('/components/_deepdive', [
       'title' => 'Cross-tab sync via WebSocket',
-      'body'  => '<p>When you add or delete a note, the server also broadcasts a <code>note_changed</code> event via <code>App::ws(\'/ws/learn\')</code>. Other browser tabs receive it and refresh their notes list via <code>htmx.ajax()</code>. Open this page in two tabs and try it — <a href="/learn/websocket">Lesson 10</a> explains how.</p>',
+      'body'  => '<p>When you add or delete a note, the server also broadcasts a <code>note_changed</code> event via WebSocket. Other browser tabs receive it and refresh their notes list with <code>htmx.ajax()</code>. Open this page in two tabs and try it &mdash; <a href="/learn/websocket">Lesson 10</a> explains how.</p>',
     ]); ?>
 
+    <?php App::render('/components/_keytakeaways', ['items' => [
+      'CRUD is four verbs: Create, Read, Update, Delete &mdash; every data app follows this pattern',
+      '<code>App::renderToString()</code> returns HTML as a string for htmx fragment responses',
+      'Four htmx attributes replace 30+ lines of JavaScript for form submission',
+      'User-scoped queries (<code>WHERE user_id = ?</code>) ensure data isolation',
+    ]]); ?>
+
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/htmx" hx-get="/api/learn/page?slug=learn/htmx" hx-target=".learn-layout" hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/htmx">← Add htmx</a>
-      <a class="lesson-chip lesson-chip-next" href="/learn/ai-chat" hx-get="/api/learn/page?slug=learn/ai-chat" hx-target=".learn-layout" hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/ai-chat">Add AI Chat →</a>
+      <a class="lesson-chip lesson-chip-prev" href="/learn/auth"
+         hx-get="/api/learn/page?slug=learn/auth" hx-target=".learn-layout"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/auth">&larr; User Accounts</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/ai-chat"
+         hx-get="/api/learn/page?slug=learn/ai-chat" hx-target=".learn-layout"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/ai-chat">AI Chat &rarr;</a>
     </div>
   </article>
 </div>

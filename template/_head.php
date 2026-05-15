@@ -16,8 +16,6 @@ $v = defined('ZEALPHP_ASSET_VERSION') ? ZEALPHP_ASSET_VERSION : '';
     @import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap');
   </style>
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
-  <?php if (str_starts_with((string)($page ?? ''), 'learn')): ?>
-    <link rel="stylesheet" href="/css/learn.css?v=<?= $v ?>">
-    <script src="/js/learn.js?v=<?= $v ?>" defer></script>
-  <?php endif; ?>
+  <link rel="stylesheet" href="/css/learn.css?v=<?= $v ?>">
+  <script src="/js/learn.js?v=<?= $v ?>" defer></script>
 </head>

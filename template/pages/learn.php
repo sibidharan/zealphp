@@ -4,62 +4,116 @@
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
       'number'   => 1,
-      'title'    => 'Quick Start',
-      'subtitle' => 'What ZealPHP is, in one paragraph — and why you would build with it.',
+      'title'    => 'Hello, ZealPHP',
+      'subtitle' => 'Build a web server in three lines of PHP. No Apache. No Nginx. Just PHP.',
       'next'     => ['slug' => 'learn/create-app', 'title' => 'Create a ZealPHP App'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
-      'What ZealPHP is and why it exists',
+      'What ZealPHP is and the problem it solves',
       'Why OpenSwoole changes what PHP can do',
-      'Why server-rendered components beat a full SPA for most apps',
-      'Why we picked htmx over React for the demo',
+      'The mental model: PHP IS the server',
+      'What you\'ll build across 13 lessons',
     ]]); ?>
 
-    <h2>What is ZealPHP?</h2>
+    <h2>The three-line web server</h2>
+    <p>Here is a complete web server in PHP:</p>
+    <pre><code class="language-php">&lt;?php
+require 'vendor/autoload.php';
+ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
     <p>
-      ZealPHP is an async PHP framework built on <strong>OpenSwoole</strong>.
-      One server process handles HTTP, WebSocket, SSE, task workers, sessions, and shared memory —
-      no Redis, no Node sidecar, no queue worker, no nginx-fastcgi handshake.
-      You write routes and templates in plain PHP, and the runtime gives you Go-level concurrency
-      with coroutines, channels, and an in-memory key-value <code>Store</code>.
+      Run <code>php app.php</code>. Open <code>http://localhost:8080</code>. You have a web server.
+    </p>
+    <p>
+      No Apache configuration. No Nginx. No php-fpm. No <code>.htaccess</code>. Just PHP, running
+      its own HTTP server.
     </p>
 
-    <h2>Why we wrote this tutorial</h2>
+    <h2>Why does this matter?</h2>
     <p>
-      Most framework docs are reference manuals. This one is a tutorial app.
-      Every lesson you scroll through is also a <em>page in a real app</em> — register an account,
-      save notes, talk to an AI agent that can read and modify those notes. The code that
-      renders this page is the same code that powers the demo.
+      In traditional PHP, you need a <strong>web server</strong> (Apache or Nginx) that listens for HTTP
+      requests, then <strong>hands them off</strong> to PHP via FastCGI. Each request spawns a fresh process,
+      shares nothing with other requests, and dies when done.
     </p>
     <p>
-      By the end you'll have built a working PHP app with auth, a SQLite database, htmx-driven
-      interactivity, server-sent events, a Python agent, and a WebSocket — all served from one
+      That architecture worked for 25 years. But it can't do WebSocket. It can't stream AI responses
+      token-by-token. It can't share state between requests without Redis. It can't run background tasks
+      without a queue worker. Every "modern" feature requires bolting on another service.
+    </p>
+
+    <?php App::render('/components/_before_after', [
+      'id' => 'arch',
+      'before_label' => 'Traditional PHP',
+      'after_label'  => 'ZealPHP',
+      'before' => '<pre><code>Browser → Nginx → php-fpm → your code
+                          ↓
+                     Redis (sessions)
+                     Queue worker (jobs)
+                     Node.js (WebSocket)
+                     Supervisor (process mgmt)
+
+6 processes. 4 config files. 3 languages.</code></pre>',
+      'after' => '<pre><code>Browser → php app.php → your code
+
+1 process. 0 config files. 1 language.
+
+HTTP, WebSocket, SSE, sessions, shared memory,
+background tasks — all built in.</code></pre>',
+    ]); ?>
+
+    <h2>The mental model</h2>
+    <p>
+      Think of traditional PHP like a <strong>restaurant with a waiter</strong>. The waiter (Nginx) takes
+      your order, walks to the kitchen (php-fpm), waits for the chef to finish, walks back, and
+      delivers the plate. Every customer gets this roundtrip.
+    </p>
+    <p>
+      ZealPHP is the <strong>chef standing at the counter</strong>. No waiter, no trip. The chef hears your
+      order and hands you the plate directly. One process handles everything: HTTP, WebSocket, sessions,
+      timers, shared memory.
+    </p>
+    <p>
+      This is possible because of <strong>OpenSwoole</strong> &mdash; a PHP extension that gives PHP an
+      event loop, coroutines, and its own HTTP server. ZealPHP wraps OpenSwoole with a developer-friendly
+      API: routes, templates, sessions, middleware &mdash; everything you know from traditional PHP, but
+      running inside a persistent process.
+    </p>
+
+    <h2>What you'll build</h2>
+    <p>
+      This tutorial is not a reference manual. It's a working app. Over 13 lessons, you'll build a
+      <strong>Personal Notes app with an AI chat assistant</strong>:
+    </p>
+    <ol>
+      <li><strong>Lessons 1&ndash;3:</strong> Install ZealPHP, create pages, build layouts</li>
+      <li><strong>Lessons 4&ndash;7:</strong> Add htmx interactivity, sessions, user accounts</li>
+      <li><strong>Lessons 8&ndash;10:</strong> Build the full app &mdash; notes CRUD, AI chat, real-time sync</li>
+      <li><strong>Lessons 11&ndash;13:</strong> Deep dive into routing, coroutines, deployment</li>
+    </ol>
+    <p>
+      Every lesson you scroll through is <em>also a page in the real app</em>. The code that renders
+      this lesson is the same code that powers the interactive demos. Register an account in Lesson 7,
+      save notes in Lesson 8, and chat with an AI agent in Lesson 9 &mdash; all served from one
       <code>php app.php</code> process.
     </p>
 
-    <h2>The tour</h2>
-    <ol>
-      <li><a href="/learn/create-app">Create a ZealPHP App</a> — install + scaffold + run</li>
-      <li><a href="/learn/first-page">Your First Page</a> — implicit public routing</li>
-      <li><a href="/learn/components">Components</a> — three render methods, live demos</li>
-      <li><a href="/learn/routing">Routing</a> — implicit, explicit, namespaced, file-based</li>
-      <li><a href="/learn/sessions">Sessions &amp; Auth</a> — register/login/logout with SQLite</li>
-      <li><a href="/learn/htmx">Add htmx</a> — interactivity without JavaScript</li>
-      <li><a href="/learn/notes">Build Personal Notes</a> — the real app</li>
-      <li><a href="/learn/ai-chat">Add AI Chat</a> — SSE streaming + tool calls</li>
-      <li><a href="/learn/websocket">WebSocket</a> — real-time sync, when to use pub/sub</li>
-      <li><a href="/learn/async">Async &amp; Coroutines</a> — when concurrency helps</li>
-      <li><a href="/learn/deployment">Deployment</a> — daemon, Nginx, Docker</li>
-      <li><a href="/learn/philosophy">Philosophy</a> — when not to reach for React</li>
-    </ol>
-
     <?php App::render('/components/_callout', [
       'variant' => 'info',
-      'title'   => 'Already know ZealPHP?',
-      'body'    => 'Skip to <a href="/learn/notes">Lesson 8</a> and start building the app immediately. The earlier lessons are a refresher for the patterns you\'ll use.',
+      'title'   => 'Already know PHP frameworks?',
+      'body'    => 'Skip to <a href="/learn/htmx">Lesson 5 (Forms &amp; htmx)</a> if you\'re comfortable with routing and templates. Skip to <a href="/learn/notes">Lesson 8 (Personal Notes)</a> to jump straight into the app build.',
     ]); ?>
 
-    <div class="lesson-chips"><a class="lesson-chip lesson-chip-next" href="/learn/create-app">Create a ZealPHP App →</a></div>
+    <?php App::render('/components/_keytakeaways', ['items' => [
+      'ZealPHP is a PHP framework built on OpenSwoole &mdash; PHP runs its own HTTP server',
+      'One process handles HTTP, WebSocket, SSE, sessions, and shared memory',
+      'No Apache, Nginx, Redis, or queue workers needed for most apps',
+      'This tutorial builds a real Notes + AI Chat app across 13 lessons',
+    ]]); ?>
+
+    <div class="lesson-chips">
+      <a class="lesson-chip lesson-chip-next" href="/learn/create-app"
+         hx-get="/api/learn/page?slug=learn/create-app" hx-target=".learn-layout"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/create-app">Create a ZealPHP App &rarr;</a>
+    </div>
   </article>
 </div>

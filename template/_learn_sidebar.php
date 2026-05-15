@@ -1,29 +1,31 @@
 <?php
 $active ??= 'learn';
 $groups = [
-  'Get Started' => [
-    ['learn',              'Quick Start'],
+  'Hello World' => [
+    ['learn',              'Hello, ZealPHP'],
     ['learn/create-app',   'Create a ZealPHP App'],
     ['learn/first-page',   'Your First Page'],
   ],
-  'Core Concepts' => [
-    ['learn/components',   'Components'],
-    ['learn/routing',      'Routing'],
-    ['learn/sessions',     'Sessions & Auth'],
-    ['learn/htmx',         'Add htmx'],
+  'Interactivity' => [
+    ['learn/components',   'Layouts & Components'],
+    ['learn/htmx',         'Forms & htmx'],
+    ['learn/sessions',     'Sessions'],
+    ['learn/auth',         'User Accounts'],
   ],
   'Build the App' => [
-    ['learn/notes',        'Build Personal Notes'],
-    ['learn/ai-chat',      'Add AI Chat'],
-    ['learn/websocket',    'WebSocket'],
+    ['learn/notes',        'Personal Notes'],
+    ['learn/ai-chat',      'AI Chat'],
+    ['learn/websocket',    'Real-Time Sync'],
+  ],
+  'Under the Hood' => [
+    ['learn/routing',      'Routes & APIs'],
     ['learn/async',        'Async & Coroutines'],
-    ['learn/deployment',   'Deployment'],
-    ['learn/philosophy',   'Philosophy'],
+    ['learn/deployment',   'Ship It'],
   ],
 ];
 ?>
 <input type="checkbox" id="learn-sidebar-toggle" class="learn-sidebar-toggle-input">
-<label for="learn-sidebar-toggle" class="learn-sidebar-toggle-btn" aria-label="Toggle lessons">☰ Lessons</label>
+<label for="learn-sidebar-toggle" class="learn-sidebar-toggle-btn" aria-label="Toggle lessons">&#9776; Lessons</label>
 <aside class="learn-sidebar" aria-label="Lesson navigation">
   <div class="learn-sidebar-inner">
     <?php $i = 1; foreach ($groups as $title => $items): ?>

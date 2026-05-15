@@ -3,102 +3,129 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 5,
-      'title'    => 'Routing',
-      'subtitle' => 'Four ways to register a URL. Pick the one that fits.',
-      'prev'     => ['slug' => 'learn/components', 'title' => 'Components'],
-      'next'     => ['slug' => 'learn/sessions', 'title' => 'Sessions & Auth'],
+      'number'   => 11,
+      'title'    => 'Routes & APIs',
+      'subtitle' => 'Four routing patterns. Pick the one that fits your use case.',
+      'prev'     => ['slug' => 'learn/websocket', 'title' => 'Real-Time Sync'],
+      'next'     => ['slug' => 'learn/async', 'title' => 'Async & Coroutines'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
-      'Implicit public/ file routing — drop a file, get a URL',
-      'Implicit api/ file routing — file-based REST handlers via ZealAPI',
-      'Explicit routes with $app->route()',
-      'Dynamic path params and method matching',
+      'Four ways to register URLs: implicit public, ZealAPI, explicit routes, namespaced',
+      'Dynamic path parameters like /users/{id}',
+      'How ZealPHP injects parameters by name via reflection',
+      'Return value conventions: int, array, string, Generator',
     ]]); ?>
 
+    <h2>The problem</h2>
+    <p>
+      So far, you've used implicit routing: drop a file in <code>public/</code>, get a URL. That
+      covers pages. You've also used ZealAPI files in <code>api/</code> for REST endpoints. But what
+      about URLs like <code>/users/42</code>? Or restricting a route to POST only? Or versioning
+      an API?
+    </p>
+    <p>ZealPHP has four routing patterns. You've already used two &mdash; here are all four.</p>
+
     <h2>1. Implicit public routes</h2>
-    <p>Anything in <code>public/</code> is served as a page or static asset. We covered this in Lesson 3.</p>
-    <pre><code>public/index.php       → GET /
-public/about.php       → GET /about
-public/blog/post.php   → GET /blog/post
-public/css/site.css    → GET /css/site.css</code></pre>
+    <p>You learned this in Lesson 3. Files in <code>public/</code> become URLs automatically:</p>
+    <pre><code>public/index.php       &rarr; GET /
+public/about.php       &rarr; GET /about
+public/blog/post.php   &rarr; GET /blog/post</code></pre>
+    <p><strong>Use for:</strong> Pages the user visits. Simple, zero config.</p>
 
     <h2>2. Implicit API routes (ZealAPI)</h2>
-    <p>Files under <code>api/</code> become REST endpoints. The file's basename becomes both the URL segment <em>and</em> the closure variable name:</p>
-    <pre><code>// api/users/list.php
-&lt;?php
-${basename(__FILE__, '.php')} = function () {
-    $this-&gt;response($this-&gt;json([
-        ['id' =&gt; 1, 'name' =&gt; 'Alice'],
-        ['id' =&gt; 2, 'name' =&gt; 'Bob'],
-    ]), 200);
-};
-// → GET /api/users/list</code></pre>
-
-    <?php App::render('/components/_tryit', ['title' => 'ZealAPI in action', 'body' => <<<HTML
-      <p>This very page ships a real ZealAPI handler at <code>api/learn/chat_status.php</code>. URL <code>GET /api/learn/chat_status</code> maps to that file:</p>
-      <pre><code>// api/learn/chat_status.php
-\${basename(__FILE__, '.php')} = function () {
-    \$key = (string)(getenv('OPENAI_API_KEY') ?: '');
-    \$this->response(\$this->json([
-        'ai_enabled' => \$key !== '',
-        'mock_mode'  => \$key === '',
-    ]), 200);
+    <p>You used this in Lesson 8. Files in <code>api/</code> become REST endpoints:</p>
+    <pre><code class="language-php">// api/learn/notes.php &rarr; GET/POST /api/learn/notes
+$notes = function () {
+    $u = Auth::currentUser();
+    // ... handle GET (list) and POST (create)
 };</code></pre>
-      <p><a class="lesson-chip" href="/api/learn/chat_status" target="_blank">Call /api/learn/chat_status →</a></p>
-      <p>The variable name (<code>\$status</code>) must match the file's basename. Inside the closure, <code>\$this</code> is the ZealAPI instance with helpers like <code>response()</code>, <code>json()</code>, <code>paramsExists()</code>.</p>
-HTML]); ?>
+    <p>The closure variable name (<code>$notes</code>) must match the filename. Inside, <code>$this</code> is the ZealAPI instance with helpers like <code>response()</code>, <code>json()</code>.</p>
+    <p><strong>Use for:</strong> REST endpoints. One file per resource, auto-routed.</p>
 
     <h2>3. Explicit routes</h2>
-    <p>When you need full control — custom HTTP methods, path patterns, middleware — register an explicit route in a file under <code>route/</code> (loaded at startup):</p>
-    <pre><code>// route/users.php
-use ZealPHP\App;
-$app = App::instance();
-
-$app->route('/users/{id}', ['methods' =&gt; ['GET']], function($request, $response, $id) {
-    return ['id' =&gt; (int)$id, 'name' =&gt; 'User ' . $id];
+    <p>When you need path parameters or method restrictions, register explicit routes in a file under <code>route/</code>:</p>
+    <pre><code class="language-php">// route/users.php
+$app->route('/users/{id}', ['methods' => ['GET']], function($id) {
+    return ['id' => (int)$id, 'name' => 'User ' . $id];
 });
 
-$app->route('/users', ['methods' =&gt; ['POST']], function($request, $response) {
-    // POST body via $g->zealphp_request->parent->getContent()
-    return ['created' =&gt; true];
+$app->route('/users', ['methods' => ['POST']], function($request) {
+    return ['created' => true];
 });</code></pre>
+    <p><strong>Use for:</strong> Dynamic URLs, method-specific routes, WebSocket handlers, Store table registration.</p>
 
     <h2>4. Namespaced routes</h2>
-    <p><code>nsRoute</code> and <code>nsPathRoute</code> add a path prefix. <code>nsPathRoute</code> additionally captures everything after the prefix as a single parameter:</p>
-    <pre><code>$app->nsRoute('api/v2', '/health', function() {
-    return ['ok' =&gt; true];
+    <p><code>nsRoute</code> and <code>nsPathRoute</code> add a URL prefix:</p>
+    <pre><code class="language-php">$app->nsRoute('api/v2', '/health', function() {
+    return ['ok' => true];
 });
-// → GET /api/v2/health
+// &rarr; GET /api/v2/health
 
 $app->nsPathRoute('files', function($path) {
-    return ['path' =&gt; $path];
+    return ['path' => $path];
 });
-// → GET /files/foo/bar/baz.txt  → ['path' =&gt; 'foo/bar/baz.txt']</code></pre>
+// &rarr; GET /files/foo/bar/baz.txt &rarr; $path = 'foo/bar/baz.txt'</code></pre>
+    <p><strong>Use for:</strong> API versioning, catch-all paths (file serving, proxy).</p>
 
     <h2>Parameter injection</h2>
-    <p>ZealPHP injects route handler arguments by <em>name</em> via reflection (cached at registration — zero per-request overhead):</p>
-    <pre><code>| Parameter name   | Injected value                       |
-| ---------------- | ------------------------------------ |
-| $request         | ZealPHP\HTTP\Request                 |
-| $response        | ZealPHP\HTTP\Response                |
-| $app             | ResponseMiddleware instance          |
-| {param} captures | matched URL segment                  |
-| any other        | null or the parameter's default      |</code></pre>
+    <p>
+      ZealPHP injects route handler arguments <strong>by name</strong> via reflection. The reflection
+      result is cached at route registration &mdash; zero per-request overhead:
+    </p>
+    <pre><code>| Parameter name | Injected value                    |
+| -------------- | --------------------------------- |
+| $request       | ZealPHP\HTTP\Request              |
+| $response      | ZealPHP\HTTP\Response             |
+| $app           | ResponseMiddleware instance       |
+| {param} names  | Matched URL segments              |
+| any other      | null or the parameter's default   |</code></pre>
+    <p>This means parameter <em>order doesn't matter</em>. <code>function($id, $request)</code> and <code>function($request, $id)</code> both work.</p>
 
     <h2>Return value conventions</h2>
-    <pre><code>| Return type    | Behavior                                  |
-| -------------- | ----------------------------------------- |
-| int            | HTTP status code (e.g. return 404)        |
-| array / object | JSON-serialized, Content-Type set         |
-| string         | HTML body                                 |
-| Generator      | SSR streaming (each yield sent live)      |
-| void + echo    | Output buffer captured                    |</code></pre>
+    <pre><code>| Return type    | Behavior                             |
+| -------------- | ------------------------------------ |
+| int            | HTTP status code (e.g. return 404)   |
+| array / object | JSON-serialized, Content-Type set    |
+| string         | HTML body                            |
+| Generator      | SSR streaming (each yield sent live) |
+| void + echo    | Output buffer captured               |</code></pre>
+
+    <?php App::render('/components/_tryit', ['title' => 'Live routing demos', 'body' => <<<HTML
+      <p>This site uses all four routing patterns. Explore them:</p>
+      <ul>
+        <li><a href="/api/learn/chat_status" target="_blank">/api/learn/chat_status</a> &mdash; ZealAPI endpoint (implicit API)</li>
+        <li><a href="/api/learn/demo/greeting?name=World" target="_blank">/api/learn/demo/greeting?name=World</a> &mdash; Explicit route</li>
+        <li><a href="/api/learn/demo/timing?mode=parallel" target="_blank">/api/learn/demo/timing?mode=parallel</a> &mdash; Explicit route returning JSON</li>
+      </ul>
+HTML]); ?>
+
+    <?php App::render('/components/_concept_check', [
+      'id'       => 'route1',
+      'question' => 'You need a REST endpoint at /api/products that handles GET and POST. Which routing pattern should you use?',
+      'correct'  => 'b',
+      'explain'  => 'ZealAPI (api/ directory) is designed for REST endpoints. Create api/products.php and it auto-routes to /api/products.',
+      'options'  => [
+        'a' => 'A file in public/api/products.php',
+        'b' => 'A file in api/products.php (ZealAPI)',
+        'c' => 'An explicit route in route/products.php',
+      ],
+    ]); ?>
+
+    <?php App::render('/components/_keytakeaways', ['items' => [
+      'Four routing patterns: implicit public, ZealAPI, explicit, namespaced &mdash; each for a different use case',
+      'Path parameters (<code>{id}</code>) are injected by name &mdash; order doesn\'t matter',
+      'Reflection is cached at registration &mdash; zero per-request cost',
+      'Return type determines response format: array &rarr; JSON, string &rarr; HTML, Generator &rarr; streaming',
+    ]]); ?>
 
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/components">← Components</a>
-      <a class="lesson-chip lesson-chip-next" href="/learn/sessions">Sessions & Auth →</a>
+      <a class="lesson-chip lesson-chip-prev" href="/learn/websocket"
+         hx-get="/api/learn/page?slug=learn/websocket" hx-target=".learn-layout"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/websocket">&larr; Real-Time Sync</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/async"
+         hx-get="/api/learn/page?slug=learn/async" hx-target=".learn-layout"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/async">Async &amp; Coroutines &rarr;</a>
     </div>
   </article>
 </div>

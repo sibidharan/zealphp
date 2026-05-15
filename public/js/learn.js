@@ -242,6 +242,18 @@
 
   // Cross-tab notes sync via WebSocket — opens on /learn/notes and /learn/ai-chat.
   let wsConnected = false;
+  function wsLog(msg) {
+    if (!msg.type || msg.type === 'heartbeat' || msg.type === 'pong') return;
+    const log = document.getElementById('ws-log');
+    if (!log) return;
+    const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
+    const op = msg.op ? ` (${msg.op}${msg.id ? ', id: ' + msg.id : ''})` : '';
+    const line = document.createElement('div');
+    line.textContent = `[${time}] ${msg.type}${op}`;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  }
+
   function initWebSocket() {
     if (wsConnected) return;
     const notesList = document.getElementById('notes-list');
@@ -257,6 +269,7 @@
       ws.addEventListener('message', (ev) => {
         try {
           const msg = JSON.parse(ev.data);
+          wsLog(msg);
           if (msg.type === 'note_changed' && window.htmx) {
             window.htmx.ajax('GET', '/api/learn/notes', { target: '#notes-list', swap: 'innerHTML' });
           }
