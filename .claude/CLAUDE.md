@@ -142,6 +142,7 @@ Reflection is cached per route at registration time — zero reflection overhead
 - `ETagMiddleware` — `W/"md5"` ETag on GET, returns 304 on `If-None-Match` match
 - `CompressionMiddleware` — reference gzip/deflate implementation for apps that disable OpenSwoole `http_compression`; the demo app does not register it
 - `RangeMiddleware` — RFC 7233 Range requests: `Accept-Ranges: bytes`, 206 single/multi-range, 416 unsatisfiable, `If-Range` ETag support
+- `SessionStartMiddleware` — eagerly starts a session and sends `Set-Cookie` for new visitors. `CoSessionManager` only starts sessions when a `PHPSESSID` cookie already exists (returning visitors); without this middleware, first-time visitors get no session cookie and session state resets every request. The `secure` flag auto-detects HTTPS (via `X-Forwarded-Proto`, `HTTPS`, or port 443) — works behind Traefik/Nginx and on direct HTTP. Override with `ZEALPHP_SESSION_SECURE` env var.
 
 ### HTTP Protocol Features
 
@@ -429,6 +430,7 @@ All ZealPHP usage examples live as first-class project files:
 | `Middleware/ETagMiddleware.php` | ETag generation + 304 Not Modified |
 | `Middleware/CompressionMiddleware.php` | Reference gzip/deflate middleware; only use when OpenSwoole `http_compression` is disabled |
 | `Middleware/RangeMiddleware.php` | RFC 7233 Range requests: Accept-Ranges, 206 single/multi-range, 416, If-Range ETag support |
+| `Middleware/SessionStartMiddleware.php` | Eager session start for first-time visitors — sets `PHPSESSID` cookie on first request |
 | `deploy/zealphp.service` | systemd service template (Type=simple, no -d) |
 
 ---
