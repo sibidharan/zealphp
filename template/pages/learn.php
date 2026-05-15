@@ -39,7 +39,7 @@
     </p>
 
     <h2>The tour</h2>
-    <ol style="line-height:1.9">
+    <ol>
       <li><a href="/learn/create-app">Create a ZealPHP App</a> — install + scaffold + run</li>
       <li><a href="/learn/first-page">Your First Page</a> — implicit public routing</li>
       <li><a href="/learn/components">Components</a> — three render methods, live demos</li>
