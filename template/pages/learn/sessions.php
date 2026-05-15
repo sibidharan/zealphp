@@ -77,7 +77,7 @@ function learn_login_user(\PDO $db, string $username, string $password): ?int {
 
     <?php App::render('/components/_tryit', ['title' => 'Try it now — register and stay logged in', 'body' => $user
       ? '<p>You\'re already logged in as <strong>' . htmlspecialchars($user['username']) . '</strong>.</p><p>Visit <a href="/learn/notes">/learn/notes</a> to see your notes, or <a href="/api/learn/logout">log out</a>.</p>'
-      : '<p>Pick a username and password. The page rerenders with your logged-in state — same form, different branch.</p><form method="post" action="/api/learn/register" style="display:grid;gap:.5rem;max-width:320px"><input type="text" name="username" placeholder="username" required minlength="3" maxlength="64"><input type="password" name="password" placeholder="password (≥ 8)" required minlength="8"><button type="submit" style="padding:.55rem 1rem;border:0;border-radius:6px;background:#f59e0b;color:#fff;font-weight:600">Register</button></form>'
+      : '<p>Pick a username and password. The page rerenders with your logged-in state — same form, different branch.</p><div class="auth-card"><form method="post" action="/api/learn/register"><input type="text" name="username" placeholder="username" required minlength="3" maxlength="64"><input type="password" name="password" placeholder="password (≥ 8)" required minlength="8"><button type="submit">Register</button></form></div>'
     ]); ?>
 
     <?php App::render('/components/_deepdive', [
