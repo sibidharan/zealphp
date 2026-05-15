@@ -232,7 +232,8 @@
           }
         } catch (e) { /* ignore */ }
       });
-      ws.addEventListener('close', () => {
+      ws.addEventListener('close', (ev) => {
+        if (ev.code === 1008) return;
         reconnectDelay = Math.min(reconnectDelay * 2, 10000);
         setTimeout(connect, reconnectDelay);
       });

@@ -40,8 +40,18 @@ $app->ws('/ws/learn',
         if (($frame->data ?? '') === 'ping') $server->push($frame->fd, 'pong');
     },
     onOpen: function ($server, $request) {
-        session_start();
-        $userId = (int) (G::instance()->session['user_id'] ?? 0);
+        // WebSocket upgrade doesn't go through CoSessionManager, so
+        // $g->session isn't populated. Read the cookie from the raw
+        // request and load the session file directly.
+        $sid = $request->cookie['PHPSESSID'] ?? '';
+        $userId = 0;
+        if ($sid !== '') {
+            $sessFile = '/var/lib/php/sessions/sess_' . $sid;
+            if (file_exists($sessFile)) {
+                $data = @unserialize(file_get_contents($sessFile), ['allowed_classes' => false]);
+                if (is_array($data)) $userId = (int) ($data['user_id'] ?? 0);
+            }
+        }
         if (!$userId) { $server->disconnect($request->fd, 1008, 'auth_required'); return; }
         \ZealPHP\Store::set('learn_ws_clients', (string) $request->fd, ['user_id' => $userId]);
     },
