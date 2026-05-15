@@ -126,18 +126,19 @@
   box-shadow: 0 0 0 2px rgba(52, 211, 153, .25);
 }
 .note-updated {
-  animation: noteFlash .8s ease-out;
+  animation: noteFlash 3s ease-out;
 }
 .note-deleting {
   animation: noteFadeOut .35s ease-in forwards;
 }
 @keyframes noteFlashIn {
   0% { opacity: 0; transform: translateY(-8px); border-color: #34d399; box-shadow: 0 0 0 4px rgba(52, 211, 153, .3); }
-  60% { opacity: 1; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(0); }
   100% { border-color: #34d399; box-shadow: 0 0 0 2px rgba(52, 211, 153, .25); }
 }
 @keyframes noteFlash {
   0% { border-color: #34d399; box-shadow: 0 0 0 4px rgba(52, 211, 153, .35); }
+  60% { border-color: #34d399; box-shadow: 0 0 0 2px rgba(52, 211, 153, .2); }
   100% { border-color: #e7e5e4; box-shadow: none; }
 }
 @keyframes noteFadeOut {
