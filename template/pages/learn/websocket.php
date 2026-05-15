@@ -5,7 +5,7 @@
     <?php App::render('/components/_lesson_header', [
       'number'   => 11,
       'title'    => 'Real-Time Sync',
-      'subtitle' => 'WebSocket &mdash; persistent connections for when the server needs to talk first.',
+      'subtitle' => 'WebSocket — persistent connections for when the server needs to talk first.',
       'prev'     => ['slug' => 'learn/ai-chat', 'title' => 'AI Chat'],
       'next'     => ['slug' => 'learn/routing', 'title' => 'Routes & APIs'],
     ]); ?>

@@ -5,7 +5,7 @@
     <?php App::render('/components/_lesson_header', [
       'number'   => 5,
       'title'    => 'React vs PHP',
-      'subtitle' => 'Why most web apps don\'t need a JavaScript framework &mdash; and what to use instead.',
+      'subtitle' => 'Why most web apps don\'t need a JavaScript framework — and what to use instead.',
       'prev'     => ['slug' => 'learn/components', 'title' => 'Layouts & Components'],
       'next'     => ['slug' => 'learn/htmx', 'title' => 'Forms & htmx'],
     ]); ?>
