@@ -23,6 +23,12 @@
       'body'    => '<p>ZealPHP is a <strong>PHP runtime</strong>, not a religion. It works with React, Vue, Svelte, or plain HTML. It can serve a JSON API for a React SPA, stream HTML for htmx, or run an unmodified WordPress. This lesson isn\'t "React bad" &mdash; it\'s "know when you need it and when you don\'t."</p>',
     ]); ?>
 
+    <?php App::render('/components/_callout', [
+      'variant' => 'info',
+      'title'   => 'The LAMP stack already shipped the web',
+      'body'    => '<p>Server-rendered PHP powered the web for 25 years &mdash; Wikipedia, Facebook (originally), WordPress, every shop that ever ran on cPanel. The LAMP era proved server-rendered HTML works at planetary scale. What broke wasn\'t the rendering model. It was the <em>execution</em> model: one process per request, no shared state, no persistent connections. ZealPHP keeps LAMP\'s rendering wins and fixes its execution.</p>',
+    ]); ?>
+
     <h2>The question nobody asks</h2>
     <p>
       When a team starts a new web project in 2026, the default is React. Not because they evaluated

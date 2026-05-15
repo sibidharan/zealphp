@@ -31,9 +31,10 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
 
     <h2>Why does this matter?</h2>
     <p>
-      In traditional PHP, you need a <strong>web server</strong> (Apache or Nginx) that listens for HTTP
-      requests, then <strong>hands them off</strong> to PHP via FastCGI. Each request spawns a fresh process,
-      shares nothing with other requests, and dies when done.
+      In traditional PHP &mdash; what you might know as the <strong>LAMP stack</strong>
+      (Linux/Apache/MySQL/PHP) or its modern PHP-FPM cousin &mdash; you need a <strong>web server</strong>
+      (Apache or Nginx) that listens for HTTP requests, then <strong>hands them off</strong> to PHP via
+      FastCGI. Each request spawns a fresh process, shares nothing with other requests, and dies when done.
     </p>
     <p>
       That architecture worked for 25 years. But it can't do WebSocket. It can't stream AI responses
@@ -128,6 +129,7 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
       'ZealPHP is a PHP framework built on OpenSwoole &mdash; PHP runs its own HTTP server',
       'One process handles HTTP, WebSocket, SSE, sessions, and shared memory',
       'No Apache, Nginx, Redis, or queue workers needed for most apps',
+      'ZealPHP modernizes the Apache/FPM half of the LAMP stack &mdash; keep your DB, swap the request model',
       'This tutorial builds a real Notes + AI Chat app across 13 lessons',
     ]]); ?>
 

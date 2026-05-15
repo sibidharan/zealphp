@@ -255,8 +255,8 @@
 
 /* CTA button */
 .lesson-cta { margin: 2rem 0; text-align: center; }
-.btn-cta { display: inline-block; padding: .75rem 1.5rem; background: var(--accent, #f59e0b); color: #fff; border-radius: 8px; font-weight: 700; text-decoration: none; font-size: 1.05rem; }
-.btn-cta:hover { filter: brightness(1.1); text-decoration: none; }
+.btn-cta, .btn-cta:link, .btn-cta:visited { display: inline-block; padding: .75rem 1.5rem; background: var(--accent, #f59e0b); color: #fff; border-radius: 8px; font-weight: 700; text-decoration: none; font-size: 1.05rem; }
+.btn-cta:hover, .btn-cta:focus { filter: brightness(1.1); text-decoration: none; color: #fff; }
 
 /* Concept check — inline quiz */
 .concept-check {

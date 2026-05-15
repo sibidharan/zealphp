@@ -187,6 +187,52 @@ p  { max-width: 70ch; }
   color: #fde68a;
 }
 
+/* ── Problem section (home page, between hero and AI demo) ── */
+.section.section-problem {
+  background: var(--bg-alt);
+  padding-top: 3.5rem;
+  padding-bottom: 3.5rem;
+  text-align: center;
+}
+.section.section-problem .section-title {
+  font-size: 1.85rem;
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: 1.25rem;
+}
+.section.section-problem .section-desc {
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: 1rem;
+  font-size: 1rem;
+  line-height: 1.65;
+  color: var(--text);
+}
+.section.section-problem .section-problem-payoff {
+  margin-top: 1.75rem;
+  margin-bottom: 0;
+  font-size: 1.05rem;
+}
+.section.section-problem .section-problem-payoff strong {
+  color: var(--accent-dark);
+}
+
+/* ── Dark-background section (bg + own title/desc only; children keep their own styling) ── */
+.section.section-darkbg {
+  background: linear-gradient(180deg, #0c0a09 0%, #1c1917 100%);
+}
+.section.section-darkbg > .container > .section-title {
+  color: #fff;
+}
+.section.section-darkbg > .container > .section-desc {
+  color: #a8a29e;
+}
+.section.section-darkbg > .container > .section-desc strong {
+  color: #fde68a;
+}
+
 /* ── Hero ── */
 .hero {
   background: linear-gradient(135deg, #0c0a09 0%, #1c1917 50%, #292524 100%);
