@@ -125,16 +125,18 @@ $register = function () {
       ? '<p>You\'re logged in as <strong>' . htmlspecialchars($user['username']) . '</strong>. <a href="/api/learn/logout">Log out</a> to try registering a new account, or head to <a href="/learn/notes">Lesson 8</a> to start building notes.</p>'
       : '<p>Pick a username and password. This creates a real account stored in SQLite. You\'ll use it in the next three lessons to save notes and chat with the AI.</p>
 <div class="auth-card">
-  <form method="post" action="/api/learn/register">
+  <form hx-post="/api/learn/register" hx-target="#auth-feedback-reg" hx-swap="innerHTML">
     <input type="text" name="username" placeholder="username" required minlength="3" maxlength="64" autocomplete="username">
     <input type="password" name="password" placeholder="password (8+ chars)" required minlength="8" autocomplete="new-password">
     <button type="submit">Register</button>
+    <div id="auth-feedback-reg"></div>
   </form>
   <details style="margin-top:.75rem"><summary>Already have an account?</summary>
-    <form method="post" action="/api/learn/login" style="margin-top:.5rem">
+    <form hx-post="/api/learn/login" hx-target="#auth-feedback-login" hx-swap="innerHTML" style="margin-top:.5rem">
       <input type="text" name="username" placeholder="username" required autocomplete="username">
       <input type="password" name="password" placeholder="password" required autocomplete="current-password">
       <button type="submit" class="auth-toggle">Log in</button>
+      <div id="auth-feedback-login"></div>
     </form>
   </details>
 </div>'

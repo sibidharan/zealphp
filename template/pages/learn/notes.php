@@ -34,17 +34,19 @@ $active = $active ?? 'learn/notes';
       <section class="auth-card">
         <h2>Sign in to your vault</h2>
         <p>No email needed &mdash; just pick a username and password. Lost the password? Make a new account.</p>
-        <form method="post" action="/api/learn/login">
+        <form hx-post="/api/learn/login" hx-target="#notes-auth-fb-login" hx-swap="innerHTML">
           <input type="text" name="username" placeholder="username" autocomplete="username" required minlength="3" maxlength="64">
           <input type="password" name="password" placeholder="password (8+ chars)" autocomplete="current-password" required minlength="8">
           <button type="submit">Log in</button>
+          <div id="notes-auth-fb-login"></div>
         </form>
         <details style="margin-top:1rem">
           <summary>New here? Register</summary>
-          <form method="post" action="/api/learn/register" style="margin-top:.75rem">
+          <form hx-post="/api/learn/register" hx-target="#notes-auth-fb-reg" hx-swap="innerHTML" style="margin-top:.75rem">
             <input type="text" name="username" placeholder="new username" required minlength="3" maxlength="64">
             <input type="password" name="password" placeholder="new password" required minlength="8">
             <button type="submit" class="auth-toggle">Register</button>
+            <div id="notes-auth-fb-reg"></div>
           </form>
         </details>
       </section>
