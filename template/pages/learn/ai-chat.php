@@ -9,7 +9,7 @@ $active = $active ?? 'learn/ai-chat';
       'number' => 9, 'title' => 'Add AI Chat',
       'subtitle' => 'A chat that can read AND modify your notes — streamed via SSE with live tool calls.',
       'prev' => ['slug' => 'learn/notes', 'title' => 'Build Personal Notes'],
-      'next' => ['slug' => 'learn/async', 'title' => 'Async & Coroutines'],
+      'next' => ['slug' => 'learn/websocket', 'title' => 'WebSocket'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [

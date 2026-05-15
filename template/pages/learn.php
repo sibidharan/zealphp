@@ -48,6 +48,7 @@
       <li><a href="/learn/htmx">Add htmx</a> — interactivity without JavaScript</li>
       <li><a href="/learn/notes">Build Personal Notes</a> — the real app</li>
       <li><a href="/learn/ai-chat">Add AI Chat</a> — SSE streaming + tool calls</li>
+      <li><a href="/learn/websocket">WebSocket</a> — real-time sync, when to use pub/sub</li>
       <li><a href="/learn/async">Async &amp; Coroutines</a> — when concurrency helps</li>
       <li><a href="/learn/deployment">Deployment</a> — daemon, Nginx, Docker</li>
       <li><a href="/learn/philosophy">Philosophy</a> — when not to reach for React</li>

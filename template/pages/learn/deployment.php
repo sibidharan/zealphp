@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 11,
+      'number'   => 12,
       'title'    => 'Deployment',
       'subtitle' => 'From dev to prod — daemon mode, reverse proxy, env vars, Docker.',
       'prev'     => ['slug' => 'learn/async', 'title' => 'Async & Coroutines'],

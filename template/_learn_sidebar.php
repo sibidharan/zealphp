@@ -15,6 +15,7 @@ $groups = [
   'Build the App' => [
     ['learn/notes',        'Build Personal Notes'],
     ['learn/ai-chat',      'Add AI Chat'],
+    ['learn/websocket',    'WebSocket'],
     ['learn/async',        'Async & Coroutines'],
     ['learn/deployment',   'Deployment'],
     ['learn/philosophy',   'Philosophy'],

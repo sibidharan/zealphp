@@ -3,10 +3,10 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 10,
+      'number'   => 11,
       'title'    => 'Async & Coroutines',
       'subtitle' => 'OpenSwoole gives PHP go-style concurrency. Here is when it helps.',
-      'prev'     => ['slug' => 'learn/ai-chat', 'title' => 'Add AI Chat'],
+      'prev'     => ['slug' => 'learn/websocket', 'title' => 'WebSocket'],
       'next'     => ['slug' => 'learn/deployment', 'title' => 'Deployment'],
     ]); ?>
 

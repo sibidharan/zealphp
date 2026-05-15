@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 12,
+      'number'   => 13,
       'title'    => 'Philosophy',
       'subtitle' => 'When to reach for ZealPHP — and when not to.',
       'prev'     => ['slug' => 'learn/deployment', 'title' => 'Deployment'],

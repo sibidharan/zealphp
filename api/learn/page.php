@@ -12,7 +12,7 @@ ${basename(__FILE__, '.php')} = function () {
 
     $allowed = ['learn', 'learn/create-app', 'learn/first-page', 'learn/components',
         'learn/routing', 'learn/sessions', 'learn/htmx', 'learn/notes',
-        'learn/ai-chat', 'learn/async', 'learn/deployment', 'learn/philosophy'];
+        'learn/ai-chat', 'learn/websocket', 'learn/async', 'learn/deployment', 'learn/philosophy'];
 
     if ($slug === '') $slug = 'learn';
     if (!in_array($slug, $allowed, true)) {
