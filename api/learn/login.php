@@ -17,11 +17,8 @@ ${basename(__FILE__, '.php')} = function () {
     $userId = Auth::login($db, $creds['username'], $creds['password']);
     if ($userId === null) { $this->response($this->json(['error' => 'invalid_credentials']), 401); return; }
 
-    session_start();
     $g->session['user_id'] = $userId;
     $g->session['username'] = $creds['username'];
-    setcookie('PHPSESSID', session_id(), 0, '/', '', false, true);
-    session_write_close();
 
     $ct = $g->server['HTTP_CONTENT_TYPE'] ?? '';
     if (stripos($ct, 'application/json') !== false) {

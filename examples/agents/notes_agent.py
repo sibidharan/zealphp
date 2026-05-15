@@ -202,11 +202,14 @@ async def main():
                 t == "response.output_item.added"
                 and getattr(ev.data.item, "type", "") == "function_call"
             ):
-                call_id = ev.data.item.id
-                tool_names[call_id] = ev.data.item.name
+                item_id = ev.data.item.id
+                call_id = getattr(ev.data.item, "call_id", item_id)
+                name = ev.data.item.name
+                tool_names[item_id] = name
+                tool_names[call_id] = name
                 emit("tool_call", {
                     "id": call_id,
-                    "name": ev.data.item.name,
+                    "name": name,
                     "phase": "start",
                 })
             elif t == "response.function_call_arguments.delta":
