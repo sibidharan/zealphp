@@ -320,10 +320,33 @@ $app->route('/api/learn/demo/incr', ['methods' => ['POST', 'GET']], function($re
 // HTTP behavior: render() / renderToString() return all at once,
 // renderStream() flushes chunks as the Generator yields.
 
+// Tiny HTML shell so the demo pages render correctly when opened directly
+// in a browser tab (charset declared, learn.css linked).
+function learn_demo_shell(string $title, string $body): string {
+    $titleHtml = htmlspecialchars($title);
+    return <<<HTML
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{$titleHtml} · ZealPHP Learn</title>
+  <link rel="stylesheet" href="/css/learn.css">
+  <style>body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1c1917; } nav { margin-bottom: 1rem; font-size: .85rem; } nav a { color: #f59e0b; text-decoration: none; margin-right: 1rem; }</style>
+</head>
+<body>
+  <nav><a href="/learn/components">← Back to Lesson 4</a> · <strong>{$titleHtml}</strong></nav>
+  {$body}
+</body>
+</html>
+HTML;
+}
+
 $app->route('/api/learn/demo/render', ['methods' => ['GET']], function() {
     header('Content-Type: text/html; charset=utf-8');
     header('X-Render-Method: App::render');
-    App::render('/components/_demo_clock', ['label' => 'render() — echoed', 'now' => microtime(true)]);
+    $card = App::renderToString('/components/_demo_clock', ['label' => 'render() — echoed', 'now' => microtime(true)]);
+    return learn_demo_shell('App::render() demo', '<section class="render-demo"><h4>One-shot echo</h4>' . $card . '</section>');
 });
 
 $app->route('/api/learn/demo/render-to-string', ['methods' => ['GET']], function() {
@@ -333,12 +356,29 @@ $app->route('/api/learn/demo/render-to-string', ['methods' => ['GET']], function
         'label' => 'renderToString() — composed',
         'now'   => microtime(true),
     ]);
-    return "<section class=\"render-demo\"><h4>Composed wrapper</h4>{$card}</section>";
+    return learn_demo_shell('App::renderToString() demo', '<section class="render-demo"><h4>Composed wrapper</h4>' . $card . '</section>');
 });
 
 $app->route('/api/learn/demo/render-stream', ['methods' => ['GET']], function() {
+    header('Content-Type: text/html; charset=utf-8');
+    header('X-Render-Method: App::renderStream');
     return (function() {
-        yield "<section class=\"render-demo\"><h4>Streamed rows</h4>";
+        // Stream a full HTML page so the browser parses charset early
+        // and rows visibly arrive over ~1.25s.
+        yield <<<HTML
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>App::renderStream() demo · ZealPHP Learn</title>
+  <link rel="stylesheet" href="/css/learn.css">
+  <style>body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1c1917; } nav { margin-bottom: 1rem; font-size: .85rem; } nav a { color: #f59e0b; text-decoration: none; margin-right: 1rem; }</style>
+</head>
+<body>
+  <nav><a href="/learn/components">← Back to Lesson 4</a> · <strong>App::renderStream() demo</strong> · streaming 5 rows over ~1.25s</nav>
+  <section class="render-demo"><h4>Streamed rows</h4>
+HTML;
         for ($i = 1; $i <= 5; $i++) {
             usleep(250000);
             yield from App::renderStream('/components/_demo_clock', [
@@ -346,7 +386,7 @@ $app->route('/api/learn/demo/render-stream', ['methods' => ['GET']], function() 
                 'now'   => microtime(true),
             ]);
         }
-        yield "</section>";
+        yield "</section></body></html>";
     })();
 });
 
