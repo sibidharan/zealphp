@@ -84,7 +84,10 @@
     const bub  = makeEl('div', 'chat-bubble', text);
     wrap.appendChild(bub);
     messages.appendChild(wrap);
-    messages.scrollTop = messages.scrollHeight;
+    requestAnimationFrame(() => {
+      const scr = messages.closest('.chat-scroll');
+      if (scr) scr.scrollTop = scr.scrollHeight;
+    });
   }
 
   function streamChat(message, threadId, messages, done) {
