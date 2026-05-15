@@ -11,7 +11,7 @@ ${basename(__FILE__, '.php')} = function ($request, $response) {
     if (!$u) { http_response_code(401); header('Content-Type: application/json'); return ['error' => 'auth_required']; }
     $g = G::instance();
     $ip = $g->server['REMOTE_ADDR'] ?? 'unknown';
-    $limit = (int) (getenv('ZEALPHP_LEARN_RATE_LIMIT') ?: 30);
+    $limit = (int) (getenv('ZEALPHP_LEARN_RATE_LIMIT') ?: 60);
     if (!Auth::rateLimit('learn_chat_rl', $ip, $limit, 3600)) {
         $response->sse(function ($emit) {
             $emit(json_encode(['error' => 'rate_limit']), 'error');

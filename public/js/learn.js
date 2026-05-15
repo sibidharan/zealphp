@@ -198,12 +198,14 @@
         } else if (ev === 'notes_changed') {
           if (window.htmx) window.htmx.ajax('GET', '/api/learn/notes', { target: '#notes-list', swap: 'innerHTML' });
         } else if (ev === 'error') {
+          removeTyping();
           const p = makeEl('p', null, 'Error: ' + (data.error || ''));
           p.style.color = '#b91c1c';
           bubble.appendChild(p);
         }
       }
     }).catch(err => {
+      removeTyping();
       const p = makeEl('p', null, 'Network error: ' + String(err));
       p.style.color = '#b91c1c';
       bubble.appendChild(p);
