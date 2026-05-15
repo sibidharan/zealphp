@@ -2,8 +2,9 @@
 
 .learn-layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 260px minmax(0, 1fr);
   gap: 2.5rem;
+  width: 100%;
   max-width: 1200px;
   margin: 0 auto;
   padding: 1.5rem;

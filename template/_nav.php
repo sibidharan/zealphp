@@ -48,7 +48,7 @@ $links = [
       <?php endforeach; ?>
     </div>
   </nav>
-  <div class="actions">
+  <div id="nav-actions" class="actions" hx-preserve="true">
     <a href="https://deepwiki.com/sibidharan/zealphp" target="_blank">DeepWiki ↗</a>
     <a id="gh-star-link" href="https://github.com/sibidharan/zealphp" target="_blank" rel="noopener"
        style="display:inline-flex;align-items:center;gap:.35rem">
