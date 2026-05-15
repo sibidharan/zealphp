@@ -17,6 +17,12 @@
       'When you SHOULD reach for React (and when you shouldn\'t)',
     ]]); ?>
 
+    <?php App::render('/components/_callout', [
+      'variant' => 'info',
+      'title'   => 'ZealPHP is frontend-agnostic',
+      'body'    => '<p>ZealPHP is a <strong>PHP runtime</strong>, not a religion. It works with React, Vue, Svelte, or plain HTML. It can serve a JSON API for a React SPA, stream HTML for htmx, or run an unmodified WordPress. This lesson isn\'t "React bad" &mdash; it\'s "know when you need it and when you don\'t."</p>',
+    ]); ?>
+
     <h2>The question nobody asks</h2>
     <p>
       When a team starts a new web project in 2026, the default is React. Not because they evaluated

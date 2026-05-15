@@ -98,14 +98,18 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
 
     <h2>What you'll build</h2>
     <p>
-      This tutorial is not a reference manual. It's a working app. Over 13 lessons, you'll build a
+      ZealPHP is <strong>frontend and backend agnostic</strong>. It can serve a JSON API for a React SPA,
+      stream HTML for htmx, or run an unmodified WordPress or Laravel app. It's a runtime, not a framework religion.
+    </p>
+    <p>
+      This tutorial is not a reference manual. It's a working app. Over 14 lessons, you'll build a
       <strong>Personal Notes app with an AI chat assistant</strong>:
     </p>
     <ol>
-      <li><strong>Lessons 1&ndash;3:</strong> Install ZealPHP, create pages, build layouts</li>
-      <li><strong>Lessons 4&ndash;7:</strong> Add htmx interactivity, sessions, user accounts</li>
-      <li><strong>Lessons 8&ndash;10:</strong> Build the full app &mdash; notes CRUD, AI chat, real-time sync</li>
-      <li><strong>Lessons 11&ndash;13:</strong> Deep dive into routing, coroutines, deployment</li>
+      <li><strong>Lessons 1&ndash;4:</strong> Install ZealPHP, create pages, build layouts</li>
+      <li><strong>Lessons 5&ndash;8:</strong> React vs PHP, htmx, sessions, user accounts</li>
+      <li><strong>Lessons 9&ndash;11:</strong> Build the full app &mdash; notes CRUD, AI chat, real-time sync</li>
+      <li><strong>Lessons 12&ndash;14:</strong> Deep dive into routing, coroutines, deployment</li>
     </ol>
     <p>
       Every lesson you scroll through is <em>also a page in the real app</em>. The code that renders
