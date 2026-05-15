@@ -575,10 +575,86 @@ function learn_chat_mock($response, array $user, string $message, string $thread
 }
 
 function learn_chat_real($response, array $user, string $message, string $threadId, string $apiKey): void {
-    // Filled in by Milestone 7.
-    $response->sse(function($emit) use ($threadId) {
-        $emit(json_encode(['thread_id' => $threadId]), 'thread');
-        $emit(json_encode(['token' => '<p>Real AI not wired yet (Milestone 7).</p>']), 'token');
-        $emit(json_encode(['done' => true]), 'done');
+    $db = learn_db_open();
+    $notes = learn_notes_list($db, $user['user_id']);
+    $recent = array_slice(array_map(fn($n) => $n['title'], $notes), 0, 5);
+
+    learn_chat_history_append($db, $user['user_id'], $threadId, 'user', [['type' => 'text', 'html' => '<p>' . htmlspecialchars($message) . '</p>']]);
+
+    $payload = [
+        'message'   => $message,
+        'thread_id' => $threadId,
+        'db_path'   => learn_db_path(),
+        'user_id'   => $user['user_id'],
+        'profile'   => [
+            'username'           => $user['username'],
+            'note_count'         => count($notes),
+            'recent_note_titles' => $recent,
+        ],
+    ];
+    $b64 = base64_encode(json_encode($payload));
+    $agentPath = (defined('ZEALPHP_ROOT') ? ZEALPHP_ROOT : __DIR__ . '/..') . '/examples/agents/notes_agent.py';
+
+    $response->sse(function($emit) use ($apiKey, $b64, $agentPath, $threadId, $db, $user) {
+        $env = [];
+        foreach ($_SERVER as $k => $v) { if (is_string($v)) $env[$k] = $v; }
+        $env['OPENAI_API_KEY'] = $apiKey;
+        $env['ZEALPHP_LEARN_AI_MODEL'] = (string)(getenv('ZEALPHP_LEARN_AI_MODEL') ?: 'gpt-4.1-mini');
+        $env['HOME'] = getenv('HOME') ?: '/tmp';
+        $env['PATH'] = getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin';
+        $cmd = getenv('HOME') . '/.local/bin/uv run ' . escapeshellarg($agentPath) . ' ' . escapeshellarg($b64);
+
+        $desc = [0 => ['pipe','r'], 1 => ['pipe','w'], 2 => ['pipe','w']];
+        $proc = proc_open($cmd, $desc, $pipes, null, $env);
+        if (!is_resource($proc)) {
+            $emit(json_encode(['thread_id' => $threadId]), 'thread');
+            $emit(json_encode(['error' => 'agent_unavailable']), 'error');
+            $emit(json_encode(['done' => true]), 'done');
+            return;
+        }
+        fclose($pipes[0]);
+        stream_set_blocking($pipes[1], false);
+
+        $items = []; $textBuf = '';
+        $flush = function() use (&$items, &$textBuf) { if ($textBuf !== '') { $items[] = ['type' => 'text', 'html' => $textBuf]; $textBuf = ''; } };
+        $reemit = function(string $data, string $event) use ($emit, &$items, &$textBuf, $flush) {
+            $emit($data, $event);
+            $payload = json_decode($data, true) ?: [];
+            if ($event === 'token') {
+                $textBuf .= (string)($payload['token'] ?? '');
+            } elseif ($event === 'tool_call') {
+                $flush();
+                $items[] = ['type' => 'tool', 'id' => $payload['id'] ?? '?', 'name' => $payload['name'] ?? '?', 'status' => 'running', 'args' => '', 'result' => ''];
+            } elseif ($event === 'tool_args') {
+                foreach ($items as &$it) if ($it['type'] === 'tool' && $it['id'] === ($payload['id'] ?? '')) { $it['args'] .= (string)($payload['delta'] ?? ''); break; }
+            } elseif ($event === 'tool_done') {
+                foreach ($items as &$it) if ($it['type'] === 'tool' && $it['id'] === ($payload['id'] ?? '')) { $it['status'] = $payload['status'] ?? 'ok'; $it['result'] = (string)($payload['result_preview'] ?? ''); break; }
+            }
+        };
+
+        $buffer = ''; $currentEvent = null;
+        while (!feof($pipes[1])) {
+            $chunk = fread($pipes[1], 4096);
+            if ($chunk === false || $chunk === '') { usleep(40000); continue; }
+            $buffer .= $chunk;
+            while (($pos = strpos($buffer, "\n")) !== false) {
+                $line = substr($buffer, 0, $pos);
+                $buffer = substr($buffer, $pos + 1);
+                $line = rtrim($line, "\r");
+                if (str_starts_with($line, 'event: ')) $currentEvent = trim(substr($line, 7));
+                elseif (str_starts_with($line, 'data: ')) $reemit(substr($line, 6), $currentEvent ?: 'token');
+            }
+        }
+        fclose($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($proc);
+
+        if ($exitCode !== 0 && empty($items)) {
+            $emit(json_encode(['error' => 'agent_error: ' . trim(substr($stderr ?: '', 0, 200))]), 'error');
+        }
+
+        $flush();
+        learn_chat_history_append($db, $user['user_id'], $threadId, 'assistant', $items);
     });
 }
