@@ -2,8 +2,8 @@
 namespace ZealPHP\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
-
-require_once __DIR__ . '/../../route/learn.php';
+use ZealPHP\Learn\DB;
+use ZealPHP\Learn\Auth;
 
 class LearnAuthTest extends TestCase
 {
@@ -24,32 +24,32 @@ class LearnAuthTest extends TestCase
 
     public function test_validate_username_accepts_valid(): void
     {
-        $this->assertTrue(\learn_validate_username('alice'));
-        $this->assertTrue(\learn_validate_username('alice_99'));
-        $this->assertTrue(\learn_validate_username(str_repeat('a', 64)));
+        $this->assertTrue(Auth::validateUsername('alice'));
+        $this->assertTrue(Auth::validateUsername('alice_99'));
+        $this->assertTrue(Auth::validateUsername(str_repeat('a', 64)));
     }
 
     public function test_validate_username_rejects_invalid(): void
     {
-        $this->assertFalse(\learn_validate_username('ab'));
-        $this->assertFalse(\learn_validate_username(str_repeat('a', 65)));
-        $this->assertFalse(\learn_validate_username('alice bob'));
-        $this->assertFalse(\learn_validate_username('alice-bob'));
-        $this->assertFalse(\learn_validate_username('alice!'));
+        $this->assertFalse(Auth::validateUsername('ab'));
+        $this->assertFalse(Auth::validateUsername(str_repeat('a', 65)));
+        $this->assertFalse(Auth::validateUsername('alice bob'));
+        $this->assertFalse(Auth::validateUsername('alice-bob'));
+        $this->assertFalse(Auth::validateUsername('alice!'));
     }
 
     public function test_validate_password_length(): void
     {
-        $this->assertTrue(\learn_validate_password(str_repeat('x', 8)));
-        $this->assertTrue(\learn_validate_password(str_repeat('x', 256)));
-        $this->assertFalse(\learn_validate_password(str_repeat('x', 7)));
-        $this->assertFalse(\learn_validate_password(str_repeat('x', 257)));
+        $this->assertTrue(Auth::validatePassword(str_repeat('x', 8)));
+        $this->assertTrue(Auth::validatePassword(str_repeat('x', 256)));
+        $this->assertFalse(Auth::validatePassword(str_repeat('x', 7)));
+        $this->assertFalse(Auth::validatePassword(str_repeat('x', 257)));
     }
 
     public function test_db_bootstrap_is_idempotent(): void
     {
-        $db1 = \learn_db_open();
-        $db2 = \learn_db_open();
+        $db1 = DB::open();
+        $db2 = DB::open();
         $this->assertInstanceOf(\PDO::class, $db1);
         $tables = $db1->query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")->fetchAll(\PDO::FETCH_COLUMN);
         $this->assertContains('users', $tables);
@@ -58,22 +58,22 @@ class LearnAuthTest extends TestCase
 
     public function test_register_and_login_roundtrip(): void
     {
-        $db = \learn_db_open();
-        $userId = \learn_register_user($db, 'alice', 'password123');
+        $db = DB::open();
+        $userId = Auth::register($db, 'alice', 'password123');
         $this->assertIsInt($userId);
         $this->assertGreaterThan(0, $userId);
 
-        $loggedInId = \learn_login_user($db, 'alice', 'password123');
+        $loggedInId = Auth::login($db, 'alice', 'password123');
         $this->assertSame($userId, $loggedInId);
 
-        $this->assertNull(\learn_login_user($db, 'alice', 'wrong'));
-        $this->assertNull(\learn_login_user($db, 'nope', 'password123'));
+        $this->assertNull(Auth::login($db, 'alice', 'wrong'));
+        $this->assertNull(Auth::login($db, 'nope', 'password123'));
     }
 
     public function test_register_duplicate_username_returns_null(): void
     {
-        $db = \learn_db_open();
-        \learn_register_user($db, 'alice', 'password123');
-        $this->assertNull(\learn_register_user($db, 'alice', 'differentpw99'));
+        $db = DB::open();
+        Auth::register($db, 'alice', 'password123');
+        $this->assertNull(Auth::register($db, 'alice', 'differentpw99'));
     }
 }

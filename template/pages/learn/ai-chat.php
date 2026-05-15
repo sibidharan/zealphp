@@ -1,5 +1,5 @@
 <?php use ZealPHP\App;
-$user = function_exists('learn_current_user') ? learn_current_user() : null;
+$user = \ZealPHP\Learn\Auth::currentUser();
 $active = $active ?? 'learn/ai-chat';
 ?>
 <div class="learn-layout">
