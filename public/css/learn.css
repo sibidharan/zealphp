@@ -119,6 +119,32 @@
 .note-form textarea { min-height: 80px; resize: vertical; }
 .note-form button { padding: .55rem 1rem; border: 0; border-radius: 6px; background: var(--accent, #f59e0b); color: #fff; font-weight: 600; cursor: pointer; }
 
+/* Note card animations */
+.note-created {
+  animation: noteFlashIn .5s ease-out;
+  border-color: #34d399;
+  box-shadow: 0 0 0 2px rgba(52, 211, 153, .25);
+}
+.note-updated {
+  animation: noteFlash .8s ease-out;
+}
+.note-deleting {
+  animation: noteFadeOut .35s ease-in forwards;
+}
+@keyframes noteFlashIn {
+  0% { opacity: 0; transform: translateY(-8px); border-color: #34d399; box-shadow: 0 0 0 4px rgba(52, 211, 153, .3); }
+  60% { opacity: 1; transform: translateY(0); }
+  100% { border-color: #34d399; box-shadow: 0 0 0 2px rgba(52, 211, 153, .25); }
+}
+@keyframes noteFlash {
+  0% { border-color: #34d399; box-shadow: 0 0 0 4px rgba(52, 211, 153, .35); }
+  100% { border-color: #e7e5e4; box-shadow: none; }
+}
+@keyframes noteFadeOut {
+  0% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(.96); max-height: 0; padding: 0; margin: 0; overflow: hidden; }
+}
+
 /* Auth */
 .auth-card { max-width: 420px; margin: 1.5rem 0; padding: 1.5rem; border: 1px solid #e7e5e4; border-radius: 8px; background: #fff; }
 .auth-card h2 { margin: 0 0 .25rem; font-size: 1.25rem; }

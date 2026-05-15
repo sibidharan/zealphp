@@ -60,7 +60,8 @@ $active = $active ?? 'learn/notes';
               hx-post="/api/learn/notes"
               hx-target="#notes-list"
               hx-swap="afterbegin"
-              hx-on::after-request="this.reset()">
+              hx-on::after-request="this.reset()"
+              hx-on::after-settle="var f=document.querySelector('#notes-list .note:first-child');if(f){f.classList.add('note-created');setTimeout(function(){f.classList.remove('note-created')},2500)}">
           <input type="text" name="title" placeholder="Note title" required maxlength="200">
           <textarea name="body" placeholder="What's on your mind?" maxlength="4096"></textarea>
           <button type="submit">Add note</button>

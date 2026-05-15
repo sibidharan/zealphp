@@ -9,6 +9,7 @@
       initChat(chatRoot);
     }
     initWebSocket();
+    initNoteFormHighlight();
   }
 
   document.addEventListener('DOMContentLoaded', initLearn);
@@ -218,8 +219,8 @@
           eventLog('sse', 'tool_done', (data.status || 'ok') + (data.result_preview ? ' — ' + data.result_preview.substring(0, 40) : ''));
           lastItem = null;
         } else if (ev === 'notes_changed') {
-          eventLog('sse', 'notes_changed', '→ refreshing notes via htmx');
-          if (window.htmx) window.htmx.ajax('GET', '/api/learn/notes', { target: '#notes-list', swap: 'innerHTML' });
+          eventLog('sse', 'notes_changed', '→ refreshing notes');
+          handleNoteChanged('refresh', null);
         } else if (ev === 'error') {
           removeTyping();
           const p = makeEl('p', null, 'Error: ' + (data.error || ''));
@@ -275,6 +276,42 @@
     eventLog('ws', msg.type, [op, id].filter(Boolean).join(' '));
   }
 
+  var _lastLocalCreateId = null;
+
+  function handleNoteChanged(op, noteId) {
+    if (op === 'delete' && noteId) {
+      const card = document.getElementById('note-' + noteId);
+      if (card) {
+        card.classList.add('note-deleting');
+        setTimeout(() => card.remove(), 400);
+        const list = document.getElementById('notes-list');
+        if (list) setTimeout(() => { if (!list.querySelector('.note')) { list.textContent = ''; list.appendChild(makeEl('p', 'notes-empty', 'No notes yet. Add one above.')); } }, 450);
+      }
+      return;
+    }
+    if (op === 'create' && noteId && document.getElementById('note-' + noteId)) {
+      const card = document.getElementById('note-' + noteId);
+      if (!card.classList.contains('note-created')) {
+        card.classList.add('note-created');
+        setTimeout(() => card.classList.remove('note-created'), 2500);
+      }
+      return;
+    }
+    if (!window.htmx) return;
+    window.htmx.ajax('GET', '/api/learn/notes', { target: '#notes-list', swap: 'innerHTML' });
+    if (noteId) {
+      setTimeout(() => {
+        const card = document.getElementById('note-' + noteId);
+        if (card) {
+          card.classList.add(op === 'create' ? 'note-created' : 'note-updated');
+          setTimeout(() => card.classList.remove('note-created', 'note-updated'), 2500);
+        }
+      }, 300);
+    }
+  }
+
+  function initNoteFormHighlight() {}
+
   function initWebSocket() {
     if (wsConnected) return;
     const notesList = document.getElementById('notes-list');
@@ -291,9 +328,7 @@
         try {
           const msg = JSON.parse(ev.data);
           wsLog(msg);
-          if (msg.type === 'note_changed' && window.htmx) {
-            window.htmx.ajax('GET', '/api/learn/notes', { target: '#notes-list', swap: 'innerHTML' });
-          }
+          if (msg.type === 'note_changed') handleNoteChanged(msg.op, msg.id);
         } catch (e) { /* ignore */ }
       });
       ws.addEventListener('close', (ev) => {
