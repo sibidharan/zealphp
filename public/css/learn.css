@@ -1,5 +1,7 @@
 /* /learn — layout, sidebar, lesson components, chat, notes */
 
+html:has(.learn-layout) { scroll-behavior: auto; }
+
 .learn-layout {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
