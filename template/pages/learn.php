@@ -41,11 +41,10 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
       without a queue worker. Every "modern" feature requires bolting on another service.
     </p>
 
-    <?php App::render('/components/_before_after', [
-      'id' => 'arch',
-      'before_label' => 'Traditional PHP',
-      'after_label'  => 'ZealPHP',
-      'before' => '<pre class="mermaid">graph TD
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.25rem 0">
+      <div>
+        <h4 style="text-align:center;margin:0 0 .5rem;color:#78716c;font-size:.82rem;text-transform:uppercase;letter-spacing:.05em">Traditional PHP</h4>
+        <pre class="mermaid">graph TD
     B[Browser] --> N[Nginx]
     N --> F[php-fpm]
     F --> C[Your Code]
@@ -56,8 +55,12 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
     style R fill:#fef2f2,stroke:#f87171
     style Q fill:#fef2f2,stroke:#f87171
     style WS fill:#fef2f2,stroke:#f87171
-    style S fill:#fef2f2,stroke:#f87171</pre><p style="text-align:center;color:#78716c;font-size:.82rem">6 processes &middot; 4 config files &middot; 3 languages</p>',
-      'after' => '<pre class="mermaid">graph TD
+    style S fill:#fef2f2,stroke:#f87171</pre>
+        <p style="text-align:center;color:#78716c;font-size:.82rem;margin:.35rem 0 0">6 processes &middot; 4 config files &middot; 3 languages</p>
+      </div>
+      <div>
+        <h4 style="text-align:center;margin:0 0 .5rem;color:var(--accent,#f59e0b);font-size:.82rem;text-transform:uppercase;letter-spacing:.05em">ZealPHP</h4>
+        <pre class="mermaid">graph TD
     B[Browser] --> Z["php app.php"]
     Z --> C[Your Code]
     Z --> H[HTTP + SSE]
@@ -70,8 +73,10 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
     style W fill:#ecfdf5,stroke:#059669
     style SE fill:#ecfdf5,stroke:#059669
     style SM fill:#ecfdf5,stroke:#059669
-    style T fill:#ecfdf5,stroke:#059669</pre><p style="text-align:center;color:#78716c;font-size:.82rem">1 process &middot; 0 config files &middot; 1 language</p>',
-    ]); ?>
+    style T fill:#ecfdf5,stroke:#059669</pre>
+        <p style="text-align:center;color:#78716c;font-size:.82rem;margin:.35rem 0 0">1 process &middot; 0 config files &middot; 1 language</p>
+      </div>
+    </div>
 
     <h2>The mental model</h2>
     <p>
