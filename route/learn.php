@@ -181,8 +181,8 @@ $app->ws('/ws/learn',
         if (($frame->data ?? '') === 'ping') $server->push($frame->fd, 'pong');
     },
     onOpen: function($server, $request) {
-        if (session_status() !== PHP_SESSION_ACTIVE) session_start();
-        $userId = (int)($_SESSION['user_id'] ?? 0);
+        session_start();
+        $userId = (int)(G::instance()->session['user_id'] ?? 0);
         if (!$userId) { $server->disconnect($request->fd, 1008, 'auth_required'); return; }
         \ZealPHP\Store::set('learn_ws_clients', (string)$request->fd, ['user_id' => $userId]);
     },
@@ -241,9 +241,13 @@ function learn_read_credentials($g): ?array {
 }
 
 function learn_current_user(): ?array {
-    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
-    if (empty($_SESSION['user_id'])) return null;
-    return ['user_id' => (int)$_SESSION['user_id'], 'username' => (string)($_SESSION['username'] ?? '')];
+    $g = G::instance();
+    // CoSessionManager populates $g->session from the session file when
+    // the request has a PHPSESSID cookie. Just read it directly.
+    if (!empty($g->session['user_id'])) {
+        return ['user_id' => (int)$g->session['user_id'], 'username' => (string)($g->session['username'] ?? '')];
+    }
+    return null;
 }
 
 $app->route('/api/learn/register', ['methods' => ['POST']], function($request, $response) {
@@ -262,15 +266,23 @@ $app->route('/api/learn/register', ['methods' => ['POST']], function($request, $
     $userId = learn_register_user($db, $creds['username'], $creds['password']);
     if ($userId === null) { http_response_code(409); header('Content-Type: application/json'); return ['error' => 'username_taken']; }
 
-    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
-    $_SESSION['user_id'] = $userId;
-    $_SESSION['username'] = $creds['username'];
+    session_start();
+    $g = G::instance();
+    $g->session['user_id'] = $userId;
+    $g->session['username'] = $creds['username'];
     // ZealPHP's CoSessionManager only sends Set-Cookie + writes the
     // session file when the request already had a PHPSESSID cookie.
     // For a brand-new session we have to emit the cookie AND force
     // the session file write before the request ends.
     setcookie('PHPSESSID', session_id(), 0, '/', '', false, true);
     session_write_close();
+    // JSON POST → return JSON (fetch with redirect:manual won't process
+    // Set-Cookie from a 302). Form POST → 302 redirect (browser follows it).
+    $ct = $g->server['HTTP_CONTENT_TYPE'] ?? '';
+    if (stripos($ct, 'application/json') !== false) {
+        header('Content-Type: application/json');
+        return ['user_id' => $userId, 'username' => $creds['username']];
+    }
     $response->redirect('/learn/notes', 302);
 });
 
@@ -288,21 +300,24 @@ $app->route('/api/learn/login', ['methods' => ['POST']], function($request, $res
     $userId = learn_login_user($db, $creds['username'], $creds['password']);
     if ($userId === null) { http_response_code(401); header('Content-Type: application/json'); return ['error' => 'invalid_credentials']; }
 
-    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
-    $_SESSION['user_id'] = $userId;
-    $_SESSION['username'] = $creds['username'];
-    // ZealPHP's CoSessionManager only sends Set-Cookie + writes the
-    // session file when the request already had a PHPSESSID cookie.
-    // For a brand-new session we have to emit the cookie AND force
-    // the session file write before the request ends.
+    session_start();
+    $g = G::instance();
+    $g->session['user_id'] = $userId;
+    $g->session['username'] = $creds['username'];
     setcookie('PHPSESSID', session_id(), 0, '/', '', false, true);
     session_write_close();
+    $ct = $g->server['HTTP_CONTENT_TYPE'] ?? '';
+    if (stripos($ct, 'application/json') !== false) {
+        header('Content-Type: application/json');
+        return ['user_id' => $userId, 'username' => $creds['username']];
+    }
     $response->redirect('/learn/notes', 302);
 });
 
 $app->route('/api/learn/logout', ['methods' => ['POST', 'GET']], function($request, $response) {
-    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
-    $_SESSION = [];
+    session_start();
+    $g = G::instance();
+    $g->session = [];
     session_destroy();
     $response->redirect('/learn/notes', 302);
 });
@@ -369,10 +384,11 @@ $app->route('/api/learn/notes/{id}', ['methods' => ['DELETE']], function($reques
 
 // ── Lesson 7 counter (htmx demo) ─────────────────────────────────────
 $app->route('/api/learn/demo/incr', ['methods' => ['POST', 'GET']], function($request, $response) {
-    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
-    $_SESSION['demo_counter'] = (int)($_SESSION['demo_counter'] ?? 0) + 1;
+    session_start();
+    $g = G::instance();
+    $g->session['demo_counter'] = (int)($g->session['demo_counter'] ?? 0) + 1;
     header('Content-Type: text/html; charset=utf-8');
-    return App::renderToString('/components/_counter_button', ['n' => $_SESSION['demo_counter']]);
+    return App::renderToString('/components/_counter_button', ['n' => $g->session['demo_counter']]);
 });
 
 // ── Lesson 4 render-method demos ─────────────────────────────────────
