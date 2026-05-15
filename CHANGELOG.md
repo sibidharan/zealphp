@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-05-15
+
+### Added
+- **`SessionStartMiddleware`** — new PSR-15 middleware that eagerly starts sessions for first-time visitors. Fixes session-dependent features (counters, flash messages) silently failing on first request.
+- **Lesson 5: "React vs PHP"** — new lesson comparing React+Node stack vs ZealPHP+htmx with Mermaid diagrams, comparison table, and deep dives. Positions ZealPHP as frontend-agnostic.
+- **Mermaid.js diagrams** — interactive architecture diagrams in lessons 1, 5, 9, 10, 11 with click-to-expand fullscreen viewer (pinch zoom, scroll pan, trackpad-friendly).
+- **AI agent HTTP API architecture** — Python agent now calls ZealPHP's HTTP endpoints with session cookie auth instead of direct SQLite. Note mutations trigger WebSocket broadcasts for live cross-tab updates.
+- **Notes API JSON content negotiation** — `Accept: application/json` returns JSON; default returns HTML for htmx. New routes: `GET /api/learn/notes/{id}`, `GET /api/learn/notes/search`.
+- **Event log terminal** — always-visible dark terminal on AI Chat page showing SSE (blue) and WebSocket (purple) events in real time.
+- **Note card animations** — green glow on create, green flash on update, fade-out on delete. WebSocket handler skips redundant list refresh when card already exists.
+- **Concept check quizzes** — inline multiple-choice questions with letter circles (A, B, C) and htmx-powered verification.
+- **Inline auth error feedback** — register/login forms show errors inline via htmx (wrong password, username taken, etc.) instead of raw JSON.
+- **GitHub source links** — file references in lessons link to actual source on GitHub.
+
+### Changed
+- **14-lesson tutorial** (was 13) — new "React vs PHP" lesson inserted as L5, all subsequent renumbered.
+- **Pedagogical redesign** — all lessons rewritten with problem-first framing, mental models, step-by-step building, key takeaways, and challenges.
+- **Lesson reorder** — htmx moved from L7→L6, routing from L5→L12, WebSocket after AI Chat. Sessions split into two lessons (Sessions + User Accounts).
+- **Sidebar restructured** — 4 groups (Hello World, Interactivity, Build the App, Under the Hood) replacing the old 3-group layout.
+- **Notes user bar** — avatar circle with initial letter + username replacing plain "Logged in as" text.
+- **Stream demo** — increased from 5 rows to 12 rows (1.8s) for more visible streaming effect.
+- **Nav label** — "Start" renamed to "Getting Started" in top navigation.
+
+### Fixed
+- **learn.css not loading on hx-boost navigation** — CSS now loaded unconditionally in `_head.php`.
+- **Register/login session conflicts** — removed redundant `session_start()` + `setcookie()` that conflicted with `SessionStartMiddleware`.
+- **Agent `notes_changed` event never emitted** — tool_call item.id vs tool_call_output call_id mismatch fixed by storing tool names by both IDs.
+- **DELETE endpoint returning `{"ok":true}`** — now returns empty for htmx, JSON only with `Accept: application/json`.
+- **Chat double-scroll** — overrode zealphp.css `chat-messages` overflow that created a second scrollable area.
+- **Subtitle `&mdash;` not rendering** — use literal em dash character since `htmlspecialchars()` double-escapes HTML entities.
+
 ## [0.2.2] - 2026-05-15
 
 ### Added
