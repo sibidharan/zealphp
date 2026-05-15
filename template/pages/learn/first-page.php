@@ -61,7 +61,7 @@ echo "&lt;p&gt;The time is " . date('H:i:s') . "&lt;/p&gt;";</code></pre>
 
     <?php App::render('/components/_tryit', [
       'title' => 'See it live',
-      'body'  => '<p>This very site uses implicit routing. The page you\'re reading right now is served from <code>public/learn.php</code>. Every page in the docs &mdash; <a href="/routing">/routing</a>, <a href="/streaming">/streaming</a>, <a href="/websocket">/websocket</a> &mdash; is a file in <code>public/</code>.</p>
+      'body'  => '<p>This very site uses implicit routing. The page you\'re reading right now is served from <code>public/learn.php</code>. Every page in the docs &mdash; <a href="/routing">/routing</a>, <a href="/streaming">/streaming</a>, <a href="/ws">/ws</a> &mdash; is a file in <code>public/</code>.</p>
 <p>Try it: <a href="/api/learn/demo/greeting?name=ZealPHP" target="_blank">Open the greeting demo &rarr;</a></p>',
     ]); ?>
 
