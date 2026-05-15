@@ -32,7 +32,7 @@
 .learn-sidebar-inner { padding-right: .5rem; }
 .learn-sidebar-group + .learn-sidebar-group { margin-top: 1.25rem; }
 .learn-sidebar-group-title { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: #78716c; margin: 0 0 .55rem; font-weight: 700; }
-.learn-sidebar-list { list-style: decimal; padding-left: 1.6rem; margin: 0; }
+.learn-sidebar-list { list-style: decimal; padding-left: 2.25rem; margin: 0; }
 .learn-sidebar-list li { margin: .25rem 0; font-size: .88rem; }
 .learn-sidebar-list li a { color: #1c1917; text-decoration: none; display: block; padding: .15rem .3rem; border-radius: 4px; }
 .learn-sidebar-list li a:hover { background: #f5f5f4; }
