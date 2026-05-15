@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-05-15
+
+### Added
+- **`/learn` tutorial section** — 13-lesson guided tutorial that builds a working Notes + AI Chat app. Covers routing, components, sessions, htmx, SQLite, SSE streaming, WebSocket, and async coroutines.
+- **`src/Learn/` namespace** — 6 autoloaded classes (Auth, Chat, ChatHistory, DB, Notes, WS) demonstrating proper OOP architecture.
+- **8 ZealAPI endpoint files** (`api/learn/`) — register, login, logout, notes, chat, chat_status, chat_history, page.
+- **Python notes agent** (`examples/agents/notes_agent.py`) — OpenAI Agents SDK with 6 function tools, SQLite-backed, SSE-streamed through PHP.
+- **htmx site-wide** — `hx-boost="true"` on `<body>` for instant navigation; htmx page swap for lesson sidebar.
+- **WebSocket cross-tab sync** — `App::ws('/ws/learn')` with Store-backed fd→user_id mapping and broadcast helper.
+- **Chat history persistence** — SQLite `chat_history` table with ZealAPI history endpoint using `App::renderToString`.
+- **24 new tests** — 16 unit (auth, notes, chat history) + 8 integration (session persistence, CRUD, user isolation, SSE consecutive).
+- **Coding standards** — PSR-2, separation of concerns, OOP rules codified in CLAUDE.md and docs.
+- **Cache-busting asset URLs** — `?v=<git-describe>` on all local CSS/JS.
+
+### Fixed
+- **WebSocket session support** (`src/App.php`) — `onOpen` now populates `$g->session` from the upgrade request's PHPSESSID cookie.
+- **ZealAPI SSE streaming** (`src/ZealAPI.php`) — skip `ob_get_clean()` + `new Response()` when handler already sent a streaming response (`$g->_streaming` check).
+- **`$_SESSION` vs `$g->session`** — all learn code uses `$g->session` (coroutine-safe); documented the gotcha in CLAUDE.md.
+- **Session write on first registration** — explicit `setcookie()` + `session_write_close()` for new sessions (CoSessionManager only auto-writes when the request already had a cookie).
+- **Auth::currentUser() DB verification** — checks user still exists in SQLite (stale sessions after DB wipe no longer crash with FK violations).
+- **Streaming HTML token rendering** — accumulate-and-re-render pattern for partial HTML tags from character-by-character model output.
+- **highlight.js after htmx swap** — `htmx:afterSettle` instead of `htmx:afterSwap` (outerHTML replaces the target, old element is detached).
+
+### Changed
+- **htmx loaded globally** (was learn-only) — enables `hx-boost` site-wide.
+- **`scroll-behavior: smooth` removed globally** — htmx boost makes navigation instant; smooth scroll caused jank on lesson swaps.
+- **`scrollbar-gutter: stable`** on html — prevents layout shift when scrollbar appears/disappears.
+
 ## [0.2.1] - 2026-05-14
 
 ### Added
