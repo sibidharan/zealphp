@@ -33,6 +33,8 @@ if (!function_exists('learn_db_open')) {
         $pdo->query("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL)");
         $pdo->query("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, title TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)");
         $pdo->query("CREATE INDEX IF NOT EXISTS idx_notes_user_updated ON notes(user_id, updated_at DESC)");
+        $pdo->query("CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, thread_id TEXT NOT NULL, role TEXT NOT NULL, items_json TEXT NOT NULL, created_at INTEGER NOT NULL)");
+        $pdo->query("CREATE INDEX IF NOT EXISTS idx_chat_user_thread_time ON chat_history(user_id, thread_id, created_at)");
         $cache[$path] = $pdo;
         return $pdo;
     }
@@ -136,6 +138,30 @@ if (!function_exists('learn_notes_search')) {
         $q = '%' . $query . '%';
         $stmt = $db->prepare('SELECT id, title, body, updated_at FROM notes WHERE user_id = ? AND (title LIKE ? OR body LIKE ?) ORDER BY updated_at DESC LIMIT ?');
         $stmt->execute([$userId, $q, $q, $limit]);
+        return $stmt->fetchAll();
+    }
+}
+
+if (!function_exists('learn_chat_history_append')) {
+    function learn_chat_history_append(\PDO $db, int $userId, string $threadId, string $role, array $items): int {
+        $stmt = $db->prepare('INSERT INTO chat_history (user_id, thread_id, role, items_json, created_at) VALUES (?, ?, ?, ?, ?)');
+        $stmt->execute([$userId, $threadId, $role, json_encode($items, JSON_UNESCAPED_UNICODE), time()]);
+        return (int)$db->lastInsertId();
+    }
+}
+
+if (!function_exists('learn_chat_history_for_thread')) {
+    function learn_chat_history_for_thread(\PDO $db, int $userId, string $threadId): array {
+        $stmt = $db->prepare('SELECT id, role, items_json, created_at FROM chat_history WHERE user_id = ? AND thread_id = ? ORDER BY created_at ASC, id ASC');
+        $stmt->execute([$userId, $threadId]);
+        return $stmt->fetchAll();
+    }
+}
+
+if (!function_exists('learn_chat_history_threads')) {
+    function learn_chat_history_threads(\PDO $db, int $userId, int $limit = 10): array {
+        $stmt = $db->prepare('SELECT thread_id, MAX(created_at) AS last_at, COUNT(*) AS turns FROM chat_history WHERE user_id = ? GROUP BY thread_id ORDER BY last_at DESC LIMIT ?');
+        $stmt->execute([$userId, $limit]);
         return $stmt->fetchAll();
     }
 }
@@ -390,17 +416,7 @@ HTML;
     })();
 });
 
-// ── Chat status (will be replaced by ZealAPI file in M6.5) ───────────
-$app->route('/api/learn/chat/status', ['methods' => ['GET']], function() {
-    $key = (string)(getenv('OPENAI_API_KEY') ?: '');
-    header('Content-Type: application/json');
-    return [
-        'ai_enabled' => $key !== '',
-        'mock_mode'  => $key === '',
-        'model'      => $key !== '' ? (getenv('ZEALPHP_LEARN_AI_MODEL') ?: 'gpt-4.1-mini') : 'mock-rules-v1',
-    ];
-});
-
+// ── Chat status now lives at api/learn/chat_status.php (ZealAPI file)
 // ── Chat rate limit ─────────────────────────────────────────────────
 \ZealPHP\Store::make('learn_chat_rl', 1024, [
     'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],
@@ -442,57 +458,84 @@ function learn_chat_mock($response, array $user, string $message, string $thread
     $userId = $user['user_id'];
     $msgLower = strtolower($message);
 
+    // Persist the user turn immediately so a refresh shows it even if the assistant fails.
+    learn_chat_history_append($db, $userId, $threadId, 'user', [['type' => 'text', 'html' => '<p>' . htmlspecialchars($message) . '</p>']]);
+
     $response->sse(function($emit) use ($db, $userId, $message, $msgLower, $threadId) {
-        $emit(json_encode(['thread_id' => $threadId]), 'thread');
+        // Accumulator: every $emit also pushes items into $items so we can persist
+        // the full assistant turn at end-of-stream.
+        $items = []; $textBuf = '';
+        $flushText = function() use (&$items, &$textBuf) {
+            if ($textBuf !== '') { $items[] = ['type' => 'text', 'html' => $textBuf]; $textBuf = ''; }
+        };
+        $sse = function(string $data, string $event) use ($emit, &$items, &$textBuf, $flushText) {
+            $emit($data, $event);
+            $payload = json_decode($data, true) ?: [];
+            if ($event === 'token') {
+                $textBuf .= (string)($payload['token'] ?? '');
+            } elseif ($event === 'tool_call') {
+                $flushText();
+                $items[] = ['type' => 'tool', 'id' => $payload['id'] ?? '?', 'name' => $payload['name'] ?? '?', 'status' => 'running', 'args' => '', 'result' => ''];
+            } elseif ($event === 'tool_args') {
+                foreach ($items as &$it) if ($it['type'] === 'tool' && $it['id'] === ($payload['id'] ?? '')) { $it['args'] .= (string)($payload['delta'] ?? ''); break; }
+            } elseif ($event === 'tool_done') {
+                foreach ($items as &$it) if ($it['type'] === 'tool' && $it['id'] === ($payload['id'] ?? '')) { $it['status'] = $payload['status'] ?? 'ok'; $it['result'] = (string)($payload['result_preview'] ?? ''); break; }
+            }
+        };
+
+        $sse(json_encode(['thread_id' => $threadId]), 'thread');
 
         if (preg_match('/(list|show all|what\'?s in)/i', $msgLower)) {
-            $emit(json_encode(['id' => 'm1', 'name' => 'list_notes', 'phase' => 'start']), 'tool_call');
+            $sse(json_encode(['id' => 'm1', 'name' => 'list_notes', 'phase' => 'start']), 'tool_call');
             usleep(120000);
             $notes = learn_notes_list($db, $userId);
-            $emit(json_encode(['id' => 'm1', 'status' => 'ok', 'result_preview' => count($notes) . ' notes']), 'tool_done');
+            $sse(json_encode(['id' => 'm1', 'status' => 'ok', 'result_preview' => count($notes) . ' notes']), 'tool_done');
             if (empty($notes)) {
-                $emit(json_encode(['token' => '<p>No notes yet. Try "create a note titled buy milk".</p>']), 'token');
+                $sse(json_encode(['token' => '<p>No notes yet. Try "create a note titled buy milk".</p>']), 'token');
             } else {
                 $html = '<ul>' . implode('', array_map(fn($n) => '<li>' . htmlspecialchars($n['title']) . ' — id ' . (int)$n['id'] . '</li>', $notes)) . '</ul>';
-                $emit(json_encode(['token' => '<p>Here are your notes:</p>' . $html]), 'token');
+                $sse(json_encode(['token' => '<p>Here are your notes:</p>' . $html]), 'token');
             }
         } elseif (preg_match('/(create|add)(\s+a)?\s+note(\s+(titled|called|saying))?\s+["\']?(.+?)["\']?$/i', $message, $m)) {
             $title = trim($m[5] ?? 'untitled');
-            $emit(json_encode(['token' => '<p>Got it, creating that note.</p>']), 'token');
-            $emit(json_encode(['id' => 'm2', 'name' => 'create_note', 'phase' => 'start']), 'tool_call');
+            $sse(json_encode(['token' => '<p>Got it, creating that note.</p>']), 'token');
+            $sse(json_encode(['id' => 'm2', 'name' => 'create_note', 'phase' => 'start']), 'tool_call');
             $json = json_encode(['title' => $title, 'body' => '']);
             foreach (str_split($json, 12) as $chunk) {
-                $emit(json_encode(['id' => 'm2', 'delta' => $chunk]), 'tool_args');
+                $sse(json_encode(['id' => 'm2', 'delta' => $chunk]), 'tool_args');
                 usleep(40000);
             }
             $newId = learn_notes_create($db, $userId, $title, '');
-            $emit(json_encode(['id' => 'm2', 'status' => $newId ? 'ok' : 'error', 'result_preview' => $newId ? "id: $newId" : 'failed']), 'tool_done');
-            $emit(json_encode([]), 'notes_changed');
-            $emit(json_encode(['token' => "<p>Created note <strong>" . htmlspecialchars($title) . "</strong>.</p>"]), 'token');
+            $sse(json_encode(['id' => 'm2', 'status' => $newId ? 'ok' : 'error', 'result_preview' => $newId ? "id: $newId" : 'failed']), 'tool_done');
+            $sse(json_encode([]), 'notes_changed');
+            $sse(json_encode(['token' => "<p>Created note <strong>" . htmlspecialchars($title) . "</strong>.</p>"]), 'token');
         } elseif (preg_match('/delete\s+(?:note\s+)?["\']?(.+?)["\']?$/i', $message, $m)) {
             $needle = trim($m[1]);
             $notes = learn_notes_list($db, $userId);
             $hit = null;
             foreach ($notes as $n) if (stripos($n['title'], $needle) !== false) { $hit = $n; break; }
             if (!$hit) {
-                $emit(json_encode(['token' => "<p>I couldn't find a note matching <em>" . htmlspecialchars($needle) . "</em>.</p>"]), 'token');
+                $sse(json_encode(['token' => "<p>I couldn't find a note matching <em>" . htmlspecialchars($needle) . "</em>.</p>"]), 'token');
             } else {
-                $emit(json_encode(['id' => 'm3', 'name' => 'delete_note', 'phase' => 'start']), 'tool_call');
+                $sse(json_encode(['id' => 'm3', 'name' => 'delete_note', 'phase' => 'start']), 'tool_call');
                 learn_notes_delete($db, $userId, (int)$hit['id']);
-                $emit(json_encode(['id' => 'm3', 'status' => 'ok', 'result_preview' => 'deleted id ' . $hit['id']]), 'tool_done');
-                $emit(json_encode([]), 'notes_changed');
-                $emit(json_encode(['token' => "<p>Deleted note <strong>" . htmlspecialchars($hit['title']) . "</strong>.</p>"]), 'token');
+                $sse(json_encode(['id' => 'm3', 'status' => 'ok', 'result_preview' => 'deleted id ' . $hit['id']]), 'tool_done');
+                $sse(json_encode([]), 'notes_changed');
+                $sse(json_encode(['token' => "<p>Deleted note <strong>" . htmlspecialchars($hit['title']) . "</strong>.</p>"]), 'token');
             }
         } elseif (preg_match('/(search|find)\s+(.+)/i', $message, $m)) {
             $q = trim($m[2]);
-            $emit(json_encode(['id' => 'm4', 'name' => 'search_notes', 'phase' => 'start']), 'tool_call');
+            $sse(json_encode(['id' => 'm4', 'name' => 'search_notes', 'phase' => 'start']), 'tool_call');
             $hits = learn_notes_search($db, $userId, $q);
-            $emit(json_encode(['id' => 'm4', 'status' => 'ok', 'result_preview' => count($hits) . ' hits']), 'tool_done');
-            if (empty($hits)) $emit(json_encode(['token' => "<p>No notes match <em>" . htmlspecialchars($q) . "</em>.</p>"]), 'token');
-            else $emit(json_encode(['token' => '<ul>' . implode('', array_map(fn($n) => '<li>' . htmlspecialchars($n['title']) . '</li>', $hits)) . '</ul>']), 'token');
+            $sse(json_encode(['id' => 'm4', 'status' => 'ok', 'result_preview' => count($hits) . ' hits']), 'tool_done');
+            if (empty($hits)) $sse(json_encode(['token' => "<p>No notes match <em>" . htmlspecialchars($q) . "</em>.</p>"]), 'token');
+            else $sse(json_encode(['token' => '<ul>' . implode('', array_map(fn($n) => '<li>' . htmlspecialchars($n['title']) . '</li>', $hits)) . '</ul>']), 'token');
         } else {
-            $emit(json_encode(['token' => '<p>Mock mode is active — set <code>OPENAI_API_KEY</code> for the real model. Try: <em>create a note titled buy milk</em>, <em>list notes</em>, <em>delete buy milk</em>, <em>search groceries</em>.</p>']), 'token');
+            $sse(json_encode(['token' => '<p>Mock mode is active — set <code>OPENAI_API_KEY</code> for the real model. Try: <em>create a note titled buy milk</em>, <em>list notes</em>, <em>delete buy milk</em>, <em>search groceries</em>.</p>']), 'token');
         }
+
+        $flushText();
+        learn_chat_history_append($db, $userId, $threadId, 'assistant', $items);
         $emit(json_encode(['done' => true]), 'done');
     });
 }

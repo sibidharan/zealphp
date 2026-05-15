@@ -33,8 +33,13 @@ $active = $active ?? 'learn/ai-chat';
             <p class="notes-empty">Loading…</p>
           </div>
         </div>
-        <div id="learn-chat" class="chat-box">
-          <div class="chat-head">Notes assistant <span class="chat-mode">…</span></div>
+        <div id="learn-chat" class="chat-box" data-thread-id="">
+          <div class="chat-head">
+            Notes assistant
+            <span class="chat-mode">…</span>
+            <button type="button" class="chat-new" title="Start a fresh conversation">New thread</button>
+          </div>
+          <div class="chat-history" hidden></div>
           <div class="chat-messages"></div>
           <form class="chat-form" autocomplete="off">
             <input type="text" name="message" placeholder="Ask anything about your notes…" required>

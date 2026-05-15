@@ -19,16 +19,41 @@
   }
 
   function initChat(root) {
-    const messages = root.querySelector('.chat-messages');
-    const form     = root.querySelector('.chat-form');
-    const input    = form.querySelector('input[name="message"]');
-    const sendBtn  = form.querySelector('button');
+    const historyEl = root.querySelector('.chat-history');
+    const messages  = root.querySelector('.chat-messages');
+    const form      = root.querySelector('.chat-form');
+    const input     = form.querySelector('input[name="message"]');
+    const sendBtn   = form.querySelector('button');
     const modeBadge = root.querySelector('.chat-mode');
+    const newBtn    = root.querySelector('.chat-new');
 
     let threadId = localStorage.getItem('zealphp_learn_thread') || cryptoRandomId();
     localStorage.setItem('zealphp_learn_thread', threadId);
+    root.dataset.threadId = threadId;
 
-    fetch('/api/learn/chat/status').then(r => r.json()).then(s => {
+    function loadHistory() {
+      if (!historyEl) return;
+      historyEl.textContent = '';
+      historyEl.hidden = false;
+      fetch('/api/learn/chat_history?thread_id=' + encodeURIComponent(threadId))
+        .then(r => r.ok ? r.text() : '')
+        .then(html => {
+          if (!html || html.includes('chat-empty')) { historyEl.hidden = true; return; }
+          historyEl.appendChild(htmlFragment(html));
+        })
+        .catch(() => { historyEl.hidden = true; });
+    }
+    loadHistory();
+
+    if (newBtn) newBtn.addEventListener('click', () => {
+      threadId = cryptoRandomId();
+      localStorage.setItem('zealphp_learn_thread', threadId);
+      root.dataset.threadId = threadId;
+      if (historyEl) { historyEl.textContent = ''; historyEl.hidden = true; }
+      messages.textContent = '';
+    });
+
+    fetch('/api/learn/chat_status').then(r => r.json()).then(s => {
       if (modeBadge) {
         modeBadge.textContent = s.mock_mode ? 'Mock mode' : s.model;
         modeBadge.title = s.mock_mode ? 'Set OPENAI_API_KEY for real AI' : '';

@@ -86,4 +86,33 @@ class LearnNotesRepoTest extends TestCase
         $this->assertCount(1, $hits);
         $this->assertSame('Buy groceries', $hits[0]['title']);
     }
+
+    public function test_chat_history_append_and_fetch(): void
+    {
+        $items = [['type' => 'text', 'html' => '<p>hi</p>']];
+        $id = \learn_chat_history_append($this->db, $this->aliceId, 't1', 'user', $items);
+        $this->assertIsInt($id);
+        $rows = \learn_chat_history_for_thread($this->db, $this->aliceId, 't1');
+        $this->assertCount(1, $rows);
+        $this->assertSame('user', $rows[0]['role']);
+        $this->assertSame($items, json_decode($rows[0]['items_json'], true));
+    }
+
+    public function test_chat_history_user_isolation(): void
+    {
+        \learn_chat_history_append($this->db, $this->aliceId, 't1', 'user', [['type' => 'text', 'html' => 'alice']]);
+        \learn_chat_history_append($this->db, $this->bobId,   't1', 'user', [['type' => 'text', 'html' => 'bob']]);
+        $aliceRows = \learn_chat_history_for_thread($this->db, $this->aliceId, 't1');
+        $this->assertCount(1, $aliceRows);
+        $this->assertStringContainsString('alice', $aliceRows[0]['items_json']);
+    }
+
+    public function test_chat_history_thread_list(): void
+    {
+        \learn_chat_history_append($this->db, $this->aliceId, 't1', 'user', [['type' => 'text', 'html' => 'a']]);
+        \learn_chat_history_append($this->db, $this->aliceId, 't2', 'user', [['type' => 'text', 'html' => 'b']]);
+        $threads = \learn_chat_history_threads($this->db, $this->aliceId);
+        $this->assertCount(2, $threads);
+        $this->assertContains('t1', array_column($threads, 'thread_id'));
+    }
 }

@@ -37,8 +37,8 @@ ${basename(__FILE__, '.php')} = function () {
 // → GET /api/users/list</code></pre>
 
     <?php App::render('/components/_tryit', ['title' => 'ZealAPI in action', 'body' => <<<HTML
-      <p>This very page ships a real ZealAPI handler at <code>api/learn/chat/status.php</code>. URL <code>GET /api/learn/chat/status</code> maps to that file:</p>
-      <pre><code>// api/learn/chat/status.php
+      <p>This very page ships a real ZealAPI handler at <code>api/learn/chat_status.php</code>. URL <code>GET /api/learn/chat_status</code> maps to that file:</p>
+      <pre><code>// api/learn/chat_status.php
 \${basename(__FILE__, '.php')} = function () {
     \$key = (string)(getenv('OPENAI_API_KEY') ?: '');
     \$this->response(\$this->json([
@@ -46,7 +46,7 @@ ${basename(__FILE__, '.php')} = function () {
         'mock_mode'  => \$key === '',
     ]), 200);
 };</code></pre>
-      <p><a class="lesson-chip" href="/api/learn/chat/status" target="_blank">Call /api/learn/chat/status →</a></p>
+      <p><a class="lesson-chip" href="/api/learn/chat_status" target="_blank">Call /api/learn/chat_status →</a></p>
       <p>The variable name (<code>\$status</code>) must match the file's basename. Inside the closure, <code>\$this</code> is the ZealAPI instance with helpers like <code>response()</code>, <code>json()</code>, <code>paramsExists()</code>.</p>
 HTML]); ?>
 
