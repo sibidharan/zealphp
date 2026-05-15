@@ -122,9 +122,9 @@ html:has(.learn-layout) { scroll-behavior: auto !important; }
 .chat-mode { font-size: .7rem; padding: .15rem .5rem; border-radius: 999px; background: #f5f5f4; color: #57534e; }
 .chat-new { margin-left: auto; font-size: .72rem; padding: .2rem .6rem; border: 1px solid #d6d3d1; background: #fff; border-radius: 4px; cursor: pointer; }
 .chat-new:hover { background: #f5f5f4; }
-.chat-history, .chat-messages { padding: 1rem; display: flex; flex-direction: column; gap: .75rem; }
-.chat-history { border-bottom: 1px dashed #e7e5e4; }
-.chat-messages { flex: 1; overflow-y: auto; }
+.chat-history, .chat-messages { padding: 1rem; display: flex; flex-direction: column; gap: .75rem; overflow-y: auto; }
+.chat-history { border-bottom: 1px dashed #e7e5e4; flex-shrink: 1; max-height: 40%; }
+.chat-messages { flex: 1; min-height: 120px; }
 .chat-msg { max-width: 88%; }
 .chat-msg.user { align-self: flex-end; }
 .chat-msg.assistant { align-self: flex-start; }
