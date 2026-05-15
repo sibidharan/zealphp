@@ -11,8 +11,8 @@
 
     <h2>Plain PHP scales further than you think</h2>
     <p>
-      ZealPHP on 4 OpenSwoole workers benchmarks at <strong>67,000 req/s</strong> with a
-      21ms p90 latency. That's not a toy number. For most applications — SaaS dashboards,
+      ZealPHP on 4 OpenSwoole workers benchmarks at <strong>117,000 req/s</strong> with a
+      3ms p90 latency. That's not a toy number. For most applications — SaaS dashboards,
       content sites, internal tools, AI wrappers — it's 10x more than you'll ever need.
       The bottleneck in almost every web app is the database or the external API, not the framework.
     </p>
