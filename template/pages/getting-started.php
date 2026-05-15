@@ -6,8 +6,8 @@
     <p class="section-desc">From a fresh machine to a running ZealPHP app — install dependencies, scaffold a project, write your first route, deploy.</p>
 
     <div style="margin:1.25rem 0;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-      <a href="/learn" style="display:inline-block;padding:.65rem 1.4rem;background:var(--accent);color:#fff;border-radius:8px;font-weight:700;text-decoration:none;font-size:.95rem">Learn by Building →</a>
-      <span style="font-size:.85rem;color:var(--text-muted)">12-lesson tutorial — build a Notes + AI Chat app with htmx, SQLite, and SSE streaming.</span>
+      <a href="/learn" class="btn-cta">Learn by Building &rarr;</a>
+      <span style="font-size:.85rem;color:var(--text-muted)">14-lesson tutorial — build a Notes + AI Chat app with htmx, SQLite, and SSE streaming.</span>
     </div>
 
     <!-- TL;DR install — surfaced above the architecture diagram so visitors
