@@ -41,7 +41,7 @@ $active = $active ?? 'learn/ai-chat';
           </div>
           <div class="chat-history" hidden></div>
           <div class="chat-messages"></div>
-          <form class="chat-form" autocomplete="off">
+          <form class="chat-form" autocomplete="off" hx-boost="false">
             <input type="text" name="message" placeholder="Ask anything about your notes…" required>
             <button type="submit">Send</button>
           </form>
