@@ -92,9 +92,9 @@
 .lesson-content pre.mermaid:hover::after { opacity: 1; }
 
 /* Mermaid pop-out viewer */
-.mermaid-viewer { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; cursor: grab; }
+.mermaid-viewer { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.85); cursor: grab; overflow: hidden; }
 .mermaid-viewer:active { cursor: grabbing; }
-.mermaid-viewer-inner { transform-origin: 0 0; will-change: transform; }
+.mermaid-viewer-inner { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
 .mermaid-viewer-inner svg { max-width: none !important; max-height: none !important; filter: drop-shadow(0 4px 24px rgba(0,0,0,.3)); }
 .mermaid-viewer-close { position: fixed; top: 1rem; right: 1.5rem; z-index: 10000; background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3); color: #fff; width: 2.5rem; height: 2.5rem; border-radius: 50%; font-size: 1.2rem; cursor: pointer; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
 .mermaid-viewer-close:hover { background: rgba(255,255,255,.3); }
