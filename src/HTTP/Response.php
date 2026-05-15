@@ -74,6 +74,14 @@ class Response
     // You can override methods if necessary or add more custom methods
     public function header(string $key, string $value): bool
     {
+        // CRLF / NUL injection guard. Also block `:` and whitespace in the
+        // header name itself (RFC 7230 field-name = token, which excludes
+        // separators). Without this, attacker-controlled $value can smuggle
+        // a second header or split the response.
+        if (strpbrk($key, "\r\n\0: \t") !== false || strpbrk($value, "\r\n\0") !== false) {
+            trigger_error('Header injection blocked: control characters in name or value', E_USER_WARNING);
+            return false;
+        }
         $this->g->response_headers_list[] = [$key, $value];
         if (strtolower($key) === 'location' && $value && ($this->g->status === 200 || $this->g->status === null)) {
             $this->g->status = 302;
@@ -90,6 +98,9 @@ class Response
      */
     public function redirect(string $url, int $status = 302): void
     {
+        if (strpbrk($url, "\r\n\0") !== false) {
+            throw new \InvalidArgumentException('Redirect URL contains control characters');
+        }
         if (preg_match('#^(javascript|data|vbscript):#i', $url)) {
             throw new \InvalidArgumentException('Unsafe redirect URL scheme');
         }

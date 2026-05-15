@@ -723,8 +723,22 @@ function response_headers_list()
  * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
  */
 function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false, $samesite = '') {
+    // Cookie name char rules match PHP native setcookie: reject `=,; \t\r\n\013\014\0`.
+    // Reject CR/LF/NUL in value/path/domain to prevent Set-Cookie header injection.
+    if (strpbrk((string)$name, "=,; \t\r\n\013\014\0") !== false) {
+        trigger_error("Cookie names cannot contain any of the following '=,; \\t\\r\\n\\013\\014'", E_USER_WARNING);
+        return false;
+    }
+    if (strpbrk((string)$value, "\r\n\0") !== false
+        || strpbrk((string)$path, "\r\n\0") !== false
+        || strpbrk((string)$domain, "\r\n\0") !== false
+        || strpbrk((string)$samesite, "\r\n\0") !== false) {
+        trigger_error('Cookie value/path/domain/samesite contains control characters', E_USER_WARNING);
+        return false;
+    }
     $g = G::instance();
     $g->zealphp_response->cookie($name, $value, $expire, $path, $domain, $secure, $httponly, $samesite);
+    return true;
 }
 
 /**
@@ -739,6 +753,19 @@ function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $s
  * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
  */
 function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false) {
+    // setrawcookie() skips URL-encoding on $value but still must reject control
+    // chars in name/value/path/domain that would enable Set-Cookie header
+    // injection. Name char rules match PHP native setrawcookie.
+    if (strpbrk((string)$name, "=,; \t\r\n\013\014\0") !== false) {
+        trigger_error("Cookie names cannot contain any of the following '=,; \\t\\r\\n\\013\\014'", E_USER_WARNING);
+        return false;
+    }
+    if (strpbrk((string)$value, ",; \t\r\n\013\014\0") !== false
+        || strpbrk((string)$path, "\r\n\0") !== false
+        || strpbrk((string)$domain, "\r\n\0") !== false) {
+        trigger_error('Raw cookie value/path/domain contains invalid characters', E_USER_WARNING);
+        return false;
+    }
     $cookie = "$name=$value";
     if ($expire) {
         $cookie .= "; expires=" . gmdate('D, d-M-Y H:i:s T', $expire);
@@ -757,9 +784,17 @@ function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "",
     }
     $g = G::instance();
     $g->zealphp_response->rawCookie($name, $value, $expire, $path, $domain, $secure, $httponly);
+    return true;
 }
 
 function header($header, $replace = true, $http_response_code = null) {
+    // CRLF / NUL injection guard — matches PHP native header() since 4.4.2.
+    // Without this, `header("X-Foo: " . $userInput)` with CRLF in $userInput
+    // enables HTTP response splitting (smuggle a second header / response body).
+    if (strpbrk($header, "\r\n\0") !== false) {
+        trigger_error('Header may not contain more than a single header, new line detected', E_USER_WARNING);
+        return false;
+    }
     // Apache mod_php form 1: status line — header("HTTP/1.1 404 Not Found");
     if (stripos($header, 'HTTP/') === 0) {
         if (preg_match('/\s(\d{3})/', $header, $m)) {

@@ -161,6 +161,85 @@ class SecurityTest extends TestCase
     }
 
     // ─────────────────────────────────────────────────────────────
+    //  Header injection / HTTP response splitting (v0.2.5)
+    //
+    //  PHP native header() / setcookie() reject CRLF in values to prevent
+    //  response splitting. Our uopz overrides + Response wrapper must
+    //  replicate that guarantee — otherwise code that was safe on PHP-FPM
+    //  becomes vulnerable when run on ZealPHP.
+    // ─────────────────────────────────────────────────────────────
+
+    public function testResponseHeaderRejectsCRLFInValue(): void
+    {
+        $response = $this->makeResponse();
+        $g = \ZealPHP\G::instance();
+        $result = @$response->header('X-Custom', "value\r\nSet-Cookie: pwned=1");
+        $this->assertFalse($result, 'Response::header() should reject CRLF-containing value');
+        $this->assertEmpty($g->response_headers_list, 'No header should be added when CRLF detected');
+    }
+
+    public function testResponseHeaderRejectsNullByteInValue(): void
+    {
+        $response = $this->makeResponse();
+        $g = \ZealPHP\G::instance();
+        $result = @$response->header('X-Custom', "value\0evil");
+        $this->assertFalse($result);
+        $this->assertEmpty($g->response_headers_list);
+    }
+
+    public function testResponseHeaderRejectsColonOrSpaceInName(): void
+    {
+        $response = $this->makeResponse();
+        $g = \ZealPHP\G::instance();
+        $result = @$response->header("X-Foo: Bar\r\nX-Evil", 'value');
+        $this->assertFalse($result);
+        $this->assertEmpty($g->response_headers_list);
+    }
+
+    public function testHeaderOverrideRejectsCRLF(): void
+    {
+        \ZealPHP\G::instance()->response_headers_list = [];
+        $this->makeResponse(); // attach Response so header() has somewhere to write
+        $result = @\ZealPHP\header("X-Custom: value\r\nSet-Cookie: pwned=1");
+        $this->assertFalse($result, 'header() should reject CRLF in input');
+        $g = \ZealPHP\G::instance();
+        $this->assertEmpty($g->response_headers_list, 'No header should be added when CRLF detected');
+    }
+
+    public function testRedirectThrowsOnCRLFInUrl(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->makeResponse()->redirect("/dashboard\r\nSet-Cookie: pwned=1");
+    }
+
+    public function testRedirectThrowsOnNullByteInUrl(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->makeResponse()->redirect("/dashboard\0evil");
+    }
+
+    public function testSetcookieRejectsCRLFInValue(): void
+    {
+        $this->makeResponse();
+        $result = @\ZealPHP\setcookie('session', "abc123\r\nSet-Cookie: admin=1");
+        $this->assertFalse($result);
+    }
+
+    public function testSetcookieRejectsInvalidNameChars(): void
+    {
+        $this->makeResponse();
+        $result = @\ZealPHP\setcookie("bad=name", 'value');
+        $this->assertFalse($result);
+    }
+
+    public function testSetrawcookieRejectsControlChars(): void
+    {
+        $this->makeResponse();
+        $result = @\ZealPHP\setrawcookie('session', "abc\r\nSet-Cookie: admin=1");
+        $this->assertFalse($result);
+    }
+
+    // ─────────────────────────────────────────────────────────────
     //  Session ID entropy
     // ─────────────────────────────────────────────────────────────
 

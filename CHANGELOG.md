@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-05-15
+
+### Security
+- **HTTP response splitting via `header()` override (high severity).** The uopz `header()` override did not reject `\r\n` / `\0` in header values, breaking the protection PHP native `header()` has provided since 4.4.2. Application code using `header("X-Foo: " . $userInput)` with user input containing CRLF could smuggle additional response headers (including `Set-Cookie`), enabling session fixation and cache poisoning against affected apps. **All v0.2.x releases prior to 0.2.5 are affected. Upgrade is strongly recommended.**
+  - Fix: CRLF/NUL injection guards added to `header()`, `Response::header()`, `Response::redirect()`, `setcookie()`, and `setrawcookie()`.
+  - Validation: matches PHP native behavior — emits `E_USER_WARNING` and returns `false` (or throws `InvalidArgumentException` for `redirect()`).
+  - Cookie name char-class rules now match PHP native `setcookie`: `=,; \t\r\n\013\014\0` rejected.
+  - 9 new regression tests in `tests/Unit/SecurityTest.php` covering each entry point.
+
 ## [0.2.4] - 2026-05-15
 
 ### Added
