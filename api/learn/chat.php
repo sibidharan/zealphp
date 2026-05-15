@@ -39,6 +39,7 @@ ${basename(__FILE__, '.php')} = function ($request, $response) {
     }
 };
 
+if (!function_exists('learn_chat_mock')):
 function learn_chat_mock($response, array $user, string $message, string $threadId): void
 {
     $db = DB::open();
@@ -126,7 +127,9 @@ function learn_chat_mock($response, array $user, string $message, string $thread
         $emit(json_encode(['done' => true]), 'done');
     });
 }
+endif;
 
+if (!function_exists('learn_chat_real')):
 function learn_chat_real($response, array $user, string $message, string $threadId, string $apiKey): void
 {
     $db = DB::open();
@@ -150,17 +153,14 @@ function learn_chat_real($response, array $user, string $message, string $thread
     $agentPath = (defined('ZEALPHP_ROOT') ? ZEALPHP_ROOT : \ZealPHP\App::$cwd) . '/examples/agents/notes_agent.py';
 
     $response->sse(function ($emit) use ($apiKey, $b64, $agentPath, $threadId, $db, $user) {
-        $env = [];
-        $gServer = G::instance()->server ?? [];
-        foreach ($gServer as $k => $v) { if (is_string($v)) $env[$k] = $v; }
-        $env['OPENAI_API_KEY'] = $apiKey;
-        $env['ZEALPHP_LEARN_AI_MODEL'] = (string) (getenv('ZEALPHP_LEARN_AI_MODEL') ?: 'gpt-4.1-mini');
-        $env['HOME'] = getenv('HOME') ?: '/tmp';
-        $env['PATH'] = getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin';
-        $cmd = getenv('HOME') . '/.local/bin/uv run ' . escapeshellarg($agentPath) . ' ' . escapeshellarg($b64);
+        $model = (string) (getenv('ZEALPHP_LEARN_AI_MODEL') ?: 'gpt-4.1-mini');
+        $cmd = 'OPENAI_API_KEY=' . escapeshellarg($apiKey)
+             . ' ZEALPHP_LEARN_AI_MODEL=' . escapeshellarg($model)
+             . ' PYTHONUNBUFFERED=1'
+             . ' uv run ' . escapeshellarg($agentPath) . ' ' . escapeshellarg($b64);
 
         $desc = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-        $proc = proc_open($cmd, $desc, $pipes, null, $env);
+        $proc = proc_open($cmd, $desc, $pipes);
         if (!is_resource($proc)) {
             $emit(json_encode(['thread_id' => $threadId]), 'thread');
             $emit(json_encode(['error' => 'agent_unavailable']), 'error');
@@ -190,19 +190,12 @@ function learn_chat_real($response, array $user, string $message, string $thread
 
         $buffer = '';
         $currentEvent = null;
-        $lastData = microtime(true);
-        $timeout = 30;
         while (!feof($pipes[1])) {
             $chunk = fread($pipes[1], 4096);
             if ($chunk === false || $chunk === '') {
-                if (microtime(true) - $lastData > $timeout) {
-                    $emit(json_encode(['error' => 'agent_timeout']), 'error');
-                    break;
-                }
-                usleep(40000);
+                usleep(50000);
                 continue;
             }
-            $lastData = microtime(true);
             $buffer .= $chunk;
             while (($pos = strpos($buffer, "\n")) !== false) {
                 $line = substr($buffer, 0, $pos);
@@ -213,15 +206,11 @@ function learn_chat_real($response, array $user, string $message, string $thread
             }
         }
         fclose($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
         fclose($pipes[2]);
-        $exitCode = proc_close($proc);
-
-        if ($exitCode !== 0 && empty($items)) {
-            $emit(json_encode(['error' => 'agent_error: ' . trim(substr($stderr ?: '', 0, 200))]), 'error');
-        }
+        proc_close($proc);
 
         $flush();
         ChatHistory::append($db, $user['user_id'], $threadId, 'assistant', $items);
     });
 }
+endif;

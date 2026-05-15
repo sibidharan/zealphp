@@ -173,6 +173,15 @@ class ZealAPI extends REST
                         }
                         throw $e;
                     }
+                    // If the handler already sent a response (via $this->response(),
+                    // $response->sse(), or similar), the output buffer is empty and
+                    // we should NOT create a second Response — that would corrupt
+                    // streaming connections (SSE, chunked).
+                    if ($g->_streaming ?? false) {
+                        ob_end_clean();
+                        return;
+                    }
+
                     if(is_int($object)){
                         $status = (int)$object;
                     } else {
@@ -194,7 +203,7 @@ class ZealAPI extends REST
                     } else if (is_string($object)){
                         echo $object;
                     }
-                    
+
                     $buffer = ob_get_clean();
 
                     return (new Response($buffer, $status));
