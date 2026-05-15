@@ -71,6 +71,14 @@ PHPUnit 11 test suite lives in `tests/`. `ZEALPHP_TEST_PORT` env var sets the se
 
 ---
 
+## Development Gotchas
+
+- **Server restart required** for changes to `route/*.php`, `app.php`, `src/Middleware/`, and `src/App.php` — these load at startup. Template and `api/` file changes take effect immediately.
+- **Multiple instances**: if testing on a non-default port (e.g., 8090 via Traefik), ensure that instance is restarted too — `php app.php restart` only restarts the default port. Use `php app.php restart -p 8090`.
+- **Setting cookies in middleware**: use `$g->openswoole_response->cookie()` (raw OpenSwoole response), not the uopz `setcookie()` override — the PSR-7 response chain may not propagate cookies set via the wrapper.
+
+---
+
 ## Architecture
 
 ### Request Lifecycle
@@ -293,6 +301,10 @@ App::getServer()->task(['handler' => '/task/backup', 'args' => [...]]);
 ```
 
 Task workers run in coroutine mode (`task_enable_coroutine => true` is set by default).
+
+### AI Agent Architecture
+
+The Python notes agent (`examples/agents/notes_agent.py`) calls ZealPHP's HTTP API with the user's `PHPSESSID` cookie — same endpoints as the frontend. This ensures note mutations trigger WebSocket broadcasts for live cross-tab updates. `Chat::real()` passes `session_id` and `api_base` in the base64 payload. The agent uses `RunContextWrapper[AgentContext]` per OpenAI Agents SDK best practices. Notes API supports JSON responses via `Accept: application/json` content negotiation.
 
 ---
 
