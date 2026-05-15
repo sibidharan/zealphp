@@ -633,7 +633,8 @@ function learn_chat_real($response, array $user, string $message, string $thread
 
     $response->sse(function($emit) use ($apiKey, $b64, $agentPath, $threadId, $db, $user) {
         $env = [];
-        foreach ($_SERVER as $k => $v) { if (is_string($v)) $env[$k] = $v; }
+        $gServer = G::instance()->server ?? [];
+        foreach ($gServer as $k => $v) { if (is_string($v)) $env[$k] = $v; }
         $env['OPENAI_API_KEY'] = $apiKey;
         $env['ZEALPHP_LEARN_AI_MODEL'] = (string)(getenv('ZEALPHP_LEARN_AI_MODEL') ?: 'gpt-4.1-mini');
         $env['HOME'] = getenv('HOME') ?: '/tmp';

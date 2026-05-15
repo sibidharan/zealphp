@@ -42,7 +42,8 @@
       a new <code>&lt;button&gt;</code> element; <code>hx-swap="outerHTML"</code> replaces this
       one with the new one. Click it:
     </p>
-    <?php App::render('/components/_tryit', ['title' => 'Counter (server-side state via $_SESSION)', 'body' => '<div style="text-align:center;padding:1rem 0">' . App::renderToString('/components/_counter_button', ['n' => (int)($_SESSION['demo_counter'] ?? 0)]) . '</div><p style="margin-top:.75rem">The HTML you see is rendered server-side by <code>App::renderToString(\'/components/_counter_button\', [\'n\' =&gt; \$n])</code> on every click. Open DevTools → Network and watch the POST/response cycle.</p>']); ?>
+    <?php $g = \ZealPHP\G::instance(); ?>
+    <?php App::render('/components/_tryit', ['title' => 'Counter (server-side state via $g->session)', 'body' => '<div style="text-align:center;padding:1rem 0">' . App::renderToString('/components/_counter_button', ['n' => (int)($g->session['demo_counter'] ?? 0)]) . '</div><p style="margin-top:.75rem">The HTML you see is rendered server-side by <code>App::renderToString(\'/components/_counter_button\', [\'n\' =&gt; \$n])</code> on every click. Open DevTools → Network and watch the POST/response cycle.</p>']); ?>
 
     <h2>Progressive enhancement</h2>
     <p>
