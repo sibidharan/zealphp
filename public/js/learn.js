@@ -349,7 +349,7 @@
 
     var hint = document.createElement('div');
     hint.className = 'mermaid-viewer-hint';
-    hint.textContent = 'Scroll to zoom · Drag to pan · Esc to close';
+    hint.textContent = 'Pinch to zoom · Scroll or drag to pan · Esc to close';
     overlay.appendChild(hint);
 
     document.body.appendChild(overlay);
@@ -366,12 +366,17 @@
 
     overlay.addEventListener('wheel', function (e) {
       e.preventDefault();
-      var delta = e.deltaY > 0 ? 0.9 : 1.1;
-      var mx = e.clientX, my = e.clientY;
-      tx = mx - (mx - tx) * delta;
-      ty = my - (my - ty) * delta;
-      scale *= delta;
-      scale = Math.max(0.2, Math.min(scale, 8));
+      if (e.ctrlKey) {
+        var delta = e.deltaY > 0 ? 0.95 : 1.05;
+        var mx = e.clientX, my = e.clientY;
+        tx = mx - (mx - tx) * delta;
+        ty = my - (my - ty) * delta;
+        scale *= delta;
+        scale = Math.max(0.2, Math.min(scale, 8));
+      } else {
+        tx -= e.deltaX;
+        ty -= e.deltaY;
+      }
       applyTransform();
     }, { passive: false });
 
