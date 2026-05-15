@@ -2,10 +2,17 @@
 (function () {
   'use strict';
 
-  document.addEventListener('DOMContentLoaded', () => {
+  function initLearn() {
     const chatRoot = document.getElementById('learn-chat');
-    if (chatRoot) initChat(chatRoot);
-  });
+    if (chatRoot && !chatRoot.dataset.initialized) {
+      chatRoot.dataset.initialized = '1';
+      initChat(chatRoot);
+    }
+    initWebSocket();
+  }
+
+  document.addEventListener('DOMContentLoaded', initLearn);
+  document.addEventListener('htmx:afterSwap', initLearn);
 
   function htmlFragment(html) {
     return document.createRange().createContextualFragment(html);
@@ -202,9 +209,12 @@
   }
 
   // Cross-tab notes sync via WebSocket — opens on /learn/notes and /learn/ai-chat.
-  document.addEventListener('DOMContentLoaded', () => {
+  let wsConnected = false;
+  function initWebSocket() {
+    if (wsConnected) return;
     const notesList = document.getElementById('notes-list');
     if (!notesList) return;
+    wsConnected = true;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     let ws = null;
     let reconnectDelay = 500;
@@ -227,5 +237,5 @@
     }
     connect();
     setInterval(() => { if (ws && ws.readyState === 1) ws.send('ping'); }, 25000);
-  });
+  }
 })();
