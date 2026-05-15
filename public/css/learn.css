@@ -186,6 +186,7 @@
   display: flex; flex-direction: column; gap: .6rem;
 }
 .chat-history, .chat-messages { display: flex; flex-direction: column; gap: .6rem; }
+.learn-layout .chat-messages { min-height: 0; max-height: none; overflow-y: visible; padding: 0; }
 .chat-history:empty { display: none; }
 .chat-history:not(:empty) { border-bottom: 1px dashed #d6d3d1; padding-bottom: .6rem; }
 

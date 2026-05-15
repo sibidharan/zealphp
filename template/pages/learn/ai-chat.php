@@ -76,25 +76,27 @@ data: {"done":true}</code></pre>
           <div id="notes-list" class="notes-list" hx-get="/api/learn/notes" hx-trigger="load" hx-swap="innerHTML">
             <p class="notes-empty">Loading&hellip;</p>
           </div>
+        </div>
+        <div>
+          <div id="learn-chat" class="chat-box" data-thread-id="">
+            <div class="chat-head">
+              Notes assistant
+              <span class="chat-mode">&hellip;</span>
+              <button type="button" class="chat-new" title="Start a fresh conversation">New thread</button>
+            </div>
+            <div class="chat-scroll">
+              <div class="chat-history"></div>
+              <div class="chat-messages"></div>
+            </div>
+            <form class="chat-form" autocomplete="off" hx-boost="false">
+              <input type="text" name="message" placeholder="Ask anything about your notes&hellip;" required>
+              <button type="submit">Send</button>
+            </form>
+          </div>
           <div class="event-log-wrap">
             <h4 class="event-log-title">Event log</h4>
             <div id="ws-log" class="event-log"></div>
           </div>
-        </div>
-        <div id="learn-chat" class="chat-box" data-thread-id="">
-          <div class="chat-head">
-            Notes assistant
-            <span class="chat-mode">&hellip;</span>
-            <button type="button" class="chat-new" title="Start a fresh conversation">New thread</button>
-          </div>
-          <div class="chat-scroll">
-            <div class="chat-history"></div>
-            <div class="chat-messages"></div>
-          </div>
-          <form class="chat-form" autocomplete="off" hx-boost="false">
-            <input type="text" name="message" placeholder="Ask anything about your notes&hellip;" required>
-            <button type="submit">Send</button>
-          </form>
         </div>
       </section>
     <?php endif; ?>
