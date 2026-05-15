@@ -152,7 +152,7 @@
 }
 
 /* Push messages to the bottom when few, scroll naturally when many */
-.chat-messages::before { content: ''; flex: 1; }
+.chat-messages::before { content: ''; flex: 1; min-height: 0; }
 
 /* Bubbles */
 .chat-msg { max-width: 85%; }

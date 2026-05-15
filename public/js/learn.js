@@ -95,8 +95,10 @@
     bubble.appendChild(typing);
     wrap.appendChild(bubble);
     messages.appendChild(wrap);
-    const scroll = messages.closest('.chat-scroll');
-    if (scroll) scroll.scrollTop = scroll.scrollHeight;
+    requestAnimationFrame(() => {
+      const scr = messages.closest('.chat-scroll');
+      if (scr) scr.scrollTop = scr.scrollHeight;
+    });
 
     let lastItem = null;
     let textHtmlBuf = '';
@@ -140,8 +142,10 @@
               catch (e) { /* ignore */ }
             }
           }
-          const scroll = messages.closest('.chat-scroll');
-          if (scroll) scroll.scrollTop = scroll.scrollHeight;
+          requestAnimationFrame(() => {
+            const scr = messages.closest('.chat-scroll');
+            if (scr) scr.scrollTop = scr.scrollHeight;
+          });
           read();
         }).catch(() => done());
       }
