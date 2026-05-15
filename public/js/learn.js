@@ -12,7 +12,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', initLearn);
-  document.addEventListener('htmx:afterSwap', initLearn);
+  document.addEventListener('htmx:afterSettle', initLearn);
 
   function htmlFragment(html) {
     return document.createRange().createContextualFragment(html);

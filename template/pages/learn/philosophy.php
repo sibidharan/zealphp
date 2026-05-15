@@ -54,6 +54,34 @@
       'body'    => '<p>If you need client-side state management (drag-and-drop, real-time collaboration, optimistic updates), a frontend framework is the right tool. If you need horizontal scaling across many machines, you\'ll want stateless workers + external session storage. ZealPHP is one server, one process — it scales vertically well but doesn\'t pretend to be Kubernetes.</p>',
     ]); ?>
 
+    <h2>Code conventions that scale</h2>
+    <p>As your ZealPHP app grows, these conventions keep the codebase maintainable:</p>
+    <ul>
+      <li><strong>PSR-2 style</strong> — follow the <a href="https://www.php-fig.org/psr/psr-2/" target="_blank">PSR-2 coding standard</a> for consistent PHP formatting.</li>
+      <li><strong>No inline JS or CSS in templates</strong> — JavaScript goes in <code>public/js/</code>, CSS in <code>public/css/</code>. Templates produce HTML, nothing else.</li>
+      <li><strong>No function definitions in templates or API files</strong> — business logic belongs in <code>src/</code> classes, autoloaded via Composer PSR-4.</li>
+      <li><strong>API endpoints in <code>api/</code>, not <code>route/</code></strong> — use ZealAPI's file-based routing for REST. Reserve <code>route/</code> for path-param routes and WebSocket.</li>
+      <li><strong>Thin route handlers</strong> — a route handler calls a service class; it doesn't <em>contain</em> business logic.</li>
+      <li><strong>If you need <code>function_exists()</code>, the function is in the wrong place</strong> — put it in a class.</li>
+    </ul>
+    <p>
+      The <code>src/Learn/</code> namespace in the framework repo demonstrates this pattern:
+      <code>Auth.php</code>, <code>Chat.php</code>, <code>Notes.php</code>, and <code>DB.php</code> are
+      autoloaded classes that API and route handlers delegate to.
+    </p>
+
+    <h2>htmx — the interactivity layer</h2>
+    <p>
+      This site uses <code>hx-boost="true"</code> on <code>&lt;body&gt;</code>, which means every link
+      and form is AJAX-ified automatically. The server renders full HTML; htmx swaps the content
+      without a full reload. If JavaScript is disabled, everything still works — progressive enhancement.
+    </p>
+    <p>
+      Reach for htmx attributes (<code>hx-get</code>, <code>hx-post</code>,
+      <code>hx-target</code>, <code>hx-swap</code>) before writing custom <code>fetch()</code>.
+      For server-push — real-time updates, streaming AI tokens — use WebSocket or SSE instead.
+    </p>
+
     <h2>What you built</h2>
     <p>In 12 lessons you created:</p>
     <ul>
@@ -66,11 +94,8 @@
     </ul>
     <p>All served from one <code>php app.php</code> process. That's ZealPHP.</p>
 
-    <div style="margin:2rem 0;text-align:center">
-      <a href="https://github.com/sibidharan/zealphp" target="_blank"
-         style="display:inline-block;padding:.75rem 1.5rem;background:var(--accent, #f59e0b);color:#fff;border-radius:8px;font-weight:700;text-decoration:none;font-size:1.05rem">
-        Star on GitHub →
-      </a>
+    <div class="lesson-cta">
+      <a href="https://github.com/sibidharan/zealphp" target="_blank" class="btn-cta">Star on GitHub →</a>
     </div>
 
     <div class="lesson-chips">

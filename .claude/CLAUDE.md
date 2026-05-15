@@ -295,6 +295,57 @@ Task workers run in coroutine mode (`task_enable_coroutine => true` is set by de
 
 ---
 
+## Coding Standards
+
+### PHP Style
+- Follow **PSR-2** (https://www.php-fig.org/psr/psr-2/) for all PHP code.
+- Use `declare(strict_types=1)` in new `src/` classes.
+- Short array syntax (`[]` not `array()`), meaningful docblocks on public APIs.
+
+### Separation of Concerns — Hard Rules
+
+| Rule | Rationale |
+|------|-----------|
+| **No inline `<script>` blocks in templates** | All JS goes to `public/js/`. Templates produce HTML only. |
+| **No inline `style=` attributes or `<style>` blocks in templates** | All CSS goes to `public/css/`. Use CSS classes. |
+| **No PHP function definitions in templates** (`template/`) | Templates are view-only. Extract helpers to `src/` classes. |
+| **No PHP function definitions in API files** (`api/`) | API files define one closure (`$get`, `$post`, etc.) and delegate to `src/` service classes. |
+| **If you need `function_exists()` guard, the function is in the wrong place** | This means it can be re-declared — put it in a class autoloaded via PSR-4 instead. |
+
+### OOP and Autoloading
+- Business logic belongs in `src/` as proper classes with constructors, autoloaded via Composer PSR-4 (`ZealPHP\` namespace).
+- Use controllers/services in `src/` — not free functions scattered across route/api files.
+- The `src/Learn/` namespace demonstrates the pattern: `Auth.php`, `Chat.php`, `Notes.php`, `DB.php`, `WS.php` are autoloaded classes that API and route handlers delegate to.
+
+### Route vs API — When to Use Which
+
+| Layer | Use for | Example |
+|-------|---------|---------|
+| `api/` (ZealAPI) | REST endpoints — file-based, auto-routed | `api/users/get.php` → `GET /api/users` |
+| `route/` | Path-param routes, WebSocket, Store table registration, demo routes | `route/ws.php`, `route/streaming.php` |
+| `app.php` | Bootstrap only — middleware, `$app->run()` | Keep thin |
+
+**Routes are thin.** A route handler should be 1–5 lines that call a `src/` class. If a handler exceeds ~10 lines, extract the logic to a service class.
+
+### htmx Convention
+The site uses **htmx** globally. `_master.php` sets `hx-boost="true"` on `<body>`:
+- Every `<a>` and `<form>` is AJAX-ified automatically (htmx swaps the `<body>`, updates `<title>`, handles history)
+- Full-page navigation still works if JS is disabled (progressive enhancement)
+- After each swap, `htmx:afterSettle` fires — `initPageScripts()` in `_master.php` re-runs highlight.js and demo panels
+- Prefer `hx-get`/`hx-post` + `hx-target` + `hx-swap` over custom `fetch()` for standard interactions
+- For server-push (streaming, real-time), use WebSocket (`App::ws()`) or SSE (`$response->sse()`)
+
+### Known Tech Debt (do NOT copy these patterns)
+
+| Anti-pattern | Worst offenders |
+|-------------|----------------|
+| Inline `style=` attributes (~600 total) | `home.php`, `performance.php`, `why-zealphp.php`, `getting-started.php`, `migration.php` |
+| Inline `<script>` blocks | `home.php` (4 blocks, ~100 lines JS), `streaming.php`, `websocket.php`, `timers.php` |
+
+When modifying these files, extract inline JS/CSS to external files rather than adding more inline code.
+
+---
+
 ## OSS Website
 
 The demo app IS the ZealPHP documentation website. Run `php app.php` and browse `http://localhost:8080`.
@@ -328,7 +379,7 @@ template/
     templates.php, legacy-apps.php
 ```
 
-CSS: `public/css/zealphp.css` — single file, CSS variables, indigo accent, no inline styles.
+CSS: `public/css/zealphp.css` — single file, CSS variables, amber accent. Legacy pages still have ~600 inline `style=` attrs (tech debt); new code must use CSS classes only.
 
 ### Demo API Endpoints
 

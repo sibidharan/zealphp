@@ -4,11 +4,31 @@ ZealPHP positions itself as a modern PHP framework that blends the productivity 
 
 ## Coding Standards
 
+### Style and Formatting
+- **PSR-2** (https://www.php-fig.org/psr/psr-2/) — the enforced coding standard for all PHP files. Short array syntax, strict type declarations in new `src/` classes, meaningful docblocks for public APIs.
 - **Autoloading** – PSR-4 via Composer. Classes are namespaced under `ZealPHP\*` with directory structures that mirror namespaces (`src/App.php`, `src/Session/SessionManager.php`, etc.).
-- **Code Style** – Follow PSR-12 for PHP files outside legacy examples. Use short array syntax, strict type declarations where possible, and meaningful docblocks for public APIs.
-- **Templates** – Stick to native PHP templates with short open tags (`<?`). Avoid introducing third-party template engines unless the feature is isolated and optional.
-- **Logging** – Use `ZealPHP\elog()` for structured logging. Prefix messages with context (e.g., `[auth] user login failed`) and choose severity levels (`info`, `warn`, `error`, `task`).
+- **Templates** – Stick to native PHP templates with short open tags (`<?`). No third-party template engines.
+- **Logging** – Use `ZealPHP\elog()` for structured logging with context prefixes and severity levels.
 - **Error Handling** – Throw typed exceptions within the framework, catch them at the edges, and convert them into PSR responses or JSON payloads via `$this->die()`.
+
+### Separation of Concerns
+- **No inline JavaScript in templates** — all JS must live in `public/js/`. Templates produce HTML; behavior is loaded via `<script src>`.
+- **No inline CSS in templates** — no `style=` attributes, no `<style>` blocks. All styles go in `public/css/`. Use CSS classes.
+- **No PHP function definitions in templates** — templates are view-only. Extract logic to `src/` classes.
+- **No PHP function definitions in API files** — API handler files define one closure and delegate to `src/` service classes.
+- **`function_exists()` guard = wrong placement** — the function belongs in a class autoloaded via PSR-4.
+- **Routes are thin** — 1–5 lines calling `src/` classes. Business logic never lives in `route/` files.
+- **Prefer `api/` (ZealAPI) over `route/`** for REST endpoints. Use `route/` only for path-param routes, WebSocket, Store tables.
+
+### OOP Architecture
+- Business logic in `src/` as proper classes with constructors, autoloaded via Composer PSR-4.
+- Reference: `src/Learn/` namespace — `Auth.php`, `Chat.php`, `Notes.php`, `DB.php`, `WS.php`.
+
+### htmx Convention
+The site uses htmx globally with `hx-boost="true"` on `<body>` for automatic AJAX navigation with progressive enhancement. Prefer htmx attributes (`hx-get`, `hx-post`, `hx-target`, `hx-swap`) over custom `fetch()`. Use WebSocket or SSE for server-push.
+
+### Known Tech Debt
+Legacy demo pages contain ~600 inline `style=` attributes and 10+ inline `<script>` blocks (worst: `home.php`, `performance.php`, `why-zealphp.php`). When modifying these files, extract inline JS/CSS to external files rather than adding more.
 
 ## PSR Interoperability
 

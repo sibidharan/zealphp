@@ -73,7 +73,7 @@ function initPageScripts(root) {
   });
 }
 document.addEventListener('DOMContentLoaded', () => initPageScripts());
-document.addEventListener('htmx:afterSwap', (e) => initPageScripts(e.detail.target));
+document.addEventListener('htmx:afterSettle', () => initPageScripts());
 </script>
 </body>
 </html>
