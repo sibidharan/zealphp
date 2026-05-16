@@ -295,26 +295,37 @@ Five framework releases plus scaffold sync in 24 hours, all triggered by communi
 - 17 new tests in `tests/Unit/RequestContextInvariantsTest.php` pinning the v0.2.6 architectural contracts (G ↔ RequestContext class_alias, strict __set, response state location, ApacheContext lazy alloc, etc.).
 - Website docs cleanup: deployment env var table rewritten with all 20 `ZEALPHP_*` env vars; migration page updated for v0.2.6 response-state move; sessions page notes the rename + handler-stack reset; middleware page adds `SessionStartMiddleware` + `IniIsolationMiddleware` entries; README drops the deleted `prefork_request_handler` reference.
 
+### v0.2.12 — Session-file corruption worker-crash fix
+**Triggered by:** production crash report — workers abnormal-exiting with `TypeError: Cannot assign false to property RequestContext::$session of type array` on session-loading requests
+
+- **Stability fix (high severity, DoS class).** After v0.2.6 typed `RequestContext::$session` as `array`, three sites in `src/Session/utils.php` assigned `unserialize()` output directly to the property. `unserialize()` returns `false` on empty/corrupted/truncated/non-array input → TypeError → worker abnormal exits with `status=255` → every request touching the affected session ID 500s until the worker recycles. Affects v0.2.6 through v0.2.11.
+- Trip surfaces: empty session file (interrupted write), truncated serialized data, TOCTOU race between `file_exists()` and `file_get_contents()`, valid serialized non-array values (string/int/null), `session_decode()` with malformed user input.
+- Fix at all three sites: defensive `is_string($contents)` + `is_array($decoded)` checks, fall back to `[]` on any failure. `zeal_session_decode()` now returns `bool` (matches PHP native signature). `unset($g->session)` in `zeal_session_reset()` replaced with `$g->session = []` to avoid leaving the typed property uninitialized.
+- 11 new regression tests in `tests/Unit/SessionFileCorruptionTest.php` covering empty / corrupted / garbage / non-array / missing-file / valid scenarios for both `session_start` and `session_decode`.
+- **ROADMAP restructured** in this release: explicit policy that v0.2.x is the security + hardening + migration series, with the version-by-version trace inline. Connection-pool work moved out of v0.3 (was misclassified as observability) and into the v0.2.x remaining items — it's a production-trust gap, same class as `max_request` and the session fix here.
+
 ---
 
-## Outstanding work — v0.3 sprint
+## Outstanding work — remaining v0.2.x items
 
-In priority order (by ROI = risk reduction × user visibility):
+The v0.2.x line is the security + migration series (see [ROADMAP.md](ROADMAP.md)). All production-trust fixes from this thread land here before v0.3 begins. Most items from the original sprint plan have shipped (struck through below):
+
+- [x] ~~"What survives a request" docs page + coroutine safety matrix + Store semantics~~ — shipped in **v0.2.10**
+- [x] ~~`RequestContext::once($key, $fn)` helper~~ — shipped in **v0.2.10**
+- [x] ~~`ini_set` snapshot/restore middleware (opt-in via `ZEALPHP_INI_ISOLATE=1`)~~ — shipped in **v0.2.10**
+- [x] ~~Worker-recycle access-log line~~ — shipped in **v0.2.10**
+- [x] ~~Handler stack reset in `SessionManager` (superglobals mode)~~ — shipped in **v0.2.10**
+- [x] ~~Production opcache doc note~~ — shipped in **v0.2.10**
+
+Remaining for the v0.2.x line:
 
 | Item | Effort | Outcome |
 |---|---|---|
-| **"What survives a request" docs page + coroutine safety matrix + Store semantics** | 2-3h | Sets expectations correctly. Closes the visibility gap on the discipline contract. |
-| **`ZealPHP\Pool\PDOPool` + `RedisPool` with reset-on-checkout** | 1-2d | Closes the #1 production-trust gap (connection poisoning). |
-| **`RequestContext::once($key, $fn)` helper** | 1-2h | Safe alternative to `static $cache` for request-scoped memoization. |
-| **`ini_set` snapshot/restore middleware** (opt-in via `ZEALPHP_INI_ISOLATE=1`) | 1h | Catches a real footgun that doesn't manifest until under load. |
-| **Worker-recycle access-log line** | 30min | Makes the `max_request` backstop *visible* in production logs. Strongest "trust story" signal. |
-| **Handler stack reset in `SessionManager` (superglobals mode)** | 30min | Closes a leak that only affects legacy mode. |
-| **Production opcache doc note** | 15min | Avoids a class of "stale bytecode looks like a logic bug" incidents. |
+| **`ZealPHP\Pool\PDOPool` + `RedisPool` with reset-on-checkout** | 1-2d | Closes the #1 production-trust gap (pooled connection poisoning — open transactions, `SET SESSION sql_mode`, temp tables surviving across requests). The classic Swoole-era production fire. Needs proper design pass on reset semantics per driver. |
+| **Integration test isolation** — rate-limiter Store table reset in `setUp`, DB fixture isolation per-class, retry tolerance on rapid sequential requests | 2-3h | Currently 1-3 tests rotate as flaky per run. Not blocking releases but worth closing before v0.3 begins. |
+| **PHP 8.4 CI flake fix** — `test_chat_consecutive_requests_work` is environmental (Xdebug + curl timeout). Drop coverage on 8.4 (only 8.3 uploads to Codecov anyway). | 15min | One-line CI change |
 
-**Separately tracked (not directly from this thread):**
-
-- Integration test isolation — rate-limiter Store table reset in `setUp`, DB fixture isolation per-class, retry tolerance on rapid sequential requests. Currently 1-3 tests rotate as flaky per run. Not a release blocker but worth a v0.3 hardening pass.
-- PHP 8.4 CI flake on `test_chat_consecutive_requests_work` — confirmed environmental (Xdebug coverage instrumentation + curl timeout headroom). Fix: drop coverage on 8.4 job (only 8.3 uploads to Codecov anyway), bump curl timeout to 30s. ~5-line CI change.
+**v0.3+ work** (new runtime features, not hardening) is tracked in [ROADMAP.md](ROADMAP.md).
 
 ---
 

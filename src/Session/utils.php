@@ -49,14 +49,24 @@ function zeal_session_start()
     // Get session ID from cookie or generate a new one
     $session_id = zeal_session_id();
 
-    // Read session data from file
+    // Read session data from file. Defensive against three failure modes that
+    // would otherwise crash the worker (TypeError: cannot assign false to
+    // typed array property):
+    //   1. Empty file — unserialize('') returns false
+    //   2. Corrupted / truncated file (interrupted write) — unserialize returns false
+    //   3. TOCTOU race: file_exists returned true but file_get_contents fails
+    // All three reduce to "treat as no session data" rather than crashing.
     $session_data = [];
     $session_file = $g->session_params['save_path'] . '/sess_' . $session_id;
     if (file_exists($session_file)) {
-        $session_data = unserialize(file_get_contents($session_file), ['allowed_classes' => false]);
+        $contents = @file_get_contents($session_file);
+        if (is_string($contents) && $contents !== '') {
+            $decoded = @unserialize($contents, ['allowed_classes' => false]);
+            if (is_array($decoded)) {
+                $session_data = $decoded;
+            }
+        }
     }
-
-    // Populate $g->session
     $g->session = $session_data;
 
     return true;
@@ -262,13 +272,21 @@ function zeal_session_abort()
         // Get session ID
         $session_id = zeal_session_id();
 
-        // Read session data from file
+        // Read session data from file (same defensive handling as zeal_session_start —
+        // empty/corrupted files must not crash the worker).
         $session_file = $g->session_params['save_path'] . '/sess_' . $session_id;
         if (file_exists($session_file)) {
-            $session_data = unserialize(file_get_contents($session_file), ['allowed_classes' => false]);
+            $session_data = [];
+            $contents = @file_get_contents($session_file);
+            if (is_string($contents) && $contents !== '') {
+                $decoded = @unserialize($contents, ['allowed_classes' => false]);
+                if (is_array($decoded)) {
+                    $session_data = $decoded;
+                }
+            }
             $g->session = $session_data;
         } else {
-            unset($g->session);
+            $g->session = [];
         }
     }
 
@@ -282,7 +300,18 @@ function zeal_session_encode()
 
 function zeal_session_decode($data)
 {
-    RequestContext::instance()->session = unserialize($data, ['allowed_classes' => false]);
+    // Defensive: unserialize() returns false on malformed input, which would
+    // TypeError on assignment to the typed array property. Match PHP native
+    // session_decode signature — returns bool, true only on successful decode.
+    if (!is_string($data) || $data === '') {
+        return false;
+    }
+    $decoded = @unserialize($data, ['allowed_classes' => false]);
+    if (!is_array($decoded)) {
+        return false;
+    }
+    RequestContext::instance()->session = $decoded;
+    return true;
 }
 
 function zeal_session_create_id($prefix = '')

@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.12] - 2026-05-16
+
+### Security / Stability
+- **Worker-crash TypeError on corrupted session files** (severity: high; DoS for any affected session ID). After v0.2.6 declared `RequestContext::$session` as typed `array`, three sites in `src/Session/utils.php` did `unserialize(file_get_contents(...))` and assigned the result directly to `$g->session`. `unserialize()` returns `false` on empty/corrupted/truncated payloads or on any non-array serialized value, triggering `TypeError: Cannot assign false to property RequestContext::$session of type array`. The worker aborts with `status=255`, every subsequent request that touches the affected session ID 500s until the worker recycles.
+
+  Trip surfaces:
+  - Empty session file (interrupted write / partial flush)
+  - Truncated or corrupted serialized data (e.g., server killed mid-write)
+  - File became unreadable between `file_exists()` and `file_get_contents()` (TOCTOU race)
+  - Any non-array serialized value (string, int, null)
+  - `session_decode()` called with malformed user-supplied input
+
+  **All v0.2.6 through v0.2.11 are affected. Upgrade strongly recommended for any production deployment.**
+
+  Fix:
+  - `zeal_session_start()` — defensive read+decode with `is_string($contents)` + `is_array($decoded)` guards; falls back to `[]` on any failure
+  - `zeal_session_reset()` — same defensive handling; replaced the unsafe `unset($g->session)` with `$g->session = []` (matches the declared default; `unset` on a typed property leaves it uninitialized)
+  - `zeal_session_decode($data)` — now returns `bool` (matches PHP native `session_decode` signature). Returns `false` for non-string input, empty string, malformed serialized data, or valid serialized non-array. Only `is_array($decoded)` results assign to the session.
+
+  11 new regression tests in `tests/Unit/SessionFileCorruptionTest.php` covering all four trip surfaces plus the success path.
+
+### Documentation
+- **ROADMAP.md restructured** — explicit versioning policy stated at the top: the v0.2.x line is the security + hardening + migration series; new runtime features target v0.3 and beyond. "v0.2 — Security & Migration" section now lists every shipped release (v0.2.4 → v0.2.12) with trigger and outcome, plus the remaining v0.2.x items (connection pool, integration test isolation, PHP 8.4 CI flake). Connection pooling moved from v0.3 to v0.2.x — it's a production-trust item, not an observability feature.
+- **CRITIC.md outstanding section** reframed from "v0.3 sprint" to "remaining v0.2.x items" — discipline-contract sprint items struck through (shipped in v0.2.10), pool work + test isolation listed as remaining hardening.
+
 ## [0.2.11] - 2026-05-16
 
 ### Security
