@@ -24,18 +24,18 @@
       about URLs like <code>/users/42</code>? Or restricting a route to POST only? Or versioning
       an API?
     </p>
-    <p>ZealPHP has four routing patterns. You've already used two &mdash; here are all four.</p>
+    <p>ZealPHP has four routing patterns. You've already used two — here are all four.</p>
 
     <h2>1. Implicit public routes</h2>
     <p>You learned this in Lesson 3. Files in <code>public/</code> become URLs automatically:</p>
-    <pre><code>public/index.php       &rarr; GET /
-public/about.php       &rarr; GET /about
-public/blog/post.php   &rarr; GET /blog/post</code></pre>
+    <pre><code>public/index.php       → GET /
+public/about.php       → GET /about
+public/blog/post.php   → GET /blog/post</code></pre>
     <p><strong>Use for:</strong> Pages the user visits. Simple, zero config.</p>
 
     <h2>2. Implicit API routes (ZealAPI)</h2>
     <p>You used this in Lesson 8. Files in <code>api/</code> become REST endpoints:</p>
-    <pre><code class="language-php">// api/learn/notes.php &rarr; GET/POST /api/learn/notes
+    <pre><code class="language-php">// api/learn/notes.php → GET/POST /api/learn/notes
 $notes = function () {
     $u = Auth::currentUser();
     // ... handle GET (list) and POST (create)
@@ -60,18 +60,18 @@ $app->route('/users', ['methods' => ['POST']], function($request) {
     <pre><code class="language-php">$app->nsRoute('api/v2', '/health', function() {
     return ['ok' => true];
 });
-// &rarr; GET /api/v2/health
+// → GET /api/v2/health
 
 $app->nsPathRoute('files', function($path) {
     return ['path' => $path];
 });
-// &rarr; GET /files/foo/bar/baz.txt &rarr; $path = 'foo/bar/baz.txt'</code></pre>
+// → GET /files/foo/bar/baz.txt → $path = 'foo/bar/baz.txt'</code></pre>
     <p><strong>Use for:</strong> API versioning, catch-all paths (file serving, proxy).</p>
 
     <h2>Parameter injection</h2>
     <p>
       ZealPHP injects route handler arguments <strong>by name</strong> via reflection. The reflection
-      result is cached at route registration &mdash; zero per-request overhead:
+      result is cached at route registration — zero per-request overhead:
     </p>
     <pre><code>| Parameter name | Injected value                    |
 | -------------- | --------------------------------- |
@@ -94,9 +94,9 @@ $app->nsPathRoute('files', function($path) {
     <?php App::render('/components/_tryit', ['title' => 'Live routing demos', 'body' => <<<HTML
       <p>This site uses all four routing patterns. Explore them:</p>
       <ul>
-        <li><a href="/api/learn/chat_status" target="_blank">/api/learn/chat_status</a> &mdash; ZealAPI endpoint (implicit API)</li>
-        <li><a href="/api/learn/demo/greeting?name=World" target="_blank">/api/learn/demo/greeting?name=World</a> &mdash; Explicit route</li>
-        <li><a href="/api/learn/demo/timing?mode=parallel" target="_blank">/api/learn/demo/timing?mode=parallel</a> &mdash; Explicit route returning JSON</li>
+        <li><a href="/api/learn/chat_status" target="_blank">/api/learn/chat_status</a> — ZealAPI endpoint (implicit API)</li>
+        <li><a href="/api/learn/demo/greeting?name=World" target="_blank">/api/learn/demo/greeting?name=World</a> — Explicit route</li>
+        <li><a href="/api/learn/demo/timing?mode=parallel" target="_blank">/api/learn/demo/timing?mode=parallel</a> — Explicit route returning JSON</li>
       </ul>
 HTML]); ?>
 
@@ -113,19 +113,19 @@ HTML]); ?>
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
-      'Four routing patterns: implicit public, ZealAPI, explicit, namespaced &mdash; each for a different use case',
-      'Path parameters (<code>{id}</code>) are injected by name &mdash; order doesn\'t matter',
-      'Reflection is cached at registration &mdash; zero per-request cost',
-      'Return type determines response format: array &rarr; JSON, string &rarr; HTML, Generator &rarr; streaming',
+      'Four routing patterns: implicit public, ZealAPI, explicit, namespaced — each for a different use case',
+      'Path parameters (<code>{id}</code>) are injected by name — order doesn\'t matter',
+      'Reflection is cached at registration — zero per-request cost',
+      'Return type determines response format: array → JSON, string → HTML, Generator → streaming',
     ]]); ?>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/websocket"
          hx-get="/api/learn/page?slug=learn/websocket" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/websocket">&larr; Real-Time Sync</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/websocket">← Real-Time Sync</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/async"
          hx-get="/api/learn/page?slug=learn/async" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/async">Async &amp; Coroutines &rarr;</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/async">Async &amp; Coroutines →</a>
     </div>
   </article>
 </div>

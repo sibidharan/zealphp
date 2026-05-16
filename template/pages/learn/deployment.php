@@ -47,12 +47,12 @@ php app.php restart             # cycle</code></pre>
         # WebSocket
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        # SSE &mdash; disable buffering
+        # SSE — disable buffering
         proxy_buffering off;
         proxy_cache off;
     }
 }</code></pre>
-    <p><code>proxy_buffering off</code> is critical for SSE and streaming &mdash; without it, Nginx buffers the entire response before forwarding.</p>
+    <p><code>proxy_buffering off</code> is critical for SSE and streaming — without it, Nginx buffers the entire response before forwarding.</p>
 
     <h2>3. systemd service</h2>
     <pre><code class="language-ini">[Unit]
@@ -75,7 +75,7 @@ WantedBy=multi-user.target</code></pre>
     <?php App::render('/components/_callout', [
       'variant' => 'warn',
       'title'   => 'Don\'t use -d with systemd',
-      'body'    => '<p>systemd expects <code>Type=simple</code> &mdash; the process stays in the foreground. The <code>-d</code> flag is for manual invocation only. Daemonize AND systemd = systemd thinks the process died immediately.</p>',
+      'body'    => '<p>systemd expects <code>Type=simple</code> — the process stays in the foreground. The <code>-d</code> flag is for manual invocation only. Daemonize AND systemd = systemd thinks the process died immediately.</p>',
     ]); ?>
 
     <h2>4. Docker</h2>
@@ -101,10 +101,10 @@ ZEALPHP_LOG_DIR           # Log directory (default: /tmp/zealphp)</code></pre>
     <p>Over 12 lessons you created a real application:</p>
     <ul>
       <li><strong>Session-based auth</strong> with SQLite + <code>password_hash</code></li>
-      <li><strong>CRUD notes app</strong> with htmx &mdash; no page reloads</li>
+      <li><strong>CRUD notes app</strong> with htmx — no page reloads</li>
       <li><strong>AI chat assistant</strong> that streams tool calls via SSE</li>
       <li><strong>Cross-tab sync</strong> via WebSocket</li>
-      <li><strong>Agent-via-API</strong> &mdash; Python calls the same endpoints as the frontend</li>
+      <li><strong>Agent-via-API</strong> — Python calls the same endpoints as the frontend</li>
       <li><strong>Parallel I/O</strong> with <code>go() + Channel</code></li>
     </ul>
     <p>
@@ -115,7 +115,7 @@ ZEALPHP_LOG_DIR           # Log directory (default: /tmp/zealphp)</code></pre>
     <h2>When ZealPHP is right</h2>
     <p>
       ZealPHP on 4 workers benchmarks at <strong>117,000 req/s</strong> with 3ms p90 latency.
-      For SaaS dashboards, content sites, internal tools, AI wrappers &mdash; it's more than enough.
+      For SaaS dashboards, content sites, internal tools, AI wrappers — it's more than enough.
       The bottleneck is almost always the database or external API, not the framework.
     </p>
     <p>
@@ -126,7 +126,7 @@ ZEALPHP_LOG_DIR           # Log directory (default: /tmp/zealphp)</code></pre>
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'When ZealPHP isn\'t the right choice',
-      'body'    => '<p><strong>Client-side state management</strong> (optimistic updates, complex drag-and-drop, real-time collaboration) &mdash; a frontend framework is the right tool.</p><p><strong>Horizontal scaling across machines</strong> &mdash; ZealPHP is one process. It scales vertically well but doesn\'t pretend to be Kubernetes. For multi-server, you\'ll need stateless workers + Redis sessions.</p>',
+      'body'    => '<p><strong>Client-side state management</strong> (optimistic updates, complex drag-and-drop, real-time collaboration) — a frontend framework is the right tool.</p><p><strong>Horizontal scaling across machines</strong> — ZealPHP is one process. It scales vertically well but doesn\'t pretend to be Kubernetes. For multi-server, you\'ll need stateless workers + Redis sessions.</p>',
     ]); ?>
 
     <h2>The boring architecture</h2>
@@ -140,18 +140,18 @@ ZEALPHP_LOG_DIR           # Log directory (default: /tmp/zealphp)</code></pre>
     <?php App::render('/components/_keytakeaways', ['items' => [
       '<code>php app.php start -d</code> daemonizes; <code>systemd</code> keeps it alive',
       'Nginx reverse proxy needs <code>proxy_buffering off</code> for SSE/streaming',
-      'One process handles HTTP, WebSocket, SSE, sessions, shared memory &mdash; no external services',
+      'One process handles HTTP, WebSocket, SSE, sessions, shared memory — no external services',
       'ZealPHP is right for most web apps; reach for React only when you need client-side state',
     ]]); ?>
 
     <div class="lesson-cta">
-      <a href="https://github.com/sibidharan/zealphp" target="_blank" class="btn-cta">Star on GitHub &rarr;</a>
+      <a href="https://github.com/sibidharan/zealphp" target="_blank" class="btn-cta">Star on GitHub →</a>
     </div>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/async"
          hx-get="/api/learn/page?slug=learn/async" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/async">&larr; Async &amp; Coroutines</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/async">← Async &amp; Coroutines</a>
     </div>
   </article>
 </div>

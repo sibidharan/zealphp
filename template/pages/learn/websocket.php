@@ -50,7 +50,7 @@
     <h2>The mental model</h2>
     <p>
       In Lesson 9, you used SSE to stream AI tokens. SSE is like a <strong>one-way phone call</strong>
-      &mdash; the server talks, you listen. But SSE can't handle the case where the <em>client</em>
+      — the server talks, you listen. But SSE can't handle the case where the <em>client</em>
       needs to send messages back, or where the server needs to push updates <em>at any time</em>.
     </p>
     <p>
@@ -60,7 +60,7 @@
     </p>
 
     <h2>The handler</h2>
-    <p>A WebSocket route has three callbacks &mdash; same file, same framework as HTTP routes:</p>
+    <p>A WebSocket route has three callbacks — same file, same framework as HTTP routes:</p>
     <pre><code class="language-php">$app->ws('/ws/learn',
     onMessage: function ($server, $frame) {
         if ($frame->data === 'ping') {
@@ -86,11 +86,11 @@
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'Sessions in WebSocket',
-      'body'    => '<p>ZealPHP reads the <code>PHPSESSID</code> cookie from the HTTP upgrade request and populates <code>$g->session</code> before <code>onOpen</code> fires. You authenticate the same way as in an HTTP handler &mdash; no special token flow needed.</p>',
+      'body'    => '<p>ZealPHP reads the <code>PHPSESSID</code> cookie from the HTTP upgrade request and populates <code>$g->session</code> before <code>onOpen</code> fires. You authenticate the same way as in an HTTP handler — no special token flow needed.</p>',
     ]); ?>
 
     <h2>Broadcasting</h2>
-    <p>WebSocket connections live on individual workers. To broadcast to all of a user's tabs, iterate a shared <code>Store</code> table that maps <code>fd &rarr; user_id</code>:</p>
+    <p>WebSocket connections live on individual workers. To broadcast to all of a user's tabs, iterate a shared <code>Store</code> table that maps <code>fd → user_id</code>:</p>
     <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/WS.php" style="color:#f59e0b">src/Learn/WS.php</a>
 public static function broadcast(int $userId, array $payload): void
 {
@@ -103,14 +103,14 @@ public static function broadcast(int $userId, array $payload): void
     }
 }</code></pre>
     <p>
-      Call this from any endpoint &mdash; HTTP route, SSE stream, task worker. When a note is
+      Call this from any endpoint — HTTP route, SSE stream, task worker. When a note is
       created or deleted, the endpoint calls <code>WS::broadcast($userId, ['type' =&gt; 'note_changed'])</code>,
       and every open tab refreshes its notes list via <code>htmx.ajax()</code>.
     </p>
 
     <?php App::render('/components/_tryit', [
       'title' => 'Try it now',
-      'body'  => '<p>Open <a href="/learn/notes" target="_blank">your notes</a> in two browser tabs. Create a note in one tab &mdash; the other tab updates instantly with a green glow. Delete a note &mdash; it fades out in both tabs. Then visit <a href="/learn/ai-chat" target="_blank">AI Chat</a> and ask the agent to create a note: watch the Event Log show <span style="background:#3b82f6;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.72rem;font-weight:700">SSE</span> tool events, then the notes panel updates via <span style="background:#a855f7;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.72rem;font-weight:700">WS</span> broadcast.</p>',
+      'body'  => '<p>Open <a href="/learn/notes" target="_blank">your notes</a> in two browser tabs. Create a note in one tab — the other tab updates instantly with a green glow. Delete a note — it fades out in both tabs. Then visit <a href="/learn/ai-chat" target="_blank">AI Chat</a> and ask the agent to create a note: watch the Event Log show <span style="background:#3b82f6;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.72rem;font-weight:700">SSE</span> tool events, then the notes panel updates via <span style="background:#a855f7;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.72rem;font-weight:700">WS</span> broadcast.</p>',
     ]); ?>
 
     <h2>The client</h2>
@@ -142,20 +142,20 @@ ws.addEventListener('close', (ev) => {
         </tr>
       </thead>
       <tbody>
-        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>htmx</strong></td><td style="padding:.55rem">Request &rarr; response</td><td style="padding:.55rem">User-initiated actions. 95% of web apps.</td></tr>
-        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>SSE</strong></td><td style="padding:.55rem">Server &rarr; client</td><td style="padding:.55rem">Streaming responses: AI tokens, live logs, progress bars.</td></tr>
+        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>htmx</strong></td><td style="padding:.55rem">Request → response</td><td style="padding:.55rem">User-initiated actions. 95% of web apps.</td></tr>
+        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>SSE</strong></td><td style="padding:.55rem">Server → client</td><td style="padding:.55rem">Streaming responses: AI tokens, live logs, progress bars.</td></tr>
         <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>WebSocket</strong></td><td style="padding:.55rem">Bidirectional</td><td style="padding:.55rem">Real-time sync: chat, collaborative editing, live dashboards.</td></tr>
-        <tr><td style="padding:.55rem"><strong>Pub/Sub</strong></td><td style="padding:.55rem">Server &rarr; server</td><td style="padding:.55rem">Multi-server broadcast. Redis or RabbitMQ when you outgrow one box.</td></tr>
+        <tr><td style="padding:.55rem"><strong>Pub/Sub</strong></td><td style="padding:.55rem">Server → server</td><td style="padding:.55rem">Multi-server broadcast. Redis or RabbitMQ when you outgrow one box.</td></tr>
       </tbody>
     </table>
 
     <?php App::render('/components/_deepdive', [
       'title' => 'When you need a message broker',
-      'body'  => '<p>ZealPHP\'s WebSocket + <code>Store</code> is a single-server solution. The Store table lives in shared memory across workers on the same process. This breaks when you scale horizontally &mdash; multiple processes on different machines. A WebSocket client on server A can\'t receive pushes from server B.</p><p><strong>One server?</strong> <code>App::ws()</code> + <code>Store</code>. Done.<br><strong>Multiple servers?</strong> Add Redis Pub/Sub as the fan-out layer.<br><strong>Durable delivery?</strong> RabbitMQ or Kafka &mdash; messages survive restarts.</p>',
+      'body'  => '<p>ZealPHP\'s WebSocket + <code>Store</code> is a single-server solution. The Store table lives in shared memory across workers on the same process. This breaks when you scale horizontally — multiple processes on different machines. A WebSocket client on server A can\'t receive pushes from server B.</p><p><strong>One server?</strong> <code>App::ws()</code> + <code>Store</code>. Done.<br><strong>Multiple servers?</strong> Add Redis Pub/Sub as the fan-out layer.<br><strong>Durable delivery?</strong> RabbitMQ or Kafka — messages survive restarts.</p>',
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
-      'HTTP can\'t push &mdash; WebSocket keeps a persistent bidirectional connection',
+      'HTTP can\'t push — WebSocket keeps a persistent bidirectional connection',
       '<code>App::ws()</code> gives you onOpen/onMessage/onClose callbacks',
       '<code>Store</code> tables share state across workers for broadcasting to specific users',
       'Use htmx for user actions, SSE for streaming, WebSocket for real-time push, Pub/Sub for multi-server',
@@ -164,10 +164,10 @@ ws.addEventListener('close', (ev) => {
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/ai-chat"
          hx-get="/api/learn/page?slug=learn/ai-chat" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/ai-chat">&larr; AI Chat</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/ai-chat">← AI Chat</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/routing"
          hx-get="/api/learn/page?slug=learn/routing" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routing">Routes &amp; APIs &rarr;</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routing">Routes &amp; APIs →</a>
     </div>
   </article>
 </div>

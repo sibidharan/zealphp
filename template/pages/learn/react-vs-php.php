@@ -11,7 +11,7 @@
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
-      'What React actually solves &mdash; and what it doesn\'t',
+      'What React actually solves — and what it doesn\'t',
       'The hidden cost of a JavaScript-first architecture',
       'Why server-rendered HTML + htmx covers 95% of web apps',
       'When you SHOULD reach for React (and when you shouldn\'t)',
@@ -20,13 +20,13 @@
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'ZealPHP is frontend-agnostic',
-      'body'    => '<p>ZealPHP is a <strong>PHP runtime</strong>, not a religion. It works with React, Vue, Svelte, or plain HTML. It can serve a JSON API for a React SPA, stream HTML for htmx, or run an unmodified WordPress. This lesson isn\'t "React bad" &mdash; it\'s "know when you need it and when you don\'t."</p>',
+      'body'    => '<p>ZealPHP is a <strong>PHP runtime</strong>, not a religion. It works with React, Vue, Svelte, or plain HTML. It can serve a JSON API for a React SPA, stream HTML for htmx, or run an unmodified WordPress. This lesson isn\'t "React bad" — it\'s "know when you need it and when you don\'t."</p>',
     ]); ?>
 
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'The LAMP stack already shipped the web',
-      'body'    => '<p>Server-rendered PHP powered the web for 25 years &mdash; Wikipedia, Facebook (originally), WordPress, every shop that ever ran on cPanel. The LAMP era proved server-rendered HTML works at planetary scale. What broke wasn\'t the rendering model. It was the <em>execution</em> model: one process per request, no shared state, no persistent connections. ZealPHP keeps LAMP\'s rendering wins and fixes its execution.</p>',
+      'body'    => '<p>Server-rendered PHP powered the web for 25 years — Wikipedia, Facebook (originally), WordPress, every shop that ever ran on cPanel. The LAMP era proved server-rendered HTML works at planetary scale. What broke wasn\'t the rendering model. It was the <em>execution</em> model: one process per request, no shared state, no persistent connections. ZealPHP keeps LAMP\'s rendering wins and fixes its execution.</p>',
     ]); ?>
 
     <h2>The question nobody asks</h2>
@@ -43,15 +43,15 @@
     <p>
       React was built at Facebook to solve a specific problem: <strong>complex, interactive UIs with
       lots of shared client-side state</strong>. The news feed, where a like on one post updates a
-      counter in the header, a notification badge, and a sidebar &mdash; all at once, without a page
+      counter in the header, a notification badge, and a sidebar — all at once, without a page
       reload. That's genuinely hard without a framework.
     </p>
     <p>React is brilliant for:</p>
     <ul>
-      <li><strong>Spreadsheet-like interfaces</strong> &mdash; cells that depend on other cells</li>
-      <li><strong>Design tools</strong> &mdash; Figma, Canva, drag-and-drop builders</li>
-      <li><strong>Collaborative editors</strong> &mdash; Google Docs, real-time cursors</li>
-      <li><strong>Complex dashboards</strong> &mdash; 50+ interactive widgets, filters that affect each other</li>
+      <li><strong>Spreadsheet-like interfaces</strong> — cells that depend on other cells</li>
+      <li><strong>Design tools</strong> — Figma, Canva, drag-and-drop builders</li>
+      <li><strong>Collaborative editors</strong> — Google Docs, real-time cursors</li>
+      <li><strong>Complex dashboards</strong> — 50+ interactive widgets, filters that affect each other</li>
     </ul>
     <p>
       These are <strong>applications that live in the browser</strong>. The server is a data API. The
@@ -122,8 +122,8 @@
       </tr></thead>
       <tbody>
         <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>Languages</strong></td><td style="padding:.55rem">JavaScript + TypeScript + JSX + CSS-in-JS</td><td style="padding:.55rem">PHP + HTML + CSS</td></tr>
-        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>Build step</strong></td><td style="padding:.55rem">Webpack/Vite, 30s&ndash;2min</td><td style="padding:.55rem">None. Save and refresh.</td></tr>
-        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>Client JS</strong></td><td style="padding:.55rem">200&ndash;500 KB (min+gzip)</td><td style="padding:.55rem">14 KB (htmx) + 0 custom</td></tr>
+        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>Build step</strong></td><td style="padding:.55rem">Webpack/Vite, 30s–2min</td><td style="padding:.55rem">None. Save and refresh.</td></tr>
+        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>Client JS</strong></td><td style="padding:.55rem">200–500 KB (min+gzip)</td><td style="padding:.55rem">14 KB (htmx) + 0 custom</td></tr>
         <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>Hydration</strong></td><td style="padding:.55rem">Server renders HTML, client re-renders it in JS</td><td style="padding:.55rem">Server renders HTML. Done.</td></tr>
         <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>State management</strong></td><td style="padding:.55rem">Redux / Zustand / Context + hooks</td><td style="padding:.55rem">Server is the state. Session + DB.</td></tr>
         <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>API layer</strong></td><td style="padding:.55rem">REST or GraphQL + client fetching + loading states</td><td style="padding:.55rem">htmx posts, server returns HTML fragment</td></tr>
@@ -175,30 +175,30 @@ const handleSubmit = async (e) =&gt; {
 
     <?php App::render('/components/_deepdive', [
       'title' => '"Interactivity! You can\'t do interactive UIs without React"',
-      'body'  => '<p>This tutorial app has: a counter that persists across sessions, a CRUD notes app with inline create/delete, an AI chat with streaming tokens and tool call cards, cross-tab WebSocket sync with green highlight animations, and an event log terminal. Total custom JavaScript: <strong>~100 lines</strong>. Zero React.</p><p>htmx handles form submissions, list updates, and navigation. The ~100 lines of vanilla JS handle SSE streaming (for the AI chat) and WebSocket (for cross-tab sync) &mdash; things that are genuinely beyond request/response.</p>',
+      'body'  => '<p>This tutorial app has: a counter that persists across sessions, a CRUD notes app with inline create/delete, an AI chat with streaming tokens and tool call cards, cross-tab WebSocket sync with green highlight animations, and an event log terminal. Total custom JavaScript: <strong>~100 lines</strong>. Zero React.</p><p>htmx handles form submissions, list updates, and navigation. The ~100 lines of vanilla JS handle SSE streaming (for the AI chat) and WebSocket (for cross-tab sync) — things that are genuinely beyond request/response.</p>',
     ]); ?>
 
     <?php App::render('/components/_deepdive', [
       'title' => '"Performance! React is faster because virtual DOM"',
-      'body'  => '<p>The virtual DOM exists to make <em>React</em> fast, not to make your app fast. It\'s overhead that wouldn\'t exist if you weren\'t using React in the first place. Server-rendered HTML arrives ready to display &mdash; no JavaScript parse, no hydration, no re-render.</p><p>ZealPHP on 4 workers: <strong>117,000 req/s</strong>, 3ms p90 latency. The browser gets HTML it can render instantly. There\'s nothing faster than "the server already did the work."</p>',
+      'body'  => '<p>The virtual DOM exists to make <em>React</em> fast, not to make your app fast. It\'s overhead that wouldn\'t exist if you weren\'t using React in the first place. Server-rendered HTML arrives ready to display — no JavaScript parse, no hydration, no re-render.</p><p>ZealPHP on 4 workers: <strong>117,000 req/s</strong>, 3ms p90 latency. The browser gets HTML it can render instantly. There\'s nothing faster than "the server already did the work."</p>',
     ]); ?>
 
     <?php App::render('/components/_deepdive', [
       'title' => '"Ecosystem! npm has a package for everything"',
-      'body'  => '<p>And PHP has 25 years of battle-tested libraries on Packagist. PDO for databases, password_hash for security, OpenSwoole for async. The ecosystem argument is a wash &mdash; both are massive. The difference is that PHP\'s ecosystem doesn\'t require a bundler to use.</p>',
+      'body'  => '<p>And PHP has 25 years of battle-tested libraries on Packagist. PDO for databases, password_hash for security, OpenSwoole for async. The ecosystem argument is a wash — both are massive. The difference is that PHP\'s ecosystem doesn\'t require a bundler to use.</p>',
     ]); ?>
 
     <?php App::render('/components/_deepdive', [
       'title' => '"Developer experience! Hot reload, TypeScript, DevTools"',
-      'body'  => '<p>ZealPHP: save the file, refresh the browser. No compile step, no waiting for webpack, no HMR socket disconnections. PHP errors show on the page with file + line number. Chrome DevTools shows the HTML the server sent &mdash; what you see is what you debug.</p><p>TypeScript catches bugs at compile time. PHP 8.3\'s type system catches them at runtime, and PHPStan catches them statically. Different tradeoff, same goal.</p>',
+      'body'  => '<p>ZealPHP: save the file, refresh the browser. No compile step, no waiting for webpack, no HMR socket disconnections. PHP errors show on the page with file + line number. Chrome DevTools shows the HTML the server sent — what you see is what you debug.</p><p>TypeScript catches bugs at compile time. PHP 8.3\'s type system catches them at runtime, and PHPStan catches them statically. Different tradeoff, same goal.</p>',
     ]); ?>
 
     <h2>When to reach for React</h2>
     <p>Use React (or Vue, Svelte, etc.) when:</p>
     <ul>
-      <li>The UI has <strong>complex shared state</strong> &mdash; changing one thing updates many parts</li>
-      <li>The app is <strong>offline-first</strong> &mdash; the client needs to work without the server</li>
-      <li>You're building a <strong>design tool, game, or editor</strong> &mdash; the browser is the runtime</li>
+      <li>The UI has <strong>complex shared state</strong> — changing one thing updates many parts</li>
+      <li>The app is <strong>offline-first</strong> — the client needs to work without the server</li>
+      <li>You're building a <strong>design tool, game, or editor</strong> — the browser is the runtime</li>
       <li>The team <strong>already has React expertise</strong> and the project benefits from it</li>
     </ul>
     <p>Use server-rendered PHP + htmx when:</p>
@@ -229,11 +229,11 @@ const handleSubmit = async (e) =&gt; {
       JavaScript is <strong>~100 lines</strong>. No React. No bundler. No node_modules.
     </p>
     <p>
-      The next lesson shows you htmx &mdash; the 14 KB library that makes this possible.
+      The next lesson shows you htmx — the 14 KB library that makes this possible.
     </p>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
-      'React solves client-side state management &mdash; most web apps don\'t have that problem',
+      'React solves client-side state management — most web apps don\'t have that problem',
       'Server-rendered HTML + htmx replaces React for forms, tables, lists, and pages',
       'The hidden cost of React: bundler, hydration, state management, API layer, client-side routing',
       'ZealPHP + htmx: one process, zero build step, 14 KB of JS, server is the single source of truth',
@@ -242,10 +242,10 @@ const handleSubmit = async (e) =&gt; {
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/components"
          hx-get="/api/learn/page?slug=learn/components" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/components">&larr; Layouts &amp; Components</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/components">← Layouts &amp; Components</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/htmx"
          hx-get="/api/learn/page?slug=learn/htmx" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/htmx">Forms &amp; htmx &rarr;</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/htmx">Forms &amp; htmx →</a>
     </div>
   </article>
 </div>

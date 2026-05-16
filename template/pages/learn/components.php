@@ -53,14 +53,14 @@ App::render('/_master', ['title' =&gt; 'About', 'page' =&gt; 'about']);</code></
       then renders the page content with a nested <code>App::render('/pages/about')</code>.
     </p>
     <p>
-      Change the nav once in <code>_master.php</code> &mdash; every page picks it up. That's the
+      Change the nav once in <code>_master.php</code> — every page picks it up. That's the
       power of a layout.
     </p>
 
     <h2>Building reusable components</h2>
     <p>
       The same pattern works for any reusable HTML. Think of a component as a
-      <strong>stencil with holes</strong> &mdash; you lay the stencil down and fill in the holes
+      <strong>stencil with holes</strong> — you lay the stencil down and fill in the holes
       with different data each time.
     </p>
     <pre><code class="language-php">&lt;!-- template/components/_card.php --&gt;
@@ -112,8 +112,8 @@ App::render('/_master', ['title' =&gt; 'About', 'page' =&gt; 'about']);</code></
       when the caller doesn't pass <code>variant</code>.</p>
 
     <?php App::render('/components/_tryit', ['title' => 'Live demo: render in action', 'body' => <<<HTML
-      <p>This page you're reading is built with nested <code>App::render()</code> calls. The "You will learn" box, this "Try it" block, the nav, the sidebar &mdash; each is a separate component template being rendered with <code>App::render()</code>.</p>
-      <p>See the render method in action: <a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open render demo &rarr;</a></p>
+      <p>This page you're reading is built with nested <code>App::render()</code> calls. The "You will learn" box, this "Try it" block, the nav, the sidebar — each is a separate component template being rendered with <code>App::render()</code>.</p>
+      <p>See the render method in action: <a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open render demo →</a></p>
 HTML]); ?>
 
     <?php App::render('/components/_deepdive', [
@@ -122,12 +122,12 @@ HTML]); ?>
 <table style="width:100%;border-collapse:collapse;margin:.75rem 0;font-size:.88rem">
   <thead><tr style="border-bottom:2px solid #e7e5e4;text-align:left"><th style="padding:.5rem">Method</th><th>Returns</th><th>Use when</th><th></th></tr></thead>
   <tbody>
-    <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.5rem"><code>render()</code></td><td>void (echoes)</td><td>Direct output &mdash; this lesson</td><td><a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open &rarr;</a></td></tr>
-    <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.5rem"><code>renderToString()</code></td><td>string</td><td>htmx fragments &mdash; <a href="/learn/notes">Lesson 8</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-to-string" target="_blank">Open &rarr;</a></td></tr>
-    <tr><td style="padding:.5rem"><code>renderStream()</code></td><td>Generator</td><td>SSR streaming &mdash; <a href="/learn/ai-chat">Lesson 9</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-stream" target="_blank">Open &rarr;</a></td></tr>
+    <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.5rem"><code>render()</code></td><td>void (echoes)</td><td>Direct output — this lesson</td><td><a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open →</a></td></tr>
+    <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.5rem"><code>renderToString()</code></td><td>string</td><td>htmx fragments — <a href="/learn/notes">Lesson 8</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-to-string" target="_blank">Open →</a></td></tr>
+    <tr><td style="padding:.5rem"><code>renderStream()</code></td><td>Generator</td><td>SSR streaming — <a href="/learn/ai-chat">Lesson 9</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-stream" target="_blank">Open →</a></td></tr>
   </tbody>
 </table>
-<p>The streaming demo is the most visual &mdash; watch 12 rows arrive one by one over ~2 seconds. Each <code>yield</code> flushes a chunk to the browser immediately.</p>',
+<p>The streaming demo is the most visual — watch 12 rows arrive one by one over ~2 seconds. Each <code>yield</code> flushes a chunk to the browser immediately.</p>',
     ]); ?>
 
     <?php App::render('/components/_concept_check', [
@@ -144,18 +144,18 @@ HTML]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
       '<code>App::render(\'/_master\', [...])</code> wraps pages in a shared layout',
-      'Components are PHP files that echo HTML with variables &mdash; no framework overhead',
+      'Components are PHP files that echo HTML with variables — no framework overhead',
       'Variables are extracted from the render array into the template\'s scope',
-      'For now you only need <code>render()</code> &mdash; two more methods come in later lessons',
+      'For now you only need <code>render()</code> — two more methods come in later lessons',
     ]]); ?>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/first-page"
          hx-get="/api/learn/page?slug=learn/first-page" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/first-page">&larr; Your First Page</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/first-page">← Your First Page</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/react-vs-php"
          hx-get="/api/learn/page?slug=learn/react-vs-php" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/react-vs-php">React vs PHP &rarr;</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/react-vs-php">React vs PHP →</a>
     </div>
   </article>
 </div>

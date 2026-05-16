@@ -32,7 +32,7 @@ $active = $active ?? 'learn/ai-chat';
       Regular HTTP is like <strong>texting</strong>: you send a message, get a reply, conversation over.
       Server-Sent Events is like <strong>calling someone and saying "read me the news"</strong>. They
       talk continuously, you listen. You can't interrupt (that would be WebSocket). But for streaming
-      AI tokens, you don't need to &mdash; you just need to listen.
+      AI tokens, you don't need to — you just need to listen.
     </p>
     <p>On the wire, SSE looks like this:</p>
     <pre><code class="language-text">event: token
@@ -78,7 +78,7 @@ data: {"done":true}</code></pre>
     <?php if (!$user): ?>
       <?php App::render('/components/_callout', [
         'variant' => 'warn', 'title' => 'Log in to use the chat',
-        'body' => '<p><a href="/learn/auth">Register or log in</a> first &mdash; the chat needs to know whose notes to act on.</p>',
+        'body' => '<p><a href="/learn/auth">Register or log in</a> first — the chat needs to know whose notes to act on.</p>',
       ]); ?>
     <?php else: ?>
       <p>Logged in as <strong><?= htmlspecialchars($user['username']) ?></strong>.</p>
@@ -86,14 +86,14 @@ data: {"done":true}</code></pre>
         <div>
           <h3 style="margin-top:0">Your notes</h3>
           <div id="notes-list" class="notes-list" hx-get="/api/learn/notes" hx-trigger="load" hx-swap="innerHTML">
-            <p class="notes-empty">Loading&hellip;</p>
+            <p class="notes-empty">Loading…</p>
           </div>
         </div>
         <div>
           <div id="learn-chat" class="chat-box" data-thread-id="">
             <div class="chat-head">
               Notes assistant
-              <span class="chat-mode">&hellip;</span>
+              <span class="chat-mode">…</span>
               <button type="button" class="chat-new" title="Start a fresh conversation">New thread</button>
             </div>
             <div class="chat-scroll">
@@ -101,7 +101,7 @@ data: {"done":true}</code></pre>
               <div class="chat-messages"></div>
             </div>
             <form class="chat-form" autocomplete="off" hx-boost="false">
-              <input type="text" name="message" placeholder="Ask anything about your notes&hellip;" required>
+              <input type="text" name="message" placeholder="Ask anything about your notes…" required>
               <button type="submit">Send</button>
             </form>
           </div>
@@ -115,7 +115,7 @@ data: {"done":true}</code></pre>
       <?php App::render('/components/_callout', [
         'variant' => 'success',
         'title'   => 'Watch the Event Log',
-        'body'    => '<p>Try: <em>"create a note titled shopping list"</em>. Watch the Event Log below the chat &mdash; you\'ll see <span style="background:#3b82f6;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.75rem;font-weight:700">SSE</span> events (tool_call, tool_done, notes_changed) stream in as the AI works. Then check the notes panel on the left &mdash; the new note appears with a green glow, pushed via <span style="background:#a855f7;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.75rem;font-weight:700">WS</span> broadcast. Open a second tab to see cross-tab sync.</p>',
+        'body'    => '<p>Try: <em>"create a note titled shopping list"</em>. Watch the Event Log below the chat — you\'ll see <span style="background:#3b82f6;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.75rem;font-weight:700">SSE</span> events (tool_call, tool_done, notes_changed) stream in as the AI works. Then check the notes panel on the left — the new note appears with a green glow, pushed via <span style="background:#a855f7;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.75rem;font-weight:700">WS</span> broadcast. Open a second tab to see cross-tab sync.</p>',
       ]); ?>
     <?php endif; ?>
 
@@ -138,7 +138,7 @@ data: {"done":true}</code></pre>
 
     <h2>Introducing <code>App::renderStream()</code></h2>
     <p>
-      SSE is one form of streaming. ZealPHP also supports <strong>streaming HTML</strong> &mdash; sending
+      SSE is one form of streaming. ZealPHP also supports <strong>streaming HTML</strong> — sending
       chunks of a page as they're generated, rather than waiting for the entire page to render.
     </p>
     <pre><code class="language-php">// A streaming template
@@ -169,23 +169,23 @@ return function($items) {
 
     <?php App::render('/components/_deepdive', [
       'title' => 'Why pipe Python instead of calling OpenAI from PHP?',
-      'body'  => '<p>The OpenAI Agents SDK (Python) handles tool dispatch, conversation memory, and streaming out of the box. Replicating that in PHP would be hundreds of lines. By spawning a subprocess, ZealPHP stays thin &mdash; it\'s a streaming proxy, not an AI framework. This pattern lets you swap the agent (different model, different tools) without touching PHP.</p>',
+      'body'  => '<p>The OpenAI Agents SDK (Python) handles tool dispatch, conversation memory, and streaming out of the box. Replicating that in PHP would be hundreds of lines. By spawning a subprocess, ZealPHP stays thin — it\'s a streaming proxy, not an AI framework. This pattern lets you swap the agent (different model, different tools) without touching PHP.</p>',
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
-      'SSE streams events from server to browser &mdash; perfect for AI token streaming',
+      'SSE streams events from server to browser — perfect for AI token streaming',
       '<code>$response->sse($emit)</code> handles headers and formatting automatically',
-      'Tool calls let AI agents interact with your data &mdash; shown as expandable cards',
+      'Tool calls let AI agents interact with your data — shown as expandable cards',
       '<code>App::renderStream()</code> streams HTML chunks for progressive page rendering',
     ]]); ?>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/notes"
          hx-get="/api/learn/page?slug=learn/notes" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/notes">&larr; Personal Notes</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/notes">← Personal Notes</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/websocket"
          hx-get="/api/learn/page?slug=learn/websocket" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/websocket">Real-Time Sync &rarr;</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/websocket">Real-Time Sync →</a>
     </div>
   </article>
 </div>

@@ -20,7 +20,7 @@
     <h2>The problem</h2>
     <p>
       Click the counter button from the last lesson. Now open a new tab and visit the same page.
-      Your count is gone. <strong>HTTP is stateless</strong> &mdash; every request is a stranger.
+      Your count is gone. <strong>HTTP is stateless</strong> — every request is a stranger.
       The server doesn't know that the person who clicked 5 times is the same person loading the page now.
     </p>
     <p>
@@ -30,13 +30,13 @@
 
     <h2>Sessions: name badges for the web</h2>
     <p>
-      Think of a store where customers wear masks &mdash; the clerk can't tell them apart. Sessions work
+      Think of a store where customers wear masks — the clerk can't tell them apart. Sessions work
       like <strong>name badges</strong>:
     </p>
     <ol>
       <li>First visit: the server hands the browser a <strong>name badge</strong> (a cookie containing a session ID)</li>
       <li>Next visit: the browser wears the badge. The server reads the ID and opens a <strong>personal file folder</strong> with that visitor's data</li>
-      <li>The badge is just an ID &mdash; the actual data stays on the server, safe from tampering</li>
+      <li>The badge is just an ID — the actual data stays on the server, safe from tampering</li>
     </ol>
 
     <h2>Sessions in traditional PHP</h2>
@@ -63,7 +63,7 @@ echo $_SESSION['name']; // "Alice" — even across page loads</code></pre>
     <?php App::render('/components/_callout', [
       'variant' => 'warn',
       'title'   => 'The golden rule',
-      'body'    => '<p>In ZealPHP coroutine mode, use <code>$g->session</code> instead of <code>$_SESSION</code>. The <code>G::instance()</code> object is per-coroutine &mdash; each request gets its own isolated copy. <code>$_SESSION</code> is process-global and will leak between concurrent requests.</p>',
+      'body'    => '<p>In ZealPHP coroutine mode, use <code>$g->session</code> instead of <code>$_SESSION</code>. The <code>G::instance()</code> object is per-coroutine — each request gets its own isolated copy. <code>$_SESSION</code> is process-global and will leak between concurrent requests.</p>',
     ]); ?>
 
     <pre><code class="language-php">// ZealPHP coroutine mode — the right way
@@ -79,11 +79,11 @@ echo $g->session['name']; // "Alice" — per-coroutine, safe</code></pre>
 
     <?php App::render('/components/_deepdive', [
       'title' => 'How does session_start() work in ZealPHP?',
-      'body'  => '<p>ZealPHP uses the <code>uopz</code> extension to override <code>session_start()</code>, <code>session_destroy()</code>, and friends at boot time. When your code calls <code>session_start()</code>, ZealPHP\'s replacement reads the session cookie from the current request\'s <code>G::instance()</code>, loads the session data from file, and populates <code>$g->session</code>. At end of request, it writes back. This means <code>session_start()</code> still works &mdash; but it writes to the per-coroutine <code>$g->session</code>, not to the global <code>$_SESSION</code>.</p>',
+      'body'  => '<p>ZealPHP uses the <code>uopz</code> extension to override <code>session_start()</code>, <code>session_destroy()</code>, and friends at boot time. When your code calls <code>session_start()</code>, ZealPHP\'s replacement reads the session cookie from the current request\'s <code>G::instance()</code>, loads the session data from file, and populates <code>$g->session</code>. At end of request, it writes back. This means <code>session_start()</code> still works — but it writes to the per-coroutine <code>$g->session</code>, not to the global <code>$_SESSION</code>.</p>',
     ]); ?>
 
     <h2>Putting it together</h2>
-    <p>Here's how the counter from Lesson 5 persists across requests &mdash; it stores the count in the session:</p>
+    <p>Here's how the counter from Lesson 5 persists across requests — it stores the count in the session:</p>
     <pre><code class="language-php">// The counter endpoint (route/learn.php)
 $app->route('/api/learn/demo/incr', function ($request, $response) {
     session_start();
@@ -108,19 +108,19 @@ $app->route('/api/learn/demo/incr', function ($request, $response) {
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
-      'HTTP is stateless &mdash; sessions bridge the gap by giving each visitor a cookie + server-side storage',
+      'HTTP is stateless — sessions bridge the gap by giving each visitor a cookie + server-side storage',
       'In ZealPHP, use <code>$g->session</code> instead of <code>$_SESSION</code> (per-coroutine isolation)',
-      '<code>session_start()</code> still works &mdash; uopz redirects it to the coroutine-safe implementation',
-      'Session data persists to disk &mdash; survives page reloads and server restarts',
+      '<code>session_start()</code> still works — uopz redirects it to the coroutine-safe implementation',
+      'Session data persists to disk — survives page reloads and server restarts',
     ]]); ?>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/htmx"
          hx-get="/api/learn/page?slug=learn/htmx" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/htmx">&larr; Forms &amp; htmx</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/htmx">← Forms &amp; htmx</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/auth"
          hx-get="/api/learn/page?slug=learn/auth" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/auth">User Accounts &rarr;</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/auth">User Accounts →</a>
     </div>
   </article>
 </div>

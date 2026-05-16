@@ -28,7 +28,7 @@
     <p>
       Coroutines are like <strong>juggling</strong>. You throw ball 1 (API call 1) and while it's in
       the air, you throw ball 2 (API call 2). You catch them as they come down. You never waited idle
-      &mdash; while one ball was airborne, your hands were busy throwing the next.
+      — while one ball was airborne, your hands were busy throwing the next.
     </p>
     <p>
       <code>go()</code> is throwing a ball. <code>$ch->pop()</code> is catching it.
@@ -59,7 +59,7 @@ $app->route('/dashboard', function() {
 });</code></pre>
     <p>
       <code>go()</code> spawns a new coroutine on the same worker. <code>$ch->pop()</code> suspends
-      the parent coroutine until a value arrives &mdash; but the worker thread is free to handle other
+      the parent coroutine until a value arrives — but the worker thread is free to handle other
       requests while it waits.
     </p>
 
@@ -87,13 +87,13 @@ HTML]); ?>
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'When coroutines help',
-      'body'    => '<p><strong>I/O-bound work:</strong> HTTP calls, database queries, file reads, DNS lookups, <code>co::sleep()</code>. If two I/O tasks are independent, run them in parallel.</p><p><strong>NOT CPU-bound work.</strong> Coroutines don\'t make computation faster &mdash; they make <em>waiting</em> cheaper. For CPU-heavy work (image processing, PDF generation), use task workers instead.</p>',
+      'body'    => '<p><strong>I/O-bound work:</strong> HTTP calls, database queries, file reads, DNS lookups, <code>co::sleep()</code>. If two I/O tasks are independent, run them in parallel.</p><p><strong>NOT CPU-bound work.</strong> Coroutines don\'t make computation faster — they make <em>waiting</em> cheaper. For CPU-heavy work (image processing, PDF generation), use task workers instead.</p>',
     ]); ?>
 
     <h2>co::sleep() vs usleep()</h2>
-    <pre><code class="language-php">co::sleep(0.5);  // yields &mdash; other coroutines run while this one sleeps
-usleep(500000);  // blocks &mdash; the worker thread is stuck for 500ms</code></pre>
-    <p>Always use <code>co::sleep()</code> inside coroutine contexts. The one exception: inside a Generator returned from a route handler, <code>co::sleep()</code> is a no-op &mdash; use <code>usleep()</code> for artificial delays there.</p>
+    <pre><code class="language-php">co::sleep(0.5);  // yields — other coroutines run while this one sleeps
+usleep(500000);  // blocks — the worker thread is stuck for 500ms</code></pre>
+    <p>Always use <code>co::sleep()</code> inside coroutine contexts. The one exception: inside a Generator returned from a route handler, <code>co::sleep()</code> is a no-op — use <code>usleep()</code> for artificial delays there.</p>
 
     <?php App::render('/components/_deepdive', [
       'title' => 'Task workers for CPU-bound jobs',
@@ -103,17 +103,17 @@ usleep(500000);  // blocks &mdash; the worker thread is stuck for 500ms</code></
     <?php App::render('/components/_keytakeaways', ['items' => [
       '<code>go()</code> spawns a coroutine; <code>Channel</code> synchronizes results',
       'Parallel I/O: total time = max(tasks), not sum(tasks)',
-      'Coroutines help with I/O (network, file, DB) &mdash; not CPU computation',
+      'Coroutines help with I/O (network, file, DB) — not CPU computation',
       'Use task workers for CPU-heavy work that would block request handling',
     ]]); ?>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/routing"
          hx-get="/api/learn/page?slug=learn/routing" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routing">&larr; Routes &amp; APIs</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routing">← Routes &amp; APIs</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/deployment"
          hx-get="/api/learn/page?slug=learn/deployment" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/deployment">Ship It &rarr;</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/deployment">Ship It →</a>
     </div>
   </article>
 </div>

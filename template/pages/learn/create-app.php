@@ -51,24 +51,24 @@ cd my-app</code></pre>
     <h2>The folder structure</h2>
     <p>Here's what the scaffold created:</p>
     <pre><code>my-app/
-&#9500;&#9472;&#9472; app.php              # Entry point &mdash; middleware, routes, $app-&gt;run()
-&#9500;&#9472;&#9472; public/              # Pages &mdash; each .php file becomes a URL
-&#9474;   &#9492;&#9472;&#9472; index.php        # &rarr; GET /
-&#9500;&#9472;&#9472; api/                 # REST endpoints &mdash; file-based routing (ZealAPI)
-&#9500;&#9472;&#9472; route/               # Advanced routes &mdash; WebSocket, Store tables, path params
+&#9500;&#9472;&#9472; app.php              # Entry point — middleware, routes, $app-&gt;run()
+&#9500;&#9472;&#9472; public/              # Pages — each .php file becomes a URL
+&#9474;   &#9492;&#9472;&#9472; index.php        # → GET /
+&#9500;&#9472;&#9472; api/                 # REST endpoints — file-based routing (ZealAPI)
+&#9500;&#9472;&#9472; route/               # Advanced routes — WebSocket, Store tables, path params
 &#9500;&#9472;&#9472; template/            # Layouts and reusable components
 &#9474;   &#9500;&#9472;&#9472; _master.php      # Page layout shell (nav + content + footer)
 &#9474;   &#9492;&#9472;&#9472; pages/           # Page-specific content
-&#9500;&#9472;&#9472; src/                 # Business logic &mdash; PSR-4 autoloaded classes
+&#9500;&#9472;&#9472; src/                 # Business logic — PSR-4 autoloaded classes
 &#9500;&#9472;&#9472; storage/             # SQLite databases, uploaded files
 &#9492;&#9472;&#9472; vendor/              # Composer dependencies</code></pre>
 
     <p>The key rule: <strong>each folder has one job</strong>.</p>
     <ul>
-      <li><strong>public/</strong> &mdash; Pages the user visits. Files map directly to URLs.</li>
-      <li><strong>api/</strong> &mdash; REST endpoints. Each file defines one closure.</li>
-      <li><strong>src/</strong> &mdash; Business logic. Classes, services, helpers &mdash; autoloaded.</li>
-      <li><strong>template/</strong> &mdash; HTML layouts and reusable components.</li>
+      <li><strong>public/</strong> — Pages the user visits. Files map directly to URLs.</li>
+      <li><strong>api/</strong> — REST endpoints. Each file defines one closure.</li>
+      <li><strong>src/</strong> — Business logic. Classes, services, helpers — autoloaded.</li>
+      <li><strong>template/</strong> — HTML layouts and reusable components.</li>
     </ul>
 
     <h2>CLI commands</h2>
@@ -82,23 +82,23 @@ php app.php logs           # Tail log files</code></pre>
 
     <?php App::render('/components/_deepdive', [
       'title' => 'What happens when you run php app.php?',
-      'body'  => '<p>OpenSwoole starts an HTTP server inside the PHP process. It forks worker processes (one per CPU core by default), each handling thousands of concurrent connections using coroutines. Your routes, middleware, and templates are loaded once at startup and shared across all requests &mdash; unlike traditional PHP where everything is re-loaded per request.</p><p>This is why ZealPHP is fast: no bootup cost per request, and the process never dies between requests.</p>',
+      'body'  => '<p>OpenSwoole starts an HTTP server inside the PHP process. It forks worker processes (one per CPU core by default), each handling thousands of concurrent connections using coroutines. Your routes, middleware, and templates are loaded once at startup and shared across all requests — unlike traditional PHP where everything is re-loaded per request.</p><p>This is why ZealPHP is fast: no bootup cost per request, and the process never dies between requests.</p>',
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
       'One install script sets up PHP, OpenSwoole, and uopz',
       '<code>composer create-project</code> scaffolds the app with the right structure',
-      '<code>php app.php</code> starts the server &mdash; no web server config needed',
+      '<code>php app.php</code> starts the server — no web server config needed',
       'Each folder has one job: public/ for pages, api/ for REST, src/ for logic, template/ for layouts',
     ]]); ?>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn"
          hx-get="/api/learn/page?slug=learn" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn">&larr; Hello, ZealPHP</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn">← Hello, ZealPHP</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/first-page"
          hx-get="/api/learn/page?slug=learn/first-page" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/first-page">Your First Page &rarr;</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/first-page">Your First Page →</a>
     </div>
   </article>
 </div>

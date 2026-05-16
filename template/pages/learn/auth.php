@@ -29,7 +29,7 @@ $active = $active ?? 'learn/auth';
 
     <h2>Step 1: A database</h2>
     <p>
-      You need a place to store users. SQLite is perfect for this &mdash; it's a database in a single file.
+      You need a place to store users. SQLite is perfect for this — it's a database in a single file.
       No server to install, no credentials to configure. PHP includes PDO (PHP Data Objects) for talking
       to databases.
     </p>
@@ -69,7 +69,7 @@ public static function register(\PDO $db, string $username, string $password): ?
     <p>
       Think of <code>password_hash()</code> like a <strong>safe with a one-way lock</strong>. You put the
       password in, the safe locks, and even you can't open it to see what's inside. But you can check
-      whether a new password matches the one inside &mdash; that's <code>password_verify()</code>.
+      whether a new password matches the one inside — that's <code>password_verify()</code>.
     </p>
 
     <h2>Step 3: Log in</h2>
@@ -86,7 +86,7 @@ public static function login(\PDO $db, string $username, string $password): ?int
 }</code></pre>
     <p>
       <code>password_verify()</code> checks whether the password matches the hash without ever decrypting it.
-      If it matches, store the user ID in the session &mdash; now the server knows who you are on every request.
+      If it matches, store the user ID in the session — now the server knows who you are on every request.
     </p>
 
     <h2>Step 4: The auth guard</h2>
@@ -107,7 +107,7 @@ if (!$user) {
 
     <h2>Architecture: proper OOP</h2>
     <p>
-      Notice how the auth logic lives in <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Auth.php" target="_blank"><code>src/Learn/Auth.php</code></a> &mdash; a proper class, autoloaded
+      Notice how the auth logic lives in <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Auth.php" target="_blank"><code>src/Learn/Auth.php</code></a> — a proper class, autoloaded
       via Composer. The API endpoint (<a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/register.php" target="_blank"><code>api/learn/register.php</code></a>) is a thin wrapper:
     </p>
     <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/register.php" style="color:#f59e0b">api/learn/register.php</a> — thin endpoint
@@ -118,7 +118,7 @@ $register = function () {
 };</code></pre>
     <p>
       Business logic in <code>src/</code>, endpoints in <code>api/</code>. The endpoint delegates;
-      the class does the work. This pattern scales &mdash; your API files stay under 20 lines each.
+      the class does the work. This pattern scales — your API files stay under 20 lines each.
     </p>
 
     <?php App::render('/components/_tryit', ['title' => 'Register now', 'body' => $user
@@ -147,24 +147,24 @@ $register = function () {
       'body'  => '<p>Build a "change password" feature. You\'ll need: a form with old password and new password fields, an endpoint that verifies the old password with <code>password_verify()</code>, then updates the hash with <code>password_hash()</code>.</p>',
       'hints' => [
         'Use a prepared UPDATE statement: <code>UPDATE users SET password_hash = ? WHERE id = ?</code>',
-        'Always verify the old password first &mdash; never trust the client to send only valid requests',
+        'Always verify the old password first — never trust the client to send only valid requests',
       ],
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
-      'SQLite + PDO gives you a full database in a single file &mdash; no server setup',
+      'SQLite + PDO gives you a full database in a single file — no server setup',
       '<code>password_hash()</code> and <code>password_verify()</code> handle passwords safely',
-      'Store the user ID in <code>$g->session</code> after login &mdash; the session cookie handles the rest',
+      'Store the user ID in <code>$g->session</code> after login — the session cookie handles the rest',
       'Business logic in <code>src/</code> classes, thin endpoint wrappers in <code>api/</code>',
     ]]); ?>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/sessions"
          hx-get="/api/learn/page?slug=learn/sessions" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/sessions">&larr; Sessions</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/sessions">← Sessions</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/notes"
          hx-get="/api/learn/page?slug=learn/notes" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/notes">Personal Notes &rarr;</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/notes">Personal Notes →</a>
     </div>
   </article>
 </div>
