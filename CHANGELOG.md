@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.18] - 2026-05-16
+
+### Fixed
+- **composer.lock out of sync with composer.json** in v0.2.17 — the v0.2.17 commit bumped `phpstan/phpstan` constraint to `^2.1` in composer.json, but my local "restore composer.lock from HEAD" command (during the same release sequence) inadvertently reverted the lock back to the pre-upgrade PHPStan 1.12.33 entry. Result: `composer validate --strict` failed CI on v0.2.17 (caught immediately on next push to master), and anyone running `composer install` against the v0.2.17 tag would have resolved PHPStan to 1.x despite composer.json declaring 2.x.
+- composer.lock now correctly pins `phpstan/phpstan` at `2.1.54`, matching the constraint. `composer validate --strict` passes. PHPStan 2.x level 10 still reports 0 errors. 204 unit + 113 integration tests still green.
+- No behavior changes outside the dependency-resolution surface. Everyone on v0.2.17 should upgrade to v0.2.18.
+
 ## [0.2.17] - 2026-05-16
 
 ### Changed
