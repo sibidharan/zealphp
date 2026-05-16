@@ -129,42 +129,53 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <tr><td><code>ZEALPHP_MAX_REQUEST=0</code></td><td>Env var</td><td>Disable recycling entirely (don't, unless you're benchmarking)</td></tr>
 </table>
 
-<h3 id="safety-matrix" style="margin:1.5rem 0 .5rem">Coroutine safety matrix (per mode)</h3>
+<h3 id="safety-matrix" style="margin:1.5rem 0 .5rem">Safety matrix (per mode)</h3>
+<p style="color:var(--text-muted);font-size:.92rem">The two modes are different runtimes, not different settings on the same runtime. Coroutine mode runs OpenSwoole's coroutine scheduler with <code>HOOK_ALL</code> enabled — every request is its own coroutine, many in flight per worker. Superglobals mode <strong>disables the coroutine scheduler entirely</strong> (<code>enable_coroutine = false</code> on the OpenSwoole server) and runs each request synchronously in the worker process, one at a time per worker — Apache MPM-prefork semantics. Implicit file routes (legacy <code>.php</code> drops) in superglobals mode additionally run through the CGI bridge (<code>App::includeFile()</code> → <code>src/cgi_worker.php</code> via <code>proc_open</code>) for true global-scope process isolation.</p>
 <table class="ztable">
   <tr><th>Concern</th><th>Coroutine mode <br><small>(<code>App::superglobals(false)</code>, scaffold default)</small></th><th>Superglobals mode <br><small>(<code>App::superglobals(true)</code>, migration only)</small></th></tr>
   <tr>
+    <td>Concurrency model</td>
+    <td>Coroutine scheduler enabled, <code>HOOK_ALL</code> active; thousands of concurrent requests per worker, blocking I/O yields the event loop</td>
+    <td>❌ Coroutine scheduler disabled (<code>enable_coroutine = false</code>); each worker handles <strong>one request at a time</strong>, blocking</td>
+  </tr>
+  <tr>
+    <td>Implicit file routes (legacy <code>public/*.php</code>)</td>
+    <td>Run in the worker process directly</td>
+    <td>Run through the <strong>CGI bridge</strong> (<code>proc_open</code> child) — true global-scope isolation per request</td>
+  </tr>
+  <tr>
     <td><code>$g->session</code>, <code>$g->status</code>, etc.</td>
-    <td>✅ Per-coroutine, isolated</td>
+    <td>✅ Per-coroutine via <code>Coroutine::getContext()</code>, isolated</td>
     <td>⚠ Process-wide singleton; framework resets per-request, but write at your own risk</td>
   </tr>
   <tr>
     <td><code>$_GET</code>, <code>$_POST</code> direct access</td>
-    <td>✅ Per-coroutine via <code>$g->get</code>/<code>$g->post</code></td>
-    <td>⚠ Single-coroutine-per-request — <strong>do not</strong> <code>go()</code> inside handlers</td>
+    <td>✅ Per-coroutine via <code>$g->get</code> / <code>$g->post</code></td>
+    <td>⚠ Process-wide superglobals, repopulated per-request by the framework. Same address space as PHP-FPM's mental model — one request at a time, no interleaving risk.</td>
   </tr>
   <tr>
     <td><code>header()</code>, <code>setcookie()</code> via uopz</td>
     <td>✅ Writes to per-coroutine <code>$response->headersList</code></td>
-    <td>⚠ Single-coroutine-per-request</td>
+    <td>⚠ Writes to the single in-flight request's response — synchronous, no cross-request bleed because requests don't overlap in a worker</td>
   </tr>
   <tr>
     <td><code>set_error_handler()</code> / <code>register_shutdown_function()</code></td>
     <td>✅ Stack lives on per-coroutine <code>RequestContext</code>, freed on coroutine end</td>
-    <td>⚠ Process-wide stack — legacy code that re-registers per-request accumulates handlers until worker recycle</td>
+    <td>⚠ Process-wide stack; legacy code that re-registers per-request <em>would</em> accumulate handlers, but <code>SessionManager</code> explicitly resets the stacks at request entry (fixed in v0.2.10)</td>
   </tr>
   <tr>
     <td><code>go()</code> inside a request handler</td>
     <td>✅ Allowed and recommended for parallel I/O</td>
-    <td>❌ Not supported — superglobals mode disables coroutine scheduling</td>
+    <td>❌ Not supported — the coroutine scheduler isn't running. Spawn a child via <code>coprocess()</code> / <code>coproc()</code> if you need async work in this mode.</td>
   </tr>
   <tr>
     <td><code>static $cache = []</code> in user functions</td>
-    <td>❌ Survives, requires the recycling backstop</td>
-    <td>❌ Same</td>
+    <td>❌ Survives across coroutines until worker recycles — requires the <code>max_request</code> backstop</td>
+    <td>❌ Same — survives across requests until worker recycles</td>
   </tr>
   <tr>
     <td><code>OpenSwoole\Table</code> mid-write atomicity</td>
-    <td>Single <code>set()</code> is atomic at the C level; multi-call updates to the same row are not transactional. <code>incr</code>/<code>decr</code>/<code>compareAndSet</code> are atomic. SIGKILL mid-write may leave the row's spinlock held — graceful shutdown (including <code>max_request</code> recycle) releases cleanly. Use Store as best-effort cache, not a database.</td>
+    <td>Single <code>set()</code> is atomic at the C level; multi-call updates to the same row are not transactional. <code>incr</code> / <code>decr</code> / <code>compareAndSet</code> are atomic. SIGKILL mid-write may leave the row's spinlock held — graceful shutdown (including <code>max_request</code> recycle) releases cleanly. Use Store as best-effort cache, not a database.</td>
     <td>Same</td>
   </tr>
 </table>
