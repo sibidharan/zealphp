@@ -33,8 +33,8 @@ class Auth
         $row = $db->prepare('SELECT id, password_hash FROM users WHERE username = ?');
         $row->execute([$username]);
         $user = $row->fetch();
-        if (!$user) return null;
-        if (!password_verify($password, $user['password_hash'])) return null;
+        if (!is_array($user)) return null;
+        if (!password_verify($password, (string)$user['password_hash'])) return null;
         return (int) $user['id'];
     }
 
@@ -43,12 +43,13 @@ class Auth
     {
         $g = RequestContext::instance();
         if (!empty($g->session['user_id'])) {
+            // @phpstan-ignore-next-line — $g->session is array<string, mixed>; user_id coerced to int at boundary
             $userId = (int) $g->session['user_id'];
             $db = DB::open();
             $stmt = $db->prepare('SELECT id, username FROM users WHERE id = ?');
             $stmt->execute([$userId]);
             $row = $stmt->fetch();
-            if (!$row) {
+            if (!is_array($row)) {
                 unset($g->session['user_id'], $g->session['username']);
                 return null;
             }
@@ -63,14 +64,17 @@ class Auth
      */
     public static function readCredentials($g): ?array
     {
-        $ct = $g->server['HTTP_CONTENT_TYPE'] ?? $g->server['CONTENT_TYPE'] ?? '';
+        $ct = (string)($g->server['HTTP_CONTENT_TYPE'] ?? $g->server['CONTENT_TYPE'] ?? '');
         if (stripos($ct, 'application/json') !== false) {
-            $body = json_decode($g->zealphp_request->parent->getContent(), true);
+            // @phpstan-ignore-next-line — zealphp_request set by CoSessionManager before any request handler runs
+            $body = json_decode((string)$g->zealphp_request->parent->getContent(), true);
             if (!is_array($body)) return null;
             $u = (string) ($body['username'] ?? '');
             $p = (string) ($body['password'] ?? '');
         } else {
+            // @phpstan-ignore-next-line — $g->post is array<string, mixed>; username coerced to string at boundary
             $u = (string) ($g->post['username'] ?? '');
+            // @phpstan-ignore-next-line — $g->post is array<string, mixed>; password coerced to string at boundary
             $p = (string) ($g->post['password'] ?? '');
         }
         if ($u === '' || $p === '') return null;
@@ -81,8 +85,8 @@ class Auth
     {
         $now = time();
         $existing = \ZealPHP\Store::get($table, $ip);
-        if ($existing && $now < $existing['reset']) {
-            if ($existing['count'] >= $limit) return false;
+        if (is_array($existing) && $now < (int)$existing['reset']) {
+            if ((int)$existing['count'] >= $limit) return false;
             \ZealPHP\Store::incr($table, $ip, 'count', 1);
             return true;
         }

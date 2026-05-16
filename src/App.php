@@ -18,13 +18,13 @@ use Psr\Http\Server\RequestHandlerInterface;
 use OpenSwoole\Coroutine as co;
 class App
 {
-    /** @var array<int, array{path:string,pattern:string,methods:array<int,string>,handler:callable|null,param_map:array<int,array{name:string,position:int,default:mixed,is_url_param:bool}>,raw:bool}> */
+    /** @var array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool}> */
     protected array $routes = [];
-    /** @var array<string, array<int, array<string, mixed>>> */
+    /** @var array<string, array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool}>> */
     protected array $routes_by_method = [];
-    /** @var array<string, array<string, array<string, mixed>>> */
+    /** @var array<string, array<string, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool}>> */
     protected array $routes_by_exact_method = [];
-    /** @var array<string, callable|array{callable,callable|null,callable|null}> */
+    /** @var array<string, array{message: callable, open: callable|null, close: callable|null}> */
     protected array $ws_routes = [];
     /** @var array<int, callable> */
     protected static array $workerStartHooks = [];
@@ -105,6 +105,7 @@ class App
         $_ENV = [];
         if (file_exists('/etc/environment')) {
             $env = file_get_contents('/etc/environment');
+            if ($env === false) { $env = ''; }
             $env = explode("\n", $env);
             foreach ($env as $line) {
                 $line = trim($line);
@@ -222,7 +223,7 @@ class App
     public static function init($host = '0.0.0.0', $port = 8080, $cwd=null): App
     {
         if ($cwd === null) {
-            $php_self = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1)[0]['file'];
+            $php_self = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1)[0]['file'] ?? '';
             $file_name = '/'.basename($php_self);
             $cwd = dirname($php_self);
             self::$default_php_self = $file_name;
@@ -251,7 +252,7 @@ class App
     }
 
     /**
-     * @return array<int, array{path:string,pattern:string,methods:array<int,string>,handler:callable|null,param_map:array<int,array{name:string,position:int,default:mixed,is_url_param:bool}>,raw:bool}>
+     * @return array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool}>
      */
     public function routes(): array
     {
@@ -259,7 +260,7 @@ class App
     }
 
     /**
-     * @return array<string, array<int, array<string, mixed>>>
+     * @return array<string, array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool}>>
      */
     public function routesByMethod(): array
     {
@@ -267,7 +268,7 @@ class App
     }
 
     /**
-     * @return array<string, array<string, array<string, mixed>>>
+     * @return array<string, array<string, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool}>>
      */
     public function routesByExactMethod(): array
     {
@@ -297,7 +298,7 @@ class App
     }
 
     /**
-     * @return array<string, callable|array{callable,callable|null,callable|null}>
+     * @return array<string, array{message: callable, open: callable|null, close: callable|null}>
      */
     public function wsRoutes(): array
     {
@@ -346,7 +347,7 @@ class App
         try {
             $reflection = is_array($handler)
                 ? new \ReflectionMethod($handler[0], $handler[1])
-                : new \ReflectionFunction($handler);
+                : new \ReflectionFunction(\Closure::fromCallable($handler));
             $map = [];
             foreach ($reflection->getParameters() as $param) {
                 $pname = $param->getName();
@@ -414,14 +415,17 @@ class App
             $handler = $options;
             $options = [];
         }
+        assert(is_array($options));
 
         // Default methods to GET if not specified
         $methods = $options['methods'] ?? ['GET'];
+        assert(is_array($methods));
 
         // Convert flask-like {param} to named regex group
         $pattern = preg_replace('/\{([^}]+)\}/', '(?P<$1>[^/]+)', $path);
         $pattern = "#^" . $pattern . "$#";
 
+        assert(is_callable($handler));
         $this->routes[] = [
             'path'      => $path,
             'pattern'   => $pattern,
@@ -447,6 +451,7 @@ class App
             $handler = $options;
             $options = [];
         }
+        assert(is_array($options));
 
         // Prepend the namespace prefix to the path
         $namespace = trim($namespace, '/');
@@ -454,11 +459,13 @@ class App
 
         // Default methods to GET if not specified
         $methods = $options['methods'] ?? ['GET'];
+        assert(is_array($methods));
 
         // Convert {param} style placeholders (no change from route)
         $pattern = preg_replace('/\{([^}]+)\}/', '(?P<$1>[^/]+)', $path);
         $pattern = "#^" . $pattern . "$#";
 
+        assert(is_callable($handler));
         $this->routes[] = [
             'path'      => $path,
             'pattern'   => $pattern,
@@ -491,13 +498,15 @@ class App
             $handler = $options;
             $options = [];
         }
-    
+        assert(is_array($options));
+
         // Prepend the namespace prefix to the path
         $namespace = trim($namespace, '/');
         $path = '/' . $namespace . '/' . ltrim($path, '/');
-    
+
         // Default methods to GET if not specified
         $methods = $options['methods'] ?? ['GET'];
+        assert(is_array($methods));
     
         // Find all parameters
         preg_match_all('/\{([^}]+)\}/', $path, $paramMatches);
@@ -518,6 +527,7 @@ class App
     
         $pattern = "#^" . $pattern . "$#";
     
+        assert(is_callable($handler));
         $this->routes[] = [
             'path'      => $path,
             'pattern'   => $pattern,
@@ -547,14 +557,17 @@ class App
             $handler = $options;
             $options = [];
         }
+        assert(is_array($options));
 
         $methods = $options['methods'] ?? ['GET'];
+        assert(is_array($methods));
 
         // Ensure the pattern is properly anchored if not already
         if (substr($regex, 0, 1) !== '#') {
             $regex = "#^" . $regex . "$#";
         }
 
+        assert(is_callable($handler));
         $this->routes[] = [
             'path'      => $regex,
             'pattern'   => $regex,
@@ -574,6 +587,7 @@ class App
     public static function parseCss(string $file): array
     {
         $css = file_get_contents($file);
+        if ($css === false) { $css = ''; }
         preg_match_all('/(?ims)([a-z0-9\s\.\:#_\-@,]+)\{([^\}]*)\}/', $css, $arr);
         $result = array();
         foreach ($arr[0] as $i => $x) {
@@ -736,7 +750,7 @@ class App
     {
         $g = RequestContext::instance();
         if ($file == null) {
-            return basename($g->server['PHP_SELF'] ?? '', '.php');
+            return basename((string)($g->server['PHP_SELF'] ?? ''), '.php');
         } else {
             return basename($file, '.php');
         }
@@ -783,11 +797,12 @@ class App
         $g = RequestContext::instance();
 
         if (self::$directory_slash) {
-            $requestPath = parse_url($g->server['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '';
-            if ($requestPath !== '' && substr($requestPath, -1) !== '/') {
+            $requestPath = parse_url((string)($g->server['REQUEST_URI'] ?? ''), PHP_URL_PATH) ?? '';
+            if ($requestPath !== '' && substr((string)$requestPath, -1) !== '/') {
                 $newUrl = $requestPath . '/';
-                $qs = parse_url($g->server['REQUEST_URI'] ?? '', PHP_URL_QUERY);
+                $qs = parse_url((string)($g->server['REQUEST_URI'] ?? ''), PHP_URL_QUERY);
                 if ($qs) $newUrl .= '?' . $qs;
+                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->redirect($newUrl, 301);
                 $g->_streaming = true;
                 return null;
@@ -810,6 +825,7 @@ class App
                 if ($__r instanceof \Generator) return $__r;
                 return null;
             }
+            // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
             $g->zealphp_response->sendFile($abs);
             $g->_streaming = true;
             return null;
@@ -888,8 +904,9 @@ class App
         }
 
         try {
+            // @phpstan-ignore-next-line — zealphp_request set by CoSessionManager before any route dispatches
             $postBody = $g->zealphp_request->parent->getContent();
-            if ($postBody) fwrite($pipes[0], $postBody);
+            if ($postBody) fwrite($pipes[0], (string)$postBody);
         } catch (\Throwable $e) {}
         fclose($pipes[0]);
 
@@ -901,34 +918,43 @@ class App
         $streaming = false;
         if ($metaLine) {
             $meta = json_decode(trim($metaLine), true);
-            if ($meta) {
-                response_set_status($meta['status_code'] ?? 200);
-                foreach ($meta['headers'] ?? [] as $pair) {
-                    if (count($pair) >= 2) {
-                        $g->zealphp_response->header($pair[0], $pair[1]);
+            if (is_array($meta)) {
+                response_set_status((int)($meta['status_code'] ?? 200));
+                $metaHeaders = is_array($meta['headers'] ?? null) ? $meta['headers'] : [];
+                foreach ($metaHeaders as $pair) {
+                    if (is_array($pair) && count($pair) >= 2) {
+                        // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+                        $g->zealphp_response->header((string)$pair[0], (string)$pair[1]);
                     }
                 }
-                foreach ($meta['cookies'] ?? [] as $args) {
-                    if (!empty($args)) {
+                $metaCookies = is_array($meta['cookies'] ?? null) ? $meta['cookies'] : [];
+                foreach ($metaCookies as $args) {
+                    if (is_array($args) && !empty($args)) {
+                        // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                         $g->zealphp_response->cookie(...$args);
                     }
                 }
-                foreach ($meta['rawcookies'] ?? [] as $args) {
-                    if (!empty($args)) {
+                $metaRawCookies = is_array($meta['rawcookies'] ?? null) ? $meta['rawcookies'] : [];
+                foreach ($metaRawCookies as $args) {
+                    if (is_array($args) && !empty($args)) {
+                        // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                         $g->zealphp_response->rawCookie(...$args);
                     }
                 }
                 // Detect streaming content types (SSE, chunked, event-stream)
-                foreach ($meta['headers'] ?? [] as $pair) {
-                    if (strcasecmp($pair[0], 'Content-Type') === 0 &&
-                        stripos($pair[1], 'text/event-stream') !== false) {
+                foreach ($metaHeaders as $pair) {
+                    if (is_array($pair) && count($pair) >= 2
+                        && strcasecmp((string)$pair[0], 'Content-Type') === 0
+                        && stripos((string)$pair[1], 'text/event-stream') !== false) {
                         $streaming = true;
                     }
                 }
             }
         }
 
+        // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
         if ($streaming && $g->openswoole_response->isWritable()) {
+            // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
             $g->zealphp_response->flush();
             while (!feof($pipes[1])) {
                 $chunk = fread($pipes[1], 8192);
@@ -936,12 +962,16 @@ class App
                     usleep(10000);
                     continue;
                 }
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 if (!$g->openswoole_response->isWritable()) break;
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 $g->openswoole_response->write($chunk);
             }
             fclose($pipes[1]);
             proc_close($process);
+            // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
             if ($g->openswoole_response->isWritable()) {
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 $g->openswoole_response->end();
             }
             $g->_streaming = true;
@@ -951,7 +981,7 @@ class App
         $body = stream_get_contents($pipes[1]);
         fclose($pipes[1]);
         proc_close($process);
-        return $body;
+        return $body === false ? '' : $body;
     }
 
     /**
@@ -985,7 +1015,7 @@ class App
         // returned as string/array/Generator/Response — is preserved instead of
         // being discarded by the outer route's int-return path in dispatchRoute.
         if (self::$fallback_handler !== null) {
-            $method = RequestContext::instance()->server['REQUEST_METHOD'] ?? 'GET';
+            $method = (string)(RequestContext::instance()->server['REQUEST_METHOD'] ?? 'GET');
             return (new ResponseMiddleware())->dispatchRoute(self::$fallback_handler, [], $method);
         }
         return $this->renderError(404);
@@ -1007,7 +1037,8 @@ class App
             $cb = $statusOrHandler;
             $status = 0; // catch-all
         } else {
-            $status = (int)$statusOrHandler;
+            assert(is_int($statusOrHandler));
+            $status = $statusOrHandler;
             $cb = $handler;
         }
         if (!is_callable($cb)) {
@@ -1055,7 +1086,7 @@ class App
             $g->status = $status;
             $g->error_render_depth = ($g->error_render_depth ?? 0) + 1;
             try {
-                $method = $g->server['REQUEST_METHOD'] ?? 'GET';
+                $method = (string)($g->server['REQUEST_METHOD'] ?? 'GET');
                 return (new ResponseMiddleware())->dispatchRoute(
                     $route,
                     ['status' => $status, 'exception' => $exception],
@@ -1079,7 +1110,7 @@ class App
     {
         $g = RequestContext::instance();
         $reason = self::REASON_PHRASES[$status] ?? '';
-        $accept = strtolower($g->server['HTTP_ACCEPT'] ?? '');
+        $accept = strtolower((string)($g->server['HTTP_ACCEPT'] ?? ''));
         $wantsJson = $accept !== ''
             && str_contains($accept, 'application/json')
             && !str_contains($accept, 'text/html');
@@ -1221,7 +1252,7 @@ class App
             default:
                 $pidFile = self::resolvePidFile($flags);
                 if ($command === 'start' && file_exists($pidFile)) {
-                    $pid = (int)trim(file_get_contents($pidFile));
+                    $pid = (int)trim((string)file_get_contents($pidFile));
                     if ($pid > 0 && @posix_kill($pid, 0)) {
                         $port = $flags['port'] ?? (self::$instance ? self::$instance->port : 8080);
                         echo "ZealPHP is already running (pid {$pid}, port {$port})\n";
@@ -1248,13 +1279,15 @@ class App
     private static function resolvePidFile(array $flags): string
     {
         if (!empty($flags['pid_file'])) {
-            return $flags['pid_file'];
+            // @phpstan-ignore-next-line — flags is array<string, mixed>; pid_file value coerced to string at boundary
+            return (string)$flags['pid_file'];
         }
         $envPid = getenv('ZEALPHP_PID_FILE');
         if ($envPid !== false && trim((string)$envPid) !== '') {
             return trim((string)$envPid);
         }
-        $port = $flags['port'] ?? (self::$instance ? self::$instance->port : 8080);
+        // @phpstan-ignore-next-line — flags is array<string, mixed>; port value coerced to int at boundary
+        $port = (int)($flags['port'] ?? (self::$instance ? self::$instance->port : 8080));
         $logDir = getenv('ZEALPHP_LOG_DIR');
         if ($logDir !== false && trim((string)$logDir) !== '') {
             return rtrim(trim((string)$logDir), '/') . "/zealphp_{$port}.pid";
@@ -1275,7 +1308,7 @@ class App
             $say("ZealPHP is not running (no PID file: {$pidFile})\n");
             return;
         }
-        $pid = (int)trim(file_get_contents($pidFile));
+        $pid = (int)trim((string)file_get_contents($pidFile));
         if ($pid <= 0 || !@posix_kill($pid, 0)) {
             $say("ZealPHP is not running (stale PID file)\n");
             @unlink($pidFile);
@@ -1316,10 +1349,10 @@ class App
         if ($logDir === false || trim((string)$logDir) === '') {
             $logDir = is_dir('/tmp/zealphp') ? '/tmp/zealphp' : '/tmp';
         }
-        $pidFiles = glob(rtrim(trim((string)$logDir), '/') . '/zealphp_*.pid');
+        $pidFiles = glob(rtrim(trim((string)$logDir), '/') . '/zealphp_*.pid') ?: [];
         $running = [];
         foreach ($pidFiles as $f) {
-            $pid = (int)trim(file_get_contents($f));
+            $pid = (int)trim((string)file_get_contents($f));
             if ($pid > 0 && @posix_kill($pid, 0)) {
                 $port = preg_match('/zealphp_(\d+)\.pid$/', $f, $m) ? $m[1] : '?';
                 $running[] = ['file' => $f, 'pid' => $pid, 'port' => $port];
@@ -1357,7 +1390,7 @@ class App
         if ($logDir === false || trim((string)$logDir) === '') {
             $logDir = is_dir('/tmp/zealphp') ? '/tmp/zealphp' : '/tmp';
         }
-        $pidFiles = glob(rtrim(trim((string)$logDir), '/') . '/zealphp_*.pid');
+        $pidFiles = glob(rtrim(trim((string)$logDir), '/') . '/zealphp_*.pid') ?: [];
         if (empty($pidFiles)) {
             echo "No ZealPHP instances running\n";
             exit(1);
@@ -1365,7 +1398,7 @@ class App
 
         $found = 0;
         foreach ($pidFiles as $pidFile) {
-            $pid = (int)trim(file_get_contents($pidFile));
+            $pid = (int)trim((string)file_get_contents($pidFile));
             if ($pid <= 0 || !@posix_kill($pid, 0)) {
                 @unlink($pidFile);
                 continue;
@@ -1391,7 +1424,7 @@ class App
             echo "ZealPHP is not running\n";
             exit(1);
         }
-        $pid = (int)trim(file_get_contents($pidFile));
+        $pid = (int)trim((string)file_get_contents($pidFile));
         if ($pid <= 0 || !@posix_kill($pid, 0)) {
             echo "ZealPHP is not running (stale PID file)\n";
             @unlink($pidFile);
@@ -1541,17 +1574,20 @@ HELP;
     {
         $cliOverrides = self::parseCliArgs();
         if (isset($cliOverrides['_host'])) {
-            $this->host = $cliOverrides['_host'];
+            // @phpstan-ignore-next-line — cliOverrides is array<string, mixed>; _host coerced to string at boundary
+            $this->host = (string)$cliOverrides['_host'];
             unset($cliOverrides['_host']);
         }
         if (isset($cliOverrides['_port'])) {
+            // @phpstan-ignore-next-line — cliOverrides is array<string, mixed>; _port coerced to int at boundary
             $this->port = (int)$cliOverrides['_port'];
             unset($cliOverrides['_port']);
             if (is_array($settings) && isset($settings['pid_file'])) {
                 $settings['pid_file'] = preg_replace(
                     '/zealphp_\d+\.pid$/',
                     "zealphp_{$this->port}.pid",
-                    $settings['pid_file']
+                    // @phpstan-ignore-next-line — settings is array<string, mixed>; pid_file coerced to string at boundary
+                    (string)$settings['pid_file']
                 );
             }
         }
@@ -1604,9 +1640,10 @@ HELP;
             // Pass 'log_level' => 0 in $app->run() settings to restore full debug output.
             'log_level' => 4,  // 0=DEBUG 1=TRACE 2=INFO 3=NOTICE 4=WARNING 5=ERROR 6=NONE
         ];
-        $pidFile = $settings['pid_file'] ?? $default_settings['pid_file'];
+        // @phpstan-ignore-next-line — settings is array<string, mixed>; pid_file coerced to string at boundary
+        $pidFile = (string)($settings['pid_file'] ?? $default_settings['pid_file']);
         if (file_exists($pidFile)) {
-            $existingPid = (int)trim(file_get_contents($pidFile));
+            $existingPid = (int)trim((string)file_get_contents($pidFile));
             if ($existingPid > 0 && @posix_kill($existingPid, 0)) {
                 echo "ZealPHP is already running (pid {$existingPid}, port {$this->port})\n";
                 echo "Use 'php app.php stop' to stop, or 'php app.php restart' to restart\n";
@@ -1626,7 +1663,7 @@ HELP;
 
         # Include all files in route directory and its sub directories
 
-        $route_files = glob(self::$cwd."/route/*.php");
+        $route_files = glob(self::$cwd."/route/*.php") ?: [];
         foreach ($route_files as $route_file) {
             elog("Including route file 1: ".str_replace(App::$cwd, '', $route_file));
             include $route_file;
@@ -1664,7 +1701,9 @@ HELP;
 
         if(App::$ignore_php_ext){
             $this->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
-                return App::instance()->renderError(403);
+                $app = App::instance();
+                assert($app !== null);
+                return $app->renderError(403);
             });
         }
 
@@ -1674,7 +1713,9 @@ HELP;
             $this->patternRoute('/(.*/)?\.(?!well-known)[^/]*', [
                 'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD']
             ], function($response) {
-                return App::instance()->renderError(403);
+                $app = App::instance();
+                assert($app !== null);
+                return $app->renderError(403);
             });
         }
         // $this->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
@@ -1699,7 +1740,9 @@ HELP;
                     $__r = App::includeFile($abs_file);
                     if ($__r instanceof \Generator) return $__r;
                 } else {
-                    return App::instance()->renderError(403);
+                    $app = App::instance();
+                    assert($app !== null);
+                    return $app->renderError(403);
                 }
             } else {
                 return $this->invokeFallbackOrNotFound();
@@ -1716,7 +1759,7 @@ HELP;
                 $file = substr($file, 0, -4);
             }
             $abs_file = realpath(self::$cwd."/public/".$file.'.php');
-            if(file_exists($abs_file)){
+            if($abs_file !== false && file_exists($abs_file)){
                 if ($this->includeCheck($abs_file)){
                     $g->server['PHP_SELF'] = '/'.$file.'.php';
                     $g->server['SCRIPT_NAME'] = '/'.$file.'.php';
@@ -1724,7 +1767,9 @@ HELP;
                     $__r = App::includeFile($abs_file);
                     if ($__r instanceof \Generator) return $__r;
                 } else {
-                    return App::instance()->renderError(403);
+                    $app = App::instance();
+                    assert($app !== null);
+                    return $app->renderError(403);
                 }
             } else if(is_dir(self::$cwd."/public/".$file)){
                 $result = $this->serveDirectory($file, $file);
@@ -1748,7 +1793,7 @@ HELP;
                 $uri = substr($uri, 0, -4);
             }
             $abs_file = realpath(self::$cwd."/public/".$dir.'/'.$uri.'.php');
-            if(file_exists($abs_file)){
+            if($abs_file !== false && file_exists($abs_file)){
                 if ($this->includeCheck($abs_file)){
                     $g->server['PHP_SELF'] = '/'.$dir.'/'.$uri.'.php';
                     $g->server['SCRIPT_NAME'] = '/'.$dir.'/'.$uri.'.php';
@@ -1757,7 +1802,9 @@ HELP;
                     $__r = App::includeFile($abs_file);
                     if ($__r instanceof \Generator) return $__r;
                 } else {
-                    return App::instance()->renderError(403);
+                    $app = App::instance();
+                    assert($app !== null);
+                    return $app->renderError(403);
                 }
             } else if(is_dir(self::$cwd."/public/".$dir.'/'.$uri)){
                 $result = $this->serveDirectory($dir.'/'.$uri, $dir.'/'.$uri);
@@ -1782,7 +1829,7 @@ HELP;
                     elog("Task handler not found: $handler", "error");
                     $result = false;
                 }
-                elog(json_encode([$data, $result]), "task");
+                elog((string)json_encode([$data, $result]), "task");
                 return [
                     'task' => $data,
                     'result' => $result
@@ -1790,12 +1837,13 @@ HELP;
             });
 
             $server->on('finish', function ($server, $task_id, $data) {
-                elog(json_encode($data), "task_task");
+                elog((string)json_encode($data), "task_task");
             });
         }
 
         $SessionManager = self::$superglobals ?  'ZealPHP\Session\SessionManager' : 'ZealPHP\Session\CoSessionManager';
 
+        assert(self::$middleware_stack !== null);
         foreach (array_reverse(self::$middleware_wait_stack) as $middleware) {
             elog("Registering middleware: ".get_class($middleware));
             self::$middleware_stack = self::$middleware_stack->add($middleware);
@@ -1841,7 +1889,9 @@ HELP;
             $serverRequest  = new \ZealPHP\HTTP\LazyServerRequest($request->parent);
 
             try {
-                $serverResponse = App::middleware()->handle($serverRequest);
+                $mw = App::middleware();
+                assert($mw !== null);
+                $serverResponse = $mw->handle($serverRequest);
 
                 // Per-request shutdown functions (Apache mod_php parity). Run AFTER
                 // middleware returns but BEFORE emit, so a shutdown function can
@@ -1860,11 +1910,13 @@ HELP;
                     if ($extra !== false && $extra !== '') {
                         $combined = (string)$serverResponse->getBody() . $extra;
                         $bodyRes = fopen('php://temp', 'r+');
-                        fwrite($bodyRes, $combined);
-                        rewind($bodyRes);
-                        $serverResponse = $serverResponse->withBody(
-                            new \OpenSwoole\Core\Psr\Stream($bodyRes)
-                        );
+                        if ($bodyRes !== false) {
+                            fwrite($bodyRes, $combined);
+                            rewind($bodyRes);
+                            $serverResponse = $serverResponse->withBody(
+                                new \OpenSwoole\Core\Psr\Stream($bodyRes)
+                            );
+                        }
                     }
                     if ($g->status !== null && $g->status !== $beforeStatus
                         && $g->status !== $serverResponse->getStatusCode()) {
@@ -1884,7 +1936,9 @@ HELP;
                     // Render via App::renderError so a user-registered 500 handler
                     // (Apache ErrorDocument equivalent) runs even at the top level.
                     try {
-                        $errResp = App::instance()->renderError(500, $e);
+                        $app = App::instance();
+                        assert($app !== null);
+                        $errResp = $app->renderError(500, $e);
                         $response->parent->status($errResp->getStatusCode());
                         foreach ($errResp->getHeaders() as $name => $values) {
                             foreach ($values as $value) {
@@ -1935,6 +1989,7 @@ HELP;
             if (\ZealPHP\env_flag('ZEALPHP_RECYCLE_LOG', true) === false) {
                 return;
             }
+            // @phpstan-ignore-next-line — $server is typed mixed by OpenSwoole event-handler signature; method_exists guards the call
             $stats = method_exists($server, 'stats') ? @$server->stats() : [];
             $reqCount = (int)($stats['worker_request_count'] ?? $stats['request_count'] ?? 0);
             $peakMb = round(memory_get_peak_usage(true) / 1048576, 1);
@@ -1964,15 +2019,17 @@ HELP;
             $sessionName = function_exists('ZealPHP\\Session\\zeal_session_name')
                 ? \ZealPHP\Session\zeal_session_name()
                 : 'PHPSESSID';
-            if (isset($request->cookie[$sessionName])) {
-                $g->cookie[$sessionName] = $request->cookie[$sessionName];
+            if (is_array($request->cookie) && isset($request->cookie[$sessionName])) {
+                $g->cookie[(string)$sessionName] = $request->cookie[$sessionName];
                 \ZealPHP\Session\zeal_session_id($request->cookie[$sessionName]);
                 \ZealPHP\Session\zeal_session_start();
                 $g->_session_started = true;
             }
 
-            $route = App::instance()->wsRoutes()[$path] ?? null;
-            if ($route && $route['open']) {
+            $app = App::instance();
+            assert($app !== null);
+            $route = $app->wsRoutes()[$path] ?? null;
+            if ($route !== null && $route['open'] !== null) {
                 ($route['open'])($server, $request, $g);
             }
 
@@ -1992,8 +2049,10 @@ HELP;
             }
             $path  = $wsFdMap[$frame->fd] ?? null;
             $g     = RequestContext::instance();
-            $route = $path ? (App::instance()->wsRoutes()[$path] ?? null) : null;
-            if ($route && $route['message']) {
+            $app = App::instance();
+            assert($app !== null);
+            $route = $path ? ($app->wsRoutes()[$path] ?? null) : null;
+            if ($route !== null) {
                 ($route['message'])($server, $frame, $g);
             }
         });
@@ -2002,8 +2061,10 @@ HELP;
             $path  = $wsFdMap[$fd] ?? null;
             unset($wsFdMap[$fd]);
             $g     = RequestContext::instance();
-            $route = $path ? (App::instance()->wsRoutes()[$path] ?? null) : null;
-            if ($route && $route['close']) {
+            $app = App::instance();
+            assert($app !== null);
+            $route = $path ? ($app->wsRoutes()[$path] ?? null) : null;
+            if ($route !== null && $route['close'] !== null) {
                 ($route['close'])($server, $fd, $g);
             }
         });
@@ -2037,9 +2098,13 @@ class ResponseMiddleware implements MiddlewareInterface
     {
         $g = RequestContext::instance();
         $handler = $route['handler'];
+        assert(is_callable($handler));
+        $paramMap = $route['param_map'];
+        assert(is_array($paramMap));
 
         $invokeArgs = [];
-        foreach ($route['param_map'] as $param) {
+        foreach ($paramMap as $param) {
+            assert(is_array($param));
             $pname = $param['name'];
             if (isset($params[$pname])) {
                 $invokeArgs[] = $params[$pname];
@@ -2063,15 +2128,22 @@ class ResponseMiddleware implements MiddlewareInterface
             if ($object instanceof \Generator) {
                 // Capture status BEFORE flush — Response::flush() clears g->status.
                 $streamStatus = $g->status ?? 200;
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 $g->openswoole_response->status($streamStatus);
+                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->header('Accept-Ranges', 'none');
+                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->flush();
                 foreach ($object as $chunk) {
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     if (!$g->openswoole_response->isWritable()) break;
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     $g->openswoole_response->write((string)$chunk);
                     \OpenSwoole\Coroutine::sleep(0);
                 }
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 if ($g->openswoole_response->isWritable()) {
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     $g->openswoole_response->end();
                 }
                 return (new Response('', $streamStatus));
@@ -2088,7 +2160,7 @@ class ResponseMiddleware implements MiddlewareInterface
                 $status = $g->status ?? 200;
                 if (is_array($object) or is_object($object)) {
                     response_add_header('Content-Type', 'application/json');
-                    $body = json_encode($object);
+                    $body = (string)json_encode($object);
                 } else if (is_string($object)) {
                     $body = $object;
                 } else {
@@ -2106,7 +2178,9 @@ class ResponseMiddleware implements MiddlewareInterface
                 if($e->getStatus() == 0){
                     return (new Response(''))->withStatus($g->status ?? 200);
                 } else {
-                    return App::instance()->renderError(500);
+                    $app = App::instance();
+                    assert($app !== null);
+                    return $app->renderError(500);
                 }
             }
             // If this dispatch was itself invoked by renderError (error handler
@@ -2121,11 +2195,13 @@ class ResponseMiddleware implements MiddlewareInterface
             if (!empty($excStack)) {
                 ob_start();
                 try { $excStack[count($excStack) - 1]($e); } catch (\Throwable $e2) { /* swallow */ }
-                $body = ob_get_clean();
+                $body = (string)ob_get_clean();
                 return (new Response($body))->withStatus($g->status ?? 500);
             }
             elog(jTraceEx($e), "error");
-            return App::instance()->renderError(500, $e);
+            $app = App::instance();
+            assert($app !== null);
+            return $app->renderError(500, $e);
         }
     }
 
@@ -2141,9 +2217,13 @@ class ResponseMiddleware implements MiddlewareInterface
 
         $g = RequestContext::instance();
         $handler = $route['handler'];
+        assert(is_callable($handler));
+        $paramMap = $route['param_map'];
+        assert(is_array($paramMap));
 
         $invokeArgs = [];
-        foreach ($route['param_map'] as $param) {
+        foreach ($paramMap as $param) {
+            assert(is_array($param));
             $pname = $param['name'];
             if (isset($params[$pname])) {
                 $invokeArgs[] = $params[$pname];
@@ -2166,15 +2246,22 @@ class ResponseMiddleware implements MiddlewareInterface
             if ($object instanceof \Generator) {
                 ob_end_clean();
                 $streamStatus = $g->status ?? 200;
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 $g->openswoole_response->status($streamStatus);
+                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->header('Accept-Ranges', 'none');
+                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->flush();
                 foreach ($object as $chunk) {
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     if (!$g->openswoole_response->isWritable()) break;
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     $g->openswoole_response->write((string)$chunk);
                     \OpenSwoole\Coroutine::sleep(0);
                 }
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 if ($g->openswoole_response->isWritable()) {
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     $g->openswoole_response->end();
                 }
                 return (new Response('', $streamStatus));
@@ -2201,7 +2288,9 @@ class ResponseMiddleware implements MiddlewareInterface
                 // through renderError so any registered custom error page fires —
                 // Apache's `ErrorDocument` behavior for unhandled status codes.
                 if ($istatus >= 400 && $istatus < 600) {
-                    return App::instance()->renderError($istatus);
+                    $app = App::instance();
+                    assert($app !== null);
+                    return $app->renderError($istatus);
                 }
                 return (new Response('', $istatus));
             }
@@ -2215,9 +2304,11 @@ class ResponseMiddleware implements MiddlewareInterface
 
             if (is_array($object) || is_object($object)) {
                 ob_end_clean();
-                $body = json_encode($object);
+                $body = (string)json_encode($object);
+                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->header('Content-Type', 'application/json');
                 if ($method === 'HEAD') {
+                    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                     $g->zealphp_response->header('Content-Length', (string)strlen($body));
                     return (new Response('', $status));
                 }
@@ -2227,6 +2318,7 @@ class ResponseMiddleware implements MiddlewareInterface
             if (is_string($object)) {
                 ob_end_clean();
                 if ($method === 'HEAD') {
+                    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                     $g->zealphp_response->header('Content-Length', (string)strlen($object));
                     return (new Response('', $status));
                 }
@@ -2234,8 +2326,9 @@ class ResponseMiddleware implements MiddlewareInterface
             }
 
             // void + echo — only path that needs the buffered output
-            $buffer = ob_get_clean();
+            $buffer = (string)ob_get_clean();
             if ($method === 'HEAD') {
+                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->header('Content-Length', (string)strlen($buffer));
                 return (new Response('', $status));
             }
@@ -2244,10 +2337,12 @@ class ResponseMiddleware implements MiddlewareInterface
             if($e instanceof \OpenSwoole\ExitException){
                 if($e->getStatus() == 0){
                     elog("HTTP Status: ".$g->status);
-                    return (new Response(ob_get_clean()))->withStatus($g->status ?? 200);
+                    return (new Response((string)ob_get_clean()))->withStatus($g->status ?? 200);
                 } else {
                     @ob_end_clean();
-                    return App::instance()->renderError(500);
+                    $app = App::instance();
+                    assert($app !== null);
+                    return $app->renderError(500);
                 }
             }
             // Inside an error-render recursion — rethrow so the outer renderError
@@ -2262,32 +2357,36 @@ class ResponseMiddleware implements MiddlewareInterface
                 if (ob_get_level() > 0) { @ob_clean(); }
                 ob_start();
                 try { $excStack[count($excStack) - 1]($e); } catch (\Throwable $e2) { /* swallow */ }
-                $body = ob_get_clean();
+                $body = (string)ob_get_clean();
                 @ob_end_clean();
                 return (new Response($body))->withStatus($g->status ?? 500);
             }
             @ob_end_clean();
             elog(jTraceEx($e), "error");
-            return App::instance()->renderError(500, $e);
+            $app = App::instance();
+            assert($app !== null);
+            return $app->renderError(500, $e);
         }
     }
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $g = RequestContext::instance();
-        $uri = $g->server['REQUEST_URI'];
-        $method = $g->server['REQUEST_METHOD'];
+        $uri = (string)$g->server['REQUEST_URI'];
+        $method = (string)$g->server['REQUEST_METHOD'];
         $app = App::instance();
+        assert($app !== null);
 
         // URL-decoded traversal/null-byte rejection BEFORE route matching.
         // Apache rejects these at the URI parse layer; we do the same so encoded
         // attacks (%2e%2e, %00, backslash) can't survive past pattern matching.
-        $path = parse_url($uri, PHP_URL_PATH) ?? $uri;
+        $parsedPath = parse_url($uri, PHP_URL_PATH);
+        $path = is_string($parsedPath) ? $parsedPath : $uri;
         $decoded = rawurldecode($path);
         if (strpos($decoded, "\0") !== false
             || strpos($decoded, '\\') !== false
             || preg_match('#(^|/)\.\.(/|$)#', $decoded)) {
-            return App::instance()->renderError(400);
+            return $app->renderError(400);
         }
 
         // Apache PATH_INFO — `/script.php/extra/path` exposes `/extra/path` to
@@ -2349,7 +2448,7 @@ class ResponseMiddleware implements MiddlewareInterface
         if ($fallback !== null) {
             return $this->dispatchRoute($fallback, [], $method);
         }
-        return App::instance()->renderError(404);
+        return $app->renderError(404);
     }
 }
 

@@ -111,7 +111,7 @@ class SessionManager
         $g->_streaming               = null;
         $g->ignore_user_abort_state  = 0;
 
-        $sessionName = session_name();
+        $sessionName = session_name() ?: 'PHPSESSID';
         if ($this->useCookies && isset($request->cookie[$sessionName])) {
             $sessionId = $request->cookie[$sessionName];
         } else if (!$this->useOnlyCookies && isset($request->get[$sessionName])) {

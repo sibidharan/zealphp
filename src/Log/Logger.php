@@ -34,7 +34,8 @@ class Logger extends AbstractLogger
     public function log($level, \Stringable|string $message, array $context = []): void
     {
         if (!isset(self::LEVEL_PRIORITY[$level])) {
-            throw new InvalidArgumentException("Unknown log level: {$level}");
+            $levelDisplay = is_scalar($level) ? (string)$level : gettype($level);
+            throw new InvalidArgumentException("Unknown log level: {$levelDisplay}");
         }
         if (self::LEVEL_PRIORITY[$level] < self::LEVEL_PRIORITY[$this->minLevel]) {
             return;

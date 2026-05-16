@@ -38,7 +38,8 @@ function zeal_session_start(): bool
 
     // Ensure session save path exists (cached per path — directory never disappears mid-run)
     static $verified_paths = [];
-    $save_path = $g->session_params['save_path'];
+    // @phpstan-ignore-next-line — session_params is array<string, mixed>; save_path coerced to string at boundary
+    $save_path = (string)$g->session_params['save_path'];
     if (!isset($verified_paths[$save_path])) {
         if (!is_dir($save_path)) {
             mkdir($save_path, 0700, true);
@@ -87,12 +88,14 @@ function zeal_session_id($id = null)
         $g->session_params['name'] = 'PHPSESSID';
     }
 
-    $session_name = $g->session_params['name'];
+    // @phpstan-ignore-next-line — session_params is array<string, mixed>; name coerced to string at boundary
+    $session_name = (string)$g->session_params['name'];
 
     if ($id === null) {
         // Get session ID from cookie or generate new one
         if (isset($g->cookie[$session_name])) {
-            return $g->cookie[$session_name];
+            // @phpstan-ignore-next-line — cookie is array<string, mixed>; session id coerced to string at boundary
+            return (string)$g->cookie[$session_name];
         } else {
             $new_id = session_create_id();
             $g->cookie[$session_name] = $new_id;
@@ -119,14 +122,15 @@ function zeal_session_status(): int {
  * Get or set the session name
  *
  * @param string|null $name
- * @return string|false
+ * @return string
  */
 function zeal_session_name($name = null)
 {
     $g = RequestContext::instance();
 
     if ($name === null) {
-        return $g->session_params['name'] ?? 'PHPSESSID';
+        // @phpstan-ignore-next-line — session_params is array<string, mixed>; name coerced to string at boundary
+        return (string)($g->session_params['name'] ?? 'PHPSESSID');
     } else {
         $g->session_params['name'] = $name;
         return $name;
@@ -225,7 +229,12 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
 function zeal_session_get_cookie_params(): array
 {
     $g = RequestContext::instance();
-    return $g->session_params['cookie_params'] ?? [
+    $params = $g->session_params['cookie_params'] ?? null;
+    if (is_array($params)) {
+        // @phpstan-ignore-next-line — session_params is array<string, mixed>; runtime invariant: cookie_params matches shape
+        return $params;
+    }
+    return [
         'lifetime' => 0,
         'path' => '/',
         'domain' => '',
@@ -350,14 +359,15 @@ function zeal_session_create_id($prefix = '')
 
 /**
  * @param string|null $path
- * @return string|false
+ * @return string
  */
 function zeal_session_save_path($path = null)
 {
     $g = RequestContext::instance();
 
     if ($path === null) {
-        return $g->session_params['save_path'] ?? '/var/lib/php/sessions';
+        // @phpstan-ignore-next-line — session_params is array<string, mixed>; save_path coerced to string at boundary
+        return (string)($g->session_params['save_path'] ?? '/var/lib/php/sessions');
     } else {
         $g->session_params['save_path'] = $path;
         return $path;

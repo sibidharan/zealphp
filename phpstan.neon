@@ -1,5 +1,5 @@
 parameters:
-    level: 6
+    level: 9
     paths:
         - src
     excludePaths:
@@ -14,6 +14,16 @@ parameters:
         -
             message: '#^Static method OpenSwoole\\Timer::clear\(\) invoked with 1 parameter, 0 required\.$#'
             path: src/App.php
+        # OpenSwoole\Timer::tick()/after() stubs claim bool|int return but at
+        # runtime ext-openswoole always returns the timer id (int).
+        -
+            message: '#^Method ZealPHP\\App::(tick|after)\(\) should return int but returns bool\|int\.$#'
+            path: src/App.php
+        # OpenSwoole\Atomic::add()/sub() stubs claim bool|int return but at
+        # runtime ext-openswoole always returns the new value (int).
+        -
+            message: '#^Method ZealPHP\\Counter::(increment|decrement)\(\) should return int but returns bool\|int\.$#'
+            path: src/Counter.php
         # OpenSwoole\Runtime::enableCoroutine() accepts int flag (HOOK_ALL etc.)
         # at the C level; ide-helper stub declares it as bool.
         -
@@ -27,9 +37,6 @@ parameters:
         # is the polling, not the stub fiction.
         -
             message: '#^Negated boolean expression is always false\.$#'
-            path: src/App.php
-        -
-            message: '#^If condition is always true\.$#'
             path: src/App.php
         # ResponseMiddleware re-emits $g->status after handlers run; PHPStan
         # narrows from the constant ($beforeStatus = 200) and reports the

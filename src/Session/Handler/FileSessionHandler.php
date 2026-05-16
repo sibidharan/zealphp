@@ -28,7 +28,8 @@ class FileSessionHandler implements \SessionHandlerInterface
     {
         $file = "$this->savePath/sess_$sessionId";
         if (file_exists($file)) {
-            return file_get_contents($file);
+            $contents = file_get_contents($file);
+            return $contents === false ? '' : $contents;
         }
         return '';
     }
@@ -59,8 +60,10 @@ class FileSessionHandler implements \SessionHandlerInterface
     // Garbage collection
     public function gc($maxLifetime): int
     {
-        foreach (glob("$this->savePath/sess_*") as $file) {
-            if (filemtime($file) + $maxLifetime < time()) {
+        $files = glob("$this->savePath/sess_*") ?: [];
+        foreach ($files as $file) {
+            $mtime = filemtime($file);
+            if ($mtime !== false && $mtime + $maxLifetime < time()) {
                 unlink($file);
             }
         }

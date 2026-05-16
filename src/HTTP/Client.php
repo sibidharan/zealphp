@@ -62,7 +62,7 @@ class Client implements ClientInterface
 
         $rawResponse = curl_exec($ch);
 
-        if ($rawResponse === false) {
+        if ($rawResponse === false || $rawResponse === true) {
             $error = curl_error($ch);
             $errno = curl_errno($ch);
             curl_close($ch);
@@ -78,8 +78,8 @@ class Client implements ClientInterface
 
         // When following redirects, multiple header blocks may be present.
         // Parse only the last one (the final response).
-        $headerBlocks = preg_split('/\r\n\r\n/', trim($rawHeaders));
-        $lastBlock = end($headerBlocks);
+        $headerBlocks = preg_split('/\r\n\r\n/', trim($rawHeaders)) ?: [];
+        $lastBlock = (string)end($headerBlocks);
 
         $responseHeaders = [];
         $reasonPhrase = '';

@@ -4,6 +4,23 @@ namespace ZealPHP\HTTP;
 
 use function ZealPHP\response_set_status;
 
+/**
+ * Thin wrapper around \OpenSwoole\Http\Response. The __call/__get/__set proxies
+ * forward to the underlying response — these @method annotations expose the
+ * forwarded signatures to static analysis so call sites are statically typed
+ * instead of treated as mixed.
+ *
+ * @method bool isWritable()
+ * @method bool write(string $content)
+ * @method int|false sendfile(string $filename, int $offset = 0, int $length = 0)
+ * @method bool detach()
+ * @method bool trailer(string $key, string $value)
+ * @method void upgrade()
+ * @method bool push(string $filename, int $opcode = 1, bool $finish = true)
+ * @method bool recv(float $timeout = 0)
+ * @method static \OpenSwoole\Http\Response|false create(int $fd = -1)
+ * @method void close()
+ */
 class Response
 {
     public \OpenSwoole\Http\Response $parent;
@@ -40,6 +57,7 @@ class Response
     public function __call($name, $arguments)
     {
         if (method_exists($this->parent, $name)) {
+            // @phpstan-ignore-next-line — __call proxy; signature is dynamic by design
             return call_user_func_array([$this->parent, $name], $arguments);
         }
         throw new \BadMethodCallException("Method {$name} does not exist");
@@ -75,6 +93,7 @@ class Response
     {
         \ZealPHP\elog($name);
         if($name == 'parent'){
+            assert($value instanceof \OpenSwoole\Http\Response);
             $this->parent = $value;
             return;
         }
@@ -102,7 +121,7 @@ class Response
     {
         $this->header('Content-Type', 'application/json');
         $this->status($status);
-        $this->end(json_encode($data));
+        $this->end((string)json_encode($data));
     }
 
     // You can override methods if necessary or add more custom methods
@@ -283,6 +302,7 @@ class Response
 
         $this->g->_streaming = true;
         $total = filesize($path);
+        if ($total === false) { $total = 0; }
         $mime = mime_content_type($path) ?: 'application/octet-stream';
         if ($mime === 'text/plain' || $mime === 'application/octet-stream') {
             $mime = match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
@@ -313,6 +333,7 @@ class Response
         // Conditional GET — Apache-style ETag (inode-size-mtime as weak validator)
         // + If-None-Match / If-Modified-Since handling. Returns 304 on match.
         $mtime = filemtime($path);
+        if ($mtime === false) { $mtime = 0; }
         $etag = 'W/"' . dechex($mtime) . '-' . dechex($total) . '"';
         $lastModified = gmdate('D, d M Y H:i:s', $mtime) . ' GMT';
         $this->header('ETag', $etag);

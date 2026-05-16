@@ -40,7 +40,7 @@ use function ZealPHP\elog;
 
 // Custom Stream Wrapper for php://input with passthrough
 class IOStreamWrapper {
-    /** @var resource|object|null */
+    /** @var resource|null */
     public $context;
     private int $position = 0;
     private string $input = '';
@@ -70,7 +70,8 @@ class IOStreamWrapper {
         if ($path === 'php://input') {
             elog("stream_open: $path, $mode, $options", "streamio");
             $g = \ZealPHP\RequestContext::instance();
-            $content = $g->zealphp_request->parent->getContent();
+            // @phpstan-ignore-next-line — zealphp_request set by CoSessionManager before any request handler runs
+            $content = (string)$g->zealphp_request->parent->getContent();
             $stream = fopen('php://memory', 'r+');
             if ($stream === false) {
                 elog("Failed to open php://memory for php://input");
@@ -102,7 +103,8 @@ class IOStreamWrapper {
      * @return string|false
      */
     public function stream_read($count) {
-        if ($this->context) {
+        if ($this->context !== null) {
+            if ($count < 1) { return ''; }
             // Passthrough read for other streams
             return fread($this->context, $count);
         } else {
@@ -173,15 +175,10 @@ class IOStreamWrapper {
      * @param int $whence
      */
     public function stream_seek($offset, $whence = SEEK_SET): bool {
-        if ($this->context) {
+        if ($this->context !== null) {
             // Passthrough seek for other streams (resource)
             if (is_resource($this->context)) {
                 return fseek($this->context, $offset, $whence) === 0;
-            }
-            // Passthrough seek for PSR Stream instance
-            if (is_object($this->context) && method_exists($this->context, 'seek')) {
-                $this->context->seek($offset, $whence);
-                return true;
             }
             return false;
         }
@@ -231,7 +228,8 @@ class IOStreamWrapper {
      * @param int $new_size
      */
     public function stream_truncate($new_size): bool {
-        if ($this->context) {
+        if ($this->context !== null) {
+            if ($new_size < 0) { return false; }
             // Passthrough truncate for other streams
             return ftruncate($this->context, $new_size);
         }
@@ -297,9 +295,8 @@ class IOStreamWrapper {
      * @return mixed
      */
     public function __get($name) {
-        if ($this->context) {
-            return $this->context->$name;
-        }
+        // $context is a resource — magic methods don't apply. Kept as no-op for
+        // stream wrapper interface conformance (PHP may probe these names).
         return null;
     }
 
@@ -309,10 +306,8 @@ class IOStreamWrapper {
      * @return mixed
      */
     public function __call($name, $args) {
-        if ($this->context) {
-            return $this->context->$name(...$args);
-            // return call_user_func_array([, $name], $args);
-        }
+        // $context is a resource — magic methods don't apply. Kept as no-op for
+        // stream wrapper interface conformance (PHP may probe these names).
         return null;
     }
 

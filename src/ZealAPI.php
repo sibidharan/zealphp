@@ -107,7 +107,7 @@ class ZealAPI extends REST
     {
         $g = RequestContext::instance();
         $module = $module ? '/'.$module : '';
-        $func = basename($request);
+        $func = basename($request ?? '');
 
         if ($module !== '' && !preg_match('/^\/[a-zA-Z0-9_\/-]+$/', $module)) {
             $this->response($this->json(['error' => 'invalid_module']), 400);
@@ -247,8 +247,9 @@ class ZealAPI extends REST
     public function paramsExists($parms = array())
     {
         $exists = true;
+        $req = is_array($this->_request) ? $this->_request : [];
         foreach ($parms as $param) {
-            if (!array_key_exists($param, $this->_request)) {
+            if (!array_key_exists($param, $req)) {
                 $exists = false;
             }
         }
@@ -360,7 +361,7 @@ class ZealAPI extends REST
     private function json($data)
     {
         if (is_array($data)) {
-            return json_encode($data, JSON_PRETTY_PRINT);
+            return (string)json_encode($data, JSON_PRETTY_PRINT);
         } else {
             return "{}";
         }

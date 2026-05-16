@@ -234,7 +234,8 @@ function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
             $handle = @fopen($path, 'ab');
             if ($handle === false) {
                 while (($message = $queue->pop()) !== false) {
-                    error_log($message);
+                    // @phpstan-ignore-next-line — OpenSwoole\Coroutine\Channel::pop() returns mixed
+                    error_log((string)$message);
                 }
                 return;
             }
@@ -244,7 +245,8 @@ function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
                 if ($message === '') {
                     continue;
                 }
-                fwrite($handle, $message);
+                // @phpstan-ignore-next-line — OpenSwoole\Coroutine\Channel::pop() returns mixed
+                fwrite($handle, (string)$message);
             }
             fclose($handle);
         });
@@ -394,7 +396,7 @@ function jTraceEx($e, $seen=null): string
 function zapi(): string {
     $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
     $caller = array_shift($bt);
-    return basename($caller['file'], '.php');
+    return basename($caller['file'] ?? '(unknown)', '.php');
 }
 
 /**
@@ -414,8 +416,9 @@ function elog($message, $tag = "*", $limit = 1): void {
     $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, $limit);
     $caller = $bt[0];
     $date = date('d-m-Y H:i:s') . substr((string)microtime(), 1, 6);
-    $relative_path = str_replace(App::$cwd, '', $caller['file']);
-    log_write("┌[$tag] $date $relative_path:$caller[line]\n└❯ $message \n");
+    $relative_path = str_replace(App::$cwd, '', $caller['file'] ?? '(unknown)');
+    $callerLine = $caller['line'] ?? 0;
+    log_write("┌[$tag] $date $relative_path:$callerLine\n└❯ $message \n");
 }
 
 /**
@@ -433,7 +436,8 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false): vo
     if (!debug_logging_enabled()) {
         return;
     }
-    if ($filter != null and !StringUtils::str_contains($_SERVER['REQUEST_URI'], $filter)) {
+    // @phpstan-ignore-next-line — $filter is documented mixed; coerced to string at boundary
+    if ($filter != null and !StringUtils::str_contains((string)($_SERVER['REQUEST_URI'] ?? ''), (string)$filter)) {
         return;
     }
     if ($filter != null and $invert_filter) {
@@ -458,14 +462,19 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false): vo
     if (is_array($log)) {
         $log = json_encode($log);
     }
-    $unique_req_id = $g->session['UNIQUE_REQUEST_ID'];
-    $request_uri = $g->server['REQUEST_URI'];
+    // @phpstan-ignore-next-line — session map is array<string, mixed>; UNIQUE_REQUEST_ID coerced to string at boundary
+    $unique_req_id = (string)($g->session['UNIQUE_REQUEST_ID'] ?? '');
+    $request_uri = $g->server['REQUEST_URI'] ?? '';
+    $callerFile = $caller['file'] ?? '(unknown)';
+    $callerLine = $caller['line'] ?? 0;
+    // @phpstan-ignore-next-line — $log is documented mixed (string|array|object); coerced via json_encode above
+    $msg = indent((string)$log);
     log_write(
         "[*] #{$tag} [{$date}] Request ID: {$unique_req_id}\n" .
             "    URL: {$request_uri}\n" .
-            "    Caller: {$caller['file']}:{$caller['line']}\n" .
+            "    Caller: {$callerFile}:{$callerLine}\n" .
             "    Timer: " . get_current_render_time() . " sec\n" .
-            "    Message:\n" . indent($log) . "\n\n",
+            "    Message:\n" . $msg . "\n\n",
         'zlog'
     );
 }
@@ -478,8 +487,8 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false): vo
 function get_config($key)
 {
     global $__site_config;
-    $array = json_decode($__site_config, true);
-    if (isset($array[$key])) {
+    $array = json_decode((string)$__site_config, true);
+    if (is_array($array) && isset($array[$key])) {
         return $array[$key];
     } else {
         return null;
@@ -533,9 +542,9 @@ function indent($string, $indend = 4)
  */
 function purify_array($obj)
 {
-    $h = json_decode(json_encode($obj), true);
+    $h = json_decode((string)json_encode($obj), true);
     //print_r($h);
-    return empty($h) ? [] : $h;
+    return is_array($h) ? $h : [];
 }
 
 
@@ -601,6 +610,7 @@ function response_add_header($key, $value, $ucwords = true): void
 {
     $g = RequestContext::instance();
     // elog("response_add_header: $key ".var_export($value, true));
+    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any request handler runs
     $g->zealphp_response->header($key, $value, $ucwords);
 }
 
@@ -661,6 +671,7 @@ function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $s
         return false;
     }
     $g = RequestContext::instance();
+    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any request handler runs
     $g->zealphp_response->cookie($name, $value, $expire, $path, $domain, $secure, $httponly, $samesite);
     return true;
 }
@@ -719,6 +730,7 @@ function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "",
         $cookie .= "; httponly";
     }
     $g = RequestContext::instance();
+    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any request handler runs
     $g->zealphp_response->rawCookie($name, $value, $expire, $path, $domain, $secure, $httponly);
     return true;
 }
@@ -849,7 +861,7 @@ function header_remove(?string $name = null): void
 function flush(): void
 {
     $g = RequestContext::instance();
-    if (!isset($g->openswoole_response) || $g->openswoole_response === null) {
+    if ($g->openswoole_response === null) {
         return;
     }
     if (!$g->openswoole_response->isWritable()) {

@@ -102,6 +102,7 @@ class CorsMiddleware implements MiddlewareInterface
         $allowedOrigin = $this->resolveOrigin($origin);
         $g = RequestContext::instance();
         $resp = $g->zealphp_response;
+        assert($resp !== null);
 
         if ($request->getMethod() === 'OPTIONS' && $origin !== '') {
             $g->status = 204;

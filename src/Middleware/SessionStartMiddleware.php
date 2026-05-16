@@ -26,8 +26,10 @@ class SessionStartMiddleware implements MiddlewareInterface
 
             $sessionName = zeal_session_name();
             $sessionId = zeal_session_id();
+            if ($sessionId === false) { $sessionId = ''; }
             $cookie = zeal_session_get_cookie_params();
             \ZealPHP\elog("SessionStart: id=$sessionId secure=" . ($cookie['secure'] ? 'true' : 'false'));
+            assert($g->openswoole_response !== null);
             $g->openswoole_response->cookie(
                 $sessionName,
                 $sessionId,

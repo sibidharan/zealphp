@@ -22,7 +22,7 @@ class RequestContext
     // Declared properties bypass __get/__set — direct slot access (~2ns vs
     // ~50ns through magic methods). This is the entire property contract:
     // any undeclared write is a typo or a misuse and is rejected by __set.
-    /** @var array<string, mixed> */
+    /** @var array<string, scalar|null> */
     public array $server = [];
     /** @var array<string, mixed> */
     public array $get = [];
@@ -41,9 +41,13 @@ class RequestContext
     public ?int $status = null;
     public ?bool $_streaming = null;
     public ?bool $_session_started = null;
+    /** @var \ZealPHP\HTTP\Request|null In tests, this slot may hold a mock — see tests/Unit/RestTest.php */
     public mixed $zealphp_request = null;
+    /** @var \ZealPHP\HTTP\Response|null In tests, this slot may hold a mock — see tests/Unit/RestTest.php */
     public mixed $zealphp_response = null;
+    /** @var \OpenSwoole\Http\Request|null In tests, this slot may hold a mock — see tests/Unit/RestTest.php */
     public mixed $openswoole_request = null;
+    /** @var \OpenSwoole\Http\Response|null In tests, this slot may hold a mock — see tests/Unit/RestTest.php */
     public mixed $openswoole_response = null;
     // Legacy Apache mod_php shim state — only populated by the apache_*()
     // functions in src/utils.php, used by CGI bridge legacy code. Lazy.
@@ -53,7 +57,7 @@ class RequestContext
     public array $error_handlers_stack = [];
     /** @var array<int, callable> stack of callables */
     public array $exception_handlers_stack = [];
-    /** @var array<int, array{0: callable, 1: array<int, mixed>}> queue of [callable, args] */
+    /** @var array<int, array{0: callable, 1: array<int|string, mixed>}> queue of [callable, args] */
     public array $shutdown_functions = [];
     public ?int $error_reporting_level = null;
     public ?int $error_status = null;

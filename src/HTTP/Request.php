@@ -1,9 +1,17 @@
 <?php
 
-namespace ZealPHP\HTTP; 
-
 namespace ZealPHP\HTTP;
 
+/**
+ * @method string|false getContent()
+ * @method string|null rawContent()
+ * @method array<string, string>|false getHeader()
+ * @method array<string, string>|false getMethod()
+ * @method string|false getData()
+ * @method bool create(array<string, mixed> $settings = [])
+ * @method bool parse(string $data)
+ * @method bool isCompleted()
+ */
 class Request extends \OpenSwoole\HTTP\Request
 {
     public \OpenSwoole\Http\Request $parent;
@@ -50,6 +58,7 @@ class Request extends \OpenSwoole\HTTP\Request
     public function __call($name, $arguments)
     {
         if (method_exists($this->parent, $name)) {
+            // @phpstan-ignore-next-line — __call proxy; signature is dynamic by design
             return call_user_func_array([$this->parent, $name], $arguments);
         }
         throw new \BadMethodCallException("Method {$name} does not exist");

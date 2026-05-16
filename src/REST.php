@@ -33,7 +33,9 @@ class REST {
     public function response($data, $status): void {
         $this->_code = ($status)?$status:200;
         $this->setHeaders();
+        // @phpstan-ignore-next-line — $_response is documented mixed for legacy compatibility
         $this->_response->status($this->_code);
+        // @phpstan-ignore-next-line — $data is documented mixed; echo coerces scalar
         echo $data;
     }
 
@@ -56,7 +58,7 @@ class REST {
                 $this->_request = $this->cleanInputs($getData);
                 break;
             case "PUT":
-                parse_str(file_get_contents("php://input"),$this->_request);
+                parse_str((string)file_get_contents("php://input"),$this->_request);
                 $this->_request = $this->cleanInputs($this->_request);
                 break;
             default:
@@ -100,13 +102,15 @@ class REST {
         }else{
             //$data = mysqli_real_escape_string(Database::getConnection(), $data);
             //$data = trim(stripslashes($data)); //This reverses the effect of mysqli_real_escape_string so dont use this unless you know what you are doing.
-            $data = strip_tags($data);
+            // @phpstan-ignore-next-line — $data is documented mixed; coerced to string at boundary
+            $data = strip_tags((string)$data);
             $clean_input = trim($data);
         }
         return $clean_input;
     }
 
     private function setHeaders(): void {
+       // @phpstan-ignore-next-line — $_response is documented mixed for legacy compatibility
        $this->_response->header("Content-Type",$this->_content_type);
     }
 

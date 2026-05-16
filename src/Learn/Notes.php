@@ -32,15 +32,17 @@ class Notes
         $stmt = $db->prepare('SELECT id, title, body, created_at, updated_at FROM notes WHERE id = ? AND user_id = ?');
         $stmt->execute([$noteId, $userId]);
         $r = $stmt->fetch();
-        return $r ?: null;
+        return is_array($r) ? $r : null;
     }
 
     public static function update(\PDO $db, int $userId, int $noteId, ?string $title, ?string $body): bool
     {
         $existing = self::read($db, $userId, $noteId);
         if (!$existing) return false;
-        $newTitle = $title ?? $existing['title'];
-        $newBody  = $body ?? $existing['body'];
+        // @phpstan-ignore-next-line — $existing is array<string, mixed> from DB; title coerced to string at boundary
+        $newTitle = $title ?? (string)$existing['title'];
+        // @phpstan-ignore-next-line — $existing is array<string, mixed> from DB; body coerced to string at boundary
+        $newBody  = $body ?? (string)$existing['body'];
         $newTitle = trim($newTitle);
         if ($newTitle === '' || mb_strlen($newTitle) > 200) return false;
         if (strlen($newBody) > 4096) return false;

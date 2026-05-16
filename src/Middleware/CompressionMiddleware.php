@@ -73,6 +73,7 @@ class CompressionMiddleware implements MiddlewareInterface
 
         if (str_contains($accept, 'gzip')) {
             $compressed = gzencode($body, $this->level);
+            if ($compressed === false) { return $response; }
             return $response
                 ->withHeader('Content-Encoding', 'gzip')
                 ->withHeader('Content-Length',   (string)strlen($compressed))
@@ -82,6 +83,7 @@ class CompressionMiddleware implements MiddlewareInterface
 
         if (str_contains($accept, 'deflate')) {
             $compressed = gzdeflate($body, $this->level);
+            if ($compressed === false) { return $response; }
             return $response
                 ->withHeader('Content-Encoding', 'deflate')
                 ->withHeader('Content-Length',   (string)strlen($compressed))

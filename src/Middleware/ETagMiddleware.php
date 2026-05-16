@@ -45,13 +45,15 @@ class ETagMiddleware implements MiddlewareInterface
         $etag        = 'W/"' . hash('xxh3', $body) . '"';
         $ifNoneMatch = $request->getHeaderLine('If-None-Match');
 
+        $resp = $g->zealphp_response;
+        assert($resp !== null);
         if ($ifNoneMatch !== '' && $ifNoneMatch === $etag) {
             $g->status = 304;
-            $g->zealphp_response->header('ETag', $etag);
+            $resp->header('ETag', $etag);
             return new Response('', 304);
         }
 
-        $g->zealphp_response->header('ETag', $etag);
+        $resp->header('ETag', $etag);
         return $response;
     }
 }

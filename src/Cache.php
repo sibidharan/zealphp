@@ -122,12 +122,12 @@ class Cache
         $now = time();
 
         $row = Store::get(self::TABLE, $hash);
-        if ($row !== false) {
-            if ($row['ttl'] > 0 && $row['ttl'] < $now) {
+        if (is_array($row)) {
+            if ((int)$row['ttl'] > 0 && (int)$row['ttl'] < $now) {
                 Store::del(self::TABLE, $hash);
-            } elseif (crc32($row['val']) === $row['crc']) {
+            } elseif (crc32((string)$row['val']) === $row['crc']) {
                 self::$hitsMem?->increment();
-                return unserialize($row['val'], ['allowed_classes' => false]);
+                return unserialize((string)$row['val'], ['allowed_classes' => false]);
             }
         }
 
@@ -173,8 +173,8 @@ class Cache
         $now = time();
 
         $row = Store::get(self::TABLE, $hash);
-        if ($row !== false) {
-            if ($row['ttl'] > 0 && $row['ttl'] < $now) {
+        if (is_array($row)) {
+            if ((int)$row['ttl'] > 0 && (int)$row['ttl'] < $now) {
                 Store::del(self::TABLE, $hash);
             } else {
                 return true;
@@ -206,11 +206,14 @@ class Cache
         $table = Store::table(self::TABLE);
         if ($table) {
             foreach ($table as $key => $row) {
-                $table->del($key);
+                if ($key !== null) {
+                    $table->del($key);
+                }
             }
         }
 
-        foreach (glob(self::$dir . '/*.cache') as $file) {
+        $files = glob(self::$dir . '/*.cache') ?: [];
+        foreach ($files as $file) {
             @unlink($file);
         }
     }
@@ -328,7 +331,7 @@ class Cache
         }
         $now = time();
         foreach ($table as $key => $row) {
-            if ($row['ttl'] > 0 && $row['ttl'] < $now) {
+            if (is_array($row) && (int)$row['ttl'] > 0 && (int)$row['ttl'] < $now && $key !== null) {
                 $table->del($key);
             }
         }
@@ -341,7 +344,8 @@ class Cache
             return;
         }
         $now = time();
-        foreach (glob(self::$dir . '/*.cache') as $file) {
+        $files = glob(self::$dir . '/*.cache') ?: [];
+        foreach ($files as $file) {
             $f = @fopen($file, 'r');
             if (!$f) {
                 continue;

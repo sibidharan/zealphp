@@ -9,7 +9,8 @@ A retrospective record of every substantive technical critique ZealPHP has recei
 | Window | Forum | Releases triggered |
 |---|---|---|
 | 2026-05-15 → 2026-05-16 | r/PHP thread + #phpc Discord | v0.2.4, v0.2.5, v0.2.6, v0.2.7, v0.2.8 (framework) + v0.2.4, v0.2.5, v0.2.6, v0.2.7, v0.2.8, v0.2.9 (scaffold) |
-| 2026-05-16 (later) | Pastebin line-by-line review of `app.php` | (pending tag) — `CorsMiddleware` env-var origins + wildcard warning; main `app.php` rewrite (PSR-12, drop unused, fix `/json` session leak, remove `exit()` route + 9 junk routes, demo middleware moved to `examples/`); **static_handler_locations prefix-collision bug fix** (`/js` was intercepting `/json`); scaffold app.php demonstrates explicit CORS origins |
+| 2026-05-16 (later) | Pastebin line-by-line review of `app.php` | v0.2.13 — `CorsMiddleware` env-var origins + wildcard warning; main `app.php` rewrite (PSR-12, drop unused, fix `/json` session leak, remove `exit()` route + 9 junk routes, demo middleware moved to `examples/`); **static_handler_locations prefix-collision bug fix** (`/js` was intercepting `/json`); scaffold app.php demonstrates explicit CORS origins |
+| 2026-05-16 (continuing) | Pastebin reviewer's PHPStan-level-1 mocking subtext | **v0.2.14 → v0.2.15 → v0.2.16 — PHPStan baseline climbed from level 1 to level 9.** v0.2.14 deleted `src/Session.php` dead code + fixed real `StringUtils` casting bugs + landed level 5. v0.2.15 was the annotation cliff (369 mechanical `@param`/`@return`/`array<K, V>` fixes; level 6). v0.2.16 closed the design-tax with 74 inline `@phpstan-ignore-next-line` annotations (each with a one-line reason) + fixed 6 real bugs along the way (`Auth::login`/`currentUser` null-handling, `Cache` miss handling, `ZealAPI::processApi` nullable request crash). |
 
 Five framework releases plus scaffold sync in 24 hours, all triggered by community technical review. This document captures **what was raised**, **how we assessed it**, and **what we did about it**, in one place — so the next time the same point surfaces we don't relitigate.
 
@@ -127,15 +128,17 @@ Five framework releases plus scaffold sync in 24 hours, all triggered by communi
 - **Shipped in:** **v0.2.6** — deleted
 - **Status:** ✅ Gone; unblocked the response-state refactor
 
-#### PHPStan level 1 ceiling
-- **Raised by:** "snakeoil salesmen" mocker (insult only, no specifics)
-- **Assessment:** Deliberate trade-off, not laziness. Higher PHPStan levels conflict with:
-  - uopz overrides on PHP built-ins (PHPStan can't see that `header()` writes to `$response->headersList`)
-  - Dual-mode runtime branching (`App::$superglobals`)
-  - `mixed` types on proxy properties forwarding to OpenSwoole via `__call`
-  - CGI bridge serializing/deserializing across processes
-  - Reflection-based parameter injection
-- **No code change needed** — Symfony/Laravel/Mezzio score level 9 but don't run unmodified PHP-FPM code. Different problems.
+#### PHPStan level 1 → level 9 ~~(deliberate trade-off)~~
+- **Raised by:** "snakeoil salesmen" mocker (insult only, no specifics), plus the app.php pastebin reviewer (line annotation calling level 1 out)
+- **Original framing (v0.2.13 and earlier):** "Deliberate trade-off, not laziness. Higher PHPStan levels conflict with uopz overrides, dual-mode runtime branching, `mixed` on `__call` proxies, the CGI bridge, and reflection-based parameter injection. Symfony/Laravel/Mezzio score level 9 but don't run unmodified PHP-FPM code."
+- **Reality check (v0.2.14–v0.2.16):** Mostly overstated. The original ceiling number at level 9 was 572 errors; investigation showed only ~57 of those were the genuine design-tax sites listed above. The other ~515 were just **missing annotations** — mechanical work the framework had never done.
+- **Shipped in:**
+  - **v0.2.14** — Level 1 → Level 5. Deleted `src/Session.php` (31 errors, confirmed dead-code referencing nonexistent `UserSession`). Fixed real bugs in `StringUtils::get_string_between()` (3 `(int)` casts on string delimiters) and the `microtime()` float-arithmetic idiom (3 sites). Stub-mismatch ignores in `phpstan.neon` for OpenSwoole/posix/PHP-version-stubs. Added `: self` return type on `RequestContext::instance()` (cascade-killed 5+ "access to undefined property" errors via visibility into typed properties).
+  - **v0.2.15** — Level 5 → Level 6 (the annotation cliff, 369 mechanical fixes). `@param Type $x` / `@return Type` / `array<K, V>` generics added across `src/App.php` (151 errors), `src/utils.php` (54), `src/Learn/Chat.php` (52), `src/IOStreamWrapper.php` (37), `src/Session/utils.php` (35), `src/REST.php`, `src/ZealAPI.php`, `src/RequestContext.php`, `src/HTTP/*`, `src/Middleware/*`, `src/Legacy/*`. Three subagents handled high-error files in parallel.
+  - **v0.2.16** — Level 6 → Level 9. Real bugs found and fixed: `Auth::login()` returned an int when `$user === false` (PDO miss → cast `false['id']` to int → returned `0`); `Auth::currentUser()` had the same shape; `Auth::rateLimit()` treated `Store::get()` miss (`false`) as a valid existing record; `Cache::get()`/`has()`/`gcMemory()` treated misses as hits; `ZealAPI::processApi()` crashed on nullable `$request`. Real type-tightening: `RequestContext::$zealphp_request`/`$zealphp_response`/`$openswoole_request`/`$openswoole_response` from `mixed` to concrete typed nullables. `HTTP/Request.php` + `HTTP/Response.php` got class-level `@method` PHPDoc declaring forwarded signatures for `__call` proxy so call sites are statically typed. **74 inline `@phpstan-ignore-next-line` annotations** with one-line reasons at the genuine design-tax sites (uopz overrides, reflection-injected handler params, `__call` proxies that legitimately return `mixed`).
+- **Status:** ✅ **PHPStan level 9, 0 errors.** Symfony / Laravel / Mezzio also score level 9, and ZealPHP now runs unmodified PHP-FPM code AT THAT level. Different problems didn't make the level-1 ceiling unavoidable.
+
+The "deliberate trade-off" framing was partly true — the ~57 design-tax sites listed above are real and now carry individual `@phpstan-ignore-next-line` annotations explaining why each is excused. But the other ~515 errors had no architectural defense; they were just unfinished annotation work. Three patch releases in 12 hours closed the gap.
 
 #### PHPStan failure after G→RequestContext rename
 - **Discovered by:** CI run on v0.2.7 — 90 errors, "Call to static method instance() on an unknown class ZealPHP\G"
@@ -402,3 +405,5 @@ Remaining for the v0.2.x line:
 6. **Push back on the wrong critiques.** `debug_backtrace` "on hot path" wasn't true (once per worker). `apache_env` "leftover" wasn't true (actively used). The framework's not perfect, but it's also not as broken as a surface read suggests. Conceding everything erodes credibility as much as conceding nothing.
 
 7. **Don't lead with the bridge.** The bridge is one optional feature. The framework's value extends to greenfield Swoole code (file-based routing, htmx, streaming, single-binary deploy, eight PSRs). The migration story is the closer, not the opener.
+
+8. **Cite numbers, not categories.** Saying "PHPStan is a deliberate trade-off" invites mockery — it sounds like an excuse, and the next reviewer can't disprove it without doing all the work themselves. Saying "PHPStan level 9 with 74 documented ignore sites, each annotated with the design-choice reason it covers" invites scrutiny instead — which is what we want. The v0.2.16 climb showed the original "level 1 is principled" framing was 90% overstated: ~515 of the 572 errors were just missing annotations the framework had never written. Only ~57 were the genuine design-tax sites that the original framing actually applied to. Categorical defenses that hide a 9-to-1 ratio of "we never bothered" to "we considered and rejected" don't survive contact with the numbers.
