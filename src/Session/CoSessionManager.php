@@ -50,7 +50,7 @@ class CoSessionManager
     /**
      * Delegate execution to the underlying middleware wrapping it into the session start/stop calls
      */
-    public function __invoke(\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response)
+    public function __invoke(\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response): void
     {
         $g = RequestContext::instance();
         if (bench_mode_enabled()) {

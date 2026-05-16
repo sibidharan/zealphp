@@ -18,6 +18,7 @@ class Notes
         return (int) $db->lastInsertId();
     }
 
+    /** @return array<int, array<string, mixed>> */
     public static function list(\PDO $db, int $userId): array
     {
         $stmt = $db->prepare('SELECT id, title, body, created_at, updated_at FROM notes WHERE user_id = ? ORDER BY updated_at DESC');
@@ -25,6 +26,7 @@ class Notes
         return $stmt->fetchAll();
     }
 
+    /** @return array<string, mixed>|null */
     public static function read(\PDO $db, int $userId, int $noteId): ?array
     {
         $stmt = $db->prepare('SELECT id, title, body, created_at, updated_at FROM notes WHERE id = ? AND user_id = ?');
@@ -54,6 +56,7 @@ class Notes
         return $stmt->rowCount() > 0;
     }
 
+    /** @return array<int, array<string, mixed>> */
     public static function search(\PDO $db, int $userId, string $query, int $limit = 10): array
     {
         $q = '%' . $query . '%';

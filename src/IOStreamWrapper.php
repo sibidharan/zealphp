@@ -40,6 +40,7 @@ use function ZealPHP\elog;
 
 // Custom Stream Wrapper for php://input with passthrough
 class IOStreamWrapper {
+    /** @var resource|object|null */
     public $context;
     private int $position = 0;
     private string $input = '';
@@ -57,7 +58,13 @@ class IOStreamWrapper {
     //     }
     // }
 
-    public function stream_open($path, $mode, $options, &$opened_path) {
+    /**
+     * @param string      $path
+     * @param string      $mode
+     * @param int         $options
+     * @param string|null $opened_path
+     */
+    public function stream_open($path, $mode, $options, &$opened_path): bool {
         // Only log php://input — other php:// streams (memory, filter, etc.) are
         // used internally by the PSR layer and logging them adds noise per request.
         if ($path === 'php://input') {
@@ -90,6 +97,10 @@ class IOStreamWrapper {
     }
     
 
+    /**
+     * @param int $count
+     * @return string|false
+     */
     public function stream_read($count) {
         if ($this->context) {
             // Passthrough read for other streams
@@ -102,6 +113,10 @@ class IOStreamWrapper {
         }
     }
 
+    /**
+     * @param string $data
+     * @return int|false
+     */
     public function stream_write($data) {
         if ($this->context) {
             // Passthrough write for other streams
@@ -112,7 +127,7 @@ class IOStreamWrapper {
         return false;
     }
 
-    public function stream_eof() {
+    public function stream_eof(): bool {
         if ($this->context) {
             // Passthrough EOF for other streams
             return feof($this->context);
@@ -122,6 +137,9 @@ class IOStreamWrapper {
         return $this->position >= strlen($this->input);
     }
 
+    /**
+     * @return array<int|string, mixed>|false
+     */
     public function stream_stat() {
         if ($this->context) {
             // Passthrough stat for other streams
@@ -132,14 +150,14 @@ class IOStreamWrapper {
         return [];
     }
 
-    public function stream_close() {
+    public function stream_close(): void {
         if ($this->context) {
             // Passthrough close for other streams
             fclose($this->context);
         }
     }
 
-    public function stream_rewind() {
+    public function stream_rewind(): bool {
         if ($this->context) {
             // Passthrough rewind for other streams
             return rewind($this->context);
@@ -150,7 +168,11 @@ class IOStreamWrapper {
         }
     }
 
-    public function stream_seek($offset, $whence = SEEK_SET) {
+    /**
+     * @param int $offset
+     * @param int $whence
+     */
+    public function stream_seek($offset, $whence = SEEK_SET): bool {
         if ($this->context) {
             // Passthrough seek for other streams (resource)
             if (is_resource($this->context)) {
@@ -192,6 +214,9 @@ class IOStreamWrapper {
         }
     }
 
+    /**
+     * @return int|false
+     */
     public function stream_tell() {
         if ($this->context) {
             // Passthrough tell for other streams
@@ -202,7 +227,10 @@ class IOStreamWrapper {
         return $this->position;
     }
 
-    public function stream_truncate($new_size) {
+    /**
+     * @param int $new_size
+     */
+    public function stream_truncate($new_size): bool {
         if ($this->context) {
             // Passthrough truncate for other streams
             return ftruncate($this->context, $new_size);
@@ -212,7 +240,7 @@ class IOStreamWrapper {
         return false;
     }
 
-    public function stream_flush() {
+    public function stream_flush(): bool {
         if ($this->context) {
             // Passthrough flush for other streams
             return fflush($this->context);
@@ -222,7 +250,10 @@ class IOStreamWrapper {
         return false;
     }
 
-    public function stream_lock($operation) {
+    /**
+     * @param int $operation
+     */
+    public function stream_lock($operation): bool {
         if ($this->context) {
             // Passthrough lock for other streams
             return flock($this->context, $operation);
@@ -232,6 +263,11 @@ class IOStreamWrapper {
         return false;
     }
 
+    /**
+     * @param string $path
+     * @param int    $flags
+     * @return array<int|string, mixed>|false
+     */
     public function url_stat($path, $flags) {
         if ($this->context) {
             // Passthrough url_stat for other streams
@@ -242,7 +278,10 @@ class IOStreamWrapper {
         return false;
     }
 
-    public function stream_unlink($path) {
+    /**
+     * @param string $path
+     */
+    public function stream_unlink($path): bool {
         if ($this->context) {
             // Passthrough unlink for other streams
             return unlink($path);
@@ -253,17 +292,28 @@ class IOStreamWrapper {
     }
 
     # write magic method __get and __call for all other methods
+    /**
+     * @param string $name
+     * @return mixed
+     */
     public function __get($name) {
         if ($this->context) {
             return $this->context->$name;
         }
+        return null;
     }
 
+    /**
+     * @param string       $name
+     * @param array<mixed> $args
+     * @return mixed
+     */
     public function __call($name, $args) {
         if ($this->context) {
             return $this->context->$name(...$args);
             // return call_user_func_array([, $name], $args);
         }
+        return null;
     }
 
 }

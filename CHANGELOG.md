@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.15] - 2026-05-16
+
+### Changed
+- **PHPStan baseline raised from level 5 → level 6.** Second of three planned releases climbing to level 9. **The annotation cliff is now complete: 369 missing-type errors are fixed across the entire `src/` tree.**
+- Pure annotation pass. **No behavior changes anywhere** — `@param`/`@return` PHPDoc and `array<K, V>` generic specs added, plus real type hints where safe.
+
+### Added (PHPDoc / typed properties)
+- **`src/App.php`** — 75+ method annotations: constructor + setters got real `string`/`int`/`bool` hints; route registration methods (`route`/`nsRoute`/`nsPathRoute`/`patternRoute`) got `@param array<string, mixed>|callable $options`; iterables returned by `routes()`/`routesByMethod()`/`routesByExactMethod()`/`wsRoutes()`/`parseCss()`/`getFallback()`/`getErrorHandler()`/`parseCliArgs()`/`buildParamMap()` got `array<K, V>` generics; `$error_handlers` property typed with a detailed shape array; `TemplateUnavailableException` properties got `@var` (native type override would error); `LocationHeaderMiddleware::$correctPort` typed `int`.
+- **`src/utils.php`** — annotated 50+ free functions including the uopz override targets (`header`, `setcookie`, `setrawcookie`, `http_response_code`, `headers_list`, `headers_sent`, `header_remove`, `flush`, `ob_*`, `apache_*`, `is_uploaded_file`, `move_uploaded_file`, `set_error_handler`, `set_exception_handler`, `register_shutdown_function`, `error_reporting`). Signatures match PHP native exactly.
+- **`src/Session/utils.php`** — annotated all 19 `zeal_session_*` shims. PHPDoc matches the PHP native `session_*` signatures.
+- **`src/Session/{Co,}SessionManager.php`** — `__invoke(): void`, `$g` typed `\ZealPHP\RequestContext`.
+- **`src/IOStreamWrapper.php`** — typed all 17 stream wrapper methods (PHP's `streamWrapper` contract); `$context` PHPDoc'd as `resource|object|null`.
+- **`src/RequestContext.php`** — typed `$instance` as `?self`; `array<string, mixed>` generics on all bag/session/memo arrays; shape annotations on handler stacks; `mixed` PHPDoc on `__get`/`__set`/`get`/`set`.
+- **`src/REST.php`** — typed all 6 properties; `mixed` on `_response`/`_request`; PHPDoc + real return types throughout.
+- **`src/ZealAPI.php`** — typed `$data: string`, `$reflectionCache: array<string, array<int, \ReflectionParameter>>`, `$api_rpc: \Closure|null`, `$_undefinedMethodError: array<string, mixed>|null`; PHPDoc on `__construct`, `processApi`, `paramsExists`, `die`, `__call`, `json`.
+- **`src/Cache.php`** — `@return array{...}` shape for `stats()`.
+- **`src/StringUtils.php`** — typed all 4 static methods as `(string, string): bool|string`.
+- **`src/Counter.php` / `src/Store.php`** — `array<string, array{0: int, 1: int}>` generics on `Store::make()` columns, `array<string, mixed>` on `set()` rows, `list<string>` return on `names()`.
+- **`src/apache_shims.php`** — `array<string, string>` return on header functions; `string|false` on `apache_getenv`.
+- **`src/Learn/*`** — `array<string, mixed>` generics on `mock`/`real` `$user`; `array<int, array<string, mixed>>` returns on `Notes::list`/`search`, `ChatHistory::forThread`/`threads`; `array{user_id: int, username: string}` shape on `Auth::currentUser`; `array<string, \PDO>` on `DB::$cache`; `array<string, mixed>` on `WS::broadcast` payload.
+- **`src/HTTP/Request.php` / `src/HTTP/Response.php`** — PHPDoc on `__call`/`__get`/`__set` proxy magic methods; `array<int, array{0: string, 1: string}>` shape on `Response::$headersList`; `array<int, array{0: string, 1: string, 2: int, 3: string, 4: string, 5: bool, 6: bool, 7: string, 8: string}>` on cookies lists.
+- **`src/HTTP/LazyServerRequest.php`** — `array<string, mixed>` generics on PSR-7 `getServerParams`/`getQueryParams`/`getAttributes`/`with*` methods.
+- **`src/Middleware/CorsMiddleware.php`** — `array<int, string>` on all three list properties + constructor params; `resolveOriginsList()` PHPDoc'd.
+- **`src/Middleware/RangeMiddleware.php`** — `array{0: int, 1: int}` shape on `singleRange` ranges; `array<int, array{0: int, 1: int}>` on `multiRange`.
+- **`src/Legacy/ApacheContext.php`** — `array<string, string>` on `$env` and `$notes`.
+- **`src/Log/Logger.php`** — `array<string, mixed>` on `interpolate()` `$context`.
+- **`src/Cache/SimpleCacheAdapter.php`** — `iterable<string, mixed>` on `setMultiple()` `$values`.
+- **`src/HTTP/Client.php`** — `array{timeout?: int, verify_ssl?: bool, max_redirects?: int}` on `__construct()` `$options`.
+- **`src/HTTP/Factory/ServerRequestFactory.php`** — `array<string, mixed>` on `createServerRequest()` `$serverParams`.
+- **`src/Session/Handler/CoroutineMemorySessionHandler.php`** — `array<int, array<string, array{data: string, last_access: int}>>` shape on `$sessions`.
+
+### Notes
+- v0.2.16 will tackle the remaining ~155 errors at levels 7–9 (null safety + the design-tax sites for `__call` proxies, uopz overrides, and reflection-injected handler params). That release flips the [CRITIC.md](CRITIC.md):128-136 entry "PHPStan level 1 is a deliberate trade-off."
+
 ## [0.2.14] - 2026-05-16
 
 ### Changed

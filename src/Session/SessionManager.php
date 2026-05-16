@@ -35,7 +35,7 @@ class SessionManager
 
     protected bool $useOnlyCookies;
 
-    public $g;
+    public \ZealPHP\RequestContext $g;
 
     /**
      * Inject dependencies
@@ -64,8 +64,11 @@ class SessionManager
 
     /**
      * Delegate execution to the underlying middleware wrapping it into the session start/stop calls
+     *
+     * @param \OpenSwoole\Http\Request  $request
+     * @param \OpenSwoole\Http\Response $response
      */
-    public function __invoke($request,$response)
+    public function __invoke($request, $response): void
     {
         $g = RequestContext::instance();
         if (bench_mode_enabled()) {

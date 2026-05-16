@@ -55,6 +55,7 @@ class Logger extends AbstractLogger
         \ZealPHP\log_write($formatted, $kind);
     }
 
+    /** @param array<string, mixed> $context */
     private function interpolate(string $message, array $context): string
     {
         $replace = [];

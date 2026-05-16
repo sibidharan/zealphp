@@ -6,6 +6,10 @@ use ZealPHP\RequestContext;
 
 class Chat
 {
+    /**
+     * @param mixed                $response  ZealPHP\HTTP\Response (or compatible) — calls $response->sse(callable)
+     * @param array<string, mixed> $user
+     */
     public static function mock($response, array $user, string $message, string $threadId): void
     {
         $db = DB::open();
@@ -97,6 +101,10 @@ class Chat
         });
     }
 
+    /**
+     * @param mixed                $response  ZealPHP\HTTP\Response (or compatible) — calls $response->sse(callable)
+     * @param array<string, mixed> $user
+     */
     public static function real($response, array $user, string $message, string $threadId, string $apiKey): void
     {
         $db = DB::open();

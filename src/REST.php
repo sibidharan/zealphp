@@ -2,35 +2,46 @@
 namespace ZealPHP;
 class REST {
 
-    public $_allow = array();
-    public $_content_type = "application/json";
+    /** @var array<int|string, mixed> */
+    public array $_allow = array();
+    public string $_content_type = "application/json";
+    /** @var mixed */
     public $_request = array();
 
-    private $_method = "";
-    private $_code = 200;
+    private string $_method = "";
+    private int $_code = 200;
+    /** @var mixed */
     public $_response;
+    /**
+     * @param mixed $request
+     * @param mixed $response
+     */
     public function __construct($request, $response){
         $this->_response = RequestContext::instance()->zealphp_response;
         $this->_request = RequestContext::instance()->zealphp_request;
         $this->inputs();
     }
 
-    public function get_referer(){
+    public function get_referer(): mixed {
         return $this->serverValue('HTTP_REFERER');
     }
 
-    public function response($data, $status){
+    /**
+     * @param mixed $data
+     * @param int|null $status
+     */
+    public function response($data, $status): void {
         $this->_code = ($status)?$status:200;
         $this->setHeaders();
         $this->_response->status($this->_code);
         echo $data;
     }
 
-    public function get_request_method(){
+    public function get_request_method(): mixed {
         return $this->serverValue('REQUEST_METHOD', 'GET');
     }
 
-    private function inputs(){
+    private function inputs(): void {
         $getData = $this->requestValues('get');
         $postData = $this->requestValues('post');
 
@@ -54,6 +65,11 @@ class REST {
         }
     }
 
+    /**
+     * @param string $key
+     * @param mixed  $default
+     * @return mixed
+     */
     private function serverValue($key, $default = null){
         $server = RequestContext::instance()->server;
         if (!is_array($server)) {
@@ -62,11 +78,19 @@ class REST {
         return $server[$key] ?? $default;
     }
 
-    private function requestValues($key){
+    /**
+     * @param string $key
+     * @return array<int|string, mixed>
+     */
+    private function requestValues($key): array {
         $value = RequestContext::instance()->$key;
         return is_array($value) ? $value : [];
     }
 
+    /**
+     * @param mixed $data
+     * @return mixed
+     */
     private function cleanInputs($data){
         $clean_input = array();
         if(is_array($data)){
@@ -82,11 +106,14 @@ class REST {
         return $clean_input;
     }
 
-    private function setHeaders(){
+    private function setHeaders(): void {
        $this->_response->header("Content-Type",$this->_content_type);
     }
 
-    public function setContentType($type){
+    /**
+     * @param string $type
+     */
+    public function setContentType($type): void {
         $this->_content_type = $type;
     }
 }

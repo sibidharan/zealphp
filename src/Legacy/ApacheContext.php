@@ -17,6 +17,8 @@ namespace ZealPHP\Legacy;
  */
 class ApacheContext
 {
+    /** @var array<string, string> */
     public array $env = [];
+    /** @var array<string, string> */
     public array $notes = [];
 }

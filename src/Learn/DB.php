@@ -3,6 +3,7 @@ namespace ZealPHP\Learn;
 
 class DB
 {
+    /** @var array<string, \PDO> */
     private static array $cache = [];
 
     public static function path(): string

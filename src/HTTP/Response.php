@@ -17,8 +17,11 @@ class Response
      * $cookiesList / $rawCookiesList are arrays of cookie() / rawCookie()
      * argument tuples.
      */
+    /** @var array<int, array{0: string, 1: string}> */
     public array $headersList = [];
+    /** @var array<int, array{0: string, 1: string, 2: int, 3: string, 4: string, 5: bool, 6: bool, 7: string, 8: string}> */
     public array $cookiesList = [];
+    /** @var array<int, array{0: string, 1: string, 2: int, 3: string, 4: string, 5: bool, 6: bool, 7: string, 8: string}> */
     public array $rawCookiesList = [];
 
     public function __construct(\OpenSwoole\Http\Response $response)
@@ -27,7 +30,13 @@ class Response
         $this->g = \ZealPHP\RequestContext::instance();
     }
 
-    // Magic method to forward method calls to the parent
+    /**
+     * Forward method calls to the underlying OpenSwoole response.
+     *
+     * @param string         $name
+     * @param array<int, mixed> $arguments
+     * @return mixed
+     */
     public function __call($name, $arguments)
     {
         if (method_exists($this->parent, $name)) {
@@ -36,7 +45,12 @@ class Response
         throw new \BadMethodCallException("Method {$name} does not exist");
     }
 
-    // Magic method to get properties from the parent
+    /**
+     * Proxy property reads to the underlying OpenSwoole response.
+     *
+     * @param string $name
+     * @return mixed
+     */
     public function &__get($name)
     {
         \ZealPHP\elog($name);
@@ -51,7 +65,12 @@ class Response
         throw new \InvalidArgumentException("Property {$name} does not exist");
     }
 
-    // Magic method to set properties on the parent
+    /**
+     * Proxy property writes to the underlying OpenSwoole response.
+     *
+     * @param string $name
+     * @param mixed  $value
+     */
     public function __set($name, $value)
     {
         \ZealPHP\elog($name);
@@ -73,7 +92,13 @@ class Response
         return $this->parent->status($statusCode, $reason);
     }
 
-    public function json($data, $status = 200)
+    /**
+     * Emit a JSON response and end the connection.
+     *
+     * @param mixed $data
+     * @param int   $status
+     */
+    public function json($data, $status = 200): void
     {
         $this->header('Content-Type', 'application/json');
         $this->status($status);

@@ -14,6 +14,9 @@ class Client implements ClientInterface
     private bool $verifySsl;
     private int $maxRedirects;
 
+    /**
+     * @param array{timeout?: int, verify_ssl?: bool, max_redirects?: int} $options
+     */
     public function __construct(array $options = [])
     {
         $this->timeout = $options['timeout'] ?? 30;

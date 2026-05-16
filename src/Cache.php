@@ -244,6 +244,8 @@ class Cache
      *   'spills_full'    => int,   // set() skipped memory (table full)
      *   'hit_rate'       => float, // hits / (hits + misses), 0.0–1.0
      * ]
+     *
+     * @return array{memory_entries: int, hits_memory: int, hits_file: int, misses: int, spills_oversize: int, spills_full: int, hit_rate: float}
      */
     public static function stats(): array
     {

@@ -73,18 +73,21 @@ class LazyServerRequest implements ServerRequestInterface
         return $headers;
     }
 
+    /** @return array<string, mixed> */
     public function getServerParams(): array
     {
         if ($this->hydrated) return $this->hydrated->getServerParams();
         return $this->native->server ?? [];
     }
 
+    /** @return array<string, mixed> */
     public function getQueryParams(): array
     {
         if ($this->hydrated) return $this->hydrated->getQueryParams();
         return $this->native->get ?? [];
     }
 
+    /** @return array<string, string> */
     public function getCookieParams(): array
     {
         if ($this->hydrated) return $this->hydrated->getCookieParams();
@@ -116,16 +119,21 @@ class LazyServerRequest implements ServerRequestInterface
         return $this->hydrate()->getUri();
     }
 
+    /** @return array<string, \Psr\Http\Message\UploadedFileInterface> */
     public function getUploadedFiles(): array
     {
         return $this->hydrate()->getUploadedFiles();
     }
 
+    /**
+     * @return array<string, mixed>|object|null
+     */
     public function getParsedBody()
     {
         return $this->hydrate()->getParsedBody();
     }
 
+    /** @return array<string, mixed> */
     public function getAttributes(): array
     {
         return $this->hydrate()->getAttributes();
@@ -194,6 +202,7 @@ class LazyServerRequest implements ServerRequestInterface
         return $new;
     }
 
+    /** @param array<string, string> $cookies */
     public function withCookieParams(array $cookies): static
     {
         $new = clone $this;
@@ -201,6 +210,7 @@ class LazyServerRequest implements ServerRequestInterface
         return $new;
     }
 
+    /** @param array<string, mixed> $query */
     public function withQueryParams(array $query): static
     {
         $new = clone $this;
@@ -208,6 +218,7 @@ class LazyServerRequest implements ServerRequestInterface
         return $new;
     }
 
+    /** @param array<string, \Psr\Http\Message\UploadedFileInterface> $uploadedFiles */
     public function withUploadedFiles(array $uploadedFiles): static
     {
         $new = clone $this;
@@ -215,6 +226,7 @@ class LazyServerRequest implements ServerRequestInterface
         return $new;
     }
 
+    /** @param array<string, mixed>|object|null $data */
     public function withParsedBody($data): static
     {
         $new = clone $this;

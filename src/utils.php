@@ -8,6 +8,11 @@ use OpenSwoole\Process;
 use OpenSwoole\Coroutine as co;
 use Throwable;
 
+/**
+ * @param string $key
+ * @param mixed  $default
+ * @return mixed
+ */
 function get($key, $default = null)
 {
     return $_GET[$key] ?? $default;
@@ -325,6 +330,10 @@ function coprocess($taskLogic, $wait = true)
     return $data;
 }
 
+/**
+ * @param callable $taskLogic
+ * @return mixed
+ */
 function coproc($taskLogic){
     return coprocess($taskLogic);
 }
@@ -332,12 +341,12 @@ function coproc($taskLogic){
 
 /**
 * jTraceEx() - provide a Java style exception trace
-* @param $exception
-* @param $seen      - array passed to recursive calls to accumulate trace lines already seen
-*                     leave as NULL when calling this function
+* @param \Throwable        $e
+* @param array<int,string>|null $seen array passed to recursive calls to accumulate trace lines already seen
+*                                     leave as NULL when calling this function
 * @return string of array strings, one entry per trace line
 */
-function jTraceEx($e, $seen=null)
+function jTraceEx($e, $seen=null): string
 {
     $starter = $seen ? 'Caused by: ' : '';
     $result = array();
@@ -382,7 +391,7 @@ function jTraceEx($e, $seen=null)
     return $result;
 }
 
-function zapi(){
+function zapi(): string {
     $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
     $caller = array_shift($bt);
     return basename($caller['file'], '.php');
@@ -395,7 +404,7 @@ function zapi(){
  * @param string $tag The tag to associate with the log message. Default is "*".
  * @param int $limit The limit for the log message. Default is 1.
  */
-function elog($message, $tag = "*", $limit = 1){
+function elog($message, $tag = "*", $limit = 1): void {
     if (!debug_logging_enabled()) {
         return;
     }
@@ -417,7 +426,7 @@ function elog($message, $tag = "*", $limit = 1){
  * @param mixed  $filter        Optional filter to apply to the log entry.
  * @param bool   $invert_filter Whether to invert the filter logic. Default is false.
  */
-function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
+function zlog($log, $tag = "system", $filter = null, $invert_filter = false): void
 {
     static $validTags = ['system' => 1, 'fatal' => 1, 'error' => 1, 'warning' => 1, 'info' => 1, 'debug' => 1];
 
@@ -462,6 +471,10 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
 }
 
 
+/**
+ * @param string $key
+ * @return mixed
+ */
 function get_config($key)
 {
     global $__site_config;
@@ -516,7 +529,7 @@ function indent($string, $indend = 4)
 /**
  * Takes an iterator or object, and converts it into an Array.
  * @param  mixed $obj
- * @return array
+ * @return array<int|string, mixed>
  */
 function purify_array($obj)
 {
@@ -551,7 +564,7 @@ function uniqidReal($length = 13)
  * @param int $status The HTTP status code to log.
  * @param int $length The length of the response content.
  */
-function access_log(int $status = 200, int $length = 0){
+function access_log(int $status = 200, int $length = 0): void {
     if (!access_logging_enabled()) {
         return;
     }
@@ -579,7 +592,12 @@ function access_log(int $status = 200, int $length = 0){
  * @param string $value The value of the header.
  * @param bool $ucwords Optional. Whether to capitalize the first letter of each word in the header name. Default is true.
  */
-function response_add_header($key, $value, $ucwords = true)
+/**
+ * @param string $key
+ * @param string $value
+ * @param bool   $ucwords
+ */
+function response_add_header($key, $value, $ucwords = true): void
 {
     $g = RequestContext::instance();
     // elog("response_add_header: $key ".var_export($value, true));
@@ -591,7 +609,7 @@ function response_add_header($key, $value, $ucwords = true)
  *
  * @param int $status The HTTP status code to set for the response.
  */
-function response_set_status(int $status)
+function response_set_status(int $status): void
 {
     RequestContext::instance()->status = $status;
 }
@@ -599,9 +617,9 @@ function response_set_status(int $status)
 /**
  * Retrieves all the response headers.
  *
- * @return array An associative array of all the response headers.
+ * @return array<int, array{0: string, 1: string}> An associative array of all the response headers.
  */
-function response_headers_list()
+function response_headers_list(): array
 {
     $response = RequestContext::instance()->zealphp_response;
     return $response === null ? [] : $response->headersList;
@@ -618,7 +636,17 @@ function response_headers_list()
  * @param bool $secure Indicates that the cookie should only be transmitted over a secure HTTPS connection from the client. Default is false.
  * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
  */
-function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false, $samesite = '') {
+/**
+ * @param string $name
+ * @param string $value
+ * @param int    $expire
+ * @param string $path
+ * @param string $domain
+ * @param bool   $secure
+ * @param bool   $httponly
+ * @param string $samesite
+ */
+function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false, $samesite = ''): bool {
     // Cookie name char rules match PHP native setcookie: reject `=,; \t\r\n\013\014\0`.
     // Reject CR/LF/NUL in value/path/domain to prevent Set-Cookie header injection.
     if (strpbrk((string)$name, "=,; \t\r\n\013\014\0") !== false) {
@@ -648,7 +676,16 @@ function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $s
  * @param bool $secure Indicates that the cookie should only be transmitted over a secure HTTPS connection from the client. Default is false.
  * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
  */
-function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false) {
+/**
+ * @param string $name
+ * @param string $value
+ * @param int    $expire
+ * @param string $path
+ * @param string $domain
+ * @param bool   $secure
+ * @param bool   $httponly
+ */
+function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false): bool {
     // setrawcookie() skips URL-encoding on $value, which is the whole point —
     // it's "raw" so callers can pass already-encoded values verbatim. Match
     // PHP native behavior: reject the name char-class, but only reject
@@ -686,6 +723,12 @@ function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "",
     return true;
 }
 
+/**
+ * @param string   $header
+ * @param bool     $replace
+ * @param int|null $http_response_code
+ * @return false|void
+ */
 function header($header, $replace = true, $http_response_code = null) {
     // CRLF / NUL injection guard — matches PHP native header() since 4.4.2.
     // Without this, `header("X-Foo: " . $userInput)` with CRLF in $userInput
@@ -734,12 +777,17 @@ function header($header, $replace = true, $http_response_code = null) {
 * @param int|null $code The HTTP status code to set. If null, the current status code is returned.
 * @return int The current HTTP response status code.
 */
+/**
+ * @param int|null $code
+ * @return int|null
+ */
 function http_response_code($code = null) {
    if ($code !== null) {
        response_set_status($code);
    } else {
        return RequestContext::instance()->status;
    }
+   return null;
 }
 
 /**
@@ -748,9 +796,9 @@ function http_response_code($code = null) {
 * This function returns an array of all the HTTP headers that have been sent
 * by the server. It can be useful for debugging or logging purposes.
 *
-* @return array An associative array of all the HTTP headers.
+* @return array<int, string> An associative array of all the HTTP headers.
 */
-function headers_list() {
+function headers_list(): array {
    $headers = response_headers_list();
    $result = [];
    foreach ($headers as $pair) {
@@ -839,6 +887,9 @@ function ob_end_flush(): void
  * Apache mod_php toggles implicit flush on/off. ZealPHP buffers per request
  * by default; we accept the call as a no-op rather than crashing legacy code.
  */
+/**
+ * @param bool|int $enable
+ */
 function ob_implicit_flush($enable = true): void
 {
     // no-op
@@ -847,6 +898,8 @@ function ob_implicit_flush($enable = true): void
 /**
  * Apache mod_php getallheaders() / apache_request_headers() — return all
  * inbound request headers with canonical (Hyphen-Capitalized) case.
+ *
+ * @return array<string, string>
  */
 function apache_request_headers(): array
 {
@@ -863,6 +916,9 @@ function apache_request_headers(): array
     return $out;
 }
 
+/**
+ * @return array<string, string>
+ */
 function getallheaders(): array
 {
     return apache_request_headers();
@@ -870,6 +926,8 @@ function getallheaders(): array
 
 /**
  * Apache mod_php apache_response_headers() — currently set outbound headers.
+ *
+ * @return array<string, string>
  */
 function apache_response_headers(): array
 {
@@ -899,6 +957,9 @@ function apache_setenv(string $variable, string $value, bool $walk_to_top = fals
     return true;
 }
 
+/**
+ * @return string|false
+ */
 function apache_getenv(string $variable, bool $walk_to_top = false)
 {
     $ctx = RequestContext::instance()->apacheContext;
@@ -945,6 +1006,9 @@ function set_time_limit(int $seconds): bool
  * ignore_user_abort() — Apache mod_php controls whether the script keeps
  * running after the client disconnects. Tracked in G; with OpenSwoole the
  * coroutine continues regardless, but we honor the API contract.
+ */
+/**
+ * @param bool|null $enable
  */
 function ignore_user_abort($enable = null): int
 {

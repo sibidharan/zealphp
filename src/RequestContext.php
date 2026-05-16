@@ -17,18 +17,26 @@ use ZealPHP\App;
  */
 class RequestContext
 {
-    private static $instance = null;
+    private static ?self $instance = null;
 
     // Declared properties bypass __get/__set — direct slot access (~2ns vs
     // ~50ns through magic methods). This is the entire property contract:
     // any undeclared write is a typo or a misuse and is rejected by __set.
+    /** @var array<string, mixed> */
     public array $server = [];
+    /** @var array<string, mixed> */
     public array $get = [];
+    /** @var array<string, mixed> */
     public array $post = [];
+    /** @var array<string, mixed> */
     public array $request = [];
+    /** @var array<string, mixed> */
     public array $cookie = [];
+    /** @var array<string, mixed> */
     public array $files = [];
+    /** @var array<string, mixed> */
     public array $session = [];
+    /** @var array<string, mixed> */
     public array $session_params = [];
     public ?int $status = null;
     public ?bool $_streaming = null;
@@ -41,9 +49,12 @@ class RequestContext
     // functions in src/utils.php, used by CGI bridge legacy code. Lazy.
     public ?\ZealPHP\Legacy\ApacheContext $apacheContext = null;
     public int $ignore_user_abort_state = 0;
-    public array $error_handlers_stack = [];     // stack of [callable, levels]
-    public array $exception_handlers_stack = []; // stack of callables
-    public array $shutdown_functions = [];       // queue of [callable, args]
+    /** @var array<int, array{0: callable, 1: int}> stack of [callable, levels] */
+    public array $error_handlers_stack = [];
+    /** @var array<int, callable> stack of callables */
+    public array $exception_handlers_stack = [];
+    /** @var array<int, array{0: callable, 1: array<int, mixed>}> queue of [callable, args] */
+    public array $shutdown_functions = [];
     public ?int $error_reporting_level = null;
     public ?int $error_status = null;
     public ?\Throwable $error_exception = null;
@@ -55,6 +66,7 @@ class RequestContext
     // Per-request memoization scratch space — back-end for once() / has() / forget().
     // Keyed by caller-chosen string. Lifetime matches RequestContext (per coroutine
     // in coroutine mode, per request in superglobals mode after the manager resets).
+    /** @var array<string, mixed> */
     public array $memo = [];
 
     private function __construct()
@@ -88,6 +100,9 @@ class RequestContext
      * mode (recommended default) all reads go through the typed properties
      * declared above; returning by value avoids the autovivification footgun
      * where `&$g->nonexistent` would create a property on first read.
+     *
+     * @param string $key
+     * @return mixed
      */
     public function &__get($key)
     {
@@ -127,6 +142,9 @@ class RequestContext
      * typed properties are the contract; we re-initialize the declared slot
      * (preserves PHP's type-check via direct property assignment) and reject
      * any other write loudly so typos still surface.
+     *
+     * @param string $key
+     * @param mixed  $value
      */
     public function __set($key, $value)
     {
@@ -146,12 +164,20 @@ class RequestContext
         );
     }
 
+    /**
+     * @param string $key
+     * @return mixed
+     */
     public static function get($key)
     {
         return self::instance()->$key;
     }
 
-    public static function set($key, $value)
+    /**
+     * @param string $key
+     * @param mixed  $value
+     */
+    public static function set($key, $value): void
     {
         self::instance()->$key = $value;
     }

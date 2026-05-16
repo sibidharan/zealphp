@@ -18,38 +18,55 @@ use Psr\Http\Server\RequestHandlerInterface;
 use OpenSwoole\Coroutine as co;
 class App
 {
-    protected $routes = [];
-    protected $routes_by_method = [];
-    protected $routes_by_exact_method = [];
-    protected $ws_routes = [];
-    protected static $workerStartHooks = [];
+    /** @var array<int, array{path:string,pattern:string,methods:array<int,string>,handler:callable|null,param_map:array<int,array{name:string,position:int,default:mixed,is_url_param:bool}>,raw:bool}> */
+    protected array $routes = [];
+    /** @var array<string, array<int, array<string, mixed>>> */
+    protected array $routes_by_method = [];
+    /** @var array<string, array<string, array<string, mixed>>> */
+    protected array $routes_by_exact_method = [];
+    /** @var array<string, callable|array{callable,callable|null,callable|null}> */
+    protected array $ws_routes = [];
+    /** @var array<int, callable> */
+    protected static array $workerStartHooks = [];
     protected static float $workerStartedAt = 0.0;
-    protected $host;
-    protected $port;
-    static $cwd;
-    static $server;
-    static $default_php_self;
-    private static $instance = null;
-    public static $display_errors = true;
-    public static $superglobals = true;
-    public static $middleware_stack = null;
-    public static $middleware_wait_stack = [];
-    public static $ignore_php_ext = true;
-    public static $coproc_implicit_request_handler = false;
+    protected string $host;
+    protected int $port;
+    public static string $cwd;
+    /** @var \OpenSwoole\WebSocket\Server|\OpenSwoole\Http\Server|null */
+    public static $server;
+    public static ?string $default_php_self = null;
+    private static ?self $instance = null;
+    public static bool $display_errors = true;
+    public static bool $superglobals = true;
+    public static ?StackHandler $middleware_stack = null;
+    /** @var array<int, MiddlewareInterface> */
+    public static array $middleware_wait_stack = [];
+    public static bool $ignore_php_ext = true;
+    public static bool $coproc_implicit_request_handler = false;
     /** Apache DirectorySlash equivalent — redirect `/foo` → `/foo/` when foo is a directory. */
-    public static $directory_slash = true;
-    /** Apache DirectoryIndex — file names tried in order when a directory is requested. */
-    public static $directory_index = ['index.php', 'index.html', 'index.htm'];
+    public static bool $directory_slash = true;
+    /**
+     * Apache DirectoryIndex — file names tried in order when a directory is requested.
+     * @var array<int, string>
+     */
+    public static array $directory_index = ['index.php', 'index.html', 'index.htm'];
     /** Apache PATH_INFO — when `/script.php/extra/path`, expose `/extra/path` as PATH_INFO. */
-    public static $path_info = true;
-    /** Static handler URL-prefix whitelist. Empty = serve any path under document_root (Apache default). */
-    public static $static_handler_locations = [];
+    public static bool $path_info = true;
+    /**
+     * Static handler URL-prefix whitelist. Empty = serve any path under document_root (Apache default).
+     * @var array<int, string>
+     */
+    public static array $static_handler_locations = [];
     /** Block any path containing a dotfile component (.git, .env, .htaccess, etc.). Apache convention. */
-    public static $block_dotfiles = true;
-    private static $fallback_handler = null;
+    public static bool $block_dotfiles = true;
+    /** @var array<string, mixed>|null */
+    private static ?array $fallback_handler = null;
     /** Initial error_reporting level captured at boot — referenced by the per-coroutine override. */
     public static int $initial_error_reporting = E_ALL;
-    /** Status -> custom error handler registry (key 0 = catch-all). */
+    /**
+     * Status -> custom error handler registry (key 0 = catch-all).
+     * @var array<int, array{handler:callable, param_map:array<int, array{name:string, has_default:bool, default:mixed}>, raw:bool}>
+     */
     private static array $error_handlers = [];
     private const REASON_PHRASES = [
         400 => 'Bad Request',
@@ -74,7 +91,7 @@ class App
         504 => 'Gateway Timeout',
     ];
 
-    private function __construct($host = '0.0.0.0', $port = 8080,$cwd = __DIR__)
+    private function __construct(string $host = '0.0.0.0', int $port = 8080, string $cwd = __DIR__)
     {
         # if uopz not enabled, throw error
         if (!extension_loaded('uopz')) {
@@ -223,25 +240,35 @@ class App
         return self::$instance;
     }
 
-    public static function superglobals($enable = true){
+    public static function superglobals(bool $enable = true): void
+    {
         self::$superglobals = $enable;
     }
 
-    public static function instance()
+    public static function instance(): ?App
     {
         return self::$instance;
     }
 
-    public function routes()
+    /**
+     * @return array<int, array{path:string,pattern:string,methods:array<int,string>,handler:callable|null,param_map:array<int,array{name:string,position:int,default:mixed,is_url_param:bool}>,raw:bool}>
+     */
+    public function routes(): array
     {
         return $this->routes;
     }
 
+    /**
+     * @return array<string, array<int, array<string, mixed>>>
+     */
     public function routesByMethod(): array
     {
         return $this->routes_by_method;
     }
 
+    /**
+     * @return array<string, array<string, array<string, mixed>>>
+     */
     public function routesByExactMethod(): array
     {
         return $this->routes_by_exact_method;
@@ -269,6 +296,9 @@ class App
         ];
     }
 
+    /**
+     * @return array<string, callable|array{callable,callable|null,callable|null}>
+     */
     public function wsRoutes(): array
     {
         return $this->ws_routes;
@@ -307,6 +337,10 @@ class App
         self::$workerStartHooks[] = $fn;
     }
 
+    /**
+     * @param callable|array{0:object|string,1:string} $handler
+     * @return array<int, array{name:string, has_default:bool, default:mixed}>
+     */
     private function buildParamMap($handler): array
     {
         try {
@@ -338,12 +372,15 @@ class App
     {
     }
 
+    /**
+     * @return \OpenSwoole\WebSocket\Server|\OpenSwoole\Http\Server|null
+     */
     public static function getServer()
     {
         return self::$server;
     }
 
-    public static function display_errors($display_errors = true)
+    public static function display_errors(bool $display_errors = true): void
     {
         self::$display_errors = $display_errors;
     }
@@ -365,8 +402,11 @@ class App
      * $app->route('/user/{id}', ['methods' => ['GET', 'POST']], function($id) {
      *     // Handler code here
      * });
+     *
+     * @param array<string, mixed>|callable $options
+     * @param callable|null $handler
      */
-    public function route($path, $options = [], $handler = null)
+    public function route(string $path, $options = [], $handler = null): void
     {
         // If only two arguments are provided, assume second is handler and no options.
         // But it's good that we clearly specify all three arguments in usage.
@@ -396,8 +436,11 @@ class App
      * nsRoute: Define a route under a specific namespace.
      * e.g. $app->nsRoute('api', '/users', ['methods' => ['GET']], fn() => "User list");
      * This will create a route at /api/users
+     *
+     * @param array<string, mixed>|callable $options
+     * @param callable|null $handler
      */
-    public function nsRoute($namespace, $path, $options = [], $handler = null)
+    public function nsRoute(string $namespace, string $path, $options = [], $handler = null): void
     {
         // If only two arguments are provided, assume second is handler and no options.
         if (is_callable($options) && $handler === null) {
@@ -437,8 +480,11 @@ class App
      * });
      * 
      * Accessing /api/devices/set_pref will set $path = "devices/set_pref".
+     *
+     * @param array<string, mixed>|callable $options
+     * @param callable|null $handler
      */
-    public function nsPathRoute($namespace, $path, $options = [], $handler = null)
+    public function nsPathRoute(string $namespace, string $path, $options = [], $handler = null): void
     {
         // If only two arguments are provided, assume second is handler and no options.
         if (is_callable($options) && $handler === null) {
@@ -490,8 +536,11 @@ class App
      * This will match any route starting with /api/.
      * 
      * TODO: Allow users to provide variable names for the regex groups.
+     *
+     * @param array<string, mixed>|callable $options
+     * @param callable|null $handler
      */
-    public function patternRoute($regex, $options = [], $handler = null)
+    public function patternRoute(string $regex, $options = [], $handler = null): void
     {
         // If only two arguments are provided
         if (is_callable($options) && $handler === null) {
@@ -520,9 +569,9 @@ class App
      * Parses the given CSS file.
      *
      * @param string $file The path to the CSS file to be parsed.
-     * @return array The parsed CSS rules as an associative array.
+     * @return array<string, array<string, string>> The parsed CSS rules as an associative array.
      */
-    public static function parseCss($file)
+    public static function parseCss(string $file): array
     {
         $css = file_get_contents($file);
         preg_match_all('/(?ims)([a-z0-9\s\.\:#_\-@,]+)\{([^\}]*)\}/', $css, $arr);
@@ -582,6 +631,9 @@ class App
      *   2. return (function() use ($var) { yield ...; })()  → Generator (IIFE, explicit)
      *   3. Regular echo template  → captured output yielded as one chunk
      */
+    /**
+     * @param array<string, mixed> $__args
+     */
     public static function renderStream(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): \Generator
     {
         $__current_file = self::getCurrentFile(null);
@@ -632,6 +684,9 @@ class App
         }
     }
 
+    /**
+     * @param array<string, mixed> $__args
+     */
     public static function renderToString(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): string
     {
         ob_start();
@@ -644,7 +699,10 @@ class App
         return (string) ob_get_clean();
     }
 
-    public static function render($__template_file = 'index', $__args = [], $__default_template_dir = 'template')
+    /**
+     * @param array<string, mixed> $__args
+     */
+    public static function render(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): void
     {
         $__current_file = self::getCurrentFile(null);
         $__template_dir = self::$cwd . "/$__default_template_dir";
@@ -674,7 +732,7 @@ class App
      * Returns the current executing script name without extenstion
      * @return String
      */
-    public static function getCurrentFile($file = null)
+    public static function getCurrentFile(?string $file = null): string
     {
         $g = RequestContext::instance();
         if ($file == null) {
@@ -717,6 +775,8 @@ class App
      * Returns: \Generator for streaming, int for status code, null when the
      * route was handled inline (response already emitted), or false to
      * indicate the directory has no servable index.
+     *
+     * @return \Generator<mixed>|int|null|false
      */
     public function serveDirectory(string $relDir, string $urlPrefix)
     {
@@ -906,12 +966,16 @@ class App
         ];
     }
 
+    /**
+     * @return array<string, mixed>|null
+     */
     public static function getFallback(): ?array
     {
         return self::$fallback_handler;
     }
 
-    public function addMiddleware(\Psr\Http\Server\MiddlewareInterface $middleware){
+    public function addMiddleware(\Psr\Http\Server\MiddlewareInterface $middleware): void
+    {
         self::$middleware_wait_stack[] = $middleware;
     }
 
@@ -956,6 +1020,9 @@ class App
         ];
     }
 
+    /**
+     * @return array{handler:callable, param_map:array<int, array{name:string, has_default:bool, default:mixed}>, raw:bool}|null
+     */
     public static function getErrorHandler(int $status): ?array
     {
         return self::$error_handlers[$status] ?? self::$error_handlers[0] ?? null;
@@ -1037,6 +1104,9 @@ class App
         return (new Response($body))->withStatus($status);
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     protected static function parseCliArgs(): array
     {
         $argv = $_SERVER['argv'] ?? $GLOBALS['argv'] ?? [];
@@ -1172,6 +1242,9 @@ class App
         }
     }
 
+    /**
+     * @param array<string, mixed> $flags
+     */
     private static function resolvePidFile(array $flags): string
     {
         if (!empty($flags['pid_file'])) {
@@ -1269,6 +1342,9 @@ class App
         echo "Use 'php app.php stop -p PORT' to stop a specific instance\n";
     }
 
+    /**
+     * @param array<string, mixed> $flags
+     */
     private static function cliStatus(array $flags): void
     {
         if (isset($flags['port'])) {
@@ -1329,6 +1405,9 @@ class App
         exit(0);
     }
 
+    /**
+     * @param array<string, mixed> $flags
+     */
     private static function cliLogs(array $flags): void
     {
         if (isset($flags['port'])) {
@@ -1455,8 +1534,10 @@ HELP;
      *
      * CLI usage:
      *   php app.php [start|stop|status] [-p port] [-H host] [-w workers] [-d] [--task-workers N] [--pid-file path]
+     *
+     * @param array<string, mixed>|null $settings
      */
-    public function run($settings = null)
+    public function run(?array $settings = null): void
     {
         $cliOverrides = self::parseCliArgs();
         if (isset($cliOverrides['_host'])) {
@@ -1828,6 +1909,7 @@ HELP;
         foreach ($this->routes as $route) {
             foreach ($route['methods'] as $m) {
                 $this->routes_by_method[$m][] = $route;
+                /** @phpstan-ignore-next-line isset on always-present key kept defensively */
                 if (isset($route['path']) && $this->isExactRoutePath($route['path'])) {
                     $this->routes_by_exact_method[$m][$route['path']] = $route;
                 }
@@ -1939,13 +2021,18 @@ HELP;
         $server->start();
     }
 
-    public static function middleware(){
+    public static function middleware(): ?StackHandler
+    {
         return self::$middleware_stack;
     }
 }
 
 class ResponseMiddleware implements MiddlewareInterface
 {
+    /**
+     * @param array<string, mixed> $route
+     * @param array<string, mixed> $params
+     */
     private function dispatchRawRoute(array $route, array $params, string $method): ResponseInterface
     {
         $g = RequestContext::instance();
@@ -2042,6 +2129,10 @@ class ResponseMiddleware implements MiddlewareInterface
         }
     }
 
+    /**
+     * @param array<string, mixed> $route
+     * @param array<string, mixed> $params
+     */
     public function dispatchRoute(array $route, array $params, string $method): ResponseInterface
     {
         if (($route['raw'] ?? false) === true) {
@@ -2275,11 +2366,13 @@ class ResponseMiddleware implements MiddlewareInterface
 
 class TemplateUnavailableException extends \Exception {
 
+	/** @var string */
 	protected $message = "The template you are trying to include does not seem to exist. Please check the file name.
 	Invalid error message. ";
+	/** @var int */
 	protected $code = 1002;
 
-	public function __construct($message) {
+	public function __construct(string $message) {
 		$this->message = $message;
 		parent::__construct($this->message, $this->code);
 	}
@@ -2293,9 +2386,9 @@ class TemplateUnavailableException extends \Exception {
 
 class LocationHeaderMiddleware implements MiddlewareInterface
 {
-    private $correctPort;
+    private int $correctPort;
 
-    public function __construct($correctPort)
+    public function __construct(int $correctPort)
     {
         $this->correctPort = $correctPort;
     }
@@ -2318,7 +2411,10 @@ class LocationHeaderMiddleware implements MiddlewareInterface
         return $response;
     }
 
-    private function buildUrl($parsedUrl)
+    /**
+     * @param array<string, string|int> $parsedUrl
+     */
+    private function buildUrl(array $parsedUrl): string
     {
         $scheme   = isset($parsedUrl['scheme']) ? $parsedUrl['scheme'] . '://' : '';
         $host     = isset($parsedUrl['host']) ? $parsedUrl['host'] : '';

@@ -9,18 +9,21 @@
 // implementations in src/utils.php.
 
 if (!function_exists('apache_request_headers')) {
+    /** @return array<string, string> */
     function apache_request_headers(): array {
         return \ZealPHP\apache_request_headers();
     }
 }
 
 if (!function_exists('getallheaders')) {
+    /** @return array<string, string> */
     function getallheaders(): array {
         return \ZealPHP\getallheaders();
     }
 }
 
 if (!function_exists('apache_response_headers')) {
+    /** @return array<string, string> */
     function apache_response_headers(): array {
         return \ZealPHP\apache_response_headers();
     }
@@ -33,6 +36,7 @@ if (!function_exists('apache_setenv')) {
 }
 
 if (!function_exists('apache_getenv')) {
+    /** @return string|false */
     function apache_getenv(string $variable, bool $walk_to_top = false) {
         return \ZealPHP\apache_getenv($variable, $walk_to_top);
     }

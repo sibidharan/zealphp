@@ -120,6 +120,9 @@ class RangeMiddleware implements MiddlewareInterface
         return $this->multiRange($ranges, $body, $total, $contentType, $g);
     }
 
+    /**
+     * @param array{0: int, 1: int} $range
+     */
     private function singleRange(array $range, string $body, int $total, RequestContext $g): ResponseInterface
     {
         [$start, $end] = $range;
@@ -135,6 +138,9 @@ class RangeMiddleware implements MiddlewareInterface
             ->withHeader('Accept-Ranges', 'bytes');
     }
 
+    /**
+     * @param array<int, array{0: int, 1: int}> $ranges
+     */
     private function multiRange(array $ranges, string $body, int $total, string $contentType, RequestContext $g): ResponseInterface
     {
         $boundary = 'zealphp_' . bin2hex(random_bytes(16));

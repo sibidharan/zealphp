@@ -7,18 +7,25 @@ namespace ZealPHP\HTTP;
 class Request extends \OpenSwoole\HTTP\Request
 {
     public \OpenSwoole\Http\Request $parent;
+    /** @var array<string, string>|null */
     public $header;
 
+    /** @var array<string, mixed>|null */
     public $server;
 
+    /** @var array<string, string>|null */
     public $cookie;
 
-    public  $get;
+    /** @var array<string, mixed>|null */
+    public $get;
 
+    /** @var array<string, mixed>|null */
     public $files;
 
+    /** @var array<string, mixed>|null */
     public $post;
 
+    /** @var array<string, mixed>|null */
     public $tmpfiles;
 
     public function __construct(\OpenSwoole\Http\Request $request)
@@ -33,7 +40,13 @@ class Request extends \OpenSwoole\HTTP\Request
         $this->tmpfiles = &$request->tmpfiles;
     }
 
-    // Magic method to forward method calls to the parent
+    /**
+     * Forward method calls to the underlying OpenSwoole request.
+     *
+     * @param string            $name
+     * @param array<int, mixed> $arguments
+     * @return mixed
+     */
     public function __call($name, $arguments)
     {
         if (method_exists($this->parent, $name)) {
@@ -42,7 +55,12 @@ class Request extends \OpenSwoole\HTTP\Request
         throw new \BadMethodCallException("Method {$name} does not exist");
     }
 
-    // Magic method to get properties from the parent
+    /**
+     * Proxy property reads to the underlying OpenSwoole request.
+     *
+     * @param string $name
+     * @return mixed
+     */
     public function &__get($name)
     {
         if($name == 'parent'){
@@ -54,7 +72,12 @@ class Request extends \OpenSwoole\HTTP\Request
         throw new \InvalidArgumentException("Property {$name} does not exist");
     }
 
-    // Magic method to set properties on the parent
+    /**
+     * Proxy property writes to the underlying OpenSwoole request.
+     *
+     * @param string $name
+     * @param mixed  $value
+     */
     public function __set($name, $value)
     {
         if (property_exists($this->parent, $name)) {

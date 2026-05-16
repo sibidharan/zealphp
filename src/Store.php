@@ -46,7 +46,7 @@ class Store
      *
      * @param string $name    Logical name
      * @param int    $maxRows Power-of-2 capacity (actual allocation is next power of 2 ≥ $maxRows)
-     * @param array  $columns ['colName' => [TYPE, size]]
+     * @param array<string, array{0: int, 1: int}> $columns ['colName' => [TYPE, size]]
      */
     public static function make(string $name, int $maxRows = 1024, array $columns = []): \OpenSwoole\Table
     {
@@ -72,7 +72,11 @@ class Store
         return self::$tables[$name] ?? null;
     }
 
-    /** Set a row. $key must be a string. */
+    /**
+     * Set a row. $key must be a string.
+     *
+     * @param array<string, mixed> $row
+     */
     public static function set(string $table, string $key, array $row): bool
     {
         return (self::$tables[$table] ?? null)?->set($key, $row) ?? false;
@@ -116,7 +120,11 @@ class Store
         return (self::$tables[$table] ?? null)?->count() ?? 0;
     }
 
-    /** List all registered store names. */
+    /**
+     * List all registered store names.
+     *
+     * @return list<string>
+     */
     public static function names(): array
     {
         return array_keys(self::$tables);

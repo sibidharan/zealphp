@@ -37,14 +37,22 @@ use function ZealPHP\response_add_header;
  */
 class CorsMiddleware implements MiddlewareInterface
 {
+    /** @var array<int, string> */
     private array $origins;
+    /** @var array<int, string> */
     private array $methods;
+    /** @var array<int, string> */
     private array $headers;
     private bool  $credentials;
     private int   $maxAge;
 
     private static bool $warnedWildcard = false;
 
+    /**
+     * @param array<int, string>|null $origins      Explicit allowed origins, or null to fall back to env / wildcard.
+     * @param array<int, string>      $methods
+     * @param array<int, string>      $headers
+     */
     public function __construct(
         ?array $origins     = null,
         array  $methods     = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -59,6 +67,10 @@ class CorsMiddleware implements MiddlewareInterface
         $this->maxAge      = $maxAge;
     }
 
+    /**
+     * @param array<int, string>|null $explicit
+     * @return array<int, string>
+     */
     private function resolveOriginsList(?array $explicit): array
     {
         if ($explicit !== null) {

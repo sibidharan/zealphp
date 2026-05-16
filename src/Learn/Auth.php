@@ -38,6 +38,7 @@ class Auth
         return (int) $user['id'];
     }
 
+    /** @return array{user_id: int, username: string}|null */
     public static function currentUser(): ?array
     {
         $g = RequestContext::instance();
@@ -56,6 +57,10 @@ class Auth
         return null;
     }
 
+    /**
+     * @param \ZealPHP\RequestContext $g
+     * @return array{username: string, password: string}|null
+     */
     public static function readCredentials($g): ?array
     {
         $ct = $g->server['HTTP_CONTENT_TYPE'] ?? $g->server['CONTENT_TYPE'] ?? '';

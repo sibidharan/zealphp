@@ -7,6 +7,10 @@ use OpenSwoole\Core\Psr\ServerRequest;
 
 class ServerRequestFactory implements ServerRequestFactoryInterface
 {
+    /**
+     * @param string|\Psr\Http\Message\UriInterface $uri
+     * @param array<string, mixed>                  $serverParams
+     */
     public function createServerRequest(string $method, $uri, array $serverParams = []): ServerRequestInterface
     {
         return new ServerRequest($uri, $method, '', [], [], [], $serverParams);

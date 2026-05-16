@@ -6,6 +6,7 @@ use OpenSwoole\Coroutine as co;
 
 class CoroutineMemorySessionHandler implements \SessionHandlerInterface
 {
+    /** @var array<int, array<string, array{data: string, last_access: int}>> */
     private array $sessions = [];
 
     // Open session

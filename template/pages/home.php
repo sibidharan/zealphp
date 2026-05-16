@@ -505,7 +505,7 @@ redis_client.set(key, json.dumps(data))</code></pre>
 
     <div class="qs-panel active" data-panel="starter">
       <div class="qs-block">
-        <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project:^0.2.14 my-app</span><button class="qs-copy" data-copy="composer create-project sibidharan/zealphp-project:^0.2.14 my-app">copy</button></div>
+        <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project:^0.2.15 my-app</span><button class="qs-copy" data-copy="composer create-project sibidharan/zealphp-project:^0.2.15 my-app">copy</button></div>
         <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd my-app && php app.php</span><button class="qs-copy" data-copy="cd my-app && php app.php">copy</button></div>
         <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">Server running at <code style="color:#fbbf24">http://localhost:8080</code></span></div>
       </div>

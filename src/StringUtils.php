@@ -3,13 +3,13 @@ namespace ZealPHP;
 
 class StringUtils
 {
-    public static function str_starts_with($haystack, $needle)
+    public static function str_starts_with(string $haystack, string $needle): bool
     {
         $length = strlen($needle);
         return (substr($haystack, 0, $length) === $needle);
     }
 
-    public static function str_ends_with($haystack, $needle)
+    public static function str_ends_with(string $haystack, string $needle): bool
     {
         $length = strlen($needle);
         if ($length == 0) {
@@ -40,7 +40,7 @@ class StringUtils
     }
 
 
-   public static function str_contains($haystack, $needle)
+   public static function str_contains(string $haystack, string $needle): bool
    {
        return strpos($haystack, $needle) !== false;
    }

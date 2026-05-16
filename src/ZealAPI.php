@@ -65,15 +65,26 @@ use Psr\Http\Server\RequestHandlerInterface;
  */
 class ZealAPI extends REST
 {
-    public $data = "";
+    public string $data = "";
+    /** @var array<string, array<int, \ReflectionParameter>> */
     private static array $reflectionCache = [];
 
+    /** @var \Closure|null */
     private $api_rpc;
+    /** @var mixed */
     public $_response = null;
+    /** @var mixed */
     public $request = null;
+    /** @var string|null */
     public $cwd = null;
+    /** @var array<string, mixed>|null */
     private ?array $_undefinedMethodError = null;
-    
+
+    /**
+     * @param mixed  $request
+     * @param mixed  $response
+     * @param string $cwd
+     */
     public function __construct($request, $response, $cwd)
     {
         $this->cwd = $cwd;
@@ -87,6 +98,11 @@ class ZealAPI extends REST
     * This method dynmically call the method based on the query string
     *
     */
+    /**
+     * @param string      $module
+     * @param string|null $request
+     * @return mixed
+     */
     public function processApi($module, $request=null)
     {
         $g = RequestContext::instance();
@@ -223,8 +239,10 @@ class ZealAPI extends REST
     // }
 
     /**
-     * @param $param Http Parameters
      * Checks if all supplied parameters exists
+     *
+     * @param array<int, string> $parms Http Parameters
+     * @return bool
      */
     public function paramsExists($parms = array())
     {
@@ -252,7 +270,10 @@ class ZealAPI extends REST
     //     return Session::getUser()->getUsername();
     // }
 
-    public function die($e)
+    /**
+     * @param \Throwable $e
+     */
+    public function die($e): void
     {
         $data = [
             "error" => $e->getMessage(),
@@ -282,6 +303,10 @@ class ZealAPI extends REST
      * directly, so __call is only reached on actual typos. Surface the typo
      * loudly with a "did you mean" hint so developers don't waste time
      * staring at "method_not_callable" wondering what's wrong.
+     *
+     * @param string             $method
+     * @param array<int, mixed>  $args
+     * @return mixed
      */
     public function __call($method, $args)
     {
@@ -328,6 +353,10 @@ class ZealAPI extends REST
     /*
     Encode array into JSON
     */
+    /**
+     * @param mixed $data
+     * @return string
+     */
     private function json($data)
     {
         if (is_array($data)) {

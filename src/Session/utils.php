@@ -6,7 +6,7 @@ use ZealPHP\RequestContext;
 /**
  * Start a new session or resume existing one
  */
-function zeal_session_start()
+function zeal_session_start(): bool
 {
     $g = RequestContext::instance();
 
@@ -75,6 +75,9 @@ function zeal_session_start()
 
 /**
  * Get or set the session ID
+ *
+ * @param string|null $id
+ * @return string|false
  */
 function zeal_session_id($id = null)
 {
@@ -102,7 +105,7 @@ function zeal_session_id($id = null)
     }
 }
 
-function zeal_session_status(){
+function zeal_session_status(): int {
     $g = RequestContext::instance();
     if(isset($g->session)){
         return PHP_SESSION_ACTIVE;
@@ -114,6 +117,9 @@ function zeal_session_status(){
 
 /**
  * Get or set the session name
+ *
+ * @param string|null $name
+ * @return string|false
  */
 function zeal_session_name($name = null)
 {
@@ -130,7 +136,7 @@ function zeal_session_name($name = null)
 /**
  * Write session data and close the session
  */
-function zeal_session_write_close()
+function zeal_session_write_close(): bool
 {
     $g = RequestContext::instance();
 
@@ -151,7 +157,7 @@ function zeal_session_write_close()
 /**
  * Destroy the session
  */
-function zeal_session_destroy()
+function zeal_session_destroy(): bool
 {
     $g = RequestContext::instance();
 
@@ -174,7 +180,7 @@ function zeal_session_destroy()
 /**
  * Unset all session variables
  */
-function zeal_session_unset()
+function zeal_session_unset(): void
 {
     $g = RequestContext::instance();
     $g->session = [];
@@ -182,8 +188,10 @@ function zeal_session_unset()
 
 /**
  * Regenerate session ID
+ *
+ * @param bool $delete_old_session
  */
-function zeal_session_regenerate_id($delete_old_session = false)
+function zeal_session_regenerate_id($delete_old_session = false): bool
 {
     $g = RequestContext::instance();
 
@@ -211,8 +219,10 @@ function zeal_session_regenerate_id($delete_old_session = false)
 
 /**
  * Get session cookie parameters
+ *
+ * @return array{lifetime: int, path: string, domain: string, secure: bool, httponly: bool, samesite?: string}
  */
-function zeal_session_get_cookie_params()
+function zeal_session_get_cookie_params(): array
 {
     $g = RequestContext::instance();
     return $g->session_params['cookie_params'] ?? [
@@ -227,14 +237,23 @@ function zeal_session_get_cookie_params()
 
 /**
  * Set session cookie parameters
+ *
+ * @param int    $lifetime
+ * @param string $path
+ * @param string $domain
+ * @param bool   $secure
+ * @param bool   $httponly
  */
-function zeal_session_set_cookie_params($lifetime, $path = '/', $domain = '', $secure = false, $httponly = false)
+function zeal_session_set_cookie_params($lifetime, $path = '/', $domain = '', $secure = false, $httponly = false): void
 {
     $g = RequestContext::instance();
     $g->session_params['cookie_params'] = compact('lifetime', 'path', 'domain', 'secure', 'httponly');
 }
 
-function zeal_session_cache_limiter($cache_limiter = null)
+/**
+ * @param string|null $cache_limiter
+ */
+function zeal_session_cache_limiter($cache_limiter = null): string
 {
     $g = RequestContext::instance();
 
@@ -246,12 +265,15 @@ function zeal_session_cache_limiter($cache_limiter = null)
     }
 }
 
-function zeal_session_commit()
+function zeal_session_commit(): bool
 {
     return zeal_session_write_close();
 }
 
-function zeal_session_cache_expire($cache_expire = null)
+/**
+ * @param int|null $cache_expire
+ */
+function zeal_session_cache_expire($cache_expire = null): int
 {
     $g = RequestContext::instance();
 
@@ -263,7 +285,7 @@ function zeal_session_cache_expire($cache_expire = null)
     }
 }
 
-function zeal_session_abort()
+function zeal_session_abort(): bool
 {
     $g = RequestContext::instance();
 
@@ -293,12 +315,15 @@ function zeal_session_abort()
     return true;
 }
 
-function zeal_session_encode()
+function zeal_session_encode(): string
 {
     return serialize(RequestContext::instance()->session);
 }
 
-function zeal_session_decode($data)
+/**
+ * @param string $data
+ */
+function zeal_session_decode($data): bool
 {
     // Defensive: unserialize() returns false on malformed input, which would
     // TypeError on assignment to the typed array property. Match PHP native
@@ -314,11 +339,19 @@ function zeal_session_decode($data)
     return true;
 }
 
+/**
+ * @param string $prefix
+ * @return string|false
+ */
 function zeal_session_create_id($prefix = '')
 {
     return session_create_id($prefix);
 }
 
+/**
+ * @param string|null $path
+ * @return string|false
+ */
 function zeal_session_save_path($path = null)
 {
     $g = RequestContext::instance();
@@ -331,7 +364,10 @@ function zeal_session_save_path($path = null)
     }
 }
 
-function zeal_session_module_name($module = null)
+/**
+ * @param string|null $module
+ */
+function zeal_session_module_name($module = null): string
 {
     $g = RequestContext::instance();
 
