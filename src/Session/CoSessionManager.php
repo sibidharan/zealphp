@@ -104,10 +104,7 @@ class CoSessionManager
         }
 
         try {
-            $time = microtime();
-            $time = explode(' ', $time);
-            $time = $time[1] + $time[0];
-            $g->session['__start_time'] = $time;
+            $g->session['__start_time'] = microtime(true);
             $g->session['UNIQUE_REQUEST_ID'] = uniqidReal();
             $g->openswoole_request = $request;
             $g->openswoole_response = $response;

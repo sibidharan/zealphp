@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.14] - 2026-05-16
+
+### Changed
+- **PHPStan baseline raised from level 1 → level 5.** First of three planned releases (v0.2.14 / v0.2.15 / v0.2.16) climbing to level 9. Reframes the "PHPStan level 1 is a deliberate trade-off" framing from [CRITIC.md](CRITIC.md):128-136 — investigation showed most of the gap was missing annotations, not architectural limits. Level 5 = full parameter-type checking with 0 errors.
+
+### Fixed
+- **`src/StringUtils.php::get_string_between()`** — three `(int)` casts on string delimiters made the function return wrong results for any non-numeric delimiter. The docblock said "Integer" but the implementation needs string delimiters (e.g., finding text between `[start]` and `[end]` tags). Casts removed. Method is currently unreferenced in framework code but is part of the public `ZealPHP\StringUtils` API.
+- **`microtime()` float-arithmetic idiom** in `src/Session/CoSessionManager.php`, `src/Session/SessionManager.php`, and `src/utils.php::get_current_render_time()` — the classic `$t = microtime(); $t = explode(' ', $t); $time = $t[1] + $t[0];` pattern computes a float via PHP's string-to-float coercion. Replaced with `microtime(true)` (which returns float directly) at all three sites. No behavior change; cleaner and PHPStan-correct.
+- **`src/utils.php::response_set_status(int $status)`** — `is_int($status)` check after a typed `int` parameter was dead code. Simplified.
+- **`src/ZealAPI.php::processApi()`** — `is_array($handler)` branch on a `Closure`-only field was dead code (the upstream assignment is `Closure::bind(...)` exclusively). Branch removed; reflection now goes directly to `\ReflectionFunction`.
+- **`src/utils.php::resolve_log_dir()` + `resolve_log_path()`** — defensive `$candidate === ''` and `$path === null` guards on values that PHPStan (and runtime) can confirm are never empty/null. Removed.
+
+### Removed
+- **Deleted `src/Session.php`** — confirmed dead code by static analysis and explore-agent investigation. The class referenced a `\ZealPHP\UserSession` type that **does not exist anywhere in the codebase**, was imported by `src/App.php` but never called, and was distinct from the real session managers in `src/Session/SessionManager.php` and `src/Session/CoSessionManager.php`. Removed entirely. Removed `use ZealPHP\Session;` from `src/App.php`.
+- **`src/ZealAPI.php::$auth` property** — declared but never read, only written. Dead.
+- **`src/REST.php::get_status_message()`** — private method, no internal callers. Dead.
+
+### Documentation
+- `phpstan.neon` now has documented `ignoreErrors` patterns covering the OpenSwoole / posix / PHP-version stub mismatches (each with a one-line `# reason` comment explaining what the stub got wrong vs runtime behavior).
+
+### Notes on architectural improvements driven by analysis
+- `RequestContext::instance(): self` — added explicit return type. PHPStan now correctly narrows `$g = RequestContext::instance()` to `RequestContext`, which alone removed 5+ "access to undefined property `object::$X`" errors at level 2 across `src/Session/utils.php` and `src/utils.php`. Same change improves IDE autocomplete for any code calling `instance()`.
+- `RequestContext::instance()` now `assert($instance instanceof self)` on the coroutine-context retrieval, replacing the implicit `mixed` return.
+- `\ZealPHP\HTTP\Request::$parent` made public (was private, exposed through `__get` magic anyway — the `private` was illusory and forced consumers through the slower magic path).
+- `IOStreamWrapper::$position` and `$input` typed as `int` and `string` respectively.
+
 ## [0.2.13] - 2026-05-16
 
 ### Fixed (framework)

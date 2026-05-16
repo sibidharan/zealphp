@@ -41,8 +41,8 @@ use function ZealPHP\elog;
 // Custom Stream Wrapper for php://input with passthrough
 class IOStreamWrapper {
     public $context;
-    private $position = 0;
-    private $input = '';
+    private int $position = 0;
+    private string $input = '';
 
     // public function stream_open($path, $mode, $options, &$opened_path) {
     //     if ($path === 'php://input') {

@@ -69,7 +69,6 @@ class ZealAPI extends REST
     private static array $reflectionCache = [];
 
     private $api_rpc;
-    private $auth = null;
     public $_response = null;
     public $request = null;
     public $cwd = null;
@@ -131,9 +130,9 @@ class ZealAPI extends REST
                     $handler = $this->api_rpc;
                     $cacheKey = $file . ':' . $func;
                     if (!isset(self::$reflectionCache[$cacheKey])) {
-                        $reflection = is_array($handler)
-                            ? new \ReflectionMethod($handler[0], $handler[1])
-                            : new \ReflectionFunction($handler);
+                        // $handler is always a bound Closure here (set above by
+                        // \Closure::bind(${$func}, $this, get_class()) at line 124).
+                        $reflection = new \ReflectionFunction($handler);
                         self::$reflectionCache[$cacheKey] = $reflection->getParameters();
                     }
 

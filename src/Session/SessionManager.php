@@ -136,10 +136,7 @@ class SessionManager
             );
         }
         try {
-            $time = microtime();
-            $time = explode(' ', $time);
-            $time = $time[1] + $time[0];
-            $_SESSION['__start_time'] = $time;
+            $_SESSION['__start_time'] = microtime(true);
             $_SESSION['UNIQUE_REQUEST_ID'] = uniqidReal();
             $g->openswoole_request = $request;
             $g->openswoole_response = $response;

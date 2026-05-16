@@ -6,7 +6,7 @@ namespace ZealPHP\HTTP;
 
 class Request extends \OpenSwoole\HTTP\Request
 {
-    private \OpenSwoole\Http\Request $parent;
+    public \OpenSwoole\Http\Request $parent;
     public $header;
 
     public $server;

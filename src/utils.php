@@ -105,9 +105,6 @@ function resolve_log_dir(): ?string
     }
 
     foreach (array_unique($candidates) as $candidate) {
-        if ($candidate === '') {
-            continue;
-        }
         if (!is_dir($candidate)) {
             @mkdir($candidate, 0775, true);
         }
@@ -184,7 +181,7 @@ function log_file_for(string $kind): ?string
         $path = getenv('ZEALPHP_LOG_FILE');
     }
 
-    if ($path === false || $path === null || trim((string) $path) === '') {
+    if ($path === false || trim((string) $path) === '') {
         $dir = resolve_log_dir();
         if ($dir === null) {
             return null;
@@ -485,12 +482,11 @@ function get_config($key)
  */
 function get_current_render_time()
 {
-    $time = microtime();
-    $time = explode(' ', $time);
-    $time = $time[1] + $time[0];
-    $finish = $time;
-    $total_time = number_format(($finish - RequestContext::instance()->session['__start_time']), 5);
-    return $total_time;
+    $finish = microtime(true);
+    return (float) number_format(
+        ($finish - RequestContext::instance()->session['__start_time']),
+        5
+    );
 }
 
 
@@ -519,8 +515,8 @@ function indent($string, $indend = 4)
 
 /**
  * Takes an iterator or object, and converts it into an Array.
- * @param  Any $obj
- * @return Array
+ * @param  mixed $obj
+ * @return array
  */
 function purify_array($obj)
 {
@@ -597,12 +593,7 @@ function response_add_header($key, $value, $ucwords = true)
  */
 function response_set_status(int $status)
 {
-    $g = RequestContext::instance();
-    if(is_int($status)){
-        $g->status = $status;
-    } else {
-        $g->status = 200;
-    } 
+    RequestContext::instance()->status = $status;
 }
 
 /**

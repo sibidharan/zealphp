@@ -66,7 +66,10 @@ class CorsMiddleware implements MiddlewareInterface
         }
         $env = getenv('ZEALPHP_CORS_ORIGINS');
         if ($env !== false && trim($env) !== '') {
-            return array_values(array_filter(array_map('trim', explode(',', $env)), 'strlen'));
+            return array_values(array_filter(
+                array_map('trim', explode(',', $env)),
+                fn (string $s): bool => $s !== ''
+            ));
         }
         if (!self::$warnedWildcard) {
             self::$warnedWildcard = true;

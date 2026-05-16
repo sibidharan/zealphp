@@ -1,5 +1,5 @@
 parameters:
-    level: 1
+    level: 5
     paths:
         - src
     excludePaths:
@@ -8,11 +8,58 @@ parameters:
         - phpstan-stubs.php
         - vendor/autoload.php
     ignoreErrors:
+        # ─── OpenSwoole / ext-stub mismatches ────────────────────────────
         # OpenSwoole\Timer::clear($timerId) signature is mis-stubbed
         # by openswoole/ide-helper; real ext function takes one int.
         -
             message: '#^Static method OpenSwoole\\Timer::clear\(\) invoked with 1 parameter, 0 required\.$#'
             path: src/App.php
+        # OpenSwoole\Runtime::enableCoroutine() accepts int flag (HOOK_ALL etc.)
+        # at the C level; ide-helper stub declares it as bool.
+        -
+            message: '#enableCoroutine\(\) expects bool, int given\.$#'
+            path: src/App.php
+        # openswoole/ide-helper stubs declare Http\Response::isWritable() and
+        # ext-posix declares posix_kill() as constant-return — at runtime
+        # both return false on the very condition (client disconnect /
+        # process exit) that the polling code is checking for. Suppress the
+        # always-false reports across App.php; the actual runtime behavior
+        # is the polling, not the stub fiction.
+        -
+            message: '#^Negated boolean expression is always false\.$#'
+            path: src/App.php
+        -
+            message: '#^If condition is always true\.$#'
+            path: src/App.php
+        # ResponseMiddleware re-emits $g->status after handlers run; PHPStan
+        # narrows from the constant ($beforeStatus = 200) and reports the
+        # 3-way !== check as always-false. Runtime: status is mutated by
+        # uopz overrides (http_response_code(), Response::status()) before
+        # we get here.
+        -
+            message: '#^Result of && is always false\.$#'
+            path: src/App.php
+        -
+            message: '#^Strict comparison using !== between 200 and 200 will always evaluate to false\.$#'
+            path: src/App.php
+
+        # ─── PHP < 8.0 stub vs PHP 8.3+ runtime ─────────────────────────
+        # ceil() returns int on PHP 8.0+; older stubs say float. We pin
+        # PHP 8.3+ in composer.json so this is a stub artifact.
+        -
+            message: '#expects int(<1, max>)?, float given\.$#'
+            path: src/utils.php
+
+        # ─── Closure by-ref capture limitation ──────────────────────────
+        # Chat.php SSE chunker captures $textBuf by reference; PHPStan
+        # treats every read as the initial '' and reports the !== '' guard
+        # as always-false. Real flow mutates $textBuf between the assign
+        # and the guard.
+        -
+            message: "#^Strict comparison using !== between '' and '' will always evaluate to false\\.$#"
+            path: src/Learn/Chat.php
+
+        # ─── REST.php constructor backward-compat ───────────────────────
         # REST.php constructor signature kept for backward compatibility;
         # body uses G::instance() instead of the passed-in objects.
         -

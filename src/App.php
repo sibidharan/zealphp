@@ -2,7 +2,6 @@
 namespace ZealPHP;
 
 use ZealPHP\ZealAPI;
-use ZealPHP\Session;
 use function ZealPHP\elog;
 use function ZealPHP\jTraceEx;
 use function ZealPHP\response_add_header;
@@ -456,7 +455,7 @@ class App
     
         // Find all parameters
         preg_match_all('/\{([^}]+)\}/', $path, $paramMatches);
-        $paramsFound = $paramMatches[1] ?? [];
+        $paramsFound = $paramMatches[1];
         $lastParam = end($paramsFound);
     
         // Replace parameters: all but last use [^/]+, last one uses .+
@@ -599,8 +598,9 @@ class App
         $__template_file_path = realpath($__template_file_path);
 
         if (!$__template_file_path or !file_exists($__template_file_path) or strpos($__template_file_path, self::$cwd) !== 0) {
-            $caller = array_shift(debug_backtrace());
-            throw new TemplateUnavailableException("The template $__template_file_path does not exist in file " . str_replace(App::$cwd, '', $caller['file']) . ":" . $caller['line'] );
+            $bt = debug_backtrace();
+            $caller = array_shift($bt);
+            throw new TemplateUnavailableException("The template $__template_file_path does not exist in file " . str_replace(App::$cwd, '', $caller['file'] ?? '') . ":" . ($caller['line'] ?? '') );
         }
 
         ob_start();
@@ -660,8 +660,9 @@ class App
         $__template_file_path = realpath($__template_file_path);
 
         if (!$__template_file_path or !file_exists($__template_file_path) or strpos($__template_file_path, self::$cwd) !== 0) {
-            $caller = array_shift(debug_backtrace());
-            throw new TemplateUnavailableException("The template $__template_file_path does not exist in file " . str_replace(App::$cwd, '', $caller['file']) . ":" . $caller['line'] );
+            $bt = debug_backtrace();
+            $caller = array_shift($bt);
+            throw new TemplateUnavailableException("The template $__template_file_path does not exist in file " . str_replace(App::$cwd, '', $caller['file'] ?? '') . ":" . ($caller['line'] ?? '') );
         } else {
             extract($__args, EXTR_SKIP);
             include $__template_file_path;
@@ -997,7 +998,7 @@ class App
                 elog("Error handler for $status itself threw: " . $e->getMessage(), 'error');
                 // fall through to default
             } finally {
-                $g->error_render_depth = max(0, ($g->error_render_depth ?? 1) - 1);
+                $g->error_render_depth = max(0, $g->error_render_depth - 1);
             }
         }
         return $this->defaultErrorResponse($status, $exception);

@@ -19,22 +19,23 @@ class StringUtils
     }
 
     /**
-    * A general method used to ger the string between two index locations.
-    * @param  String $string
-    * @param  Integer $start
-    * @param  Integer $end
-    * @return String         The sliced string.
-    */
+     * Return the substring between two string delimiters.
+     *
+     * @param string $string
+     * @param string $start  Opening delimiter
+     * @param string $end    Closing delimiter
+     * @return string The sliced string, or '' if $start was not found.
+     */
     public static function get_string_between($string, $start, $end)
     {
         $string = ' ' . $string;
-        $ini = strpos($string, (int)$start);
+        $ini = strpos($string, $start);
         if ($ini == 0) {
             return '';
         }
 
-        $ini += strlen((int)$start);
-        $len = strpos($string, (int)$end, $ini) - $ini;
+        $ini += strlen($start);
+        $len = strpos($string, $end, $ini) - $ini;
         return substr($string, $ini, $len);
     }
 

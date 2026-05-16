@@ -49,7 +49,10 @@ class Chat
                     $sse(json_encode(['token' => '<p>Here are your notes:</p>' . $html]), 'token');
                 }
             } elseif (preg_match('/(create|add)(\s+a)?\s+note(\s+(titled|called|saying))?\s+["\']?(.+?)["\']?$/i', $message, $m)) {
-                $title = trim($m[5] ?? 'untitled');
+                $title = trim($m[5]);
+                if ($title === '') {
+                    $title = 'untitled';
+                }
                 $sse(json_encode(['token' => '<p>Got it, creating that note.</p>']), 'token');
                 $sse(json_encode(['id' => 'm2', 'name' => 'create_note', 'phase' => 'start']), 'tool_call');
                 $json = json_encode(['title' => $title, 'body' => '']);

@@ -61,7 +61,7 @@ class RequestContext
     {
     }
 
-    public static function instance()
+    public static function instance(): self
     {
         if (!App::$superglobals) {
             $cid = \OpenSwoole\Coroutine::getCid();
@@ -70,7 +70,9 @@ class RequestContext
                 if (!isset($context['__g'])) {
                     $context['__g'] = new self();
                 }
-                return $context['__g'];
+                $instance = $context['__g'];
+                assert($instance instanceof self);
+                return $instance;
             }
         }
         if (self::$instance === null) {
