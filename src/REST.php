@@ -10,8 +10,8 @@ class REST {
     private $_code = 200;
     public $_response;
     public function __construct($request, $response){
-        $this->_response = G::instance()->zealphp_response;
-        $this->_request = G::instance()->zealphp_request;
+        $this->_response = RequestContext::instance()->zealphp_response;
+        $this->_request = RequestContext::instance()->zealphp_request;
         $this->inputs();
     }
 
@@ -101,7 +101,7 @@ class REST {
     }
 
     private function serverValue($key, $default = null){
-        $server = G::instance()->server;
+        $server = RequestContext::instance()->server;
         if (!is_array($server)) {
             return $default;
         }
@@ -109,7 +109,7 @@ class REST {
     }
 
     private function requestValues($key){
-        $value = G::instance()->$key;
+        $value = RequestContext::instance()->$key;
         return is_array($value) ? $value : [];
     }
 

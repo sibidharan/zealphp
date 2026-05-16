@@ -6,7 +6,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use OpenSwoole\Core\Psr\Response;
-use ZealPHP\G;
+use ZealPHP\RequestContext;
 use function ZealPHP\response_add_header;
 use function ZealPHP\response_set_status;
 
@@ -32,7 +32,7 @@ class ETagMiddleware implements MiddlewareInterface
             return $response;
         }
 
-        $g = G::instance();
+        $g = RequestContext::instance();
         if ($g->_streaming ?? false) {
             return $response;
         }

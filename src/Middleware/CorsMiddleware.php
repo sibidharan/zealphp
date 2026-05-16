@@ -6,7 +6,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use OpenSwoole\Core\Psr\Response;
-use ZealPHP\G;
+use ZealPHP\RequestContext;
 use function ZealPHP\response_add_header;
 
 /**
@@ -52,7 +52,7 @@ class CorsMiddleware implements MiddlewareInterface
     {
         $origin        = $request->getHeaderLine('Origin');
         $allowedOrigin = $this->resolveOrigin($origin);
-        $g = G::instance();
+        $g = RequestContext::instance();
         $resp = $g->zealphp_response;
 
         if ($request->getMethod() === 'OPTIONS' && $origin !== '') {

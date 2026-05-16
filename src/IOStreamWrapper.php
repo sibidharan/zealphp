@@ -62,7 +62,7 @@ class IOStreamWrapper {
         // used internally by the PSR layer and logging them adds noise per request.
         if ($path === 'php://input') {
             elog("stream_open: $path, $mode, $options", "streamio");
-            $g = \ZealPHP\G::instance();
+            $g = \ZealPHP\RequestContext::instance();
             $content = $g->zealphp_request->parent->getContent();
             $stream = fopen('php://memory', 'r+');
             if ($stream === false) {

@@ -2,7 +2,7 @@
 namespace ZealPHP\Learn;
 
 use ZealPHP\App;
-use ZealPHP\G;
+use ZealPHP\RequestContext;
 
 class Chat
 {
@@ -102,7 +102,7 @@ class Chat
 
         ChatHistory::append($db, $user['user_id'], $threadId, 'user', [['type' => 'text', 'html' => '<p>' . htmlspecialchars($message) . '</p>']]);
 
-        $g = G::instance();
+        $g = RequestContext::instance();
         $payload = [
             'message'    => $message,
             'thread_id'  => $threadId,

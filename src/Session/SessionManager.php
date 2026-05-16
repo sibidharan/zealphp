@@ -9,7 +9,7 @@ use function ZealPHP\get_current_render_time;
 use OpenSwoole\Coroutine as co;
 
 use ZealPHP\Session\Handler\FileSessionHandler;
-use ZealPHP\G;
+use ZealPHP\RequestContext;
 
 use OpenSwoole\Core\Psr\Middleware\StackHandler;
 use OpenSwoole\Core\Psr\Response;
@@ -55,7 +55,7 @@ class SessionManager
         $this->idGenerator = $idGenerator;
         $this->useCookies = is_null($useCookies) ? (bool)ini_get('session.use_cookies') : $useCookies;
         $this->useOnlyCookies = is_null($useOnlyCookies) ? (bool)ini_get('session.use_only_cookies') : $useOnlyCookies;
-        $this->g = G::instance();
+        $this->g = RequestContext::instance();
     }
 
     // public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface {
@@ -67,7 +67,7 @@ class SessionManager
      */
     public function __invoke($request,$response)
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         if (bench_mode_enabled()) {
             $g->session = [];
             $g->openswoole_request = $request;

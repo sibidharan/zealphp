@@ -444,7 +444,7 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false)
 
     $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1);
     $caller = $bt[0];
-    $g = G::instance();
+    $g = RequestContext::instance();
     $date = date('Y-m-d H:i:s');
     if (is_object($log)) {
         $log = purify_array($log);
@@ -489,7 +489,7 @@ function get_current_render_time()
     $time = explode(' ', $time);
     $time = $time[1] + $time[0];
     $finish = $time;
-    $total_time = number_format(($finish - G::instance()->session['__start_time']), 5);
+    $total_time = number_format(($finish - RequestContext::instance()->session['__start_time']), 5);
     return $total_time;
 }
 
@@ -559,7 +559,7 @@ function access_log(int $status = 200, int $length = 0){
     if (!access_logging_enabled()) {
         return;
     }
-    $g = G::instance();
+    $g = RequestContext::instance();
     static $cachedDate = '';
     static $cachedSecond = 0;
     $now = time();
@@ -585,7 +585,7 @@ function access_log(int $status = 200, int $length = 0){
  */
 function response_add_header($key, $value, $ucwords = true)
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     // elog("response_add_header: $key ".var_export($value, true));
     $g->zealphp_response->header($key, $value, $ucwords);
 }
@@ -597,7 +597,7 @@ function response_add_header($key, $value, $ucwords = true)
  */
 function response_set_status(int $status)
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     if(is_int($status)){
         $g->status = $status;
     } else {
@@ -612,7 +612,7 @@ function response_set_status(int $status)
  */
 function response_headers_list()
 {
-    $response = G::instance()->zealphp_response;
+    $response = RequestContext::instance()->zealphp_response;
     return $response === null ? [] : $response->headersList;
 }
 
@@ -641,7 +641,7 @@ function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $s
         trigger_error('Cookie value/path/domain/samesite contains control characters', E_USER_WARNING);
         return false;
     }
-    $g = G::instance();
+    $g = RequestContext::instance();
     $g->zealphp_response->cookie($name, $value, $expire, $path, $domain, $secure, $httponly, $samesite);
     return true;
 }
@@ -690,7 +690,7 @@ function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "",
     if ($httponly) {
         $cookie .= "; httponly";
     }
-    $g = G::instance();
+    $g = RequestContext::instance();
     $g->zealphp_response->rawCookie($name, $value, $expire, $path, $domain, $secure, $httponly);
     return true;
 }
@@ -724,7 +724,7 @@ function header($header, $replace = true, $http_response_code = null) {
     $name = trim($parts[0]);
     $value = trim($parts[1]);
     if ($replace) {
-        $response = G::instance()->zealphp_response;
+        $response = RequestContext::instance()->zealphp_response;
         if ($response !== null) {
             $response->headersList = array_values(array_filter(
                 $response->headersList,
@@ -747,7 +747,7 @@ function http_response_code($code = null) {
    if ($code !== null) {
        response_set_status($code);
    } else {
-       return G::instance()->status;
+       return RequestContext::instance()->status;
    }
 }
 
@@ -776,7 +776,7 @@ function headers_list() {
 * @return bool Returns true if headers have already been sent, false otherwise.
 */
 function headers_sent(&$file = null, &$line = null) {
-   $g = G::instance();
+   $g = RequestContext::instance();
    if (isset($g->openswoole_response) && $g->openswoole_response !== null) {
        return !$g->openswoole_response->isWritable();
    }
@@ -788,7 +788,7 @@ function headers_sent(&$file = null, &$line = null) {
  */
 function header_remove(?string $name = null): void
 {
-    $response = G::instance()->zealphp_response;
+    $response = RequestContext::instance()->zealphp_response;
     if ($response === null) {
         return;
     }
@@ -809,7 +809,7 @@ function header_remove(?string $name = null): void
  */
 function flush(): void
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     if (!isset($g->openswoole_response) || $g->openswoole_response === null) {
         return;
     }
@@ -859,7 +859,7 @@ function ob_implicit_flush($enable = true): void
  */
 function apache_request_headers(): array
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     $out = [];
     $raw = [];
     if (isset($g->zealphp_request) && $g->zealphp_request !== null) {
@@ -882,7 +882,7 @@ function getallheaders(): array
  */
 function apache_response_headers(): array
 {
-    $response = G::instance()->zealphp_response;
+    $response = RequestContext::instance()->zealphp_response;
     if ($response === null) {
         return [];
     }
@@ -900,7 +900,7 @@ function apache_response_headers(): array
  */
 function apache_setenv(string $variable, string $value, bool $walk_to_top = false): bool
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     if ($g->apacheContext === null) {
         $g->apacheContext = new \ZealPHP\Legacy\ApacheContext();
     }
@@ -910,7 +910,7 @@ function apache_setenv(string $variable, string $value, bool $walk_to_top = fals
 
 function apache_getenv(string $variable, bool $walk_to_top = false)
 {
-    $ctx = G::instance()->apacheContext;
+    $ctx = RequestContext::instance()->apacheContext;
     return $ctx === null ? false : ($ctx->env[$variable] ?? false);
 }
 
@@ -919,7 +919,7 @@ function apache_getenv(string $variable, bool $walk_to_top = false)
  */
 function apache_note(string $note_name, ?string $note_value = null): string
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     $previous = (string)($g->apacheContext->notes[$note_name] ?? '');
     if ($note_value !== null) {
         if ($g->apacheContext === null) {
@@ -957,7 +957,7 @@ function set_time_limit(int $seconds): bool
  */
 function ignore_user_abort($enable = null): int
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     $previous = $g->ignore_user_abort_state;
     if ($enable !== null) {
         $g->ignore_user_abort_state = $enable ? 1 : 0;
@@ -967,7 +967,7 @@ function ignore_user_abort($enable = null): int
 
 function connection_status(): int
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     if (isset($g->openswoole_response) && $g->openswoole_response !== null
         && !$g->openswoole_response->isWritable()) {
         return 1; // CONNECTION_ABORTED
@@ -977,7 +977,7 @@ function connection_status(): int
 
 function connection_aborted(): int
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     if (isset($g->openswoole_response) && $g->openswoole_response !== null
         && !$g->openswoole_response->isWritable()) {
         return 1;
@@ -1004,7 +1004,7 @@ function output_reset_rewrite_vars(): bool
  */
 function is_uploaded_file(string $filename): bool
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     foreach ($g->files ?? [] as $entry) {
         if (!is_array($entry)) continue;
         $tmp = $entry['tmp_name'] ?? null;
@@ -1043,7 +1043,7 @@ function move_uploaded_file(string $from, string $to): bool
  */
 function set_error_handler(?callable $callback, int $error_levels = E_ALL): ?callable
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     $stack = $g->error_handlers_stack;
     $prev = !empty($stack) ? $stack[count($stack) - 1][0] : null;
     if ($callback === null) {
@@ -1057,7 +1057,7 @@ function set_error_handler(?callable $callback, int $error_levels = E_ALL): ?cal
 
 function restore_error_handler(): bool
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     $stack = $g->error_handlers_stack;
     array_pop($stack);
     $g->error_handlers_stack = $stack;
@@ -1066,7 +1066,7 @@ function restore_error_handler(): bool
 
 function set_exception_handler(?callable $callback): ?callable
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     $stack = $g->exception_handlers_stack;
     $prev = !empty($stack) ? $stack[count($stack) - 1] : null;
     if ($callback === null) {
@@ -1080,7 +1080,7 @@ function set_exception_handler(?callable $callback): ?callable
 
 function restore_exception_handler(): bool
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     $stack = $g->exception_handlers_stack;
     array_pop($stack);
     $g->exception_handlers_stack = $stack;
@@ -1094,7 +1094,7 @@ function restore_exception_handler(): bool
  */
 function register_shutdown_function(callable $callback, mixed ...$args): void
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     $list = $g->shutdown_functions;
     $list[] = [$callback, $args];
     $g->shutdown_functions = $list;
@@ -1105,7 +1105,7 @@ function register_shutdown_function(callable $callback, mixed ...$args): void
  */
 function error_reporting(?int $error_level = null): int
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     $current = $g->error_reporting_level ?? \ZealPHP\App::$initial_error_reporting;
     if ($error_level !== null) {
         $g->error_reporting_level = $error_level;

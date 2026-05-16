@@ -7,7 +7,7 @@ use function ZealPHP\response_set_status;
 class Response
 {
     public \OpenSwoole\Http\Response $parent;
-    private \ZealPHP\G $g;
+    private \ZealPHP\RequestContext $g;
     private ?int $statusCode = null;
 
     /**
@@ -24,7 +24,7 @@ class Response
     public function __construct(\OpenSwoole\Http\Response $response)
     {
         $this->parent = $response;
-        $this->g = \ZealPHP\G::instance();
+        $this->g = \ZealPHP\RequestContext::instance();
     }
 
     // Magic method to forward method calls to the parent

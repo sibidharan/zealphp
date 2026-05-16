@@ -1,7 +1,7 @@
 <?php
 namespace ZealPHP\Learn;
 
-use ZealPHP\G;
+use ZealPHP\RequestContext;
 
 class Auth
 {
@@ -40,7 +40,7 @@ class Auth
 
     public static function currentUser(): ?array
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         if (!empty($g->session['user_id'])) {
             $userId = (int) $g->session['user_id'];
             $db = DB::open();

@@ -1,14 +1,14 @@
 <?php
 namespace ZealPHP\Session;
 
-use ZealPHP\G;
+use ZealPHP\RequestContext;
 
 /**
  * Start a new session or resume existing one
  */
 function zeal_session_start()
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
 
     // Ensure session parameters are initialized
     if (!isset($g->session_params['save_path'])) {
@@ -68,7 +68,7 @@ function zeal_session_start()
  */
 function zeal_session_id($id = null)
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
 
     if (!isset($g->session_params['name'])) {
         $g->session_params['name'] = 'PHPSESSID';
@@ -93,7 +93,7 @@ function zeal_session_id($id = null)
 }
 
 function zeal_session_status(){
-    $g = G::instance();
+    $g = RequestContext::instance();
     if(isset($g->session)){
         return PHP_SESSION_ACTIVE;
     }else{
@@ -107,7 +107,7 @@ function zeal_session_status(){
  */
 function zeal_session_name($name = null)
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
 
     if ($name === null) {
         return $g->session_params['name'] ?? 'PHPSESSID';
@@ -122,7 +122,7 @@ function zeal_session_name($name = null)
  */
 function zeal_session_write_close()
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
 
     if (isset($g->session)) {
         // Get session ID
@@ -143,7 +143,7 @@ function zeal_session_write_close()
  */
 function zeal_session_destroy()
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
 
     // Get session ID
     $session_id = zeal_session_id();
@@ -166,7 +166,7 @@ function zeal_session_destroy()
  */
 function zeal_session_unset()
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     $g->session = [];
 }
 
@@ -175,7 +175,7 @@ function zeal_session_unset()
  */
 function zeal_session_regenerate_id($delete_old_session = false)
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
 
     // Get old session ID
     $old_session_id = zeal_session_id();
@@ -204,7 +204,7 @@ function zeal_session_regenerate_id($delete_old_session = false)
  */
 function zeal_session_get_cookie_params()
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     return $g->session_params['cookie_params'] ?? [
         'lifetime' => 0,
         'path' => '/',
@@ -220,13 +220,13 @@ function zeal_session_get_cookie_params()
  */
 function zeal_session_set_cookie_params($lifetime, $path = '/', $domain = '', $secure = false, $httponly = false)
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
     $g->session_params['cookie_params'] = compact('lifetime', 'path', 'domain', 'secure', 'httponly');
 }
 
 function zeal_session_cache_limiter($cache_limiter = null)
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
 
     if ($cache_limiter === null) {
         return $g->cache_limiter ?? 'nocache';
@@ -243,7 +243,7 @@ function zeal_session_commit()
 
 function zeal_session_cache_expire($cache_expire = null)
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
 
     if ($cache_expire === null) {
         return $g->cache_expire ?? 180;
@@ -255,7 +255,7 @@ function zeal_session_cache_expire($cache_expire = null)
 
 function zeal_session_abort()
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
 
     // Discard session changes
     if (isset($g->session)) {
@@ -277,12 +277,12 @@ function zeal_session_abort()
 
 function zeal_session_encode()
 {
-    return serialize(G::instance()->session);
+    return serialize(RequestContext::instance()->session);
 }
 
 function zeal_session_decode($data)
 {
-    G::instance()->session = unserialize($data, ['allowed_classes' => false]);
+    RequestContext::instance()->session = unserialize($data, ['allowed_classes' => false]);
 }
 
 function zeal_session_create_id($prefix = '')
@@ -292,7 +292,7 @@ function zeal_session_create_id($prefix = '')
 
 function zeal_session_save_path($path = null)
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
 
     if ($path === null) {
         return $g->session_params['save_path'] ?? '/var/lib/php/sessions';
@@ -304,7 +304,7 @@ function zeal_session_save_path($path = null)
 
 function zeal_session_module_name($module = null)
 {
-    $g = G::instance();
+    $g = RequestContext::instance();
 
     if ($module === null) {
         return $g->session_module_name ?? 'files';

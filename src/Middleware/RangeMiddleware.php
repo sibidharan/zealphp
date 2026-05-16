@@ -6,7 +6,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use OpenSwoole\Core\Psr\Response;
-use ZealPHP\G;
+use ZealPHP\RequestContext;
 
 /**
  * HTTP Range Request Middleware (RFC 7233)
@@ -38,7 +38,7 @@ class RangeMiddleware implements MiddlewareInterface
             return $response;
         }
 
-        $g = G::instance();
+        $g = RequestContext::instance();
         if ($g->_streaming ?? false) {
             return $response;
         }
@@ -120,7 +120,7 @@ class RangeMiddleware implements MiddlewareInterface
         return $this->multiRange($ranges, $body, $total, $contentType, $g);
     }
 
-    private function singleRange(array $range, string $body, int $total, G $g): ResponseInterface
+    private function singleRange(array $range, string $body, int $total, RequestContext $g): ResponseInterface
     {
         [$start, $end] = $range;
         $slice  = substr($body, $start, $end - $start + 1);
@@ -135,7 +135,7 @@ class RangeMiddleware implements MiddlewareInterface
             ->withHeader('Accept-Ranges', 'bytes');
     }
 
-    private function multiRange(array $ranges, string $body, int $total, string $contentType, G $g): ResponseInterface
+    private function multiRange(array $ranges, string $body, int $total, string $contentType, RequestContext $g): ResponseInterface
     {
         $boundary = 'zealphp_' . bin2hex(random_bytes(16));
         $parts    = [];
@@ -161,7 +161,7 @@ class RangeMiddleware implements MiddlewareInterface
             ->withHeader('Accept-Ranges', 'bytes');
     }
 
-    private function unsatisfiable(int $total, G $g): ResponseInterface
+    private function unsatisfiable(int $total, RequestContext $g): ResponseInterface
     {
         $crHeader = "bytes */{$total}";
         $this->setHeader($g, 'Content-Range', $crHeader);
@@ -175,7 +175,7 @@ class RangeMiddleware implements MiddlewareInterface
      * Queue a response header via the ZealPHP response wrapper (production path).
      * Guards against null in unit-test contexts where zealphp_response is not set.
      */
-    private function setHeader(G $g, string $key, string $value): void
+    private function setHeader(RequestContext $g, string $key, string $value): void
     {
         if ($g->zealphp_response !== null) {
             $g->zealphp_response->header($key, $value);

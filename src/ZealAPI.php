@@ -90,7 +90,7 @@ class ZealAPI extends REST
     */
     public function processApi($module, $request=null)
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         $module = $module ? '/'.$module : '';
         $func = basename($request);
 

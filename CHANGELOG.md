@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] - 2026-05-15
+
+### Fixed
+- **PHPStan static-analysis CI failure** — after the v0.2.6 rename of `G` → `RequestContext` (with `class_alias` for runtime backward compat), PHPStan reported 90 "Call to static method instance() on an unknown class ZealPHP\G" errors because static analysis doesn't follow runtime `class_alias`. Framework-internal references are now migrated from `G::` to `RequestContext::` across `src/` (97 call sites across 18 files). The `class_alias(RequestContext::class, 'ZealPHP\\G')` registration remains untouched — user code referencing `\ZealPHP\G` or `use ZealPHP\G;` continues to work exactly as before. CI is green again at level 1 with 0 errors.
+
 ## [0.2.7] - 2026-05-15
 
 ### Fixed

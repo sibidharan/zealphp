@@ -109,7 +109,7 @@ class App
         // raised by the engine still go through THIS native dispatcher, which
         // reads the current coroutine's G stack — giving per-coroutine isolation.
         \set_error_handler(static function (int $severity, string $message, string $file, int $line) {
-            $g = \ZealPHP\G::instance();
+            $g = \ZealPHP\RequestContext::instance();
             $level = $g->error_reporting_level ?? \ZealPHP\App::$initial_error_reporting;
             if (!($severity & $level)) {
                 return true; // suppressed by error_reporting
@@ -131,7 +131,7 @@ class App
         });
 
         \set_exception_handler(static function (\Throwable $e) {
-            $g = \ZealPHP\G::instance();
+            $g = \ZealPHP\RequestContext::instance();
             $stack = $g->exception_handlers_stack;
             if (!empty($stack)) {
                 try {
@@ -674,7 +674,7 @@ class App
      */
     public static function getCurrentFile($file = null)
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         if ($file == null) {
             return basename($g->server['PHP_SELF'] ?? '', '.php');
         } else {
@@ -718,7 +718,7 @@ class App
      */
     public function serveDirectory(string $relDir, string $urlPrefix)
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
 
         if (self::$directory_slash) {
             $requestPath = parse_url($g->server['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '';
@@ -776,7 +776,7 @@ class App
 
     private static function cgiInclude(string $path): string
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
 
         $ctx = json_encode([
             'server' => $g->server ?? [],
@@ -919,7 +919,7 @@ class App
         // returned as string/array/Generator/Response — is preserved instead of
         // being discarded by the outer route's int-return path in dispatchRoute.
         if (self::$fallback_handler !== null) {
-            $method = G::instance()->server['REQUEST_METHOD'] ?? 'GET';
+            $method = RequestContext::instance()->server['REQUEST_METHOD'] ?? 'GET';
             return (new ResponseMiddleware())->dispatchRoute(self::$fallback_handler, [], $method);
         }
         return $this->renderError(404);
@@ -969,7 +969,7 @@ class App
      */
     public function renderError(int $status, ?\Throwable $exception = null): \Psr\Http\Message\ResponseInterface
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         // Recursion guard — if a user-registered error handler itself triggers
         // an error, the nested call falls straight through to the default page
         // instead of looping back into the same handler.
@@ -1008,7 +1008,7 @@ class App
      */
     private function defaultErrorResponse(int $status, ?\Throwable $exception): \Psr\Http\Message\ResponseInterface
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         $reason = self::REASON_PHRASES[$status] ?? '';
         $accept = strtolower($g->server['HTTP_ACCEPT'] ?? '');
         $wantsJson = $accept !== ''
@@ -1598,7 +1598,7 @@ HELP;
             'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
         ], function($response){
             // elog("Index route hit");
-            $g = G::instance();
+            $g = RequestContext::instance();
             $file = 'index';
             $g->server['PHP_SELF'] = '/'.$file.'.php';
             $g->server['SCRIPT_NAME'] = '/'.$file.'.php';
@@ -1620,7 +1620,7 @@ HELP;
         $this->route(App::$ignore_php_ext ? '/{file}/?' : '/{file}(\.php)?/?', [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
         ], function($file, $response){
-            $g = G::instance();
+            $g = RequestContext::instance();
             # if file ends with .php remove it
             if (substr($file, -4) == '.php') {
                 $file = substr($file, 0, -4);
@@ -1651,7 +1651,7 @@ HELP;
         $this->nsPathRoute('{dir}', App::$ignore_php_ext ? '{uri}/?' : '{uri}(\.php)?/?', [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
         ], function($dir, $uri, $response){
-            $g = G::instance();
+            $g = RequestContext::instance();
             elog("Directory: $dir, URI: $uri");
             # if uri ends with .php remove it
             if (substr($uri, -4) == '.php') {
@@ -1712,7 +1712,7 @@ HELP;
         }
 
         $server->on("request",new $SessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) {
-            $g = G::instance();
+            $g = RequestContext::instance();
             static $serverSoftware = null;
             if ($serverSoftware === null) {
                 $serverSoftware = 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion();
@@ -1841,7 +1841,7 @@ HELP;
         $server->on('open', function(\OpenSwoole\WebSocket\Server $server, \OpenSwoole\Http\Request $request) use (&$wsFdMap) {
             $path  = $request->server['path_info'] ?? '/';
             $wsFdMap[$request->fd] = $path;
-            $g     = G::instance();
+            $g     = RequestContext::instance();
 
             // Initialize session from the upgrade request's cookie so
             // WebSocket onOpen handlers can read $g->session just like
@@ -1876,7 +1876,7 @@ HELP;
                 return;
             }
             $path  = $wsFdMap[$frame->fd] ?? null;
-            $g     = G::instance();
+            $g     = RequestContext::instance();
             $route = $path ? (App::instance()->wsRoutes()[$path] ?? null) : null;
             if ($route && $route['message']) {
                 ($route['message'])($server, $frame, $g);
@@ -1886,7 +1886,7 @@ HELP;
         $server->on('close', function(\OpenSwoole\WebSocket\Server $server, int $fd) use (&$wsFdMap) {
             $path  = $wsFdMap[$fd] ?? null;
             unset($wsFdMap[$fd]);
-            $g     = G::instance();
+            $g     = RequestContext::instance();
             $route = $path ? (App::instance()->wsRoutes()[$path] ?? null) : null;
             if ($route && $route['close']) {
                 ($route['close'])($server, $fd, $g);
@@ -1915,7 +1915,7 @@ class ResponseMiddleware implements MiddlewareInterface
 {
     private function dispatchRawRoute(array $route, array $params, string $method): ResponseInterface
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         $handler = $route['handler'];
 
         $invokeArgs = [];
@@ -2015,7 +2015,7 @@ class ResponseMiddleware implements MiddlewareInterface
             return $this->dispatchRawRoute($route, $params, $method);
         }
 
-        $g = G::instance();
+        $g = RequestContext::instance();
         $handler = $route['handler'];
 
         $invokeArgs = [];
@@ -2150,7 +2150,7 @@ class ResponseMiddleware implements MiddlewareInterface
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         $uri = $g->server['REQUEST_URI'];
         $method = $g->server['REQUEST_METHOD'];
         $app = App::instance();

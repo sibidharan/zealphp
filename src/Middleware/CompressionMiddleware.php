@@ -6,7 +6,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use OpenSwoole\Core\Psr\Stream;
-use ZealPHP\G;
+use ZealPHP\RequestContext;
 
 /**
  * Compression Middleware (gzip / deflate)
@@ -44,7 +44,7 @@ class CompressionMiddleware implements MiddlewareInterface
         $response = $handler->handle($request);
 
         // Never compress streaming responses (body already sent)
-        $g = G::instance();
+        $g = RequestContext::instance();
         if ($g->_streaming ?? false) {
             return $response;
         }

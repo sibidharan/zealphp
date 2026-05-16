@@ -9,7 +9,7 @@ use function ZealPHP\get_current_render_time;
 use OpenSwoole\Coroutine as co;
 
 use ZealPHP\Session\Handler\FileSessionHandler;
-use ZealPHP\G;
+use ZealPHP\RequestContext;
 
 class CoSessionManager
 {
@@ -52,7 +52,7 @@ class CoSessionManager
      */
     public function __invoke(\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response)
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         if (bench_mode_enabled()) {
             $g->session = [];
             $g->openswoole_request = $request;

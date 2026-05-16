@@ -1,6 +1,6 @@
 <?php
 namespace ZealPHP;
-use ZealPHP\G;
+use ZealPHP\RequestContext;
 use ZealPHP\StringUtils;
 
 /**
@@ -120,7 +120,7 @@ class Session
      */
     public static function init()
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         Session::$documentRoot = $g->server['DOCUMENT_ROOT'];
         if (php_sapi_name() == "cli" and StringUtils::str_ends_with($g->server['PHP_SELF'], 'worker.php')) {
             parse_str(implode('&', array_slice((array)$g->server['argv'], 1)), $_GET);
@@ -193,13 +193,13 @@ class Session
      */
     public static function set($key, $value)
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         $g->session[$key] = $value;
     }
 
     public static function unset($key)
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         unset($g->session[$key]);
     }
 
@@ -211,7 +211,7 @@ class Session
      */
     public static function isset($key)
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         return isset($g->session[$key]);
     }
 
@@ -223,7 +223,7 @@ class Session
      */
     public static function get($key, $default = false)
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
         if (isset($g->session[$key])) {
             return $g->session[$key];
         } else {

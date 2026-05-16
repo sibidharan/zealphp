@@ -7,7 +7,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use ZealPHP\G;
+use ZealPHP\RequestContext;
 
 use function ZealPHP\Session\zeal_session_id;
 use function ZealPHP\Session\zeal_session_start;
@@ -18,7 +18,7 @@ class SessionStartMiddleware implements MiddlewareInterface
 {
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        $g = G::instance();
+        $g = RequestContext::instance();
 
         if (!$g->_session_started) {
             zeal_session_start();
