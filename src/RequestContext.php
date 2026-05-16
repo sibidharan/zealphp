@@ -99,26 +99,38 @@ class RequestContext
         // read is a bug in the caller — surface it instead of silently
         // creating a dynamic property. PHP emits an undefined-property
         // notice automatically when the key is missing.
+        //
+        // After unset() on a declared typed property the slot is "uninitialized";
+        // reading it by ref would throw "must not be accessed before initialization".
+        // We return a ref to a local null in that case, matching the missing-key
+        // behavior — callers see the same null, regardless of how the slot got there.
         $null = null;
         $ref =& $null;
-        if (property_exists($this, $key)) {
+        if (property_exists($this, $key) && isset($this->$key)) {
             $ref =& $this->$key;
         }
         return $ref;
     }
 
     /**
-     * __set fires only for undeclared properties — declared typed slots
-     * bypass it entirely (PHP semantics). In superglobals mode we keep the
+     * __set fires for undeclared properties AND for declared typed properties
+     * that have been unset() (the slot is "uninitialized" so direct access
+     * routes through __set on assignment). In superglobals mode we keep the
      * legacy bridge to `$GLOBALS[$key]` so pre-coroutine code that stashed
      * values via `$g->custom = $val` keeps working. In coroutine mode the
-     * typed properties are the contract; an undeclared write is a typo and
-     * is rejected loudly.
+     * typed properties are the contract; we re-initialize the declared slot
+     * (preserves PHP's type-check via direct property assignment) and reject
+     * any other write loudly so typos still surface.
      */
     public function __set($key, $value)
     {
         if (App::$superglobals) {
             $GLOBALS[$key] = $value;
+            return;
+        }
+        if (property_exists($this, $key)) {
+            // Declared-but-unset slot: direct write bypasses __set and re-inits.
+            $this->$key = $value;
             return;
         }
         throw new \BadMethodCallException(
