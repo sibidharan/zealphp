@@ -16,6 +16,8 @@ $siteUrl = site_url();
   <tr><td><code>ETagMiddleware</code></td><td>(none)</td><td>Generates <code>W/"md5"</code> ETag, returns 304 on cache hit</td></tr>
   <tr><td><code>CompressionMiddleware</code></td><td><code>($minLength=1024, $level=6, $skipProxiedRequests=false)</code></td><td>Reference gzip/deflate middleware; runtime compression is handled by OpenSwoole by default</td></tr>
   <tr><td><code>RangeMiddleware</code></td><td>(none)</td><td>RFC 7233 Range requests — adds <code>Accept-Ranges: bytes</code>, returns 206 with sliced body for single or multi-range, 416 for unsatisfiable</td></tr>
+  <tr><td><code>SessionStartMiddleware</code></td><td>(none)</td><td>Eagerly starts a session and sends <code>Set-Cookie</code> for new visitors. Without it, first-time visitors get no session cookie and session state resets every request.</td></tr>
+  <tr><td><code>IniIsolationMiddleware</code></td><td><code>(?array $keys = null)</code></td><td>Snapshots <code>ini_set()</code> changes (timezone, error_reporting, display_errors, memory_limit, etc.) at request start and restores them on exit. Opt-in defense against ini-value leakage across requests on long-running workers. Enable with <code>ZEALPHP_INI_ISOLATE=1</code> or register explicitly. <a href="/coroutines#what-survives">Why this matters ↗</a></td></tr>
 </table>
 
 <?php

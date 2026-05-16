@@ -78,7 +78,7 @@ docker compose up app
 
 ```bash
 # New project
-composer create-project sibidharan/zealphp-project:^0.2.10 my-project
+composer create-project sibidharan/zealphp-project:^0.2.11 my-project
 cd my-project
 php app.php
 # → https://php.zeal.ninja
@@ -392,11 +392,11 @@ App::onWorkerStart(function($server, $workerId) use ($hitCounter) {
 
 ## Design Principles
 
-**Coroutine mode (recommended):** `App::superglobals(false)` enables `OpenSwoole\Runtime::HOOK_ALL` so all PHP I/O (file, curl, PDO, sleep) yields the event loop automatically. Each request runs in its own coroutine with isolated `G::instance()` state. This is the default in the demo app.
+**Coroutine mode (recommended):** `App::superglobals(false)` enables `OpenSwoole\Runtime::HOOK_ALL` so all PHP I/O (file, curl, PDO, sleep) yields the event loop automatically. Each request runs in its own coroutine with isolated `RequestContext::instance()` state (`G` remains as a `class_alias` for `RequestContext` since v0.2.6 — both names resolve to the same class). This is the default for new scaffolds since v0.2.4.
 
-**Superglobals mode (legacy compatibility):** `App::superglobals(true)` disables coroutines in the main thread — `$_GET`, `$_POST`, `$_SESSION` work safely because only one request runs at a time per worker. Implicit file routes use `prefork_request_handler()` (forks a child process) to run blocking PHP safely. Use this when migrating existing apps incrementally.
+**Superglobals mode (legacy compatibility):** `App::superglobals(true)` disables coroutines in the main thread — `$_GET`, `$_POST`, `$_SESSION` work safely because only one request runs at a time per worker. Use this when migrating existing apps incrementally. Implicit file routes for legacy code run through the CGI bridge (`App::includeFile()` → `src/cgi_worker.php` via `proc_open`) so blocking PHP runs in a child process with its own arena.
 
-**`coprocess` / `coproc`:** Available in superglobals mode — spawns a child process with coroutine context for background async work. Not needed in coroutine mode (use `go()` directly).
+**`coprocess` / `coproc`:** Available in superglobals mode — spawns a child process for background async work. Not needed in coroutine mode (use `go()` directly).
 
 **uopz overrides:** `header()`, `setcookie()`, all `session_*()` functions are permanently replaced at startup via `uopz_set_return()`. This makes existing PHP code work unchanged inside the long-running OpenSwoole process.
 
@@ -408,8 +408,8 @@ App::onWorkerStart(function($server, $workerId) use ($hitCounter) {
 2. Run `composer validate` and confirm tests pass.
 3. Tag both `zealphp` and `zealphp-project` with the same version:
    ```bash
-   git tag -a v0.2.10 -m "Release v0.2.10"
-   git push origin master && git push origin v0.2.10
+   git tag -a v0.2.11 -m "Release v0.2.11"
+   git push origin master && git push origin v0.2.11
    ```
 4. Trigger Packagist webhook for both packages.
 

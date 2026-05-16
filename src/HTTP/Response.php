@@ -110,6 +110,21 @@ class Response
         if (strpbrk($url, "\r\n\0") !== false) {
             throw new \InvalidArgumentException('Redirect URL contains control characters');
         }
+        // Leading/trailing whitespace bypasses the scheme-prefix check below:
+        // `   javascript:alert(1)` doesn't match `#^javascript:#i` but browsers
+        // strip leading whitespace from Location header values before parsing,
+        // executing the javascript: URL anyway. Reject up front — callers with
+        // legitimate URLs should trim themselves.
+        if ($url !== trim($url, " \t\v\f")) {
+            throw new \InvalidArgumentException('Redirect URL contains leading or trailing whitespace');
+        }
+        // Backslash in URLs is never legitimate per RFC 3986. Browsers parse
+        // `/\evil.com` and `\\evil.com` as protocol-relative redirects to
+        // evil.com — same effective bypass as `//evil.com` (which our
+        // protocol-relative warning catches downstream). Block at the source.
+        if (strpos($url, '\\') !== false) {
+            throw new \InvalidArgumentException('Redirect URL contains backslash');
+        }
         if (preg_match('#^(javascript|data|vbscript):#i', $url)) {
             throw new \InvalidArgumentException('Unsafe redirect URL scheme');
         }

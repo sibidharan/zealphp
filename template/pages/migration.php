@@ -99,7 +99,7 @@ $rungs = [
     'n'    => '4',
     'title' => 'Full coroutine mode',
     'code'  => 'App::superglobals(false);   // thousands of concurrent requests per worker',
-    'desc'  => 'Replace <code>$_GET</code>/<code>$_SESSION</code> globals with <code>G::instance()</code>. Each coroutine gets its own context; one worker handles thousands of concurrent requests without blocking.',
+    'desc'  => 'Replace <code>$_GET</code>/<code>$_SESSION</code> globals with <code>RequestContext::instance()</code> (also reachable as <code>G::instance()</code> — same class via <code>class_alias</code>). Each coroutine gets its own context; one worker handles thousands of concurrent requests without blocking.',
     'wins'  => 'Peak throughput. <a href="/performance">117k req/s on 4 workers</a> — Express on the same box does 20k.',
     'gives_up' => 'You must avoid blocking I/O outside coroutine-hooked extensions, and any code that mutates global state needs a per-coroutine equivalent.',
     'highlight' => true,
@@ -170,8 +170,8 @@ foreach ($rungs as $r):
 <h3 style="margin-top:1.5rem;font-size:1.05rem">Function overrides (via uopz)</h3>
 <table class="ztable">
   <tr><th>Apache+mod_php function</th><th>ZealPHP behavior</th></tr>
-  <tr><td><code>header()</code>, <code>header_remove()</code>, <code>headers_list()</code>, <code>headers_sent()</code></td><td>Per-request via <code>G-&gt;response_headers_list</code>. Supports <code>header("HTTP/1.1 404 Not Found")</code> status-line form and the optional <code>$http_response_code</code> param.</td></tr>
-  <tr><td><code>setcookie()</code>, <code>setrawcookie()</code></td><td>Per-request via <code>G-&gt;response_cookies_list</code> / <code>response_rawcookies_list</code>. <code>setrawcookie</code> preserves the raw value (no urlencoding).</td></tr>
+  <tr><td><code>header()</code>, <code>header_remove()</code>, <code>headers_list()</code>, <code>headers_sent()</code></td><td>Per-request via <code>$response-&gt;headersList</code> on the Response wrapper (<code>$g-&gt;zealphp_response</code>). Supports <code>header("HTTP/1.1 404 Not Found")</code> status-line form and the optional <code>$http_response_code</code> param. CRLF/NUL in values rejected to prevent response splitting.</td></tr>
+  <tr><td><code>setcookie()</code>, <code>setrawcookie()</code></td><td>Per-request via <code>$response-&gt;cookiesList</code> / <code>rawCookiesList</code>. <code>setrawcookie</code> preserves the raw value (no urlencoding). Cookie name char-class matches PHP native (rejects <code>=,; \t\r\n\013\014\0</code>).</td></tr>
   <tr><td><code>http_response_code()</code></td><td>Per-request via <code>G-&gt;status</code>.</td></tr>
   <tr><td><code>flush()</code>, <code>ob_flush()</code>, <code>ob_end_flush()</code></td><td>Switch the response into streaming mode — buffer pushed to OpenSwoole's <code>$response-&gt;write()</code>, flips <code>G-&gt;_streaming = true</code>.</td></tr>
   <tr><td><code>apache_request_headers()</code>, <code>getallheaders()</code></td><td>Return canonical (hyphen-capitalized) request headers from the OpenSwoole request.</td></tr>

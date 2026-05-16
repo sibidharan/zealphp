@@ -210,6 +210,71 @@ class SecurityTest extends TestCase
         $this->makeResponse()->redirect("/dashboard\0evil");
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  Redirect — open-redirect variants beyond scheme + CRLF
+    //
+    //  Browsers TRIM leading/trailing whitespace and tabs in Location
+    //  header values before interpreting them. A naive scheme regex
+    //  (`#^javascript:#i`) can be bypassed by prefixing whitespace —
+    //  the regex anchors fail to match, the URL slips through, the
+    //  browser strips the whitespace, and `javascript:` executes.
+    //  Pin defenses against the variants the regex alone misses.
+    // ─────────────────────────────────────────────────────────────
+
+    public function testRedirectRejectsLeadingWhitespaceBeforeUnsafeScheme(): void
+    {
+        // Real-world bypass: '   javascript:alert(1)'. Browsers trim
+        // leading whitespace from Location headers before parsing.
+        $this->expectException(InvalidArgumentException::class);
+        $this->makeResponse()->redirect('   javascript:alert(1)');
+    }
+
+    public function testRedirectRejectsLeadingTabBeforeUnsafeScheme(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->makeResponse()->redirect("\tjavascript:alert(1)");
+    }
+
+    public function testRedirectRejectsLeadingWhitespaceBeforeDataScheme(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->makeResponse()->redirect("  data:text/html,<script>alert(1)</script>");
+    }
+
+    public function testRedirectAcceptsTrimmedSafeUrl(): void
+    {
+        // Whitespace on a safe URL should still be rejected — strict mode
+        // forces callers to trim before passing. Reading the redirect log
+        // for a 400 is friendlier than letting silently-whitespace-stripped
+        // URLs reach the browser.
+        $this->expectException(InvalidArgumentException::class);
+        $this->makeResponse()->redirect('  https://example.com/path');
+    }
+
+    public function testRedirectRejectsMixedCaseUnsafeSchemeWithWhitespace(): void
+    {
+        // Existing scheme regex IS case-insensitive, but leading whitespace
+        // historically bypassed the anchor. Pin the combined case.
+        $this->expectException(InvalidArgumentException::class);
+        $this->makeResponse()->redirect("  JaVaScRiPt:alert(1)");
+    }
+
+    public function testRedirectRejectsBackslashProtocolConfusion(): void
+    {
+        // `/\evil.com` — many browsers parse this as `//evil.com` (protocol-
+        // relative redirect to evil.com), the same effective bypass as the
+        // already-warned `//evil.com` case. Block at the source rather than
+        // log-and-allow because backslash in URLs is never legitimate.
+        $this->expectException(InvalidArgumentException::class);
+        $this->makeResponse()->redirect('/\\evil.com');
+    }
+
+    public function testRedirectRejectsBackslashSlashSequence(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->makeResponse()->redirect('\\\\evil.com');
+    }
+
     public function testSetcookieRejectsCRLFInValue(): void
     {
         $this->makeResponse();

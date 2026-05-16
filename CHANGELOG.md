@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.11] - 2026-05-16
+
+### Security
+- **Open-redirect bypass via leading whitespace + `javascript:` scheme.** v0.2.5's redirect guard used `preg_match('#^(javascript|data|vbscript):#i', $url)` — the `^` anchor failed to match when the URL had leading whitespace. Browsers strip leading whitespace from `Location` header values before parsing, so a URL like `   javascript:alert(document.cookie)` slipped past the scheme check and executed in the browser. Application code passing user input directly to `$response->redirect()` (e.g., `?next=` post-login redirects) was exploitable. **All v0.2.5 – v0.2.10 are affected.**
+  - Fix: `Response::redirect()` now rejects any URL with leading/trailing whitespace.
+  - Belt-and-suspenders: any backslash anywhere in the URL is also rejected (`/\evil.com` and `\\evil.com` are parsed as protocol-relative redirects by many browsers, same effective bypass as `//evil.com` which our cross-origin warning already catches).
+  - 7 new regression tests in `tests/Unit/SecurityTest.php` covering the variants.
+
+### Added
+- **17 regression tests** in `tests/Unit/RequestContextInvariantsTest.php` pinning the v0.2.6 architectural contracts: `G` ↔ `RequestContext` class_alias identity, strict `__set` rejecting undeclared writes in coroutine mode, response state location (on `Response`, not on `RequestContext`), `ApacheContext` lazy allocation, `#[AllowDynamicProperties]` removed, declared property defaults. Catches future drift in any of these.
+
+### Changed (documentation)
+- **`template/pages/deployment.php` env var table rewritten** — 20 variables in 4 groups (Server / Logging / Middleware & sessions / Site). Adds `ZEALPHP_INI_ISOLATE`, `ZEALPHP_RECYCLE_LOG`, `ZEALPHP_DEBUG_LOG`, `ZEALPHP_LOG_DIR`, `ZEALPHP_LOG_FILE`, `ZEALPHP_LOG_ASYNC`, `ZEALPHP_BENCH_MODE`, `ZEALPHP_MAX_CONN`, `ZEALPHP_MAX_COROUTINE`, `ZEALPHP_BACKLOG`, `ZEALPHP_REACTOR_NUM`, `ZEALPHP_DEMO_MIDDLEWARE`, `ZEALPHP_DAEMONIZE`, `ZEALPHP_PID_FILE`, `ZEALPHP_SITE_HOST`, and the per-stream log file variants. Fixes the wrong `ZEALPHP_TASK_WORKERS` default (was documented as `0`, actual default is `8`). Fixes the `ZEALPHP_DEBUG=0` typo to `ZEALPHP_DEBUG_LOG=0` in the production checklist. Bumps the Docker image tag in the compose example to current version.
+- **`template/pages/migration.php`** — replaces `G->response_headers_list` reference with `$response->headersList` (the v0.2.6 move from `RequestContext` to `Response`). Notes the v0.2.5 CRLF/NUL rejection and v0.2.7 cookie char-class behavior. Updates the rung-4 description to mention `RequestContext::instance()` as canonical.
+- **`template/pages/sessions.php`** — notes the v0.2.6 `G` → `RequestContext` rename (with `class_alias` for backward compat). New "What else gets reset per request" section covering handler-stack reset (coroutine mode automatic, superglobals mode fixed in v0.2.10).
+- **`template/pages/middleware.php`** — `SessionStartMiddleware` and `IniIsolationMiddleware` added to the built-in middleware table (both were missing from the docs).
+- **`README.md`** — removed reference to deleted `prefork_request_handler()`, updated to reference `RequestContext` as canonical with `G` alias note.
+
 ## [0.2.10] - 2026-05-16
 
 The discipline-contract sprint. Triggered by a Reddit comment articulating that per-coroutine isolation only covers framework-managed state — user-level `static $x` lives in worker process memory and survives every coroutine boundary. The trust story for long-running PHP is **isolation + recycling, not either alone** (Hyperf and RoadRunner ship the same pattern). v0.2.10 closes the *visibility* gap on this contract and adds first-class tools so users don't have to reach for `static $cache` in the first place.

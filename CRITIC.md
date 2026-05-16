@@ -276,6 +276,25 @@ Five framework releases plus scaffold sync in 24 hours, all triggered by communi
 - Solution: fresh `v0.2.9` scaffold tag at the corrected commit, no force-push
 - Lesson: when force-tag is needed for behavior, Packagist will refuse to re-index. CLAUDE.md's "cut a new tag" guidance is correct.
 
+### v0.2.10 — Discipline-contract sprint
+**Triggered by:** coroutine-isolation commenter on Reddit (the "per-coroutine isolation only covers framework state, user statics still leak" framing)
+
+- Added `RequestContext::once($key, $fn)` + `has()` + `forget()` — request-scoped memoization helper, mirrors Laravel 11's `once()`. Safe alternative to `static $cache = []`.
+- Added worker-recycle access-log line: `[recycle] worker N exited after K requests, peak RSS X MB, uptime Ys` (silence with `ZEALPHP_RECYCLE_LOG=0`). Makes the `max_request` backstop visible in production logs.
+- Added `IniIsolationMiddleware` (opt-in via `ZEALPHP_INI_ISOLATE=1`) — snapshots `ini_set()` changes at request entry, restores them at exit.
+- Fixed handler-stack accumulation across requests in superglobals mode (`SessionManager::__invoke` now resets `$g->error_handlers_stack`, `$g->exception_handlers_stack`, `$g->shutdown_functions`). Coroutine mode was already safe.
+- New docs sections: "What survives a request" + coroutine safety matrix on `/coroutines`, Store consistency semantics on `/store`, OPcache production tuning in `docs/deployment.md`.
+- Created CRITIC.md (this file).
+
+### v0.2.11 — Open-redirect hardening + docs cleanup
+**Triggered by:** test-coverage audit that uncovered a leading-whitespace bypass of the v0.2.5 redirect scheme guard
+
+- **Security:** `Response::redirect()` now rejects leading/trailing whitespace in the URL. v0.2.5's `preg_match('#^(javascript|data|vbscript):#i', $url)` was bypassable with `   javascript:alert(1)` — browsers strip leading whitespace from `Location` header values before parsing, so the malicious URL slipped past the scheme regex and executed.
+- **Security:** Backslash anywhere in the redirect URL is also rejected (`/\evil.com`, `\\evil.com` are parsed as protocol-relative redirects by many browsers — defense in depth against same bypass class).
+- 7 new redirect regression tests in `tests/Unit/SecurityTest.php`.
+- 17 new tests in `tests/Unit/RequestContextInvariantsTest.php` pinning the v0.2.6 architectural contracts (G ↔ RequestContext class_alias, strict __set, response state location, ApacheContext lazy alloc, etc.).
+- Website docs cleanup: deployment env var table rewritten with all 20 `ZEALPHP_*` env vars; migration page updated for v0.2.6 response-state move; sessions page notes the rename + handler-stack reset; middleware page adds `SessionStartMiddleware` + `IniIsolationMiddleware` entries; README drops the deleted `prefork_request_handler` reference.
+
 ---
 
 ## Outstanding work — v0.3 sprint

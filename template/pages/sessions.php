@@ -2,7 +2,7 @@
 <section class="section">
 <div class="container">
 <h1 class="section-title">Sessions</h1>
-<p class="section-desc">ZealPHP overrides all <code>session_*()</code> functions via uopz at startup. Your code calls the same PHP functions — they write to the coroutine-local <code>G::instance()->session</code> instead of the global <code>$_SESSION</code>.</p>
+<p class="section-desc">ZealPHP overrides all <code>session_*()</code> functions via uopz at startup. Your code calls the same PHP functions — they write to the coroutine-local <code>RequestContext::instance()-&gt;session</code> instead of the global <code>$_SESSION</code>. (<code>G</code> remains as a <code>class_alias</code> for <code>RequestContext</code> since v0.2.6 — both names resolve to the same class, examples here use whichever reads more naturally.)</p>
 
 <?php App::render('/components/_code', [
     'label' => 'How it works under the hood',
@@ -62,8 +62,12 @@ foreach ($demos as [$id, $title, $url, $code]) {
 
 <div class="callout warn" style="margin-top:1.5rem">
   Sessions are per-coroutine in coroutine mode. Each request gets its own isolated
-  <code>G::instance()->session</code> via <code>Coroutine::getContext()</code> —
+  <code>RequestContext::instance()-&gt;session</code> via <code>Coroutine::getContext()</code> —
   no data leaks between concurrent requests.
 </div>
+
+<h2 style="margin:1.75rem 0 .5rem">What else gets reset per request</h2>
+<p style="color:var(--text-muted)">In <strong>coroutine mode</strong>, the entire <code>RequestContext</code> instance is per-coroutine — when the coroutine ends, every field on it is freed. That includes session data, response headers/cookies pending emission (on the Response wrapper), and the handler stacks pushed by <code>set_error_handler()</code> / <code>set_exception_handler()</code> / <code>register_shutdown_function()</code>. Legacy code that calls those per-request without restoring them can't accumulate handlers across requests in this mode.</p>
+<p style="color:var(--text-muted)">In <strong>superglobals mode</strong> (the legacy migration bridge), <code>RequestContext</code> is a process-wide singleton, so handler stacks <strong>could</strong> grow unbounded across requests — fixed in v0.2.10 by an explicit reset in <code>SessionManager</code> at request entry. See <a href="/coroutines#what-survives">What survives a request</a> for the full lifecycle matrix.</p>
 </div>
 </section>
