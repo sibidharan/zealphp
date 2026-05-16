@@ -1,0 +1,44 @@
+# gitleaks — scans the repo for accidentally committed secrets (API keys,
+# tokens, credentials). Catches the class of mistakes where a quick test
+# commits a real OPENAI_API_KEY into examples/ or a private TLS key into
+# a test fixture.
+#
+# Free for public repos (the gitleaks-action calls the open-source CLI;
+# no Gitleaks license needed). Pro-license features are skipped — basic
+# scan is enough for our threat model.
+#
+# Runs on every push + PR. Fails the workflow if a leak is detected;
+# the gitleaks SARIF report is uploaded to GitHub Security tab for
+# review.
+
+name: gitleaks
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Full history so gitleaks scans every commit, not just HEAD.
+          # 0 = full clone (default is shallow). Slightly slower on large
+          # repos; ZealPHP is small enough that the cost is negligible.
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          # No GITLEAKS_LICENSE — basic OSS scan is enough.
+          # GITHUB_TOKEN allows PR comment annotations on hits.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

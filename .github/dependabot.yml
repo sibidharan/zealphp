@@ -1,0 +1,54 @@
+# Dependabot — auto-PRs for outdated dependencies.
+#
+# Watching two ecosystems:
+#   - composer: production + dev dependencies in composer.json/lock
+#   - github-actions: pinned action versions in .github/workflows/*.yml
+#
+# Weekly schedule (Monday) keeps the noise rate sane while still catching
+# CVE-class updates within a week of disclosure. Security advisories are
+# pushed immediately regardless of schedule.
+
+version: 2
+updates:
+  - package-ecosystem: composer
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - composer
+    commit-message:
+      prefix: chore
+      prefix-development: chore(dev)
+      include: scope
+    # Group non-major composer updates so we don't get five PRs for patch-level
+    # bumps on the same Monday. Major bumps still get individual PRs (more
+    # scrutiny warranted for breaking changes).
+    groups:
+      composer-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: chore(ci)
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch

@@ -1,0 +1,64 @@
+# CodeQL — GitHub's free SAST for public repos. Catches taint flows
+# (SQL injection, command injection, path traversal, XSS, unsafe
+# unserialize, etc.) that PHPStan's type-only analysis can't see.
+#
+# Especially valuable for ZealPHP because:
+#   - The CGI bridge (src/cgi_worker.php) does `include $file` with paths
+#     derived from request data — classic taint sink
+#   - uopz_set_return targets receive user-controlled args (header values,
+#     cookie names) — analysis can trace those through
+#   - Reflection-injected handler params: types are unknown statically
+#     but values are absolutely user-controlled
+#
+# Runs: on every push to master, every PR, and weekly (catches new
+# CodeQL queries published after a quiet code period).
+
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  schedule:
+    # 03:30 UTC Monday — runs the latest CodeQL ruleset against unchanged code.
+    - cron: '30 3 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, javascript-typescript]
+        # Note: GitHub's CodeQL has PHP as an experimental language. If/when
+        # GA, add `php` to this matrix. JavaScript/TypeScript catches inline
+        # scripts in template/pages/* and public/js/. Actions catches
+        # workflow-injection patterns.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # security-and-quality includes the default security queries plus
+          # the broader "code quality" pack. False positive rate is tolerable
+          # for a framework — triage in the Security tab, not block PRs.
+          queries: security-and-quality
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

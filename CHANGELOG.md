@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.19] - 2026-05-16
+
+### Added — security / quality CI rollup (Tier 1 from CRITIC.md plan)
+- **`composer audit` in CI** (`validate` job) — runs after `composer validate --strict`. Built-in to Composer 2.4+, free, calls the Packagist advisory API on every installed dependency in `composer.lock`. Catches CVEs in transitive deps that PHPStan can't see (e.g., openswoole, psr/*). `--abandoned=report` keeps abandoned-package warnings informational; only actual CVEs fail CI.
+- **Dependabot config** (`.github/dependabot.yml`) — weekly Monday PRs for `composer` + `github-actions` ecosystems. Security advisories pushed immediately regardless of schedule. Minor/patch updates are grouped into a single PR per ecosystem; majors stay individual for review.
+- **CodeQL workflow** (`.github/workflows/codeql.yml`) — GitHub's free SAST. Currently configured for `actions` and `javascript-typescript` languages (catches workflow-injection patterns + inline `<script>` blocks in `template/pages/*`). PHP is experimental in CodeQL; matrix is structured to add `php` immediately when it goes GA. Runs on every push, every PR, and weekly to pick up new CodeQL queries against unchanged code. Uses the `security-and-quality` query pack.
+- **gitleaks workflow** (`.github/workflows/gitleaks.yml`) — secret scanner. Full-history scan (`fetch-depth: 0`) on every push and PR. Free OSS scan path, no Gitleaks license needed. Catches the class of accidents where a quick test commits a real `OPENAI_API_KEY` (especially given the `examples/agents/notes_agent.py` flow).
+
+### Changed (badges)
+- **Packagist badges swapped from `poser.pugx.org` → `shields.io`.** poser caches aggressively and was still showing v0.2.10 several hours after v0.2.18 shipped to Packagist. shields.io reads the Packagist API directly with minimal cache, and matches the style (`flat-square`) of every other badge in the README.
+- README badge row reorganized: CI / CodeQL / gitleaks / Coverage / PHPStan in that order. The three new security-CI badges (CodeQL, gitleaks, and the composer-audit signal embedded in CI) give a one-line credibility scan from the README.
+
+### Notes
+- This release adds zero `/src/` changes — entirely CI hygiene + badges + docs. Tests: 204 unit + 113 integration, all green. PHPStan: 0 errors at level 10.
+- Tier 2 work (PHP-CS-Fixer, Roave Security Advisories, PHP-Compatibility checker) and Tier 3 (Infection mutation testing, PHPBench) tracked for future releases — see [CRITIC.md](CRITIC.md) for the ROI ranking.
+
 ## [0.2.18] - 2026-05-16
 
 ### Fixed

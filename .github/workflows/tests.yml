@@ -25,6 +25,15 @@ jobs:
       - name: Validate composer.json
         run: composer validate --strict
 
+      # composer audit — runs the CVE check against all installed dependency
+      # versions in composer.lock. Free + built-in to composer 2.4+. Catches
+      # vulnerable transitive deps that PHPStan can't see (e.g., a CVE in
+      # openswoole/core or in a psr/* package). Runs at install-time so it
+      # never reaches production. --no-dev skips dev-only deps; we want the
+      # check on dev too because CI exposure matters.
+      - name: Composer audit (CVE check)
+        run: composer audit --abandoned=report
+
       # Badge sync — fail fast if .github/badges/phpstan.json claims a different
       # level than phpstan.neon. The shields.io endpoint badge in README reads
       # that JSON, so a mismatch silently misrepresents the project's actual
