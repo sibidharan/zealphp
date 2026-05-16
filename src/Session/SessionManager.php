@@ -89,6 +89,25 @@ class SessionManager
         }
         unset($_SESSION);
         $_SESSION = [];
+
+        // Superglobals mode runs G as a process-wide singleton. Without an
+        // explicit reset, error/exception/shutdown handler stacks pushed by
+        // legacy code during request N survive to request N+1 — the classic
+        // "handler chain grows until worker recycles" leak. Coroutine mode
+        // avoids this naturally (G is per-coroutine, freed on coroutine end);
+        // here we have to reset by hand.
+        $g = RequestContext::instance();
+        $g->error_handlers_stack     = [];
+        $g->exception_handlers_stack = [];
+        $g->shutdown_functions       = [];
+        $g->error_render_depth       = 0;
+        $g->error_reporting_level    = null;
+        $g->error_status             = null;
+        $g->error_exception          = null;
+        $g->status                   = null;
+        $g->_streaming               = null;
+        $g->ignore_user_abort_state  = 0;
+
         $sessionName = session_name();
         if ($this->useCookies && isset($request->cookie[$sessionName])) {
             $sessionId = $request->cookie[$sessionName];

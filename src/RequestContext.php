@@ -52,6 +52,10 @@ class RequestContext
     public ?int $cache_expire = null;
     public ?string $cache_limiter = null;
     public ?string $session_module_name = null;
+    // Per-request memoization scratch space — back-end for once() / has() / forget().
+    // Keyed by caller-chosen string. Lifetime matches RequestContext (per coroutine
+    // in coroutine mode, per request in superglobals mode after the manager resets).
+    public array $memo = [];
 
     private function __construct()
     {
@@ -148,6 +152,49 @@ class RequestContext
     public static function set($key, $value)
     {
         self::instance()->$key = $value;
+    }
+
+    /**
+     * Compute once per request, cache for the rest of the request.
+     *
+     * Safe alternative to `static $cache = []` inside a function. Computes
+     * `$fn()` the first time it's called with `$key` in this request, caches
+     * the result on the per-coroutine RequestContext, returns the cached
+     * value on subsequent calls. The cache is freed automatically when the
+     * coroutine ends — no state survives to the next request.
+     *
+     * Mirrors Laravel 11's `once()` helper. Use this anywhere you'd reach
+     * for `static $foo = ...` for request-scoped memoization but want to
+     * avoid leaking state into worker process memory.
+     *
+     * ```
+     * $user = RequestContext::once('current_user', fn() => Auth::loadUser($id));
+     * ```
+     */
+    public static function once(string $key, callable $fn): mixed
+    {
+        $ctx = self::instance();
+        if (!array_key_exists($key, $ctx->memo)) {
+            $ctx->memo[$key] = $fn();
+        }
+        return $ctx->memo[$key];
+    }
+
+    /**
+     * True if once($key, ...) has been computed in this request.
+     */
+    public static function has(string $key): bool
+    {
+        return array_key_exists($key, self::instance()->memo);
+    }
+
+    /**
+     * Discard the memoized value for $key in this request. The next once()
+     * call with the same key will recompute.
+     */
+    public static function forget(string $key): void
+    {
+        unset(self::instance()->memo[$key]);
     }
 }
 

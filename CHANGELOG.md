@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.10] - 2026-05-16
+
+The discipline-contract sprint. Triggered by a Reddit comment articulating that per-coroutine isolation only covers framework-managed state — user-level `static $x` lives in worker process memory and survives every coroutine boundary. The trust story for long-running PHP is **isolation + recycling, not either alone** (Hyperf and RoadRunner ship the same pattern). v0.2.10 closes the *visibility* gap on this contract and adds first-class tools so users don't have to reach for `static $cache` in the first place.
+
+See [CRITIC.md](CRITIC.md) for the full retrospective of the public review that drove v0.2.4 → v0.2.10.
+
+### Added
+- **`RequestContext::once($key, $fn)` / `has($key)` / `forget($key)`** — request-scoped memoization helper. Computes `$fn()` once per request, caches on the per-coroutine `RequestContext`, returns the cached value on subsequent calls. Mirrors Laravel 11's `once()` helper. Use this anywhere you'd reach for `static $cache = []` for request-scoped data — gives you the same shape without leaking into worker process memory. The cache is freed automatically when the coroutine ends.
+- **Worker-recycle access log** — when a worker exits (for any reason: `max_request` hit, graceful shutdown, admin reload, OOM), the server now logs `[recycle] worker N exited after K requests, peak RSS X MB, uptime Ys`. Makes the `max_request` backstop *visible* in production logs. Silence with `ZEALPHP_RECYCLE_LOG=0`.
+- **`IniIsolationMiddleware`** (opt-in) — snapshots a curated list of common per-request mutation targets (`date.timezone`, `error_reporting`, `display_errors`, `memory_limit`, etc.) at request start and restores changed values at the end. Long-running PHP doesn't reset `ini_set()` between requests; this middleware does. Enable via `ZEALPHP_INI_ISOLATE=1` env var, or register explicitly: `$app->addMiddleware(new IniIsolationMiddleware())`. Custom key list supported via constructor argument.
+- **Coroutine safety matrix + discipline contract docs** — substantial new section on `/coroutines` documenting what's isolated per coroutine (typed `RequestContext` fields), what isn't (`static` in user code, class statics, `Store`/`Counter`, captured closures in `App::tick`/`onWorkerStart`, `ini_set` mutations), the discipline contract, and the worker recycling backstop. Per-mode safety table comparing coroutine vs superglobals modes.
+- **`Store` consistency semantics docs** — new section on `/store` documenting what's atomic (single `set()` calls, `incr`/`decr`, `compareAndSet`), what isn't (multi-`set()` updates to the same row), and the SIGKILL hazard (worker hard-kill mid-write may leave a row spinlock held; graceful shutdown including `max_request` recycle releases cleanly). "Best-effort cache, not a database."
+- **Production OPcache tuning section** in `docs/deployment.md` — concrete `php.ini` recommendations for long-running workers (`opcache.validate_timestamps=0` + restart-on-deploy), with the rationale and the failure mode (stale bytecode after deploys looks like a logic bug).
+- **CRITIC.md** — retrospective log of every public technical review and what we shipped in response across v0.2.4–v0.2.10. Internal learning document.
+
+### Fixed
+- **Error/exception/shutdown handler stacks accumulated across requests in superglobals mode** — `$g->error_handlers_stack`, `$g->exception_handlers_stack`, `$g->shutdown_functions` live on the process-wide singleton in superglobals mode. Legacy code that calls `set_error_handler()` per request without `restore_error_handler()` would grow the handler chain until the worker recycled. `SessionManager::__invoke` now resets these stacks at request entry (matching `CoSessionManager`'s coroutine-mode-by-default behavior). Coroutine mode was already safe — these stacks live on the per-coroutine `RequestContext` and die with the coroutine.
+
 ## [0.2.8] - 2026-05-15
 
 ### Fixed

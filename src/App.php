@@ -24,6 +24,7 @@ class App
     protected $routes_by_exact_method = [];
     protected $ws_routes = [];
     protected static $workerStartHooks = [];
+    protected static float $workerStartedAt = 0.0;
     protected $host;
     protected $port;
     static $cwd;
@@ -1830,9 +1831,33 @@ HELP;
         $server->on('workerStart', function($server, $workerId) {
             @stream_wrapper_unregister("php");
             stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class);
+            self::$workerStartedAt = microtime(true);
             foreach (self::$workerStartHooks as $hook) {
                 $hook($server, $workerId);
             }
+        });
+
+        // Worker recycle observability — fires when a worker exits (max_request
+        // hit, graceful shutdown, or admin reload). Logs the request count,
+        // peak RSS, and uptime so the max_request backstop is visible in prod
+        // logs. Set ZEALPHP_RECYCLE_LOG=0 to silence.
+        $server->on('workerStop', function($server, $workerId) {
+            if (\ZealPHP\env_flag('ZEALPHP_RECYCLE_LOG', true) === false) {
+                return;
+            }
+            $stats = method_exists($server, 'stats') ? @$server->stats() : [];
+            $reqCount = (int)($stats['worker_request_count'] ?? $stats['request_count'] ?? 0);
+            $peakMb = round(memory_get_peak_usage(true) / 1048576, 1);
+            $uptime = self::$workerStartedAt > 0
+                ? round(microtime(true) - self::$workerStartedAt, 1)
+                : 0.0;
+            \ZealPHP\elog(sprintf(
+                '[recycle] worker %d exited after %d requests, peak RSS %s MB, uptime %ss',
+                $workerId,
+                $reqCount,
+                $peakMb,
+                $uptime
+            ), 'info');
         });
 
         // fd → ws path map, shared across WebSocket event closures

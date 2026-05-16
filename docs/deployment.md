@@ -219,7 +219,7 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.2.8 .
+docker build -t zealphp:0.2.10 .
 ```
 
 The shipped `Dockerfile` is PHP 8.3-cli on `bookworm` with OpenSwoole and
@@ -230,7 +230,7 @@ build args:
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
     --build-arg UOPZ_VERSION=7.1.2 \
-    -t zealphp:0.2.8 .
+    -t zealphp:0.2.10 .
 ```
 
 ### Run (single container)
@@ -242,7 +242,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.2.8
+    zealphp:0.2.10
 ```
 
 ### Production compose
@@ -253,7 +253,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.2.8
+    image: registry.example.com/zealphp-app:0.2.10
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -299,6 +299,67 @@ $app->route('/healthz', fn() => 'ok');
 - [ ] Pin OpenSwoole and uopz versions in your Dockerfile build args
 - [ ] Set `ZEALPHP_TASK_WORKERS=0` if you do not use `task()` dispatch
       (saves ~8 worker processes)
+- [ ] **OPcache tuned for long-running processes** — see below
+- [ ] **`ZEALPHP_MAX_REQUEST` is set** (default 100000; tune for your
+      leak profile; set `0` only if you've audited every static cache)
+
+### OPcache settings for long-running workers
+
+ZealPHP is a long-running PHP process — opcache compiles your code once
+at worker startup and serves the bytecode for the rest of the worker's
+life. The defaults in `php.ini` are tuned for PHP-FPM (short-lived
+processes that re-check files frequently). They're wrong for our model.
+
+**Recommended production `php.ini`:**
+
+```ini
+; opcache loaded
+opcache.enable = 1
+opcache.enable_cli = 1
+
+; Sized for the codebase. 256 MB is generous for most apps; bump if
+; you load a lot of templates or run a large vendor tree.
+opcache.memory_consumption = 256
+opcache.interned_strings_buffer = 16
+opcache.max_accelerated_files = 20000
+
+; STOP checking file timestamps. Restart the server on deploy instead.
+; This is the load-bearing setting: with validate_timestamps=1, every
+; request pays a stat() on every file touched, which is significant under
+; coroutine concurrency and gives you no benefit — workers stay alive.
+opcache.validate_timestamps = 0
+
+; Belt-and-suspenders. If you choose validate_timestamps=1 for dev
+; convenience, at least keep revalidate_freq high so the stat cost is
+; bounded. revalidate_freq=2 (PHP default) under load = stat storm.
+opcache.revalidate_freq = 60
+```
+
+**Deploy pattern:** `php app.php restart` after deploying new code. The
+manager process drains workers gracefully (current requests finish),
+forks fresh workers that load the new bytecode, and the TCP listener
+stays open the whole time — zero dropped requests.
+
+The CGI bridge (legacy code via `App::includeFile()` / `proc_open`)
+needs the same opcache settings to benefit. With `validate_timestamps=1`
+plus a low `revalidate_freq`, a recently-edited file can serve stale
+bytecode for up to `revalidate_freq` seconds after deploy — looks
+identical to a logic bug. The `validate_timestamps=0` + restart pattern
+above fixes it deterministically.
+
+### Worker recycle observability
+
+When a worker exits — for any reason: `max_request` hit, graceful
+shutdown, admin reload, OOM — the server logs:
+
+```
+[recycle] worker 17 exited after 99,847 requests, peak RSS 142 MB, uptime 4831s
+```
+
+Watch your access logs for these lines. They confirm `max_request` is
+working as expected and surface workers that grow much faster than
+others (likely leak sources). Set `ZEALPHP_RECYCLE_LOG=0` to silence
+the log line if your log volume is a concern.
 
 ### logrotate
 

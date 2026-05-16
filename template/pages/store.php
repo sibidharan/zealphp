@@ -103,6 +103,60 @@ Cache::flush();                                    // clear everything</code></p
   <strong>How it works:</strong> Values are serialized and written to both tiers. Memory tier uses Store (OpenSwoole\Table) — 8KB max per value, values larger than 8KB automatically spill to file-only. File tier writes to <code>.cache/{hash}.cache</code> with TTL header. Expired entries are cleaned lazily on read + a periodic GC sweep every 60s on worker 0.
 </div>
 
+<h2 id="consistency" style="margin:2.5rem 0 .5rem">Consistency semantics — what's atomic, what isn't</h2>
+<p style="color:var(--text-muted);margin-bottom:1rem">Store is shared memory, not a database. The atomicity guarantees are narrow and important to understand before reaching for it in production.</p>
+
+<table class="ztable">
+  <tr><th>Operation</th><th>Atomicity</th><th>Notes</th></tr>
+  <tr>
+    <td><code>$table->set($key, $row)</code> — single call updating multiple fields in one row</td>
+    <td>✅ <strong>Atomic</strong> at the C level (per-row spinlock)</td>
+    <td>Readers see either the old row or the new row, never a partial update.</td>
+  </tr>
+  <tr>
+    <td><code>$table->get($key)</code> / <code>$table->get($key, 'field')</code></td>
+    <td>✅ Atomic read of one row</td>
+    <td>Acquires the row lock briefly; safe under concurrent writes.</td>
+  </tr>
+  <tr>
+    <td>Two <code>$table->set($key, ['a' =&gt; 1])</code> + <code>$table->set($key, ['b' =&gt; 2])</code> calls on the same row</td>
+    <td>❌ <strong>Not transactional</strong> across calls</td>
+    <td>Each call is atomic individually, but a reader between them sees a half-applied update. Combine into a single <code>set()</code> with both fields if order matters.</td>
+  </tr>
+  <tr>
+    <td><code>$table->incr($key, 'field', $by)</code>, <code>$table->decr($key, 'field', $by)</code></td>
+    <td>✅ Atomic — no read-then-write race</td>
+    <td>Use these for counters. Don't do <code>get</code> + <code>set</code>.</td>
+  </tr>
+  <tr>
+    <td><code>Counter</code> (<code>OpenSwoole\Atomic</code>) — <code>compareAndSet</code>, <code>add</code>, <code>sub</code>, <code>get</code>, <code>set</code></td>
+    <td>✅ Lock-free atomic on a 32/64-bit integer</td>
+    <td>For single-value cross-worker counters, prefer this over Store.</td>
+  </tr>
+</table>
+
+<h3 style="margin:1.5rem 0 .5rem">What happens on worker crash mid-write</h3>
+<p>The honest answer: it depends on how the worker died.</p>
+<table class="ztable">
+  <tr><th>Crash type</th><th>Effect</th></tr>
+  <tr>
+    <td><strong>Graceful shutdown</strong> — SIGTERM, including the <code>max_request</code> recycle</td>
+    <td>✅ Worker drains current request, releases all row locks normally, exits clean. Manager forks a fresh worker. No corruption.</td>
+  </tr>
+  <tr>
+    <td><strong>SIGKILL / OOM kill / segfault mid-<code>set()</code></strong></td>
+    <td>⚠ The row's spinlock <strong>may be left held</strong>. OpenSwoole doesn't have robust mutex-on-holder-death recovery. Other workers will spin waiting on that row until the server is fully restarted. Rare in practice (single-row writes are nanoseconds) but possible under adversarial load.</td>
+  </tr>
+  <tr>
+    <td><strong>Server hard kill (<code>kill -9</code> on the master)</strong></td>
+    <td>Shared memory segment is destroyed entirely when the last attached process exits. Fresh segment on next start. No state survives, but no corruption either.</td>
+  </tr>
+</table>
+
+<div class="callout warn" style="margin-top:1rem">
+  <strong>Rule of thumb:</strong> treat Store as a <strong>best-effort, fast, single-server cache</strong>, not as a database. For ACID needs (transactions, durability, multi-row consistency), use Postgres / MySQL / Redis with explicit transaction semantics. Store's job is to make &lt; 5µs reads possible across workers — that's it.
+</div>
+
 <h2 style="margin:2.5rem 0 .5rem">When to use Redis / Valkey</h2>
 <p style="color:var(--text-muted);margin-bottom:1rem">Store and Cache cover most single-server apps. Here's when you'll need an external cache.</p>
 

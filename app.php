@@ -29,6 +29,7 @@ use ZealPHP\Middleware\CompressionMiddleware;
 use ZealPHP\Middleware\ETagMiddleware;
 use ZealPHP\Middleware\RangeMiddleware;
 use ZealPHP\Middleware\SessionStartMiddleware;
+use ZealPHP\Middleware\IniIsolationMiddleware;
 use ZealPHP\Store;
 use ZealPHP\Counter;
 
@@ -63,6 +64,7 @@ App::superglobals(false);
 $benchMode = bench_mode_enabled();
 $demoMiddleware = env_flag('ZEALPHP_DEMO_MIDDLEWARE', false);
 $compressionMiddleware = env_flag('ZEALPHP_COMPRESSION_MIDDLEWARE', false);
+$iniIsolate = env_flag('ZEALPHP_INI_ISOLATE', false);
 
 $envInt = static function (string $name, int $default, int $min = 1): int {
     $value = getenv($name);
@@ -85,6 +87,12 @@ if (!$benchMode) {
     $app->addMiddleware(new SessionStartMiddleware()); // eager session start for new visitors
     if ($compressionMiddleware) {
         $app->addMiddleware(new CompressionMiddleware());
+    }
+    if ($iniIsolate) {
+        // Snapshot+restore per-request ini values (date.timezone, error_reporting,
+        // display_errors, memory_limit, etc.) so ini_set() inside a handler can't
+        // leak into the next request on the same worker. Opt-in via ZEALPHP_INI_ISOLATE=1.
+        $app->addMiddleware(new IniIsolationMiddleware());
     }
     // Demo-only middleware. Enable with ZEALPHP_DEMO_MIDDLEWARE=1.
     if ($demoMiddleware) {
