@@ -2,6 +2,8 @@
 
 A retrospective record of every substantive technical critique ZealPHP has received in public review, our assessment, and what we shipped in response. Maintained as an internal learning document — when the same critique surfaces twice, we want to know what we said the first time and whether anything changed.
 
+> **Looking for the public, user-facing version?** The same trade-offs are documented at [/design-tradeoffs](https://php.zeal.ninja/design-tradeoffs) (also under `template/pages/design-tradeoffs.php` in this repo). That page is the marketing-friendly shape: "what we chose, what it costs you, what mitigation exists." CRITIC.md is the version-by-version trace of how we got there.
+
 ---
 
 ## Summary

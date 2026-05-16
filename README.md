@@ -9,7 +9,7 @@ A coroutine-native PHP framework built on **OpenSwoole** for high-concurrency HT
 
 **Homepage:** [https://php.zeal.ninja](https://php.zeal.ninja)  
 Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` if you want the rendered example URLs to point somewhere else.
-**Changelog:** [CHANGELOG.md](CHANGELOG.md)
+**Changelog:** [CHANGELOG.md](CHANGELOG.md) · **Design trade-offs:** [/design-tradeoffs](https://php.zeal.ninja/design-tradeoffs) · **Critique retrospective:** [CRITIC.md](CRITIC.md)
 
 ---
 

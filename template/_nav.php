@@ -7,6 +7,7 @@ $links = [
   'migration'       => ['/migration',     'Migration'],
   'performance'     => ['/performance',   'Benchmarks'],
   'getting-started' => ['/getting-started','Getting Started'],
+  'design-tradeoffs'=> ['/design-tradeoffs','Trade-offs'],
   'learn'           => ['/learn',          'Learn'],
   'routing'         => ['/routing',        'Routing'],
   'responses'       => ['/responses',      'Responses'],
