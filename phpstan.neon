@@ -1,5 +1,5 @@
 parameters:
-    level: 9
+    level: 10
     paths:
         - src
     excludePaths:
@@ -48,6 +48,20 @@ parameters:
             path: src/App.php
         -
             message: '#^Strict comparison using !== between 200 and 200 will always evaluate to false\.$#'
+            path: src/App.php
+        -
+            message: '#^Strict comparison using !== between 200 and null will always evaluate to true\.$#'
+            path: src/App.php
+        -
+            message: '#^Strict comparison using !== between \*NEVER\* and int will always evaluate to true\.$#'
+            path: src/App.php
+        # OpenSwoole\ExitException is thrown by the ext when a coroutine
+        # is killed by exit()/die() inside user code; PHPStan's reflection
+        # can't see throws across the openswoole stub boundary, so it
+        # reports the catch as dead. Real runtime: exit() inside any
+        # route handler raises ExitException up through the dispatch try.
+        -
+            message: '#^Dead catch - OpenSwoole\\ExitException is never thrown in the try block\.$#'
             path: src/App.php
 
         # ─── PHP < 8.0 stub vs PHP 8.3+ runtime ─────────────────────────

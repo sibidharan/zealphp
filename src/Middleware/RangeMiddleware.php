@@ -133,9 +133,9 @@ class RangeMiddleware implements MiddlewareInterface
         $this->setHeader($g, 'Content-Length', (string) strlen($slice));
         $g->status = 206;
 
-        return (new Response($slice, 206))
-            ->withHeader('Content-Range', $crHeader)
-            ->withHeader('Accept-Ranges', 'bytes');
+        $resp = (new Response($slice, 206))->withHeader('Content-Range', $crHeader);
+        assert($resp instanceof ResponseInterface);
+        return $resp->withHeader('Accept-Ranges', 'bytes');
     }
 
     /**
@@ -162,9 +162,9 @@ class RangeMiddleware implements MiddlewareInterface
         $this->setHeader($g, 'Content-Length', (string) strlen($multiBody));
         $g->status = 206;
 
-        return (new Response($multiBody, 206))
-            ->withHeader('Content-Type', $ct)
-            ->withHeader('Accept-Ranges', 'bytes');
+        $resp = (new Response($multiBody, 206))->withHeader('Content-Type', $ct);
+        assert($resp instanceof ResponseInterface);
+        return $resp->withHeader('Accept-Ranges', 'bytes');
     }
 
     private function unsatisfiable(int $total, RequestContext $g): ResponseInterface
@@ -173,8 +173,10 @@ class RangeMiddleware implements MiddlewareInterface
         $this->setHeader($g, 'Content-Range', $crHeader);
         $g->status = 416;
 
-        return (new Response('', 416))
+        $resp = (new Response('', 416))
             ->withHeader('Content-Range', $crHeader);
+        assert($resp instanceof ResponseInterface);
+        return $resp;
     }
 
     /**

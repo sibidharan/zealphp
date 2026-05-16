@@ -33,9 +33,10 @@ class Client implements ClientInterface
 
         $ch = curl_init();
 
+        $method = $request->getMethod();
         curl_setopt_array($ch, [
             CURLOPT_URL => $uri,
-            CURLOPT_CUSTOMREQUEST => $request->getMethod(),
+            CURLOPT_CUSTOMREQUEST => $method === '' ? null : $method,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HEADER => true,
             CURLOPT_TIMEOUT => $this->timeout,

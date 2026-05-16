@@ -272,8 +272,8 @@ class Response
         $this->header('Content-Type', 'text/event-stream');
         $this->header('Cache-Control', 'no-cache');
         $this->header('X-Accel-Buffering', 'no');
-        $this->stream(function($write) use ($fn) {
-            $emit = function(string $data, string $event = '', string $id = '') use ($write) {
+        $this->stream(function(callable $write) use ($fn) {
+            $emit = function(string $data, string $event = '', string $id = '') use ($write): void {
                 $msg = '';
                 if ($id !== '')    $msg .= "id: $id\n";
                 if ($event !== '') $msg .= "event: $event\n";
@@ -340,11 +340,20 @@ class Response
         $this->header('Last-Modified', $lastModified);
 
         $reqHeaders = $this->g->zealphp_request->parent->header ?? [];
+        if (!is_array($reqHeaders)) {
+            $reqHeaders = [];
+        }
         $ifNoneMatch = $reqHeaders['if-none-match'] ?? '';
+        if (!is_string($ifNoneMatch)) {
+            $ifNoneMatch = '';
+        }
         $ifModifiedSince = $reqHeaders['if-modified-since'] ?? '';
+        if (!is_string($ifModifiedSince)) {
+            $ifModifiedSince = '';
+        }
         $notModified = false;
         if ($ifNoneMatch !== '') {
-            foreach (array_map('trim', explode(',', $ifNoneMatch)) as $tag) {
+            foreach (array_map(static fn(string $s): string => trim($s), explode(',', $ifNoneMatch)) as $tag) {
                 if ($tag === $etag || $tag === '*' || $tag === ltrim($etag, 'W/')) {
                     $notModified = true;
                     break;
@@ -364,6 +373,9 @@ class Response
         }
 
         $rangeHeader = $reqHeaders['range'] ?? '';
+        if (!is_string($rangeHeader)) {
+            $rangeHeader = '';
+        }
 
         if ($rangeHeader !== '' && preg_match('/^bytes=(\d*)-(\d*)$/', $rangeHeader, $m)) {
             $start = $m[1] !== '' ? (int) $m[1] : null;

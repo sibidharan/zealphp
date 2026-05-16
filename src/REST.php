@@ -74,9 +74,6 @@ class REST {
      */
     private function serverValue($key, $default = null){
         $server = RequestContext::instance()->server;
-        if (!is_array($server)) {
-            return $default;
-        }
         return $server[$key] ?? $default;
     }
 

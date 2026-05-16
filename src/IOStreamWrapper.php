@@ -254,7 +254,8 @@ class IOStreamWrapper {
     public function stream_lock($operation): bool {
         if ($this->context) {
             // Passthrough lock for other streams
-            return flock($this->context, $operation);
+            $op = max(0, min(7, (int)$operation));
+            return flock($this->context, $op);
         }
 
         // Lock is not applicable for php://input

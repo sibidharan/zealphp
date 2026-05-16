@@ -453,7 +453,7 @@ ZealPHP has two companion repos that must stay aligned with framework releases:
 
 | Repo | Composer name | Role |
 |---|---|---|
-| **Scaffold** | `sibidharan/zealphp-project` | Template for `composer create-project`; ships `vendor/` checked in |
+| **Scaffold** | `sibidharan/zealphp-project` | Template for `composer create-project`. `vendor/` is gitignored as of v0.2.17 — `composer create-project` runs `composer install` automatically, so no need to ship vendor in the git tree. |
 | **WordPress showcase** | `sibidharan/zealphp-wordpress` | Demonstrates unmodified WordPress on ZealPHP |
 
 **Path discovery — never hardcode `~/zealphp-project`.** Different devs lay out their workspaces differently. Find each companion in this order, stop at the first hit:
@@ -495,7 +495,9 @@ Use `grep -rn '\bvX\.Y\.Z-1\b' --include='*.md' --include='*.php' .` (with the *
 - Previous `[X.Y.Z]` sections in `CHANGELOG.md`
 - `PERF.md` "vX.Y.Z Baseline" / "vX.Y.Z — landed-in-this-version" optimization notes
 - Test/code comments referencing when a behavior was introduced (e.g. `tests/Unit/SecurityTest.php` comments)
-- `vendor/` (third-party version-string coincidences)
+
+Also remember to bump:
+- `.github/badges/phpstan.json` — `"message": "level N"` must match the `level: N` in `phpstan.neon`. CI's `validate` job fails if they're out of sync. If the release didn't change the PHPStan level, leave this alone.
 
 ### Commit, tag, push (main repo)
 
@@ -522,15 +524,15 @@ Verify Packagist picked up the tag: `curl -sS https://repo.packagist.org/p2/sibi
 cd <scaffold-path>                            # discovered via the env-var/sibling chain above
 # Edit composer.json: "sibidharan/zealphp": "^X.Y.Z" (bump floor, not just caret)
 composer update sibidharan/zealphp --with-dependencies
-git add composer.json composer.lock vendor/
-git commit -m "chore: refresh composer.lock + vendor for ZealPHP vX.Y.Z"
+git add composer.json composer.lock
+git commit -m "chore: bump sibidharan/zealphp floor to ^X.Y.Z"
 git tag -a vX.Y.Z -m "Release vX.Y.Z — tracks sibidharan/zealphp vX.Y.Z"
 for remote in $(git remote); do
   git push $remote main && git push $remote vX.Y.Z
 done
 ```
 
-The scaffold ships `vendor/` checked in so `composer create-project` is a single round-trip — that's why we refresh it on every release.
+`vendor/` is gitignored in the scaffold as of v0.2.17 — `composer create-project sibidharan/zealphp-project` runs `composer install` after extracting, so vendor/ is recreated locally per install. Don't add it back to the commit. composer.lock IS tracked so installs are reproducible.
 
 ### WordPress sync
 

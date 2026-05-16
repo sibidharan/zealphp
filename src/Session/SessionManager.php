@@ -112,13 +112,16 @@ class SessionManager
         $g->ignore_user_abort_state  = 0;
 
         $sessionName = session_name() ?: 'PHPSESSID';
-        if ($this->useCookies && isset($request->cookie[$sessionName])) {
-            $sessionId = $request->cookie[$sessionName];
-        } else if (!$this->useOnlyCookies && isset($request->get[$sessionName])) {
-            $sessionId = $request->get[$sessionName];
+        $reqCookie = is_array($request->cookie) ? $request->cookie : [];
+        $reqGet = is_array($request->get) ? $request->get : [];
+        if ($this->useCookies && isset($reqCookie[$sessionName])) {
+            $rawSid = $reqCookie[$sessionName];
+        } else if (!$this->useOnlyCookies && isset($reqGet[$sessionName])) {
+            $rawSid = $reqGet[$sessionName];
         } else {
-            $sessionId = call_user_func($this->idGenerator);
+            $rawSid = call_user_func($this->idGenerator);
         }
+        $sessionId = is_string($rawSid) ? $rawSid : null;
         session_id($sessionId);
 
         $handler = new FileSessionHandler();

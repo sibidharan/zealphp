@@ -33,7 +33,7 @@ class Logger extends AbstractLogger
 
     public function log($level, \Stringable|string $message, array $context = []): void
     {
-        if (!isset(self::LEVEL_PRIORITY[$level])) {
+        if (!is_string($level) || !isset(self::LEVEL_PRIORITY[$level])) {
             $levelDisplay = is_scalar($level) ? (string)$level : gettype($level);
             throw new InvalidArgumentException("Unknown log level: {$levelDisplay}");
         }
@@ -41,6 +41,7 @@ class Logger extends AbstractLogger
             return;
         }
 
+        /** @var array<string, mixed> $context */
         $interpolated = $this->interpolate((string) $message, $context);
         $formatted = "[{$level}] {$interpolated}";
         if (isset($context['exception']) && $context['exception'] instanceof \Throwable) {

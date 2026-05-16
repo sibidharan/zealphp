@@ -74,21 +74,25 @@ class CompressionMiddleware implements MiddlewareInterface
         if (str_contains($accept, 'gzip')) {
             $compressed = gzencode($body, $this->level);
             if ($compressed === false) { return $response; }
+            $stream = Stream::streamFor($compressed);
+            assert($stream instanceof \Psr\Http\Message\StreamInterface);
             return $response
                 ->withHeader('Content-Encoding', 'gzip')
                 ->withHeader('Content-Length',   (string)strlen($compressed))
                 ->withHeader('Vary',             'Accept-Encoding')
-                ->withBody(Stream::streamFor($compressed));
+                ->withBody($stream);
         }
 
         if (str_contains($accept, 'deflate')) {
             $compressed = gzdeflate($body, $this->level);
             if ($compressed === false) { return $response; }
+            $stream = Stream::streamFor($compressed);
+            assert($stream instanceof \Psr\Http\Message\StreamInterface);
             return $response
                 ->withHeader('Content-Encoding', 'deflate')
                 ->withHeader('Content-Length',   (string)strlen($compressed))
                 ->withHeader('Vary',             'Accept-Encoding')
-                ->withBody(Stream::streamFor($compressed));
+                ->withBody($stream);
         }
 
         return $response;

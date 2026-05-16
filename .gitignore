@@ -10,3 +10,16 @@
 /storage/learn.test.db
 /storage/learn.test.db-wal
 /storage/learn.test.db-shm
+
+# Composer dependencies — library convention. Users run `composer install`
+# after cloning. Tracked vendor/ used to ship in this repo through v0.2.16;
+# v0.2.17 removed it to drop ~4300 file-changes per release and follow standard
+# PHP library practice (Symfony / Laravel / Mezzio all gitignore vendor/).
+# composer.lock IS tracked — pins versions for CI reproducibility (especially
+# PHPStan, where a minor version bump can change static-analysis output).
+/vendor/
+
+# IDE / local
+/.idea/
+/.vscode/
+*.swp

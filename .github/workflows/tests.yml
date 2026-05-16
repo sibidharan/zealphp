@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   validate:
@@ -25,6 +24,22 @@ jobs:
 
       - name: Validate composer.json
         run: composer validate --strict
+
+      # Badge sync — fail fast if .github/badges/phpstan.json claims a different
+      # level than phpstan.neon. The shields.io endpoint badge in README reads
+      # that JSON, so a mismatch silently misrepresents the project's actual
+      # static-analysis posture. Cheap check; runs before any heavier job.
+      - name: Verify PHPStan badge matches phpstan.neon
+        run: |
+          set -euo pipefail
+          NEON_LEVEL=$(awk '/^[[:space:]]*level:/ {print $2; exit}' phpstan.neon | tr -d '[:space:]')
+          BADGE_LEVEL=$(python3 -c "import json,re; m=json.load(open('.github/badges/phpstan.json'))['message']; print(re.search(r'\d+', m).group())")
+          echo "phpstan.neon level: $NEON_LEVEL"
+          echo "badge JSON level:   $BADGE_LEVEL"
+          if [ "$NEON_LEVEL" != "$BADGE_LEVEL" ]; then
+            echo "::error::PHPStan badge (level $BADGE_LEVEL) does not match phpstan.neon (level $NEON_LEVEL). Update .github/badges/phpstan.json."
+            exit 1
+          fi
 
   static-analysis:
     runs-on: ubuntu-latest
@@ -46,11 +61,31 @@ jobs:
         run: vendor/bin/phpstan analyse --no-progress
 
   phpunit:
+    name: phpunit (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.3', '8.4']
+        include:
+          - php: '8.3'
+            coverage: 'xdebug'
+            upload-coverage: true
+            experimental: false
+          # 8.4 runs without coverage — Xdebug + curl interaction caused the
+          # test_chat_consecutive_requests_work flake. 8.3 is already the only
+          # Codecov uploader so no signal is lost.
+          - php: '8.4'
+            coverage: 'none'
+            upload-coverage: false
+            experimental: false
+          # 8.5 is pre-GA at time of writing. openswoole/uopz binaries via
+          # shivammathur/setup-php may not be available yet; continue-on-error
+          # so a missing-extension failure doesn't block master.
+          - php: '8.5'
+            coverage: 'none'
+            upload-coverage: false
+            experimental: true
 
     steps:
       - name: Checkout
@@ -61,7 +96,7 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           extensions: openswoole, uopz
-          coverage: xdebug
+          coverage: ${{ matrix.coverage }}
           tools: composer:v2
 
       - name: Install dependencies
@@ -84,13 +119,18 @@ jobs:
           cat /tmp/zealphp-server.log
           exit 1
 
-      - name: Run tests with coverage
+      - name: Run tests (with coverage)
+        if: matrix.coverage == 'xdebug'
         run: ./vendor/bin/phpunit --coverage-clover build/logs/clover.xml
 
+      - name: Run tests (no coverage)
+        if: matrix.coverage == 'none'
+        run: ./vendor/bin/phpunit
+
       - name: Upload coverage to Codecov
-        if: matrix.php == '8.3'
+        if: matrix.upload-coverage
         uses: codecov/codecov-action@v6
         with:
           files: build/logs/clover.xml
-          use_oidc: true
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false

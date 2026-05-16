@@ -37,9 +37,10 @@ function zeal_session_start(): bool
     }
 
     // Ensure session save path exists (cached per path — directory never disappears mid-run)
+    /** @var array<string, bool> $verified_paths */
     static $verified_paths = [];
-    // @phpstan-ignore-next-line — session_params is array<string, mixed>; save_path coerced to string at boundary
-    $save_path = (string)$g->session_params['save_path'];
+    $rawSavePath = $g->session_params['save_path'];
+    $save_path = is_string($rawSavePath) ? $rawSavePath : '';
     if (!isset($verified_paths[$save_path])) {
         if (!is_dir($save_path)) {
             mkdir($save_path, 0700, true);
@@ -57,14 +58,19 @@ function zeal_session_start(): bool
     //   2. Corrupted / truncated file (interrupted write) — unserialize returns false
     //   3. TOCTOU race: file_exists returned true but file_get_contents fails
     // All three reduce to "treat as no session data" rather than crashing.
+    /** @var array<string, mixed> $session_data */
     $session_data = [];
-    $session_file = $g->session_params['save_path'] . '/sess_' . $session_id;
+    $session_file = $save_path . '/sess_' . $session_id;
     if (file_exists($session_file)) {
         $contents = @file_get_contents($session_file);
         if (is_string($contents) && $contents !== '') {
             $decoded = @unserialize($contents, ['allowed_classes' => false]);
             if (is_array($decoded)) {
-                $session_data = $decoded;
+                foreach ($decoded as $k => $v) {
+                    if (is_string($k)) {
+                        $session_data[$k] = $v;
+                    }
+                }
             }
         }
     }
@@ -110,6 +116,10 @@ function zeal_session_id($id = null)
 
 function zeal_session_status(): int {
     $g = RequestContext::instance();
+    // isset() on a typed property is false ONLY when unset() has been called
+    // — zeal_session_write_close() and zeal_session_destroy() unset the slot
+    // to mark the session inactive. PHPStan cannot track unset-on-typed-prop.
+    /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
     if(isset($g->session)){
         return PHP_SESSION_ACTIVE;
     }else{
@@ -144,12 +154,16 @@ function zeal_session_write_close(): bool
 {
     $g = RequestContext::instance();
 
+    // isset() runtime-checks uninitialized typed slot (unset() may have been called)
+    /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
     if (isset($g->session)) {
         // Get session ID
         $session_id = zeal_session_id();
 
         // Write session data to file
-        $session_file = $g->session_params['save_path'] . '/sess_' . $session_id;
+        $save_path = $g->session_params['save_path'] ?? '';
+        assert(is_string($save_path));
+        $session_file = $save_path . '/sess_' . $session_id;
         file_put_contents($session_file, serialize($g->session));
 
         // Unset session data in $g
@@ -169,14 +183,18 @@ function zeal_session_destroy(): bool
     $session_id = zeal_session_id();
 
     // Delete session file
-    $session_file = $g->session_params['save_path'] . '/sess_' . $session_id;
+    $save_path = $g->session_params['save_path'] ?? '';
+    assert(is_string($save_path));
+    $session_file = $save_path . '/sess_' . $session_id;
     if (file_exists($session_file)) {
         unlink($session_file);
     }
 
     // Unset session data and cookie
     unset($g->session);
-    unset($g->cookie[$g->session_params['name']]);
+    $session_name = $g->session_params['name'] ?? '';
+    assert(is_string($session_name));
+    unset($g->cookie[$session_name]);
 
     return true;
 }
@@ -207,8 +225,10 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
     zeal_session_id($new_session_id);
 
     // Rename session file if keeping old session data
-    $old_session_file = $g->session_params['save_path'] . '/sess_' . $old_session_id;
-    $new_session_file = $g->session_params['save_path'] . '/sess_' . $new_session_id;
+    $save_path = $g->session_params['save_path'] ?? '';
+    assert(is_string($save_path));
+    $old_session_file = $save_path . '/sess_' . $old_session_id;
+    $new_session_file = $save_path . '/sess_' . $new_session_id;
 
     if (file_exists($old_session_file)) {
         if ($delete_old_session) {
@@ -299,20 +319,29 @@ function zeal_session_abort(): bool
     $g = RequestContext::instance();
 
     // Discard session changes
+    // isset() runtime-checks uninitialized typed slot (unset() may have been called)
+    /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
     if (isset($g->session)) {
         // Get session ID
         $session_id = zeal_session_id();
 
         // Read session data from file (same defensive handling as zeal_session_start —
         // empty/corrupted files must not crash the worker).
-        $session_file = $g->session_params['save_path'] . '/sess_' . $session_id;
+        $save_path = $g->session_params['save_path'] ?? '';
+        assert(is_string($save_path));
+        $session_file = $save_path . '/sess_' . $session_id;
         if (file_exists($session_file)) {
+            /** @var array<string, mixed> $session_data */
             $session_data = [];
             $contents = @file_get_contents($session_file);
             if (is_string($contents) && $contents !== '') {
                 $decoded = @unserialize($contents, ['allowed_classes' => false]);
                 if (is_array($decoded)) {
-                    $session_data = $decoded;
+                    foreach ($decoded as $k => $v) {
+                        if (is_string($k)) {
+                            $session_data[$k] = $v;
+                        }
+                    }
                 }
             }
             $g->session = $session_data;
@@ -329,22 +358,27 @@ function zeal_session_encode(): string
     return serialize(RequestContext::instance()->session);
 }
 
-/**
- * @param string $data
- */
-function zeal_session_decode($data): bool
+function zeal_session_decode(string $data): bool
 {
     // Defensive: unserialize() returns false on malformed input, which would
     // TypeError on assignment to the typed array property. Match PHP native
     // session_decode signature — returns bool, true only on successful decode.
-    if (!is_string($data) || $data === '') {
+    if ($data === '') {
         return false;
     }
     $decoded = @unserialize($data, ['allowed_classes' => false]);
     if (!is_array($decoded)) {
         return false;
     }
-    RequestContext::instance()->session = $decoded;
+    // Narrow array<mixed,mixed> to array<string,mixed> for typed property assignment.
+    /** @var array<string, mixed> $sessionData */
+    $sessionData = [];
+    foreach ($decoded as $k => $v) {
+        if (is_string($k)) {
+            $sessionData[$k] = $v;
+        }
+    }
+    RequestContext::instance()->session = $sessionData;
     return true;
 }
 

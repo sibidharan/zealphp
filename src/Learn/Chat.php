@@ -19,25 +19,41 @@ class Chat
 
         ChatHistory::append($db, $userId, $threadId, 'user', [['type' => 'text', 'html' => '<p>' . htmlspecialchars($message) . '</p>']]);
 
-        $response->sse(function ($emit) use ($db, $userId, $message, $msgLower, $threadId) {
+        $response->sse(function (callable $emit) use ($db, $userId, $message, $msgLower, $threadId) {
+            /** @var array<int, array<string, mixed>> $items */
             $items = [];
             $textBuf = '';
             $flushText = function () use (&$items, &$textBuf) {
                 if ($textBuf !== '') { $items[] = ['type' => 'text', 'html' => $textBuf]; $textBuf = ''; }
             };
-            $sse = function (string $data, string $event) use ($emit, &$items, &$textBuf, $flushText) {
+            $scalarStr = static function (mixed $v): string {
+                return is_scalar($v) ? (string)$v : '';
+            };
+            $sse = function (string $data, string $event) use ($emit, &$items, &$textBuf, $flushText, $scalarStr) {
                 $emit($data, $event);
                 $payload = json_decode($data, true) ?: [];
                 assert(is_array($payload));
                 if ($event === 'token') {
-                    $textBuf .= (string) ($payload['token'] ?? '');
+                    $textBuf .= $scalarStr($payload['token'] ?? '');
                 } elseif ($event === 'tool_call') {
                     $flushText();
                     $items[] = ['type' => 'tool', 'id' => $payload['id'] ?? '?', 'name' => $payload['name'] ?? '?', 'status' => 'running', 'args' => '', 'result' => ''];
                 } elseif ($event === 'tool_args') {
-                    foreach ($items as &$it) if ($it['type'] === 'tool' && $it['id'] === ($payload['id'] ?? '')) { $it['args'] .= (string) ($payload['delta'] ?? ''); break; }
+                    foreach ($items as &$it) {
+                        if (($it['type'] ?? '') === 'tool' && ($it['id'] ?? null) === ($payload['id'] ?? '')) {
+                            $existingArgs = $it['args'] ?? '';
+                            $it['args'] = (is_string($existingArgs) ? $existingArgs : '') . $scalarStr($payload['delta'] ?? '');
+                            break;
+                        }
+                    }
                 } elseif ($event === 'tool_done') {
-                    foreach ($items as &$it) if ($it['type'] === 'tool' && $it['id'] === ($payload['id'] ?? '')) { $it['status'] = $payload['status'] ?? 'ok'; $it['result'] = (string) ($payload['result_preview'] ?? ''); break; }
+                    foreach ($items as &$it) {
+                        if (($it['type'] ?? '') === 'tool' && ($it['id'] ?? null) === ($payload['id'] ?? '')) {
+                            $it['status'] = $payload['status'] ?? 'ok';
+                            $it['result'] = $scalarStr($payload['result_preview'] ?? '');
+                            break;
+                        }
+                    }
                 }
             };
 
@@ -51,8 +67,15 @@ class Chat
                 if (empty($notes)) {
                     $sse((string)json_encode(['token' => '<p>No notes yet. Try "create a note titled buy milk".</p>']), 'token');
                 } else {
-                    // @phpstan-ignore-next-line — $notes rows are array<string, mixed> from DB::open(); title/id coerced at boundary
-                    $html = '<ul>' . implode('', array_map(fn($n) => '<li>' . htmlspecialchars((string)$n['title']) . ' — id ' . (int) $n['id'] . '</li>', $notes)) . '</ul>';
+                    $html = '<ul>' . implode('', array_map(
+                        static function (array $n): string {
+                            $title = $n['title'] ?? null;
+                            $id = $n['id'] ?? 0;
+                            return '<li>' . htmlspecialchars(is_scalar($title) ? (string)$title : '')
+                                . ' — id ' . (is_numeric($id) ? (int)$id : 0) . '</li>';
+                        },
+                        $notes
+                    )) . '</ul>';
                     $sse((string)json_encode(['token' => '<p>Here are your notes:</p>' . $html]), 'token');
                 }
             } elseif (preg_match('/(create|add)(\s+a)?\s+note(\s+(titled|called|saying))?\s+["\']?(.+?)["\']?$/i', $message, $m)) {
@@ -76,20 +99,26 @@ class Chat
                 $needle = trim($m[1]);
                 $notes = Notes::list($db, $userId);
                 $hit = null;
-                // @phpstan-ignore-next-line — $notes rows are array<string, mixed> from DB; title coerced at boundary
-                foreach ($notes as $n) if (stripos((string)$n['title'], $needle) !== false) { $hit = $n; break; }
+                foreach ($notes as $n) {
+                    $title = $n['title'] ?? '';
+                    if (is_scalar($title) && stripos((string)$title, $needle) !== false) {
+                        $hit = $n;
+                        break;
+                    }
+                }
                 if (!$hit) {
                     $sse((string)json_encode(['token' => "<p>I couldn't find a note matching <em>" . htmlspecialchars($needle) . "</em>.</p>"]), 'token');
                 } else {
+                    $hitId = $hit['id'] ?? 0;
+                    $hitTitle = $hit['title'] ?? '';
+                    $hitIdInt = is_numeric($hitId) ? (int)$hitId : 0;
+                    $hitTitleStr = is_scalar($hitTitle) ? (string)$hitTitle : '';
                     $sse((string)json_encode(['id' => 'm3', 'name' => 'delete_note', 'phase' => 'start']), 'tool_call');
-                    // @phpstan-ignore-next-line — $hit is array<string, mixed> from DB; id coerced at boundary
-                    Notes::delete($db, $userId, (int) $hit['id']);
-                    $sse((string)json_encode(['id' => 'm3', 'status' => 'ok', 'result_preview' => 'deleted id ' . $hit['id']]), 'tool_done');
+                    Notes::delete($db, $userId, $hitIdInt);
+                    $sse((string)json_encode(['id' => 'm3', 'status' => 'ok', 'result_preview' => 'deleted id ' . $hitIdInt]), 'tool_done');
                     $sse((string)json_encode([]), 'notes_changed');
-                    // @phpstan-ignore-next-line — $hit is array<string, mixed> from DB; id coerced at boundary
-                    WS::broadcast($userId, ['type' => 'note_changed', 'op' => 'delete', 'id' => (int) $hit['id']]);
-                    // @phpstan-ignore-next-line — $hit is array<string, mixed> from DB; title coerced at boundary
-                    $sse((string)json_encode(['token' => "<p>Deleted note <strong>" . htmlspecialchars((string)$hit['title']) . "</strong>.</p>"]), 'token');
+                    WS::broadcast($userId, ['type' => 'note_changed', 'op' => 'delete', 'id' => $hitIdInt]);
+                    $sse((string)json_encode(['token' => "<p>Deleted note <strong>" . htmlspecialchars($hitTitleStr) . "</strong>.</p>"]), 'token');
                 }
             } elseif (preg_match('/(search|find)\s+(.+)/i', $message, $m)) {
                 $q = trim($m[2]);
@@ -97,8 +126,13 @@ class Chat
                 $hits = Notes::search($db, $userId, $q);
                 $sse((string)json_encode(['id' => 'm4', 'status' => 'ok', 'result_preview' => count($hits) . ' hits']), 'tool_done');
                 if (empty($hits)) $sse((string)json_encode(['token' => "<p>No notes match <em>" . htmlspecialchars($q) . "</em>.</p>"]), 'token');
-                // @phpstan-ignore-next-line — $hits rows are array<string, mixed> from DB; title coerced at boundary
-                else $sse((string)json_encode(['token' => '<ul>' . implode('', array_map(fn($n) => '<li>' . htmlspecialchars((string)$n['title']) . '</li>', $hits)) . '</ul>']), 'token');
+                else $sse((string)json_encode(['token' => '<ul>' . implode('', array_map(
+                    static function (array $n): string {
+                        $title = $n['title'] ?? '';
+                        return '<li>' . htmlspecialchars(is_scalar($title) ? (string)$title : '') . '</li>';
+                    },
+                    $hits
+                )) . '</ul>']), 'token');
             } else {
                 $sse((string)json_encode(['token' => '<p>Mock mode is active — set <code>OPENAI_API_KEY</code> for the real model. Try: <em>create a note titled buy milk</em>, <em>list notes</em>, <em>delete buy milk</em>, <em>search groceries</em>.</p>']), 'token');
             }
@@ -139,7 +173,7 @@ class Chat
         $b64 = base64_encode((string)json_encode($payload));
         $agentPath = App::$cwd . '/examples/agents/notes_agent.py';
 
-        $response->sse(function ($emit) use ($apiKey, $b64, $agentPath, $threadId, $db, $userId) {
+        $response->sse(function (callable $emit) use ($apiKey, $b64, $agentPath, $threadId, $db, $userId) {
             $model = (string) (getenv('ZEALPHP_LEARN_AI_MODEL') ?: 'gpt-4.1-mini');
             $cmd = 'OPENAI_API_KEY=' . escapeshellarg($apiKey)
                  . ' ZEALPHP_LEARN_AI_MODEL=' . escapeshellarg($model)
@@ -157,22 +191,38 @@ class Chat
             fclose($pipes[0]);
             stream_set_blocking($pipes[1], false);
 
+            /** @var array<int, array<string, mixed>> $items */
             $items = [];
             $textBuf = '';
             $flush = function () use (&$items, &$textBuf) { if ($textBuf !== '') { $items[] = ['type' => 'text', 'html' => $textBuf]; $textBuf = ''; } };
-            $reemit = function (string $data, string $event) use ($emit, &$items, &$textBuf, $flush) {
+            $scalarStr = static function (mixed $v): string {
+                return is_scalar($v) ? (string)$v : '';
+            };
+            $reemit = function (string $data, string $event) use ($emit, &$items, &$textBuf, $flush, $scalarStr) {
                 $emit($data, $event);
                 $payload = json_decode($data, true) ?: [];
                 assert(is_array($payload));
                 if ($event === 'token') {
-                    $textBuf .= (string) ($payload['token'] ?? '');
+                    $textBuf .= $scalarStr($payload['token'] ?? '');
                 } elseif ($event === 'tool_call') {
                     $flush();
                     $items[] = ['type' => 'tool', 'id' => $payload['id'] ?? '?', 'name' => $payload['name'] ?? '?', 'status' => 'running', 'args' => '', 'result' => ''];
                 } elseif ($event === 'tool_args') {
-                    foreach ($items as &$it) if ($it['type'] === 'tool' && $it['id'] === ($payload['id'] ?? '')) { $it['args'] .= (string) ($payload['delta'] ?? ''); break; }
+                    foreach ($items as &$it) {
+                        if (($it['type'] ?? '') === 'tool' && ($it['id'] ?? null) === ($payload['id'] ?? '')) {
+                            $existingArgs = $it['args'] ?? '';
+                            $it['args'] = (is_string($existingArgs) ? $existingArgs : '') . $scalarStr($payload['delta'] ?? '');
+                            break;
+                        }
+                    }
                 } elseif ($event === 'tool_done') {
-                    foreach ($items as &$it) if ($it['type'] === 'tool' && $it['id'] === ($payload['id'] ?? '')) { $it['status'] = $payload['status'] ?? 'ok'; $it['result'] = (string) ($payload['result_preview'] ?? ''); break; }
+                    foreach ($items as &$it) {
+                        if (($it['type'] ?? '') === 'tool' && ($it['id'] ?? null) === ($payload['id'] ?? '')) {
+                            $it['status'] = $payload['status'] ?? 'ok';
+                            $it['result'] = $scalarStr($payload['result_preview'] ?? '');
+                            break;
+                        }
+                    }
                 }
             };
 

@@ -23,6 +23,7 @@ class Notes
     {
         $stmt = $db->prepare('SELECT id, title, body, created_at, updated_at FROM notes WHERE user_id = ? ORDER BY updated_at DESC');
         $stmt->execute([$userId]);
+        /** @var array<int, array<string, mixed>> */
         return $stmt->fetchAll();
     }
 
@@ -32,7 +33,9 @@ class Notes
         $stmt = $db->prepare('SELECT id, title, body, created_at, updated_at FROM notes WHERE id = ? AND user_id = ?');
         $stmt->execute([$noteId, $userId]);
         $r = $stmt->fetch();
-        return is_array($r) ? $r : null;
+        if (!is_array($r)) return null;
+        /** @var array<string, mixed> $r */
+        return $r;
     }
 
     public static function update(\PDO $db, int $userId, int $noteId, ?string $title, ?string $body): bool
@@ -64,6 +67,7 @@ class Notes
         $q = '%' . $query . '%';
         $stmt = $db->prepare('SELECT id, title, body, updated_at FROM notes WHERE user_id = ? AND (title LIKE ? OR body LIKE ?) ORDER BY updated_at DESC LIMIT ?');
         $stmt->execute([$userId, $q, $q, $limit]);
+        /** @var array<int, array<string, mixed>> */
         return $stmt->fetchAll();
     }
 }

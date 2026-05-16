@@ -11,8 +11,9 @@ class DB
         $configured = getenv('ZEALPHP_LEARN_DB_PATH');
         if ($configured === false || $configured === '') $configured = 'storage/learn.db';
         if ($configured[0] !== '/') {
-            $root = defined('ZEALPHP_ROOT') ? ZEALPHP_ROOT : dirname(__DIR__, 2);
-            $configured = $root . '/' . $configured;
+            $root = defined('ZEALPHP_ROOT') ? constant('ZEALPHP_ROOT') : dirname(__DIR__, 2);
+            $rootStr = is_string($root) ? $root : dirname(__DIR__, 2);
+            $configured = $rootStr . '/' . $configured;
         }
         $dir = dirname($configured);
         if (!is_dir($dir)) @mkdir($dir, 0775, true);

@@ -39,12 +39,20 @@ class Request extends \OpenSwoole\HTTP\Request
     public function __construct(\OpenSwoole\Http\Request $request)
     {
         $this->parent = $request;
+        // OpenSwoole stubs type these as mixed; runtime they're array<string, ...>
+        /** @phpstan-ignore-next-line assign.propertyType — by-ref proxy to mixed-typed OpenSwoole prop */
         $this->header = &$request->header;
+        /** @phpstan-ignore-next-line assign.propertyType — by-ref proxy to mixed-typed OpenSwoole prop */
         $this->server = &$request->server;
+        /** @phpstan-ignore-next-line assign.propertyType — by-ref proxy to mixed-typed OpenSwoole prop */
         $this->cookie = &$request->cookie;
+        /** @phpstan-ignore-next-line assign.propertyType — by-ref proxy to mixed-typed OpenSwoole prop */
         $this->get = &$request->get;
+        /** @phpstan-ignore-next-line assign.propertyType — by-ref proxy to mixed-typed OpenSwoole prop */
         $this->files = &$request->files;
+        /** @phpstan-ignore-next-line assign.propertyType — by-ref proxy to mixed-typed OpenSwoole prop */
         $this->post = &$request->post;
+        /** @phpstan-ignore-next-line assign.propertyType — by-ref proxy to mixed-typed OpenSwoole prop */
         $this->tmpfiles = &$request->tmpfiles;
     }
 

@@ -34,8 +34,10 @@ class Auth
         $row->execute([$username]);
         $user = $row->fetch();
         if (!is_array($user)) return null;
-        if (!password_verify($password, (string)$user['password_hash'])) return null;
-        return (int) $user['id'];
+        $hash = $user['password_hash'] ?? '';
+        if (!is_string($hash) || !password_verify($password, $hash)) return null;
+        $id = $user['id'] ?? 0;
+        return is_numeric($id) ? (int)$id : null;
     }
 
     /** @return array{user_id: int, username: string}|null */
@@ -53,7 +55,12 @@ class Auth
                 unset($g->session['user_id'], $g->session['username']);
                 return null;
             }
-            return ['user_id' => (int) $row['id'], 'username' => (string) $row['username']];
+            $id = $row['id'] ?? 0;
+            $username = $row['username'] ?? '';
+            return [
+                'user_id' => is_numeric($id) ? (int)$id : 0,
+                'username' => is_scalar($username) ? (string)$username : '',
+            ];
         }
         return null;
     }
@@ -69,13 +76,15 @@ class Auth
             // @phpstan-ignore-next-line — zealphp_request set by CoSessionManager before any request handler runs
             $body = json_decode((string)$g->zealphp_request->parent->getContent(), true);
             if (!is_array($body)) return null;
-            $u = (string) ($body['username'] ?? '');
-            $p = (string) ($body['password'] ?? '');
+            $rawU = $body['username'] ?? '';
+            $rawP = $body['password'] ?? '';
+            $u = is_scalar($rawU) ? (string)$rawU : '';
+            $p = is_scalar($rawP) ? (string)$rawP : '';
         } else {
-            // @phpstan-ignore-next-line — $g->post is array<string, mixed>; username coerced to string at boundary
-            $u = (string) ($g->post['username'] ?? '');
-            // @phpstan-ignore-next-line — $g->post is array<string, mixed>; password coerced to string at boundary
-            $p = (string) ($g->post['password'] ?? '');
+            $rawU = $g->post['username'] ?? '';
+            $rawP = $g->post['password'] ?? '';
+            $u = is_scalar($rawU) ? (string)$rawU : '';
+            $p = is_scalar($rawP) ? (string)$rawP : '';
         }
         if ($u === '' || $p === '') return null;
         return ['username' => $u, 'password' => $p];
@@ -85,10 +94,16 @@ class Auth
     {
         $now = time();
         $existing = \ZealPHP\Store::get($table, $ip);
-        if (is_array($existing) && $now < (int)$existing['reset']) {
-            if ((int)$existing['count'] >= $limit) return false;
-            \ZealPHP\Store::incr($table, $ip, 'count', 1);
-            return true;
+        if (is_array($existing)) {
+            $reset = $existing['reset'] ?? 0;
+            $count = $existing['count'] ?? 0;
+            $resetInt = is_numeric($reset) ? (int)$reset : 0;
+            $countInt = is_numeric($count) ? (int)$count : 0;
+            if ($now < $resetInt) {
+                if ($countInt >= $limit) return false;
+                \ZealPHP\Store::incr($table, $ip, 'count', 1);
+                return true;
+            }
         }
         \ZealPHP\Store::set($table, $ip, ['ip' => $ip, 'count' => 1, 'reset' => $now + $window]);
         return true;

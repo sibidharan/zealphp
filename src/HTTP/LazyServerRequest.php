@@ -29,7 +29,9 @@ class LazyServerRequest implements ServerRequestInterface
     private function hydrate(): ServerRequestInterface
     {
         if ($this->hydrated === null) {
-            $this->hydrated = \OpenSwoole\Core\Psr\ServerRequest::from($this->native);
+            $hydrated = \OpenSwoole\Core\Psr\ServerRequest::from($this->native);
+            assert($hydrated instanceof ServerRequestInterface);
+            $this->hydrated = $hydrated;
         }
         return $this->hydrated;
     }
@@ -39,36 +41,56 @@ class LazyServerRequest implements ServerRequestInterface
     public function getMethod(): string
     {
         if ($this->hydrated) return $this->hydrated->getMethod();
-        return $this->native->server['request_method'] ?? 'GET';
+        $server = $this->native->server ?? [];
+        assert(is_array($server));
+        $method = $server['request_method'] ?? 'GET';
+        return is_string($method) ? $method : 'GET';
     }
 
     public function getHeaderLine(string $name): string
     {
         if ($this->hydrated) return $this->hydrated->getHeaderLine($name);
         $lower = strtolower($name);
-        return $this->native->header[$lower] ?? '';
+        $header = $this->native->header ?? [];
+        assert(is_array($header));
+        $val = $header[$lower] ?? '';
+        return is_string($val) ? $val : '';
     }
 
+    /** @return array<string> */
     public function getHeader(string $name): array
     {
         if ($this->hydrated) return $this->hydrated->getHeader($name);
         $lower = strtolower($name);
-        $val = $this->native->header[$lower] ?? null;
-        return $val !== null ? [$val] : [];
+        $header = $this->native->header ?? [];
+        assert(is_array($header));
+        $val = $header[$lower] ?? null;
+        return (is_string($val) && $val !== '') ? [$val] : [];
     }
 
     public function hasHeader(string $name): bool
     {
         if ($this->hydrated) return $this->hydrated->hasHeader($name);
-        return isset($this->native->header[strtolower($name)]);
+        $header = $this->native->header ?? [];
+        assert(is_array($header));
+        return isset($header[strtolower($name)]);
     }
 
+    /** @return array<string, array<string>> */
     public function getHeaders(): array
     {
-        if ($this->hydrated) return $this->hydrated->getHeaders();
+        if ($this->hydrated) {
+            /** @var array<string, array<string>> */
+            return $this->hydrated->getHeaders();
+        }
+        /** @var array<string, array<string>> $headers */
         $headers = [];
-        foreach ($this->native->header ?? [] as $k => $v) {
-            $headers[$k] = [$v];
+        $rawHeaders = $this->native->header ?? [];
+        assert(is_array($rawHeaders));
+        foreach ($rawHeaders as $k => $v) {
+            if (!is_string($k)) continue;
+            $strVal = is_string($v) ? $v : (is_scalar($v) ? (string)$v : '');
+            $headers[$k] = [$strVal];
         }
         return $headers;
     }
@@ -76,34 +98,78 @@ class LazyServerRequest implements ServerRequestInterface
     /** @return array<string, mixed> */
     public function getServerParams(): array
     {
-        if ($this->hydrated) return $this->hydrated->getServerParams();
-        return $this->native->server ?? [];
+        if ($this->hydrated) {
+            /** @var array<string, mixed> */
+            return $this->hydrated->getServerParams();
+        }
+        $server = $this->native->server ?? [];
+        assert(is_array($server));
+        /** @var array<string, mixed> $result */
+        $result = [];
+        foreach ($server as $k => $v) {
+            if (is_string($k)) {
+                $result[$k] = $v;
+            }
+        }
+        return $result;
     }
 
     /** @return array<string, mixed> */
     public function getQueryParams(): array
     {
-        if ($this->hydrated) return $this->hydrated->getQueryParams();
-        return $this->native->get ?? [];
+        if ($this->hydrated) {
+            /** @var array<string, mixed> */
+            return $this->hydrated->getQueryParams();
+        }
+        $get = $this->native->get ?? [];
+        assert(is_array($get));
+        /** @var array<string, mixed> $result */
+        $result = [];
+        foreach ($get as $k => $v) {
+            if (is_string($k)) {
+                $result[$k] = $v;
+            }
+        }
+        return $result;
     }
 
     /** @return array<string, string> */
     public function getCookieParams(): array
     {
-        if ($this->hydrated) return $this->hydrated->getCookieParams();
-        return $this->native->cookie ?? [];
+        if ($this->hydrated) {
+            /** @var array<string, string> */
+            return $this->hydrated->getCookieParams();
+        }
+        $cookie = $this->native->cookie ?? [];
+        assert(is_array($cookie));
+        /** @var array<string, string> $result */
+        $result = [];
+        foreach ($cookie as $k => $v) {
+            if (is_string($k) && is_string($v)) {
+                $result[$k] = $v;
+            }
+        }
+        return $result;
     }
 
     public function getRequestTarget(): string
     {
         if ($this->hydrated) return $this->hydrated->getRequestTarget();
-        return $this->native->server['request_uri'] ?? '/';
+        $server = $this->native->server ?? [];
+        assert(is_array($server));
+        $target = $server['request_uri'] ?? '/';
+        return is_string($target) ? $target : '/';
     }
 
     public function getProtocolVersion(): string
     {
         if ($this->hydrated) return $this->hydrated->getProtocolVersion();
-        $protocol = $this->native->server['server_protocol'] ?? 'HTTP/1.1';
+        $server = $this->native->server ?? [];
+        assert(is_array($server));
+        $protocol = $server['server_protocol'] ?? 'HTTP/1.1';
+        if (!is_string($protocol)) {
+            $protocol = 'HTTP/1.1';
+        }
         return str_replace('HTTP/', '', $protocol);
     }
 
@@ -122,6 +188,7 @@ class LazyServerRequest implements ServerRequestInterface
     /** @return array<string, \Psr\Http\Message\UploadedFileInterface> */
     public function getUploadedFiles(): array
     {
+        /** @var array<string, \Psr\Http\Message\UploadedFileInterface> */
         return $this->hydrate()->getUploadedFiles();
     }
 
@@ -130,12 +197,14 @@ class LazyServerRequest implements ServerRequestInterface
      */
     public function getParsedBody()
     {
+        /** @var array<string, mixed>|object|null */
         return $this->hydrate()->getParsedBody();
     }
 
     /** @return array<string, mixed> */
     public function getAttributes(): array
     {
+        /** @var array<string, mixed> */
         return $this->hydrate()->getAttributes();
     }
 

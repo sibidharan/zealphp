@@ -16,6 +16,7 @@ class ChatHistory
     {
         $stmt = $db->prepare('SELECT id, role, items_json, created_at FROM chat_history WHERE user_id = ? AND thread_id = ? ORDER BY created_at ASC, id ASC');
         $stmt->execute([$userId, $threadId]);
+        /** @var array<int, array<string, mixed>> */
         return $stmt->fetchAll();
     }
 
@@ -24,6 +25,7 @@ class ChatHistory
     {
         $stmt = $db->prepare('SELECT thread_id, MAX(created_at) AS last_at, COUNT(*) AS turns FROM chat_history WHERE user_id = ? GROUP BY thread_id ORDER BY last_at DESC LIMIT ?');
         $stmt->execute([$userId, $limit]);
+        /** @var array<int, array<string, mixed>> */
         return $stmt->fetchAll();
     }
 }

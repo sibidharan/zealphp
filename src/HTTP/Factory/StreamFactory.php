@@ -9,12 +9,16 @@ class StreamFactory implements StreamFactoryInterface
 {
     public function createStream(string $content = ''): StreamInterface
     {
-        return Stream::streamFor($content);
+        $stream = Stream::streamFor($content);
+        assert($stream instanceof StreamInterface);
+        return $stream;
     }
 
     public function createStreamFromFile(string $filename, string $mode = 'r'): StreamInterface
     {
-        return Stream::createStreamFromFile($filename, $mode);
+        $stream = Stream::createStreamFromFile($filename, $mode);
+        assert($stream instanceof StreamInterface);
+        return $stream;
     }
 
     public function createStreamFromResource($resource): StreamInterface

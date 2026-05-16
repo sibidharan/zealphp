@@ -123,11 +123,16 @@ class Cache
 
         $row = Store::get(self::TABLE, $hash);
         if (is_array($row)) {
-            if ((int)$row['ttl'] > 0 && (int)$row['ttl'] < $now) {
+            $ttl = $row['ttl'] ?? 0;
+            $val = $row['val'] ?? '';
+            $crc = $row['crc'] ?? 0;
+            $ttlInt = is_numeric($ttl) ? (int)$ttl : 0;
+            $valStr = is_scalar($val) ? (string)$val : '';
+            if ($ttlInt > 0 && $ttlInt < $now) {
                 Store::del(self::TABLE, $hash);
-            } elseif (crc32((string)$row['val']) === $row['crc']) {
+            } elseif (crc32($valStr) === $crc) {
                 self::$hitsMem?->increment();
-                return unserialize((string)$row['val'], ['allowed_classes' => false]);
+                return unserialize($valStr, ['allowed_classes' => false]);
             }
         }
 
@@ -174,7 +179,9 @@ class Cache
 
         $row = Store::get(self::TABLE, $hash);
         if (is_array($row)) {
-            if ((int)$row['ttl'] > 0 && (int)$row['ttl'] < $now) {
+            $ttl = $row['ttl'] ?? 0;
+            $ttlInt = is_numeric($ttl) ? (int)$ttl : 0;
+            if ($ttlInt > 0 && $ttlInt < $now) {
                 Store::del(self::TABLE, $hash);
             } else {
                 return true;
@@ -331,8 +338,12 @@ class Cache
         }
         $now = time();
         foreach ($table as $key => $row) {
-            if (is_array($row) && (int)$row['ttl'] > 0 && (int)$row['ttl'] < $now && $key !== null) {
-                $table->del($key);
+            if (is_array($row)) {
+                $ttl = $row['ttl'] ?? 0;
+                $ttlInt = is_numeric($ttl) ? (int)$ttl : 0;
+                if ($ttlInt > 0 && $ttlInt < $now && $key !== null) {
+                    $table->del($key);
+                }
             }
         }
     }

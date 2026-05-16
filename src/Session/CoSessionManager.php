@@ -78,13 +78,16 @@ class CoSessionManager
         $g->_session_started = false;
 
         $sessionName = zeal_session_name();
-        $hasSessionCookie = $this->useCookies && isset($request->cookie[$sessionName]);
-        $hasSessionParam = !$this->useOnlyCookies && isset($request->get[$sessionName]);
+        $reqCookie = is_array($request->cookie) ? $request->cookie : [];
+        $reqGet = is_array($request->get) ? $request->get : [];
+        $hasSessionCookie = $this->useCookies && isset($reqCookie[$sessionName]);
+        $hasSessionParam = !$this->useOnlyCookies && isset($reqGet[$sessionName]);
 
         // Lazy session: only start if client already has a session cookie/param.
         // For new visitors, use SessionStartMiddleware to eagerly start sessions.
         if ($hasSessionCookie || $hasSessionParam) {
-            $sessionId = $hasSessionCookie ? $request->cookie[$sessionName] : $request->get[$sessionName];
+            $rawSid = $hasSessionCookie ? $reqCookie[$sessionName] : $reqGet[$sessionName];
+            $sessionId = is_string($rawSid) ? $rawSid : null;
             zeal_session_id($sessionId);
             zeal_session_start();
             $g->_session_started = true;

@@ -136,7 +136,9 @@ class ZealAPI extends REST
                 if (file_exists($realFile)) {
                     include $realFile;
                     try {
-                        $this->api_rpc = \Closure::bind(${$func}, $this, get_class());
+                        /** @var \Closure $closureToBind */
+                        $closureToBind = ${$func};
+                        $this->api_rpc = \Closure::bind($closureToBind, $this, get_class());
                     } catch (\TypeError $e) {
                         elog(jTraceEx($e), "error");
                         $this->response($this->json(['error'=>'method_not_found']), 404);

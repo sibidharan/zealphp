@@ -31,6 +31,7 @@ function env_flag(string $name, bool $default): bool
 
 function bench_mode_enabled(): bool
 {
+    /** @var bool|null $enabled */
     static $enabled = null;
     if ($enabled !== null) {
         return $enabled;
@@ -42,6 +43,7 @@ function bench_mode_enabled(): bool
 
 function site_url(string $path = ''): string
 {
+    /** @var string|null $base */
     static $base = null;
     if ($base === null) {
         $configured = getenv('ZEALPHP_SITE_URL');
@@ -80,6 +82,7 @@ function site_host(): string
 
 function async_logging_enabled(): bool
 {
+    /** @var bool|null $enabled */
     static $enabled = null;
     if ($enabled !== null) {
         return $enabled;
@@ -91,10 +94,14 @@ function async_logging_enabled(): bool
 
 function resolve_log_dir(): ?string
 {
+    /** @var string|null $resolved */
     static $resolved = null;
-    if ($resolved !== null) {
+    /** @var bool $checked */
+    static $checked = false;
+    if ($checked) {
         return $resolved;
     }
+    $checked = true;
 
     $candidates = [];
     $envDir = getenv('ZEALPHP_LOG_DIR');
@@ -104,7 +111,7 @@ function resolve_log_dir(): ?string
     $candidates[] = '/tmp/zealphp';
 
     $cwd = getcwd();
-    if ($cwd !== false && $cwd !== '') {
+    if ($cwd !== false) {
         $candidates[] = $cwd . '/tmp/zealphp';
         $candidates[] = $cwd . '/logs/zealphp';
     }
@@ -125,6 +132,7 @@ function resolve_log_dir(): ?string
 
 function debug_logging_enabled(): bool
 {
+    /** @var bool|null $enabled */
     static $enabled = null;
     if ($enabled !== null) {
         return $enabled;
@@ -152,6 +160,7 @@ function debug_logging_enabled(): bool
 
 function access_logging_enabled(): bool
 {
+    /** @var bool|null $enabled */
     static $enabled = null;
     if ($enabled !== null) {
         return $enabled;
@@ -168,6 +177,7 @@ function access_logging_enabled(): bool
 
 function log_file_for(string $kind): ?string
 {
+    /** @var array<string, string|null> $cache */
     static $cache = [];
     if (array_key_exists($kind, $cache)) {
         return $cache[$kind];
@@ -207,7 +217,9 @@ function log_file_for(string $kind): ?string
 
 function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
 {
+    /** @var array<string, \OpenSwoole\Coroutine\Channel> $sinks */
     static $sinks = [];
+    /** @var array<string, bool> $started */
     static $started = [];
 
     if (isset($sinks[$path])) {
@@ -300,17 +312,17 @@ function coprocess($taskLogic, $wait = true)
     if(App::$superglobals == false){
         throw new \Exception("Superglobals are disabled which enables coroutines, cannot use coprocess inside coroutine, use coroutines directly.");
     }
-    $worker = new Process(function ($worker) use ($taskLogic) {
+    $worker = new Process(function (Process $worker) use ($taskLogic) {
         try{
             ob_start();
             $taskLogic($worker);
             $data = ob_get_clean();
-            $worker->write(empty($data) ? 'EOF' : $data);
+            $worker->write(empty($data) ? 'EOF' : (string)$data);
             $worker->exit();
         } catch (\Throwable $e) {
             $data = ob_get_clean();
             if(!empty($data)){
-                $worker->write($data);
+                $worker->write((string)$data);
             } else {
                 $worker->write('EOF');
             }
@@ -362,22 +374,20 @@ function jTraceEx($e, $seen=null): string
     $line = $e->getLine();
     while (true) {
         $current = "$file:$line";
-        if (is_array($seen) && in_array($current, $seen)) {
+        if (in_array($current, $seen, true)) {
             $result[] = sprintf(' ... %d more', count($trace)+1);
             break;
         }
         $result[] = sprintf(
             ' at %s%s%s(%s%s%s)',
             count($trace) && array_key_exists('class', $trace[0]) ? str_replace('\\', '.', $trace[0]['class']) : '',
-            count($trace) && array_key_exists('class', $trace[0]) && array_key_exists('function', $trace[0]) ? '.' : '',
-            count($trace) && array_key_exists('function', $trace[0]) ? str_replace('\\', '.', $trace[0]['function']) : '(main)',
+            count($trace) && array_key_exists('class', $trace[0]) ? '.' : '',
+            count($trace) ? str_replace('\\', '.', $trace[0]['function']) : '(main)',
             $line === null ? $file : str_replace(App::$cwd, '', $file),
             $line === null ? '' : ':',
             $line === null ? '' : $line
         );
-        if (is_array($seen)) {
-            $seen[] = "$file:$line";
-        }
+        $seen[] = "$file:$line";
         if (!count($trace)) {
             break;
         }
@@ -431,6 +441,7 @@ function elog($message, $tag = "*", $limit = 1): void {
  */
 function zlog($log, $tag = "system", $filter = null, $invert_filter = false): void
 {
+    /** @var array<string, int> $validTags */
     static $validTags = ['system' => 1, 'fatal' => 1, 'error' => 1, 'warning' => 1, 'info' => 1, 'debug' => 1];
 
     if (!debug_logging_enabled()) {
@@ -487,7 +498,8 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false): vo
 function get_config($key)
 {
     global $__site_config;
-    $array = json_decode((string)$__site_config, true);
+    $configStr = is_scalar($__site_config) ? (string)$__site_config : '';
+    $array = json_decode($configStr, true);
     if (is_array($array) && isset($array[$key])) {
         return $array[$key];
     } else {
@@ -505,8 +517,10 @@ function get_config($key)
 function get_current_render_time()
 {
     $finish = microtime(true);
+    $start = RequestContext::instance()->session['__start_time'] ?? 0.0;
+    $startFloat = is_numeric($start) ? (float)$start : 0.0;
     return (float) number_format(
-        ($finish - RequestContext::instance()->session['__start_time']),
+        ($finish - $startFloat),
         5
     );
 }
@@ -578,7 +592,9 @@ function access_log(int $status = 200, int $length = 0): void {
         return;
     }
     $g = RequestContext::instance();
+    /** @var string $cachedDate */
     static $cachedDate = '';
+    /** @var int $cachedSecond */
     static $cachedSecond = 0;
     $now = time();
     if ($now !== $cachedSecond) {
@@ -586,10 +602,10 @@ function access_log(int $status = 200, int $length = 0): void {
         $cachedSecond = $now;
     }
     $time = $cachedDate . substr((string)microtime(), 1, 6);
-    $remote = $g->server['REMOTE_ADDR'];
-    $request = $g->server['REQUEST_METHOD'].' '.$g->server['REQUEST_URI'].' '.$g->server['SERVER_PROTOCOL'];
-    $referer = $g->server['HTTP_REFERER'] ?? '-';
-    $user_agent = $g->server['HTTP_USER_AGENT'] ?? '-';
+    $remote = (string)($g->server['REMOTE_ADDR'] ?? '-');
+    $request = ((string)($g->server['REQUEST_METHOD'] ?? '')).' '.((string)($g->server['REQUEST_URI'] ?? '')).' '.((string)($g->server['SERVER_PROTOCOL'] ?? ''));
+    $referer = (string)($g->server['HTTP_REFERER'] ?? '-');
+    $user_agent = (string)($g->server['HTTP_USER_AGENT'] ?? '-');
     $log = "$remote - - [$time] \"$request\" $status $length \"$referer\" \"$user_agent\"\n";
     log_write($log, 'access');
 }
@@ -828,7 +844,7 @@ function headers_list(): array {
 */
 function headers_sent(&$file = null, &$line = null) {
    $g = RequestContext::instance();
-   if (isset($g->openswoole_response) && $g->openswoole_response !== null) {
+   if (isset($g->openswoole_response)) {
        return !$g->openswoole_response->isWritable();
    }
    return false;
@@ -861,7 +877,7 @@ function header_remove(?string $name = null): void
 function flush(): void
 {
     $g = RequestContext::instance();
-    if ($g->openswoole_response === null) {
+    if (!isset($g->openswoole_response)) {
         return;
     }
     if (!$g->openswoole_response->isWritable()) {
@@ -869,7 +885,7 @@ function flush(): void
     }
     if (!($g->_streaming ?? false)) {
         $g->_streaming = true;
-        if (isset($g->zealphp_response) && $g->zealphp_response !== null) {
+        if (isset($g->zealphp_response)) {
             $g->zealphp_response->flush();
         }
     }
@@ -918,12 +934,25 @@ function apache_request_headers(): array
     $g = RequestContext::instance();
     $out = [];
     $raw = [];
-    if (isset($g->zealphp_request) && $g->zealphp_request !== null) {
+    if (isset($g->zealphp_request)) {
         $raw = $g->zealphp_request->parent->header ?? [];
+    }
+    if (!is_array($raw)) {
+        return $out;
     }
     foreach ($raw as $name => $value) {
         $canonical = str_replace(' ', '-', ucwords(str_replace('-', ' ', strtolower((string)$name))));
-        $out[$canonical] = is_array($value) ? implode(', ', $value) : (string)$value;
+        if (is_array($value)) {
+            $strValues = [];
+            foreach ($value as $v) {
+                if (is_scalar($v)) {
+                    $strValues[] = (string)$v;
+                }
+            }
+            $out[$canonical] = implode(', ', $strValues);
+        } else {
+            $out[$canonical] = is_scalar($value) ? (string)$value : '';
+        }
     }
     return $out;
 }
@@ -1035,7 +1064,7 @@ function ignore_user_abort($enable = null): int
 function connection_status(): int
 {
     $g = RequestContext::instance();
-    if (isset($g->openswoole_response) && $g->openswoole_response !== null
+    if (isset($g->openswoole_response)
         && !$g->openswoole_response->isWritable()) {
         return 1; // CONNECTION_ABORTED
     }
@@ -1045,7 +1074,7 @@ function connection_status(): int
 function connection_aborted(): int
 {
     $g = RequestContext::instance();
-    if (isset($g->openswoole_response) && $g->openswoole_response !== null
+    if (isset($g->openswoole_response)
         && !$g->openswoole_response->isWritable()) {
         return 1;
     }
@@ -1072,7 +1101,7 @@ function output_reset_rewrite_vars(): bool
 function is_uploaded_file(string $filename): bool
 {
     $g = RequestContext::instance();
-    foreach ($g->files ?? [] as $entry) {
+    foreach ($g->files as $entry) {
         if (!is_array($entry)) continue;
         $tmp = $entry['tmp_name'] ?? null;
         if (is_array($tmp)) {

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "label": "PHPStan",
+  "message": "level 10",
+  "color": "brightgreen",
+  "namedLogo": "php",
+  "style": "flat-square"
+}

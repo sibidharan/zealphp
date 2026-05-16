@@ -227,7 +227,9 @@ class App
             $file_name = '/'.basename($php_self);
             $cwd = dirname($php_self);
             self::$default_php_self = $file_name;
-            self::$middleware_stack = (new StackHandler())->add(new ResponseMiddleware());
+            $stack = (new StackHandler())->add(new ResponseMiddleware());
+            assert($stack instanceof StackHandler);
+            self::$middleware_stack = $stack;
         }
         if(!App::$superglobals){
             co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
@@ -339,15 +341,38 @@ class App
     }
 
     /**
+     * Normalize a methods array (any shape) into a list of uppercase strings.
+     *
+     * @param array<mixed> $methods
+     * @return array<int, string>
+     */
+    private static function normalizeMethods(array $methods): array
+    {
+        $out = [];
+        foreach ($methods as $m) {
+            if (is_string($m)) {
+                $out[] = strtoupper($m);
+            }
+        }
+        return $out;
+    }
+
+    /**
      * @param callable|array{0:object|string,1:string} $handler
      * @return array<int, array{name:string, has_default:bool, default:mixed}>
      */
     private function buildParamMap($handler): array
     {
         try {
-            $reflection = is_array($handler)
-                ? new \ReflectionMethod($handler[0], $handler[1])
-                : new \ReflectionFunction(\Closure::fromCallable($handler));
+            if (is_array($handler)) {
+                $target = $handler[0];
+                $method = $handler[1];
+                assert(is_object($target) || is_string($target));
+                assert(is_string($method));
+                $reflection = new \ReflectionMethod($target, $method);
+            } else {
+                $reflection = new \ReflectionFunction(\Closure::fromCallable($handler));
+            }
             $map = [];
             foreach ($reflection->getParameters() as $param) {
                 $pname = $param->getName();
@@ -429,7 +454,7 @@ class App
         $this->routes[] = [
             'path'      => $path,
             'pattern'   => $pattern,
-            'methods'   => array_map('strtoupper', $methods),
+            'methods'   => self::normalizeMethods($methods),
             'handler'   => $handler,
             'param_map' => $this->buildParamMap($handler),
             'raw'       => (bool)($options['raw'] ?? false),
@@ -469,7 +494,7 @@ class App
         $this->routes[] = [
             'path'      => $path,
             'pattern'   => $pattern,
-            'methods'   => array_map('strtoupper', $methods),
+            'methods'   => self::normalizeMethods($methods),
             'handler'   => $handler,
             'param_map' => $this->buildParamMap($handler),
             'raw'       => (bool)($options['raw'] ?? false),
@@ -526,12 +551,12 @@ class App
         }, $path);
     
         $pattern = "#^" . $pattern . "$#";
-    
+
         assert(is_callable($handler));
         $this->routes[] = [
             'path'      => $path,
             'pattern'   => $pattern,
-            'methods'   => array_map('strtoupper', $methods),
+            'methods'   => self::normalizeMethods($methods),
             'handler'   => $handler,
             'param_map' => $this->buildParamMap($handler),
             'raw'       => (bool)($options['raw'] ?? false),
@@ -571,7 +596,7 @@ class App
         $this->routes[] = [
             'path'      => $regex,
             'pattern'   => $regex,
-            'methods'   => array_map('strtoupper', $methods),
+            'methods'   => self::normalizeMethods($methods),
             'handler'   => $handler,
             'param_map' => $this->buildParamMap($handler),
             'raw'       => (bool)($options['raw'] ?? false),
@@ -675,11 +700,12 @@ class App
         $__output = ob_get_clean();
 
         if ($__result instanceof \Closure) {
+            /** @var array<string, array<int, array{name: string, default: mixed}>> $__reflCache */
             static $__reflCache = [];
             if (!isset($__reflCache[$__template_file_path])) {
                 $__ref = new \ReflectionFunction($__result);
                 $__reflCache[$__template_file_path] = array_map(
-                    fn($__p) => ['name' => $__p->getName(), 'default' => $__p->isDefaultValueAvailable() ? $__p->getDefaultValue() : null],
+                    static fn(\ReflectionParameter $__p): array => ['name' => $__p->getName(), 'default' => $__p->isDefaultValueAvailable() ? $__p->getDefaultValue() : null],
                     $__ref->getParameters()
                 );
             }
@@ -857,17 +883,17 @@ class App
         $g = RequestContext::instance();
 
         $ctx = json_encode([
-            'server' => $g->server ?? [],
-            'get'    => $g->get ?? [],
-            'post'   => $g->post ?? [],
-            'cookie' => $g->cookie ?? [],
-            'files'  => $g->files ?? [],
+            'server' => $g->server,
+            'get'    => $g->get,
+            'post'   => $g->post,
+            'cookie' => $g->cookie,
+            'files'  => $g->files,
             'env'    => $g->env ?? $_ENV,
         ], JSON_UNESCAPED_SLASHES);
 
         $env = [];
         $allowedPrefixes = ['HTTP_', 'REQUEST_', 'SERVER_', 'SCRIPT_', 'DOCUMENT_', 'CONTENT_', 'REMOTE_', 'QUERY_', 'PATH_'];
-        foreach ($g->server ?? [] as $k => $v) {
+        foreach ($g->server as $k => $v) {
             if (!is_string($v)) continue;
             if ($k === 'HTTPS') {
                 $env[$k] = $v;
@@ -919,12 +945,15 @@ class App
         if ($metaLine) {
             $meta = json_decode(trim($metaLine), true);
             if (is_array($meta)) {
-                response_set_status((int)($meta['status_code'] ?? 200));
+                $statusCode = $meta['status_code'] ?? 200;
+                response_set_status(is_numeric($statusCode) ? (int)$statusCode : 200);
                 $metaHeaders = is_array($meta['headers'] ?? null) ? $meta['headers'] : [];
                 foreach ($metaHeaders as $pair) {
                     if (is_array($pair) && count($pair) >= 2) {
+                        $p0 = is_scalar($pair[0]) ? (string)$pair[0] : '';
+                        $p1 = is_scalar($pair[1]) ? (string)$pair[1] : '';
                         // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                        $g->zealphp_response->header((string)$pair[0], (string)$pair[1]);
+                        $g->zealphp_response->header($p0, $p1);
                     }
                 }
                 $metaCookies = is_array($meta['cookies'] ?? null) ? $meta['cookies'] : [];
@@ -943,10 +972,13 @@ class App
                 }
                 // Detect streaming content types (SSE, chunked, event-stream)
                 foreach ($metaHeaders as $pair) {
-                    if (is_array($pair) && count($pair) >= 2
-                        && strcasecmp((string)$pair[0], 'Content-Type') === 0
-                        && stripos((string)$pair[1], 'text/event-stream') !== false) {
-                        $streaming = true;
+                    if (is_array($pair) && count($pair) >= 2) {
+                        $p0 = is_scalar($pair[0]) ? (string)$pair[0] : '';
+                        $p1 = is_scalar($pair[1]) ? (string)$pair[1] : '';
+                        if (strcasecmp($p0, 'Content-Type') === 0
+                            && stripos($p1, 'text/event-stream') !== false) {
+                            $streaming = true;
+                        }
                     }
                 }
             }
@@ -1073,7 +1105,7 @@ class App
         // Recursion guard — if a user-registered error handler itself triggers
         // an error, the nested call falls straight through to the default page
         // instead of looping back into the same handler.
-        if (($g->error_render_depth ?? 0) >= 1) {
+        if ($g->error_render_depth >= 1) {
             return $this->defaultErrorResponse($status, $exception);
         }
         $route = self::getErrorHandler($status);
@@ -1084,7 +1116,7 @@ class App
             // produces a response with the right HTTP status (the handler can still
             // override via http_response_code() before returning).
             $g->status = $status;
-            $g->error_render_depth = ($g->error_render_depth ?? 0) + 1;
+            $g->error_render_depth = $g->error_render_depth + 1;
             try {
                 $method = (string)($g->server['REQUEST_METHOD'] ?? 'GET');
                 return (new ResponseMiddleware())->dispatchRoute(
@@ -1123,9 +1155,11 @@ class App
                     'trace'   => ($exception && self::$display_errors) ? jTraceEx($exception) : null,
                 ],
             ], JSON_UNESCAPED_SLASHES);
-            return (new Response($body))
+            $resp = (new Response($body))
                 ->withStatus($status)
                 ->withHeader('Content-Type', 'application/json');
+            assert($resp instanceof \Psr\Http\Message\ResponseInterface);
+            return $resp;
         }
 
         $body = "<pre>{$status} {$reason}</pre>";
@@ -1140,7 +1174,12 @@ class App
      */
     protected static function parseCliArgs(): array
     {
-        $argv = $_SERVER['argv'] ?? $GLOBALS['argv'] ?? [];
+        $rawArgv = $_SERVER['argv'] ?? $GLOBALS['argv'] ?? [];
+        if (!is_array($rawArgv)) {
+            return [];
+        }
+        // Filter to ensure all elements are strings (PHPStan can't infer from $_SERVER).
+        $argv = array_values(array_filter($rawArgv, 'is_string'));
         if (count($argv) <= 1) {
             return [];
         }
@@ -1477,7 +1516,7 @@ class App
                     $serverLog = $dir . '/server.log';
                 }
             }
-            if ($serverLog !== null && trim((string)$serverLog) !== '') {
+            if ($serverLog !== false && trim((string)$serverLog) !== '') {
                 $files[] = trim((string)$serverLog);
             }
         }
@@ -1677,7 +1716,7 @@ HELP;
         # would fail validation with a misleading "invalid_request" error.
         $this->nsPathRoute('api', "{module}/{rquest}", [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE']
-        ], function($module, $rquest, $response, $request){
+        ], function(string $module, string $rquest, $response, $request){
             $api = new ZealAPI($request, $response, self::$cwd);
             try {
                 return $api->processApi($module, $rquest);
@@ -1688,7 +1727,7 @@ HELP;
 
         $this->nsPathRoute('api', "{rquest}", [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE']
-        ], function($rquest, $response, $request){
+        ], function(string $rquest, $response, $request){
             $api = new ZealAPI($request, $response, self::$cwd);
             try {
                 return $api->processApi("", $rquest);
@@ -1752,7 +1791,7 @@ HELP;
         # Global route for all files in the root of the public directory
         $this->route(App::$ignore_php_ext ? '/{file}/?' : '/{file}(\.php)?/?', [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
-        ], function($file, $response){
+        ], function(string $file, $response){
             $g = RequestContext::instance();
             # if file ends with .php remove it
             if (substr($file, -4) == '.php') {
@@ -1785,7 +1824,7 @@ HELP;
         # Global route for all directories and sub directories in the public directory
         $this->nsPathRoute('{dir}', App::$ignore_php_ext ? '{uri}/?' : '{uri}(\.php)?/?', [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
-        ], function($dir, $uri, $response){
+        ], function(string $dir, string $uri, $response){
             $g = RequestContext::instance();
             elog("Directory: $dir, URI: $uri");
             # if uri ends with .php remove it
@@ -1819,11 +1858,17 @@ HELP;
 
         if (($effective_settings['task_worker_num'] ?? 0) > 0) {
             $server->on('task', function ($server, $id, $rid, $data) {
-                $handler = $data['handler'];
+                assert(is_array($data));
+                $handler = $data['handler'] ?? '';
+                assert(is_string($handler));
+                $args = $data['args'] ?? [];
+                assert(is_array($args));
                 $_func = basename($handler);
                 if(file_exists(App::$cwd.$handler.'.php')){
                     include App::$cwd.$handler.'.php';
-                    $result = $$_func(...$data['args']);
+                    /** @var callable $fn */
+                    $fn = $$_func;
+                    $result = $fn(...$args);
                     unset($$_func);
                 } else {
                     elog("Task handler not found: $handler", "error");
@@ -1846,25 +1891,42 @@ HELP;
         assert(self::$middleware_stack !== null);
         foreach (array_reverse(self::$middleware_wait_stack) as $middleware) {
             elog("Registering middleware: ".get_class($middleware));
-            self::$middleware_stack = self::$middleware_stack->add($middleware);
+            $newStack = self::$middleware_stack->add($middleware);
+            assert($newStack instanceof StackHandler);
+            self::$middleware_stack = $newStack;
         }
 
         $server->on("request",new $SessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) {
             $g = RequestContext::instance();
+            /** @var string|null $serverSoftware */
             static $serverSoftware = null;
             if ($serverSoftware === null) {
                 $serverSoftware = 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion();
             }
 
             $g->status = 200;
-            $g->get = $request->get ?? [];
-            $g->post = $request->post ?? [];
+            /** @var array<string, mixed> $get */
+            $get = $request->get ?? [];
+            /** @var array<string, mixed> $post */
+            $post = $request->post ?? [];
+            /** @var array<string, mixed> $cookie */
+            $cookie = $request->cookie ?? [];
+            /** @var array<string, mixed> $files */
+            $files = $request->files ?? [];
+            $g->get = $get;
+            $g->post = $post;
             $g->request = $g->get + $g->post;
-            $g->cookie = $request->cookie ?? [];
-            $g->files = $request->files ?? [];
+            $g->cookie = $cookie;
+            $g->files = $files;
 
             // Build $_SERVER — use array_change_key_case instead of foreach+strtoupper
-            $srv = $request->server ? array_change_key_case($request->server, CASE_UPPER) : [];
+            /** @var array<string, bool|float|int|string|null> $srv */
+            $srv = [];
+            if ($request->server) {
+                foreach ($request->server as $sk => $sv) {
+                    $srv[strtoupper($sk)] = $sv;
+                }
+            }
             if ($request->header) {
                 foreach ($request->header as $key => $value) {
                     $srv['HTTP_' . strtr(strtoupper($key), '-', '_')] = $value;
@@ -1879,12 +1941,20 @@ HELP;
                 'PHP_SELF' => App::$default_php_self,
                 'SERVER_SOFTWARE' => $serverSoftware,
             ];
-            $srv['SCRIPT_FILENAME'] ??= $srv['DOCUMENT_ROOT'] . $srv['PHP_SELF'];
+            if (!isset($srv['SCRIPT_FILENAME'])) {
+                $docRoot = $srv['DOCUMENT_ROOT'] ?? '';
+                $phpSelf = $srv['PHP_SELF'] ?? '';
+                $srv['SCRIPT_FILENAME'] = (is_scalar($docRoot) ? (string)$docRoot : '')
+                    . (is_scalar($phpSelf) ? (string)$phpSelf : '');
+            }
 
             if ($srv['REQUEST_METHOD'] === 'POST' && isset($srv['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
-                $srv['REQUEST_METHOD'] = $srv['HTTP_X_HTTP_METHOD_OVERRIDE'];
+                $override = $srv['HTTP_X_HTTP_METHOD_OVERRIDE'];
+                $srv['REQUEST_METHOD'] = is_scalar($override) ? $override : null;
             }
-            $g->server = $srv;
+            /** @var array<string, bool|float|int|string|null> $srvFinal */
+            $srvFinal = $srv;
+            $g->server = $srvFinal;
 
             $serverRequest  = new \ZealPHP\HTTP\LazyServerRequest($request->parent);
 
@@ -1991,14 +2061,17 @@ HELP;
             }
             // @phpstan-ignore-next-line — $server is typed mixed by OpenSwoole event-handler signature; method_exists guards the call
             $stats = method_exists($server, 'stats') ? @$server->stats() : [];
-            $reqCount = (int)($stats['worker_request_count'] ?? $stats['request_count'] ?? 0);
+            assert(is_array($stats));
+            $rawReqCount = $stats['worker_request_count'] ?? $stats['request_count'] ?? 0;
+            $reqCount = is_numeric($rawReqCount) ? (int)$rawReqCount : 0;
             $peakMb = round(memory_get_peak_usage(true) / 1048576, 1);
             $uptime = self::$workerStartedAt > 0
                 ? round(microtime(true) - self::$workerStartedAt, 1)
                 : 0.0;
+            $workerIdInt = is_numeric($workerId) ? (int)$workerId : 0;
             \ZealPHP\elog(sprintf(
                 '[recycle] worker %d exited after %d requests, peak RSS %s MB, uptime %ss',
-                $workerId,
+                $workerIdInt,
                 $reqCount,
                 $peakMb,
                 $uptime
@@ -2006,11 +2079,17 @@ HELP;
         });
 
         // fd → ws path map, shared across WebSocket event closures
+        /** @var array<int, string> $wsFdMap */
         $wsFdMap = [];
 
         $server->on('open', function(\OpenSwoole\WebSocket\Server $server, \OpenSwoole\Http\Request $request) use (&$wsFdMap) {
-            $path  = $request->server['path_info'] ?? '/';
-            $wsFdMap[$request->fd] = $path;
+            $serverArr = $request->server ?? [];
+            assert(is_array($serverArr));
+            $rawPath = $serverArr['path_info'] ?? '/';
+            $path = is_string($rawPath) ? $rawPath : '/';
+            $fd = $request->fd;
+            assert(is_int($fd));
+            $wsFdMap[$fd] = $path;
             $g     = RequestContext::instance();
 
             // Initialize session from the upgrade request's cookie so
@@ -2020,10 +2099,13 @@ HELP;
                 ? \ZealPHP\Session\zeal_session_name()
                 : 'PHPSESSID';
             if (is_array($request->cookie) && isset($request->cookie[$sessionName])) {
-                $g->cookie[(string)$sessionName] = $request->cookie[$sessionName];
-                \ZealPHP\Session\zeal_session_id($request->cookie[$sessionName]);
-                \ZealPHP\Session\zeal_session_start();
-                $g->_session_started = true;
+                $rawSid = $request->cookie[$sessionName];
+                if (is_string($rawSid)) {
+                    $g->cookie[$sessionName] = $rawSid;
+                    \ZealPHP\Session\zeal_session_id($rawSid);
+                    \ZealPHP\Session\zeal_session_start();
+                    $g->_session_started = true;
+                }
             }
 
             $app = App::instance();
@@ -2047,7 +2129,9 @@ HELP;
                 $op !== \OpenSwoole\WebSocket\Server::WEBSOCKET_OPCODE_BINARY) {
                 return;
             }
-            $path  = $wsFdMap[$frame->fd] ?? null;
+            $fd = $frame->fd;
+            assert(is_int($fd));
+            $path  = $wsFdMap[$fd] ?? null;
             $g     = RequestContext::instance();
             $app = App::instance();
             assert($app !== null);
@@ -2072,8 +2156,9 @@ HELP;
         // Graceful shutdown: send WebSocket CLOSE frame 1001 (Going Away) to all connections
         $server->on('shutdown', function(\OpenSwoole\WebSocket\Server $server) use (&$wsFdMap) {
             foreach (array_keys($wsFdMap) as $fd) {
-                if ($server->isEstablished($fd)) {
-                    $server->disconnect($fd, 1001, 'Server shutting down');
+                $fdInt = (int)$fd;
+                if ($server->isEstablished($fdInt)) {
+                    $server->disconnect($fdInt, 1001, 'Server shutting down');
                 }
             }
         });
@@ -2105,7 +2190,8 @@ class ResponseMiddleware implements MiddlewareInterface
         $invokeArgs = [];
         foreach ($paramMap as $param) {
             assert(is_array($param));
-            $pname = $param['name'];
+            $pname = $param['name'] ?? null;
+            assert(is_string($pname));
             if (isset($params[$pname])) {
                 $invokeArgs[] = $params[$pname];
             } else if ($pname === 'app') {
@@ -2187,11 +2273,11 @@ class ResponseMiddleware implements MiddlewareInterface
             // dispatch path), let the throw bubble back so the outer renderError
             // catches it and renders the ORIGINAL error status's default page —
             // not a fresh 500 from inside the recursion.
-            if (($g->error_render_depth ?? 0) > 0) {
+            if ($g->error_render_depth > 0) {
                 throw $e;
             }
             // User-installed exception handler runs before the default error page.
-            $excStack = $g->exception_handlers_stack ?? [];
+            $excStack = $g->exception_handlers_stack;
             if (!empty($excStack)) {
                 ob_start();
                 try { $excStack[count($excStack) - 1]($e); } catch (\Throwable $e2) { /* swallow */ }
@@ -2224,7 +2310,8 @@ class ResponseMiddleware implements MiddlewareInterface
         $invokeArgs = [];
         foreach ($paramMap as $param) {
             assert(is_array($param));
-            $pname = $param['name'];
+            $pname = $param['name'] ?? null;
+            assert(is_string($pname));
             if (isset($params[$pname])) {
                 $invokeArgs[] = $params[$pname];
             } else if ($pname === 'app') {
@@ -2347,12 +2434,12 @@ class ResponseMiddleware implements MiddlewareInterface
             }
             // Inside an error-render recursion — rethrow so the outer renderError
             // catches and falls through to the default body for the ORIGINAL status.
-            if (($g->error_render_depth ?? 0) > 0) {
+            if ($g->error_render_depth > 0) {
                 @ob_end_clean();
                 throw $e;
             }
             // User-installed exception handler runs before the default error page.
-            $excStack = $g->exception_handlers_stack ?? [];
+            $excStack = $g->exception_handlers_stack;
             if (!empty($excStack)) {
                 if (ob_get_level() > 0) { @ob_clean(); }
                 ob_start();

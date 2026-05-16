@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.17] - 2026-05-16
+
+### Changed
+- **PHPStan upgraded from `^1.12` → `^2.1`** + **baseline raised from level 9 (1.x) → level 10 (2.x)**. Level 10 is the strictest PHPStan tier and is what Symfony 8+, Laravel 12+, and Mezzio score at. 252 errors at level 10 on the bare upgrade → **0 errors after this release.** ZealPHP joins the level-10 club while still running unmodified PHP-FPM-era code via uopz, `__call` proxies, and reflection-injected handler params.
+- **Inline `@phpstan-ignore-next-line` count**: 74 → 75. Net delta is mostly category churn — some 1.x identifiers were renamed in 2.x (e.g., `nullCoalesce.property`, `isset.property` as new identifiers), and seven new sites surfaced after 2.x's stricter mixed-type rules.
+- **`vendor/` removed from git** in both this repo and the scaffold. Previously committed through v0.2.16, dropping ~4300 file-changes per release and aligning with standard PHP library practice (Symfony / Laravel / Mezzio all gitignore `vendor/`). `composer create-project` users see no UX change — Composer runs `composer install` automatically after extraction. `composer.lock` IS kept tracked for CI reproducibility (especially PHPStan, where a minor version bump can change static-analysis output).
+
+### Added
+- **PHPStan badge auto-sync**: README badge now reads from `.github/badges/phpstan.json` via shields.io's `endpoint` API. CI's `validate` job verifies the JSON's `level` matches `phpstan.neon`'s `level:` setting; out-of-sync states fail CI loudly instead of silently misrepresenting the project's static-analysis posture. Release flow drops "manually bump README badge level" — CI now enforces consistency.
+- **PHP 8.5 in CI matrix** (experimental, `continue-on-error: true`). 8.5 is pre-GA at time of writing; OpenSwoole/uopz binaries via shivammathur/setup-php may not be available yet. Result: status visible in CI, failures don't block master.
+- **Tier-1 CI hygiene** prep: workflow restructured for explicit per-PHP-version coverage / experimental flags (`matrix.include` with named keys instead of bare version list).
+
+### Fixed
+- **PHP 8.4 CI flake** (`test_chat_consecutive_requests_work` returning `0` instead of `200`). Root cause: Xdebug coverage instrumentation slows PHP enough that curl's default timeout fires on consecutive chat requests, returning curl failure code `0`. Fix: drop Xdebug from the 8.4 matrix entry (`coverage: 'none'`). 8.3 remains the only Codecov uploader, so no signal is lost. 8.4 still runs the full test suite. This closes the [ROADMAP.md](ROADMAP.md) "PHP 8.4 CI flake fix" item.
+- **`Range`-middleware chained `->withHeader()->withHeader()`** previously produced an L10 error because OpenSwoole's `withHeader()` has no return type. Split into two statements with intermediate `assert($resp instanceof ResponseInterface)` (annotation-only, no behavior change).
+- **`LazyServerRequest`** PSR-7 getter return types were widened by OpenSwoole's mixed-typed `Request::$server`/`$header`/`$cookie` properties. Added per-getter `assert(is_array(...))` + value-by-value scalar coercion so PSR-7's declared return types are honored without runtime cost.
+
+### Notes on Codecov integration
+- Swapped the upload step from `use_oidc: true` to `token: ${{ secrets.CODECOV_TOKEN }}` per Codecov's standard onboarding flow. Both methods work once a repo is enabled at Codecov; token-based is the official documented path. Dropped `id-token: write` permission since OIDC is no longer used. CI's coverage upload now succeeds (was failing silently with "Repository not found" before the token was added).
+
+### CRITIC.md
+- "PHPStan level 1 ceiling" entry extended with a v0.2.17 update: **level 10 reached on PHPStan 2.x.** The original "deliberate trade-off" framing was 90% overstated; only ~57 of the original 572 level-9 errors were genuine design tax. 75 ignore-with-reason sites now individually document each.
+
 ## [0.2.16] - 2026-05-16
 
 ### Changed
