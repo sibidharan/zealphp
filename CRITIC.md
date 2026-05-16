@@ -218,10 +218,10 @@ Five framework releases plus scaffold sync in 24 hours, all triggered by communi
 - **Assessment:** Right for shops that already run FPM. The bridge is for shops that explicitly don't want two runtimes. Both are valid migration ladders.
 - **Resolved by:** acknowledging the alternative; the bridge has a smaller niche than the original framing implied.
 
-#### "Bridge is the whole framework"
-- **Raised by:** user (self-correction)
-- **Assessment:** Correct framing issue — the thread had narrowed to debating one optional feature. The framework has file-based routing, PSR-15 middleware, WebSocket, streaming, templates, CLI, 8 PSRs, etc. Bridge is one feature, not the product.
-- **Resolved by:** explicit reframe in the consolidated #phpc post + in docs
+#### "Does the bridge look like the whole framework?" (calibration check, not a claim)
+- **Raised by:** user (mid-conversation calibration question — *"the bridge is not the whole zealphp right!?"*)
+- **Assessment:** The question itself was the value. The user wasn't asserting that the bridge was the whole framework — they were checking whether the *public framing* had narrowed to that point, because the assistant kept over-emphasizing the bridge in replies as a reaction to attackers. The check was correct: the thread had drifted into debating one optional feature.
+- **Resolved by:** explicit reframe of the project — a Swoole framework with file-based routing, htmx-first templates, streaming primitives, single-binary deploy, 8 PSRs, *plus* an optional CGI bridge for the migration tail. The bridge is one feature, not the headline.
 
 ---
 
