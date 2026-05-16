@@ -1,77 +1,52 @@
 <?php
 
+declare(strict_types=1);
+
 require_once __DIR__ . '/vendor/autoload.php';
 
-date_default_timezone_set('Asia/Kolkata');
-
-if (!defined('ZEALPHP_ASSET_VERSION')) {
-    $gitDesc = trim((string) @`git describe --long 2>/dev/null`);
-    define('ZEALPHP_ASSET_VERSION', $gitDesc ?: (string) time());
-}
-use OpenSwoole\Core\Psr\Response;
-use OpenSwoole\Coroutine as co;
-use OpenSwoole\Coroutine\Channel;
 use ZealPHP\App;
-use ZealPHP\G;
+use ZealPHP\Middleware\CompressionMiddleware;
+use ZealPHP\Middleware\CorsMiddleware;
+use ZealPHP\Middleware\ETagMiddleware;
+use ZealPHP\Middleware\IniIsolationMiddleware;
+use ZealPHP\Middleware\RangeMiddleware;
+use ZealPHP\Middleware\SessionStartMiddleware;
+use ZealPHP\Store;
 
 use function ZealPHP\bench_mode_enabled;
 use function ZealPHP\env_flag;
-use function ZealPHP\elog;
-use function ZealPHP\response_add_header;
-use function ZealPHP\response_set_status;
-use function ZealPHP\zlog;
-use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Message\ServerRequestInterface;
-use Psr\Http\Server\MiddlewareInterface;
-use Psr\Http\Server\RequestHandlerInterface;
-use ZealPHP\Middleware\CorsMiddleware;
-use ZealPHP\Middleware\CompressionMiddleware;
-use ZealPHP\Middleware\ETagMiddleware;
-use ZealPHP\Middleware\RangeMiddleware;
-use ZealPHP\Middleware\SessionStartMiddleware;
-use ZealPHP\Middleware\IniIsolationMiddleware;
-use ZealPHP\Store;
-use ZealPHP\Counter;
 
-class AuthenticationMiddleware implements MiddlewareInterface
-{
-    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
-    {
-        elog("AuthenticationMiddleware: process()");
-        $g = G::instance();
-        $g->session['test'] = 'test';
-        return $handler->handle($request);
-        // return new Response('Forbidden', 403, 'success', ['Content-Type' => 'text/plain']);
-    }
+// Timezone — honors php.ini's date.timezone, or override via ZEALPHP_TZ.
+// No hardcoded locale; servers run in different regions.
+$tz = getenv('ZEALPHP_TZ');
+if ($tz !== false && $tz !== '') {
+    date_default_timezone_set($tz);
 }
 
-class ValidationMiddleware implements MiddlewareInterface
-{
-    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
-    {
-        elog("Validation: process()");
-        $g = G::instance();
-        ob_start();
-        print_r($request->getQueryParams());
-        $data = ob_get_clean();
-        // elog($data, "validate");;
-        $g->session['validate'] = 'test';
-        return $handler->handle($request);
-    }
+// Asset cache-bust key — drives ?v=… on CSS/JS in template/_head.php.
+// Tracks filemtime of the main stylesheet (changes when styling changes); no
+// git dependency (composer installs don't ship .git). Falls back to boot time
+// so a missing file never kills startup.
+if (!defined('ZEALPHP_ASSET_VERSION')) {
+    $assetSource = __DIR__ . '/public/css/zealphp.css';
+    define(
+        'ZEALPHP_ASSET_VERSION',
+        (string) (is_file($assetSource) ? filemtime($assetSource) : time())
+    );
 }
 
 App::superglobals(false);
-$benchMode = bench_mode_enabled();
-$demoMiddleware = env_flag('ZEALPHP_DEMO_MIDDLEWARE', false);
+
+$benchMode             = bench_mode_enabled();
+$demoMiddleware        = env_flag('ZEALPHP_DEMO_MIDDLEWARE', false);
 $compressionMiddleware = env_flag('ZEALPHP_COMPRESSION_MIDDLEWARE', false);
-$iniIsolate = env_flag('ZEALPHP_INI_ISOLATE', false);
+$iniIsolate            = env_flag('ZEALPHP_INI_ISOLATE', false);
 
 $envInt = static function (string $name, int $default, int $min = 1): int {
     $value = getenv($name);
     if ($value === false || $value === '') {
         return $default;
     }
-
     return max($min, (int) $value);
 };
 
@@ -80,276 +55,100 @@ $app = App::init(
     getenv('ZEALPHP_HOST') ?: '0.0.0.0',
     $appPort
 );
+
 if (!$benchMode) {
-    $app->addMiddleware(new CorsMiddleware());         // outermost — handles preflight, adds Allow-Origin
-    $app->addMiddleware(new ETagMiddleware());         // generates ETag, returns 304 on cache hit
-    $app->addMiddleware(new RangeMiddleware());       // Range / 206 Partial Content (RFC 7233)
-    $app->addMiddleware(new SessionStartMiddleware()); // eager session start for new visitors
+    // CorsMiddleware reads ZEALPHP_CORS_ORIGINS (comma-separated) when no
+    // explicit origins are passed. Falls back to '*' with a one-time warning
+    // — fine for an OSS docs site, NOT for a real API.
+    $app->addMiddleware(new CorsMiddleware());           // outermost — preflight + Allow-Origin
+    $app->addMiddleware(new ETagMiddleware());           // generates ETag, returns 304 on If-None-Match
+    $app->addMiddleware(new RangeMiddleware());          // RFC 7233 Range / 206 Partial Content
+    $app->addMiddleware(new SessionStartMiddleware());   // eager session start for first-time visitors
     if ($compressionMiddleware) {
         $app->addMiddleware(new CompressionMiddleware());
     }
     if ($iniIsolate) {
-        // Snapshot+restore per-request ini values (date.timezone, error_reporting,
-        // display_errors, memory_limit, etc.) so ini_set() inside a handler can't
-        // leak into the next request on the same worker. Opt-in via ZEALPHP_INI_ISOLATE=1.
+        // Snapshot/restore per-request ini values (date.timezone, error_reporting,
+        // display_errors, memory_limit, ...) so user ini_set() can't leak across
+        // requests on the same worker. Opt-in via ZEALPHP_INI_ISOLATE=1.
         $app->addMiddleware(new IniIsolationMiddleware());
     }
-    // Demo-only middleware. Enable with ZEALPHP_DEMO_MIDDLEWARE=1.
     if ($demoMiddleware) {
-        $app->addMiddleware(new AuthenticationMiddleware());
-        $app->addMiddleware(new ValidationMiddleware());
+        // Demo trace middleware — loaded only when ZEALPHP_DEMO_MIDDLEWARE=1.
+        // Honestly named: they log, they don't auth/validate.
+        require_once __DIR__ . '/examples/demo_middleware.php';
+        $app->addMiddleware(new \ZealPHP\Demo\RequestLogMiddleware());
+        $app->addMiddleware(new \ZealPHP\Demo\QueryDumpMiddleware());
     }
-    elog("Core middleware added");
 }
-# Route for /phpinfo 
-$app->route('/phpinfo', function() {
-    //Loads template from app/phpinfo.php since PHP_SELF is /app.php
+
+// ─── Docs-site routes ───────────────────────────────────────────────
+
+// Public phpinfo for the docs site. Fine on a public docs site; do NOT
+// expose on production apps without gating behind a dev-only env check.
+$app->route('/phpinfo', function () {
     App::render('phpinfo');
 });
 
-$app->route('/json', function($request) {
-    return G::instance()->session;
+// /json — full PSR-15 stack benchmark endpoint (referenced by PERF.md).
+// Returns a tiny static payload, not session data. Exercises the same
+// PSR-15 stack + array→JSON auto-serialization path as a real API handler.
+$app->route('/json', function () {
+    return ['ok' => true, 'service' => 'zealphp'];
 });
 
-$app->route('/raw/bench', ['raw' => true], function() {
+// /raw/bench — lean-runtime benchmark endpoint ('raw' => true skips the PSR stack).
+$app->route('/raw/bench', ['raw' => true], function () {
     return 'You requested: bench';
 });
 
 // One-line installer: curl -fsSL https://php.zeal.ninja/install.sh | sudo bash
-// Streams the repo's setup.sh from the project root with a text/x-shellscript
-// content-type so the browser shows it inline and curl + bash both accept it.
-$app->route('/install.sh', function($response) {
+$app->route('/install.sh', function ($response) {
     $response->sendFile(__DIR__ . '/setup.sh');
 });
 
-// Bench-environment installer: curl -fsSL https://php.zeal.ninja/bench-install.sh | sudo bash
-// Wraps setup.sh + installs wrk/ab + clones the repo + composer install,
-// leaving the machine ready to run scripts/bench.sh.
-$app->route('/bench-install.sh', function($response) {
+// Bench-environment installer — wraps setup.sh + installs wrk/ab + clones the repo.
+$app->route('/bench-install.sh', function ($response) {
     $response->sendFile(__DIR__ . '/bench-install.sh');
 });
 
-$app->route('/bench/template', function() {
+// Benchmark template — perf comparisons against template rendering.
+$app->route('/bench/template', function () {
     App::render('/bench_page', [
         'title' => 'ZealPHP Benchmark',
         'items' => [
-            ['name' => 'Routing', 'desc' => 'Flask-style routes'],
-            ['name' => 'Streaming', 'desc' => 'SSR via yield'],
-            ['name' => 'WebSocket', 'desc' => 'Built-in real-time'],
-            ['name' => 'Store', 'desc' => 'Shared memory'],
+            ['name' => 'Routing',    'desc' => 'Flask-style routes'],
+            ['name' => 'Streaming',  'desc' => 'SSR via yield'],
+            ['name' => 'WebSocket',  'desc' => 'Built-in real-time'],
+            ['name' => 'Store',      'desc' => 'Shared memory'],
             ['name' => 'Coroutines', 'desc' => 'go() + Channel'],
         ],
     ]);
 });
 
-$app->route('/stream_test',[
-    'methods' => ['GET', 'PUT']
-], function($request) {
-        // Original data
-    $originalData = "ZealPHP is awesome!!!";
-    // $stream = \OpenSwoole\Core\Psr\Stream::streamFor("Test Data");
-    // elog($stream->read(10), "streamio_psr");
-    $stream = fopen('php://memory', 'r+');
-    $resource = $originalData;
-    if ($resource !== '') {
-        fwrite($stream, (string) $resource);
-        fseek($stream, 0);
-    }
-    $data = stream_get_contents($stream);
-    elog("Stream Data: $data");
-    // Step 1: Base64 Encoding
-    $stream = fopen('php://memory', 'w+');
-    $encodedStream = fopen('php://filter/write=convert.base64-encode/resource=php://memory', 'w+');
-    fwrite($encodedStream, $originalData);
-    rewind($encodedStream);
-    $base64Encoded = stream_get_contents($encodedStream);
-    fseek($encodedStream, 0);
-    fclose($encodedStream);
-    elog("Base64 Encoded:\n$base64Encoded\n");
-
-    // Step 2: Base64 Decoding
-    rewind($stream); // Reset the stream position
-    $decodedStream = fopen('php://filter/read=convert.base64-decode/resource=php://memory', 'r');
-    $decodedStream = fopen('php://filter/read=convert.base64-decode/resource=php://memory', 'w+');
-    fwrite($decodedStream, $base64Encoded);
-    rewind($decodedStream);
-    $decodedData = stream_get_contents($decodedStream);
-    elog("Base64 Decoded:\n$decodedData\n");
-    // Close the streams
-    fclose($stream);
-    fclose($decodedStream);
-
-    $file = file_get_contents('php://input');
-    elog("php://input file_get_contents(): ".$file);
-
-    return new Response('Stream Test: '.$file, 200, 'success', ['Content-Type' => 'text/plain']);
-});
-
-
-$app->route('/co', function() {
-    $channel = new Channel(5);
-    go(function() use ($channel) {
-        co::sleep(3);
-        $channel->push('Hello, Coroutine 1!');
-    });
-    go(function() use ($channel) {
-        co::sleep(3);
-        $channel->push('Hello, Coroutine! 2');
-    });
-    go(function() use ($channel) {
-        co::sleep(1);
-        $channel->push('Hello, Coroutine! 3');
-    });
-    go(function() use ($channel) {
-        co::sleep(2);
-        $channel->push('Hello, Coroutine! 4');
-    });
-    go(function() use ($channel) {
-        co::sleep(3);
-        $channel->push('Hello, Coroutine 5!');
-    });
-    $results = [];
-    for ($i = 0; $i < 5; $i++) {
-        $results[] = $channel->pop();
-    }
-    echo "<pre>";
-    print_r($results);
-    echo "</pre>";
-});
-
-// $app->route('/home', function() {
-//     echo "<h1>This is home override</h1>";
-// });
-
-$app->route('/quiz/{page}', function($page) {
-    echo "<h1>This is quiz: $page</h1>";
-});
-
-$app->route('/quiz/{page}/{tab}/{nwe}', function($nwe, $tab, $page) {
-
-    echo "<h1>This is quiz: $page tab=$tab</h1>";
-});
-
-// $app->route('/quiz/{page}/{tab}/{id}', function($page, $tab, $id) {
-//     echo "<h1>This is quiz: $page tab=$tab id=$id</h1>";
-// });
-
-// $app->route('/hello/{name}', function($name, $self) {
-//     echo "<h1>Hello, $self->get $name!</h1>";
-// });
-
-$app->route('/sessleak', function(){
-
-});
-
-$app->route("/suglobal/{name}", [
-    'methods' => ['GET', 'POST']
-],function($name) {
-    response_add_header('X-Prototype',  'buffer');
-    response_set_status(202);
-    // $g = G::instance();
-    if(App::$superglobals){
-        if (isset($GLOBALS[$name])) {
-            print_r($GLOBALS[$name]);
-        } else{
-            echo "Unknown superglobal $name";
-        }
-    } else {
-        $g = G::instance();
-        if (isset($g->$name)) {
-            print_r($g->$name);
-        } else{
-            echo "Unknown global $name";
-        }
-    }
-});
-
-$app->route("/header", [
-    'methods' => ['GET', 'POST']
-],function() {
-    header('Content-Type: text/plain');
-    header('X-Test: foo');
-    setcookie('test', 'test');
-    header("Location: https://example.com");
-
-    return G::instance()->server;
-});
-
-$app->route("/exittest", [
-    'methods' => ['GET', 'POST']
-],function() {
-    echo "Exiting...";
-    exit(1);
-});
-
-$app->route("/coglobal/set/session", [
-    'methods' => ['GET', 'POST']
-],function($name) {
-    $G = G::instance();
-    $G->session['name'] = $name;
-    return new Response('Session set', 300, 'success', ['Content-Type' => 'text/plain', 'X-Test' => 'test']);
-});
-
-$app->route("/coglobal/get/{name}", [
-    'methods' => ['GET', 'POST']
-],function($name) {
-    echo G::get('session')['name'];
-});
-
-$app->route('/user/{id}/post/{postId}',[
-    'methods' => ['GET', 'POST']
-], function($id, $postId) {
-    echo "<h1>User $id, Post $postId</h1>";
-});
-
-$app->nsRoute('watch', '/get/{key}', function($key){
-    echo G::instance()->get[$key] ?? null;
-});
-
-// patternRoute
-// Matches any URL starting with /raw/
-$app->patternRoute('/raw/(?P<rest>.*)', ['methods' => ['GET']], function($rest) {
-    echo "You requested: $rest";
-});
-
-# Override Implicit Rules
-// $app->nsRoute('api', '{name}', function($name) {
-//     echo "<h1>Namespace Route Override, $name!</h1>";
-// });
-
+// ─── Server settings ────────────────────────────────────────────────
 
 $settings = [
-    'task_worker_num' => $envInt('ZEALPHP_TASK_WORKERS', 8, 0),
+    'task_worker_num'  => $envInt('ZEALPHP_TASK_WORKERS', 8, 0),
+    'http_compression' => env_flag('ZEALPHP_HTTP_COMPRESSION', !$compressionMiddleware),
 ];
 
-$settings['http_compression'] = env_flag('ZEALPHP_HTTP_COMPRESSION', !$compressionMiddleware);
-
-$workerNum = getenv('ZEALPHP_WORKERS');
-if ($workerNum !== false && $workerNum !== '') {
-    $settings['worker_num'] = max(1, (int) $workerNum);
-}
-
 foreach ([
+    'ZEALPHP_WORKERS'       => 'worker_num',
     'ZEALPHP_MAX_CONN'      => 'max_conn',
     'ZEALPHP_MAX_COROUTINE' => 'max_coroutine',
     'ZEALPHP_BACKLOG'       => 'backlog',
     'ZEALPHP_REACTOR_NUM'   => 'reactor_num',
-] as $envName => $settingName) {
-    $settingValue = getenv($envName);
-    if ($settingValue !== false && $settingValue !== '') {
-        $settings[$settingName] = max(1, (int) $settingValue);
+] as $envName => $settingKey) {
+    $value = getenv($envName);
+    if ($value !== false && $value !== '') {
+        $settings[$settingKey] = max(1, (int) $value);
     }
 }
 
-$pidFile = getenv('ZEALPHP_PID_FILE');
-if ($pidFile === false || trim((string) $pidFile) === '') {
-    $logDir = getenv('ZEALPHP_LOG_DIR');
-    if ($logDir === false || trim((string) $logDir) === '') {
-        $logDir = '/tmp/zealphp';
-    }
-    $pidFile = rtrim(trim((string) $logDir), '/') . '/zealphp_' . $appPort . '.pid';
-}
-$pidFile = trim((string) $pidFile);
+// PID file resolution — explicit env wins; otherwise default under ZEALPHP_LOG_DIR.
+$logDir  = trim((string) (getenv('ZEALPHP_LOG_DIR') ?: '/tmp/zealphp'));
+$pidFile = trim((string) (getenv('ZEALPHP_PID_FILE') ?: rtrim($logDir, '/') . '/zealphp_' . $appPort . '.pid'));
 if ($pidFile !== '') {
     $pidDir = dirname($pidFile);
     if ($pidDir !== '.' && !is_dir($pidDir)) {
@@ -363,18 +162,12 @@ if ($daemonize) {
     $settings['daemonize'] = true;
 }
 
-$serverLogFile = getenv('ZEALPHP_SERVER_LOG_FILE');
-if ($serverLogFile === false || $serverLogFile === '') {
-    if ($daemonize) {
-        $logDir = getenv('ZEALPHP_LOG_DIR');
-        if ($logDir === false || trim((string) $logDir) === '') {
-            $logDir = '/tmp/zealphp';
-        }
-        $serverLogFile = rtrim(trim((string) $logDir), '/') . '/server.log';
-    }
+// Server log file — explicit env wins; daemon mode picks a sensible default.
+$serverLogFile = trim((string) getenv('ZEALPHP_SERVER_LOG_FILE'));
+if ($serverLogFile === '' && $daemonize) {
+    $serverLogFile = rtrim($logDir, '/') . '/server.log';
 }
-if ($serverLogFile !== false && trim((string) $serverLogFile) !== '') {
-    $serverLogFile = trim((string) $serverLogFile);
+if ($serverLogFile !== '') {
     $serverLogDir = dirname($serverLogFile);
     if ($serverLogDir !== '.' && !is_dir($serverLogDir)) {
         @mkdir($serverLogDir, 0775, true);
@@ -382,8 +175,8 @@ if ($serverLogFile !== false && trim((string) $serverLogFile) !== '') {
     $settings['log_file'] = $serverLogFile;
 }
 
-// Test fixture support: error-handling tests use a Store table for cross-coroutine
-// signaling. Created only when the fixture is present so demo deployments stay clean.
+// Cross-coroutine signaling Store for error-handling integration tests.
+// Created only when the test fixture is present so demo deployments stay clean.
 if (file_exists(__DIR__ . '/route/_error_test.php')) {
     Store::make('error_test', 16, [
         'handler_fired'  => [\OpenSwoole\Table::TYPE_INT, 1],

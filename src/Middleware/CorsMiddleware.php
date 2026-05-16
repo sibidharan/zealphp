@@ -14,10 +14,15 @@ use function ZealPHP\response_add_header;
  *
  * Handles Cross-Origin Resource Sharing headers and OPTIONS preflight requests.
  *
- * Usage in app.php (add first so it runs outermost):
- *   $app->addMiddleware(new \ZealPHP\Middleware\CorsMiddleware());
+ * Origin resolution order:
+ *   1. Constructor `$origins` argument (if not null)
+ *   2. ZEALPHP_CORS_ORIGINS env var (comma-separated)
+ *   3. Falls back to ['*'] with a one-time warning logged via elog()
  *
- *   // Custom origins / settings:
+ * Wildcard (`*`) is a security foot-gun for any API serving credentials or
+ * user-scoped data; the warning surfaces this without breaking existing apps.
+ * Lock down origins explicitly in production:
+ *
  *   $app->addMiddleware(new \ZealPHP\Middleware\CorsMiddleware(
  *       origins:     ['https://myapp.com'],
  *       methods:     ['GET', 'POST', 'PUT', 'DELETE'],
@@ -25,6 +30,10 @@ use function ZealPHP\response_add_header;
  *       credentials: true,
  *       maxAge:      3600,
  *   ));
+ *
+ * Or, to lock down without touching code:
+ *
+ *   ZEALPHP_CORS_ORIGINS="https://myapp.com,https://admin.myapp.com" php app.php
  */
 class CorsMiddleware implements MiddlewareInterface
 {
@@ -34,18 +43,42 @@ class CorsMiddleware implements MiddlewareInterface
     private bool  $credentials;
     private int   $maxAge;
 
+    private static bool $warnedWildcard = false;
+
     public function __construct(
-        array  $origins     = ['*'],
+        ?array $origins     = null,
         array  $methods     = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         array  $headers     = ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
         bool   $credentials = false,
         int    $maxAge      = 86400
     ) {
-        $this->origins     = $origins;
+        $this->origins     = $this->resolveOriginsList($origins);
         $this->methods     = $methods;
         $this->headers     = $headers;
         $this->credentials = $credentials;
         $this->maxAge      = $maxAge;
+    }
+
+    private function resolveOriginsList(?array $explicit): array
+    {
+        if ($explicit !== null) {
+            return $explicit;
+        }
+        $env = getenv('ZEALPHP_CORS_ORIGINS');
+        if ($env !== false && trim($env) !== '') {
+            return array_values(array_filter(array_map('trim', explode(',', $env)), 'strlen'));
+        }
+        if (!self::$warnedWildcard) {
+            self::$warnedWildcard = true;
+            if (function_exists('ZealPHP\\elog')) {
+                \ZealPHP\elog(
+                    'CorsMiddleware: no origins configured; defaulting to "*". '
+                    . 'Set ZEALPHP_CORS_ORIGINS or pass origins explicitly for production use.',
+                    'cors'
+                );
+            }
+        }
+        return ['*'];
     }
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface

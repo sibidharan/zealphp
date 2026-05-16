@@ -9,6 +9,7 @@ A retrospective record of every substantive technical critique ZealPHP has recei
 | Window | Forum | Releases triggered |
 |---|---|---|
 | 2026-05-15 → 2026-05-16 | r/PHP thread + #phpc Discord | v0.2.4, v0.2.5, v0.2.6, v0.2.7, v0.2.8 (framework) + v0.2.4, v0.2.5, v0.2.6, v0.2.7, v0.2.8, v0.2.9 (scaffold) |
+| 2026-05-16 (later) | Pastebin line-by-line review of `app.php` | (pending tag) — `CorsMiddleware` env-var origins + wildcard warning; main `app.php` rewrite (PSR-12, drop unused, fix `/json` session leak, remove `exit()` route + 9 junk routes, demo middleware moved to `examples/`); **static_handler_locations prefix-collision bug fix** (`/js` was intercepting `/json`); scaffold app.php demonstrates explicit CORS origins |
 
 Five framework releases plus scaffold sync in 24 hours, all triggered by community technical review. This document captures **what was raised**, **how we assessed it**, and **what we did about it**, in one place — so the next time the same point surfaces we don't relitigate.
 
@@ -26,6 +27,7 @@ Five framework releases plus scaffold sync in 24 hours, all triggered by communi
 | Tiffany | Discord | "Is it a security nightmare?" — the lurker question that mattered most to address publicly |
 | PHPStan-level-1 mocker | Discord | No technical content; useful for sharpening the level-1 trade-off explanation |
 | **coroutine-isolation commenter** | Reddit (latest) | **Second-sharpest critic.** Articulated the discipline-contract framing: isolation + recycling, not either alone. Raised `ini_set`/handler-stack/pool-poisoning/opcache as the four real production-trust gaps |
+| **app.php pastebin reviewer** | Pastebin link | Line-by-line annotation of the main repo's `app.php`. Most comments were about a demo file (out of `/src/` scope), but the critique uncovered: misleading `AuthenticationMiddleware` name (didn't authenticate), `/exittest` calling `exit()` (kills OpenSwoole workers — actually dangerous), session-data leak in `/json`, hardcoded timezone, backtick `git describe`, and most importantly the **CORS `*` default**. Also indirectly led to discovering the `/js` static-handler prefix-collision framework bug. |
 
 ---
 
@@ -200,6 +202,53 @@ Five framework releases plus scaffold sync in 24 hours, all triggered by communi
   - Graceful shutdown (SIGTERM, including the `max_request` recycle) releases locks normally
 - **Recommended:** docs page on Store semantics. Set expectations correctly: best-effort cache, not a database. For ACID needs use Postgres/Redis with explicit transactions + the pool reset story.
 
+### Demo-app + framework critiques from app.php pastebin review
+
+#### Misleading middleware names — `AuthenticationMiddleware` didn't authenticate
+- **Raised by:** pastebin reviewer (line annotations on `app.php`)
+- **Assessment:** Correct and embarrassing. Two inline middleware classes (`AuthenticationMiddleware`, `ValidationMiddleware`) only ran `elog()` and wrote a test marker into the session — neither authenticated nor validated. Gated behind `ZEALPHP_DEMO_MIDDLEWARE=1`, but the names alone teach users the wrong shape.
+- **Shipped in:** main repo cleanup — moved to `examples/demo_middleware.php` and renamed to `RequestLogMiddleware` / `QueryDumpMiddleware`. Honestly named: they log, they don't auth/validate.
+- **Status:** ✅ Fixed; no more deceptively-named demo code
+
+#### `CorsMiddleware` defaulted to `origins: ['*']`
+- **Raised by:** pastebin reviewer ("CORS middleware defaults to origin *, which... is also a security risk")
+- **Assessment:** Real foot-gun. `*` is the lowest-friction default but unsafe for any API serving credentials or user-scoped data. v0.2.x policy is no breaking changes, so a hard "require origins" can't ship — but a silent wildcard default is also wrong.
+- **Shipped:** `CorsMiddleware` constructor now accepts `?array $origins = null` and resolves in order: (1) explicit arg, (2) `ZEALPHP_CORS_ORIGINS` env var (comma-separated), (3) `['*']` with a one-time `elog()` warning. Backward-compatible with existing `new CorsMiddleware()` calls but the warning surfaces the risk in production logs.
+- **Scaffold:** `composer create-project sibidharan/zealphp-project` now ships an `app.php` that demonstrates explicit origins with a strongly-worded comment block.
+- **Status:** ✅ Wildcard still works (backward compat), but is visible and overridable without code changes
+
+#### `/exittest` route called `exit(1)` — worker-killer
+- **Raised by:** pastebin reviewer ("what does this test? is the point to stream input or output, or SSE or what?")
+- **Assessment:** Worse than the reviewer thought. `exit()` inside an OpenSwoole worker handler **kills the worker**, taking out every other in-flight coroutine on that worker. Calling it from a public docs site route was a self-DoS waiting to be discovered. Test fixture or not, it shouldn't have shipped.
+- **Shipped in:** main repo cleanup — route deleted
+- **Status:** ✅ Gone
+
+#### `/json` route returned `RequestContext::instance()->session` (session data leak)
+- **Raised by:** pastebin reviewer ("why are you exposing server side sessions data here")
+- **Assessment:** Real, even on a public docs site. The route was used as a full-PSR-15-stack benchmark endpoint (`PERF.md` references it) but the implementation leaked whatever was in the session. Kept the route to preserve the benchmark contract, swapped the body to a static `['ok' => true, 'service' => 'zealphp']` — same auto-JSON serialization path, no leak.
+- **Status:** ✅ Fixed
+
+#### `static_handler_locations` prefix-collision (FRAMEWORK BUG)
+- **Found by:** us, while testing the post-cleanup `/json` route — it kept returning OpenSwoole's default 404 (no middleware headers) instead of hitting the framework.
+- **Assessment:** This is a real `/src/` framework bug that was hiding behind the demo app. OpenSwoole's `static_handler_locations` does raw string-prefix matching, not segment-boundary matching. The default whitelist was `['/css', '/js', '/img', ...]` — which means **`/json` matches the `/js` prefix** (because `json` literally starts with `js`). OpenSwoole's static handler intercepts before the request reaches the framework, looks for `public/json`, doesn't find it, returns 404 directly. Any user route starting with `/js`, `/css`, `/img`, `/fonts`, `/assets`, `/static` would silently 404 — and the user would have no idea why.
+- **Shipped:** changed the default whitelist to use trailing-slash directory entries: `['/css/', '/js/', '/img/', '/images/', '/fonts/', '/assets/', '/static/', '/favicon.ico', '/robots.txt']`. Trailing slash forces segment-boundary matching at the C level. Exact-file entries (`/favicon.ico`, `/robots.txt`) keep their bare form.
+- **Status:** ✅ Fixed. Without this catch, `/json` would have continued returning 404 in production after the demo cleanup. Genuine value out of an otherwise-noisy review.
+
+#### Other accepted critiques (bundled with main repo cleanup)
+- Hardcoded `date_default_timezone_set('Asia/Kolkata')` — replaced with `ZEALPHP_TZ` env or php.ini `date.timezone`
+- Backtick `git describe` for asset versioning — replaced with `filemtime(public/css/zealphp.css)` (composer installs don't ship `.git`, falls back to boot time)
+- `use` statements after non-use code (PSR-12) — fixed; all imports at top
+- Unused `zlog` import — removed
+- 9 junk demo routes (`/co`, `/quiz/{page}`, `/sessleak`, `/suglobal`, `/header`, `/coglobal/*`, `/stream_test`, `/user/{id}/post/{postId}`, etc.) — removed from main `app.php`; not referenced anywhere
+- Multiple env-parsing styles — consolidated where it didn't churn surface
+- `declare(strict_types=1)` added to main `app.php`
+
+#### Pushbacks (reviewer was wrong)
+- `# vs //` comment-style inconsistency — both are valid PHP, PSR-12 doesn't ban `#`. Bikeshed.
+- `$envInt` as closure not function — local helper in bootstrap; closure scoping is correct. Free functions would pollute global namespace.
+- `if (!defined(ZEALPHP_ASSET_VERSION))` "should only be defined once" — that's exactly what the guard prevents (re-include during testing). Standard idiom.
+- "PSR-7 middleware uses G singleton instead of `$request`/`$response`" — wrong about *framework* middleware. `CorsMiddleware`, `ETagMiddleware`, `RangeMiddleware`, `CompressionMiddleware`, `SessionStartMiddleware` all work off `$request`/`$response` from the PSR-15 stack. The two that touched `G` were the *demo middleware in `app.php`*, which is the same scaffold-cleanup point.
+
 ### Positioning & framing
 
 #### "Just describes Swoole, why the extra layer?"
@@ -294,6 +343,15 @@ Five framework releases plus scaffold sync in 24 hours, all triggered by communi
 - 7 new redirect regression tests in `tests/Unit/SecurityTest.php`.
 - 17 new tests in `tests/Unit/RequestContextInvariantsTest.php` pinning the v0.2.6 architectural contracts (G ↔ RequestContext class_alias, strict __set, response state location, ApacheContext lazy alloc, etc.).
 - Website docs cleanup: deployment env var table rewritten with all 20 `ZEALPHP_*` env vars; migration page updated for v0.2.6 response-state move; sessions page notes the rename + handler-stack reset; middleware page adds `SessionStartMiddleware` + `IniIsolationMiddleware` entries; README drops the deleted `prefork_request_handler` reference.
+
+### (pending tag) — app.php cleanup + CorsMiddleware safer-default + static_handler prefix fix
+**Triggered by:** pastebin line-by-line review of `app.php`
+
+- **Framework — `CorsMiddleware`**: constructor now accepts `?array $origins = null`; resolves in order: explicit arg → `ZEALPHP_CORS_ORIGINS` env (comma-separated) → `['*']` with one-time `elog()` warning. Backward-compatible.
+- **Framework — `static_handler_locations` default**: directory entries now use trailing slashes (`/css/`, `/js/`, …) instead of bare prefixes. Fixes prefix collision where `/js` was intercepting `/json` (and any other user route starting with a whitelisted prefix) at OpenSwoole's static handler before the request reached the framework. Genuine bug found while testing the demo cleanup.
+- **Main repo — `app.php` rewrite**: PSR-12 use-statement ordering, `declare(strict_types=1)`, removed `zlog` unused import, replaced hardcoded `Asia/Kolkata` timezone with `ZEALPHP_TZ` env, replaced backtick `git describe` with `filemtime(public/css/zealphp.css)` for cache-bust key, fixed `/json` to return static payload not session data, removed `/exittest` (`exit()` kills the worker), removed 9 other junk demo routes (`/co`, `/quiz/*`, `/sessleak`, `/suglobal`, `/header`, `/coglobal/*`, `/stream_test`, `/user/{id}/post/{postId}`, …). Kept the routes that power the OSS website: `/json`, `/raw/bench`, `/phpinfo`, `/install.sh`, `/bench-install.sh`, `/bench/template`.
+- **Demo middleware**: `AuthenticationMiddleware` / `ValidationMiddleware` (which authenticated/validated nothing) moved to `examples/demo_middleware.php` and renamed `RequestLogMiddleware` / `QueryDumpMiddleware` — honest names. Still gated behind `ZEALPHP_DEMO_MIDDLEWARE=1`.
+- **Scaffold**: `app.php` rewritten to demonstrate the correct middleware-with-explicit-origins pattern, with a strongly-worded comment block explaining why wildcard is unsafe in production.
 
 ### v0.2.12 — Session-file corruption worker-crash fix
 **Triggered by:** production crash report — workers abnormal-exiting with `TypeError: Cannot assign false to property RequestContext::$session of type array` on session-loading requests

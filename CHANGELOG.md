@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.13] - 2026-05-16
+
+### Fixed (framework)
+- **`static_handler_locations` prefix-collision bug.** OpenSwoole's built-in static handler does raw string-prefix matching, not segment-boundary matching. The default whitelist `['/css', '/js', '/img', '/images', '/fonts', '/assets', '/static']` meant `/json` (and any user route starting with `js`) was silently intercepted by the static handler before reaching the framework — OpenSwoole returned its default 404 (no middleware headers, no framework routing). Any route starting with `/css*`, `/js*`, `/img*`, `/fonts*`, `/assets*`, `/static*` was affected.
+  - **Affected versions: all v0.2.x through v0.2.12.**
+  - Fix: directory entries in the default whitelist now have trailing slashes (`/css/`, `/js/`, `/img/`, ...). Trailing slash forces segment-boundary matching at the C level. Exact-file entries (`/favicon.ico`, `/robots.txt`) keep their bare form. ([src/App.php:1497-1505](src/App.php#L1497-L1505))
+  - Found while testing the demo cleanup after [pastebin app.php review](CRITIC.md) — `/json` returned OpenSwoole's default 404 instead of the framework's, and the trace led back to `/js` matching `/json` as a prefix.
+
+### Changed (framework)
+- **`CorsMiddleware` default origin behavior.** Constructor signature changed from `array $origins = ['*']` to `?array $origins = null` (backward-compatible — existing `new CorsMiddleware()` calls still work). Origin resolution order is now:
+  1. Explicit `origins` constructor argument
+  2. `ZEALPHP_CORS_ORIGINS` env var (comma-separated)
+  3. Falls back to `['*']` with a one-time `elog()` warning per worker
+  - Rationale: `*` is the lowest-friction default but unsafe for any API serving credentials or user-scoped data. v0.2.x's no-breaking-change policy rules out a hard "require origins" — but a silent wildcard default also can't ship. The warning surfaces the risk in production logs without breaking any existing app.
+  - Triggered by [pastebin app.php review](CRITIC.md) — reviewer flagged the `*` default as a "security risk."
+
+### Changed (main repo demo / OSS website)
+- **`app.php` rewrite** in response to a public line-by-line review (371 → 187 lines):
+  - Use statements moved to top of file (PSR-12 compliance)
+  - Added `declare(strict_types=1)`
+  - Removed unused `zlog` import
+  - Removed hardcoded `date_default_timezone_set('Asia/Kolkata')` — now reads `ZEALPHP_TZ` env or php.ini's `date.timezone`
+  - Removed backtick `git describe` for asset versioning (broken in `composer create-project` deployments where `.git` doesn't exist) — replaced with `filemtime(public/css/zealphp.css)` so cache-bust tracks actual style changes
+  - Inline `AuthenticationMiddleware` / `ValidationMiddleware` classes (which authenticated and validated nothing) moved to `examples/demo_middleware.php` with honest names: `RequestLogMiddleware`, `QueryDumpMiddleware`. Still gated behind `ZEALPHP_DEMO_MIDDLEWARE=1`.
+  - Removed 9 junk demo routes: `/exittest` (called `exit()` — kills the OpenSwoole worker), `/co`, `/quiz/{page}` (both forms), `/sessleak` (empty stub), `/suglobal/{name}`, `/header`, `/coglobal/set/session`, `/coglobal/get/{name}`, `/stream_test`, `/user/{id}/post/{postId}`, `nsRoute('watch', ...)`, `patternRoute('/raw/(.*)', ...)`. None were referenced from tests, docs (as live links), bench scripts, or website templates.
+  - `/json` body changed from `RequestContext::instance()->session` (which leaked session data!) to `['ok' => true, 'service' => 'zealphp']`. Same full PSR-15 stack + auto-JSON serialization path; no data leak. The route remains the documented `PERF.md` benchmark endpoint.
+  - Env-parsing consolidation pass — `worker_num` joined the `foreach` loop with the other integer env keys instead of having its own duplicated block.
+
+### Changed (scaffold sync)
+- The `sibidharan/zealphp-project` scaffold's `app.php` now demonstrates the correct CORS pattern: explicit `origins`, plus a comment block explaining that wildcard is unsafe in production and that `ZEALPHP_CORS_ORIGINS` env override is the alternative. Imports follow PSR-12; `declare(strict_types=1)` added.
+
+### Documentation
+- **CRITIC.md** — new section for the app.php pastebin review round, including the demo-app critiques accepted, the static-handler prefix-collision bug discovered during testing, the CorsMiddleware default change, and the pushbacks (`#` vs `//` is bikeshed; `$envInt` as closure is correct; framework middleware does *not* use the G singleton).
+
 ## [0.2.12] - 2026-05-16
 
 ### Security / Stability

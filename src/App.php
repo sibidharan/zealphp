@@ -1494,9 +1494,16 @@ HELP;
             // (Apache equivalent: serving only safe subtrees). Leave empty to serve all
             // — including dotfiles — like Apache default. Default whitelist below is
             // safe for typical web apps; override via $app->run(['static_handler_locations' => [...]]).
+            //
+            // IMPORTANT: directory entries MUST end with `/`. OpenSwoole does raw
+            // string-prefix matching, so a bare `/js` entry silently intercepts
+            // user routes like `/json` (a real bug we shipped in 0.2.x — found
+            // when /json on the docs site returned OpenSwoole's default 404
+            // instead of routing into the framework). Trailing slash forces
+            // segment-boundary matching.
             'static_handler_locations' => self::$static_handler_locations !== []
                 ? self::$static_handler_locations
-                : ['/css', '/js', '/img', '/images', '/fonts', '/assets', '/static', '/favicon.ico', '/robots.txt'],
+                : ['/css/', '/js/', '/img/', '/images/', '/fonts/', '/assets/', '/static/', '/favicon.ico', '/robots.txt'],
             'enable_coroutine' =>  !self::$superglobals,
             // Runtime compression is owned by OpenSwoole. Do not also register
             // CompressionMiddleware unless this setting is disabled.
