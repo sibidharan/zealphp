@@ -9,7 +9,7 @@ $active = $active ?? 'learn/notes';
       'number' => 18, 'title' => 'Personal Notes',
       'subtitle' => 'Everything comes together. Auth, htmx, SQLite, components — a real app.',
       'prev' => ['slug' => 'learn/auth', 'title' => 'User Accounts'],
-      'next' => ['slug' => 'learn/ai-chat', 'title' => 'AI Chat'],
+      'next' => ['slug' => 'learn/websocket', 'title' => 'Real-Time Sync'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
@@ -248,9 +248,9 @@ if (msg.type === 'note_changed') {
       <a class="lesson-chip lesson-chip-prev" href="/learn/auth"
          hx-get="/api/learn/page?slug=learn/auth" hx-target=".lesson-content"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/auth">← User Accounts</a>
-      <a class="lesson-chip lesson-chip-next" href="/learn/ai-chat"
-         hx-get="/api/learn/page?slug=learn/ai-chat" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/ai-chat">AI Chat →</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/websocket"
+         hx-get="/api/learn/page?slug=learn/websocket" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/websocket">Real-Time Sync →</a>
     </div>
   </article>
 </div>

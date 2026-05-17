@@ -30,8 +30,8 @@ $groups = [
   ],
   'Build the App' => [
     ['learn/notes',            'Personal Notes', 'auth + crud',  'notes/widget'],
-    ['learn/ai-chat',          'AI Chat',        'sse + stream', 'chat/widget'],
     ['learn/websocket',        'Real-Time Sync', 'realtime',     'websocket/counter'],
+    ['learn/ai-chat',          'AI Chat',        'sse + stream', 'chat/widget'],
     ['learn/tictactoe',        'Tic-Tac-Toe',    'multiplayer',  'tictactoe/play'],
   ],
   'Under the Hood' => [
