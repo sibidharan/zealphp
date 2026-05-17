@@ -122,8 +122,68 @@ function initPageScripts(root) {
           added++;
         }
         if (added > 0) li.appendChild(ul);
+        // Wire scrollspy: as the user scrolls past each <h2>, the matching
+        // substep in the sidebar gets a .current highlight.
+        setupSubstepScrollspy(li, headings);
       }
     }
+  }
+
+  // Scrollspy for the active lesson's substeps. Implementation: a single
+  // scroll listener, throttled via requestAnimationFrame, recomputes which
+  // <h2> is at the top of the viewport on every frame. We tried
+  // IntersectionObserver first — it works for smooth scrolling, but instant
+  // jumps (clicking a substep link, programmatic scrollTo) don't trigger
+  // intersection-state changes for elements that go straight from
+  // out-of-view to out-of-view, so the highlight gets stuck.
+  function setupSubstepScrollspy(activeLi, headings) {
+    if (window.__substepCleanup) {
+      window.__substepCleanup();
+      window.__substepCleanup = null;
+    }
+    if (!activeLi || !headings || !headings.length) return;
+    const links = new Map();
+    activeLi.querySelectorAll('.learn-substeps a[href^="#"]').forEach(a => {
+      links.set(a.getAttribute('href').slice(1), a);
+    });
+    if (!links.size) return;
+    let currentId = null;
+    const setCurrent = (id) => {
+      if (id === currentId) return;
+      currentId = id;
+      activeLi.querySelectorAll('.learn-substeps a.current').forEach(a => a.classList.remove('current'));
+      const a = links.get(id);
+      if (a) a.classList.add('current');
+    };
+    // Recompute the active substep: the last <h2> whose top has scrolled
+    // past the 'active zone' line (80px below viewport top — leaves room
+    // for the sticky page nav). At page top, before any h2 has crossed
+    // the line, fall through to the first heading.
+    const recompute = () => {
+      const lineY = 80;
+      let pick = headings[0];
+      for (const h of headings) {
+        if (h.getBoundingClientRect().top - lineY <= 0) pick = h;
+        else break;
+      }
+      setCurrent(pick.id);
+    };
+    let rafPending = false;
+    const onScroll = () => {
+      if (rafPending) return;
+      rafPending = true;
+      requestAnimationFrame(() => {
+        rafPending = false;
+        recompute();
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    recompute();  // initial state
+    window.__substepCleanup = () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
   }
 
   // Tab switching
