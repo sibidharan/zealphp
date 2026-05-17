@@ -26,18 +26,16 @@
     </p>
 
     <?php App::render('/components/_tryit', [
-      'title' => 'Live demo: a session-backed counter',
-      'body'  => '<div class="demo-panel" style="--demo-min:0">
-  <div class="demo-output" style="text-align:center;padding:2.2rem 1rem">
-    <div style="font-size:3rem;font-weight:700;color:#92400e" id="session-counter-value">' . (int)($g->session['lesson_counter'] ?? 0) . '</div>
-    <p style="margin:.4rem 0 1rem;color:#78716c;font-size:.88rem">your session counter</p>
-    <button type="button" class="btn btn-primary"
-            hx-post="/api/learn/demo/session-bump"
-            hx-target="#session-counter-value"
-            hx-swap="innerHTML">+1</button>
-  </div>
-</div>
-<p style="margin-top:.85rem">Click <strong>+1</strong>. Now reload the page — the number stays. Open <strong>/learn/sessions</strong> in another tab — same number there too. The browser sent a <code>PHPSESSID</code> cookie that maps to a file on the server; this lesson is just reading and writing through it.</p>',
+      'title' => 'Live demo: a session-backed counter (cross-tab synced)',
+      'body'  => '<div style="text-align:center;padding:1.25rem 0">' .
+                 App::renderToString('/components/_session_counter', ['n' => (int)($g->session['lesson_counter'] ?? 0)]) .
+                 '<div data-session-counter-status class="ws-counter-status" style="margin-top:.85rem">starting…</div>' .
+                 '<p style="margin:.85rem 0 0;font-size:.85rem;color:#78716c">' .
+                 '<a href="/demo/view/sessions/counter" target="_blank" rel="opener">Open this counter in a popup &rarr;</a>' .
+                 ' &middot; open it in multiple windows and watch them all update from any click.' .
+                 '</p>' .
+                 '</div>' .
+                 '<p>htmx posts <code>+1</code> from the clicking tab. The server increments the session counter and broadcasts the new HTML over a WebSocket scoped to your <code>PHPSESSID</code>. Every other tab in this browser receives the broadcast and swaps in the same button. Reload, close the browser, come back — the number persists because the session file does.</p>',
     ]); ?>
 
     <h2>Step 1 — HTTP doesn't remember anything</h2>

@@ -301,23 +301,20 @@ $app->route('/demo/middleware/compress', ['methods' => ['GET']], function() {
 // ---------------------------------------------------------------------------
 
 /**
- * Render a demo viewer page through the site's master shell — full site
- * theme (top nav, footer, /css/zealphp.css, /css/learn.css). The body
- * lives in template/pages/_demo_view.php and expects the $demo_* vars.
+ * Render a demo viewer page through a clean standalone shell —
+ * site CSS (zealphp.css + learn.css) for typography and colors, but no
+ * big top-nav or footer. The whole shell + breadcrumb + body lives in
+ * template/components/_demo_shell.php.
  *
  * @param array<int, array{heading: string, body: string}> $sections
  */
 function demo_render(string $title, string $description, array $sections, string $back_slug, string $back_label): string {
-    return App::renderToString('/_master', [
-        'title'            => $title . ' · ZealPHP Demo',
-        'description'      => 'ZealPHP live demo · ' . $title,
-        'page'             => '_demo_view',
-        'active'           => $back_slug,            // highlight the lesson group in top nav
-        'demo_title'       => $title,
-        'demo_back_slug'   => $back_slug,
-        'demo_back_label'  => $back_label,
-        'demo_description' => $description,
-        'demo_sections'    => $sections,
+    return App::renderToString('/components/_demo_shell', [
+        'title'       => $title,
+        'description' => $description,
+        'sections'    => $sections,
+        'back_slug'   => $back_slug,
+        'back_label'  => $back_label,
     ]);
 }
 

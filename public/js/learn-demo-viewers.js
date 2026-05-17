@@ -165,3 +165,45 @@
   document.addEventListener('DOMContentLoaded', maybeConnect);
   document.addEventListener('htmx:afterSettle', maybeConnect);
 })();
+
+// Session-counter cross-tab live sync (Sessions lesson + /demo/view/sessions/counter).
+// Same PHPSESSID = same session: when one tab clicks +1, the WS broadcasts the
+// new button HTML to every other tab in the session. The clicking tab gets the
+// update via htmx; this handler just keeps the rest in sync.
+(function () {
+  let ws = null;
+
+  function setStatus(text, cls) {
+    document.querySelectorAll('[data-session-counter-status]').forEach(el => {
+      el.textContent = text;
+      el.className = 'ws-counter-status ' + (cls || '');
+    });
+  }
+
+  function applyHtml(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html.trim();
+    const incoming = tmp.firstElementChild;
+    if (!incoming) return;
+    const existing = document.getElementById('session-counter-btn');
+    if (existing) {
+      existing.outerHTML = incoming.outerHTML;
+      // Re-process htmx attrs on the new node so it stays clickable
+      if (window.htmx) htmx.process(document.getElementById('session-counter-btn'));
+    }
+  }
+
+  function connect() {
+    if (ws || !document.querySelector('[data-session-counter]')) return;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws/session-counter');
+    setStatus('connecting…', 'connecting');
+    ws.onopen    = () => setStatus('connected — other tabs in this session will sync live', 'open');
+    ws.onmessage = e => { if (e.data && e.data !== 'pong') applyHtml(e.data); };
+    ws.onclose   = () => { ws = null; setStatus('disconnected', 'closed'); };
+    ws.onerror   = () => setStatus('error', 'err');
+  }
+
+  document.addEventListener('DOMContentLoaded', connect);
+  document.addEventListener('htmx:afterSettle', connect);
+})();

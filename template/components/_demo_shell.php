@@ -1,23 +1,23 @@
 <?php
 /**
- * Standalone HTML wrapper for demo viewer pages.
- * Opens in a new tab from lesson "Try it live" links.
+ * Standalone demo viewer shell. Mirrors the clean look of
+ * learn_demo_shell() in route/learn.php — site CSS, slim breadcrumb,
+ * focused content area, no big top-nav. Open in new tab/popup.
  *
  * Expects:
- *   $title       — short heading shown in nav + <title>
- *   $description — HTML string describing what this demo proves
- *   $sections    — array of ['heading' => string, 'body' => string]; body is raw HTML
- *   $back_slug   — lesson slug to link back to (e.g. 'learn/injection')
- *   $back_label  — human-readable name (e.g. 'Parameter Injection')
+ *   $title       — page heading
+ *   $description — HTML string (can include <code>)
+ *   $sections    — array of ['heading' => string, 'body' => string]
+ *   $back_slug   — lesson slug for the back-link (e.g. 'learn/sessions')
+ *   $back_label  — human-readable lesson name
  */
-$title       ??= 'ZealPHP Demo';
+$title       ??= 'Demo';
 $description ??= '';
 $sections    ??= [];
 $back_slug   ??= 'learn';
 $back_label  ??= 'Learn';
+$v           = defined('ZEALPHP_ASSET_VERSION') ? ZEALPHP_ASSET_VERSION : (string)time();
 $titleHtml   = htmlspecialchars($title);
-$backHtml    = htmlspecialchars($back_label);
-$backSlug    = htmlspecialchars($back_slug);
 ?><!doctype html>
 <html lang="en">
 <head>
@@ -25,54 +25,58 @@ $backSlug    = htmlspecialchars($back_slug);
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><?= $titleHtml ?> · ZealPHP Demo</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/css/zealphp.css?v=<?= $v ?>">
+  <link rel="stylesheet" href="/css/learn.css?v=<?= $v ?>">
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" defer></script>
+  <script src="/js/learn-demo-viewers.js?v=<?= $v ?>" defer></script>
   <style>
-    *{box-sizing:border-box}
-    body{font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,sans-serif;max-width:760px;margin:0 auto;padding:1.5rem 1rem 3rem;background:#fafaf9;color:#1c1917;line-height:1.55}
-    nav.demo-nav{display:flex;align-items:center;gap:.75rem;padding:.6rem .85rem;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:.85rem;margin-bottom:1.5rem}
-    nav.demo-nav a{color:#b45309;text-decoration:none;font-weight:600}
-    nav.demo-nav a:hover{text-decoration:underline}
-    nav.demo-nav .sep{color:#92400e;opacity:.5}
-    h1{font-size:1.5rem;margin:0 0 .5rem;color:#1c1917;letter-spacing:-.01em}
-    .demo-desc{color:#57534e;font-size:.95rem;margin:0 0 1.5rem}
-    h2.demo-h{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#78716c;margin:1.5rem 0 .55rem}
-    .demo-section{background:#fff;border:1px solid #e7e5e4;border-radius:10px;padding:1rem 1.15rem;margin-bottom:1rem;box-shadow:0 1px 2px rgba(0,0,0,.04)}
-    pre.demo-payload{background:#1c1917;color:#f5f5f4;padding:.9rem 1rem;border-radius:8px;overflow-x:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem;line-height:1.55;margin:0;white-space:pre-wrap;word-break:break-word}
-    pre.demo-payload .k{color:#fbbf24}
-    code.demo-inline{background:#f5f5f4;padding:.1rem .35rem;border-radius:3px;font-size:.85em;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-    .demo-kv{display:grid;grid-template-columns:auto 1fr;gap:.35rem 1rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem;margin:0}
-    .demo-kv dt{color:#a8a29e;font-weight:600}
-    .demo-kv dd{margin:0;color:#1c1917;word-break:break-word}
-    button.demo-btn{padding:.45rem 1rem;border-radius:6px;border:1px solid #f59e0b;background:#fef3c7;color:#92400e;font-weight:600;font-size:.85rem;cursor:pointer;font-family:inherit}
-    button.demo-btn:hover{background:#fde68a}
-    button.demo-btn.ghost{background:transparent;color:#78716c;border-color:#d6d3d1}
-    .demo-output{margin-top:.75rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem;padding:.85rem 1rem;background:#1c1917;color:#f5f5f4;border-radius:8px;min-height:80px;max-height:340px;overflow:auto}
-    .demo-output .ev{padding:.15rem 0;border-bottom:1px solid #292524}
-    .demo-output .ev:last-child{border-bottom:0}
-    .demo-output .ts{color:#a8a29e;margin-right:.5rem}
-    .demo-output .open{color:#34d399}
-    .demo-output .tick{color:#fbbf24}
-    .demo-output .done{color:#a78bfa}
-    .demo-status{display:inline-block;padding:.1rem .5rem;border-radius:3px;font-size:.75rem;font-weight:700;color:#fff}
-    .demo-status.s2xx{background:#16a34a}
-    .demo-status.s3xx{background:#3b82f6}
-    .demo-status.s4xx,.demo-status.s5xx{background:#dc2626}
+    body.demo-shell-body { max-width: 760px; margin: 0 auto; padding: 1.25rem 1rem 4rem; background: var(--bg, #fafaf9); }
+    .demo-shell-crumb { display: flex; align-items: center; gap: .35rem; padding: .55rem .9rem; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; font-size: .85rem; color: #92400e; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .demo-shell-crumb a { color: #b45309; text-decoration: none; font-weight: 600; }
+    .demo-shell-crumb a:hover { text-decoration: underline; }
+    .demo-shell-crumb .sep { color: #92400e; opacity: .55; }
+    .demo-shell-crumb .here { color: #1c1917; font-weight: 700; }
+    .demo-shell-crumb .close { margin-left: auto; padding: .15rem .7rem; border: 1px solid #fcd34d; border-radius: 999px; background: #fef3c7; font-size: .78rem; }
+    .demo-shell-crumb .close:hover { background: #fde68a; text-decoration: none; }
+    .demo-shell-title { font-size: 1.7rem; margin: 0 0 .55rem; letter-spacing: -.01em; color: #1c1917; }
+    .demo-shell-desc { color: #57534e; font-size: .98rem; margin: 0 0 1.5rem; line-height: 1.6; }
+    .demo-shell-h { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #78716c; margin: 1.5rem 0 .5rem; }
   </style>
 </head>
-<body>
-  <nav class="demo-nav">
-    <a href="/<?= $backSlug ?>">← Back to “<?= $backHtml ?>” lesson</a>
-    <span class="sep">·</span>
-    <strong style="color:#92400e"><?= $titleHtml ?></strong>
+<body class="demo-shell-body">
+  <nav class="demo-shell-crumb">
+    <a href="/learn">ZealPHP Learn</a>
+    <span class="sep">&rsaquo;</span>
+    <a href="/<?= htmlspecialchars($back_slug) ?>"><?= htmlspecialchars($back_label) ?></a>
+    <span class="sep">&rsaquo;</span>
+    <span class="here"><?= $titleHtml ?></span>
+    <a class="close"
+       href="/<?= htmlspecialchars($back_slug) ?>"
+       onclick="if (window.opener || window.history.length <= 2) { window.close(); return false; }">&larr; Close</a>
   </nav>
 
-  <h1><?= $titleHtml ?></h1>
+  <h1 class="demo-shell-title"><?= $titleHtml ?></h1>
   <?php if ($description !== ''): ?>
-    <p class="demo-desc"><?= $description ?></p>
+    <p class="demo-shell-desc"><?= $description ?></p>
   <?php endif; ?>
 
   <?php foreach ($sections as $sec): ?>
-    <h2 class="demo-h"><?= htmlspecialchars($sec['heading'] ?? '') ?></h2>
-    <div class="demo-section"><?= $sec['body'] ?? '' ?></div>
+    <h2 class="demo-shell-h"><?= htmlspecialchars($sec['heading'] ?? '') ?></h2>
+    <div class="inject-case">
+      <div class="inject-case-body inject-case-body--solo">
+        <div class="demo-output">
+          <?= $sec['body'] ?? '' ?>
+        </div>
+      </div>
+    </div>
   <?php endforeach; ?>
+
+  <script>
+    // Code highlighting once highlight.js loads
+    window.addEventListener('load', () => {
+      if (window.hljs) document.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+    });
+  </script>
 </body>
 </html>

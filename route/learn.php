@@ -165,12 +165,82 @@ $app->route('/api/learn/demo/check', ['methods' => ['POST']], function () {
     ]);
 });
 
-// Session-counter demo for /learn/sessions — htmx swaps the value in place.
+// ── Session-counter demo for /learn/sessions ────────────────────────
+// Cross-tab live sync within one browser (same PHPSESSID cookie). htmx
+// swaps the button for the clicking tab; the WebSocket pushes the new
+// button HTML to every other tab open in the same session.
+\ZealPHP\Store::make('ws_session_counter_clients', 4096, [
+    'session_id' => [\OpenSwoole\Table::TYPE_STRING, 64],
+]);
+
+$app->ws('/ws/session-counter',
+    onMessage: function ($server, $frame) {
+        if (($frame->data ?? '') === 'ping') $server->push($frame->fd, 'pong');
+    },
+    onOpen: function ($server, $request) {
+        $sid = $request->cookie['PHPSESSID'] ?? '';
+        if ($sid === '') { $server->disconnect($request->fd, 1008, 'no_session'); return; }
+        \ZealPHP\Store::set('ws_session_counter_clients', (string) $request->fd, ['session_id' => $sid]);
+    },
+    onClose: function ($server, $fd) {
+        \ZealPHP\Store::del('ws_session_counter_clients', (string) $fd);
+    },
+);
+
+function ws_session_counter_broadcast(string $sessionId, string $html): void
+{
+    $server = \ZealPHP\App::getServer();
+    if (!$server) return;
+    $table = \ZealPHP\Store::table('ws_session_counter_clients');
+    if (!$table) return;
+    foreach ($table as $fd => $row) {
+        if (($row['session_id'] ?? '') !== $sessionId) continue;
+        $fd = (int) $fd;
+        if ($server->isEstablished($fd)) $server->push($fd, $html);
+    }
+}
+
 $app->route('/api/learn/demo/session-bump', ['methods' => ['POST']], function () {
     $g = G::instance();
     $g->session['lesson_counter'] = (int) ($g->session['lesson_counter'] ?? 0) + 1;
+    $html = App::renderToString('/components/_session_counter', [
+        'n' => (int) $g->session['lesson_counter'],
+    ]);
+    $sid = $g->cookie['PHPSESSID'] ?? '';
+    if ($sid !== '') ws_session_counter_broadcast($sid, $html);
     header('Content-Type: text/html; charset=utf-8');
-    return (string) $g->session['lesson_counter'];
+    return $html;
+});
+
+// Standalone popup-friendly viewer — open in N windows to see cross-tab sync.
+$app->route('/demo/view/sessions/counter', ['methods' => ['GET']], function () {
+    $g = G::instance();
+    $n = (int) ($g->session['lesson_counter'] ?? 0);
+    return demo_render(
+        'Session-counter cross-tab demo',
+        'Click <strong>+1</strong>. Open this URL in a second window — both update live via a WebSocket broadcast scoped to your <code class="demo-inline">PHPSESSID</code>. Foundations &rarr; <a href="/learn/sessions">Sessions</a> explains the mechanism.',
+        [
+            ['heading' => 'Live counter', 'body' =>
+                '<div style="text-align:center;padding:1.25rem 0">' .
+                App::renderToString('/components/_session_counter', ['n' => $n]) .
+                '<div data-session-counter-status class="ws-counter-status" style="margin-top:.85rem">starting…</div>' .
+                '</div>'
+            ],
+            ['heading' => 'How it works', 'body' =>
+                '<pre class="demo-payload">// Client
+const ws = new WebSocket(proto + \'//\' + host + \'/ws/session-counter\');
+ws.onmessage = e =&gt; document.getElementById(\'session-counter-btn\')
+                       ?.outerHTML = e.data;
+
+// Server (excerpt — route/learn.php)
+$app-&gt;route(\'/api/learn/demo/session-bump\', ...
+    $html = App::renderToString(\'/components/_session_counter\', [\'n\' =&gt; $n]);
+    ws_session_counter_broadcast($sid, $html);
+    return $html;   // for the clicking tab&rsquo;s htmx swap
+);</pre>'],
+        ],
+        'learn/sessions', 'Sessions'
+    );
 });
 
 $app->route('/api/learn/demo/greeting', ['methods' => ['GET']], function () {
