@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 21,
+      'number'   => 22,
       'title'    => 'Routes & APIs: Advanced Patterns',
       'subtitle' => 'Regex, namespace groups, fallbacks, and the route-ordering edge cases. Foundations covers the basics.',
       'prev'     => ['slug' => 'learn/websocket', 'title' => 'Real-Time Sync'],

@@ -6,7 +6,7 @@ $active = $active ?? 'learn/auth';
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 8,
+      'number'   => 17,
       'title'    => 'User Accounts',
       'subtitle' => 'SQLite, password hashing, and an auth guard. Real accounts in 50 lines.',
       'prev'     => ['slug' => 'learn/sessions', 'title' => 'Sessions'],

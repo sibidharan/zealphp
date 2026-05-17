@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 4,
+      'number'   => 13,
       'title'    => 'Layouts & Components',
       'subtitle' => 'Stop copy-pasting HTML. Extract shared structure into reusable templates.',
       'prev'     => ['slug' => 'learn/first-page', 'title' => 'Your First Page'],

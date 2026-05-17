@@ -6,7 +6,7 @@ $active = $active ?? 'learn/ai-chat';
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number' => 10, 'title' => 'AI Chat',
+      'number' => 19, 'title' => 'AI Chat',
       'subtitle' => 'An assistant that reads and modifies your notes — streamed token by token.',
       'prev' => ['slug' => 'learn/notes', 'title' => 'Personal Notes'],
       'next' => ['slug' => 'learn/websocket', 'title' => 'Real-Time Sync'],

@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 5,
+      'number'   => 14,
       'title'    => 'React vs PHP',
       'subtitle' => 'Why most web apps don\'t need a JavaScript framework — and what to use instead.',
       'prev'     => ['slug' => 'learn/components', 'title' => 'Layouts & Components'],
