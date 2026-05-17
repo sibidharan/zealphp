@@ -86,28 +86,129 @@ class App
      * @var array<int, array{handler:callable, param_map:array<int, array{name:string, has_default:bool, default:mixed}>, raw:bool}>
      */
     private static array $error_handlers = [];
+    /**
+     * IANA-registered HTTP status reason phrases.
+     * Source: https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml
+     * Universal return contract: handlers may return any 100-599 status — see
+     * template/pages/responses.php#status-range (canonical).
+     */
     private const REASON_PHRASES = [
+        // 1xx Informational
+        100 => 'Continue',
+        101 => 'Switching Protocols',
+        102 => 'Processing',
+        103 => 'Early Hints',
+        // 2xx Success
+        200 => 'OK',
+        201 => 'Created',
+        202 => 'Accepted',
+        203 => 'Non-Authoritative Information',
+        204 => 'No Content',
+        205 => 'Reset Content',
+        206 => 'Partial Content',
+        207 => 'Multi-Status',
+        208 => 'Already Reported',
+        226 => 'IM Used',
+        // 3xx Redirection
+        300 => 'Multiple Choices',
+        301 => 'Moved Permanently',
+        302 => 'Found',
+        303 => 'See Other',
+        304 => 'Not Modified',
+        307 => 'Temporary Redirect',
+        308 => 'Permanent Redirect',
+        // 4xx Client Errors
         400 => 'Bad Request',
         401 => 'Unauthorized',
+        402 => 'Payment Required',
         403 => 'Forbidden',
         404 => 'Not Found',
         405 => 'Method Not Allowed',
         406 => 'Not Acceptable',
+        407 => 'Proxy Authentication Required',
         408 => 'Request Timeout',
         409 => 'Conflict',
         410 => 'Gone',
+        411 => 'Length Required',
+        412 => 'Precondition Failed',
         413 => 'Payload Too Large',
         414 => 'URI Too Long',
         415 => 'Unsupported Media Type',
+        416 => 'Range Not Satisfiable',
+        417 => 'Expectation Failed',
         418 => "I'm a teapot",
+        421 => 'Misdirected Request',
         422 => 'Unprocessable Entity',
+        423 => 'Locked',
+        424 => 'Failed Dependency',
+        425 => 'Too Early',
+        426 => 'Upgrade Required',
+        428 => 'Precondition Required',
         429 => 'Too Many Requests',
+        431 => 'Request Header Fields Too Large',
+        451 => 'Unavailable For Legal Reasons',
+        // 5xx Server Errors
         500 => 'Internal Server Error',
         501 => 'Not Implemented',
         502 => 'Bad Gateway',
         503 => 'Service Unavailable',
         504 => 'Gateway Timeout',
+        505 => 'HTTP Version Not Supported',
+        506 => 'Variant Also Negotiates',
+        507 => 'Insufficient Storage',
+        508 => 'Loop Detected',
+        510 => 'Not Extended',
+        511 => 'Network Authentication Required',
     ];
+
+    /**
+     * Coerce a handler's int return value to a valid HTTP status code.
+     * Per the universal return contract, ints must be in 100-599 (RFC 7230).
+     * Out-of-range values are coerced to 500 with a warning logged via elog()
+     * so the bug surfaces in the debug log instead of silently downgrading.
+     * Matches Apache HTTP server's behavior (out-of-range → 500).
+     */
+    public static function coerceStatusCode(int $status): int
+    {
+        if ($status >= 100 && $status < 600) {
+            return $status;
+        }
+        \ZealPHP\elog(
+            "Invalid HTTP status code returned: {$status}. Coercing to 500. "
+            . "(Universal return contract allows 100-599. "
+            . "See template/pages/responses.php#status-range.)"
+        );
+        return 500;
+    }
+
+    /**
+     * Look up an IANA reason phrase for the given status code. Used by
+     * emitStatus() to pass an explicit reason to OpenSwoole's two-arg
+     * `$response->status($code, $reason)` — required because the native
+     * one-arg form silently rejects codes missing from its internal C
+     * list (notably 451, even on ext 26.x), and the request emits HTTP
+     * 200 instead.
+     */
+    public static function reasonPhrase(int $status): string
+    {
+        return self::REASON_PHRASES[$status] ?? '';
+    }
+
+    /**
+     * Set the response status via OpenSwoole's two-arg form so codes its
+     * native list doesn't recognise still emit correctly on the wire.
+     * Empty reason → defer to OpenSwoole's default (which has its own
+     * built-in phrasing for the common codes).
+     */
+    public static function emitStatus(\OpenSwoole\HTTP\Response $response, int $status): void
+    {
+        $reason = self::reasonPhrase($status);
+        if ($reason !== '') {
+            $response->status($status, $reason);
+        } else {
+            $response->status($status);
+        }
+    }
 
     private function __construct(string $host = '0.0.0.0', int $port = 8080, string $cwd = __DIR__)
     {
@@ -2314,7 +2415,27 @@ HELP;
                 if ($response->parent->isWritable()) {
                     $response->flush();
                     $response->parent->header('X-Powered-By', 'ZealPHP + OpenSwoole');
-                    \OpenSwoole\Core\Psr\Response::emit($response->parent, $serverResponse);
+                    // Threaded emit — use App::emitStatus() instead of vendor
+                    // Response::emit()'s one-arg status() call, so codes like
+                    // 451 (missing from OpenSwoole's native C list) emit
+                    // correctly. Body/header transcription mirrors vendor.
+                    App::emitStatus($response->parent, $serverResponse->getStatusCode());
+                    foreach ($serverResponse->getHeaders() as $hName => $hValues) {
+                        foreach ($hValues as $hValue) {
+                            $response->parent->header($hName, $hValue);
+                        }
+                    }
+                    $body = $serverResponse->getBody();
+                    $body->rewind();
+                    $chunkSize = \OpenSwoole\Core\Psr\Response::CHUNK_SIZE;
+                    if ($body->getSize() > $chunkSize) {
+                        while (!$body->eof()) {
+                            $response->parent->write($body->read($chunkSize));
+                        }
+                        $response->parent->end();
+                    } else {
+                        $response->parent->end($body->getContents());
+                    }
                 }
                 access_log($serverResponse->getStatusCode(), 0);
             } catch (\Throwable|\OpenSwoole\ExitException $e) {
@@ -2326,7 +2447,7 @@ HELP;
                         $app = App::instance();
                         assert($app !== null);
                         $errResp = $app->renderError(500, $e);
-                        $response->parent->status($errResp->getStatusCode());
+                        App::emitStatus($response->parent, $errResp->getStatusCode());
                         foreach ($errResp->getHeaders() as $name => $values) {
                             foreach ($values as $value) {
                                 $response->parent->header($name, $value);
@@ -2335,7 +2456,7 @@ HELP;
                         $g->status = $errResp->getStatusCode();
                         $response->parent->end((string)$errResp->getBody());
                     } catch (\Throwable $e2) {
-                        $response->parent->status(500);
+                        App::emitStatus($response->parent, 500);
                         $g->status = 500;
                         $body = App::$display_errors
                             ? "<pre>".jTraceEx($e)."</pre>"
@@ -2532,7 +2653,7 @@ class ResponseMiddleware implements MiddlewareInterface
                 // Capture status BEFORE flush — Response::flush() clears g->status.
                 $streamStatus = $g->status ?? 200;
                 // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                $g->openswoole_response->status($streamStatus);
+                App::emitStatus($g->openswoole_response, $streamStatus);
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->header('Accept-Ranges', 'none');
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
@@ -2557,7 +2678,10 @@ class ResponseMiddleware implements MiddlewareInterface
             }
 
             if (is_int($object)) {
-                $status = (int)$object;
+                // Universal return contract: int = HTTP status. Coerce out-of-range
+                // to 500 + log warning so bugs surface instead of silently emitting
+                // bogus status codes (Apache-parity behavior).
+                $status = App::coerceStatusCode((int)$object);
                 $body = '';
             } else {
                 $status = $g->status ?? 200;
@@ -2651,7 +2775,7 @@ class ResponseMiddleware implements MiddlewareInterface
                 ob_end_clean();
                 $streamStatus = $g->status ?? 200;
                 // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                $g->openswoole_response->status($streamStatus);
+                App::emitStatus($g->openswoole_response, $streamStatus);
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->header('Accept-Ranges', 'none');
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
@@ -2687,7 +2811,9 @@ class ResponseMiddleware implements MiddlewareInterface
 
             if (is_int($object)) {
                 ob_end_clean();
-                $istatus = (int)$object;
+                // Universal return contract: int = HTTP status. Coerce out-of-range
+                // (< 100 or >= 600) to 500 + log warning — Apache-parity behavior.
+                $istatus = App::coerceStatusCode((int)$object);
                 // Status-only returns from a handler (e.g. `return 404;`) route
                 // through renderError so any registered custom error page fires —
                 // Apache's `ErrorDocument` behavior for unhandled status codes.

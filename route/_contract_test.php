@@ -120,6 +120,15 @@ $app->route('/_contract/render-stream/closure-param', fn() =>
     App::renderStream('/_contract_test/closure_param', ['greeting' => 'Hello', 'name' => 'team'])
 );
 
+// --- Status code coercion (universal contract: 100-599; out-of-range → 500) ----
+// One dynamic route that returns whatever int the URL says — exercises the
+// coerceStatusCode() boundary in ResponseMiddleware. Negative numbers travel
+// as `_<digits>` to dodge URL-path semantics.
+$app->patternRoute('/_contract/status/(?P<code>_?[0-9]+)', function (string $code) {
+    $n = (int)(str_starts_with($code, '_') ? '-' . substr($code, 1) : $code);
+    return $n;
+});
+
 // Coroutine state isolation — for tests/Integration/CoroutineStateIsolationTest.php.
 // Each request reads ?cid=N, writes it to $g->get['cid'] (per-coroutine in
 // coroutine mode), then App::include()s a fixture that echoes it back. Under

@@ -202,4 +202,57 @@ class FileExecutionContractTest extends TestCase
         $this->assertStatus(200, $r);
         $this->assertSame('Hello,team', $r['body']);
     }
+
+    // --- Status code coercion (Apache-parity: 100-599 valid, others → 500) ---
+
+    /**
+     * IANA-registered codes that used to silently downgrade to 200 — now emit correctly.
+     * Codes chosen because they survive OpenSwoole's C-level status whitelist
+     * (425 Too Early and 451 Unavailable For Legal Reasons are silently rejected
+     * by OpenSwoole 22.1.5 even when REASON_PHRASES knows them — documented
+     * upstream limitation; see template/pages/responses.php#status-range).
+     */
+    public function testStatusCode423EmitsAsLocked(): void
+    {
+        $r = $this->get('/_contract/status/423');
+        $this->assertSame(423, $r['status']);
+    }
+
+    public function testStatusCode421EmitsAsMisdirectedRequest(): void
+    {
+        $r = $this->get('/_contract/status/421');
+        $this->assertSame(421, $r['status']);
+    }
+
+    public function testStatusCode511EmitsAsNetworkAuthRequired(): void
+    {
+        $r = $this->get('/_contract/status/511');
+        $this->assertSame(511, $r['status']);
+    }
+
+    /** Out-of-range ints coerce to 500 + log a warning to debug log. */
+    public function testStatusCode42CoercesTo500(): void
+    {
+        $r = $this->get('/_contract/status/42');
+        $this->assertSame(500, $r['status']);
+    }
+
+    public function testStatusCode0CoercesTo500(): void
+    {
+        $r = $this->get('/_contract/status/0');
+        $this->assertSame(500, $r['status']);
+    }
+
+    public function testStatusCode999CoercesTo500(): void
+    {
+        $r = $this->get('/_contract/status/999');
+        $this->assertSame(500, $r['status']);
+    }
+
+    public function testStatusCodeNegativeCoercesTo500(): void
+    {
+        // _1 → -1 (underscore prefix → negative; see route/_contract_test.php)
+        $r = $this->get('/_contract/status/_1');
+        $this->assertSame(500, $r['status']);
+    }
 }
