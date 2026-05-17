@@ -91,6 +91,66 @@
       your code; you change what serves it.</em>
     </p>
 
+    <h2>Why we even need a coroutine mode</h2>
+    <p>
+      The swap table is almost the whole story. The 20% it doesn’t cover is one specific category of
+      bug, and it’s worth understanding before we describe the modes — because once you see it, the
+      two modes read as <em>the answer</em>, not just a configuration option.
+    </p>
+    <p>
+      Classic PHP gives you <code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code>,
+      <code>$_SERVER</code>, <code>$_COOKIE</code>, <code>$_FILES</code> "for free". The SAPI
+      (Apache, PHP-FPM) populates them at the start of each request, and the process dies at the
+      end. There is no chance one request’s <code>$_GET</code> can leak into another, because
+      there <em>is</em> no other request in this process — the next one gets a brand-new fish.
+    </p>
+    <p>
+      OpenSwoole has no per-request SAPI. Workers live for thousands of requests. Two coroutines on
+      the same worker share the same process address space — including any <code>$GLOBALS['_GET']</code>
+      array sitting there. If a handler reads <code>$_GET['id']</code> while another coroutine just
+      wrote a different <code>$_GET['id']</code>, you read the wrong one:
+    </p>
+    <pre class="mermaid">sequenceDiagram
+    participant W as Worker (process)
+    participant A as Coroutine A
+    participant B as Coroutine B
+    A->>W: $_GET = ['id' => 5]
+    A-->>W: yield (await DB)
+    B->>W: $_GET = ['id' => 9]
+    Note over W: $_GET is process-wide<br/>both coroutines see it
+    W-->>A: resume
+    A->>A: read $_GET['id']  →  9  (B's data!)</pre>
+    <p>
+      That’s the trap. Naive PHP-FPM code that reads <code>$_GET</code> assuming "this is
+      <em>my</em> request’s data" silently picks up another request’s data the moment two coroutines
+      overlap. The bug is intermittent, traffic-dependent, and impossible to reproduce locally with
+      one user clicking around — which is the worst kind of bug to debug in production.
+    </p>
+    <p><strong>ZealPHP solves it two ways</strong> — these are the two modes:</p>
+    <ul>
+      <li>
+        <strong>Coroutine mode (default).</strong> The superglobals are simply <em>not populated</em>.
+        Use <code>$g->get</code>, <code>$g->post</code>, <code>$g->cookie</code>, <code>$g->server</code>,
+        <code>$g->files</code> instead — these live on the coroutine’s own context object via
+        <code>Coroutine::getContext()</code>, so concurrent coroutines can’t see each other’s state.
+        Reading <code>$_GET['id']</code> in coroutine mode returns <code>null</code>, which is loud
+        and obviously wrong — not silently-wrong like a race.
+      </li>
+      <li>
+        <strong>Superglobals mode.</strong> The framework runs each request in a forked CGI
+        subprocess (a true isolated address space). <code>$_GET</code> et al. are populated normally.
+        You pay a fork per request (~1ms), but unmodified WordPress / Drupal — and any code base
+        whose mental model is "I am the only PHP script running" — works without a line changing.
+      </li>
+    </ul>
+    <p>
+      Sessions are the one exception that works in <em>both</em> modes via <code>$_SESSION</code> as
+      well as <code>$g->session</code>. The framework intercepts every <code>session_*()</code> call
+      via uopz at startup so legacy <code>session_start()</code> code routes to a per-request session
+      bag instead of a shared global. See <a href="/learn/sessions">Lesson 16: Sessions</a> for the
+      mechanics.
+    </p>
+
     <h2>The two modes</h2>
     <p>
       ZealPHP has two runtime modes. New apps default to <strong>coroutine mode</strong> —

@@ -114,13 +114,42 @@ lesson_counter|i:5;cart|a:2:{...}</code></pre>
         </tr>
       </tbody>
     </table>
+    <h3>Why this works — and what would break without it</h3>
     <p>
-      The reason both exist: in <strong>coroutine mode</strong> (the default for new ZealPHP apps),
-      every request runs in its own coroutine with its own <code>RequestContext</code>. The
-      framework hooks <code>session_start()</code> and <code>$_SESSION</code> to point at <em>the
-      current coroutine&rsquo;s</em> session bag — not a process-wide global. <code>$g-&gt;session</code>
-      is the direct, unmediated access path; <code>$_SESSION</code> is the back-compat path that
-      legacy code expects. Either works. Use whichever reads better in context.
+      Sessions are the <em>one</em> classic PHP superglobal that survives unchanged in coroutine
+      mode. That’s not an accident — the framework intercepts every <code>session_*()</code> call
+      (<code>session_start</code>, <code>session_id</code>, <code>session_destroy</code>,
+      <code>session_write_close</code>, <code>session_regenerate_id</code>) via the
+      <strong>uopz</strong> extension at startup. Those overrides live in <code>src/Session/utils.php</code>
+      and route every call to the current coroutine&rsquo;s <code>RequestContext</code> instead of a
+      process-wide <code>$_SESSION</code> global. The Mental Model lesson covers
+      <a href="/learn/mental-model#why-we-even-need-a-coroutine-mode">why that matters for
+      <code>$_GET</code> / <code>$_POST</code> too</a>.
+    </p>
+    <p>Without that interception, here&rsquo;s the bug you&rsquo;d see in production:</p>
+    <ul>
+      <li>Request A calls <code>session_start()</code> for user 1, writes
+        <code>$_SESSION['user_id'] = 1</code>, then yields on a DB query.</li>
+      <li>Request B arrives at the same worker, calls <code>session_start()</code> for user 2.
+        Without the override this would clobber the shared <code>$_SESSION</code> array with user
+        2&rsquo;s data.</li>
+      <li>Request A resumes, reads <code>$_SESSION['user_id']</code>, gets <code>2</code>, and
+        returns user 2&rsquo;s shopping cart to user 1.</li>
+    </ul>
+    <p>
+      That’s the exact race the framework prevents. Sessions are safe in both modes because the
+      framework went out of its way to keep <code>session_start()</code> and <code>$_SESSION</code>
+      semantics working. <strong>For everything else request-scoped — query strings, form bodies,
+      cookies, file uploads — use <code>$g-&gt;X</code> in coroutine mode.</strong> Reading
+      <code>$_GET</code> directly in coroutine mode returns <code>null</code> (not a leaked value),
+      which makes the mistake loud instead of silent.
+    </p>
+    <p>
+      The reason both <code>$_SESSION</code> and <code>$g-&gt;session</code> exist: in
+      <strong>coroutine mode</strong> (the default for new ZealPHP apps), every request runs in its
+      own coroutine with its own <code>RequestContext</code>. <code>$g-&gt;session</code> is the
+      direct, unmediated access path; <code>$_SESSION</code> is the back-compat path that legacy
+      code expects. Either works. Use whichever reads better in context.
     </p>
     <p>
       The full mental-model is in Foundations &rarr;
