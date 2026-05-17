@@ -21,7 +21,7 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **SSR streaming** | Generator `yield`, `$response->stream()`, `$response->sse()` — like React's `renderToPipeableStream` |
 | **WebSocket** | `App::ws($path, $onMessage, $onOpen, $onClose)` — rooms, auth, binary, heartbeat |
 | **Dynamic routing** | `route()`, `nsRoute()`, `nsPathRoute()`, `patternRoute()` with reflection-based parameter injection |
-| **Middleware** | PSR-15 stack — CORS, ETag/304, and custom middleware in any order |
+| **Middleware** | PSR-15 stack — 17 built-ins (CORS, ETag, Range, Compression, SessionStart, IniIsolation, Charset, CacheControl, Expires, Header, BasicAuth, IpAccess, RateLimit, ConcurrencyLimit, BlockPhpExt, MimeType, BodyRewrite, HostRouter) — full Apache `mod_rewrite` / `mod_headers` / `mod_expires` and nginx `limit_req` / `auth_basic` parity |
 | **HTTP/1.1 compliance** | HEAD, OPTIONS, 301/302/307/308 redirects, Cookie SameSite, ETag, OpenSwoole compression |
 | **Shared memory** | `Store` (OpenSwoole\Table) + `Counter` (OpenSwoole\Atomic) — cross-worker state |
 | **Timers** | `App::tick()`, `App::after()`, `App::onWorkerStart()` — per-worker recurring tasks |
@@ -37,6 +37,8 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 >
 > Reproduce: `./scripts/bench_vs_express.sh`. See [PERF.md](PERF.md) for environment, latency sweep, and head-to-head.
 > **Stability:** Alpha (v0.2.x). API may change between minor versions until v1.0. Pin to a specific version in production.
+
+> **Apache + nginx parity (v0.2.21).** Every common `.htaccess` / `nginx.conf` directive is now covered by a built-in middleware or a server-level `App::$*` setter. 12 new middlewares (`HeaderMiddleware`, `BasicAuthMiddleware`, `RateLimitMiddleware`, `CharsetMiddleware`, `CacheControlMiddleware`, `ExpiresMiddleware`, `IpAccessMiddleware`, `ConcurrencyLimitMiddleware`, `BlockPhpExtMiddleware`, `MimeTypeMiddleware`, `BodyRewriteMiddleware`, `HostRouterMiddleware`) and 8 new configurables (`$server_admin`, `$canonical_name`, `$trusted_proxies` + `App::clientIp()`, `$access_log_format`, `LimitRequestFields` family, `$strip_trailing_slash`, `App::tryInclude()`) landed in v0.2.21. See the [middleware reference](https://php.zeal.ninja/middleware) and the [legacy-apps coverage matrix](https://php.zeal.ninja/legacy-apps) for the full story.
 
 ---
 
