@@ -163,8 +163,14 @@
 (function () {
   let ws = null;
   let connected = false;
+  // Cached last-known value so we can repaint the widget when it
+  // remounts via an htmx swap. Without this, the second visit to
+  // /learn/websocket shows the initial HTML ("0", "starting…") because
+  // ws.onopen already fired during the FIRST visit and won't fire again.
+  let lastValue = 0;
 
   function update(value) {
+    lastValue = value;
     document.querySelectorAll('[data-ws-counter-value]').forEach(el => {
       el.textContent = value;
       el.classList.remove('flash');
@@ -215,9 +221,19 @@
     if (action === 'reset') reset();
   });
 
-  // Auto-connect when the lesson page is visible
+  // Auto-connect when the lesson page is visible. On htmx remount, if
+  // ws is still alive from the previous mount, sync the freshly-rendered
+  // DOM to the live connection state instead of skipping silently.
   function maybeConnect() {
-    if (document.querySelector('[data-ws-counter-value]')) connect();
+    if (!document.querySelector('[data-ws-counter-value]')) return;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      // Widget remounted — repaint the new DOM from cached state.
+      update(lastValue);
+      setStatus('connected', 'open');
+      return;
+    }
+    if (ws) return;  // ws exists but not OPEN — wait for onclose to clear it
+    connect();
   }
   document.addEventListener('DOMContentLoaded', maybeConnect);
   document.addEventListener('htmx:afterSettle', maybeConnect);
@@ -251,7 +267,14 @@
   }
 
   function connect() {
-    if (ws || !document.querySelector('[data-session-counter]')) return;
+    if (!document.querySelector('[data-session-counter]')) return;
+    // Widget remounted via htmx with a live ws still around — sync the
+    // new status pill instead of silently skipping.
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      setStatus('connected — other tabs in this session will sync live', 'open');
+      return;
+    }
+    if (ws) return;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(proto + '//' + location.host + '/ws/session-counter');
     setStatus('connecting…', 'connecting');
@@ -299,9 +322,16 @@
   }
 
   function connect() {
-    if (ws) return;
     const wantsConnection = document.querySelector('[data-store-counter-value], [data-store-row], [data-store-form]');
     if (!wantsConnection) return;
+    // Widget remounted via htmx with a live ws — repaint the new DOM
+    // from the cached row state and resync the status pill.
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      render(lastRow);
+      setStatus('connected — every tab will see the row update live', 'open');
+      return;
+    }
+    if (ws) return;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(proto + '//' + location.host + '/ws/store-demo');
     setStatus('connecting…', 'connecting');

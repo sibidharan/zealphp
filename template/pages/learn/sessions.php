@@ -35,7 +35,7 @@
                  ' &middot; open it in multiple windows and watch them all update from any click.' .
                  '</p>' .
                  '</div>' .
-                 '<p>htmx posts <code>+1</code> from the clicking tab. The server increments the session counter and broadcasts the new HTML over a WebSocket scoped to your <code>PHPSESSID</code>. Every other tab in this browser receives the broadcast and swaps in the same button. Reload, close the browser, come back — the number persists because the session file does.</p>',
+                 '<p>htmx posts <code>+1</code> from the clicking tab. The server increments the session counter and broadcasts the new HTML over a WebSocket scoped to your <code>PHPSESSID</code> (<a href="/learn/websocket">Lesson 19, Real-Time Sync</a> teaches the broadcast pattern). Every other tab in this browser receives the broadcast and swaps in the same button. Reload, close the browser, come back — the number persists because the session file does.</p>',
     ]); ?>
 
     <h2>Step 1 — HTTP doesn't remember anything</h2>
