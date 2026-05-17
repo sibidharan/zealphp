@@ -111,7 +111,7 @@
     <p>
       The framework formats the SSE wire protocol (<code>data:</code>, <code>event:</code>,
       <code>id:</code> lines). On the client, <code>new EventSource('/ai/chat')</code> hooks in.
-      See lesson 10 (AI Chat) for the full setup with a real chat UI.
+      See lesson 19 (AI Chat) for the full setup with a real chat UI.
     </p>
 
     <h2>Pattern 4: App::renderStream() — compose templates</h2>
@@ -197,7 +197,7 @@ $response-&gt;sse(function ($emit) {
     <p>
       Streaming is one-way (server → client). When you need <em>both</em> directions —
       client typing into chat, server pushing replies — WebSocket is the right tool. Covered in
-      lesson 11 (Real-Time Sync). Rule of thumb: <strong>SSE for push-only, WebSocket for two-way.</strong>
+      lesson 20 (Real-Time Sync). Rule of thumb: <strong>SSE for push-only, WebSocket for two-way.</strong>
       Don’t reach for WebSocket when SSE will do; the operational cost is real.
     </p>
 

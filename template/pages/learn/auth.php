@@ -122,7 +122,7 @@ $register = function () {
     </p>
 
     <?php App::render('/components/_tryit', ['title' => 'Register now', 'body' => $user
-      ? '<p>You\'re logged in as <strong>' . htmlspecialchars($user['username']) . '</strong>. <a href="/api/learn/logout">Log out</a> to try registering a new account, or head to <a href="/learn/notes">Lesson 8</a> to start building notes.</p>'
+      ? '<p>You\'re logged in as <strong>' . htmlspecialchars($user['username']) . '</strong>. <a href="/api/learn/logout">Log out</a> to try registering a new account, or head to <a href="/learn/notes">Lesson 18</a> to start building notes.</p>'
       : '<p>Pick a username and password. This creates a real account stored in SQLite. You\'ll use it in the next three lessons to save notes and chat with the AI.</p>
 <div class="auth-card">
   <form hx-post="/api/learn/register" hx-target="#auth-feedback-reg" hx-swap="innerHTML">

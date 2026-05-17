@@ -114,15 +114,15 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
     </ol>
     <p>
       Every lesson you scroll through is <em>also a page in the real app</em>. The code that renders
-      this lesson is the same code that powers the interactive demos. Register an account in Lesson 7,
-      save notes in Lesson 8, and chat with an AI agent in Lesson 9 &mdash; all served from one
+      this lesson is the same code that powers the interactive demos. Register an account in Lesson 17,
+      save notes in Lesson 18, and chat with an AI agent in Lesson 19 &mdash; all served from one
       <code>php app.php</code> process.
     </p>
 
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'Already know PHP frameworks?',
-      'body'    => 'Skip to <a href="/learn/htmx">Lesson 5 (Forms &amp; htmx)</a> if you\'re comfortable with routing and templates. Skip to <a href="/learn/notes">Lesson 8 (Personal Notes)</a> to jump straight into the app build.',
+      'body'    => 'Skip to <a href="/learn/htmx">Lesson 15 (Forms &amp; htmx)</a> if you\'re comfortable with routing and templates. Skip to <a href="/learn/notes">Lesson 18 (Personal Notes)</a> to jump straight into the app build.',
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [

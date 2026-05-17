@@ -150,9 +150,10 @@ class Notes
 
     <h3>Introducing <code>App::renderToString()</code></h3>
     <p>
-      In Lesson 4, you learned <code>App::render()</code> which echoes HTML. But htmx sent a POST and
-      expects HTML back as the <em>response body</em>. You need the HTML as a string, not echoed to
-      the page. That's <code>App::renderToString()</code>:
+      In Lesson 13 (<a href="/learn/components">Layouts &amp; Components</a>), you learned
+      <code>App::render()</code> which echoes HTML. But htmx sent a POST and expects HTML back as the
+      <em>response body</em>. You need the HTML as a string, not echoed to the page. That's
+      <code>App::renderToString()</code>:
     </p>
     <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/notes.php" style="color:#f59e0b">api/learn/notes.php</a> — return the rendered note card
 $note = Notes::read($db, $userId, $id);
