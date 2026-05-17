@@ -6,10 +6,10 @@ $active = $active ?? 'learn/ai-chat';
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number' => 19, 'title' => 'AI Chat',
+      'number' => 20, 'title' => 'AI Chat',
       'subtitle' => 'An assistant that reads and modifies your notes — streamed token by token.',
-      'prev' => ['slug' => 'learn/notes', 'title' => 'Personal Notes'],
-      'next' => ['slug' => 'learn/websocket', 'title' => 'Real-Time Sync'],
+      'prev' => ['slug' => 'learn/websocket', 'title' => 'Real-Time Sync'],
+      'next' => ['slug' => 'learn/tictactoe', 'title' => 'Tic-Tac-Toe'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
@@ -226,12 +226,12 @@ return function($items) {
     ]]); ?>
 
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/notes"
-         hx-get="/api/learn/page?slug=learn/notes" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/notes">← Personal Notes</a>
-      <a class="lesson-chip lesson-chip-next" href="/learn/websocket"
+      <a class="lesson-chip lesson-chip-prev" href="/learn/websocket"
          hx-get="/api/learn/page?slug=learn/websocket" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/websocket">Real-Time Sync →</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/websocket">← Real-Time Sync</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/tictactoe"
+         hx-get="/api/learn/page?slug=learn/tictactoe" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/tictactoe">Tic-Tac-Toe →</a>
     </div>
   </article>
 </div>

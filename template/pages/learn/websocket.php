@@ -3,11 +3,11 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 20,
+      'number'   => 19,
       'title'    => 'Real-Time Sync',
       'subtitle' => 'Open this page in two tabs. Click +1 in one. The other tab counts up too.',
-      'prev'     => ['slug' => 'learn/ai-chat', 'title' => 'AI Chat'],
-      'next'     => ['slug' => 'learn/tictactoe', 'title' => 'Tic-Tac-Toe'],
+      'prev'     => ['slug' => 'learn/notes', 'title' => 'Personal Notes'],
+      'next'     => ['slug' => 'learn/ai-chat', 'title' => 'AI Chat'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
@@ -197,12 +197,12 @@ $app-&gt;route('/api/counter/bump', ['methods' =&gt; ['POST']], function () use 
     ]]); ?>
 
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/ai-chat"
+      <a class="lesson-chip lesson-chip-prev" href="/learn/notes"
+         hx-get="/api/learn/page?slug=learn/notes" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/notes">← Personal Notes</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/ai-chat"
          hx-get="/api/learn/page?slug=learn/ai-chat" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/ai-chat">← AI Chat</a>
-      <a class="lesson-chip lesson-chip-next" href="/learn/tictactoe"
-         hx-get="/api/learn/page?slug=learn/tictactoe" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/tictactoe">Tic-Tac-Toe →</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/ai-chat">AI Chat →</a>
     </div>
   </article>
 </div>

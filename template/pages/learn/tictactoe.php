@@ -9,8 +9,8 @@ $active = $active ?? 'learn/tictactoe';
       'number'   => 21,
       'title'    => 'Multiplayer Tic-Tac-Toe',
       'subtitle' => 'Two players, one room ID, real-time gameplay over WebSocket. The Build-the-App capstone.',
-      'prev'     => ['slug' => 'learn/websocket', 'title' => 'Real-Time Sync'],
-      'next'     => ['slug' => 'learn/routing',   'title' => 'Routes & APIs'],
+      'prev'     => ['slug' => 'learn/ai-chat', 'title' => 'AI Chat'],
+      'next'     => ['slug' => 'learn/routing',  'title' => 'Routes & APIs'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
@@ -363,9 +363,9 @@ Store::set('ws_tictactoe_rooms', $room, $update);   // one write</code></pre>
     ]]); ?>
 
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/websocket"
-         hx-get="/api/learn/page?slug=learn/websocket" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/websocket">← Real-Time Sync</a>
+      <a class="lesson-chip lesson-chip-prev" href="/learn/ai-chat"
+         hx-get="/api/learn/page?slug=learn/ai-chat" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/ai-chat">← AI Chat</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/routing"
          hx-get="/api/learn/page?slug=learn/routing" hx-target=".lesson-content"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routing">Routes & APIs →</a>
