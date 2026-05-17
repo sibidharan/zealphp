@@ -117,13 +117,15 @@ PHP]); ?>
     <div style="margin-top:2.5rem">
       <h2 style="font-size:1.3rem;margin-bottom:.75rem;color:#fff">5. CGI bridge for legacy apps</h2>
       <p style="color:var(--text-light);line-height:1.7;font-size:.95rem">
-        <code>App::includeFile($path)</code> runs PHP files in a separate process via <code>proc_open</code>,
-        capturing their <code>header()</code> / <code>setcookie()</code> / <code>echo</code> output and stitching
-        them into the OpenSwoole response. This is how unmodified WordPress and Drupal run on ZealPHP.
+        <code>App::include($publicPath)</code> runs PHP files in a separate process via <code>proc_open</code>
+        (when in superglobals mode), capturing their <code>header()</code> / <code>setcookie()</code> /
+        <code>echo</code> output and stitching them into the OpenSwoole response. The file's return value also
+        flows back through the <a href="/responses#return-contract" style="color:var(--accent)">universal return contract</a>.
+        This is how unmodified WordPress and Drupal run on ZealPHP.
       </p>
       <ul style="color:var(--text-light);line-height:1.7;font-size:.92rem;margin-top:.5rem;padding-left:1.5rem">
         <li><strong style="color:#fff">What it buys:</strong> Apache mod_php compatibility for the last mile of
-          migration. <code>App::setFallback(fn() => App::includeFile('/path/to/wp-index.php'))</code> serves
+          migration. <code>App::setFallback(fn() =&gt; App::include('/index.php'))</code> serves
           WordPress unmodified.</li>
         <li><strong style="color:#fff">What it costs:</strong> a process per legacy request — no coroutine
           async, no shared state, fork latency. Slow relative to a main-worker route. Adds maintenance surface

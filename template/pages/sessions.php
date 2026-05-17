@@ -63,7 +63,7 @@ foreach ($demos as [$id, $title, $url, $code]) {
 <div class="callout warn" style="margin-top:1.5rem">
   Sessions are per-coroutine in coroutine mode. Each request gets its own isolated
   <code>RequestContext::instance()-&gt;session</code> via <code>Coroutine::getContext()</code> —
-  no data leaks between concurrent requests.
+  no data leaks between concurrent requests. See the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a> for the cross-mode story (when <code>$_SESSION</code> is safe vs. when only <code>$g-&gt;session</code> works).
 </div>
 
 <h2 style="margin:1.75rem 0 .5rem">What else gets reset per request</h2>

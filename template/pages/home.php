@@ -698,7 +698,7 @@ document.addEventListener('click', function(e) {
 <section class="section" style="background:var(--bg-alt)">
   <div class="container">
     <h2 class="section-title">Return anything, get the right response</h2>
-    <p class="section-desc">ZealPHP inspects your return type and does the right thing — no boilerplate.</p>
+    <p class="section-desc">ZealPHP inspects your return type and does the right thing — no boilerplate. One contract for every entry point (route handler, public file, API closure, fallback, error handler, <code>App::render() / renderToString() / renderStream() / include()</code>).</p>
     <table class="ztable" style="margin-top:1.5rem">
       <tr><th style="width:30%">Return</th><th style="width:35%">Result</th><th>Example</th></tr>
       <tr><td><code>int</code></td><td>HTTP status code</td><td><code>return 404;</code> <code>return 201;</code></td></tr>
@@ -708,6 +708,7 @@ document.addEventListener('click', function(e) {
       <tr><td><code>void</code> + <code>echo</code></td><td>Buffered output via <code>ob_get_clean()</code></td><td><code>echo "Hello"; echo " World";</code></td></tr>
       <tr><td><code>ResponseInterface</code></td><td>PSR-7 response used directly</td><td><code>return new Response(...);</code></td></tr>
     </table>
+    <p style="margin-top:1rem;text-align:center"><a href="/responses#return-contract">Full contract reference →</a></p>
   </div>
 </section>
 

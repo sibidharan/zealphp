@@ -190,7 +190,8 @@ $this->nsPathRoute('api', '{rquest}', [...]);          // /api/healthcheck</code
     </p>
     <pre><code class="language-php">// app.php
 App::setFallback(function () {
-    App::includeFile(__DIR__ . '/wordpress/index.php');
+    // App::include() resolves paths relative to public/ (Apache DocumentRoot convention).
+    App::include('/wordpress/index.php');
 });</code></pre>
     <p>
       This is the equivalent of Apache&rsquo;s <code>RewriteRule . /index.php [L]</code>. It&rsquo;s

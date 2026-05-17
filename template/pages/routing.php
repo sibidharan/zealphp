@@ -32,7 +32,7 @@ PHP
 ]); ?>
 
 <div class="callout info" style="margin-top:1rem">
-<strong>This is the migration on-ramp.</strong> Drop your existing PHP files into <code>public/</code> and they run on OpenSwoole immediately — <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>$_POST</code>, <code>echo</code> all work unchanged via uopz overrides. <strong>Caveat:</strong> this needs <code>App::superglobals(true)</code>, where state is shared per worker — fine to get running, <em>not</em> per-coroutine isolated. For full async (thousands of concurrent requests per worker), the recommended endpoint is coroutine mode — swap <code>$_GET</code> / <code>$_SESSION</code> / etc. for <code>G::instance()-&gt;get</code> / <code>-&gt;session</code>. See the <a href="/migration">migration ladder</a> for the path.
+<strong>This is the migration on-ramp.</strong> Drop your existing PHP files into <code>public/</code> and they run on OpenSwoole immediately — <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>$_POST</code>, <code>echo</code> all work unchanged via uopz overrides. <strong>Caveat:</strong> this needs <code>App::superglobals(true)</code>, where state is shared per worker — fine to get running, <em>not</em> per-coroutine isolated. For full async (thousands of concurrent requests per worker), the recommended endpoint is coroutine mode — swap <code>$_GET</code> / <code>$_SESSION</code> / etc. for <code>$g-&gt;get</code> / <code>$g-&gt;session</code> (see the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a> and the <a href="/migration">migration ladder</a>).
 </div>
 
 <p style="margin:1rem 0">Same convention works for APIs — drop files in <code>api/</code>:</p>
@@ -44,7 +44,7 @@ PHP
   <tr><td><code>api/orders/get.php</code></td><td><code>GET /api/orders</code></td><td>Directory = resource</td></tr>
 </table>
 
-<p style="margin-top:1rem">Public files support the same return conventions as framework routes — return an <code>array</code> for JSON, a <code>Generator</code> for streaming, an <code>int</code> for a status code, or just <code>echo</code>. See <a href="/responses">Responses</a>.</p>
+<p style="margin-top:1rem">Public files ride the <a href="/responses#return-contract">universal return contract</a> — same shapes as a route handler.</p>
 
 <h2 style="margin:2.5rem 0 .5rem">Programmatic routes</h2>
 <p style="margin-bottom:1rem">When you need URL parameters, WebSocket, or middleware — use programmatic routes. File-based routing handles the rest.</p>
