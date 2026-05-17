@@ -151,7 +151,7 @@ ZEALPHP_LOG_DIR           # Log directory (default: /tmp/zealphp)</code></pre>
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/async"
          hx-get="/api/learn/page?slug=learn/async" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/async">← Async &amp; Coroutines</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/async">← Async &amp; Coroutines</a>
     </div>
   </article>
 </div>

@@ -107,10 +107,10 @@ App::render('/_master', [
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/create-app"
          hx-get="/api/learn/page?slug=learn/create-app" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/create-app">← Create a ZealPHP App</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/create-app">← Create a ZealPHP App</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/mental-model"
          hx-get="/api/learn/page?slug=learn/mental-model" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/mental-model">The Mental Model →</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/mental-model">The Mental Model →</a>
     </div>
   </article>
 </div>

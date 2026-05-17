@@ -190,10 +190,10 @@ $this->response($html, 200);</code></pre>
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/auth"
          hx-get="/api/learn/page?slug=learn/auth" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/auth">← User Accounts</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/auth">← User Accounts</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/ai-chat"
          hx-get="/api/learn/page?slug=learn/ai-chat" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/ai-chat">AI Chat →</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/ai-chat">AI Chat →</a>
     </div>
   </article>
 </div>

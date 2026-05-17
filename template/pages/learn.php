@@ -136,7 +136,7 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-next" href="/learn/create-app"
          hx-get="/api/learn/page?slug=learn/create-app" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/create-app">Create a ZealPHP App &rarr;</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/create-app">Create a ZealPHP App &rarr;</a>
     </div>
   </article>
 </div>

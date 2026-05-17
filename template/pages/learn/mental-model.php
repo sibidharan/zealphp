@@ -194,10 +194,10 @@
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/first-page"
          hx-get="/api/learn/page?slug=learn/first-page" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/first-page">← Your First Page</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/first-page">← Your First Page</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/project-structure"
          hx-get="/api/learn/page?slug=learn/project-structure" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/project-structure">Project Structure →</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/project-structure">Project Structure →</a>
     </div>
   </article>
 </div>

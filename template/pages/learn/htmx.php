@@ -246,10 +246,10 @@ $g = \ZealPHP\G::instance();
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/components"
          hx-get="/api/learn/page?slug=learn/components" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/components">← Layouts &amp; Components</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/components">← Layouts &amp; Components</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/sessions"
          hx-get="/api/learn/page?slug=learn/sessions" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/sessions">Sessions →</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/sessions">Sessions →</a>
     </div>
   </article>
 </div>

@@ -164,10 +164,10 @@ ws.addEventListener('close', (ev) => {
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/ai-chat"
          hx-get="/api/learn/page?slug=learn/ai-chat" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/ai-chat">← AI Chat</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/ai-chat">← AI Chat</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/routing"
          hx-get="/api/learn/page?slug=learn/routing" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/routing">Routes &amp; APIs →</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routing">Routes &amp; APIs →</a>
     </div>
   </article>
 </div>

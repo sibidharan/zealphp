@@ -146,10 +146,10 @@
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/injection"
          hx-get="/api/learn/page?slug=learn/injection" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/injection">← Parameter Injection</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/injection">← Parameter Injection</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/middleware"
          hx-get="/api/learn/page?slug=learn/middleware" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/middleware">Middleware: The Wrap →</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/middleware">Middleware: The Wrap →</a>
     </div>
   </article>
 </div>
