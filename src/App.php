@@ -59,6 +59,24 @@ class App
     public static array $static_handler_locations = [];
     /** Block any path containing a dotfile component (.git, .env, .htaccess, etc.). Apache convention. */
     public static bool $block_dotfiles = true;
+    /**
+     * Apache DocumentRoot equivalent. Relative values (the default) are
+     * resolved against App::$cwd; absolute values are used as-is. Drives
+     * App::include() path resolution and the implicit /{file}/{dir/uri} routes.
+     */
+    public static string $document_root = 'public';
+    /**
+     * Apache TraceEnable — defaults to OFF for security. When false (default)
+     * ResponseMiddleware refuses HTTP TRACE with 405 regardless of any matching
+     * route definition. Set to true only if you know you need TRACE.
+     */
+    public static bool $trace_enabled = false;
+    /**
+     * Apache AddDefaultCharset. Stored here for consumers (e.g. a future
+     * CharsetMiddleware) that want a server-wide default charset to append
+     * to text-ish Content-Type headers.
+     */
+    public static string $default_charset = 'utf-8';
     /** @var array<string, mixed>|null */
     private static ?array $fallback_handler = null;
     /** Initial error_reporting level captured at boot — referenced by the per-coroutine override. */
@@ -246,6 +264,88 @@ class App
     public static function superglobals(bool $enable = true): void
     {
         self::$superglobals = $enable;
+    }
+
+    // -----------------------------------------------------------------------
+    // Fluent configuration accessors. The convention: pass null (or no arg)
+    // to read the current value; pass a non-null value to set and return it.
+    // Backing static properties stay public for BC — these methods are the
+    // documented API surface and what the converter bot is taught to emit.
+    // -----------------------------------------------------------------------
+
+    public static function ignorePhpExt(?bool $on = null): bool
+    {
+        if ($on !== null) self::$ignore_php_ext = $on;
+        return self::$ignore_php_ext;
+    }
+
+    public static function directorySlash(?bool $on = null): bool
+    {
+        if ($on !== null) self::$directory_slash = $on;
+        return self::$directory_slash;
+    }
+
+    /**
+     * @param array<int, string>|null $files
+     * @return array<int, string>
+     */
+    public static function directoryIndex(?array $files = null): array
+    {
+        if ($files !== null) self::$directory_index = $files;
+        return self::$directory_index;
+    }
+
+    public static function pathInfo(?bool $on = null): bool
+    {
+        if ($on !== null) self::$path_info = $on;
+        return self::$path_info;
+    }
+
+    /**
+     * @param array<int, string>|null $prefixes
+     * @return array<int, string>
+     */
+    public static function staticHandlerLocations(?array $prefixes = null): array
+    {
+        if ($prefixes !== null) self::$static_handler_locations = $prefixes;
+        return self::$static_handler_locations;
+    }
+
+    public static function blockDotfiles(?bool $on = null): bool
+    {
+        if ($on !== null) self::$block_dotfiles = $on;
+        return self::$block_dotfiles;
+    }
+
+    public static function displayErrors(?bool $on = null): bool
+    {
+        if ($on !== null) self::$display_errors = $on;
+        return self::$display_errors;
+    }
+
+    /**
+     * Apache DocumentRoot equivalent. Relative path → resolved against cwd;
+     * absolute path → used as-is. Drives App::include() resolution and the
+     * implicit-route file lookups.
+     */
+    public static function documentRoot(?string $path = null): string
+    {
+        if ($path !== null) self::$document_root = $path;
+        return self::$document_root;
+    }
+
+    /** Apache TraceEnable. Default OFF for security (XST attack vector). */
+    public static function traceEnabled(?bool $on = null): bool
+    {
+        if ($on !== null) self::$trace_enabled = $on;
+        return self::$trace_enabled;
+    }
+
+    /** Apache AddDefaultCharset. Server-wide default. */
+    public static function defaultCharset(?string $charset = null): string
+    {
+        if ($charset !== null) self::$default_charset = $charset;
+        return self::$default_charset;
     }
 
     public static function instance(): ?App
@@ -634,137 +734,287 @@ class App
         return $result;
     }
 
+    // -----------------------------------------------------------------------
+    // File execution family — shared core + four public surfaces.
+    //
+    // The universal return contract: see template/pages/responses.php
+    // (canonical) and .claude/CLAUDE.md "Return value conventions" (mirror).
+    // Keep all three in lock-step on any change.
+    //
+    //   render()           → template name, BC echo on void+echo, full contract otherwise
+    //   renderToString()   → template name, coerces every return shape to string
+    //   renderStream()     → template name, coerces every return shape to Generator
+    //   include()          → public-relative path, full contract, never echoes
+    //
+    // All four share self::executeFile() — they only differ in path resolution
+    // and how they coerce the core's return value.
+    // -----------------------------------------------------------------------
+
     /**
-     * Renders a template with the provided data.
-     * This function looks for templates in the ./template folder located in the current working directory of the server.
-     * It takes PHP_SELF into account and uses it as the source folder to look for templates unless the $__template_file starts with /.
-     * Starting the $__template_file with / tells the render function to look for the template from the root of the template folder.
+     * Run a PHP file with the framework's universal return contract.
      *
-     * @param string $__template_file The name of the template to render. Defaults to 'index'.
-     * @param array $__args An associative array of data to pass to the template. Defaults to an empty array.
-     * @throws TemplateUnavailableException if the template does not exist.
-     * @return void
+     * Captures buffered output, then maps the included file's result:
+     *   void+echo                        → buffered string
+     *   return 404; (int)                → int
+     *   return ['ok' => true]; (array)   → array
+     *   return "html"; (string)          → string (concatenated with prior echo)
+     *   echo "shell"; return "body";     → "shellbody"
+     *   return (function(){yield…})();   → Generator (prefixed with echo, if any)
+     *   return function($req){yield…};   → Closure (param-injected at call site,
+     *                                       then re-applied to result)
+     *
+     * Throws bubble up to the caller — output buffer is dropped on throw so
+     * partial echo doesn't leak into the next response.
+     *
+     * @param string $absPath  Already resolved absolute path
+     * @param array<string,mixed> $args  Extracted into the file's scope
+     * @return mixed
      */
+    private static function executeFile(string $absPath, array $args): mixed
+    {
+        ob_start();
+        try {
+            extract($args, EXTR_SKIP);
+            $result = include $absPath;
+        } catch (\Throwable $e) {
+            @ob_end_clean();
+            throw $e;
+        }
+        $output = ob_get_clean();
+        if ($output === false) {
+            $output = '';
+        }
+
+        if ($result instanceof \Closure) {
+            $params = self::resolveClosureParams($result, $args, $absPath);
+            $invoked = $result(...$params);
+            // The closure may yield a Generator, return a scalar, or return
+            // another Closure. Re-thread through the same coercion logic so
+            // the wire shape matches whatever the closure produced.
+            if ($invoked instanceof \Generator) {
+                return $output !== '' ? self::prependToStreamable($output, $invoked) : $invoked;
+            }
+            // Closure returning a scalar — surface the value directly; if the
+            // file also echoed pre-return, concat for the "echo shell, return
+            // body" idiom (only meaningful when both are strings).
+            if (is_string($invoked) && $output !== '') {
+                return $output . $invoked;
+            }
+            if ($invoked === null || $invoked === 1) {
+                return $output !== '' ? $output : null;
+            }
+            return $invoked;
+        }
+
+        if ($result instanceof \Generator) {
+            return $output !== '' ? self::prependToStreamable($output, $result) : $result;
+        }
+
+        // PHP's `include` returns int(1) when the file has no explicit `return`.
+        // Treat as "no explicit return" — surface the buffered echo (or null).
+        if ($result === 1) {
+            return $output !== '' ? $output : null;
+        }
+
+        // Explicit string return: if the file also echoed, preserve wire order.
+        if (is_string($result) && $output !== '') {
+            return $output . $result;
+        }
+
+        return $result;
+    }
+
     /**
-     * Returns a Generator that yields template output. If the template file returns
-     * a Generator (via IIFE), delegates to it with yield from — enabling streaming
-     * templates. If the template echoes normally, captures output and yields it
-     * as a single chunk. Backwards-compatible with all existing templates.
+     * Resolve a template-file name to an absolute path.
      *
-     * Streaming template — declare parameters, framework injects by name:
-     *   <?php return function($users) {
-     *       foreach ($users as $user) {
-     *           yield "<div>{$user['name']}</div>";
-     *       }
-     *   };
+     * Lookup rules mirror the historical render() behaviour:
+     *   - Leading slash ("/foo") = absolute lookup from $dir root
+     *   - When the current request's PHP_SELF basename is a sub-directory
+     *     under $dir, prefer "$dir/{basename}/$tpl.php"
+     *   - Otherwise fall back to "$dir/$tpl.php"
+     */
+    private static function resolveTemplatePath(string $tpl, string $dir): string
+    {
+        $currentFile  = self::getCurrentFile(null);
+        $templateDir  = self::$cwd . "/$dir";
+        $rootLookup   = strpos($tpl, '/') === 0;
+
+        if ($rootLookup) {
+            $candidate = $templateDir . $tpl . '.php';
+        } else if (!empty($currentFile) && is_dir("$templateDir/" . $currentFile)) {
+            $candidate = "$templateDir/" . $currentFile . '/' . $tpl . '.php';
+        } else {
+            $candidate = "$templateDir/" . $tpl . '.php';
+        }
+
+        $resolved = realpath($candidate);
+        if (!$resolved || !file_exists($resolved) || strpos($resolved, self::$cwd) !== 0) {
+            $bt = debug_backtrace();
+            $caller = array_shift($bt);
+            throw new TemplateUnavailableException(
+                "The template $candidate does not exist in file "
+                . str_replace(self::$cwd, '', $caller['file'] ?? '') . ":" . ($caller['line'] ?? '')
+            );
+        }
+        return $resolved;
+    }
+
+    /**
+     * Resolve a Closure's parameters by name from $args, using each parameter's
+     * default value when the name is absent. Reflection is cached per file path
+     * so repeated calls (e.g. streaming templates yielded in a loop) pay only
+     * one reflection cost per worker.
      *
-     * Route handler:
+     * @param array<string,mixed> $args
+     * @return array<int,mixed>
+     */
+    private static function resolveClosureParams(\Closure $fn, array $args, string $cacheKey): array
+    {
+        /** @var array<string, array<int, array{name: string, default: mixed}>> $cache */
+        static $cache = [];
+        if (!isset($cache[$cacheKey])) {
+            $ref = new \ReflectionFunction($fn);
+            $cache[$cacheKey] = array_map(
+                static fn(\ReflectionParameter $p): array => [
+                    'name'    => $p->getName(),
+                    'default' => $p->isDefaultValueAvailable() ? $p->getDefaultValue() : null,
+                ],
+                $ref->getParameters()
+            );
+        }
+        $out = [];
+        foreach ($cache[$cacheKey] as $p) {
+            $out[] = $args[$p['name']] ?? $p['default'];
+        }
+        return $out;
+    }
+
+    /**
+     * Combine a pre-yield buffered chunk with a Generator so the wire order
+     * is "echo first, then stream". Returns a new Generator that yields the
+     * buffered chunk before delegating to the original.
+     */
+    private static function prependToStreamable(string $prefix, \Generator $gen): \Generator
+    {
+        yield $prefix;
+        yield from $gen;
+    }
+
+    /**
+     * Coerce an executeFile() result to a string. Generators are consumed and
+     * concatenated; arrays/objects are JSON-encoded; null becomes ''.
+     */
+    private static function coerceToString(mixed $result): string
+    {
+        if ($result === null) return '';
+        if (is_string($result)) return $result;
+        if (is_int($result) || is_float($result) || is_bool($result)) return (string)$result;
+        if ($result instanceof \Generator) {
+            $buf = '';
+            foreach ($result as $chunk) {
+                $buf .= (string)$chunk;
+            }
+            return $buf;
+        }
+        if (is_array($result) || is_object($result)) {
+            return (string)json_encode($result);
+        }
+        return '';
+    }
+
+    /**
+     * Coerce an executeFile() result to a Generator. Strings/scalars yield
+     * once; Generators yield-from; null yields nothing.
+     */
+    private static function coerceToStream(mixed $result): \Generator
+    {
+        if ($result === null) {
+            return;
+        }
+        if ($result instanceof \Generator) {
+            yield from $result;
+            return;
+        }
+        if (is_array($result) || is_object($result)) {
+            yield (string)json_encode($result);
+            return;
+        }
+        if (is_string($result) || is_int($result) || is_float($result) || is_bool($result)) {
+            yield (string)$result;
+        }
+    }
+
+    /**
+     * Render a template with the provided data.
+     *
+     * Templates are looked up under ./template/ in the current working dir;
+     * PHP_SELF is consulted as a sub-directory prefix unless $tpl starts with `/`.
+     *
+     * **Return contract**: see executeFile(). Templates may return int / array /
+     * string / Generator / Closure to participate in the universal contract.
+     *
+     * **Backwards compatibility**: legacy callers expect render() to echo. When
+     * the template has no explicit `return` (the historical pattern in every
+     * public/*.php) the captured output is echoed back. Explicit non-void
+     * returns flow through to the caller unchanged.
+     *
+     * @see App::executeFile() (private core) and the sibling methods (renderToString / renderStream / include).
+     *
+     * @param array<string, mixed> $__args
+     */
+    public static function render(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): mixed
+    {
+        $path = self::resolveTemplatePath($__template_file, $__default_template_dir);
+        $result = self::executeFile($path, $__args);
+        // BC: void-context callers (every App::render('_master', ...) call in
+        // public/*.php) expect echo. If executeFile() returned a string (the
+        // "file only echoed, no explicit return" case OR an explicit string
+        // return) emit it now. Explicit non-string returns pass through so
+        // route handlers can `return App::render(...)` and get the universal
+        // contract applied at the response boundary.
+        if (is_string($result)) {
+            echo $result;
+        }
+        return $result;
+    }
+
+    /**
+     * Render a template and return the result as a string. Generators are
+     * consumed; Closures are invoked with param injection; arrays/objects
+     * are JSON-encoded.
+     *
+     * @see App::executeFile() (private core) and the sibling methods (render / renderStream / include).
+     *
+     * @param array<string, mixed> $__args
+     */
+    public static function renderToString(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): string
+    {
+        $path = self::resolveTemplatePath($__template_file, $__default_template_dir);
+        $result = self::executeFile($path, $__args);
+        return self::coerceToString($result);
+    }
+
+    /**
+     * Render a template as a Generator. Streaming templates (return-a-Closure
+     * or return-a-Generator) yield directly; echo-style templates yield their
+     * buffered output once.
+     *
+     * Compose multiple template streams with `yield from`:
      *   return (function() {
      *       yield from App::renderStream('shell-open', ['title' => 'Users']);
      *       yield from App::renderStream('users/list', ['users' => $users]);
      *       yield from App::renderStream('shell-close');
      *   })();
      *
-     * Supports three template styles:
-     *   1. return function($var) { yield ...; }  → Closure with param injection (cleanest)
-     *   2. return (function() use ($var) { yield ...; })()  → Generator (IIFE, explicit)
-     *   3. Regular echo template  → captured output yielded as one chunk
-     */
-    /**
+     * @see App::executeFile() (private core) and the sibling methods (render / renderToString / include).
+     *
      * @param array<string, mixed> $__args
      */
     public static function renderStream(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): \Generator
     {
-        $__current_file = self::getCurrentFile(null);
-        $__template_dir = self::$cwd . "/$__default_template_dir";
-        $__root_lookup = strpos($__template_file, '/') === 0;
-        if ($__root_lookup) {
-            $__template_file_path = $__template_dir . $__template_file . '.php';
-        } else if(!empty($__current_file) and is_dir("$__template_dir/" . $__current_file)){
-            $__template_file_path = "$__template_dir/" . $__current_file . '/' . $__template_file . '.php';
-        } else {
-            $__template_file_path = "$__template_dir/" . $__template_file . '.php';
-        }
-
-        $__template_file_path = realpath($__template_file_path);
-
-        if (!$__template_file_path or !file_exists($__template_file_path) or strpos($__template_file_path, self::$cwd) !== 0) {
-            $bt = debug_backtrace();
-            $caller = array_shift($bt);
-            throw new TemplateUnavailableException("The template $__template_file_path does not exist in file " . str_replace(App::$cwd, '', $caller['file'] ?? '') . ":" . ($caller['line'] ?? '') );
-        }
-
-        ob_start();
-        extract($__args, EXTR_SKIP);
-        $__result = include $__template_file_path;
-        $__output = ob_get_clean();
-
-        if ($__result instanceof \Closure) {
-            /** @var array<string, array<int, array{name: string, default: mixed}>> $__reflCache */
-            static $__reflCache = [];
-            if (!isset($__reflCache[$__template_file_path])) {
-                $__ref = new \ReflectionFunction($__result);
-                $__reflCache[$__template_file_path] = array_map(
-                    static fn(\ReflectionParameter $__p): array => ['name' => $__p->getName(), 'default' => $__p->isDefaultValueAvailable() ? $__p->getDefaultValue() : null],
-                    $__ref->getParameters()
-                );
-            }
-            $__params = [];
-            foreach ($__reflCache[$__template_file_path] as $__p) {
-                $__params[] = $__args[$__p['name']] ?? $__p['default'];
-            }
-            $__gen = $__result(...$__params);
-            if ($__gen instanceof \Generator) {
-                yield from $__gen;
-            }
-        } else if ($__result instanceof \Generator) {
-            yield from $__result;
-        } else if ($__output !== '' && $__output !== false) {
-            yield $__output;
-        }
-    }
-
-    /**
-     * @param array<string, mixed> $__args
-     */
-    public static function renderToString(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): string
-    {
-        ob_start();
-        try {
-            self::render($__template_file, $__args, $__default_template_dir);
-        } catch (\Throwable $e) {
-            ob_end_clean();
-            throw $e;
-        }
-        return (string) ob_get_clean();
-    }
-
-    /**
-     * @param array<string, mixed> $__args
-     */
-    public static function render(string $__template_file = 'index', array $__args = [], string $__default_template_dir = 'template'): void
-    {
-        $__current_file = self::getCurrentFile(null);
-        $__template_dir = self::$cwd . "/$__default_template_dir";
-        $__root_lookup = strpos($__template_file, '/') === 0;
-        if ($__root_lookup) {
-            $__template_file_path = $__template_dir . $__template_file . '.php';
-        } else if(!empty($__current_file) and is_dir("$__template_dir/" . $__current_file)){
-            $__template_file_path = "$__template_dir/" . $__current_file . '/' . $__template_file . '.php';
-        } else {
-            $__template_file_path = "$__template_dir/" . $__template_file . '.php';
-        }
-
-        $__template_file_path = realpath($__template_file_path);
-
-        if (!$__template_file_path or !file_exists($__template_file_path) or strpos($__template_file_path, self::$cwd) !== 0) {
-            $bt = debug_backtrace();
-            $caller = array_shift($bt);
-            throw new TemplateUnavailableException("The template $__template_file_path does not exist in file " . str_replace(App::$cwd, '', $caller['file'] ?? '') . ":" . ($caller['line'] ?? '') );
-        } else {
-            extract($__args, EXTR_SKIP);
-            include $__template_file_path;
-        }
+        $path = self::resolveTemplatePath($__template_file, $__default_template_dir);
+        $result = self::executeFile($path, $__args);
+        yield from self::coerceToStream($result);
     }
 
     
@@ -790,11 +1040,12 @@ class App
      * @return bool Returns true if the file is within the public directory, false otherwise.
      */
     public function includeCheck($abs_file){
-        if (!$abs_file || strpos($abs_file, self::$cwd."/public") !== 0) {
-            return false; // outside the public directory
+        $docRoot = self::resolveDocumentRoot();
+        if (!$abs_file || strpos($abs_file, $docRoot) !== 0) {
+            return false; // outside the document root
         }
         if (self::$block_dotfiles) {
-            $relative = substr($abs_file, strlen(self::$cwd."/public"));
+            $relative = substr($abs_file, strlen($docRoot));
             foreach (explode('/', $relative) as $segment) {
                 if ($segment !== '' && $segment[0] === '.') {
                     return false; // dotfile (.git, .env, .htaccess, etc.)
@@ -835,22 +1086,20 @@ class App
             }
         }
 
-        $base = self::$cwd . '/public/' . $relDir;
+        $base = self::resolveDocumentRoot() . '/' . $relDir;
         foreach (self::$directory_index as $indexFile) {
             $abs = realpath($base . '/' . $indexFile);
             if (!$abs || !file_exists($abs)) continue;
             if (!$this->includeCheck($abs)) continue;
 
             $relPath = '/' . trim($urlPrefix, '/') . '/' . $indexFile;
+            if (substr($indexFile, -4) === '.php') {
+                // App::include() owns the $_SERVER preamble + the contract.
+                return App::include($relPath);
+            }
             $g->server['PHP_SELF']        = $relPath;
             $g->server['SCRIPT_NAME']     = $relPath;
             $g->server['SCRIPT_FILENAME'] = $abs;
-
-            if (substr($indexFile, -4) === '.php') {
-                $__r = App::includeFile($abs);
-                if ($__r instanceof \Generator) return $__r;
-                return null;
-            }
             // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
             $g->zealphp_response->sendFile($abs);
             $g->_streaming = true;
@@ -860,25 +1109,106 @@ class App
     }
 
     /**
-     * Include a PHP file with process isolation when superglobals mode is active.
-     * Uses a separate PHP process (CGI-style) to ensure files run at the true
-     * global scope — required for legacy apps like WordPress that use bare
-     * variable assignments and `global` keyword declarations.
+     * Run a public/ file with Apache document-root parity and the framework's
+     * universal return contract.
+     *
+     * Path resolution: $publicPath is relative to App::$document_root (defaults
+     * to "public"). Leading slash optional — '/article.php' and 'article.php'
+     * both resolve to public/article.php. Same convention as a URL path.
+     *
+     * Security: includeCheck() rejects paths outside the document root and
+     * dotfile segments (when App::$block_dotfiles is on); refused paths return
+     * int(403) so ResponseMiddleware can render the right status.
+     *
+     * Apache parity: $g->server['PHP_SELF'], SCRIPT_NAME, SCRIPT_FILENAME are
+     * auto-populated before include so the file sees canonical $_SERVER values
+     * — callers no longer need the 3-line preamble.
+     *
+     * In superglobals mode (legacy apps) dispatches via cgiSubprocess(); in
+     * coroutine mode runs in-process via executeFile(). Return value is the
+     * same shape in both modes (the subprocess metadata channel carries it).
+     *
+     * @see App::executeFile() (private core) and the sibling methods (render / renderToString / renderStream).
+     *
+     * @param array<string,mixed> $args  Extracted into the file's scope (coroutine mode only)
+     */
+    public static function include(string $publicPath, array $args = []): mixed
+    {
+        $rel    = ltrim($publicPath, '/');
+        $docAbs = self::resolveDocumentRoot();
+        $absPath = realpath($docAbs . '/' . $rel);
+
+        $app = self::instance();
+        if (!$app || $absPath === false || !$app->includeCheck($absPath)) {
+            return 403;
+        }
+
+        $g = RequestContext::instance();
+        $g->server['PHP_SELF']        = '/' . $rel;
+        $g->server['SCRIPT_NAME']     = '/' . $rel;
+        $g->server['SCRIPT_FILENAME'] = $absPath;
+
+        if (self::$coproc_implicit_request_handler) {
+            return self::cgiSubprocess($absPath);
+        }
+        return self::executeFile($absPath, $args);
+    }
+
+    /**
+     * @deprecated since 0.2.18 — use App::include() with a public-relative path.
+     *
+     * Legacy alias kept for the WordPress showcase and existing user scaffolds.
+     * Accepts an absolute path. For paths under the document root, delegates
+     * to App::include() (security check + $_SERVER preamble apply). For paths
+     * outside (e.g. test fixtures, embedded utilities), passes straight to the
+     * shared core so the return contract applies but no security gate fires —
+     * matching the historical includeFile() behaviour.
      */
     public static function includeFile(string $path): mixed
     {
+        $docAbs = self::resolveDocumentRoot();
+        if (strpos($path, $docAbs) === 0) {
+            $rel = substr($path, strlen($docAbs));
+            return self::include($rel, []);
+        }
+        // Outside the document root — preserve legacy "trust the caller"
+        // semantics while still applying the universal return contract.
         if (self::$coproc_implicit_request_handler) {
-            echo self::cgiInclude($path);
-            return null;
+            return self::cgiSubprocess($path);
         }
-        $result = include $path;
-        if ($result instanceof \Generator || $result instanceof \Closure) {
-            return $result;
-        }
-        return null;
+        return self::executeFile($path, []);
     }
 
-    private static function cgiInclude(string $path): string
+    /**
+     * Resolve App::$document_root to an absolute path. Relative values are
+     * treated as ${App::$cwd}/$document_root; absolute values pass through.
+     */
+    public static function resolveDocumentRoot(): string
+    {
+        $root = self::$document_root;
+        if ($root !== '' && $root[0] === '/') {
+            return rtrim($root, '/');
+        }
+        return self::$cwd . '/' . rtrim($root, '/');
+    }
+
+    /**
+     * Run a PHP file in a separate process at true global scope (CGI-style).
+     * Required for legacy apps like WordPress that depend on bare variable
+     * assignments and `global` keyword declarations being seen by every file.
+     *
+     * The subprocess (src/cgi_worker.php) serialises status, headers, cookies
+     * AND the include's return value to stderr as a single JSON line; this
+     * method consumes that channel and returns the same shape executeFile()
+     * would have, so the universal return contract applies in both modes.
+     *
+     * Streaming responses (Generator returns, text/event-stream content type)
+     * are consumed inside the subprocess and streamed back through stdout;
+     * this method threads them through to the OpenSwoole response and
+     * returns null (the caller signals _streaming and ResponseMiddleware
+     * skips its buffering).
+     */
+    private static function cgiSubprocess(string $path): mixed
     {
         $g = RequestContext::instance();
 
@@ -920,13 +1250,13 @@ class App
             PHP_BINARY . ' ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path),
             $descriptors,
             $pipes,
-            self::$cwd . '/public',
+            self::resolveDocumentRoot(),
             $env
         );
 
         if (!is_resource($process)) {
-            elog("cgiInclude: failed to start process for $path", "error");
-            return '<pre>500 Internal Server Error</pre>';
+            elog("cgiSubprocess: failed to start process for $path", "error");
+            return 500;
         }
 
         try {
@@ -941,7 +1271,9 @@ class App
         $metaLine = fgets($pipes[2]);
         fclose($pipes[2]);
 
-        $streaming = false;
+        $streaming   = false;
+        $returnValue = null;
+        $hasReturn   = false;
         if ($metaLine) {
             $meta = json_decode(trim($metaLine), true);
             if (is_array($meta)) {
@@ -981,6 +1313,14 @@ class App
                         }
                     }
                 }
+                // Universal return contract: the subprocess captures the file's
+                // return value (int / array / string / null) and ships it here.
+                // Generator/Closure returns are consumed inside the subprocess
+                // and stream out as body — they appear as a `streamed` marker.
+                if (array_key_exists('return_value', $meta)) {
+                    $hasReturn   = true;
+                    $returnValue = $meta['return_value'];
+                }
             }
         }
 
@@ -1007,13 +1347,26 @@ class App
                 $g->openswoole_response->end();
             }
             $g->_streaming = true;
-            return '';
+            return null;
         }
 
         $body = stream_get_contents($pipes[1]);
         fclose($pipes[1]);
         proc_close($process);
-        return $body === false ? '' : $body;
+        $body = $body === false ? '' : $body;
+
+        // Surface the file's return value when it was explicit (int / array /
+        // string). Trust the subprocess: when return_value is non-null AND
+        // not the default 1-from-no-return, return it. The body (echoed
+        // output) is folded in only if the return was a string (echo-shell-
+        // then-return-body idiom) — exactly matching executeFile().
+        if ($hasReturn && $returnValue !== null && $returnValue !== 1) {
+            if (is_string($returnValue) && $body !== '') {
+                return $body . $returnValue;
+            }
+            return $returnValue;
+        }
+        return $body !== '' ? $body : null;
     }
 
     /**
@@ -1646,7 +1999,7 @@ HELP;
         $defaultPidFile = self::resolvePidFile(['port' => $this->port]);
         $default_settings = [
             'enable_static_handler' => true,
-            'document_root' => self::$cwd . '/public',
+            'document_root' => self::resolveDocumentRoot(),
             // Restrict OpenSwoole's built-in static handler to the listed URL prefixes
             // (Apache equivalent: serving only safe subtrees). Leave empty to serve all
             // — including dotfiles — like Apache default. Default whitelist below is
@@ -1767,93 +2120,57 @@ HELP;
         $this->route('/',[
             'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
         ], function($response){
-            // elog("Index route hit");
-            $g = RequestContext::instance();
-            $file = 'index';
-            $g->server['PHP_SELF'] = '/'.$file.'.php';
-            $g->server['SCRIPT_NAME'] = '/'.$file.'.php';
-            $g->server['SCRIPT_FILENAME'] = self::$cwd."/public/".$file.".php";
-            $abs_file = self::$cwd."/public/".$file.".php";
-            if(file_exists($abs_file)){
-                if ($this->includeCheck($abs_file)){
-                    $__r = App::includeFile($abs_file);
-                    if ($__r instanceof \Generator) return $__r;
-                } else {
-                    $app = App::instance();
-                    assert($app !== null);
-                    return $app->renderError(403);
-                }
-            } else {
-                return $this->invokeFallbackOrNotFound();
+            $docRoot = self::resolveDocumentRoot();
+            if (file_exists($docRoot . '/index.php')) {
+                // App::include() owns includeCheck() + the $_SERVER preamble.
+                return App::include('/index.php');
             }
+            return $this->invokeFallbackOrNotFound();
         });
 
         # Global route for all files in the root of the public directory
         $this->route(App::$ignore_php_ext ? '/{file}/?' : '/{file}(\.php)?/?', [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
         ], function(string $file, $response){
-            $g = RequestContext::instance();
             # if file ends with .php remove it
             if (substr($file, -4) == '.php') {
                 $file = substr($file, 0, -4);
             }
-            $abs_file = realpath(self::$cwd."/public/".$file.'.php');
-            if($abs_file !== false && file_exists($abs_file)){
-                if ($this->includeCheck($abs_file)){
-                    $g->server['PHP_SELF'] = '/'.$file.'.php';
-                    $g->server['SCRIPT_NAME'] = '/'.$file.'.php';
-                    $g->server['SCRIPT_FILENAME'] = $abs_file;
-                    $__r = App::includeFile($abs_file);
-                    if ($__r instanceof \Generator) return $__r;
-                } else {
-                    $app = App::instance();
-                    assert($app !== null);
-                    return $app->renderError(403);
-                }
-            } else if(is_dir(self::$cwd."/public/".$file)){
+            $docRoot  = self::resolveDocumentRoot();
+            $abs_file = realpath($docRoot . '/' . $file . '.php');
+            if ($abs_file !== false && file_exists($abs_file)) {
+                return App::include('/' . $file . '.php');
+            } else if (is_dir($docRoot . '/' . $file)) {
                 $result = $this->serveDirectory($file, $file);
                 if ($result === false) {
                     return $this->invokeFallbackOrNotFound();
                 }
                 return $result;
-            } else {
-                return $this->invokeFallbackOrNotFound();
             }
+            return $this->invokeFallbackOrNotFound();
         });
 
         # Global route for all directories and sub directories in the public directory
         $this->nsPathRoute('{dir}', App::$ignore_php_ext ? '{uri}/?' : '{uri}(\.php)?/?', [
             'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
         ], function(string $dir, string $uri, $response){
-            $g = RequestContext::instance();
             elog("Directory: $dir, URI: $uri");
             # if uri ends with .php remove it
             if (substr($uri, -4) == '.php') {
                 $uri = substr($uri, 0, -4);
             }
-            $abs_file = realpath(self::$cwd."/public/".$dir.'/'.$uri.'.php');
-            if($abs_file !== false && file_exists($abs_file)){
-                if ($this->includeCheck($abs_file)){
-                    $g->server['PHP_SELF'] = '/'.$dir.'/'.$uri.'.php';
-                    $g->server['SCRIPT_NAME'] = '/'.$dir.'/'.$uri.'.php';
-                    $g->server['SCRIPT_FILENAME'] = $abs_file;
-                    // include $abs_file;
-                    $__r = App::includeFile($abs_file);
-                    if ($__r instanceof \Generator) return $__r;
-                } else {
-                    $app = App::instance();
-                    assert($app !== null);
-                    return $app->renderError(403);
-                }
-            } else if(is_dir(self::$cwd."/public/".$dir.'/'.$uri)){
+            $docRoot  = self::resolveDocumentRoot();
+            $abs_file = realpath($docRoot . '/' . $dir . '/' . $uri . '.php');
+            if ($abs_file !== false && file_exists($abs_file)) {
+                return App::include('/' . $dir . '/' . $uri . '.php');
+            } else if (is_dir($docRoot . '/' . $dir . '/' . $uri)) {
                 $result = $this->serveDirectory($dir.'/'.$uri, $dir.'/'.$uri);
                 if ($result === false) {
                     return $this->invokeFallbackOrNotFound();
                 }
                 return $result;
-            } else {
-                return $this->invokeFallbackOrNotFound();
             }
+            return $this->invokeFallbackOrNotFound();
         });
 
         if (($effective_settings['task_worker_num'] ?? 0) > 0) {
@@ -1937,7 +2254,7 @@ HELP;
                 'REQUEST_URI' => '/',
                 'SCRIPT_NAME' => '/app.php',
                 'SERVER_NAME' => $srv['HTTP_HOST'] ?? site_host(),
-                'DOCUMENT_ROOT' => self::$cwd . '/public',
+                'DOCUMENT_ROOT' => self::resolveDocumentRoot(),
                 'PHP_SELF' => App::$default_php_self,
                 'SERVER_SOFTWARE' => $serverSoftware,
             ];
@@ -2483,10 +2800,11 @@ class ResponseMiddleware implements MiddlewareInterface
         if (App::$path_info && strpos($path, '.php/') !== false) {
             [$scriptPath, $extra] = explode('.php/', $path, 2);
             $scriptPath .= '.php';
-            $abs = realpath(App::$cwd . '/public' . $scriptPath);
-            if ($abs && is_file($abs) && strpos($abs, App::$cwd . '/public') === 0) {
+            $docRoot = App::resolveDocumentRoot();
+            $abs = realpath($docRoot . $scriptPath);
+            if ($abs && is_file($abs) && strpos($abs, $docRoot) === 0) {
                 $g->server['PATH_INFO']       = '/' . $extra;
-                $g->server['PATH_TRANSLATED'] = App::$cwd . '/public/' . $extra;
+                $g->server['PATH_TRANSLATED'] = $docRoot . '/' . $extra;
                 $g->server['SCRIPT_NAME']     = $scriptPath;
                 $qs = parse_url($uri, PHP_URL_QUERY);
                 // When ignore_php_ext is on, the `.php` URI would hit the 403-block
@@ -2497,6 +2815,14 @@ class ResponseMiddleware implements MiddlewareInterface
                 $uri = $rewritten . ($qs ? '?' . $qs : '');
                 $g->server['REQUEST_URI'] = $uri;
             }
+        }
+
+        // TRACE — disabled by default (XST attack vector). Apache TraceEnable
+        // default is OFF; mirror that. Set App::traceEnabled(true) to allow.
+        if ($method === 'TRACE' && !App::$trace_enabled) {
+            response_set_status(405);
+            response_add_header('Allow', 'GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH');
+            return new Response('', 405);
         }
 
         // OPTIONS — return allowed methods for this URI without running a handler
