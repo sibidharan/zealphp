@@ -82,8 +82,8 @@
     <div class="callout warn">
       <strong>ZealPHP runs as a long-lived process.</strong> This changes the rules from PHP-FPM:
       <ul style="margin:.5rem 0 0;padding-left:1.25rem">
-        <li style="margin-bottom:.35rem"><strong>Global state leaks</strong> — code written for request-per-process may accidentally retain state across requests. Audit your superglobals and <code>static</code> variables.</li>
-        <li style="margin-bottom:.35rem"><strong>Coroutine safety</strong> — references to <code>G::instance()</code> must not be held across <code>yield</code> points; each coroutine has its own context.</li>
+        <li style="margin-bottom:.35rem"><strong>Superglobals leak across visitors in coroutine mode</strong> — <code>$_GET</code> / <code>$_POST</code> / <code>$_SESSION</code> are process-wide PHP arrays. Under the default coroutine mode they're not populated per request, and writes are visible to every other request hitting the same worker. Always use <code>$g-&gt;get</code> / <code>$g-&gt;post</code> / <code>$g-&gt;session</code> via <a href="/coroutines#state-parity">RequestContext</a> — those are per-coroutine and safe in both modes. Also audit <code>static</code> variables for similar cross-request leaks.</li>
+        <li style="margin-bottom:.35rem"><strong>Coroutine safety</strong> — references to <code>RequestContext::instance()</code> (a.k.a. <code>$g</code>) must not be held across <code>yield</code> points; each coroutine has its own context.</li>
         <li style="margin-bottom:.35rem"><strong>uopz compatibility bridge is experimental</strong> — <code>session_start()</code>, <code>header()</code>, etc. are virtualized via <a href="https://pecl.php.net/package/uopz" target="_blank" rel="noopener">uopz</a>. Edge cases exist; report them.</li>
         <li style="margin-bottom:.35rem"><strong>Memory growth</strong> — workers stay alive between requests; profile for leaks under sustained load.</li>
         <li><strong>API stability</strong> — v0.2.x; breaking changes possible until v1.0. Pin a version in <code>composer.json</code>.</li>
@@ -223,8 +223,8 @@ BASH
         <tr><th>LAMP</th><th>ZealPHP</th></tr>
         <tr><td>Apache / Nginx</td><td>OpenSwoole (built into <code>php app.php</code>)</td></tr>
         <tr><td><code>htdocs/about.php</code> → <code>/about.php</code></td><td><code>public/about.php</code> → <code>/about</code></td></tr>
-        <tr><td><code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code></td><td>Same — all work unchanged</td></tr>
-        <tr><td><code>session_start()</code>, <code>header()</code></td><td>Same — overridden via uopz</td></tr>
+        <tr><td><code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code></td><td>Use <code>$g->get</code> / <code>$g->post</code> / <code>$g->session</code> via <code>RequestContext::instance()</code> — works in both modes. PHP superglobals are only safe under <code>App::superglobals(true)</code>; coroutine mode does NOT populate them per request. See <a href="/coroutines#state-parity">the parity rule</a>.</td></tr>
+        <tr><td><code>session_start()</code>, <code>header()</code></td><td>Same — overridden via uopz; populates the per-coroutine <code>$g->session</code> in coroutine mode</td></tr>
         <tr><td>One process per request</td><td>One process, thousands of concurrent coroutines</td></tr>
         <tr><td>Restart Apache after config changes</td><td>Restart <code>php app.php</code> after code changes</td></tr>
         <tr><td>Needs Redis for shared state</td><td>Built-in <code>Store</code> — cross-worker shared memory</td></tr>
@@ -240,17 +240,27 @@ BASH
     <p>Create a file in <code>public/</code>. It becomes a route. No framework code needed.</p>
 
     <?php App::render('/components/_code', [
-      'label' => 'public/hello.php — plain PHP, like you\'ve always written',
+      'label' => 'public/hello.php — coroutine-safe form (works in both modes)',
       'code' => <<<'PHP'
 <?php
+use ZealPHP\RequestContext;
+
+$g = RequestContext::instance();
 session_start();
-$_SESSION['visits'] = ($_SESSION['visits'] ?? 0) + 1;
+$g->session['visits'] = ($g->session['visits'] ?? 0) + 1;
 ?>
 <h1>Hello from ZealPHP</h1>
-<p>You've visited this page <?= $_SESSION['visits'] ?> time(s).</p>
-<p>Query string: <?= htmlspecialchars($_GET['name'] ?? 'world') ?></p>
+<p>You've visited this page <?= $g->session['visits'] ?> time(s).</p>
+<p>Query string: <?= htmlspecialchars($g->get['name'] ?? 'world') ?></p>
 PHP
     ]); ?>
+
+    <div class="callout warn" style="margin-top:1rem">
+      <strong>Two modes, one rule: <a href="/coroutines#state-parity">always use <code>$g->*</code></a>.</strong>
+      The default <code>app.php</code> runs in <strong>coroutine mode</strong> (<code>App::superglobals(false)</code>) — PHP's <code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code> are NOT populated per request there. Writing to <code>$_SESSION</code> would leak across visitors because the superglobal is process-wide. <code>$g->session</code> / <code>$g->get</code> / <code>$g->post</code> are per-coroutine and always work.
+      <br><br>
+      If you're porting a legacy <code>.htaccess</code> + <code>$_*</code> codebase and want a quick lift, set <code>App::superglobals(true);</code> before <code>App::init()</code> — ZealPHP then bridges <code>$g-&gt;*</code> to the real PHP superglobals via <code>$GLOBALS</code> so legacy code keeps working. See the <a href="/legacy-apps">Legacy apps</a> page for the full migration matrix.
+    </div>
 
     <p style="margin-top:.75rem">Start the server and visit <code>http://localhost:8080/hello?name=PHP</code>:</p>
 
