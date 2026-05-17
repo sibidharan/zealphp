@@ -28,6 +28,19 @@ class AppConfigurablesTest extends TestCase
         }
     }
 
+    public static function tearDownAfterClass(): void
+    {
+        // CRITICAL: setUpBeforeClass()'s App::superglobals(false) triggered
+        // OpenSwoole\Runtime::enableCoroutine(HOOK_ALL) (per App::init() in
+        // src/App.php:234-237), which intercepts native curl + file I/O and
+        // requires every such call to live inside a coroutine. Without this
+        // teardown, ANY downstream Integration test using TestCase->http()
+        // (curl_exec under the hood) fatals with "OpenSwoole\Error: API must
+        // be called in the coroutine". Restore the pre-test state.
+        \OpenSwoole\Runtime::enableCoroutine(0);
+        App::superglobals(true);
+    }
+
     protected function setUp(): void
     {
         // Reset every configurable to its documented default before each test.
