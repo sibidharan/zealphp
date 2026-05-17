@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/vendor/autoload.php';
 
 use ZealPHP\App;
+use ZealPHP\GithubStars;
 use ZealPHP\Middleware\CompressionMiddleware;
 use ZealPHP\Middleware\CorsMiddleware;
 use ZealPHP\Middleware\ETagMiddleware;
@@ -184,5 +185,11 @@ if (file_exists(__DIR__ . '/route/_error_test.php')) {
         'shutdown_count' => [\OpenSwoole\Table::TYPE_INT, 1],
     ]);
 }
+
+// GitHub stargazer-count cache — renders the badge in the nav directly via
+// PHP (no client-side fetch, no empty-number flicker on every page load).
+// Refreshed every 15 minutes in a background coroutine; first-ever page load
+// hits an empty cache and shows just the "★" until the refresh resolves.
+GithubStars::register('sibidharan/zealphp');
 
 $app->run($settings);

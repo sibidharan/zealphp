@@ -54,23 +54,12 @@ $links = [
     <a id="gh-star-link" href="https://github.com/sibidharan/zealphp" target="_blank" rel="noopener"
        style="display:inline-flex;align-items:center;gap:.35rem">
       <span style="color:#fbbf24">★</span>
-      <span id="gh-star-count" style="color:#fbbf24;font-variant-numeric:tabular-nums;font-weight:600"></span>
+      <?php $__ghStars = \ZealPHP\GithubStars::format(); ?>
+      <?php if ($__ghStars !== ''): ?>
+        <span id="gh-star-count" style="color:#fbbf24;font-variant-numeric:tabular-nums;font-weight:600"><?= htmlspecialchars($__ghStars, ENT_QUOTES, 'UTF-8') ?></span>
+      <?php endif; ?>
       <span>GitHub ↗</span>
     </a>
   </div>
 </nav>
 </header>
-<script>
-(function() {
-  fetch('https://api.github.com/repos/sibidharan/zealphp', { headers: { 'Accept': 'application/vnd.github+json' } })
-    .then(r => r.ok ? r.json() : Promise.reject(r.status))
-    .then(d => {
-      const n = d.stargazers_count;
-      if (typeof n !== 'number') return;
-      const fmt = n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n);
-      const el = document.getElementById('gh-star-count');
-      if (el) el.textContent = fmt;
-    })
-    .catch(() => { /* silent fallback: link still shows "GitHub ↗" */ });
-})();
-</script>
