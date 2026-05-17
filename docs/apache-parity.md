@@ -59,7 +59,7 @@ ZealPHP closes all three via uopz overrides backed by per-coroutine state in `G`
 | `apache_note()` | namespaced | `G->apache_notes` |
 | `virtual()` | namespaced no-op (returns `false`) | logs "unsupported" once |
 
-The CGI worker ([`src/cgi_worker.php`](../src/cgi_worker.php)) has its own self-contained set of these for legacy files run via `App::includeFile()` in superglobals mode. The subprocess runs in a fresh PHP CLI process so native `session_*` works natively there — no override needed.
+The CGI worker ([`src/cgi_worker.php`](../src/cgi_worker.php)) has its own self-contained set of these for legacy files run via `App::include()` (formerly `App::includeFile()` — alias retained) in superglobals mode. The subprocess runs in a fresh PHP CLI process so native `session_*` works natively there — no override needed.
 
 ### Boot order — process-level error dispatcher before uopz
 
@@ -120,7 +120,7 @@ The static-handler whitelist is the real defense against `/.env` or `/.git/confi
 
 1. Apply DirectorySlash 301 if URI has no trailing slash.
 2. Walk `App::$directory_index` until a file is found.
-3. `.php` entries run via `App::includeFile()` (supports Generator streaming).
+3. `.php` entries run via `App::include()` — file return value flows through the universal return contract (supports `int` status, `array` JSON, `string` HTML, `Generator` streaming, `Closure` with param injection, `void+echo` buffered body).
 4. Non-`.php` entries (HTML, HTM) go via `$response->sendFile()` so Range and ETag still work.
 5. Return `false` if nothing matches — caller falls through to fallback / 404.
 
@@ -156,7 +156,7 @@ The trade-off: zero-copy `sendfile()` on a sub-process boundary is faster than P
 
 ## CGI subprocess for legacy apps
 
-When `App::$superglobals = true`, `App::includeFile($path)` spawns `php cgi_worker.php $path` via `proc_open` — true global scope, native sessions, isolated request lifecycle. The CGI worker has its own uopz overrides ([`src/cgi_worker.php`](../src/cgi_worker.php)) for:
+When `App::$superglobals = true`, `App::include($publicPath)` spawns `php cgi_worker.php $path` via `proc_open` — true global scope, native sessions, isolated request lifecycle. The CGI worker has its own uopz overrides ([`src/cgi_worker.php`](../src/cgi_worker.php)) for:
 
 - header / header_remove / headers_list / headers_sent
 - setcookie / setrawcookie / http_response_code
