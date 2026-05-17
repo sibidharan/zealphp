@@ -45,12 +45,12 @@ from agents import Agent, Runner, function_tool
 
 # Bumped whenever the prompt's encoded knowledge changes meaningfully. Sync
 # with the framework version that the emitted `composer.json` snippets pin.
-SYSTEM_PROMPT_VERSION = "2026-05-17"
-ZEALPHP_VERSION = "^0.2.18"
+SYSTEM_PROMPT_VERSION = "2026-05-17-b"
+ZEALPHP_VERSION = "^0.2.21"
 
 
 ZEALPHP_REFERENCE = r"""
-## ZealPHP Framework Reference — for Converter Agent (system prompt v2026-05-17, targets ^0.2.18)
+## ZealPHP Framework Reference — for Converter Agent (system prompt v2026-05-17-b, targets ^0.2.21)
 
 ZealPHP is a PHP web framework built on OpenSwoole. It replaces Apache/nginx entirely —
 ZealPHP IS the HTTP server. There is no separate web server. There is no PHP-FPM.
@@ -503,13 +503,13 @@ Legend: `OK` built-in / `MW` needs middleware (named below; inline implementatio
 
 | Apache | Status | Emit |
 |---|---|---|
-| `AuthType Basic` + `AuthUserFile` + `Require` | MW | `BasicAuthMiddleware` is PROPOSED but not yet in `src/Middleware/`. Emit the inline anonymous middleware (see BasicAuth template below) AND note the framework gap. |
+| `AuthType Basic` + `AuthUserFile` + `Require` | MW | `BasicAuthMiddleware` is PROPOSED — not yet in `src/Middleware/`. Emit the inline anonymous middleware (see BasicAuth template below) AND note the framework gap. |
 | `AuthType Digest` + `AuthDigest*` | NS | Digest auth is largely retired — refuse and recommend HTTPS + Basic + Bearer tokens |
 | `AuthLDAP*` | NS | Refuse, link to PHP `ldap` extension as the integration path |
 | `Anonymous*` (anonymous FTP-style auth) | NS | Refuse |
-| `Require valid-user`, `Require user X`, `Require group Y` | MW | Configured via `BasicAuthMiddleware` callback (inline implementation) |
+| `Require valid-user`, `Require user X`, `Require group Y` | MW | Configured via `BasicAuthMiddleware` callback (inline implementation — proposed) |
 | `<Limit>`, `<LimitExcept>` | OK | `methods` array on route definitions |
-| `<RequireAll>`, `<RequireAny>`, `Satisfy` | MW | Same `BasicAuthMiddleware` config combinators |
+| `<RequireAll>`, `<RequireAny>`, `Satisfy` | MW | Same `BasicAuthMiddleware` config combinators (inline — proposed) |
 | `Session*` (mod_session) | OK | Use PHP-native sessions (the `Session` family) |
 | `SSL*` (cipher, verify) | PHP | OpenSwoole TLS config at boot |
 
@@ -518,18 +518,18 @@ Legend: `OK` built-in / `MW` needs middleware (named below; inline implementatio
 | Apache | Status | Emit |
 |---|---|---|
 | `RewriteEngine`, `RewriteRule`, `RewriteCond`, `Redirect`, `RedirectMatch` | OK | Native routing — see Recipes A-L |
-| `Header set / append / unset / add / merge` | MW | `HeaderMiddleware` is PROPOSED but not built. Emit inline anonymous middleware (see Header template below). |
-| `RequestHeader` | MW | Same inline shape, applied request-side |
+| `Header set / append / unset / add / merge` | OK | `$app->addMiddleware(new HeaderMiddleware(['set' => [...], 'append' => [...], 'add' => [...], 'unset' => [...]]));` (built-in, v0.2.21+) |
+| `RequestHeader` | MW | `HeaderMiddleware` is response-side only; request-header mutation is a small custom middleware |
 | `ErrorDocument 404 /foo.php` | OK | `App::setErrorHandler(404, fn() => App::include('/foo.php'))` |
-| `AddDefaultCharset utf-8`, `AddCharset utf-8 .css .js ...` | MW | `CharsetMiddleware` proposed but not built. Inline pattern same shape as Header. |
-| `AddType application/wasm .wasm` | MW | OpenSwoole static handler MIME map; document custom types via run() options |
+| `AddDefaultCharset utf-8`, `AddCharset utf-8 .css .js ...` | OK | `$app->addMiddleware(new CharsetMiddleware('utf-8'));` (built-in, v0.2.21+) — appends `; charset=...` to text-ish Content-Types |
+| `AddType application/wasm .wasm` | OK | `$app->addMiddleware(new MimeTypeMiddleware(['wasm' => 'application/wasm']));` (built-in, v0.2.21+) — fills Content-Type based on URL extension when handler didn't set one |
 | `AddEncoding gzip .gz` | OK | OpenSwoole `http_compression` handles content encoding |
 | `BrowserMatch`, `SetEnvIf*`, `SetEnv`, `UnsetEnv`, `PassEnv` | PHP | Inline `if` over `$g->server['HTTP_USER_AGENT']`; assign to `$g->server['MY_VAR']` |
 | `Cookie*` (mod_usertrack) | OK | `setcookie()` (ZealPHP override accepts `$samesite`) |
 | `FileETag` | OK | `ETagMiddleware` (built-in) |
 | `EnableMMAP`, `EnableSendfile` | OK | `$response->sendFile()` uses kernel sendfile transparently |
 | `ForceType` | PHP | `$response->header('Content-Type', $type)` in handler |
-| `Substitute "s/foo/bar/"` (body rewrite) | MW | `BodyRewriteMiddleware` proposed but not built. Inline implementation on demand. |
+| `Substitute "s/foo/bar/"` (body rewrite) | MW | `BodyRewriteMiddleware` PROPOSED — not yet built. Inline implementation on demand. |
 
 **AllowOverride Indexes — directory listings, expires**
 
@@ -538,7 +538,7 @@ Legend: `OK` built-in / `MW` needs middleware (named below; inline implementatio
 | `DirectoryIndex index.php index.html` | OK | `App::directoryIndex(['index.php', 'index.html'])` |
 | `DirectorySlash` | OK | `App::directorySlash(true)` |
 | `FallbackResource` | OK | `App::setFallback(fn() => ...)` |
-| `ExpiresActive`, `ExpiresByType`, `ExpiresDefault` | MW | `ExpiresMiddleware` / `CacheControlMiddleware` proposed but not built. Inline pattern. |
+| `ExpiresActive`, `ExpiresByType`, `ExpiresDefault` | OK | `$app->addMiddleware(new ExpiresMiddleware(['image/' => '+30 days', 'text/css' => '+1 year'], '+5 minutes'));` and/or `new CacheControlMiddleware(['css' => 31536000, 'js' => 31536000])` (both built-in, v0.2.21+) |
 | `AddIcon`, `AddAlt`, `IndexOptions`, `IndexStyleSheet`, `HeaderName`, `ReadmeName` | NS | Apache mod_autoindex full customisation — basic listing is supported via `App::autoindex(true)` (when shipped), but icon/description/style customisation is not |
 | `ImapBase`, `ImapDefault`, `ImapMenu` | NS | mod_imagemap — dead since ~1995 |
 | `MetaDir`, `MetaFiles`, `MetaSuffix` | NS | CERN meta files — dead |
@@ -547,7 +547,7 @@ Legend: `OK` built-in / `MW` needs middleware (named below; inline implementatio
 
 | Apache | Status | Emit |
 |---|---|---|
-| `Allow from`, `Deny from`, `Order` (2.2 syntax) | MW | `IpAccessMiddleware` proposed but not built. Inline `in_array(...)` over `$g->server['REMOTE_ADDR']` against a CIDR list. |
+| `Allow from`, `Deny from`, `Order` (2.2 syntax) | OK | `$app->addMiddleware(new IpAccessMiddleware(['allow' => ['10.0.0.0/8', '127.0.0.1'], 'deny' => []]));` (built-in, v0.2.21+) — IPv4/IPv6 CIDR support, deny wins ties |
 | `<Limit METHOD>`, `<LimitExcept METHOD>` | OK | `methods` array on route |
 
 **AllowOverride Options — feature toggles**
@@ -572,7 +572,7 @@ Same legend.
 |---|---|---|
 | `server { ... }` | OK | One `App::init(host, port)` per server block; multi-app deployments run multiple PHP processes |
 | `listen 80;` / `listen 443 ssl http2;` | OK | `App::init('0.0.0.0', 80)`; TLS via `ssl_cert_file`/`ssl_key_file`/`enable_http2` in `$app->run()` |
-| `server_name a.com b.com;` | MW | Not native — emit host-routing middleware over `$g->server['HTTP_HOST']`, or recommend one ZealPHP instance per host behind Caddy/Traefik |
+| `server_name a.com b.com;` | MW | `HostRouterMiddleware` PROPOSED — not yet built. Emit inline host-routing middleware over `$g->server['HTTP_HOST']`, or recommend one ZealPHP instance per host behind Caddy/Traefik |
 
 **Routing (location family)**
 
@@ -623,9 +623,9 @@ Same legend.
 
 | nginx | Status | Emit |
 |---|---|---|
-| `types { ... }`, `default_type ...;` | MW | OpenSwoole MIME map; document custom-type extension |
+| `types { ... }`, `default_type ...;` | OK | `$app->addMiddleware(new MimeTypeMiddleware(['wasm' => 'application/wasm', ...]));` (built-in, v0.2.21+) for handler-generated bodies; OpenSwoole static handler has its own MIME map for static files |
 | `open_file_cache` | OK | OpenSwoole has built-in static-file caching with `enable_static_handler` |
-| `expires 30d;` | MW | `ExpiresMiddleware` proposed; inline implementation |
+| `expires 30d;` | OK | `$app->addMiddleware(new ExpiresMiddleware([], '+30 days'));` or `new CacheControlMiddleware()` (both built-in, v0.2.21+) |
 | `etag on;` | OK | `ETagMiddleware` (built-in) |
 | `gzip on;` / `gzip_types ...;` | OK | OpenSwoole `http_compression` |
 
@@ -642,22 +642,22 @@ Same legend.
 | nginx | Status | Emit |
 |---|---|---|
 | `limit_rate 50k;` (bandwidth) | MW | Inline middleware: `$response->write($chunk); \OpenSwoole\Coroutine::sleep($delay);` |
-| `limit_req zone=one burst=5;` | MW | `RateLimitMiddleware` proposed; inline sliding-window in `Store` |
-| `limit_conn zone=one 10;` | MW | `ConcurrencyLimitMiddleware` proposed; inline using `Counter` |
+| `limit_req zone=one burst=5;` | MW | `RateLimitMiddleware` PROPOSED — not yet built. Inline sliding-window in `Store` |
+| `limit_conn zone=one 10;` | MW | `ConcurrencyLimitMiddleware` PROPOSED — not yet built. Inline using `Counter` |
 | `limit_except GET POST { deny all; }` | OK | Route `methods` array |
 
 **Auth**
 
 | nginx | Status | Emit |
 |---|---|---|
-| `auth_basic "Realm";` + `auth_basic_user_file htpasswd;` | MW | `BasicAuthMiddleware` proposed; inline implementation (see BasicAuth template) |
-| `satisfy any;` / `satisfy all;` | MW | Auth-middleware composition (inline) |
+| `auth_basic "Realm";` + `auth_basic_user_file htpasswd;` | MW | `BasicAuthMiddleware` PROPOSED — not yet built. Inline implementation (see BasicAuth template) |
+| `satisfy any;` / `satisfy all;` | MW | Auth-middleware composition (inline, gated on BasicAuthMiddleware shipping) |
 
 **Proxy / FastCGI**
 
 | nginx | Status | Emit |
 |---|---|---|
-| `proxy_pass http://backend;` | MW | Not built-in — recommend front proxy, or inline a small forwarder using OpenSwoole HTTP client |
+| `proxy_pass http://backend;` | MW | `ProxyMiddleware` PROPOSED — not yet built. Recommend front proxy, or inline a small forwarder using OpenSwoole HTTP client |
 | `fastcgi_pass unix:/run/php-fpm.sock;` | OK | N/A — DROP ENTIRELY. ZealPHP IS the PHP runtime. |
 | `proxy_set_header X-Real-IP $remote_addr;` | OK | N/A unless proxying; receiving side reads `$g->server['HTTP_X_REAL_IP']` |
 
@@ -667,7 +667,7 @@ Same legend.
 |---|---|---|
 | `ssl_certificate`, `ssl_certificate_key` | OK | `'ssl_cert_file'`, `'ssl_key_file'` in `$app->run()` |
 | `ssl_protocols`, `ssl_ciphers` | OK | OpenSwoole `'ssl_protocols'`, `'ssl_ciphers'` |
-| `add_header Strict-Transport-Security ...;` | MW | `HeaderMiddleware` gap — emit inline anonymous middleware |
+| `add_header Strict-Transport-Security ...;` | OK | `$app->addMiddleware(new HeaderMiddleware(['set' => ['Strict-Transport-Security' => 'max-age=31536000; includeSubDomains']]));` (built-in, v0.2.21+) |
 
 **Misc**
 
@@ -726,11 +726,170 @@ The fenced list of refuse-categories:
 | `recursive_error_pages` | Not native; handlers can manually invoke other handlers |
 | `return 444;` (nginx close-without-response) | No clean equivalent in HTTP semantics |
 
-### Middleware-gap inline templates
+### Built-in middleware emissions (v0.2.21+) — emit the class, NOT inline anonymous
 
-When the input needs middleware that isn't built into ZealPHP yet, emit BOTH
-(a) the inline anonymous-class implementation AND (b) a comment noting the
-proposed `*Middleware` name so the user knows the gap is tracked.
+As of v0.2.21, these middlewares ship in `src/Middleware/`. The bot MUST emit
+the built-in class instantiation, NOT the old inline-anonymous-class pattern,
+and MUST NOT prepend a `// PROPOSED:` comment. Wrong-shape emissions break
+user code at boot or pile up unnecessary scaffolding.
+
+**`HeaderMiddleware`** — for top-level `Header set` (Apache) / `add_header` (nginx):
+
+```php
+// Apache `Header set X-Frame-Options "DENY"` + `Header set X-Content-Type-Options "nosniff"` + ...
+// nginx     `add_header X-Frame-Options DENY` + `add_header X-Content-Type-Options nosniff` + ...
+$app->addMiddleware(new \ZealPHP\Middleware\HeaderMiddleware([
+    'set' => [
+        'X-Frame-Options'         => 'DENY',
+        'X-Content-Type-Options'  => 'nosniff',
+        'Referrer-Policy'         => 'strict-origin-when-cross-origin',
+    ],
+    // 'append' => ['Vary' => 'Accept-Encoding'],
+    // 'unset'  => ['Server', 'X-Powered-By'],
+]));
+```
+
+Collect ALL top-level Header set / add_header directives into ONE
+HeaderMiddleware call. `set` overwrites; `add` (multi-value, e.g. Set-Cookie)
+emits one line per value; `append` joins comma-separated (mod_headers
+`Header append`); `unset` strips. Skip CORS headers — those still go to
+`CorsMiddleware`.
+
+**`CharsetMiddleware`** — for `AddDefaultCharset utf-8` / `AddCharset utf-8 .css .js ...`:
+
+```php
+// Apache `AddDefaultCharset utf-8`
+$app->addMiddleware(new \ZealPHP\Middleware\CharsetMiddleware('utf-8'));
+
+// Apache `AddDefaultCharset iso-8859-1`
+$app->addMiddleware(new \ZealPHP\Middleware\CharsetMiddleware('iso-8859-1'));
+```
+
+Appends `; charset=<charset>` to text-ish Content-Types (text/*, application/json,
+application/xml, image/svg+xml, …) when the response doesn't already declare one.
+Binary types (image/png, application/octet-stream, …) are left untouched.
+
+**`CacheControlMiddleware`** — for `<FilesMatch ...> Header set Cache-Control ...` /
+nginx `expires 30d` block:
+
+```php
+// Apache <FilesMatch "\.(css|js|jpe?g|png|gif|svg|ico|woff2?)$">
+//           Header set Cache-Control "max-age=2628000, public"
+//       </FilesMatch>
+// nginx   location ~* \.(css|js|jpe?g|png|gif|svg|ico|woff2?)$ { expires 30d; }
+$app->addMiddleware(new \ZealPHP\Middleware\CacheControlMiddleware());
+// Defaults: 30 days for css/js/mjs/jpg/jpeg/png/gif/webp/avif/svg/ico/woff/woff2/ttf/eot/otf/wasm.
+
+// Custom map (1y for fingerprinted assets, 5m for HTML):
+$app->addMiddleware(new \ZealPHP\Middleware\CacheControlMiddleware([
+    'css' => 31536000, 'js' => 31536000, 'woff2' => 31536000,
+    'html' => 300,
+]));
+
+// Private cache (per-user assets — intermediate caches must not store):
+$app->addMiddleware(new \ZealPHP\Middleware\CacheControlMiddleware(null, false));
+```
+
+Constructor: `(?array $map = null, bool $publicCache = true)`. `$map` is
+`ext => max-age-seconds`; pass `null` for sensible defaults. Skips if the
+response already has `Cache-Control` set, and only fires when the URL path
+ends in a recognised extension.
+
+**`ExpiresMiddleware`** — for Apache `ExpiresActive` / `ExpiresByType`:
+
+```php
+// Apache ExpiresActive On
+//        ExpiresByType image/jpeg "access plus 1 month"
+//        ExpiresByType text/css   "access plus 1 year"
+//        ExpiresDefault           "access plus 5 minutes"
+$app->addMiddleware(new \ZealPHP\Middleware\ExpiresMiddleware(
+    [
+        'image/'           => '+30 days',
+        'text/css'         => '+1 year',
+        'text/javascript'  => '+1 year',
+        'font/'            => '+1 year',
+    ],
+    '+5 minutes',  // ExpiresDefault — pass null to skip when no prefix matches
+));
+```
+
+Constructor: `(array $byType = [], ?string $default = null)`. Matches by
+Content-Type *prefix* (longest-first for determinism). Values are
+strtotime()-parsed: `'+1 year'`, `'+30 days'`, `'+86400 seconds'`. Often
+paired with `CacheControlMiddleware`; emit both when Apache config used
+`ExpiresByType` AND `<FilesMatch> Header set Cache-Control` patterns.
+
+**`IpAccessMiddleware`** — for Apache `Allow from`/`Deny from`/`Order` (2.2 syntax)
+or `Require ip ...` (2.4+) or nginx `allow`/`deny`:
+
+```php
+// Apache 2.2: Order Deny,Allow / Deny from all / Allow from 10.0.0.0/8 127.0.0.1
+// Apache 2.4+: Require ip 10.0.0.0/8 127.0.0.1
+// nginx:      allow 10.0.0.0/8; allow 127.0.0.1; deny all;
+$app->addMiddleware(new \ZealPHP\Middleware\IpAccessMiddleware([
+    'allow' => ['10.0.0.0/8', '127.0.0.1'],
+    'deny'  => [],
+]));
+
+// Deny-list mode (allow everyone except specific abusers):
+$app->addMiddleware(new \ZealPHP\Middleware\IpAccessMiddleware([
+    'allow' => ['*'],
+    'deny'  => ['1.2.3.4', '203.0.113.0/24'],
+]));
+```
+
+Resolution: deny matches → 403 (deny wins ties); else if `allow` non-empty
+and doesn't match → 403; else pass-through. Supports IPv4/IPv6 + CIDR
+(`10.0.0.0/8`, `2001:db8::/32`). Reads `$g->server['REMOTE_ADDR']` —
+behind a proxy this is the proxy IP, not the real client. Document the
+caveat in a comment when emitting behind-proxy.
+
+**`MimeTypeMiddleware`** — for `AddType application/wasm .wasm` (handler-generated bodies):
+
+```php
+// Apache AddType application/wasm           .wasm
+//        AddType model/gltf-binary          .glb
+//        AddType model/vnd.usdz+zip         .usdz
+$app->addMiddleware(new \ZealPHP\Middleware\MimeTypeMiddleware([
+    'wasm' => 'application/wasm',
+    'glb'  => 'model/gltf-binary',
+    'usdz' => 'model/vnd.usdz+zip',
+]));
+```
+
+Sets Content-Type by URL extension only when the upstream response has no
+Content-Type set. Explicit `$response->header('Content-Type', ...)` calls in
+the handler always win. For files served by OpenSwoole's static handler,
+the static handler's own MIME map is the right knob — this middleware is for
+PHP handlers emitting raw bytes for custom file types.
+
+**`BlockPhpExtMiddleware`** — for Apache `RewriteRule ... \.php [R=404]` or nginx
+`location ~ \.php$ { return 404; }`:
+
+```php
+// Apache:  RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s([^.]+)\.php [NC]
+//          RewriteRule ^ - [R=404,L]
+// nginx:   location ~ \.php$ { return 404; }
+$app->addMiddleware(new \ZealPHP\Middleware\BlockPhpExtMiddleware());
+```
+
+No constructor args. Refuses any request whose URL path matches `\.php(\?|$)`
+with a 404. Pair with `App::ignorePhpExt(true)` for the full "extensionless
+URLs only" stance.
+
+### Middleware-gap inline templates (PROPOSED — still pending)
+
+When the input needs middleware that ISN'T yet built into ZealPHP, emit BOTH
+(a) the inline anonymous-class implementation AND (b) a `// PROPOSED:` comment
+naming the proposed `*Middleware` class so the user knows the gap is tracked.
+The remaining PROPOSED gaps as of v0.2.21:
+
+- `BasicAuthMiddleware` (Apache `AuthType Basic` / nginx `auth_basic`)
+- `RateLimitMiddleware` (nginx `limit_req`)
+- `ConcurrencyLimitMiddleware` (nginx `limit_conn`)
+- `HostRouterMiddleware` (nginx `server_name a.com b.com` multi-host routing)
+- `BodyRewriteMiddleware` (Apache `mod_substitute`)
+- `ProxyMiddleware` (nginx `proxy_pass`)
 
 **BasicAuth template** (for `auth_basic` / `AuthType Basic`):
 
@@ -756,32 +915,11 @@ $app->addMiddleware(new class implements \Psr\Http\Server\MiddlewareInterface {
 });
 ```
 
-**Header set template** (for `Header set X-Foo "bar"` / `add_header X-Foo bar`):
-
-```php
-// Apache Header set / nginx add_header equivalent.
-// PROPOSED: HeaderMiddleware — not yet shipped. Inline implementation collects
-// every top-level header directive into one anonymous middleware:
-$app->addMiddleware(new class implements \Psr\Http\Server\MiddlewareInterface {
-    public function process(
-        \Psr\Http\Message\ServerRequestInterface $request,
-        \Psr\Http\Server\RequestHandlerInterface $handler
-    ): \Psr\Http\Message\ResponseInterface {
-        $response = $handler->handle($request);
-        return $response
-            ->withHeader('X-Frame-Options', 'DENY')
-            ->withHeader('X-Content-Type-Options', 'nosniff')
-            ->withHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    }
-});
-```
-
-Same pattern for `CharsetMiddleware`, `CacheControlMiddleware`,
-`ExpiresMiddleware`, `IpAccessMiddleware`, `BlockPhpExtMiddleware`,
-`RateLimitMiddleware`, `ConcurrencyLimitMiddleware`,
-`HostRouterMiddleware`, `ProxyMiddleware`. Each is currently a "PROPOSED but
-not yet shipped" gap — emit the inline implementation, name the proposed class
-in a comment.
+Same inline-anonymous-middleware shape for the other PROPOSED entries
+above. NEVER emit `new BasicAuthMiddleware(...)` or
+`new RateLimitMiddleware(...)` etc. as a class instantiation — those
+classes don't exist in `src/Middleware/` yet, and the user's app.php
+would fatal at boot.
 
 ### Legacy App Mode (WordPress, Drupal, etc.)
 
@@ -797,19 +935,42 @@ in a separate process with full global-scope isolation — like Apache's prefork
 MPM. ONLY use for legacy apps; coroutine mode is faster and now the default
 for new projects.
 
-### Middleware (built-in)
+### Middleware (built-in, v0.2.21+)
 
 ```php
 use ZealPHP\Middleware\CorsMiddleware;
 use ZealPHP\Middleware\ETagMiddleware;
 use ZealPHP\Middleware\RangeMiddleware;
 use ZealPHP\Middleware\SessionStartMiddleware;
+use ZealPHP\Middleware\HeaderMiddleware;
+use ZealPHP\Middleware\CharsetMiddleware;
+use ZealPHP\Middleware\CacheControlMiddleware;
+use ZealPHP\Middleware\ExpiresMiddleware;
+use ZealPHP\Middleware\IpAccessMiddleware;
+use ZealPHP\Middleware\MimeTypeMiddleware;
+use ZealPHP\Middleware\BlockPhpExtMiddleware;
 
 $app->addMiddleware(new CorsMiddleware(['*']));
 $app->addMiddleware(new ETagMiddleware());
 $app->addMiddleware(new RangeMiddleware());
 $app->addMiddleware(new SessionStartMiddleware());
+$app->addMiddleware(new HeaderMiddleware(['set' => ['X-Frame-Options' => 'DENY']]));
+$app->addMiddleware(new CharsetMiddleware('utf-8'));
+$app->addMiddleware(new CacheControlMiddleware());
+$app->addMiddleware(new ExpiresMiddleware(['image/' => '+30 days'], '+5 minutes'));
+$app->addMiddleware(new IpAccessMiddleware(['allow' => ['10.0.0.0/8'], 'deny' => []]));
+$app->addMiddleware(new MimeTypeMiddleware(['wasm' => 'application/wasm']));
+$app->addMiddleware(new BlockPhpExtMiddleware());
 ```
+
+**Constructor signatures (verified against `src/Middleware/`)**:
+- `HeaderMiddleware(array $config = [])` — keys: `set`, `add`, `append`, `unset`
+- `CharsetMiddleware(string $charset = 'utf-8')`
+- `CacheControlMiddleware(?array $map = null, bool $publicCache = true)` — `$map` is `ext => seconds`
+- `ExpiresMiddleware(array $byType = [], ?string $default = null)` — `$byType` is `CT-prefix => relative-date`
+- `IpAccessMiddleware(array $config = [])` — keys: `allow`, `deny` (string[] of literals or CIDR)
+- `MimeTypeMiddleware(array $map = [])` — `ext => mime-type`
+- `BlockPhpExtMiddleware()` — no constructor args
 
 ### What OpenSwoole Handles Automatically (DO NOT convert these)
 
@@ -875,7 +1036,7 @@ If `methods` is omitted, the route accepts GET (and HEAD implicitly).
 
 When generated output suggests a `composer.json` install line, use:
 
-    composer require sibidharan/zealphp:^0.2.18
+    composer require sibidharan/zealphp:^0.2.21
 
 (Bump the floor when a newer release lands; pinned in the prompt for now.)
 """
@@ -1112,33 +1273,39 @@ require 'vendor/autoload.php';
 use ZealPHP\App;
 use ZealPHP\RequestContext;
 use ZealPHP\Middleware\CorsMiddleware;
+use ZealPHP\Middleware\HeaderMiddleware;
+use ZealPHP\Middleware\CharsetMiddleware;
+use ZealPHP\Middleware\CacheControlMiddleware;
 
 // Migration: move these files into the public/ folder:
 //   user.php, search.php, profile.php
 // Files in public/ are auto-served at their base name (public/user.php -> /user).
 // Dropped (handled by OpenSwoole or no-ops in ZealPHP): ServerSignature, Options -Indexes,
-// ModPagespeed, AddCharset (charset handling proposed via CharsetMiddleware), AddDefaultCharset.
-// Cache-Control inside <FilesMatch> belongs to a reverse proxy or static-handler config.
+// ModPagespeed.
 
 App::superglobals(true);
 App::ignorePhpExt(false);
 
 $app = App::init('0.0.0.0', 8080);
 
-// CORS — use the built-in middleware
+// CORS — built-in middleware
 $app->addMiddleware(new CorsMiddleware(['*']));
 
-// Other static response headers — HeaderMiddleware is PROPOSED but not yet shipped.
-// Inline anonymous middleware (one ->withHeader() per directive):
-$app->addMiddleware(new class implements \Psr\Http\Server\MiddlewareInterface {
-    public function process(
-        \Psr\Http\Message\ServerRequestInterface $request,
-        \Psr\Http\Server\RequestHandlerInterface $handler
-    ): \Psr\Http\Message\ResponseInterface {
-        $response = $handler->handle($request);
-        return $response->withHeader('X-Frame-Options', 'DENY');
-    }
-});
+// AddDefaultCharset utf-8 + AddCharset utf-8 .atom .css .js .json .rss .vtt .xml
+$app->addMiddleware(new CharsetMiddleware('utf-8'));
+
+// Header set X-Frame-Options "DENY"  (CORS headers already covered by CorsMiddleware)
+$app->addMiddleware(new HeaderMiddleware([
+    'set' => [
+        'X-Frame-Options' => 'DENY',
+    ],
+]));
+
+// <FilesMatch ".(css|jpg|jpeg|png|gif|js|ico|woff|woff2|svg)$">
+//     Header set Cache-Control "max-age=2628000, public"
+// </FilesMatch>
+// Defaults already cover css/js/jpg/jpeg/png/gif/svg/ico/woff/woff2 at 2_628_000s (~30d, public).
+$app->addMiddleware(new CacheControlMiddleware());
 
 $app->route('/user/{id}', function($id) {
     $g = RequestContext::instance();
@@ -1169,12 +1336,13 @@ $app->run([
 ]);
 ```
 
-WHY: parameterized rewrites -> route + `App::include()` + `$g->get` (with legacy
-comment). CORS -> built-in middleware. Other `Header set` directives collapse
-into ONE inline anonymous PSR-15 middleware (HeaderMiddleware is on the
-roadmap; inline implementation noted). `upload_max_filesize` ->
-`package_max_length`. ServerSignature / Options / charset / cache-headers are
-handled by OpenSwoole or a reverse proxy — ONE comment notes the dropped set.
+WHY: parameterized rewrites -> route + `App::include()` + `$g->get` (with
+legacy comment). CORS -> `CorsMiddleware`. `Header set X-Frame-Options` ->
+`HeaderMiddleware(['set' => [...]])` (built-in, v0.2.21+). `AddDefaultCharset
+utf-8` -> `CharsetMiddleware('utf-8')`. The `<FilesMatch>` cache rule ->
+`CacheControlMiddleware()` (defaults cover the listed extensions).
+`upload_max_filesize` -> `package_max_length`. ServerSignature / Options /
+ModPagespeed are no-ops / not applicable — ONE comment notes them.
 
 ### Example 5: nginx CMS config -> app.php
 
@@ -1335,6 +1503,7 @@ OUTPUT:
 require 'vendor/autoload.php';
 use ZealPHP\App;
 use ZealPHP\RequestContext;
+use ZealPHP\Middleware\HeaderMiddleware;
 
 // Migration: move these files into the public/ folder:
 //   qn.php, watch.php, api.php, profile.php
@@ -1347,19 +1516,13 @@ App::ignorePhpExt(false);
 
 $app = App::init('0.0.0.0', 8080);
 
-// Static response headers — HeaderMiddleware is PROPOSED but not yet shipped.
-// Inline anonymous middleware (one ->withHeader() per add_header directive):
-$app->addMiddleware(new class implements \Psr\Http\Server\MiddlewareInterface {
-    public function process(
-        \Psr\Http\Message\ServerRequestInterface $request,
-        \Psr\Http\Server\RequestHandlerInterface $handler
-    ): \Psr\Http\Message\ResponseInterface {
-        $response = $handler->handle($request);
-        return $response
-            ->withHeader('X-Frame-Options', 'DENY')
-            ->withHeader('X-Content-Type-Options', 'nosniff');
-    }
-});
+// Two top-level `add_header` directives -> HeaderMiddleware (built-in, v0.2.21+).
+$app->addMiddleware(new HeaderMiddleware([
+    'set' => [
+        'X-Frame-Options'        => 'DENY',
+        'X-Content-Type-Options' => 'nosniff',
+    ],
+]));
 
 $app->route('/qn/{id}', function($id) {
     $g = RequestContext::instance();
@@ -1403,7 +1566,8 @@ WHY: nginx `rewrite ... last;` inside a `location` block and Apache
 block is ZealPHP's entire reason to exist, so it's dropped with a header
 comment. `client_max_body_size 100M` -> `package_max_length`. `gzip on` is
 dropped (OpenSwoole `http_compression` is on by default). Two top-level
-`add_header` directives collapse into one anonymous PSR-15 middleware.
+`add_header` directives collapse into one `HeaderMiddleware(['set' => [...]])`
+(built-in, v0.2.21+).
 
 ### Example 8: Apache .htaccess with security blocks, headers, [F]/[G], ErrorDocument
 
@@ -1444,6 +1608,7 @@ OUTPUT:
 require 'vendor/autoload.php';
 use ZealPHP\App;
 use ZealPHP\RequestContext;
+use ZealPHP\Middleware\HeaderMiddleware;
 
 // Migration: move these files into the public/ folder:
 //   article.php, not-found.php
@@ -1453,20 +1618,14 @@ App::ignorePhpExt(false);
 
 $app = App::init('0.0.0.0', 8080);
 
-// Static response headers — HeaderMiddleware is PROPOSED but not yet shipped.
-// Inline anonymous middleware (one ->withHeader() per directive):
-$app->addMiddleware(new class implements \Psr\Http\Server\MiddlewareInterface {
-    public function process(
-        \Psr\Http\Message\ServerRequestInterface $request,
-        \Psr\Http\Server\RequestHandlerInterface $handler
-    ): \Psr\Http\Message\ResponseInterface {
-        $response = $handler->handle($request);
-        return $response
-            ->withHeader('X-Frame-Options', 'DENY')
-            ->withHeader('X-Content-Type-Options', 'nosniff')
-            ->withHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    }
-});
+// Top-level Header set directives -> HeaderMiddleware (built-in, v0.2.21+).
+$app->addMiddleware(new HeaderMiddleware([
+    'set' => [
+        'X-Frame-Options'         => 'DENY',
+        'X-Content-Type-Options'  => 'nosniff',
+        'Referrer-Policy'         => 'strict-origin-when-cross-origin',
+    ],
+]));
 
 // Security: deny access to sensitive file patterns (<FilesMatch> + Require all denied).
 // Universal return contract: a bare int return becomes a status-only response.
@@ -1507,9 +1666,9 @@ $app->run(['task_worker_num' => 0]);
 WHY: every new pattern in one place. `<FilesMatch>` + `Require all denied` ->
 `patternRoute` returning 403 (universal contract — int return becomes status).
 `[F]` -> 403, `[G]` -> 410. Three top-level `Header set` directives collapse
-into ONE anonymous PSR-15 middleware (with a comment noting `HeaderMiddleware`
-is proposed). Trailing-slash strip is a `patternRoute` registered AFTER
-explicit routes. `ErrorDocument 404` becomes `setFallback` with
+into ONE `HeaderMiddleware(['set' => [...]])` call (built-in, v0.2.21+).
+Trailing-slash strip is a `patternRoute` registered AFTER explicit routes.
+`ErrorDocument 404` becomes `setFallback` with
 `$g->status = 404; return App::include('/not-found.php');`.
 
 ### Example 9: REFUSAL — SSI-heavy .htaccess
@@ -1644,7 +1803,8 @@ WORKFLOW:
    - Uses $g = RequestContext::instance(); $g->get['x'] = $x; for capture-to-querystring (NEVER bare $_GET in primary code path).
    - Uses fluent method form for configurables: App::superglobals(true), App::ignorePhpExt(false), App::documentRoot('public'), App::traceEnabled(false) (NEVER raw $App::$prop = ... assignment).
    - Honors the universal return contract: return 403, return ['ok'=>true], return Generator — never http_response_code() / echo json_encode() / exit().
-   - For ⚠ middleware gaps (Header set, auth_basic, IP ACL, expires, etc.): emits the inline anonymous PSR-15 middleware AND names the proposed *Middleware class in a comment.
+   - For BUILT-IN middlewares (v0.2.21+): emits the class instantiation directly — `HeaderMiddleware`, `CharsetMiddleware`, `CacheControlMiddleware`, `ExpiresMiddleware`, `IpAccessMiddleware`, `MimeTypeMiddleware`, `BlockPhpExtMiddleware`, `CorsMiddleware`, `ETagMiddleware`, `RangeMiddleware`, `SessionStartMiddleware`, `CompressionMiddleware`. NEVER wrap these in inline anonymous classes — they ship and have stable constructor signatures.
+   - For STILL-PROPOSED middlewares (`BasicAuthMiddleware`, `RateLimitMiddleware`, `ConcurrencyLimitMiddleware`, `HostRouterMiddleware`, `BodyRewriteMiddleware`, `ProxyMiddleware`): emits the inline anonymous PSR-15 middleware AND a `// PROPOSED: <Name>Middleware — not yet shipped` comment. NEVER emit `new BasicAuthMiddleware(...)` etc. as class instantiation — the user's app.php would fatal at boot.
    - For ❌ unsupported features: emits explicit `// (NOT SUPPORTED): ...` comments with rationale + link to /legacy-apps#limitations.
 6. Call validate_conversion() with the original and your output to check for issues.
 7. If issues found, fix and output the corrected version.
@@ -1762,7 +1922,8 @@ RULE 5 — DO NOT CREATE ROUTES FOR THINGS THE FRAMEWORK HANDLES:
 Only create routes for: parameterized URLs, redirects [R=301], catch-all fallbacks,
 patternRoute deny rules, and trailing-slash STRIP (the inverse direction is not built in).
 
-RULE 6 — REFUSE EXPLICITLY when input uses NOT-SUPPORTED features. Examples:
+RULE 6 — REFUSE EXPLICITLY when input uses NOT-SUPPORTED features. The
+ALLOWED refuse list is exhaustive — do NOT refuse anything outside it:
   - Server-Side Includes / .shtml / mod_speling / mod_imagemap / mod_dav
   - mod_perl / mod_python / mod_ruby / mod_isapi / mod_lua hooks
   - CERN meta files / AuthLDAP* / AuthDigest* / Anonymous* auth
@@ -1775,35 +1936,88 @@ RULE 6 — REFUSE EXPLICITLY when input uses NOT-SUPPORTED features. Examples:
   //                  <one-sentence migration path or workaround>.
   //                  See https://php.zeal.ninja/legacy-apps#limitations
   ```
+
+  CRITICAL: `auth_basic` / `AuthType Basic`, `limit_req`, `limit_conn`,
+  `server_name a.com b.com` (multi-host), `proxy_pass`, and `mod_substitute`
+  are NOT on the refuse list. These ARE supported — emit the inline
+  anonymous PSR-15 middleware with a `// PROPOSED: <Name>Middleware`
+  comment (see RULE 7 TIER B). Do NOT emit a `(NOT SUPPORTED)` comment
+  for these — the inline middleware IS the supported emission. Adding a
+  `(NOT SUPPORTED)` header alongside working middleware code confuses
+  users into thinking their auth doesn't work when it does. The
+  `(NOT SUPPORTED)` label is reserved for directives where no code is
+  emitted at all (the framework genuinely can't express them).
+
   Never silently drop. The user's trust depends on knowing what was refused.
 
-RULE 7 — FOR ⚠ MIDDLEWARE-GAP DIRECTIVES, emit BOTH (a) the inline anonymous-class
-middleware implementation AND (b) a comment naming the PROPOSED *Middleware class
-that will eventually replace it:
+RULE 7 — MIDDLEWARE EMISSION (v0.2.21+) — built-in vs PROPOSED:
 
-  // PROPOSED: HeaderMiddleware — not yet shipped. Inline implementation:
+  TIER A — BUILT-IN (ship in src/Middleware/): emit the class instantiation
+  directly. Do NOT prepend `// PROPOSED:`. Do NOT wrap in inline anonymous
+  class. Constructor signatures are stable.
+
+    Apache/nginx directive                     ZealPHP emission
+    ----------------------------------------   ----------------------------------------
+    Header set / add_header (top-level)        new HeaderMiddleware(['set' => [...],
+                                                    'append' => [...], 'add' => [...],
+                                                    'unset' => [...]])
+    AddDefaultCharset / AddCharset             new CharsetMiddleware('utf-8')
+    <FilesMatch> Header set Cache-Control      new CacheControlMiddleware()  // defaults
+    expires 30d; (nginx)                       new CacheControlMiddleware() or
+                                                  new ExpiresMiddleware([], '+30 days')
+    ExpiresActive / ExpiresByType              new ExpiresMiddleware(['image/' => '+30 days',
+                                                    'text/css' => '+1 year'], '+5 minutes')
+    Allow from / Deny from / Order / Require ip  new IpAccessMiddleware(['allow' => [...],
+                                                    'deny' => [...]])  // CIDR supported
+    AddType (handler-generated bodies)         new MimeTypeMiddleware(['wasm' => 'application/wasm'])
+    Refuse `.php` in URLs                      new BlockPhpExtMiddleware()  // no args
+    Access-Control-Allow-Origin (CORS)         new CorsMiddleware(['*'])
+    ETag                                       new ETagMiddleware()
+    Range / 206 / 416                          new RangeMiddleware()
+    Eager session cookie                       new SessionStartMiddleware()
+
+  TIER B — STILL PROPOSED (NOT YET in src/Middleware/): emit a WORKING
+  inline anonymous-class PSR-15 middleware implementation, PLUS a
+  `// PROPOSED:` comment naming the class. These directives are SUPPORTED
+  in ZealPHP — the inline anonymous-class PSR-15 middleware is a fully
+  valid PHP construct and the framework's middleware stack handles it
+  identically to a named class. Do NOT refuse with `(NOT SUPPORTED)`;
+  that's reserved for features the framework genuinely can't express
+  (SSI, mod_dav, AuthLDAP, return 444, etc.).
+
+  NEVER emit `new BasicAuthMiddleware(...)` etc. as class instantiation
+  — those classes don't exist yet, and the user's app.php would fatal at
+  boot with `Class 'ZealPHP\\Middleware\\BasicAuthMiddleware' not found`.
+
+  // PROPOSED: BasicAuthMiddleware — not yet shipped. Inline implementation:
   $app->addMiddleware(new class implements \\Psr\\Http\\Server\\MiddlewareInterface {
       public function process(
           \\Psr\\Http\\Message\\ServerRequestInterface $request,
           \\Psr\\Http\\Server\\RequestHandlerInterface $handler
       ): \\Psr\\Http\\Message\\ResponseInterface {
-          $response = $handler->handle($request);
-          return $response->withHeader('X-Foo', 'bar');
+          $auth = $request->getHeaderLine('Authorization');
+          if (!str_starts_with($auth, 'Basic ')) {
+              return (new \\OpenSwoole\\Core\\Psr\\Response('Authentication required'))
+                  ->withStatus(401)
+                  ->withHeader('WWW-Authenticate', 'Basic realm="Realm"');
+          }
+          // Verify $auth here against htpasswd / DB / callback — placeholder block.
+          return $handler->handle($request);
       }
   });
 
-  Middleware-gap names to use:
+  Still-PROPOSED names to use in the `// PROPOSED:` comment (emit inline,
+  not (NOT SUPPORTED)):
     auth_basic / AuthType Basic       -> BasicAuthMiddleware
-    Header set / add_header           -> HeaderMiddleware
-    AddCharset / AddDefaultCharset    -> CharsetMiddleware
-    ExpiresActive / ExpiresByType     -> ExpiresMiddleware
-    Cache-Control (FilesMatch / expires) -> CacheControlMiddleware
-    Allow / Deny / Order (IP ACL)     -> IpAccessMiddleware
-    BlockPhpExt (.php in URL = 404)   -> BlockPhpExtMiddleware
     limit_req (rate limit)            -> RateLimitMiddleware
     limit_conn (concurrent limit)     -> ConcurrencyLimitMiddleware
     server_name multi-host            -> HostRouterMiddleware
     proxy_pass                        -> ProxyMiddleware
+    mod_substitute (body rewrite)     -> BodyRewriteMiddleware
+
+  Cross-reference: the reference (get_zealphp_reference()) shows the exact
+  constructor signature for each built-in class — copy from there, don't
+  guess parameter names.
 
 ADDITIONAL RULES:
 
@@ -1853,30 +2067,32 @@ APACHE FLAG / RULE HANDLING (compact table — apply per rewrite):
   ErrorDocument N /path              -> $app->setErrorHandler(N, fn() => App::include('/path'))
   Redirect / RedirectMatch           -> route returning $response->redirect($url, 301)
 
-STATIC RESPONSE HEADERS:
+STATIC RESPONSE HEADERS (v0.2.21+ — use built-in HeaderMiddleware):
   Apache `Header set X-Foo "bar"` (top-level, NOT inside <FilesMatch>) and nginx
   `add_header X-Foo "bar";` (top-level inside server {}) are GLOBAL static headers
-  applied to every response. Collect all such directives and emit ONE inline anonymous
-  PSR-15 middleware (the HeaderMiddleware gap is tracked in Rule 7).
+  applied to every response. Collect all such directives into ONE `HeaderMiddleware`
+  call. Do NOT emit inline anonymous classes — `HeaderMiddleware` ships in v0.2.21+.
 
   Emit pattern:
 
-    $app->addMiddleware(new class implements \\Psr\\Http\\Server\\MiddlewareInterface {
-        public function process(
-            \\Psr\\Http\\Message\\ServerRequestInterface $request,
-            \\Psr\\Http\\Server\\RequestHandlerInterface $handler
-        ): \\Psr\\Http\\Message\\ResponseInterface {
-            $response = $handler->handle($request);
-            return $response
-                ->withHeader('X-Frame-Options', 'DENY')
-                ->withHeader('X-Content-Type-Options', 'nosniff');
-        }
-    });
+    $app->addMiddleware(new \\ZealPHP\\Middleware\\HeaderMiddleware([
+        'set' => [
+            'X-Frame-Options'         => 'DENY',
+            'X-Content-Type-Options'  => 'nosniff',
+            'Referrer-Policy'         => 'strict-origin-when-cross-origin',
+        ],
+        // 'append' => ['Vary' => 'Accept-Encoding'],   // mod_headers `Header append`
+        // 'add'    => ['Link' => ['<x>; rel=preload', '<y>; rel=preload']],  // mod_headers `Header add` (multi-value)
+        // 'unset'  => ['Server', 'X-Powered-By'],
+    ]));
 
-  One ->withHeader() call per Header/add_header directive collected.
+  One key under `'set'` per Header set / add_header directive collected.
+  `Header append X "v"` -> `'append' => ['X' => 'v']` (joins comma-separated to existing).
+  `Header add X "v1"` then `Header add X "v2"` -> `'add' => ['X' => ['v1', 'v2']]`.
+  `Header unset X` / nginx `more_clear_headers X` -> `'unset' => ['X']`.
   Skip CORS headers (those go to CorsMiddleware).
-  Skip cache headers inside <FilesMatch>/extension blocks (front proxy / future
-  CacheControlMiddleware territory).
+  For <FilesMatch> cache headers, use `new CacheControlMiddleware()` (defaults cover
+  the usual static-asset extensions) or `new CacheControlMiddleware(['css' => 31536000])`.
   If there are NO non-CORS static headers, do not emit this block.
 
 TRAILING-SLASH STRIP:
@@ -1939,9 +2155,11 @@ FRAMEWORK DETECTION (run BEFORE classification):
 
 OUTPUT FORMAT:
 - Output ONLY the PHP code — no markdown fences, no explanations before/after the code.
-- Include: <?php opening tag, require autoload, use statements (App + RequestContext + any built-in middleware),
-  static config (App::superglobals / App::ignorePhpExt / etc.), App::init(), middleware,
-  routes, $app->run().
+- Include: <?php opening tag, require autoload, use statements (App + RequestContext + any
+  built-in middleware classes used — HeaderMiddleware, CharsetMiddleware, CacheControlMiddleware,
+  ExpiresMiddleware, IpAccessMiddleware, MimeTypeMiddleware, BlockPhpExtMiddleware, CorsMiddleware,
+  ETagMiddleware, RangeMiddleware, SessionStartMiddleware), static config (App::superglobals /
+  App::ignorePhpExt / etc.), App::init(), middleware, routes, $app->run().
 - PSR-2 indentation (4 spaces). Short array syntax `[]`. One-line comments for the Apache/nginx
   equivalent of each block, so users learning the migration can map back.
 - End with `$app->run(['task_worker_num' => 0]);` (or include `package_max_length` when the
@@ -2205,19 +2423,76 @@ def validate_conversion(original_config: str, zealphp_code: str) -> str:
             )
 
     # ------------------------------------------------------------------
-    # Static response headers -> inline middleware (HeaderMiddleware gap)
+    # Static response headers -> HeaderMiddleware (built-in v0.2.21+)
     # ------------------------------------------------------------------
     header_set_lines = re.findall(
         r'(?:^|\n)\s*(?:header\s+set|add_header)\s+([A-Za-z][\w-]*)',
         original_lower,
     )
     non_cors_headers = [h for h in header_set_lines if not h.startswith('access-control-')]
-    if non_cors_headers and "withheader(" not in code_lower:
+    if non_cors_headers and "headermiddleware" not in code_lower:
         issues.append(
             f"Static response headers found in input ({len(non_cors_headers)} non-CORS "
-            "directives) — emit an inline anonymous PSR-15 middleware that withHeader()s "
-            "them. Add `// PROPOSED: HeaderMiddleware` comment noting the gap."
+            "directives) — emit `new HeaderMiddleware(['set' => [...]])` (built-in, v0.2.21+). "
+            "Do NOT emit an inline anonymous PSR-15 middleware or `// PROPOSED:` comment — "
+            "HeaderMiddleware ships."
         )
+
+    # ------------------------------------------------------------------
+    # Built-in middleware emission enforcement (v0.2.21+)
+    # ------------------------------------------------------------------
+    # For each Apache/nginx directive whose middleware now ships, the bot
+    # MUST emit the class instantiation, NOT an inline anonymous class with
+    # a `// PROPOSED:` comment. We detect each by sniffing the input for
+    # the directive AND sniffing the output for the wrong pattern.
+
+    has_inline_anon = re.search(
+        r"new\s+class\s+implements\s+\\?Psr\\?\\Http\\?\\Server\\?\\MiddlewareInterface",
+        zealphp_code,
+        re.IGNORECASE,
+    )
+
+    shipped_directive_checks = [
+        # (input regex,                          middleware class name,    proposed-comment marker)
+        (r'(?:^|\n)\s*(?:header\s+set|add_header)\s+', "HeaderMiddleware",        "proposed: headermiddleware"),
+        (r'\baddcharset\b|\badddefaultcharset\b',      "CharsetMiddleware",       "proposed: charsetmiddleware"),
+        (r'\bexpires(?:active|bytype|default)\b|\bexpires\s+\d', "ExpiresMiddleware", "proposed: expiresmiddleware"),
+        (r'<filesmatch[^>]*>\s*[^<]*header\s+set\s+cache-control', "CacheControlMiddleware", "proposed: cachecontrolmiddleware"),
+        (r'\ballow\s+from\b|\bdeny\s+from\b|\brequire\s+ip\b|^\s*(?:allow|deny)\s+\d', "IpAccessMiddleware", "proposed: ipaccessmiddleware"),
+        (r'\baddtype\s+\S+\s+\.', "MimeTypeMiddleware", "proposed: mimetypemiddleware"),
+    ]
+    for input_re, mw_class, proposed_marker in shipped_directive_checks:
+        if re.search(input_re, original_lower, re.IGNORECASE | re.MULTILINE):
+            if mw_class.lower() not in code_lower:
+                issues.append(
+                    f"Input directive matches `{mw_class}` (built-in, v0.2.21+) territory but "
+                    f"the output never instantiates `new {mw_class}(...)`. Emit the built-in "
+                    f"class instead of inline anonymous middleware."
+                )
+            elif proposed_marker in code_lower and has_inline_anon:
+                # User wrote both the inline anonymous AND a // PROPOSED: comment for a
+                # middleware that now ships — that's the exact regression we're guarding against.
+                issues.append(
+                    f"Output contains `// PROPOSED: {mw_class}` + inline anonymous class for "
+                    f"a middleware that ships in v0.2.21+. Replace with `new {mw_class}(...)` "
+                    f"and drop both the inline anonymous block and the `// PROPOSED:` comment."
+                )
+
+    # General check: if the output contains a // PROPOSED: comment for a middleware that
+    # now ships, flag it. (PROPOSED is still valid for BasicAuth / RateLimit /
+    # ConcurrencyLimit / HostRouter / BodyRewrite / Proxy.)
+    shipped_names = (
+        "HeaderMiddleware", "CharsetMiddleware", "CacheControlMiddleware",
+        "ExpiresMiddleware", "IpAccessMiddleware", "MimeTypeMiddleware",
+        "BlockPhpExtMiddleware",
+    )
+    for name in shipped_names:
+        marker = f"proposed: {name.lower()}"
+        if marker in code_lower:
+            issues.append(
+                f"`// PROPOSED: {name}` comment found in output, but this middleware ships "
+                f"in v0.2.21+. Drop the comment and emit `new {name}(...)` directly."
+            )
 
     # Trailing-slash strip
     has_apache_slash_strip = bool(

@@ -1,11 +1,18 @@
 # Skill: Apache `RewriteRule` → ZealPHP
 
 Mechanical reference for converting any `RewriteRule` line to the right
-ZealPHP route shape. Two questions decide everything:
+ZealPHP route shape (and the surrounding directives like `Header set`,
+`AddDefaultCharset`, `<FilesMatch>`, `Allow from`, etc. to their built-in
+middleware classes). Two questions decide everything for RewriteRule:
 
 1. **Does the flag block contain `R=…` or just `L`?** — picks the primitive.
 2. **If `[L]`, does the destination set a query string?** — picks whether you
    populate `$g->get` before delegating.
+
+For non-rewrite directives, see the **Built-in middleware emission table**
+at the bottom — most of the common ones (`Header set`, `AddDefaultCharset`,
+`<FilesMatch> Header set Cache-Control`, `ExpiresByType`, `Allow from`,
+`AddType`) map to shipped middleware classes as of v0.2.21.
 
 ## The two modes
 
@@ -214,3 +221,45 @@ framework translates them into the right HTTP response:
 | `return (function() { yield ...; })();` | SSR streaming |
 
 Cross-link in generated comments: `/responses#return-contract`.
+
+## Built-in middleware emission table (v0.2.21+)
+
+For non-`RewriteRule` directives surrounding the rewrites, emit the built-in
+middleware class directly. Do NOT emit inline anonymous PSR-15 classes for
+these — they ship in `src/Middleware/` with stable constructor signatures,
+and the inline shape is now a legacy pattern.
+
+| Apache / nginx directive | Emit |
+|---|---|
+| `Header set X "v"` / nginx `add_header X v` | `new HeaderMiddleware(['set' => ['X' => 'v']])` |
+| `Header append X "v"` | `new HeaderMiddleware(['append' => ['X' => 'v']])` |
+| `Header add X "v1"` repeated | `new HeaderMiddleware(['add' => ['X' => ['v1', 'v2']]])` |
+| `Header unset X` / `more_clear_headers X` | `new HeaderMiddleware(['unset' => ['X']])` |
+| `AddDefaultCharset utf-8` / `AddCharset utf-8 .css .js ...` | `new CharsetMiddleware('utf-8')` |
+| `<FilesMatch> Header set Cache-Control` / nginx `expires 30d` | `new CacheControlMiddleware()` (defaults cover css/js/jpg/png/svg/woff2/...) |
+| Custom cache map | `new CacheControlMiddleware(['css' => 31536000, 'html' => 300])` |
+| `ExpiresActive On` + `ExpiresByType image/jpeg "access plus 30 days"` | `new ExpiresMiddleware(['image/' => '+30 days', 'text/css' => '+1 year'], '+5 minutes')` |
+| `Allow from 10.0.0.0/8` + `Deny from all` (Apache 2.2) | `new IpAccessMiddleware(['allow' => ['10.0.0.0/8'], 'deny' => []])` |
+| `Require ip 10.0.0.0/8` (Apache 2.4+) | `new IpAccessMiddleware(['allow' => ['10.0.0.0/8'], 'deny' => []])` |
+| nginx `allow 10.0.0.0/8; deny all;` | `new IpAccessMiddleware(['allow' => ['10.0.0.0/8'], 'deny' => []])` |
+| `AddType application/wasm .wasm` (handler-generated bodies) | `new MimeTypeMiddleware(['wasm' => 'application/wasm'])` |
+| Apache `RewriteRule ... \.php [R=404]` / nginx `location ~ \.php$ { return 404; }` | `new BlockPhpExtMiddleware()` |
+| `Access-Control-Allow-Origin "*"` | `new CorsMiddleware(['*'])` |
+| `FileETag` / nginx `etag on` | `new ETagMiddleware()` |
+
+Collect all top-level `Header set` / `add_header` directives into ONE
+`HeaderMiddleware` call. Don't emit one middleware per directive.
+
+### Still-PROPOSED middlewares (NOT yet built — keep the inline pattern)
+
+These don't ship yet. Emitting `new BasicAuthMiddleware(...)` etc. as a
+class instantiation will FATAL at boot. For these, keep emitting the
+inline anonymous-class pattern AND a `// PROPOSED: <Name>Middleware`
+comment:
+
+- `BasicAuthMiddleware` — `auth_basic` / `AuthType Basic` + `Require valid-user`
+- `RateLimitMiddleware` — nginx `limit_req zone=one burst=5;`
+- `ConcurrencyLimitMiddleware` — nginx `limit_conn zone=one 10;`
+- `HostRouterMiddleware` — nginx `server_name a.com b.com;` multi-host
+- `BodyRewriteMiddleware` — Apache `mod_substitute "s/foo/bar/"`
+- `ProxyMiddleware` — nginx `proxy_pass http://backend;`
