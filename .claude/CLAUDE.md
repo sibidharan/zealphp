@@ -172,6 +172,32 @@ Reflection is cached per route at registration time — zero reflection overhead
 - `CompressionMiddleware` — reference gzip/deflate implementation for apps that disable OpenSwoole `http_compression`; the demo app does not register it
 - `RangeMiddleware` — RFC 7233 Range requests: `Accept-Ranges: bytes`, 206 single/multi-range, 416 unsatisfiable, `If-Range` ETag support
 - `SessionStartMiddleware` — eagerly starts a session and sends `Set-Cookie` for new visitors. `CoSessionManager` only starts sessions when a `PHPSESSID` cookie already exists (returning visitors); without this middleware, first-time visitors get no session cookie and session state resets every request. The `secure` flag auto-detects HTTPS (via `X-Forwarded-Proto`, `HTTPS`, or port 443) — works behind Traefik/Nginx and on direct HTTP. Override with `ZEALPHP_SESSION_SECURE` env var.
+- `IniIsolationMiddleware` — snapshots `ini_set()` changes per request and restores them on exit. Opt-in defense against ini-value leakage across requests on long-running workers (`ZEALPHP_INI_ISOLATE=1` or explicit registration).
+- `CharsetMiddleware` — auto-appends `; charset=utf-8` (or `App::$default_charset`) to text-ish response `Content-Type` values. Apache `AddDefaultCharset` / `AddCharset` parity.
+- `CacheControlMiddleware` — extension-keyed `Cache-Control: max-age=N, public` for static assets. Apache `<FilesMatch> Header set Cache-Control` parity.
+- `ExpiresMiddleware` — adds legacy `Expires:` header by content type. Apache `mod_expires` (`ExpiresActive`, `ExpiresByType`, `ExpiresDefault`) parity.
+- `HeaderMiddleware` — declarative response-header manipulation: `set/add/unset` with conditional variants. Apache `mod_headers` (`Header set / append / unset / add / merge`) parity.
+- `BasicAuthMiddleware` — HTTP Basic Auth via htpasswd file or callback verifier. Apache `AuthType Basic` + `AuthUserFile` + `Require`, nginx `auth_basic` parity.
+- `IpAccessMiddleware` — CIDR allow/deny lists with allow-first / deny-first ordering. Apache legacy `Allow from` / `Deny from`, modern `Require ip` parity. Pair with `App::clientIp()` for correct client-IP behind a proxy.
+- `RateLimitMiddleware` — sliding-window request rate limiter backed by `Store` (cross-worker shared state). Returns 429 + `Retry-After`. nginx `limit_req` parity.
+- `ConcurrencyLimitMiddleware` — in-flight concurrent-request cap backed by `Counter`. Returns 503 when full. nginx `limit_conn` parity.
+- `BlockPhpExtMiddleware` — refuses `*.php` URLs with 404 for apps that want extensionless URLs as the only public surface. Apache `RewriteRule \.php$ - [F]` parity.
+- `MimeTypeMiddleware` — sets/overrides `Content-Type` on non-static responses by URL extension or pattern. Apache `AddType` / `ForceType` parity.
+- `BodyRewriteMiddleware` — single-line regex substitution on response body. Apache `mod_substitute` parity (multi-line variants on the roadmap).
+- `HostRouterMiddleware` — dispatches per-host routes inside one ZealPHP instance. nginx `server_name a.com b.com` parity; for true isolation prefer one process per host behind a real proxy.
+
+**Server-level configurability** (Apache `httpd.conf` parity — static `App::$*` properties + fluent setters, set BEFORE `App::init()`):
+- `App::$document_root` (default `'public'`) + `App::documentRoot()` — Apache `DocumentRoot` equivalent.
+- `App::$trace_enabled` (default `false`, security-first) + `App::traceEnabled()` — Apache `TraceEnable Off`. XST defence.
+- `App::$default_charset` (default `'utf-8'`) + `App::defaultCharset()` — consumed by `CharsetMiddleware`.
+- `App::$strip_trailing_slash` + `App::stripTrailingSlash()` — inverse of `App::$directory_slash`; 301 non-directory URIs ending in `/` to the no-slash form.
+- `App::$server_admin` + `App::serverAdmin()` — Apache `ServerAdmin`; surfaced on built-in 500 error pages.
+- `App::$canonical_name` + `App::$use_canonical_name` + `App::canonicalHost()` — Apache `ServerName` + `UseCanonicalName`; controls host source for absolute redirects.
+- `App::$hostname_lookups` (default `false`) — Apache `HostnameLookups`; reverse-DNS populates `$g->server['REMOTE_HOST']`. Off by default (perf cost).
+- `App::$trusted_proxies` (CIDR list) + `App::clientIp()` — walks `X-Forwarded-For` only if `REMOTE_ADDR` is in the trusted list. **Critical for production deploys behind Traefik / Caddy / nginx.**
+- `App::$access_log_format` — Apache `LogFormat` / `CustomLog` equivalent. Tokens: `%h %l %u %t "%r" %>s %b "%{Referer}i" "%{User-Agent}i" %D` and friends.
+- `App::$limit_request_fields`, `App::$limit_request_field_size`, `App::$limit_request_line` — Apache `LimitRequestFields` family.
+- `App::tryInclude($publicPath)` — variant of `App::include()` that returns `null` (instead of `403`) when the file is missing, so callers can chain extension-resolver patterns without conflating "not found" with "security violation".
 
 ### HTTP Protocol Features
 
@@ -494,6 +520,19 @@ All ZealPHP usage examples live as first-class project files:
 | `Middleware/CompressionMiddleware.php` | Reference gzip/deflate middleware; only use when OpenSwoole `http_compression` is disabled |
 | `Middleware/RangeMiddleware.php` | RFC 7233 Range requests: Accept-Ranges, 206 single/multi-range, 416, If-Range ETag support |
 | `Middleware/SessionStartMiddleware.php` | Eager session start for first-time visitors — sets `PHPSESSID` cookie on first request |
+| `Middleware/IniIsolationMiddleware.php` | Snapshots `ini_set()` changes per request, restores on exit. Opt-in via `ZEALPHP_INI_ISOLATE=1`. |
+| `Middleware/CharsetMiddleware.php` | Appends `; charset=utf-8` to text-ish response `Content-Type` (Apache `AddCharset` parity) |
+| `Middleware/CacheControlMiddleware.php` | Extension-keyed `Cache-Control: max-age=N, public` for static assets (Apache `<FilesMatch>` parity) |
+| `Middleware/ExpiresMiddleware.php` | Adds `Expires:` header by content type (Apache `mod_expires` parity) |
+| `Middleware/HeaderMiddleware.php` | Declarative response-header `set/add/unset` with conditional variants (Apache `mod_headers` parity) |
+| `Middleware/BasicAuthMiddleware.php` | HTTP Basic Auth — htpasswd file or callback verifier (Apache `AuthType Basic` parity) |
+| `Middleware/IpAccessMiddleware.php` | CIDR allow/deny lists with allow-first / deny-first ordering (Apache `Allow from / Deny from` parity) |
+| `Middleware/RateLimitMiddleware.php` | Sliding-window request rate limiter backed by `Store` (nginx `limit_req` parity) |
+| `Middleware/ConcurrencyLimitMiddleware.php` | In-flight concurrent-request cap backed by `Counter` (nginx `limit_conn` parity) |
+| `Middleware/BlockPhpExtMiddleware.php` | Refuses `*.php` URLs with 404 for apps wanting extensionless URLs only |
+| `Middleware/MimeTypeMiddleware.php` | Sets/overrides `Content-Type` on non-static responses by extension or pattern (Apache `AddType` / `ForceType` parity) |
+| `Middleware/BodyRewriteMiddleware.php` | Single-line regex substitution on response body (Apache `mod_substitute` parity) |
+| `Middleware/HostRouterMiddleware.php` | Dispatches per-host routes inside one ZealPHP instance (nginx `server_name` parity) |
 | `deploy/zealphp.service` | systemd service template (Type=simple, no -d) |
 
 ---
