@@ -7,7 +7,7 @@
       'title'    => 'Your First Page',
       'subtitle' => 'Drop a file, get a URL. The filesystem is the router.',
       'prev'     => ['slug' => 'learn/create-app', 'title' => 'Create a ZealPHP App'],
-      'next'     => ['slug' => 'learn/components', 'title' => 'Layouts & Components'],
+      'next'     => ['slug' => 'learn/mental-model', 'title' => 'The Mental Model'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
@@ -110,9 +110,9 @@ App::render('/_master', [
       <a class="lesson-chip lesson-chip-prev" href="/learn/create-app"
          hx-get="/api/learn/page?slug=learn/create-app" hx-target=".learn-layout"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/create-app">← Create a ZealPHP App</a>
-      <a class="lesson-chip lesson-chip-next" href="/learn/components"
-         hx-get="/api/learn/page?slug=learn/components" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/components">Layouts &amp; Components →</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/mental-model"
+         hx-get="/api/learn/page?slug=learn/mental-model" hx-target=".learn-layout"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/mental-model">The Mental Model →</a>
     </div>
   </article>
 </div>

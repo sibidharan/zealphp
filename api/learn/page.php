@@ -10,9 +10,12 @@ ${basename(__FILE__, '.php')} = function () {
     $g = G::instance();
     $slug = trim((string) ($g->get['slug'] ?? ''));
 
-    $allowed = ['learn', 'learn/create-app', 'learn/first-page', 'learn/components',
-        'learn/react-vs-php', 'learn/routing', 'learn/sessions', 'learn/auth', 'learn/htmx',
-        'learn/notes', 'learn/ai-chat', 'learn/websocket', 'learn/async', 'learn/deployment'];
+    $allowed = ['learn', 'learn/create-app', 'learn/first-page',
+        'learn/mental-model', 'learn/lifecycle', 'learn/injection', 'learn/responses',
+        'learn/middleware', 'learn/streaming', 'learn/store',
+        'learn/components', 'learn/react-vs-php', 'learn/htmx', 'learn/sessions', 'learn/auth',
+        'learn/notes', 'learn/ai-chat', 'learn/websocket',
+        'learn/routing', 'learn/async', 'learn/deployment'];
 
     if ($slug === '') $slug = 'learn';
     if (!in_array($slug, $allowed, true)) {

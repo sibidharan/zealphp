@@ -6,6 +6,15 @@ $groups = [
     ['learn/create-app',   'Create a ZealPHP App'],
     ['learn/first-page',   'Your First Page'],
   ],
+  'Foundations' => [
+    ['learn/mental-model', 'The Mental Model'],
+    ['learn/lifecycle',    'A Request\'s Journey'],
+    ['learn/injection',    'Parameter Injection'],
+    ['learn/responses',    'Returning a Response'],
+    ['learn/middleware',   'Middleware: The Wrap'],
+    ['learn/streaming',    'Streaming Done Right'],
+    ['learn/store',        'Sharing State'],
+  ],
   'Interactivity' => [
     ['learn/components',    'Layouts & Components'],
     ['learn/react-vs-php',  'React vs PHP'],
