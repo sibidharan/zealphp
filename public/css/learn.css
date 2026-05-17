@@ -133,24 +133,29 @@
 
 /* ============================================================
  * Substeps — injected by JS only into the active item.
- * Renders as an indented list of in-page anchor links.
+ * The parent .learn-sidebar-item is a 2-col grid; this list lives in
+ * the second row and spans BOTH columns so its content has full width.
+ * Indent aligns the substep text under the parent link text.
  * ============================================================ */
 .learn-substeps {
-  list-style: none; padding: 0; margin: .35rem 0 .25rem;
+  grid-column: 1 / -1;
+  list-style: none; padding: 0;
+  margin: .35rem 0 .25rem 1.75rem;   /* match grid col 1 width so list
+                                         starts under the parent link */
   position: relative;
   animation: substepsIn .22s ease;
 }
 .learn-substeps::before {
   content: '';
   position: absolute;
-  left: 1.1rem; top: .15rem; bottom: .15rem;
+  left: .35rem; top: .15rem; bottom: .15rem;
   width: 1px;
   background: #fde68a;
 }
 .learn-substeps li { margin: 0; }
 .learn-substeps a {
   display: block;
-  margin-left: 1.6rem;
+  margin-left: .9rem;
   padding: .28rem .7rem;
   font-size: .8rem; font-weight: 400; line-height: 1.4;
   color: #78716c;
@@ -158,8 +163,11 @@
   border-radius: 5px;
   transition: background .14s ease, color .14s ease;
   position: relative;
+  /* Long labels wrap normally instead of breaking per-character */
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
-.learn-substeps a:hover { color: #1c1917; background: #f5f5f4; }
+.learn-substeps a:hover { color: #1c1917; background: #f5f5f4; text-decoration: none; }
 .learn-substeps a.current {
   color: #b45309; font-weight: 600;
   background: #fffbeb;
@@ -167,7 +175,7 @@
 .learn-substeps a.current::before {
   content: '';
   position: absolute;
-  left: -.85rem; top: 50%; margin-top: -3px;
+  left: -.6rem; top: 50%; margin-top: -3px;
   width: 6px; height: 6px;
   border-radius: 50%;
   background: var(--accent, #f59e0b);
