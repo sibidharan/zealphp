@@ -146,10 +146,12 @@ class App
      *   %H          Request protocol ("HTTP/1.1")
      *   %v          Server name (from Host header)
      *
-     * Default is Apache's Common Log Format. Set to NCSA combined via
-     * `App::accessLogFormat('%h %l %u %t "%r" %>s %b "%{Referer}i" "%{User-Agent}i"')`.
+     * Default is Apache's NCSA combined format (the prior hardcoded ZealPHP
+     * output — preserving behaviour for existing log parsers). Switch to the
+     * shorter Common Log Format via:
+     *   App::accessLogFormat('%h %l %u %t "%r" %>s %b');
      */
-    public static string $access_log_format = '%h %l %u %t "%r" %>s %b';
+    public static string $access_log_format = '%h %l %u %t "%r" %>s %b "%{Referer}i" "%{User-Agent}i"';
     /**
      * Parsed format spec cache (token list). Filled lazily by formatAccessLogLine()
      * the first time it sees a given format string. Resets when accessLogFormat()
@@ -757,6 +759,199 @@ class App
         $g = \ZealPHP\RequestContext::instance();
         $host = (string)($g->server['HTTP_HOST'] ?? $g->server['SERVER_NAME'] ?? '');
         return $host;
+    }
+
+    /**
+     * Render one access-log line for the current request using App::$access_log_format.
+     * Called by ZealPHP\access_log() — direct callers are rare but the helper is
+     * public so user code (e.g. a custom logger middleware) can reuse it.
+     *
+     * The format spec is compiled to a token list on first use and cached on
+     * App::$access_log_format_compiled; accessLogFormat() clears the cache when
+     * the format string is changed.
+     *
+     * @param int        $status   Final HTTP status code (after handler + middleware)
+     * @param int        $length   Response body byte count (0 OK; %b emits '-' per CLF)
+     * @param float|null $durationSec Request duration in seconds; pass null when unknown
+     */
+    public static function formatAccessLogLine(int $status, int $length, ?float $durationSec = null): string
+    {
+        $tokens = self::$access_log_format_compiled;
+        if ($tokens === null) {
+            $tokens = self::compileAccessLogFormat(self::$access_log_format);
+            self::$access_log_format_compiled = $tokens;
+        }
+
+        $g = \ZealPHP\RequestContext::instance();
+        $out = '';
+        foreach ($tokens as $tok) {
+            $out .= self::renderAccessLogToken($tok, $g, $status, $length, $durationSec);
+        }
+        return $out;
+    }
+
+    /**
+     * Compile an Apache LogFormat string into a flat token list. Supported
+     * directive families (Apache mod_log_config subset):
+     *   %h %l %u %t %r %s %>s %b %B %D %T %m %U %q %H %v
+     *   %{NAME}i  %{NAME}o  %{NAME}e
+     * Unknown directives are passed through verbatim (Apache compatibility:
+     * mod_log_config logs '-' for unknown but compatibility matters less than
+     * surfacing typos to the operator).
+     *
+     * @return array<int, array{kind:string, arg?:string}>
+     */
+    private static function compileAccessLogFormat(string $format): array
+    {
+        $tokens = [];
+        $len = strlen($format);
+        $literal = '';
+        $i = 0;
+        while ($i < $len) {
+            $ch = $format[$i];
+            if ($ch !== '%') {
+                $literal .= $ch;
+                $i++;
+                continue;
+            }
+            if ($literal !== '') {
+                $tokens[] = ['kind' => 'lit', 'arg' => $literal];
+                $literal = '';
+            }
+            // Lookahead — skip the '%'
+            $i++;
+            if ($i >= $len) {
+                $literal .= '%';
+                break;
+            }
+            // %{NAME}i / %{NAME}o / %{NAME}e
+            if ($format[$i] === '{') {
+                $closeBrace = strpos($format, '}', $i + 1);
+                if ($closeBrace === false || $closeBrace + 1 >= $len) {
+                    $literal .= '%' . substr($format, $i);
+                    $i = $len;
+                    continue;
+                }
+                $name = substr($format, $i + 1, $closeBrace - $i - 1);
+                $kindChar = $format[$closeBrace + 1];
+                $kindMap = ['i' => 'header_in', 'o' => 'header_out', 'e' => 'env'];
+                if (isset($kindMap[$kindChar])) {
+                    $tokens[] = ['kind' => $kindMap[$kindChar], 'arg' => $name];
+                } else {
+                    $tokens[] = ['kind' => 'lit', 'arg' => '%{' . $name . '}' . $kindChar];
+                }
+                $i = $closeBrace + 2;
+                continue;
+            }
+            // %>s — Apache's "final status after internal redirects". For us
+            // it's identical to %s; we accept both and emit the same value.
+            if ($format[$i] === '>' && $i + 1 < $len && $format[$i + 1] === 's') {
+                $tokens[] = ['kind' => 'status'];
+                $i += 2;
+                continue;
+            }
+            $code = $format[$i];
+            $i++;
+            switch ($code) {
+                case 'h': $tokens[] = ['kind' => 'host']; break;
+                case 'a': $tokens[] = ['kind' => 'host']; break;   // %a == remote IP
+                case 'l': $tokens[] = ['kind' => 'lit', 'arg' => '-']; break;
+                case 'u': $tokens[] = ['kind' => 'user']; break;
+                case 't': $tokens[] = ['kind' => 'time']; break;
+                case 'r': $tokens[] = ['kind' => 'request']; break;
+                case 's': $tokens[] = ['kind' => 'status']; break;
+                case 'b': $tokens[] = ['kind' => 'bytes_clf']; break;
+                case 'B': $tokens[] = ['kind' => 'bytes']; break;
+                case 'D': $tokens[] = ['kind' => 'duration_us']; break;
+                case 'T': $tokens[] = ['kind' => 'duration_s']; break;
+                case 'm': $tokens[] = ['kind' => 'method']; break;
+                case 'U': $tokens[] = ['kind' => 'url_path']; break;
+                case 'q': $tokens[] = ['kind' => 'query']; break;
+                case 'H': $tokens[] = ['kind' => 'protocol']; break;
+                case 'v': $tokens[] = ['kind' => 'server_name']; break;
+                case '%': $tokens[] = ['kind' => 'lit', 'arg' => '%']; break;
+                default:
+                    $tokens[] = ['kind' => 'lit', 'arg' => '%' . $code];
+            }
+        }
+        if ($literal !== '') {
+            $tokens[] = ['kind' => 'lit', 'arg' => $literal];
+        }
+        return $tokens;
+    }
+
+    /**
+     * Render one compiled access-log token. Kept separate from the tokenizer
+     * so the hot path (per-request) only does the table-lookup half; the
+     * tokenize path runs once per format-string change.
+     *
+     * @param array{kind:string, arg?:string} $token
+     */
+    private static function renderAccessLogToken(array $token, \ZealPHP\RequestContext $g, int $status, int $length, ?float $durationSec): string
+    {
+        switch ($token['kind']) {
+            case 'lit':
+                return (string)($token['arg'] ?? '');
+            case 'host':
+                $ip = self::clientIp();
+                return $ip !== '' ? $ip : '-';
+            case 'user':
+                $user = $g->session['username'] ?? $g->server['REMOTE_USER'] ?? null;
+                return is_scalar($user) && (string)$user !== '' ? (string)$user : '-';
+            case 'time':
+                // Apache CLF timestamp: [day/month/year:hour:minute:second zone]
+                // The Server gets the same per-second cache key the legacy
+                // access_log() used, but format includes timezone.
+                return '[' . date('d/M/Y:H:i:s O') . ']';
+            case 'request':
+                $method = (string)($g->server['REQUEST_METHOD'] ?? '-');
+                $uri    = (string)($g->server['REQUEST_URI'] ?? '-');
+                $proto  = (string)($g->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1');
+                return "{$method} {$uri} {$proto}";
+            case 'status':
+                return (string)$status;
+            case 'bytes_clf':
+                return $length > 0 ? (string)$length : '-';
+            case 'bytes':
+                return (string)$length;
+            case 'duration_us':
+                return $durationSec === null ? '-' : (string)(int)round($durationSec * 1_000_000);
+            case 'duration_s':
+                return $durationSec === null ? '-' : (string)(int)round($durationSec);
+            case 'method':
+                return (string)($g->server['REQUEST_METHOD'] ?? '-');
+            case 'url_path':
+                $path = parse_url((string)($g->server['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+                return is_string($path) && $path !== '' ? $path : '-';
+            case 'query':
+                $qs = parse_url((string)($g->server['REQUEST_URI'] ?? ''), PHP_URL_QUERY);
+                return is_string($qs) && $qs !== '' ? '?' . $qs : '';
+            case 'protocol':
+                return (string)($g->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1');
+            case 'server_name':
+                return (string)($g->server['HTTP_HOST'] ?? $g->server['SERVER_NAME'] ?? '-');
+            case 'header_in':
+                $name = (string)($token['arg'] ?? '');
+                if ($name === '') return '-';
+                $key = 'HTTP_' . strtr(strtoupper($name), '-', '_');
+                $val = $g->server[$key] ?? null;
+                return is_scalar($val) && (string)$val !== '' ? (string)$val : '-';
+            case 'header_out':
+                $name = (string)($token['arg'] ?? '');
+                if ($name === '' || $g->zealphp_response === null) return '-';
+                foreach (($g->zealphp_response->headersList ?? []) as [$k, $v]) {
+                    if (strcasecmp((string)$k, $name) === 0) {
+                        return (string)$v;
+                    }
+                }
+                return '-';
+            case 'env':
+                $name = (string)($token['arg'] ?? '');
+                if ($name === '') return '-';
+                $val = $g->server[$name] ?? null;
+                return is_scalar($val) && (string)$val !== '' ? (string)$val : '-';
+        }
+        return '';
     }
 
     /**
