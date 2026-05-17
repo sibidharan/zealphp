@@ -207,3 +207,88 @@
   document.addEventListener('DOMContentLoaded', connect);
   document.addEventListener('htmx:afterSettle', connect);
 })();
+
+// Store-demo cross-tab live sync (/demo/view/store/incr + /demo/view/store/set-get).
+// Mirrors the [data-ws-counter] handler but talks to /ws/store-demo and
+// shows both a single integer (incr viewer) and the full row payload
+// (set-get viewer).
+(function () {
+  let ws = null;
+  let lastRow = { n: 0, name: '', who: '', ts: 0 };
+
+  function setStatus(text, cls) {
+    document.querySelectorAll('[data-store-status]').forEach(el => {
+      el.textContent = text;
+      el.className = 'ws-counter-status ' + (cls || '');
+    });
+  }
+
+  function render(row) {
+    lastRow = row;
+    // incr viewer: just the counter value
+    document.querySelectorAll('[data-store-counter-value]').forEach(el => {
+      const oldVal = el.textContent;
+      el.textContent = String(row.n ?? 0);
+      if (oldVal !== el.textContent) {
+        el.classList.remove('flash');
+        void el.offsetWidth;
+        el.classList.add('flash');
+      }
+    });
+    // set-get viewer: full row payload
+    document.querySelectorAll('[data-store-row]').forEach(el => {
+      el.textContent = JSON.stringify(row, null, 2);
+    });
+  }
+
+  function connect() {
+    if (ws) return;
+    const wantsConnection = document.querySelector('[data-store-counter-value], [data-store-row], [data-store-form]');
+    if (!wantsConnection) return;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws/store-demo');
+    setStatus('connecting…', 'connecting');
+    ws.onopen    = () => setStatus('connected — every tab will see the row update live', 'open');
+    ws.onmessage = e => {
+      try {
+        const row = JSON.parse(e.data);
+        if (!row || typeof row !== 'object') return;
+        if (row.type === 'heartbeat') return;  // global WS keepalive, not a row update
+        render(row);
+      } catch (_) {}
+    };
+    ws.onclose   = () => { ws = null; setStatus('disconnected — click +1 or Write row to reconnect', 'closed'); };
+    ws.onerror   = () => setStatus('error', 'err');
+  }
+
+  async function bump()  { try { await fetch('/api/learn/demo/store-bump',  { method: 'POST' }); } catch (e) { setStatus('bump failed: '  + e.message, 'err'); } }
+  async function reset() { try { await fetch('/api/learn/demo/store-reset', { method: 'POST' }); } catch (e) { setStatus('reset failed: ' + e.message, 'err'); } }
+  async function write(form) {
+    const fd = new FormData(form);
+    try {
+      const res = await fetch('/api/learn/demo/store-write', { method: 'POST', body: fd });
+      if (!res.ok) setStatus('write failed: HTTP ' + res.status, 'err');
+    } catch (e) { setStatus('write failed: ' + e.message, 'err'); }
+  }
+
+  document.addEventListener('click', e => {
+    const t = e.target.closest('[data-store-counter]');
+    if (!t) return;
+    if (t.dataset.storeCounter === 'bump')  { connect(); bump(); }
+    if (t.dataset.storeCounter === 'reset') { connect(); reset(); }
+  });
+
+  document.addEventListener('submit', e => {
+    const f = e.target.closest('[data-store-form]');
+    if (!f) return;
+    e.preventDefault();
+    connect();
+    write(f);
+    // Don't reset; user might want to bump-edit. Clear name only.
+    const name = f.querySelector('input[name="name"]');
+    if (name) name.value = '';
+  });
+
+  document.addEventListener('DOMContentLoaded', connect);
+  document.addEventListener('htmx:afterSettle', connect);
+})();

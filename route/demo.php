@@ -475,48 +475,106 @@ $app->route('/demo/view/response/cookie', ['methods' => ['GET']], function($resp
 // Store + Counter viewers --------------------------------------------------
 
 $app->route('/demo/view/store/set-get', ['methods' => ['GET']], function() {
-    Store::set('demo_kv', 'last_view', ['n' => time(), 'who' => 'viewer']);
-    $row = Store::get('demo_kv', 'last_view');
     return demo_render(
         'Store: write → read across workers',
-        'Wrote a row to a shared-memory <code class="demo-inline">Store</code> table named <code class="demo-inline">demo_kv</code>, then read it back. Any worker on this server can read what any other worker wrote — no Redis, no network round-trip.',
+        'Write a row to a shared-memory <code class="demo-inline">Store</code> table. Every worker can read what any other worker wrote &mdash; no Redis, no network round-trip. Open this page in another window: click <strong>Write row</strong> here and watch the row contents update there live.',
         [
-            ['heading' => 'What we did', 'body' => '<pre class="demo-payload">Store::set(\'demo_kv\', \'last_view\', [\'n\' => ' . time() . ', \'who\' => \'viewer\']);
-$row = Store::get(\'demo_kv\', \'last_view\');</pre>'],
-            ['heading' => 'Read back', 'body' => '<pre class="demo-payload">' . htmlspecialchars(json_encode($row, JSON_PRETTY_PRINT)) . '</pre>'],
+            ['heading' => 'Write a row', 'body' =>
+                '<form data-store-form style="display:grid;grid-template-columns:1fr 1fr auto;gap:.6rem;align-items:end;padding:.4rem 0">' .
+                '  <label style="font-size:.85rem;color:#57534e">name<input name="name" required maxlength="60" placeholder="e.g. high-score" style="display:block;margin-top:.2rem;width:100%;padding:.45rem .6rem;border:1px solid #d6d3d1;border-radius:6px"></label>' .
+                '  <label style="font-size:.85rem;color:#57534e">who<input name="who" maxlength="60" value="viewer" style="display:block;margin-top:.2rem;width:100%;padding:.45rem .6rem;border:1px solid #d6d3d1;border-radius:6px"></label>' .
+                '  <button type="submit" class="btn btn-primary" style="padding:.55rem 1rem">Write row</button>' .
+                '</form>' .
+                '<p style="margin:.6rem 0 0;font-size:.85rem;color:#78716c">Hits <code class="demo-inline">Store::set(\'ws_store_demo_data\', \'shared_row\', […])</code>. Broadcasts to every connected tab.</p>'
+            ],
+            ['heading' => 'Current row (live across tabs)', 'body' =>
+                '<pre class="demo-payload" data-store-row>connecting…</pre>' .
+                '<div data-store-status class="ws-counter-status" style="margin-top:.65rem">connecting…</div>'
+            ],
+            ['heading' => 'How it works', 'body' =>
+                '<pre class="demo-payload">// route/learn.php — boot
+Store::make(\'ws_store_demo_data\', 32, [
+    \'n\'    =&gt; [Table::TYPE_INT,    8],
+    \'name\' =&gt; [Table::TYPE_STRING, 64],
+    \'who\'  =&gt; [Table::TYPE_STRING, 64],
+    \'ts\'   =&gt; [Table::TYPE_INT,    8],
+]);
+
+// POST /api/learn/demo/store-write
+Store::set(\'ws_store_demo_data\', \'shared_row\', [
+    \'name\' =&gt; $name,
+    \'who\'  =&gt; $who,
+    \'ts\'   =&gt; time(),
+]);
+ws_store_demo_broadcast();   // push current row to every /ws/store-demo client</pre>'],
         ],
         'learn/store', 'Sharing State'
     );
 });
 
 $app->route('/demo/view/store/incr', ['methods' => ['GET']], function() {
-    $new = Store::incr('demo_kv', 'incr_counter', 'n', 1);
     return demo_render(
         'Store: atomic increment',
-        'Called <code class="demo-inline">Store::incr(\'demo_kv\', \'incr_counter\', \'n\', 1)</code>. The increment is atomic across all workers — refresh this page from a different browser tab and you\'ll see the same counter advancing.',
+        '<code class="demo-inline">Store::incr(\'table\', \'row\', \'column\', $by)</code> increments an integer column atomically across all workers. No locks, no read-modify-write race &mdash; one syscall. Click <strong>+1</strong>. Open this URL in another window: every tab tracks the same value.',
         [
-            ['heading' => 'New value', 'body' => '<pre class="demo-payload">' . htmlspecialchars((string)$new) . '</pre>'],
-            ['heading' => 'Try it', 'body' => '<p style="margin:0">Refresh this page in another tab — the counter goes up on every hit, from every worker.</p>'],
+            ['heading' => 'Live counter (atomic across workers)', 'body' =>
+                '<div class="ws-counter-card">' .
+                '  <div class="ws-counter-value" data-store-counter-value>0</div>' .
+                '  <p class="ws-counter-label">stored as <code>ws_store_demo_data.shared_row.n</code> &middot; bumped via <code>Store::incr()</code></p>' .
+                '  <div class="ws-counter-actions">' .
+                '    <button type="button" class="btn btn-primary" data-store-counter="bump">+1</button>' .
+                '    <button type="button" class="btn btn-ghost" data-store-counter="reset">Reset</button>' .
+                '  </div>' .
+                '  <div data-store-status class="ws-counter-status">connecting…</div>' .
+                '</div>'
+            ],
+            ['heading' => 'Open in 2+ tabs to see it', 'body' =>
+                '<p style="margin:0">Multiple tabs all subscribe to <code class="demo-inline">/ws/store-demo</code>. Each bump POSTs to <code class="demo-inline">/api/learn/demo/store-bump</code>, which calls <code class="demo-inline">Store::incr()</code> and broadcasts the new value over the WebSocket to every connected client. <strong>This is what <code class="demo-inline">/learn/websocket</code> uses for its real-time-sync section.</strong></p>'
+            ],
         ],
         'learn/store', 'Sharing State'
     );
 });
 
 $app->route('/demo/view/counter/increment', ['methods' => ['GET']], function() {
-    /** @var Counter $demoCounter */
-    static $demoCounter = null;
-    if ($demoCounter === null) {
-        // Reuse the existing /demo/counter/increment counter if it was made
-        // at boot; otherwise create a fresh local one (per-worker, won't be
-        // shared — that's intentional for this fallback path).
-        $demoCounter = new Counter(0);
-    }
-    $n = $demoCounter->increment();
+    // Interactive cross-tab demo. Reuses the existing /ws/counter-demo
+    // endpoint that powers the /learn/websocket inline counter — so this
+    // popup-friendly viewer is a standalone mirror of that widget.
     return demo_render(
         'Counter: lock-free atomic int',
-        'Called <code class="demo-inline">$counter->increment()</code>. <code class="demo-inline">Counter</code> wraps <code class="demo-inline">OpenSwoole\\Atomic</code> — lock-free, cross-worker, no syscall per increment. Best when you need exactly one global integer.',
+        '<code class="demo-inline">$counter-&gt;increment()</code> wraps <code class="demo-inline">OpenSwoole\\Atomic</code> &mdash; lock-free, cross-worker, no syscall per bump. Click <strong>+1</strong>. Open this URL in another window/tab and click +1 there: every tab updates live via a WebSocket broadcast. Reset zeros the counter for everyone.',
         [
-            ['heading' => 'New value', 'body' => '<pre class="demo-payload">' . htmlspecialchars((string)$n) . '</pre>'],
+            ['heading' => 'Live counter (shared across tabs)', 'body' =>
+                '<div class="ws-counter-card">' .
+                '  <div class="ws-counter-value" data-ws-counter-value>0</div>' .
+                '  <p class="ws-counter-label">value lives in shared memory; every worker + every tab sees the same number</p>' .
+                '  <div class="ws-counter-actions">' .
+                '    <button type="button" class="btn btn-primary" data-ws-counter="bump">+1</button>' .
+                '    <button type="button" class="btn btn-ghost" data-ws-counter="reset">Reset</button>' .
+                '  </div>' .
+                '  <div data-ws-counter-status class="ws-counter-status">connecting…</div>' .
+                '</div>'
+            ],
+            ['heading' => 'How it works', 'body' =>
+                '<pre class="demo-payload">// route/learn.php — boot
+$wsCounterDemo = new Counter(0);
+Store::make(\'ws_counter_demo_clients\', 4096, [...]);
+
+// WebSocket endpoint — track open fds
+$app-&gt;ws(\'/ws/counter-demo\',
+    onOpen: function ($server, $request) use ($wsCounterDemo) {
+        Store::set(\'ws_counter_demo_clients\', (string)$request-&gt;fd, [...]);
+        $server-&gt;push($request-&gt;fd, json_encode([\'value\' =&gt; $wsCounterDemo-&gt;get()]));
+    },
+    /* ... onClose, onMessage ... */
+);
+
+// Bump endpoint — increment + broadcast to every connected fd
+$app-&gt;route(\'/api/learn/demo/counter-bump\', [\'methods\' =&gt; [\'POST\']], function () use ($wsCounterDemo) {
+    $new = $wsCounterDemo-&gt;increment();
+    ws_counter_demo_broadcast((int)$new);
+    return [\'value\' =&gt; (int)$new];
+});</pre>'],
         ],
         'learn/store', 'Sharing State'
     );

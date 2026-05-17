@@ -250,6 +250,86 @@ $app-&gt;route(\'/api/learn/demo/session-bump\', ...
     );
 });
 
+// ── Public WebSocket Store demo (for /demo/view/store/incr + set-get) ──
+// A global Store table with one row; any open tab can bump or write to it,
+// and every other tab receives the new state over WebSocket. Demonstrates
+// Store::incr() and Store::set/get() with the same cross-tab feedback
+// loop the websocket-lesson counter uses.
+\ZealPHP\Store::make('ws_store_demo_clients', 4096, [
+    'connected_at' => [\OpenSwoole\Table::TYPE_INT, 8],
+]);
+\ZealPHP\Store::make('ws_store_demo_data', 32, [
+    'n'    => [\OpenSwoole\Table::TYPE_INT,    8],
+    'name' => [\OpenSwoole\Table::TYPE_STRING, 64],
+    'who'  => [\OpenSwoole\Table::TYPE_STRING, 64],
+    'ts'   => [\OpenSwoole\Table::TYPE_INT,    8],
+]);
+
+$app->ws('/ws/store-demo',
+    onMessage: function ($server, $frame) {
+        if (($frame->data ?? '') === 'ping') $server->push($frame->fd, 'pong');
+    },
+    onOpen: function ($server, $request) {
+        \ZealPHP\Store::set('ws_store_demo_clients', (string) $request->fd, ['connected_at' => time()]);
+        // Sync the new tab to current state immediately
+        $row = \ZealPHP\Store::get('ws_store_demo_data', 'shared_row') ?: ['n' => 0, 'name' => '', 'who' => '', 'ts' => 0];
+        $server->push($request->fd, json_encode($row));
+    },
+    onClose: function ($server, $fd) {
+        \ZealPHP\Store::del('ws_store_demo_clients', (string) $fd);
+    },
+);
+
+function ws_store_demo_broadcast(): void
+{
+    $server = \ZealPHP\App::getServer();
+    if (!$server) return;
+    $row = \ZealPHP\Store::get('ws_store_demo_data', 'shared_row') ?: ['n' => 0, 'name' => '', 'who' => '', 'ts' => 0];
+    $payload = json_encode($row);
+    foreach (\ZealPHP\Store::table('ws_store_demo_clients') ?? [] as $fd => $_) {
+        $fd = (int) $fd;
+        if ($server->isEstablished($fd)) $server->push($fd, $payload);
+    }
+}
+
+$app->route('/api/learn/demo/store-bump', ['methods' => ['POST']], function () {
+    $row = \ZealPHP\Store::get('ws_store_demo_data', 'shared_row');
+    if (!$row) {
+        // Initialize the row if a bump arrives before any set-get touched it
+        \ZealPHP\Store::set('ws_store_demo_data', 'shared_row', ['n' => 0, 'name' => '(unset)', 'who' => '(none)', 'ts' => time()]);
+    }
+    $new = \ZealPHP\Store::incr('ws_store_demo_data', 'shared_row', 'n', 1);
+    \ZealPHP\Store::set('ws_store_demo_data', 'shared_row', ['ts' => time()]);
+    ws_store_demo_broadcast();
+    return ['n' => (int) $new];
+});
+
+$app->route('/api/learn/demo/store-reset', ['methods' => ['POST']], function () {
+    \ZealPHP\Store::set('ws_store_demo_data', 'shared_row', ['n' => 0, 'name' => '', 'who' => '', 'ts' => time()]);
+    ws_store_demo_broadcast();
+    return ['n' => 0];
+});
+
+$app->route('/api/learn/demo/store-write', ['methods' => ['POST']], function () {
+    $g = G::instance();
+    $name = trim((string) ($g->post['name'] ?? ''));
+    $who  = trim((string) ($g->post['who']  ?? 'anonymous'));
+    if ($name === '' || strlen($name) > 60) {
+        http_response_code(400);
+        return ['error' => 'name required (1-60 chars)'];
+    }
+    $row = \ZealPHP\Store::get('ws_store_demo_data', 'shared_row') ?: ['n' => 0];
+    \ZealPHP\Store::set('ws_store_demo_data', 'shared_row', [
+        'n'    => (int) ($row['n'] ?? 0),
+        'name' => $name,
+        'who'  => substr($who, 0, 60),
+        'ts'   => time(),
+    ]);
+    ws_store_demo_broadcast();
+    $current = \ZealPHP\Store::get('ws_store_demo_data', 'shared_row');
+    return ['ok' => true, 'row' => $current];
+});
+
 $app->route('/api/learn/demo/greeting', ['methods' => ['GET']], function () {
     $g = G::instance();
     $name = htmlspecialchars(trim((string) ($g->get['name'] ?? 'World')));
