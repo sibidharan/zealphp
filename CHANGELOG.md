@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.22] - 2026-05-17
+
+A focused session-interop release. Two coupled bugs were preventing frameworks that drive sessions through PHP's native `session_*()` API (Symfony, Laravel, vanilla PHP) from working under ZealPHP's superglobals mode — silent data loss on every `session_write_close()`, plus a competing `PHPSESSID` cookie from ZealPHP's own SessionManager that would invalidate the framework's cookie.
+
+### Fixed
+
+- **`$_SESSION` ↔ `$g->session` bridge in superglobals mode** — `RequestContext::$session` is a declared typed public property, and PHP resolves declared properties directly without entering the `__get`/`__set` proxy. So `$g->session` and `$_SESSION` were in fact **separate storage**: any code writing to `$_SESSION` (Symfony, legacy PHP) never reached `$g->session`, and `zeal_session_write_close()` serialised the empty `$g->session` while the actual session data was lost. The full `zeal_session_*` family (`start`, `write_close`, `status`, `destroy`, `unset`, `abort`, `encode`, `decode`) now reads/writes the canonical store for the current mode (`$_SESSION` under `superglobals(true)`, `$g->session` under coroutine mode) and mirrors writes to keep both in sync where safe.
+- **`zeal_session_status()` false-positive** — used to read `isset($g->session)`, but in superglobals mode the typed property is always initialised to `[]`, so it would always return `PHP_SESSION_ACTIVE` and trip Symfony's `NativeSessionStorage::start()` ("Failed to start the session: already started by PHP."). Now mode-aware.
+
+### Added
+
+- **`App::sessionLifecycle(?bool $on = null): bool`** and the backing `App::$session_lifecycle` static (default `true`). When set to `false`, ZealPHP's `SessionManager` / `CoSessionManager` wrappers skip session_start / cookie emission / write_close so an external framework (Symfony's `NativeSessionStorage`, Laravel, etc.) can own the session lifecycle without ZealPHP racing it for the `PHPSESSID` cookie. Request-context init (`openswoole_request`, `zealphp_response`, error-stack reset) still runs unconditionally; the `zeal_session_*` uopz overrides stay installed and callable from user code regardless. Used by the new [zealphp-symfony](https://github.com/sibidharan/zealphp-symfony) bridge to deliver Symfony-on-ZealPHP with one PHPSESSID across both layers.
+
 ## [0.2.21] - 2026-05-17
 
 The full-parity push. Every ⚠ middleware row on the v0.2.20 Apache + nginx coverage matrices now ships as a built-in. Every server-level configurability gap surfaced in the v0.2.20 plan's §10 (`App::$server_admin`, `$canonical_name`, `$hostname_lookups`, `$trusted_proxies` + `App::clientIp()`, `$access_log_format`, `LimitRequestFields` family) is now wired through `src/App.php` with fluent getter/setter methods matching the `App::superglobals()` precedent.
