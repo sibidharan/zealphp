@@ -34,6 +34,49 @@ In priority order — biggest production-trust gaps first.
 - [ ] **PHP 8.4 CI flake fix** — `test_chat_consecutive_requests_work` is environmental (Xdebug + curl timeout). Drop coverage on 8.4 in CI, keep coverage on 8.3 (which is already the only Codecov uploader). ~5-line CI change
 - [ ] **[R&D]** Legacy PHP migration analyzer — static analysis tool to assess existing PHP app compatibility with coroutine mode (catches `static $cache` patterns, ini_set() per-request, etc. that need the discipline contract)
 
+### Apache + nginx parity middlewares — surfaced by the v0.2.20 coverage matrices
+
+The Apache `AllowOverride` and nginx coverage matrices on the [legacy-apps page](https://php.zeal.ninja/legacy-apps) mark several common directives as ⚠ (small custom middleware needed). Each item below is a ~15–25 line PSR-15 middleware that closes one ⚠ row. Order is rough-priority by real-world `.htaccess` frequency.
+
+- [ ] **`src/Middleware/HeaderMiddleware.php`** — declarative response-header manipulation: `add(name, value)`, `set(name, value)`, `unset(name)`, conditional variants. Apache `mod_headers` (`Header set / append / unset / add / merge`). Easily the most-requested missing piece given how many `.htaccess` files have a stack of `Header set X-Foo bar` lines.
+- [ ] **`src/Middleware/CharsetMiddleware.php`** — auto-append `charset=utf-8` to text-ish responses missing a charset. Consumes the new `App::$default_charset` introduced in v0.2.20. Apache `AddDefaultCharset` / `AddCharset`.
+- [ ] **`src/Middleware/CacheControlMiddleware.php`** — extension-based `Cache-Control` for static assets. Apache `<FilesMatch ".(css|jpg|...)$"> Header set Cache-Control "max-age=N"`. Configurable map.
+- [ ] **`src/Middleware/ExpiresMiddleware.php`** (or merge into `CacheControlMiddleware`) — `Expires:` header by content type. Apache `mod_expires`: `ExpiresActive`, `ExpiresByType`, `ExpiresDefault`.
+- [ ] **`src/Middleware/BasicAuthMiddleware.php`** — HTTP Basic Auth with htpasswd-style file OR callback verifier. Apache `AuthType Basic` + `AuthUserFile` + `Require`. Same DX as `CorsMiddleware`. The biggest auth gap in current ZealPHP.
+- [ ] **`src/Middleware/IpAccessMiddleware.php`** — IP/CIDR allow/deny lists. Apache legacy `Allow`, `Deny`, `Order` (2.2 syntax); modern `Require ip`.
+- [ ] **`src/Middleware/RateLimitMiddleware.php`** — sliding-window request rate limiter using `Store` for shared-state across workers. nginx `limit_req`. Configurable per route or globally.
+- [ ] **`src/Middleware/ConcurrencyLimitMiddleware.php`** — concurrent in-flight request limit using `Counter`. nginx `limit_conn`. Per-IP or global.
+- [ ] **`src/Middleware/BlockPhpExtMiddleware.php`** (optional) — refuse `*.php` URLs with 404 for apps that want extensionless URLs as the only public surface. Or document the 5-line custom-inline pattern.
+
+### v0.2.20 follow-ups — discovered during the `App::include()` planning pass
+
+Each of these is independent of the file-execution work and would have unnecessarily expanded that diff. Logged so they don't get lost.
+
+- [ ] **`App::$strip_trailing_slash`** flag — companion to existing `App::$directory_slash`. Off by default. When on, non-directory URIs ending in `/` get a 301 to the no-slash form.
+- [ ] **Route fall-through semantics** — investigate and document whether `return null` from a `patternRoute` continues dispatch to the next matching route. If not, add `App::tryInclude($path)` helper that distinguishes "file missing" (returns `null` for fall-through) from "security violation" (returns `403`).
+- [ ] **`App::$server_admin`** — Apache `ServerAdmin` equivalent; surfaced on the built-in 500 error page templates.
+- [ ] **`App::$canonical_name` + `App::$use_canonical_name`** — Apache `ServerName` + `UseCanonicalName`; controls the host source used when building absolute redirect URLs.
+- [ ] **`App::$hostname_lookups`** — Apache `HostnameLookups`; populates `$g->server['REMOTE_HOST']` via reverse DNS. Off by default (perf cost).
+- [ ] **`App::$trusted_proxies` + `App::clientIp()` helper** — CIDR-based `X-Forwarded-For` trust list. Critical for production deploys behind Traefik/Caddy/nginx for TLS termination. High value.
+- [ ] **`App::$access_log_format` + custom access-log support** — Apache `LogFormat` / `CustomLog` / nginx `log_format`. Bigger refactor of `access_log()` in `src/utils.php` to support format strings.
+- [ ] **Multi-host routing pattern** — for users porting nginx `server_name a.com b.com;` configs. Either a small `HostRouterMiddleware` that dispatches on `$g->server['HTTP_HOST']`, or a documented "run one ZealPHP instance per host behind a real proxy" recipe. Decide based on demand.
+- [ ] **Reverse-proxy helper** — for users porting `proxy_pass`. A documented `ProxyMiddleware` template using OpenSwoole's HTTP client; or documentation pointing to Caddy/Traefik as the recommended front-proxy.
+- [ ] **MIME-type extensibility** — document how to add custom MIME types for the static handler (Apache `AddType` for `.wasm`, `.glb`, custom binary formats). Likely a small `MimeTypeMiddleware` for non-static responses + a config hook for the static handler.
+- [ ] **Body-rewrite middleware** — Apache `Substitute "s/foo/bar/"` reference template. Uncommon in production but worth a `BodyRewriteMiddleware` template users can copy.
+- [ ] **Directory autoindex** — opt-in `App::$autoindex` + `App::autoindex()` fluent method + `App::renderAutoindex()` + `template/_autoindex.php`. Apache `Options +Indexes` / nginx `autoindex on`. Off by default (safer). Full Apache mod_autoindex customisation surface (icons, alts, descriptions) is intentionally NOT replicated — users override the template instead.
+
+**Explicitly NOT planned** (marked ❌ in the legacy-apps coverage matrix):
+
+- Server-Side Includes (`Options +Includes`, `XBitHack`, `.shtml` parsing) — modern apps use templates; ZealPHP has `App::render()`
+- mod_speling fuzzy URL matching — niche, security-questionable
+- mod_imagemap (server-side `<map>` files) — dead ~1995
+- mod_dav (WebDAV) — separate scope; use a dedicated WebDAV server
+- CERN meta files (MetaDir/MetaFiles/MetaSuffix) — dead ~1996
+- ISAPI directives — Windows IIS-only
+- mod_lua hook directives — PSR-15 middleware is the native equivalent
+- LDAP authentication built-in — document the PHP LDAP extension integration path
+- HTTP Digest Auth — Basic + HTTPS is the modern recommendation
+
 ---
 
 ## v0.3 — Observability & Performance
