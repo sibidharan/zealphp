@@ -3290,6 +3290,30 @@ class ResponseMiddleware implements MiddlewareInterface
             return new Response('', 405);
         }
 
+        // Apache: RewriteCond %{REQUEST_FILENAME} !-d
+        //         RewriteRule ^(.+)/$ /$1 [R=301,L]
+        // When stripTrailingSlash() is on and the URI ends in `/` but does not
+        // map to a directory under document_root, 301-redirect to the no-slash
+        // form. Directory URIs are left alone so the existing DirectorySlash
+        // path (serveDirectory()) keeps working. Only safe for GET/HEAD per
+        // RFC 9110 §15.4.2 — POST/PUT/DELETE pass through unchanged.
+        if (App::$strip_trailing_slash
+            && ($method === 'GET' || $method === 'HEAD')
+            && $path !== '/'
+            && substr($path, -1) === '/') {
+            $docRoot = App::resolveDocumentRoot();
+            $candidate = realpath($docRoot . rtrim($path, '/'));
+            if ($candidate === false || !is_dir($candidate)) {
+                $newPath = rtrim($path, '/');
+                $qs = parse_url($uri, PHP_URL_QUERY);
+                $location = $newPath . ($qs ? '?' . $qs : '');
+                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+                $g->zealphp_response->redirect($location, 301);
+                $g->_streaming = true;
+                return new Response('', 301);
+            }
+        }
+
         // OPTIONS — return allowed methods for this URI without running a handler
         if ($method === 'OPTIONS') {
             $allowed = ['OPTIONS'];
