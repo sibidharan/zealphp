@@ -4,17 +4,25 @@
 <h1 class="section-title">HTTP Responses</h1>
 <p class="section-desc">ZealPHP wraps OpenSwoole's response with a clean API. Every method is coroutine-safe — no output buffering leaks across concurrent requests.</p>
 
-<h2>Return Value Conventions</h2>
-<p>What you return from a route handler determines the response — no boilerplate needed:</p>
+<h2 id="return-contract">Universal return contract</h2>
+<div class="callout info" style="margin:1rem 0 1.5rem">
+  <p style="margin:0"><strong>One contract, every entry point.</strong> Any function that produces a response — route handler, fallback, error handler, <code>App::render()</code>, <code>App::renderToString()</code>, <code>App::renderStream()</code>, <code>App::include()</code>, public file, API closure, streaming template Closure — uses the same return contract. The framework translates the return value into an HTTP response identically regardless of where it came from. Other pages link here rather than restating it.</p>
+</div>
+
 <table class="ztable" style="margin-bottom:2rem">
-  <tr><th>Return type</th><th>Behavior</th><th>Example</th></tr>
-  <tr><td><code>int</code></td><td>HTTP status code (empty body)</td><td><code>return 404;</code> <code>return 201;</code> <code>return 403;</code></td></tr>
-  <tr><td><code>array</code> / <code>object</code></td><td>JSON-serialized, <code>Content-Type: application/json</code> set</td><td><code>return ['id' => 42, 'name' => 'alice'];</code></td></tr>
-  <tr><td><code>string</code></td><td>Sent as response body (HTML)</td><td><code>return '&lt;h1&gt;Hello&lt;/h1&gt;';</code></td></tr>
-  <tr><td><code>Generator</code></td><td>SSR streaming — each <code>yield</code> sent immediately</td><td><code>yield '&lt;head&gt;...'; yield $content;</code></td></tr>
-  <tr><td><code>void</code> + <code>echo</code></td><td>Output buffer captured via <code>ob_get_clean()</code></td><td><code>echo "Hello"; echo " World";</code></td></tr>
-  <tr><td><code>ResponseInterface</code></td><td>PSR-7 response used directly</td><td><code>return new Response($body, 200);</code></td></tr>
+  <tr><th>The handler / file does</th><th>Core sees</th><th>ResponseMiddleware emits</th></tr>
+  <tr><td><code>echo "html"; // no explicit return</code></td><td><code>"html"</code> (buffered)</td><td>200 + HTML body</td></tr>
+  <tr><td><code>return 404;</code></td><td><code>404</code> (int)</td><td>404 status, empty body</td></tr>
+  <tr><td><code>return ['ok' => true];</code></td><td><code>['ok' => true]</code> (array)</td><td>200 + JSON (<code>Content-Type: application/json</code>)</td></tr>
+  <tr><td><code>return "explicit html";</code></td><td><code>"explicit html"</code> (string)</td><td>HTML body</td></tr>
+  <tr><td><code>echo "shell"; return "body";</code></td><td><code>"shellbody"</code> (concatenated)</td><td>HTML body (wire order preserved)</td></tr>
+  <tr><td><code>return (function() { yield ...; })();</code></td><td><code>\Generator</code></td><td>SSR stream — each <code>yield</code> flushed</td></tr>
+  <tr><td><code>return function($req) { yield ...; };</code></td><td><code>\Closure</code> (param-injected when invoked)</td><td>SSR stream after invocation</td></tr>
+  <tr><td><code>echo "header"; return (function() { yield ...; })();</code></td><td><code>\Generator</code> wrapping <code>"header"</code> + delegated yields</td><td>Streamed in source order</td></tr>
+  <tr><td><code>return new Response($body, 200);</code></td><td><code>ResponseInterface</code></td><td>PSR-7 response used directly (output buffer ignored)</td></tr>
 </table>
+
+<p style="margin-top:.5rem;color:var(--text-muted);font-size:.92rem"><strong>Lock-step:</strong> this table is mirrored verbatim in <code>.claude/CLAUDE.md</code> under "Return value conventions". Any change to return-value handling MUST update both in the same commit. The shared private core that implements this is <code>App::executeFile()</code>.</p>
 
 <?php App::render('/components/_code', [
     'label' => 'All return patterns in one glance',
@@ -40,7 +48,15 @@ $app->route('/echo', function() {
     echo '<div>This is captured</div>';
     echo '<div>by output buffering</div>';
 });
+
+// Same contract inside an included file:
+//   public/article.php → return 404;        // status flows back
+//   public/api.php     → return ['ok'=>1];  // JSON flows back
+//   public/feed.php    → return (function(){ yield ...; })();  // streamed
+$app->route('/article/{id}', fn($id) => App::include('/article.php'));
 PHP]); ?>
+
+<p style="margin-top:1rem">The same contract applies inside any file invoked by <a href="/templates"><code>App::render() / renderToString() / renderStream() / include()</code></a> — see <a href="/templates#file-execution-family">the file-execution family</a>.</p>
 
 <h2>Response Object Methods</h2>
 <table class="ztable" style="margin-bottom:2rem">
@@ -160,7 +176,7 @@ $app->route('/api/created', function() {
 PHP]); ?>
 
 <h2 style="margin-top:2.5rem">Custom error pages — Apache <code>ErrorDocument</code></h2>
-<p>Register a handler for any 4xx/5xx status. Fires whenever the framework or a route emits that status. Return values follow the same conventions as regular routes — <code>string</code> for HTML, <code>array</code> for JSON, <code>Generator</code> for streaming, void+echo for output buffer capture.</p>
+<p>Register a handler for any 4xx/5xx status. Fires whenever the framework or a route emits that status. Return values follow the <a href="#return-contract">universal return contract</a> — the same shapes a route handler returns work here too.</p>
 
 <?php App::render('/components/_code', [
     'label' => 'Status-specific + catch-all handlers',
