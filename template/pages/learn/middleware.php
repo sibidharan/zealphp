@@ -146,11 +146,11 @@ $app-&gt;addMiddleware(new RateLimitHeader(100));</code></pre>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/responses"
-         hx-get="/api/learn/page?slug=learn/responses" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/responses">← Returning a Response</a>
+         hx-get="/api/learn/page?slug=learn/responses" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/responses">← Returning a Response</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/streaming"
-         hx-get="/api/learn/page?slug=learn/streaming" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/streaming">Streaming Done Right →</a>
+         hx-get="/api/learn/page?slug=learn/streaming" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/streaming">Streaming Done Right →</a>
     </div>
   </article>
 </div>

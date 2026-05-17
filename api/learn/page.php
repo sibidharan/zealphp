@@ -1,6 +1,7 @@
 <?php
 // ZealAPI file: GET /api/learn/page?slug=routing
-// Renders just the <div class="learn-layout">...</div> for a lesson.
+// Returns ONLY the <article class="lesson-content">...</article> for a lesson —
+// the sidebar lives outside the swap zone and stays put across navigations.
 // Used by htmx to swap lesson content without a full page reload.
 
 use ZealPHP\App;
@@ -26,5 +27,12 @@ ${basename(__FILE__, '.php')} = function () {
     $tplPath = $slug === 'learn' ? '/pages/learn' : '/pages/' . $slug;
     header('Content-Type: text/html; charset=utf-8');
     $html = App::renderToString($tplPath, ['active' => $slug, 'page' => $slug]);
+
+    // Extract just the <article class="lesson-content">…</article> so the
+    // htmx swap target receives the article alone — no nested layout/sidebar.
+    if (preg_match('/<article class="lesson-content">.*?<\/article>/s', $html, $m)) {
+        $html = $m[0];
+    }
+
     $this->response($html, 200);
 };

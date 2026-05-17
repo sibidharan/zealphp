@@ -210,11 +210,11 @@ $app->run();</code></pre>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/mental-model"
-         hx-get="/api/learn/page?slug=learn/mental-model" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/mental-model">← The Mental Model</a>
+         hx-get="/api/learn/page?slug=learn/mental-model" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/mental-model">← The Mental Model</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/routes"
-         hx-get="/api/learn/page?slug=learn/routes" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routes">How Routes Work →</a>
+         hx-get="/api/learn/page?slug=learn/routes" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/routes">How Routes Work →</a>
     </div>
   </article>
 </div>

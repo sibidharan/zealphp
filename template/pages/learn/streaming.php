@@ -235,11 +235,11 @@ $response-&gt;sse(function ($emit) {
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/middleware"
-         hx-get="/api/learn/page?slug=learn/middleware" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/middleware">← Middleware: The Wrap</a>
+         hx-get="/api/learn/page?slug=learn/middleware" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/middleware">← Middleware: The Wrap</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/store"
-         hx-get="/api/learn/page?slug=learn/store" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/store">Sharing State →</a>
+         hx-get="/api/learn/page?slug=learn/store" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/store">Sharing State →</a>
     </div>
   </article>
 </div>

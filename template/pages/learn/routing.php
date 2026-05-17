@@ -121,11 +121,11 @@ HTML]); ?>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/websocket"
-         hx-get="/api/learn/page?slug=learn/websocket" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/websocket">← Real-Time Sync</a>
+         hx-get="/api/learn/page?slug=learn/websocket" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/websocket">← Real-Time Sync</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/async"
-         hx-get="/api/learn/page?slug=learn/async" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/async">Async &amp; Coroutines →</a>
+         hx-get="/api/learn/page?slug=learn/async" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/async">Async &amp; Coroutines →</a>
     </div>
   </article>
 </div>

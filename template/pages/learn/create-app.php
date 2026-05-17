@@ -81,11 +81,11 @@ php app.php logs           # Tail log files</code></pre>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn"
-         hx-get="/api/learn/page?slug=learn" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn">← Hello, ZealPHP</a>
+         hx-get="/api/learn/page?slug=learn" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn">← Hello, ZealPHP</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/first-page"
-         hx-get="/api/learn/page?slug=learn/first-page" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/first-page">Your First Page →</a>
+         hx-get="/api/learn/page?slug=learn/first-page" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/first-page">Your First Page →</a>
     </div>
   </article>
 </div>

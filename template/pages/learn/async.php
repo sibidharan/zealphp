@@ -109,11 +109,11 @@ usleep(500000);  // blocks — the worker thread is stuck for 500ms</code></pre>
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/routing"
-         hx-get="/api/learn/page?slug=learn/routing" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routing">← Routes &amp; APIs</a>
+         hx-get="/api/learn/page?slug=learn/routing" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/routing">← Routes &amp; APIs</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/deployment"
-         hx-get="/api/learn/page?slug=learn/deployment" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/deployment">Ship It →</a>
+         hx-get="/api/learn/page?slug=learn/deployment" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/deployment">Ship It →</a>
     </div>
   </article>
 </div>

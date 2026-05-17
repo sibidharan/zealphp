@@ -48,8 +48,8 @@ $groups = [
             <li<?= $active === $slug ? ' class="active"' : '' ?>>
               <a href="/<?= $slug ?>"
                  hx-get="/api/learn/page?slug=<?= urlencode($slug) ?>"
-                 hx-target=".learn-layout"
-                 hx-swap="outerHTML show:.learn-layout:top"
+                 hx-target=".lesson-content"
+                 hx-swap="outerHTML show:.lesson-content:top"
                  hx-push-url="/<?= $slug ?>"><?= htmlspecialchars($label) ?></a>
             </li>
             <?php $i++; endforeach; ?>

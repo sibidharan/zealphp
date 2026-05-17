@@ -241,11 +241,11 @@ const handleSubmit = async (e) =&gt; {
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/components"
-         hx-get="/api/learn/page?slug=learn/components" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/components">← Layouts &amp; Components</a>
+         hx-get="/api/learn/page?slug=learn/components" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/components">← Layouts &amp; Components</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/htmx"
-         hx-get="/api/learn/page?slug=learn/htmx" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/htmx">Forms &amp; htmx →</a>
+         hx-get="/api/learn/page?slug=learn/htmx" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/htmx">Forms &amp; htmx →</a>
     </div>
   </article>
 </div>

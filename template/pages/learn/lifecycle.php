@@ -202,11 +202,11 @@ $app->run();                                     // ← OpenSwoole takes over he
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/routes"
-         hx-get="/api/learn/page?slug=learn/routes" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routes">← How Routes Work</a>
+         hx-get="/api/learn/page?slug=learn/routes" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/routes">← How Routes Work</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/injection"
-         hx-get="/api/learn/page?slug=learn/injection" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/injection">Parameter Injection →</a>
+         hx-get="/api/learn/page?slug=learn/injection" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/injection">Parameter Injection →</a>
     </div>
   </article>
 </div>

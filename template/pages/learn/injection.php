@@ -136,11 +136,11 @@
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/lifecycle"
-         hx-get="/api/learn/page?slug=learn/lifecycle" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/lifecycle">← A Request’s Journey</a>
+         hx-get="/api/learn/page?slug=learn/lifecycle" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/lifecycle">← A Request’s Journey</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/responses"
-         hx-get="/api/learn/page?slug=learn/responses" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/responses">Returning a Response →</a>
+         hx-get="/api/learn/page?slug=learn/responses" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/responses">Returning a Response →</a>
     </div>
   </article>
 </div>

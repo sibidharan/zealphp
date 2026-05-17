@@ -234,11 +234,11 @@ App::setFallback(function () {
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/project-structure"
-         hx-get="/api/learn/page?slug=learn/project-structure" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/project-structure">← Project Structure</a>
+         hx-get="/api/learn/page?slug=learn/project-structure" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/project-structure">← Project Structure</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/lifecycle"
-         hx-get="/api/learn/page?slug=learn/lifecycle" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/lifecycle">A Request's Journey →</a>
+         hx-get="/api/learn/page?slug=learn/lifecycle" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/lifecycle">A Request's Journey →</a>
     </div>
   </article>
 </div>

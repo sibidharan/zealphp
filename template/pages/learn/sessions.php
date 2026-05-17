@@ -116,11 +116,11 @@ $app->route('/api/learn/demo/incr', function ($request, $response) {
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/htmx"
-         hx-get="/api/learn/page?slug=learn/htmx" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/htmx">← Forms &amp; htmx</a>
+         hx-get="/api/learn/page?slug=learn/htmx" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/htmx">← Forms &amp; htmx</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/auth"
-         hx-get="/api/learn/page?slug=learn/auth" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/auth">User Accounts →</a>
+         hx-get="/api/learn/page?slug=learn/auth" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/auth">User Accounts →</a>
     </div>
   </article>
 </div>

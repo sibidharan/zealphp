@@ -160,11 +160,11 @@ $register = function () {
 
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/sessions"
-         hx-get="/api/learn/page?slug=learn/sessions" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/sessions">← Sessions</a>
+         hx-get="/api/learn/page?slug=learn/sessions" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/sessions">← Sessions</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/notes"
-         hx-get="/api/learn/page?slug=learn/notes" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/notes">Personal Notes →</a>
+         hx-get="/api/learn/page?slug=learn/notes" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.lesson-content:top" hx-push-url="/learn/notes">Personal Notes →</a>
     </div>
   </article>
 </div>
