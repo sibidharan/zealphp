@@ -7,11 +7,19 @@ use ZealPHP\RequestContext;
  * Decode PHP 'php' session serialize format (key|serialized_value;key|...).
  * Falls back to unserialize() for php_serialize handler format.
  *
+ * SECURITY: both unserialize() calls pass allowed_classes => false to keep
+ * the object-injection hardening that commit c43da63 introduced. Sessions
+ * are user-controlled storage (tampered cookie, compromised Redis); allowing
+ * arbitrary class instantiation here would let an attacker trigger
+ * __wakeup() / __destruct() gadgets in any class in the autoload graph.
+ * If a future caller genuinely needs to round-trip objects through sessions,
+ * that's a separate feature with an explicit class whitelist, not a global flip.
+ *
  * @return array<string, mixed>
  */
 function php_session_decode_to_array(string $data): array
 {
-    $decoded = @unserialize($data, ['allowed_classes' => true]);
+    $decoded = @unserialize($data, ['allowed_classes' => false]);
     if (is_array($decoded)) {
         /** @var array<string, mixed> $narrowed */
         $narrowed = [];
@@ -30,7 +38,7 @@ function php_session_decode_to_array(string $data): array
         if ($pipe === false) break;
         $key = substr($data, $offset, $pipe - $offset);
         $offset = $pipe + 1;
-        $value = @unserialize(substr($data, $offset), ['allowed_classes' => true]);
+        $value = @unserialize(substr($data, $offset), ['allowed_classes' => false]);
         if ($value === false && substr($data, $offset, 4) !== 'b:0;') {
             $next = strpos($data, ';', $offset);
             if ($next !== false) {
