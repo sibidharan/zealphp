@@ -100,6 +100,10 @@ function initPageScripts(root) {
           const liEl = document.createElement('li');
           const a = document.createElement('a');
           a.href = '#' + h2.id;
+          // body has hx-boost="true" which intercepts every <a> for an
+          // htmx swap. For pure same-page anchor jumps we need a plain
+          // browser navigation so the URL fragment + scroll lands cleanly.
+          a.setAttribute('hx-boost', 'false');
           a.textContent = label || h2.textContent.trim();
           liEl.appendChild(a);
           ul.appendChild(liEl);
@@ -155,16 +159,25 @@ function initPageScripts(root) {
       const a = links.get(id);
       if (a) a.classList.add('current');
     };
-    // Recompute the active substep: the last <h2> whose top has scrolled
-    // past the 'active zone' line (80px below viewport top — leaves room
-    // for the sticky page nav). At page top, before any h2 has crossed
-    // the line, fall through to the first heading.
+    // Recompute the active substep. Pick the LAST <h2> in document order
+    // whose top has scrolled past the active line (just below the page
+    // nav). Two edge cases:
+    //   - Page top: no h2 has crossed yet → fall through to first h2
+    //   - Page bottom: the last h2 may never reach the line because the
+    //     page can't scroll that far → if we're within 20px of page
+    //     bottom, force-pick the last h2
     const recompute = () => {
       const lineY = 80;
-      let pick = headings[0];
+      let pick = null;
       for (const h of headings) {
         if (h.getBoundingClientRect().top - lineY <= 0) pick = h;
-        else break;
+        // Don't break — keep scanning so we pick the LAST h2 past the
+        // line, not the first.
+      }
+      if (!pick) pick = headings[0];
+      const docH = document.documentElement.scrollHeight;
+      if (window.scrollY + window.innerHeight >= docH - 20) {
+        pick = headings[headings.length - 1];
       }
       setCurrent(pick.id);
     };
