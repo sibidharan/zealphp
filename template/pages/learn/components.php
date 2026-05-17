@@ -124,7 +124,7 @@ HTML]); ?>
   <tbody>
     <tr><td><code>render()</code></td><td>void (echoes)</td><td>Direct output — this lesson</td><td><a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open →</a></td></tr>
     <tr><td><code>renderToString()</code></td><td>string</td><td>htmx fragments — <a href="/learn/notes">Lesson 18</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-to-string" target="_blank">Open →</a></td></tr>
-    <tr><td><code>renderStream()</code></td><td>Generator</td><td>SSR streaming — <a href="/learn/ai-chat">Lesson 19</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-stream" target="_blank">Open →</a></td></tr>
+    <tr><td><code>renderStream()</code></td><td>Generator</td><td>SSR streaming — <a href="/learn/ai-chat">Lesson 20</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-stream" target="_blank">Open →</a></td></tr>
   </tbody>
 </table>
 <p>The streaming demo is the most visual — watch 12 rows arrive one by one over ~2 seconds. Each <code>yield</code> flushes a chunk to the browser immediately.</p>',

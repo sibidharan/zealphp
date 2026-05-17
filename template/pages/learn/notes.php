@@ -188,7 +188,7 @@ $this->response($html, 200);</code></pre>
 
     <h3>Component reuse</h3>
     <p>
-      The <a href="https://github.com/sibidharan/zealphp/blob/master/template/components/_note_card.php" target="_blank"><code>_note_card</code></a> component is used in three places: the notes list (GET), the create response (POST), and the chat history bubbles (next lesson). Same file, three consumers. <code>_notes_widget</code> from step&nbsp;2 takes the same idea one level up — it&rsquo;s the whole notes panel, also used in two places (this lesson + the popup viewer).
+      The <a href="https://github.com/sibidharan/zealphp/blob/master/template/components/_note_card.php" target="_blank"><code>_note_card</code></a> component is used in three places: the notes list (GET), the create response (POST), and the chat history bubbles (<a href="/learn/ai-chat">Lesson 20, AI Chat</a>). Same file, three consumers. <code>_notes_widget</code> from step&nbsp;2 takes the same idea one level up — it&rsquo;s the whole notes panel, also used in two places (this lesson + the popup viewer).
     </p>
 
     <h2 id="step-sync">5. Live sync — cross-tab via WebSocket</h2>
@@ -212,10 +212,10 @@ if (msg.type === 'note_changed') {
     htmx.ajax('GET', '/api/learn/notes', { target: '#notes-list', swap: 'innerHTML' });
 }</code></pre>
     <p>
-      The full <a href="/learn/websocket">WebSocket lesson</a> walks through how
-      <code>learn_ws_broadcast</code> iterates the <code>Store</code> table of connected fds and
-      filters by <code>user_id</code> — same broadcaster shape as the tic-tac-toe room
-      broadcaster, just keyed differently.
+      The next lesson — <a href="/learn/websocket">Lesson 19, Real-Time Sync</a> — walks through
+      how <code>learn_ws_broadcast</code> iterates the <code>Store</code> table of connected fds
+      and filters by <code>user_id</code> (the tic-tac-toe lesson later applies the same
+      broadcaster shape with a different filter key: <code>room</code>).
     </p>
 
     <h2 id="step-tryit">6. Try it — the live widget</h2>

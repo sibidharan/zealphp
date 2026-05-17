@@ -115,7 +115,7 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
     <p>
       Every lesson you scroll through is <em>also a page in the real app</em>. The code that renders
       this lesson is the same code that powers the interactive demos. Register an account in Lesson 17,
-      save notes in Lesson 18, and chat with an AI agent in Lesson 19 &mdash; all served from one
+      save notes in Lesson 18, and chat with an AI agent in Lesson 20 &mdash; all served from one
       <code>php app.php</code> process.
     </p>
 
