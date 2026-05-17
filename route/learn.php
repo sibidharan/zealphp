@@ -90,13 +90,48 @@ function ws_counter_demo_broadcast(int $value): void
     }
 }
 
+// ── Rate-limit for unauthenticated public demo POSTs ────────────────
+// All /api/learn/demo/* mutation endpoints below are reachable without
+// auth — they power live widgets on the public docs site. To prevent
+// trivial griefing (flooding the counter, spam-writing the store-row
+// shown to every connected tab), every mutation runs through
+// demo_rate_check() first. Reuses Auth::rateLimit() (same pattern
+// Lesson 17 teaches as a security challenge), keyed by REMOTE_ADDR.
+// Limit: 30 writes per IP per minute — orders of magnitude above what
+// the live widgets need, far below sustained abuse.
+\ZealPHP\Store::make('demo_rate_limits', 10000, [
+    'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],   // IPv6 max
+    'count' => [\OpenSwoole\Table::TYPE_INT,    4],
+    'reset' => [\OpenSwoole\Table::TYPE_INT,    4],
+]);
+
+/**
+ * Returns null if the caller is under the limit (proceed). Returns an
+ * error payload + sets 429 + Retry-After if rate-limited — caller should
+ * `return` this directly from its route handler.
+ *
+ * @return null|array{error: string, limit: int, window: int}
+ */
+function demo_rate_check(): ?array
+{
+    $g  = G::instance();
+    $ip = (string) ($g->server['REMOTE_ADDR'] ?? 'unknown');
+    if (Auth::rateLimit('demo_rate_limits', $ip, 30, 60)) return null;
+    http_response_code(429);
+    header('Retry-After: 60');
+    header('Content-Type: application/json; charset=utf-8');
+    return ['error' => 'rate_limit', 'limit' => 30, 'window' => 60];
+}
+
 $app->route('/api/learn/demo/counter-bump', ['methods' => ['POST']], function () use ($wsCounterDemo) {
+    if ($err = demo_rate_check()) return $err;
     $new = $wsCounterDemo->increment();
     ws_counter_demo_broadcast((int) $new);
     return ['value' => (int) $new];
 });
 
 $app->route('/api/learn/demo/counter-reset', ['methods' => ['POST']], function () use ($wsCounterDemo) {
+    if ($err = demo_rate_check()) return $err;
     $wsCounterDemo->set(0);
     ws_counter_demo_broadcast(0);
     return ['value' => 0];
@@ -158,12 +193,15 @@ $app->route('/api/learn/demo/check', ['methods' => ['POST']], function () {
     $explain = trim((string) ($g->post['explain'] ?? ''));
     $isRight = $answer === $correct;
     // Allow a tiny tag whitelist so lesson authors can put <code>, <em>,
-    // <strong>, <a> in the explanation text. The value round-trips
-    // through a form hidden input (browser decodes once before submit),
-    // so the raw payload here is what the lesson author wrote.
-    // strip_tags with an allow-list keeps the rendering safe against a
-    // hand-crafted POST that swaps in <script>.
-    $safe = strip_tags($explain, '<code><em><strong><a><br>');
+    // <strong> in the explanation text. The value round-trips through a
+    // form hidden input (browser decodes once before submit), so the
+    // raw payload here is what the lesson author wrote — OR what a
+    // malicious client crafted in a hand-rolled POST. strip_tags
+    // filters tags but does NOT filter attributes, so we deliberately
+    // exclude <a> (would allow href="javascript:…") and any tag with
+    // an event-handler attribute surface. <code>/<em>/<strong>/<br>
+    // are inert — no attributes worth abusing — so they're safe to allow.
+    $safe = strip_tags($explain, '<code><em><strong><br>');
     header('Content-Type: text/html; charset=utf-8');
     return App::renderToString('/components/_callout', [
         'variant' => $isRight ? 'success' : 'warn',
@@ -293,6 +331,7 @@ function ws_store_demo_broadcast(): void
 }
 
 $app->route('/api/learn/demo/store-bump', ['methods' => ['POST']], function () {
+    if ($err = demo_rate_check()) return $err;
     $row = \ZealPHP\Store::get('ws_store_demo_data', 'shared_row');
     if (!$row) {
         // Initialize the row if a bump arrives before any set-get touched it
@@ -305,24 +344,31 @@ $app->route('/api/learn/demo/store-bump', ['methods' => ['POST']], function () {
 });
 
 $app->route('/api/learn/demo/store-reset', ['methods' => ['POST']], function () {
+    if ($err = demo_rate_check()) return $err;
     \ZealPHP\Store::set('ws_store_demo_data', 'shared_row', ['n' => 0, 'name' => '', 'who' => '', 'ts' => time()]);
     ws_store_demo_broadcast();
     return ['n' => 0];
 });
 
 $app->route('/api/learn/demo/store-write', ['methods' => ['POST']], function () {
+    if ($err = demo_rate_check()) return $err;
     $g = G::instance();
-    $name = trim((string) ($g->post['name'] ?? ''));
-    $who  = trim((string) ($g->post['who']  ?? 'anonymous'));
+    // Strip control chars (anything below 0x20 except space) to prevent broken
+    // JSON rendering on the client + ANSI/terminal escape tricks in CLI viewers.
+    $clean = static fn(string $s): string => preg_replace('/[\x00-\x1f\x7f]+/u', '', $s) ?? '';
+    $name = trim($clean((string) ($g->post['name'] ?? '')));
+    $who  = trim($clean((string) ($g->post['who']  ?? 'anonymous')));
     if ($name === '' || strlen($name) > 60) {
         http_response_code(400);
-        return ['error' => 'name required (1-60 chars)'];
+        return ['error' => 'name required (1-60 chars, printable)'];
     }
+    if ($who === '')      $who = 'anonymous';
+    if (strlen($who) > 60) $who = substr($who, 0, 60);
     $row = \ZealPHP\Store::get('ws_store_demo_data', 'shared_row') ?: ['n' => 0];
     \ZealPHP\Store::set('ws_store_demo_data', 'shared_row', [
         'n'    => (int) ($row['n'] ?? 0),
         'name' => $name,
-        'who'  => substr($who, 0, 60),
+        'who'  => $who,
         'ts'   => time(),
     ]);
     ws_store_demo_broadcast();

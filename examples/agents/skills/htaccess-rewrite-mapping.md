@@ -107,6 +107,44 @@ $app->route('/docs', function($response) {
    which is exactly what `[R=301]` is meant to FIX (force the canonical URL
    into the address bar for SEO).
 
+3. **Building the target path from a URL param without sanitization.** This
+   is a **path-traversal vulnerability**, NOT just a code-style issue:
+
+   ```php
+   // ⚠️ VULNERABLE — attacker can pass /serve/..%2F..%2F..%2Fetc%2Fpasswd
+   $app->route('/serve/{file}', fn($file) =>
+       App::includeFile(App::$cwd . '/public/' . $file . '.php')
+   );
+   ```
+
+   `App::includeFile()` executes whatever file path you hand it. If the
+   path is user-controlled and you don't constrain it, the user can read or
+   execute any PHP file the worker has access to.
+
+   **Two safe patterns** depending on what flexibility you actually need:
+
+   ```php
+   // (a) Whitelist — only specific known files are allowed.
+   $allowed = ['users', 'orders', 'health'];
+   $app->route('/serve/{file}', function ($file) use ($allowed) {
+       if (!in_array($file, $allowed, true)) return 404;
+       return App::includeFile(App::$cwd . '/public/' . $file . '.php');
+   });
+
+   // (b) basename() + realpath() containment — for filesystem-like resources.
+   $app->route('/serve/{file}', function ($file) {
+       $base = App::$cwd . '/public/';
+       $abs  = realpath($base . basename($file) . '.php');
+       if ($abs === false || !str_starts_with($abs, $base)) return 404;
+       return App::includeFile($abs);
+   });
+   ```
+
+   `basename()` strips any directory parts; `realpath()` resolves symlinks
+   and `..` segments. The `str_starts_with($abs, $base)` check confirms the
+   resolved file is still inside the document root — required because
+   `realpath()` alone doesn't prevent escape, it just normalizes.
+
 3. **Forgetting to populate `$g->get` for parameterized internal rewrites.**
    The legacy `.php` file reads `$_GET['id']` and gets nothing — silent bug.
 
