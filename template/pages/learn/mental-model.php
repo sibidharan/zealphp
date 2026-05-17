@@ -6,8 +6,8 @@
       'number'   => 4,
       'title'    => 'The Mental Model',
       'subtitle' => 'Apache that drank coffee and decided to stay. The mental model in one lesson.',
-      'prev'     => ['slug' => 'learn/first-page', 'title' => 'Your First Page'],
-      'next'     => ['slug' => 'learn/lifecycle',  'title' => 'A Request\'s Journey'],
+      'prev'     => ['slug' => 'learn/first-page',       'title' => 'Your First Page'],
+      'next'     => ['slug' => 'learn/project-structure','title' => 'Project Structure'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
@@ -195,9 +195,9 @@
       <a class="lesson-chip lesson-chip-prev" href="/learn/first-page"
          hx-get="/api/learn/page?slug=learn/first-page" hx-target=".learn-layout"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/first-page">← Your First Page</a>
-      <a class="lesson-chip lesson-chip-next" href="/learn/lifecycle"
-         hx-get="/api/learn/page?slug=learn/lifecycle" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/lifecycle">A Request’s Journey →</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/project-structure"
+         hx-get="/api/learn/page?slug=learn/project-structure" hx-target=".learn-layout"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/project-structure">Project Structure →</a>
     </div>
   </article>
 </div>

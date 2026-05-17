@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 8,
+      'number'   => 9,
       'title'    => 'Middleware: The Wrap',
       'subtitle' => 'Middleware is airport security between the gate and the plane. You don\'t write it for every flight. You nod at the TSA agent.',
       'prev'     => ['slug' => 'learn/responses', 'title' => 'Returning a Response'],

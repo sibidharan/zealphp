@@ -3,19 +3,44 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 5,
+      'number'   => 6,
       'title'    => 'A Request\'s Journey',
       'subtitle' => 'A request walks into a server. Nine things happen before your code runs. Let\'s audit the trip.',
-      'prev'     => ['slug' => 'learn/mental-model', 'title' => 'The Mental Model'],
-      'next'     => ['slug' => 'learn/injection',    'title' => 'Parameter Injection'],
+      'prev'     => ['slug' => 'learn/project-structure', 'title' => 'Project Structure'],
+      'next'     => ['slug' => 'learn/injection',         'title' => 'Parameter Injection'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
+      'How the server boots — the one-time setup that happens before any request',
       'The nine steps a request goes through from socket to your handler',
       'Where per-request state actually lives (and why it\'s isolated)',
       'How middleware wraps a request (and why order is reversed at registration)',
       'What ResponseMiddleware does last that you never see',
     ]]); ?>
+
+    <h2>Step 0 — the boot</h2>
+    <p>
+      Before any request, the server boots. <code>php app.php</code> runs your bootstrap top to
+      bottom:
+    </p>
+    <pre><code class="language-php">$app = App::init('0.0.0.0', 8080);
+
+$app->addMiddleware(new CorsMiddleware());      // registered (not running yet)
+$app->addMiddleware(new ETagMiddleware());
+$app->addMiddleware(new SessionStartMiddleware());
+
+Store::make('rate_limits', 10000, [...]);       // shared memory allocated
+
+$app->route('/health', fn() => ['ok' => true]); // route table populated
+
+$app->run();                                     // ← OpenSwoole takes over here</code></pre>
+    <p>
+      At the moment <code>$app-&gt;run()</code> is called, the master process forks N workers (one
+      per CPU core by default), each worker boots its own PHP runtime (autoloader, opcode cache),
+      then sits in an event loop waiting for connections. The route table, middleware stack, and
+      <code>Store</code> tables are inherited &mdash; <em>not re-computed per request</em>. Everything
+      after this point is per-request work.
+    </p>
 
     <h2>The trip, end to end</h2>
     <p>
@@ -176,9 +201,9 @@
     ]]); ?>
 
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/mental-model"
-         hx-get="/api/learn/page?slug=learn/mental-model" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/mental-model">← The Mental Model</a>
+      <a class="lesson-chip lesson-chip-prev" href="/learn/project-structure"
+         hx-get="/api/learn/page?slug=learn/project-structure" hx-target=".learn-layout"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/project-structure">← Project Structure</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/injection"
          hx-get="/api/learn/page?slug=learn/injection" hx-target=".learn-layout"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/injection">Parameter Injection →</a>

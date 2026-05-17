@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 7,
+      'number'   => 8,
       'title'    => 'Returning a Response',
       'subtitle' => 'Most frameworks make you construct a response object. ZealPHP infers it from what you return — like a thoughtful waiter who doesn\'t need you to spell out medium-rare, no onions.',
       'prev'     => ['slug' => 'learn/injection',  'title' => 'Parameter Injection'],
@@ -117,7 +117,8 @@
     </p>
     <ul>
       <li><a href="/demo/response/json">/demo/response/json</a> — <code>return [...]</code></li>
-      <li><a href="/demo/response/redirect">/demo/response/redirect</a> — <code>$response-&gt;redirect()</code></li>
+      <li><a href="/demo/response/redirect-301">/demo/response/redirect-301</a> — <code>$response-&gt;redirect($url, 301)</code></li>
+      <li><a href="/demo/response/redirect-302">/demo/response/redirect-302</a> — <code>$response-&gt;redirect($url)</code> (default 302)</li>
       <li><a href="/demo/response/headers">/demo/response/headers</a> — custom headers via <code>$response-&gt;header()</code></li>
       <li><a href="/demo/response/cookie">/demo/response/cookie</a> — <code>$response-&gt;cookie()</code></li>
     </ul>

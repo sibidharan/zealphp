@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 6,
+      'number'   => 7,
       'title'    => 'Parameter Injection',
       'subtitle' => 'PHP is a permissive language. ZealPHP is a permissive language that also reads — specifically, the signature of every handler you write.',
       'prev'     => ['slug' => 'learn/lifecycle',  'title' => 'A Request\'s Journey'],
@@ -107,10 +107,11 @@
       Visit a few to see what gets injected:
     </p>
     <ul>
-      <li><a href="/demo/inject/simple">/demo/inject/simple</a> — URL param only</li>
-      <li><a href="/demo/inject/request">/demo/inject/request</a> — <code>$request</code> dumped</li>
-      <li><a href="/demo/inject/response">/demo/inject/response</a> — <code>$response</code> used to set a custom header</li>
-      <li><a href="/demo/inject/mixed">/demo/inject/mixed</a> — URL param + <code>$request</code> + <code>$response</code></li>
+      <li><a href="/demo/inject/url/42">/demo/inject/url/42</a> — URL param only (<code>$id</code>)</li>
+      <li><a href="/demo/inject/request-only">/demo/inject/request-only</a> — <code>$request</code> dumped</li>
+      <li><a href="/demo/inject/url-response/42">/demo/inject/url-response/42</a> — <code>$id</code> + <code>$response</code> setting a header</li>
+      <li><a href="/demo/inject/all/42">/demo/inject/all/42</a> — URL param + <code>$request</code> + <code>$response</code></li>
+      <li><a href="/demo/inject/defaults/42">/demo/inject/defaults/42</a> — handler with a defaulted <code>$page = 1</code> parameter</li>
     </ul>
 
     <?php App::render('/components/_concept_check', [

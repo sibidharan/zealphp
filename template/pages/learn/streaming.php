@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 9,
+      'number'   => 10,
       'title'    => 'Streaming Done Right',
       'subtitle' => 'Streaming is the difference between handing someone a 1 GB file and turning on a faucet.',
       'prev'     => ['slug' => 'learn/middleware', 'title' => 'Middleware: The Wrap'],

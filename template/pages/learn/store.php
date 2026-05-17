@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 10,
+      'number'   => 11,
       'title'    => 'Sharing State: Store & Counter',
       'subtitle' => 'Workers don\'t share memory. Workers share a fridge.',
       'prev'     => ['slug' => 'learn/streaming',  'title' => 'Streaming Done Right'],
@@ -145,8 +145,9 @@ $app-&gt;route('/api/expensive', function ($request) {
 
     <h2>Try it live</h2>
     <ul>
-      <li><a href="/demo/store/">/demo/store/</a> — <code>Store</code> in action</li>
-      <li><a href="/demo/counter/">/demo/counter/</a> — <code>Counter</code> incrementing on every request</li>
+      <li><a href="/demo/store/set-get">/demo/store/set-get</a> — write a row, read it back across workers</li>
+      <li><a href="/demo/store/incr">/demo/store/incr</a> — atomic increment on a Store field</li>
+      <li><a href="/demo/counter/increment">/demo/counter/increment</a> — <code>Counter</code> incrementing on every request</li>
       <li><a href="/store">/store</a> — full reference docs</li>
     </ul>
 
