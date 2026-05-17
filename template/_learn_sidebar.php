@@ -56,7 +56,7 @@ $groups = [
                   $chip = $item[2] ?? null;
                   $demo = $item[3] ?? null; ?>
             <li class="learn-sidebar-item<?= $active === $slug ? ' active' : '' ?>"
-                data-num="<?= sprintf('%02d', $lessonNum) ?>"
+                data-num="<?= $lessonNum ?>"
                 <?= $chip ? 'data-chip="'.htmlspecialchars($chip, ENT_QUOTES).'"' : '' ?>
                 <?= $demo ? 'data-demo="'.htmlspecialchars($demo, ENT_QUOTES).'"' : '' ?>>
               <a href="/<?= $slug ?>"
