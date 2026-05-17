@@ -88,6 +88,21 @@ function initPageScripts(root) {
 }
 document.addEventListener('DOMContentLoaded', () => initPageScripts());
 document.addEventListener('htmx:afterSettle', () => initPageScripts());
+
+// hx-preserve keeps the sidebar DOM element identity across swaps, but htmx
+// detaches/reattaches it during the swap and the browser zeroes scrollTop on
+// reinsertion. Snapshot before, restore after.
+(function () {
+  let savedScrollTop = 0;
+  document.addEventListener('htmx:beforeSwap', () => {
+    const sb = document.getElementById('learn-sidebar');
+    if (sb) savedScrollTop = sb.scrollTop;
+  });
+  document.addEventListener('htmx:afterSettle', () => {
+    const sb = document.getElementById('learn-sidebar');
+    if (sb && savedScrollTop > 0) sb.scrollTop = savedScrollTop;
+  });
+})();
 </script>
 </body>
 </html>
