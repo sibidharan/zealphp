@@ -263,6 +263,8 @@ $app->route('/users', fn() => (function() {
 
 Non-standard codes have empty reason phrases on the wire (`HTTP/1.1 451\r\n` without "Unavailable For Legal Reasons"). Browsers don't display reason phrases, so this is cosmetic. Canonical home: `template/pages/responses.php#status-range`.
 
+**OpenSwoole upstream limitation — 425 and 451 don't reach the wire.** OpenSwoole 22.1.5's C-level status whitelist is missing two recent IANA additions: **425 Too Early** (RFC 8470) and **451 Unavailable For Legal Reasons** (RFC 7725). Returning these from a handler results in `HTTP/1.1 200 OK` on the wire even though the framework recognises them internally (REASON_PHRASES has them, PSR `withStatus()` accepts them). All other 4xx/5xx codes — 421, 422, 423, 424, 426, 428, 429, 431, 506, 507, 508, 510, 511 — work correctly. Workaround for content-takedown responses: use `403` or `410` until OpenSwoole's status table is updated upstream. The contract tests (`tests/Integration/FileExecutionContractTest.php`) exercise 423 (Locked) instead of 451 to dodge this.
+
 **Yield from everywhere** — Generators work in all contexts:
 - Route handlers: `return (function() { yield ...; })();`
 - Public files: `public/feed.php` returns a Generator → framework streams it

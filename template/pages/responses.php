@@ -82,6 +82,10 @@ PHP]); ?>
   <strong>Ops note.</strong> Out-of-range coercion writes to ZealPHP's debug log (<code>ZEALPHP_DEBUG_LOG</code> or <code>/tmp/zealphp/debug.log</code> by default). Grep for <code>Invalid HTTP status code returned:</code> to surface handlers that are silently bouncing to 500 in production.
 </div>
 
+<div class="callout warn" style="margin-top:1rem">
+  <strong>OpenSwoole upstream limitation — two codes don't reach the wire.</strong> OpenSwoole 22.1.5's native status whitelist is missing two recent IANA additions: <strong>425 Too Early</strong> (RFC 8470) and <strong>451 Unavailable For Legal Reasons</strong> (RFC 7725). Returning these from a handler results in <code>HTTP/1.1 200 OK</code> on the wire even though the framework recognises them internally (the framework's <code>REASON_PHRASES</code> has them, and PSR's <code>withStatus()</code> accepts them). All other 4xx/5xx codes — including 421, 422, 423, 424, 426, 428, 429, 431, 506, 507, 508, 510, 511 — work correctly. If you need to emit 451 specifically (e.g., for content-takedown responses), use <code>403 Forbidden</code> or <code>410 Gone</code> as a workaround until OpenSwoole's status table is updated upstream.
+</div>
+
 <h2 style="margin-top:2.5rem">Response Object Methods</h2>
 <table class="ztable" style="margin-bottom:2rem">
   <tr><th>Method</th><th>Signature</th><th>What it does</th></tr>
