@@ -2720,6 +2720,19 @@ HELP;
                 $override = $srv['HTTP_X_HTTP_METHOD_OVERRIDE'];
                 $srv['REQUEST_METHOD'] = is_scalar($override) ? $override : null;
             }
+            // Apache HostnameLookups: populate REMOTE_HOST via reverse DNS when
+            // explicitly enabled. WARNING — blocking call (OpenSwoole's coroutine
+            // hook converts gethostbyaddr() to non-blocking, but it's still a
+            // measurable per-request cost). Off by default since Apache 1.3.
+            if (App::$hostname_lookups && isset($srv['REMOTE_ADDR'])) {
+                $remote = (string)$srv['REMOTE_ADDR'];
+                if ($remote !== '') {
+                    $host = @gethostbyaddr($remote);
+                    if ($host !== false && $host !== $remote) {
+                        $srv['REMOTE_HOST'] = $host;
+                    }
+                }
+            }
             /** @var array<string, bool|float|int|string|null> $srvFinal */
             $srvFinal = $srv;
             $g->server = $srvFinal;
