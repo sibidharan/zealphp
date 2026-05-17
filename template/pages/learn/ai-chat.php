@@ -19,7 +19,7 @@ $active = $active ?? 'learn/ai-chat';
       'The architecture: PHP spawns Python, Python streams SSE, browser renders live',
     ]]); ?>
 
-    <h2>What you're building</h2>
+    <h2 id="step-overview">1. Overview — what you&rsquo;re building</h2>
     <p>
       Your notes app works, but the user does everything manually. By the end of this lesson, they
       can <strong>talk to an assistant</strong> that reads their notes, searches them, and creates
@@ -37,11 +37,65 @@ $active = $active ?? 'learn/ai-chat';
       <li><strong>The live event log</strong> — a side panel that shows every SSE event in real time, so you can <em>see</em> the protocol working.</li>
     </ol>
     <p>
-      All of it is wired up below. The interactive chat is the finished product; the sections after
-      it are the build.
+      The widget at <a href="#step-tryit">step 6</a> is the finished product; the sections in between
+      are the build.
     </p>
 
-    <h2>Step 1 — Why a Python subprocess?</h2>
+    <h2 id="step-components">2. Component extraction — the chat widget</h2>
+    <p>
+      Like the Notes lesson, the entire chat UI — left-side notes panel, center chat box, right-side
+      event log — is extracted into a reusable partial that the lesson page and the standalone popup
+      both render:
+    </p>
+    <pre><code class="language-php">// template/components/_chat_widget.php
+&lt;?php
+$user ??= null;
+if (!$user) return;
+?&gt;
+&lt;section class="chat"&gt;
+  &lt;div&gt;&lt;h3 class="chat-h"&gt;Your notes&lt;/h3&gt;
+       &lt;div id="notes-list" class="notes-list" hx-get="/api/learn/notes" hx-trigger="load"&gt;…&lt;/div&gt;&lt;/div&gt;
+  &lt;div&gt;&lt;div id="learn-chat" class="chat-box"&gt;…&lt;/div&gt;
+       &lt;div class="event-log-wrap"&gt;&lt;div id="ws-log" class="event-log"&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;
+&lt;/section&gt;</code></pre>
+    <p>
+      Same as Notes, two consumers: this lesson page calls
+      <code>App::render('/components/_chat_widget', ['user' =&gt; $user])</code> at
+      <a href="#step-tryit">step 6</a>; the standalone shell at
+      <code>/demo/view/chat/widget</code> renders the same partial inside <code>_demo_shell.php</code>.
+      The widget output is identical — <code>#learn-chat</code> and <code>#ws-log</code> ids stay
+      stable so <code>/js/learn.js</code> wires up SSE + the event-log identically in both contexts.
+    </p>
+
+    <h2 id="step-sse">3. Server-Sent Events — what is it?</h2>
+    <p>
+      Regular HTTP is like <strong>texting</strong>: you send a message, get a reply, conversation over.
+      Server-Sent Events is like <strong>calling someone and saying &ldquo;read me the news&rdquo;</strong>. They
+      talk continuously, you listen. You can&rsquo;t interrupt (that would be WebSocket). But for streaming
+      AI tokens, you don&rsquo;t need to — you just need to listen.
+    </p>
+    <p>On the wire, SSE looks like this:</p>
+    <pre><code class="language-text">event: token
+data: {"token":"Hello"}
+
+event: token
+data: {"token":" world"}
+
+event: done
+data: {"done":true}</code></pre>
+    <p>Each event is two lines (<code>event:</code> + <code>data:</code>) followed by a blank line. The browser receives them one by one as they arrive.</p>
+    <p>
+      ZealPHP makes SSE a one-liner. The <code>$response-&gt;sse()</code> helper sets the right
+      headers and gives you an <code>$emit</code> callback:
+    </p>
+    <pre><code class="language-php">$response->sse(function($emit) {
+    $emit(json_encode(['token' => 'Hello']), 'token');
+    usleep(100000);
+    $emit(json_encode(['token' => ' world']), 'token');
+    $emit(json_encode(['done' => true]), 'done');
+});</code></pre>
+
+    <h2 id="step-agent">4. Python agent bridge</h2>
     <p>
       The OpenAI Agents SDK is Python-only. It handles conversation memory, tool dispatch, and token
       streaming &mdash; hundreds of lines of logic ZealPHP doesn&rsquo;t want to reimplement. So
@@ -56,34 +110,7 @@ $active = $active ?? 'learn/ai-chat';
       output and read it.
     </p>
 
-    <h2>Step 2 — What is SSE?</h2>
-    <p>
-      Regular HTTP is like <strong>texting</strong>: you send a message, get a reply, conversation over.
-      Server-Sent Events is like <strong>calling someone and saying "read me the news"</strong>. They
-      talk continuously, you listen. You can't interrupt (that would be WebSocket). But for streaming
-      AI tokens, you don't need to — you just need to listen.
-    </p>
-    <p>On the wire, SSE looks like this:</p>
-    <pre><code class="language-text">event: token
-data: {"token":"Hello"}
-
-event: token
-data: {"token":" world"}
-
-event: done
-data: {"done":true}</code></pre>
-    <p>Each event is two lines (<code>event:</code> + <code>data:</code>) followed by a blank line. The browser receives them one by one as they arrive.</p>
-
-    <h2>Step 3 — The streaming proxy route</h2>
-    <p>ZealPHP makes SSE a one-liner. The <code>sse()</code> helper sets the right headers and gives you an <code>$emit</code> callback:</p>
-    <pre><code class="language-php">$response->sse(function($emit) {
-    $emit(json_encode(['token' => 'Hello']), 'token');
-    usleep(100000);
-    $emit(json_encode(['token' => ' world']), 'token');
-    $emit(json_encode(['done' => true]), 'done');
-});</code></pre>
-
-    <h2>Step 4 — The architecture, end to end</h2>
+    <h2 id="step-stream">5. Streaming + tool calls — the architecture</h2>
     <pre class="mermaid">sequenceDiagram
     participant B as Browser
     participant PHP as ZealPHP
@@ -104,59 +131,13 @@ data: {"done":true}</code></pre>
     PY-->>PHP: SSE: tool_done
     PHP-->>B: SSE: tool_done + notes_changed</pre>
 
-    <?php if (!$user): ?>
-      <?php App::render('/components/_callout', [
-        'variant' => 'warn', 'title' => 'Log in to use the chat',
-        'body' => '<p><a href="/learn/auth">Register or log in</a> first — the chat needs to know whose notes to act on.</p>',
-      ]); ?>
-    <?php else: ?>
-      <p>Logged in as <strong><?= htmlspecialchars($user['username']) ?></strong>.</p>
-      <section class="chat">
-        <div>
-          <h3 class="chat-h">Your notes</h3>
-          <div id="notes-list" class="notes-list" hx-get="/api/learn/notes" hx-trigger="load" hx-swap="innerHTML">
-            <p class="notes-empty">Loading…</p>
-          </div>
-        </div>
-        <div>
-          <div id="learn-chat" class="chat-box" data-thread-id="">
-            <div class="chat-head">
-              Notes assistant
-              <span class="chat-mode">…</span>
-              <button type="button" class="chat-new" title="Start a fresh conversation">New thread</button>
-            </div>
-            <div class="chat-scroll">
-              <div class="chat-history"></div>
-              <div class="chat-messages"></div>
-            </div>
-            <form class="chat-form" autocomplete="off" hx-boost="false">
-              <input type="text" name="message" placeholder="Ask anything about your notes…" required>
-              <button type="submit">Send</button>
-            </form>
-          </div>
-          <div class="event-log-wrap">
-            <h4 class="event-log-title">Event log</h4>
-            <div id="ws-log" class="event-log"></div>
-          </div>
-        </div>
-      </section>
-
-      <?php App::render('/components/_callout', [
-        'variant' => 'success',
-        'title'   => 'Watch the Event Log',
-        'body'    => '<p>Try: <em>"create a note titled shopping list"</em>. Watch the Event Log below the chat — you\'ll see <span class="proto-badge sse">SSE</span> events (tool_call, tool_done, notes_changed) stream in as the AI works. Then check the notes panel on the left — the new note appears with a green glow, pushed via <span class="proto-badge ws">WS</span> broadcast. Open a second tab to see cross-tab sync.</p>',
-      ]); ?>
-    <?php endif; ?>
-
-    <h2>Step 5 — Tool calls</h2>
     <p>
-      The AI doesn't just generate text. It can <strong>call functions</strong> that interact with your
-      data. The <a href="https://github.com/sibidharan/zealphp/blob/master/examples/agents/notes_agent.py" target="_blank">Python agent</a> defines six tools: <code>list_notes</code>, <code>read_note</code>,
+      The AI doesn&rsquo;t just generate text. It can <strong>call functions</strong> that interact
+      with your data. The <a href="https://github.com/sibidharan/zealphp/blob/master/examples/agents/notes_agent.py" target="_blank">Python agent</a> defines six tools: <code>list_notes</code>, <code>read_note</code>,
       <code>search_notes</code>, <code>create_note</code>, <code>update_note</code>, <code>delete_note</code>.
-    </p>
-    <p>
-      When the model decides to use a tool, the browser shows an expandable card with the tool name,
-      arguments, and result. You see the AI's reasoning process in real time.
+      When the model decides to use a tool, the agent emits a <code>tool_call</code> SSE event; the
+      result comes back as a <code>tool_done</code> event. The browser shows an expandable card with
+      the tool name, arguments, and result — you see the AI&rsquo;s reasoning process in real time.
     </p>
 
     <?php App::render('/components/_callout', [
@@ -164,6 +145,24 @@ data: {"done":true}</code></pre>
       'title'   => 'Mock mode',
       'body'    => '<p>If <code>OPENAI_API_KEY</code> is not set, the server runs a rule-based mock that responds to phrases like "create a note titled X" and "delete X." The mock emits the same SSE events as the real model, so the timeline UI works either way. The header badge shows which mode you\'re in.</p>',
     ]); ?>
+
+    <h2 id="step-tryit">6. Try it — the live chat widget</h2>
+    <?php if (!$user): ?>
+      <?php App::render('/components/_callout', [
+        'variant' => 'warn', 'title' => 'Log in to use the chat',
+        'body' => '<p><a href="/learn/auth">Register or log in</a> first — the chat needs to know whose notes to act on.</p>',
+      ]); ?>
+    <?php else: ?>
+      <?php App::render('/components/_chat_widget', ['user' => $user]); ?>
+      <a class="lesson-popout-cta" href="/demo/view/chat/widget" target="_blank" rel="noopener">
+        Open this chat in a new tab ↗
+      </a>
+      <?php App::render('/components/_callout', [
+        'variant' => 'success',
+        'title'   => 'Watch the Event Log',
+        'body'    => '<p>Try: <em>"create a note titled shopping list"</em>. Watch the Event Log below the chat — you&rsquo;ll see <span class="proto-badge sse">SSE</span> events (tool_call, tool_done, notes_changed) stream in as the AI works. Then check the notes panel on the left — the new note appears with a green glow, pushed via <span class="proto-badge ws">WS</span> broadcast. Open the popout for cross-tab sync from a clean window.</p>',
+      ]); ?>
+    <?php endif; ?>
 
     <h2>What you built — and the streaming shape underneath it</h2>
     <p>

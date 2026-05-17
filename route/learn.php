@@ -376,6 +376,247 @@ $app->route('/api/learn/demo/store-write', ['methods' => ['POST']], function () 
     return ['ok' => true, 'row' => $current];
 });
 
+// ── Tic-tac-toe multiplayer (Build-the-App capstone) ────────────────
+// Two-player game over WebSocket. Login required (display name = username).
+// Per-fd seating: first fd in a room gets X, second gets O, rest are
+// spectators. Spectators see state via fan-out broadcast but can't move
+// or reset. `?view=1` forces spectator even if a seat is free — useful
+// for casting/streaming the game without participating.
+//
+// Two Store tables: one for per-fd bookkeeping, one for shared room state.
+// All client→server traffic flows through the socket itself (no HTTP POST
+// for moves), so the server can trust fd→symbol mapping without a
+// separate auth token.
+\ZealPHP\Store::make('ws_tictactoe_clients', 4096, [
+    'room'   => [\OpenSwoole\Table::TYPE_STRING, 32],
+    'name'   => [\OpenSwoole\Table::TYPE_STRING, 32],
+    'symbol' => [\OpenSwoole\Table::TYPE_STRING, 2],   // 'X' | 'O' | 'S'
+    'joined' => [\OpenSwoole\Table::TYPE_INT,    8],
+]);
+\ZealPHP\Store::make('ws_tictactoe_rooms', 1024, [
+    'board'   => [\OpenSwoole\Table::TYPE_STRING, 9],
+    'turn'    => [\OpenSwoole\Table::TYPE_STRING, 2],
+    'winner'  => [\OpenSwoole\Table::TYPE_STRING, 8],
+    'px_fd'   => [\OpenSwoole\Table::TYPE_INT,    8],
+    'po_fd'   => [\OpenSwoole\Table::TYPE_INT,    8],
+    'px_name' => [\OpenSwoole\Table::TYPE_STRING, 32],
+    'po_name' => [\OpenSwoole\Table::TYPE_STRING, 32],
+    'starter' => [\OpenSwoole\Table::TYPE_STRING, 2],
+    'rounds'  => [\OpenSwoole\Table::TYPE_INT,    4],
+]);
+
+function ttt_sanitize_room(string $room): string
+{
+    $room = strtolower($room);
+    $room = preg_replace('/[^a-z0-9-]/', '', $room) ?? '';
+    return substr($room, 0, 32);
+}
+
+function ttt_detect_winner(string $board): array
+{
+    $lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+    foreach ($lines as $line) {
+        [$a, $b, $c] = $line;
+        $s = $board[$a];
+        if ($s !== '_' && $s === $board[$b] && $s === $board[$c]) {
+            return [$s, $line];
+        }
+    }
+    return [null, null];
+}
+
+function ttt_broadcast_state(string $room): void
+{
+    $server = \ZealPHP\App::getServer();
+    if (!$server) return;
+    $row = \ZealPHP\Store::get('ws_tictactoe_rooms', $room);
+    if (!$row) return;
+    // Count viewers in the room (everyone with symbol 'S')
+    $viewers = 0;
+    foreach (\ZealPHP\Store::table('ws_tictactoe_clients') ?? [] as $_ => $c) {
+        if (($c['room'] ?? '') === $room && ($c['symbol'] ?? '') === 'S') $viewers++;
+    }
+    $payload = json_encode([
+        'type'    => 'state',
+        'board'   => $row['board'],
+        'turn'    => $row['turn'],
+        'winner'  => $row['winner'],
+        'rounds'  => (int) $row['rounds'],
+        'players' => [
+            'X' => ['name' => $row['px_name'], 'connected' => ((int) $row['px_fd']) > 0],
+            'O' => ['name' => $row['po_name'], 'connected' => ((int) $row['po_fd']) > 0],
+        ],
+        'viewers' => $viewers,
+    ]);
+    foreach (\ZealPHP\Store::table('ws_tictactoe_clients') ?? [] as $fd => $c) {
+        if (($c['room'] ?? '') !== $room) continue;
+        $fd = (int) $fd;
+        if ($server->isEstablished($fd)) $server->push($fd, $payload);
+    }
+}
+
+function ttt_broadcast_state_with(string $room, array $extras): void
+{
+    $server = \ZealPHP\App::getServer();
+    if (!$server) return;
+    $row = \ZealPHP\Store::get('ws_tictactoe_rooms', $room);
+    if (!$row) return;
+    $viewers = 0;
+    foreach (\ZealPHP\Store::table('ws_tictactoe_clients') ?? [] as $_ => $c) {
+        if (($c['room'] ?? '') === $room && ($c['symbol'] ?? '') === 'S') $viewers++;
+    }
+    $payload = json_encode(array_merge([
+        'type'    => 'state',
+        'board'   => $row['board'],
+        'turn'    => $row['turn'],
+        'winner'  => $row['winner'],
+        'rounds'  => (int) $row['rounds'],
+        'players' => [
+            'X' => ['name' => $row['px_name'], 'connected' => ((int) $row['px_fd']) > 0],
+            'O' => ['name' => $row['po_name'], 'connected' => ((int) $row['po_fd']) > 0],
+        ],
+        'viewers' => $viewers,
+    ], $extras));
+    foreach (\ZealPHP\Store::table('ws_tictactoe_clients') ?? [] as $fd => $c) {
+        if (($c['room'] ?? '') !== $room) continue;
+        $fd = (int) $fd;
+        if ($server->isEstablished($fd)) $server->push($fd, $payload);
+    }
+}
+
+$app->ws('/ws/tictactoe',
+    onMessage: function ($server, $frame) {
+        if (($frame->data ?? '') === 'ping') { $server->push($frame->fd, 'pong'); return; }
+        $me = \ZealPHP\Store::get('ws_tictactoe_clients', (string) $frame->fd);
+        if (!$me) return;
+        $msg = json_decode((string) ($frame->data ?? ''), true);
+        if (!is_array($msg)) return;
+        $type = (string) ($msg['type'] ?? '');
+        $room = (string) ($me['room'] ?? '');
+        if ($room === '') return;
+        $rowRoom = \ZealPHP\Store::get('ws_tictactoe_rooms', $room);
+        if (!$rowRoom) return;
+
+        if ($type === 'move') {
+            // Spectators cannot move
+            if (($me['symbol'] ?? '') === 'S') return;
+            // Game over — no moves until reset
+            if (($rowRoom['winner'] ?? '') !== '') return;
+            // Wrong turn
+            if (($me['symbol'] ?? '') !== ($rowRoom['turn'] ?? '')) return;
+            $cell = (int) ($msg['cell'] ?? -1);
+            if ($cell < 0 || $cell > 8) return;
+            $board = (string) ($rowRoom['board'] ?? '_________');
+            if (strlen($board) !== 9 || $board[$cell] !== '_') return;
+            $board[$cell] = $me['symbol'];
+            [$winSymbol, $winLine] = ttt_detect_winner($board);
+            $update = ['board' => $board, 'last_move_ts' => time()];
+            $extras = [];
+            if ($winSymbol !== null) {
+                $update['winner'] = $winSymbol;
+                $update['turn']   = '';
+                $update['rounds'] = (int) ($rowRoom['rounds'] ?? 0) + 1;
+                $extras['win_line'] = $winLine;
+            } elseif (strpos($board, '_') === false) {
+                $update['winner'] = 'draw';
+                $update['turn']   = '';
+                $update['rounds'] = (int) ($rowRoom['rounds'] ?? 0) + 1;
+            } else {
+                $update['turn'] = ($rowRoom['turn'] === 'X') ? 'O' : 'X';
+            }
+            \ZealPHP\Store::set('ws_tictactoe_rooms', $room, $update);
+            ttt_broadcast_state_with($room, $extras);
+            return;
+        }
+
+        if ($type === 'reset') {
+            // Only seated players can reset, not spectators
+            if (($me['symbol'] ?? '') === 'S') return;
+            $starter = ($rowRoom['starter'] ?? 'X') === 'X' ? 'O' : 'X';
+            \ZealPHP\Store::set('ws_tictactoe_rooms', $room, [
+                'board'   => '_________',
+                'turn'    => $starter,
+                'winner'  => '',
+                'starter' => $starter,
+            ]);
+            ttt_broadcast_state($room);
+            return;
+        }
+    },
+    onOpen: function ($server, $request) {
+        // Auth: same pattern as /ws/learn — G::instance() exposes the
+        // current request's session (populated from PHPSESSID by
+        // CoSessionManager before onOpen fires).
+        $g = G::instance();
+        $userId   = (int) ($g->session['user_id'] ?? 0);
+        $username = (string) ($g->session['username'] ?? '');
+        if (!$userId || $username === '') {
+            $server->disconnect($request->fd, 1008, 'auth_required'); return;
+        }
+        $room = ttt_sanitize_room((string) ($request->get['room'] ?? ''));
+        if ($room === '') { $server->disconnect($request->fd, 1008, 'no_room'); return; }
+        $viewMode = ((string) ($request->get['view'] ?? '')) === '1';
+
+        // Look up or create the room row.
+        $row = \ZealPHP\Store::get('ws_tictactoe_rooms', $room);
+        if (!$row) {
+            \ZealPHP\Store::set('ws_tictactoe_rooms', $room, [
+                'board'   => '_________',
+                'turn'    => 'X',
+                'winner'  => '',
+                'px_fd'   => 0,
+                'po_fd'   => 0,
+                'px_name' => '',
+                'po_name' => '',
+                'starter' => 'X',
+                'rounds'  => 0,
+            ]);
+            $row = \ZealPHP\Store::get('ws_tictactoe_rooms', $room);
+        }
+
+        // Assign seat. ?view=1 forces spectator regardless of free seats.
+        $symbol = 'S';
+        if (!$viewMode) {
+            if (((int) $row['px_fd']) === 0) {
+                $symbol = 'X';
+                \ZealPHP\Store::set('ws_tictactoe_rooms', $room, ['px_fd' => $request->fd, 'px_name' => $username]);
+            } elseif (((int) $row['po_fd']) === 0) {
+                $symbol = 'O';
+                \ZealPHP\Store::set('ws_tictactoe_rooms', $room, ['po_fd' => $request->fd, 'po_name' => $username]);
+            }
+        }
+        \ZealPHP\Store::set('ws_tictactoe_clients', (string) $request->fd, [
+            'room'   => $room,
+            'name'   => $username,
+            'symbol' => $symbol,
+            'joined' => time(),
+        ]);
+
+        // Welcome message tells the client their assigned role + room name.
+        $server->push($request->fd, json_encode([
+            'type'   => 'welcome',
+            'symbol' => $symbol,
+            'room'   => $room,
+            'name'   => $username,
+        ]));
+        ttt_broadcast_state($room);
+    },
+    onClose: function ($server, $fd) {
+        $me = \ZealPHP\Store::get('ws_tictactoe_clients', (string) $fd);
+        \ZealPHP\Store::del('ws_tictactoe_clients', (string) $fd);
+        if (!$me) return;
+        $room = (string) ($me['room'] ?? '');
+        if ($room === '') return;
+        $row = \ZealPHP\Store::get('ws_tictactoe_rooms', $room);
+        if (!$row) return;
+        $update = [];
+        if (((int) $row['px_fd']) === $fd) $update['px_fd'] = 0;
+        if (((int) $row['po_fd']) === $fd) $update['po_fd'] = 0;
+        if (!empty($update)) \ZealPHP\Store::set('ws_tictactoe_rooms', $room, $update);
+        ttt_broadcast_state($room);
+    },
+);
+
 $app->route('/api/learn/demo/greeting', ['methods' => ['GET']], function () {
     $g = G::instance();
     $name = htmlspecialchars(trim((string) ($g->get['name'] ?? 'World')));

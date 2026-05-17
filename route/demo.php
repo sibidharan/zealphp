@@ -687,3 +687,74 @@ $app->route('/demo/view/streaming/sse', ['methods' => ['GET']], function() {
         'learn/streaming', 'Streaming Done Right'
     );
 });
+
+// Build-the-App widget viewers ------------------------------------------------
+// Each of these pops a Build-the-App lesson's interactive widget into its
+// own /demo/view/* shell — same partial as inlined in the lesson, but
+// hosted in the slim breadcrumb shell so users can side-by-side a clean
+// surface against the lesson tab (for cross-tab WS sync testing).
+
+$app->route('/demo/view/notes/widget', ['methods' => ['GET']], function () {
+    $u = \ZealPHP\Learn\Auth::currentUser();
+    if (!$u) {
+        return demo_render(
+            'Personal Notes — log in first',
+            'This widget needs an account. <a href="/learn/auth" target="_blank" rel="noopener">Open the auth lesson in a new tab</a>, log in there, then refresh this tab.',
+            [],
+            'learn/notes', 'Personal Notes'
+        );
+    }
+    return demo_render(
+        'Personal Notes — standalone',
+        'Same <code class="demo-inline">_notes_widget</code> partial that renders inline in the <a href="/learn/notes">Personal Notes lesson</a> — here in its own shell so you can open multiple windows for cross-tab WebSocket sync testing.',
+        [
+            ['heading' => 'Live widget',
+             'body'    => App::renderToString('/components/_notes_widget', ['user' => $u])],
+        ],
+        'learn/notes', 'Personal Notes'
+    );
+});
+
+$app->route('/demo/view/chat/widget', ['methods' => ['GET']], function () {
+    $u = \ZealPHP\Learn\Auth::currentUser();
+    if (!$u) {
+        return demo_render(
+            'AI Chat — log in first',
+            'This widget needs an account. <a href="/learn/auth" target="_blank" rel="noopener">Open the auth lesson in a new tab</a>, log in there, then refresh this tab.',
+            [],
+            'learn/ai-chat', 'AI Chat'
+        );
+    }
+    return demo_render(
+        'AI Chat — standalone',
+        'Same <code class="demo-inline">_chat_widget</code> partial that renders inline in the <a href="/learn/ai-chat">AI Chat lesson</a>. Try a prompt like <em>"create a note titled shopping list"</em> and watch the Event Log below the chat for live <span class="proto-badge sse">SSE</span> + <span class="proto-badge ws">WS</span> events.',
+        [
+            ['heading' => 'Live widget',
+             'body'    => App::renderToString('/components/_chat_widget', ['user' => $u])],
+        ],
+        'learn/ai-chat', 'AI Chat'
+    );
+});
+
+$app->route('/demo/view/tictactoe/play', ['methods' => ['GET']], function () {
+    $u = \ZealPHP\Learn\Auth::currentUser();
+    if (!$u) {
+        return demo_render(
+            'Multiplayer Tic-Tac-Toe — log in first',
+            'Tic-tac-toe needs an account so other players see your name. <a href="/learn/auth" target="_blank" rel="noopener">Log in</a> in a separate tab and refresh this one.',
+            [],
+            'learn/tictactoe', 'Tic-Tac-Toe'
+        );
+    }
+    // Use a focused full-board layout — short description, no section heading.
+    // The widget is the page; everything else is breadcrumb + 1-line context.
+    return demo_render(
+        'Tic-Tac-Toe',
+        'Same room ID = same game. First two players take X and O; rest are viewers. <code class="demo-inline">?view=1</code> forces viewer. <a href="/learn/tictactoe">Read the build</a>.',
+        [
+            ['heading' => '',  // empty heading; demo-shell-h:empty hides it via CSS
+             'body'    => App::renderToString('/components/_tictactoe_widget', ['user' => $u])],
+        ],
+        'learn/tictactoe', 'Tic-Tac-Toe'
+    );
+});

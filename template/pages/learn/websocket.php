@@ -17,7 +17,7 @@
       'When to use WebSocket vs SSE vs htmx vs Redis Pub/Sub',
     ]]); ?>
 
-    <h2>What you're building</h2>
+    <h2 id="step-overview">1. Overview — what you&rsquo;re building</h2>
     <p>
       A counter that <strong>updates in every open tab the moment any tab clicks +1</strong>. No
       reloads, no polling, no Redis. The server holds a list of open WebSocket connections; the
@@ -25,7 +25,7 @@
       back over WebSocket to every connected tab. Try it now — open this URL in another tab first.
     </p>
 
-    <section class="ws-counter-card" style="margin:1.5rem 0">
+    <section id="step-tryit" class="ws-counter-card" style="margin:1.5rem 0">
       <div class="ws-counter-value" data-ws-counter-value>0</div>
       <p class="ws-counter-label">connected clients see this value update in real time</p>
       <div class="ws-counter-actions">
@@ -39,7 +39,7 @@
       Open <a href="/learn/websocket" target="_blank">/learn/websocket</a> in a second tab. Click +1 here. Watch the second tab count up without reloading.
     </p>
 
-    <h2>Why HTTP can't push</h2>
+    <h2 id="step-server">2. Server setup — why HTTP can&rsquo;t push</h2>
     <p>
       HTTP is request/response. Client asks, server answers, connection closes. The server cannot
       "speak first" because there&rsquo;s no open socket waiting. To get a new value to a browser
@@ -54,7 +54,7 @@
       worker-time while idle.
     </p>
 
-    <h2>The four callbacks</h2>
+    <h3>The four callbacks</h3>
     <p>
       One call to <code>$app-&gt;ws()</code>, three callbacks. The callbacks handle the connection
       lifecycle:
@@ -83,7 +83,7 @@
       broadcasting.
     </p>
 
-    <h2>Broadcasting</h2>
+    <h2 id="step-broadcast">3. Broadcast patterns</h2>
     <p>
       To push a message to every connected client, walk your fd table and call
       <code>$server-&gt;push()</code> on each one:
@@ -109,7 +109,7 @@ $app-&gt;route('/api/counter/bump', ['methods' =&gt; ['POST']], function () use 
       Pushing to a dead fd raises a warning; <code>isEstablished()</code> avoids it.
     </p>
 
-    <h2>The client side</h2>
+    <h2 id="step-client">4. Client lifecycle</h2>
     <p>
       In the browser, <code>WebSocket</code> is a one-liner:
     </p>
@@ -129,7 +129,7 @@ ws.send('ping');   // round-trip test</code></pre>
       stable since 2011; every major browser ships it. No library needed.
     </p>
 
-    <h2>When to use what</h2>
+    <h3>When to use what</h3>
     <p>
       WebSocket isn&rsquo;t the answer to "make the UI update." Pick by data shape:
     </p>
@@ -149,7 +149,7 @@ ws.send('ping');   // round-trip test</code></pre>
       that handles long-lived HTTP, no upgrade handshake).
     </p>
 
-    <h2>Scaling past one server: Pub/Sub bridge</h2>
+    <h3>Scaling past one server: Pub/Sub bridge</h3>
     <p>
       Everything above lives in one process. Two ZealPHP servers behind a load balancer don&rsquo;t
       share their <code>ws_clients</code> tables — a broadcast in process A doesn&rsquo;t reach

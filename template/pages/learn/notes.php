@@ -19,15 +19,58 @@ $active = $active ?? 'learn/notes';
       'Reuse components across different contexts (list, create, chat history)',
     ]]); ?>
 
-    <h2>The problem</h2>
+    <h2 id="step-overview">1. Overview — what you&rsquo;re building</h2>
     <p>
-      You have users who can log in. Now they want to <strong>store things</strong> — each user
-      seeing only their own notes, adding new ones, deleting old ones. No page reloads. This is the
-      lesson where everything you've learned comes together.
+      Users can log in. Now they want to <strong>store things</strong> — each user seeing only their
+      own notes, adding new ones, deleting old ones. No page reloads. This is the lesson where
+      everything you&rsquo;ve learned comes together.
     </p>
     <p>
       Every data-driven app follows the <strong>CRUD loop</strong>: Create, Read, Update, Delete.
       Build this once, and you can build any data app — a todo list, a blog, an inventory system.
+    </p>
+
+    <h2 id="step-components">2. Component extraction — the same widget, two places</h2>
+    <p>
+      Before we wire anything up, look at the page structure. The note-creation form, the list of
+      notes below it, and the user bar at the top form a self-contained UI block. That block is
+      extracted into a reusable partial:
+    </p>
+    <pre><code class="language-php">// template/components/_notes_widget.php
+&lt;?php
+$user ??= null;
+if (!$user) return;
+?&gt;
+&lt;div class="notes-user-bar"&gt;…&lt;/div&gt;
+&lt;section class="notes-app"&gt;
+  &lt;form class="note-form" hx-post="/api/learn/notes" …&gt;…&lt;/form&gt;
+  &lt;div id="notes-list" class="notes-list" hx-get="/api/learn/notes" hx-trigger="load"&gt;…&lt;/div&gt;
+&lt;/section&gt;</code></pre>
+    <p>
+      The partial renders identical HTML in two consumers — and that&rsquo;s the lesson:
+    </p>
+    <ol>
+      <li><strong>Inline in this lesson</strong> — the lesson page calls
+        <code>App::render('/components/_notes_widget', ['user' =&gt; $user])</code> below, embedded
+        right between explanation paragraphs so you can try it without leaving the page.</li>
+      <li><strong>Standalone in a popup</strong> — <code>/demo/view/notes/widget</code> renders the
+        same partial inside <code>_demo_shell.php</code> (the focused, no-nav shell). Open it in a
+        second tab to test cross-tab sync without two lesson pages cluttering the screen.</li>
+    </ol>
+    <p>
+      Both consumers pass the same <code>$user</code> array; the widget itself trusts that and emits
+      the same DOM, with the same <code>#notes-list</code> id so <code>/js/learn.js</code> wires up
+      WebSocket sync identically in both contexts. <strong>One component, two consumers</strong> —
+      that&rsquo;s the React-style reuse pattern, just at the server-side template layer.
+    </p>
+
+    <h2 id="step-auth">3. Auth gate</h2>
+    <p>
+      Notes are per-user, so the lesson page checks for a logged-in user. If none, it renders the
+      login/register card (lesson-specific copy). If a user is found, it scrolls down to the working
+      widget at <a href="#step-tryit">Try it</a>. The widget itself does not check auth — that&rsquo;s
+      the caller&rsquo;s job, which means the same widget can be rendered in any context that
+      already has a user (lesson page, standalone popup, future admin tool, etc).
     </p>
 
     <?php if (!$user): ?>
@@ -51,40 +94,10 @@ $active = $active ?? 'learn/notes';
         </details>
       </section>
     <?php else: ?>
-      <div class="notes-user-bar">
-        <span class="notes-user-avatar"><?= strtoupper(substr($user['username'], 0, 1)) ?></span>
-        <span class="notes-user-name"><?= htmlspecialchars($user['username']) ?></span>
-        <a href="/api/learn/logout" class="notes-user-logout">Log out</a>
-      </div>
-
-      <section class="notes-app">
-        <form class="note-form"
-              hx-post="/api/learn/notes"
-              hx-target="#notes-list"
-              hx-swap="afterbegin"
-              hx-on::after-request="this.reset()"
-              hx-on::after-settle="var f=document.querySelector('#notes-list .note:first-child');if(f){f.classList.add('note-created');setTimeout(function(){f.classList.remove('note-created')},2500)}">
-          <input type="text" name="title" placeholder="Note title" required maxlength="200">
-          <textarea name="body" placeholder="What's on your mind?" maxlength="4096"></textarea>
-          <button type="submit">Add note</button>
-        </form>
-
-        <div id="notes-list" class="notes-list"
-             hx-get="/api/learn/notes"
-             hx-trigger="load"
-             hx-swap="innerHTML">
-          <p class="notes-empty">Loading…</p>
-        </div>
-      </section>
+      <p>Logged in as <strong><?= htmlspecialchars($user['username']) ?></strong>. Scroll to <a href="#step-tryit">Try it</a> to see the working widget — or read on for the CRUD wiring underneath.</p>
     <?php endif; ?>
 
-    <?php App::render('/components/_callout', [
-      'variant' => 'success',
-      'title'   => 'Watch what happens',
-      'body'    => '<p><strong>Create a note</strong> above and watch: the card slides in with a green glow. Now <strong>open this page in a second tab</strong>, delete a note in one — the other tab updates instantly (via WebSocket). On the <a href="/learn/ai-chat">AI Chat page</a>, the Event Log terminal shows every SSE and WebSocket event as it flows.</p>',
-    ]); ?>
-
-    <h2>The architecture</h2>
+    <h2 id="step-crud">4. CRUD operations</h2>
     <pre class="mermaid">sequenceDiagram
     participant B as Browser
     participant H as htmx
@@ -173,12 +186,55 @@ $this->response($html, 200);</code></pre>
     <p><code>hx-swap="outerHTML"</code> replaces the entire note card with the empty response — effectively removing it.</p>
 
     <h3>Component reuse</h3>
-    <p>The <a href="https://github.com/sibidharan/zealphp/blob/master/template/components/_note_card.php" target="_blank"><code>_note_card</code></a> component is used in three places: the notes list (GET), the create response (POST), and the chat history bubbles (Lesson 9). Same file, three contexts — that's the power of server-rendered components.</p>
+    <p>
+      The <a href="https://github.com/sibidharan/zealphp/blob/master/template/components/_note_card.php" target="_blank"><code>_note_card</code></a> component is used in three places: the notes list (GET), the create response (POST), and the chat history bubbles (next lesson). Same file, three consumers. <code>_notes_widget</code> from step&nbsp;2 takes the same idea one level up — it&rsquo;s the whole notes panel, also used in two places (this lesson + the popup viewer).
+    </p>
 
-    <?php App::render('/components/_deepdive', [
-      'title' => 'Cross-tab sync via WebSocket',
-      'body'  => '<p>When you add or delete a note, the server also broadcasts a <code>note_changed</code> event via WebSocket. Other browser tabs receive it and refresh their notes list with <code>htmx.ajax()</code>. Open this page in two tabs and try it — <a href="/learn/websocket">Lesson 10</a> explains how.</p>',
-    ]); ?>
+    <h2 id="step-sync">5. Live sync — cross-tab via WebSocket</h2>
+    <p>
+      Adding a note and seeing it appear in your own tab is just htmx swapping HTML. The harder
+      problem is: <strong>another tab is open on the same account</strong> — maybe on the AI Chat
+      page, maybe in a popup, maybe on a phone — and it should also reflect the change without the
+      user reloading anything.
+    </p>
+    <p>
+      The Notes API does it by broadcasting a <code>note_changed</code> event over WebSocket every
+      time a note is created, updated, or deleted. Every connected tab on that user&rsquo;s account
+      receives the event and calls <code>htmx.ajax('GET', '/api/learn/notes', '#notes-list')</code>
+      to refresh its list. One-liner on the client, one broadcast on the server.
+    </p>
+    <pre><code class="language-php">// api/learn/notes.php — inside the POST handler, after the INSERT
+learn_ws_broadcast($userId, ['type' =&gt; 'note_changed', 'op' =&gt; 'create', 'id' =&gt; $id]);
+
+// public/js/learn.js — inside the WebSocket onmessage
+if (msg.type === 'note_changed') {
+    htmx.ajax('GET', '/api/learn/notes', { target: '#notes-list', swap: 'innerHTML' });
+}</code></pre>
+    <p>
+      The full <a href="/learn/websocket">WebSocket lesson</a> walks through how
+      <code>learn_ws_broadcast</code> iterates the <code>Store</code> table of connected fds and
+      filters by <code>user_id</code> — same broadcaster shape as the tic-tac-toe room
+      broadcaster, just keyed differently.
+    </p>
+
+    <h2 id="step-tryit">6. Try it — the live widget</h2>
+    <?php if (!$user): ?>
+      <?php App::render('/components/_callout', [
+        'variant' => 'warn',
+        'title'   => 'Log in first',
+        'body'    => '<p>Sign in at <a href="#step-auth">step 3</a> to render the widget here.</p>',
+      ]); ?>
+    <?php else: ?>
+      <?php App::render('/components/_notes_widget', ['user' => $user]); ?>
+      <a class="lesson-popout-cta" href="/demo/view/notes/widget" target="_blank" rel="noopener">
+        Open this widget in a new tab ↗
+      </a>
+      <?php App::render('/components/_callout', [
+        'variant' => 'success',
+        'title'   => 'Watch what happens',
+        'body'    => '<p><strong>Create a note</strong> above and watch the card slide in with a green glow. Now <strong>open the widget in a new tab</strong> via the popout link, delete a note in one — the other updates instantly via WebSocket. Same widget partial, two consumers, the cross-tab sync just works.</p>',
+      ]); ?>
+    <?php endif; ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
       'CRUD is four verbs: Create, Read, Update, Delete — every data app follows this pattern',
