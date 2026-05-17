@@ -45,15 +45,18 @@ $groups = [
 <label for="learn-sidebar-toggle" class="learn-sidebar-toggle-btn" aria-label="Toggle lessons">&#9776; Lessons</label>
 <aside id="learn-sidebar" class="learn-sidebar" aria-label="Lesson navigation" hx-preserve="true">
   <div class="learn-sidebar-inner">
+    <?php $lessonNum = 0; ?>
     <?php foreach ($groups as $title => $items): ?>
       <div class="learn-sidebar-group">
         <h4 class="learn-sidebar-group-title"><?= htmlspecialchars($title) ?></h4>
         <ul class="learn-sidebar-list">
           <?php foreach ($items as $item): ?>
-            <?php [$slug, $label] = [$item[0], $item[1]];
+            <?php $lessonNum++;
+                  [$slug, $label] = [$item[0], $item[1]];
                   $chip = $item[2] ?? null;
                   $demo = $item[3] ?? null; ?>
             <li class="learn-sidebar-item<?= $active === $slug ? ' active' : '' ?>"
+                data-num="<?= sprintf('%02d', $lessonNum) ?>"
                 <?= $chip ? 'data-chip="'.htmlspecialchars($chip, ENT_QUOTES).'"' : '' ?>
                 <?= $demo ? 'data-demo="'.htmlspecialchars($demo, ENT_QUOTES).'"' : '' ?>>
               <a href="/<?= $slug ?>"
