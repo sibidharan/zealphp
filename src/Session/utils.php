@@ -74,7 +74,16 @@ function zeal_session_start(): bool
             }
         }
     }
+    // In superglobals mode, $_SESSION is the canonical store. The declared
+    // typed property `$g->session` shadows the __get/__set proxy, so any
+    // legacy code (and Symfony's NativeSessionStorage) that writes through
+    // $_SESSION would never round-trip through $g->session. Mirror to both:
+    // $_SESSION is what user/Symfony code reads/writes, $g->session is what
+    // coroutine-mode code reads/writes via the typed property.
     $g->session = $session_data;
+    if (\ZealPHP\App::$superglobals) {
+        $GLOBALS['_SESSION'] = $session_data;
+    }
 
     return true;
 }
@@ -115,16 +124,21 @@ function zeal_session_id($id = null)
 }
 
 function zeal_session_status(): int {
-    $g = RequestContext::instance();
-    // isset() on a typed property is false ONLY when unset() has been called
-    // — zeal_session_write_close() and zeal_session_destroy() unset the slot
-    // to mark the session inactive. PHPStan cannot track unset-on-typed-prop.
-    /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
-    if(isset($g->session)){
-        return PHP_SESSION_ACTIVE;
-    }else{
-        return PHP_SESSION_NONE;
+    // In superglobals mode the canonical "is session active?" signal is
+    // $_SESSION's existence — the declared typed $g->session property is
+    // always isset (default []), so checking it would always report ACTIVE
+    // and trip Symfony/PSR-7 frameworks that refuse to start an already-
+    // active session.
+    if (\ZealPHP\App::$superglobals) {
+        return (isset($GLOBALS['_SESSION']) && is_array($GLOBALS['_SESSION']))
+            ? PHP_SESSION_ACTIVE
+            : PHP_SESSION_NONE;
     }
+    $g = RequestContext::instance();
+    // Coroutine mode: typed slot is unset() by write_close/destroy to mark
+    // inactive. PHPStan cannot track unset-on-typed-prop.
+    /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
+    return isset($g->session) ? PHP_SESSION_ACTIVE : PHP_SESSION_NONE;
 }
 
 
@@ -154,20 +168,35 @@ function zeal_session_write_close(): bool
 {
     $g = RequestContext::instance();
 
-    // isset() runtime-checks uninitialized typed slot (unset() may have been called)
-    /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
-    if (isset($g->session)) {
-        // Get session ID
-        $session_id = zeal_session_id();
+    // In superglobals mode the canonical session store is $_SESSION (the
+    // declared typed property $g->session shadows the __get/__set proxy,
+    // so Symfony/legacy code that writes through $_SESSION never reaches
+    // $g->session). Persist whichever holds the live data for the mode.
+    $superglobals = \ZealPHP\App::$superglobals;
+    $hasSession = $superglobals
+        ? (isset($GLOBALS['_SESSION']) && is_array($GLOBALS['_SESSION']))
+        /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
+        : isset($g->session);
 
-        // Write session data to file
+    if ($hasSession) {
+        $session_id = zeal_session_id();
         $save_path = $g->session_params['save_path'] ?? '';
         assert(is_string($save_path));
         $session_file = $save_path . '/sess_' . $session_id;
-        file_put_contents($session_file, serialize($g->session));
+        $data = $superglobals ? $GLOBALS['_SESSION'] : $g->session;
+        file_put_contents($session_file, serialize($data));
 
-        // Unset session data in $g
-        unset($g->session);
+        // Mark inactive — in both modes. Unset the typed slot in coroutine
+        // mode; clear the superglobal in superglobals mode so the next
+        // request starts from a known-empty state (CoSessionManager /
+        // SessionManager clear $_SESSION too, but native routes calling
+        // session_write_close() directly need it here as well).
+        if ($superglobals) {
+            $GLOBALS['_SESSION'] = [];
+            unset($GLOBALS['_SESSION']);
+        } else {
+            unset($g->session);
+        }
     }
     return true;
 }
@@ -190,8 +219,13 @@ function zeal_session_destroy(): bool
         unlink($session_file);
     }
 
-    // Unset session data and cookie
+    // Unset session data and cookie — mirror in both storages for the same
+    // reason as zeal_session_start: typed $g->session and $_SESSION are
+    // independent slots in superglobals mode.
     unset($g->session);
+    if (\ZealPHP\App::$superglobals) {
+        unset($GLOBALS['_SESSION']);
+    }
     $session_name = $g->session_params['name'] ?? '';
     assert(is_string($session_name));
     unset($g->cookie[$session_name]);
@@ -206,6 +240,9 @@ function zeal_session_unset(): void
 {
     $g = RequestContext::instance();
     $g->session = [];
+    if (\ZealPHP\App::$superglobals) {
+        $GLOBALS['_SESSION'] = [];
+    }
 }
 
 /**
@@ -345,8 +382,14 @@ function zeal_session_abort(): bool
                 }
             }
             $g->session = $session_data;
+            if (\ZealPHP\App::$superglobals) {
+                $GLOBALS['_SESSION'] = $session_data;
+            }
         } else {
             $g->session = [];
+            if (\ZealPHP\App::$superglobals) {
+                $GLOBALS['_SESSION'] = [];
+            }
         }
     }
 
@@ -355,7 +398,12 @@ function zeal_session_abort(): bool
 
 function zeal_session_encode(): string
 {
-    return serialize(RequestContext::instance()->session);
+    // In superglobals mode, $_SESSION is the canonical store (Symfony / legacy
+    // code writes here). In coroutine mode, the typed $g->session is.
+    $data = \ZealPHP\App::$superglobals
+        ? ($GLOBALS['_SESSION'] ?? [])
+        : RequestContext::instance()->session;
+    return serialize($data);
 }
 
 function zeal_session_decode(string $data): bool
@@ -379,6 +427,9 @@ function zeal_session_decode(string $data): bool
         }
     }
     RequestContext::instance()->session = $sessionData;
+    if (\ZealPHP\App::$superglobals) {
+        $GLOBALS['_SESSION'] = $sessionData;
+    }
     return true;
 }
 

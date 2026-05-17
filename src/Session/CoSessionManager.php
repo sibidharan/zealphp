@@ -77,38 +77,51 @@ class CoSessionManager
         $g->session = [];
         $g->_session_started = false;
 
-        $sessionName = zeal_session_name();
-        $reqCookie = is_array($request->cookie) ? $request->cookie : [];
-        $reqGet = is_array($request->get) ? $request->get : [];
-        $hasSessionCookie = $this->useCookies && isset($reqCookie[$sessionName]);
-        $hasSessionParam = !$this->useOnlyCookies && isset($reqGet[$sessionName]);
+        // Session lifecycle is opt-out (via App::sessionLifecycle(false)) for
+        // setups where another framework owns sessions — e.g. Symfony's
+        // NativeSessionStorage through the zealphp-symfony bridge. When
+        // disabled, we still do the request-context setup below; we just
+        // skip reading the PHPSESSID cookie, calling zeal_session_start, and
+        // emitting our own Set-Cookie header. The zeal_session_* uopz
+        // overrides remain available to user code regardless.
+        $manageSession = \ZealPHP\App::$session_lifecycle;
 
-        // Lazy session: only start if client already has a session cookie/param.
-        // For new visitors, use SessionStartMiddleware to eagerly start sessions.
-        if ($hasSessionCookie || $hasSessionParam) {
-            $rawSid = $hasSessionCookie ? $reqCookie[$sessionName] : $reqGet[$sessionName];
-            $sessionId = is_string($rawSid) ? $rawSid : null;
-            zeal_session_id($sessionId);
-            zeal_session_start();
-            $g->_session_started = true;
+        if ($manageSession) {
+            $sessionName = zeal_session_name();
+            $reqCookie = is_array($request->cookie) ? $request->cookie : [];
+            $reqGet = is_array($request->get) ? $request->get : [];
+            $hasSessionCookie = $this->useCookies && isset($reqCookie[$sessionName]);
+            $hasSessionParam = !$this->useOnlyCookies && isset($reqGet[$sessionName]);
 
-            if ($this->useCookies) {
-                $cookie = zeal_session_get_cookie_params();
-                $response->cookie(
-                    $sessionName,
-                    $sessionId,
-                    $cookie['lifetime'] ? time() + $cookie['lifetime'] : 0,
-                    $cookie['path'],
-                    $cookie['domain'],
-                    $cookie['secure'],
-                    $cookie['httponly']
-                );
+            // Lazy session: only start if client already has a session cookie/param.
+            // For new visitors, use SessionStartMiddleware to eagerly start sessions.
+            if ($hasSessionCookie || $hasSessionParam) {
+                $rawSid = $hasSessionCookie ? $reqCookie[$sessionName] : $reqGet[$sessionName];
+                $sessionId = is_string($rawSid) ? $rawSid : null;
+                zeal_session_id($sessionId);
+                zeal_session_start();
+                $g->_session_started = true;
+
+                if ($this->useCookies) {
+                    $cookie = zeal_session_get_cookie_params();
+                    $response->cookie(
+                        $sessionName,
+                        $sessionId,
+                        $cookie['lifetime'] ? time() + $cookie['lifetime'] : 0,
+                        $cookie['path'],
+                        $cookie['domain'],
+                        $cookie['secure'],
+                        $cookie['httponly']
+                    );
+                }
             }
         }
 
         try {
-            $g->session['__start_time'] = microtime(true);
-            $g->session['UNIQUE_REQUEST_ID'] = uniqidReal();
+            if ($manageSession) {
+                $g->session['__start_time'] = microtime(true);
+                $g->session['UNIQUE_REQUEST_ID'] = uniqidReal();
+            }
             $g->openswoole_request = $request;
             $g->openswoole_response = $response;
             $request = new \ZealPHP\HTTP\Request($request);
@@ -118,7 +131,7 @@ class CoSessionManager
 
             call_user_func($this->middleware, $request, $response);
         } finally {
-            if ($g->_session_started) {
+            if ($manageSession && $g->_session_started) {
                 zeal_session_write_close();
                 zeal_session_id('');
             }

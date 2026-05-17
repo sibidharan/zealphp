@@ -87,18 +87,31 @@ class SessionManager
             return;
         }
 
-        if(isset($_SESSION) and isset($_SESSION['__start_time'])) {
-            elog('[warn] Session leak detected');
+        // Session lifecycle is opt-out (via App::sessionLifecycle(false)) for
+        // setups where another framework owns sessions — e.g. Symfony's
+        // NativeSessionStorage through the zealphp-symfony bridge. When
+        // disabled, we still do the request-context setup + handler-stack
+        // reset below; we just skip reading the PHPSESSID cookie, calling
+        // session_start, and emitting our own Set-Cookie header. The native
+        // session_* functions remain available for user code that wants
+        // them.
+        $manageSession = \ZealPHP\App::$session_lifecycle;
+
+        if ($manageSession) {
+            if(isset($_SESSION) and isset($_SESSION['__start_time'])) {
+                elog('[warn] Session leak detected');
+            }
+            unset($_SESSION);
+            $_SESSION = [];
         }
-        unset($_SESSION);
-        $_SESSION = [];
 
         // Superglobals mode runs G as a process-wide singleton. Without an
         // explicit reset, error/exception/shutdown handler stacks pushed by
         // legacy code during request N survive to request N+1 — the classic
         // "handler chain grows until worker recycles" leak. Coroutine mode
         // avoids this naturally (G is per-coroutine, freed on coroutine end);
-        // here we have to reset by hand.
+        // here we have to reset by hand. This runs regardless of
+        // sessionLifecycle — it's not session-specific.
         $g = RequestContext::instance();
         $g->error_handlers_stack     = [];
         $g->exception_handlers_stack = [];
@@ -111,39 +124,44 @@ class SessionManager
         $g->_streaming               = null;
         $g->ignore_user_abort_state  = 0;
 
-        $sessionName = session_name() ?: 'PHPSESSID';
-        $reqCookie = is_array($request->cookie) ? $request->cookie : [];
-        $reqGet = is_array($request->get) ? $request->get : [];
-        if ($this->useCookies && isset($reqCookie[$sessionName])) {
-            $rawSid = $reqCookie[$sessionName];
-        } else if (!$this->useOnlyCookies && isset($reqGet[$sessionName])) {
-            $rawSid = $reqGet[$sessionName];
-        } else {
-            $rawSid = call_user_func($this->idGenerator);
-        }
-        $sessionId = is_string($rawSid) ? $rawSid : null;
-        session_id($sessionId);
+        $sessionId = null;
+        if ($manageSession) {
+            $sessionName = session_name() ?: 'PHPSESSID';
+            $reqCookie = is_array($request->cookie) ? $request->cookie : [];
+            $reqGet = is_array($request->get) ? $request->get : [];
+            if ($this->useCookies && isset($reqCookie[$sessionName])) {
+                $rawSid = $reqCookie[$sessionName];
+            } else if (!$this->useOnlyCookies && isset($reqGet[$sessionName])) {
+                $rawSid = $reqGet[$sessionName];
+            } else {
+                $rawSid = call_user_func($this->idGenerator);
+            }
+            $sessionId = is_string($rawSid) ? $rawSid : null;
+            session_id($sessionId);
 
-        $handler = new FileSessionHandler();
-        session_set_save_handler($handler, true);
+            $handler = new FileSessionHandler();
+            session_set_save_handler($handler, true);
 
-        session_start();
+            session_start();
 
-        if ($this->useCookies) {
-            $cookie = session_get_cookie_params();
-            $response->cookie(
-                $sessionName,
-                $sessionId,
-                $cookie['lifetime'] ? time() + $cookie['lifetime'] : 0,
-                $cookie['path'],
-                $cookie['domain'],
-                $cookie['secure'],
-                $cookie['httponly']
-            );
+            if ($this->useCookies) {
+                $cookie = session_get_cookie_params();
+                $response->cookie(
+                    $sessionName,
+                    $sessionId,
+                    $cookie['lifetime'] ? time() + $cookie['lifetime'] : 0,
+                    $cookie['path'],
+                    $cookie['domain'],
+                    $cookie['secure'],
+                    $cookie['httponly']
+                );
+            }
         }
         try {
-            $_SESSION['__start_time'] = microtime(true);
-            $_SESSION['UNIQUE_REQUEST_ID'] = uniqidReal();
+            if ($manageSession) {
+                $_SESSION['__start_time'] = microtime(true);
+                $_SESSION['UNIQUE_REQUEST_ID'] = uniqidReal();
+            }
             $g->openswoole_request = $request;
             $g->openswoole_response = $response;
             $request = new \ZealPHP\HTTP\Request($request);
@@ -152,11 +170,13 @@ class SessionManager
             $g->zealphp_response = $response;
             call_user_func($this->middleware, $request, $response);
         } finally {
-            elog('SessionManager:: session_write_close took '.get_current_render_time(), 'info');
-            session_write_close();
-            session_id('');
-            $_SESSION = [];
-            unset($_SESSION);
+            if ($manageSession) {
+                elog('SessionManager:: session_write_close took '.get_current_render_time(), 'info');
+                session_write_close();
+                session_id('');
+                $_SESSION = [];
+                unset($_SESSION);
+            }
         }
     }
 }

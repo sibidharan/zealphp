@@ -78,6 +78,22 @@ class App
      */
     public static string $default_charset = 'utf-8';
     /**
+     * Whether ZealPHP's per-request session lifecycle runs. Default true: the
+     * SessionManager / CoSessionManager OnRequest wrapper reads the PHPSESSID
+     * cookie, calls zeal_session_start(), optionally emits the Set-Cookie
+     * header, and closes the session at request end. Set to false when
+     * another framework (e.g. Symfony's NativeSessionStorage via the
+     * zealphp-symfony bridge) owns the session lifecycle — ZealPHP then skips
+     * the session-specific work but still does request-context setup
+     * ($g->openswoole_request, $g->zealphp_response, error-stack reset, etc.).
+     *
+     * The underlying zeal_session_* uopz-overridden functions remain
+     * installed and callable from user code either way; this toggle only
+     * controls whether the SessionManager wrapper drives the lifecycle
+     * automatically for every request.
+     */
+    public static bool $session_lifecycle = true;
+    /**
      * Apache `RewriteCond %{REQUEST_FILENAME} !-d` + `RewriteRule ^(.+)/$ /$1 [R=301,L]`.
      * When true, non-directory URIs ending in `/` are 301-redirected to the no-slash
      * form. Inverse of `$directory_slash`. Default false (keeps current behaviour).
@@ -549,6 +565,23 @@ class App
     {
         if ($charset !== null) self::$default_charset = $charset;
         return self::$default_charset;
+    }
+
+    /**
+     * Toggle ZealPHP's per-request session lifecycle. When disabled, the
+     * SessionManager / CoSessionManager OnRequest wrapper skips
+     * session_start / cookie emission / session write-close — request-context
+     * init (openswoole_request, zealphp_response, error-stack reset) still
+     * runs unconditionally. Use this when another framework (e.g. Symfony's
+     * NativeSessionStorage via the zealphp-symfony bridge) owns sessions and
+     * you don't want ZealPHP racing it for the PHPSESSID cookie. The
+     * zeal_session_* uopz overrides remain installed and callable from user
+     * code either way.
+     */
+    public static function sessionLifecycle(?bool $enabled = null): bool
+    {
+        if ($enabled !== null) self::$session_lifecycle = $enabled;
+        return self::$session_lifecycle;
     }
 
     /**
