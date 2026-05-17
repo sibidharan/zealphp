@@ -28,6 +28,11 @@ php app.php &
 # All tests
 ./vendor/bin/phpunit --testdox
 
+# PHPStan static analysis — LEVEL 10, MANDATORY check alongside phpunit.
+# Run this whenever you add or modify code in src/; fix issues immediately
+# rather than letting them accumulate to release time. CI enforces it.
+./vendor/bin/phpstan analyse --no-progress
+
 # Install system dependencies (PHP 8.3, OpenSwoole, uopz) — requires root
 sudo bash setup.sh
 
@@ -386,6 +391,25 @@ The Python notes agent (`examples/agents/notes_agent.py`) calls ZealPHP's HTTP A
 ---
 
 ## Coding Standards
+
+### Pre-commit discipline — both checks must pass
+
+Every change to `src/` runs the same two checks CI runs. Run them as you work, fix issues immediately rather than letting them pile up to release time (lesson from v0.2.21: 11 PHPStan errors accumulated across the parity push because middleware-builder + configurables-builder agents didn't run the analyser between commits — caught at the pre-tag sweep, took a separate fix commit to clean up).
+
+| Check | Command | Bar |
+|-------|---------|-----|
+| **Unit tests** | `./vendor/bin/phpunit tests/Unit/ --testdox` | All green. New classes get their own test file. |
+| **Integration tests** | `./vendor/bin/phpunit tests/Integration/ --testdox` (server up on :8080) | All green. New routes get coverage in the matching `tests/Integration/` file. |
+| **PHPStan static analysis** | `./vendor/bin/phpstan analyse --no-progress` | **Level 10, zero errors.** No `@phpstan-ignore` comments, no type widening to silence errors, no `assert()` / inline `@var` overrides. Fix the underlying type problem. |
+
+The PHPStan badge at `.github/badges/phpstan.json` must match `phpstan.neon`'s level. CI's `validate` job fails if they're out of sync.
+
+**Common level-10 traps in this codebase** (drawn from real v0.2.21 fixes):
+- Casting `mixed` to string without a `is_scalar()` / `is_string()` / `is_object() + method_exists($_, '__toString')` guard first — PSR-7 `getServerParams()` returns `array<string, mixed>`, so any `$params['REMOTE_ADDR'] ?? ''` needs the guard before `(string)`.
+- `Foo::bar() ?? default` when `Foo::bar()` has a declared non-nullable return — PHPStan flags the unreachable `??` branch.
+- `is_callable($x)` when `$x` is already typed `callable` in the function signature — PHPStan complains it's always true. Either widen the parameter docblock to `mixed` if runtime validation is actually meaningful, or drop the redundant check.
+- `streamFor()` and other vendor helpers without declared return types — PSR-7 wrappers under `OpenSwoole\Core\Psr\*` sometimes return `Stream|void`. Construct the target type directly instead of going through the helper.
+- `is_int($result) ? ... : (string)$result` — the false branch still sees mixed; narrow with `is_scalar` or `is_null` before the cast.
 
 ### PHP Style
 - Follow **PSR-2** (https://www.php-fig.org/psr/psr-2/) for all PHP code.
