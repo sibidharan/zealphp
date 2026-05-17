@@ -51,16 +51,20 @@
       One call to <code>$app-&gt;ws()</code>, three callbacks. The callbacks handle the connection
       lifecycle:
     </p>
-    <pre><code class="language-php">$app-&gt;ws('/ws/counter-demo',
+    <pre><code class="language-php">// Create the shared counter ONCE, before $app-&gt;run() — it lives across all
+// workers and the closures below capture it via use().
+$counter = new \ZealPHP\Counter(0);
+
+$app-&gt;ws('/ws/counter-demo',
     onMessage: function ($server, $frame) {
         // Client sent a frame. $frame->data is the payload.
         if ($frame->data === 'ping') $server->push($frame->fd, 'pong');
     },
-    onOpen: function ($server, $request) {
+    onOpen: function ($server, $request) use ($counter) {
         // New connection — store the fd so we can push to it later.
         Store::set('ws_clients', (string)$request->fd, ['connected_at' => time()]);
         // Send the current value to this new tab so it&rsquo;s in sync immediately.
-        $server->push($request->fd, json_encode(['value' => Counter::get('hits')]));
+        $server->push($request->fd, json_encode(['value' => $counter->get()]));
     },
     onClose: function ($server, $fd) {
         // Client disconnected — forget the fd.

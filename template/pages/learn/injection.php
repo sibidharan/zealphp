@@ -45,7 +45,7 @@
       <tbody>
         <tr><td><code>$request</code></td><td>The <code>ZealPHP\HTTP\Request</code> wrapper — headers, query, body, cookies, files</td></tr>
         <tr><td><code>$response</code></td><td>The <code>ZealPHP\HTTP\Response</code> wrapper — <code>json()</code>, <code>redirect()</code>, <code>stream()</code>, <code>sse()</code>, <code>cookie()</code></td></tr>
-        <tr><td><code>$app</code></td><td>The <code>ResponseMiddleware</code> instance — rarely needed, occasionally useful for sub-rendering</td></tr>
+        <tr><td><code>$app</code></td><td>The <code>ResponseMiddleware</code> instance handling this request — almost never useful in modern handlers; reach for the static <code>\ZealPHP\App::*</code> facade (<code>render()</code>, <code>include()</code>, <code>after()</code>, <code>getServer()</code>) instead</td></tr>
         <tr><td>Anything matching a <code>{name}</code> in the route</td><td>The captured URL segment as a string</td></tr>
       </tbody>
     </table>

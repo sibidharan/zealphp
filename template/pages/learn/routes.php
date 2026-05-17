@@ -58,26 +58,47 @@ public/css/site.css    → GET /css/site.css   (static files served as-is)</code
       Use it for: marketing pages, docs, anything that&rsquo;s "show this HTML for that URL."
     </p>
 
-    <h3>2. <code>api/</code> — REST endpoints by HTTP method</h3>
+    <h3>2. <code>api/</code> — JSON endpoints with parameter injection</h3>
     <p>
-      The same filesystem idea, but the file&rsquo;s name is the HTTP method:
+      The same filesystem idea, but each file defines a <em>closure</em> (named to match the file)
+      that the framework invokes with named-parameter injection. The filename becomes the last URL
+      segment — it&rsquo;s NOT the HTTP method:
     </p>
-    <pre><code>api/users/get.php       → GET    /api/users
-api/users/post.php      → POST   /api/users
-api/users/delete.php    → DELETE /api/users
-api/devices/new/id.php  → GET    /api/devices/new/id</code></pre>
+    <pre><code>api/users/list.php           → /api/users/list
+api/users/create.php         → /api/users/create
+api/devices/new/id.php       → /api/devices/new/id
+api/learn/login.php          → /api/learn/login</code></pre>
     <p>
-      Inside each file you define one closure named after the verb:
+      Inside each file you define one closure whose variable name matches <code>basename($file, '.php')</code>:
     </p>
-    <pre><code class="language-php">// api/users/get.php
-$get = function ($app, $request, $response) {
-    return User::list();
+    <pre><code class="language-php">// api/users/list.php
+$list = function ($app, $request, $response) {
+    // $app is the ZealAPI instance; $this also works (Closure::bind)
+    return User::all();  // array → auto-JSON encoded
 };</code></pre>
     <p>
-      Why a separate convention from <code>public/</code>? Because REST methods don&rsquo;t map cleanly
-      to filenames. You can&rsquo;t have a single file respond to <code>GET</code> and <code>POST</code>
-      while keeping the verb in the URL. The <code>api/</code> tree solves it by making the verb the
-      filename and routing all four HTTP methods at the namespace level.
+      The implicit <code>/api/*</code> dispatcher (registered in <code>src/App.php</code>) listens for
+      <strong>all four HTTP verbs — GET, POST, PUT, DELETE — on the same URL</strong>, then loads
+      the matching file and invokes the closure. If your handler cares about the method, read it
+      yourself:
+    </p>
+    <pre><code class="language-php">// api/users/list.php — handle GET + POST in one file
+$list = function ($request) {
+    $method = $request->server['REQUEST_METHOD'];
+    return match ($method) {
+        'GET'  => User::all(),
+        'POST' => User::create($request->post),
+        default => 405,  // Method Not Allowed
+    };
+};</code></pre>
+    <p>
+      Why a separate convention from <code>public/</code>? Because <code>api/</code> files get
+      parameter injection (<code>$app</code>, <code>$request</code>, <code>$response</code>,
+      <code>$server</code>), a <code>ZealAPI</code> base class with helpers like
+      <code>$this-&gt;paramsExists()</code>, and automatic JSON encoding for array/object returns.
+      <code>public/</code> files are plain PHP scripts that echo their own output. Pick
+      <code>api/</code> when you want "structured JSON endpoint with helpers";
+      <code>public/</code> when you want "render HTML for this URL."
     </p>
 
     <h3>3. <code>route/</code> — explicit routes with URL parameters</h3>
@@ -136,7 +157,8 @@ $app->run();</code></pre>
       </li>
       <li>
         <strong>The <code>/api/*</code> namespace</strong> → handed off to <code>ZealAPI::processApi()</code>,
-        which loads the right <code>api/&lt;path&gt;/&lt;method&gt;.php</code>.
+        which loads the matching <code>api/&lt;module&gt;/&lt;segment&gt;.php</code> (the URL segments
+        pick the file — same file handles all HTTP methods).
       </li>
       <li>
         <strong>Dotfile + raw-<code>.php</code>-URL guards</strong> → URLs containing <code>.git/</code>,
@@ -173,14 +195,16 @@ $this->nsPathRoute('api', '{rquest}', [...]);          // /api/healthcheck</code
     <p>
       Both delegate to <code>ZealAPI::processApi($module, $request)</code>. That class walks the
       <code>api/</code> directory, finds the matching <code>api/&lt;module&gt;/&lt;request&gt;.php</code>
-      file, <code>include</code>s it (which defines a single <code>$get</code>/<code>$post</code>/etc.
-      closure), and invokes the closure with parameter injection.
+      file, <code>include</code>s it (which must define a single closure whose variable name matches
+      <code>basename($file, '.php')</code>), and invokes the closure with parameter injection.
     </p>
     <p>
-      The result: <code>GET /api/users/list</code> auto-runs <code>api/users/list.php</code>&rsquo;s
-      <code>$get</code> closure. <code>POST /api/users/list</code> auto-runs the same file&rsquo;s
-      <code>$post</code> closure. You never register an API route by hand &mdash; the framework
-      builds the dispatcher once at boot.
+      The result: any method on <code>/api/users/list</code> &mdash; <code>GET</code>,
+      <code>POST</code>, <code>PUT</code>, <code>DELETE</code> &mdash; auto-runs
+      <code>api/users/list.php</code>&rsquo;s <code>$list</code> closure. The framework does NOT
+      dispatch by HTTP verb; if your handler cares about the method, read
+      <code>$request-&gt;server['REQUEST_METHOD']</code> inside the closure. You never register an
+      API route by hand &mdash; the framework builds the two catch-all dispatchers once at boot.
     </p>
 
     <h2>When nothing matches — fallback or 404</h2>
@@ -205,7 +229,7 @@ App::setFallback(function () {
       <tbody>
         <tr><td>A static page</td><td><code>public/about.php</code></td><td><code>/about</code></td></tr>
         <tr><td>A CSS or image asset</td><td><code>public/css/site.css</code></td><td><code>/css/site.css</code></td></tr>
-        <tr><td>A JSON API endpoint</td><td><code>api/users/get.php</code></td><td><code>GET /api/users</code></td></tr>
+        <tr><td>A JSON API endpoint</td><td><code>api/users/list.php</code> (closure named <code>$list</code>)</td><td><code>/api/users/list</code> (any HTTP method)</td></tr>
         <tr><td>A URL with a parameter</td><td><code>route/users.php</code> via <code>$app-&gt;route('/users/{id}', ...)</code></td><td><code>/users/42</code></td></tr>
         <tr><td>A WebSocket endpoint</td><td><code>route/ws.php</code> via <code>$app-&gt;ws('/chat', ...)</code></td><td><code>ws://host/chat</code></td></tr>
         <tr><td>A pattern that captures regex</td><td><code>route/legacy.php</code> via <code>$app-&gt;patternRoute('/post/(\d+)', ...)</code></td><td><code>/post/123</code></td></tr>
@@ -226,10 +250,10 @@ App::setFallback(function () {
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
-      'Three filesystem conventions: <code>public/</code> for pages, <code>api/</code> for REST, <code>route/</code> for anything dynamic.',
+      'Three filesystem conventions: <code>public/</code> for pages, <code>api/</code> for JSON endpoints, <code>route/</code> for anything dynamic.',
       'Inline <code>$app-&gt;route()</code> calls in <code>app.php</code> are for one-offs — move to <code>route/</code> once you have more than a handful.',
       'Priority order: explicit (app.php) → route/ → /api/* → dotfile/.php guards → public/ → fallback.',
-      'The <code>api/</code> tree is auto-dispatched via <code>ZealAPI::processApi()</code>: <code>api/users/get.php</code> auto-handles <code>GET /api/users</code>.',
+      'The <code>api/</code> tree is auto-dispatched via <code>ZealAPI::processApi()</code>: <code>api/users/list.php</code> (closure named <code>$list</code>) auto-handles <code>/api/users/list</code> for every HTTP method — the handler reads <code>$request-&gt;server[\'REQUEST_METHOD\']</code> if it cares.',
       'Use <code>App::setFallback()</code> to catch unmatched URLs — perfect for hosting legacy apps under a ZealPHP front door.',
     ]]); ?>
 
