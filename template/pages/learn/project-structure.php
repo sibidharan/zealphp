@@ -7,7 +7,7 @@
       'title'    => 'Project Structure',
       'subtitle' => 'Six directories and a single bootstrap. Here\'s where each kind of code goes.',
       'prev'     => ['slug' => 'learn/mental-model', 'title' => 'The Mental Model'],
-      'next'     => ['slug' => 'learn/lifecycle',    'title' => 'A Request\'s Journey'],
+      'next'     => ['slug' => 'learn/routes',       'title' => 'How Routes Work'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
@@ -212,9 +212,9 @@ $app->run();</code></pre>
       <a class="lesson-chip lesson-chip-prev" href="/learn/mental-model"
          hx-get="/api/learn/page?slug=learn/mental-model" hx-target=".learn-layout"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/mental-model">← The Mental Model</a>
-      <a class="lesson-chip lesson-chip-next" href="/learn/lifecycle"
-         hx-get="/api/learn/page?slug=learn/lifecycle" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/lifecycle">A Request's Journey →</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/routes"
+         hx-get="/api/learn/page?slug=learn/routes" hx-target=".learn-layout"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routes">How Routes Work →</a>
     </div>
   </article>
 </div>

@@ -3,10 +3,10 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 6,
+      'number'   => 7,
       'title'    => 'A Request\'s Journey',
       'subtitle' => 'A request walks into a server. Nine things happen before your code runs. Let\'s audit the trip.',
-      'prev'     => ['slug' => 'learn/project-structure', 'title' => 'Project Structure'],
+      'prev'     => ['slug' => 'learn/routes',            'title' => 'How Routes Work'],
       'next'     => ['slug' => 'learn/injection',         'title' => 'Parameter Injection'],
     ]); ?>
 
@@ -201,9 +201,9 @@ $app->run();                                     // ← OpenSwoole takes over he
     ]]); ?>
 
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/project-structure"
-         hx-get="/api/learn/page?slug=learn/project-structure" hx-target=".learn-layout"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/project-structure">← Project Structure</a>
+      <a class="lesson-chip lesson-chip-prev" href="/learn/routes"
+         hx-get="/api/learn/page?slug=learn/routes" hx-target=".learn-layout"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routes">← How Routes Work</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/injection"
          hx-get="/api/learn/page?slug=learn/injection" hx-target=".learn-layout"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/injection">Parameter Injection →</a>

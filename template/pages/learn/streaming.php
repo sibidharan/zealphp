@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 10,
+      'number'   => 11,
       'title'    => 'Streaming Done Right',
       'subtitle' => 'Streaming is the difference between handing someone a 1 GB file and turning on a faucet.',
       'prev'     => ['slug' => 'learn/middleware', 'title' => 'Middleware: The Wrap'],
@@ -139,6 +139,59 @@ $app-&gt;route('/feed', function () {
       Templates that <code>return function($var) { yield ...; };</code> get parameter injection —
       same convention as route handlers. You declare what the template needs; the framework wires it.
     </p>
+
+    <h2>Same primitive, any routing style</h2>
+    <p>
+      <code>$response-&gt;sse()</code> is just a method on the response wrapper. It doesn&rsquo;t care
+      <em>where</em> your handler lives. The same SSE code works identically whether you put it in
+      <code>route/</code>, <code>api/</code>, or <code>public/</code> &mdash; only the way you reach
+      the response object differs.
+    </p>
+    <table class="cmp-table">
+      <thead><tr><th>Routing style</th><th>How <code>$response</code> reaches your code</th><th>Demo URL</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>route/streaming.php</code></td>
+          <td>Parameter injection — declare <code>$response</code> on the handler signature</td>
+          <td><a href="/stream/events">/stream/events</a></td>
+        </tr>
+        <tr>
+          <td><code>api/stream/events.php</code></td>
+          <td>Parameter injection — same convention, same names</td>
+          <td><a href="/api/stream/events">/api/stream/events</a></td>
+        </tr>
+        <tr>
+          <td><code>public/learn/sse-demo.php</code></td>
+          <td><code>RequestContext::instance()-&gt;zealphp_response</code> (no handler signature in public files)</td>
+          <td><a href="/learn/sse-demo">/learn/sse-demo</a></td>
+        </tr>
+      </tbody>
+    </table>
+    <p>The body is identical in all three:</p>
+    <pre><code class="language-php">// route/ — $app-&gt;route('/stream/events', function ($response) { ... });
+// api/  — ${basename(__FILE__, '.php')} = function ($request, $response) { ... };
+// public/ — $response = RequestContext::instance()-&gt;zealphp_response;
+
+$response-&gt;sse(function ($emit) {
+    $emit(json_encode(['status' =&gt; 'connected']), 'open');
+    for ($i = 1; $i &lt;= 5; $i++) {
+        co::sleep(1);
+        $emit(json_encode(['tick' =&gt; $i]), 'tick', (string)$i);
+    }
+    $emit(json_encode(['status' =&gt; 'done']), 'done');
+});</code></pre>
+    <p>
+      All three demos are live on this site &mdash; open any of them in a terminal with
+      <code>curl -N</code> and watch the tick events arrive once a second. Same wire format, same
+      browser <code>EventSource</code> behavior, same coroutine isolation. <strong>The routing style
+      is a filing decision, not a feature constraint.</strong>
+    </p>
+
+    <?php App::render('/components/_callout', [
+      'variant' => 'warn',
+      'title'   => 'Always use coroutine mode for streaming',
+      'body'    => '<p>Everything above assumes <code>App::superglobals(false)</code> &mdash; the default for new apps. Coroutine mode is what makes streaming cheap: a long-lived stream lives in a coroutine, and the worker can handle hundreds of other requests in parallel. In <code>superglobals(true)</code> mode, streams in <code>public/</code> files run through a CGI subprocess (the parent worker forwards stdout chunks via pipes), and the worker is pinned to that one client for the stream&rsquo;s lifetime &mdash; same as Apache+php-fpm. <strong>The CGI bridge exists for unmodified WordPress/Drupal compatibility, not as a recommended streaming path.</strong> Keep <code>superglobals(false)</code> on, use coroutines, and your SSE endpoints scale to thousands of concurrent streams per worker.</p>',
+    ]); ?>
 
     <h2>What about WebSocket?</h2>
     <p>

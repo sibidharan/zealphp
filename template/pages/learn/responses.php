@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 8,
+      'number'   => 9,
       'title'    => 'Returning a Response',
       'subtitle' => 'Most frameworks make you construct a response object. ZealPHP infers it from what you return — like a thoughtful waiter who doesn\'t need you to spell out medium-rare, no onions.',
       'prev'     => ['slug' => 'learn/injection',  'title' => 'Parameter Injection'],

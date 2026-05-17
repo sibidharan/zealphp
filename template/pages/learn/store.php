@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 11,
+      'number'   => 12,
       'title'    => 'Sharing State: Store & Counter',
       'subtitle' => 'Workers don\'t share memory. Workers share a fridge.',
       'prev'     => ['slug' => 'learn/streaming',  'title' => 'Streaming Done Right'],

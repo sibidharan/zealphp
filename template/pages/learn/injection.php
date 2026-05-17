@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 7,
+      'number'   => 8,
       'title'    => 'Parameter Injection',
       'subtitle' => 'PHP is a permissive language. ZealPHP is a permissive language that also reads — specifically, the signature of every handler you write.',
       'prev'     => ['slug' => 'learn/lifecycle',  'title' => 'A Request\'s Journey'],

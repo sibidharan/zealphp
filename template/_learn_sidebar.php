@@ -9,6 +9,7 @@ $groups = [
   'Foundations' => [
     ['learn/mental-model',     'The Mental Model'],
     ['learn/project-structure','Project Structure'],
+    ['learn/routes',           'How Routes Work'],
     ['learn/lifecycle',        'A Request\'s Journey'],
     ['learn/injection',        'Parameter Injection'],
     ['learn/responses',        'Returning a Response'],

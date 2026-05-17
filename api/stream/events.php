@@ -2,10 +2,9 @@
 /**
  * SSE via ZealAPI — GET /api/stream/events
  *
- * $this->response is the ZealPHP HTTP\Response wrapper.
- * Calling $this->response->sse() sets the streaming flag so
- * ResponseMiddleware skips output buffering and lets write() go
- * straight to the client.
+ * Standard ZealAPI closure pattern: assign a closure to a variable named
+ * after the file ($events for events.php) and take $request/$response via
+ * parameter injection — same convention as $get/$post/etc. handler files.
  *
  * Usage:
  *   curl -N http://localhost:8080/api/stream/events
@@ -14,9 +13,8 @@
 
 use OpenSwoole\Coroutine as co;
 
-$events = function() {
-    $response = $this->response;
-    $response->sse(function($emit) {
+${basename(__FILE__, '.php')} = function ($request, $response) {
+    $response->sse(function ($emit) {
         $emit(json_encode(['status' => 'connected', 'ts' => time()]), 'open');
 
         for ($i = 1; $i <= 10; $i++) {
@@ -25,7 +23,7 @@ $events = function() {
                 'tick'    => $i,
                 'ts'      => time(),
                 'memory'  => round(memory_get_usage() / 1024) . ' KB',
-            ]), 'tick', (string)$i);
+            ]), 'tick', (string) $i);
         }
 
         $emit(json_encode(['status' => 'done']), 'done');

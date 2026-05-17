@@ -11,7 +11,7 @@ ${basename(__FILE__, '.php')} = function () {
     $slug = trim((string) ($g->get['slug'] ?? ''));
 
     $allowed = ['learn', 'learn/create-app', 'learn/first-page',
-        'learn/mental-model', 'learn/project-structure', 'learn/lifecycle', 'learn/injection',
+        'learn/mental-model', 'learn/project-structure', 'learn/routes', 'learn/lifecycle', 'learn/injection',
         'learn/responses', 'learn/middleware', 'learn/streaming', 'learn/store',
         'learn/components', 'learn/react-vs-php', 'learn/htmx', 'learn/sessions', 'learn/auth',
         'learn/notes', 'learn/ai-chat', 'learn/websocket',
