@@ -120,6 +120,14 @@ $app->route('/api/learn/demo/check', ['methods' => ['POST']], function () {
     ]);
 });
 
+// Session-counter demo for /learn/sessions — htmx swaps the value in place.
+$app->route('/api/learn/demo/session-bump', ['methods' => ['POST']], function () {
+    $g = G::instance();
+    $g->session['lesson_counter'] = (int) ($g->session['lesson_counter'] ?? 0) + 1;
+    header('Content-Type: text/html; charset=utf-8');
+    return (string) $g->session['lesson_counter'];
+});
+
 $app->route('/api/learn/demo/greeting', ['methods' => ['GET']], function () {
     $g = G::instance();
     $name = htmlspecialchars(trim((string) ($g->get['name'] ?? 'World')));
