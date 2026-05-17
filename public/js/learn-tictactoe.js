@@ -234,12 +234,21 @@
   function maybeAutoConnect() {
     const form = $('ttt-join-form');
     if (!form) return;
+    // Widget remounted via htmx swap with a live ws still around — repaint
+    // the freshly-rendered DOM from cached state (your symbol, room name,
+    // board, scores, status). Without this the join form would show even
+    // though the player is already mid-game.
+    if (ws && ws.readyState === WebSocket.OPEN && me.room) {
+      setYou(me.symbol, me.room);
+      showStage(true);
+      if (lastState) applyState(lastState);
+      return;
+    }
+    if (ws) return;  // ws exists but not OPEN — wait for onclose to clear it
     const u = new URL(location.href);
     const room = (u.searchParams.get('room') || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 32);
     if (!room) return;
     const viewMode = u.searchParams.get('view') === '1';
-    // Don't auto-reconnect if we already have a socket
-    if (ws) return;
     connect(room, viewMode);
   }
   document.addEventListener('DOMContentLoaded', maybeAutoConnect);
