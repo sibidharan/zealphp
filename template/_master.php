@@ -130,6 +130,17 @@ function initPageScripts(root) {
         // substep in the sidebar gets a .current highlight.
         setupSubstepScrollspy(li, headings);
       }
+      // Hard-load case (e.g. /learn/tictactoe — lesson 21, far below the
+      // sidebar viewport): the sidebar's scrollTop starts at 0, so the
+      // active item is off-screen and the reader can't see where they are
+      // in the curriculum. Center it. Called AFTER substep injection because
+      // injected substeps grow li.active's measured height — centering on
+      // the short bare-li would land off-by-N once the substeps expanded.
+      // The htmx:afterSettle restore IIFE below calls the same helper after
+      // restoring saved scroll, fixing "user clicked a far-away lesson"
+      // (where the restored scrollTop puts them where they were, not where
+      // the new active is).
+      ensureActiveSidebarVisible(sb);
     }
   }
 
@@ -213,9 +224,26 @@ function initPageScripts(root) {
 document.addEventListener('DOMContentLoaded', () => initPageScripts());
 document.addEventListener('htmx:afterSettle', () => initPageScripts());
 
+// Center the sidebar's active <li> in its own scroll viewport if it's
+// off-screen. Used by initPageScripts (hard load) and the scroll-restore
+// IIFE below (after htmx swap restores user's prior scroll position, which
+// may not include the new active item).
+function ensureActiveSidebarVisible(sb) {
+  const li = sb.querySelector('li.active');
+  if (!li) return;
+  const sbR = sb.getBoundingClientRect();
+  const liR = li.getBoundingClientRect();
+  if (liR.top < sbR.top || liR.bottom > sbR.bottom) {
+    sb.scrollTop += (liR.top - sbR.top) - (sbR.height - liR.height) / 2;
+  }
+}
+
 // hx-preserve keeps the sidebar DOM element identity across swaps, but htmx
 // detaches/reattaches it during the swap and the browser zeroes scrollTop on
-// reinsertion. Snapshot before, restore after.
+// reinsertion. Snapshot before, restore after — then re-center the active
+// item if the restore left it off-screen (e.g. user clicked a far-away lesson
+// from the bottom of the sidebar; their old scroll position is irrelevant to
+// the new active item).
 (function () {
   let savedScrollTop = 0;
   document.addEventListener('htmx:beforeSwap', () => {
@@ -224,7 +252,9 @@ document.addEventListener('htmx:afterSettle', () => initPageScripts());
   });
   document.addEventListener('htmx:afterSettle', () => {
     const sb = document.getElementById('learn-sidebar');
-    if (sb && savedScrollTop > 0) sb.scrollTop = savedScrollTop;
+    if (!sb) return;
+    if (savedScrollTop > 0) sb.scrollTop = savedScrollTop;
+    ensureActiveSidebarVisible(sb);
   });
 })();
 
