@@ -55,39 +55,75 @@ php app.php restart             # cycle</code></pre>
     <p><code>proxy_buffering off</code> is critical for SSE and streaming — without it, Nginx buffers the entire response before forwarding.</p>
 
     <h2>3. systemd service</h2>
+    <p>
+      This matches <a href="https://github.com/sibidharan/zealphp/blob/master/deploy/zealphp.service" target="_blank"><code>deploy/zealphp.service</code></a>
+      in the repo — copy it as <code>/etc/systemd/system/zealphp.service</code> and adjust the two
+      paths.
+    </p>
     <pre><code class="language-ini">[Unit]
-Description=ZealPHP App
+Description=ZealPHP App Server
 After=network.target
 
 [Service]
 Type=simple
 User=www-data
+Group=www-data
+
 WorkingDirectory=/var/www/myapp
-ExecStart=/usr/bin/php app.php start -p 8080
-ExecStop=/usr/bin/php app.php stop -p 8080
+ExecStart=/usr/bin/php app.php
+
+# Graceful shutdown — SIGTERM then SIGKILL after 30s
+ExecStop=/bin/kill -TERM $MAINPID
+KillMode=mixed
+TimeoutStopSec=30s
+
 Restart=on-failure
-RestartSec=5
+RestartSec=2s
+
+LimitNOFILE=65535
 Environment=OPENAI_API_KEY=sk-...
+
+# Captures stdout/stderr → journalctl -u zealphp -f
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target</code></pre>
 
     <?php App::render('/components/_callout', [
       'variant' => 'warn',
-      'title'   => 'Don\'t use -d with systemd',
-      'body'    => '<p>systemd expects <code>Type=simple</code> — the process stays in the foreground. The <code>-d</code> flag is for manual invocation only. Daemonize AND systemd = systemd thinks the process died immediately.</p>',
+      'title'   => 'Don\'t use start -p / -d with systemd',
+      'body'    => '<p>systemd expects <code>Type=simple</code> — the process stays in the foreground and systemd tracks it by PID. Using <code>app.php start -p 8080</code> (with the CLI start subcommand) or the <code>-d</code> daemonize flag both fork the process away from systemd, which then thinks the service died immediately and restarts in a loop. Use bare <code>php app.php</code> as <code>ExecStart</code>.</p>',
     ]); ?>
 
     <h2>4. Docker</h2>
-    <pre><code class="language-dockerfile">FROM php:8.3-cli
+    <p>
+      This is a teaching version showing the pieces inline. The
+      <a href="https://github.com/sibidharan/zealphp/blob/master/Dockerfile" target="_blank">canonical <code>Dockerfile</code></a>
+      uses <code>setup.sh --docker</code> for the OpenSwoole / uopz install,
+      which keeps the same recipe in one script across CLI installs and Docker builds.
+    </p>
+    <pre><code class="language-dockerfile">FROM php:8.3-cli-bookworm
+
 RUN apt-get update &amp;&amp; apt-get install -y libssl-dev libcurl4-openssl-dev \
     &amp;&amp; pecl install openswoole &amp;&amp; docker-php-ext-enable openswoole \
     &amp;&amp; pecl install uopz &amp;&amp; docker-php-ext-enable uopz
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
 WORKDIR /app
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --optimize-autoloader
+
 COPY . .
-RUN composer install --no-dev
+
 EXPOSE 8080
-CMD ["php", "app.php", "start", "-p", "8080"]</code></pre>
+CMD ["php", "app.php"]</code></pre>
+    <p>
+      The <code>CMD</code> is bare <code>php app.php</code> — no <code>-d</code>, no <code>start -p</code>
+      flags. Docker containers run in the foreground; daemonize flags would orphan the process and
+      Docker would exit immediately.
+    </p>
 
     <h2>5. Environment variables</h2>
     <pre><code>OPENAI_API_KEY            # Real AI chat; mock mode without it
