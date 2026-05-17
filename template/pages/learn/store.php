@@ -42,9 +42,9 @@
 use ZealPHP\Store;
 
 Store::make('rate_limits', 10000, [
-    'count' =&gt; ['type' =&gt; Store::TYPE_INT,    'size' =&gt; 4],
-    'reset' =&gt; ['type' =&gt; Store::TYPE_INT,    'size' =&gt; 4],
-    'note'  =&gt; ['type' =&gt; Store::TYPE_STRING, 'size' =&gt; 64],
+    'count' =&gt; [\OpenSwoole\Table::TYPE_INT,    4],
+    'reset' =&gt; [\OpenSwoole\Table::TYPE_INT,    4],
+    'note'  =&gt; [\OpenSwoole\Table::TYPE_STRING, 64],
 ]);</code></pre>
     <p>Once registered, any worker can interact with the table by name:</p>
     <pre><code class="language-php">// In a route handler — this works from any worker:
@@ -120,8 +120,8 @@ $ok = $visits-&gt;compareAndSet(1000, 0); // atomic CAS — reset only if value 
     <h2>A complete example: per-IP rate limit</h2>
     <pre><code class="language-php">// app.php
 Store::make('rate', 100000, [
-    'count' =&gt; ['type' =&gt; Store::TYPE_INT, 'size' =&gt; 4],
-    'reset' =&gt; ['type' =&gt; Store::TYPE_INT, 'size' =&gt; 4],
+    'count' =&gt; [\OpenSwoole\Table::TYPE_INT, 4],
+    'reset' =&gt; [\OpenSwoole\Table::TYPE_INT, 4],
 ]);
 
 $app-&gt;route('/api/expensive', function ($request) {

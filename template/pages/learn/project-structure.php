@@ -81,8 +81,8 @@ $app->addMiddleware(new SessionStartMiddleware());  // innermost (closest to han
 
 // Shared-memory tables MUST be made before run() so workers inherit them.
 Store::make('rate_limits', 10000, [
-    'count' => ['type' => Store::TYPE_INT, 'size' => 4],
-    'reset' => ['type' => Store::TYPE_INT, 'size' => 4],
+    'count' => [\OpenSwoole\Table::TYPE_INT, 4],
+    'reset' => [\OpenSwoole\Table::TYPE_INT, 4],
 ]);
 
 // Inline route — fine for one-off endpoints. Most routes live in route/ or api/.
