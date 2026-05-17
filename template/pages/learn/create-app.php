@@ -48,28 +48,15 @@ cd my-app</code></pre>
     <p>Open <code>http://localhost:8080</code> in your browser. You should see the starter page.</p>
     <p>That's it. Your app is running. No Apache config, no virtual host, no <code>.htaccess</code>.</p>
 
-    <h2>The folder structure</h2>
-    <p>Here's what the scaffold created:</p>
-    <pre><code>my-app/
-&#9500;&#9472;&#9472; app.php              # Entry point — middleware, routes, $app-&gt;run()
-&#9500;&#9472;&#9472; public/              # Pages — each .php file becomes a URL
-&#9474;   &#9492;&#9472;&#9472; index.php        # → GET /
-&#9500;&#9472;&#9472; api/                 # REST endpoints — file-based routing (ZealAPI)
-&#9500;&#9472;&#9472; route/               # Advanced routes — WebSocket, Store tables, path params
-&#9500;&#9472;&#9472; template/            # Layouts and reusable components
-&#9474;   &#9500;&#9472;&#9472; _master.php      # Page layout shell (nav + content + footer)
-&#9474;   &#9492;&#9472;&#9472; pages/           # Page-specific content
-&#9500;&#9472;&#9472; src/                 # Business logic — PSR-4 autoloaded classes
-&#9500;&#9472;&#9472; storage/             # SQLite databases, uploaded files
-&#9492;&#9472;&#9472; vendor/              # Composer dependencies</code></pre>
-
-    <p>The key rule: <strong>each folder has one job</strong>.</p>
-    <ul>
-      <li><strong>public/</strong> — Pages the user visits. Files map directly to URLs.</li>
-      <li><strong>api/</strong> — REST endpoints. Each file defines one closure.</li>
-      <li><strong>src/</strong> — Business logic. Classes, services, helpers — autoloaded.</li>
-      <li><strong>template/</strong> — HTML layouts and reusable components.</li>
-    </ul>
+    <h2>The folder structure (in one breath)</h2>
+    <p>
+      The scaffold lays out the directories every ZealPHP app uses: <code>public/</code> for pages,
+      <code>api/</code> for REST, <code>route/</code> for explicit registrations, <code>template/</code>
+      for layouts, <code>src/</code> for business logic. We cover each in detail later &mdash; the
+      <a href="/learn/project-structure">Project Structure</a> lesson has the full layout map and the
+      "where do I put X?" reference table. For now, just know the names exist; you&rsquo;ll touch
+      <code>public/</code> first in the next lesson.
+    </p>
 
     <h2>CLI commands</h2>
     <p>The server management works through <code>app.php</code>:</p>

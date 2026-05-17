@@ -121,6 +121,97 @@ $g = \ZealPHP\G::instance();
       '<p>Open DevTools → Network tab and watch each click: a POST goes out, an HTML fragment comes back, the button is replaced. No page reload. No JSON parsing. No client-side state management.</p>'
     ]); ?>
 
+    <h2>Five recipes you'll actually use</h2>
+    <p>
+      The four attributes cover the mechanics. These five patterns cover the everyday use cases —
+      every one of them is wired up in the demo app you're reading right now. Copy, paste, adapt.
+    </p>
+
+    <h3>1. Inline edit — click to edit, save in place</h3>
+    <p>
+      The user clicks an item. The server returns the same row, but with an <code>&lt;input&gt;</code>
+      replacing the static text. They edit, blur, the server saves and returns the static row again.
+      Used in the notes app for renaming notes.
+    </p>
+    <pre><code class="language-html">&lt;!-- The static row --&gt;
+&lt;div id="note-42"&gt;
+  &lt;span hx-get="/api/learn/notes/42/edit"
+        hx-target="#note-42"
+        hx-swap="outerHTML"
+        style="cursor:pointer"&gt;Buy milk&lt;/span&gt;
+&lt;/div&gt;
+
+&lt;!-- What the server returns when /edit is clicked --&gt;
+&lt;div id="note-42"&gt;
+  &lt;input name="title" value="Buy milk"
+         hx-post="/api/learn/notes/42"
+         hx-trigger="blur, keyup[key=='Enter']"
+         hx-target="#note-42"
+         hx-swap="outerHTML" autofocus&gt;
+&lt;/div&gt;</code></pre>
+
+    <h3>2. Delete with confirmation</h3>
+    <p>
+      One attribute, native browser confirm dialog, the row disappears on success.
+      No <code>confirm()</code> wrapper, no event handlers, no state.
+    </p>
+    <pre><code class="language-html">&lt;button hx-delete="/api/learn/notes/42"
+        hx-confirm="Delete this note?"
+        hx-target="#note-42"
+        hx-swap="delete"&gt;Delete&lt;/button&gt;</code></pre>
+
+    <h3>3. Search as you type</h3>
+    <p>
+      Type in the search box, results filter live. The <code>delay:300ms</code> debounces requests;
+      <code>changed</code> only fires when the input actually changed (not every keystroke).
+    </p>
+    <pre><code class="language-html">&lt;input type="search" name="q" placeholder="Search notes…"
+       hx-get="/api/learn/notes/search"
+       hx-trigger="keyup changed delay:300ms"
+       hx-target="#results"
+       hx-swap="innerHTML"&gt;
+&lt;div id="results"&gt;&lt;/div&gt;</code></pre>
+
+    <h3>4. Load more on scroll</h3>
+    <p>
+      The "Load more" link replaces itself with the next page of items plus a new "Load more" at
+      the bottom. <code>hx-trigger="revealed"</code> auto-fires when the link enters the viewport —
+      true infinite scroll, three lines.
+    </p>
+    <pre><code class="language-html">&lt;div id="feed"&gt;
+  &lt;!-- ...first page of items... --&gt;
+  &lt;a hx-get="/api/feed?page=2"
+     hx-target="this"
+     hx-swap="outerHTML"
+     hx-trigger="revealed"&gt;Loading more…&lt;/a&gt;
+&lt;/div&gt;</code></pre>
+
+    <h3>5. Modal — open, fill, close</h3>
+    <p>
+      Click a button, server returns a <code>&lt;dialog&gt;</code> element with the form inside.
+      Append it to <code>&lt;body&gt;</code>. The form posts and removes the dialog on success.
+    </p>
+    <pre><code class="language-html">&lt;button hx-get="/notes/new-modal"
+        hx-target="body"
+        hx-swap="beforeend"&gt;+ New note&lt;/button&gt;
+
+&lt;!-- Server returns: --&gt;
+&lt;dialog id="modal" open&gt;
+  &lt;form hx-post="/api/learn/notes"
+        hx-target="#modal"
+        hx-swap="outerHTML"&gt;
+    &lt;input name="title" placeholder="Title" required autofocus&gt;
+    &lt;button type="submit"&gt;Create&lt;/button&gt;
+    &lt;button type="button" onclick="this.closest('dialog').remove()"&gt;Cancel&lt;/button&gt;
+  &lt;/form&gt;
+&lt;/dialog&gt;</code></pre>
+
+    <?php App::render('/components/_callout', [
+      'variant' => 'info',
+      'title'   => 'The pattern under all five',
+      'body'    => '<p>Notice what every recipe has in common: <strong>the server returns HTML, not JSON</strong>. No client-side rendering. No "wait for the data, then build the DOM." The server already knows how to render this row, this dialog, this search result — htmx just puts the rendered HTML where it belongs. Your route handlers become HTML fragment factories. That is the entire architectural shift.</p>',
+    ]); ?>
+
     <h2>Progressive enhancement</h2>
     <p>
       htmx works <em>on top of</em> regular HTML. If JavaScript is disabled, a

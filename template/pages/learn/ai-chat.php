@@ -19,15 +19,44 @@ $active = $active ?? 'learn/ai-chat';
       'The architecture: PHP spawns Python, Python streams SSE, browser renders live',
     ]]); ?>
 
-    <h2>The problem</h2>
+    <h2>What you're building</h2>
     <p>
-      Your notes app works, but the user does everything manually. What if they could talk to an
-      assistant that <strong>reads, searches, creates, and deletes their notes</strong>? And what if the
-      response <strong>streamed in token by token</strong>, like ChatGPT, instead of making the user
-      wait for the full answer?
+      Your notes app works, but the user does everything manually. By the end of this lesson, they
+      can <strong>talk to an assistant</strong> that reads their notes, searches them, and creates
+      or deletes them on command. The reply <strong>streams token by token</strong>, like ChatGPT,
+      so a slow model never feels frozen.
+    </p>
+    <p>
+      Five pieces, in build order:
+    </p>
+    <ol>
+      <li><strong>The PHP-to-Python bridge</strong> — why we spawn a subprocess instead of calling OpenAI from PHP, and how the wire protocol works.</li>
+      <li><strong>The streaming proxy route</strong> — one PHP route that opens an SSE connection and forwards whatever the Python process emits.</li>
+      <li><strong>The chat UI</strong> — a form + an <code>EventSource</code> client that appends tokens as they arrive.</li>
+      <li><strong>Tool calls</strong> — the AI doesn&rsquo;t just talk; it calls your existing notes API. Same endpoints the UI uses.</li>
+      <li><strong>The live event log</strong> — a side panel that shows every SSE event in real time, so you can <em>see</em> the protocol working.</li>
+    </ol>
+    <p>
+      All of it is wired up below. The interactive chat is the finished product; the sections after
+      it are the build.
     </p>
 
-    <h2>What is SSE?</h2>
+    <h2>Step 1 — Why a Python subprocess?</h2>
+    <p>
+      The OpenAI Agents SDK is Python-only. It handles conversation memory, tool dispatch, and token
+      streaming &mdash; hundreds of lines of logic ZealPHP doesn&rsquo;t want to reimplement. So
+      <strong>PHP stays thin and Python does the AI work</strong>. The PHP side spawns a Python
+      process per chat request, forwards the prompt on stdin, and reads SSE-formatted events from
+      the subprocess&rsquo;s stdout.
+    </p>
+    <p>
+      This is the same CGI-bridge pattern <code>cgi_worker.php</code> uses for legacy PHP files: parent
+      process forks a child, child writes a stream of bytes back through a pipe, parent forwards to
+      the client. The protocol is plain text &mdash; you can <code>cat</code> the python script&rsquo;s
+      output and read it.
+    </p>
+
+    <h2>Step 2 — What is SSE?</h2>
     <p>
       Regular HTTP is like <strong>texting</strong>: you send a message, get a reply, conversation over.
       Server-Sent Events is like <strong>calling someone and saying "read me the news"</strong>. They
@@ -45,7 +74,7 @@ event: done
 data: {"done":true}</code></pre>
     <p>Each event is two lines (<code>event:</code> + <code>data:</code>) followed by a blank line. The browser receives them one by one as they arrive.</p>
 
-    <h2>Streaming with <code>$response->sse()</code></h2>
+    <h2>Step 3 — The streaming proxy route</h2>
     <p>ZealPHP makes SSE a one-liner. The <code>sse()</code> helper sets the right headers and gives you an <code>$emit</code> callback:</p>
     <pre><code class="language-php">$response->sse(function($emit) {
     $emit(json_encode(['token' => 'Hello']), 'token');
@@ -54,7 +83,7 @@ data: {"done":true}</code></pre>
     $emit(json_encode(['done' => true]), 'done');
 });</code></pre>
 
-    <h2>The architecture</h2>
+    <h2>Step 4 — The architecture, end to end</h2>
     <pre class="mermaid">sequenceDiagram
     participant B as Browser
     participant PHP as ZealPHP
@@ -119,7 +148,7 @@ data: {"done":true}</code></pre>
       ]); ?>
     <?php endif; ?>
 
-    <h2>Tool calls</h2>
+    <h2>Step 5 — Tool calls</h2>
     <p>
       The AI doesn't just generate text. It can <strong>call functions</strong> that interact with your
       data. The <a href="https://github.com/sibidharan/zealphp/blob/master/examples/agents/notes_agent.py" target="_blank">Python agent</a> defines six tools: <code>list_notes</code>, <code>read_note</code>,
@@ -136,7 +165,25 @@ data: {"done":true}</code></pre>
       'body'    => '<p>If <code>OPENAI_API_KEY</code> is not set, the server runs a rule-based mock that responds to phrases like "create a note titled X" and "delete X." The mock emits the same SSE events as the real model, so the timeline UI works either way. The header badge shows which mode you\'re in.</p>',
     ]); ?>
 
-    <h2>Introducing <code>App::renderStream()</code></h2>
+    <h2>What you built — and the streaming shape underneath it</h2>
+    <p>
+      Look at what's running on this page right now:
+    </p>
+    <ul>
+      <li>A chat box that posts to <code>/api/learn/chat</code> and reads an SSE stream back.</li>
+      <li>A Python subprocess that the PHP route spawned, currently sitting on a pipe waiting for the next prompt.</li>
+      <li>A notes list on the left that updates the moment the AI calls <code>create_note</code> &mdash;
+        because that tool hits <code>/api/learn/notes</code>, which broadcasts a WebSocket event,
+        which every open tab listens for. (You'll wire that up in the next lesson.)</li>
+      <li>An event log that visualizes every <span style="background:#3b82f6;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.75rem;font-weight:700">SSE</span> and <span style="background:#a855f7;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.75rem;font-weight:700">WS</span> message as it arrives.</li>
+    </ul>
+    <p>
+      The whole thing is &lt; 200 lines of PHP plus the Python agent script. No queue worker, no
+      Redis, no message broker, no separate Node service for streaming. One <code>php app.php</code>
+      process. That's the headline.
+    </p>
+
+    <h2>Bonus — <code>App::renderStream()</code></h2>
     <p>
       SSE is one form of streaming. ZealPHP also supports <strong>streaming HTML</strong> — sending
       chunks of a page as they're generated, rather than waiting for the entire page to render.

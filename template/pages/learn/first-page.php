@@ -39,16 +39,14 @@ echo "&lt;p&gt;This page was served by ZealPHP.&lt;/p&gt;";</code></pre>
 
     <h2>How implicit routing works</h2>
     <p>
-      Think of the <code>public/</code> folder as a <strong>filing cabinet</strong>. Folders are drawers,
-      files are documents. The URL is the path you'd describe to find a document:
+      The <code>public/</code> folder is a filing cabinet — folders are drawers, files are documents,
+      and the URL mirrors the file path. <code>public/blog/post.php</code> → <code>/blog/post</code>.
+      The <code>.php</code> extension is stripped automatically. No routing table, no config.
     </p>
-    <pre><code>public/index.php       → GET /
-public/about.php       → GET /about
-public/blog/post.php   → GET /blog/post
-public/css/site.css    → GET /css/site.css  (static files too)</code></pre>
     <p>
-      No configuration. No routing table. The file's location <em>is</em> its URL. If you rename
-      the file, the URL changes. If you delete the file, the URL returns 404.
+      That covers static pages with PHP. For URL parameters (<code>/users/{id}</code>), REST APIs,
+      and the priority order between routing styles, see the <a href="/learn/routes">How Routes Work</a>
+      lesson in Foundations.
     </p>
 
     <h2>Adding dynamic content</h2>
