@@ -1,11 +1,18 @@
 # Skill: Apache `RewriteRule` → ZealPHP
 
 Mechanical reference for converting any `RewriteRule` line to the right
-ZealPHP route shape. Two questions decide everything:
+ZealPHP route shape (and the surrounding directives like `Header set`,
+`AddDefaultCharset`, `<FilesMatch>`, `Allow from`, etc. to their built-in
+middleware classes). Two questions decide everything for RewriteRule:
 
 1. **Does the flag block contain `R=…` or just `L`?** — picks the primitive.
 2. **If `[L]`, does the destination set a query string?** — picks whether you
    populate `$g->get` before delegating.
+
+For non-rewrite directives, see the **Built-in middleware emission table**
+at the bottom — most of the common ones (`Header set`, `AddDefaultCharset`,
+`<FilesMatch> Header set Cache-Control`, `ExpiresByType`, `Allow from`,
+`AddType`) map to shipped middleware classes as of v0.2.21.
 
 ## The two modes
 
@@ -214,3 +221,74 @@ framework translates them into the right HTTP response:
 | `return (function() { yield ...; })();` | SSR streaming |
 
 Cross-link in generated comments: `/responses#return-contract`.
+
+## Built-in middleware emission table (v0.2.21 phase 2 — ALL 12 ship)
+
+For non-`RewriteRule` directives surrounding the rewrites, emit the built-in
+middleware class directly. Do NOT emit inline anonymous PSR-15 classes for
+these — they ship in `src/Middleware/` with stable constructor signatures.
+
+| Apache / nginx directive | Emit |
+|---|---|
+| `Header set X "v"` / nginx `add_header X v` | `new HeaderMiddleware(['set' => ['X' => 'v']])` |
+| `Header append X "v"` | `new HeaderMiddleware(['append' => ['X' => 'v']])` |
+| `Header add X "v1"` repeated | `new HeaderMiddleware(['add' => ['X' => ['v1', 'v2']]])` |
+| `Header unset X` / `more_clear_headers X` | `new HeaderMiddleware(['unset' => ['X']])` |
+| `AddDefaultCharset utf-8` / `AddCharset utf-8 .css .js ...` | `new CharsetMiddleware('utf-8')` |
+| `<FilesMatch> Header set Cache-Control` / nginx `expires 30d` | `new CacheControlMiddleware()` (defaults cover css/js/jpg/png/svg/woff2/...) |
+| Custom cache map | `new CacheControlMiddleware(['css' => 31536000, 'html' => 300])` |
+| `ExpiresActive On` + `ExpiresByType image/jpeg "access plus 30 days"` | `new ExpiresMiddleware(['image/' => '+30 days', 'text/css' => '+1 year'], '+5 minutes')` |
+| `Allow from 10.0.0.0/8` + `Deny from all` (Apache 2.2) | `new IpAccessMiddleware(['allow' => ['10.0.0.0/8'], 'deny' => []])` |
+| `Require ip 10.0.0.0/8` (Apache 2.4+) | `new IpAccessMiddleware(['allow' => ['10.0.0.0/8'], 'deny' => []])` |
+| nginx `allow 10.0.0.0/8; deny all;` | `new IpAccessMiddleware(['allow' => ['10.0.0.0/8'], 'deny' => []])` |
+| `AddType application/wasm .wasm` (handler-generated bodies) | `new MimeTypeMiddleware(['wasm' => 'application/wasm'])` |
+| Apache `RewriteRule ... \.php [R=404]` / nginx `location ~ \.php$ { return 404; }` | `new BlockPhpExtMiddleware()` |
+| `Access-Control-Allow-Origin "*"` | `new CorsMiddleware(['*'])` |
+| `FileETag` / nginx `etag on` | `new ETagMiddleware()` |
+| `auth_basic "Realm"; auth_basic_user_file htpasswd;` / Apache `AuthType Basic` + `AuthUserFile` | `new BasicAuthMiddleware(htpasswdFile: '/etc/zealphp/.htpasswd', realm: 'Realm')` (or `verify:` callable for DB-backed) |
+| nginx `limit_req zone=one burst=5;` | `Store::make('rate_limit', 16384, ['ip' => [Table::TYPE_STRING, 64], 'count' => [Table::TYPE_INT, 4], 'reset' => [Table::TYPE_INT, 4]])` BEFORE `$app->run()`, then `new RateLimitMiddleware(limit: 60, window: 60, tableName: 'rate_limit')` |
+| nginx `limit_conn zone=one 100;` | `$counter = Counter::make('active');` BEFORE `$app->run()`, then `new ConcurrencyLimitMiddleware(100, $counter)` |
+| Apache `Substitute "s\|foo\|bar\|"` (mod_substitute) | `new BodyRewriteMiddleware([['pattern' => '\|foo\|', 'replacement' => 'bar']])` — skips streaming + binary bodies |
+| nginx multi-host `server { server_name a.com; } server { server_name b.com; }` | `new HostRouterMiddleware(['a.com' => $handlerA, 'b.com' => $handlerB, '*.example.com' => $wildcard, '*' => $catchAll])` — case-insensitive, port-stripped, falls through if no `*` and no match |
+
+Collect all top-level `Header set` / `add_header` directives into ONE
+`HeaderMiddleware` call. Don't emit one middleware per directive.
+
+### Critical setup ordering
+
+`RateLimitMiddleware` and `ConcurrencyLimitMiddleware` need their Store
+table / Counter to exist BEFORE `$app->run()`. The shared-memory resource
+is forked into every worker; creating it after `$app->run()` is too late.
+Emit the `Store::make(...)` / `Counter::make(...)` BEFORE `$app->addMiddleware(...)`.
+
+### `App::clientIp()` and `App::trustedProxies()` — behind a proxy
+
+When the input config has any proxy signal (`proxy_pass`, `X-Forwarded-For`,
+`RemoteIPHeader`, known proxy IPs):
+
+```php
+App::trustedProxies(['10.0.0.0/8', '127.0.0.1']);  // boot
+// ... handlers / IP-needing middleware use App::clientIp() now
+```
+
+`App::clientIp()` walks `X-Forwarded-For` right-to-left against the trusted-
+proxy CIDR list and returns the first untrusted hop. Without `trustedProxies()`
+set, it returns `$g->server['REMOTE_ADDR']` unchanged (refuses to honor
+headers from untrusted callers).
+
+### One remaining genuine middleware gap
+
+Only `ProxyMiddleware` (nginx `proxy_pass`) is unbuilt — ZealPHP is an
+origin server, not a forwarding proxy. Recommend Caddy/Traefik/nginx in
+front. If same-process forwarding is required (rare in practice), emit
+the inline anonymous shape with a `// PROPOSED: ProxyMiddleware` comment.
+
+### Other v0.2.21 configurables (Apache parity at the App layer)
+
+- `App::stripTrailingSlash(true)` — inverse of `directorySlash`; Apache `RewriteRule ^(.+)/$ /$1 [R=301]` equivalent
+- `App::serverAdmin('admin@x.com')` — Apache `ServerAdmin`
+- `App::canonicalName('www.example.com')` + `App::useCanonicalName(true)` — Apache `ServerName` / `UseCanonicalName`
+- `App::hostnameLookups(true)` — Apache `HostnameLookups`, populates `$g->server['REMOTE_HOST']`
+- `App::accessLogFormat('%h %l %u %t "%r" %>s %b')` — Apache `CustomLog`/`LogFormat`
+- `App::limitRequestFields(100)`, `App::limitRequestFieldSize(8190)`, `App::limitRequestLine(8190)` — Apache `LimitRequestFields*`
+- `App::tryInclude($path, $args)` — variant of `App::include()` returning `null` on missing file (for fall-through chains)

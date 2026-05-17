@@ -587,27 +587,17 @@ function uniqidReal($length = 13)
  * @param int $status The HTTP status code to log.
  * @param int $length The length of the response content.
  */
-function access_log(int $status = 200, int $length = 0): void {
+function access_log(int $status = 200, int $length = 0, ?float $durationSec = null): void {
     if (!access_logging_enabled()) {
         return;
     }
-    $g = RequestContext::instance();
-    /** @var string $cachedDate */
-    static $cachedDate = '';
-    /** @var int $cachedSecond */
-    static $cachedSecond = 0;
-    $now = time();
-    if ($now !== $cachedSecond) {
-        $cachedDate = date('d/M/Y:H:i:s');
-        $cachedSecond = $now;
-    }
-    $time = $cachedDate . substr((string)microtime(), 1, 6);
-    $remote = (string)($g->server['REMOTE_ADDR'] ?? '-');
-    $request = ((string)($g->server['REQUEST_METHOD'] ?? '')).' '.((string)($g->server['REQUEST_URI'] ?? '')).' '.((string)($g->server['SERVER_PROTOCOL'] ?? ''));
-    $referer = (string)($g->server['HTTP_REFERER'] ?? '-');
-    $user_agent = (string)($g->server['HTTP_USER_AGENT'] ?? '-');
-    $log = "$remote - - [$time] \"$request\" $status $length \"$referer\" \"$user_agent\"\n";
-    log_write($log, 'access');
+    // Render through App::formatAccessLogLine() so the line honours
+    // App::$access_log_format (Apache LogFormat / CustomLog parity) and the
+    // trusted-proxy X-Forwarded-For walk in App::clientIp(). Compiled format
+    // spec is cached inside App; the per-request hot path is just token
+    // dispatch + string concat.
+    $line = App::formatAccessLogLine($status, $length, $durationSec) . "\n";
+    log_write($line, 'access');
 }
 
 /**

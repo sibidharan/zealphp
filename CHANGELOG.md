@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.21] - 2026-05-17
+
+The full-parity push. Every ⚠ middleware row on the v0.2.20 Apache + nginx coverage matrices now ships as a built-in. Every server-level configurability gap surfaced in the v0.2.20 plan's §10 (`App::$server_admin`, `$canonical_name`, `$hostname_lookups`, `$trusted_proxies` + `App::clientIp()`, `$access_log_format`, `LimitRequestFields` family) is now wired through `src/App.php` with fluent getter/setter methods matching the `App::superglobals()` precedent.
+
+### Added — middleware (12 new entries in `src/Middleware/`)
+
+- **`CharsetMiddleware`** — auto-appends `; charset=utf-8` (or `App::$default_charset`) to text-ish response `Content-Type` values that don't already declare a charset. Apache `AddDefaultCharset` / `AddCharset` parity.
+- **`CacheControlMiddleware`** — extension-keyed `Cache-Control: max-age=N, public` (with `immutable` flag for fingerprinted assets) for static-asset responses. Apache `<FilesMatch ".(css|jpg)$"> Header set Cache-Control "max-age=N"` parity.
+- **`ExpiresMiddleware`** — adds legacy HTTP/1.0 `Expires:` header by content type. Pairs with `CacheControlMiddleware` for full Apache `mod_expires` (`ExpiresActive`, `ExpiresByType`, `ExpiresDefault`) parity; nginx `expires 30d` parity.
+- **`HeaderMiddleware`** — declarative response-header `set(name, value)`, `add(name, value)` (append), `unset(name)` with conditional variants (by status code / content type). Apache `mod_headers` (`Header set / append / unset / add / merge`) parity — the most-requested missing piece given how many `.htaccess` files have a stack of `Header set X-Foo bar` lines.
+- **`BasicAuthMiddleware`** — HTTP Basic Auth with htpasswd-style file OR callback verifier (`fn($user, $pass) => bool`). Returns `401 + WWW-Authenticate: Basic` on missing / invalid credentials; `pathPrefix` scopes auth to subtrees. Apache `AuthType Basic` + `AuthUserFile` + `Require`, nginx `auth_basic` parity.
+- **`IpAccessMiddleware`** — CIDR-based allow / deny lists with allow-first or deny-first ordering (Apache legacy semantics). Returns `403` on deny. Apache `Allow from / Deny from / Order` + modern `Require ip` parity. Pairs with `App::clientIp()` to resolve the real client IP behind a trusted proxy.
+- **`RateLimitMiddleware`** — sliding-window request rate limiter backed by `Store` for cross-worker shared state. Configurable `limit`, `window`, `keyBy` (callable, default IP); returns `429 Too Many Requests` + `Retry-After`. nginx `limit_req zone=one rate=10r/s burst=20` parity.
+- **`ConcurrencyLimitMiddleware`** — in-flight concurrent-request cap backed by `OpenSwoole\Atomic` (`Counter`); increments on entry, decrements in `finally`. Returns `503` when the cap is reached. nginx `limit_conn zone=one 10` parity.
+- **`BlockPhpExtMiddleware`** — refuses `*.php` URLs with `404` for apps that want extensionless URLs as the only public surface (so scrapers can't enumerate raw files by guessing `config.php` / `admin.php`). Apache `RewriteCond %{THE_REQUEST} \.php; RewriteRule . - [R=404,L]` parity.
+- **`MimeTypeMiddleware`** — sets / overrides `Content-Type` on non-static responses by URL extension or pattern (custom types like `.woff2`, `.glb`, `.wasm`). Static files are still MIME-typed by OpenSwoole's static handler. Apache `AddType` / `ForceType` parity.
+- **`BodyRewriteMiddleware`** — single-line regex substitution on response body, scoped by `contentTypes` (default text/html). Useful for late-stage URL rewriting (CDN versioning) or hot-patching templates. Apache `mod_substitute` parity; multi-line / streaming variants remain on the roadmap.
+- **`HostRouterMiddleware`** — dispatches per-host middleware chains inside one ZealPHP instance based on the `Host` header (with a `__default` fallback). nginx `server_name a.com b.com` ergonomic parity; for true isolation prefer one process per host behind a real proxy.
+
+### Added — server-level configurability (8 new entries in `src/App.php`)
+
+All follow the existing `App::superglobals()` precedent — public static property + fluent getter/setter (no-arg call returns the current value, one-arg call sets it). Backing properties stay public for BC.
+
+- **`App::$server_admin` + `App::serverAdmin()`** — Apache `ServerAdmin` equivalent. Surfaced on the built-in 500 error page templates.
+- **`App::$canonical_name` + `App::$use_canonical_name` + `App::canonicalHost()`** — Apache `ServerName` + `UseCanonicalName`. Controls the host source used when building absolute redirect URLs (client `Host` header vs. canonical configured name).
+- **`App::$hostname_lookups`** (default `false`) — Apache `HostnameLookups`. When `true`, populates `$g->server['REMOTE_HOST']` via reverse DNS. Off by default — non-trivial perf cost.
+- **`App::$trusted_proxies` (CIDR list) + `App::clientIp()` helper** — walks `X-Forwarded-For` only if `REMOTE_ADDR` is in the trusted-proxy CIDR list. **Critical for production deploys behind Traefik / Caddy / nginx for TLS termination.** All client-IP-sensitive built-ins (rate limiter, IP access, access log) consult this helper, so untrusted spoofing of `X-Forwarded-For` is rejected by default.
+- **`App::$access_log_format`** — Apache `LogFormat` / `CustomLog` / nginx `log_format` equivalent. Supported tokens: `%h` (client IP), `%l` (ident, always `-`), `%u` (remote user from BasicAuth), `%t` (request time), `%r` (request line), `%>s` (final status), `%b` (response bytes), `%{HEADER}i` (request header), `%{HEADER}o` (response header), `%D` (request duration in µs). `access_log()` in `src/utils.php` parses the format string once at boot and emits per-request lines via the existing async coroutine-channel logging path.
+- **`App::$limit_request_fields` / `App::$limit_request_field_size` / `App::$limit_request_line`** — Apache `LimitRequestFields` family. Hard caps on inbound request shape; threaded through to OpenSwoole's `'http_header_buffer_size'` + per-request validation that returns `400 Bad Request` for over-limit requests. Defends against header-bomb DoS patterns.
+- **`App::$strip_trailing_slash` + `App::stripTrailingSlash()`** — companion to existing `App::$directory_slash`. Off by default. When on, non-directory URIs ending in `/` get a `301` to the no-slash form. Apache `RewriteCond %{REQUEST_FILENAME} !-d; RewriteRule ^([^/]+)/$ /$1 [R=301,L]` parity.
+- **`App::tryInclude($publicPath, $args = [])`** — variant of `App::include()` that returns `null` when the file doesn't exist (vs. `App::include()`'s `403` for security violations). Lets users chain extension-resolver patterns (`return App::tryInclude("/$path.php") ?? App::tryInclude("/$path/index.php") ?? 404;`) without conflating "not found" with "blocked outside DocumentRoot".
+
+### Documentation
+
+- **`template/pages/middleware.php`** — full rewrite. Top-level coverage table now lists every built-in middleware (17 total) with its Apache / nginx parity directive in one column and a one-line behaviour summary in another. New per-middleware reference sections (one per built-in) with a 3-line description + idiomatic `$app->addMiddleware(new XMiddleware(...))` example.
+- **`template/pages/legacy-apps.php`** — the Apache `AllowOverride` coverage matrix now shows ✅ + a link to the middleware reference for `BasicAuth`, `Header`, `Charset`, `MimeType`, `Substitute`/`BodyRewrite`, `ForceType`/`MimeType`, `ExpiresActive`, `Allow from`/`IpAccess`. The nginx matrix shows ✅ for `auth_basic`, `limit_req`/`limit_conn`, `expires`, `server_name` (via `HostRouterMiddleware`), `log_format` (via `App::$access_log_format`), `client_max_body_size` / header-limit family (via `App::$limit_request_*`). Worked-example real-world `.htaccess` migration table — every previously-⚠ row now shows ✅ with a link to the matching middleware. Known limitations section trimmed: now lists only genuinely-unsupported features (SSI, mod_speling, mod_imagemap, mod_dav, LDAP / Digest auth, autoindex full customisation surface, nginx `X-Accel-Redirect`, HTTP/3, `proxy_pass`).
+- **`.claude/CLAUDE.md`** — Built-in middleware section extended with all 12 new entries (one-line summaries). New "Server-level configurability" section lists every Apache `httpd.conf`-style directive that's now exposed as a fluent `App::$*` setter. Source Layout table extended with all 12 new `Middleware/*.php` rows.
+- **`ROADMAP.md`** — every now-shipped item removed from the "Apache + nginx parity middlewares" cluster and the "v0.2.20 follow-ups" cluster. What remains: autoindex (§11), `ProxyMiddleware` (deferred — front-proxy recommendation stays the supported pattern), `BodyRewriteMiddleware` multi-line / streaming variants, HTTP/3 (upstream OpenSwoole).
+- **`README.md`** — short paragraph noting the v0.2.21 Apache / nginx parity push under Features, with a pointer to the middleware reference and the legacy-apps coverage matrix.
+
+### Notes
+
+- The 22 follow-ups discovered during the v0.2.20 planning pass have now collapsed to ~3 genuinely-future items. ZealPHP's `.htaccess` / `nginx.conf` coverage story is no longer "most of it ships, the rest is on the roadmap" — it's "all the common stuff ships, here's what we explicitly won't do and why."
+- The middleware-builder, configurables-builder, and converter-updater agents worked in parallel against the same fixed spec. The full-parity-middlewares branch bundles all three streams. The AI Config Converter agent's system prompt now knows about every new middleware + every new configurable, so generated `app.php` files use the new built-ins instead of emitting inline custom middleware.
+
 ## [0.2.20] - 2026-05-17
 
 ### Added

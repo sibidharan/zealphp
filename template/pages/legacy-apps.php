@@ -36,7 +36,7 @@
 <tr><td><strong>mod_perl, mod_python, mod_ruby</strong></td><td>ZealPHP is a PHP framework.</td><td>Run those languages in their own runtimes.</td></tr>
 <tr><td><strong>mod_isapi</strong> (Windows IIS extensions)</td><td>Windows-IIS-only API; OpenSwoole is Linux-first.</td><td>N/A — port the underlying logic to PHP.</td></tr>
 <tr><td><strong>mod_lua hooks</strong> — <code>LuaHook*</code>, <code>LuaMapHandler</code>, etc.</td><td>Apache's scriptable hook layer. PSR-15 middleware is the native equivalent.</td><td>Write a PSR-15 middleware.</td></tr>
-<tr><td><strong>CERN meta files</strong> — <code>MetaDir</code>, <code>MetaFiles</code>, <code>MetaSuffix</code></td><td>Dead since ~1996.</td><td>Use a <code>HeaderMiddleware</code> (proposed in <a href="/roadmap-or-similar">roadmap</a>).</td></tr>
+<tr><td><strong>CERN meta files</strong> — <code>MetaDir</code>, <code>MetaFiles</code>, <code>MetaSuffix</code></td><td>Dead since ~1996.</td><td>Use the built-in <a href="/middleware#header"><code>HeaderMiddleware</code></a> to attach response headers.</td></tr>
 <tr><td><strong>mod_status, mod_info</strong> (server-info / server-status pages)</td><td>Built-in observability lands in v0.3.</td><td>Roll your own <code>/metrics</code> route in the meantime.</td></tr>
 <tr><td><strong>mod_proxy_balancer</strong> (load balancing)</td><td>Out of scope.</td><td>Put HAProxy / Nginx / Caddy in front.</td></tr>
 <tr><td><strong>AuthLDAP*</strong> (LDAP authentication)</td><td>Niche in PHP apps; the standard PHP LDAP extension is the integration path.</td><td>Custom middleware using PHP's <code>ldap_*</code> functions.</td></tr>
@@ -50,9 +50,7 @@
 <tr><td><strong>Name-based virtual hosts</strong> — multiple <code>server { server_name a.com b.com; }</code> blocks</td><td>⚠ Partial. One ZealPHP instance serves all <code>Host</code> values.</td><td>Host-routing middleware that dispatches on <code>$g-&gt;server['HTTP_HOST']</code>, OR run one ZealPHP instance per host behind Caddy/Traefik.</td></tr>
 <tr><td><strong><code>proxy_pass</code> (reverse proxy)</strong></td><td>⚠ Not built-in. ZealPHP is an origin server, not a proxy.</td><td>Put Caddy/Traefik/Nginx in front, OR write a small handler that uses OpenSwoole's HTTP client to forward.</td></tr>
 <tr><td><strong><code>X-Accel-Redirect</code> / <code>X-Sendfile</code></strong></td><td>Different model — ZealPHP IS the origin.</td><td>Return <code>$response-&gt;sendFile($protectedPath)</code> directly from the authorised handler (uses kernel sendfile).</td></tr>
-<tr><td><strong><code>limit_rate</code></strong> (response bandwidth throttle)</td><td>⚠ Not built-in.</td><td>Custom middleware: <code>$response-&gt;write($chunk); OpenSwoole\Coroutine::sleep($delay);</code> between chunks.</td></tr>
-<tr><td><strong><code>limit_req</code></strong> (request rate limit)</td><td>⚠ Not built-in.</td><td>Sliding window in <code>Store</code> (a <code>RateLimitMiddleware</code> is on the roadmap).</td></tr>
-<tr><td><strong><code>limit_conn</code></strong> (concurrent connection limit)</td><td>⚠ Not built-in.</td><td>Use <code>Counter</code> (a <code>ConcurrencyLimitMiddleware</code> is on the roadmap).</td></tr>
+<tr><td><strong><code>limit_rate</code></strong> (response bandwidth throttle)</td><td>⚠ Not built-in. <code>limit_req</code> and <code>limit_conn</code> ARE shipped — see <a href="/middleware#rate-limit"><code>RateLimitMiddleware</code></a> + <a href="/middleware#concurrency-limit"><code>ConcurrencyLimitMiddleware</code></a>.</td><td>5-line response wrapper: <code>$response-&gt;write($chunk); OpenSwoole\Coroutine::sleep($delay);</code> between chunks.</td></tr>
 <tr><td><strong><code>early_hints</code></strong> (HTTP 103)</td><td>⚠ Not implemented. Niche browser feature.</td><td>Defer; revisit if demand emerges.</td></tr>
 <tr><td><strong><code>directio</code></strong> (O_DIRECT)</td><td>⚠ OpenSwoole doesn't expose O_DIRECT.</td><td>Rely on filesystem cache; for huge files use <code>$response-&gt;sendFile()</code>.</td></tr>
 <tr><td><strong><code>stream { … }</code> block</strong> (L4 TCP/UDP proxy)</td><td>Different protocol scope.</td><td>Use HAProxy or sniproxy.</td></tr>
@@ -497,11 +495,11 @@ PHP]); ?>
 <tr><td><code>php_value upload_max_filesize 512M</code></td><td><code>ini_set('upload_max_filesize', '512M');</code> in <code>app.php</code> boot, or <code>php.ini</code></td><td>✅</td></tr>
 <tr><td><code>ServerSignature Off</code></td><td>No-op — OpenSwoole sends no server-signature footer</td><td>✅</td></tr>
 <tr><td><code>Options -Indexes</code></td><td>No-op — ZealPHP never lists directories</td><td>✅</td></tr>
-<tr><td><code>AddDefaultCharset utf-8</code></td><td>One-line <code>CharsetMiddleware</code></td><td>⚠ roadmap</td></tr>
-<tr><td><code>AddCharset utf-8 .css .js …</code></td><td>Same <code>CharsetMiddleware</code></td><td>⚠ roadmap</td></tr>
-<tr><td><code>AddType font/woff2 .woff2</code> (and friends)</td><td><code>mime_type</code> option on <code>App::run()</code>, or middleware override</td><td>⚠</td></tr>
+<tr><td><code>AddDefaultCharset utf-8</code></td><td><code>App::addMiddleware(new CharsetMiddleware())</code> (reads <code>App::$default_charset</code>)</td><td>✅</td></tr>
+<tr><td><code>AddCharset utf-8 .css .js …</code></td><td>Same <a href="/middleware#charset"><code>CharsetMiddleware</code></a></td><td>✅</td></tr>
+<tr><td><code>AddType font/woff2 .woff2</code> (and friends)</td><td><a href="/middleware#mime-type"><code>MimeTypeMiddleware</code></a> for non-static responses; <code>mime_type</code> option on <code>App::run()</code> for static-handler files</td><td>✅</td></tr>
 <tr><td><code>Header set Access-Control-Allow-Origin "*"</code></td><td><code>App::addMiddleware(new CorsMiddleware([...]))</code></td><td>✅</td></tr>
-<tr><td><code>&lt;FilesMatch ".(css|jpg|…)$"&gt; Header set Cache-Control "max-age=2628000"</code></td><td>Extension-based middleware</td><td>⚠ <code>CacheControlMiddleware</code> on the roadmap</td></tr>
+<tr><td><code>&lt;FilesMatch ".(css|jpg|…)$"&gt; Header set Cache-Control "max-age=2628000"</code></td><td><a href="/middleware#cache-control"><code>CacheControlMiddleware</code></a> — extension-keyed map</td><td>✅</td></tr>
 <tr><td><code>RewriteEngine on</code> / <code>RewriteBase /</code></td><td>N/A — native routing</td><td>✅</td></tr>
 <tr><td><code>RewriteRule ^/?qn/([^/]+)?$ "qn.php?id=$1"</code></td><td><code>patternRoute('/qn/([^/]+)?', fn($id) =&gt; { $g-&gt;get['id'] = $id; return App::include('/qn.php'); })</code></td><td>✅ Recipe B</td></tr>
 <tr><td><code>RewriteRule ^/?watch/([^/]+)?$ "watch.php?v=$1"</code></td><td>Same Recipe B pattern</td><td>✅</td></tr>
@@ -512,10 +510,10 @@ PHP]); ?>
 <tr><td><code>RewriteRule ^/?help/(.+)/$ "http://%{HTTP_HOST}/help/$1" [R=301]</code> (strip trailing slash)</td><td><code>patternRoute('/help/(.+)/', fn($p, $r) =&gt; $r-&gt;redirect("/help/{$p}", 301))</code></td><td>✅</td></tr>
 <tr><td><code>RewriteRule ^/?help?$ "http://%{HTTP_HOST}/help/" [R=301]</code></td><td><code>$app-&gt;route('/help', fn($r) =&gt; $r-&gt;redirect('/help/', 301))</code></td><td>✅</td></tr>
 <tr><td><code>RewriteRule ^/?help/(.+)?$ "help.php?topic=$1"</code></td><td>Standard Recipe B pattern</td><td>✅</td></tr>
-<tr><td><code>RewriteCond %{THE_REQUEST} ^...\.php... HTTP/; RewriteRule ^(.+)\.php$ "..." [R=404]</code> (refuse direct <code>.php</code>)</td><td>Middleware inspecting <code>$g-&gt;server['REQUEST_URI']</code> — return <code>404</code> if URI ends in <code>.php</code></td><td>⚠ <code>BlockPhpExtMiddleware</code> on the roadmap (5-line custom version meanwhile)</td></tr>
+<tr><td><code>RewriteCond %{THE_REQUEST} ^...\.php... HTTP/; RewriteRule ^(.+)\.php$ "..." [R=404]</code> (refuse direct <code>.php</code>)</td><td><a href="/middleware#block-php-ext"><code>BlockPhpExtMiddleware</code></a> — returns <code>404</code> when URI ends in <code>.php</code></td><td>✅</td></tr>
 <tr><td><code>RewriteCond %{REQUEST_FILENAME}\.test.php -f; RewriteRule ^([^/.]+)$ $1.test.php</code> (extensionless <code>.test.php</code> resolver)</td><td>Custom route that file-existence-checks then includes</td><td>⚠ Document fall-through semantics</td></tr>
 <tr><td><code>RewriteCond %{REQUEST_FILENAME}\.php -f; RewriteRule ^([^/.]+)$ $1.php</code></td><td>Built-in via implicit <code>/{file}</code> route + <code>$ignore_php_ext = true</code></td><td>✅ Recipe A</td></tr>
-<tr><td><code>RewriteCond %{REQUEST_FILENAME} !-d; RewriteRule ^([^/]+)/$ "..." [R=301]</code> (strip trailing slash for non-directories)</td><td>Custom middleware (inverse of <code>App::$directory_slash</code>)</td><td>⚠ <code>App::$strip_trailing_slash</code> on the roadmap</td></tr>
+<tr><td><code>RewriteCond %{REQUEST_FILENAME} !-d; RewriteRule ^([^/]+)/$ "..." [R=301]</code> (strip trailing slash for non-directories)</td><td><code>App::stripTrailingSlash(true)</code> — inverse of <code>App::$directory_slash</code></td><td>✅</td></tr>
 <tr><td><code>RewriteCond ... !-f; RewriteCond ... !-d; RewriteRule ^([^/]+)/?$ "profile.php?username=$1"</code></td><td><code>setFallback</code> with one-segment URL check, return <code>404</code> otherwise</td><td>✅ Recipe C generalised</td></tr>
 </table>
 
@@ -542,13 +540,13 @@ PHP]); ?>
 <h3 style="margin-top:1.25rem"><code>AllowOverride AuthConfig</code> — authentication and authorisation</h3>
 <table class="ztable">
 <tr><th>Apache</th><th>ZealPHP</th></tr>
-<tr><td><code>AuthType Basic</code> + <code>AuthName</code> + <code>AuthUserFile</code> + <code>Require</code></td><td>⚠ <code>BasicAuthMiddleware</code> on the roadmap. Same DX as <code>CorsMiddleware</code>.</td></tr>
+<tr><td><code>AuthType Basic</code> + <code>AuthName</code> + <code>AuthUserFile</code> + <code>Require</code></td><td>✅ <a href="/middleware#basic-auth"><code>BasicAuthMiddleware</code></a> — htpasswd file or callback verifier, same DX as <code>CorsMiddleware</code></td></tr>
 <tr><td><code>AuthType Digest</code> + <code>AuthDigest*</code></td><td>⚠ Niche; deferred. Document recommends BasicAuth + HTTPS.</td></tr>
 <tr><td><code>AuthLDAP*</code></td><td>❌ Custom middleware via PHP's <code>ldap_*</code> extension</td></tr>
 <tr><td><code>Anonymous*</code></td><td>❌ Niche</td></tr>
-<tr><td><code>Require valid-user / user X / group Y</code></td><td>⚠ <code>BasicAuthMiddleware</code> config</td></tr>
+<tr><td><code>Require valid-user / user X / group Y</code></td><td>✅ <a href="/middleware#basic-auth"><code>BasicAuthMiddleware</code></a> config</td></tr>
 <tr><td><code>&lt;Limit&gt;</code>, <code>&lt;LimitExcept&gt;</code></td><td>✅ Route <code>methods</code> array</td></tr>
-<tr><td><code>&lt;RequireAll&gt;</code>, <code>&lt;RequireAny&gt;</code>, <code>&lt;RequireNone&gt;</code>, <code>Satisfy</code></td><td>⚠ <code>BasicAuthMiddleware</code> config (boolean composition)</td></tr>
+<tr><td><code>&lt;RequireAll&gt;</code>, <code>&lt;RequireAny&gt;</code>, <code>&lt;RequireNone&gt;</code>, <code>Satisfy</code></td><td>✅ <a href="/middleware#basic-auth"><code>BasicAuthMiddleware</code></a> config (boolean composition)</td></tr>
 <tr><td><code>Session*</code> (mod_session)</td><td>✅ N/A — PHP native sessions via ZealPHP's <code>Session</code> family</td></tr>
 <tr><td><code>SSL*</code> (cipher suite, SSLRequire, etc.)</td><td>💡 OpenSwoole TLS config at server boot</td></tr>
 <tr><td><code>CGIPassAuth</code></td><td>✅ Auth headers already in <code>$g-&gt;server['HTTP_AUTHORIZATION']</code></td></tr>
@@ -559,21 +557,21 @@ PHP]); ?>
 <tr><th>Apache</th><th>ZealPHP</th></tr>
 <tr><td><code>RewriteEngine</code>, <code>RewriteBase</code>, <code>RewriteCond</code>, <code>RewriteRule</code>, <code>RewriteOptions</code></td><td>✅ Native routing — covered exhaustively by Recipes A–L above</td></tr>
 <tr><td><code>Redirect</code>, <code>RedirectMatch</code>, <code>RedirectPermanent</code>, <code>RedirectTemp</code></td><td>✅ <code>$response-&gt;redirect($url, $status)</code> — see Recipe K</td></tr>
-<tr><td><code>Header set / append / unset / add / merge</code></td><td>⚠ <code>HeaderMiddleware</code> on the roadmap (currently a tiny custom PSR-15 middleware per Header line)</td></tr>
-<tr><td><code>RequestHeader</code></td><td>⚠ Same <code>HeaderMiddleware</code>, request-side</td></tr>
+<tr><td><code>Header set / append / unset / add / merge</code></td><td>✅ <a href="/middleware#header"><code>HeaderMiddleware</code></a> — declarative <code>add() / set() / unset()</code> with conditional variants</td></tr>
+<tr><td><code>RequestHeader</code></td><td>✅ <a href="/middleware#header"><code>HeaderMiddleware</code></a>, request-side variant</td></tr>
 <tr><td><code>ErrorDocument N /foo.php</code></td><td>✅ <code>$app-&gt;setErrorHandler(N, fn() =&gt; App::include('/foo.php'))</code> — Recipe J</td></tr>
-<tr><td><code>AddDefaultCharset</code>, <code>AddCharset</code></td><td>⚠ <code>CharsetMiddleware</code> on the roadmap</td></tr>
-<tr><td><code>AddType X .Y</code> (MIME types)</td><td>⚠ OpenSwoole static handler MIME map; small <code>MimeTypeMiddleware</code> for non-static responses</td></tr>
+<tr><td><code>AddDefaultCharset</code>, <code>AddCharset</code></td><td>✅ <a href="/middleware#charset"><code>CharsetMiddleware</code></a> — appends <code>; charset=utf-8</code> to text-ish responses; reads <code>App::$default_charset</code></td></tr>
+<tr><td><code>AddType X .Y</code> (MIME types)</td><td>✅ <a href="/middleware#mime-type"><code>MimeTypeMiddleware</code></a> for non-static responses; static handler MIME map for files</td></tr>
 <tr><td><code>AddEncoding gzip .gz</code></td><td>✅ OpenSwoole <code>http_compression</code></td></tr>
 <tr><td><code>AddHandler X .Y</code></td><td>✅ N/A — ZealPHP IS the runtime</td></tr>
-<tr><td><code>AddInputFilter</code>, <code>AddOutputFilter</code>, <code>SetOutputFilter</code>, <code>AddOutputFilterByType</code></td><td>⚠ Apache filter chains → PSR-15 middleware</td></tr>
-<tr><td><code>Substitute "s/foo/bar/"</code> (mod_substitute)</td><td>⚠ Custom body-rewrite middleware (uncommon)</td></tr>
+<tr><td><code>AddInputFilter</code>, <code>AddOutputFilter</code>, <code>SetOutputFilter</code>, <code>AddOutputFilterByType</code></td><td>✅ Apache filter chains → PSR-15 middleware (compression, ETag, range, headers, etc.)</td></tr>
+<tr><td><code>Substitute "s/foo/bar/"</code> (mod_substitute)</td><td>✅ <a href="/middleware#body-rewrite"><code>BodyRewriteMiddleware</code></a> — single-line regex substitution on response body</td></tr>
 <tr><td><code>AddLanguage</code>, <code>DefaultLanguage</code>, <code>LanguagePriority</code></td><td>⚠ <code>ContentNegotiationMiddleware</code> if demand emerges</td></tr>
 <tr><td><code>BrowserMatch</code>, <code>SetEnvIf</code>, <code>SetEnv</code>, <code>UnsetEnv</code>, <code>PassEnv</code></td><td>💡 PHP-level: read <code>$g-&gt;server['HTTP_USER_AGENT']</code>, set <code>$g-&gt;server['MY_VAR']</code></td></tr>
 <tr><td><code>Cookie*</code> (mod_usertrack)</td><td>✅ Built-in: <code>setcookie()</code> override supports all attrs incl. <code>samesite</code></td></tr>
 <tr><td><code>FileETag</code></td><td>✅ Built-in via <code>ETagMiddleware</code> (md5 of body)</td></tr>
 <tr><td><code>EnableMMAP</code>, <code>EnableSendfile</code></td><td>✅ <code>$response-&gt;sendFile()</code> uses kernel sendfile transparently</td></tr>
-<tr><td><code>ForceType X</code></td><td>⚠ Trivial — <code>$response-&gt;header('Content-Type', $type)</code></td></tr>
+<tr><td><code>ForceType X</code></td><td>✅ <a href="/middleware#mime-type"><code>MimeTypeMiddleware</code></a> or one-line <code>$response-&gt;header('Content-Type', $type)</code></td></tr>
 <tr><td><code>Action handler /script</code></td><td>✅ N/A — ZealPHP routes are explicit</td></tr>
 <tr><td><code>AcceptPathInfo</code></td><td>✅ Native routing handles this; also <code>App::$path_info</code></td></tr>
 <tr><td><code>QualifyRedirectURL</code></td><td>⚠ Niche</td></tr>
@@ -590,7 +588,7 @@ PHP]); ?>
 <tr><td><code>DirectorySlash On</code></td><td>✅ <code>App::$directory_slash = true</code></td></tr>
 <tr><td><code>FallbackResource</code></td><td>✅ <code>App::setFallback(fn() =&gt; ...)</code></td></tr>
 <tr><td><code>DirectoryIndexRedirect</code></td><td>⚠ Trivial via redirect in fallback</td></tr>
-<tr><td><code>ExpiresActive</code>, <code>ExpiresByType</code>, <code>ExpiresDefault</code> (mod_expires)</td><td>⚠ <code>ExpiresMiddleware</code> / <code>CacheControlMiddleware</code> on the roadmap</td></tr>
+<tr><td><code>ExpiresActive</code>, <code>ExpiresByType</code>, <code>ExpiresDefault</code> (mod_expires)</td><td>✅ <a href="/middleware#expires"><code>ExpiresMiddleware</code></a> — <code>Expires:</code> by content type; pairs with <a href="/middleware#cache-control"><code>CacheControlMiddleware</code></a></td></tr>
 <tr><td>mod_autoindex full surface (<code>AddIcon</code>, <code>IndexStyleSheet</code>, etc.)</td><td>❌ Not supported (basic autoindex is on the roadmap)</td></tr>
 <tr><td><code>ImapBase</code>, <code>ImapDefault</code> (server-side imagemaps)</td><td>❌ Dead tech (~1995)</td></tr>
 <tr><td><code>MetaDir</code>, <code>MetaFiles</code>, <code>MetaSuffix</code> (CERN meta files)</td><td>❌ Dead tech</td></tr>
@@ -599,7 +597,7 @@ PHP]); ?>
 <h3 style="margin-top:1.25rem"><code>AllowOverride Limit</code> — legacy host-based access control</h3>
 <table class="ztable">
 <tr><th>Apache</th><th>ZealPHP</th></tr>
-<tr><td><code>Allow from X</code>, <code>Deny from Y</code>, <code>Order Allow,Deny</code></td><td>⚠ <code>IpAccessMiddleware</code> on the roadmap (CIDR allow/deny lists)</td></tr>
+<tr><td><code>Allow from X</code>, <code>Deny from Y</code>, <code>Order Allow,Deny</code></td><td>✅ <a href="/middleware#ip-access"><code>IpAccessMiddleware</code></a> — CIDR allow/deny lists with allow-first or deny-first ordering</td></tr>
 <tr><td><code>&lt;Limit METHOD&gt;</code>, <code>&lt;LimitExcept METHOD&gt;</code></td><td>✅ Route <code>methods</code> array</td></tr>
 </table>
 
@@ -623,20 +621,20 @@ PHP]); ?>
 <tr><td>Rewrites &amp; redirects (<code>mod_rewrite</code>, <code>mod_alias</code>)</td><td><strong>100% — native routing</strong></td></tr>
 <tr><td>Directory &amp; front-controller (<code>mod_dir</code>)</td><td><strong>100% — built-in</strong></td></tr>
 <tr><td>HTTP method limits (<code>&lt;Limit&gt;</code>)</td><td><strong>100% — route <code>methods</code> array</strong></td></tr>
-<tr><td>MIME, charset, encoding</td><td><strong>~70% — gzip ✅, MIME ⚠ partial, charset ⚠ middleware</strong></td></tr>
-<tr><td>Headers &amp; cookies</td><td><strong>Cookie ✅; Header ⚠ roadmap</strong></td></tr>
-<tr><td>Cache &amp; expires</td><td><strong>⚠ <code>ExpiresMiddleware</code> + <code>CacheControlMiddleware</code> on the roadmap</strong></td></tr>
+<tr><td>MIME, charset, encoding</td><td><strong>✅ gzip ✅ <code>CharsetMiddleware</code> ✅ <code>MimeTypeMiddleware</code></strong></td></tr>
+<tr><td>Headers &amp; cookies</td><td><strong>✅ Cookie + <code>HeaderMiddleware</code> (declarative response-header manipulation)</strong></td></tr>
+<tr><td>Cache &amp; expires</td><td><strong>✅ <code>ExpiresMiddleware</code> + <code>CacheControlMiddleware</code> (extension-based static-asset caching)</strong></td></tr>
 <tr><td>ETag</td><td><strong>✅ built-in</strong></td></tr>
 <tr><td>Compression</td><td><strong>✅ OpenSwoole <code>http_compression</code></strong></td></tr>
 <tr><td>Error documents</td><td><strong>✅ <code>App::setErrorHandler()</code></strong></td></tr>
 <tr><td>Range / conditional requests</td><td><strong>✅ <code>RangeMiddleware</code> + <code>ETagMiddleware</code></strong></td></tr>
-<tr><td>HTTP Basic Auth</td><td><strong>⚠ <code>BasicAuthMiddleware</code> on the roadmap</strong></td></tr>
+<tr><td>HTTP Basic Auth</td><td><strong>✅ <code>BasicAuthMiddleware</code> (htpasswd file or callback verifier)</strong></td></tr>
 <tr><td>LDAP / Digest auth</td><td><strong>❌ niche — PHP extension integration documented</strong></td></tr>
 <tr><td>Env vars per request</td><td><strong>💡 PHP-level inline</strong></td></tr>
-<tr><td>IP allow/deny</td><td><strong>⚠ <code>IpAccessMiddleware</code> on the roadmap</strong></td></tr>
+<tr><td>IP allow/deny</td><td><strong>✅ <code>IpAccessMiddleware</code> (CIDR allow/deny lists)</strong></td></tr>
 <tr><td>SSI</td><td><strong>❌ not supported — use templates</strong></td></tr>
 <tr><td>Autoindex</td><td><strong>❌ basic listing on roadmap; full Apache customisation surface not planned</strong></td></tr>
-<tr><td>Body rewrite (<code>mod_substitute</code>)</td><td><strong>⚠ custom middleware on demand</strong></td></tr>
+<tr><td>Body rewrite (<code>mod_substitute</code>)</td><td><strong>✅ <code>BodyRewriteMiddleware</code> (single-line regex substitution; multi-line variants on roadmap)</strong></td></tr>
 <tr><td>Content negotiation</td><td><strong>⚠ custom middleware on demand</strong></td></tr>
 <tr><td>Server identity</td><td><strong>✅ no-op / ⚠ trivial</strong></td></tr>
 <tr><td>Dead tech (imap, speling, CERN meta, ISAPI, mod_dav, XBitHack)</td><td><strong>❌ N/A — not goals</strong></td></tr>
@@ -652,7 +650,7 @@ PHP]); ?>
 <tr><th>nginx</th><th>ZealPHP / OpenSwoole</th></tr>
 <tr><td><code>server { … }</code></td><td>✅ One <code>App::init(host, port)</code> instance per server block. Multi-app deployments run multiple instances on different ports (PID-file-per-port already supports this)</td></tr>
 <tr><td><code>listen 80;</code> / <code>listen 443 ssl http2;</code></td><td>✅ <code>App::init('0.0.0.0', 80)</code>; for TLS pass <code>ssl_cert_file</code> / <code>ssl_key_file</code> / <code>enable_http2</code> in <code>$app-&gt;run()</code> settings</td></tr>
-<tr><td><code>server_name a.com b.com;</code> (name-based vhosts)</td><td>⚠ One ZealPHP instance serves all <code>Host</code> headers — dispatch via middleware on <code>$g-&gt;server['HTTP_HOST']</code>, or run one instance per host behind Caddy/Traefik</td></tr>
+<tr><td><code>server_name a.com b.com;</code> (name-based vhosts)</td><td>✅ <a href="/middleware#host-router"><code>HostRouterMiddleware</code></a> — dispatches on <code>$g-&gt;server['HTTP_HOST']</code> to per-host handlers; OR run one instance per host behind Caddy/Traefik for true isolation</td></tr>
 </table>
 
 <h3 style="margin-top:1.25rem">Routing — the <code>location</code> family</h3>
@@ -695,15 +693,16 @@ PHP]); ?>
 <tr><td><code>open_file_cache</code></td><td>✅ OpenSwoole built-in static-file caching</td></tr>
 <tr><td><code>disable_symlinks on;</code></td><td>✅ <code>App::includeCheck()</code> rejects paths outside <code>public/</code></td></tr>
 <tr><td><code>access_log</code> / <code>error_log</code></td><td>✅ Built-in: <code>access_log()</code>, <code>elog()</code>, <code>zlog()</code> (configurable via <code>ZEALPHP_*</code> env vars)</td></tr>
-<tr><td><code>log_format custom "…";</code></td><td>⚠ Fixed format — custom format support is roadmap</td></tr>
-<tr><td><code>limit_rate</code> / <code>limit_req</code> / <code>limit_conn</code></td><td>⚠ <code>RateLimitMiddleware</code> + <code>ConcurrencyLimitMiddleware</code> on the roadmap (<code>Store</code> + <code>Counter</code> back them)</td></tr>
+<tr><td><code>log_format custom "…";</code></td><td>✅ <code>App::$access_log_format</code> — Apache <code>%h %l %u %t "%r" %&gt;s %b "%{Referer}i" "%{User-Agent}i" %D</code> tokens supported</td></tr>
+<tr><td><code>limit_rate</code> / <code>limit_req</code> / <code>limit_conn</code></td><td>✅ <a href="/middleware#rate-limit"><code>RateLimitMiddleware</code></a> (sliding window in <code>Store</code>) + <a href="/middleware#concurrency-limit"><code>ConcurrencyLimitMiddleware</code></a> (in-flight cap via <code>Counter</code>); <code>limit_rate</code> bandwidth throttle is a 5-line response wrapper</td></tr>
 <tr><td><code>limit_except GET POST { deny all; }</code></td><td>✅ Route <code>methods</code> array</td></tr>
-<tr><td><code>auth_basic</code> + <code>auth_basic_user_file</code></td><td>⚠ <code>BasicAuthMiddleware</code> on the roadmap</td></tr>
+<tr><td><code>auth_basic</code> + <code>auth_basic_user_file</code></td><td>✅ <a href="/middleware#basic-auth"><code>BasicAuthMiddleware</code></a></td></tr>
 <tr><td><code>proxy_pass http://backend;</code></td><td>⚠ Not built-in. Use Caddy/Traefik/Nginx in front, OR a handler using OpenSwoole's HTTP client</td></tr>
 <tr><td><code>fastcgi_pass unix:/run/php-fpm.sock;</code></td><td>✅ N/A — ZealPHP IS the PHP runtime</td></tr>
 <tr><td><code>ssl_certificate</code>, <code>ssl_certificate_key</code>, <code>ssl_protocols</code>, <code>ssl_ciphers</code></td><td>✅ OpenSwoole <code>'ssl_*'</code> settings</td></tr>
 <tr><td><code>if_modified_since</code> / <code>etag on;</code></td><td>✅ <code>ETagMiddleware</code> handles <code>If-None-Match</code></td></tr>
-<tr><td><code>expires 30d;</code></td><td>⚠ <code>ExpiresMiddleware</code> on the roadmap</td></tr>
+<tr><td><code>expires 30d;</code></td><td>✅ <a href="/middleware#expires"><code>ExpiresMiddleware</code></a> + <a href="/middleware#cache-control"><code>CacheControlMiddleware</code></a></td></tr>
+<tr><td><code>client_max_body_size</code> / <code>large_client_header_buffers</code> / <code>max_headers</code></td><td>✅ <code>App::$limit_request_fields</code> + <code>$limit_request_field_size</code> + <code>$limit_request_line</code> (Apache <code>LimitRequestFields</code> family). <code>client_max_body_size</code> is <code>'package_max_length'</code> in <code>$app-&gt;run()</code>.</td></tr>
 <tr><td><code>merge_slashes on;</code></td><td>💡 Middleware normalising <code>$g-&gt;server['REQUEST_URI']</code></td></tr>
 <tr><td><code>server_tokens off;</code></td><td>✅ No Server header sent by default</td></tr>
 <tr><td><code>chunked_transfer_encoding on;</code></td><td>✅ OpenSwoole handles chunked encoding for streaming responses</td></tr>

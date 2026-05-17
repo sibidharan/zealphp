@@ -77,6 +77,108 @@ class App
      * to text-ish Content-Type headers.
      */
     public static string $default_charset = 'utf-8';
+    /**
+     * Apache `RewriteCond %{REQUEST_FILENAME} !-d` + `RewriteRule ^(.+)/$ /$1 [R=301,L]`.
+     * When true, non-directory URIs ending in `/` are 301-redirected to the no-slash
+     * form. Inverse of `$directory_slash`. Default false (keeps current behaviour).
+     */
+    public static bool $strip_trailing_slash = false;
+    /**
+     * Apache `ServerAdmin webmaster@example.com`. When set, the framework's default
+     * 500/error page mentions this contact. Null disables the contact line.
+     */
+    public static ?string $server_admin = null;
+    /**
+     * Apache `ServerName www.example.com:443`. The canonical host the server
+     * advertises in absolute redirects (and other absolute URL builders) when
+     * `$use_canonical_name` is true. Include scheme-port if relevant; the raw
+     * value is returned as-is by App::canonicalHost().
+     */
+    public static ?string $canonical_name = null;
+    /**
+     * Apache `UseCanonicalName On|Off`. When true and `$canonical_name` is set,
+     * App::canonicalHost() returns the canonical name; otherwise it returns the
+     * request `Host` header. Default false (Apache's default since 2.0).
+     */
+    public static bool $use_canonical_name = false;
+    /**
+     * Apache `HostnameLookups On|Off`. When true, the framework populates
+     * `$g->server['REMOTE_HOST']` via `gethostbyaddr($g->server['REMOTE_ADDR'])`
+     * on each request. **WARNING**: this performs a blocking reverse-DNS lookup
+     * per request (mitigated by OpenSwoole's coroutine hook converting it to a
+     * non-blocking async resolve, but still a measurable per-request cost). Off
+     * by default — Apache's own default since 1.3.
+     */
+    public static bool $hostname_lookups = false;
+    /**
+     * CIDR list of proxy IPs whose `X-Forwarded-For` / `X-Real-IP` headers
+     * App::clientIp() will trust. Empty (the default) means no proxies trusted
+     * — App::clientIp() always returns `REMOTE_ADDR`. Critical for production
+     * deploys behind Traefik/Caddy/nginx; without it rate limiters and access
+     * logs see the proxy IP instead of the real client.
+     *
+     * Supports IPv4 (`10.0.0.0/8`, `192.168.1.42`) and IPv6 (`2001:db8::/32`,
+     * `::1`). A bare IP without `/prefix` is treated as `/32` (v4) or `/128` (v6).
+     *
+     * @var array<int, string>
+     */
+    public static array $trusted_proxies = [];
+    /**
+     * Apache `LogFormat "..."`. Format string used by access_log() to render
+     * each request line. Tokens (Apache mod_log_config subset):
+     *
+     *   %h          Remote host/IP (uses App::clientIp() when $trusted_proxies set)
+     *   %l          Remote logname (always `-` — RFC 1413 ident is dead)
+     *   %u          Remote user (session username if set, else `-`)
+     *   %t          Time `[17/May/2026:07:30:00 +0000]`
+     *   %r          First line of request "GET /foo HTTP/1.1"
+     *   %>s         Final response status
+     *   %b          Response body bytes (`-` when zero, CLF convention)
+     *   %B          Response body bytes (0 when zero)
+     *   %D          Request duration in microseconds
+     *   %T          Request duration in seconds
+     *   %{NAME}i    Value of request header NAME (e.g. %{Referer}i)
+     *   %{NAME}o    Value of response header NAME
+     *   %{NAME}e    Value of $g->server[NAME] (env)
+     *   %m          Request method
+     *   %U          URL path (no query string)
+     *   %q          Query string (prefixed with `?` if present)
+     *   %H          Request protocol ("HTTP/1.1")
+     *   %v          Server name (from Host header)
+     *
+     * Default is Apache's NCSA combined format (the prior hardcoded ZealPHP
+     * output — preserving behaviour for existing log parsers). Switch to the
+     * shorter Common Log Format via:
+     *   App::accessLogFormat('%h %l %u %t "%r" %>s %b');
+     */
+    public static string $access_log_format = '%h %l %u %t "%r" %>s %b "%{Referer}i" "%{User-Agent}i"';
+    /**
+     * Parsed format spec cache (token list). Filled lazily by formatAccessLogLine()
+     * the first time it sees a given format string. Resets when accessLogFormat()
+     * is reassigned via the fluent setter.
+     *
+     * @var array<int, array{kind:string, arg?:string}>|null
+     */
+    private static ?array $access_log_format_compiled = null;
+    /**
+     * Apache `LimitRequestFields` — maximum number of request header fields a
+     * single request may carry. Hint to OpenSwoole's parser (currently advisory;
+     * OpenSwoole enforces this implicitly via `http_header_buffer_size`).
+     */
+    public static int $limit_request_fields = 100;
+    /**
+     * Apache `LimitRequestFieldSize` — maximum byte length of one request header
+     * line. Maps to OpenSwoole's `http_header_buffer_size` (8 KiB default).
+     */
+    public static int $limit_request_field_size = 8190;
+    /**
+     * Apache `LimitRequestLine` — maximum byte length of the HTTP request line
+     * (method + URI + protocol). OpenSwoole doesn't expose this independently,
+     * but its `http_header_buffer_size` covers the request line too, so this
+     * value is advisory; setting it above $limit_request_field_size has no
+     * effect.
+     */
+    public static int $limit_request_line = 8190;
     /** @var array<string, mixed>|null */
     private static ?array $fallback_handler = null;
     /** Initial error_reporting level captured at boot — referenced by the per-coroutine override. */
@@ -447,6 +549,438 @@ class App
     {
         if ($charset !== null) self::$default_charset = $charset;
         return self::$default_charset;
+    }
+
+    /**
+     * Apache `RewriteCond %{REQUEST_FILENAME} !-d; RewriteRule ^(.+)/$ /$1 [R=301,L]`.
+     * Inverse of directorySlash(). When true, non-directory URIs ending in `/`
+     * 301-redirect to the no-slash form. Default off.
+     */
+    public static function stripTrailingSlash(?bool $on = null): bool
+    {
+        if ($on !== null) self::$strip_trailing_slash = $on;
+        return self::$strip_trailing_slash;
+    }
+
+    /**
+     * Apache `ServerAdmin`. Contact email/identifier embedded in the framework's
+     * default error pages. Pass null (or '') to clear.
+     */
+    public static function serverAdmin(?string $admin = null): ?string
+    {
+        if (func_num_args() > 0) {
+            self::$server_admin = ($admin === '' ? null : $admin);
+        }
+        return self::$server_admin;
+    }
+
+    /**
+     * Apache `ServerName`. Canonical host advertised in absolute redirects
+     * when useCanonicalName() is on. Pass null/'' to clear.
+     */
+    public static function canonicalName(?string $name = null): ?string
+    {
+        if (func_num_args() > 0) {
+            self::$canonical_name = ($name === '' ? null : $name);
+        }
+        return self::$canonical_name;
+    }
+
+    /** Apache `UseCanonicalName`. See $use_canonical_name docblock. */
+    public static function useCanonicalName(?bool $on = null): bool
+    {
+        if ($on !== null) self::$use_canonical_name = $on;
+        return self::$use_canonical_name;
+    }
+
+    /** Apache `HostnameLookups`. Default false — blocking DNS is a perf cost. */
+    public static function hostnameLookups(?bool $on = null): bool
+    {
+        if ($on !== null) self::$hostname_lookups = $on;
+        return self::$hostname_lookups;
+    }
+
+    /**
+     * Trusted proxy CIDRs consulted by App::clientIp().
+     *
+     * @param  array<int, string>|null $cidrs
+     * @return array<int, string>
+     */
+    public static function trustedProxies(?array $cidrs = null): array
+    {
+        if ($cidrs !== null) self::$trusted_proxies = array_values($cidrs);
+        return self::$trusted_proxies;
+    }
+
+    /** Apache `LogFormat`. Resets the compiled-spec cache on set. */
+    public static function accessLogFormat(?string $format = null): string
+    {
+        if ($format !== null) {
+            self::$access_log_format = $format;
+            self::$access_log_format_compiled = null;
+        }
+        return self::$access_log_format;
+    }
+
+    /** Apache `LimitRequestFields`. */
+    public static function limitRequestFields(?int $n = null): int
+    {
+        if ($n !== null) self::$limit_request_fields = max(0, $n);
+        return self::$limit_request_fields;
+    }
+
+    /** Apache `LimitRequestFieldSize`. Maps to OpenSwoole http_header_buffer_size. */
+    public static function limitRequestFieldSize(?int $n = null): int
+    {
+        if ($n !== null) self::$limit_request_field_size = max(0, $n);
+        return self::$limit_request_field_size;
+    }
+
+    /** Apache `LimitRequestLine`. Advisory; OpenSwoole's header buffer covers it. */
+    public static function limitRequestLine(?int $n = null): int
+    {
+        if ($n !== null) self::$limit_request_line = max(0, $n);
+        return self::$limit_request_line;
+    }
+
+    /**
+     * Resolve the real client IP for the current request, honouring the
+     * `$trusted_proxies` allow-list. Behaviour:
+     *
+     *   1. Read REMOTE_ADDR from $g->server (the direct peer).
+     *   2. If REMOTE_ADDR is NOT in any trusted_proxies CIDR, return it as-is.
+     *      The peer is untrusted, so any X-Forwarded-* header it sent is a lie.
+     *   3. If REMOTE_ADDR IS in a trusted CIDR, walk X-Forwarded-For right-to-left
+     *      (Apache mod_remoteip semantics) and return the rightmost IP that is
+     *      NOT in trusted_proxies — that's the real client. If every entry is
+     *      trusted, fall back to the leftmost address.
+     *   4. If X-Forwarded-For is absent but X-Real-IP is present (and the peer
+     *      is trusted), return X-Real-IP.
+     *
+     * Returns the empty string when no IP can be determined (REMOTE_ADDR missing
+     * entirely — only happens for non-request contexts like CLI invocation).
+     */
+    public static function clientIp(): string
+    {
+        $g = \ZealPHP\RequestContext::instance();
+        $remote = (string)($g->server['REMOTE_ADDR'] ?? '');
+        if ($remote === '') {
+            return '';
+        }
+        if (empty(self::$trusted_proxies) || !self::peerInTrustedProxies($remote)) {
+            return $remote;
+        }
+
+        $forwarded = (string)($g->server['HTTP_X_FORWARDED_FOR'] ?? '');
+        if ($forwarded !== '') {
+            $chain = array_map('trim', explode(',', $forwarded));
+            for ($i = count($chain) - 1; $i >= 0; $i--) {
+                $ip = $chain[$i];
+                if ($ip === '') continue;
+                if (!self::peerInTrustedProxies($ip)) {
+                    return $ip;
+                }
+            }
+            // Every hop is trusted — fall back to the first (originator) entry.
+            $first = $chain[0] ?? '';
+            return $first !== '' ? $first : $remote;
+        }
+
+        $realIp = (string)($g->server['HTTP_X_REAL_IP'] ?? '');
+        if ($realIp !== '') {
+            return $realIp;
+        }
+        return $remote;
+    }
+
+    /**
+     * Match $ip against every entry in App::$trusted_proxies. Wrapper so the
+     * CIDR walk lives in one place; callers pass user-controlled input here so
+     * the per-entry guard inside cidrContains() is the only validation needed.
+     */
+    private static function peerInTrustedProxies(string $ip): bool
+    {
+        foreach (self::$trusted_proxies as $cidr) {
+            if (self::cidrContains((string)$cidr, $ip)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Does $ip fall within $cidr? Supports IPv4 and IPv6. A bare IP without
+     * `/prefix` is treated as a single-host range (/32 v4, /128 v6). Returns
+     * false on any parse failure rather than throwing — defensive for header-
+     * sourced input.
+     */
+    private static function cidrContains(string $cidr, string $ip): bool
+    {
+        if ($cidr === '' || $ip === '') return false;
+
+        $slash = strpos($cidr, '/');
+        $net   = $slash === false ? $cidr : substr($cidr, 0, $slash);
+        $bits  = $slash === false ? null  : (int)substr($cidr, $slash + 1);
+
+        $netPacked = @inet_pton($net);
+        $ipPacked  = @inet_pton($ip);
+        if ($netPacked === false || $ipPacked === false) return false;
+        // Different address families (v4 vs v6) never match.
+        if (strlen($netPacked) !== strlen($ipPacked)) return false;
+
+        $maxBits = strlen($netPacked) * 8;
+        if ($bits === null) $bits = $maxBits;
+        if ($bits < 0 || $bits > $maxBits) return false;
+        if ($bits === 0) return true;  // 0.0.0.0/0 or ::/0 matches everything
+
+        $fullBytes = intdiv($bits, 8);
+        $remBits   = $bits % 8;
+        if ($fullBytes > 0 && substr($netPacked, 0, $fullBytes) !== substr($ipPacked, 0, $fullBytes)) {
+            return false;
+        }
+        if ($remBits === 0) return true;
+        $mask = chr((0xFF << (8 - $remBits)) & 0xFF);
+        return (ord($netPacked[$fullBytes]) & ord($mask))
+             === (ord($ipPacked[$fullBytes])  & ord($mask));
+    }
+
+    /**
+     * Canonical host for absolute URL building. Returns $canonical_name when
+     * useCanonicalName() is on AND $canonical_name is set; otherwise returns
+     * the request `Host` header (falling back to `SERVER_NAME`, then ''). Used
+     * by absolute-redirect builders that need to decide between the configured
+     * server name and the client-provided Host.
+     */
+    public static function canonicalHost(): string
+    {
+        if (self::$use_canonical_name && self::$canonical_name !== null && self::$canonical_name !== '') {
+            return self::$canonical_name;
+        }
+        $g = \ZealPHP\RequestContext::instance();
+        $host = (string)($g->server['HTTP_HOST'] ?? $g->server['SERVER_NAME'] ?? '');
+        return $host;
+    }
+
+    /**
+     * Render one access-log line for the current request using App::$access_log_format.
+     * Called by ZealPHP\access_log() — direct callers are rare but the helper is
+     * public so user code (e.g. a custom logger middleware) can reuse it.
+     *
+     * The format spec is compiled to a token list on first use and cached on
+     * App::$access_log_format_compiled; accessLogFormat() clears the cache when
+     * the format string is changed.
+     *
+     * @param int        $status   Final HTTP status code (after handler + middleware)
+     * @param int        $length   Response body byte count (0 OK; %b emits '-' per CLF)
+     * @param float|null $durationSec Request duration in seconds; pass null when unknown
+     */
+    public static function formatAccessLogLine(int $status, int $length, ?float $durationSec = null): string
+    {
+        $tokens = self::$access_log_format_compiled;
+        if ($tokens === null) {
+            $tokens = self::compileAccessLogFormat(self::$access_log_format);
+            self::$access_log_format_compiled = $tokens;
+        }
+
+        $g = \ZealPHP\RequestContext::instance();
+        $out = '';
+        foreach ($tokens as $tok) {
+            $out .= self::renderAccessLogToken($tok, $g, $status, $length, $durationSec);
+        }
+        return $out;
+    }
+
+    /**
+     * Compile an Apache LogFormat string into a flat token list. Supported
+     * directive families (Apache mod_log_config subset):
+     *   %h %l %u %t %r %s %>s %b %B %D %T %m %U %q %H %v
+     *   %{NAME}i  %{NAME}o  %{NAME}e
+     * Unknown directives are passed through verbatim (Apache compatibility:
+     * mod_log_config logs '-' for unknown but compatibility matters less than
+     * surfacing typos to the operator).
+     *
+     * @return array<int, array{kind:string, arg?:string}>
+     */
+    private static function compileAccessLogFormat(string $format): array
+    {
+        $tokens = [];
+        $len = strlen($format);
+        $literal = '';
+        $i = 0;
+        while ($i < $len) {
+            $ch = $format[$i];
+            if ($ch !== '%') {
+                $literal .= $ch;
+                $i++;
+                continue;
+            }
+            if ($literal !== '') {
+                $tokens[] = ['kind' => 'lit', 'arg' => $literal];
+                $literal = '';
+            }
+            // Lookahead — skip the '%'
+            $i++;
+            if ($i >= $len) {
+                $literal .= '%';
+                break;
+            }
+            // %{NAME}i / %{NAME}o / %{NAME}e
+            if ($format[$i] === '{') {
+                $closeBrace = strpos($format, '}', $i + 1);
+                if ($closeBrace === false || $closeBrace + 1 >= $len) {
+                    $literal .= '%' . substr($format, $i);
+                    $i = $len;
+                    continue;
+                }
+                $name = substr($format, $i + 1, $closeBrace - $i - 1);
+                $kindChar = $format[$closeBrace + 1];
+                $kindMap = ['i' => 'header_in', 'o' => 'header_out', 'e' => 'env'];
+                if (isset($kindMap[$kindChar])) {
+                    $tokens[] = ['kind' => $kindMap[$kindChar], 'arg' => $name];
+                } else {
+                    $tokens[] = ['kind' => 'lit', 'arg' => '%{' . $name . '}' . $kindChar];
+                }
+                $i = $closeBrace + 2;
+                continue;
+            }
+            // %>s — Apache's "final status after internal redirects". For us
+            // it's identical to %s; we accept both and emit the same value.
+            if ($format[$i] === '>' && $i + 1 < $len && $format[$i + 1] === 's') {
+                $tokens[] = ['kind' => 'status'];
+                $i += 2;
+                continue;
+            }
+            $code = $format[$i];
+            $i++;
+            switch ($code) {
+                case 'h': $tokens[] = ['kind' => 'host']; break;
+                case 'a': $tokens[] = ['kind' => 'host']; break;   // %a == remote IP
+                case 'l': $tokens[] = ['kind' => 'lit', 'arg' => '-']; break;
+                case 'u': $tokens[] = ['kind' => 'user']; break;
+                case 't': $tokens[] = ['kind' => 'time']; break;
+                case 'r': $tokens[] = ['kind' => 'request']; break;
+                case 's': $tokens[] = ['kind' => 'status']; break;
+                case 'b': $tokens[] = ['kind' => 'bytes_clf']; break;
+                case 'B': $tokens[] = ['kind' => 'bytes']; break;
+                case 'D': $tokens[] = ['kind' => 'duration_us']; break;
+                case 'T': $tokens[] = ['kind' => 'duration_s']; break;
+                case 'm': $tokens[] = ['kind' => 'method']; break;
+                case 'U': $tokens[] = ['kind' => 'url_path']; break;
+                case 'q': $tokens[] = ['kind' => 'query']; break;
+                case 'H': $tokens[] = ['kind' => 'protocol']; break;
+                case 'v': $tokens[] = ['kind' => 'server_name']; break;
+                case '%': $tokens[] = ['kind' => 'lit', 'arg' => '%']; break;
+                default:
+                    $tokens[] = ['kind' => 'lit', 'arg' => '%' . $code];
+            }
+        }
+        if ($literal !== '') {
+            $tokens[] = ['kind' => 'lit', 'arg' => $literal];
+        }
+        return $tokens;
+    }
+
+    /**
+     * Render one compiled access-log token. Kept separate from the tokenizer
+     * so the hot path (per-request) only does the table-lookup half; the
+     * tokenize path runs once per format-string change.
+     *
+     * @param array{kind:string, arg?:string} $token
+     */
+    private static function renderAccessLogToken(array $token, \ZealPHP\RequestContext $g, int $status, int $length, ?float $durationSec): string
+    {
+        switch ($token['kind']) {
+            case 'lit':
+                return (string)($token['arg'] ?? '');
+            case 'host':
+                $ip = self::clientIp();
+                return $ip !== '' ? $ip : '-';
+            case 'user':
+                $user = $g->session['username'] ?? $g->server['REMOTE_USER'] ?? null;
+                return is_scalar($user) && (string)$user !== '' ? (string)$user : '-';
+            case 'time':
+                // Apache CLF timestamp: [day/month/year:hour:minute:second zone]
+                // The Server gets the same per-second cache key the legacy
+                // access_log() used, but format includes timezone.
+                return '[' . date('d/M/Y:H:i:s O') . ']';
+            case 'request':
+                $method = (string)($g->server['REQUEST_METHOD'] ?? '-');
+                $uri    = (string)($g->server['REQUEST_URI'] ?? '-');
+                $proto  = (string)($g->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1');
+                return "{$method} {$uri} {$proto}";
+            case 'status':
+                return (string)$status;
+            case 'bytes_clf':
+                return $length > 0 ? (string)$length : '-';
+            case 'bytes':
+                return (string)$length;
+            case 'duration_us':
+                return $durationSec === null ? '-' : (string)(int)round($durationSec * 1_000_000);
+            case 'duration_s':
+                return $durationSec === null ? '-' : (string)(int)round($durationSec);
+            case 'method':
+                return (string)($g->server['REQUEST_METHOD'] ?? '-');
+            case 'url_path':
+                $path = parse_url((string)($g->server['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+                return is_string($path) && $path !== '' ? $path : '-';
+            case 'query':
+                $qs = parse_url((string)($g->server['REQUEST_URI'] ?? ''), PHP_URL_QUERY);
+                return is_string($qs) && $qs !== '' ? '?' . $qs : '';
+            case 'protocol':
+                return (string)($g->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1');
+            case 'server_name':
+                return (string)($g->server['HTTP_HOST'] ?? $g->server['SERVER_NAME'] ?? '-');
+            case 'header_in':
+                $name = (string)($token['arg'] ?? '');
+                if ($name === '') return '-';
+                $key = 'HTTP_' . strtr(strtoupper($name), '-', '_');
+                $val = $g->server[$key] ?? null;
+                return is_scalar($val) && (string)$val !== '' ? (string)$val : '-';
+            case 'header_out':
+                $name = (string)($token['arg'] ?? '');
+                if ($name === '' || $g->zealphp_response === null) return '-';
+                foreach (($g->zealphp_response->headersList ?? []) as [$k, $v]) {
+                    if (strcasecmp((string)$k, $name) === 0) {
+                        return (string)$v;
+                    }
+                }
+                return '-';
+            case 'env':
+                $name = (string)($token['arg'] ?? '');
+                if ($name === '') return '-';
+                $val = $g->server[$name] ?? null;
+                return is_scalar($val) && (string)$val !== '' ? (string)$val : '-';
+        }
+        return '';
+    }
+
+    /**
+     * Like App::include() but returns null instead of 403 when the requested
+     * file does not exist under the document root. Use for "try this file,
+     * fall through to something else if missing" patterns:
+     *
+     *   $app->route('/{slug}', function($slug) use ($app) {
+     *       $result = App::tryInclude("/articles/{$slug}.php");
+     *       if ($result === null) return App::tryInclude("/legacy/{$slug}.php") ?? 404;
+     *       return $result;
+     *   });
+     *
+     * Security gating (dotfile/document-root checks) still applies — paths
+     * that exist but fail the security check return 403 just like include().
+     * Only the "file missing" branch is rewritten to null.
+     *
+     * @param array<string, mixed> $args
+     */
+    public static function tryInclude(string $publicPath, array $args = []): mixed
+    {
+        $rel    = ltrim($publicPath, '/');
+        $docAbs = self::resolveDocumentRoot();
+        $absPath = realpath($docAbs . '/' . $rel);
+
+        if ($absPath === false || !is_file($absPath)) {
+            return null;
+        }
+        return self::include($publicPath, $args);
     }
 
     public static function instance(): ?App
@@ -1602,13 +2136,18 @@ class App
             && !str_contains($accept, 'text/html');
 
         if ($wantsJson) {
-            $body = json_encode([
-                'error' => [
-                    'status'  => $status,
-                    'message' => $reason,
-                    'trace'   => ($exception && self::$display_errors) ? jTraceEx($exception) : null,
-                ],
-            ], JSON_UNESCAPED_SLASHES);
+            $errorPayload = [
+                'status'  => $status,
+                'message' => $reason,
+                'trace'   => ($exception && self::$display_errors) ? jTraceEx($exception) : null,
+            ];
+            // Apache ServerAdmin parity: surface the configured contact in
+            // machine-readable error responses too, so API clients can route
+            // bug reports without scraping HTML.
+            if (self::$server_admin !== null && self::$server_admin !== '') {
+                $errorPayload['contact'] = self::$server_admin;
+            }
+            $body = json_encode(['error' => $errorPayload], JSON_UNESCAPED_SLASHES);
             $resp = (new Response($body))
                 ->withStatus($status)
                 ->withHeader('Content-Type', 'application/json');
@@ -1619,6 +2158,12 @@ class App
         $body = "<pre>{$status} {$reason}</pre>";
         if ($exception && self::$display_errors) {
             $body .= "\n<pre>" . htmlspecialchars(jTraceEx($exception)) . "</pre>";
+        }
+        // Apache ServerAdmin parity: default error pages show a contact line
+        // when one is configured. Mirrors mod_core's behaviour and the
+        // <address> block Apache appends when ServerSignature is on.
+        if (self::$server_admin !== null && self::$server_admin !== '') {
+            $body .= "\n<address>Contact: " . htmlspecialchars(self::$server_admin) . "</address>";
         }
         return (new Response($body))->withStatus($status);
     }
@@ -2132,6 +2677,14 @@ HELP;
             // "session does not exist" when SSE/WS clients disconnect mid-stream).
             // Pass 'log_level' => 0 in $app->run() settings to restore full debug output.
             'log_level' => 4,  // 0=DEBUG 1=TRACE 2=INFO 3=NOTICE 4=WARNING 5=ERROR 6=NONE
+            // Apache LimitRequestFieldSize / LimitRequestLine parity:
+            // App::$limit_request_field_size / $limit_request_line are kept as
+            // ADVISORY properties — OpenSwoole 22.x does not expose a public
+            // server option matching Apache's per-header byte limit. The
+            // earlier attempt to publish them as 'http_header_buffer_size'
+            // was rejected by OpenSwoole's option validator at boot
+            // (server option not recognised). If you need a hard cap, run
+            // ZealPHP behind a front proxy (Caddy/nginx) that enforces it.
         ];
         // @phpstan-ignore-next-line — settings is array<string, mixed>; pid_file coerced to string at boundary
         $pidFile = (string)($settings['pid_file'] ?? $default_settings['pid_file']);
@@ -2369,6 +2922,19 @@ HELP;
             if ($srv['REQUEST_METHOD'] === 'POST' && isset($srv['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
                 $override = $srv['HTTP_X_HTTP_METHOD_OVERRIDE'];
                 $srv['REQUEST_METHOD'] = is_scalar($override) ? $override : null;
+            }
+            // Apache HostnameLookups: populate REMOTE_HOST via reverse DNS when
+            // explicitly enabled. WARNING — blocking call (OpenSwoole's coroutine
+            // hook converts gethostbyaddr() to non-blocking, but it's still a
+            // measurable per-request cost). Off by default since Apache 1.3.
+            if (App::$hostname_lookups && isset($srv['REMOTE_ADDR'])) {
+                $remote = (string)$srv['REMOTE_ADDR'];
+                if ($remote !== '') {
+                    $host = @gethostbyaddr($remote);
+                    if ($host !== false && $host !== $remote) {
+                        $srv['REMOTE_HOST'] = $host;
+                    }
+                }
             }
             /** @var array<string, bool|float|int|string|null> $srvFinal */
             $srvFinal = $srv;
@@ -2949,6 +3515,30 @@ class ResponseMiddleware implements MiddlewareInterface
             response_set_status(405);
             response_add_header('Allow', 'GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH');
             return new Response('', 405);
+        }
+
+        // Apache: RewriteCond %{REQUEST_FILENAME} !-d
+        //         RewriteRule ^(.+)/$ /$1 [R=301,L]
+        // When stripTrailingSlash() is on and the URI ends in `/` but does not
+        // map to a directory under document_root, 301-redirect to the no-slash
+        // form. Directory URIs are left alone so the existing DirectorySlash
+        // path (serveDirectory()) keeps working. Only safe for GET/HEAD per
+        // RFC 9110 §15.4.2 — POST/PUT/DELETE pass through unchanged.
+        if (App::$strip_trailing_slash
+            && ($method === 'GET' || $method === 'HEAD')
+            && $path !== '/'
+            && substr($path, -1) === '/') {
+            $docRoot = App::resolveDocumentRoot();
+            $candidate = realpath($docRoot . rtrim($path, '/'));
+            if ($candidate === false || !is_dir($candidate)) {
+                $newPath = rtrim($path, '/');
+                $qs = parse_url($uri, PHP_URL_QUERY);
+                $location = $newPath . ($qs ? '?' . $qs : '');
+                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+                $g->zealphp_response->redirect($location, 301);
+                $g->_streaming = true;
+                return new Response('', 301);
+            }
         }
 
         // OPTIONS — return allowed methods for this URI without running a handler
