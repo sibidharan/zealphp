@@ -7,17 +7,29 @@ $siteUrl = site_url();
 <section class="section">
 <div class="container">
 <h1 class="section-title">Middleware</h1>
-<p class="section-desc">ZealPHP uses PSR-15 middleware. Add with <code>$app->addMiddleware()</code>. The last added runs outermost (first to process request, last to process response).</p>
+<p class="section-desc">ZealPHP uses PSR-15 middleware. Add with <code>$app->addMiddleware()</code>. The last added runs outermost (first to process request, last to process response). Middleware always returns a <code>Psr\Http\Message\ResponseInterface</code> — handlers inside use the <a href="/responses#return-contract">universal return contract</a>; <code>ResponseMiddleware</code> coerces handler returns to PSR-7 before your middleware sees them.</p>
 
 <h2 style="margin:1.5rem 0 .5rem">Built-in middleware</h2>
 <table class="ztable" style="margin-bottom:2rem">
-  <tr><th>Class</th><th>Constructor</th><th>What it does</th></tr>
-  <tr><td><code>CorsMiddleware</code></td><td><code>($origins, $methods, $headers, $credentials, $maxAge)</code></td><td>CORS preflight + Access-Control headers on every response</td></tr>
-  <tr><td><code>ETagMiddleware</code></td><td>(none)</td><td>Generates <code>W/"md5"</code> ETag, returns 304 on cache hit</td></tr>
-  <tr><td><code>CompressionMiddleware</code></td><td><code>($minLength=1024, $level=6, $skipProxiedRequests=false)</code></td><td>Reference gzip/deflate middleware; runtime compression is handled by OpenSwoole by default</td></tr>
-  <tr><td><code>RangeMiddleware</code></td><td>(none)</td><td>RFC 7233 Range requests — adds <code>Accept-Ranges: bytes</code>, returns 206 with sliced body for single or multi-range, 416 for unsatisfiable</td></tr>
-  <tr><td><code>SessionStartMiddleware</code></td><td>(none)</td><td>Eagerly starts a session and sends <code>Set-Cookie</code> for new visitors. Without it, first-time visitors get no session cookie and session state resets every request.</td></tr>
-  <tr><td><code>IniIsolationMiddleware</code></td><td><code>(?array $keys = null)</code></td><td>Snapshots <code>ini_set()</code> changes (timezone, error_reporting, display_errors, memory_limit, etc.) at request start and restores them on exit. Opt-in defense against ini-value leakage across requests on long-running workers. Enable with <code>ZEALPHP_INI_ISOLATE=1</code> or register explicitly. <a href="/coroutines#what-survives">Why this matters ↗</a></td></tr>
+  <tr><th>Class</th><th>Apache / nginx parity</th><th>What it does</th></tr>
+  <tr><td><a href="#cors"><code>CorsMiddleware</code></a></td><td>n/a (modern browser feature)</td><td>CORS preflight + Access-Control headers on every response</td></tr>
+  <tr><td><a href="#etag"><code>ETagMiddleware</code></a></td><td>Apache <code>FileETag</code>, nginx <code>etag on</code></td><td>Generates <code>W/"md5"</code> ETag, returns 304 on cache hit</td></tr>
+  <tr><td><a href="#compression"><code>CompressionMiddleware</code></a></td><td>Apache <code>mod_deflate</code>, nginx <code>gzip on</code></td><td>Reference gzip/deflate; runtime compression is handled by OpenSwoole by default</td></tr>
+  <tr><td><a href="#range"><code>RangeMiddleware</code></a></td><td>HTTP/1.1 RFC 7233 (universally expected)</td><td><code>Accept-Ranges: bytes</code>; 206 for single/multi-range; 416 for unsatisfiable</td></tr>
+  <tr><td><a href="#session-start"><code>SessionStartMiddleware</code></a></td><td>n/a (PHP-native sessions)</td><td>Eagerly starts a session and sends <code>Set-Cookie</code> for new visitors</td></tr>
+  <tr><td><a href="#ini-isolation"><code>IniIsolationMiddleware</code></a></td><td>n/a (long-running runtime concern)</td><td>Snapshots and restores <code>ini_set()</code> changes per request</td></tr>
+  <tr><td><a href="#charset"><code>CharsetMiddleware</code></a></td><td>Apache <code>AddDefaultCharset</code> / <code>AddCharset</code></td><td>Appends <code>; charset=utf-8</code> to text-ish response <code>Content-Type</code></td></tr>
+  <tr><td><a href="#cache-control"><code>CacheControlMiddleware</code></a></td><td>Apache <code>&lt;FilesMatch&gt; Header set Cache-Control</code></td><td>Extension-keyed <code>Cache-Control: max-age=N, public</code> for static assets</td></tr>
+  <tr><td><a href="#expires"><code>ExpiresMiddleware</code></a></td><td>Apache <code>mod_expires</code>, nginx <code>expires 30d</code></td><td>Adds <code>Expires:</code> header by content type</td></tr>
+  <tr><td><a href="#header"><code>HeaderMiddleware</code></a></td><td>Apache <code>mod_headers</code> (<code>Header set/add/unset</code>)</td><td>Declarative response-header manipulation with conditional variants</td></tr>
+  <tr><td><a href="#basic-auth"><code>BasicAuthMiddleware</code></a></td><td>Apache <code>AuthType Basic</code>, nginx <code>auth_basic</code></td><td>HTTP Basic Auth: htpasswd file or callback verifier</td></tr>
+  <tr><td><a href="#ip-access"><code>IpAccessMiddleware</code></a></td><td>Apache <code>Allow from / Deny from</code></td><td>CIDR allow/deny lists with allow-first or deny-first ordering</td></tr>
+  <tr><td><a href="#rate-limit"><code>RateLimitMiddleware</code></a></td><td>nginx <code>limit_req</code></td><td>Sliding-window request rate limiter backed by <code>Store</code> (cross-worker)</td></tr>
+  <tr><td><a href="#concurrency-limit"><code>ConcurrencyLimitMiddleware</code></a></td><td>nginx <code>limit_conn</code></td><td>In-flight concurrent-request cap backed by <code>Counter</code></td></tr>
+  <tr><td><a href="#block-php-ext"><code>BlockPhpExtMiddleware</code></a></td><td>Apache <code>RewriteRule ^(.+)\.php$ - [F]</code></td><td>Refuses <code>*.php</code> URLs with 404 (for extensionless-only public surfaces)</td></tr>
+  <tr><td><a href="#mime-type"><code>MimeTypeMiddleware</code></a></td><td>Apache <code>AddType</code> / <code>ForceType</code></td><td>Sets/overrides <code>Content-Type</code> on non-static responses by extension or pattern</td></tr>
+  <tr><td><a href="#body-rewrite"><code>BodyRewriteMiddleware</code></a></td><td>Apache <code>mod_substitute</code> (<code>Substitute s/x/y/</code>)</td><td>Single-line regex substitution on response body</td></tr>
+  <tr><td><a href="#host-router"><code>HostRouterMiddleware</code></a></td><td>nginx <code>server_name a.com b.com</code></td><td>Dispatches per-host routes inside one ZealPHP instance</td></tr>
 </table>
 
 <?php
@@ -30,6 +42,8 @@ $app->addMiddleware(new AuthMiddleware());         // your custom middleware
 // ResponseMiddleware is always innermost (built-in)
 PHP]);
 ?>
+
+<p style="color:var(--text-muted);font-size:.9rem;margin-top:.75rem">Server-level Apache directives map to <code>App::$*</code> static properties + fluent setters (e.g., <code>App::clientIp()</code>, <code>App::canonicalHost()</code>, <code>App::$trusted_proxies</code>, <code>App::$access_log_format</code>). See <a href="/legacy-apps">legacy-apps</a> for the full server-level configurability matrix.</p>
 
 <h2 style="margin:2rem 0 .5rem">Live demos</h2>
 <?php
@@ -68,7 +82,269 @@ foreach ($demos as [$id, $title, $url, $code]) {
 }
 ?>
 
-<h2 style="margin:2rem 0 .5rem">Custom middleware</h2>
+<h2 style="margin:2.5rem 0 .5rem">Per-middleware reference</h2>
+
+<h3 id="cors" style="margin-top:1.5rem"><code>CorsMiddleware</code></h3>
+<p>CORS preflight (OPTIONS + <code>Origin</code>) plus <code>Access-Control-*</code> headers on every response. There is no Apache/nginx parity here — CORS is a modern browser concern, not a server-config item.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\CorsMiddleware;
+
+$app->addMiddleware(new CorsMiddleware(
+    origins:     ['https://app.example.com', 'https://admin.example.com'],
+    methods:     ['GET', 'POST', 'PUT', 'DELETE'],
+    headers:     ['Content-Type', 'Authorization'],
+    credentials: true,
+    maxAge:      86400,
+));
+PHP]); ?>
+
+<h3 id="etag" style="margin-top:1.5rem"><code>ETagMiddleware</code></h3>
+<p>Generates <code>W/"md5(body)"</code> on GET responses; returns <code>304 Not Modified</code> when the client's <code>If-None-Match</code> matches. Apache parity: <code>FileETag</code>. nginx parity: <code>etag on;</code> + <code>if_modified_since</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\ETagMiddleware;
+
+$app->addMiddleware(new ETagMiddleware());
+PHP]); ?>
+
+<h3 id="compression" style="margin-top:1.5rem"><code>CompressionMiddleware</code></h3>
+<p>Reference gzip/deflate body compression. <strong>OpenSwoole's <code>http_compression</code> is enabled by default</strong> — only register this middleware if you've disabled it. Apache parity: <code>mod_deflate</code>. nginx parity: <code>gzip on;</code> + <code>gzip_types</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\CompressionMiddleware;
+
+// Only register if you've turned off OpenSwoole's http_compression.
+$app->addMiddleware(new CompressionMiddleware(
+    minLength:           1024,   // do not compress small bodies
+    level:               6,      // 1..9 — same as zlib
+    skipProxiedRequests: true,   // skip when Via header is present
+));
+PHP]); ?>
+
+<h3 id="range" style="margin-top:1.5rem"><code>RangeMiddleware</code></h3>
+<p>RFC 7233 Range requests. Adds <code>Accept-Ranges: bytes</code>, returns <code>206 Partial Content</code> for single or multi-range requests, <code>416</code> for unsatisfiable ranges, and honors <code>If-Range</code> ETag pinning. Required for video seeking and resumable downloads. nginx serves this automatically; ZealPHP needs the middleware registered.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\RangeMiddleware;
+
+$app->addMiddleware(new RangeMiddleware());
+// Now: curl -r 0-1023 /video.mp4 → 206 Partial Content (first 1024 bytes)
+PHP]); ?>
+
+<h3 id="session-start" style="margin-top:1.5rem"><code>SessionStartMiddleware</code></h3>
+<p>Eagerly starts a session and sends <code>Set-Cookie: PHPSESSID=...</code> for first-time visitors. Without it, <code>CoSessionManager</code> only starts sessions when a <code>PHPSESSID</code> cookie already exists — so first-time visitors see no session cookie and session state resets every request. The <code>secure</code> flag auto-detects HTTPS via <code>X-Forwarded-Proto</code>, <code>HTTPS</code>, or port 443 — works behind Traefik/Nginx and on direct HTTP. Override with <code>ZEALPHP_SESSION_SECURE</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\SessionStartMiddleware;
+
+$app->addMiddleware(new SessionStartMiddleware());
+PHP]); ?>
+
+<h3 id="ini-isolation" style="margin-top:1.5rem"><code>IniIsolationMiddleware</code></h3>
+<p>Snapshots <code>ini_set()</code> changes (<code>timezone</code>, <code>error_reporting</code>, <code>display_errors</code>, <code>memory_limit</code>, etc.) at request start and restores them on exit. Opt-in defence against ini-value leakage across requests on long-running workers — see <a href="/coroutines#what-survives">what survives a request</a>. Enable with <code>ZEALPHP_INI_ISOLATE=1</code> or by registering it explicitly.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\IniIsolationMiddleware;
+
+// Default — snapshots a curated key list
+$app->addMiddleware(new IniIsolationMiddleware());
+
+// Or pass an explicit list to track
+$app->addMiddleware(new IniIsolationMiddleware([
+    'date.timezone', 'memory_limit', 'error_reporting',
+]));
+PHP]); ?>
+
+<h3 id="charset" style="margin-top:1.5rem"><code>CharsetMiddleware</code></h3>
+<p>Auto-appends <code>; charset=utf-8</code> to text-ish response <code>Content-Type</code> values that don't already declare a charset. Reads <code>App::$default_charset</code> (settable via <code>App::defaultCharset('utf-8')</code>). Apache parity: <code>AddDefaultCharset utf-8</code> + <code>AddCharset utf-8 .css .js .html</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\CharsetMiddleware;
+
+App::defaultCharset('utf-8');  // optional — utf-8 is the default
+$app->addMiddleware(new CharsetMiddleware());
+// → text/html → text/html; charset=utf-8 (only if not already set)
+PHP]); ?>
+
+<h3 id="cache-control" style="margin-top:1.5rem"><code>CacheControlMiddleware</code></h3>
+<p>Extension-based <code>Cache-Control: max-age=N, public</code> for static-asset responses. Apache parity: <code>&lt;FilesMatch "\.(css|js|jpg|png)$"&gt; Header set Cache-Control "max-age=2628000"</code>. nginx parity: <code>location ~* \.(css|js)$ { expires 30d; }</code> partial.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\CacheControlMiddleware;
+
+$app->addMiddleware(new CacheControlMiddleware([
+    'css'   => ['max-age' => 2628000, 'public' => true],     // 1 month
+    'js'    => ['max-age' => 2628000, 'public' => true],
+    'jpg'   => ['max-age' => 31536000, 'public' => true],   // 1 year
+    'png'   => ['max-age' => 31536000, 'public' => true],
+    'woff2' => ['max-age' => 31536000, 'public' => true, 'immutable' => true],
+]));
+PHP]); ?>
+
+<h3 id="expires" style="margin-top:1.5rem"><code>ExpiresMiddleware</code></h3>
+<p>Adds the legacy HTTP/1.0 <code>Expires:</code> header by content type. Pairs with <code>CacheControlMiddleware</code> for full Apache <code>mod_expires</code> parity. nginx parity: <code>expires 30d;</code> in a <code>location</code> block.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\ExpiresMiddleware;
+
+$app->addMiddleware(new ExpiresMiddleware([
+    'image/jpeg'             => '+1 year',
+    'image/png'              => '+1 year',
+    'text/css'               => '+1 month',
+    'application/javascript' => '+1 month',
+    '__default'              => '+1 hour',
+]));
+PHP]); ?>
+
+<h3 id="header" style="margin-top:1.5rem"><code>HeaderMiddleware</code></h3>
+<p>Declarative response-header manipulation: <code>set</code> (overwrite), <code>add</code> (append), <code>unset</code> (remove). Conditional variants run only on specific status codes or content types. Apache parity: <code>Header set / append / unset / add / merge</code> (mod_headers).</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\HeaderMiddleware;
+
+$app->addMiddleware(
+    (new HeaderMiddleware())
+        ->set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')
+        ->set('X-Content-Type-Options', 'nosniff')
+        ->set('X-Frame-Options', 'SAMEORIGIN')
+        ->set('Referrer-Policy', 'strict-origin-when-cross-origin')
+        ->add('Link', '</css/zealphp.css>; rel=preload; as=style')
+        ->unset('X-Powered-By')
+);
+PHP]); ?>
+
+<h3 id="basic-auth" style="margin-top:1.5rem"><code>BasicAuthMiddleware</code></h3>
+<p>HTTP Basic Auth — htpasswd file or callback verifier. Returns <code>401</code> with <code>WWW-Authenticate: Basic</code> on missing/invalid credentials. Apache parity: <code>AuthType Basic</code> + <code>AuthName</code> + <code>AuthUserFile</code> + <code>Require</code>. nginx parity: <code>auth_basic "Realm"</code> + <code>auth_basic_user_file htpasswd</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\BasicAuthMiddleware;
+
+// 1) htpasswd-file backend
+$app->addMiddleware(new BasicAuthMiddleware(
+    realm:      'Admin Area',
+    htpasswd:   __DIR__ . '/.htpasswd',
+    pathPrefix: '/admin',
+));
+
+// 2) callback verifier — lets you check against the DB
+$app->addMiddleware(new BasicAuthMiddleware(
+    realm:      'API',
+    verify:     fn($user, $pass) => User::checkCredentials($user, $pass),
+    pathPrefix: '/api/private',
+));
+PHP]); ?>
+
+<h3 id="ip-access" style="margin-top:1.5rem"><code>IpAccessMiddleware</code></h3>
+<p>CIDR allow/deny lists. Apache parity: legacy <code>Allow from</code> / <code>Deny from</code> / <code>Order Allow,Deny</code> (mod_access_compat) and modern <code>Require ip</code>. Pairs naturally with <code>App::$trusted_proxies</code> + <code>App::clientIp()</code> for correct client-IP resolution behind a front proxy.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\IpAccessMiddleware;
+
+// Allow only internal networks to hit /admin
+$app->addMiddleware(new IpAccessMiddleware(
+    allow:      ['10.0.0.0/8', '192.168.0.0/16', '127.0.0.1/32'],
+    deny:       ['0.0.0.0/0'],     // explicit deny-all fallback
+    order:      'deny,allow',      // Apache legacy semantics
+    pathPrefix: '/admin',
+));
+PHP]); ?>
+
+<h3 id="rate-limit" style="margin-top:1.5rem"><code>RateLimitMiddleware</code></h3>
+<p>Sliding-window request rate limiter using <code>Store</code> for cross-worker shared state. nginx parity: <code>limit_req zone=one rate=10r/s burst=20;</code>. Returns <code>429 Too Many Requests</code> with <code>Retry-After</code> when the window is full.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\RateLimitMiddleware;
+
+// Create the backing Store once (BEFORE $app->run())
+Store::make('rate_limit', 100_000, [
+    'count' => ['type' => Store::TYPE_INT, 'size' => 4],
+    'reset' => ['type' => Store::TYPE_INT, 'size' => 8],
+]);
+
+// 60 requests per minute per client IP
+$app->addMiddleware(new RateLimitMiddleware(
+    limit:    60,
+    window:   60,                              // seconds
+    keyBy:    fn($req) => App::clientIp(),     // respects $trusted_proxies
+    store:    'rate_limit',
+));
+PHP]); ?>
+
+<h3 id="concurrency-limit" style="margin-top:1.5rem"><code>ConcurrencyLimitMiddleware</code></h3>
+<p>In-flight concurrent-request cap. nginx parity: <code>limit_conn zone=one 10;</code>. Backed by <code>OpenSwoole\Atomic</code> (<code>Counter</code>) — increments on entry, decrements in a <code>finally</code>. Returns <code>503</code> when the cap is reached.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Counter;
+use ZealPHP\Middleware\ConcurrencyLimitMiddleware;
+
+$counter = new Counter('inflight');   // create BEFORE $app->run()
+
+$app->addMiddleware(new ConcurrencyLimitMiddleware(
+    max:     100,           // max concurrent in-flight requests
+    counter: $counter,
+));
+PHP]); ?>
+
+<h3 id="block-php-ext" style="margin-top:1.5rem"><code>BlockPhpExtMiddleware</code></h3>
+<p>Refuses any URL ending in <code>.php</code> with a <code>404</code>. Useful for apps that want extensionless URLs as the only public surface (so scrapers can't enumerate raw files by guessing <code>config.php</code> / <code>admin.php</code>). Apache parity: <code>RewriteCond %{THE_REQUEST} \.php; RewriteRule . - [R=404,L]</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\BlockPhpExtMiddleware;
+
+$app->addMiddleware(new BlockPhpExtMiddleware());
+// /admin.php       → 404
+// /config.php?x=1  → 404
+// /admin           → handled normally (the .php is implicit)
+PHP]); ?>
+
+<h3 id="mime-type" style="margin-top:1.5rem"><code>MimeTypeMiddleware</code></h3>
+<p>Sets or overrides <code>Content-Type</code> on non-static responses by URL extension or pattern. Static files are MIME-typed by OpenSwoole's static handler — this middleware fills the gap for handler-generated responses. Apache parity: <code>AddType font/woff2 .woff2</code> and <code>ForceType image/svg+xml</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\MimeTypeMiddleware;
+
+$app->addMiddleware(new MimeTypeMiddleware([
+    'woff2' => 'font/woff2',
+    'glb'   => 'model/gltf-binary',
+    'wasm'  => 'application/wasm',
+]));
+PHP]); ?>
+
+<h3 id="body-rewrite" style="margin-top:1.5rem"><code>BodyRewriteMiddleware</code></h3>
+<p>Single-line regex substitution on the response body. Useful for late-stage URL rewriting (e.g., serving a CDN-versioned <code>asset.js?v=abc</code>) or hot-patching templates. Apache parity: <code>Substitute "s/foo/bar/"</code> (mod_substitute). Multi-line and streaming variants are on the roadmap.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\BodyRewriteMiddleware;
+
+$app->addMiddleware(new BodyRewriteMiddleware([
+    // CDN URL rewrite for HTML responses
+    '#https?://old-cdn\.example\.com/#' => 'https://cdn.example.com/',
+    // Asset version cache-bust
+    '#\.js"#'                            => '.js?v=' . APP_VERSION . '"',
+], contentTypes: ['text/html', 'application/xhtml+xml']));
+PHP]); ?>
+
+<h3 id="host-router" style="margin-top:1.5rem"><code>HostRouterMiddleware</code></h3>
+<p>Routes by <code>Host</code> header inside one ZealPHP instance. nginx parity: multiple <code>server { server_name a.com; }</code> blocks. For true isolation prefer one ZealPHP process per host behind Caddy/Traefik; use this when ergonomic co-tenancy is the goal.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\HostRouterMiddleware;
+
+$app->addMiddleware(new HostRouterMiddleware([
+    'app.example.com'   => fn($req, $next) => $next->handle($req),
+    'admin.example.com' => function ($req, $next) {
+        // Tighter middleware stack for the admin host
+        $req = $req->withAttribute('app.scope', 'admin');
+        return $next->handle($req);
+    },
+    'api.example.com'   => fn($req, $next) =>
+        $next->handle($req->withAttribute('app.scope', 'api')),
+    '__default'         => fn($req, $next) => $next->handle($req),
+]));
+PHP]); ?>
+
+<h2 style="margin:2.5rem 0 .5rem">Custom middleware</h2>
 <p style="color:var(--text-muted);font-size:.92rem">Middleware always returns a <code>Psr\Http\Message\ResponseInterface</code> — that's PSR-15's contract, not ZealPHP's. Inside the route handler that the middleware wraps, the handler still uses the <a href="/responses#return-contract">universal return contract</a>; ZealPHP's <code>ResponseMiddleware</code> converts the return into a PSR-7 response before your middleware sees it.</p>
 
 <?php App::render('/components/_code', [
