@@ -82,8 +82,9 @@
     })();
 });</code></pre>
     <p>
-      The next lesson on streaming covers the four patterns in detail. For now: <em>any Generator
-      return triggers streaming mode</em>. The browser starts rendering before your handler finishes.
+      <a href="/learn/streaming">Lesson 11 (Streaming Done Right)</a> covers the four patterns
+      in detail. For now: <em>any Generator return triggers streaming mode</em>. The browser starts
+      rendering before your handler finishes.
     </p>
 
     <h2>echo + void: the legacy escape hatch</h2>

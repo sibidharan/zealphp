@@ -73,8 +73,10 @@ echo "&lt;p&gt;The time is " . date('H:i:s') . "&lt;/p&gt;";</code></pre>
     <h2>Using a layout</h2>
     <p>
       Right now, your page outputs raw HTML with no <code>&lt;head&gt;</code>, no stylesheet, no navigation.
-      Every real page needs a shared layout. The next lesson teaches you how to wrap pages in a layout
-      template using <code>App::render()</code>.
+      Every real page needs a shared layout. The next nine Foundations lessons cover the request
+      lifecycle, routing, and the response model that makes layouts work;
+      <a href="/learn/components">Lesson 13 (Layouts &amp; Components)</a> teaches you how to wrap pages
+      in a layout template using <code>App::render()</code>.
     </p>
     <p>Here's a preview — this is how most pages in ZealPHP apps look:</p>
     <pre><code class="language-php">&lt;?php use ZealPHP\App;
