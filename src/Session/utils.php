@@ -6,6 +6,8 @@ use ZealPHP\RequestContext;
 /**
  * Decode PHP 'php' session serialize format (key|serialized_value;key|...).
  * Falls back to unserialize() for php_serialize handler format.
+ *
+ * @return array<string, mixed>
  */
 function php_session_decode_to_array(string $data): array
 {
@@ -95,8 +97,10 @@ function zeal_session_start(): bool
     $session_data = [];
 
     if ($handler instanceof \SessionHandlerInterface) {
-        $handler->open($save_path, $g->session_params['name'] ?? 'PHPSESSID');
-        $contents = $handler->read($session_id);
+        /** @var string $sessionName */
+        $sessionName = $g->session_params['name'] ?? 'PHPSESSID';
+        $handler->open($save_path, (string) $sessionName);
+        $contents = $handler->read((string) $session_id);
         if (is_string($contents) && $contents !== '') {
             $session_data = php_session_decode_to_array($contents);
         }
@@ -115,6 +119,7 @@ function zeal_session_start(): bool
     // $_SESSION would never round-trip through $g->session. Mirror to both:
     // $_SESSION is what user/Symfony code reads/writes, $g->session is what
     // coroutine-mode code reads/writes via the typed property.
+    /** @var array<string, mixed> $session_data */
     $g->session = $session_data;
     if (\ZealPHP\App::$superglobals) {
         $GLOBALS['_SESSION'] = $session_data;
@@ -337,9 +342,10 @@ function zeal_session_get_cookie_params(): array
 }
 
 /**
- * Set session cookie parameters
+ * Set session cookie parameters. Accepts either positional args (PHP < 8.0)
+ * or an options array (PHP 8.0+).
  *
- * @param int    $lifetime
+ * @param int|array<string, mixed> $lifetime_or_options
  * @param string $path
  * @param string $domain
  * @param bool   $secure

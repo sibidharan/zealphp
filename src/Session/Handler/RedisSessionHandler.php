@@ -35,7 +35,7 @@ class RedisSessionHandler implements \SessionHandlerInterface
     public function read($sessionId): string
     {
         $data = $this->redis->get($this->prefix . $sessionId);
-        return $data === false ? '' : $data;
+        return is_string($data) ? $data : '';
     }
 
     public function write($sessionId, $sessionData): bool

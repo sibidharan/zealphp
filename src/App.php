@@ -1580,6 +1580,7 @@ class App
     private static function executeFile(string $absPath, array $args): mixed
     {
         ob_start();
+        $result = null;
         try {
             $args['g'] = RequestContext::instance();
             extract($args, EXTR_SKIP);
