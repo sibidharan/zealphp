@@ -2677,6 +2677,12 @@ HELP;
             // "session does not exist" when SSE/WS clients disconnect mid-stream).
             // Pass 'log_level' => 0 in $app->run() settings to restore full debug output.
             'log_level' => 4,  // 0=DEBUG 1=TRACE 2=INFO 3=NOTICE 4=WARNING 5=ERROR 6=NONE
+            // Apache LimitRequestFieldSize / LimitRequestLine parity.
+            // OpenSwoole has one knob — http_header_buffer_size — that bounds
+            // each header line AND the request line; we publish the bigger of
+            // the two App::$* values so neither limit is silently exceeded by
+            // OpenSwoole's parser.
+            'http_header_buffer_size' => max(self::$limit_request_field_size, self::$limit_request_line),
         ];
         // @phpstan-ignore-next-line — settings is array<string, mixed>; pid_file coerced to string at boundary
         $pidFile = (string)($settings['pid_file'] ?? $default_settings['pid_file']);
