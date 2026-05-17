@@ -67,11 +67,61 @@ function initPageScripts(root) {
   const sb = document.getElementById('learn-sidebar');
   if (sb) {
     sb.querySelectorAll('li.active').forEach(li => li.classList.remove('active'));
+    sb.querySelectorAll('.learn-substeps').forEach(el => el.remove());
     const link = sb.querySelector('a[href="' + location.pathname + '"]');
     if (link) {
-      link.closest('li')?.classList.add('active');
-      const lessonName = link.textContent.trim();
+      const li = link.closest('li');
+      li?.classList.add('active');
+      const lessonName = (link.firstChild?.textContent || link.textContent).trim();
       if (lessonName) document.title = 'ZealPHP Learn · ' + lessonName + ' · ZealPHP';
+      // Inject auto-generated substeps under the active item. Scans the
+      // current lesson's .lesson-content for <h2> elements; auto-slugifies
+      // any missing ids so anchor links work. Only the active lesson gets
+      // a substep list — active state IS the expand state, no toggle UI.
+      const article = document.querySelector('.lesson-content');
+      if (article && li) {
+        const headings = Array.from(article.querySelectorAll('h2'));
+        const ul = document.createElement('ul');
+        ul.className = 'learn-substeps';
+        let added = 0;
+        headings.forEach(h2 => {
+          if (!h2.id) {
+            const slug = h2.textContent.toLowerCase()
+              .replace(/^\s*\d+\.\s*/, '')
+              .replace(/[^a-z0-9\s-]/g, '')
+              .trim().replace(/\s+/g, '-').slice(0, 60);
+            if (slug) h2.id = slug;
+          }
+          if (!h2.id) return;
+          let label = h2.textContent.replace(/^\s*\d+\.\s*/, '').trim();
+          const dashIdx = label.search(/\s+[—–-]\s+/);
+          if (dashIdx > 0 && dashIdx < 40) label = label.slice(0, dashIdx).trim();
+          const liEl = document.createElement('li');
+          const a = document.createElement('a');
+          a.href = '#' + h2.id;
+          a.textContent = label || h2.textContent.trim();
+          liEl.appendChild(a);
+          ul.appendChild(liEl);
+          added++;
+        });
+        if (li.dataset.demo) {
+          const liEl = document.createElement('li');
+          liEl.className = 'learn-substep-demo';
+          const a = document.createElement('a');
+          a.href = '/demo/view/' + li.dataset.demo;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          a.appendChild(document.createTextNode('Open standalone '));
+          const arrow = document.createElement('span');
+          arrow.style.fontWeight = '600';
+          arrow.textContent = '↗';
+          a.appendChild(arrow);
+          liEl.appendChild(a);
+          ul.appendChild(liEl);
+          added++;
+        }
+        if (added > 0) li.appendChild(ul);
+      }
     }
   }
 
