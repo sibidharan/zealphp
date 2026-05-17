@@ -6,7 +6,7 @@
       'number'   => 22,
       'title'    => 'Routes & APIs: Advanced Patterns',
       'subtitle' => 'Regex, namespace groups, fallbacks, and the route-ordering edge cases. Foundations covers the basics.',
-      'prev'     => ['slug' => 'learn/websocket', 'title' => 'Real-Time Sync'],
+      'prev'     => ['slug' => 'learn/tictactoe', 'title' => 'Tic-Tac-Toe'],
       'next'     => ['slug' => 'learn/async',     'title' => 'Async & Coroutines'],
     ]); ?>
 
@@ -169,9 +169,9 @@ App::$ignore_php_ext = false;  // accept /about.php as a valid URL
     ]]); ?>
 
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/websocket"
-         hx-get="/api/learn/page?slug=learn/websocket" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/websocket">← Real-Time Sync</a>
+      <a class="lesson-chip lesson-chip-prev" href="/learn/tictactoe"
+         hx-get="/api/learn/page?slug=learn/tictactoe" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/tictactoe">← Tic-Tac-Toe</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/async"
          hx-get="/api/learn/page?slug=learn/async" hx-target=".lesson-content"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/async">Async & Coroutines →</a>

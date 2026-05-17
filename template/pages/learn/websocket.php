@@ -7,7 +7,7 @@
       'title'    => 'Real-Time Sync',
       'subtitle' => 'Open this page in two tabs. Click +1 in one. The other tab counts up too.',
       'prev'     => ['slug' => 'learn/ai-chat', 'title' => 'AI Chat'],
-      'next'     => ['slug' => 'learn/routing', 'title' => 'Routes & APIs'],
+      'next'     => ['slug' => 'learn/tictactoe', 'title' => 'Tic-Tac-Toe'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
@@ -200,9 +200,9 @@ $app-&gt;route('/api/counter/bump', ['methods' =&gt; ['POST']], function () use 
       <a class="lesson-chip lesson-chip-prev" href="/learn/ai-chat"
          hx-get="/api/learn/page?slug=learn/ai-chat" hx-target=".lesson-content"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/ai-chat">← AI Chat</a>
-      <a class="lesson-chip lesson-chip-next" href="/learn/routing"
-         hx-get="/api/learn/page?slug=learn/routing" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routing">Routes & APIs →</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/tictactoe"
+         hx-get="/api/learn/page?slug=learn/tictactoe" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/tictactoe">Tic-Tac-Toe →</a>
     </div>
   </article>
 </div>

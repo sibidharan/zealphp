@@ -6,7 +6,7 @@
       'number'   => 13,
       'title'    => 'Layouts & Components',
       'subtitle' => 'Stop copy-pasting HTML. Extract shared structure into reusable templates.',
-      'prev'     => ['slug' => 'learn/first-page', 'title' => 'Your First Page'],
+      'prev'     => ['slug' => 'learn/store', 'title' => 'Sharing State'],
       'next'     => ['slug' => 'learn/react-vs-php', 'title' => 'React vs PHP'],
     ]); ?>
 
@@ -150,9 +150,9 @@ HTML]); ?>
     ]]); ?>
 
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/first-page"
-         hx-get="/api/learn/page?slug=learn/first-page" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/first-page">← Your First Page</a>
+      <a class="lesson-chip lesson-chip-prev" href="/learn/store"
+         hx-get="/api/learn/page?slug=learn/store" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/store">← Sharing State</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/react-vs-php"
          hx-get="/api/learn/page?slug=learn/react-vs-php" hx-target=".lesson-content"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/react-vs-php">React vs PHP →</a>
