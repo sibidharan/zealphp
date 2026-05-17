@@ -21,13 +21,13 @@ from agents import Agent, Runner, function_tool
 
 # Sync these constants with config_converter.py so the website's /api/convert
 # and the CLI tool advertise the same encoded knowledge surface.
-SYSTEM_PROMPT_VERSION = "2026-05-17-b"
+SYSTEM_PROMPT_VERSION = "2026-05-17-c"
 ZEALPHP_VERSION = "^0.2.21"
 
 
 ZEALPHP_REF = r"""
 ZealPHP is a PHP web framework on OpenSwoole. ZealPHP IS the HTTP server — no Apache/nginx needed.
-System prompt v2026-05-17-b; emit code targeting ZealPHP ^0.2.21.
+System prompt v2026-05-17-c; emit code targeting ZealPHP ^0.2.21.
 
 ## App Structure
 - app.php — entry point. Configures the framework, calls App::init(), registers routes, calls $app->run().
@@ -168,8 +168,10 @@ App::superglobals(true);     // Enable $_GET, $_POST, $_SESSION
 App::ignorePhpExt(false);    // Allow .php URLs (/wp-login.php)
 ```
 
-## Middleware (built-in, v0.2.21+)
+## Middleware (built-in, v0.2.21 phase 2 — ALL 12 now ship)
 ```php
+use ZealPHP\Store;
+use ZealPHP\Counter;
 use ZealPHP\Middleware\CorsMiddleware;
 use ZealPHP\Middleware\ETagMiddleware;
 use ZealPHP\Middleware\HeaderMiddleware;
@@ -179,6 +181,11 @@ use ZealPHP\Middleware\ExpiresMiddleware;
 use ZealPHP\Middleware\IpAccessMiddleware;
 use ZealPHP\Middleware\MimeTypeMiddleware;
 use ZealPHP\Middleware\BlockPhpExtMiddleware;
+use ZealPHP\Middleware\BasicAuthMiddleware;
+use ZealPHP\Middleware\RateLimitMiddleware;
+use ZealPHP\Middleware\ConcurrencyLimitMiddleware;
+use ZealPHP\Middleware\BodyRewriteMiddleware;
+use ZealPHP\Middleware\HostRouterMiddleware;
 
 $app->addMiddleware(new CorsMiddleware(['*']));                            // CORS
 $app->addMiddleware(new ETagMiddleware());                                 // ETag/304
@@ -213,11 +220,52 @@ $app->addMiddleware(new IpAccessMiddleware([
     'deny'  => [],
 ]));
 
-// AddType application/wasm .wasm  ->  MimeTypeMiddleware (handler-generated bodies)
+// AddType application/wasm .wasm  ->  MimeTypeMiddleware
 $app->addMiddleware(new MimeTypeMiddleware(['wasm' => 'application/wasm']));
 
 // Refuse `.php` in URLs  ->  BlockPhpExtMiddleware
 $app->addMiddleware(new BlockPhpExtMiddleware());
+
+// auth_basic "Realm"; / AuthType Basic + AuthUserFile + Require valid-user  ->  BasicAuthMiddleware
+$app->addMiddleware(new BasicAuthMiddleware(
+    htpasswdFile: '/etc/zealphp/.htpasswd',
+    realm:        'Restricted',
+));
+// Or callback-based (DB lookup):
+//   $app->addMiddleware(new BasicAuthMiddleware(
+//       verify: fn(string $u, string $p): bool => User::verify($u, $p),
+//       realm:  'API',
+//   ));
+
+// nginx limit_req zone=one burst=N  ->  RateLimitMiddleware
+// Store table MUST be created BEFORE $app->run() — middleware reads it per-request.
+Store::make('rate_limit', 16384, [
+    'ip'    => [\OpenSwoole\Table::TYPE_STRING, 64],
+    'count' => [\OpenSwoole\Table::TYPE_INT,    4],
+    'reset' => [\OpenSwoole\Table::TYPE_INT,    4],
+]);
+$app->addMiddleware(new RateLimitMiddleware(
+    limit:     60,
+    window:    60,
+    tableName: 'rate_limit',
+));
+
+// nginx limit_conn zone=one N  ->  ConcurrencyLimitMiddleware
+$conn = Counter::make('active_requests');  // BEFORE $app->run()
+$app->addMiddleware(new ConcurrencyLimitMiddleware(100, $conn));
+
+// Apache mod_substitute  ->  BodyRewriteMiddleware
+$app->addMiddleware(new BodyRewriteMiddleware([
+    ['pattern' => '|http://old\.example|i', 'replacement' => 'https://new.example'],
+]));
+
+// nginx multi-host server_name  ->  HostRouterMiddleware
+$app->addMiddleware(new HostRouterMiddleware([
+    'a.com'         => fn() => App::include('/sites/a/index.php'),
+    'b.com'         => fn() => App::include('/sites/b/index.php'),
+    '*.example.com' => fn() => App::include('/sites/example/index.php'),
+    '*'             => fn() => App::include('/default.php'),
+]));
 ```
 
 Constructor signatures (stable, verified in src/Middleware/):
@@ -228,33 +276,53 @@ Constructor signatures (stable, verified in src/Middleware/):
 - `IpAccessMiddleware(array $config = [])` — keys: allow, deny (string[] of literals/CIDR)
 - `MimeTypeMiddleware(array $map = [])` — ext => mime-type
 - `BlockPhpExtMiddleware()` — no args
+- `BasicAuthMiddleware(?string $htpasswdFile = null, ?callable $verify = null, string $realm = 'Restricted')` — throws if neither
+- `RateLimitMiddleware(int $limit = 60, int $window = 60, string $tableName = 'rate_limit')` — Store table required
+- `ConcurrencyLimitMiddleware(int $maxConcurrent, Counter $counter)` — both positional, Counter required
+- `BodyRewriteMiddleware(array $rules = [])` — each rule `['pattern' => $regex, 'replacement' => $string]`
+- `HostRouterMiddleware(array $hosts)` — `host => callable`; '*' catch-all; '*.example.com' wildcard subdomain; falls through if no match
 
-## Middleware gaps STILL PROPOSED (NOT YET in src/Middleware/ — emit inline anonymous + // PROPOSED: comment)
+## v0.2.21 configurables (Apache/nginx parity at the App layer)
 
-`BasicAuthMiddleware` (auth_basic / AuthType Basic), `RateLimitMiddleware` (limit_req),
-`ConcurrencyLimitMiddleware` (limit_conn), `HostRouterMiddleware` (multi-host server_name),
-`BodyRewriteMiddleware` (mod_substitute), `ProxyMiddleware` (proxy_pass).
+```php
+App::stripTrailingSlash(true);                   // inverse of directorySlash — RewriteRule ^(.+)/$ /$1 [R=301] equivalent
+App::serverAdmin('admin@example.com');           // Apache ServerAdmin
+App::canonicalName('www.example.com');           // Apache ServerName
+App::useCanonicalName(true);                     // Apache UseCanonicalName — self-URLs use canonicalName()
+App::hostnameLookups(false);                     // Apache HostnameLookups — REMOTE_HOST gethostbyaddr() (default off)
+App::trustedProxies(['10.0.0.0/8', '127.0.0.1']); // CIDRs whose X-Forwarded-For App::clientIp() trusts
+App::accessLogFormat('%h %l %u %t "%r" %>s %b'); // Apache CustomLog/LogFormat
+App::limitRequestFields(100);                    // Apache LimitRequestFields
+App::limitRequestFieldSize(8190);
+App::limitRequestLine(8190);
+```
 
-NEVER emit `new BasicAuthMiddleware(...)` etc. as class instantiation — those classes
-don't exist in src/Middleware/ yet; the user's app.php would fatal at boot. Always
-emit BOTH (a) inline anonymous class AND (b) `// PROPOSED: <Name>Middleware` comment.
+ALWAYS use `App::clientIp()` instead of `$g->server['REMOTE_ADDR']` when the
+input config has any proxy signal (proxy_pass / X-Forwarded-For / RemoteIPHeader /
+known proxy IPs). `App::clientIp()` walks X-Forwarded-For right-to-left against
+the trusted-proxy CIDR list and returns the first untrusted hop (defends against
+spoofing from untrusted callers).
 
-Emit pattern for STILL-PROPOSED entries:
+`App::tryInclude(string $publicPath, array $args = []): mixed` — same as
+`App::include()` but returns null on missing file instead of 404'ing. Use in
+fall-through chains:
 
-    // PROPOSED: BasicAuthMiddleware — not yet shipped. Inline implementation:
+    return App::tryInclude("/articles/{$slug}.php")
+        ?? App::tryInclude("/legacy/{$slug}.php")
+        ?? 404;
+
+## One remaining genuine middleware gap
+
+Only `ProxyMiddleware` (nginx `proxy_pass`) is unbuilt. ZealPHP is an origin
+server, not a forwarding proxy. Recommend Caddy/Traefik/nginx in front. If
+same-process forwarding is absolutely required (rare), emit the inline
+anonymous middleware shape with a `// PROPOSED: ProxyMiddleware` comment:
+
+    // PROPOSED: ProxyMiddleware — ZealPHP is an origin server, not a proxy.
+    // Recommended: put a real proxy (Caddy/Traefik/nginx) in front instead.
     $app->addMiddleware(new class implements \Psr\Http\Server\MiddlewareInterface {
-        public function process(
-            \Psr\Http\Message\ServerRequestInterface $request,
-            \Psr\Http\Server\RequestHandlerInterface $handler
-        ): \Psr\Http\Message\ResponseInterface {
-            $auth = $request->getHeaderLine('Authorization');
-            if (!str_starts_with($auth, 'Basic ')) {
-                return (new \OpenSwoole\Core\Psr\Response('Authentication required'))
-                    ->withStatus(401)
-                    ->withHeader('WWW-Authenticate', 'Basic realm="Realm"');
-            }
-            // Verify against htpasswd / DB — placeholder; do not invent a parser here.
-            return $handler->handle($request);
+        public function process(/* ... */): \Psr\Http\Message\ResponseInterface {
+            // \OpenSwoole\Coroutine\Http\Client to backend, copy headers + body ...
         }
     });
 
@@ -386,10 +454,10 @@ Never silently drop. Categories: SSI, mod_speling, mod_imagemap, mod_dav, mod_lu
 AuthLDAP*, AuthDigest*, Anonymous*, CERN meta files, nginx return 444, early_hints,
 nginx stream {{}} / mail {{}} / grpc_pass.
 
-RULE 7: MIDDLEWARE EMISSION (v0.2.21+ — built-in vs PROPOSED):
+RULE 7: MIDDLEWARE EMISSION (v0.2.21 phase 2 — ALL 12 ship). Emit the
+built-in class directly. NO `// PROPOSED:` comments. NO inline anonymous
+classes. NO `(NOT SUPPORTED)` refusals.
 
-  TIER A — BUILT-IN (emit the class instantiation directly, NO // PROPOSED: comment,
-  NO inline anonymous class — these ship in src/Middleware/):
     Header set / add_header                -> new HeaderMiddleware(['set' => [...], 'append' => [...], 'unset' => [...]])
     AddDefaultCharset / AddCharset         -> new CharsetMiddleware('utf-8')
     <FilesMatch> Header set Cache-Control  -> new CacheControlMiddleware()  // defaults cover css/js/jpg/png/svg/woff2/...
@@ -400,16 +468,27 @@ RULE 7: MIDDLEWARE EMISSION (v0.2.21+ — built-in vs PROPOSED):
     Refuse `.php` in URL                   -> new BlockPhpExtMiddleware()
     Access-Control-*                       -> new CorsMiddleware(['*'])
     ETag                                   -> new ETagMiddleware()
+    auth_basic / AuthType Basic            -> new BasicAuthMiddleware(htpasswdFile: '/etc/zealphp/.htpasswd', realm: 'X')
+                                              OR new BasicAuthMiddleware(verify: fn($u,$p) => ..., realm: 'X')
+    limit_req (rate limit)                 -> Store::make('rate_limit', 16384, [...]); BEFORE $app->run()
+                                              then new RateLimitMiddleware(limit: 60, window: 60, tableName: 'rate_limit')
+    limit_conn (concurrent limit)          -> $c = Counter::make('active'); BEFORE $app->run()
+                                              then new ConcurrencyLimitMiddleware($maxConcurrent, $c)
+    server_name a.com b.com (multi-host)   -> new HostRouterMiddleware(['a.com' => $handler, '*.example.com' => $h, '*' => $catchAll])
+    mod_substitute (body rewrite)          -> new BodyRewriteMiddleware([['pattern' => '/x/', 'replacement' => 'y']])
 
-  TIER B — STILL PROPOSED (NOT yet in src/Middleware/; emit BOTH (a) inline
-  anonymous PSR-15 middleware AND (b) `// PROPOSED: <Name>Middleware — not yet
-  shipped` comment. NEVER emit `new BasicAuthMiddleware(...)` etc. — would fatal):
-    auth_basic / AuthType Basic            -> // PROPOSED: BasicAuthMiddleware
-    limit_req (rate limit)                 -> // PROPOSED: RateLimitMiddleware
-    limit_conn (concurrent limit)          -> // PROPOSED: ConcurrencyLimitMiddleware
-    server_name a.com b.com (multi-host)   -> // PROPOSED: HostRouterMiddleware
-    mod_substitute (body rewrite)          -> // PROPOSED: BodyRewriteMiddleware
-    proxy_pass                             -> // PROPOSED: ProxyMiddleware
+  Critical ordering: RateLimit and ConcurrencyLimit need their Store table /
+  Counter created BEFORE `$app->run()`. Emit the make() call BEFORE the
+  addMiddleware() line.
+
+  ONLY remaining gap: proxy_pass — no ProxyMiddleware. Drop with one-line
+  comment recommending Caddy/Traefik/nginx in front. Only emit the inline
+  anonymous shape with `// PROPOSED: ProxyMiddleware` if user explicitly
+  asks for same-process forwarding.
+
+  Behind a proxy: emit `App::trustedProxies([...])` at boot and use
+  `App::clientIp()` (instead of `$g->server['REMOTE_ADDR']`) in any IP-needing
+  middleware/handler.
 
 OTHER RULES:
 - App::init() takes ($host, $port) — NEVER arrays or phpSettings.
