@@ -43,6 +43,33 @@ class App
     public static array $middleware_wait_stack = [];
     public static bool $ignore_php_ext = true;
     public static bool $coproc_implicit_request_handler = false;
+    /**
+     * Per-include CGI process-isolation override. `null` means "follow
+     * $superglobals" (true → CGI subprocess via cgi_worker.php; false →
+     * in-process via executeFile()), which preserves today's default
+     * coupling. Set via App::processIsolation(bool) — see that method for
+     * the trade-offs. App::run() resolves this into the backing
+     * $coproc_implicit_request_handler flag right before the server starts.
+     */
+    public static ?bool $process_isolation = null;
+    /**
+     * OpenSwoole `enable_coroutine` server-setting override. `null` means
+     * "follow !$superglobals" (true → coroutine-per-request, false → one
+     * synchronous request at a time per worker). Set via
+     * App::enableCoroutine(bool). Combining true with $superglobals=true
+     * is unsafe — process-wide $_GET/$_POST/$_SESSION will race across
+     * concurrent coroutines; the helper warns at run() time.
+     */
+    public static ?bool $enable_coroutine_override = null;
+    /**
+     * `OpenSwoole\Runtime::enableCoroutine($flags)` override. Same shape
+     * as App::hookAll() input: `null` → follow !$superglobals (HOOK_ALL when
+     * coroutine mode, 0 in superglobals mode); `true` → HOOK_ALL; `false`
+     * → 0; `int` → explicit bitmask. PDO is intentionally NOT hooked in
+     * OpenSwoole 22.1 / 26.2 regardless of this flag.
+     * @var bool|int|null
+     */
+    public static $hook_all_override = null;
     /** Apache DirectorySlash equivalent — redirect `/foo` → `/foo/` when foo is a directory. */
     public static bool $directory_slash = true;
     /**
@@ -582,6 +609,116 @@ class App
     {
         if ($enabled !== null) self::$session_lifecycle = $enabled;
         return self::$session_lifecycle;
+    }
+
+    /**
+     * Per-include CGI process isolation (Apache mod_php-style fresh process
+     * per file). When true (the default in superglobals mode),
+     * App::include() dispatches each .php file through cgi_worker.php via
+     * proc_open() — global state (defined classes, constants, ini_set,
+     * output handlers) is contained inside the subprocess. When false,
+     * runs in-process via executeFile() — saves the ~30-50ms proc_open +
+     * PHP startup + autoloader cost per call, but every include shares the
+     * worker's PHP arena.
+     *
+     * Set to false when the legacy code is well-behaved enough to coexist
+     * in a shared worker (Symfony, Laravel, modern PHP apps). Keep true
+     * for unmodified WordPress / Drupal where define()-heavy plugins assume
+     * a fresh process per request.
+     *
+     * `null` (default) means "follow App::$superglobals" — preserves the
+     * historical pairing so callers that don't touch this knob see no
+     * behaviour change. App::run() resolves null into the backing
+     * $coproc_implicit_request_handler bool right before the server starts.
+     */
+    public static function processIsolation(?bool $on = null): bool
+    {
+        if (func_num_args() > 0) self::$process_isolation = $on;
+        return self::$process_isolation ?? self::$superglobals;
+    }
+
+    /**
+     * OpenSwoole's `enable_coroutine` server setting — whether each inbound
+     * HTTP request is auto-wrapped in its own coroutine. When false,
+     * requests run synchronously one at a time per worker (a worker
+     * handling request N blocks any other inbound request until N
+     * completes). When true, requests can yield on hooked I/O and other
+     * requests dispatched on the same worker make progress.
+     *
+     * Default coupling is `!App::$superglobals` — running coroutines in
+     * superglobals mode races the process-wide $_GET/$_POST/$_SESSION
+     * arrays across concurrent requests, the original bug ZealPHP's
+     * per-coroutine $g context was designed to avoid. **Setting this to
+     * true while $superglobals=true is unsafe — App::run() emits a
+     * [lifecycle] warning to the debug log.**
+     *
+     * `null` follows the default coupling.
+     */
+    public static function enableCoroutine(?bool $on = null): bool
+    {
+        if (func_num_args() > 0) self::$enable_coroutine_override = $on;
+        return self::$enable_coroutine_override ?? !self::$superglobals;
+    }
+
+    /**
+     * `OpenSwoole\Runtime::enableCoroutine($flags)` — process-wide PHP
+     * I/O hooks that make blocking calls (fopen, fread, curl, mysqli,
+     * etc.) yield to the coroutine scheduler instead of blocking the
+     * worker. PDO is intentionally NOT hooked in OpenSwoole 22.1 / 26.2
+     * regardless of this flag — Doctrine queries always block.
+     *
+     * Default coupling is `!App::$superglobals` (HOOK_ALL when coroutine
+     * mode, 0 when superglobals mode). Hooked I/O in superglobals mode is
+     * **unsafe** — yields can expose process-wide superglobal mutations
+     * to other concurrent coroutines. App::run() emits a [lifecycle]
+     * warning for that combination.
+     *
+     * Accepts:
+     *  - null  → follow default coupling
+     *  - true  → HOOK_ALL
+     *  - false → 0 (no hooks)
+     *  - int   → explicit flag bitmask (HOOK_TCP | HOOK_FILE | ...)
+     *
+     * Returns the resolved int flag bitmask currently in effect.
+     *
+     * @param bool|int|null $on
+     */
+    public static function hookAll($on = null): int
+    {
+        if (func_num_args() > 0) self::$hook_all_override = $on;
+        $v = self::$hook_all_override;
+        if ($v === null)  return self::$superglobals ? 0 : \OpenSwoole\Runtime::HOOK_ALL;
+        if ($v === true)  return \OpenSwoole\Runtime::HOOK_ALL;
+        if ($v === false) return 0;
+        return (int) $v;
+    }
+
+    /**
+     * Warn about lifecycle combinations that are syntactically allowed but
+     * semantically unsafe. elog() at warn level so the warning lands in
+     * /tmp/zealphp/debug.log; we don't throw — users may have niche
+     * reasons (security audits, debugging). But silently honouring an
+     * override that races $_SESSION across coroutines would be worse than
+     * no API at all.
+     */
+    private static function validateLifecycleCombination(bool $sg, int $hookFlags, bool $enableCo): void
+    {
+        if ($sg && $enableCo) {
+            elog(
+                '[lifecycle] App::superglobals(true) + App::enableCoroutine(true) — '
+                . 'concurrent coroutines will race $_GET/$_POST/$_SESSION (process-wide PHP arrays). '
+                . 'Use superglobals(false) for coroutines, or accept the cross-request state-leak risk.',
+                'warn'
+            );
+        }
+        if ($sg && $hookFlags !== 0) {
+            elog(
+                '[lifecycle] App::superglobals(true) + App::hookAll(non-zero) — '
+                . 'hooked I/O can yield mid-request, exposing process-wide superglobal mutations to '
+                . 'concurrent coroutines. Use superglobals(false) when enabling hooks.',
+                'warn'
+            );
+        }
     }
 
     /**
@@ -2380,6 +2517,149 @@ class App
         return "/tmp/zealphp_{$port}.pid";
     }
 
+    /**
+     * Pull the port number from a default-shaped pid file path like
+     * /tmp/zealphp/zealphp_8080.pid. Returns 0 when the caller passed a
+     * --pid-file override that doesn't match the convention.
+     */
+    private static function extractPortFromPidFile(string $pidFile): int
+    {
+        if (preg_match('/zealphp_(\d+)\.pid$/', $pidFile, $m) === 1) {
+            return (int)$m[1];
+        }
+        return 0;
+    }
+
+    /**
+     * Returns the PID listening on $port, or null when nothing's listening
+     * or it can't be determined (non-Linux, /proc unreadable). Linux-only:
+     * /proc/net/tcp + tcp6 give the LISTEN-state socket inode; /proc/[pid]/fd/*
+     * resolves inode → owner pid. We deliberately avoid stream_socket_server /
+     * socket_bind here — those are intercepted by OpenSwoole's runtime hook
+     * (HOOK_ALL) and become coroutine-only, which would crash this CLI path.
+     */
+    private static function findPortOwnerPid(int $port): ?int
+    {
+        if ($port <= 0 || !is_readable('/proc/net/tcp')) {
+            return null;
+        }
+        $hexPort = strtoupper(str_pad(dechex($port), 4, '0', STR_PAD_LEFT));
+        $inode   = null;
+        foreach (['/proc/net/tcp', '/proc/net/tcp6'] as $tcpFile) {
+            $lines = @file($tcpFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if ($lines === false) {
+                continue;
+            }
+            foreach ($lines as $line) {
+                $parts = preg_split('/\s+/', trim((string)$line));
+                if (!is_array($parts) || count($parts) < 10) {
+                    continue;
+                }
+                if ($parts[3] !== '0A') {    // 0A = TCP_LISTEN
+                    continue;
+                }
+                if (!str_ends_with($parts[1], ':' . $hexPort)) {
+                    continue;
+                }
+                $candidate = $parts[9];
+                if ($candidate !== '' && $candidate !== '0') {
+                    $inode = $candidate;
+                    break 2;
+                }
+            }
+        }
+        if ($inode === null) {
+            return null;
+        }
+        $target = "socket:[{$inode}]";
+        $fds    = glob('/proc/[0-9]*/fd/*') ?: [];
+        foreach ($fds as $fd) {
+            if (@readlink($fd) !== $target) {
+                continue;
+            }
+            if (preg_match('#^/proc/(\d+)/#', $fd, $m) === 1) {
+                return (int)$m[1];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * True when /proc/$pid/cmdline looks like a ZealPHP daemon: argv[0] is
+     * a real php binary (php, php8.3, etc.) AND the args reference app.php.
+     * Used to gate kill operations so a recycled PID belonging to an
+     * unrelated process is never targeted.
+     *
+     * The stricter argv[0] check matters because bash wrappers that spawn
+     * `php app.php …` as a child carry "app.php" in their own cmdline — a
+     * naive substring match falsely identifies them as ZealPHP daemons and
+     * would happily kill them.
+     *
+     * Non-Linux returns true (be permissive — caller still has posix_kill).
+     */
+    private static function processIsZealphp(int $pid): bool
+    {
+        $cmdlinePath = "/proc/{$pid}/cmdline";
+        if (!is_readable($cmdlinePath)) {
+            return true;
+        }
+        $raw = @file_get_contents($cmdlinePath);
+        if ($raw === false || $raw === '') {
+            return false;
+        }
+        // strtok on non-empty input always returns non-empty-string here
+        // (we checked $raw !== '' above), so no false-return branch needed.
+        $argv0 = strtok($raw, "\0");
+        // Match `php`, `php8`, `php8.3` but not `php-fpm`, `php-cgi`,
+        // `phpunit`, `phpstan`, etc.
+        if (preg_match('/^php(\d|\.|$)/', basename($argv0)) !== 1) {
+            return false;
+        }
+        return strpos(str_replace("\0", ' ', $raw), 'app.php') !== false;
+    }
+
+    /**
+     * Recover from an orphaned-daemon situation: pid file missing or stale
+     * but the port is still held. If the listener is a ZealPHP process,
+     * graceful-then-force kill it. Returns true when an orphan was
+     * cleaned up, false when there's nothing to do (port free, or held by
+     * something that isn't ours).
+     *
+     * Orphan recovery is rare and notable, so messages always print even
+     * when called from a "quiet" code path (cliStop during restart) —
+     * silent recovery hides the fact that the system was in a degraded
+     * state that needed self-healing.
+     */
+    private static function claimOrphanIfAny(int $port): bool
+    {
+        // findPortOwnerPid returns null in three indistinguishable cases:
+        // port free, /proc unreadable, or LISTEN socket owner not in
+        // /proc/*/fd. All three mean "no orphan to clean up."
+        $ownerPid = self::findPortOwnerPid($port);
+        if ($ownerPid === null) {
+            return false;
+        }
+        if (!self::processIsZealphp($ownerPid)) {
+            echo "Port {$port} is held by pid {$ownerPid} (not a ZealPHP process) — refusing to touch it.\n";
+            return false;
+        }
+        echo "Found orphaned ZealPHP daemon on port {$port} (pid {$ownerPid}, no PID file) — cleaning up.\n";
+        $pgid      = @posix_getpgid($ownerPid);
+        $killGroup = $pgid && $pgid !== posix_getpgid(posix_getpid());
+        $killGroup ? posix_kill(-$pgid, SIGTERM) : posix_kill($ownerPid, SIGTERM);
+        for ($i = 0; $i < 100; $i++) {      // up to 10s
+            usleep(100000);
+            if (!@posix_kill($ownerPid, 0)) {
+                echo "Orphan cleaned up.\n";
+                return true;
+            }
+        }
+        echo "Orphan ignored graceful SIGTERM — force killing.\n";
+        $killGroup ? posix_kill(-$pgid, SIGKILL) : posix_kill($ownerPid, SIGKILL);
+        usleep(200000);
+        return true;
+    }
+
     private static function cliStop(string $pidFile, bool $quiet = false): void
     {
         $say = function (string $msg) use ($quiet): void {
@@ -2387,13 +2667,24 @@ class App
         };
 
         if (!file_exists($pidFile)) {
+            // Pid file gone but the port might still be held by an orphaned
+            // daemon. Auto-recover instead of silently passing through; the
+            // alternative is the next start/restart binding the port and
+            // failing without ever telling the user why.
+            $port = self::extractPortFromPidFile($pidFile);
+            if (self::claimOrphanIfAny($port)) {
+                return;
+            }
             $say("ZealPHP is not running (no PID file: {$pidFile})\n");
             return;
         }
         $pid = (int)trim((string)file_get_contents($pidFile));
-        if ($pid <= 0 || !@posix_kill($pid, 0)) {
+        if ($pid <= 0 || !@posix_kill($pid, 0) || !self::processIsZealphp($pid)) {
             $say("ZealPHP is not running (stale PID file)\n");
             @unlink($pidFile);
+            // Stale pid file gone, but an orphan listener may still be there.
+            $port = self::extractPortFromPidFile($pidFile);
+            self::claimOrphanIfAny($port);
             return;
         }
         $pgid = @posix_getpgid($pid);
@@ -2435,7 +2726,11 @@ class App
         $running = [];
         foreach ($pidFiles as $f) {
             $pid = (int)trim((string)file_get_contents($f));
-            if ($pid > 0 && @posix_kill($pid, 0)) {
+            // Pids get recycled — a bare posix_kill check will report a long-
+            // dead ZealPHP daemon as "running" if its PID was reused by an
+            // unrelated process. processIsZealphp() reads /proc/$pid/cmdline
+            // to confirm the listener is actually ours.
+            if ($pid > 0 && @posix_kill($pid, 0) && self::processIsZealphp($pid)) {
                 $port = preg_match('/zealphp_(\d+)\.pid$/', $f, $m) ? $m[1] : '?';
                 $running[] = ['file' => $f, 'pid' => $pid, 'port' => $port];
             } else {
@@ -2481,7 +2776,9 @@ class App
         $found = 0;
         foreach ($pidFiles as $pidFile) {
             $pid = (int)trim((string)file_get_contents($pidFile));
-            if ($pid <= 0 || !@posix_kill($pid, 0)) {
+            // Pid liveness + cmdline check: posix_kill(0) only tells us the
+            // PID exists, not that it's ours — recycled PIDs would lie.
+            if ($pid <= 0 || !@posix_kill($pid, 0) || !self::processIsZealphp($pid)) {
                 @unlink($pidFile);
                 continue;
             }
@@ -2507,7 +2804,8 @@ class App
             exit(1);
         }
         $pid = (int)trim((string)file_get_contents($pidFile));
-        if ($pid <= 0 || !@posix_kill($pid, 0)) {
+        // Cmdline verification guards against PID recycling (see cliStatus).
+        if ($pid <= 0 || !@posix_kill($pid, 0) || !self::processIsZealphp($pid)) {
             echo "ZealPHP is not running (stale PID file)\n";
             @unlink($pidFile);
             exit(1);
@@ -2677,10 +2975,32 @@ HELP;
             $settings = array_merge($settings ?? [], $cliOverrides);
         }
 
-        App::$coproc_implicit_request_handler = App::$superglobals;
-        if(!App::$superglobals){
-            co::set(['hook_flags'=> \OpenSwoole\Runtime::HOOK_ALL]);
-            \OpenSwoole\Runtime::enableCoroutine(\OpenSwoole\Runtime::HOOK_ALL);
+        // Resolve the three lifecycle knobs through their fluent setters.
+        // Each defaults to "follow App::$superglobals" (null backing → the
+        // historical pairing), so callers that never touch the new
+        // App::processIsolation() / App::enableCoroutine() / App::hookAll()
+        // methods see exactly today's behaviour. Callers that want the
+        // "Symfony mixed-mode" combo (superglobals=true + processIsolation=
+        // false + enable_coroutine=false + hook_all=0) set the knobs
+        // independently before App::run().
+        App::$coproc_implicit_request_handler = App::processIsolation();
+        $hookFlags = App::hookAll();
+        $enableCoroutine = App::enableCoroutine();
+
+        // Surface combinations that are syntactically allowed but race
+        // process-wide superglobals against concurrent coroutines / hooked
+        // I/O. We warn rather than refuse — see App::hookAll() docblock.
+        self::validateLifecycleCombination(App::$superglobals, $hookFlags, $enableCoroutine);
+
+        if ($hookFlags !== 0) {
+            co::set(['hook_flags' => $hookFlags]);
+            // Two-arg form (enable, flags). Single-arg with an int as $enable
+            // also works at runtime — PHP truthiness coerces non-zero int to
+            // true and OpenSwoole's C side reads the int as the flag bitmask
+            // — but the IDE stub declares the first arg as strict bool, so
+            // PHPStan flags it. Two-arg form is the canonical OpenSwoole API
+            // and matches every stub version.
+            \OpenSwoole\Runtime::enableCoroutine(true, $hookFlags);
         }
         // Use the same path resolution as the stop/status CLI commands so that
         // `php app.php stop` finds the PID file the server just wrote. Without
@@ -2704,7 +3024,7 @@ HELP;
             'static_handler_locations' => self::$static_handler_locations !== []
                 ? self::$static_handler_locations
                 : ['/css/', '/js/', '/img/', '/images/', '/fonts/', '/assets/', '/static/', '/favicon.ico', '/robots.txt'],
-            'enable_coroutine' =>  !self::$superglobals,
+            'enable_coroutine' => $enableCoroutine,
             // Runtime compression is owned by OpenSwoole. Do not also register
             // CompressionMiddleware unless this setting is disabled.
             'http_compression' => true,
@@ -2734,20 +3054,32 @@ HELP;
         $pidFile = (string)($settings['pid_file'] ?? $default_settings['pid_file']);
         if (file_exists($pidFile)) {
             $existingPid = (int)trim((string)file_get_contents($pidFile));
-            if ($existingPid > 0 && @posix_kill($existingPid, 0)) {
+            // processIsZealphp() guards against recycled PIDs falsely
+            // reporting "already running" when the original daemon is gone.
+            if ($existingPid > 0 && @posix_kill($existingPid, 0) && self::processIsZealphp($existingPid)) {
                 echo "ZealPHP is already running (pid {$existingPid}, port {$this->port})\n";
                 echo "Use 'php app.php stop' to stop, or 'php app.php restart' to restart\n";
                 exit(0);
             }
             @unlink($pidFile);
         }
+        // Catch the orphan case the pid-file check above can't see: pid file
+        // missing or stale, but a previous daemon is still bound to the port.
+        // Without this, OpenSwoole's bind would fail silently and the user
+        // would see "could not confirm" with no actionable explanation.
+        self::claimOrphanIfAny($this->port);
 
         self::$server = $server = new \OpenSwoole\WebSocket\Server($this->host, $this->port);
         if ($settings == null){
             $effective_settings = $default_settings;
         } else {
             $effective_settings = array_merge($default_settings, $settings);
-            $effective_settings['enable_coroutine'] = !self::$superglobals;
+            // Re-assert the resolved enable_coroutine value AFTER user
+            // settings merge — otherwise a stray `enable_coroutine` key in
+            // the user-passed settings array would silently override the
+            // App::enableCoroutine() decision and the lifecycle warnings
+            // would be a lie.
+            $effective_settings['enable_coroutine'] = $enableCoroutine;
         }
         $server->set($effective_settings);
 

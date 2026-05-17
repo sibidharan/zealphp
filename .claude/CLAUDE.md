@@ -128,6 +128,34 @@ That architectural reality is why configuration is exposed as **static methods o
 
 **API convention — fluent getter/setter methods.** Configurable options follow the `App::superglobals()` precedent: a no-arg call returns the current value; a one-arg call sets it. Backing static properties stay public for BC (existing `App::$ignore_php_ext = false` style code keeps working), but the documented API and the website's example code use the method form throughout. The AI config converter agent also emits the method form. Don't add instance-method shims that delegate to static — the static surface matches the process-singleton reality.
 
+### Lifecycle modes — `superglobals` × `processIsolation` × `enableCoroutine` × `hookAll`
+
+Historically `App::superglobals()` bundled four decisions into one flag. As of v0.2.23, each is exposed as its own fluent setter so users can mix-and-match for their workload. Each new knob defaults to `null` and resolves to "follow `App::$superglobals`" at `App::run()` time — apps that don't touch them see no behaviour change.
+
+| Knob | Setter | `null` resolves to | What it controls |
+|------|--------|--------------------|------------------|
+| `App::$superglobals` | `App::superglobals(bool)` | — (no default) | `$g` storage strategy: process-wide PHP superglobals (true) vs per-coroutine `RequestContext` (false). Also picks `SessionManager` (true) vs `CoSessionManager` (false). |
+| `App::$process_isolation` | `App::processIsolation(bool)` | `$superglobals` | `App::include()` dispatch: true → `cgi_worker.php` subprocess per file (Apache mod_php-style isolation, ~30-50 ms `proc_open` cost); false → in-process via `executeFile()` |
+| `App::$enable_coroutine_override` | `App::enableCoroutine(bool)` | `!$superglobals` | OpenSwoole's `enable_coroutine` server setting — auto-coroutine-per-request wrapper. false → workers handle one request at a time synchronously |
+| `App::$hook_all_override` | `App::hookAll(bool\|int)` | `!$superglobals` (HOOK_ALL or 0) | `OpenSwoole\Runtime::enableCoroutine($flags)` — process-wide PHP I/O hooks (curl, fopen, mysqli). PDO is **not** hooked in OpenSwoole 22.1 / 26.2 regardless |
+
+**Supported mode matrix:**
+
+| Mode | `superglobals` | `processIsolation` | `enableCoroutine` | `hookAll` | When to use |
+|------|---------------|---------------------|--------------------|-----------|-------------|
+| **Legacy CGI** (`superglobals(true)` default) | true | true | false | 0 | Unmodified WordPress / Drupal — `define()`-heavy plugins need fresh process per request |
+| **Coroutine** (`superglobals(false)` default) | false | false | true | HOOK_ALL | Modern apps benefiting from concurrent coroutine I/O; OpenSwoole-native code |
+| **Mixed-mode / Symfony** | true | **false** | false | 0 | Symfony / Laravel on ZealPHP — real `$_SESSION` needed, but no per-include CGI fork cost. Sequential request handling per worker → no race risk on superglobals |
+| **In-process + sync** | true | false | false | 0 | Same shape as Mixed-mode — the "scheduler off, no CGI" combo |
+| **Coroutine without HOOK_ALL** | false | false | true | 0 | Per-request coroutine isolation but no auto I/O hooks (e.g. testing, custom hooks) |
+
+**Unsafe combinations** — `App::run()` emits a `[lifecycle]` warning to the debug log but does not refuse:
+
+- `superglobals(true) + enableCoroutine(true)` — process-wide `$_GET`/`$_POST`/`$_SESSION` arrays will race across concurrent coroutines (this is exactly the bug per-coroutine `$g` was designed to avoid).
+- `superglobals(true) + hookAll(non-zero)` — hooked I/O can yield mid-request, exposing process-wide superglobal mutations to other coroutines.
+
+The default coupling — `null` everywhere — preserves the historical behaviour for any app that doesn't touch these knobs. The [zealphp-symfony](https://github.com/sibidharan/zealphp-symfony) bridge uses `superglobals(true) + processIsolation(false) + sessionLifecycle(false)` to get the Mixed-mode lifecycle.
+
 ### uopz Function Overrides
 
 At startup (`src/App.php:__construct()`), `uopz_set_return()` permanently replaces PHP built-ins:

@@ -361,4 +361,115 @@ class AppConfigurablesTest extends TestCase
     {
         $this->assertNull(App::tryInclude('/nope/also-missing.php'));
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // processIsolation() — null backing follows $superglobals
+    // ─────────────────────────────────────────────────────────────
+
+    private function resetLifecycleOverrides(): void
+    {
+        App::$process_isolation = null;
+        App::$enable_coroutine_override = null;
+        App::$hook_all_override = null;
+    }
+
+    public function testProcessIsolationFollowsSuperglobalsByDefault(): void
+    {
+        $this->resetLifecycleOverrides();
+        // setUpBeforeClass set superglobals=false → default is in-process.
+        $this->assertFalse(App::processIsolation());
+        // Flip superglobals (briefly) and verify the default tracks it.
+        App::superglobals(true);
+        $this->assertTrue(App::processIsolation());
+        App::superglobals(false);
+    }
+
+    public function testProcessIsolationExplicitOverrideWins(): void
+    {
+        $this->resetLifecycleOverrides();
+        App::superglobals(true);
+        // True default for superglobals=true; explicit false beats default.
+        App::processIsolation(false);
+        $this->assertFalse(App::processIsolation());
+        // null restores default coupling.
+        App::processIsolation(null);
+        $this->assertTrue(App::processIsolation());
+        App::superglobals(false);
+        $this->resetLifecycleOverrides();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // enableCoroutine() — null backing follows !$superglobals
+    // ─────────────────────────────────────────────────────────────
+
+    public function testEnableCoroutineFollowsSuperglobalsInverseByDefault(): void
+    {
+        $this->resetLifecycleOverrides();
+        // superglobals=false → enable_coroutine=true by default.
+        $this->assertTrue(App::enableCoroutine());
+        App::superglobals(true);
+        $this->assertFalse(App::enableCoroutine());
+        App::superglobals(false);
+    }
+
+    public function testEnableCoroutineExplicitOverride(): void
+    {
+        $this->resetLifecycleOverrides();
+        App::enableCoroutine(false);
+        $this->assertFalse(App::enableCoroutine());
+        App::enableCoroutine(true);
+        $this->assertTrue(App::enableCoroutine());
+        App::enableCoroutine(null);
+        // After null, follows default again — superglobals=false → true.
+        $this->assertTrue(App::enableCoroutine());
+        $this->resetLifecycleOverrides();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // hookAll() — bool|int|null backing, returns int bitmask
+    // ─────────────────────────────────────────────────────────────
+
+    public function testHookAllFollowsSuperglobalsByDefault(): void
+    {
+        $this->resetLifecycleOverrides();
+        // superglobals=false → HOOK_ALL.
+        $this->assertSame(\OpenSwoole\Runtime::HOOK_ALL, App::hookAll());
+        App::superglobals(true);
+        $this->assertSame(0, App::hookAll());
+        App::superglobals(false);
+    }
+
+    public function testHookAllAcceptsBoolAndIntOverrides(): void
+    {
+        $this->resetLifecycleOverrides();
+        $this->assertSame(0, App::hookAll(false));
+        $this->assertSame(\OpenSwoole\Runtime::HOOK_ALL, App::hookAll(true));
+        // Explicit int bitmask — caller could pass HOOK_TCP | HOOK_FILE etc.
+        $partial = \OpenSwoole\Runtime::HOOK_TCP;
+        $this->assertSame($partial, App::hookAll($partial));
+        App::hookAll(null);
+        // After null, default coupling returns again.
+        $this->assertSame(\OpenSwoole\Runtime::HOOK_ALL, App::hookAll());
+        $this->resetLifecycleOverrides();
+    }
+
+    public function testThreeLifecycleSettersAreIndependent(): void
+    {
+        // The whole point of the new API: each knob can be set independently
+        // of $superglobals (which used to bundle all three).
+        $this->resetLifecycleOverrides();
+        App::superglobals(true);          // legacy mode
+        App::processIsolation(false);     // but skip CGI fork
+        App::enableCoroutine(false);      // and stay synchronous
+        App::hookAll(false);              // and no hooks
+
+        // This is the "Symfony mixed-mode" combination.
+        $this->assertTrue(App::$superglobals);
+        $this->assertFalse(App::processIsolation());
+        $this->assertFalse(App::enableCoroutine());
+        $this->assertSame(0, App::hookAll());
+
+        App::superglobals(false);
+        $this->resetLifecycleOverrides();
+    }
 }

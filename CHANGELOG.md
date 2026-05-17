@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.23] - 2026-05-17
+
+Decouples the four lifecycle decisions that `App::superglobals()` used to bundle into one call. Each is now its own fluent setter, and they default to `null` which resolves to "follow `App::$superglobals`" — so apps that don't touch the new knobs see no behaviour change. Enables the **Mixed-mode / Symfony lifecycle** (`superglobals(true) + processIsolation(false)`): real `$_SESSION` semantics for Symfony's `NativeSessionStorage`, but without the ~30-50 ms `proc_open` + PHP startup + autoloader cost of forking a CGI subprocess on every `App::include()` call.
+
+### Added
+
+- **`App::processIsolation(?bool)`** and backing `App::$process_isolation`. Controls whether `App::include()` dispatches each .php file through `cgi_worker.php` via `proc_open()` (Apache mod_php-style fresh process per file — required for unmodified WordPress / Drupal) or runs in-process via `executeFile()` (much faster, but every include shares the worker's PHP arena). Default `null` follows `App::$superglobals`.
+- **`App::enableCoroutine(?bool)`** and backing `App::$enable_coroutine_override`. Controls OpenSwoole's `enable_coroutine` server setting — whether each inbound HTTP request is auto-wrapped in its own coroutine. Default `null` follows `!App::$superglobals`. Setting `true` while `superglobals(true)` is **unsafe** (process-wide `$_GET`/`$_POST`/`$_SESSION` race across concurrent coroutines); `App::run()` emits a `[lifecycle]` warning.
+- **`App::hookAll(bool|int|null)`** and backing `App::$hook_all_override`. Controls `OpenSwoole\Runtime::enableCoroutine($flags)` — process-wide PHP I/O hooks (curl, fopen, mysqli). PDO is intentionally NOT hooked in OpenSwoole 22.1 / 26.2 regardless. Accepts `null` (follow `!$superglobals`), `true` (HOOK_ALL), `false` (0), or an explicit int bitmask. Setting non-zero in `superglobals(true)` mode is unsafe and warned.
+- **`App::validateLifecycleCombination()`** internal helper — emits `[lifecycle]` warnings to the debug log for unsafe combinations rather than refusing them (users may have niche reasons).
+- **Lifecycle mode matrix** in `.claude/CLAUDE.md` documents all six supported combinations: Legacy CGI / Coroutine / Mixed-mode / In-process+sync / Coroutine-no-HOOK_ALL / weird-CGI+coroutine.
+
+### Changed
+
+- `App::run()` resolves the four lifecycle decisions through the new setters instead of hard-coding `App::$superglobals` at three sites ([src/App.php:2841-2845, 2868, 2918](src/App.php#L2841-L2918)). User-passed `enable_coroutine` in `$app->run($settings)` is now re-asserted after settings merge with a comment explaining why (otherwise stray user values silently override the App::enableCoroutine() decision and the lifecycle warnings would be a lie).
+- Internal `OpenSwoole\Runtime::enableCoroutine($flags)` call now uses the canonical two-arg form `enableCoroutine(true, $flags)` so PHPStan level 10 accepts it against the IDE stub's `bool` first-arg declaration.
+
+### Backwards compatibility
+
+- 100% — every existing app that doesn't touch the new knobs sees identical behaviour. PHPUnit: 321 unit + 146 integration tests pass. PHPStan level 10: clean.
+
 ## [0.2.22] - 2026-05-17
 
 A focused session-interop release. Two coupled bugs were preventing frameworks that drive sessions through PHP's native `session_*()` API (Symfony, Laravel, vanilla PHP) from working under ZealPHP's superglobals mode — silent data loss on every `session_write_close()`, plus a competing `PHPSESSID` cookie from ZealPHP's own SessionManager that would invalidate the framework's cookie.
