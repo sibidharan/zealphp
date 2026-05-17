@@ -13,7 +13,14 @@ function php_session_decode_to_array(string $data): array
 {
     $decoded = @unserialize($data, ['allowed_classes' => true]);
     if (is_array($decoded)) {
-        return $decoded;
+        /** @var array<string, mixed> $narrowed */
+        $narrowed = [];
+        foreach ($decoded as $k => $v) {
+            if (is_string($k)) {
+                $narrowed[$k] = $v;
+            }
+        }
+        return $narrowed;
     }
     $result = [];
     $offset = 0;
@@ -98,7 +105,7 @@ function zeal_session_start(): bool
 
     if ($handler instanceof \SessionHandlerInterface) {
         /** @var string $sessionName */
-        $sessionName = $g->session_params['name'] ?? 'PHPSESSID';
+        $sessionName = $g->session_params['name'];
         $handler->open($save_path, (string) $sessionName);
         $contents = $handler->read((string) $session_id);
         if (is_string($contents) && $contents !== '') {
