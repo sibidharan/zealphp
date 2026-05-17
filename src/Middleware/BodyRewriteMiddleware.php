@@ -97,8 +97,17 @@ class BodyRewriteMiddleware implements MiddlewareInterface
             return $response;
         }
 
+        // Construct Stream directly rather than via Stream::streamFor() — the
+        // vendor helper has no declared return type and falls through to void
+        // for non-scalar inputs, which trips PHPStan at level 10.
+        $stream = fopen('php://memory', 'r+');
+        if ($stream === false) {
+            return $response; // can't rewrite without a stream
+        }
+        fwrite($stream, $newBody);
+        fseek($stream, 0);
         return $response
-            ->withBody(Stream::streamFor($newBody))
+            ->withBody(new Stream($stream))
             ->withHeader('Content-Length', (string)strlen($newBody));
     }
 

@@ -95,7 +95,9 @@ class HeaderMiddleware implements MiddlewareInterface
                     // OpenSwoole's header() replaces by default — explicitly
                     // disable replace so multiple Set-Cookie / Link entries
                     // accumulate (mod_headers `Header add` semantics).
-                    $resp->header($name, $v, false);
+                    // The ZealPHP\HTTP\Response wrapper only exposes a 2-arg
+                    // header(), so bypass it via ->parent for the 3-arg form.
+                    $resp->parent->header($name, $v, false);
                 }
             }
         }

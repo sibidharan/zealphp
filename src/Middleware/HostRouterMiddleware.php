@@ -48,7 +48,10 @@ class HostRouterMiddleware implements MiddlewareInterface
     private array $wildcards;
 
     /**
-     * @param array<string, callable> $hosts host => callable, plus optional '*' catch-all
+     * @param array<string, mixed> $hosts host => callable, plus optional '*' catch-all.
+     *                                    Marked mixed at the type-level because PHP
+     *                                    can't enforce callable inside an array;
+     *                                    each handler is validated at runtime.
      */
     public function __construct(array $hosts)
     {
@@ -124,6 +127,13 @@ class HostRouterMiddleware implements MiddlewareInterface
                 ['Content-Type' => 'application/json']
             );
         }
-        return new Response((string)$result, 200, '', ['Content-Type' => 'text/html']);
+        // Remaining: null | string | scalar (bool, float). Cast safely.
+        if ($result === null) {
+            return new Response('', 200);
+        }
+        if (is_scalar($result)) {
+            return new Response((string)$result, 200, '', ['Content-Type' => 'text/html']);
+        }
+        return new Response('', 200);
     }
 }

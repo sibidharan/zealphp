@@ -122,7 +122,8 @@ class RateLimitMiddleware implements MiddlewareInterface
             return $ip;
         }
         $params = $request->getServerParams();
-        return (string)($params['REMOTE_ADDR'] ?? '');
+        $remote = $params['REMOTE_ADDR'] ?? '';
+        return is_scalar($remote) ? (string)$remote : '';
     }
 
     private function isLoopback(string $ip): bool

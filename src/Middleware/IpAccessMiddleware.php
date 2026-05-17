@@ -94,7 +94,8 @@ class IpAccessMiddleware implements MiddlewareInterface
         // Fallback for PSR-7 test contexts where REMOTE_ADDR isn't populated
         // on $g — read off the ServerRequest's server params.
         $params = $request->getServerParams();
-        return (string)($params['REMOTE_ADDR'] ?? '');
+        $remote = $params['REMOTE_ADDR'] ?? '';
+        return is_scalar($remote) ? (string)$remote : '';
     }
 
     /**

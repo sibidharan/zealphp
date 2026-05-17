@@ -682,7 +682,9 @@ class App
                 }
             }
             // Every hop is trusted — fall back to the first (originator) entry.
-            $first = $chain[0] ?? '';
+            // $chain is guaranteed non-empty here: $forwarded !== '' and explode
+            // always yields at least one element, so [0] is always defined.
+            $first = $chain[0];
             return $first !== '' ? $first : $remote;
         }
 
@@ -939,7 +941,7 @@ class App
             case 'header_out':
                 $name = (string)($token['arg'] ?? '');
                 if ($name === '' || $g->zealphp_response === null) return '-';
-                foreach (($g->zealphp_response->headersList ?? []) as [$k, $v]) {
+                foreach ($g->zealphp_response->headersList as [$k, $v]) {
                     if (strcasecmp((string)$k, $name) === 0) {
                         return (string)$v;
                     }
@@ -1547,7 +1549,14 @@ class App
         if ($result instanceof \Generator) {
             $buf = '';
             foreach ($result as $chunk) {
-                $buf .= (string)$chunk;
+                if (is_string($chunk)) {
+                    $buf .= $chunk;
+                } elseif (is_scalar($chunk) || $chunk === null) {
+                    $buf .= (string)$chunk;
+                } elseif (is_object($chunk) && method_exists($chunk, '__toString')) {
+                    $buf .= (string)$chunk;
+                }
+                // else: skip non-stringifiable yields (array/object without __toString)
             }
             return $buf;
         }
@@ -1702,9 +1711,11 @@ class App
      * route was handled inline (response already emitted), or false to
      * indicate the directory has no servable index.
      *
-     * @return \Generator<mixed>|int|null|false
+     * @return mixed Generator|int|string|array|object|Closure|null|false — whatever
+     *               App::include() returns for .php indexes, false when no index
+     *               matched, null when a slash-redirect or sendFile was emitted.
      */
-    public function serveDirectory(string $relDir, string $urlPrefix)
+    public function serveDirectory(string $relDir, string $urlPrefix): mixed
     {
         $g = RequestContext::instance();
 
@@ -2921,14 +2932,15 @@ HELP;
 
             if ($srv['REQUEST_METHOD'] === 'POST' && isset($srv['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
                 $override = $srv['HTTP_X_HTTP_METHOD_OVERRIDE'];
-                $srv['REQUEST_METHOD'] = is_scalar($override) ? $override : null;
+                $srv['REQUEST_METHOD'] = is_scalar($override) ? (string)$override : null;
             }
             // Apache HostnameLookups: populate REMOTE_HOST via reverse DNS when
             // explicitly enabled. WARNING — blocking call (OpenSwoole's coroutine
             // hook converts gethostbyaddr() to non-blocking, but it's still a
             // measurable per-request cost). Off by default since Apache 1.3.
             if (App::$hostname_lookups && isset($srv['REMOTE_ADDR'])) {
-                $remote = (string)$srv['REMOTE_ADDR'];
+                $remoteRaw = $srv['REMOTE_ADDR'];
+                $remote = is_scalar($remoteRaw) ? (string)$remoteRaw : '';
                 if ($remote !== '') {
                     $host = @gethostbyaddr($remote);
                     if ($host !== false && $host !== $remote) {
