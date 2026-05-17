@@ -4,6 +4,58 @@ namespace ZealPHP\Session;
 use ZealPHP\RequestContext;
 
 /**
+ * Decode PHP 'php' session serialize format (key|serialized_value;key|...).
+ * Falls back to unserialize() for php_serialize handler format.
+ *
+ * SECURITY: both unserialize() calls pass allowed_classes => false to keep
+ * the object-injection hardening that commit c43da63 introduced. Sessions
+ * are user-controlled storage (tampered cookie, compromised Redis); allowing
+ * arbitrary class instantiation here would let an attacker trigger
+ * __wakeup() / __destruct() gadgets in any class in the autoload graph.
+ * If a future caller genuinely needs to round-trip objects through sessions,
+ * that's a separate feature with an explicit class whitelist, not a global flip.
+ *
+ * @return array<string, mixed>
+ */
+function php_session_decode_to_array(string $data): array
+{
+    $decoded = @unserialize($data, ['allowed_classes' => false]);
+    if (is_array($decoded)) {
+        /** @var array<string, mixed> $narrowed */
+        $narrowed = [];
+        foreach ($decoded as $k => $v) {
+            if (is_string($k)) {
+                $narrowed[$k] = $v;
+            }
+        }
+        return $narrowed;
+    }
+    $result = [];
+    $offset = 0;
+    $len = strlen($data);
+    while ($offset < $len) {
+        $pipe = strpos($data, '|', $offset);
+        if ($pipe === false) break;
+        $key = substr($data, $offset, $pipe - $offset);
+        $offset = $pipe + 1;
+        $value = @unserialize(substr($data, $offset), ['allowed_classes' => false]);
+        if ($value === false && substr($data, $offset, 4) !== 'b:0;') {
+            $next = strpos($data, ';', $offset);
+            if ($next !== false) {
+                $offset = $next + 1;
+            } else {
+                break;
+            }
+        } else {
+            $serialized = serialize($value);
+            $offset += strlen($serialized);
+            $result[$key] = $value;
+        }
+    }
+    return $result;
+}
+
+/**
  * Start a new session or resume existing one
  */
 function zeal_session_start(): bool
@@ -41,36 +93,38 @@ function zeal_session_start(): bool
     static $verified_paths = [];
     $rawSavePath = $g->session_params['save_path'];
     $save_path = is_string($rawSavePath) ? $rawSavePath : '';
-    if (!isset($verified_paths[$save_path])) {
-        if (!is_dir($save_path)) {
-            mkdir($save_path, 0700, true);
+
+    $handler = $g->session_params['handler'] ?? null;
+
+    if (!($handler instanceof \SessionHandlerInterface)) {
+        if (!isset($verified_paths[$save_path])) {
+            if (!is_dir($save_path)) {
+                mkdir($save_path, 0700, true);
+            }
+            $verified_paths[$save_path] = true;
         }
-        $verified_paths[$save_path] = true;
     }
 
     // Get session ID from cookie or generate a new one
     $session_id = zeal_session_id();
 
-    // Read session data from file. Defensive against three failure modes that
-    // would otherwise crash the worker (TypeError: cannot assign false to
-    // typed array property):
-    //   1. Empty file — unserialize('') returns false
-    //   2. Corrupted / truncated file (interrupted write) — unserialize returns false
-    //   3. TOCTOU race: file_exists returned true but file_get_contents fails
-    // All three reduce to "treat as no session data" rather than crashing.
     /** @var array<string, mixed> $session_data */
     $session_data = [];
-    $session_file = $save_path . '/sess_' . $session_id;
-    if (file_exists($session_file)) {
-        $contents = @file_get_contents($session_file);
+
+    if ($handler instanceof \SessionHandlerInterface) {
+        /** @var string $sessionName */
+        $sessionName = $g->session_params['name'];
+        $handler->open($save_path, (string) $sessionName);
+        $contents = $handler->read((string) $session_id);
         if (is_string($contents) && $contents !== '') {
-            $decoded = @unserialize($contents, ['allowed_classes' => false]);
-            if (is_array($decoded)) {
-                foreach ($decoded as $k => $v) {
-                    if (is_string($k)) {
-                        $session_data[$k] = $v;
-                    }
-                }
+            $session_data = php_session_decode_to_array($contents);
+        }
+    } else {
+        $session_file = $save_path . '/sess_' . $session_id;
+        if (file_exists($session_file)) {
+            $contents = @file_get_contents($session_file);
+            if (is_string($contents) && $contents !== '') {
+                $session_data = php_session_decode_to_array($contents);
             }
         }
     }
@@ -80,6 +134,7 @@ function zeal_session_start(): bool
     // $_SESSION would never round-trip through $g->session. Mirror to both:
     // $_SESSION is what user/Symfony code reads/writes, $g->session is what
     // coroutine-mode code reads/writes via the typed property.
+    /** @var array<string, mixed> $session_data */
     $g->session = $session_data;
     if (\ZealPHP\App::$superglobals) {
         $GLOBALS['_SESSION'] = $session_data;
@@ -302,18 +357,27 @@ function zeal_session_get_cookie_params(): array
 }
 
 /**
- * Set session cookie parameters
+ * Set session cookie parameters. Accepts either positional args (PHP < 8.0)
+ * or an options array (PHP 8.0+).
  *
- * @param int    $lifetime
+ * @param int|array<string, mixed> $lifetime_or_options
  * @param string $path
  * @param string $domain
  * @param bool   $secure
  * @param bool   $httponly
  */
-function zeal_session_set_cookie_params($lifetime, $path = '/', $domain = '', $secure = false, $httponly = false): void
+function zeal_session_set_cookie_params($lifetime_or_options, $path = '/', $domain = '', $secure = false, $httponly = false): void
 {
     $g = RequestContext::instance();
-    $g->session_params['cookie_params'] = compact('lifetime', 'path', 'domain', 'secure', 'httponly');
+    if (is_array($lifetime_or_options)) {
+        $g->session_params['cookie_params'] = array_merge([
+            'lifetime' => 0, 'path' => '/', 'domain' => '',
+            'secure' => false, 'httponly' => false, 'samesite' => 'Lax',
+        ], $lifetime_or_options);
+    } else {
+        $g->session_params['cookie_params'] = compact('path', 'domain', 'secure', 'httponly');
+        $g->session_params['cookie_params']['lifetime'] = $lifetime_or_options;
+    }
 }
 
 /**

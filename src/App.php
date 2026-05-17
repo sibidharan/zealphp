@@ -1580,9 +1580,13 @@ class App
     private static function executeFile(string $absPath, array $args): mixed
     {
         ob_start();
+        $result = null;
         try {
+            $args['g'] = RequestContext::instance();
             extract($args, EXTR_SKIP);
             $result = include $absPath;
+        } catch (HaltException $e) {
+            // Clean halt (redirect, exit) — capture buffered output and return
         } catch (\Throwable $e) {
             @ob_end_clean();
             throw $e;
