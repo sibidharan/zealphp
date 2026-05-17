@@ -206,11 +206,11 @@ class FileExecutionContractTest extends TestCase
     // --- Status code coercion (Apache-parity: 100-599 valid, others → 500) ---
 
     /**
-     * IANA-registered codes that used to silently downgrade to 200 — now emit correctly.
-     * Codes chosen because they survive OpenSwoole's C-level status whitelist
-     * (425 Too Early and 451 Unavailable For Legal Reasons are silently rejected
-     * by OpenSwoole 22.1.5 even when REASON_PHRASES knows them — documented
-     * upstream limitation; see template/pages/responses.php#status-range).
+     * IANA-registered codes — all valid 100-599 statuses now emit correctly on
+     * the wire. OpenSwoole's one-arg `$response->status($code)` silently rejects
+     * codes missing from its native C list (notably 451 even on ext 26.x); the
+     * framework's App::emitStatus() helper threads the IANA reason phrase via
+     * the two-arg form to rescue them.
      */
     public function testStatusCode423EmitsAsLocked(): void
     {
@@ -222,6 +222,20 @@ class FileExecutionContractTest extends TestCase
     {
         $r = $this->get('/_contract/status/421');
         $this->assertSame(421, $r['status']);
+    }
+
+    public function testStatusCode451EmitsAsUnavailableForLegalReasons(): void
+    {
+        // 451 is the canonical "OpenSwoole native list missing" case — proves
+        // App::emitStatus() rescues codes that the one-arg status() rejects.
+        $r = $this->get('/_contract/status/451');
+        $this->assertSame(451, $r['status']);
+    }
+
+    public function testStatusCode431EmitsAsRequestHeaderFieldsTooLarge(): void
+    {
+        $r = $this->get('/_contract/status/431');
+        $this->assertSame(431, $r['status']);
     }
 
     public function testStatusCode511EmitsAsNetworkAuthRequired(): void
