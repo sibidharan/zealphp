@@ -396,3 +396,18 @@ code.demo-inline { background: var(--bg-alt); padding: .1rem .35rem; border-radi
 .ws-counter-status.open       { background: #d1fae5; color: #065f46; }
 .ws-counter-status.closed     { background: #fee2e2; color: #991b1b; }
 .ws-counter-status.err        { background: #fee2e2; color: #991b1b; }
+
+/* ---------- Inline protocol badges (in running prose) ---------- */
+.proto-badge { display: inline-block; padding: 0 .3rem; border-radius: 3px; font-size: .75rem; font-weight: 700; color: #fff; font-family: var(--font-mono); }
+.proto-badge.sse { background: #3b82f6; }
+.proto-badge.ws  { background: #a855f7; }
+
+/* ---------- Components-lesson render-methods preview table ---------- */
+.preview-table { width: 100%; border-collapse: collapse; margin: .75rem 0; font-size: .88rem; }
+.preview-table thead tr { border-bottom: 2px solid #e7e5e4; }
+.preview-table thead th { padding: .5rem; text-align: left; font-weight: 600; }
+.preview-table tbody tr { border-bottom: 1px solid #f5f5f4; }
+.preview-table tbody tr:last-child { border-bottom: 0; }
+.preview-table td { padding: .5rem; }
+
+.chat-h { margin-top: 0; }

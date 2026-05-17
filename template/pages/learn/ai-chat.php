@@ -113,7 +113,7 @@ data: {"done":true}</code></pre>
       <p>Logged in as <strong><?= htmlspecialchars($user['username']) ?></strong>.</p>
       <section class="chat">
         <div>
-          <h3 style="margin-top:0">Your notes</h3>
+          <h3 class="chat-h">Your notes</h3>
           <div id="notes-list" class="notes-list" hx-get="/api/learn/notes" hx-trigger="load" hx-swap="innerHTML">
             <p class="notes-empty">Loading…</p>
           </div>
@@ -144,7 +144,7 @@ data: {"done":true}</code></pre>
       <?php App::render('/components/_callout', [
         'variant' => 'success',
         'title'   => 'Watch the Event Log',
-        'body'    => '<p>Try: <em>"create a note titled shopping list"</em>. Watch the Event Log below the chat — you\'ll see <span style="background:#3b82f6;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.75rem;font-weight:700">SSE</span> events (tool_call, tool_done, notes_changed) stream in as the AI works. Then check the notes panel on the left — the new note appears with a green glow, pushed via <span style="background:#a855f7;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.75rem;font-weight:700">WS</span> broadcast. Open a second tab to see cross-tab sync.</p>',
+        'body'    => '<p>Try: <em>"create a note titled shopping list"</em>. Watch the Event Log below the chat — you\'ll see <span class="proto-badge sse">SSE</span> events (tool_call, tool_done, notes_changed) stream in as the AI works. Then check the notes panel on the left — the new note appears with a green glow, pushed via <span class="proto-badge ws">WS</span> broadcast. Open a second tab to see cross-tab sync.</p>',
       ]); ?>
     <?php endif; ?>
 
@@ -175,7 +175,7 @@ data: {"done":true}</code></pre>
       <li>A notes list on the left that updates the moment the AI calls <code>create_note</code> &mdash;
         because that tool hits <code>/api/learn/notes</code>, which broadcasts a WebSocket event,
         which every open tab listens for. (You'll wire that up in the next lesson.)</li>
-      <li>An event log that visualizes every <span style="background:#3b82f6;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.75rem;font-weight:700">SSE</span> and <span style="background:#a855f7;color:#fff;padding:0 .3rem;border-radius:3px;font-size:.75rem;font-weight:700">WS</span> message as it arrives.</li>
+      <li>An event log that visualizes every <span class="proto-badge sse">SSE</span> and <span class="proto-badge ws">WS</span> message as it arrives.</li>
     </ul>
     <p>
       The whole thing is &lt; 200 lines of PHP plus the Python agent script. No queue worker, no

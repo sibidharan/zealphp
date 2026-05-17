@@ -119,12 +119,12 @@ HTML]); ?>
     <?php App::render('/components/_deepdive', [
       'title' => 'Preview: two more render methods',
       'body'  => '<p>You\'ll learn these in later lessons, but you can preview them now:</p>
-<table style="width:100%;border-collapse:collapse;margin:.75rem 0;font-size:.88rem">
-  <thead><tr style="border-bottom:2px solid #e7e5e4;text-align:left"><th style="padding:.5rem">Method</th><th>Returns</th><th>Use when</th><th></th></tr></thead>
+<table class="preview-table">
+  <thead><tr><th>Method</th><th>Returns</th><th>Use when</th><th></th></tr></thead>
   <tbody>
-    <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.5rem"><code>render()</code></td><td>void (echoes)</td><td>Direct output — this lesson</td><td><a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open →</a></td></tr>
-    <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.5rem"><code>renderToString()</code></td><td>string</td><td>htmx fragments — <a href="/learn/notes">Lesson 8</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-to-string" target="_blank">Open →</a></td></tr>
-    <tr><td style="padding:.5rem"><code>renderStream()</code></td><td>Generator</td><td>SSR streaming — <a href="/learn/ai-chat">Lesson 9</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-stream" target="_blank">Open →</a></td></tr>
+    <tr><td><code>render()</code></td><td>void (echoes)</td><td>Direct output — this lesson</td><td><a class="lesson-chip" href="/api/learn/demo/render" target="_blank">Open →</a></td></tr>
+    <tr><td><code>renderToString()</code></td><td>string</td><td>htmx fragments — <a href="/learn/notes">Lesson 8</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-to-string" target="_blank">Open →</a></td></tr>
+    <tr><td><code>renderStream()</code></td><td>Generator</td><td>SSR streaming — <a href="/learn/ai-chat">Lesson 9</a></td><td><a class="lesson-chip" href="/api/learn/demo/render-stream" target="_blank">Open →</a></td></tr>
   </tbody>
 </table>
 <p>The streaming demo is the most visual — watch 12 rows arrive one by one over ~2 seconds. Each <code>yield</code> flushes a chunk to the browser immediately.</p>',
