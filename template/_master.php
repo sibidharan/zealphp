@@ -155,30 +155,57 @@ document.addEventListener('htmx:afterSettle', () => initPageScripts());
   });
 })();
 
-// Top-of-page progress bar for in-flight htmx requests. Pattern is the
-// same as NProgress/GitHub/Linear docs nav: a 2px amber strip at the top
-// of the viewport, animated via CSS transform. Without this, slow
-// connections leave users wondering whether their click did anything.
+// Top-of-page progress bar for in-flight htmx requests. NProgress / Linear /
+// Vercel-docs pattern: a 2px amber strip animated via CSS transform.
+// Two-threshold behavior so it works on BOTH fast and slow connections:
+//
+//   - Sub-SHOW_AFTER ms request (fast — fiber, cached): bar never appears.
+//     Flashing a partial loader for a 50ms request feels janky and worse than
+//     no indicator at all. Major docs sites (Linear, Vercel) do the same.
+//   - Request still pending after SHOW_AFTER: bar fades in at "start" (30%),
+//     then creeps to "mid" (75%) over 1.4s for the "working on it" feel.
+//   - Request completes: bar snaps to "done" (100%) and fades out.
+//
+// SHOW_AFTER tuning: 150ms is the threshold below which users perceive an
+// action as "instant" (Jakob Nielsen). Above that they want feedback.
 (function () {
   const bar = document.getElementById('htmx-progress');
   if (!bar) return;
+  const SHOW_AFTER = 150;   // ms before showing the bar at all
+  const CREEP_AFTER = 380;  // ms before transitioning start → mid
   let pending = 0;
+  let visible = false;
+  let showTimer = null;
   let creepTimer = null;
+  const reveal = () => {
+    visible = true;
+    bar.className = 'htmx-progress start';
+    creepTimer = setTimeout(() => {
+      if (pending > 0) bar.className = 'htmx-progress mid';
+    }, CREEP_AFTER - SHOW_AFTER);
+  };
   const start = () => {
     pending++;
     if (pending > 1) return;
-    bar.className = 'htmx-progress start';
-    clearTimeout(creepTimer);
-    creepTimer = setTimeout(() => {
-      if (pending > 0) bar.className = 'htmx-progress mid';
-    }, 220);
+    // Don't reveal yet — wait SHOW_AFTER ms. Most clicks resolve faster than
+    // that on a fiber connection and never need a loading indicator.
+    clearTimeout(showTimer);
+    showTimer = setTimeout(reveal, SHOW_AFTER);
   };
   const finish = () => {
     pending = Math.max(0, pending - 1);
     if (pending > 0) return;
+    clearTimeout(showTimer);
     clearTimeout(creepTimer);
+    if (!visible) {
+      // Fast request — never showed the bar, don't show it now either.
+      return;
+    }
     bar.className = 'htmx-progress done';
-    setTimeout(() => { if (pending === 0) bar.className = 'htmx-progress'; }, 280);
+    visible = false;
+    setTimeout(() => {
+      if (pending === 0 && !visible) bar.className = 'htmx-progress';
+    }, 280);
   };
   document.addEventListener('htmx:beforeRequest', start);
   document.addEventListener('htmx:afterRequest', finish);
