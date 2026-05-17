@@ -58,7 +58,31 @@ PHP]); ?>
 
 <p style="margin-top:1rem">The same contract applies inside any file invoked by <a href="/templates"><code>App::render() / renderToString() / renderStream() / include()</code></a> — see <a href="/templates#file-execution-family">the file-execution family</a>.</p>
 
-<h2>Response Object Methods</h2>
+<h3 id="status-range" style="margin-top:2rem">Valid HTTP status codes</h3>
+
+<p>When the contract says <code>int = HTTP status</code>, the int must be in the range <strong>100&ndash;599</strong> (RFC 7230 — three-digit response codes). ZealPHP supports every IANA-registered code in that range, including the long-tail ones like <code>418</code>, <code>421</code>, <code>423</code>, <code>425</code>, <code>451</code>, <code>507</code>, <code>511</code>.</p>
+
+<h4 style="margin-top:1rem">What if you return something outside that range?</h4>
+
+<table class="ztable" style="margin-bottom:1rem">
+  <tr><th>You return</th><th>What happens</th></tr>
+  <tr><td><code>return 0;</code> / <code>return -1;</code> / <code>return 42;</code> / <code>return 999;</code></td><td>Coerced to <strong>500 Internal Server Error</strong> with a warning logged via <code>elog()</code>. Matches Apache HTTP server behaviour (Apache silently coerces out-of-range codes to 500). The log entry surfaces the bug instead of letting it silently fail in production.</td></tr>
+  <tr><td><code>return 1;</code> <em>(special case)</em></td><td>That's what PHP's <code>include</code> returns by default when a file has no explicit <code>return</code> statement. Inside <code>App::include()</code> / <code>App::render()</code> / <code>App::renderToString()</code> / <code>App::renderStream()</code>, a <code>1</code> return is treated as "no explicit return" — the framework surfaces the buffered echo as the response body instead of trying to set HTTP status 1. The same return value from a plain route handler DOES get treated as a status (HTTP/1.1 1). If you ever explicitly mean "return 1 as a status," return <code>100</code> or another in-range code instead.</td></tr>
+  <tr><td><code>return null;</code></td><td>"No status override, no body override" — the response defaults to <code>200</code> with whatever body the framework computed (usually empty).</td></tr>
+</table>
+
+<h4 style="margin-top:1rem">Edge cases worth knowing</h4>
+<ul style="margin-left:1.2rem">
+  <li><strong>600&ndash;999</strong> are technically in RFC 7230's three-digit range but have no defined meaning. ZealPHP currently lets them pass through (no 500 coercion) — clients may or may not interpret them.</li>
+  <li><strong>Reason phrases</strong> for non-standard codes default to empty. The wire format is still <code>HTTP/1.1 451\r\n</code>, just without "Unavailable For Legal Reasons" after the digits. Browsers don't display reason phrases, so this is cosmetic.</li>
+  <li><strong>Returning <code>null</code></strong> means "no status override, no body override" — same as a handler that doesn't <code>return</code> at all.</li>
+</ul>
+
+<div class="callout info" style="margin-top:1rem">
+  <strong>Ops note.</strong> Out-of-range coercion writes to ZealPHP's debug log (<code>ZEALPHP_DEBUG_LOG</code> or <code>/tmp/zealphp/debug.log</code> by default). Grep for <code>Invalid HTTP status code returned:</code> to surface handlers that are silently bouncing to 500 in production.
+</div>
+
+<h2 style="margin-top:2.5rem">Response Object Methods</h2>
 <table class="ztable" style="margin-bottom:2rem">
   <tr><th>Method</th><th>Signature</th><th>What it does</th></tr>
   <tr><td><code>json()</code></td><td><code>json($data, $status=200)</code></td><td>Sets Content-Type: application/json, encodes and ends response</td></tr>

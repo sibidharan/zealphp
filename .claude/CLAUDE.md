@@ -252,6 +252,17 @@ $app->route('/users', fn() => (function() {
 | `echo "header"; return (function() { yield ...; })();` | `\Generator` wrapping `"header"` + delegated yields | Streamed in source order |
 | `return new Response($body, 200);` | `ResponseInterface` | PSR-7 response used directly (output buffer ignored) |
 
+**Valid HTTP status codes.** When the contract says `int = HTTP status`, the int must be in the range **100–599** (RFC 7230). ZealPHP supports every IANA-registered code in that range, including the long-tail ones (`418`, `421`, `423`, `425`, `451`, `507`, `511`, etc.).
+
+| You return | What happens |
+|------------|--------------|
+| `return 0;` / `-1;` / `42;` / `999;` (out of range) | Coerced to **500 Internal Server Error** with a warning logged via `elog()`. Matches Apache HTTP server behaviour. Grep `/tmp/zealphp/debug.log` (or `ZEALPHP_DEBUG_LOG`) for `Invalid HTTP status code returned:` to surface these in production. |
+| `return 1;` (special case) | PHP's `include` returns `1` by default when a file has no explicit `return`. Inside `App::include() / render() / renderToString() / renderStream()`, a `1` return is treated as "no explicit return" — the framework surfaces the buffered echo as the response body instead of trying to set HTTP status 1. The same return from a plain route handler DOES get treated as a status. If you ever explicitly mean "return 1 as a status," return `100` instead. |
+| `return null;` | "No status override, no body override" — the response defaults to `200` with whatever body the framework computed. |
+| 600–999 | Technically in RFC 7230's three-digit range but have no defined meaning. Currently pass through without 500 coercion. |
+
+Non-standard codes have empty reason phrases on the wire (`HTTP/1.1 451\r\n` without "Unavailable For Legal Reasons"). Browsers don't display reason phrases, so this is cosmetic. Canonical home: `template/pages/responses.php#status-range`.
+
 **Yield from everywhere** — Generators work in all contexts:
 - Route handlers: `return (function() { yield ...; })();`
 - Public files: `public/feed.php` returns a Generator → framework streams it
