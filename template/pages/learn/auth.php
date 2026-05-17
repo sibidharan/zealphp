@@ -143,11 +143,42 @@ $register = function () {
     ]); ?>
 
     <?php App::render('/components/_challenge', [
-      'title' => 'Challenge: change password',
+      'title' => 'Challenge 1: change password',
       'body'  => '<p>Build a "change password" feature. You\'ll need: a form with old password and new password fields, an endpoint that verifies the old password with <code>password_verify()</code>, then updates the hash with <code>password_hash()</code>.</p>',
       'hints' => [
         'Use a prepared UPDATE statement: <code>UPDATE users SET password_hash = ? WHERE id = ?</code>',
         'Always verify the old password first — never trust the client to send only valid requests',
+      ],
+    ]); ?>
+
+    <?php App::render('/components/_challenge', [
+      'title' => 'Challenge 2: rate-limit failed logins',
+      'body'  => '<p>Right now <code>/api/learn/login</code> happily accepts unlimited password guesses. Add a per-IP rate limit: after 5 failed attempts in 60 seconds, return 429 for that IP for the next 5 minutes. Use <code>Store</code> for the counter — see Foundations &rarr; <a href="/learn/store">Sharing State</a> for the table-allocation pattern.</p>',
+      'hints' => [
+        'Allocate the table at boot: <code>Store::make(\'login_fails\', 10000, [\'count\' =&gt; [\'type\' =&gt; Store::TYPE_INT, \'size\' =&gt; 4], \'reset_at\' =&gt; [\'type\' =&gt; Store::TYPE_INT, \'size\' =&gt; 4]])</code>',
+        'Key by <code>$request-&gt;server[\'REMOTE_ADDR\']</code>. Bump <code>count</code> only when the password check fails — never on success.',
+        'On lockout, return <code>$response-&gt;status(429)-&gt;header(\'Retry-After\', \'300\')-&gt;end()</code>',
+      ],
+    ]); ?>
+
+    <?php App::render('/components/_challenge', [
+      'title' => 'Challenge 3: invalidate the session on logout',
+      'body'  => '<p>The current <code>/api/learn/logout</code> probably just clears <code>$g-&gt;session[\'user_id\']</code>. That leaves the session file alive with whatever else was in it. Switch to <code>session_destroy()</code> and re-generate the session id on the user&rsquo;s next request, so the old <code>PHPSESSID</code> can\'t be replayed even if it leaked into a log.</p>',
+      'hints' => [
+        '<code>session_destroy()</code> wipes the server-side file but leaves <code>$_SESSION</code> alive in this request. Pair with <code>session_unset()</code>.',
+        'On login (not logout) call <code>session_regenerate_id(true)</code> — that\'s where session fixation attacks land; <code>true</code> deletes the old file.',
+        'Set the <code>PHPSESSID</code> cookie\'s <code>Max-Age</code> to <code>0</code> in the logout response so the browser drops its copy too.',
+      ],
+    ]); ?>
+
+    <?php App::render('/components/_challenge', [
+      'title' => 'Challenge 4: password reset via email (mocked)',
+      'body'  => '<p>Build a password-reset flow. User enters an email; if it exists, you generate a single-use token, store it with a 30-min expiry, and "email" it (just log the URL for now). The reset link points at <code>/reset?token=...</code>. Submitting that page with a new password verifies the token, updates the hash, and invalidates the token.</p>',
+      'hints' => [
+        'Token storage: a <code>password_resets</code> table with columns <code>token</code> (unique), <code>user_id</code>, <code>expires_at</code>. Or use <code>Store::make(\'pw_resets\', 1024, [...])</code> for in-memory.',
+        '<code>random_bytes(32)</code> + <code>bin2hex()</code> gives you a 64-char token. Constant-time compare on lookup.',
+        '"Send the email" = <code>elog(\'Reset link: https://yourapp/reset?token=\' . $token)</code>. Wire real email later via <code>swiftmailer</code> or a transactional-mail API.',
+        'Delete the token row the moment it\'s redeemed — never leave it around for replay.',
       ],
     ]); ?>
 

@@ -100,3 +100,68 @@
     else if (action === 'sse-stop')  stopSSE();
   });
 })();
+
+// WebSocket cross-tab counter demo on /learn/websocket. Uses event
+// delegation so it keeps working after htmx swaps to/from this lesson.
+(function () {
+  let ws = null;
+  let connected = false;
+
+  function update(value) {
+    document.querySelectorAll('[data-ws-counter-value]').forEach(el => {
+      el.textContent = value;
+      el.classList.remove('flash');
+      void el.offsetWidth;  // force reflow to restart animation
+      el.classList.add('flash');
+    });
+  }
+
+  function setStatus(text, cls) {
+    document.querySelectorAll('[data-ws-counter-status]').forEach(el => {
+      el.textContent = text;
+      el.className = 'ws-counter-status ' + (cls || '');
+    });
+  }
+
+  function connect() {
+    if (ws) return;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws/counter-demo');
+    setStatus('connecting…', 'connecting');
+    ws.onopen = () => { connected = true; setStatus('connected', 'open'); };
+    ws.onmessage = e => {
+      try {
+        const m = JSON.parse(e.data);
+        if (typeof m.value === 'number') update(m.value);
+      } catch (_) {}
+    };
+    ws.onclose = () => { connected = false; ws = null; setStatus('disconnected — click +1 to reconnect', 'closed'); };
+    ws.onerror = () => { setStatus('error', 'err'); };
+  }
+
+  async function bump() {
+    if (!connected) connect();
+    try { await fetch('/api/learn/demo/counter-bump', { method: 'POST' }); }
+    catch (e) { setStatus('bump failed: ' + e.message, 'err'); }
+  }
+
+  async function reset() {
+    try { await fetch('/api/learn/demo/counter-reset', { method: 'POST' }); }
+    catch (e) { setStatus('reset failed: ' + e.message, 'err'); }
+  }
+
+  document.addEventListener('click', e => {
+    const t = e.target.closest('[data-ws-counter]');
+    if (!t) return;
+    const action = t.dataset.wsCounter;
+    if (action === 'bump')  bump();
+    if (action === 'reset') reset();
+  });
+
+  // Auto-connect when the lesson page is visible
+  function maybeConnect() {
+    if (document.querySelector('[data-ws-counter-value]')) connect();
+  }
+  document.addEventListener('DOMContentLoaded', maybeConnect);
+  document.addEventListener('htmx:afterSettle', maybeConnect);
+})();

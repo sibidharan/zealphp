@@ -121,7 +121,7 @@ $g = \ZealPHP\G::instance();
       '<p>Open DevTools → Network tab and watch each click: a POST goes out, an HTML fragment comes back, the button is replaced. No page reload. No JSON parsing. No client-side state management.</p>'
     ]); ?>
 
-    <h2>Five recipes you'll actually use</h2>
+    <h2>Six recipes you'll actually use</h2>
     <p>
       The four attributes cover the mechanics. These five patterns cover the everyday use cases —
       every one of them is wired up in the demo app you're reading right now. Copy, paste, adapt.
@@ -206,9 +206,56 @@ $g = \ZealPHP\G::instance();
   &lt;/form&gt;
 &lt;/dialog&gt;</code></pre>
 
+    <h3>6. Server-driven pagination</h3>
+    <p>
+      Recipe 4 is client-driven — the browser fires a request when a sentinel scrolls into view, and
+      the server replies with whatever page <em>the client asked for</em>. That works when the data
+      is static. When the underlying list is changing live (new posts arriving, items getting
+      deleted), you want the <strong>server</strong> to decide what "next page" means using its own
+      state — typically a cursor (last id seen) instead of a page number.
+    </p>
+    <pre><code class="language-html">&lt;!-- Initial render — server emits N items + a "Load more" link
+     whose hx-get carries the cursor of the last row shown --&gt;
+&lt;ul id="feed"&gt;
+  &lt;li&gt;Item 200&lt;/li&gt;
+  &lt;li&gt;Item 199&lt;/li&gt;
+  ...
+  &lt;!-- The link replaces itself with the next page + a new "Load more" --&gt;
+  &lt;a hx-get="/api/feed?after=180"
+     hx-target="this"
+     hx-swap="outerHTML"&gt;Load more&lt;/a&gt;
+&lt;/ul&gt;
+
+&lt;!-- Server returns, for /api/feed?after=180: --&gt;
+&lt;li&gt;Item 180&lt;/li&gt;
+&lt;li&gt;Item 179&lt;/li&gt;
+...
+&lt;a hx-get="/api/feed?after=161"
+   hx-target="this"
+   hx-swap="outerHTML"&gt;Load more&lt;/a&gt;</code></pre>
+    <p>
+      The handler:
+    </p>
+    <pre><code class="language-php">$app-&gt;route('/api/feed', function ($request) {
+    $after = (int)($request-&gt;get['after'] ?? PHP_INT_MAX);
+    $rows  = Feed::recent(beforeId: $after, limit: 20);
+    if (empty($rows)) return '&lt;!-- end --&gt;';  // empty fragment, link is gone
+    $last  = end($rows)-&gt;id;
+    $html  = '';
+    foreach ($rows as $row) $html .= "&lt;li&gt;{$row-&gt;title}&lt;/li&gt;";
+    $html .= "&lt;a hx-get=\"/api/feed?after={$last}\" hx-target=\"this\" hx-swap=\"outerHTML\"&gt;Load more&lt;/a&gt;";
+    return $html;
+});</code></pre>
+    <p>
+      The cursor (<code>last_id</code>) lives in the URL of the next request, not in client state.
+      The server can change page size, skip soft-deleted rows, or insert promotional content
+      between pages — all without the client knowing. This is the pattern most "infinite feed"
+      products actually use; recipe 4 is the demo, recipe 6 is the product.
+    </p>
+
     <?php App::render('/components/_callout', [
       'variant' => 'info',
-      'title'   => 'The pattern under all five',
+      'title'   => 'The pattern under all six',
       'body'    => '<p>Notice what every recipe has in common: <strong>the server returns HTML, not JSON</strong>. No client-side rendering. No "wait for the data, then build the DOM." The server already knows how to render this row, this dialog, this search result — htmx just puts the rendered HTML where it belongs. Your route handlers become HTML fragment factories. That is the entire architectural shift.</p>',
     ]); ?>
 

@@ -383,3 +383,16 @@ code.demo-inline { background: var(--bg-alt); padding: .1rem .35rem; border-radi
 .demo-live-output .tick  { color: #fbbf24; }
 .demo-live-output .done  { color: #a78bfa; }
 .demo-live-output .err   { color: #f87171; }
+
+/* ---------- WebSocket cross-tab counter demo ---------- */
+.ws-counter-card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; text-align: center; }
+.ws-counter-value { font-size: 4rem; font-weight: 700; color: var(--accent); line-height: 1; font-variant-numeric: tabular-nums; display: inline-block; transition: color .15s; }
+.ws-counter-value.flash { animation: ws-counter-flash .55s ease-out; }
+@keyframes ws-counter-flash { 0% { color: #16a34a; transform: scale(1.2); } 100% { color: var(--accent); transform: scale(1); } }
+.ws-counter-label { color: #78716c; font-size: .85rem; margin: .35rem 0 1.25rem; }
+.ws-counter-actions { display: flex; gap: .65rem; justify-content: center; }
+.ws-counter-status { display: inline-block; padding: .15rem .55rem; border-radius: 3px; font-size: .73rem; font-weight: 600; margin-top: 1rem; }
+.ws-counter-status.connecting { background: #fef3c7; color: #92400e; }
+.ws-counter-status.open       { background: #d1fae5; color: #065f46; }
+.ws-counter-status.closed     { background: #fee2e2; color: #991b1b; }
+.ws-counter-status.err        { background: #fee2e2; color: #991b1b; }

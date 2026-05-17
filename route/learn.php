@@ -57,6 +57,51 @@ function learn_ws_broadcast(int $userId, array $payload): void
     \ZealPHP\Learn\WS::broadcast($userId, $payload);
 }
 
+// ── Public WebSocket counter demo (for /learn/websocket lesson) ─────
+// A single global counter that any open tab can bump; all tabs see the
+// updated value over WebSocket. No auth — purely a teaching demo.
+\ZealPHP\Store::make('ws_counter_demo_clients', 4096, [
+    'connected_at' => [\OpenSwoole\Table::TYPE_INT, 8],
+]);
+$wsCounterDemo = new \ZealPHP\Counter(0);
+
+$app->ws('/ws/counter-demo',
+    onMessage: function ($server, $frame) {
+        if (($frame->data ?? '') === 'ping') $server->push($frame->fd, 'pong');
+    },
+    onOpen: function ($server, $request) use ($wsCounterDemo) {
+        \ZealPHP\Store::set('ws_counter_demo_clients', (string) $request->fd, ['connected_at' => time()]);
+        // On open, push the current value so the new tab is in sync immediately.
+        $server->push($request->fd, json_encode(['value' => $wsCounterDemo->get()]));
+    },
+    onClose: function ($server, $fd) {
+        \ZealPHP\Store::del('ws_counter_demo_clients', (string) $fd);
+    },
+);
+
+function ws_counter_demo_broadcast(int $value): void
+{
+    $server = \ZealPHP\App::getServer();
+    if (!$server) return;
+    $payload = json_encode(['value' => $value]);
+    foreach (\ZealPHP\Store::table('ws_counter_demo_clients') ?? [] as $fd => $_) {
+        $fd = (int) $fd;
+        if ($server->isEstablished($fd)) $server->push($fd, $payload);
+    }
+}
+
+$app->route('/api/learn/demo/counter-bump', ['methods' => ['POST']], function () use ($wsCounterDemo) {
+    $new = $wsCounterDemo->increment();
+    ws_counter_demo_broadcast((int) $new);
+    return ['value' => (int) $new];
+});
+
+$app->route('/api/learn/demo/counter-reset', ['methods' => ['POST']], function () use ($wsCounterDemo) {
+    $wsCounterDemo->set(0);
+    ws_counter_demo_broadcast(0);
+    return ['value' => 0];
+});
+
 // ── Notes routes with path params (can't be ZealAPI files) ───────────
 
 $app->route('/api/learn/notes/search', ['methods' => ['GET']], function () {
