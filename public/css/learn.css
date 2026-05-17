@@ -338,3 +338,48 @@
 .challenge-hint { margin-top: .65rem; }
 .challenge-hint summary { cursor: pointer; font-size: .85rem; color: #78716c; font-weight: 500; }
 .challenge-hint p { margin: .35rem 0 0; font-size: .85rem; color: #57534e; }
+
+/* ---------- Demo viewer (themed /demo/view/* pages) ---------- */
+.demo-viewer { max-width: 880px; margin: 0 auto; padding: 1.5rem 1.5rem 4rem; }
+.demo-viewer-crumb { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: .7rem 1rem; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; margin-bottom: 1.75rem; font-size: .9rem; }
+.demo-viewer-crumb a { color: #b45309; text-decoration: none; font-weight: 600; }
+.demo-viewer-crumb a:hover { text-decoration: underline; }
+.demo-viewer-crumb span { color: #92400e; opacity: .5; }
+.demo-viewer-crumb strong { color: #92400e; }
+.demo-viewer-title { font-size: 1.85rem; margin: 0 0 .6rem; letter-spacing: -.01em; color: #1c1917; }
+.demo-viewer-desc { color: #57534e; font-size: 1rem; margin: 0 0 1.75rem; line-height: 1.6; }
+.demo-viewer-h { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #78716c; margin: 1.5rem 0 .55rem; }
+
+.inject-case-body--solo { grid-template-columns: 1fr !important; }
+.inject-case-body--solo .demo-code { border-right: none; }
+
+/* Demo payload (JSON / response body) */
+pre.demo-payload { background: #1c1917; color: #f5f5f4; padding: .9rem 1rem; border-radius: 8px; overflow-x: auto; font-family: var(--font-mono); font-size: .82rem; line-height: 1.55; margin: 0; white-space: pre-wrap; word-break: break-word; }
+code.demo-inline { background: var(--bg-alt); padding: .1rem .35rem; border-radius: 3px; font-size: .85em; font-family: var(--font-mono); }
+
+/* Status badges (200 OK / 301 / 404 / etc.) */
+.demo-status { display: inline-block; padding: .12rem .55rem; border-radius: 3px; font-size: .75rem; font-weight: 700; color: #fff; font-family: var(--font-mono); }
+.demo-status.s2xx { background: #16a34a; }
+.demo-status.s3xx { background: #3b82f6; }
+.demo-status.s4xx,
+.demo-status.s5xx { background: #dc2626; }
+
+/* Key-value list inside demo sections */
+.demo-kv { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; font-family: var(--font-mono); font-size: .82rem; margin: 0 0 .5rem; }
+.demo-kv dt { color: #a8a29e; font-weight: 600; }
+.demo-kv dd { margin: 0; color: #1c1917; word-break: break-word; }
+
+/* Buttons inside demo viewer (Run / Connect / Disconnect) */
+.demo-action-btn { padding: .5rem 1.1rem; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #1c1917; font-weight: 600; font-size: .88rem; cursor: pointer; font-family: inherit; }
+.demo-action-btn:hover { background: #fbbf24; }
+.demo-action-btn.ghost { background: transparent; color: #78716c; border-color: var(--border); }
+
+/* Live output panels (SSR chunks, SSE events) */
+.demo-live-output { margin-top: .85rem; font-family: var(--font-mono); font-size: .82rem; padding: .85rem 1rem; background: #1c1917; color: #f5f5f4; border-radius: 8px; min-height: 90px; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.demo-live-output .ev { padding: .15rem 0; border-bottom: 1px solid #292524; }
+.demo-live-output .ev:last-child { border-bottom: 0; }
+.demo-live-output .ts { color: #a8a29e; margin-right: .5rem; }
+.demo-live-output .open  { color: #34d399; }
+.demo-live-output .tick  { color: #fbbf24; }
+.demo-live-output .done  { color: #a78bfa; }
+.demo-live-output .err   { color: #f87171; }

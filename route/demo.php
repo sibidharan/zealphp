@@ -300,14 +300,24 @@ $app->route('/demo/middleware/compress', ['methods' => ['GET']], function() {
 // use; the viewers below are the human-friendly versions.
 // ---------------------------------------------------------------------------
 
-/** @param array<int, array{heading: string, body: string}> $sections */
+/**
+ * Render a demo viewer page through the site's master shell — full site
+ * theme (top nav, footer, /css/zealphp.css, /css/learn.css). The body
+ * lives in template/pages/_demo_view.php and expects the $demo_* vars.
+ *
+ * @param array<int, array{heading: string, body: string}> $sections
+ */
 function demo_render(string $title, string $description, array $sections, string $back_slug, string $back_label): string {
-    return App::renderToString('/components/_demo_shell', [
-        'title'       => $title,
-        'description' => $description,
-        'sections'    => $sections,
-        'back_slug'   => $back_slug,
-        'back_label'  => $back_label,
+    return App::renderToString('/_master', [
+        'title'            => $title . ' · ZealPHP Demo',
+        'description'      => 'ZealPHP live demo · ' . $title,
+        'page'             => '_demo_view',
+        'active'           => $back_slug,            // highlight the lesson group in top nav
+        'demo_title'       => $title,
+        'demo_back_slug'   => $back_slug,
+        'demo_back_label'  => $back_label,
+        'demo_description' => $description,
+        'demo_sections'    => $sections,
     ]);
 }
 
@@ -555,5 +565,70 @@ $app->route('/demo/view/middleware/compress', ['methods' => ['GET']], function($
             ['heading' => 'Response', 'body' => '<dl class="demo-kv"><dt>Status</dt><dd><span class="demo-status s2xx">200 OK</span></dd><dt>Content-Encoding</dt><dd><code class="demo-inline">' . ($hasGzip ? 'gzip' : 'identity') . '</code> (depends on your Accept-Encoding)</dd><dt>Raw body size</dt><dd>≈ 2.7 KB</dd></dl>'],
         ],
         'learn/middleware', 'Middleware: The Wrap'
+    );
+});
+
+// Streaming viewers --------------------------------------------------------
+// User: "add ssr sse demo streaming shells without linking the api directly."
+// These wrap the raw /stream/* endpoints in the themed shell with buttons
+// that drive the stream from the page (no raw chunks in the address bar).
+
+$app->route('/demo/view/streaming/ssr', ['methods' => ['GET']], function() {
+    return demo_render(
+        'Streaming: Generator yield (SSR)',
+        'A route handler that returns a <code class="demo-inline">\\Generator</code> streams every <code class="demo-inline">yield</code> chunk to the browser the moment it produces it &mdash; the page renders progressively instead of waiting for the whole HTML to assemble. Click <strong>Run</strong> below; the chunks arrive in the dark panel.',
+        [
+            ['heading' => 'How it\'s wired (route side)', 'body' => '<pre class="demo-payload">$app->route(\'/stream/ssr\', function () {
+    return (function () {
+        yield \'&lt;section&gt;&lt;h2&gt;Loading…&lt;/h2&gt;&lt;/section&gt;\';
+        foreach (slow_data_source() as $row) {
+            yield "&lt;article&gt;{$row}&lt;/article&gt;";
+        }
+        yield \'&lt;footer&gt;Done.&lt;/footer&gt;\';
+    })();
+});</pre>'],
+            ['heading' => 'Run it', 'body' => '<button class="demo-action-btn" type="button" data-viewer-action="ssr" data-demo-url="/stream/ssr" data-target="demo-ssr-out">▶ Run Generator SSR</button><div id="demo-ssr-out" class="demo-live-output">Click <em>Run</em> to start the stream…</div>'],
+        ],
+        'learn/streaming', 'Streaming Done Right'
+    );
+});
+
+$app->route('/demo/view/streaming/stream', ['methods' => ['GET']], function() {
+    return demo_render(
+        'Streaming: $response->stream()',
+        'The <code class="demo-inline">$response->stream($fn)</code> primitive gives you fine-grained control: <code class="demo-inline">$fn</code> receives a <code class="demo-inline">$write(string)</code> closure that flushes chunks the moment you call it. Useful when you want to decide what to send <em>at run time</em> instead of yielding a fixed sequence.',
+        [
+            ['heading' => 'How it\'s wired (route side)', 'body' => '<pre class="demo-payload">$app->route(\'/stream/words\', function ($response) {
+    return $response->stream(function ($write) {
+        foreach (explode(\' \', \'streamed word by word from the server\') as $w) {
+            $write($w . \' \');
+            co::sleep(0.15);  // a real handler waits on real I/O instead
+        }
+    });
+});</pre>'],
+            ['heading' => 'Run it', 'body' => '<button class="demo-action-btn" type="button" data-viewer-action="stream" data-demo-url="/stream/words" data-target="demo-stream-out">▶ Run stream() demo</button><div id="demo-stream-out" class="demo-live-output">Click <em>Run</em>. Each word arrives as a separate chunk.</div>'],
+        ],
+        'learn/streaming', 'Streaming Done Right'
+    );
+});
+
+$app->route('/demo/view/streaming/sse', ['methods' => ['GET']], function() {
+    return demo_render(
+        'Streaming: Server-Sent Events',
+        'SSE is one-way push over plain HTTP &mdash; the browser opens an <code class="demo-inline">EventSource</code>, the server keeps the response open and emits named events. <code class="demo-inline">$response->sse($fn)</code> sets the right headers and gives you an <code class="demo-inline">$emit($data, $event, $id)</code> callback. Below: <strong>Connect</strong> opens an <code class="demo-inline">EventSource</code> to <code class="demo-inline">/stream/events</code>; the event log fills with one tick per second.',
+        [
+            ['heading' => 'How it\'s wired (route side)', 'body' => '<pre class="demo-payload">$app->route(\'/stream/events\', function ($response) {
+    $response->sse(function ($emit) {
+        $emit(json_encode([\'status\' =&gt; \'connected\']), \'open\');
+        for ($i = 1; $i &lt;= 10; $i++) {
+            co::sleep(1);
+            $emit(json_encode([\'tick\' =&gt; $i]), \'tick\', (string)$i);
+        }
+        $emit(json_encode([\'done\' =&gt; true]), \'done\');
+    });
+});</pre>'],
+            ['heading' => 'Connect', 'body' => '<button class="demo-action-btn" type="button" data-viewer-action="sse-start" data-demo-url="/stream/events" data-target="demo-sse-out">▶ Connect EventSource</button> <button class="demo-action-btn ghost" type="button" data-viewer-action="sse-stop">■ Disconnect</button><div id="demo-sse-out" class="demo-live-output">Click <em>Connect</em>. One event per second, 10 ticks then auto-closes.</div>'],
+        ],
+        'learn/streaming', 'Streaming Done Right'
     );
 });

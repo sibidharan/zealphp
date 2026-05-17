@@ -209,8 +209,10 @@ $response-&gt;sse(function ($emit) {
 
     <h2>Try it live</h2>
     <ul>
-      <li><a href="/streaming">/streaming</a> — the docs page with live SSR demos</li>
-      <li><a href="/api/stream/events">/api/stream/events</a> — raw SSE endpoint (open in another tab, watch chunks arrive)</li>
+      <li><a href="/demo/view/streaming/ssr" target="_blank">SSR generator yield</a> — click Run, watch chunks arrive progressively</li>
+      <li><a href="/demo/view/streaming/stream" target="_blank">$response-&gt;stream() word-by-word</a> — text streams a word at a time</li>
+      <li><a href="/demo/view/streaming/sse" target="_blank">Server-Sent Events</a> — EventSource connects, 10 ticks at 1/sec</li>
+      <li><a href="/streaming">/streaming</a> — the docs page with the same demos inline</li>
     </ul>
 
     <?php App::render('/components/_concept_check', [

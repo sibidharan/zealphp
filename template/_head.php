@@ -21,4 +21,5 @@ $v = defined('ZEALPHP_ASSET_VERSION') ? ZEALPHP_ASSET_VERSION : '';
   <link rel="stylesheet" href="/css/learn.css?v=<?= $v ?>">
   <script src="/js/learn.js?v=<?= $v ?>" defer></script>
   <script src="/js/streaming-demos.js?v=<?= $v ?>" defer></script>
+  <script src="/js/learn-demo-viewers.js?v=<?= $v ?>" defer></script>
 </head>
