@@ -340,7 +340,7 @@ manager process drains workers gracefully (current requests finish),
 forks fresh workers that load the new bytecode, and the TCP listener
 stays open the whole time — zero dropped requests.
 
-The CGI bridge (legacy code via `App::includeFile()` / `proc_open`)
+The CGI bridge (legacy code via `App::include()` / `proc_open`)
 needs the same opcache settings to benefit. With `validate_timestamps=1`
 plus a low `revalidate_freq`, a recently-edited file can serve stale
 bytecode for up to `revalidate_freq` seconds after deploy — looks

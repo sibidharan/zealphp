@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.20] - 2026-05-17
+
+### Added
+- **`App::include($publicPath, $args = [])`** — fourth member of the file-execution family alongside `render() / renderToString() / renderStream()`. Takes a path relative to `public/` (Apache document-root convention; leading slash optional), auto-populates `$_SERVER['PHP_SELF']` / `SCRIPT_NAME` / `SCRIPT_FILENAME` for the included file (mod_php parity), and applies `includeCheck()` so traversal outside `public/` is refused via the universal return contract (returns `403`). Honours the full route return contract (`int` / `array` / `string` / `Generator` / `Closure` / `void+echo`) in **both** `superglobals(true)` and `superglobals(false)` modes.
+- **Configurable static properties + fluent accessor methods** (matching the existing `App::superglobals()` precedent):
+  - `App::$document_root` (default `'public'`) + `App::documentRoot(?string $path = null)` — overrides the hardcoded `public/` convention. Apache `DocumentRoot` equivalent.
+  - `App::$trace_enabled` (default `false`, security-first) + `App::traceEnabled(?bool $on = null)` — HTTP TRACE method is refused with `405 Method Not Allowed` unless explicitly opted in. Apache `TraceEnable Off` equivalent.
+  - `App::$default_charset` (default `'utf-8'`) + `App::defaultCharset(?string $charset = null)` — Apache `AddDefaultCharset` equivalent. Consumed by future `CharsetMiddleware`.
+- Wrapper methods for existing configurable static properties: `App::ignorePhpExt()`, `App::directorySlash()`, `App::directoryIndex()`, `App::pathInfo()`, `App::staticHandlerLocations()`, `App::blockDotfiles()`, `App::displayErrors()`. Existing direct property access (`App::$X = Y`) keeps working for BC.
+- **Universal return contract — canonical home at `/responses#return-contract`** with deep-linkable anchor. Every other website page that previously restated fragments of the contract now links here. `.claude/CLAUDE.md` mirrors the table verbatim under a lock-step note.
+- **`$g` vs `$_*` parity rule — canonical home at `/coroutines#state-parity`**. Documents when superglobals are safe (bridged in `superglobals(true)`, NOT populated per request in coroutine mode), and the one-line decision rule: "Use `$g->X`. It works in both modes."
+- **Apache rewrite recipes — 12 worked examples (A through L)** on the legacy-apps page, each side-by-side Apache → ZealPHP. Covers extension strip, pretty URL → `.php`, front controller, API prefix, specific file mapping, blocking direct access, HTTPS/canonical host, maintenance mode, ErrorDocument, SEO redirects, trailing slash.
+- **Full Apache `AllowOverride` coverage matrix** + **full nginx `ngx_http_core_module` / `ngx_http_rewrite_module` coverage matrix** on the legacy-apps page — every practical directive mapped to its ZealPHP equivalent (✅ built-in / ⚠ small middleware on the roadmap / 💡 PHP-level / ❌ unsupported with reason).
+- **Real-world full-`.htaccess` worked example** — a Q&A platform with ~30 RewriteRules, headers, charsets, caching — ported row-by-row with per-row coverage classification.
+- **"Known limitations" section at the top of legacy-apps** — 30-second dealbreaker scan organised by Apache / nginx / ZealPHP-internal categories, so porters can check for blockers before committing.
+
+### Changed
+- **`App::render()` now returns `mixed`** instead of `void` and honours the full route return contract for explicit returns from templates. **BC preserved**: templates with no explicit `return` (the existing pattern in every `public/*.php`) continue to echo their captured output — every existing `App::render('_master', …)` call site keeps working unchanged. Templates that explicitly `return` a status / array / Generator / Closure now flow that value back to the caller.
+- **`App::includeFile()` renamed to `App::include()`**. Old name retained as a deprecated alias with no runtime warning — no behaviour change for existing callers (WordPress showcase, scaffolds, learn-mode tutorials). The deprecation is documentation-only this cycle and will survive at least through v0.2.x.
+- **Internal refactor — `render() / renderToString() / renderStream() / include()` now share a single private core (`executeFile()`)** that runs the file, captures output, and applies the return contract. Public methods are thin wrappers that differ on path resolution and result coercion only. Closure-param-injection reflection cache is shared too.
+- **Configurable options now have fluent getter/setter methods** uniformly. No-argument call returns the current value; one-argument call sets it. Backing static properties stay public for BC. The documented API, the converter bot, and the website example code all use the method form. Direct property access is not deprecated this cycle — that's a future minor-release announcement.
+- **Internal implicit-route call sites (4 of them — `serveDirectory()`, implicit `/`, `/{file}`, `/{dir}/{uri}`)** simplified to one-line `return App::include('/...')` calls. The 3-line `$g->server[...]` preamble + manual absolute-path construction is now owned by `App::include()` itself.
+- **AI Config Converter agent** (`examples/agents/config_converter.py`) — system prompt updated to teach the new `App::include()` form, the universal return contract, the `$g` vs `$_*` parity rule, the 12 Apache recipes, the Apache `AllowOverride` + nginx coverage matrices, and the known-limitations list. The bot now refuses unsupported directives explicitly (rather than silently emitting broken or no-op code).
+
+### Fixed
+- **In-process file execution no longer silently discards `int` / `array` / `string` return values** from the included file. Previously only `Generator`/`Closure` returns surfaced; everything else got dropped on the floor. Templates and included files can now `return 404;` to set the status, `return ['ok' => true];` for JSON, `return "explicit body";` for HTML.
+- **Subprocess (`superglobals=true`) path now threads the included file's return value back** over the stderr metadata channel so the universal return contract works across the process boundary too. Closure returns can't carry param injection across the pipe — documented as the one footnote in the limitations section.
+
+### Security
+- **HTTP TRACE method refused with `405 Method Not Allowed` by default** (`App::$trace_enabled = false`). TRACE is a Cross-Site Tracing (XST) attack vector that can leak cookies and auth headers from clients that issue TRACE requests with credentials. Opt back in via `App::traceEnabled(true)` if you have a specific debugging need behind an internal-only network.
+
+### Documentation
+- **`template/pages/responses.php`** — promoted to the canonical home for the universal return contract (anchor `#return-contract`). Lock-step with `.claude/CLAUDE.md`.
+- **`template/pages/coroutines.php`** — new section "`$g` vs `$_*` — request state in both modes" (anchor `#state-parity`) as the canonical home for the parity rule.
+- **`template/pages/legacy-apps.php`** — full rewrite per the new shape. Known limitations dealbreaker scan at the top; migration ergonomics before/after; 12 Apache rewrite recipes with anchor ids; recipe summary; real-world `.htaccess` worked example with per-row coverage; full Apache `AllowOverride` matrix; full nginx coverage matrix; WordPress example bumped to one-liner; CGI architecture diagram updated to show the return-value channel.
+- **`template/pages/templates.php`** — three-render-methods table replaced with the canonical four-method file-execution family (anchor `#file-execution-family`); each row links to `/responses#return-contract` for the shared semantics.
+- **Cross-page link-update sweep** — every page that previously restated a fragment of the return-shape table or the `$g`-vs-`$_*` rule now links to `/responses#return-contract` or `/coroutines#state-parity`: `routing.php`, `streaming.php`, `api.php`, `middleware.php`, `home.php`, `sessions.php`, `migration.php`, `design-tradeoffs.php`. (The `learn/*` lesson area is owned by a separate in-flight work stream and will be propagated there in a follow-up pass.)
+- **`README.md`** — migration example uses `App::include('/index.php')`; new paragraph introduces the file-execution family.
+- **`.claude/CLAUDE.md`** — replaces "Return value conventions" with the canonical 9-row contract table (verbatim mirror with the lock-step note); adds "File-execution family" subsection; adds "Lifecycle: static config → `init()` → instance routing → `run()`" architectural section with diagram; updates "Legacy App Support (CGI Worker)" + "G Class — Dual-Mode Global State" + Source Layout sections.
+- **`ROADMAP.md`** — adds the "Apache + nginx parity middlewares" follow-up cluster surfaced by the legacy-apps coverage matrices (CharsetMiddleware, CacheControlMiddleware, ExpiresMiddleware, HeaderMiddleware, BasicAuthMiddleware, IpAccessMiddleware, RateLimitMiddleware, ConcurrencyLimitMiddleware, BlockPhpExtMiddleware) and the basic-directory-autoindex item.
+
+### Notes
+- 5 of the Discovered follow-up items (`App::$server_admin`, `App::$canonical_name` + `App::$use_canonical_name`, `App::$hostname_lookups`, `App::$trusted_proxies` + `App::clientIp()`, `App::$access_log_format` + custom access-log support) are intentionally deferred to a follow-up so this changeset stays focused on `App::include()` + the return contract.
+- The Apache `AllowOverride` matrix on the legacy-apps page is the single most-asked-for missing piece this release closes — porters can now scan ONE table and know exactly which `.htaccess` directives are ✅ ⚠ 💡 ❌ before they commit to a migration.
+
 ## [0.2.19] - 2026-05-16
 
 ### Added — security / quality CI rollup (Tier 1 from CRITIC.md plan)

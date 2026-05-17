@@ -4,17 +4,25 @@
 <h1 class="section-title">HTTP Responses</h1>
 <p class="section-desc">ZealPHP wraps OpenSwoole's response with a clean API. Every method is coroutine-safe — no output buffering leaks across concurrent requests.</p>
 
-<h2>Return Value Conventions</h2>
-<p>What you return from a route handler determines the response — no boilerplate needed:</p>
+<h2 id="return-contract">Universal return contract</h2>
+<div class="callout info" style="margin:1rem 0 1.5rem">
+  <p style="margin:0"><strong>One contract, every entry point.</strong> Any function that produces a response — route handler, fallback, error handler, <code>App::render()</code>, <code>App::renderToString()</code>, <code>App::renderStream()</code>, <code>App::include()</code>, public file, API closure, streaming template Closure — uses the same return contract. The framework translates the return value into an HTTP response identically regardless of where it came from. Other pages link here rather than restating it.</p>
+</div>
+
 <table class="ztable" style="margin-bottom:2rem">
-  <tr><th>Return type</th><th>Behavior</th><th>Example</th></tr>
-  <tr><td><code>int</code></td><td>HTTP status code (empty body)</td><td><code>return 404;</code> <code>return 201;</code> <code>return 403;</code></td></tr>
-  <tr><td><code>array</code> / <code>object</code></td><td>JSON-serialized, <code>Content-Type: application/json</code> set</td><td><code>return ['id' => 42, 'name' => 'alice'];</code></td></tr>
-  <tr><td><code>string</code></td><td>Sent as response body (HTML)</td><td><code>return '&lt;h1&gt;Hello&lt;/h1&gt;';</code></td></tr>
-  <tr><td><code>Generator</code></td><td>SSR streaming — each <code>yield</code> sent immediately</td><td><code>yield '&lt;head&gt;...'; yield $content;</code></td></tr>
-  <tr><td><code>void</code> + <code>echo</code></td><td>Output buffer captured via <code>ob_get_clean()</code></td><td><code>echo "Hello"; echo " World";</code></td></tr>
-  <tr><td><code>ResponseInterface</code></td><td>PSR-7 response used directly</td><td><code>return new Response($body, 200);</code></td></tr>
+  <tr><th>The handler / file does</th><th>Core sees</th><th>ResponseMiddleware emits</th></tr>
+  <tr><td><code>echo "html"; // no explicit return</code></td><td><code>"html"</code> (buffered)</td><td>200 + HTML body</td></tr>
+  <tr><td><code>return 404;</code></td><td><code>404</code> (int)</td><td>404 status, empty body</td></tr>
+  <tr><td><code>return ['ok' => true];</code></td><td><code>['ok' => true]</code> (array)</td><td>200 + JSON (<code>Content-Type: application/json</code>)</td></tr>
+  <tr><td><code>return "explicit html";</code></td><td><code>"explicit html"</code> (string)</td><td>HTML body</td></tr>
+  <tr><td><code>echo "shell"; return "body";</code></td><td><code>"shellbody"</code> (concatenated)</td><td>HTML body (wire order preserved)</td></tr>
+  <tr><td><code>return (function() { yield ...; })();</code></td><td><code>\Generator</code></td><td>SSR stream — each <code>yield</code> flushed</td></tr>
+  <tr><td><code>return function($req) { yield ...; };</code></td><td><code>\Closure</code> (param-injected when invoked)</td><td>SSR stream after invocation</td></tr>
+  <tr><td><code>echo "header"; return (function() { yield ...; })();</code></td><td><code>\Generator</code> wrapping <code>"header"</code> + delegated yields</td><td>Streamed in source order</td></tr>
+  <tr><td><code>return new Response($body, 200);</code></td><td><code>ResponseInterface</code></td><td>PSR-7 response used directly (output buffer ignored)</td></tr>
 </table>
+
+<p style="margin-top:.5rem;color:var(--text-muted);font-size:.92rem"><strong>Lock-step:</strong> this table is mirrored verbatim in <code>.claude/CLAUDE.md</code> under "Return value conventions". Any change to return-value handling MUST update both in the same commit. The shared private core that implements this is <code>App::executeFile()</code>.</p>
 
 <?php App::render('/components/_code', [
     'label' => 'All return patterns in one glance',
@@ -40,9 +48,45 @@ $app->route('/echo', function() {
     echo '<div>This is captured</div>';
     echo '<div>by output buffering</div>';
 });
+
+// Same contract inside an included file:
+//   public/article.php → return 404;        // status flows back
+//   public/api.php     → return ['ok'=>1];  // JSON flows back
+//   public/feed.php    → return (function(){ yield ...; })();  // streamed
+$app->route('/article/{id}', fn($id) => App::include('/article.php'));
 PHP]); ?>
 
-<h2>Response Object Methods</h2>
+<p style="margin-top:1rem">The same contract applies inside any file invoked by <a href="/templates"><code>App::render() / renderToString() / renderStream() / include()</code></a> — see <a href="/templates#file-execution-family">the file-execution family</a>.</p>
+
+<h3 id="status-range" style="margin-top:2rem">Valid HTTP status codes</h3>
+
+<p>When the contract says <code>int = HTTP status</code>, the int must be in the range <strong>100&ndash;599</strong> (RFC 7230 — three-digit response codes). ZealPHP supports every IANA-registered code in that range, including the long-tail ones like <code>418</code>, <code>421</code>, <code>423</code>, <code>425</code>, <code>451</code>, <code>507</code>, <code>511</code>.</p>
+
+<h4 style="margin-top:1rem">What if you return something outside that range?</h4>
+
+<table class="ztable" style="margin-bottom:1rem">
+  <tr><th>You return</th><th>What happens</th></tr>
+  <tr><td><code>return 0;</code> / <code>return -1;</code> / <code>return 42;</code> / <code>return 999;</code></td><td>Coerced to <strong>500 Internal Server Error</strong> with a warning logged via <code>elog()</code>. Matches Apache HTTP server behaviour (Apache silently coerces out-of-range codes to 500). The log entry surfaces the bug instead of letting it silently fail in production.</td></tr>
+  <tr><td><code>return 1;</code> <em>(special case)</em></td><td>That's what PHP's <code>include</code> returns by default when a file has no explicit <code>return</code> statement. Inside <code>App::include()</code> / <code>App::render()</code> / <code>App::renderToString()</code> / <code>App::renderStream()</code>, a <code>1</code> return is treated as "no explicit return" — the framework surfaces the buffered echo as the response body instead of trying to set HTTP status 1. The same return value from a plain route handler DOES get treated as a status (HTTP/1.1 1). If you ever explicitly mean "return 1 as a status," return <code>100</code> or another in-range code instead.</td></tr>
+  <tr><td><code>return null;</code></td><td>"No status override, no body override" — the response defaults to <code>200</code> with whatever body the framework computed (usually empty).</td></tr>
+</table>
+
+<h4 style="margin-top:1rem">Edge cases worth knowing</h4>
+<ul style="margin-left:1.2rem">
+  <li><strong>600&ndash;999</strong> are technically in RFC 7230's three-digit range but have no defined meaning. ZealPHP currently lets them pass through (no 500 coercion) — clients may or may not interpret them.</li>
+  <li><strong>Reason phrases</strong> for non-standard codes default to empty. The wire format is still <code>HTTP/1.1 451\r\n</code>, just without "Unavailable For Legal Reasons" after the digits. Browsers don't display reason phrases, so this is cosmetic.</li>
+  <li><strong>Returning <code>null</code></strong> means "no status override, no body override" — same as a handler that doesn't <code>return</code> at all.</li>
+</ul>
+
+<div class="callout info" style="margin-top:1rem">
+  <strong>Ops note.</strong> Out-of-range coercion writes to ZealPHP's debug log (<code>ZEALPHP_DEBUG_LOG</code> or <code>/tmp/zealphp/debug.log</code> by default). Grep for <code>Invalid HTTP status code returned:</code> to surface handlers that are silently bouncing to 500 in production.
+</div>
+
+<div class="callout info" style="margin-top:1rem">
+  <strong>How the framework rescues codes OpenSwoole's native list rejects.</strong> OpenSwoole 22.1.5's single-arg <code>$response-&gt;status($code)</code> silently downgrades certain IANA codes (notably <strong>425 Too Early</strong> and <strong>451 Unavailable For Legal Reasons</strong>) to <code>HTTP/1.1 200 OK</code> on the wire — its C-side whitelist predates RFCs 8470 and 7725. ZealPHP works around this via an internal <code>App::emitStatus()</code> helper that uses OpenSwoole's <strong>two-arg</strong> form <code>$response-&gt;status($code, $reason)</code>, threading the IANA reason phrase from <code>REASON_PHRASES</code>. Every IANA-registered status in 100–599 now emits correctly. (Niche nginx-extension codes like <code>444</code> and <code>499</code> that aren't in <code>REASON_PHRASES</code> still fall back to the single-arg form and may downgrade; add them to <code>REASON_PHRASES</code> if you need them.)
+</div>
+
+<h2 style="margin-top:2.5rem">Response Object Methods</h2>
 <table class="ztable" style="margin-bottom:2rem">
   <tr><th>Method</th><th>Signature</th><th>What it does</th></tr>
   <tr><td><code>json()</code></td><td><code>json($data, $status=200)</code></td><td>Sets Content-Type: application/json, encodes and ends response</td></tr>
@@ -160,7 +204,7 @@ $app->route('/api/created', function() {
 PHP]); ?>
 
 <h2 style="margin-top:2.5rem">Custom error pages — Apache <code>ErrorDocument</code></h2>
-<p>Register a handler for any 4xx/5xx status. Fires whenever the framework or a route emits that status. Return values follow the same conventions as regular routes — <code>string</code> for HTML, <code>array</code> for JSON, <code>Generator</code> for streaming, void+echo for output buffer capture.</p>
+<p>Register a handler for any 4xx/5xx status. Fires whenever the framework or a route emits that status. Return values follow the <a href="#return-contract">universal return contract</a> — the same shapes a route handler returns work here too.</p>
 
 <?php App::render('/components/_code', [
     'label' => 'Status-specific + catch-all handlers',

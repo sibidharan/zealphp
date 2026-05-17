@@ -102,6 +102,27 @@ Every inbound request flows through these layers (defined across multiple files)
 
 The **demo app uses `superglobals(false)` (coroutine mode)**. This is now the recommended default for new projects.
 
+**Canonical `$g` vs `$_*` parity rule** — `template/pages/coroutines.php#state-parity` is the single source of truth: **use `$g->get` / `$g->post` / `$g->cookie` / `$g->server` / `$g->session`. It works identically in both modes.** Under `superglobals(true)` the framework bridges `$g->get` to `$GLOBALS['_GET']` so both forms are equivalent; under `superglobals(false)` the superglobals are NOT populated per request (they're process-wide arrays — writes leak across coroutines), so only the `$g->X` form is safe. Recipes and migration examples in the website link to `/coroutines#state-parity` rather than restating this rule.
+
+### Lifecycle: static config → `init()` → instance routing → `run()`
+
+ZealPHP is one-app-per-process by design — OpenSwoole's `Server` is a process singleton (once `start()` runs, the master owns the event loop and worker pool). Multi-port within a single process is supported via `addListener()`, but those listeners share the same workers, same config, same `App` instance. Truly independent apps run as separate PHP processes via the per-port PID-file CLI (`php app.php start -p 9501` vs `-p 9502`).
+
+That architectural reality is why configuration is exposed as **static methods on `App`**, not instance methods on `$app`. The boot pattern is "configure the framework, then boot it" — config has to be set before `App::init()` returns, when the instance doesn't yet exist:
+
+```
+┌─────────────────────┐    ┌──────────────────┐    ┌────────────────────┐    ┌──────────┐
+│ Static configuration│ -> │   App::init()    │ -> │  Instance routing  │ -> │  run()   │
+│ App::superglobals() │    │  Creates the     │    │  $app->route(...)  │    │  Starts  │
+│ App::documentRoot() │    │  singleton       │    │  $app->addMiddl…() │    │  the     │
+│ App::traceEnabled() │    │  instance,       │    │  $app->setFallba…()│    │  server  │
+│ App::ignorePhpExt() │    │  binds host/port │    │  $app->ws(...)     │    │  loop    │
+│ etc.                │    │                  │    │  etc.              │    │          │
+└─────────────────────┘    └──────────────────┘    └────────────────────┘    └──────────┘
+```
+
+**API convention — fluent getter/setter methods.** Configurable options follow the `App::superglobals()` precedent: a no-arg call returns the current value; a one-arg call sets it. Backing static properties stay public for BC (existing `App::$ignore_php_ext = false` style code keeps working), but the documented API and the website's example code use the method form throughout. The AI config converter agent also emits the method form. Don't add instance-method shims that delegate to static — the static surface matches the process-singleton reality.
+
 ### uopz Function Overrides
 
 At startup (`src/App.php:__construct()`), `uopz_set_return()` permanently replaces PHP built-ins:
@@ -175,15 +196,22 @@ Four streaming patterns via `src/HTTP/Response.php` and `ResponseMiddleware`:
 | **`$response->stream($fn)`** | `$fn` receives `$write(string)` closure; headers flushed before `$fn` runs | Fine-grained streaming control |
 | **`$response->sse($fn)`** | `$fn` receives `$emit($data, $event, $id)` — formats SSE wire protocol | Server-Sent Events for JS `EventSource` |
 
+### File-execution family
+
+All four file-execution methods share a single private core (`App::executeFile()`) that runs the file, captures output, and applies the universal return contract. They differ only on (a) path resolution and (b) what the wrapper does with the result. Canonical reference: `template/pages/templates.php#file-execution-family`.
+
+| Method | Path resolved from | Returns | Notes |
+|--------|--------------------|---------|-------|
+| `App::render($tpl, $args)` | `template/` (with `.php` suffix) | `mixed` — full return contract | **BC:** templates with no explicit `return` (the pattern in every `public/*.php`) have their captured output echoed back — every existing `App::render('_master', …)` call site keeps working unchanged. Explicit returns (int/array/string/Generator/Closure) flow back to the caller without echo. |
+| `App::renderToString($tpl, $args)` | `template/` | `string` | Coerces every shape (Generator consumed, Closure invoked, scalar cast). |
+| `App::renderStream($tpl, $args)` | `template/` | `\Generator` | Yields whatever the template returned, chunk-by-chunk. |
+| `App::include($publicPath, $args = [])` | `public/` (Apache document-root convention — leading `/` optional) | `mixed` — full return contract, never echoed | Apache parity: auto-populates `$_SERVER['PHP_SELF']`, `SCRIPT_NAME`, `SCRIPT_FILENAME` for the included file (mod_php does the same). Applies `includeCheck()` so traversal outside `public/` is refused (returns `403` via the universal contract). In `superglobals(true)` mode dispatches to the CGI subprocess; in coroutine mode runs in-process. `App::includeFile()` is the deprecated alias. |
+
+The 4 implicit-route call sites in `src/App.php` (`serveDirectory()`, implicit `/`, implicit `/{file}`, implicit `/{dir}/{uri}`) all collapse to one-line `return App::include('/...')` calls — `include()` owns the `$_SERVER` preamble and the result-coercion shape that `ResponseMiddleware` consumes.
+
 ### Template Rendering
 
-Three render methods:
-
-| Method | Returns | Use when |
-|--------|---------|----------|
-| `App::render($tpl, $args)` | `void` (echoes) | Direct output in route handler or inside another template |
-| `App::renderToString($tpl, $args)` | `string` | Need HTML as value — email, cache, or `yield` |
-| `App::renderStream($tpl, $args)` | `Generator` | SSR streaming — works with both regular and streaming templates |
+`App::render() / renderToString() / renderStream()` are three members of the [file-execution family](#file-execution-family) — see that table for the full method comparison.
 
 **Streaming templates** — template returns a Closure with named parameters; framework injects by name (same as route handlers):
 
@@ -210,32 +238,55 @@ $app->route('/users', fn() => (function() {
 2. `return (function() use ($var) { yield ...; })();` — IIFE Generator (explicit)
 3. Regular echo template — captured output yielded as one chunk
 
-**Return value conventions** in route handlers:
+**Universal return contract** — one contract, every entry point. Route handler, fallback, error handler, `App::render() / renderToString() / renderStream() / include()`, public file, API closure, streaming-template Closure — every one of them rides the same return-shape mapping. Canonical home: `template/pages/responses.php#return-contract`. This table mirrors that one **verbatim** — any change to return-value handling MUST update both in lock-step. The shared private core that implements this is `App::executeFile()`.
 
-| Return | Behavior |
-|--------|----------|
-| `int` | HTTP status code (e.g., `return 404;`) |
-| `array` / `object` | JSON-serialized, Content-Type set |
-| `string` | HTML body |
-| `Generator` | SSR streaming (each yield sent immediately) |
-| `void` + `echo` | Output buffer captured via `ob_get_clean()` |
-| `ResponseInterface` | PSR-7 response used directly |
+| The handler / file does | Core sees | ResponseMiddleware emits |
+|-------------------------|-----------|--------------------------|
+| `echo "html"; // no explicit return` | `"html"` (buffered) | 200 + HTML body |
+| `return 404;` | `404` (int) | 404 status, empty body |
+| `return ['ok' => true];` | `['ok' => true]` (array) | 200 + JSON (`Content-Type: application/json`) |
+| `return "explicit html";` | `"explicit html"` (string) | HTML body |
+| `echo "shell"; return "body";` | `"shellbody"` (concatenated) | HTML body (wire order preserved) |
+| `return (function() { yield ...; })();` | `\Generator` | SSR stream — each `yield` flushed |
+| `return function($req) { yield ...; };` | `\Closure` (param-injected when invoked) | SSR stream after invocation |
+| `echo "header"; return (function() { yield ...; })();` | `\Generator` wrapping `"header"` + delegated yields | Streamed in source order |
+| `return new Response($body, 200);` | `ResponseInterface` | PSR-7 response used directly (output buffer ignored) |
+
+**Valid HTTP status codes.** When the contract says `int = HTTP status`, the int must be in the range **100–599** (RFC 7230). ZealPHP supports every IANA-registered code in that range, including the long-tail ones (`418`, `421`, `423`, `425`, `451`, `507`, `511`, etc.).
+
+| You return | What happens |
+|------------|--------------|
+| `return 0;` / `-1;` / `42;` / `999;` (out of range) | Coerced to **500 Internal Server Error** with a warning logged via `elog()`. Matches Apache HTTP server behaviour. Grep `/tmp/zealphp/debug.log` (or `ZEALPHP_DEBUG_LOG`) for `Invalid HTTP status code returned:` to surface these in production. |
+| `return 1;` (special case) | PHP's `include` returns `1` by default when a file has no explicit `return`. Inside `App::include() / render() / renderToString() / renderStream()`, a `1` return is treated as "no explicit return" — the framework surfaces the buffered echo as the response body instead of trying to set HTTP status 1. The same return from a plain route handler DOES get treated as a status. If you ever explicitly mean "return 1 as a status," return `100` instead. |
+| `return null;` | "No status override, no body override" — the response defaults to `200` with whatever body the framework computed. |
+| 600–999 | Technically in RFC 7230's three-digit range but have no defined meaning. Currently pass through without 500 coercion. |
+
+Non-standard codes have empty reason phrases on the wire (`HTTP/1.1 451\r\n` without "Unavailable For Legal Reasons"). Browsers don't display reason phrases, so this is cosmetic. Canonical home: `template/pages/responses.php#status-range`.
+
+**Rescuing codes OpenSwoole's native list rejects.** OpenSwoole 22.1.5's single-arg `$response->status($code)` silently downgrades certain IANA codes (notably **425 Too Early** and **451 Unavailable For Legal Reasons**) to `HTTP/1.1 200 OK` — its C-side whitelist predates RFCs 8470 and 7725. The framework works around this internally via `App::emitStatus()` which uses the **two-arg** form `$response->status($code, $reason)`, threading the IANA reason phrase from `REASON_PHRASES`. Every IANA-registered status in 100–599 emits correctly. Wired in at the response-emission boundary in `App::run()`'s OnRequest handler (one place — not in user-facing API). Niche nginx-extension codes (444 Connection Closed Without Response, 499 Client Closed Request) aren't in `REASON_PHRASES` and may still downgrade; add them if your app needs them.
 
 **Yield from everywhere** — Generators work in all contexts:
 - Route handlers: `return (function() { yield ...; })();`
 - Public files: `public/feed.php` returns a Generator → framework streams it
 - API handlers: `$get = function() { return (function() { yield ...; })(); };`
 - Templates via `renderStream()`: `return function($items) { yield ...; };`
+- Files dispatched via `App::include()`: same — the file's `return` value flows through the same contract.
 
 `$g->_streaming = true` is set by `stream()`/`sse()` so `ResponseMiddleware` knows to skip `ob_get_clean()`.
 
 ### Legacy App Support (CGI Worker)
 
-`App::includeFile($path)` runs PHP files in a separate process (`proc_open`) at true global scope when `App::superglobals(true)` is set. This enables unmodified WordPress/Drupal to run on ZealPHP.
+`App::include($publicPath, $args = [])` is the 4th member of the [file-execution family](#file-execution-family). It runs PHP files from `public/` through the framework:
+- **Coroutine mode** (`superglobals(false)`): in-process via the shared `App::executeFile()` core.
+- **Superglobals mode** (`superglobals(true)`): dispatches to a CGI subprocess via `proc_open` for true global-scope isolation. This is how unmodified WordPress/Drupal runs on ZealPHP.
+
+In both modes the file's return value flows back through the universal return contract — `return 404;` sets the status, `return ['ok'=>true];` emits JSON, `return (function(){ yield ...; })();` streams. The subprocess path serialises the return value over the stderr metadata channel.
+
+`App::includeFile()` is kept as a deprecated alias for `App::include()` — the WordPress showcase and existing scaffolds still call it. No runtime warning; the rename is surfaced in CHANGELOG.
 
 `App::setFallback(callable)` registers a catch-all handler for unmatched routes — replaces Apache's `.htaccess` `RewriteRule . /index.php [L]`.
 
-**CGI worker** (`src/cgi_worker.php`) captures `header()`, `setcookie()`, `setrawcookie()`, `header_remove()`, `headers_list()`, `http_response_code()`, `headers_sent()` via uopz. SSE streaming works in CGI mode via `flush()` override.
+**CGI worker** (`src/cgi_worker.php`) captures `header()`, `setcookie()`, `setrawcookie()`, `header_remove()`, `headers_list()`, `http_response_code()`, `headers_sent()` via uopz. SSE streaming works in CGI mode via `flush()` override. As of v0.2.20, also captures the included file's return value and threads it back as JSON metadata so the universal return contract works across the process boundary too (Closure-return param injection is the one documented limitation — reflection doesn't survive the pipe).
 
 ### CLI Management
 
@@ -424,7 +475,7 @@ All ZealPHP usage examples live as first-class project files:
 
 | File | Role |
 |------|------|
-| `App.php` | Framework core: init, route registration, `run()`, `ResponseMiddleware`, `render()`/`renderToString()`/`renderStream()`, `includeFile()`, `setFallback()`, `tick()`/`after()`/`onWorkerStart()`, CLI `parseCliArgs()` |
+| `App.php` | Framework core: init, route registration, `run()`, `ResponseMiddleware`, file-execution family (`render()`/`renderToString()`/`renderStream()`/`include()` — all sharing a private `executeFile()` core), `setFallback()`, `tick()`/`after()`/`onWorkerStart()`, CLI `parseCliArgs()`. `includeFile()` is a deprecated alias for `include()`. |
 | `cgi_worker.php` | CGI-style process for legacy apps — true global scope, uopz header/cookie capture, SSE streaming via flush() |
 | `G.php` | Per-request global state; superglobals mode uses static singleton, coroutine mode uses `Coroutine::getContext()` |
 | `Store.php` | `OpenSwoole\Table` adapter — cross-worker shared-memory key-value store |

@@ -191,13 +191,16 @@ use ZealPHP\App;
 App::superglobals(true);  // legacy mode — $_GET, $_POST, $_SESSION work
 $app = App::init('0.0.0.0', 8080);
 
-// Your existing PHP app becomes the fallback handler
-$app->setFallback(fn() => App::includeFile('index.php'));
+// Your existing PHP app becomes the fallback handler.
+// App::include() takes a public/-relative path (Apache document-root
+// convention) — leading slash optional. The framework auto-populates
+// $_SERVER['PHP_SELF'] / SCRIPT_NAME / SCRIPT_FILENAME, mod_php-style.
+$app->setFallback(fn() => App::include('/index.php'));
 
 $app->run();
 ```
 
-Now your WordPress, Drupal, or custom PHP app runs on OpenSwoole — persistent connections, no cold starts, WebSocket and streaming available when you're ready.
+Now your WordPress, Drupal, or custom PHP app runs on OpenSwoole — persistent connections, no cold starts, WebSocket and streaming available when you're ready. ZealPHP's **file-execution family** — `App::render()` / `App::renderToString()` / `App::renderStream()` / `App::include()` — share a single core that runs the file, captures its output, and applies the [universal return contract](https://php.zeal.ninja/responses#return-contract). `App::includeFile()` is the deprecated alias for `App::include()` and still works. See the [legacy apps page](https://php.zeal.ninja/legacy-apps) for the 12 Apache rewrite recipes and the full `.htaccess` / `nginx.conf` coverage matrices.
 
 ---
 
@@ -394,7 +397,7 @@ App::onWorkerStart(function($server, $workerId) use ($hitCounter) {
 
 **Coroutine mode (recommended):** `App::superglobals(false)` enables `OpenSwoole\Runtime::HOOK_ALL` so all PHP I/O (file, curl, PDO, sleep) yields the event loop automatically. Each request runs in its own coroutine with isolated `RequestContext::instance()` state (`G` remains as a `class_alias` for `RequestContext` since v0.2.6 — both names resolve to the same class). This is the default for new scaffolds since v0.2.4.
 
-**Superglobals mode (legacy compatibility):** `App::superglobals(true)` disables coroutines in the main thread — `$_GET`, `$_POST`, `$_SESSION` work safely because only one request runs at a time per worker. Use this when migrating existing apps incrementally. Implicit file routes for legacy code run through the CGI bridge (`App::includeFile()` → `src/cgi_worker.php` via `proc_open`) so blocking PHP runs in a child process with its own arena.
+**Superglobals mode (legacy compatibility):** `App::superglobals(true)` disables coroutines in the main thread — `$_GET`, `$_POST`, `$_SESSION` work safely because only one request runs at a time per worker. Use this when migrating existing apps incrementally. Implicit file routes for legacy code run through the CGI bridge (`App::include()` → `src/cgi_worker.php` via `proc_open`) so blocking PHP runs in a child process with its own arena.
 
 **`coprocess` / `coproc`:** Available in superglobals mode — spawns a child process for background async work. Not needed in coroutine mode (use `go()` directly).
 

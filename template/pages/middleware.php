@@ -69,6 +69,8 @@ foreach ($demos as [$id, $title, $url, $code]) {
 ?>
 
 <h2 style="margin:2rem 0 .5rem">Custom middleware</h2>
+<p style="color:var(--text-muted);font-size:.92rem">Middleware always returns a <code>Psr\Http\Message\ResponseInterface</code> — that's PSR-15's contract, not ZealPHP's. Inside the route handler that the middleware wraps, the handler still uses the <a href="/responses#return-contract">universal return contract</a>; ZealPHP's <code>ResponseMiddleware</code> converts the return into a PSR-7 response before your middleware sees it.</p>
+
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
 use Psr\Http\Message\{ResponseInterface, ServerRequestInterface};

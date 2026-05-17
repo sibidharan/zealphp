@@ -120,13 +120,38 @@ PHP]); ?>
 <tr><td><code>App::render('header')</code> (fallback)</td><td><code>template/header.php</code></td><td>If namespaced path doesn't exist</td></tr>
 </table>
 
-<h2>Three render methods</h2>
-<table class="ztable">
-<tr><th>Method</th><th>Returns</th><th>Use when</th></tr>
-<tr><td><code>App::render($tpl, $args)</code></td><td><code>void</code> (echoes)</td><td>Direct output in route handler or another template</td></tr>
-<tr><td><code>App::renderToString($tpl, $args)</code></td><td><code>string</code></td><td>Need HTML as value — email, cache, or <code>yield</code></td></tr>
-<tr><td><code>App::renderStream($tpl, $args)</code></td><td><code>Generator</code></td><td>SSR streaming — works with both regular and streaming templates</td></tr>
+<h2 id="file-execution-family">The file-execution family — four ways to run a PHP file through the framework</h2>
+<p>All four share a single private core (<code>App::executeFile()</code>) that runs the file, captures output, and applies the <a href="/responses#return-contract">universal return contract</a>. They differ only on (a) where the path is resolved from and (b) what the wrapper does with the result.</p>
+
+<table class="ztable" style="margin-bottom:1.5rem">
+<tr><th>Method</th><th>Path resolved from</th><th>Returns</th><th>Use when</th></tr>
+<tr>
+  <td><code>App::render($tpl, $args)</code></td>
+  <td><code>template/</code> (with <code>.php</code> suffix)</td>
+  <td><code>mixed</code> — full <a href="/responses#return-contract">return contract</a>. <strong>BC:</strong> if the template only echoes (no explicit <code>return</code>), the captured output is echoed back — keeps every <code>App::render('_master', …)</code> call site working unchanged.</td>
+  <td>Direct output in a route handler or inside another template; the bread-and-butter render call</td>
+</tr>
+<tr>
+  <td><code>App::renderToString($tpl, $args)</code></td>
+  <td><code>template/</code></td>
+  <td><code>string</code> — coerces every shape (Generator consumed, Closure invoked, scalar cast)</td>
+  <td>Need the HTML as a value: email body, cache entry, or to pass into another renderer</td>
+</tr>
+<tr>
+  <td><code>App::renderStream($tpl, $args)</code></td>
+  <td><code>template/</code></td>
+  <td><code>\Generator</code> — yields whatever the template returned, chunk-by-chunk</td>
+  <td>SSR streaming. Works with regular echo templates AND streaming-Closure templates uniformly</td>
+</tr>
+<tr>
+  <td><code>App::include($publicPath, $args = [])</code></td>
+  <td><code>public/</code> (Apache document-root convention — leading <code>/</code> optional)</td>
+  <td><code>mixed</code> — full <a href="/responses#return-contract">return contract</a>, never echoed (always returned so it threads through <code>ResponseMiddleware</code>). Auto-populates <code>$_SERVER['PHP_SELF']</code>, <code>SCRIPT_NAME</code>, <code>SCRIPT_FILENAME</code> for the included file (Apache mod_php parity).</td>
+  <td>Apache rewrites — <code>$app-&gt;route('/old-page', fn() =&gt; App::include('/new.php'))</code> serves <code>public/new.php</code> in-process with the URL bar still at <code>/old-page</code>. See <a href="/legacy-apps">Legacy Apps</a> for the 12 rewrite recipes</td>
+</tr>
 </table>
+
+<p style="color:var(--text-muted);font-size:.92rem"><code>App::includeFile()</code> is the deprecated alias for <code>App::include()</code> — kept for backward compatibility (the WordPress showcase and existing scaffolds still call it). New code should use <code>App::include()</code>.</p>
 
 <h2>SSR Streaming — yield from templates</h2>
 <p><code>App::renderStream()</code> returns a Generator. If the template file returns a Generator (via IIFE), it delegates with <code>yield from</code>. If the template echoes normally, the output is captured and yielded as one chunk. <strong>Both patterns compose in the same streaming pipeline.</strong></p>

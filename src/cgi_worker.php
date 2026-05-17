@@ -36,16 +36,28 @@ foreach ($_FILES as $entry) {
     }
 }
 
+$__z_return_value = null;
+$__z_has_return   = false;
+
 function __z_send_meta() {
-    global $__z_headers, $__z_cookies, $__z_rawcookies, $__z_status, $__z_meta_sent;
+    global $__z_headers, $__z_cookies, $__z_rawcookies, $__z_status, $__z_meta_sent,
+           $__z_return_value, $__z_has_return;
     if ($__z_meta_sent) return;
     $__z_meta_sent = true;
-    fwrite(STDERR, json_encode([
+    $payload = [
         'status_code' => $__z_status,
         'headers' => $__z_headers,
         'cookies' => $__z_cookies,
         'rawcookies' => $__z_rawcookies,
-    ], JSON_UNESCAPED_SLASHES) . "\n");
+    ];
+    // Universal return contract: surface the include's return value so the
+    // host process can apply the same int/array/string/null treatment that
+    // executeFile() does in coroutine mode. Generator returns are streamed
+    // inline (already echoed pre-meta) and don't ride this channel.
+    if ($__z_has_return) {
+        $payload['return_value'] = $__z_return_value;
+    }
+    fwrite(STDERR, json_encode($payload, JSON_UNESCAPED_SLASHES) . "\n");
 }
 
 if (function_exists('uopz_set_return')) {
@@ -277,7 +289,29 @@ register_shutdown_function(function() {
 ob_start();
 
 try {
-    include $__z_file;
+    $__z_result = include $__z_file;
+    $__z_has_return = true;
+    // Closure return: invoke with no args (param injection doesn't cross the
+    // process boundary). The result of the invocation is what we surface — if
+    // it's itself a Generator, fall through to the streaming branch.
+    if ($__z_result instanceof \Closure) {
+        $__z_result = $__z_result();
+    }
+    if ($__z_result instanceof \Generator) {
+        // Consume the generator inside this process — each chunk is echoed
+        // (and streamed back via the existing flush() override on the host
+        // side). The return_value is then null so the host doesn't double-up.
+        foreach ($__z_result as $__z_chunk) {
+            echo (string)$__z_chunk;
+        }
+        $__z_result = null;
+    }
+    // Skip non-serialisable returns (resources, raw objects) — host can't
+    // make sense of them anyway. Coerce to JSON-safe shape.
+    if (is_resource($__z_result) || (is_object($__z_result) && !($__z_result instanceof \JsonSerializable) && !($__z_result instanceof \stdClass))) {
+        $__z_result = null;
+    }
+    $__z_return_value = $__z_result;
 } catch (\Throwable $__z_err) {
     $__z_status = 500;
     echo '<pre>' . htmlspecialchars($__z_err->getMessage()) . "\n" . htmlspecialchars($__z_err->getTraceAsString()) . '</pre>';

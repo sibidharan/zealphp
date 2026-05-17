@@ -41,15 +41,7 @@ The variable name <strong>must match</strong> the filename (without <code>.php</
 </div>
 
 <h2>Return value conventions</h2>
-<p>Same as route handlers — return type determines the response:</p>
-<table class="ztable">
-<tr><th>Return</th><th>Result</th></tr>
-<tr><td><code>array</code> / <code>object</code></td><td>JSON-serialized with <code>Content-Type: application/json</code></td></tr>
-<tr><td><code>string</code></td><td>Sent as-is (HTML or plain text)</td></tr>
-<tr><td><code>int</code></td><td>HTTP status code</td></tr>
-<tr><td><code>Generator</code></td><td>SSR streaming — each yield sent immediately</td></tr>
-<tr><td><code>ResponseInterface</code></td><td>PSR-7 response used directly</td></tr>
-</table>
+<p>API handlers ride the <a href="/responses#return-contract">universal return contract</a> — same shapes as route handlers, public files, <code>App::render()</code>, and <code>App::include()</code>. <code>int</code> = status, <code>array</code> = JSON, <code>string</code> = HTML, <code>Generator</code> = stream, <code>ResponseInterface</code> = PSR-7 used directly.</p>
 
 <?php App::render('/components/_code', [
     'label' => 'api/products/list.php — return array for JSON',
@@ -213,7 +205,7 @@ PHP]); ?>
 </div>
 </div>
 
-<p>Public files can return <strong>Generators</strong> for streaming, <strong>arrays</strong> for JSON, or just <code>echo</code> for buffered output — same return conventions as route handlers.</p>
+<p>Public files ride the <a href="/responses#return-contract">universal return contract</a> — same shapes as a route handler.</p>
 
 <div class="callout info">
 <strong>Static files</strong> (CSS, JS, images, fonts) in <code>public/</code> are served directly by OpenSwoole's <code>enable_static_handler</code> — they never hit PHP. Only <code>.php</code> files are processed by ZealPHP.
