@@ -172,8 +172,11 @@ data: {"done":true}</code></pre>
       <li>A chat box that posts to <code>/api/learn/chat</code> and reads an SSE stream back.</li>
       <li>A Python subprocess that the PHP route spawned, currently sitting on a pipe waiting for the next prompt.</li>
       <li>A notes list on the left that updates the moment the AI calls <code>create_note</code> &mdash;
-        because that tool hits <code>/api/learn/notes</code>, which broadcasts a WebSocket event,
-        which every open tab listens for. (You'll wire that up in the next lesson.)</li>
+        because that tool hits <code>/api/learn/notes</code>, which uses the <strong>scoped
+        broadcaster pattern from the previous lesson</strong> (filtered by <code>user_id</code>
+        instead of <code>room</code>) to push a <code>note_changed</code> event to every tab
+        signed in as you. The chat tab, the Notes tab, and any popup viewer all receive it in
+        the same broadcast frame.</li>
       <li>An event log that visualizes every <span class="proto-badge sse">SSE</span> and <span class="proto-badge ws">WS</span> message as it arrives.</li>
     </ul>
     <p>
