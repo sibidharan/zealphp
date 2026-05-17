@@ -192,7 +192,9 @@ foreach ($rungs as $r):
   <tr><td><code>DirectorySlash On</code></td><td><code>/foo</code> → 301 <code>/foo/</code> when <code>foo</code> is a directory.</td></tr>
   <tr><td><code>AcceptPathInfo On</code></td><td><code>/script.php/extra</code> exposes <code>PATH_INFO=/extra</code>; rewrites <code>REQUEST_URI</code>.</td></tr>
   <tr><td><code>&lt;FilesMatch "^\.&gt;"</code> deny</td><td>Dotfile URLs return 403 (<code>.well-known/</code> allow-listed per RFC 8615).</td></tr>
-  <tr><td><code>RewriteRule . /index.php [L]</code></td><td><code>App::setFallback(fn() => App::includeFile(...))</code>. Body, status, headers, Generator return all preserved.</td></tr>
+  <tr><td><code>RewriteRule . /index.php [L]</code> <small>(catch-all, internal)</small></td><td><code>App::setFallback(fn() => App::includeFile(...))</code>. URL stays whatever the user typed; body, status, headers, Generator return all preserved.</td></tr>
+  <tr><td><code>RewriteRule ^old$ /new [L]</code> <small>(specific, internal — no <code>[R]</code>)</small></td><td><code>$app-&gt;route('/old', fn() =&gt; App::includeFile(App::$cwd.'/public/new.php'))</code>. Same in-process include; user still sees <code>/old</code> in the URL bar. <strong>Don't use <code>header('Location:&nbsp;…')</code> here</strong> — that would expose the internal target.</td></tr>
+  <tr><td><code>RewriteRule ^old$ /new [R=301,L]</code> <small>(external)</small></td><td><code>$app-&gt;route('/old', fn($response) =&gt; $response-&gt;redirect('/new', 301))</code>. Browser does a fresh request; URL bar changes. Use <code>R=302</code> for temporary.</td></tr>
   <tr><td><code>ErrorDocument 404 /custom.php</code></td><td><code>App::setErrorHandler(404, $cb)</code>. Catch-all variant: <code>setErrorHandler($cb)</code>. Handlers fire for every 4xx/5xx site in the framework.</td></tr>
   <tr><td><code>FileETag</code> / conditional GET</td><td><code>$response-&gt;sendFile()</code> emits weak ETag + <code>Last-Modified</code>; honors <code>If-None-Match</code> and <code>If-Modified-Since</code> → 304.</td></tr>
 </table>

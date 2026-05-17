@@ -157,11 +157,18 @@ $app->route('/api/learn/demo/check', ['methods' => ['POST']], function () {
     $correct = trim((string) ($g->post['correct'] ?? ''));
     $explain = trim((string) ($g->post['explain'] ?? ''));
     $isRight = $answer === $correct;
+    // Allow a tiny tag whitelist so lesson authors can put <code>, <em>,
+    // <strong>, <a> in the explanation text. The value round-trips
+    // through a form hidden input (browser decodes once before submit),
+    // so the raw payload here is what the lesson author wrote.
+    // strip_tags with an allow-list keeps the rendering safe against a
+    // hand-crafted POST that swaps in <script>.
+    $safe = strip_tags($explain, '<code><em><strong><a><br>');
     header('Content-Type: text/html; charset=utf-8');
     return App::renderToString('/components/_callout', [
         'variant' => $isRight ? 'success' : 'warn',
         'title'   => $isRight ? 'Correct!' : 'Not quite',
-        'body'    => '<p>' . htmlspecialchars($explain) . '</p>',
+        'body'    => '<p>' . $safe . '</p>',
     ]);
 });
 

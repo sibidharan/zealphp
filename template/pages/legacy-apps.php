@@ -102,33 +102,92 @@ PHP]); ?>
 </div>
 </div>
 
-<h3>Redirect rules</h3>
+<h3>Rewrite rules — internal vs. external</h3>
+<p>
+  Apache <code>RewriteRule</code> has two flavors that get conflated all the time. The flag in
+  brackets decides whether the URL bar in the user's browser changes.
+</p>
+<ul>
+  <li><strong>No <code>[R]</code> flag = internal rewrite.</strong> Apache serves the destination's
+    file but the URL bar still shows the original URL. <em>No Location header sent.</em> The user
+    never sees the internal path. Most SEO-safe, used for friendly URLs over a front controller.</li>
+  <li><strong><code>[R=301]</code> or <code>[R=302]</code> = external redirect.</strong> Apache
+    sends a Location header; browser does a fresh request to the destination; URL bar changes.
+    Used to permanently move a page or for vanity short-links.</li>
+</ul>
+<p>
+  These map to two <em>different</em> ZealPHP patterns. <strong>Don't use <code>header('Location: …')</code>
+  for a non-<code>[R]</code> rewrite</strong> — that would expose the internal URL the original
+  rule was hiding.
+</p>
+
+<h4 style="margin-top:1.5rem">Internal rewrite — no <code>[R]</code></h4>
 <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
 <div>
 <?php App::render('/components/_code', [
-    'label' => 'Before (.htaccess)',
+    'label' => 'Before (.htaccess) — internal rewrite',
     'lang'  => 'apache',
     'code'  => <<<'APACHE'
+# URL bar stays at /old-page; server serves /new's content
+RewriteRule ^old-page$ /new [L]
+
+# /blog/anything serves /articles/anything; URL unchanged
+RewriteRule ^blog/(.*)$ /articles/$1 [L]
+APACHE]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'After (app.php) — load the file in place',
+    'code'  => <<<'PHP'
+// Internal: include the destination's public/ file in the
+// SAME request — URL bar stays /old-page, content comes
+// from public/new.php. No redirect, no Location header.
+$app->route('/old-page', function() {
+    return App::includeFile(App::$cwd . '/public/new.php');
+});
+
+$app->patternRoute('/blog/(.*)', function($slug) {
+    return App::includeFile(
+        App::$cwd . "/public/articles/{$slug}.php"
+    );
+});
+PHP]); ?>
+</div>
+</div>
+<p style="font-size:.9rem;color:#57534e">
+  <code>App::includeFile()</code> is the right primitive here: it runs the destination's file
+  in-process for the current request, so the response body, status, headers, cookies, and even
+  <code>\Generator</code> streaming all come from the destination &mdash; but the visible URL is
+  whatever the user requested. Same mechanism that powers the public-file implicit router under
+  the hood.
+</p>
+
+<h4 style="margin-top:1.75rem">External redirect — <code>[R=301]</code> or <code>[R=302]</code></h4>
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'Before (.htaccess) — external redirect',
+    'lang'  => 'apache',
+    'code'  => <<<'APACHE'
+# Browser navigates to /new; URL bar changes; 301 permanent
 RewriteRule ^old-page$ /new [R=301,L]
+
+# 302 = temporary, browser/SEO won't cache the move
 RewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]
 APACHE]); ?>
 </div>
 <div>
 <?php App::render('/components/_code', [
-    'label' => 'After (app.php)',
+    'label' => 'After (app.php) — Location header',
     'code'  => <<<'PHP'
-$app->route('/old-page', function() {
-    header('Location: /new');
-    return 301;
+// External: tell the browser to go fetch /new instead.
+// URL bar changes. 301 = permanent, 302 = temporary.
+$app->route('/old-page', function($response) {
+    return $response->redirect('/new', 301);
 });
 
-$app->patternRoute('/blog/.*', function() {
-    $path = preg_replace(
-        '#^/blog/#', '/articles/',
-        $_SERVER['REQUEST_URI']
-    );
-    header('Location: ' . $path);
-    return 302;
+$app->patternRoute('/blog/(.*)', function($slug, $response) {
+    return $response->redirect("/articles/{$slug}", 302);
 });
 PHP]); ?>
 </div>
@@ -138,8 +197,9 @@ PHP]); ?>
 <table class="ztable">
 <tr><th>Apache .htaccess</th><th>ZealPHP equivalent</th></tr>
 <tr><td><code>RewriteEngine On</code></td><td>Not needed — ZealPHP routes natively</td></tr>
-<tr><td><code>RewriteRule . /index.php [L]</code></td><td><code>$app->setFallback(function() { ... })</code></td></tr>
-<tr><td><code>RewriteRule ^path$ /dest [R=301,L]</code></td><td><code>$app->route('/path', function() { header('Location: /dest'); return 301; })</code></td></tr>
+<tr><td><code>RewriteRule . /index.php [L]</code></td><td><code>$app->setFallback(function() { App::includeFile(...); })</code> — internal, URL preserved</td></tr>
+<tr><td><code>RewriteRule ^old$ /new [L]</code> (internal)</td><td><code>$app->route('/old', fn() => App::includeFile('public/new.php'))</code> — URL stays <code>/old</code></td></tr>
+<tr><td><code>RewriteRule ^old$ /new [R=301,L]</code> (external)</td><td><code>$app->route('/old', fn($response) => $response->redirect('/new', 301))</code> — URL changes to <code>/new</code></td></tr>
 <tr><td><code>DirectoryIndex index.php</code></td><td>Built-in — implicit routes serve <code>index.php</code> for directories</td></tr>
 <tr><td><code>Options -Indexes</code></td><td>Not needed — ZealPHP never lists directories</td></tr>
 <tr><td><code>&lt;FilesMatch "\.php$"&gt;</code></td><td>Not needed — ZealPHP IS the PHP runtime</td></tr>

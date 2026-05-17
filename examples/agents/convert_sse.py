@@ -41,11 +41,43 @@ $app->patternRoute('/files/.*', function() { ... });             // raw regex
 
 Magic params (injected automatically): $request, $response, $app
 
-## Redirects
+## Rewrites — internal vs external (CRITICAL — pick the right pattern)
+
+Apache `[L]` without `[R]` = INTERNAL rewrite. URL bar does NOT change. Use
+`App::includeFile()` to load the destination in-process. NEVER use
+`header('Location: ...')` here — that would expose the internal URL the
+rewrite was hiding.
+
 ```php
-$app->route('/old', function() { header('Location: /new'); return 301; });
-$app->route('/blog/{slug}', function($slug) { header('Location: /articles/' . $slug); return 302; });
+// RewriteRule ^old$ /new [L]              -> internal, URL stays /old
+$app->route('/old', function() {
+    return App::includeFile(App::$cwd . '/public/new.php');
+});
+
+// RewriteRule ^qn/([^/]+)?$ "qn.php?id=$1" [L,QSA]    -> internal with param
+$app->route('/qn/{id}', function($id) {
+    $g = G::instance();
+    $g->get['id'] = $id;
+    $g->server['SCRIPT_NAME']     = '/qn.php';
+    $g->server['SCRIPT_FILENAME'] = App::$cwd . '/public/qn.php';
+    App::includeFile(App::$cwd . '/public/qn.php');
+});
 ```
+
+Apache `[R=301,L]` or `[R=302,L]` = EXTERNAL redirect. URL bar DOES change.
+Use `$response->redirect($url, $status)`.
+
+```php
+// RewriteRule ^old$ /new [R=301,L]
+$app->route('/old', function($response) { return $response->redirect('/new', 301); });
+
+// RewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]
+$app->route('/blog/{slug}', function($slug, $response) {
+    return $response->redirect("/articles/{$slug}", 302);
+});
+```
+
+Decision: read the flag block. `R=`anything → `$response->redirect()`. No `R` → `App::includeFile()`.
 
 ## Fallback (ONLY for CMS front-controller: WordPress, Drupal, Laravel)
 ```php
@@ -85,8 +117,24 @@ $app->run(['package_max_length' => 512 * 1024 * 1024]);
 
 @function_tool
 def get_reference() -> str:
-    """Get ZealPHP API reference."""
+    """Get the ZealPHP API reference (routes, middleware, return values, legacy mode)."""
     return ZEALPHP_REF
+
+
+@function_tool
+def get_rewrite_skill() -> str:
+    """Get the dedicated skill for converting Apache RewriteRule directives — explains
+    when to use App::includeFile() (internal rewrite, no [R] flag) vs $response->redirect()
+    (external redirect, [R=301]/[R=302]). Call this whenever the input contains
+    RewriteRule lines."""
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    skill_path = os.path.join(here, "skills", "htaccess-rewrite-mapping.md")
+    try:
+        with open(skill_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "(rewrite skill file missing — fall back to the rules in the system prompt)"
 
 
 converter = Agent(
@@ -94,7 +142,10 @@ converter = Agent(
     model="gpt-5.4-mini",
     instructions="""Convert Apache .htaccess or nginx config to a ZealPHP app.php.
 
-1. Call get_reference() first.
+1. Call get_reference() first for the general API.
+2. If the input contains any `RewriteRule` line, ALSO call get_rewrite_skill() for the
+   internal-vs-external decision rules. Apply them strictly — don't use header('Location:')
+   for a no-[R] rule.
 2. Classify: LEGACY CMS (front-controller → setFallback + includeFile + superglobals) vs MODERN APP ({param} routes, no include).
 3. Output ONLY PHP code — no markdown, no explanations.
 
@@ -113,7 +164,7 @@ RULE 3: Do NOT create routes for things the framework handles automatically:
 - .php extension blocking → built-in
 - Extensionless URL resolution → built-in
 - Trailing slash handling → not needed
-Only create routes for: parameterized URLs, redirects [R=301], catch-all fallbacks.
+Only create routes for: parameterized URLs, rewrites (internal [L] or external [R=301]), catch-all fallbacks.
 
 OTHER RULES:
 - App::init() takes ($host, $port) — NEVER arrays or phpSettings.
@@ -122,11 +173,12 @@ OTHER RULES:
 - Drop non-route Apache directives (ServerSignature, Options, AddType, charset, static caching) — one brief comment.
 - CORS → CorsMiddleware. Upload size → package_max_length.
 - HTTPS/SSL redirect → comment: reverse proxy concern.
-- Redirect RewriteRules [R=301] → route with header('Location: ...'); return 301;
-- Catch-all fallback rules → $app->setFallback()
+- Internal RewriteRule (no [R]) → route with App::includeFile(App::$cwd . '/public/<target>.php'). NEVER use header('Location: ...') here — that would expose the internal URL.
+- External Redirect RewriteRule [R=301] / [R=302] → route with $response->redirect($url, $status). Returns the right shape automatically.
+- Catch-all fallback rules → $app->setFallback() containing App::includeFile() (internal — preserves URL).
 - Always include: <?php, require autoload, use statements, App::init(), routes, $app->run().
 - If not valid config: output ONLY: // Error: Not a valid Apache .htaccess or nginx server config""",
-    tools=[get_reference],
+    tools=[get_reference, get_rewrite_skill],
 )
 
 

@@ -225,7 +225,7 @@ Variable name must match basename. Auto-bound as closure with $this = ZealAPI in
 
 ## HTTP Features
 
-    $response->redirect('/new-url', 301);    // 301, 302, 307, 308
+    $response->redirect('/new-url', 301);    // 301, 302, 307, 308 — EXTERNAL only
     header('X-Custom: value');               // works via uopz override
     setcookie('name', 'value', 0, '/', '', false, true, 'Lax');
     http_response_code(201);
@@ -233,11 +233,38 @@ Variable name must match basename. Auto-bound as closure with $this = ZealAPI in
 HEAD auto-mapped to GET (body stripped). OPTIONS returns 204 + Allow header.
 OpenSwoole http_compression enabled by default (gzip).
 
+## Internal Rewrites vs External Redirects (read this — they ARE different)
+
+Internal rewrite = Apache's `RewriteRule ^/old$ /new [L]` (no `[R]`). The user
+keeps seeing /old in the URL bar; server serves /new's content. No Location
+header is sent. The right ZealPHP equivalent loads the destination file IN-
+PROCESS via App::includeFile(). DO NOT use $response->redirect() or
+header('Location: …') for these — that would expose the internal URL the
+rewrite was hiding.
+
+    // Internal — URL stays /old, content from public/new.php
+    $app->route('/old', function() {
+        return App::includeFile(App::$cwd . '/public/new.php');
+    });
+
+External redirect = Apache's `RewriteRule ^/old$ /new [R=301,L]` (with `[R]`).
+Server tells browser to fetch /new instead; URL bar changes. Use
+$response->redirect($url, $status).
+
+    // External — URL changes to /new, 301 permanent
+    $app->route('/old', function($response) {
+        return $response->redirect('/new', 301);
+    });
+
+Decision: read the `[…]` flag block on each RewriteRule. Contains `R=anything`?
+External — use $response->redirect(). No R? Internal — use App::includeFile().
+
 ## Legacy App Support
 
     App::superglobals(true);   // enables $_GET, $_POST, $_SESSION
     App::setFallback(function() {
-        include 'wordpress/index.php';  // catch-all for unmatched routes
+        // Catch-all = internal include. URL stays whatever user typed.
+        App::includeFile(App::$cwd . '/public/index.php');
     });
 
 CGI worker runs PHP files in separate process for true global scope isolation.

@@ -115,20 +115,62 @@ $app->nsPathRoute('api', '{path}', function($path) { ... });
 $app->patternRoute('/files/.*', function() { ... });
 ```
 
-### Redirects
+### Rewrites — INTERNAL vs. EXTERNAL (read this carefully)
+
+Apache `RewriteRule` has TWO modes that ZealPHP maps to different patterns.
+The flag in brackets decides which one you're looking at.
+
+**Internal rewrite — no `[R]` flag.** Apache serves the destination's file
+but the URL bar still shows the original URL. No Location header is sent.
+The user never sees the internal path. This is the COMMON case for friendly
+URLs (`/users/42` → `users.php?id=42`) and for catch-all front controllers.
+
+ZealPHP equivalent: load the destination IN-PROCESS via `App::includeFile()`.
+NEVER use `header('Location: …')` for a no-`[R]` rule — that would expose
+the internal URL the original rule was hiding (browser navigates, URL bar
+changes — wrong behavior).
 
 ```php
+// Apache:  RewriteRule ^old-page$ /new-page [L]
+// URL bar stays /old-page; content comes from public/new-page.php
 $app->route('/old-page', function() {
-    header('Location: /new-page');
-    return 301;
+    return App::includeFile(App::$cwd . '/public/new-page.php');
 });
 
-// With captured param
-$app->route('/blog/{slug}', function($slug) {
-    header('Location: /articles/' . $slug);
-    return 301;
+// Apache:  RewriteRule ^qn/([^/]+)?$ "qn.php?id=$1" [L,QSA]
+// URL bar stays /qn/42; qn.php reads $_GET['id'] = '42' as usual
+$app->route('/qn/{id}', function($id) {
+    $g = G::instance();
+    $g->get['id'] = $id;                                       // populate $_GET like Apache does
+    $g->server['SCRIPT_NAME']     = '/qn.php';
+    $g->server['SCRIPT_FILENAME'] = App::$cwd . '/public/qn.php';
+    App::includeFile(App::$cwd . '/public/qn.php');
 });
 ```
+
+**External redirect — `[R=301]` or `[R=302]` flag.** Apache sends a Location
+header; browser does a fresh request; URL bar changes. Use this when you
+genuinely want the new URL to be visible (permanent move, link shortener,
+HTTPS upgrade).
+
+ZealPHP equivalent: `$response->redirect($url, $status)`.
+
+```php
+// Apache:  RewriteRule ^old-page$ /new-page [R=301,L]  -- permanent move
+$app->route('/old-page', function($response) {
+    return $response->redirect('/new-page', 301);
+});
+
+// Apache:  RewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]  -- temporary
+$app->route('/blog/{slug}', function($slug, $response) {
+    return $response->redirect("/articles/{$slug}", 302);
+});
+```
+
+**Decision rule**: read the `[…]` flag block. If it contains `R=301` or
+`R=302` or just `R`, output `$response->redirect(...)`. Otherwise output an
+`App::includeFile(...)` route. NEVER mix the two — that defeats the rewrite
+the user was actually asking for.
 
 ### Fallback Handler
 
@@ -231,11 +273,10 @@ is a raw regex (no implicit anchoring), invoked when the request URI matches.
 $app->patternRoute('/.*\\.(env|log|git|htaccess).*', function() { return 403; });
 
 // Strip trailing slashes (registered LAST so it doesn't shadow /dir/)
-$app->patternRoute('/(.+)/$', function() {
+$app->patternRoute('/(.+)/$', function($response) {
     $g = ZealPHP\G::instance();
     $path = rtrim(parse_url($g->server['REQUEST_URI'] ?? '/', PHP_URL_PATH), '/');
-    header('Location: ' . $path);
-    return 301;
+    return $response->redirect($path, 301);
 });
 ```
 
@@ -438,14 +479,14 @@ use ZealPHP\App;
 
 $app = App::init('0.0.0.0', 8080);
 
-$app->route('/old-page', function() {
-    header('Location: /new-page');
-    return 301;
+// [R=301,L] => permanent external redirect — use $response->redirect()
+$app->route('/old-page', function($response) {
+    return $response->redirect('/new-page', 301);
 });
 
-$app->route('/blog/{slug}', function($slug) {
-    header('Location: /articles/' . $slug);
-    return 302;
+// [R=302,L] => temporary external redirect — same helper, different status
+$app->route('/blog/{slug}', function($slug, $response) {
+    return $response->redirect("/articles/{$slug}", 302);
 });
 
 // HTTPS redirect: handle via reverse proxy (nginx/Caddy) in front of ZealPHP.
@@ -453,8 +494,11 @@ $app->route('/blog/{slug}', function($slug) {
 $app->run();
 ```
 
-WHY: Redirect rules become route handlers that return the status code. HTTPS redirect is
-a transport concern — belongs to the reverse proxy, not the app server.
+WHY: ALL three input rules have `[R=…]` — explicit external redirect flags. Each one becomes
+`$response->redirect($url, $status)`, which sets the Location header and returns the right
+status. The framework handles the response shape (no manual `header()` calls, no `return
+$status` boilerplate). HTTPS redirect is a transport concern — belongs to the reverse proxy,
+not the app server.
 
 ### Example 4: Complex .htaccess with mixed directives → app.php
 
