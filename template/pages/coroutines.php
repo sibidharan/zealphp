@@ -103,6 +103,65 @@ PHP]); ?>
 
 <p>Pages that touch request state link here rather than restating this rule: <a href="/legacy-apps">Legacy Apps</a> (the Apache rewrite recipes), <a href="/sessions">Sessions</a>, <a href="/routing">Routing</a>, and the <a href="/api">API layer</a>.</p>
 
+<h2 id="lifecycle-modes" style="margin:2.5rem 0 .5rem">Lifecycle modes — four knobs, six combinations</h2>
+
+<p><code>App::superglobals()</code> used to bundle four decisions into one flag. As of v0.2.23 each is exposed as its own fluent setter so you can mix-and-match. Each new knob defaults to <code>null</code> and resolves to "follow <code>App::$superglobals</code>" at <code>App::run()</code> time — apps that don't touch them see no behaviour change.</p>
+
+<table class="ztable" style="margin-bottom:1.5rem">
+  <tr><th>Knob</th><th>Setter</th><th><code>null</code> resolves to</th><th>What it controls</th></tr>
+  <tr>
+    <td><code>$superglobals</code></td>
+    <td><code>App::superglobals(bool)</code></td>
+    <td>— (no default)</td>
+    <td><code>$g</code> storage strategy: process-wide PHP superglobals (true) vs per-coroutine <code>RequestContext</code> (false). Also picks <code>SessionManager</code> (true) vs <code>CoSessionManager</code> (false).</td>
+  </tr>
+  <tr>
+    <td><code>$process_isolation</code></td>
+    <td><code>App::processIsolation(bool)</code></td>
+    <td><code>$superglobals</code></td>
+    <td><code>App::include()</code> dispatch: true → <code>cgi_worker.php</code> subprocess per file (Apache <code>mod_php</code>-style isolation, ~30-50 ms <code>proc_open</code> cost); false → in-process via <code>executeFile()</code>.</td>
+  </tr>
+  <tr>
+    <td><code>$enable_coroutine_override</code></td>
+    <td><code>App::enableCoroutine(bool)</code></td>
+    <td><code>!$superglobals</code></td>
+    <td>OpenSwoole's <code>enable_coroutine</code> server setting — auto-coroutine-per-request wrapper. <code>false</code> → workers handle one request at a time synchronously.</td>
+  </tr>
+  <tr>
+    <td><code>$hook_all_override</code></td>
+    <td><code>App::hookAll(bool|int)</code></td>
+    <td><code>!$superglobals</code> (HOOK_ALL or 0)</td>
+    <td><code>OpenSwoole\Runtime::enableCoroutine($flags)</code> — process-wide PHP I/O hooks (curl, fopen, mysqli). PDO is <strong>not</strong> hooked in OpenSwoole 22.1 / 26.2 regardless.</td>
+  </tr>
+  <tr>
+    <td><code>$session_lifecycle</code></td>
+    <td><code>App::sessionLifecycle(bool)</code></td>
+    <td><code>true</code></td>
+    <td>Whether <code>SessionManager</code> / <code>CoSessionManager</code> drive the per-request session lifecycle (session_start, cookie emission, session_write_close). Set to <code>false</code> when another framework (Symfony's <code>NativeSessionStorage</code> via the <a href="https://github.com/sibidharan/zealphp-symfony">zealphp-symfony</a> bridge) owns sessions.</td>
+  </tr>
+</table>
+
+<h3 style="margin:1.5rem 0 .5rem">Supported mode matrix</h3>
+
+<table class="ztable" style="margin-bottom:1.5rem">
+  <tr><th>Mode</th><th><code>superglobals</code></th><th><code>processIsolation</code></th><th><code>enableCoroutine</code></th><th><code>hookAll</code></th><th>When to use</th></tr>
+  <tr><td><strong>Legacy CGI</strong><br><small>default when <code>superglobals(true)</code></small></td><td>true</td><td>true</td><td>false</td><td>0</td><td>Unmodified WordPress / Drupal — <code>define()</code>-heavy plugins need a fresh process per request.</td></tr>
+  <tr><td><strong>Coroutine</strong><br><small>default when <code>superglobals(false)</code></small></td><td>false</td><td>false</td><td>true</td><td>HOOK_ALL</td><td>Modern apps benefiting from concurrent coroutine I/O; OpenSwoole-native code.</td></tr>
+  <tr><td><strong>Mixed-mode / Symfony</strong></td><td>true</td><td><strong>false</strong></td><td>false</td><td>0</td><td>Symfony / Laravel on ZealPHP — real <code>$_SESSION</code> needed, but no per-include CGI fork cost. Sequential request handling per worker → no race risk on superglobals.</td></tr>
+  <tr><td>In-process + sync</td><td>true</td><td>false</td><td>false</td><td>0</td><td>Same shape as Mixed-mode — the "scheduler off, no CGI" combo.</td></tr>
+  <tr><td>Coroutine without HOOK_ALL</td><td>false</td><td>false</td><td>true</td><td>0</td><td>Per-request coroutine isolation but no auto I/O hooks (e.g. testing, custom hooks).</td></tr>
+</table>
+
+<div class="callout warn" style="margin-bottom:1.5rem">
+  <strong>Unsafe combinations</strong> — <code>App::run()</code> emits a <code>[lifecycle]</code> warning to the debug log but does not refuse:
+  <ul style="margin:.5rem 0 0;padding-left:1.25rem">
+    <li><code>superglobals(true) + enableCoroutine(true)</code> — process-wide <code>$_GET</code> / <code>$_POST</code> / <code>$_SESSION</code> arrays will race across concurrent coroutines (the bug per-coroutine <code>$g</code> was designed to avoid).</li>
+    <li><code>superglobals(true) + hookAll(non-zero)</code> — hooked I/O can yield mid-request, exposing process-wide superglobal mutations to other coroutines.</li>
+  </ul>
+</div>
+
+<p>The default coupling — <code>null</code> everywhere — preserves the historical behaviour for any app that doesn't touch these knobs. The <a href="https://github.com/sibidharan/zealphp-symfony">zealphp-symfony</a> bridge uses <code>superglobals(true) + processIsolation(false) + sessionLifecycle(false)</code> to get the Mixed-mode lifecycle.</p>
+
 <h2 id="what-survives" style="margin:2.5rem 0 .5rem">What survives a request</h2>
 <p class="section-desc">Long-running PHP changes the rules from PHP-FPM. This is the discipline contract you accept when running on ZealPHP — what the framework isolates for you, and what you have to keep clean yourself.</p>
 

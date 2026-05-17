@@ -35,7 +35,10 @@ $app->route('/timers/sse', function($response) use ($tickCounter, $requestCounte
     $response->sse(function($emit) use ($tickCounter, $requestCounter) {
         $emit(json_encode(['event' => 'connected', 'tick' => $tickCounter->get()]), 'open');
         for ($i = 0; $i < 20; $i++) {
-            usleep(2000000);
+            // co::sleep() yields the coroutine — other requests on this worker
+            // make progress during the 2-second wait. (usleep also yields under
+            // HOOK_ALL, but co::sleep makes the coroutine-aware intent explicit.)
+            \OpenSwoole\Coroutine::sleep(2);
             $emit(json_encode([
                 'tick'     => $tickCounter->get(),
                 'requests' => $requestCounter->get(),

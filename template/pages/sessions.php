@@ -2,7 +2,7 @@
 <section class="section">
 <div class="container">
 <h1 class="section-title">Sessions</h1>
-<p class="section-desc">ZealPHP overrides all <code>session_*()</code> functions via uopz at startup. Your code calls the same PHP functions — they write to the coroutine-local <code>RequestContext::instance()-&gt;session</code> instead of the global <code>$_SESSION</code>. (<code>G</code> remains as a <code>class_alias</code> for <code>RequestContext</code> since v0.2.6 — both names resolve to the same class, examples here use whichever reads more naturally.)</p>
+<p class="section-desc">ZealPHP overrides every <code>session_*()</code> function via uopz at startup — those calls route through the coroutine-local <code>RequestContext::instance()-&gt;session</code>. <strong>Direct writes to the <code>$_SESSION</code> superglobal are NOT intercepted</strong> — PHP has no hook for variable assignment, so <code>$_SESSION['k'] = $v</code> always lands in the process-wide PHP array. In coroutine mode that array leaks across concurrent requests; in <code>App::superglobals(true)</code> mode it's bridged through <code>$GLOBALS</code> per the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a>. <strong>Always read and write through <code>$g-&gt;session</code></strong> — it's the only form that's per-coroutine safe in both modes. (<code>G</code> remains as a <code>class_alias</code> for <code>RequestContext</code> since v0.2.6 — both names resolve to the same class.)</p>
 
 <?php App::render('/components/_code', [
     'label' => 'How it works under the hood',
@@ -13,11 +13,15 @@
 \uopz_set_return('session_write_close', \Closure::fromCallable('ZealPHP\Session\zeal_session_write_close'));
 // ... + 15 more functions
 
-// Your code stays unchanged:
-session_start();
-$_SESSION['user'] = ['id' => 42, 'name' => 'alice'];
-session_write_close();
-// → writes to G::instance()->session, not $GLOBALS['_SESSION']
+// Use $g->session for per-coroutine safety in both modes:
+$g = \ZealPHP\RequestContext::instance();
+session_start();                                          // zeal_session_start — loads disk → $g->session
+$g->session['user'] = ['id' => 42, 'name' => 'alice'];    // safe in both modes
+session_write_close();                                    // zeal_session_write_close — serializes $g->session
+
+// AVOID direct $_SESSION writes — they hit the process-wide superglobal and
+// leak across concurrent requests in coroutine mode. The framework cannot
+// intercept the assignment, only the session_*() function calls around it.
 PHP]); ?>
 
 <h2 style="margin:1.5rem 0 .5rem">Overridden functions</h2>

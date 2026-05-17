@@ -63,20 +63,38 @@ PHP]); ?>
 <p>API handlers get the same parameter injection as route handlers:</p>
 
 <?php App::render('/components/_code', [
-    'label' => 'Magic parameters: $request, $response, $app, $server',
+    'label' => 'Magic parameters: $request, $response, $app, $server (auto-injected by name)',
     'code'  => <<<'PHP'
 <?php
+use ZealPHP\RequestContext;
+
 $get = function($request, $response) {
-    // $request  → ZealPHP\HTTP\Request (incoming request)
-    // $response → ZealPHP\HTTP\Response (outgoing response)
-    // $this     → ZealAPI instance (via Closure::bind)
+    // ZealAPI's dispatcher injects these by parameter name (reflection-cached):
+    //   $request  → ZealPHP\HTTP\Request  (wrapped OpenSwoole request)
+    //   $response → ZealPHP\HTTP\Response (wrapped OpenSwoole response)
+    //   $app      → ZealAPI instance      (same as $this)
+    //   $server   → \OpenSwoole\Http\Server (raw OpenSwoole server handle)
+    //   $this     → ZealAPI instance      (handler runs inside Closure::bind)
+    // Any other named parameter receives its default value (or null if none).
 
-    $id = $this->_request->get['id'] ?? null;
-    if (!$id) return 400;
+    // Pull a query param via the injected request — the cleanest form:
+    $id = $request->get['id'] ?? null;
+    //                  ^ ZealPHP\HTTP\Request->get is the OpenSwoole-parsed
+    //                    query array (per-request, NOT the $_GET superglobal).
 
-    return ['user' => User::find($id)];
+    if (!$id) return 400;                      // int return = HTTP status (universal contract)
+
+    // Need $g (session, cookies, server vars)? Grab it explicitly:
+    $g = RequestContext::instance();
+    if (empty($g->session['user'])) return 401;
+
+    return ['user' => User::find($id)];        // array return = JSON body (universal contract)
 };
 PHP]); ?>
+
+<div class="callout info" style="margin-top:.5rem">
+<strong>Three equivalent ways to read query params</strong> inside an API handler — all are per-request safe (none touch the process-wide <code>$_GET</code> superglobal): <code>$request-&gt;get['id']</code> (injected parameter, cleanest), <code>RequestContext::instance()-&gt;get['id']</code> (useful when you also need <code>$g-&gt;session</code>), or <code>$this-&gt;_request-&gt;get['id']</code> (legacy form — works because the closure is bound to the <code>ZealAPI</code> instance and <code>$_request</code> is the same wrapper). Prefer the injected <code>$request</code> for new code. ZealAPI does NOT auto-inject <code>$g</code> by name — call <code>RequestContext::instance()</code> explicitly when you need it.
+</div>
 
 <h2>Streaming from APIs</h2>
 <p>API handlers can return Generators for streaming responses:</p>
@@ -154,9 +172,9 @@ foreach ($demos as [$id, $title, $url, $code]) {
     'url'   => '/api/bug/bad',
     'code'  => <<<'PHP'
 // api/bug/bad.php
-$bad = function() {
-    if ($this->paramExist(['id'])) {   // ← typo
-        return ['id' => $_GET['id'] ?? 'n/a'];
+$bad = function($request) {
+    if ($this->paramExist(['id'])) {   // ← typo (real method is paramsExists)
+        return ['id' => $request->get['id'] ?? 'n/a'];
     }
 };
 PHP,
