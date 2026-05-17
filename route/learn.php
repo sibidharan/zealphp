@@ -403,6 +403,11 @@ $app->route('/api/learn/demo/store-write', ['methods' => ['POST']], function () 
     'po_name' => [\OpenSwoole\Table::TYPE_STRING, 32],
     'starter' => [\OpenSwoole\Table::TYPE_STRING, 2],
     'rounds'  => [\OpenSwoole\Table::TYPE_INT,    4],
+    // Running scoreboard for the room — wins per symbol + draws. Persists
+    // across Reset clicks; only cleared by an explicit {type:'reset_score'}.
+    'x_wins'  => [\OpenSwoole\Table::TYPE_INT,    4],
+    'o_wins'  => [\OpenSwoole\Table::TYPE_INT,    4],
+    'draws'   => [\OpenSwoole\Table::TYPE_INT,    4],
 ]);
 
 function ttt_sanitize_room(string $room): string
@@ -446,6 +451,11 @@ function ttt_broadcast_state(string $room): void
             'X' => ['name' => $row['px_name'], 'connected' => ((int) $row['px_fd']) > 0],
             'O' => ['name' => $row['po_name'], 'connected' => ((int) $row['po_fd']) > 0],
         ],
+        'score'   => [
+            'X'    => (int) ($row['x_wins'] ?? 0),
+            'O'    => (int) ($row['o_wins'] ?? 0),
+            'draw' => (int) ($row['draws']  ?? 0),
+        ],
         'viewers' => $viewers,
     ]);
     foreach (\ZealPHP\Store::table('ws_tictactoe_clients') ?? [] as $fd => $c) {
@@ -474,6 +484,11 @@ function ttt_broadcast_state_with(string $room, array $extras): void
         'players' => [
             'X' => ['name' => $row['px_name'], 'connected' => ((int) $row['px_fd']) > 0],
             'O' => ['name' => $row['po_name'], 'connected' => ((int) $row['po_fd']) > 0],
+        ],
+        'score'   => [
+            'X'    => (int) ($row['x_wins'] ?? 0),
+            'O'    => (int) ($row['o_wins'] ?? 0),
+            'draw' => (int) ($row['draws']  ?? 0),
         ],
         'viewers' => $viewers,
     ], $extras));
@@ -516,11 +531,20 @@ $app->ws('/ws/tictactoe',
                 $update['winner'] = $winSymbol;
                 $update['turn']   = '';
                 $update['rounds'] = (int) ($rowRoom['rounds'] ?? 0) + 1;
+                // Bump the running scoreboard. Same Store::set call as the
+                // rest of the game-state mutation — single critical section,
+                // so the score can never disagree with the winner field.
+                if ($winSymbol === 'X') {
+                    $update['x_wins'] = (int) ($rowRoom['x_wins'] ?? 0) + 1;
+                } else {
+                    $update['o_wins'] = (int) ($rowRoom['o_wins'] ?? 0) + 1;
+                }
                 $extras['win_line'] = $winLine;
             } elseif (strpos($board, '_') === false) {
                 $update['winner'] = 'draw';
                 $update['turn']   = '';
                 $update['rounds'] = (int) ($rowRoom['rounds'] ?? 0) + 1;
+                $update['draws']  = (int) ($rowRoom['draws'] ?? 0) + 1;
             } else {
                 $update['turn'] = ($rowRoom['turn'] === 'X') ? 'O' : 'X';
             }
@@ -538,6 +562,21 @@ $app->ws('/ws/tictactoe',
                 'turn'    => $starter,
                 'winner'  => '',
                 'starter' => $starter,
+            ]);
+            ttt_broadcast_state($room);
+            return;
+        }
+
+        if ($type === 'reset_score') {
+            // Same guard as reset — spectators can't touch room state.
+            // Zeroes the scoreboard but keeps the board, turn, and seat
+            // assignments intact.
+            if (($me['symbol'] ?? '') === 'S') return;
+            \ZealPHP\Store::set('ws_tictactoe_rooms', $room, [
+                'x_wins' => 0,
+                'o_wins' => 0,
+                'draws'  => 0,
+                'rounds' => 0,
             ]);
             ttt_broadcast_state($room);
             return;
@@ -570,6 +609,9 @@ $app->ws('/ws/tictactoe',
                 'po_name' => '',
                 'starter' => 'X',
                 'rounds'  => 0,
+                'x_wins'  => 0,
+                'o_wins'  => 0,
+                'draws'   => 0,
             ]);
             $row = \ZealPHP\Store::get('ws_tictactoe_rooms', $room);
         }

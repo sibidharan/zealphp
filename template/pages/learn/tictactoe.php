@@ -245,7 +245,80 @@ Store::make('ws_tictactoe_clients', 4096, [
       row and realize X always opens.
     </p>
 
-    <h2 id="step-tryit">7. Try it — two tabs, one room</h2>
+    <h2 id="step-score">7. Keeping score — extend the row, not the schema</h2>
+    <p>
+      Players want to know <em>how many rounds X has won versus O</em> across the session. The
+      naive instinct is to spin up a new table for it — but the scoreboard is just three more
+      counters that live for the lifetime of the room. They belong in the SAME
+      <code>ws_tictactoe_rooms</code> row we already have. Three new fixed-width columns:
+    </p>
+    <pre><code class="language-php">// route/learn.php — extending the existing Store::make call from step 2
+Store::make('ws_tictactoe_rooms', 1024, [
+    // …existing columns…
+    'x_wins' =&gt; [Table::TYPE_INT, 4],
+    'o_wins' =&gt; [Table::TYPE_INT, 4],
+    'draws'  =&gt; [Table::TYPE_INT, 4],
+]);</code></pre>
+
+    <h3>Mutate where you already mutate</h3>
+    <p>
+      The win/draw branches of <code>onMessage</code> already write to the room row when a game
+      ends. Bumping the scoreboard in the SAME <code>Store::set</code> call means the counters
+      can never disagree with the <code>winner</code> field — it&rsquo;s one critical section,
+      one round-trip to shared memory:
+    </p>
+    <pre><code class="language-php">if ($winSymbol !== null) {
+    $update['winner'] = $winSymbol;
+    $update['turn']   = '';
+    $update['rounds'] = (int) $rowRoom['rounds'] + 1;
+    // Bump the matching counter in the SAME update — atomic with the
+    // winner field, no chance of a "we say X won but the score doesn't
+    // reflect it" desync.
+    if ($winSymbol === 'X') $update['x_wins'] = (int) $rowRoom['x_wins'] + 1;
+    else                    $update['o_wins'] = (int) $rowRoom['o_wins'] + 1;
+} elseif (!str_contains($board, '_')) {
+    $update['winner'] = 'draw';
+    $update['turn']   = '';
+    $update['rounds'] = (int) $rowRoom['rounds'] + 1;
+    $update['draws']  = (int) $rowRoom['draws']  + 1;
+}
+Store::set('ws_tictactoe_rooms', $room, $update);   // one write</code></pre>
+
+    <h3>Broadcast for free</h3>
+    <p>
+      The scoreboard rides on the same state-broadcast machinery that already carries the board,
+      the turn, the winner, and the player names. Adding it to the JSON payload makes every tab
+      in the room receive the new score the moment the game ends — no separate message type, no
+      separate <code>onMessage</code> branch on the client:
+    </p>
+    <pre><code class="language-php">// inside ttt_broadcast_state(), the payload gets one extra key
+'score' =&gt; [
+    'X'    =&gt; (int) $row['x_wins'],
+    'O'    =&gt; (int) $row['o_wins'],
+    'draw' =&gt; (int) $row['draws'],
+],</code></pre>
+
+    <h3>Resetting the score</h3>
+    <p>
+      A second socket message, <code>{"type":"reset_score"}</code>, zeroes the three counters
+      and re-broadcasts. Same authorization guard as the board reset — spectators are rejected,
+      seated players are allowed:
+    </p>
+    <pre><code class="language-php">if ($type === 'reset_score') {
+    if (($me['symbol'] ?? '') === 'S') return;
+    Store::set('ws_tictactoe_rooms', $room, [
+        'x_wins' =&gt; 0, 'o_wins' =&gt; 0, 'draws' =&gt; 0, 'rounds' =&gt; 0,
+    ]);
+    ttt_broadcast_state($room);
+}</code></pre>
+
+    <?php App::render('/components/_callout', [
+      'variant' => 'info',
+      'title'   => 'When NOT to use Store for scoring',
+      'body'    => '<p>This scoreboard lives in shared memory: it survives across rounds in the same room and across both players&rsquo; reconnections, but it&rsquo;s <strong>gone when the server restarts</strong> and it doesn&rsquo;t cross rooms. If you wanted a <em>persistent</em> leaderboard ("alice has won 1,247 games across all rooms ever"), you&rsquo;d use SQLite the same way the <a href="/learn/notes">Notes lesson</a> does: write to disk on every win, query for the top-N on render. Store is the right tool for ephemeral match-state; SQLite is the right tool for durable history.</p>',
+    ]); ?>
+
+    <h2 id="step-tryit">8. Try it — two tabs, one room</h2>
     <?php if (!$user): ?>
       <?php App::render('/components/_callout', [
         'variant' => 'warn',

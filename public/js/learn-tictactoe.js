@@ -67,12 +67,25 @@
     const r = $('ttt-rounds');
     if (r) r.textContent = state.rounds > 0 ? `round ${state.rounds + (state.winner ? 0 : 1)}` : '';
 
+    // Scoreboard — flash the cell whose count changed since the previous state.
+    const score = state.score || { X: 0, O: 0, draw: 0 };
+    updateScoreCell('ttt-score-x',     score.X    | 0);
+    updateScoreCell('ttt-score-o',     score.O    | 0);
+    updateScoreCell('ttt-score-draws', score.draw | 0);
+
     const isMyTurn = me.symbol === state.turn;
     const board = $('ttt-board');
     board?.setAttribute('data-disabled', (!isMyTurn || me.symbol === 'S' || state.winner !== '') ? '1' : '0');
 
     const reset = $('ttt-reset');
     if (reset) reset.hidden = me.symbol === 'S';
+    const resetScore = $('ttt-reset-score');
+    if (resetScore) {
+      // Show "Reset score" only to seated players AND only when there's
+      // anything to clear (avoids dead-button clutter on a fresh room).
+      const hasScore = (score.X | 0) + (score.O | 0) + (score.draw | 0) > 0;
+      resetScore.hidden = me.symbol === 'S' || !hasScore;
+    }
 
     if (state.winner === 'X' || state.winner === 'O') {
       const w = state.players[state.winner];
@@ -88,6 +101,17 @@
     } else {
       setStatus(`Waiting on ${state.turn}`, 'their-turn');
     }
+  }
+
+  function updateScoreCell(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const prev = el.textContent;
+    if (prev === String(value)) return;
+    el.textContent = String(value);
+    el.classList.remove('ttt-score-flash');
+    void el.offsetWidth;
+    el.classList.add('ttt-score-flash');
   }
 
   function setYou(symbol, room) {
@@ -160,6 +184,12 @@
     ws.send(JSON.stringify({ type: 'reset' }));
   }
 
+  function sendResetScore() {
+    if (!ws || ws.readyState !== 1) return;
+    if (!confirm('Reset the scoreboard? Wins/losses/draws will be zeroed.')) return;
+    ws.send(JSON.stringify({ type: 'reset_score' }));
+  }
+
   function leave() {
     manualClose = true;
     if (ws) try { ws.close(1000); } catch (_) {}
@@ -194,8 +224,9 @@
       sendMove(parseInt(cell.dataset.cell, 10));
       return;
     }
-    if (e.target.closest('#ttt-reset')) { sendReset(); return; }
-    if (e.target.closest('#ttt-leave')) { leave(); return; }
+    if (e.target.closest('#ttt-reset'))       { sendReset(); return; }
+    if (e.target.closest('#ttt-reset-score')) { sendResetScore(); return; }
+    if (e.target.closest('#ttt-leave'))       { leave(); return; }
   });
 
   // Auto-connect if the URL already carries ?room=… (deep-linking from

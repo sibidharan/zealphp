@@ -770,6 +770,36 @@ code.demo-inline { background: var(--bg-alt); padding: .1rem .35rem; border-radi
 .ttt-status.draw { background: #e7e5e4; color: #44403c; }
 .ttt-status.err, .ttt-status.closed { background: #fee2e2; color: #991b1b; }
 
+/* Scoreboard — sits above the board. X | O score with draws aside.
+ * Numbers flash amber when a count changes via .ttt-score-flash. */
+.ttt-scoreboard {
+  display: inline-flex; align-items: center; gap: .55rem;
+  padding: .35rem .85rem;
+  background: #fff;
+  border: 1px solid #e7e5e4;
+  border-radius: 999px;
+  font-size: .9rem;
+  color: #44403c;
+}
+.ttt-score-cell { display: inline-flex; align-items: center; gap: .35rem; }
+.ttt-score-num {
+  display: inline-block; min-width: 1.1rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700; font-size: 1rem;
+  text-align: center;
+  transition: color .12s;
+}
+.ttt-score-sep { color: #a8a29e; font-size: .75rem; text-transform: uppercase; letter-spacing: .1em; }
+.ttt-score-draws { margin-left: .35rem; padding-left: .65rem; border-left: 1px solid #e7e5e4; font-size: .78rem; color: #78716c; }
+.ttt-score-draws #ttt-score-draws { font-weight: 700; color: #44403c; font-family: var(--font-mono, ui-monospace, monospace); }
+@keyframes ttt-score-flash-anim {
+  0%   { color: #b91c1c; transform: scale(1.25); }
+  100% { color: inherit; transform: scale(1); }
+}
+.ttt-score-flash { animation: ttt-score-flash-anim .5s ease-out; }
+.ttt-reset-score { font-size: .82rem; }
+
 /* The board. 3×3 grid with chunky cells. Cells animate on hover/click for tactile feedback. */
 .ttt-board {
   display: grid;

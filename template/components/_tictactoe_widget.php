@@ -46,6 +46,18 @@ $preView = (((string) ($_GET['view'] ?? '')) === '1') ? ' checked' : '';
       </div>
     </div>
     <div id="ttt-status" class="ttt-status">connecting…</div>
+    <div id="ttt-scoreboard" class="ttt-scoreboard" aria-label="Match scoreboard">
+      <span class="ttt-score-cell" data-side="X">
+        <span class="ttt-symbol-chip ttt-symbol-x">X</span>
+        <span class="ttt-score-num" id="ttt-score-x">0</span>
+      </span>
+      <span class="ttt-score-sep">vs</span>
+      <span class="ttt-score-cell" data-side="O">
+        <span class="ttt-score-num" id="ttt-score-o">0</span>
+        <span class="ttt-symbol-chip ttt-symbol-o">O</span>
+      </span>
+      <span class="ttt-score-draws"><span id="ttt-score-draws">0</span> draws</span>
+    </div>
     <div id="ttt-board" class="ttt-board" data-disabled="1">
       <?php for ($i = 0; $i < 9; $i++): ?>
         <button type="button" class="ttt-cell" data-cell="<?= $i ?>" aria-label="cell <?= $i + 1 ?>"></button>
@@ -53,6 +65,7 @@ $preView = (((string) ($_GET['view'] ?? '')) === '1') ? ' checked' : '';
     </div>
     <div class="ttt-actions">
       <button type="button" id="ttt-reset" class="btn btn-ghost" hidden>Reset game</button>
+      <button type="button" id="ttt-reset-score" class="btn btn-ghost ttt-reset-score" hidden>Reset score</button>
       <button type="button" id="ttt-leave" class="btn btn-ghost ttt-leave">Leave room</button>
       <span id="ttt-viewers" class="ttt-viewers"></span>
       <span id="ttt-rounds" class="ttt-rounds"></span>
