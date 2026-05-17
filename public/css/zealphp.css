@@ -912,3 +912,29 @@ pre:hover > .code-copy { opacity: 1; }
 .bold-claim > p {
   color: var(--text-muted); margin-bottom: 1.25rem;
 }
+
+/* ============================================================
+ * Top-of-page htmx progress bar (NProgress / GitHub-docs pattern)
+ * Animated via CSS transform; JS in _master.php toggles the class.
+ * States: idle (default) → start → mid → done → idle
+ * ============================================================ */
+.htmx-progress {
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: 2px;
+  background: linear-gradient(90deg, var(--accent, #f59e0b), #fbbf24);
+  box-shadow: 0 0 8px rgba(245, 158, 11, .55);
+  transform-origin: left center;
+  transform: scaleX(0);
+  opacity: 0;
+  z-index: 9999;
+  pointer-events: none;
+  transition: transform .25s ease, opacity .15s ease;
+}
+.htmx-progress.start { opacity: 1; transform: scaleX(.30); transition-duration: .18s; }
+.htmx-progress.mid   { opacity: 1; transform: scaleX(.75); transition: transform 1.4s cubic-bezier(.1,.6,.3,.95), opacity .15s; }
+.htmx-progress.done  { opacity: 0; transform: scaleX(1.00); transition: transform .22s ease, opacity .25s .15s ease; }
+
+/* htmx auto-adds the .htmx-request class to the triggering element while a
+ * request is in flight. Subtle dim + progress cursor so the click target
+ * acknowledges itself even before the response arrives. */
+.htmx-request { opacity: .6; cursor: progress; transition: opacity .15s ease; }

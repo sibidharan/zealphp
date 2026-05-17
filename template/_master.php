@@ -9,6 +9,7 @@ $active      ??= $page;
 <html lang="en">
 <?php App::render('/_head', compact('title', 'description', 'page')); ?>
 <body hx-boost="true">
+<div id="htmx-progress" class="htmx-progress" aria-hidden="true"></div>
 <?php App::render('/_nav', ['active' => $active]); ?>
 <?php App::render('/components/_banner'); ?>
 <main class="page-body">
@@ -152,6 +153,39 @@ document.addEventListener('htmx:afterSettle', () => initPageScripts());
     const sb = document.getElementById('learn-sidebar');
     if (sb && savedScrollTop > 0) sb.scrollTop = savedScrollTop;
   });
+})();
+
+// Top-of-page progress bar for in-flight htmx requests. Pattern is the
+// same as NProgress/GitHub/Linear docs nav: a 2px amber strip at the top
+// of the viewport, animated via CSS transform. Without this, slow
+// connections leave users wondering whether their click did anything.
+(function () {
+  const bar = document.getElementById('htmx-progress');
+  if (!bar) return;
+  let pending = 0;
+  let creepTimer = null;
+  const start = () => {
+    pending++;
+    if (pending > 1) return;
+    bar.className = 'htmx-progress start';
+    clearTimeout(creepTimer);
+    creepTimer = setTimeout(() => {
+      if (pending > 0) bar.className = 'htmx-progress mid';
+    }, 220);
+  };
+  const finish = () => {
+    pending = Math.max(0, pending - 1);
+    if (pending > 0) return;
+    clearTimeout(creepTimer);
+    bar.className = 'htmx-progress done';
+    setTimeout(() => { if (pending === 0) bar.className = 'htmx-progress'; }, 280);
+  };
+  document.addEventListener('htmx:beforeRequest', start);
+  document.addEventListener('htmx:afterRequest', finish);
+  document.addEventListener('htmx:responseError', finish);
+  document.addEventListener('htmx:sendError', finish);
+  document.addEventListener('htmx:swapError', finish);
+  document.addEventListener('htmx:timeout', finish);
 })();
 </script>
 </body>
