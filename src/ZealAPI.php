@@ -235,10 +235,14 @@ class ZealAPI extends REST
         }
     }
 
-    // public function isAuthenticated()
-    // {
-    //     return Session::$authStatus == Constants::STATUS_LOGGEDIN ;
-    // }
+    /**
+     * Override in your application's API base class to provide auth checking.
+     * Default returns false (no session integration).
+     */
+    public function isAuthenticated(): bool
+    {
+        return false;
+    }
 
     /**
      * Checks if all supplied parameters exists
@@ -258,20 +262,33 @@ class ZealAPI extends REST
         return $exists;
     }
 
-    // public function isAuthenticatedFor(User $user)
-    // {
-    //     return Session::getUser()->getEmail() == $user->getEmail();
-    // }
+    /**
+     * Override in your application's API base class.
+     */
+    public function isAdmin(): bool
+    {
+        return false;
+    }
 
-    // public function isAdmin()
-    // {
-    //     return Session::isAdmin();
-    // }
+    /**
+     * Override in your application's API base class.
+     */
+    public function getUsername(): ?string
+    {
+        return null;
+    }
 
-    // public function getUsername()
-    // {
-    //     return Session::getUser()->getUsername();
-    // }
+    /**
+     * POST + authenticated guard. Returns false and sends 403 if check fails.
+     */
+    public function requirePostAuth(): bool
+    {
+        if ($this->get_request_method() !== "POST" || !$this->isAuthenticated()) {
+            $this->response($this->json(["error" => "Unauthorized"]), 403);
+            return false;
+        }
+        return true;
+    }
 
     /**
      * @param \Throwable $e
