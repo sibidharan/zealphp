@@ -58,6 +58,51 @@ foreach ($demos as [$id, $title, $url, $code]) {
   In coroutine mode, every request runs in its own coroutine with isolated <code>RequestContext::instance()</code> state (formerly named <code>G</code>; <code>G</code> remains as a class alias for backward compatibility).
 </div>
 
+<h2 id="state-parity" style="margin:2.5rem 0 .5rem"><code>$g</code> vs <code>$_*</code> — request state in both modes</h2>
+<div class="callout info" style="margin:1rem 0 1.5rem">
+  <p style="margin:0"><strong>One-line rule.</strong> Use <code>$g-&gt;get</code>, <code>$g-&gt;post</code>, <code>$g-&gt;cookie</code>, <code>$g-&gt;server</code>, <code>$g-&gt;session</code>, <code>$g-&gt;files</code> (where <code>$g = RequestContext::instance()</code>). It works identically in both <code>App::superglobals(true)</code> and <code>App::superglobals(false)</code>. Reserve <code>$_GET</code>, <code>$_POST</code>, <code>$_SERVER</code>, <code>$_SESSION</code>, <code>$_COOKIE</code>, <code>$_FILES</code> for legacy code that you can't change — and only when you're in superglobals mode.</p>
+</div>
+
+<p>The two forms diverge on one axis: how the framework populates them per request.</p>
+
+<table class="ztable" style="margin-bottom:1.5rem">
+  <tr><th>Mode</th><th><code>$g-&gt;get</code> / <code>$g-&gt;post</code> / …</th><th><code>$_GET</code> / <code>$_POST</code> / …</th></tr>
+  <tr>
+    <td><code>App::superglobals(true)</code><br><small>legacy / migration mode</small></td>
+    <td>✅ Bridged to <code>$GLOBALS['_GET']</code> etc. on each request — both forms read &amp; write the same backing array, so they're observationally equivalent.</td>
+    <td>✅ Repopulated per request by the framework. Safe because each worker runs one request at a time (coroutine scheduler is disabled in this mode).</td>
+  </tr>
+  <tr>
+    <td><code>App::superglobals(false)</code><br><small>coroutine mode (recommended default)</small></td>
+    <td>✅ A per-coroutine typed property on <code>RequestContext</code>, stored on <code>Coroutine::getContext()</code>. Isolated per request even when thousands run concurrently in the same worker.</td>
+    <td>❌ <strong>NOT populated per request.</strong> They're process-wide arrays; the framework does not write to them under coroutine mode. Reads see whatever the last writer left behind; writes leak across coroutines.</td>
+  </tr>
+</table>
+
+<p style="margin-top:.5rem"><strong>Why the <code>$g</code> form is always the right answer:</strong> the rule "use <code>$g-&gt;X</code>" composes correctly regardless of which mode you flip to next. If you write a route today against <code>$g-&gt;get['id']</code>, that handler still works the day you decide to migrate from <code>superglobals(true)</code> to coroutine mode — no rewrite. The <code>$_GET</code> form silently breaks at that boundary.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'The same code, both modes',
+    'code'  => <<<'PHP'
+use ZealPHP\RequestContext;
+
+$app->route('/article/{id}', function ($id) {
+    $g = RequestContext::instance();
+
+    // Recommended — always works in both modes:
+    $g->get['id'] = $id;
+    $g->server['PHP_SELF'] = '/article.php';
+
+    // Legacy equivalent (works in superglobals(true) only):
+    //     $_GET['id'] = $id;
+    //     $_SERVER['PHP_SELF'] = '/article.php';
+
+    return App::include('/article.php');
+});
+PHP]); ?>
+
+<p>Pages that touch request state link here rather than restating this rule: <a href="/legacy-apps">Legacy Apps</a> (the Apache rewrite recipes), <a href="/sessions">Sessions</a>, <a href="/routing">Routing</a>, and the <a href="/api">API layer</a>.</p>
+
 <h2 id="what-survives" style="margin:2.5rem 0 .5rem">What survives a request</h2>
 <p class="section-desc">Long-running PHP changes the rules from PHP-FPM. This is the discipline contract you accept when running on ZealPHP — what the framework isolates for you, and what you have to keep clean yourself.</p>
 
@@ -130,7 +175,7 @@ foreach ($demos as [$id, $title, $url, $code]) {
 </table>
 
 <h3 id="safety-matrix" style="margin:1.5rem 0 .5rem">Safety matrix (per mode)</h3>
-<p style="color:var(--text-muted);font-size:.92rem">The two modes are different runtimes, not different settings on the same runtime. Coroutine mode runs OpenSwoole's coroutine scheduler with <code>HOOK_ALL</code> enabled — every request is its own coroutine, many in flight per worker. Superglobals mode <strong>disables the coroutine scheduler entirely</strong> (<code>enable_coroutine = false</code> on the OpenSwoole server) and runs each request synchronously in the worker process, one at a time per worker — Apache MPM-prefork semantics. Implicit file routes (legacy <code>.php</code> drops) in superglobals mode additionally run through the CGI bridge (<code>App::includeFile()</code> → <code>src/cgi_worker.php</code> via <code>proc_open</code>) for true global-scope process isolation.</p>
+<p style="color:var(--text-muted);font-size:.92rem">The two modes are different runtimes, not different settings on the same runtime. Coroutine mode runs OpenSwoole's coroutine scheduler with <code>HOOK_ALL</code> enabled — every request is its own coroutine, many in flight per worker. Superglobals mode <strong>disables the coroutine scheduler entirely</strong> (<code>enable_coroutine = false</code> on the OpenSwoole server) and runs each request synchronously in the worker process, one at a time per worker — Apache MPM-prefork semantics. Implicit file routes (legacy <code>.php</code> drops) in superglobals mode additionally run through the CGI bridge (<code>App::include()</code> → <code>src/cgi_worker.php</code> via <code>proc_open</code>) for true global-scope process isolation. See the <a href="/templates#file-execution-family">file-execution family</a> for the four entry points and the <a href="/responses#return-contract">universal return contract</a> for the shared return semantics.</p>
 <table class="ztable">
   <tr><th>Concern</th><th>Coroutine mode <br><small>(<code>App::superglobals(false)</code>, scaffold default)</small></th><th>Superglobals mode <br><small>(<code>App::superglobals(true)</code>, migration only)</small></th></tr>
   <tr>
@@ -149,9 +194,9 @@ foreach ($demos as [$id, $title, $url, $code]) {
     <td>⚠ Process-wide singleton; framework resets per-request, but write at your own risk</td>
   </tr>
   <tr>
-    <td><code>$_GET</code>, <code>$_POST</code> direct access</td>
-    <td>✅ Per-coroutine via <code>$g->get</code> / <code>$g->post</code></td>
-    <td>⚠ Process-wide superglobals, repopulated per-request by the framework. Same address space as PHP-FPM's mental model — one request at a time, no interleaving risk.</td>
+    <td><code>$_GET</code>, <code>$_POST</code> direct access<br><small>(see <a href="#state-parity">the parity rule</a>)</small></td>
+    <td>❌ <strong>Not populated per request</strong> in coroutine mode. Use <code>$g-&gt;get</code> / <code>$g-&gt;post</code> instead — per-coroutine, isolated.</td>
+    <td>⚠ Process-wide superglobals, repopulated per-request by the framework. Same address space as PHP-FPM's mental model — one request at a time, no interleaving risk. <code>$g-&gt;get</code> / <code>$g-&gt;post</code> still work too — they bridge to the same arrays.</td>
   </tr>
   <tr>
     <td><code>header()</code>, <code>setcookie()</code> via uopz</td>
