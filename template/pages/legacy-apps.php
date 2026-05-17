@@ -23,14 +23,97 @@
 <p><strong>Zero WordPress modifications required.</strong> Login, sessions, cookies, redirects, file uploads, REST API, pretty permalinks — everything works through ZealPHP's CGI worker with true global scope isolation. The same <code>app.php</code> works for Drupal, Laravel, or any traditional PHP application.</p>
 </div>
 
-<h2>How It Works</h2>
+<h2 id="limitations">Known limitations — things ZealPHP won't do</h2>
+<p>Before going deep, do the 30-second dealbreaker scan. If your app depends on any of the categories marked ❌ below <em>and</em> you can't put a front proxy in front of ZealPHP, this isn't the right runtime. If you pass this gate, the porting story is clean — keep reading.</p>
+
+<h3 style="margin-top:1.25rem">Apache-side features not supported</h3>
+<table class="ztable">
+<tr><th>Feature</th><th>Why not</th><th>Workaround if any</th></tr>
+<tr><td><strong>Server-Side Includes (SSI)</strong> — <code>Options +Includes</code>, <code>XBitHack</code>, <code>.shtml</code> parsing, <code>&lt;!--#include --&gt;</code></td><td>SSI was Apache's pre-PHP templating system. Anyone porting an SSI site is replacing it with PHP anyway.</td><td>Use <code>App::render()</code> / <code>App::include()</code> — that's what they do.</td></tr>
+<tr><td><strong>mod_speling</strong> — <code>CheckSpelling</code>, <code>CheckCaseOnly</code>, fuzzy URL matching for typos</td><td>Security-questionable (cache pollution, info disclosure), low-value, low-usage.</td><td>Send a real 404 and let users retype.</td></tr>
+<tr><td><strong>mod_imagemap</strong> — server-side <code>&lt;map&gt;</code> files</td><td>Dead since ~1995. Browsers do client-side imagemaps.</td><td>Use HTML <code>&lt;map&gt;</code> / <code>&lt;area&gt;</code> in templates.</td></tr>
+<tr><td><strong>mod_dav</strong> — WebDAV (PROPFIND, MKCOL, etc.)</td><td>Different protocol scope; ZealPHP is an HTTP framework, not a file server.</td><td>Use a dedicated WebDAV server (Nextcloud, Apache mod_dav).</td></tr>
+<tr><td><strong>mod_perl, mod_python, mod_ruby</strong></td><td>ZealPHP is a PHP framework.</td><td>Run those languages in their own runtimes.</td></tr>
+<tr><td><strong>mod_isapi</strong> (Windows IIS extensions)</td><td>Windows-IIS-only API; OpenSwoole is Linux-first.</td><td>N/A — port the underlying logic to PHP.</td></tr>
+<tr><td><strong>mod_lua hooks</strong> — <code>LuaHook*</code>, <code>LuaMapHandler</code>, etc.</td><td>Apache's scriptable hook layer. PSR-15 middleware is the native equivalent.</td><td>Write a PSR-15 middleware.</td></tr>
+<tr><td><strong>CERN meta files</strong> — <code>MetaDir</code>, <code>MetaFiles</code>, <code>MetaSuffix</code></td><td>Dead since ~1996.</td><td>Use a <code>HeaderMiddleware</code> (proposed in <a href="/roadmap-or-similar">roadmap</a>).</td></tr>
+<tr><td><strong>mod_status, mod_info</strong> (server-info / server-status pages)</td><td>Built-in observability lands in v0.3.</td><td>Roll your own <code>/metrics</code> route in the meantime.</td></tr>
+<tr><td><strong>mod_proxy_balancer</strong> (load balancing)</td><td>Out of scope.</td><td>Put HAProxy / Nginx / Caddy in front.</td></tr>
+<tr><td><strong>AuthLDAP*</strong> (LDAP authentication)</td><td>Niche in PHP apps; the standard PHP LDAP extension is the integration path.</td><td>Custom middleware using PHP's <code>ldap_*</code> functions.</td></tr>
+<tr><td><strong>AuthDigest*</strong> (HTTP Digest Auth)</td><td>Largely replaced by Bearer/Cookie auth over TLS. Browser support is patchy.</td><td>HTTPS + Basic Auth, or token-based auth.</td></tr>
+<tr><td><strong>Full mod_autoindex customisation</strong> — <code>AddIcon</code>, <code>AddAlt</code>, <code>IndexStyleSheet</code>, <code>HeaderName</code>, <code>ReadmeName</code></td><td>Basic directory listing is on the roadmap (opt-in only). Apache's icon/description customisation surface is niche and design-heavy.</td><td>Override <code>template/_autoindex.php</code> in your project for custom rendering when basic autoindex ships.</td></tr>
+</table>
+
+<h3 style="margin-top:1.25rem">nginx-side features not supported (or partial)</h3>
+<table class="ztable">
+<tr><th>Feature</th><th>Why / Status</th><th>Workaround</th></tr>
+<tr><td><strong>Name-based virtual hosts</strong> — multiple <code>server { server_name a.com b.com; }</code> blocks</td><td>⚠ Partial. One ZealPHP instance serves all <code>Host</code> values.</td><td>Host-routing middleware that dispatches on <code>$g-&gt;server['HTTP_HOST']</code>, OR run one ZealPHP instance per host behind Caddy/Traefik.</td></tr>
+<tr><td><strong><code>proxy_pass</code> (reverse proxy)</strong></td><td>⚠ Not built-in. ZealPHP is an origin server, not a proxy.</td><td>Put Caddy/Traefik/Nginx in front, OR write a small handler that uses OpenSwoole's HTTP client to forward.</td></tr>
+<tr><td><strong><code>X-Accel-Redirect</code> / <code>X-Sendfile</code></strong></td><td>Different model — ZealPHP IS the origin.</td><td>Return <code>$response-&gt;sendFile($protectedPath)</code> directly from the authorised handler (uses kernel sendfile).</td></tr>
+<tr><td><strong><code>limit_rate</code></strong> (response bandwidth throttle)</td><td>⚠ Not built-in.</td><td>Custom middleware: <code>$response-&gt;write($chunk); OpenSwoole\Coroutine::sleep($delay);</code> between chunks.</td></tr>
+<tr><td><strong><code>limit_req</code></strong> (request rate limit)</td><td>⚠ Not built-in.</td><td>Sliding window in <code>Store</code> (a <code>RateLimitMiddleware</code> is on the roadmap).</td></tr>
+<tr><td><strong><code>limit_conn</code></strong> (concurrent connection limit)</td><td>⚠ Not built-in.</td><td>Use <code>Counter</code> (a <code>ConcurrencyLimitMiddleware</code> is on the roadmap).</td></tr>
+<tr><td><strong><code>early_hints</code></strong> (HTTP 103)</td><td>⚠ Not implemented. Niche browser feature.</td><td>Defer; revisit if demand emerges.</td></tr>
+<tr><td><strong><code>directio</code></strong> (O_DIRECT)</td><td>⚠ OpenSwoole doesn't expose O_DIRECT.</td><td>Rely on filesystem cache; for huge files use <code>$response-&gt;sendFile()</code>.</td></tr>
+<tr><td><strong><code>stream { … }</code> block</strong> (L4 TCP/UDP proxy)</td><td>Different protocol scope.</td><td>Use HAProxy or sniproxy.</td></tr>
+<tr><td><strong><code>mail { … }</code> block</strong> (SMTP/IMAP proxy)</td><td>Different protocol scope.</td><td>Postfix / Dovecot.</td></tr>
+<tr><td><strong><code>grpc_pass</code></strong> (gRPC proxy)</td><td>Out of scope.</td><td>Envoy or a real gRPC server.</td></tr>
+</table>
+
+<h3 style="margin-top:1.25rem">ZealPHP internal limitations</h3>
+<table class="ztable">
+<tr><th>Feature</th><th>Why</th><th>Workaround</th></tr>
+<tr><td><code>coprocess()</code> in coroutine mode</td><td>Process-spawning isn't safe inside a coroutine; the API throws <code>Exception</code> (<code>src/utils.php:312</code>). Intentional.</td><td>Use native coroutines (<code>go()</code>) for parallelism in coroutine mode.</td></tr>
+<tr><td><code>App::include()</code> Closure return with param injection in subprocess mode (<code>superglobals=true</code>)</td><td>Reflection-driven param injection doesn't survive the process boundary.</td><td>Use coroutine mode for Closure returns, or have the closure invoke itself within the included file.</td></tr>
+<tr><td>Multi-port HTTP/HTTPS on a single instance (<code>listen 80; listen 443 ssl;</code>)</td><td>OpenSwoole binds one listening socket per server.</td><td>Run two instances behind a proxy that does TLS termination + HTTP→HTTPS redirect, OR investigate <code>Server::addListener()</code>.</td></tr>
+<tr><td>HTTP/3 (QUIC)</td><td>Not yet supported by OpenSwoole.</td><td>Use a front proxy (Caddy supports HTTP/3); ZealPHP serves over HTTP/1.1 or HTTP/2 internally.</td></tr>
+</table>
+
+<p style="margin-top:1rem"><strong>Headline:</strong> the dealbreakers list is short and the items on it are either (a) dead tech nobody uses anymore (SSI, imagemaps, CERN meta files), (b) protocol-scope mismatches that belong to dedicated servers (WebDAV, SMTP, L4 proxy), or (c) features intentionally delegated to a front proxy (multi-host TLS, load balancing, HTTP/3, reverse proxy). For the ~95% of PHP apps that don't depend on these, the migration is clean.</p>
+
+<h2 style="margin-top:2.5rem">Migration ergonomics — one-liner Apache parity</h2>
+<p>Earlier ZealPHP releases needed a 5-line boot preamble to set <code>$_SERVER</code> globals before serving a legacy file. <code>App::include()</code> owns that preamble now: leading slash optional, Apache-document-root convention (paths are relative to <code>public/</code>), and the framework auto-populates <code>$_SERVER['PHP_SELF']</code> / <code>SCRIPT_NAME</code> / <code>SCRIPT_FILENAME</code> exactly as Apache's mod_php does.</p>
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'Before — manual preamble + absolute paths',
+    'code'  => <<<'PHP'
+$app->setFallback(function () {
+    $g = RequestContext::instance();
+    $g->server['PHP_SELF']        = '/index.php';
+    $g->server['SCRIPT_NAME']     = '/index.php';
+    $g->server['SCRIPT_FILENAME'] =
+        App::$cwd . '/public/index.php';
+    App::includeFile(
+        App::$cwd . '/public/index.php'
+    );
+});
+PHP]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'After — Apache document-root convention',
+    'code'  => <<<'PHP'
+$app->setFallback(fn() => App::include('/index.php'));
+
+// Paths are relative to public/ (Apache DocumentRoot
+// convention) — leading slash optional. The framework
+// auto-populates $_SERVER preamble, blocks traversal
+// outside public/, and honours the universal return
+// contract — see /responses#return-contract.
+PHP]); ?>
+</div>
+</div>
+
+<h2 style="margin-top:2.5rem">How It Works</h2>
 <p>Three framework features enable legacy app compatibility:</p>
 
 <table class="ztable">
 <tr><th>Feature</th><th>What it does</th><th>Apache equivalent</th></tr>
 <tr>
   <td><code>App::superglobals(true)</code></td>
-  <td><code>$_GET</code>, <code>$_POST</code>, <code>$_SERVER</code>, <code>$_SESSION</code>, <code>$_COOKIE</code> work as expected</td>
+  <td><code>$_GET</code>, <code>$_POST</code>, <code>$_SERVER</code>, <code>$_SESSION</code>, <code>$_COOKIE</code> work as expected. See <a href="/coroutines#state-parity">the <code>$g</code> vs <code>$_*</code> parity rule</a> for the cross-mode story.</td>
   <td>mod_php (default behavior)</td>
 </tr>
 <tr>
@@ -39,9 +122,14 @@
   <td><code>AddHandler php-script .php</code></td>
 </tr>
 <tr>
-  <td><code>App::includeFile()</code></td>
-  <td>Runs each PHP file in a separate process at <strong>true global scope</strong> via the CGI worker</td>
+  <td><code>App::include()</code><br><small>(was <code>App::includeFile()</code> — deprecated alias)</small></td>
+  <td>Runs a PHP file from <code>public/</code> through the framework. In superglobals mode, dispatches through the CGI worker for true global-scope isolation; in coroutine mode, runs in-process. Either way, the file's return value flows through the <a href="/responses#return-contract">universal return contract</a>.</td>
   <td>mod_prefork MPM + CGI</td>
+</tr>
+<tr>
+  <td>Auto-<code>$_SERVER</code> preamble</td>
+  <td><code>App::include()</code> populates <code>$_SERVER['PHP_SELF']</code>, <code>SCRIPT_NAME</code>, <code>SCRIPT_FILENAME</code> for the included file before invoking it.</td>
+  <td>mod_php's automatic CGI environment</td>
 </tr>
 </table>
 
@@ -60,49 +148,571 @@ $app->run(['task_worker_num' => 0]);
 // PHP files in public/ are served automatically with process isolation
 PHP]); ?>
 
-<h2>Porting from Apache .htaccess</h2>
-<p>ZealPHP replaces <code>.htaccess</code> entirely. Here are real-world conversions:</p>
+<h2 style="margin-top:2.5rem">Apache rewrite recipes — the 12 patterns</h2>
+<p>Real <code>.htaccess</code> files are full of <code>RewriteRule</code> destinations that end in <code>.php</code>. Each recipe below shows the Apache directive and its ZealPHP equivalent. Every example uses the <a href="/coroutines#state-parity"><code>$g</code> form</a> for query-string injection — works in both modes, no per-coroutine leak in coroutine mode. The legacy <code>$_GET</code> equivalent appears as a comment for readers porting older code.</p>
 
-<h3>WordPress .htaccess</h3>
-<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+<h3 id="recipe-a" style="margin-top:1.5rem">Recipe A — Strip <code>.php</code> extension (clean URLs)</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
 <div>
 <?php App::render('/components/_code', [
-    'label' => 'Before (.htaccess)',
+    'label' => '.htaccess',
     'lang'  => 'apache',
     'code'  => <<<'APACHE'
-RewriteEngine On
-RewriteBase /
-RewriteRule ^index\.php$ - [L]
+# URL /about → public/about.php
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule . /index.php [L]
+RewriteCond %{REQUEST_FILENAME}\.php -f
+RewriteRule ^(.+)$ $1.php [L]
 APACHE]); ?>
 </div>
 <div>
 <?php App::render('/components/_code', [
-    'label' => 'After (app.php)',
+    'label' => 'app.php — built-in, zero user code',
     'code'  => <<<'PHP'
-App::superglobals(true);
-App::$ignore_php_ext = false;
-$app = App::init('0.0.0.0', 8080);
-
-$app->setFallback(function() {
-    $g = G::instance();
-    $g->server['PHP_SELF'] = '/index.php';
-    $g->server['SCRIPT_NAME'] = '/index.php';
-    $g->server['SCRIPT_FILENAME'] =
-        App::$cwd . '/public/index.php';
-    App::includeFile(
-        App::$cwd . '/public/index.php'
-    );
-});
-
-$app->run(['task_worker_num' => 0]);
+// The implicit /{file} route already matches both
+// /about and /about.php to public/about.php when
+// $ignore_php_ext is true.
+App::$ignore_php_ext = true;
 PHP]); ?>
 </div>
 </div>
 
-<h3>Rewrite rules — internal vs. external</h3>
+<h3 id="recipe-b" style="margin-top:1.5rem">Recipe B — Pretty URL → real <code>.php</code> file (with route param)</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => '.htaccess',
+    'lang'  => 'apache',
+    'code'  => <<<'APACHE'
+RewriteRule ^my-page$              /pages/my-page.php             [L]
+RewriteRule ^article/([0-9]+)\.html$ /article.php?id=$1           [L,QSA]
+RewriteRule ^user/([a-z0-9-]+)$    /user/profile.php?slug=$1      [L,QSA]
+APACHE]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'app.php',
+    'code'  => <<<'PHP'
+use ZealPHP\RequestContext;
+
+$app->route('/my-page',
+    fn() => App::include('/pages/my-page.php'));
+
+$app->patternRoute('/article/([0-9]+)\.html', function ($id) {
+    $g = RequestContext::instance();
+    $g->get['id'] = $id;          // legacy: $_GET['id'] = $id
+    return App::include('/article.php');
+});
+
+$app->patternRoute('/user/([a-z0-9-]+)', function ($slug) {
+    $g = RequestContext::instance();
+    $g->get['slug'] = $slug;      // legacy: $_GET['slug'] = $slug
+    return App::include('/user/profile.php');
+});
+PHP]); ?>
+</div>
+</div>
+
+<h3 id="recipe-c" style="margin-top:1.5rem">Recipe C — Front controller (WordPress / Drupal / Laravel)</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => '.htaccess',
+    'lang'  => 'apache',
+    'code'  => <<<'APACHE'
+# WordPress / Laravel — try real file, else hand to index.php
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+
+# Drupal 7 / older CMSes — pass the path as ?q=
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php?q=$1 [L,QSA]
+APACHE]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'app.php',
+    'code'  => <<<'PHP'
+use ZealPHP\RequestContext;
+
+// WordPress / Laravel — fallback handler.
+// Implicit router already tried public/{file}.php;
+// setFallback() catches everything else.
+$app->setFallback(fn() => App::include('/index.php'));
+
+// Drupal — populate $g->get['q'] (legacy: $_GET['q']):
+$app->setFallback(function () {
+    $g = RequestContext::instance();
+    $g->get['q'] = ltrim(parse_url(
+        $g->server['REQUEST_URI'], PHP_URL_PATH
+    ) ?? '', '/');
+    return App::include('/index.php');
+});
+PHP]); ?>
+</div>
+</div>
+
+<h3 id="recipe-d" style="margin-top:1.5rem">Recipe D — API prefix → single front controller</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => '.htaccess',
+    'lang'  => 'apache',
+    'code'  => <<<'APACHE'
+# /api/v1/users/42 → /api/index.php
+# with REQUEST_URI preserved
+RewriteRule ^api/(.*)$ /api/index.php [L,QSA]
+APACHE]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'app.php',
+    'code'  => <<<'PHP'
+use ZealPHP\RequestContext;
+
+$app->nsPathRoute('api', '{path}', function (string $path) {
+    $g = RequestContext::instance();
+    $g->get['path'] = $path;       // legacy: $_GET['path'] = $path
+    return App::include('/api/index.php');
+});
+PHP]); ?>
+</div>
+</div>
+
+<h3 id="recipe-e" style="margin-top:1.5rem">Recipe E — Specific <code>.php</code> file in subdirectory</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => '.htaccess',
+    'lang'  => 'apache',
+    'code'  => <<<'APACHE'
+RewriteRule ^admin/?$         /admin/login.php       [L]
+RewriteRule ^admin/users$     /admin/users/index.php [L]
+RewriteRule ^checkout/done$   /shop/thankyou.php     [L]
+APACHE]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'app.php',
+    'code'  => <<<'PHP'
+$app->route('/admin',         fn() => App::include('/admin/login.php'));
+$app->route('/admin/users',   fn() => App::include('/admin/users/index.php'));
+$app->route('/checkout/done', fn() => App::include('/shop/thankyou.php'));
+PHP]); ?>
+</div>
+</div>
+
+<h3 id="recipe-f" style="margin-top:1.5rem">Recipe F — Block direct access to internal <code>.php</code> files</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => '.htaccess',
+    'lang'  => 'apache',
+    'code'  => <<<'APACHE'
+# WordPress: prevent direct hits on wp-includes/*.php
+RewriteRule ^wp-includes/(.+\.php)$ - [F,L]
+APACHE]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'app.php',
+    'code'  => <<<'PHP'
+// Refuse with 403 (universal return contract — int = status).
+$app->nsPathRoute('wp-includes', '{rest}(\.php)?', fn() => 403);
+PHP]); ?>
+</div>
+</div>
+
+<h3 id="recipe-g" style="margin-top:1.5rem">Recipe G — HTTPS canonical scheme</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => '.htaccess',
+    'lang'  => 'apache',
+    'code'  => <<<'APACHE'
+RewriteCond %{HTTPS} off
+RewriteRule (.*) https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+APACHE]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'app.php — middleware',
+    'code'  => <<<'PHP'
+use Psr\Http\{Server\MiddlewareInterface,
+              Message\ResponseInterface};
+use OpenSwoole\Core\Psr\Response;
+
+$app->addMiddleware(new class implements MiddlewareInterface {
+    public function process($request, $handler): ResponseInterface {
+        if (($request->getServerParams()['HTTPS'] ?? '') !== 'on') {
+            $url = 'https://' . $request->getUri()->getHost()
+                 . $request->getUri()->getPath();
+            return (new Response(''))->withStatus(301)
+                ->withHeader('Location', $url);
+        }
+        return $handler->handle($request);
+    }
+});
+PHP]); ?>
+</div>
+</div>
+
+<h3 id="recipe-h" style="margin-top:1.5rem">Recipe H — Canonical host (www vs apex)</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => '.htaccess',
+    'lang'  => 'apache',
+    'code'  => <<<'APACHE'
+RewriteCond %{HTTP_HOST} !^www\. [NC]
+RewriteRule (.*) https://www.%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+APACHE]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'app.php — middleware (same shape as G)',
+    'code'  => <<<'PHP'
+// Inspect Host header; if missing www., 301 to the www form.
+// See Recipe G for the full middleware skeleton.
+PHP]); ?>
+</div>
+</div>
+
+<h3 id="recipe-i" style="margin-top:1.5rem">Recipe I — Maintenance mode</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => '.htaccess',
+    'lang'  => 'apache',
+    'code'  => <<<'APACHE'
+RewriteCond %{REMOTE_ADDR} !^203\.0\.113\.42$
+RewriteRule .* /maintenance.html [R=503,L]
+APACHE]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'app.php — middleware',
+    'code'  => <<<'PHP'
+// Check $g->server['REMOTE_ADDR']; non-allow-listed IPs get
+// a 503 response served via App::include('/maintenance.php').
+// Universal return contract handles status + body.
+PHP]); ?>
+</div>
+</div>
+
+<h3 id="recipe-j" style="margin-top:1.5rem">Recipe J — Custom error pages (Apache <code>ErrorDocument</code>)</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => '.htaccess',
+    'lang'  => 'apache',
+    'code'  => <<<'APACHE'
+ErrorDocument 404 /custom-404.php
+ErrorDocument 500 /custom-500.php
+APACHE]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'app.php',
+    'code'  => <<<'PHP'
+$app->setErrorHandler(404, fn() => App::include('/custom-404.php'));
+
+$app->setErrorHandler(500, fn($exception) =>
+    App::include('/custom-500.php', ['exception' => $exception]));
+
+// Args passed to App::include() are extracted into the file's
+// scope — custom-500.php sees $exception as a local variable.
+PHP]); ?>
+</div>
+</div>
+
+<h3 id="recipe-k" style="margin-top:1.5rem">Recipe K — SEO redirect (old paths to new)</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => '.htaccess',
+    'lang'  => 'apache',
+    'code'  => <<<'APACHE'
+RedirectMatch 301 ^/old-section/(.*)$ /new-section/$1
+RewriteRule ^blog/(.*)$ /articles/$1 [R=301,L]
+APACHE]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'app.php',
+    'code'  => <<<'PHP'
+$app->patternRoute('/old-section/(.*)',
+    fn($rest, $response) => $response->redirect("/new-section/{$rest}", 301));
+
+$app->patternRoute('/blog/(.*)',
+    fn($rest, $response) => $response->redirect("/articles/{$rest}", 301));
+PHP]); ?>
+</div>
+</div>
+
+<h3 id="recipe-l" style="margin-top:1.5rem">Recipe L — Trailing-slash enforcement</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<div>
+<?php App::render('/components/_code', [
+    'label' => '.htaccess',
+    'lang'  => 'apache',
+    'code'  => <<<'APACHE'
+RewriteCond %{REQUEST_URI} !(\.[a-zA-Z]+|/)$
+RewriteRule (.*) /$1/ [R=301,L]
+APACHE]); ?>
+</div>
+<div>
+<?php App::render('/components/_code', [
+    'label' => 'app.php — built-in',
+    'code'  => <<<'PHP'
+// 301 to the trailing-slash form for directories under public/.
+App::$directory_slash = true;
+PHP]); ?>
+</div>
+</div>
+
+<h3 style="margin-top:2rem">Recipe summary</h3>
+<table class="ztable">
+<tr><th>Pattern</th><th>ZealPHP equivalent</th></tr>
+<tr><td>A — Strip <code>.php</code></td><td>Built-in: <code>App::$ignore_php_ext = true</code></td></tr>
+<tr><td>B — Pretty URL → <code>.php</code> + param</td><td><code>patternRoute</code> + <code>App::include</code> + <code>$g-&gt;get</code></td></tr>
+<tr><td>C — Front controller</td><td><code>setFallback(fn() =&gt; App::include('/index.php'))</code></td></tr>
+<tr><td>D — API prefix</td><td><code>nsPathRoute('api', '{path}', ...) + App::include</code></td></tr>
+<tr><td>E — Specific file mapping</td><td><code>$app-&gt;route('/url', fn() =&gt; App::include('/file.php'))</code></td></tr>
+<tr><td>F — Block direct access</td><td><code>nsPathRoute(...) =&gt; 403</code> (int = status)</td></tr>
+<tr><td>G/H — HTTPS / www canonical</td><td>PSR-15 middleware</td></tr>
+<tr><td>I — Maintenance mode</td><td>PSR-15 middleware + <code>App::include</code></td></tr>
+<tr><td>J — Error pages</td><td><code>setErrorHandler(N, fn() =&gt; App::include('/...'))</code></td></tr>
+<tr><td>K — SEO 301</td><td><code>patternRoute</code> + <code>$response-&gt;redirect(..., 301)</code></td></tr>
+<tr><td>L — Trailing slash</td><td>Built-in: <code>App::$directory_slash = true</code></td></tr>
+</table>
+
+<h2 style="margin-top:2.5rem">Real-world full-<code>.htaccess</code> migration — worked example</h2>
+<p>A production-style Q&amp;A platform <code>.htaccess</code> with ~30 rewrite rules, headers, charsets, and caching. Each row maps directly to a ZealPHP construct. ✅ = built-in. ⚠ = small custom middleware (on the roadmap). 💡 = PHP-level idiom.</p>
+
+<table class="ztable">
+<tr><th>Apache directive</th><th>ZealPHP equivalent</th><th>Support</th></tr>
+<tr><td><code>php_value upload_max_filesize 512M</code></td><td><code>ini_set('upload_max_filesize', '512M');</code> in <code>app.php</code> boot, or <code>php.ini</code></td><td>✅</td></tr>
+<tr><td><code>ServerSignature Off</code></td><td>No-op — OpenSwoole sends no server-signature footer</td><td>✅</td></tr>
+<tr><td><code>Options -Indexes</code></td><td>No-op — ZealPHP never lists directories</td><td>✅</td></tr>
+<tr><td><code>AddDefaultCharset utf-8</code></td><td>One-line <code>CharsetMiddleware</code></td><td>⚠ roadmap</td></tr>
+<tr><td><code>AddCharset utf-8 .css .js …</code></td><td>Same <code>CharsetMiddleware</code></td><td>⚠ roadmap</td></tr>
+<tr><td><code>AddType font/woff2 .woff2</code> (and friends)</td><td><code>mime_type</code> option on <code>App::run()</code>, or middleware override</td><td>⚠</td></tr>
+<tr><td><code>Header set Access-Control-Allow-Origin "*"</code></td><td><code>App::addMiddleware(new CorsMiddleware([...]))</code></td><td>✅</td></tr>
+<tr><td><code>&lt;FilesMatch ".(css|jpg|…)$"&gt; Header set Cache-Control "max-age=2628000"</code></td><td>Extension-based middleware</td><td>⚠ <code>CacheControlMiddleware</code> on the roadmap</td></tr>
+<tr><td><code>RewriteEngine on</code> / <code>RewriteBase /</code></td><td>N/A — native routing</td><td>✅</td></tr>
+<tr><td><code>RewriteRule ^/?qn/([^/]+)?$ "qn.php?id=$1"</code></td><td><code>patternRoute('/qn/([^/]+)?', fn($id) =&gt; { $g-&gt;get['id'] = $id; return App::include('/qn.php'); })</code></td><td>✅ Recipe B</td></tr>
+<tr><td><code>RewriteRule ^/?watch/([^/]+)?$ "watch.php?v=$1"</code></td><td>Same Recipe B pattern</td><td>✅</td></tr>
+<tr><td><code>RewriteRule ^/?_/([^/]+)/([^/]+)?$ "_data.php?switch=$1&amp;query=$2"</code></td><td><code>patternRoute('/_/([^/]+)/([^/]+)?', fn($switch, $query) =&gt; { $g-&gt;get['switch']=$switch; $g-&gt;get['query']=$query; return App::include('/_data.php'); })</code></td><td>✅</td></tr>
+<tr><td><code>RewriteRule ^/?account/([^/]+)?$</code> + <code>^/?account/([^/]+)/([^/]+)?$</code> (overloaded)</td><td>Two <code>patternRoute</code> calls, more specific first</td><td>✅</td></tr>
+<tr><td><code>RewriteRule ^/?api/([^/]+)/([^/]+)?$ "api.php?rquest=$2&amp;ns=$1"</code> (swapped captures)</td><td>Capture order in closure params matches regex; assign by name: <code>fn($ns, $rquest) =&gt; { $g-&gt;get['ns']=$ns; ... }</code></td><td>✅</td></tr>
+<tr><td><code>RewriteRule ^/?contents/(.+)?$ "contents.php?path=$1"</code> (greedy <code>.+</code>)</td><td><code>patternRoute('/contents/(.+)?', ...)</code></td><td>✅</td></tr>
+<tr><td><code>RewriteRule ^/?help/(.+)/$ "http://%{HTTP_HOST}/help/$1" [R=301]</code> (strip trailing slash)</td><td><code>patternRoute('/help/(.+)/', fn($p, $r) =&gt; $r-&gt;redirect("/help/{$p}", 301))</code></td><td>✅</td></tr>
+<tr><td><code>RewriteRule ^/?help?$ "http://%{HTTP_HOST}/help/" [R=301]</code></td><td><code>$app-&gt;route('/help', fn($r) =&gt; $r-&gt;redirect('/help/', 301))</code></td><td>✅</td></tr>
+<tr><td><code>RewriteRule ^/?help/(.+)?$ "help.php?topic=$1"</code></td><td>Standard Recipe B pattern</td><td>✅</td></tr>
+<tr><td><code>RewriteCond %{THE_REQUEST} ^...\.php... HTTP/; RewriteRule ^(.+)\.php$ "..." [R=404]</code> (refuse direct <code>.php</code>)</td><td>Middleware inspecting <code>$g-&gt;server['REQUEST_URI']</code> — return <code>404</code> if URI ends in <code>.php</code></td><td>⚠ <code>BlockPhpExtMiddleware</code> on the roadmap (5-line custom version meanwhile)</td></tr>
+<tr><td><code>RewriteCond %{REQUEST_FILENAME}\.test.php -f; RewriteRule ^([^/.]+)$ $1.test.php</code> (extensionless <code>.test.php</code> resolver)</td><td>Custom route that file-existence-checks then includes</td><td>⚠ Document fall-through semantics</td></tr>
+<tr><td><code>RewriteCond %{REQUEST_FILENAME}\.php -f; RewriteRule ^([^/.]+)$ $1.php</code></td><td>Built-in via implicit <code>/{file}</code> route + <code>$ignore_php_ext = true</code></td><td>✅ Recipe A</td></tr>
+<tr><td><code>RewriteCond %{REQUEST_FILENAME} !-d; RewriteRule ^([^/]+)/$ "..." [R=301]</code> (strip trailing slash for non-directories)</td><td>Custom middleware (inverse of <code>App::$directory_slash</code>)</td><td>⚠ <code>App::$strip_trailing_slash</code> on the roadmap</td></tr>
+<tr><td><code>RewriteCond ... !-f; RewriteCond ... !-d; RewriteRule ^([^/]+)/?$ "profile.php?username=$1"</code></td><td><code>setFallback</code> with one-segment URL check, return <code>404</code> otherwise</td><td>✅ Recipe C generalised</td></tr>
+</table>
+
+<p style="margin-top:1rem"><strong>Coverage:</strong> ~80% fully supported with no new framework work (every <code>patternRoute</code> + <code>App::include</code> case, redirects, CORS, MIME via static handler, extension resolver, front-controller fallback). ~20% need a small middleware addition or 5-line custom inline.</p>
+
+<h2 style="margin-top:2.5rem">Apache <code>AllowOverride</code> coverage matrix</h2>
+<p>Every directive that can appear in a <code>.htaccess</code> file (sourced from <a href="https://httpd.apache.org/docs/current/mod/overrides.html" target="_blank">Apache's overrides reference</a>), grouped by <code>AllowOverride</code> category. ✅ built-in / ⚠ custom middleware / 💡 PHP-level / ❌ obsolete or unsupported.</p>
+
+<h3 style="margin-top:1.25rem"><code>AllowOverride All</code> — request shape, server identity, conditionals</h3>
+<table class="ztable">
+<tr><th>Apache</th><th>ZealPHP</th></tr>
+<tr><td><code>&lt;Files&gt;</code>, <code>&lt;FilesMatch&gt;</code></td><td>✅ Route patterns + middleware conditionals on <code>$g-&gt;server['REQUEST_URI']</code></td></tr>
+<tr><td><code>&lt;If&gt;</code>, <code>&lt;ElseIf&gt;</code>, <code>&lt;Else&gt;</code></td><td>✅ Native PHP control flow — Apache <code>ap_expr</code> becomes PHP expressions</td></tr>
+<tr><td><code>&lt;IfModule&gt;</code>, <code>&lt;IfDefine&gt;</code>, <code>&lt;IfDirective&gt;</code>, <code>&lt;IfFile&gt;</code>, <code>&lt;IfSection&gt;</code>, <code>&lt;IfVersion&gt;</code></td><td>✅ N/A — PHP <code>if (class_exists / extension_loaded / file_exists / version_compare)</code></td></tr>
+<tr><td><code>LimitRequestBody</code></td><td>✅ <code>'package_max_length' =&gt; N</code> in <code>$app-&gt;run()</code></td></tr>
+<tr><td><code>LimitXMLRequestBody</code></td><td>💡 <code>libxml_disable_entity_loader</code> + check <code>Content-Length</code></td></tr>
+<tr><td><code>LogIOTrackTTFB</code></td><td>💡 Custom logging middleware</td></tr>
+<tr><td>Lua hooks (<code>mod_lua</code>)</td><td>✅ N/A — PSR-15 middleware is the equivalent</td></tr>
+<tr><td><code>RLimitCPU / MEM / NPROC</code></td><td>💡 PHP-level (<code>set_time_limit</code> / <code>memory_limit</code>) or OS-level (<code>ulimit</code>, systemd <code>LimitNPROC=</code>)</td></tr>
+<tr><td><code>ServerSignature</code></td><td>✅ Built-in (always off — no signature footer)</td></tr>
+<tr><td>SSI directives (<code>SSIErrorMsg</code>, etc.)</td><td>❌ SSI not supported</td></tr>
+</table>
+
+<h3 style="margin-top:1.25rem"><code>AllowOverride AuthConfig</code> — authentication and authorisation</h3>
+<table class="ztable">
+<tr><th>Apache</th><th>ZealPHP</th></tr>
+<tr><td><code>AuthType Basic</code> + <code>AuthName</code> + <code>AuthUserFile</code> + <code>Require</code></td><td>⚠ <code>BasicAuthMiddleware</code> on the roadmap. Same DX as <code>CorsMiddleware</code>.</td></tr>
+<tr><td><code>AuthType Digest</code> + <code>AuthDigest*</code></td><td>⚠ Niche; deferred. Document recommends BasicAuth + HTTPS.</td></tr>
+<tr><td><code>AuthLDAP*</code></td><td>❌ Custom middleware via PHP's <code>ldap_*</code> extension</td></tr>
+<tr><td><code>Anonymous*</code></td><td>❌ Niche</td></tr>
+<tr><td><code>Require valid-user / user X / group Y</code></td><td>⚠ <code>BasicAuthMiddleware</code> config</td></tr>
+<tr><td><code>&lt;Limit&gt;</code>, <code>&lt;LimitExcept&gt;</code></td><td>✅ Route <code>methods</code> array</td></tr>
+<tr><td><code>&lt;RequireAll&gt;</code>, <code>&lt;RequireAny&gt;</code>, <code>&lt;RequireNone&gt;</code>, <code>Satisfy</code></td><td>⚠ <code>BasicAuthMiddleware</code> config (boolean composition)</td></tr>
+<tr><td><code>Session*</code> (mod_session)</td><td>✅ N/A — PHP native sessions via ZealPHP's <code>Session</code> family</td></tr>
+<tr><td><code>SSL*</code> (cipher suite, SSLRequire, etc.)</td><td>💡 OpenSwoole TLS config at server boot</td></tr>
+<tr><td><code>CGIPassAuth</code></td><td>✅ Auth headers already in <code>$g-&gt;server['HTTP_AUTHORIZATION']</code></td></tr>
+</table>
+
+<h3 style="margin-top:1.25rem"><code>AllowOverride FileInfo</code> — response headers, content negotiation, rewrites, env vars (the big one)</h3>
+<table class="ztable">
+<tr><th>Apache</th><th>ZealPHP</th></tr>
+<tr><td><code>RewriteEngine</code>, <code>RewriteBase</code>, <code>RewriteCond</code>, <code>RewriteRule</code>, <code>RewriteOptions</code></td><td>✅ Native routing — covered exhaustively by Recipes A–L above</td></tr>
+<tr><td><code>Redirect</code>, <code>RedirectMatch</code>, <code>RedirectPermanent</code>, <code>RedirectTemp</code></td><td>✅ <code>$response-&gt;redirect($url, $status)</code> — see Recipe K</td></tr>
+<tr><td><code>Header set / append / unset / add / merge</code></td><td>⚠ <code>HeaderMiddleware</code> on the roadmap (currently a tiny custom PSR-15 middleware per Header line)</td></tr>
+<tr><td><code>RequestHeader</code></td><td>⚠ Same <code>HeaderMiddleware</code>, request-side</td></tr>
+<tr><td><code>ErrorDocument N /foo.php</code></td><td>✅ <code>$app-&gt;setErrorHandler(N, fn() =&gt; App::include('/foo.php'))</code> — Recipe J</td></tr>
+<tr><td><code>AddDefaultCharset</code>, <code>AddCharset</code></td><td>⚠ <code>CharsetMiddleware</code> on the roadmap</td></tr>
+<tr><td><code>AddType X .Y</code> (MIME types)</td><td>⚠ OpenSwoole static handler MIME map; small <code>MimeTypeMiddleware</code> for non-static responses</td></tr>
+<tr><td><code>AddEncoding gzip .gz</code></td><td>✅ OpenSwoole <code>http_compression</code></td></tr>
+<tr><td><code>AddHandler X .Y</code></td><td>✅ N/A — ZealPHP IS the runtime</td></tr>
+<tr><td><code>AddInputFilter</code>, <code>AddOutputFilter</code>, <code>SetOutputFilter</code>, <code>AddOutputFilterByType</code></td><td>⚠ Apache filter chains → PSR-15 middleware</td></tr>
+<tr><td><code>Substitute "s/foo/bar/"</code> (mod_substitute)</td><td>⚠ Custom body-rewrite middleware (uncommon)</td></tr>
+<tr><td><code>AddLanguage</code>, <code>DefaultLanguage</code>, <code>LanguagePriority</code></td><td>⚠ <code>ContentNegotiationMiddleware</code> if demand emerges</td></tr>
+<tr><td><code>BrowserMatch</code>, <code>SetEnvIf</code>, <code>SetEnv</code>, <code>UnsetEnv</code>, <code>PassEnv</code></td><td>💡 PHP-level: read <code>$g-&gt;server['HTTP_USER_AGENT']</code>, set <code>$g-&gt;server['MY_VAR']</code></td></tr>
+<tr><td><code>Cookie*</code> (mod_usertrack)</td><td>✅ Built-in: <code>setcookie()</code> override supports all attrs incl. <code>samesite</code></td></tr>
+<tr><td><code>FileETag</code></td><td>✅ Built-in via <code>ETagMiddleware</code> (md5 of body)</td></tr>
+<tr><td><code>EnableMMAP</code>, <code>EnableSendfile</code></td><td>✅ <code>$response-&gt;sendFile()</code> uses kernel sendfile transparently</td></tr>
+<tr><td><code>ForceType X</code></td><td>⚠ Trivial — <code>$response-&gt;header('Content-Type', $type)</code></td></tr>
+<tr><td><code>Action handler /script</code></td><td>✅ N/A — ZealPHP routes are explicit</td></tr>
+<tr><td><code>AcceptPathInfo</code></td><td>✅ Native routing handles this; also <code>App::$path_info</code></td></tr>
+<tr><td><code>QualifyRedirectURL</code></td><td>⚠ Niche</td></tr>
+<tr><td><code>DefaultType</code></td><td>✅ Deprecated by Apache too</td></tr>
+<tr><td><code>CGI*</code>, <code>CharsetSourceEnc</code>, <code>CharsetDefault</code>, <code>CharsetOptions</code></td><td>✅ N/A or 💡 PHP-level</td></tr>
+<tr><td><code>ScriptInterpreterSource</code></td><td>✅ N/A (Windows-only CGI quirk)</td></tr>
+<tr><td><code>ISAPI*</code></td><td>✅ N/A (Windows IIS, irrelevant)</td></tr>
+</table>
+
+<h3 style="margin-top:1.25rem"><code>AllowOverride Indexes</code> — directory listings, autoindex, expires headers</h3>
+<table class="ztable">
+<tr><th>Apache</th><th>ZealPHP</th></tr>
+<tr><td><code>DirectoryIndex index.php index.html</code></td><td>✅ <code>App::$directory_index = ['index.php', 'index.html']</code></td></tr>
+<tr><td><code>DirectorySlash On</code></td><td>✅ <code>App::$directory_slash = true</code></td></tr>
+<tr><td><code>FallbackResource</code></td><td>✅ <code>App::setFallback(fn() =&gt; ...)</code></td></tr>
+<tr><td><code>DirectoryIndexRedirect</code></td><td>⚠ Trivial via redirect in fallback</td></tr>
+<tr><td><code>ExpiresActive</code>, <code>ExpiresByType</code>, <code>ExpiresDefault</code> (mod_expires)</td><td>⚠ <code>ExpiresMiddleware</code> / <code>CacheControlMiddleware</code> on the roadmap</td></tr>
+<tr><td>mod_autoindex full surface (<code>AddIcon</code>, <code>IndexStyleSheet</code>, etc.)</td><td>❌ Not supported (basic autoindex is on the roadmap)</td></tr>
+<tr><td><code>ImapBase</code>, <code>ImapDefault</code> (server-side imagemaps)</td><td>❌ Dead tech (~1995)</td></tr>
+<tr><td><code>MetaDir</code>, <code>MetaFiles</code>, <code>MetaSuffix</code> (CERN meta files)</td><td>❌ Dead tech</td></tr>
+</table>
+
+<h3 style="margin-top:1.25rem"><code>AllowOverride Limit</code> — legacy host-based access control</h3>
+<table class="ztable">
+<tr><th>Apache</th><th>ZealPHP</th></tr>
+<tr><td><code>Allow from X</code>, <code>Deny from Y</code>, <code>Order Allow,Deny</code></td><td>⚠ <code>IpAccessMiddleware</code> on the roadmap (CIDR allow/deny lists)</td></tr>
+<tr><td><code>&lt;Limit METHOD&gt;</code>, <code>&lt;LimitExcept METHOD&gt;</code></td><td>✅ Route <code>methods</code> array</td></tr>
+</table>
+
+<h3 style="margin-top:1.25rem"><code>AllowOverride Options</code> — feature toggles and filter chains</h3>
+<table class="ztable">
+<tr><th>Apache</th><th>ZealPHP</th></tr>
+<tr><td><code>Options Indexes</code></td><td>❌ Not supported (basic autoindex on roadmap)</td></tr>
+<tr><td><code>Options FollowSymLinks</code>, <code>SymLinksIfOwnerMatch</code></td><td>💡 PHP-level: <code>realpath()</code> follows symlinks; <code>App::includeCheck()</code> is the safety gate</td></tr>
+<tr><td><code>Options ExecCGI</code></td><td>✅ N/A — no CGI handlers outside legacy-app mode</td></tr>
+<tr><td><code>Options Includes</code> / <code>IncludesNoExec</code> / <code>XBitHack</code> (SSI)</td><td>❌ SSI not supported</td></tr>
+<tr><td><code>Options MultiViews</code></td><td>⚠ Custom middleware if needed; uncommon</td></tr>
+<tr><td><code>ContentDigest</code></td><td>⚠ Trivial custom middleware</td></tr>
+<tr><td><code>CheckSpelling</code>, <code>CheckCaseOnly</code> (mod_speling)</td><td>❌ Not supported</td></tr>
+<tr><td><code>FilterChain</code>, <code>FilterDeclare</code> (mod_filter)</td><td>⚠ Map to PSR-15 middleware</td></tr>
+<tr><td><code>SSLOptions</code></td><td>💡 OpenSwoole TLS config</td></tr>
+</table>
+
+<h3 style="margin-top:1.25rem">Headline coverage</h3>
+<table class="ztable">
+<tr><th>Category</th><th>ZealPHP coverage</th></tr>
+<tr><td>Rewrites &amp; redirects (<code>mod_rewrite</code>, <code>mod_alias</code>)</td><td><strong>100% — native routing</strong></td></tr>
+<tr><td>Directory &amp; front-controller (<code>mod_dir</code>)</td><td><strong>100% — built-in</strong></td></tr>
+<tr><td>HTTP method limits (<code>&lt;Limit&gt;</code>)</td><td><strong>100% — route <code>methods</code> array</strong></td></tr>
+<tr><td>MIME, charset, encoding</td><td><strong>~70% — gzip ✅, MIME ⚠ partial, charset ⚠ middleware</strong></td></tr>
+<tr><td>Headers &amp; cookies</td><td><strong>Cookie ✅; Header ⚠ roadmap</strong></td></tr>
+<tr><td>Cache &amp; expires</td><td><strong>⚠ <code>ExpiresMiddleware</code> + <code>CacheControlMiddleware</code> on the roadmap</strong></td></tr>
+<tr><td>ETag</td><td><strong>✅ built-in</strong></td></tr>
+<tr><td>Compression</td><td><strong>✅ OpenSwoole <code>http_compression</code></strong></td></tr>
+<tr><td>Error documents</td><td><strong>✅ <code>App::setErrorHandler()</code></strong></td></tr>
+<tr><td>Range / conditional requests</td><td><strong>✅ <code>RangeMiddleware</code> + <code>ETagMiddleware</code></strong></td></tr>
+<tr><td>HTTP Basic Auth</td><td><strong>⚠ <code>BasicAuthMiddleware</code> on the roadmap</strong></td></tr>
+<tr><td>LDAP / Digest auth</td><td><strong>❌ niche — PHP extension integration documented</strong></td></tr>
+<tr><td>Env vars per request</td><td><strong>💡 PHP-level inline</strong></td></tr>
+<tr><td>IP allow/deny</td><td><strong>⚠ <code>IpAccessMiddleware</code> on the roadmap</strong></td></tr>
+<tr><td>SSI</td><td><strong>❌ not supported — use templates</strong></td></tr>
+<tr><td>Autoindex</td><td><strong>❌ basic listing on roadmap; full Apache customisation surface not planned</strong></td></tr>
+<tr><td>Body rewrite (<code>mod_substitute</code>)</td><td><strong>⚠ custom middleware on demand</strong></td></tr>
+<tr><td>Content negotiation</td><td><strong>⚠ custom middleware on demand</strong></td></tr>
+<tr><td>Server identity</td><td><strong>✅ no-op / ⚠ trivial</strong></td></tr>
+<tr><td>Dead tech (imap, speling, CERN meta, ISAPI, mod_dav, XBitHack)</td><td><strong>❌ N/A — not goals</strong></td></tr>
+</table>
+
+<p style="margin-top:1rem"><strong>Verdict:</strong> ZealPHP covers the practical 80–90% of <code>.htaccess</code> capability that real PHP apps actually use, has clear middleware-extension paths for another 10%, and explicitly disclaims the dead-tech ~5%.</p>
+
+<h2 style="margin-top:2.5rem">nginx coverage matrix</h2>
+<p>For users porting from <code>nginx.conf</code>. Sourced from <a href="https://nginx.org/en/docs/http/ngx_http_core_module.html" target="_blank">ngx_http_core_module</a> + <a href="https://nginx.org/en/docs/http/ngx_http_rewrite_module.html" target="_blank">ngx_http_rewrite_module</a>.</p>
+
+<h3 style="margin-top:1.25rem">Virtual host &amp; listen</h3>
+<table class="ztable">
+<tr><th>nginx</th><th>ZealPHP / OpenSwoole</th></tr>
+<tr><td><code>server { … }</code></td><td>✅ One <code>App::init(host, port)</code> instance per server block. Multi-app deployments run multiple instances on different ports (PID-file-per-port already supports this)</td></tr>
+<tr><td><code>listen 80;</code> / <code>listen 443 ssl http2;</code></td><td>✅ <code>App::init('0.0.0.0', 80)</code>; for TLS pass <code>ssl_cert_file</code> / <code>ssl_key_file</code> / <code>enable_http2</code> in <code>$app-&gt;run()</code> settings</td></tr>
+<tr><td><code>server_name a.com b.com;</code> (name-based vhosts)</td><td>⚠ One ZealPHP instance serves all <code>Host</code> headers — dispatch via middleware on <code>$g-&gt;server['HTTP_HOST']</code>, or run one instance per host behind Caddy/Traefik</td></tr>
+</table>
+
+<h3 style="margin-top:1.25rem">Routing — the <code>location</code> family</h3>
+<table class="ztable">
+<tr><th>nginx</th><th>ZealPHP</th></tr>
+<tr><td><code>location /prefix/ { … }</code></td><td>✅ <code>$app-&gt;route('/prefix/...', ...)</code> or <code>nsPathRoute('prefix', ...)</code></td></tr>
+<tr><td><code>location = /exact { … }</code></td><td>✅ <code>$app-&gt;route('/exact', ...)</code></td></tr>
+<tr><td><code>location ~ \.php$ { … }</code> (regex)</td><td>✅ <code>patternRoute('.*\.php$', ...)</code></td></tr>
+<tr><td><code>location ~* \.(css|js)$ { … }</code> (case-insensitive)</td><td>⚠ ZealPHP patterns are case-sensitive; wrap regex with <code>(?i)</code> flag</td></tr>
+<tr><td><code>location ^~ /static/ { … }</code> (prefix wins over regex)</td><td>✅ Route registration order determines priority</td></tr>
+<tr><td><code>location @named { … }</code> (named locations)</td><td>✅ <code>App::setErrorHandler(N, fn() =&gt; App::include('/fallback.php'))</code></td></tr>
+<tr><td><code>root /var/www/html;</code></td><td>✅ Built-in — <code>public/</code> is the document root by convention</td></tr>
+<tr><td><code>alias /var/some/other/path;</code></td><td>✅ Custom route + <code>App::include()</code> with the aliased path</td></tr>
+<tr><td><code>index index.php index.html;</code></td><td>✅ <code>App::$directory_index = ['index.php', 'index.html']</code></td></tr>
+<tr><td><code>try_files $uri $uri/ /index.php?$args;</code></td><td>✅ Recipe C — implicit router tries <code>public/{file}.php</code>, then <code>setFallback</code> catches the rest</td></tr>
+<tr><td><code>error_page 404 /custom-404.html;</code></td><td>✅ <code>App::setErrorHandler(404, ...)</code> — Recipe J</td></tr>
+<tr><td><code>X-Accel-Redirect</code></td><td>⚠ ZealPHP IS the origin; the offload pattern collapses to <code>$response-&gt;sendFile()</code> after auth</td></tr>
+</table>
+
+<h3 style="margin-top:1.25rem">Rewrite module</h3>
+<table class="ztable">
+<tr><th>nginx</th><th>ZealPHP</th></tr>
+<tr><td><code>rewrite ^/old$ /new last;</code></td><td>✅ Route <code>/old</code> + <code>App::include('/new.php')</code>, or use <code>patternRoute</code></td></tr>
+<tr><td><code>rewrite ^/old$ /new redirect;</code> (302)</td><td>✅ <code>return $response-&gt;redirect('/new', 302);</code></td></tr>
+<tr><td><code>rewrite ^/old$ /new permanent;</code> (301)</td><td>✅ <code>return $response-&gt;redirect('/new', 301);</code></td></tr>
+<tr><td><code>return 301 https://$host$request_uri;</code></td><td>✅ Universal HTTPS middleware (Recipe G) or inline <code>$response-&gt;redirect(...)</code></td></tr>
+<tr><td><code>return 200 "OK\n";</code> (inline body)</td><td>✅ <code>return "OK\n";</code> (<a href="/responses#return-contract">return contract</a>)</td></tr>
+<tr><td><code>if ($http_user_agent ~ MSIE) { … }</code></td><td>✅ <code>if (preg_match('/MSIE/', $g-&gt;server['HTTP_USER_AGENT']))</code></td></tr>
+<tr><td><code>if (-f $request_filename) { … }</code></td><td>✅ <code>if (file_exists(App::$cwd . '/public/' . $path))</code></td></tr>
+<tr><td><code>set $foo bar;</code></td><td>✅ Plain PHP variable</td></tr>
+</table>
+
+<h3 style="margin-top:1.25rem">Body, headers, transmission, keep-alive, types, cache, logs, rate limits, auth, proxy, TLS</h3>
+<table class="ztable">
+<tr><th>nginx</th><th>ZealPHP / OpenSwoole</th></tr>
+<tr><td><code>client_max_body_size 100m;</code></td><td>✅ <code>'package_max_length' =&gt; 100 * 1024 * 1024</code></td></tr>
+<tr><td><code>sendfile on;</code> / <code>tcp_nopush</code> / <code>tcp_nodelay</code></td><td>✅ Built-in via <code>$response-&gt;sendFile()</code> and OpenSwoole socket options</td></tr>
+<tr><td><code>keepalive_timeout 75s;</code></td><td>✅ OpenSwoole <code>'keepalive_timeout' =&gt; N</code></td></tr>
+<tr><td><code>types { … }</code> / <code>default_type</code></td><td>⚠ OpenSwoole <code>static_handler_locations</code> MIME map</td></tr>
+<tr><td><code>open_file_cache</code></td><td>✅ OpenSwoole built-in static-file caching</td></tr>
+<tr><td><code>disable_symlinks on;</code></td><td>✅ <code>App::includeCheck()</code> rejects paths outside <code>public/</code></td></tr>
+<tr><td><code>access_log</code> / <code>error_log</code></td><td>✅ Built-in: <code>access_log()</code>, <code>elog()</code>, <code>zlog()</code> (configurable via <code>ZEALPHP_*</code> env vars)</td></tr>
+<tr><td><code>log_format custom "…";</code></td><td>⚠ Fixed format — custom format support is roadmap</td></tr>
+<tr><td><code>limit_rate</code> / <code>limit_req</code> / <code>limit_conn</code></td><td>⚠ <code>RateLimitMiddleware</code> + <code>ConcurrencyLimitMiddleware</code> on the roadmap (<code>Store</code> + <code>Counter</code> back them)</td></tr>
+<tr><td><code>limit_except GET POST { deny all; }</code></td><td>✅ Route <code>methods</code> array</td></tr>
+<tr><td><code>auth_basic</code> + <code>auth_basic_user_file</code></td><td>⚠ <code>BasicAuthMiddleware</code> on the roadmap</td></tr>
+<tr><td><code>proxy_pass http://backend;</code></td><td>⚠ Not built-in. Use Caddy/Traefik/Nginx in front, OR a handler using OpenSwoole's HTTP client</td></tr>
+<tr><td><code>fastcgi_pass unix:/run/php-fpm.sock;</code></td><td>✅ N/A — ZealPHP IS the PHP runtime</td></tr>
+<tr><td><code>ssl_certificate</code>, <code>ssl_certificate_key</code>, <code>ssl_protocols</code>, <code>ssl_ciphers</code></td><td>✅ OpenSwoole <code>'ssl_*'</code> settings</td></tr>
+<tr><td><code>if_modified_since</code> / <code>etag on;</code></td><td>✅ <code>ETagMiddleware</code> handles <code>If-None-Match</code></td></tr>
+<tr><td><code>expires 30d;</code></td><td>⚠ <code>ExpiresMiddleware</code> on the roadmap</td></tr>
+<tr><td><code>merge_slashes on;</code></td><td>💡 Middleware normalising <code>$g-&gt;server['REQUEST_URI']</code></td></tr>
+<tr><td><code>server_tokens off;</code></td><td>✅ No Server header sent by default</td></tr>
+<tr><td><code>chunked_transfer_encoding on;</code></td><td>✅ OpenSwoole handles chunked encoding for streaming responses</td></tr>
+<tr><td><code>gzip on;</code> / <code>gzip_types</code></td><td>✅ OpenSwoole <code>http_compression</code></td></tr>
+</table>
+
+<p style="margin-top:1rem"><strong>Headline:</strong> nginx-as-front-controller patterns (<code>try_files</code>, <code>location</code>, <code>rewrite</code>, <code>return</code>, <code>error_page</code>) port 1:1 to ZealPHP's native routing — same way <code>.htaccess</code> rewrites do. The "I serve PHP via FastCGI" half of nginx configs is N/A. The proxy/upstream/load-balancing half is intentionally delegated to a real front proxy.</p>
+
+<h2 style="margin-top:2.5rem">Rewrite rules — internal vs. external</h2>
 <p>
   Apache <code>RewriteRule</code> has two flavors that get conflated all the time. The flag in
   brackets decides whether the URL bar in the user's browser changes.
@@ -121,179 +731,31 @@ PHP]); ?>
   rule was hiding.
 </p>
 
-<h4 style="margin-top:1.5rem">Internal rewrite — no <code>[R]</code></h4>
-<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-<div>
-<?php App::render('/components/_code', [
-    'label' => 'Before (.htaccess) — internal rewrite',
-    'lang'  => 'apache',
-    'code'  => <<<'APACHE'
-# URL bar stays at /old-page; server serves /new's content
-RewriteRule ^old-page$ /new [L]
-
-# /blog/anything serves /articles/anything; URL unchanged
-RewriteRule ^blog/(.*)$ /articles/$1 [L]
-APACHE]); ?>
-</div>
-<div>
-<?php App::render('/components/_code', [
-    'label' => 'After (app.php) — load the file in place',
-    'code'  => <<<'PHP'
-// Internal: include the destination's public/ file in the
-// SAME request — URL bar stays /old-page, content comes
-// from public/new.php. No redirect, no Location header.
-$app->route('/old-page', function() {
-    return App::includeFile(App::$cwd . '/public/new.php');
-});
-
-$app->patternRoute('/blog/(.*)', function($slug) {
-    return App::includeFile(
-        App::$cwd . "/public/articles/{$slug}.php"
-    );
-});
-PHP]); ?>
-</div>
-</div>
-<p style="font-size:.9rem;color:#57534e">
-  <code>App::includeFile()</code> is the right primitive here: it runs the destination's file
-  in-process for the current request, so the response body, status, headers, cookies, and even
-  <code>\Generator</code> streaming all come from the destination &mdash; but the visible URL is
-  whatever the user requested. Same mechanism that powers the public-file implicit router under
-  the hood.
-</p>
-
-<h4 style="margin-top:1.75rem">External redirect — <code>[R=301]</code> or <code>[R=302]</code></h4>
-<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-<div>
-<?php App::render('/components/_code', [
-    'label' => 'Before (.htaccess) — external redirect',
-    'lang'  => 'apache',
-    'code'  => <<<'APACHE'
-# Browser navigates to /new; URL bar changes; 301 permanent
-RewriteRule ^old-page$ /new [R=301,L]
-
-# 302 = temporary, browser/SEO won't cache the move
-RewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]
-APACHE]); ?>
-</div>
-<div>
-<?php App::render('/components/_code', [
-    'label' => 'After (app.php) — Location header',
-    'code'  => <<<'PHP'
-// External: tell the browser to go fetch /new instead.
-// URL bar changes. 301 = permanent, 302 = temporary.
-$app->route('/old-page', function($response) {
-    return $response->redirect('/new', 301);
-});
-
-$app->patternRoute('/blog/(.*)', function($slug, $response) {
-    return $response->redirect("/articles/{$slug}", 302);
-});
-PHP]); ?>
-</div>
-</div>
-
-<h3>Quick reference</h3>
-<table class="ztable">
-<tr><th>Apache .htaccess</th><th>ZealPHP equivalent</th></tr>
-<tr><td><code>RewriteEngine On</code></td><td>Not needed — ZealPHP routes natively</td></tr>
-<tr><td><code>RewriteRule . /index.php [L]</code></td><td><code>$app->setFallback(function() { App::includeFile(...); })</code> — internal, URL preserved</td></tr>
-<tr><td><code>RewriteRule ^old$ /new [L]</code> (internal)</td><td><code>$app->route('/old', fn() => App::includeFile('public/new.php'))</code> — URL stays <code>/old</code></td></tr>
-<tr><td><code>RewriteRule ^old$ /new [R=301,L]</code> (external)</td><td><code>$app->route('/old', fn($response) => $response->redirect('/new', 301))</code> — URL changes to <code>/new</code></td></tr>
-<tr><td><code>DirectoryIndex index.php</code></td><td>Built-in — implicit routes serve <code>index.php</code> for directories</td></tr>
-<tr><td><code>Options -Indexes</code></td><td>Not needed — ZealPHP never lists directories</td></tr>
-<tr><td><code>&lt;FilesMatch "\.php$"&gt;</code></td><td>Not needed — ZealPHP IS the PHP runtime</td></tr>
-</table>
-
-<h2>Porting from nginx</h2>
-
-<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-<div>
-<?php App::render('/components/_code', [
-    'label' => 'Before (nginx.conf)',
-    'lang'  => 'nginx',
-    'code'  => <<<'NGINX'
-server {
-    listen 80;
-    root /var/www/html;
-
-    location / {
-        try_files $uri $uri/ /index.php?$args;
-    }
-    location ~ \.php$ {
-        fastcgi_pass unix:/run/php-fpm.sock;
-    }
-    location ~* \.(css|js|png)$ {
-        expires 30d;
-    }
-}
-NGINX]); ?>
-</div>
-<div>
-<?php App::render('/components/_code', [
-    'label' => 'After (app.php)',
-    'code'  => <<<'PHP'
-App::superglobals(true);
-App::$ignore_php_ext = false;
-$app = App::init('0.0.0.0', 8080);
-
-// try_files → fallback
-$app->setFallback(function() {
-    $g = G::instance();
-    $g->server['PHP_SELF'] = '/index.php';
-    $g->server['SCRIPT_NAME'] = '/index.php';
-    $g->server['SCRIPT_FILENAME'] =
-        App::$cwd . '/public/index.php';
-    App::includeFile(
-        App::$cwd . '/public/index.php'
-    );
-});
-
-// Static files (css, js, png) served
-// automatically by OpenSwoole
-// Cache headers: add custom middleware
-
-$app->run(['task_worker_num' => 0]);
-PHP]); ?>
-</div>
-</div>
-
-<table class="ztable">
-<tr><th>nginx directive</th><th>ZealPHP equivalent</th></tr>
-<tr><td><code>try_files $uri $uri/ /index.php</code></td><td><code>$app->setFallback(fn() => App::includeFile(...))</code></td></tr>
-<tr><td><code>location ~ \.php$ { fastcgi_pass ...; }</code></td><td>Not needed — ZealPHP serves PHP directly</td></tr>
-<tr><td><code>location ~* \.(css|js)$ { expires 30d; }</code></td><td>OpenSwoole <code>enable_static_handler</code> + middleware for headers</td></tr>
-<tr><td><code>proxy_pass http://backend;</code></td><td>Use native <code>$app->route()</code> or reverse proxy in front</td></tr>
-</table>
-
-<div class="callout info" style="margin-top:1.5rem">
-<strong>Fallback bodies are preserved.</strong> When the fallback handler <code>echo</code>s or runs <code>App::includeFile()</code>, the output is sent verbatim — no body discard. (Earlier the implicit <code>/{file}</code> route would call <code>invokeFallbackOrNotFound()</code> and return an int, which <code>dispatchRoute</code>'s int branch would discard; <a href="https://github.com/sibidharan/zealphp/blob/master/src/App.php#L840-L851"><code>invokeFallbackOrNotFound()</code></a> now dispatches the fallback as a real route, preserving its body, status, headers, and Generator return.)
-</div>
-
-<h2 style="margin-top:2rem">Custom error pages for legacy apps</h2>
-<p>Mirror <code>.htaccess</code>'s <code>ErrorDocument 404 /custom-404.php</code> directive with <code>App::setErrorHandler()</code>:</p>
+<h2 style="margin-top:2.5rem">Custom error pages for legacy apps</h2>
+<p>Mirror <code>.htaccess</code>'s <code>ErrorDocument 404 /custom-404.php</code> with <code>App::setErrorHandler()</code> — see Recipe J above:</p>
 
 <?php App::render('/components/_code', [
     'label' => 'Apache ErrorDocument equivalent',
     'code'  => <<<'PHP'
-$app->setErrorHandler(404, function($status) {
+$app->setErrorHandler(404, function ($status) {
     // Hand 404s to WordPress so it can render its own theme template.
-    App::includeFile(App::$cwd . '/public/wp/index.php');
+    return App::include('/wp/index.php');
 });
 
-$app->setErrorHandler(500, function($exception) {
+$app->setErrorHandler(500, function ($exception) {
     // Send a JSON envelope to API clients, HTML to browsers.
-    if (str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json')) {
+    $g = ZealPHP\RequestContext::instance();
+    if (str_contains($g->server['HTTP_ACCEPT'] ?? '', 'application/json')) {
         return ['error' => 'Internal Server Error', 'trace_id' => uniqid()];
     }
-    App::render('error/500', ['exception' => $exception]);
+    return App::renderToString('error/500', ['exception' => $exception]);
 });
 PHP]); ?>
 
-<p style="margin-top:.5rem">Handlers receive <code>$status</code>, <code>$exception</code>, <code>$request</code>, <code>$response</code> by param injection — same machinery as regular routes. Return shapes: string for HTML, array for JSON, Generator for streaming, void+echo for buffered output. See <a href="/responses">Responses</a> for details and the <a href="https://github.com/sibidharan/zealphp/blob/master/docs/error-handling.md"><code>docs/error-handling.md</code></a> deep dive.</p>
+<p style="margin-top:.5rem">Handlers receive <code>$status</code>, <code>$exception</code>, <code>$request</code>, <code>$response</code> by param injection — same machinery as regular routes. Returns follow the <a href="/responses#return-contract">universal return contract</a>. See <a href="/responses">Responses</a> for details and the <a href="https://github.com/sibidharan/zealphp/blob/master/docs/error-handling.md"><code>docs/error-handling.md</code></a> deep dive.</p>
 
-<h2>AI Config Converter</h2>
-<p>Paste your <code>.htaccess</code> or nginx config — get a working <code>app.php</code> streamed in real-time. Powered by gpt-5.4-mini with the full ZealPHP API reference.</p>
+<h2 style="margin-top:2.5rem">AI Config Converter</h2>
+<p>Paste your <code>.htaccess</code> or nginx config — get a working <code>app.php</code> streamed in real-time. The converter knows about the 12 recipes above, the <a href="#limitations">known limitations matrix</a>, the universal return contract, and the <code>$g</code>-vs-<code>$_*</code> parity rule — so it emits modern <code>App::include()</code> form, refuses unsupported directives explicitly (rather than silently dropping them), and uses <code>$g-&gt;get['x']</code> over <code>$_GET['x']</code>. Powered by gpt-5.4-mini with the full ZealPHP API reference.</p>
 
 <div class="converter-split" style="display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin:1.5rem 0;">
   <div style="border-right:1px solid var(--border);">
@@ -445,7 +907,7 @@ cat .htaccess | uv run examples/agents/config_converter.py
 uv run examples/agents/config_converter.py
 BASH, 'lang' => 'bash']); ?>
 
-<h2>WordPress Example</h2>
+<h2 style="margin-top:2.5rem">WordPress example</h2>
 <p>A complete <code>app.php</code> that runs WordPress on ZealPHP:</p>
 
 <?php App::render('/components/_code', [
@@ -454,7 +916,7 @@ BASH, 'lang' => 'bash']); ?>
 <?php
 require 'vendor/autoload.php';
 use ZealPHP\App;
-use ZealPHP\G;
+use ZealPHP\RequestContext;
 
 App::superglobals(true);
 App::$ignore_php_ext = false;
@@ -462,94 +924,95 @@ App::$ignore_php_ext = false;
 $app = App::init('0.0.0.0', 9501);
 
 // Redirect /wp-admin to /wp-admin/index.php
-$app->route('/wp-admin', function() {
-    $qs = !empty($_SERVER['QUERY_STRING']) ? '?' . $_SERVER['QUERY_STRING'] : '';
-    header('Location: /wp-admin/index.php' . $qs);
-    return 301;
+$app->route('/wp-admin', function ($response) {
+    $g = RequestContext::instance();
+    $qs = !empty($g->server['QUERY_STRING'])
+        ? '?' . $g->server['QUERY_STRING'] : '';
+    return $response->redirect('/wp-admin/index.php' . $qs, 301);
 });
 
 // Fallback: unmatched URLs → WordPress front controller
 // Replaces Apache's: RewriteRule . /index.php [L]
-$app->setFallback(function() {
-    $g = G::instance();
-    $g->server['PHP_SELF'] = '/index.php';
-    $g->server['SCRIPT_NAME'] = '/index.php';
-    $g->server['SCRIPT_FILENAME'] = App::$cwd . '/public/index.php';
-    App::includeFile(App::$cwd . '/public/index.php');
-});
+$app->setFallback(fn() => App::include('/index.php'));
 
 $app->run(['task_worker_num' => 0]);
 PHP]); ?>
 
-<h2>Setup Steps</h2>
+<h2 style="margin-top:2.5rem">Setup Steps</h2>
 <p>See the full working example: <a href="https://github.com/sibidharan/zealphp-wordpress" target="_blank">github.com/sibidharan/zealphp-wordpress</a></p>
 <ol style="line-height:2">
   <li>Create a ZealPHP project: <code>composer create-project sibidharan/zealphp-project my-wordpress</code></li>
-  <li>Download WordPress into <code>public/</code>: <code>cd my-wordpress/public && wp core download</code></li>
+  <li>Download WordPress into <code>public/</code>: <code>cd my-wordpress/public &amp;&amp; wp core download</code></li>
   <li>Configure <code>public/wp-config.php</code> with your database settings</li>
   <li>Write <code>app.php</code> as shown above</li>
   <li>Start: <code>php app.php</code> (or <code>php app.php start -p 9501 -d</code> to daemonize)</li>
   <li>Visit <code>http://localhost:9501/wp-admin/install.php</code> to complete installation</li>
 </ol>
 
-<h2>CGI Worker Architecture</h2>
-<p><code>App::includeFile()</code> runs each PHP file in a separate process via <code>proc_open</code>. This gives every request a clean PHP interpreter with true global scope — exactly like Apache's prefork MPM.</p>
+<h2 style="margin-top:2.5rem">CGI Worker Architecture</h2>
+<p><code>App::include()</code> dispatches to two different paths depending on the mode:</p>
+<ul>
+  <li><strong>Coroutine mode</strong> (<code>App::superglobals(false)</code>) — runs the file in-process via the shared <code>App::executeFile()</code> core. Captures output, applies the <a href="/responses#return-contract">universal return contract</a>.</li>
+  <li><strong>Superglobals mode</strong> (<code>App::superglobals(true)</code>) — dispatches to <code>src/cgi_worker.php</code> via <code>proc_open</code>. Each request gets a clean PHP interpreter with true global scope — exactly like Apache's prefork MPM. The subprocess captures the file's return value over the stderr metadata channel and threads it back through the same contract.</li>
+</ul>
 
 <?php App::render('/components/_code', [
-    'label' => 'How App::includeFile() works',
+    'label' => 'How App::include() works (superglobals mode)',
     'code'  => <<<'TEXT'
 OpenSwoole Worker (long-lived)          CGI Worker (per-request)
 ┌─────────────────────────┐             ┌──────────────────────────┐
 │                         │  proc_open  │  php cgi_worker.php      │
 │  Route matched          │ ──────────► │                          │
-│  App::includeFile()     │             │  TRUE global scope:      │
-│                         │   stdin     │  ├─ $_SERVER, $_GET, etc. │
+│  App::include('/x.php') │             │  TRUE global scope:      │
+│                         │   stdin     │  ├─ $_SERVER, $_GET, etc.│
 │  Serializes context:    │ ──────────► │  ├─ $_COOKIE, $_FILES    │
 │  ├─ $_SERVER, $_GET     │  (POST body)│  │                       │
 │  ├─ $_POST, $_COOKIE    │             │  ├─ uopz captures:       │
-│  └─ Request body        │             │  │  header(), setcookie() │
-│                         │   stdout    │  │  http_response_code()  │
+│  └─ Request body        │             │  │  header(), setcookie()│
+│                         │   stdout    │  │  http_response_code() │
 │  Reads response:        │ ◄────────── │  │                       │
 │  ├─ Body from stdout    │             │  ├─ include file.php     │
 │  ├─ Metadata from stderr│   stderr    │  │  ← app runs at global │
 │  │  (status, headers,   │ ◄────────── │  │    scope              │
-│  │   cookies as JSON)   │             │  │                       │
-│  └─ Applies to response │             │  └─ Process exits (clean)│
+│  │   cookies, return    │             │  │                       │
+│  │   value as JSON)     │             │  └─ Process exits (clean)│
+│  └─ Applies to response │             │                          │
 └─────────────────────────┘             └──────────────────────────┘
 TEXT]); ?>
 
-<h3>What the CGI worker handles</h3>
+<h3 style="margin-top:1.25rem">What the CGI worker handles</h3>
 <table class="ztable">
 <tr><th>Feature</th><th>How</th></tr>
 <tr><td>All HTTP methods</td><td><code>$_SERVER['REQUEST_METHOD']</code> passed via context; request body piped to stdin (<code>php://input</code>)</td></tr>
 <tr><td><code>header()</code> / <code>header_remove()</code></td><td>Captured via <code>uopz_set_return</code> — sent back as JSON metadata</td></tr>
 <tr><td><code>setcookie()</code> / <code>setrawcookie()</code></td><td>Captured — applied to response by parent worker</td></tr>
 <tr><td><code>http_response_code()</code> / <code>headers_list()</code></td><td>Captured — status and headers returned in metadata</td></tr>
+<tr><td>File return value</td><td>Serialised over stderr metadata; threaded through the <a href="/responses#return-contract">universal return contract</a></td></tr>
 <tr><td><code>exit()</code> / <code>die()</code></td><td><code>register_shutdown_function</code> flushes output and metadata</td></tr>
 <tr><td>SSE streaming</td><td>Detects <code>text/event-stream</code>; streams via <code>flush()</code> like Apache</td></tr>
 <tr><td>Static files</td><td>Served directly by OpenSwoole — never reaches PHP</td></tr>
 <tr><td>File uploads / Sessions</td><td><code>$_FILES</code> via context; PHP native sessions work in CGI process</td></tr>
 </table>
 
-<h2>CLI Management</h2>
+<h2 style="margin-top:2.5rem">CLI Management</h2>
 
 <?php App::render('/components/_code', [
     'label' => 'CLI commands',
     'code'  => <<<'BASH'
 php app.php                     # Start with defaults
 php app.php start -p 9501       # Start on port 9501
-php app.php start -p 9501 -d   # Start daemonized
+php app.php start -p 9501 -d    # Start daemonized
 php app.php stop                # Stop the server (reads PID file)
 php app.php status              # Check if server is running
 php app.php start -w 8          # Start with 8 workers
 php app.php --help              # Show all options
 BASH, 'lang' => 'bash']); ?>
 
-<h2>Limitations</h2>
+<h2 style="margin-top:2.5rem">Performance &amp; Hybrid Mode</h2>
 <div class="callout warn">
-<p><strong>Performance:</strong> Each PHP file request spawns a new process. Static files bypass this (served by OpenSwoole). For high-traffic production, convert hot paths to native ZealPHP routes.</p>
+<p><strong>Performance:</strong> In superglobals mode, each <code>App::include()</code> spawns a CGI subprocess. Static files bypass this (served by OpenSwoole). For high-traffic production, convert hot paths to native ZealPHP routes that run in coroutine mode.</p>
 <p><strong>Streaming:</strong> SSE works in CGI mode via <code>flush()</code>. WebSocket requires native ZealPHP routes (<code>App::ws()</code>).</p>
-<p><strong>Hybrid approach:</strong> Mix native routes (coroutine mode, high performance) with legacy PHP file serving (CGI mode) in the same app. Explicit <code>$app->route()</code> handlers run directly in the worker.</p>
+<p><strong>Hybrid approach:</strong> Mix native routes (coroutine mode, high performance) with legacy PHP file serving (CGI mode) in the same app. Explicit <code>$app-&gt;route()</code> handlers run directly in the worker.</p>
 </div>
 
 </div>
