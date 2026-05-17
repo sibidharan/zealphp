@@ -1941,13 +1941,18 @@ class App
             && !str_contains($accept, 'text/html');
 
         if ($wantsJson) {
-            $body = json_encode([
-                'error' => [
-                    'status'  => $status,
-                    'message' => $reason,
-                    'trace'   => ($exception && self::$display_errors) ? jTraceEx($exception) : null,
-                ],
-            ], JSON_UNESCAPED_SLASHES);
+            $errorPayload = [
+                'status'  => $status,
+                'message' => $reason,
+                'trace'   => ($exception && self::$display_errors) ? jTraceEx($exception) : null,
+            ];
+            // Apache ServerAdmin parity: surface the configured contact in
+            // machine-readable error responses too, so API clients can route
+            // bug reports without scraping HTML.
+            if (self::$server_admin !== null && self::$server_admin !== '') {
+                $errorPayload['contact'] = self::$server_admin;
+            }
+            $body = json_encode(['error' => $errorPayload], JSON_UNESCAPED_SLASHES);
             $resp = (new Response($body))
                 ->withStatus($status)
                 ->withHeader('Content-Type', 'application/json');
@@ -1958,6 +1963,12 @@ class App
         $body = "<pre>{$status} {$reason}</pre>";
         if ($exception && self::$display_errors) {
             $body .= "\n<pre>" . htmlspecialchars(jTraceEx($exception)) . "</pre>";
+        }
+        // Apache ServerAdmin parity: default error pages show a contact line
+        // when one is configured. Mirrors mod_core's behaviour and the
+        // <address> block Apache appends when ServerSignature is on.
+        if (self::$server_admin !== null && self::$server_admin !== '') {
+            $body .= "\n<address>Contact: " . htmlspecialchars(self::$server_admin) . "</address>";
         }
         return (new Response($body))->withStatus($status);
     }
