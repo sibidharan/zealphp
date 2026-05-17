@@ -80,9 +80,10 @@ $i = 1;
       <?php if ($slot === '__BTA__'): ?>
         <div class="learn-sidebar-group">
           <h4 class="learn-sidebar-group-title">Build the App</h4>
-          <ol class="learn-sidebar-list learn-bta-list" start="<?= $i ?>">
+          <ul class="learn-sidebar-list learn-bta-list">
             <?php foreach ($buildTheApp as [$slug, $label, $chip, $desc, $demoSlug, $steps]): ?>
-              <li class="learn-bta-item<?= $active === $slug ? ' active' : '' ?>">
+              <li class="learn-sidebar-item learn-bta-item<?= $active === $slug ? ' is-active' : '' ?>"
+                  data-num="<?= sprintf('%02d', $i) ?>">
                 <details<?= $active === $slug ? ' open' : '' ?>>
                   <summary>
                     <a class="learn-bta-link"
@@ -111,15 +112,16 @@ $i = 1;
                 </details>
               </li>
               <?php $i++; endforeach; ?>
-          </ol>
+          </ul>
         </div>
       <?php else: ?>
         <?php $items = $groups[$slot] ?? []; ?>
         <div class="learn-sidebar-group">
           <h4 class="learn-sidebar-group-title"><?= htmlspecialchars($slot) ?></h4>
-          <ol class="learn-sidebar-list" start="<?= $i ?>">
+          <ul class="learn-sidebar-list">
             <?php foreach ($items as [$slug, $label]): ?>
-              <li<?= $active === $slug ? ' class="active"' : '' ?>>
+              <li class="learn-sidebar-item<?= $active === $slug ? ' is-active' : '' ?>"
+                  data-num="<?= sprintf('%02d', $i) ?>">
                 <a href="/<?= $slug ?>"
                    hx-get="/api/learn/page?slug=<?= urlencode($slug) ?>"
                    hx-target=".lesson-content"
@@ -127,7 +129,7 @@ $i = 1;
                    hx-push-url="/<?= $slug ?>"><?= htmlspecialchars($label) ?></a>
               </li>
               <?php $i++; endforeach; ?>
-          </ol>
+          </ul>
         </div>
       <?php endif; ?>
     <?php endforeach; ?>

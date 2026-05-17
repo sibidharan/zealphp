@@ -24,19 +24,73 @@
 }
 @media (max-width: 900px) { .learn-sidebar-toggle-btn { display: inline-block; } }
 
-.learn-sidebar { position: sticky; top: 1.5rem; align-self: start; max-height: calc(100vh - 3rem); overflow-y: auto; }
+.learn-sidebar { position: sticky; top: 1.5rem; align-self: start; max-height: calc(100vh - 3rem); overflow-y: auto; padding-right: .35rem; }
 @media (max-width: 900px) {
   .learn-sidebar { display: none; position: static; }
   .learn-sidebar-toggle-input:checked ~ .learn-sidebar { display: block; }
 }
-.learn-sidebar-inner { padding-right: .5rem; }
-.learn-sidebar-group + .learn-sidebar-group { margin-top: 1.25rem; }
-.learn-sidebar-group-title { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: #78716c; margin: 0 0 .55rem; font-weight: 700; }
-.learn-sidebar-list { list-style: decimal; padding-left: 2.25rem; margin: 0; }
-.learn-sidebar-list li { margin: .25rem 0; font-size: .88rem; }
-.learn-sidebar-list li a { color: #1c1917; text-decoration: none; display: block; padding: .15rem .3rem; border-radius: 4px; }
-.learn-sidebar-list li a:hover { background: #f5f5f4; }
-.learn-sidebar-list li.active a { color: var(--accent, #f59e0b); font-weight: 600; background: #fffbeb; }
+.learn-sidebar-inner { padding: .25rem 0; }
+
+/* Group rhythm: tight title, breathing space between sections. */
+.learn-sidebar-group + .learn-sidebar-group { margin-top: 1.65rem; }
+.learn-sidebar-group-title {
+  font-size: .62rem; text-transform: uppercase; letter-spacing: .14em;
+  color: #a8a29e; font-weight: 600;
+  margin: 0 0 .55rem;
+  padding: 0 .65rem;
+}
+
+/* The unified list. No native bullets — numbers come from data-num via CSS.
+ * Every <li> shares the same 2-col grid: [tiny mono number] [title row]. */
+.learn-sidebar-list {
+  list-style: none; padding: 0; margin: 0;
+}
+.learn-sidebar-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.75rem 1fr;
+  align-items: start;
+  margin: 0;
+}
+/* Leading-zero monospace numerals — quiet, right-aligned. */
+.learn-sidebar-item::before {
+  content: attr(data-num);
+  grid-column: 1;
+  align-self: start;
+  padding: .38rem .5rem 0 0;
+  text-align: right;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: .62rem; font-variant-numeric: tabular-nums;
+  color: #d6d3d1;
+  letter-spacing: .02em;
+  user-select: none;
+  transition: color .12s;
+}
+.learn-sidebar-item.is-active::before { color: var(--accent, #f59e0b); }
+
+/* Active marker — 2px amber bar on the row's left edge. Replaces the old
+ * flat amber background; pairs nicely with the leading-zero number. */
+.learn-sidebar-item.is-active::after {
+  content: '';
+  position: absolute; left: 0; top: .3rem; bottom: .3rem;
+  width: 2px;
+  background: var(--accent, #f59e0b);
+  border-radius: 2px;
+}
+
+/* Plain link row (every item type uses this base). */
+.learn-sidebar-item > a {
+  grid-column: 2;
+  display: block;
+  padding: .3rem .65rem;
+  color: #44403c;
+  text-decoration: none;
+  font-size: .87rem; line-height: 1.35;
+  border-radius: 3px;
+  transition: color .12s, background .12s;
+}
+.learn-sidebar-item > a:hover { color: var(--accent, #f59e0b); background: #fafaf9; }
+.learn-sidebar-item.is-active > a { color: #1c1917; font-weight: 600; }
 
 /* Lesson header */
 .lesson-header { margin-bottom: 2rem; }
@@ -433,27 +487,41 @@ code.demo-inline { background: var(--bg-alt); padding: .1rem .35rem; border-radi
  * skip the <ol> wrapper entirely (use <ul list-style: none>), and let
  * flexbox align number + chevron + link + chip on one tidy row.
  */
-/* The BTA list inherits .learn-sidebar-list (decimal numbers + 2.25rem
- * padding-left from line 35), so each BTA <li> already has the same
- * right-aligned "9.", "10.", … numbering as the surrounding groups.
- * The only override needed is to neutralise the implicit margin <details>
- * adds — everything else (number, hover, active accent) flows from the
- * shared list styles below. */
-.learn-bta-list .learn-bta-item { margin: .25rem 0; }
-.learn-bta-item > details { margin: 0; }
+/* Build-the-App items share the unified .learn-sidebar-item grid, so the
+ * leading-zero number, the amber active bar, and the row padding all come
+ * from the shared rules above. These overrides only add: the summary row
+ * (= the same shape as a plain <a>), the chevron + chip, and the
+ * sub-step subtree under a hairline vertical rule. */
+.learn-bta-item > details { grid-column: 2; margin: 0; min-width: 0; }
 .learn-bta-item > details > summary {
-  display: flex; align-items: center; gap: .35rem;
-  /* Mirror the regular <a> in .learn-sidebar-list li (line 37) so BTA rows
-   * and plain rows are visually indistinguishable at top level. */
-  color: #1c1917; padding: .15rem .3rem; border-radius: 4px;
+  display: flex; align-items: baseline; gap: .45rem;
+  padding: .3rem .65rem;
+  color: #44403c;
+  font-size: .87rem; line-height: 1.35;
+  border-radius: 3px;
   cursor: pointer; list-style: none; user-select: none;
-  font-size: .88rem; line-height: 1.35;
-  transition: background .1s, color .1s;
+  transition: background .12s, color .12s;
 }
 .learn-bta-item > details > summary::-webkit-details-marker { display: none; }
 .learn-bta-item > details > summary::marker { content: ''; }
-.learn-bta-item > details > summary:hover { background: #f5f5f4; }
-.learn-bta-item > details > summary:hover .learn-bta-link { color: var(--accent, #f59e0b); }
+.learn-bta-item > details > summary:hover { color: var(--accent, #f59e0b); background: #fafaf9; }
+
+/* Chevron — slim, sits before the title (signals "this row expands"). */
+.learn-bta-item > details > summary::before {
+  content: '\203A';            /* › single-right-pointing-angle */
+  display: inline-block;
+  width: .55rem;
+  color: #d6d3d1;
+  font-weight: 600;
+  text-align: center;
+  transform: translateY(-1px);
+  transition: transform .18s ease, color .12s;
+  flex-shrink: 0;
+}
+.learn-bta-item > details[open] > summary::before {
+  transform: rotate(90deg) translateX(-1px);
+  color: var(--accent, #f59e0b);
+}
 
 .learn-bta-link {
   flex: 1 1 auto; min-width: 0;
@@ -461,77 +529,59 @@ code.demo-inline { background: var(--bg-alt); padding: .1rem .35rem; border-radi
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-/* Chip: quiet monospace tag that says what this tutorial covers without
- * shouting. Stone palette, no amber chrome — chrome is reserved for the
- * active state below. */
+/* Chip: tiny uppercase tag, monochrome — never competes with the title.
+ * Sits after the title in the summary row's right gutter. */
 .learn-bta-chip {
   flex-shrink: 0;
-  font-size: .58rem; font-weight: 600;
+  font-size: .55rem; font-weight: 600;
   font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: .05em;
-  padding: 0 .35rem;
-  color: #a8a29e; background: transparent;
+  text-transform: uppercase; letter-spacing: .06em;
+  color: #c7c2bc;
+  transition: color .12s;
+}
+.learn-bta-item.is-active .learn-bta-chip,
+.learn-bta-item > details > summary:hover .learn-bta-chip { color: #a8a29e; }
+
+/* Active state on the summary — bolder text, no fill (the amber left bar
+ * from .learn-sidebar-item.is-active::after is the visual cue). */
+.learn-bta-item.is-active > details > summary {
+  color: #1c1917; font-weight: 600;
 }
 
-/* Chevron sits on the RIGHT — signals "expand for steps" without
- * competing with the lesson title at the LEFT. Rotates on open. */
-.learn-bta-item > details > summary::after {
-  content: '';
-  width: 0; height: 0;
-  border-style: solid;
-  border-width: 3.5px 0 3.5px 4.5px;
-  border-color: transparent transparent transparent #d6d3d1;
-  transition: transform .15s ease, border-left-color .12s;
-  flex-shrink: 0; margin-left: .15rem;
-}
-.learn-bta-item > details[open] > summary::after {
-  transform: rotate(90deg);
-  border-left-color: var(--accent, #f59e0b);
-}
-
-/* Active item: amber accent on the link + tinted background — exactly
- * matches the regular .learn-sidebar-list li.active a style at line 39. */
-.learn-bta-item.active > details > summary { background: #fffbeb; }
-.learn-bta-item.active > details > summary .learn-bta-link {
-  color: var(--accent, #f59e0b); font-weight: 600;
-}
-.learn-bta-item.active .learn-bta-chip { color: #92400e; }
-
-/* Sub-step subtree: small left-edge accent line connects to parent.
- * Padding aligns the step text under the parent title (not the number). */
+/* Expanded body — a quiet sub-tree under a thin vertical rule. No
+ * background flood. Indented to align step text under the parent title. */
 .learn-bta-body {
-  margin: .15rem 0 .35rem .25rem;
-  padding: .2rem 0 .2rem .85rem;
+  margin: .1rem 0 .35rem .35rem;
+  padding: .15rem 0 .15rem .75rem;
   border-left: 1px solid #e7e5e4;
 }
-.learn-bta-item.active .learn-bta-body { border-left-color: #fde68a; }
+.learn-bta-item.is-active .learn-bta-body { border-left-color: #f5e7c3; }
 
 .learn-bta-steps { list-style: none; padding: 0; margin: 0; }
-.learn-bta-steps li {
-  padding: .15rem 0;
-  font-size: .8rem; line-height: 1.35;
-}
+.learn-bta-steps li { margin: 0; }
 .learn-bta-steps a {
+  display: block;
+  padding: .22rem .55rem;
+  font-size: .79rem; line-height: 1.35;
   color: #78716c;
   text-decoration: none;
-  display: block;
-  padding: 0 .25rem;
   border-radius: 3px;
+  transition: color .12s, background .12s;
 }
-.learn-bta-steps a:hover { color: var(--accent, #f59e0b); background: #f5f5f4; }
+.learn-bta-steps a:hover { color: var(--accent, #f59e0b); background: #fafaf9; }
 
-/* "Open standalone ↗" — quiet text link, not a button. Matches the
- * editorial tone of the surrounding sidebar copy. */
+/* "Open standalone ↗" — editorial footer note, never a CTA pill. */
 .learn-bta-open {
-  display: inline-flex; align-items: center; gap: .2rem;
-  margin-top: .3rem; padding: 0 .25rem;
-  font-size: .73rem;
+  display: inline-flex; align-items: baseline; gap: .25rem;
+  margin: .35rem 0 .15rem;
+  padding: 0 .55rem;
+  font-size: .72rem;
   color: #a8a29e;
   text-decoration: none;
   font-style: italic;
 }
 .learn-bta-open:hover { color: var(--accent, #f59e0b); }
-.learn-bta-open-arrow { font-style: normal; }
+.learn-bta-open-arrow { font-style: normal; font-weight: 600; }
 
 /* ---------- Tic-tac-toe widget ----------
  *
