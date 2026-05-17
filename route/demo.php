@@ -698,9 +698,12 @@ $app->route('/demo/view/notes/widget', ['methods' => ['GET']], function () {
     $u = \ZealPHP\Learn\Auth::currentUser();
     if (!$u) {
         return demo_render(
-            'Personal Notes — log in first',
-            'This widget needs an account. <a href="/learn/auth" target="_blank" rel="noopener">Open the auth lesson in a new tab</a>, log in there, then refresh this tab.',
-            [],
+            'Personal Notes',
+            'Log in below to use the standalone notes widget. You\'ll stay on this page after sign-in.',
+            [['heading' => '',
+              'body'    => App::renderToString('/components/_demo_login_card', [
+                  'intro' => 'This demo needs an account. Sign in or create one — no redirects, the widget loads in place.',
+              ])]],
             'learn/notes', 'Personal Notes'
         );
     }
@@ -719,9 +722,12 @@ $app->route('/demo/view/chat/widget', ['methods' => ['GET']], function () {
     $u = \ZealPHP\Learn\Auth::currentUser();
     if (!$u) {
         return demo_render(
-            'AI Chat — log in first',
-            'This widget needs an account. <a href="/learn/auth" target="_blank" rel="noopener">Open the auth lesson in a new tab</a>, log in there, then refresh this tab.',
-            [],
+            'AI Chat',
+            'Log in below to use the standalone chat widget.',
+            [['heading' => '',
+              'body'    => App::renderToString('/components/_demo_login_card', [
+                  'intro' => 'The chat needs an account so it can read and modify your notes. Sign in or create one — the chat loads in place.',
+              ])]],
             'learn/ai-chat', 'AI Chat'
         );
     }
@@ -736,13 +742,31 @@ $app->route('/demo/view/chat/widget', ['methods' => ['GET']], function () {
     );
 });
 
+$app->route('/demo/view/websocket/counter', ['methods' => ['GET']], function () {
+    // Open this URL in two windows: click +1 in either, the other updates
+    // live. No auth — every connected tab on every account sees the same
+    // global value (it's a teaching demo for the broadcast pattern).
+    return demo_render(
+        'WebSocket cross-tab counter',
+        'Click <strong>+1</strong>. Open this URL in a second window — both update live via a WebSocket broadcast to every connected client. <a href="/learn/websocket">Read the build</a>.',
+        [
+            ['heading' => '',
+             'body'    => App::renderToString('/components/_ws_counter_widget', ['as_demo' => true])],
+        ],
+        'learn/websocket', 'Real-Time Sync'
+    );
+});
+
 $app->route('/demo/view/tictactoe/play', ['methods' => ['GET']], function () {
     $u = \ZealPHP\Learn\Auth::currentUser();
     if (!$u) {
         return demo_render(
-            'Multiplayer Tic-Tac-Toe — log in first',
-            'Tic-tac-toe needs an account so other players see your name. <a href="/learn/auth" target="_blank" rel="noopener">Log in</a> in a separate tab and refresh this one.',
-            [],
+            'Multiplayer Tic-Tac-Toe',
+            'Sign in to play. Display name = your username so opponents see who they\'re playing.',
+            [['heading' => '',
+              'body'    => App::renderToString('/components/_demo_login_card', [
+                  'intro' => 'Tic-tac-toe needs an account so other players see your name. Sign in or create one — the game loads in place.',
+              ])]],
             'learn/tictactoe', 'Tic-Tac-Toe'
         );
     }

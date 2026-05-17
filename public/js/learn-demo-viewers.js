@@ -101,6 +101,63 @@
   });
 })();
 
+// Inline login/register handler for demo viewers (Notes, Chat, Tic-Tac-Toe).
+// Posts to /api/learn/{login,register} via fetch (deliberately bypasses
+// htmx's HX-Redirect → /learn/notes default) so on success we can stay on
+// the current demo viewer with location.reload() — the widget appears
+// in place. The toggle button flips between login and register forms.
+(function () {
+  async function postAuth(form, kind) {
+    const msg = form.querySelector('[data-demo-login-msg]');
+    const btn = form.querySelector('button[type="submit"]');
+    if (msg) { msg.textContent = ''; msg.className = 'demo-login-msg'; }
+    if (btn) btn.disabled = true;
+    const params = new URLSearchParams();
+    new FormData(form).forEach((v, k) => params.append(k, v));
+    try {
+      const res = await fetch('/api/learn/' + kind, {
+        method: 'POST',
+        body: params,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
+        },
+      });
+      if (res.ok || res.status === 302) {
+        location.reload();
+        return;
+      }
+      let text = 'Failed (' + res.status + ')';
+      try {
+        const j = await res.json();
+        if (j && j.error) text = String(j.error).replace(/_/g, ' ');
+      } catch (_) {}
+      if (msg) { msg.textContent = text; msg.className = 'demo-login-msg err'; }
+    } catch (e) {
+      if (msg) { msg.textContent = 'Network error: ' + e.message; msg.className = 'demo-login-msg err'; }
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  document.addEventListener('submit', e => {
+    const form = e.target.closest('form[data-demo-login]');
+    if (!form) return;
+    e.preventDefault();
+    const kind = form.dataset.demoLogin;
+    if (kind !== 'login' && kind !== 'register') return;
+    postAuth(form, kind);
+  });
+
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-demo-login-toggle]');
+    if (!btn) return;
+    const wrap = btn.closest('.demo-login-wrap');
+    if (!wrap) return;
+    wrap.querySelectorAll('form[data-demo-login]').forEach(f => f.hidden = !f.hidden);
+  });
+})();
+
 // WebSocket cross-tab counter demo on /learn/websocket. Uses event
 // delegation so it keeps working after htmx swaps to/from this lesson.
 (function () {

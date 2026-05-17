@@ -50,12 +50,12 @@ $titleHtml   = htmlspecialchars($title);
        for JSON payloads — sandstone background, monospace, 360px max-height —
        which crops the game board and looks wrong around a chat panel.
        Unwrap them when the body contains a known widget root. */
-    .demo-output:has(.ttt, .notes-app, .chat) {
+    .demo-output:has(.ttt, .notes-app, .chat, .demo-login-wrap, .ws-counter-card) {
         background: transparent; padding: 0;
         min-height: auto; max-height: none; overflow: visible;
-        font-family: inherit; font-size: inherit;
+        font-family: var(--font, ui-sans-serif, system-ui); font-size: inherit;
     }
-    .inject-case:has(.ttt, .notes-app, .chat) { border: none; border-radius: 0; }
+    .inject-case:has(.ttt, .notes-app, .chat, .demo-login-wrap, .ws-counter-card) { border: none; border-radius: 0; }
   </style>
 </head>
 <body class="demo-shell-body">

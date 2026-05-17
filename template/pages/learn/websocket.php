@@ -25,15 +25,7 @@
       back over WebSocket to every connected tab. Try it now — open this URL in another tab first.
     </p>
 
-    <section id="step-tryit" class="ws-counter-card" style="margin:1.5rem 0">
-      <div class="ws-counter-value" data-ws-counter-value>0</div>
-      <p class="ws-counter-label">connected clients see this value update in real time</p>
-      <div class="ws-counter-actions">
-        <button type="button" class="btn btn-primary" data-ws-counter="bump">+1</button>
-        <button type="button" class="btn btn-ghost" data-ws-counter="reset">Reset</button>
-      </div>
-      <div data-ws-counter-status class="ws-counter-status">starting…</div>
-    </section>
+    <?php App::render('/components/_ws_counter_widget'); ?>
 
     <p style="margin-top:-.5rem;color:#78716c;font-size:.88rem">
       Open <a href="/learn/websocket" target="_blank">/learn/websocket</a> in a second tab. Click +1 here. Watch the second tab count up without reloading.

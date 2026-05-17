@@ -859,3 +859,21 @@ code.demo-inline { background: var(--bg-alt); padding: .1rem .35rem; border-radi
 /* "Open in new tab" CTA shared by Build-the-App lessons. */
 .lesson-popout-cta { display: inline-flex; align-items: center; gap: .35rem; padding: .4rem .8rem; background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; border-radius: 999px; font-size: .82rem; font-weight: 600; text-decoration: none; margin: .85rem 0; }
 .lesson-popout-cta:hover { background: #fde68a; text-decoration: none; }
+
+/* Inline login/register card used in demo viewers when no session active. */
+.demo-login-wrap { max-width: 380px; margin: 0 auto; padding: 1.5rem; background: #fff; border: 1px solid #e7e5e4; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.04); font-family: var(--font, ui-sans-serif, system-ui); }
+/* `display: flex` overrides UA [hidden] otherwise — explicit reset. */
+.demo-login-form[hidden] { display: none !important; }
+.demo-login-intro { margin: 0 0 1rem; color: #57534e; font-size: .9rem; line-height: 1.5; }
+.demo-login-form { display: flex; flex-direction: column; gap: .75rem; }
+.demo-login-row { display: flex; flex-direction: column; gap: .25rem; font-size: .78rem; font-weight: 600; color: #57534e; text-transform: uppercase; letter-spacing: .04em; }
+.demo-login-row input { font-size: 1rem; padding: .55rem .7rem; border: 1px solid #e7e5e4; border-radius: 6px; font-family: inherit; transition: border-color .14s; }
+.demo-login-row input:focus { outline: none; border-color: var(--accent, #f59e0b); box-shadow: 0 0 0 3px rgba(245, 158, 11, .15); }
+.demo-login-actions { display: flex; align-items: center; gap: .75rem; margin-top: .25rem; flex-wrap: wrap; }
+.demo-login-btn { padding: .55rem 1.1rem; background: var(--accent, #f59e0b); color: #1c1917; border: none; border-radius: 6px; font-weight: 600; font-size: .9rem; cursor: pointer; transition: background .14s; }
+.demo-login-btn:hover:not(:disabled) { background: #d97706; color: #fff; }
+.demo-login-btn:disabled { opacity: .55; cursor: not-allowed; }
+.demo-login-toggle { background: transparent; border: none; color: #78716c; font-size: .8rem; cursor: pointer; padding: .25rem .5rem; border-radius: 4px; text-decoration: underline; }
+.demo-login-toggle:hover { color: var(--accent, #f59e0b); }
+.demo-login-msg { min-height: 1.2em; font-size: .82rem; padding: 0 .15rem; }
+.demo-login-msg.err { color: #b91c1c; background: #fef2f2; padding: .35rem .65rem; border-radius: 5px; }
