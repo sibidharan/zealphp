@@ -38,7 +38,7 @@ $groups = [
 ?>
 <input type="checkbox" id="learn-sidebar-toggle" class="learn-sidebar-toggle-input">
 <label for="learn-sidebar-toggle" class="learn-sidebar-toggle-btn" aria-label="Toggle lessons">&#9776; Lessons</label>
-<aside class="learn-sidebar" aria-label="Lesson navigation">
+<aside id="learn-sidebar" class="learn-sidebar" aria-label="Lesson navigation" hx-preserve="true">
   <div class="learn-sidebar-inner">
     <?php $i = 1; foreach ($groups as $title => $items): ?>
       <div class="learn-sidebar-group">

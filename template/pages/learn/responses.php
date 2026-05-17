@@ -116,11 +116,11 @@
       Every response convention has a demo at <code>/demo/response/{method}</code>:
     </p>
     <ul>
-      <li><a href="/demo/response/json">/demo/response/json</a> — <code>return [...]</code></li>
-      <li><a href="/demo/response/redirect-301">/demo/response/redirect-301</a> — <code>$response-&gt;redirect($url, 301)</code></li>
-      <li><a href="/demo/response/redirect-302">/demo/response/redirect-302</a> — <code>$response-&gt;redirect($url)</code> (default 302)</li>
-      <li><a href="/demo/response/headers">/demo/response/headers</a> — custom headers via <code>$response-&gt;header()</code></li>
-      <li><a href="/demo/response/cookie">/demo/response/cookie</a> — <code>$response-&gt;cookie()</code></li>
+      <li><a href="/demo/view/response/json" target="_blank">Return an array → JSON</a></li>
+      <li><a href="/demo/view/response/redirect-301" target="_blank">301 permanent redirect</a> — <code>$response-&gt;redirect($url, 301)</code></li>
+      <li><a href="/demo/view/response/redirect-302" target="_blank">302 redirect</a> — <code>$response-&gt;redirect($url)</code></li>
+      <li><a href="/demo/view/response/headers" target="_blank">Custom headers</a> — <code>$response-&gt;header()</code></li>
+      <li><a href="/demo/view/response/cookie" target="_blank">Set a cookie</a> — <code>$response-&gt;cookie()</code></li>
     </ul>
 
     <?php App::render('/components/_concept_check', [

@@ -145,9 +145,9 @@ $app-&gt;route('/api/expensive', function ($request) {
 
     <h2>Try it live</h2>
     <ul>
-      <li><a href="/demo/store/set-get">/demo/store/set-get</a> — write a row, read it back across workers</li>
-      <li><a href="/demo/store/incr">/demo/store/incr</a> — atomic increment on a Store field</li>
-      <li><a href="/demo/counter/increment">/demo/counter/increment</a> — <code>Counter</code> incrementing on every request</li>
+      <li><a href="/demo/view/store/set-get" target="_blank">Store: write → read across workers</a></li>
+      <li><a href="/demo/view/store/incr" target="_blank">Store: atomic increment</a> — refresh in another tab to confirm</li>
+      <li><a href="/demo/view/counter/increment" target="_blank">Counter: lock-free atomic int</a></li>
       <li><a href="/store">/store</a> — full reference docs</li>
     </ul>
 

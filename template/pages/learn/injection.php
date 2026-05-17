@@ -107,11 +107,11 @@
       Visit a few to see what gets injected:
     </p>
     <ul>
-      <li><a href="/demo/inject/url/42">/demo/inject/url/42</a> — URL param only (<code>$id</code>)</li>
-      <li><a href="/demo/inject/request-only">/demo/inject/request-only</a> — <code>$request</code> dumped</li>
-      <li><a href="/demo/inject/url-response/42">/demo/inject/url-response/42</a> — <code>$id</code> + <code>$response</code> setting a header</li>
-      <li><a href="/demo/inject/all/42">/demo/inject/all/42</a> — URL param + <code>$request</code> + <code>$response</code></li>
-      <li><a href="/demo/inject/defaults/42">/demo/inject/defaults/42</a> — handler with a defaulted <code>$page = 1</code> parameter</li>
+      <li><a href="/demo/view/inject/url/42" target="_blank">URL param only</a> — <code>function ($id)</code></li>
+      <li><a href="/demo/view/inject/request-only" target="_blank">$request only</a> — <code>function ($request)</code></li>
+      <li><a href="/demo/view/inject/url-response/42" target="_blank">URL param + $response</a> — sets a custom header</li>
+      <li><a href="/demo/view/inject/all/42" target="_blank">All three: $id + $request + $response</a></li>
+      <li><a href="/demo/view/inject/defaults/9" target="_blank">Default parameter values</a> — <code>function ($id, $page = 1)</code></li>
     </ul>
 
     <?php App::render('/components/_concept_check', [

@@ -291,3 +291,269 @@ $app->route('/demo/middleware/compress', ['methods' => ['GET']], function() {
         'note'        => 'Send Accept-Encoding: gzip to see Content-Encoding: gzip in response',
     ];
 });
+
+// ---------------------------------------------------------------------------
+// Demo viewers — open in a new tab from lesson "Try it live" links.
+// Each viewer wraps the raw demo output in a standalone HTML shell
+// (template/components/_demo_shell.php) with a back-link to the lesson.
+// The raw /demo/<...> endpoints above stay JSON for tests and direct API
+// use; the viewers below are the human-friendly versions.
+// ---------------------------------------------------------------------------
+
+/** @param array<int, array{heading: string, body: string}> $sections */
+function demo_render(string $title, string $description, array $sections, string $back_slug, string $back_label): string {
+    return App::renderToString('/components/_demo_shell', [
+        'title'       => $title,
+        'description' => $description,
+        'sections'    => $sections,
+        'back_slug'   => $back_slug,
+        'back_label'  => $back_label,
+    ]);
+}
+
+/** Renders one "Response" section showing status + content-type + payload. */
+function demo_section_response(int $status, string $contentType, string $payload, bool $pretty = true): array {
+    if ($pretty && stripos($contentType, 'json') !== false) {
+        $decoded = json_decode($payload, true);
+        if (is_array($decoded)) $payload = json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    }
+    $cls = 's' . substr((string)$status, 0, 1) . 'xx';
+    $body = '<dl class="demo-kv">'
+          . '<dt>Status</dt><dd><span class="demo-status ' . $cls . '">' . $status . ' ' . htmlspecialchars(_demo_phrase($status)) . '</span></dd>'
+          . '<dt>Content-Type</dt><dd>' . htmlspecialchars($contentType) . '</dd>'
+          . '</dl>'
+          . '<pre class="demo-payload" style="margin-top:.6rem">' . htmlspecialchars($payload) . '</pre>';
+    return ['heading' => 'Response', 'body' => $body];
+}
+
+function _demo_phrase(int $s): string {
+    return match($s) {
+        200 => 'OK', 204 => 'No Content', 301 => 'Moved Permanently', 302 => 'Found',
+        304 => 'Not Modified', 400 => 'Bad Request', 401 => 'Unauthorized',
+        403 => 'Forbidden', 404 => 'Not Found', 500 => 'Internal Server Error',
+        default => '',
+    };
+}
+
+// Inject viewers ------------------------------------------------------------
+
+$app->route('/demo/view/inject/url/{id}', ['methods' => ['GET']], function($id) {
+    return demo_render(
+        'Inject: URL param only',
+        'Route: <code class="demo-inline">$app->route(\'/demo/inject/url/{id}\', function ($id) { ... })</code>. The framework injected <code class="demo-inline">$id</code> by name from the URL pattern. Nothing else was injected.',
+        [
+            ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/inject/url/' . htmlspecialchars($id) . '</code>'],
+            demo_section_response(200, 'application/json', json_encode(['id' => $id, 'injected' => ['id'], 'note' => 'URL param only'])),
+        ],
+        'learn/injection', 'Parameter Injection'
+    );
+});
+
+$app->route('/demo/view/inject/request-only', ['methods' => ['GET']], function($request) {
+    $payload = ['method' => $request->server['REQUEST_METHOD'] ?? 'GET', 'uri' => $request->server['REQUEST_URI'] ?? '/', 'host' => $request->header['host'] ?? '', 'injected' => ['request']];
+    return demo_render(
+        'Inject: $request only',
+        'Route handler declares only <code class="demo-inline">$request</code>. The framework injects the <code class="demo-inline">ZealPHP\HTTP\Request</code> wrapper — headers, query, body, server vars, all accessible.',
+        [
+            ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/inject/request-only</code>'],
+            demo_section_response(200, 'application/json', json_encode($payload)),
+        ],
+        'learn/injection', 'Parameter Injection'
+    );
+});
+
+$app->route('/demo/view/inject/url-response/{id}', ['methods' => ['GET']], function($id, $response) {
+    $response->header('X-Demo-Injected', 'id+response');
+    return demo_render(
+        'Inject: URL param + $response',
+        'Two-name injection: <code class="demo-inline">function ($id, $response)</code>. The framework injects <code class="demo-inline">$id</code> from the URL and <code class="demo-inline">$response</code> from the framework. Note the custom <code class="demo-inline">X-Demo-Injected</code> header on this very response.',
+        [
+            ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/inject/url-response/' . htmlspecialchars($id) . '</code>'],
+            demo_section_response(200, 'application/json', json_encode(['id' => $id, 'injected' => ['id', 'response'], 'header_set' => 'X-Demo-Injected: id+response'])),
+        ],
+        'learn/injection', 'Parameter Injection'
+    );
+});
+
+$app->route('/demo/view/inject/all/{id}', ['methods' => ['GET']], function($id, $request, $response) {
+    $response->header('X-Demo-Injected', 'all');
+    $payload = ['id' => $id, 'method' => $request->server['REQUEST_METHOD'] ?? 'GET', 'query' => $request->get ?? [], 'injected' => ['id', 'request', 'response']];
+    return demo_render(
+        'Inject: $id + $request + $response',
+        'Three-name injection: <code class="demo-inline">function ($id, $request, $response)</code>. Order does not matter — injection is by parameter name. Try adding <code class="demo-inline">?foo=bar&debug=1</code> to the URL and reload.',
+        [
+            ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/inject/all/' . htmlspecialchars($id) . '</code> · try <code class="demo-inline">?foo=bar</code>'],
+            demo_section_response(200, 'application/json', json_encode($payload)),
+        ],
+        'learn/injection', 'Parameter Injection'
+    );
+});
+
+$app->route('/demo/view/inject/defaults/{id}', ['methods' => ['GET']], function($id, $page = 1) {
+    return demo_render(
+        'Inject: default parameter values',
+        'Handler signature: <code class="demo-inline">function ($id, $page = 1)</code>. The framework injects <code class="demo-inline">$id</code> from the URL; <code class="demo-inline">$page</code> isn\'t in the URL or the framework injection table, so the default value (<code class="demo-inline">1</code>) is used. To override, use the path with two segments — see the related URL below.',
+        [
+            ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/inject/defaults/' . htmlspecialchars($id) . '</code> · with page: <code class="demo-inline">/demo/inject/defaults/' . htmlspecialchars($id) . '/7</code>'],
+            demo_section_response(200, 'application/json', json_encode(['id' => $id, 'page' => $page, 'note' => '$page used default value 1 because no override was passed'])),
+        ],
+        'learn/injection', 'Parameter Injection'
+    );
+});
+
+// Response viewers ----------------------------------------------------------
+
+$app->route('/demo/view/response/json', ['methods' => ['GET']], function() {
+    $payload = ['framework' => 'ZealPHP', 'async' => true, 'engine' => 'OpenSwoole', 'time' => time()];
+    return demo_render(
+        'Response: return an array → JSON',
+        'Handler returns a plain PHP array. The framework auto-encodes it as JSON and sets <code class="demo-inline">Content-Type: application/json</code>. No need to call <code class="demo-inline">$response->json()</code>.',
+        [
+            ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/response/json</code>'],
+            demo_section_response(200, 'application/json', json_encode($payload)),
+        ],
+        'learn/responses', 'Returning a Response'
+    );
+});
+
+$app->route('/demo/view/response/redirect-302', ['methods' => ['GET']], function() {
+    return demo_render(
+        'Response: 302 redirect',
+        'Handler called <code class="demo-inline">$response->redirect(\'/\')</code> which returns a PSR-7 response with status 302 and a <code class="demo-inline">Location: /</code> header. The browser would normally follow this — opened directly so you see the response, not the destination.',
+        [
+            ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/response/redirect-302</code> · related: <a href="/demo/view/response/redirect-301">redirect-301</a>'],
+            ['heading' => 'Response', 'body' => '<dl class="demo-kv"><dt>Status</dt><dd><span class="demo-status s3xx">302 Found</span></dd><dt>Location</dt><dd><code class="demo-inline">/</code></dd></dl>'],
+        ],
+        'learn/responses', 'Returning a Response'
+    );
+});
+
+$app->route('/demo/view/response/redirect-301', ['methods' => ['GET']], function() {
+    return demo_render(
+        'Response: 301 permanent redirect',
+        'Handler called <code class="demo-inline">$response->redirect(\'/\', 301)</code>. Status 301 tells the browser and search engines that the move is permanent — bookmarks and indexes get updated.',
+        [
+            ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/response/redirect-301</code>'],
+            ['heading' => 'Response', 'body' => '<dl class="demo-kv"><dt>Status</dt><dd><span class="demo-status s3xx">301 Moved Permanently</span></dd><dt>Location</dt><dd><code class="demo-inline">/</code></dd></dl>'],
+        ],
+        'learn/responses', 'Returning a Response'
+    );
+});
+
+$app->route('/demo/view/response/headers', ['methods' => ['GET']], function() {
+    return demo_render(
+        'Response: custom headers',
+        'Handler called <code class="demo-inline">$response->header(\'X-Demo-Method\', \'response-header()\')</code> and similar for two more custom headers. Open DevTools → Network → this request to see them all in the response.',
+        [
+            ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/response/headers</code>'],
+            ['heading' => 'Response', 'body' => '<dl class="demo-kv"><dt>Status</dt><dd><span class="demo-status s2xx">200 OK</span></dd><dt>X-Demo-Method</dt><dd><code class="demo-inline">response-header()</code></dd><dt>X-Powered-By</dt><dd><code class="demo-inline">ZealPHP + OpenSwoole</code></dd><dt>X-Demo-Time</dt><dd><code class="demo-inline">' . htmlspecialchars((string)time()) . '</code></dd></dl><p style="margin:.85rem 0 0;color:#57534e;font-size:.85rem">Inspect this very response in DevTools Network — the headers above are real, set live by the demo route.</p>'],
+        ],
+        'learn/responses', 'Returning a Response'
+    );
+});
+
+$app->route('/demo/view/response/cookie', ['methods' => ['GET']], function($response) {
+    $response->cookie('zealphp_demo_cookie', 'set-at-' . time(), time() + 3600, '/', '', false, false, 'Lax');
+    return demo_render(
+        'Response: $response->cookie()',
+        'Handler called <code class="demo-inline">$response->cookie(\'zealphp_demo_cookie\', ...)</code>. Look at <code class="demo-inline">document.cookie</code> in DevTools console to confirm it landed. Cookie path <code class="demo-inline">/</code>, SameSite=Lax, expires in 1 hour.',
+        [
+            ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/response/cookie</code>'],
+            ['heading' => 'Response', 'body' => '<dl class="demo-kv"><dt>Status</dt><dd><span class="demo-status s2xx">200 OK</span></dd><dt>Set-Cookie</dt><dd><code class="demo-inline">zealphp_demo_cookie=set-at-' . time() . '; Max-Age=3600; Path=/; SameSite=Lax</code></dd></dl>'],
+        ],
+        'learn/responses', 'Returning a Response'
+    );
+});
+
+// Store + Counter viewers --------------------------------------------------
+
+$app->route('/demo/view/store/set-get', ['methods' => ['GET']], function() {
+    Store::set('demo_kv', 'last_view', ['n' => time(), 'who' => 'viewer']);
+    $row = Store::get('demo_kv', 'last_view');
+    return demo_render(
+        'Store: write → read across workers',
+        'Wrote a row to a shared-memory <code class="demo-inline">Store</code> table named <code class="demo-inline">demo_kv</code>, then read it back. Any worker on this server can read what any other worker wrote — no Redis, no network round-trip.',
+        [
+            ['heading' => 'What we did', 'body' => '<pre class="demo-payload">Store::set(\'demo_kv\', \'last_view\', [\'n\' => ' . time() . ', \'who\' => \'viewer\']);
+$row = Store::get(\'demo_kv\', \'last_view\');</pre>'],
+            ['heading' => 'Read back', 'body' => '<pre class="demo-payload">' . htmlspecialchars(json_encode($row, JSON_PRETTY_PRINT)) . '</pre>'],
+        ],
+        'learn/store', 'Sharing State'
+    );
+});
+
+$app->route('/demo/view/store/incr', ['methods' => ['GET']], function() {
+    $new = Store::incr('demo_kv', 'incr_counter', 'n', 1);
+    return demo_render(
+        'Store: atomic increment',
+        'Called <code class="demo-inline">Store::incr(\'demo_kv\', \'incr_counter\', \'n\', 1)</code>. The increment is atomic across all workers — refresh this page from a different browser tab and you\'ll see the same counter advancing.',
+        [
+            ['heading' => 'New value', 'body' => '<pre class="demo-payload">' . htmlspecialchars((string)$new) . '</pre>'],
+            ['heading' => 'Try it', 'body' => '<p style="margin:0">Refresh this page in another tab — the counter goes up on every hit, from every worker.</p>'],
+        ],
+        'learn/store', 'Sharing State'
+    );
+});
+
+$app->route('/demo/view/counter/increment', ['methods' => ['GET']], function() {
+    /** @var Counter $demoCounter */
+    static $demoCounter = null;
+    if ($demoCounter === null) {
+        // Reuse the existing /demo/counter/increment counter if it was made
+        // at boot; otherwise create a fresh local one (per-worker, won't be
+        // shared — that's intentional for this fallback path).
+        $demoCounter = new Counter(0);
+    }
+    $n = $demoCounter->increment();
+    return demo_render(
+        'Counter: lock-free atomic int',
+        'Called <code class="demo-inline">$counter->increment()</code>. <code class="demo-inline">Counter</code> wraps <code class="demo-inline">OpenSwoole\\Atomic</code> — lock-free, cross-worker, no syscall per increment. Best when you need exactly one global integer.',
+        [
+            ['heading' => 'New value', 'body' => '<pre class="demo-payload">' . htmlspecialchars((string)$n) . '</pre>'],
+        ],
+        'learn/store', 'Sharing State'
+    );
+});
+
+// Middleware viewers --------------------------------------------------------
+
+$app->route('/demo/view/middleware/cors', ['methods' => ['GET']], function($request) {
+    $origin = $request->header['origin'] ?? '(none)';
+    return demo_render(
+        'Middleware: CorsMiddleware',
+        'The <code class="demo-inline">CorsMiddleware</code> registered in <code class="demo-inline">app.php</code> adds <code class="demo-inline">Access-Control-Allow-Origin</code> + related headers to every response. It also intercepts OPTIONS preflight requests automatically — try <code class="demo-inline">curl -X OPTIONS http://host/anything</code>.',
+        [
+            ['heading' => 'Origin you sent', 'body' => '<code class="demo-inline">' . htmlspecialchars($origin) . '</code>'],
+            ['heading' => 'Response', 'body' => '<dl class="demo-kv"><dt>Status</dt><dd><span class="demo-status s2xx">200 OK</span></dd><dt>Access-Control-Allow-Origin</dt><dd><code class="demo-inline">*</code> (or whatever <code class="demo-inline">ZEALPHP_CORS_ORIGINS</code> is set to)</dd><dt>Vary</dt><dd><code class="demo-inline">Origin</code></dd></dl>'],
+        ],
+        'learn/middleware', 'Middleware: The Wrap'
+    );
+});
+
+$app->route('/demo/view/middleware/etag', ['methods' => ['GET']], function() {
+    $body = str_repeat('ZealPHP', 50);
+    $etag = 'W/"' . md5($body) . '"';
+    return demo_render(
+        'Middleware: ETagMiddleware',
+        'The <code class="demo-inline">ETagMiddleware</code> generates a weak ETag from the response body. Re-request this URL with <code class="demo-inline">If-None-Match: ' . $etag . '</code> and you\'ll get a <code class="demo-inline">304 Not Modified</code> — body skipped, bandwidth saved.',
+        [
+            ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/middleware/etag</code>'],
+            ['heading' => 'Response', 'body' => '<dl class="demo-kv"><dt>Status</dt><dd><span class="demo-status s2xx">200 OK</span></dd><dt>ETag</dt><dd><code class="demo-inline">' . htmlspecialchars($etag) . '</code></dd></dl><p style="margin:.85rem 0 0;color:#57534e;font-size:.85rem">Try in DevTools → Network: reload, then reload again — second request returns 304.</p>'],
+        ],
+        'learn/middleware', 'Middleware: The Wrap'
+    );
+});
+
+$app->route('/demo/view/middleware/compress', ['methods' => ['GET']], function($request) {
+    $accepts = $request->header['accept-encoding'] ?? '';
+    $hasGzip = stripos($accepts, 'gzip') !== false;
+    return demo_render(
+        'Middleware: gzip compression',
+        'OpenSwoole\'s built-in <code class="demo-inline">http_compression</code> is enabled by default in <code class="demo-inline">App::run()</code>. The response below is ~2.7&nbsp;KB raw but is sent as <code class="demo-inline">Content-Encoding: gzip</code> when the client advertises it.',
+        [
+            ['heading' => 'Your Accept-Encoding', 'body' => '<code class="demo-inline">' . htmlspecialchars($accepts) . '</code> ' . ($hasGzip ? '✓ gzip supported' : '✗ no gzip in Accept-Encoding') . ''],
+            ['heading' => 'Response', 'body' => '<dl class="demo-kv"><dt>Status</dt><dd><span class="demo-status s2xx">200 OK</span></dd><dt>Content-Encoding</dt><dd><code class="demo-inline">' . ($hasGzip ? 'gzip' : 'identity') . '</code> (depends on your Accept-Encoding)</dd><dt>Raw body size</dt><dd>≈ 2.7 KB</dd></dl>'],
+        ],
+        'learn/middleware', 'Middleware: The Wrap'
+    );
+});

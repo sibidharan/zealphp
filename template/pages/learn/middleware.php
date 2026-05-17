@@ -119,9 +119,9 @@ $app-&gt;addMiddleware(new RateLimitHeader(100));</code></pre>
       The demo app registers CORS + ETag + Session-start + Range. See the headers in action:
     </p>
     <ul>
-      <li><a href="/demo/middleware/cors">/demo/middleware/cors</a> — <code>Access-Control-*</code> headers</li>
-      <li><a href="/demo/middleware/etag">/demo/middleware/etag</a> — <code>ETag</code> + 304 on repeat</li>
-      <li><a href="/demo/middleware/compress">/demo/middleware/compress</a> — <code>Content-Encoding: gzip</code></li>
+      <li><a href="/demo/view/middleware/cors" target="_blank">CORS: <code>Access-Control-*</code> headers</a></li>
+      <li><a href="/demo/view/middleware/etag" target="_blank">ETag: 304 Not Modified on repeat</a></li>
+      <li><a href="/demo/view/middleware/compress" target="_blank">Gzip compression: <code>Content-Encoding: gzip</code></a></li>
     </ul>
 
     <?php App::render('/components/_concept_check', [

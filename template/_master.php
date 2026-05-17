@@ -61,6 +61,20 @@ function initPageScripts(root) {
     if (btn.dataset.autorun !== undefined) load();
   });
 
+  // Learn sidebar is hx-preserved across swaps so scroll position stays put.
+  // Re-sync its active-state + page <title> with the current URL after each
+  // navigation (htmx swaps .learn-layout, which doesn't touch <head>).
+  const sb = document.getElementById('learn-sidebar');
+  if (sb) {
+    sb.querySelectorAll('li.active').forEach(li => li.classList.remove('active'));
+    const link = sb.querySelector('a[href="' + location.pathname + '"]');
+    if (link) {
+      link.closest('li')?.classList.add('active');
+      const lessonName = link.textContent.trim();
+      if (lessonName) document.title = 'ZealPHP Learn · ' + lessonName + ' · ZealPHP';
+    }
+  }
+
   // Tab switching
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {

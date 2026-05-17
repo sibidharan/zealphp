@@ -40,7 +40,7 @@ PHP]); ?>
   <div class="inject-case-header"><span class="badge badge-get">GET</span><code>/stream/ssr — Generator yield</code></div>
   <div style="padding:1rem;background:var(--bg-alt)">
     <p style="font-size:.85rem;margin-bottom:.75rem">Opens a streaming connection. Watch sections appear one by one (1s, then 2s):</p>
-    <button class="btn btn-primary btn-sm" onclick="runStreamSSR()">▶ Run Generator SSR</button>
+    <button class="btn btn-primary btn-sm" data-streaming-demo="ssr">▶ Run Generator SSR</button>
     <div id="ssr-out" style="margin-top:.75rem;font-family:var(--font-mono);font-size:.78rem;padding:.75rem;background:var(--code-bg);color:var(--code-text);border-radius:6px;min-height:60px">Click Run to start…</div>
   </div>
 </div>
@@ -50,8 +50,8 @@ PHP]); ?>
   <div class="inject-case-header"><span class="badge badge-sse">SSE</span><code>/stream/events — Server-Sent Events</code></div>
   <div style="padding:1rem;background:var(--bg-alt)">
     <p style="font-size:.85rem;margin-bottom:.75rem">10 events, 1 second apart. EventSource reconnects automatically on drop.</p>
-    <button class="btn btn-primary btn-sm" onclick="startSSE()">▶ Connect EventSource</button>
-    <button class="btn btn-ghost btn-sm" onclick="stopSSE()">■ Disconnect</button>
+    <button class="btn btn-primary btn-sm" data-streaming-demo="sse-start">▶ Connect EventSource</button>
+    <button class="btn btn-ghost btn-sm" data-streaming-demo="sse-stop">■ Disconnect</button>
     <div class="sse-log" id="sse-out" style="margin-top:.75rem">Click Connect to start…</div>
   </div>
 </div>
@@ -181,38 +181,4 @@ PHP]); ?>
 </div>
 </section>
 
-<script>
-async function runStreamSSR() {
-  const out = document.getElementById('ssr-out');
-  out.textContent = 'Connecting…';
-  const res = await fetch('/stream/ssr');
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  out.textContent = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const chunk = decoder.decode(value, { stream: true });
-    out.textContent += chunk;
-  }
-}
-
-let es = null;
-function startSSE() {
-  if (es) es.close();
-  const log = document.getElementById('sse-out');
-  log.textContent = '';
-  es = new EventSource('/stream/events');
-  const addLine = (text, cls) => {
-    const el = document.createElement('div');
-    el.className = 'sse-event ' + (cls || '');
-    el.textContent = new Date().toLocaleTimeString() + ' — ' + text;
-    log.appendChild(el);
-    log.scrollTop = log.scrollHeight;
-  };
-  es.addEventListener('open', e => addLine(e.data, 'open'));
-  es.addEventListener('tick', e => addLine(e.data, 'tick'));
-  es.addEventListener('done', e => { addLine(e.data, 'done'); es.close(); });
-}
-function stopSSE() { if (es) { es.close(); es = null; } }
-</script>
+<!-- handlers live in /js/streaming-demos.js (loaded site-wide via _head.php) -->
