@@ -95,8 +95,7 @@ $app-&gt;nsPathRoute('admin', '{path}', function ($path) {
 
 App::setFallback(function () {
     // Hand any URL we don't explicitly own to WordPress's front controller.
-    // App::include() resolves paths relative to public/ (Apache DocumentRoot convention).
-    App::include('/wordpress/index.php');
+    App::includeFile(__DIR__ . '/wordpress/index.php');
 });</code></pre>
     <p>
       The fallback is the Apache <code>RewriteRule . /index.php [L]</code> equivalent. You can put
