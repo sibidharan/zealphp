@@ -134,7 +134,7 @@ ZEALPHP_PORT              # Listen port (default: 8080)
 ZEALPHP_LOG_DIR           # Log directory (default: /tmp/zealphp)</code></pre>
 
     <h2>What you built</h2>
-    <p>Over 12 lessons you created a real application:</p>
+    <p>Over 24 lessons you created a real application:</p>
     <ul>
       <li><strong>Session-based auth</strong> with SQLite + <code>password_hash</code></li>
       <li><strong>CRUD notes app</strong> with htmx — no page reloads</li>

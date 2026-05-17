@@ -280,7 +280,7 @@ $g = \ZealPHP\G::instance();
 
     <?php App::render('/components/_deepdive', [
       'title' => 'When htmx isn\'t enough',
-      'body'  => '<p>htmx is request/response. The client asks, the server answers. For scenarios where the <em>server</em> needs to push updates without being asked — live notifications, multi-tab sync, AI token streaming — you need a persistent connection. ZealPHP has WebSocket (<code>App::ws()</code>) and Server-Sent Events (<code>$response->sse()</code>) for those cases. You\'ll use both in Lessons 9 and 10.</p>',
+      'body'  => '<p>htmx is request/response. The client asks, the server answers. For scenarios where the <em>server</em> needs to push updates without being asked — live notifications, multi-tab sync, AI token streaming — you need a persistent connection. ZealPHP has WebSocket (<code>App::ws()</code>) and Server-Sent Events (<code>$response->sse()</code>) for those cases. You\'ll use both in Lessons 19 (Real-Time Sync) and 20 (AI Chat).</p>',
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [

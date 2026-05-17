@@ -13,7 +13,7 @@
       'What ZealPHP is and the problem it solves',
       'Why OpenSwoole changes what PHP can do',
       'The mental model: PHP IS the server',
-      'What you\'ll build across 13 lessons',
+      'What you\'ll build across 24 lessons',
     ]]); ?>
 
     <h2>The three-line web server</h2>
@@ -103,14 +103,15 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
       stream HTML for htmx, or run an unmodified WordPress or Laravel app. It's a runtime, not a framework religion.
     </p>
     <p>
-      This tutorial is not a reference manual. It's a working app. Over 14 lessons, you'll build a
+      This tutorial is not a reference manual. It's a working app. Over 24 lessons, you'll build a
       <strong>Personal Notes app with an AI chat assistant</strong>:
     </p>
     <ol>
-      <li><strong>Lessons 1&ndash;4:</strong> Install ZealPHP, create pages, build layouts</li>
-      <li><strong>Lessons 5&ndash;8:</strong> React vs PHP, htmx, sessions, user accounts</li>
-      <li><strong>Lessons 9&ndash;11:</strong> Build the full app &mdash; notes CRUD, AI chat, real-time sync</li>
-      <li><strong>Lessons 12&ndash;14:</strong> Deep dive into routing, coroutines, deployment</li>
+      <li><strong>Lessons 1&ndash;3 (Hello World):</strong> Install ZealPHP, create your first page</li>
+      <li><strong>Lessons 4&ndash;12 (Foundations):</strong> Request lifecycle, routing, parameter injection, responses, middleware, streaming, shared state</li>
+      <li><strong>Lessons 13&ndash;17 (Interactivity):</strong> Layouts &amp; components, React vs PHP, htmx, sessions, user accounts</li>
+      <li><strong>Lessons 18&ndash;21 (Build the App):</strong> Notes CRUD, real-time sync, AI chat, multiplayer tic-tac-toe</li>
+      <li><strong>Lessons 22&ndash;24 (Under the Hood):</strong> Advanced routing, async patterns, deployment</li>
     </ol>
     <p>
       Every lesson you scroll through is <em>also a page in the real app</em>. The code that renders
@@ -130,7 +131,7 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
       'One process handles HTTP, WebSocket, SSE, sessions, and shared memory',
       'No Apache, Nginx, Redis, or queue workers needed for most apps',
       'ZealPHP modernizes the Apache/FPM half of the LAMP stack &mdash; keep your DB, swap the request model',
-      'This tutorial builds a real Notes + AI Chat app across 13 lessons',
+      'This tutorial builds a real Notes + AI Chat + multiplayer Tic-Tac-Toe app across 24 lessons',
     ]]); ?>
 
     <div class="lesson-chips">
