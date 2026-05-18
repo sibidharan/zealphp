@@ -566,6 +566,18 @@ footer {
 .ws-input:focus { border-color: var(--accent); }
 button:disabled { opacity: .55; cursor: not-allowed; }
 
+/* ── Demo controls (button row above a demo output) ── */
+.demo-controls {
+  display: flex; gap: .5rem; flex-wrap: wrap;
+  padding-top: 1rem; margin-bottom: .75rem;
+}
+
+/* ── Subsection heading inside a page section ── */
+.subsection-title { margin: 2rem 0 .5rem; }
+
+/* Standalone demo block — extra top margin when not inside .inject-grid */
+.inject-case.is-standalone { margin-top: 1.5rem; }
+
 /* ── SSE log ── */
 .sse-log {
   background: var(--code-bg); color: var(--code-text);

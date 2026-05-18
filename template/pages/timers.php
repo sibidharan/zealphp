@@ -97,7 +97,7 @@ foreach ($demos as [$id, $title, $url, $code]) {
 }
 ?>
 
-<div class="inject-case" style="margin-top:1.5rem">
+<div class="inject-case is-standalone">
   <div class="inject-case-header"><span class="badge badge-sse">SSE</span><code>/timers/sse — Server-Sent Events</code></div>
   <div class="inject-case-body">
     <div class="demo-code">
@@ -108,16 +108,16 @@ es.addEventListener('done', () => es.close());</code></pre>
     </div>
     <div class="demo-output">
       <span class="label">LIVE OUTPUT</span>
-      <div style="display:flex; gap:.5rem; flex-wrap:wrap; padding-top:1rem; margin-bottom:.75rem">
-        <button class="btn btn-primary btn-sm" type="button" onclick="startTimerSSE()">Connect EventSource</button>
-        <button class="btn btn-ghost btn-sm" type="button" onclick="stopTimerSSE()">Disconnect</button>
+      <div class="demo-controls">
+        <button class="btn btn-primary btn-sm" type="button" data-action="timers-sse-start">Connect EventSource</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="timers-sse-stop">Disconnect</button>
       </div>
       <div class="sse-log" id="timer-sse-out">Click Connect to start…</div>
     </div>
   </div>
 </div>
 
-<h2 style="margin:2rem 0 .5rem">Timer API</h2>
+<h2 class="subsection-title">Timer API</h2>
 <table class="ztable">
   <tr><th>Method</th><th>When to use</th></tr>
   <tr><td><code>App::tick(int $ms, callable $fn)</code></td><td>Recurring task — runs every $ms milliseconds in this worker</td></tr>
@@ -126,48 +126,9 @@ es.addEventListener('done', () => es.close());</code></pre>
   <tr><td><code>App::onWorkerStart(callable $fn)</code></td><td>Register a callback called when each worker starts — right place for timers</td></tr>
 </table>
 
-<div class="callout warn" style="margin-top:1rem">
+<div class="callout warn">
   <strong>Must be called inside a coroutine context.</strong>
   <code>App::tick()</code> works inside <code>onWorkerStart</code> callbacks and route handlers, but not at the global PHP scope (before the server starts).
 </div>
 </div>
 </section>
-
-<script>
-let timerEventSource = null;
-
-function stopTimerSSE() {
-  if (timerEventSource) {
-    timerEventSource.close();
-    timerEventSource = null;
-  }
-}
-
-function addTimerSSELine(text, cls) {
-  const log = document.getElementById('timer-sse-out');
-  if (!log) return;
-  const el = document.createElement('div');
-  el.className = 'sse-event ' + (cls || '');
-  el.textContent = new Date().toLocaleTimeString() + ' — ' + text;
-  log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
-}
-
-function startTimerSSE() {
-  stopTimerSSE();
-  const log = document.getElementById('timer-sse-out');
-  if (!log) return;
-  log.textContent = '';
-  timerEventSource = new EventSource('/timers/sse');
-  timerEventSource.addEventListener('open', e => addTimerSSELine(e.data, 'open'));
-  timerEventSource.addEventListener('tick', e => addTimerSSELine(e.data, 'tick'));
-  timerEventSource.addEventListener('done', e => {
-    addTimerSSELine(e.data, 'done');
-    stopTimerSSE();
-  });
-  timerEventSource.onerror = () => {
-    addTimerSSELine('connection closed', 'done');
-    stopTimerSSE();
-  };
-}
-</script>
