@@ -8,7 +8,7 @@
 
 <div class="bench-method" style="margin-top:1.5rem">
   <strong>TL;DR</strong> &nbsp;|&nbsp;
-  In coroutine mode, ZealPHP routes a request in microseconds — there's no fork, no IPC, no nginx hop. The current legacy CGI bridge (for unmodified WordPress) pays a per-include <code>proc_open</code> cost (~30–50 ms) that's an order of magnitude slower than FPM today — Apache/FPM keep the PHP interpreter alive between requests, we don't yet. The roadmap fix is a built-in persistent CGI worker pool (v0.3.0) that brings legacy-mode performance to FPM parity. Coroutine-mode performance is already 5–10× FPM.
+  The apples-to-apples comparison is <strong>Mixed-mode</strong> — ZealPHP with process isolation OFF (<code>superglobals(true) + processIsolation(false) + enableCoroutine(false)</code>). That's PHP-FPM's <em>exact</em> execution model: one request at a time per warm worker, native <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>, in-process — minus the FastCGI socket hop and minus the separate web server (the HTTP server is built in). Same model, fewer moving parts, faster. <strong>Coroutine mode</strong> (the default) goes further — sub-millisecond, thousands of concurrent connections — but it's a <em>different</em> execution model, so it's the bonus path, not the FPM comparison. The <strong>legacy CGI bridge</strong> (<code>processIsolation(true)</code>) exists only for unmodified WordPress/Drupal and pays a ~30–50 ms <code>proc_open</code> cost today; the v0.3.0 persistent worker pool brings it to FPM parity.
 </div>
 
 <!-- ────────────────────────────────────────────────────────────── -->
@@ -38,19 +38,19 @@ Apache → browser</code></pre>
   </div>
 
   <div class="qs-block" style="padding:1.1rem 1.3rem;border-left:3px solid var(--accent)">
-    <h3 style="margin:0 0 .5rem;color:var(--accent);font-size:1.05rem">ZealPHP — coroutine mode</h3>
+    <h3 style="margin:0 0 .5rem;color:var(--accent);font-size:1.05rem">ZealPHP — Mixed-mode (FPM-equivalent)</h3>
     <pre style="background:rgba(0,0,0,.35);padding:.7rem;border-radius:6px;font-size:.78rem;line-height:1.4;margin:.4rem 0;overflow-x:auto"><code>browser
   ↓  TCP
 OpenSwoole HTTP server (master + workers)
-  ↓  pick idle worker, spawn coroutine
-ResponseMiddleware (in-process)
-  ↓  reflection-cached param injection
-your route handler / public file
+  ↓  pick idle worker (one request at a time)
+ResponseMiddleware (in-process, no fork)
+  ↓  $_GET/$_POST/$_SESSION populated, warm interpreter
+your script.php  (in-process include)
   ↓  return body
 OpenSwoole writes response on the same socket
   ↓
 browser</code></pre>
-    <p style="margin:.5rem 0 0;color:#cbd5e1;font-size:.82rem">One process, one socket, request-to-handler in microseconds. Worker is back on the next request immediately (the coroutine yields, doesn't block the worker).</p>
+    <p style="margin:.5rem 0 0;color:#cbd5e1;font-size:.82rem">Same execution model as FPM — sequential per warm worker, native superglobals — but <strong>no FastCGI socket hop and no separate web server</strong>. The interpreter is pre-loaded; nothing forks per request. Flip on <code>enableCoroutine(true)</code> (the default) and the same worker handles thousands of concurrent connections — the bonus fast path, covered below.</p>
   </div>
 </div>
 
@@ -62,34 +62,41 @@ browser</code></pre>
 
 <p style="color:#cbd5e1;margin-bottom:1rem">Three stacks, three workloads. Costs are per-request, with the request body kept small so we're measuring the framework, not the bandwidth.</p>
 
+<p style="color:#94a3b8;margin-bottom:1rem;font-size:.85rem">The <strong>Mixed-mode</strong> column is the apples-to-apples FPM comparison (same sequential execution model). Coroutine mode is the different-model bonus path.</p>
+
 <table class="ztable">
   <tr>
     <th style="text-align:left">Workload</th>
     <th style="text-align:right">Apache + PHP-FPM</th>
-    <th style="text-align:right">ZealPHP coroutine</th>
+    <th style="text-align:right">ZealPHP Mixed-mode<br><small>(FPM-equivalent)</small></th>
+    <th style="text-align:right">ZealPHP coroutine<br><small>(bonus path)</small></th>
     <th style="text-align:right">ZealPHP legacy CGI</th>
   </tr>
   <tr>
     <td>JSON endpoint (no DB)</td>
     <td style="text-align:right">~1–3 ms (FCGI hop)</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">&lt; 0.1 ms (in-process)</td>
+    <td style="text-align:right;color:var(--accent);font-weight:700">~1 ms (in-process, no hop)</td>
+    <td style="text-align:right">&lt; 0.1 ms (coroutine)</td>
     <td style="text-align:right">~30–50 ms (proc_open)</td>
   </tr>
   <tr style="background:rgba(255,255,255,.02)">
     <td>Static template render</td>
     <td style="text-align:right">~1–3 ms + opcache</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">~0.1 ms</td>
+    <td style="text-align:right;color:var(--accent);font-weight:700">~1 ms (warm interpreter)</td>
+    <td style="text-align:right">~0.1 ms</td>
     <td style="text-align:right">~30–50 ms (proc_open)</td>
   </tr>
   <tr>
-    <td>WordPress home (warm)</td>
+    <td>Legacy app (native <code>$_SESSION</code>)</td>
     <td style="text-align:right">~40–80 ms (mod_php)</td>
-    <td style="text-align:right">N/A — needs legacy mode</td>
+    <td style="text-align:right;color:var(--accent);font-weight:700">same, in-process, no fork</td>
+    <td style="text-align:right">use <code>$g-&gt;X</code> (no superglobals)</td>
     <td style="text-align:right">~40–80 ms + ~30 ms bridge</td>
   </tr>
   <tr style="background:rgba(255,255,255,.02)">
     <td>SSE stream (long-lived)</td>
     <td style="text-align:right">1 worker pinned</td>
+    <td style="text-align:right">1 worker pinned (scheduler off)</td>
     <td style="text-align:right;color:var(--accent);font-weight:700">1 coroutine — worker free</td>
     <td style="text-align:right">1 child process pinned</td>
   </tr>
@@ -97,9 +104,14 @@ browser</code></pre>
     <td>WebSocket connection</td>
     <td style="text-align:right">Not supported</td>
     <td style="text-align:right;color:var(--accent);font-weight:700">Native — same process</td>
+    <td style="text-align:right;color:var(--accent);font-weight:700">Native — same process</td>
     <td style="text-align:right">Native (handler in coroutine)</td>
   </tr>
 </table>
+
+<p style="margin:.7rem 0 0;color:#94a3b8;font-size:.85rem">
+  Note the honest trade-off: in Mixed-mode the coroutine scheduler is off, so a long-lived SSE stream pins its worker exactly like FPM. That's the one place coroutine mode clearly wins — and why it's worth flipping on for new code that does streaming or concurrent I/O.
+</p>
 
 <p style="margin:.7rem 0 0;color:#94a3b8;font-size:.85rem">
   Ranges, not point measurements — actual numbers depend on kernel, CPU, opcache state, and which exact FPM tuning you've done. The bench script at <code>scripts/bench_vs_fpm.sh</code> runs the JSON workload on the local box; reproduce before quoting.
