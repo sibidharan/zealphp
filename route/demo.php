@@ -293,6 +293,55 @@ $app->route('/demo/middleware/compress', ['methods' => ['GET']], function() {
 });
 
 // ---------------------------------------------------------------------------
+// Template fragments — App::fragment() (added in v0.2.24).
+//
+// Same URL renders either the full contacts list (browser navigation /
+// htmx-boost) OR just one row (htmx swap with hx-get="?fragment=contact-N").
+// One template file, one route handler, both responses. The template uses
+// App::fragment('contact-{id}', ...) to mark each row as a named region;
+// the framework either runs them inline (no fragment selector → full page)
+// or extracts the matching one (selector present → just that row).
+//
+// See /learn/htmx#fragments for the teaching version.
+// ---------------------------------------------------------------------------
+
+$app->route('/demo/fragments/contacts', ['methods' => ['GET']], function() {
+    $g = \ZealPHP\RequestContext::instance();
+    $contacts = [
+        ['id' => 1, 'name' => 'Alice Chen',  'role' => 'Backend lead',  'email' => 'alice@example.com'],
+        ['id' => 2, 'name' => 'Bob Singh',   'role' => 'Designer',      'email' => 'bob@example.com'],
+        ['id' => 3, 'name' => 'Carol Davis', 'role' => 'Infra engineer','email' => 'carol@example.com'],
+        ['id' => 4, 'name' => 'Dan Mei',     'role' => 'Product',       'email' => 'dan@example.com'],
+    ];
+    $fragment = is_string($g->get['fragment'] ?? null) ? $g->get['fragment'] : null;
+
+    if ($fragment !== null) {
+        // htmx swap response — bare fragment HTML, no shell, so htmx replaces
+        // just the matched row. The framework returns 404 automatically if
+        // the fragment selector doesn't match any App::fragment() block.
+        return App::render('/demos/contacts-list', [
+            'contacts' => $contacts,
+            'fragment' => $fragment,
+        ]);
+    }
+
+    // Full page render — wrap in the standard _demo_shell so the page has
+    // the same breadcrumb + theme as every other /demo/view/ page on the
+    // site, with a back-link to the htmx lesson where this is taught.
+    $body = App::renderToString('/demos/contacts-list', [
+        'contacts' => $contacts,
+        'fragment' => null,
+    ]);
+    return demo_render(
+        'Template fragments — contacts list',
+        'One template file, two responses. Click <strong>Show details</strong> on any row — htmx requests <code class="demo-inline">?fragment=contact-{id}</code> and the server returns only that row\'s markup, not the whole page. Open DevTools → Network → XHR to confirm each swap is a single 200 response with just one <code class="demo-inline">&lt;li&gt;</code> in the body. Try <a href="/demo/fragments/contacts?fragment=does-not-exist" target="_blank" rel="noopener">/demo/fragments/contacts?fragment=does-not-exist</a> for the HTTP 404 case — fragment selector with no matching region, no fallback to the full page.',
+        [['heading' => 'Live contacts', 'body' => $body]],
+        'learn/htmx',
+        'Forms & htmx'
+    );
+});
+
+// ---------------------------------------------------------------------------
 // Demo viewers — open in a new tab from lesson "Try it live" links.
 // Each viewer wraps the raw demo output in a standalone HTML shell
 // (template/components/_demo_shell.php) with a back-link to the lesson.

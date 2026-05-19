@@ -1579,21 +1579,68 @@ class App
      */
     private static function executeFile(string $absPath, array $args): mixed
     {
+        $g = RequestContext::instance();
+
+        // ── Fragment-mode setup (htmx-essay-style template fragments).
+        // If $args['fragment'] names a region, App::fragment() helpers inside
+        // the template extract it; everything else short-circuits via
+        // HaltException. Save+restore the state slot so nested executeFile()
+        // calls (e.g. App::render() inside a template) compose cleanly.
+        $fragmentName = (isset($args['fragment']) && is_string($args['fragment']))
+            ? $args['fragment']
+            : null;
+        $previousFragmentState = $g->memo['_fragment'] ?? null;
+        if ($fragmentName !== null) {
+            $g->memo['_fragment'] = [
+                'wanted'  => $fragmentName,
+                'matched' => false,
+                'result'  => null,
+            ];
+        }
+
         ob_start();
         $result = null;
         try {
-            $args['g'] = RequestContext::instance();
+            $args['g'] = $g;
             extract($args, EXTR_SKIP);
             $result = include $absPath;
         } catch (HaltException $e) {
-            // Clean halt (redirect, exit) — capture buffered output and return
+            // Clean halt — preserves buffered output as the body (PR #10).
+            // Fragment-capture extension: if App::fragment() matched and the
+            // closure returned a non-null contract-shaped value (int / array
+            // / Generator / Closure / string), surface it as $result so the
+            // universal return contract applies.
+            $haltState = self::getFragmentState();
+            if ($haltState !== null && $haltState['matched'] && $haltState['result'] !== null) {
+                $result = $haltState['result'];
+            } else {
+                // Plain halt (no explicit fragment return) — flag the
+                // buffered echo as the response body via the same code path
+                // PHP's "no explicit return from include" uses ($result === 1).
+                // Without this, the bottom-of-method `return $result` would
+                // throw away the buffered HTML the template echoed before
+                // the halt, defeating the whole point of catching HaltException.
+                $result = 1;
+            }
         } catch (\Throwable $e) {
             @ob_end_clean();
+            self::restoreFragmentState($previousFragmentState);
             throw $e;
         }
         $output = ob_get_clean();
         if ($output === false) {
             $output = '';
+        }
+
+        // Fragment-mode post-flight: requested but no App::fragment('X', ...)
+        // block matched. The template ran to completion and we now have the
+        // full-page output — definitely not what the caller asked for. Per
+        // the universal return contract, surface a 404.
+        $postState = self::getFragmentState();
+        $fragmentMatched = ($postState !== null && $postState['matched']);
+        self::restoreFragmentState($previousFragmentState);
+        if ($fragmentName !== null && !$fragmentMatched) {
+            return 404;
         }
 
         if ($result instanceof \Closure) {
@@ -1833,6 +1880,129 @@ class App
         $path = self::resolveTemplatePath($__template_file, $__default_template_dir);
         $result = self::executeFile($path, $__args);
         yield from self::coerceToStream($result);
+    }
+
+    /**
+     * Declare a named region inside a template — the htmx-essay "template
+     * fragment" pattern. The same template renders the full page when called
+     * via `App::render('page', $args)`, and just the named region when called
+     * via `App::render('page', ['fragment' => $name] + $args)`. One file,
+     * two responses — no separate partial file required.
+     *
+     * Three behaviours depending on the parent render's fragment selector:
+     *  - selector is null (normal full-page render) → `$fn()` runs inline,
+     *    its echo flows into the surrounding template, its return value is
+     *    discarded (the parent render's return owns the universal contract).
+     *  - selector matches $name → the page-shell buffer is cleared, `$fn()`
+     *    runs, its return is captured, then `HaltException` short-circuits
+     *    the rest of the template. `executeFile()` propagates the return
+     *    so the closure can `return 404;` / `return ['k'=>'v'];` / yield a
+     *    Generator just like a route handler.
+     *  - selector is set but does not match $name → skipped silently.
+     *
+     * Same return contract as every other entry point: int=status,
+     * array=JSON, string=HTML, Generator=stream, Closure=invoked-and-recursed,
+     * null=use buffered output. See `template/pages/responses.php#return-contract`.
+     *
+     * Example — htmx-style row swap:
+     * ```php
+     * // template/contacts/list.php
+     * <ul>
+     *   <?php foreach ($contacts as $contact): ?>
+     *     <?php App::fragment("contact-{$contact->id}", function() use ($contact) { ?>
+     *       <li id="contact-<?= $contact->id ?>"><?= htmlspecialchars($contact->name) ?></li>
+     *     <?php }); ?>
+     *   <?php endforeach; ?>
+     * </ul>
+     * ```
+     *
+     * Full page: `App::render('contacts/list', ['contacts' => $all])`.
+     * Single row (htmx swap response, same template): `App::render('contacts/list', ['contacts' => $all, 'fragment' => "contact-{$id}"])`.
+     */
+    public static function fragment(string $name, callable $fn): void
+    {
+        $state = self::getFragmentState();
+
+        // Not in fragment-extraction mode — render the region inline as part
+        // of the full page. The callable's return value is discarded; the
+        // parent App::render() / App::include() owns the universal contract.
+        if ($state === null) {
+            $fn();
+            return;
+        }
+
+        if ($state['wanted'] !== $name) {
+            // Fragment-extraction mode, but not this region. Skip silently.
+            return;
+        }
+
+        // Match. Clear the page-shell buffer so only this fragment's output
+        // survives, run the callable, capture its return value, and throw
+        // HaltException to short-circuit the rest of the template.
+        // `executeFile()` catches the throw, surfaces the captured return as
+        // the response's $result, and emits the buffered (fragment-only)
+        // echo as the response body — same universal-return-contract path
+        // every other entry point uses.
+        ob_clean();
+        $state['matched'] = true;
+        $result = $fn();
+        if ($result !== null) {
+            $state['result'] = $result;
+        }
+        // Write the state back as a fresh array. PHPStan can't track nested-
+        // key writes through $g->memo['_fragment']['matched'] because $g->memo
+        // is typed as array<string, mixed>; assigning the whole sub-array
+        // keeps the offset-access checker happy.
+        $g = RequestContext::instance();
+        $g->memo['_fragment'] = $state;
+        throw new HaltException("fragment {$name} captured");
+    }
+
+    /**
+     * Read and narrow the current fragment-extraction state from $g->memo.
+     * `$g->memo` is `array<string, mixed>` so PHPStan can't see the shape of
+     * `$g->memo['_fragment']` without help — this helper does the narrowing
+     * once and returns a typed array (or null when no fragment mode is set).
+     *
+     * @return array{wanted: string, matched: bool, result: mixed}|null
+     */
+    private static function getFragmentState(): ?array
+    {
+        $g = RequestContext::instance();
+        /** @var mixed $state */
+        $state = $g->memo['_fragment'] ?? null;
+        if (!is_array($state)) {
+            return null;
+        }
+        /** @var mixed $wantedRaw */
+        $wantedRaw = $state['wanted'] ?? null;
+        if (!is_string($wantedRaw)) {
+            return null;
+        }
+        return [
+            'wanted'  => $wantedRaw,
+            'matched' => (bool)($state['matched'] ?? false),
+            'result'  => $state['result'] ?? null,
+        ];
+    }
+
+    /**
+     * Restore `$g->memo['_fragment']` to its prior state. Called by
+     * `executeFile()` to undo fragment-mode setup for nested renders and on
+     * error paths. `null` means "no fragment mode was active before" — drop
+     * the slot entirely so the next App::fragment() call falls into the
+     * normal inline-render branch.
+     *
+     * @param mixed $previous
+     */
+    private static function restoreFragmentState($previous): void
+    {
+        $g = RequestContext::instance();
+        if ($previous === null) {
+            unset($g->memo['_fragment']);
+        } else {
+            $g->memo['_fragment'] = $previous;
+        }
     }
 
     

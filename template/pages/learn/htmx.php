@@ -283,6 +283,168 @@ $g = \ZealPHP\G::instance();
       'body'  => '<p>htmx is request/response. The client asks, the server answers. For scenarios where the <em>server</em> needs to push updates without being asked — live notifications, multi-tab sync, AI token streaming — you need a persistent connection. ZealPHP has WebSocket (<code>App::ws()</code>) and Server-Sent Events (<code>$response->sse()</code>) for those cases. You\'ll use both in Lessons 19 (Real-Time Sync) and 20 (AI Chat).</p>',
     ]); ?>
 
+    <h2 id="fragments" style="margin-top:2rem">Template fragments — one file, two responses</h2>
+    <p>
+      The htmx pattern above has a tension: when a user clicks the
+      <strong>Add</strong> button, the server returns a single <code>&lt;li&gt;</code>
+      to insert into the list. But the <em>same</em> page on first load needs the
+      <strong>full</strong> list rendered as part of the HTML — same markup, same
+      template variables. Where does the <code>&lt;li&gt;</code> markup live?
+    </p>
+
+    <p>The naive answer is "two files":</p>
+
+    <?php App::render('/components/_code', [
+      'label' => 'The two-file approach — partials (works, but duplicated knowledge)',
+      'code'  => <<<'PHP'
+// template/contacts/list.php — full page
+<ul>
+<?php foreach ($contacts as $c): ?>
+  <?= App::renderToString('/partials/contact-row', ['c' => $c]) ?>
+<?php endforeach; ?>
+</ul>
+
+// template/partials/contact-row.php — the row in a separate file
+<li id="contact-<?= $c['id'] ?>">
+  <?= htmlspecialchars($c['name']) ?>
+</li>
+
+// Route handler — call render() OR include the partial directly:
+$app->route('/contacts',         fn() => App::render('contacts/list', ['contacts' => Contact::all()]));
+$app->route('/contacts/{id}/row', fn($id) => App::render('/partials/contact-row', ['c' => Contact::find($id)]));
+PHP,
+    ]); ?>
+
+    <p>
+      That works (and ZealPHP does it natively — <code>App::render()</code>,
+      <code>App::renderToString()</code>, <code>App::renderStream()</code>, and
+      <code>App::include()</code> all let one template call another;
+      see <a href="/learn/components">Layouts &amp; Components</a> for the full
+      family). But it forces the row markup to live in a separate file from the
+      list it's used in, and the route handler now has two near-identical entries
+      that drift apart over time.
+    </p>
+
+    <p>
+      <strong>Template fragments</strong> (since v0.2.24) collapse both into one
+      template + one route. Mark named regions inline with
+      <code>App::fragment($name, fn)</code>; the framework either runs the
+      region inline as part of the full page (no fragment selector) or extracts
+      <em>just that region</em> when the caller asks for it by name.
+    </p>
+
+    <?php App::render('/components/_code', [
+      'label' => 'template/contacts/list.php — single file, both responses',
+      'code'  => <<<'PHP'
+<ul id="contacts">
+<?php foreach ($contacts as $c): ?>
+  <?php App::fragment("contact-{$c['id']}", function() use ($c) { ?>
+    <li id="contact-<?= $c['id'] ?>" hx-target="this" hx-swap="outerHTML">
+      <span><?= htmlspecialchars($c['name']) ?></span>
+      <button hx-get="/contacts?fragment=contact-<?= $c['id'] ?>-edit">Edit</button>
+    </li>
+  <?php }); ?>
+  <?php App::fragment("contact-{$c['id']}-edit", function() use ($c) { ?>
+    <li id="contact-<?= $c['id'] ?>" hx-target="this" hx-swap="outerHTML">
+      <form hx-post="/contacts/<?= $c['id'] ?>" hx-swap="outerHTML">
+        <input name="name" value="<?= htmlspecialchars($c['name']) ?>">
+        <button>Save</button>
+      </form>
+    </li>
+  <?php }); ?>
+<?php endforeach; ?>
+</ul>
+PHP,
+    ]); ?>
+
+    <?php App::render('/components/_code', [
+      'label' => 'route handler — ONE entry, both modes',
+      'code'  => <<<'PHP'
+$app->route('/contacts', function($g) {
+    return App::render('contacts/list', [
+        'contacts' => Contact::all(),
+        // No fragment → full page renders normally.
+        // ?fragment=contact-2 → only that row's <li> comes back, no <ul>, no siblings.
+        'fragment' => is_string($g->get['fragment'] ?? null) ? $g->get['fragment'] : null,
+    ]);
+});
+PHP,
+    ]); ?>
+
+    <h3 style="margin-top:1.25rem">Fragments ride the universal return contract</h3>
+    <p>
+      Inside the closure passed to <code>App::fragment()</code> you can return
+      anything a route handler can — the framework propagates it through the
+      same <a href="/responses#return-contract">universal return contract</a>
+      that every other entry point uses (route handler, public file, API
+      closure, <code>App::include()</code>).
+    </p>
+
+    <?php App::render('/components/_code', [
+      'label' => 'Fragment closures return shapes — same as route handlers',
+      'code'  => <<<'PHP'
+<?php App::fragment('contact-row', function() use ($contact, $request, $g) {
+    // Auth check — return HTTP status int and the framework emits 403:
+    if (!$g->session['user'] || !canSee($g->session['user'], $contact)) {
+        return 403;
+    }
+
+    // Accept: application/json — return array, framework emits JSON:
+    if (str_contains($request->header['accept'] ?? '', 'application/json')) {
+        return ['id' => $contact->id, 'name' => $contact->name];
+    }
+
+    // Otherwise stream HTML chunks via a Generator:
+    return (function() use ($contact) {
+        yield "<li id='contact-{$contact->id}'>";
+        yield htmlspecialchars($contact->name);
+        yield '</li>';
+    })();
+}); ?>
+PHP,
+    ]); ?>
+
+    <p>
+      Three other behaviours worth knowing:
+    </p>
+    <ul style="margin:.5rem 0;line-height:1.7">
+      <li>
+        <strong>Missing fragment → 404.</strong> Asking for
+        <code>?fragment=does-not-exist</code> when no
+        <code>App::fragment('does-not-exist', …)</code> block matched returns
+        HTTP 404. Doesn't accidentally fall through to the full page.
+      </li>
+      <li>
+        <strong>First match wins.</strong> If the same fragment name appears
+        twice in a template, the first block is extracted; the rest of the
+        template short-circuits via <code>HaltException</code>.
+      </li>
+      <li>
+        <strong>Nested renders compose cleanly.</strong> An <code>App::render()</code>
+        called from inside a fragment closure does <em>not</em> inherit the parent's
+        fragment selector — each render's scope is saved and restored.
+      </li>
+    </ul>
+
+    <h3 style="margin-top:1.25rem">Try it live</h3>
+    <p>
+      A four-contact list rendered through one template. Each row's "Show
+      details" button does <code>hx-get="/demo/fragments/contacts?fragment=contact-{id}"</code> —
+      same URL as the page, just one named fragment swapped in place. View source
+      after a swap and you'll see only the <code>&lt;li&gt;</code> came back, not the surrounding
+      <code>&lt;html&gt;</code> shell.
+    </p>
+
+    <?php App::render('/components/_tryit', [
+      'title' => 'Open the contacts demo',
+      'body'  => '<p style="margin:.25rem 0">'
+              .  '<a href="/demo/fragments/contacts" target="_blank" rel="noopener" class="tryit-link" style="color:#fbbf24">/demo/fragments/contacts</a>'
+              .  ' — full page, then click any row.</p>'
+              .  '<p style="margin:.25rem 0;font-size:.85rem;color:#9ca3af">'
+              .  'Open DevTools → Network → XHR to see each swap is a single 200 response with just one <code>&lt;li&gt;</code> as the body. '
+              .  'And <a href="/demo/fragments/contacts?fragment=does-not-exist" target="_blank" rel="noopener" style="color:#fbbf24">/demo/fragments/contacts?fragment=does-not-exist</a> returns HTTP 404 — the framework refuses to fall back to the full page when the named fragment doesn\'t exist.</p>',
+    ]); ?>
+
     <?php App::render('/components/_keytakeaways', ['items' => [
       'htmx turns any HTML element into an AJAX trigger with just HTML attributes',
       'The server returns HTML fragments, not JSON — no client-side rendering needed',

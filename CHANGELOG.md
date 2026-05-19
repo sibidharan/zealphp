@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.24] - 2026-05-19
+
+Two features land together: a real session-cookie bug fix for OAuth/redirect flows ([PR #12](https://github.com/sibidharan/zealphp/pull/12)) and the new template-fragment helper for htmx-style single-file partial rendering.
+
+### Added
+
+- **`App::fragment(string $name, callable $fn): void`** — the [htmx-essay template-fragment pattern](https://htmx.org/essays/template-fragments/) without separate partial files. Mark named regions inline inside any template; the same `App::render('page', $args)` call serves the full page (no fragment selector → every `App::fragment()` runs inline), or returns just one region's HTML when called with `['fragment' => 'name']` (matched region's buffer is cleared, only that closure runs, the rest of the template short-circuits via `HaltException`). Missing fragment → HTTP 404 per the universal return contract. The fragment closure rides the full universal return contract — `return 404;` / `return ['k'=>'v'];` / `return (fn(){ yield ...; })();` all propagate exactly like in a route handler. Lives next to `App::render() / renderToString() / renderStream() / include()` as the fifth member of the file-execution family. See [/learn/htmx#fragments](https://php.zeal.ninja/learn/htmx#fragments) for the lesson, [/demo/fragments/contacts](https://php.zeal.ninja/demo/fragments/contacts) for the live demo.
+- New tests: `tests/Unit/FragmentTest.php` (12 tests) pinning full-page rendering, fragment extraction, return-shape propagation (int / array / Generator / string / echo-only), 404-on-missing, nested-render scope isolation, special characters in fragment names, and first-match-wins semantics on repeated names.
+
+### Fixed
+
+- **`session_start()` now auto-emits `Set-Cookie` on first-time visitors** ([PR #12](https://github.com/sibidharan/zealphp/pull/12)). Previously a handler that did `session_start();` + `$_SESSION['x'] = ...;` + `header('Location: …');` on a request with no incoming `PHPSESSID` would 302-redirect *without* a `Set-Cookie` header — the next request started a fresh session and the just-stored data was lost. Broke OAuth flows (state token gone on callback) and any pre-auth redirect pattern. The auto-emit is idempotent (only fires when no inbound `PHPSESSID`), respects `session.use_cookies = 0`, and skips if the response is already flushed. Regression test pinned in `tests/Integration/HttpFeaturesTest::testSessionCookieEmittedOnRedirect`.
+- **`HaltException` no longer discards buffered output** when the caller didn't set a fragment result. The PR #10 path was supposed to preserve `echo "html"; throw new HaltException;` as the response body, but the buffered output was dropped at the `return $result` (null) fall-through. Now treated identically to PHP's `include`-returned-1 case → buffered echo becomes the body. Surfaced by FragmentTest; fix wired into `executeFile()`'s HaltException catch.
+
+### Changed
+
+- `template/pages/learn/htmx.php` extended with a new "Template fragments — one file, two responses" section covering the partial-vs-fragment trade-off, the universal-return-contract integration, and a live demo link.
+- `template/pages/learn/sessions.php` extended with a "First-visit cookie: redirects work after session_start() too" section documenting PR #12's behaviour with the OAuth-handoff example.
+
+### Backwards compatibility
+
+- 100% — existing apps that don't call `App::fragment()` see no behaviour change. The HaltException-buffer-preservation fix only affects code that already throws HaltException; that path was strictly broken before and now works as documented.
+
+PHPStan level 10 clean. 362 unit + 147 integration tests pass (+12 new FragmentTest cases + 1 regression test for PR #12, 6 cleanly skipped for ext-redis absence).
+
 ## [0.2.23] - 2026-05-17
 
 Decouples the four lifecycle decisions that `App::superglobals()` used to bundle into one call. Each is now its own fluent setter, and they default to `null` which resolves to "follow `App::$superglobals`" — so apps that don't touch the new knobs see no behaviour change. Enables the **Mixed-mode / Symfony lifecycle** (`superglobals(true) + processIsolation(false)`): real `$_SESSION` semantics for Symfony's `NativeSessionStorage`, but without the ~30-50 ms `proc_open` + PHP startup + autoloader cost of forking a CGI subprocess on every `App::include()` call.
