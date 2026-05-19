@@ -1,32 +1,23 @@
 <?php
 /**
- * $g compat shim — runs on Apache (mod_php) AND ZealPHP unchanged.
+ * $g compat shim for this scaffold.
  *
- * Drop this file into your project and `require_once` it at the top of every
- * public/*.php. After that, use `$g->get`, `$g->post`, `$g->session`, etc. —
- * never `$_GET`, `$_POST`, `$_SESSION` directly. Your code now works on both
- * servers from a single source tree.
+ * This is a copy of ZealPHP's canonical dual-runtime shim, which lives at
+ * `compat/g.php` in the framework package. The canonical file carries the
+ * full explanation of why the shim can't be a framework feature and how the
+ * two runtimes resolve `$g`. See:
  *
- * What this file does:
+ *   - vendor/sibidharan/zealphp/compat/g.php   (the canonical source)
+ *   - https://php.zeal.ninja/legacy-apps#dual-runtime
  *
- *   - On ZealPHP: returns `\ZealPHP\RequestContext::instance()`, which the
- *     framework populates per request from the OpenSwoole HTTP request.
- *     `$g->get` is a DECLARED property — `$_GET` is never involved.
+ * Apps that have ZealPHP in vendor/ on both their Apache and ZealPHP
+ * deployments can `require_once` the canonical copy directly instead of
+ * keeping their own:
  *
- *   - On Apache (no ZealPHP loaded): creates a plain object with REFERENCES
- *     to PHP's real superglobals (`&$_GET`, `&$_SESSION`, etc.). Reads and
- *     writes still go through the live PHP arrays — same semantics as Apache
- *     code that uses `$_GET` directly.
+ *   require_once __DIR__ . '/../vendor/sibidharan/zealphp/compat/g.php';
  *
- * Why references and not copies: legacy code often mutates `$_SESSION` after
- * `session_start()` (e.g., `$_SESSION['user'] = ...`). The reference makes
- * that mutation visible through `$g->session` too.
- *
- * Why this can't ship as part of the framework: on Apache there IS no ZealPHP
- * — vendor/ doesn't get autoloaded by mod_php. The shim has to be a single
- * standalone file the app can include unconditionally.
- *
- * This file has no dependencies. Copy it, version it with your app.
+ * This scaffold keeps a local copy so it works standalone (before
+ * `composer install`).
  */
 
 if (!isset($GLOBALS['g'])) {

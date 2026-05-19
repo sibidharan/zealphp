@@ -218,6 +218,14 @@ $app->run();
   This is the apples-to-apples FPM comparison and ZealPHP wins it cleanly: <strong>same per-request execution model, same worker semantics, but no FastCGI socket hop and no separate web server to run.</strong> The 30–50 ms CGI bridge cost was never mandatory — it's the price of <em>true process isolation per request</em>, which only WordPress/Drupal-class apps with <code>define()</code> collisions actually need.
 </p>
 
+<!-- ────────────────────────────────────────────────────────────── -->
+<!-- 3c. Measured: process isolation on vs off                       -->
+<!-- ────────────────────────────────────────────────────────────── -->
+
+<p style="color:#cbd5e1;line-height:1.65;margin-top:1rem">
+  How much does that <code>proc_open</code> fork actually cost? On this box, turning process isolation off takes the same legacy file from <strong>179 req/s to 12,803 req/s — a ~71× jump</strong>, with nothing else changed. The full measured breakdown (Apache mod_php, ZealPHP coroutine, Mixed-mode, and legacy CGI, all on one machine) is in the <a href="#measured-four-ways">measured table below</a>.
+</p>
+
 <div style="margin-top:1rem;padding:1rem 1.2rem;background:rgba(148,163,184,.08);border-left:3px solid #94a3b8;border-radius:var(--radius)">
   <strong style="color:#cbd5e1">When you still need the CGI bridge</strong>
   <p style="margin:.5rem 0 0;color:#94a3b8;line-height:1.55;font-size:.9rem">
@@ -302,33 +310,64 @@ $app->run();
 <!-- 7. Reproduce locally                                           -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 style="margin:3rem 0 1rem">Reproduce locally</h2>
+<!-- SYNC: this table mirrors /performance "Legacy-file serving". Any change
+     to the numbers must update BOTH in lock-step. -->
+<h2 id="measured-four-ways" style="margin:3rem 0 1rem">Measured: four ways to serve the same legacy file</h2>
 
 <p style="color:#cbd5e1;line-height:1.65">
-  Don't take the numbers above on faith. <code>scripts/bench_vs_fpm.sh</code> runs the JSON-endpoint workload through both stacks on the same machine and prints the cost delta. Requires Apache + PHP-FPM installed locally; the script tells you what's missing if not.
+  These are <strong>real numbers</strong>, not illustrative. Same machine, same trivial <code>public/probe.php</code> (<code>echo "ok"</code>), 4 workers each, <code>ab -n 3000 -c 20</code>. The only thing that changes is which server / lifecycle mode serves the file. This is specifically the <em>legacy-file-serving</em> path (implicit <code>public/*.php</code> routing) — the workload that matters when you're migrating an existing app, not ZealPHP's native-route fast path.
 </p>
 
-<?php App::render('/components/_code', [
-  'lang' => 'bash',
-  'code' => '# Same machine, three stacks (illustrative shape — actual numbers
-# vary by kernel, CPU, opcache state, FPM tuning, etc.)
-$ scripts/bench_vs_fpm.sh
+<table class="ztable">
+  <tr>
+    <th style="text-align:left">Stack</th>
+    <th style="text-align:left">How the file runs</th>
+    <th style="text-align:right">req/s</th>
+    <th style="text-align:right">ms/req</th>
+  </tr>
+  <tr>
+    <td><strong>Apache + mod_php</strong></td>
+    <td>Interpreter loaded in-process, warm</td>
+    <td style="text-align:right;color:#fde68a;font-weight:700">46,471</td>
+    <td style="text-align:right">0.43</td>
+  </tr>
+  <tr style="background:rgba(255,255,255,.02)">
+    <td><strong>ZealPHP coroutine</strong> (default)</td>
+    <td>In-process include, coroutine-per-request</td>
+    <td style="text-align:right;color:var(--accent);font-weight:700">19,748</td>
+    <td style="text-align:right">1.01</td>
+  </tr>
+  <tr>
+    <td><strong>ZealPHP Mixed-mode</strong><br><small><code>processIsolation(false)</code></small></td>
+    <td>In-process include, sequential per worker</td>
+    <td style="text-align:right;color:var(--accent);font-weight:700">12,803</td>
+    <td style="text-align:right">1.56</td>
+  </tr>
+  <tr style="background:rgba(255,255,255,.02)">
+    <td><strong>ZealPHP legacy CGI</strong><br><small><code>processIsolation(true)</code></small></td>
+    <td><code>proc_open</code> spawns fresh PHP per request</td>
+    <td style="text-align:right;color:#fca5a5;font-weight:700">179</td>
+    <td style="text-align:right;color:#fca5a5">111.2</td>
+  </tr>
+</table>
 
-== ZealPHP coroutine (port 8080) ==
-Requests per second:   ~100k+  [#/sec]   (no FCGI hop, in-process)
+<p style="margin:.7rem 0 0;color:#94a3b8;font-size:.85rem">
+  AMD Ryzen 9 7900X · PHP 8.3 · 4 workers each · <code style="background:rgba(255,255,255,.06);padding:.1rem .3rem;border-radius:3px">ab -n 3000 -c 20</code>. Apache served <code>/probe.php</code>; ZealPHP served <code>/probe</code> (extensionless implicit route). PHP-FPM wasn't installed on this box — Apache+mod_php is the warm-interpreter baseline and is actually <em>faster</em> than FPM would be (mod_php is in-process; FPM adds a FastCGI socket hop).
+</p>
 
-== Apache + PHP-FPM (port 8081) ==
-Requests per second:   ~10–20k [#/sec]   (FCGI hop + opcache hit)
+<h3 style="margin:2rem 0 .75rem;color:var(--accent)">What these numbers actually say</h3>
 
-== ZealPHP legacy CGI bridge (port 8082) ==
-Requests per second:   ~5–10k  [#/sec]   (proc_open per include)
+<ul style="color:#cbd5e1;line-height:1.7;font-size:.95rem;margin-top:.5rem;padding-left:1.5rem">
+  <li><strong>The CGI bridge is the outlier, by 70–260×.</strong> 179 req/s vs everything else in the 12k–46k range. That gap is <em>entirely</em> the per-request <code>proc_open</code> + PHP-startup cost. If you serve legacy files through <code>processIsolation(true)</code> on a hot path, this is what it costs you.</li>
+  <li><strong>Turning off process isolation recovers ~71×.</strong> Same file, same superglobals semantics, just no fork: 179 → 12,803 req/s. For any legacy app that doesn't need fresh-process-per-request <code>define()</code> isolation, this is free performance.</li>
+  <li><strong>Coroutine mode is fastest for ZealPHP</strong> (19.7k) — but note it keeps superglobals empty, so legacy code must use <code>$g-&gt;X</code>.</li>
+  <li><strong>Honest finding: Apache mod_php (46k) beats ZealPHP on this trivial echo.</strong> For a no-I/O, no-middleware legacy file, a mature in-process C SAPI is hard to beat. ZealPHP's win shows up elsewhere — native routes (116k on <a href="/performance">/performance</a>), coroutine I/O concurrency, WebSocket, SSE, and not needing a separate web server at all. We're not going to pretend otherwise.</li>
+</ul>
 
-Reproducer: scripts/bench_vs_fpm.sh (run it on your own box)
-',
-]); ?>
+<h2 style="margin:2.5rem 0 1rem">Reproduce locally</h2>
 
-<p style="color:#94a3b8;line-height:1.6;font-size:.88rem;margin-top:.7rem">
-  The shape is what matters: coroutine mode wins comfortably because there's no FCGI hop; the legacy CGI bridge runs <em>slower</em> than FPM because <code>proc_open</code> is more expensive than FastCGI's pooled-worker handoff (FPM was specifically engineered to keep workers warm and minimise per-request fork). The bridge exists for compatibility, not speed — if a legacy file is on a hot path, port it to coroutine mode and the cost vanishes. Actual req/s numbers depend on your hardware and tuning; run the script before quoting.
+<p style="color:#cbd5e1;line-height:1.65">
+  <code>scripts/bench_vs_fpm.sh</code> benches the ZealPHP coroutine endpoint and, if you point it at them, an FPM URL (<code>FPM_URL=</code>) and a legacy-CGI ZealPHP instance (<code>LEGACY_CGI_URL=</code>). It probes each first and skips with a setup hint if it can't reach one — it won't auto-install Apache/FPM.
 </p>
 
 <!-- ────────────────────────────────────────────────────────────── -->

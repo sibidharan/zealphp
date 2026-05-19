@@ -135,6 +135,11 @@ PHP,
 </ol>
 <p>The <code>$g</code> pattern let us migrate file by file over 35 commits instead of needing a single big-bang rewrite.</p>
 
+<div style="margin:1.25rem 0;padding:1rem 1.25rem;background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.25);border-left:3px solid #f59e0b;border-radius:8px">
+  <strong style="color:#fde68a">This bridge is now a first-class ZealPHP pattern.</strong>
+  <p style="margin:.5rem 0 0;line-height:1.6">What started as our <code>load.php</code> hack is now shipped and documented in the framework as the canonical <strong>dual-runtime Apache-parity bridge</strong> — a standalone, dependency-free <code>compat/g.php</code> (with a drift-guard test) that any project running on both Apache and ZealPHP can drop in. It's not a workaround for a limitation; it's the only design that <em>can</em> work across the "with ZealPHP / without ZealPHP" boundary, because on Apache the framework simply isn't loaded. See <a href="/legacy-apps#dual-runtime">the dual-runtime guide</a> for the full pattern and why it can't be a runtime feature. (Note: this is the <strong>coroutine-mode</strong> story — distinct from v0.2.27's <a href="/vs-fpm">superglobals(true) drop-in LAMP mode</a>, where ZealPHP-only apps can read <code>$_GET</code>/<code>$_SESSION</code> directly and skip the shim.)</p>
+</div>
+
 <h2 id="phase-3-die" style="margin:2rem 0 .75rem">Phase 3: Killing <code>die()</code> and <code>exit()</code></h2>
 <p>This one surprised us. The codebase had <code>die()</code> and <code>exit()</code> calls scattered across error paths, validation failures, and early returns:</p>
 <?php App::render('/components/_code', [

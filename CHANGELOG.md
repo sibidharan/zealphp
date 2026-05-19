@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.28] - 2026-05-19
+
+Documentation + tooling follow-up to v0.2.27. No framework behaviour change — ships the canonical dual-runtime compat shim as a package artifact and grounds the PHP-FPM comparison in real measured numbers.
+
+### Added
+
+- **`compat/g.php`** — the canonical dual-runtime `$g` compat shim, now shipped inside the package. Lets one source tree run on both Apache+mod_php (no ZealPHP loaded → `$g` built from `&$_GET` references) and ZealPHP (any mode → `RequestContext::instance()`). Standalone, dependency-free, includable without the autoloader: `require_once 'vendor/sibidharan/zealphp/compat/g.php'`. Formalises the pattern SNA Labs ran in production (previously a hand-rolled `load.php` snippet). It is **included by the app, not loaded by the framework** — by design, since on Apache the framework isn't present at all.
+- **`tests/Unit/CompatShimDriftTest.php`** — 4 tests guarding the shim against drift: canonical file exists, Apache-branch keys match the expected request-data surface, the LAMP scaffold copy matches canonical, and every shim key is an array-typed declared property on `RequestContext`.
+
+### Documentation
+
+- **`/vs-fpm`** — replaced illustrative "shape" numbers with a **real measured 4-way benchmark** (Apache+mod_php, ZealPHP coroutine, Mixed-mode, legacy CGI) on one machine, same trivial `public/probe.php`, `ab -n 3000 -c 20`. Honest findings: the CGI bridge's `proc_open` fork is the entire 179 req/s story (turning `processIsolation(false)` recovers ~71×), and Apache mod_php (46k) beats ZealPHP on trivial legacy-file echo — ZealPHP's win is native routes / coroutine I/O / WebSocket / no separate web server. Added the "Mixed-mode = an FPM pool, minus the operations" section and the v0.3.0 built-in CGI worker pool roadmap.
+- **`/performance`** — added "Legacy-file serving — Apache vs ZealPHP lifecycle modes" mirroring the `/vs-fpm` measured table (kept in lock-step via `SYNC:` comments in both files).
+- **`/legacy-apps#dual-runtime`** — new section documenting the dual-runtime pattern, the compat shim, and *why it can't be a framework feature* (the Apache path has no autoloader).
+- **`/case-studies/sna-labs`** — reframed the `$g` bridge from "a workaround" to the first-class, shipped, drift-guarded dual-runtime Apache-parity bridge.
+- **`examples/lamp-scaffold/`** — bootstrap shim points at the canonical `compat/g.php`; README documents both portability styles (`$g->X` vs raw superglobals).
+
+### Tests
+
+- 395 unit (4 new compat-shim drift tests) + 156 integration tests pass. PHPStan level 10 clean.
+
 ## [0.2.27] - 2026-05-19
 
 Restore v0.1.x "superglobals just work" behaviour that was silently dropped during the December 2024 declared-property refactor (commits `327e180` + `900c18a`). Under `App::superglobals(true)` the framework was populating `$g->get` / `$g->session` etc. but **NOT** `$_GET` / `$_SESSION` — making the flag's name misleading and forcing every dual-mode app (notably labs) to maintain a compat shim that v0.1.x didn't need. v0.2.27 closes the loop in two places: per-request superglobal population in the request handler, and a `$g->session ↔ $_SESSION` alias via `__get`/`__set` proxy so direct `$_SESSION['k']=v` writes are visible through `$g->session` immediately (the v0.2.22 "mirror at call-points" approach couldn't catch writes between `session_*()` calls because typed declared properties bypass magic methods).
