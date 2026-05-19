@@ -121,6 +121,26 @@ class App
      */
     public static bool $session_lifecycle = true;
     /**
+     * Auth-hook callbacks consulted by `ZealAPI::isAuthenticated()`,
+     * `::isAdmin()`, and `::getUsername()` so the framework's built-in
+     * file-based API layer can delegate auth questions to whatever auth
+     * system the app uses (Symfony Security, Auth0, the SelfMadeNinja stack,
+     * a custom `$_SESSION['user']` check, etc.) without subclassing or
+     * monkey-patching ZealAPI itself.
+     *
+     * Set via the fluent setters `App::authChecker()`, `App::adminChecker()`,
+     * `App::usernameProvider()`. Defaults: null → ZealAPI returns the safe
+     * fail-closed values (`false`, `false`, `null`). See the issue #13
+     * discussion and `/learn/api` for usage.
+     *
+     * @var callable|null
+     */
+    public static $auth_checker = null;
+    /** @var callable|null */
+    public static $admin_checker = null;
+    /** @var callable|null */
+    public static $username_provider = null;
+    /**
      * Apache `RewriteCond %{REQUEST_FILENAME} !-d` + `RewriteRule ^(.+)/$ /$1 [R=301,L]`.
      * When true, non-directory URIs ending in `/` are 301-redirected to the no-slash
      * form. Inverse of `$directory_slash`. Default false (keeps current behaviour).
@@ -609,6 +629,57 @@ class App
     {
         if ($enabled !== null) self::$session_lifecycle = $enabled;
         return self::$session_lifecycle;
+    }
+
+    /**
+     * Register a callback that `ZealAPI::isAuthenticated()` consults.
+     * Signature: `fn(): bool`. The callback decides whether the current
+     * request is authenticated — typically by reading `$_SESSION`,
+     * `$g->session`, or your own auth state.
+     *
+     * Without this hook, `ZealAPI::isAuthenticated()` returns `false`
+     * (fail-closed default), so any API endpoint guarded by
+     * `requirePostAuth()` rejects every request. Fixes the gap surfaced
+     * in [issue #13](https://github.com/sibidharan/zealphp/issues/13).
+     *
+     * Pass `null` (or omit the argument and rely on the existing value)
+     * to read the current checker. Pass a callable to install one.
+     *
+     * Example:
+     *   App::authChecker(fn() => !empty($_SESSION['user_id']));
+     *   App::authChecker(fn() => MyAuth::status() === MyAuth::LOGGED_IN);
+     *
+     * @param callable|null $fn
+     */
+    public static function authChecker(?callable $fn = null): ?callable
+    {
+        if (func_num_args() > 0) self::$auth_checker = $fn;
+        return self::$auth_checker;
+    }
+
+    /**
+     * Register a callback that `ZealAPI::isAdmin()` consults.
+     * Same shape as `authChecker()` — `fn(): bool`, default null.
+     *
+     * @param callable|null $fn
+     */
+    public static function adminChecker(?callable $fn = null): ?callable
+    {
+        if (func_num_args() > 0) self::$admin_checker = $fn;
+        return self::$admin_checker;
+    }
+
+    /**
+     * Register a callback that `ZealAPI::getUsername()` consults.
+     * Signature: `fn(): ?string`. Default null → `getUsername()` returns
+     * null.
+     *
+     * @param callable|null $fn
+     */
+    public static function usernameProvider(?callable $fn = null): ?callable
+    {
+        if (func_num_args() > 0) self::$username_provider = $fn;
+        return self::$username_provider;
     }
 
     /**

@@ -236,12 +236,20 @@ class ZealAPI extends REST
     }
 
     /**
-     * Override in your application's API base class to provide auth checking.
-     * Default returns false (no session integration).
+     * Whether the current request is authenticated.
+     *
+     * Consults the callback registered with `App::authChecker()`. Without
+     * one, returns `false` (safe fail-closed default). The callback shape is
+     * `fn(): bool` — typically reads `$_SESSION`, `$g->session`, or your
+     * auth system's own state.
+     *
+     * See issue #13. Earlier versions hardcoded `return false;`, breaking
+     * every endpoint guarded by `requirePostAuth()`.
      */
     public function isAuthenticated(): bool
     {
-        return false;
+        $checker = App::authChecker();
+        return $checker !== null ? (bool) $checker() : false;
     }
 
     /**
@@ -263,19 +271,29 @@ class ZealAPI extends REST
     }
 
     /**
-     * Override in your application's API base class.
+     * Whether the current user is an admin. Consults the callback
+     * registered with `App::adminChecker()` — `fn(): bool` — or returns
+     * `false` if none. See `isAuthenticated()` for the design.
      */
     public function isAdmin(): bool
     {
-        return false;
+        $checker = App::adminChecker();
+        return $checker !== null ? (bool) $checker() : false;
     }
 
     /**
-     * Override in your application's API base class.
+     * The current user's display name (or null when unauthenticated).
+     * Consults the callback registered with `App::usernameProvider()` —
+     * `fn(): ?string` — or returns `null` if none.
      */
     public function getUsername(): ?string
     {
-        return null;
+        $provider = App::usernameProvider();
+        if ($provider === null) {
+            return null;
+        }
+        $name = $provider();
+        return is_string($name) ? $name : null;
     }
 
     /**
