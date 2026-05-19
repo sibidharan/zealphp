@@ -241,7 +241,7 @@ $app->run();
 <div style="margin-top:1rem;padding:1rem 1.2rem;background:rgba(148,163,184,.08);border-left:3px solid #94a3b8;border-radius:var(--radius)">
   <strong style="color:#cbd5e1">When you still need the CGI bridge</strong>
   <p style="margin:.5rem 0 0;color:#94a3b8;line-height:1.55;font-size:.9rem">
-    Mixed-mode reuses the worker's PHP heap across requests, so <code>define()</code>, declared classes, and <code>ini_set()</code> changes from request N persist into request N+1 on the same worker. For unmodified WordPress / Drupal that re-<code>define()</code> constants every request, you need <code>processIsolation(true)</code> (the CGI bridge) so each request gets a clean interpreter — OR lean on OpenSwoole <code>max_request</code> recycling + <a href="/middleware">IniIsolationMiddleware</a>. SNA Labs runs Mixed-mode in production with worker recycling; see the <a href="/case-studies/sna-labs#phase-2-superglobals">case study</a>.
+    Mixed-mode reuses the worker's PHP heap across requests, so <code>define()</code>, declared classes, and <code>ini_set()</code> changes from request N persist into request N+1 on the same worker. For unmodified WordPress / Drupal that re-<code>define()</code> constants every request, you need <code>processIsolation(true)</code> (the CGI bridge) so each request gets a clean interpreter — OR lean on OpenSwoole <code>max_request</code> recycling + <a href="/middleware">IniIsolationMiddleware</a>. (SNA Labs took a different route — full coroutine mode on dev with an async Rust MongoDB driver; see the <a href="/case-studies/sna-labs">case study</a>.)
   </p>
 </div>
 

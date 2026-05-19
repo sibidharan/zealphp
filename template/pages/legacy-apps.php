@@ -152,7 +152,7 @@ PHP]); ?>
 
 <h2 id="dual-runtime" style="margin-top:2.5rem">Dual-runtime — one codebase, Apache AND ZealPHP at once</h2>
 
-<p>The strongest migration story isn't "rewrite for ZealPHP." It's "run the <em>same source tree</em> on both servers simultaneously" — Apache+mod_php for the battle-tested path, ZealPHP for speed and coroutines — and cut over gradually with zero risk. This is exactly how <a href="/case-studies/sna-labs">Selfmade Ninja Labs migrated in production</a>: one volume, two servers, same files.</p>
+<p>The strongest migration story isn't "rewrite for ZealPHP." It's "run the <em>same source tree</em> on both servers simultaneously" — Apache+mod_php for the battle-tested path, ZealPHP for speed and coroutines — and cut over gradually with zero risk. This is exactly how <a href="/case-studies/sna-labs">Selfmade Ninja Labs migrated</a>: one volume, two servers, same files (running on dev today, production cutover next).</p>
 
 <p>The mechanism is a tiny <strong>compat shim</strong> that gives application code a single accessor — <code>$g-&gt;get</code>, <code>$g-&gt;session</code>, etc. — that resolves correctly in whichever runtime is loading the file:</p>
 

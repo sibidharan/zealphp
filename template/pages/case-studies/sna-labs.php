@@ -32,7 +32,7 @@
 <p>But migration from a superglobal-based, process-per-request PHP codebase to a shared-process async runtime is not trivial. It is, in fact, one of the hardest migrations in the PHP world.</p>
 
 <h2 style="margin:2rem 0 .75rem">The architecture: one container, two servers, same volume</h2>
-<p>Here's what we ended up with:</p>
+<p>Here's what we ended up with <strong>in development</strong> (not yet cut over to production):</p>
 
 <?php App::render('/components/_code', [
   'label' => 'Architecture diagram',
@@ -47,7 +47,6 @@
     ┌───────────────┼───────────────┐
     │                               │
 labsdev.selfmade.ninja          zealphp.selfmade.ninja
-labs.selfmade.ninja              php.zeal.ninja
     │                               │
     ▼                               ▼
 Apache :80                     ZealPHP :8080
@@ -422,13 +421,13 @@ PHP,
   <tr><td><a href="https://labsdev.selfmade.ninja">labsdev.selfmade.ninja</a></td><td>Apache :80</td><td><code>Server: Apache/2.4.63</code></td></tr>
   <tr><td><a href="https://zealphp.selfmade.ninja">zealphp.selfmade.ninja</a></td><td>ZealPHP :8080</td><td><code>X-Powered-By: ZealPHP + OpenSwoole</code></td></tr>
 </table>
-<p>And in production (106.51.76.75), the same migration has been deployed:</p>
+<p>Production (<code>labs.selfmade.ninja</code> at 106.51.76.75) still runs <strong>Apache only</strong> — ZealPHP hasn't been deployed there yet. That's the next step:</p>
 <table class="ztable" style="margin-bottom:1.25rem">
   <tr><th>URL</th><th>Server</th><th>Header</th></tr>
   <tr><td><a href="https://labs.selfmade.ninja">labs.selfmade.ninja</a></td><td>Apache :80</td><td><code>Server: Apache/2.4.58</code></td></tr>
-  <tr><td><a href="https://php.zeal.ninja">php.zeal.ninja</a></td><td>ZealPHP :8080</td><td><code>X-Powered-By: ZealPHP + OpenSwoole</code></td></tr>
 </table>
-<p>The same PHP files. The same MongoDB. The same Redis sessions. Two completely different PHP execution models. Running in the same container — on both dev and production.</p>
+<p style="color:var(--text-muted);font-size:.9rem"><strong>Note:</strong> <a href="https://php.zeal.ninja">php.zeal.ninja</a> is a <em>separate</em> project — the ZealPHP portfolio/demo site, not the Labs dashboard. It was born from the same framework but is its own application.</p>
+<p>The same PHP files. The same MongoDB. The same Redis sessions. Two completely different PHP execution models. Running in the same container <strong>on dev</strong>, with production deployment coming next.</p>
 
 <h2 style="margin:2rem 0 .75rem">Key takeaways</h2>
 <ol style="margin:.5rem 0 1.25rem;padding-left:1.4rem;line-height:1.85">
@@ -441,7 +440,7 @@ PHP,
 
 <h2 style="margin:2rem 0 .75rem">What's next</h2>
 <p>The <code>$g</code> bridge and <code>SSEStream</code> will eventually be retired. Each SSE endpoint can become a clean ZealPHP route with native <code>$response->sse()</code>. Each page handler can take <code>$request</code> and <code>$response</code> as parameters instead of reaching into <code>$g</code>.</p>
-<p>But that's optimization, not migration. The migration is done. The old code works. The new server works. Both serve the same files, and both are live in production.</p>
+<p>But that's optimization, not migration. The migration is done <strong>on dev</strong> — the old code works, the new server works, both serve the same files. Production deployment is the next milestone.</p>
 <p style="font-style:italic;color:var(--text-muted);margin-top:1rem">Sometimes the best migration is the one where you don't have to choose.</p>
 
 <hr style="margin:2.5rem 0 1.25rem;border:0;border-top:1px solid var(--border)">
