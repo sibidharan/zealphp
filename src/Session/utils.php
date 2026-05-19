@@ -7,19 +7,33 @@ use ZealPHP\RequestContext;
  * Decode PHP 'php' session serialize format (key|serialized_value;key|...).
  * Falls back to unserialize() for php_serialize handler format.
  *
- * SECURITY: both unserialize() calls pass allowed_classes => false to keep
- * the object-injection hardening that commit c43da63 introduced. Sessions
- * are user-controlled storage (tampered cookie, compromised Redis); allowing
+ * SECURITY: every `unserialize()` call in this file is narrowly scoped to
+ * an explicit class whitelist — currently `['stdClass']`. Sessions are
+ * user-controlled storage (tampered cookie, compromised Redis); allowing
  * arbitrary class instantiation here would let an attacker trigger
- * __wakeup() / __destruct() gadgets in any class in the autoload graph.
- * If a future caller genuinely needs to round-trip objects through sessions,
- * that's a separate feature with an explicit class whitelist, not a global flip.
+ * `__wakeup()` / `__destruct()` gadgets in any class on the autoload
+ * graph (the vulnerability commit c43da63 originally fixed by passing
+ * `allowed_classes => false`).
+ *
+ * Why `stdClass` is on the whitelist (added v0.2.26, issue #15):
+ *   - `stdClass` has zero methods — no `__wakeup`, no `__destruct`, no
+ *     `__get`/`__set`/`__call`. There is no gadget to chain.
+ *   - `json_decode($x)` (the default mode without the second arg) returns
+ *     a `stdClass` graph, and apps routinely stash that result in
+ *     `$_SESSION['oauth_token']`, `$_SESSION['api_profile']`, etc.
+ *     Refusing to round-trip it broke real apps in v0.2.25 (issue #15).
+ *
+ * Adding more classes to the whitelist requires a SECURITY review for
+ * each one: any magic method that runs on unserialize (`__wakeup`,
+ * `__unserialize`) or destruct (`__destruct`) can be turned into a
+ * gadget. `DateTime` for example has `__wakeup` and is therefore
+ * deliberately excluded.
  *
  * @return array<string, mixed>
  */
 function php_session_decode_to_array(string $data): array
 {
-    $decoded = @unserialize($data, ['allowed_classes' => false]);
+    $decoded = @unserialize($data, ['allowed_classes' => ['stdClass']]);
     if (is_array($decoded)) {
         /** @var array<string, mixed> $narrowed */
         $narrowed = [];
@@ -38,7 +52,7 @@ function php_session_decode_to_array(string $data): array
         if ($pipe === false) break;
         $key = substr($data, $offset, $pipe - $offset);
         $offset = $pipe + 1;
-        $value = @unserialize(substr($data, $offset), ['allowed_classes' => false]);
+        $value = @unserialize(substr($data, $offset), ['allowed_classes' => ['stdClass']]);
         if ($value === false && substr($data, $offset, 4) !== 'b:0;') {
             $next = strpos($data, ';', $offset);
             if ($next !== false) {
@@ -526,7 +540,7 @@ function zeal_session_abort(): bool
             $session_data = [];
             $contents = @file_get_contents($session_file);
             if (is_string($contents) && $contents !== '') {
-                $decoded = @unserialize($contents, ['allowed_classes' => false]);
+                $decoded = @unserialize($contents, ['allowed_classes' => ['stdClass']]);
                 if (is_array($decoded)) {
                     foreach ($decoded as $k => $v) {
                         if (is_string($k)) {
@@ -568,7 +582,7 @@ function zeal_session_decode(string $data): bool
     if ($data === '') {
         return false;
     }
-    $decoded = @unserialize($data, ['allowed_classes' => false]);
+    $decoded = @unserialize($data, ['allowed_classes' => ['stdClass']]);
     if (!is_array($decoded)) {
         return false;
     }

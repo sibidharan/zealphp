@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.26] - 2026-05-19
+
+Closes [issue #15](https://github.com/sibidharan/zealphp/issues/15): v0.2.25's blanket `allowed_classes => false` on session-unserialize converted any `stdClass` (the default `json_decode()` shape) into `__PHP_Incomplete_Class`, breaking real apps that stash OAuth token responses or API profile payloads in `$_SESSION`. The hardening was too tight.
+
+### Fixed
+
+- **Narrowly whitelist `stdClass` in all session `unserialize()` calls** in `src/Session/utils.php` — 4 sites (`php_session_decode_to_array()` array-format branch, `php_session_decode_to_array()` pipe-format branch, `zeal_session_abort()`, `zeal_session_decode()`). `['allowed_classes' => false]` → `['allowed_classes' => ['stdClass']]`. The c43da63 object-injection hardening is preserved for every other class — `stdClass` has zero methods (no `__wakeup`, no `__destruct`, no `__get`/`__set`/`__call`), so there is no gadget to chain. `DateTime` and other classes with magic methods on unserialize remain deliberately excluded; adding any class to the whitelist requires a per-class security review per the docblock at `php_session_decode_to_array()`.
+
+### Tests
+
+- Two new tests pin `stdClass` round-trips through both decoder branches (top-level `serialize()` form and pipe-format `key|value;` form): `testStdClassRoundTripsInPhpSerializeBranch`, `testStdClassRoundTripsInPhpHandlerBranch`.
+- Two existing tests rewritten to use a custom non-whitelisted fixture class (`PhpSessionDecodeTestNonWhitelistedFake`) and pin the security property as "no live instance of a non-whitelisted class": `testNonWhitelistedClassIsBlockedInPhpSerializeBranch`, `testNonWhitelistedClassIsBlockedInPhpHandlerBranch`.
+
+### Backwards compatibility
+
+- Apps that don't store objects in sessions: identical behaviour to v0.2.25.
+- Apps that stored `stdClass` (issue #15): now round-trip correctly (was broken in v0.2.25).
+- Apps that relied on `__PHP_Incomplete_Class` placeholders for non-`stdClass` objects: unchanged — those classes are still refused.
+
+PHPStan level 10 clean. 385 unit + 147 integration tests pass.
+
 ## [0.2.25] - 2026-05-19
 
 Closes [issue #13](https://github.com/sibidharan/zealphp/issues/13) with two complementary fixes — one at the symptom layer (`ZealAPI::isAuthenticated()` hardcoded to `false`), one at the underlying-cause layer (session data loss from missing handler-side persistence + concurrent-write races).
