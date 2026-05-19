@@ -127,7 +127,74 @@ PHP]); ?>
 <tr><td><code>$this->die($exception)</code></td><td>Handle exception and send error response</td></tr>
 <tr><td><code>$this->get_request_method()</code></td><td>Returns GET, POST, PUT, DELETE</td></tr>
 <tr><td><code>$this->setContentType($type)</code></td><td>Set response content type</td></tr>
+<tr><td><code>$this->isAuthenticated()</code></td><td>Consults <code>App::authChecker()</code>. Default <code>false</code>. See below.</td></tr>
+<tr><td><code>$this->isAdmin()</code></td><td>Consults <code>App::adminChecker()</code>. Default <code>false</code>.</td></tr>
+<tr><td><code>$this->getUsername()</code></td><td>Consults <code>App::usernameProvider()</code>. Default <code>null</code>.</td></tr>
+<tr><td><code>$this->requirePostAuth()</code></td><td>POST + authenticated guard. Returns <code>false</code> and emits <code>403</code> JSON on failure.</td></tr>
 </table>
+
+<h2 id="auth-hooks">Pluggable auth hooks <span class="badge" style="font-size:.65rem;background:#fbbf24;color:#1c1917;padding:.05rem .35rem;border-radius:3px;margin-left:.25rem">v0.2.25</span></h2>
+<p>
+  ZealAPI doesn't know what your auth system looks like — your app might use ZealPHP sessions, a Symfony bundle, the SelfMade Ninja stack, a custom OAuth flow, or JWT in a header. So the framework <strong>doesn't bake an auth check in</strong>. Instead it consults three optional callbacks you register on <code>App</code>. They default to fail-closed values (<code>false</code>, <code>false</code>, <code>null</code>) so endpoints guarded by <code>requirePostAuth()</code> reject everything until you wire them up.
+</p>
+
+<table class="ztable" style="margin-bottom:1rem">
+<tr><th>Setter</th><th>Signature</th><th>Consumed by</th><th>Default</th></tr>
+<tr><td><code>App::authChecker(?callable)</code></td><td><code>fn(): bool</code></td><td><code>ZealAPI::isAuthenticated()</code></td><td><code>false</code></td></tr>
+<tr><td><code>App::adminChecker(?callable)</code></td><td><code>fn(): bool</code></td><td><code>ZealAPI::isAdmin()</code></td><td><code>false</code></td></tr>
+<tr><td><code>App::usernameProvider(?callable)</code></td><td><code>fn(): ?string</code></td><td><code>ZealAPI::getUsername()</code></td><td><code>null</code></td></tr>
+</table>
+
+<p>Wire them <strong>once</strong>, in your app's boot file (or in a framework wrapper's bootstrap if you're shipping a multi-app platform). Every ZealAPI handler downstream inherits the answers — no per-handler boilerplate.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'app.php — wiring ZealAPI auth to your own session',
+    'code'  => <<<'PHP'
+<?php
+use ZealPHP\App;
+
+require __DIR__ . '/vendor/autoload.php';
+
+// Register the three hooks ONCE during boot. ZealPHP doesn't care what
+// auth system you use — it just asks you. Callbacks run on each
+// requirePostAuth() / isAuthenticated() / isAdmin() / getUsername() call,
+// so you can read $_SESSION / $g->session / a JWT header / a global —
+// whatever lives at the moment the API handler dispatches.
+App::authChecker(fn(): bool       => !empty($_SESSION['user_id']));
+App::adminChecker(fn(): bool      => ($_SESSION['role'] ?? '') === 'admin');
+App::usernameProvider(fn(): ?string => $_SESSION['username'] ?? null);
+
+App::superglobals(true);  // because we read $_SESSION above
+$app = App::init('0.0.0.0', 8080);
+$app->run();
+PHP,
+]); ?>
+
+<?php App::render('/components/_code', [
+    'label' => 'api/users/delete.php — handler-side use',
+    'code'  => <<<'PHP'
+<?php
+// File: api/users/delete.php → POST /api/users/delete
+$delete = function() {
+    // POST + authenticated guard. Sends 403 JSON and returns false if
+    // either check fails — short-circuits the handler.
+    if (!$this->requirePostAuth()) return;
+
+    // Admin-only operation? Compose checks naturally:
+    if (!$this->isAdmin()) {
+        return $this->response($this->json(['error' => 'admin_only']), 403);
+    }
+
+    $username = $this->getUsername();   // for audit log
+    User::delete($_POST['id'], $username);
+    return ['ok' => true];
+};
+PHP,
+]); ?>
+
+<div class="callout info" style="margin-top:.5rem">
+<strong>Why three orthogonal setters instead of one auth-provider interface?</strong> Most apps need only <code>isAuthenticated()</code>; a few need <code>isAdmin()</code> too; a smaller subset wants <code>getUsername()</code> for logging. Three closures means the trivial case is one line, the polished case is three. The setters follow the existing <code>App::superglobals()</code> / <code>App::sessionLifecycle()</code> fluent precedent — same shape, same lifecycle (configure before <code>App::init()</code>, queried by ZealAPI at request time). See <a href="/learn/auth">the auth lesson</a> for a worked example with a real session.
+</div>
 
 <h2>Live ZealAPI endpoints</h2>
 <?php

@@ -70,6 +70,46 @@ foreach ($demos as [$id, $title, $url, $code]) {
   no data leaks between concurrent requests. See the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a> for the cross-mode story (when <code>$_SESSION</code> is safe vs. when only <code>$g-&gt;session</code> works).
 </div>
 
+<h2 id="objects-in-session" style="margin:1.75rem 0 .5rem">Storing objects in sessions — the <code>stdClass</code> whitelist</h2>
+<p>
+  PHP's <code>unserialize()</code> can be turned into a remote-code-execution vector when fed
+  attacker-controlled data — any class on the autoload graph with <code>__wakeup()</code> /
+  <code>__destruct()</code> magic methods becomes a "gadget". Sessions are user-controlled
+  storage (tampered cookie, compromised Redis), so since v0.2.25 ZealPHP's session decode
+  refuses to instantiate arbitrary classes on read.
+</p>
+<p>
+  v0.2.26 (<a href="https://github.com/sibidharan/zealphp/issues/15" target="_blank" rel="noopener">issue #15</a>) narrowed the policy to an explicit whitelist:
+</p>
+<table class="ztable" style="margin-bottom:1rem">
+<tr><th>Stored as</th><th>Read back as</th><th>Why</th></tr>
+<tr><td>Scalar (string, int, float, bool, null)</td><td>Same scalar</td><td>No instantiation needed; trivially safe.</td></tr>
+<tr><td>Array (assoc or list)</td><td>Same array</td><td>Same — recursive scalars only by default.</td></tr>
+<tr><td><code>stdClass</code></td><td>Live <code>stdClass</code></td><td>Zero magic methods (<code>__wakeup</code>, <code>__destruct</code>, <code>__get</code>, etc.) — no gadget chain. <code>json_decode()</code> output rides this path: OAuth token responses, API profile data, anything from <code>json_decode($x)</code> without the assoc flag.</td></tr>
+<tr><td>Any other class (<code>DateTime</code>, your <code>User</code>, …)</td><td><code>__PHP_Incomplete_Class</code></td><td>Property access prints a warning and yields nulls. The class is <em>refused</em> at unserialize time. Add it to the whitelist only after a security review of its magic methods.</td></tr>
+</table>
+
+<?php App::render('/components/_code', [
+    'label' => 'In practice: storing an OAuth token from json_decode',
+    'code'  => <<<'PHP'
+$g = \ZealPHP\RequestContext::instance();
+session_start();
+
+$tokenResponse = json_decode($curl_body);   // returns stdClass
+$g->session['oauth_token'] = $tokenResponse;
+session_write_close();
+
+// On the next request:
+session_start();
+echo $g->session['oauth_token']->access_token;  // ✓ works — stdClass round-trips
+echo $g->session['oauth_token']->expires_in;
+PHP,
+]); ?>
+
+<p style="font-size:.9rem;color:var(--text-muted)">
+  Need another class on the whitelist (rare)? Audit its <code>__wakeup</code> / <code>__unserialize</code> / <code>__destruct</code> first — those are the gadget surfaces — then patch the four <code>unserialize()</code> calls in <code>src/Session/utils.php</code>. The function-level docblock at <code>php_session_decode_to_array()</code> documents the constraint.
+</p>
+
 <h2 style="margin:1.75rem 0 .5rem">What else gets reset per request</h2>
 <p style="color:var(--text-muted)">In <strong>coroutine mode</strong>, the entire <code>RequestContext</code> instance is per-coroutine — when the coroutine ends, every field on it is freed. That includes session data, response headers/cookies pending emission (on the Response wrapper), and the handler stacks pushed by <code>set_error_handler()</code> / <code>set_exception_handler()</code> / <code>register_shutdown_function()</code>. Legacy code that calls those per-request without restoring them can't accumulate handlers across requests in this mode.</p>
 <p style="color:var(--text-muted)">In <strong>superglobals mode</strong> (the legacy migration bridge), <code>RequestContext</code> is a process-wide singleton, so handler stacks <strong>could</strong> grow unbounded across requests — fixed in v0.2.10 by an explicit reset in <code>SessionManager</code> at request entry. See <a href="/coroutines#what-survives">What survives a request</a> for the full lifecycle matrix.</p>

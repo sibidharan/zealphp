@@ -182,11 +182,58 @@ $register = function () {
       ],
     ]); ?>
 
+    <h2 id="wire-zealapi">Wire your auth into ZealAPI</h2>
+    <p>
+      <code>ZealAPI</code> handlers (the file-based API layer at <code>api/</code>) have built-in helpers for guarding endpoints — <code>$this-&gt;isAuthenticated()</code>, <code>$this-&gt;isAdmin()</code>, <code>$this-&gt;getUsername()</code>, and the composite <code>$this-&gt;requirePostAuth()</code>. But ZealPHP doesn't know what your auth system looks like, so by default these return <strong>fail-closed</strong> values (<code>false</code>, <code>false</code>, <code>null</code>). Endpoints guarded by <code>requirePostAuth()</code> reject everything until you wire the hooks up.
+    </p>
+    <p>
+      Three one-liners in <code>app.php</code> tell ZealPHP how to consult <em>your</em> auth state. Configure once, every API handler downstream gets the answer:
+    </p>
+
+    <?php App::render('/components/_code', [
+      'label' => 'app.php — wire ZealAPI to the Auth + Session classes we built above',
+      'code'  => <<<'PHP'
+<?php
+use ZealPHP\App;
+use App\Auth;          // the src/Auth.php class from Step 2
+
+App::authChecker(fn(): bool       => Auth::currentUserId() !== null);
+App::adminChecker(fn(): bool      => Auth::currentRole() === 'admin');
+App::usernameProvider(fn(): ?string => Auth::currentUsername());
+
+$app = App::init('0.0.0.0', 8080);
+$app->run();
+PHP,
+    ]); ?>
+
+    <p>Now any handler under <code>api/</code> can guard itself with one line:</p>
+
+    <?php App::render('/components/_code', [
+      'label' => 'api/notes/delete.php — guarded endpoint',
+      'code'  => <<<'PHP'
+<?php
+// File: api/notes/delete.php → POST /api/notes/delete
+$delete = function() {
+    // POST + authenticated guard. Emits 403 JSON and returns false on failure.
+    if (!$this->requirePostAuth()) return;
+
+    $userId = \App\Auth::currentUserId();
+    Note::delete((int)$_POST['note_id'], $userId);
+    return ['ok' => true];
+};
+PHP,
+    ]); ?>
+
+    <p style="font-size:.9rem;color:var(--text-muted)">
+      No subclassing, no monkey-patching <code>ZealAPI</code>. The framework asks your code at request time via a function pointer — adds no per-request cost when no checker is registered. Full surface: <a href="/api#auth-hooks">Pluggable auth hooks</a> on the API reference page.
+    </p>
+
     <?php App::render('/components/_keytakeaways', ['items' => [
       'SQLite + PDO gives you a full database in a single file — no server setup',
       '<code>password_hash()</code> and <code>password_verify()</code> handle passwords safely',
       'Store the user ID in <code>$g->session</code> after login — the session cookie handles the rest',
       'Business logic in <code>src/</code> classes, thin endpoint wrappers in <code>api/</code>',
+      'Register <code>App::authChecker / adminChecker / usernameProvider</code> once in <code>app.php</code> to wire ZealAPI handlers to your auth code — no per-endpoint plumbing',
     ]]); ?>
 
     <div class="lesson-chips">

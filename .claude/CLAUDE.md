@@ -165,6 +165,8 @@ At startup (`src/App.php:__construct()`), `uopz_set_return()` permanently replac
 
 This lets legacy PHP code call `header()` or `session_start()` unchanged while the framework routes those calls to the correct per-request objects.
 
+**Session unserialize whitelist (v0.2.26, issue #15)** — all four `unserialize()` calls in `src/Session/utils.php` pass `['allowed_classes' => ['stdClass']]`. Scalars and arrays pass through normally. `stdClass` round-trips as a live instance (it has zero magic methods, no gadget surface — makes `json_decode($x)` results storable in `$_SESSION` without breakage). Every other class is refused — read back as `__PHP_Incomplete_Class`. Adding any class to the whitelist requires reviewing its `__wakeup` / `__unserialize` / `__destruct` magic methods first; the function-level docblock at `php_session_decode_to_array()` documents the constraint. Canonical user-facing doc: `template/pages/sessions.php#objects-in-session`.
+
 ### IOStreamWrapper
 
 `src/IOStreamWrapper.php` replaces the `php://` stream wrapper (registered once per worker in `workerStart`). When code reads `php://input`, the wrapper instead returns `$g->zealphp_request->parent->getContent()`. Other `php://` streams are delegated to the original wrapper.
@@ -180,6 +182,14 @@ Routes are registered in this order inside `App::run()` (earlier = higher priori
 5. Implicit public file routes: `/` → `public/index.php`, `/{file}` → `public/{file}.php`, `/{dir}/{uri}` → `public/{dir}/{uri}.php`
 
 **API handler naming rule**: `api/users/get.php` must define `$get = function(...)`. The variable name must match `basename($file, '.php')`. ZealAPI binds it as a closure with `$this` set to the `ZealAPI` instance.
+
+**ZealAPI auth hooks (v0.2.25, issue #13)** — `$this->isAuthenticated()`, `$this->isAdmin()`, `$this->getUsername()`, and the composite `$this->requirePostAuth()` are not hardcoded. They consult three optional callbacks registered on `App`:
+
+- `App::authChecker(?callable)` — `fn(): bool`, consumed by `isAuthenticated()`, default `false` (fail-closed).
+- `App::adminChecker(?callable)` — `fn(): bool`, consumed by `isAdmin()`, default `false`.
+- `App::usernameProvider(?callable)` — `fn(): ?string`, consumed by `getUsername()`, default `null`.
+
+Wire them ONCE during boot — either in the user's `app.php` for single-app deployments, or in a platform wrapper's bootstrap (labs/Symfony bundle/etc.) so every downstream app inherits the answers without per-app glue. The framework deliberately doesn't ship a default checker — ZealPHP doesn't know about your auth system. See `template/pages/api.php#auth-hooks` for the canonical doc, `template/pages/learn/auth.php#wire-zealapi` for a worked example, and `tests/Unit/ZealApiAuthHooksTest.php` for the 15 behaviour cases pinned (defaults, callback round-trip, coercion edges, independence of the three hooks, setter introspection).
 
 ### Parameter Injection
 
