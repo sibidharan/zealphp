@@ -7,6 +7,7 @@ $links = [
   'case-studies'    => ['/case-studies/sna-labs', 'Case Study'],
   'migration'       => ['/migration',     'Migration'],
   'performance'     => ['/performance',   'Benchmarks'],
+  'vs-fpm'          => ['/vs-fpm',         'vs FPM'],
   'design-tradeoffs'=> ['/design-tradeoffs','Trade-offs'],
   'getting-started' => ['/getting-started','Get Started'],
   'learn'           => ['/learn',          'Learn'],
