@@ -282,7 +282,26 @@ function zeal_session_write_close(): bool
         assert(is_string($save_path));
         $session_file = $save_path . '/sess_' . $session_id;
         $data = $superglobals ? $GLOBALS['_SESSION'] : $g->session;
-        file_put_contents($session_file, serialize($data));
+        $wHandler = $g->session_params["handler"] ?? ($GLOBALS["__labs_session_handler"] ?? null);
+        if ($wHandler instanceof \SessionHandlerInterface) {
+            // Merge with current stored data to prevent concurrent request
+            // race conditions. Apache serialises session access via file
+            // locking; ZealPHP handles requests concurrently, so two
+            // requests reading the same session can each write back their
+            // own snapshot — the last write wins and the other's changes
+            // are lost. Reading-then-merging before writing ensures keys
+            // added by a concurrent request survive.
+            $existing = $wHandler->read((string) $session_id);
+            if (is_string($existing) && $existing !== '') {
+                $existingData = php_session_decode_to_array($existing);
+                if (is_array($existingData) && is_array($data)) {
+                    $data = array_merge($existingData, $data);
+                }
+            }
+            $wHandler->write((string) $session_id, serialize($data));
+        } else {
+            file_put_contents($session_file, serialize($data));
+        }
 
         // Mark inactive — in both modes. Unset the typed slot in coroutine
         // mode; clear the superglobal in superglobals mode so the next
@@ -309,12 +328,17 @@ function zeal_session_destroy(): bool
     // Get session ID
     $session_id = zeal_session_id();
 
-    // Delete session file
+    // Delete session data via handler or file
     $save_path = $g->session_params['save_path'] ?? '';
     assert(is_string($save_path));
-    $session_file = $save_path . '/sess_' . $session_id;
-    if (file_exists($session_file)) {
-        unlink($session_file);
+    $dHandler = $g->session_params["handler"] ?? ($GLOBALS["__labs_session_handler"] ?? null);
+    if ($dHandler instanceof \SessionHandlerInterface) {
+        $dHandler->destroy((string) $session_id);
+    } else {
+        $session_file = $save_path . '/sess_' . $session_id;
+        if (file_exists($session_file)) {
+            unlink($session_file);
+        }
     }
 
     // Unset session data and cookie — mirror in both storages for the same
