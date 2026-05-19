@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.25] - 2026-05-19
+
+Closes [issue #13](https://github.com/sibidharan/zealphp/issues/13) with two complementary fixes — one at the symptom layer (`ZealAPI::isAuthenticated()` hardcoded to `false`), one at the underlying-cause layer (session data loss from missing handler-side persistence + concurrent-write races).
+
+### Added — auth hooks
+
+- **`App::authChecker(?callable)`** + backing `App::$auth_checker` static. Consulted by `ZealAPI::isAuthenticated()`. Signature: `fn(): bool`. Apps register a closure that decides whether the current request is authenticated by reading `$_SESSION`, `$g->session`, or their own auth state. Default `null` → `ZealAPI::isAuthenticated()` returns `false` (safe fail-closed).
+- **`App::adminChecker(?callable)`** + backing `App::$admin_checker`. Same shape; consulted by `ZealAPI::isAdmin()`.
+- **`App::usernameProvider(?callable)`** + backing `App::$username_provider`. Signature: `fn(): ?string`; consulted by `ZealAPI::getUsername()`.
+
+Closes the `return false;` stub gap from PR #10 that broke every endpoint guarded by `requirePostAuth()` — even for logged-in users. New `tests/Unit/ZealApiAuthHooksTest.php` pins 15 cases: defaults, callback round-trips, type coercion edge cases, independence of the three hooks, setter introspection.
+
+### Fixed — session handler write/destroy + concurrent merge (PR #14)
+
+- **`zeal_session_write_close()` and `zeal_session_destroy()` now delegate to `\SessionHandlerInterface`** when one is registered in `$g->session_params['handler']`. Previously hardcoded `file_put_contents` / `unlink`, so Redis-backed sessions (added in PR #10) could be READ but never persisted or cleaned up.
+- **Concurrent-write race**: ZealPHP handles requests concurrently (Apache serialises via file lock; we don't). Two requests both reading and writing back the same session used to drop one writer's data. The handler-write path now reads-then-merges via `array_merge` before writing, preserving divergent top-level keys (OAuth state, code_verifier, flash messages, etc.). **Documented limitation**: shallow merge — both requests pushing to the same nested array still last-write-wins for that nested key. Use a locking handler (Redis WATCH/MULTI) or a database hash for stronger guarantees.
+
+New `tests/Unit/SessionHandlerWriteTest.php` (6 tests): handler-write payload correctness, no-handler file-fallback, concurrent merge with divergent keys, top-level collision resolution semantics, handler-destroy delegation, no-handler unlink fallback.
+
+### Backwards compatibility
+
+- 100% — existing apps that don't call `App::authChecker()` see `isAuthenticated()` continue to return `false` (same as before). Existing apps that don't register a session handler see file-based session storage continue to work (same as before). The two fixes only change behaviour when their respective opt-ins are used.
+
+PHPStan level 10 clean. 383 unit + 147 integration tests pass (+15 auth-hook + 6 session-handler-write, 6 cleanly skipped for ext-redis absence).
+
 ## [0.2.24] - 2026-05-19
 
 Two features land together: a real session-cookie bug fix for OAuth/redirect flows ([PR #12](https://github.com/sibidharan/zealphp/pull/12)) and the new template-fragment helper for htmx-style single-file partial rendering.
