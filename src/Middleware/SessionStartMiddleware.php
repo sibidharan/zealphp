@@ -9,10 +9,7 @@ use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use ZealPHP\RequestContext;
 
-use function ZealPHP\Session\zeal_session_id;
 use function ZealPHP\Session\zeal_session_start;
-use function ZealPHP\Session\zeal_session_get_cookie_params;
-use function ZealPHP\Session\zeal_session_name;
 
 class SessionStartMiddleware implements MiddlewareInterface
 {
@@ -20,25 +17,14 @@ class SessionStartMiddleware implements MiddlewareInterface
     {
         $g = RequestContext::instance();
 
+        // zeal_session_start() auto-emits Set-Cookie on new sessions (issue
+        // #12 fix in src/Session/utils.php) — no need to emit it from here.
+        // This middleware just triggers an eager start so first-time visitors
+        // get a session cookie even when their handler never calls
+        // session_start() themselves.
         if (!$g->_session_started) {
             zeal_session_start();
             $g->_session_started = true;
-
-            $sessionName = zeal_session_name();
-            $sessionId = zeal_session_id();
-            if ($sessionId === false) { $sessionId = ''; }
-            $cookie = zeal_session_get_cookie_params();
-            \ZealPHP\elog("SessionStart: id=$sessionId secure=" . ($cookie['secure'] ? 'true' : 'false'));
-            assert($g->openswoole_response !== null);
-            $g->openswoole_response->cookie(
-                $sessionName,
-                $sessionId,
-                $cookie['lifetime'] ? time() + $cookie['lifetime'] : 0,
-                $cookie['path'],
-                $cookie['domain'],
-                $cookie['secure'],
-                $cookie['httponly']
-            );
         }
 
         return $handler->handle($request);

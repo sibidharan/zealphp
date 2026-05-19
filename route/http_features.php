@@ -106,3 +106,21 @@ $app->route('/http/range-test', ['methods' => ['GET']], function() {
 $app->route('/http/sendfile-test', ['methods' => ['GET']], function($response) {
     $response->sendFile(__DIR__ . '/../public/css/zealphp.css');
 });
+
+// ---------------------------------------------------------------------------
+// 10. Session cookie on redirect (issue #12 regression guard)
+//     A handler that starts a new session and then issues a Location
+//     redirect MUST emit Set-Cookie on the same response — otherwise the
+//     OAuth state stored in the session is lost on the next request.
+// ---------------------------------------------------------------------------
+$app->route('/http/session-redirect', ['methods' => ['GET']], function() {
+    session_start();
+    $_SESSION['oauth_state'] = 'state-xyz';
+    header('Location: /http/session-target');
+    http_response_code(302);
+});
+
+$app->route('/http/session-target', ['methods' => ['GET']], function() {
+    session_start();
+    return ['oauth_state' => $_SESSION['oauth_state'] ?? null];
+});

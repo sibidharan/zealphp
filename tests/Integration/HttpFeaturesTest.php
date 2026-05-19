@@ -29,6 +29,31 @@ class HttpFeaturesTest extends TestCase
         $this->assertStatus(307, $r);
     }
 
+    /**
+     * Regression for issue #12 — Set-Cookie missing on 302 redirects when
+     * a new session was started mid-request. OAuth flows that
+     * `session_start(); $_SESSION['state'] = ...; header('Location: ...')`
+     * lost their state on the next request because no PHPSESSID was
+     * emitted. zeal_session_start() now auto-emits Set-Cookie for new
+     * sessions, regardless of whether SessionStartMiddleware is registered.
+     */
+    public function testSessionCookieEmittedOnRedirect(): void
+    {
+        $r = $this->get('/http/session-redirect');
+        $this->assertStatus(302, $r);
+        $this->assertHeader('location', '/http/session-target', $r);
+        $this->assertHeader('set-cookie', 'PHPSESSID=', $r);
+
+        // Pull the session id out of the Set-Cookie header and replay it.
+        // The data we stashed in $_SESSION must round-trip back to us.
+        preg_match('/PHPSESSID=([^;]+)/', $r['headers']['set-cookie'] ?? '', $m);
+        $this->assertNotEmpty($m[1] ?? '', 'PHPSESSID value missing from Set-Cookie');
+        $follow = $this->get('/http/session-target', ['Cookie' => 'PHPSESSID=' . $m[1]]);
+        $this->assertStatus(200, $follow);
+        $json = $this->assertJsonResponse($follow);
+        $this->assertSame('state-xyz', $json['oauth_state']);
+    }
+
     public function testHeadReturnsNoBody(): void
     {
         $r = $this->http('HEAD', '/http/head-test');

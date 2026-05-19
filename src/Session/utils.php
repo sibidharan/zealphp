@@ -105,8 +105,43 @@ function zeal_session_start(): bool
         }
     }
 
+    // Detect whether the client already had a session cookie BEFORE we ask
+    // zeal_session_id() — that call generates+stashes a new ID into $g->cookie
+    // when no cookie was present, so checking after would always be true.
+    /** @var string $sessionNameForCookie */
+    $sessionNameForCookie = $g->session_params['name'];
+    $hadIncomingSessionCookie = isset($g->cookie[$sessionNameForCookie]);
+
     // Get session ID from cookie or generate a new one
     $session_id = zeal_session_id();
+
+    // Bug #12: emit Set-Cookie if the session is brand-new (no incoming
+    // PHPSESSID cookie). Without this, a handler that calls session_start()
+    // for a first-time visitor + header('Location: ...') redirects them with
+    // no cookie — the next request sees no PHPSESSID, starts a fresh session,
+    // and the data we just stored (OAuth state, code_verifier, flash msgs)
+    // is gone. Idempotent: $hadIncomingSessionCookie is true on the second
+    // call within the same request, so we don't emit twice. Skipped when
+    // useCookies is off (zeal_session_set_cookie_params 'use_cookies' = 0)
+    // or when the response is no longer writable (already flushed).
+    $useCookies = (bool)ini_get('session.use_cookies');
+    if (!$hadIncomingSessionCookie
+        && $useCookies
+        && $g->openswoole_response !== null
+        && is_string($session_id)
+        && $session_id !== ''
+        && $g->openswoole_response->isWritable()) {
+        $cookieParams = zeal_session_get_cookie_params();
+        $g->openswoole_response->cookie(
+            $sessionNameForCookie,
+            $session_id,
+            $cookieParams['lifetime'] ? time() + (int)$cookieParams['lifetime'] : 0,
+            $cookieParams['path'],
+            $cookieParams['domain'],
+            $cookieParams['secure'],
+            $cookieParams['httponly']
+        );
+    }
 
     /** @var array<string, mixed> $session_data */
     $session_data = [];
