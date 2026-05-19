@@ -56,7 +56,7 @@ $app->route('/echo', function() {
 $app->route('/article/{id}', fn($id) => App::include('/article.php'));
 PHP]); ?>
 
-<p style="margin-top:1rem">The same contract applies inside any file invoked by <a href="/templates"><code>App::render() / renderToString() / renderStream() / include()</code></a> — see <a href="/templates#file-execution-family">the file-execution family</a>.</p>
+<p style="margin-top:1rem">The same contract applies inside any file invoked by <a href="/templates"><code>App::render() / renderToString() / renderStream() / include()</code></a> — and inside any region declared by <a href="/templates#fragments"><code>App::fragment()</code></a> when extracted. See <a href="/templates#file-execution-family">the file-execution family</a> for the full method table.</p>
 
 <h3 id="status-range" style="margin-top:2rem">Valid HTTP status codes</h3>
 

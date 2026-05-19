@@ -257,7 +257,7 @@ Four streaming patterns via `src/HTTP/Response.php` and `ResponseMiddleware`:
 
 ### File-execution family
 
-All four file-execution methods share a single private core (`App::executeFile()`) that runs the file, captures output, and applies the universal return contract. They differ only on (a) path resolution and (b) what the wrapper does with the result. Canonical reference: `template/pages/templates.php#file-execution-family`.
+The first four methods share a single private core (`App::executeFile()`) that runs the file, captures output, and applies the universal return contract. They differ only on (a) path resolution and (b) what the wrapper does with the result. The fifth — `App::fragment()` (v0.2.24) — runs *inside* a template and marks a named region the framework can extract by name. Canonical reference: `template/pages/templates.php#file-execution-family`.
 
 | Method | Path resolved from | Returns | Notes |
 |--------|--------------------|---------|-------|
@@ -265,12 +265,13 @@ All four file-execution methods share a single private core (`App::executeFile()
 | `App::renderToString($tpl, $args)` | `template/` | `string` | Coerces every shape (Generator consumed, Closure invoked, scalar cast). |
 | `App::renderStream($tpl, $args)` | `template/` | `\Generator` | Yields whatever the template returned, chunk-by-chunk. |
 | `App::include($publicPath, $args = [])` | `public/` (Apache document-root convention — leading `/` optional) | `mixed` — full return contract, never echoed | Apache parity: auto-populates `$_SERVER['PHP_SELF']`, `SCRIPT_NAME`, `SCRIPT_FILENAME` for the included file (mod_php does the same). Applies `includeCheck()` so traversal outside `public/` is refused (returns `403` via the universal contract). In `superglobals(true)` mode dispatches to the CGI subprocess; in coroutine mode runs in-process. `App::includeFile()` is the deprecated alias. |
+| `App::fragment($name, $fn)` (v0.2.24) | N/A — called *inside* a template, not on a path | `void`. The closure's return rides the full return contract when the fragment is extracted (the parent `App::render()` propagates it back through `ResponseMiddleware`). | The htmx-essay "template fragment" pattern. Mark named regions inside any template; `App::render('page', $args)` either runs every `App::fragment()` inline (no selector → full page) or extracts just one region (`$args['fragment'] = 'name'`). State carried in `$g->memo['_fragment']` (save+restored across nested renders). Missing fragment → HTTP 404 — no silent fallback. First match wins on repeated names. |
 
 The 4 implicit-route call sites in `src/App.php` (`serveDirectory()`, implicit `/`, implicit `/{file}`, implicit `/{dir}/{uri}`) all collapse to one-line `return App::include('/...')` calls — `include()` owns the `$_SERVER` preamble and the result-coercion shape that `ResponseMiddleware` consumes.
 
 ### Template Rendering
 
-`App::render() / renderToString() / renderStream()` are three members of the [file-execution family](#file-execution-family) — see that table for the full method comparison.
+`App::render() / renderToString() / renderStream()` are three of the five members of the [file-execution family](#file-execution-family) — see that table for the full method comparison (the other two are `App::include()` for `public/`-rooted files and `App::fragment()` for in-template named regions).
 
 **Streaming templates** — template returns a Closure with named parameters; framework injects by name (same as route handlers):
 
@@ -335,7 +336,7 @@ Non-standard codes have empty reason phrases on the wire (`HTTP/1.1 451\r\n` wit
 
 ### Legacy App Support (CGI Worker)
 
-`App::include($publicPath, $args = [])` is the 4th member of the [file-execution family](#file-execution-family). It runs PHP files from `public/` through the framework:
+`App::include($publicPath, $args = [])` is one of the five members of the [file-execution family](#file-execution-family). It runs PHP files from `public/` through the framework:
 - **Coroutine mode** (`superglobals(false)`): in-process via the shared `App::executeFile()` core.
 - **Superglobals mode** (`superglobals(true)`): dispatches to a CGI subprocess via `proc_open` for true global-scope isolation. This is how unmodified WordPress/Drupal runs on ZealPHP.
 
@@ -553,7 +554,7 @@ All ZealPHP usage examples live as first-class project files:
 
 | File | Role |
 |------|------|
-| `App.php` | Framework core: init, route registration, `run()`, `ResponseMiddleware`, file-execution family (`render()`/`renderToString()`/`renderStream()`/`include()` — all sharing a private `executeFile()` core), `setFallback()`, `tick()`/`after()`/`onWorkerStart()`, CLI `parseCliArgs()`. `includeFile()` is a deprecated alias for `include()`. |
+| `App.php` | Framework core: init, route registration, `run()`, `ResponseMiddleware`, file-execution family (`render()`/`renderToString()`/`renderStream()`/`include()` — all sharing a private `executeFile()` core — plus `fragment()` for in-template named regions), `setFallback()`, `tick()`/`after()`/`onWorkerStart()`, CLI `parseCliArgs()`. `includeFile()` is a deprecated alias for `include()`. |
 | `cgi_worker.php` | CGI-style process for legacy apps — true global scope, uopz header/cookie capture, SSE streaming via flush() |
 | `G.php` | Per-request global state; superglobals mode uses static singleton, coroutine mode uses `Coroutine::getContext()` |
 | `Store.php` | `OpenSwoole\Table` adapter — cross-worker shared-memory key-value store |
