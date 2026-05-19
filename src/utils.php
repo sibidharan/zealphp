@@ -300,12 +300,51 @@ function log_write(string $message, string $kind = 'debug'): void
 }
 
 /**
- * Executes a task logic in a separate process.
+ * Run a closure in a throwaway child process that HAS the coroutine scheduler,
+ * even though the caller does not. This is the escape hatch for parallel I/O
+ * from a coroutine-scheduler-OFF worker — i.e. `superglobals(true)` /
+ * `enableCoroutine(false)` mode (the Symfony/FPM-style lifecycle, where running
+ * coroutines in the main worker would race process-wide $_GET/$_POST/$_SESSION
+ * and shared framework singletons).
  *
- * @param callable $taskLogic The logic to be executed in the separate process.
- * @param bool $wait Optional. Whether to wait for the process to complete. Default is true.
+ * The child is spawned with OpenSwoole's coroutine runtime enabled, so inside
+ * `$taskLogic` you can `go()` + `Channel` + hooked I/O (curl, file_get_contents,
+ * PDO over the network, Co\System::exec, ...) and they run concurrently. The
+ * call BLOCKS until the child finishes (when $wait is true) and returns whatever
+ * the child echoed — so serialise structured results (json_encode in the child,
+ * json_decode in the caller).
  *
- * @return mixed The result of the task logic if $wait is true, otherwise null.
+ * Cost & caveats:
+ *  - One `proc`-style fork per call (~ms). Worth it when a request needs N
+ *    genuinely-parallel slow I/O calls; not worth it for a single call or
+ *    CPU-bound work.
+ *  - The child is a FRESH process — it does NOT inherit your framework
+ *    container, DB connection pool, or request state. Pass everything it needs
+ *    as captured variables; do raw I/O inside (it can't reach Symfony services
+ *    / Doctrine's managed connection).
+ *  - Refused when `superglobals(false)` (coroutine mode) — there you already
+ *    have a scheduler, so just `go()` directly.
+ *
+ * Example (3 parallel HTTP fetches from a sequential worker):
+ *
+ *     $json = coprocess(function () {
+ *         $chan = new \OpenSwoole\Coroutine\Channel(3);
+ *         foreach (['a','b','c'] as $svc) {
+ *             go(function () use ($svc, $chan) {
+ *                 $chan->push([$svc => file_get_contents("https://api/$svc")]);
+ *             });
+ *         }
+ *         $out = [];
+ *         for ($i = 0; $i < 3; $i++) { $out += $chan->pop(); }
+ *         echo json_encode($out);            // returned to the caller as a string
+ *     });
+ *     $data = json_decode($json, true);
+ *
+ * @param callable $taskLogic The logic to run in the coroutine-enabled child.
+ *                            Receives the OpenSwoole\Process as its argument.
+ * @param bool $wait Whether to block until the child completes. Default true.
+ *
+ * @return mixed The child's echoed output (string) when $wait is true.
  */
 function coprocess($taskLogic, $wait = true)
 {
