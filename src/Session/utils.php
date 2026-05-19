@@ -282,20 +282,43 @@ function zeal_session_write_close(): bool
         assert(is_string($save_path));
         $session_file = $save_path . '/sess_' . $session_id;
         $data = $superglobals ? $GLOBALS['_SESSION'] : $g->session;
-        $wHandler = $g->session_params["handler"] ?? ($GLOBALS["__labs_session_handler"] ?? null);
+        $wHandler = $g->session_params['handler'] ?? null;
         if ($wHandler instanceof \SessionHandlerInterface) {
-            // Merge with current stored data to prevent concurrent request
-            // race conditions. Apache serialises session access via file
-            // locking; ZealPHP handles requests concurrently, so two
-            // requests reading the same session can each write back their
-            // own snapshot — the last write wins and the other's changes
-            // are lost. Reading-then-merging before writing ensures keys
-            // added by a concurrent request survive.
+            // Merge with stored data to mitigate concurrent-request races.
+            // Apache serialises session access via file locks; ZealPHP
+            // handles requests concurrently, so two requests both reading
+            // the same session and both writing back their own snapshots
+            // means last-write-wins and the loser's changes are lost.
+            // Reading-then-merging before writing keeps top-level keys
+            // added by a concurrent request alive.
+            //
+            // NOTE: array_merge is SHALLOW. If both requests touched the
+            // same NESTED array (e.g. both pushed to $_SESSION['cart']),
+            // the later writer's cart still replaces the earlier one —
+            // last-write-wins survives at that nesting depth. For
+            // OAuth-style flows where each step writes top-level scalars
+            // (oauth_state, code_verifier, user_id) the merge is enough.
+            // Apps with conflicting nested writes should use a database
+            // / Redis hash directly, not session storage.
+            //
+            // Also note: handler-side locking is not assumed. A
+            // SessionHandlerInterface implementation that itself serialises
+            // (e.g. via Redis WATCH/MULTI) is strictly better than this
+            // best-effort merge — but the merge is correct for the file-
+            // handler default and for handlers that don't lock.
             $existing = $wHandler->read((string) $session_id);
             if (is_string($existing) && $existing !== '') {
                 $existingData = php_session_decode_to_array($existing);
-                if (is_array($existingData) && is_array($data)) {
-                    $data = array_merge($existingData, $data);
+                // $data is $GLOBALS['_SESSION'] (mixed) or $g->session (array)
+                // — narrow before the array_merge so PHPStan can verify the
+                // call shape. Non-array $data means somebody outside the
+                // framework reassigned $_SESSION to a scalar; treat that as
+                // empty and let the merge surface the disk state.
+                $current = is_array($data) ? $data : [];
+                if ($existingData !== []) {
+                    $data = array_merge($existingData, $current);
+                } else {
+                    $data = $current;
                 }
             }
             $wHandler->write((string) $session_id, serialize($data));
@@ -331,7 +354,7 @@ function zeal_session_destroy(): bool
     // Delete session data via handler or file
     $save_path = $g->session_params['save_path'] ?? '';
     assert(is_string($save_path));
-    $dHandler = $g->session_params["handler"] ?? ($GLOBALS["__labs_session_handler"] ?? null);
+    $dHandler = $g->session_params['handler'] ?? null;
     if ($dHandler instanceof \SessionHandlerInterface) {
         $dHandler->destroy((string) $session_id);
     } else {
