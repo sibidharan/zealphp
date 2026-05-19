@@ -124,8 +124,16 @@ function zeal_session_start(): bool
     // call within the same request, so we don't emit twice. Skipped when
     // useCookies is off (zeal_session_set_cookie_params 'use_cookies' = 0)
     // or when the response is no longer writable (already flushed).
+    //
+    // Gated on App::$session_lifecycle (v0.2.22 contract): when set to false,
+    // another framework (e.g. Symfony's NativeSessionStorage via the
+    // zealphp-symfony bridge, or user code that drives session_start() +
+    // $response->cookie() manually) owns cookie emission. We must NOT
+    // race them — auto-emitting here when sessionLifecycle is false caused
+    // duplicate PHPSESSID headers on /session/dump in the Symfony bridge.
     $useCookies = (bool)ini_get('session.use_cookies');
     if (!$hadIncomingSessionCookie
+        && \ZealPHP\App::$session_lifecycle
         && $useCookies
         && $g->openswoole_response !== null
         && is_string($session_id)
