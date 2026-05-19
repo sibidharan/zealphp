@@ -1,0 +1,38 @@
+# Apache vhost — run the LAMP scaffold on mod_php.
+#
+# Drop this file at /etc/apache2/sites-available/lamp-scaffold.conf,
+# adjust DocumentRoot to your checkout path, then:
+#
+#   sudo a2ensite lamp-scaffold
+#   sudo apache2ctl configtest
+#   sudo systemctl reload apache2
+#
+# Then hit http://localhost:8081 — same code, same session cookie name,
+# same JSON payloads as the ZealPHP version on :8080.
+
+<VirtualHost *:8081>
+    ServerName  lamp-scaffold.local
+    DocumentRoot /opt/zealphp/examples/lamp-scaffold/public
+
+    <Directory /opt/zealphp/examples/lamp-scaffold/public>
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+
+        # Implicit-file routing: /about → /about.php
+        # (ZealPHP does this natively; this gives Apache the same behaviour)
+        DirectoryIndex index.php index.html
+        RewriteEngine On
+        RewriteCond %{REQUEST_FILENAME} !-f
+        RewriteCond %{REQUEST_FILENAME} !-d
+        RewriteRule ^([^.]+)$ $1.php [L]
+    </Directory>
+
+    # Block direct access to the compat bootstrap from outside.
+    <Directory /opt/zealphp/examples/lamp-scaffold/bootstrap>
+        Require all denied
+    </Directory>
+
+    ErrorLog  ${APACHE_LOG_DIR}/lamp-scaffold-error.log
+    CustomLog ${APACHE_LOG_DIR}/lamp-scaffold-access.log combined
+</VirtualHost>

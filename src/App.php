@@ -720,8 +720,8 @@ class App
      * superglobals mode races the process-wide $_GET/$_POST/$_SESSION
      * arrays across concurrent requests, the original bug ZealPHP's
      * per-coroutine $g context was designed to avoid. **Setting this to
-     * true while $superglobals=true is unsafe — App::run() emits a
-     * [lifecycle] warning to the debug log.**
+     * true while $superglobals=true is REFUSED — App::run() throws
+     * RuntimeException at boot (v0.2.27+).**
      *
      * `null` follows the default coupling.
      */
@@ -741,8 +741,8 @@ class App
      * Default coupling is `!App::$superglobals` (HOOK_ALL when coroutine
      * mode, 0 when superglobals mode). Hooked I/O in superglobals mode is
      * **unsafe** — yields can expose process-wide superglobal mutations
-     * to other concurrent coroutines. App::run() emits a [lifecycle]
-     * warning for that combination.
+     * to other concurrent coroutines. App::run() throws RuntimeException
+     * at boot for that combination (v0.2.27+).
      *
      * Accepts:
      *  - null  → follow default coupling
@@ -765,29 +765,42 @@ class App
     }
 
     /**
-     * Warn about lifecycle combinations that are syntactically allowed but
-     * semantically unsafe. elog() at warn level so the warning lands in
-     * /tmp/zealphp/debug.log; we don't throw — users may have niche
-     * reasons (security audits, debugging). But silently honouring an
-     * override that races $_SESSION across coroutines would be worse than
-     * no API at all.
+     * Refuse to start with lifecycle combinations that race process-wide
+     * superglobals across concurrent coroutines.
+     *
+     * History: pre-v0.2.27 these were elog()'d at warn level so they
+     * landed in /tmp/zealphp/debug.log but didn't refuse — the rationale
+     * was "users may have niche reasons (security audits, debugging)". In
+     * practice the warning was invisible to anyone not actively reading
+     * the debug log, and the unsafe configuration is how cross-request
+     * state-leak bugs ship to production. v0.2.27 changes this to a hard
+     * throw at App::run() boot — fail loud, fail fast, before any
+     * request can be served against a broken contract.
+     *
+     * @throws \RuntimeException When superglobals(true) is combined with
+     *   enableCoroutine(true) or hookAll(non-zero) — both expose
+     *   $_GET/$_POST/$_SESSION (process-wide PHP arrays) to concurrent
+     *   coroutine writes, which races across requests.
      */
     private static function validateLifecycleCombination(bool $sg, int $hookFlags, bool $enableCo): void
     {
         if ($sg && $enableCo) {
-            elog(
-                '[lifecycle] App::superglobals(true) + App::enableCoroutine(true) — '
-                . 'concurrent coroutines will race $_GET/$_POST/$_SESSION (process-wide PHP arrays). '
-                . 'Use superglobals(false) for coroutines, or accept the cross-request state-leak risk.',
-                'warn'
+            throw new \RuntimeException(
+                'ZealPHP lifecycle: App::superglobals(true) + App::enableCoroutine(true) is unsafe. '
+                . 'Concurrent coroutines would race $_GET/$_POST/$_SESSION (process-wide PHP arrays). '
+                . 'Use App::superglobals(false) for coroutine concurrency, or App::enableCoroutine(false) '
+                . 'to keep legacy superglobals semantics with sequential request handling per worker '
+                . '(Apache prefork MPM-style). Refer to /coroutines#lifecycle-modes for the supported '
+                . 'mode matrix.'
             );
         }
         if ($sg && $hookFlags !== 0) {
-            elog(
-                '[lifecycle] App::superglobals(true) + App::hookAll(non-zero) — '
-                . 'hooked I/O can yield mid-request, exposing process-wide superglobal mutations to '
-                . 'concurrent coroutines. Use superglobals(false) when enabling hooks.',
-                'warn'
+            throw new \RuntimeException(
+                'ZealPHP lifecycle: App::superglobals(true) + App::hookAll(non-zero) is unsafe. '
+                . 'Hooked I/O can yield mid-request, exposing process-wide superglobal mutations to '
+                . 'other concurrent coroutines. Use App::superglobals(false) when enabling I/O hooks, '
+                . 'or App::hookAll(0) to keep legacy superglobals semantics. Refer to '
+                . '/coroutines#lifecycle-modes for the supported mode matrix.'
             );
         }
     }
@@ -3561,6 +3574,25 @@ HELP;
             /** @var array<string, bool|float|int|string|null> $srvFinal */
             $srvFinal = $srv;
             $g->server = $srvFinal;
+
+            // v0.2.27 — superglobals(true) mode populates PHP's $_GET, $_POST,
+            // $_COOKIE, $_FILES, $_SERVER, $_REQUEST from the OpenSwoole request.
+            // Restores v0.1.x behaviour that was lost when G switched to declared
+            // properties (commit 900c18a). Legacy code using $_GET['foo'] works
+            // without rewriting it as $g->get['foo'], which is the entire point
+            // of the `$superglobals = true` flag. Race-safe under the documented
+            // superglobals(true) + enableCoroutine(false) pairing; the unsafe
+            // combination is already flagged at App::run() boot time. $_SESSION
+            // is intentionally NOT touched here — the session manager owns its
+            // own write path (file load + uopz session_start).
+            if (App::$superglobals) {
+                $GLOBALS['_GET']     = $get;
+                $GLOBALS['_POST']    = $post;
+                $GLOBALS['_COOKIE']  = $cookie;
+                $GLOBALS['_FILES']   = $files;
+                $GLOBALS['_SERVER']  = $srvFinal;
+                $GLOBALS['_REQUEST'] = $g->request;
+            }
 
             $serverRequest  = new \ZealPHP\HTTP\LazyServerRequest($request->parent);
 

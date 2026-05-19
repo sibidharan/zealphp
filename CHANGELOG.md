@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.27] - 2026-05-19
+
+Restore v0.1.x "superglobals just work" behaviour that was silently dropped during the December 2024 declared-property refactor (commits `327e180` + `900c18a`). Under `App::superglobals(true)` the framework was populating `$g->get` / `$g->session` etc. but **NOT** `$_GET` / `$_SESSION` — making the flag's name misleading and forcing every dual-mode app (notably labs) to maintain a compat shim that v0.1.x didn't need. v0.2.27 closes the loop in two places: per-request superglobal population in the request handler, and a `$g->session ↔ $_SESSION` alias via `__get`/`__set` proxy so direct `$_SESSION['k']=v` writes are visible through `$g->session` immediately (the v0.2.22 "mirror at call-points" approach couldn't catch writes between `session_*()` calls because typed declared properties bypass magic methods).
+
+### Fixed
+
+- **`$_GET` / `$_POST` / `$_COOKIE` / `$_FILES` / `$_SERVER` / `$_REQUEST` populated per request in `superglobals(true)` mode** (`src/App.php:3565+`). The OpenSwoole HTTP server doesn't auto-populate these (only CGI/SAPI does); v0.1.x's `G::init()` aliased them via `$_GET = &$context['get']` but the December 2024 refactor to declared properties on `RequestContext` dropped the bridge. The new block writes `$GLOBALS['_GET']`, `$GLOBALS['_POST']`, etc. from the same source data the framework already populates on `$g->get`. Race-safe under the documented `superglobals(true) + enableCoroutine(false)` pairing; the unsafe combination warning at boot already covers `superglobals + coroutines`.
+- **`$g->session` and `$_SESSION` are now the same array** in `superglobals(true)` mode. `SessionManager::__invoke()` calls `unset($g->session)` after `session_start()`, making the declared typed property "uninitialised" so reads/writes route through `RequestContext::__get()` / `__set()` which proxy to `$GLOBALS['_SESSION']`. Mutations through either name are visible through the other immediately — no more "one request behind" drift from v0.2.22's mirror-at-call-points approach. Reference assignment (`$g->session = &$_SESSION`) doesn't work on overloaded objects in PHP; the `unset()` + magic-method approach is the workaround.
+- **`RequestContext::__set` symmetric superglobal-key mapping** (`src/RequestContext.php:155-170`). The pre-v0.2.27 `__set` wrote `$g->session = $newArray` to `$GLOBALS['session']` (creating a useless top-level global) while `__get` correctly returned `$GLOBALS['_SESSION']`. Now both directions map the same seven names (`get`, `post`, `cookie`, `files`, `server`, `request`, `env`, `session`) → `$GLOBALS['_' . strtoupper($key)]`.
+- **`RequestContext::__get` empty-array fallback** (`src/RequestContext.php:113-122`). Initialised missing superglobal slots to `null` — meant `$g->session['x'] = 'y'` would fatal-error on null array access if called before any `session_*()`. Now initialises to `[]`, matching Apache mod_php behaviour where superglobals are always arrays once populated.
+
+### Added
+
+- **`examples/lamp-scaffold/`** — the new home for the "vanilla PHP runs on both servers" pattern (`bootstrap/g.php` compat shim, `apache/vhost.conf.example`, README walking through both portability styles).
+- **`examples/lamp-scaffold/public/classic-php.php`** — demonstrates pure `$_GET` / `$_SESSION` / `$_SERVER` use, no `$g`, no bootstrap. Runs unchanged on Apache mod_php AND ZealPHP Mixed-mode (`superglobals(true) + processIsolation(false)`) thanks to this release.
+- **`tests/Integration/SuperglobalsParityTest.php`** + **`tests/fixtures/mixed_mode_server.php`** — 9 integration tests pinning the Mixed-mode contract: `$_GET` populated from query string, `$_SERVER` keys present, `$_REQUEST = $_GET + $_POST`, `$g->get == $_GET`, `$_SESSION ↔ $g->session` cross-writes, session counter persists across requests, POST body parsing, `session_destroy` clears both names, `session_unset` clears data but keeps id. First test in the codebase that spawns its own dedicated mixed-mode server via `proc_open` array form — pattern reusable for future lifecycle-mode coverage.
+
+### Documentation
+
+- **`/vs-fpm`** — corrects the misleading "CGI bridge cost is same order of magnitude as FPM" framing. Honest accounting: FPM is ~1–3 ms (FastCGI handshake to a long-lived warm worker), Apache mod_php is ~0 ms (PHP loaded in-process), our current CGI bridge is ~30–50 ms (`proc_open` spawns a fresh interpreter per request). Documents the **v0.3.0 roadmap fix**: a built-in persistent CGI worker pool that holds PHP interpreters warm between requests and recycles them after N requests (the FPM `pm.max_requests` trick) — expected to bring legacy-mode performance to FPM parity.
+
+### Changed (breaking)
+
+- **Unsafe lifecycle combinations now throw at `App::run()` boot instead of emitting a warning.** Two configurations race `$_GET`/`$_POST`/`$_SESSION` across coroutines and have no legitimate use case:
+  - `App::superglobals(true) + App::enableCoroutine(true)` — concurrent coroutines clobber process-wide superglobals.
+  - `App::superglobals(true) + App::hookAll(non-zero)` — hooked I/O can yield mid-request, exposing process-wide superglobal mutations to other coroutines.
+  Pre-v0.2.27 these emitted a `[lifecycle]` warning to `debug.log` but didn't refuse; in practice the warning was invisible to anyone not actively reading the debug log. v0.2.27 fails loud at boot with a `RuntimeException` pointing to `/coroutines#lifecycle-modes`. The supported lifecycle matrix is unchanged — only the enforcement got stricter.
+
+### Backwards compatibility
+
+- **`superglobals(false)` (coroutine mode):** unchanged. Superglobals are intentionally not populated (process-wide writes would race across coroutines). All existing coroutine-mode code keeps working.
+- **`superglobals(true)`:** newly populated PHP superglobals are an addition, not a removal. Code that read `$g->get` keeps working; code that read `$_GET` (previously empty) now works too. The `$g->session` alias is a fix to an existing drift bug, not a behaviour change for any code that was already using one consistent name.
+- **Mirror code in `zeal_session_*`** (v0.2.22) is now technically redundant in superglobals mode (both names point at the same array) but kept in place as defense-in-depth and to preserve the existing API contract.
+- **Apps deliberately running an unsafe lifecycle combination (e.g., for security audits)** will now refuse to boot. The supported mode matrix at `/coroutines#lifecycle-modes` covers every safe configuration. Audit tooling that needs the unsafe path can fork and remove the throw temporarily.
+
+### Tests
+
+- 9 new integration tests in `SuperglobalsParityTest` + 6 new unit tests in `AppConfigurablesTest` pinning the lifecycle-refusal contract (3 unsafe-combo throws + 3 safe-combo non-throws).
+- Full suite: 391 unit + 156 integration tests pass. PHPStan level 10 clean.
+
+### Known issues
+
+- **Symfony sessions under `superglobals(false)` coroutine mode are not concurrency-safe (zealphp-symfony bridge).** Sessions round-trip correctly request-to-request in sequential / low-concurrency operation, but concurrent requests carrying *different* `PHPSESSID`s can cross-contaminate (request A observing request B's session). Root cause is architectural, not session-specific: Symfony's container services (`AbstractSessionListener`, security token storage, etc.) are per-worker singletons booted once per worker, and they are not coroutine-aware — when OpenSwoole interleaves coroutines on one worker, those shared singletons race. ZealPHP's own per-coroutine `RequestContext` (`$g`) isolation is correct; the leak is in Symfony's shared service state. **Mitigation until a coroutine-aware container lands:** run the bridge with `App::enableCoroutine(false)` (one request at a time per worker; scale via worker count, FPM-style) — or use Mixed-mode `superglobals(true) + processIsolation(false)` (this release), where native `$_SESSION` is the canonical store and the same per-worker-serialisation applies. Coroutine-per-request concurrency for stateful Symfony apps is tracked for a future release.
+
 ## [0.2.26] - 2026-05-19
 
 Closes [issue #15](https://github.com/sibidharan/zealphp/issues/15): v0.2.25's blanket `allowed_classes => false` on session-unserialize converted any `stdClass` (the default `json_decode()` shape) into `__PHP_Incomplete_Class`, breaking real apps that stash OAuth token responses or API profile payloads in `$_SESSION`. The hardening was too tight.

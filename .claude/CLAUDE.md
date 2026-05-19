@@ -100,14 +100,16 @@ Every inbound request flows through these layers (defined across multiple files)
 
 `G::instance()` (`src/G.php`) is the per-request global state container. Its behaviour depends on the mode:
 
-| Mode | `G::instance()` returns |
-|------|------------------------|
-| Superglobals ON | A single process-wide singleton; `$g->session` proxies to `$_SESSION`, `$g->get` to `$_GET`, etc. via `$GLOBALS` |
-| Superglobals OFF | A per-coroutine instance stored in `OpenSwoole\Coroutine::getContext()` — each coroutine has isolated state |
+| Mode | `G::instance()` returns | `$_GET` / `$_SESSION` etc. |
+|------|------------------------|----------------------------|
+| Superglobals ON | A single process-wide singleton. `$g->session` is **aliased** to `$_SESSION` via `unset()`-on-declared-property + `__get`/`__set` proxy — they're the same array, mutations cross over immediately (v0.2.27). `$g->get`, `$g->post` etc. are declared typed properties populated from the OpenSwoole request, ALSO populated as `$GLOBALS['_GET']` etc. (v0.2.27 fix). | Populated per request from OpenSwoole's `$request->*`. Use them directly OR via `$g->X` — both work, both see the same data |
+| Superglobals OFF | A per-coroutine instance stored in `OpenSwoole\Coroutine::getContext()` — each coroutine has isolated state | NOT populated. Process-wide writes would race across coroutines. Use `$g->X` exclusively |
 
-The **demo app uses `superglobals(false)` (coroutine mode)**. This is now the recommended default for new projects.
+The **demo app uses `superglobals(false)` (coroutine mode)**. This is the recommended default for new projects.
 
-**Canonical `$g` vs `$_*` parity rule** — `template/pages/coroutines.php#state-parity` is the single source of truth: **use `$g->get` / `$g->post` / `$g->cookie` / `$g->server` / `$g->session`. It works identically in both modes.** Under `superglobals(true)` the framework bridges `$g->get` to `$GLOBALS['_GET']` so both forms are equivalent; under `superglobals(false)` the superglobals are NOT populated per request (they're process-wide arrays — writes leak across coroutines), so only the `$g->X` form is safe. Recipes and migration examples in the website link to `/coroutines#state-parity` rather than restating this rule.
+**v0.2.27 superglobal contract** — `App::superglobals(true)` now lives up to its name. Both `$_GET` / `$_SESSION` AND `$g->get` / `$g->session` are populated per request, and `$_SESSION ↔ $g->session` is an alias (writes through one are visible through the other). This restores v0.1.x behaviour that was dropped during the Dec 2024 declared-property refactor (commits `327e180` + `900c18a`). The implementation lives in three places: `src/App.php:3565+` (populates `$GLOBALS['_GET']` family), `src/Session/SessionManager.php:159` (`unset($g->session)` after `session_start()`), and `src/RequestContext.php` `__get`/`__set` (symmetric superglobal-key mapping `session ↔ _SESSION` etc.). Tests pin the contract: `tests/Integration/SuperglobalsParityTest.php`.
+
+**Canonical `$g` vs `$_*` parity rule** — `template/pages/coroutines.php#state-parity` is the single source of truth: **use `$g->get` / `$g->post` / `$g->cookie` / `$g->server` / `$g->session`. It works identically in both modes.** In `superglobals(true)` mode the framework also populates the matching `$_*` superglobals (v0.2.27), so code reading `$_GET` works too. In `superglobals(false)` mode the superglobals are NOT populated per request (process-wide arrays — writes leak across coroutines), so only the `$g->X` form is safe. Recipes and migration examples link to `/coroutines#state-parity` rather than restating this rule.
 
 ### Lifecycle: static config → `init()` → instance routing → `run()`
 
@@ -149,10 +151,12 @@ Historically `App::superglobals()` bundled four decisions into one flag. As of v
 | **In-process + sync** | true | false | false | 0 | Same shape as Mixed-mode — the "scheduler off, no CGI" combo |
 | **Coroutine without HOOK_ALL** | false | false | true | 0 | Per-request coroutine isolation but no auto I/O hooks (e.g. testing, custom hooks) |
 
-**Unsafe combinations** — `App::run()` emits a `[lifecycle]` warning to the debug log but does not refuse:
+**Unsafe combinations** — `App::run()` **throws `RuntimeException` at boot** (v0.2.27+). Pre-v0.2.27 these emitted a `[lifecycle]` warning to `debug.log` but didn't refuse; in practice the warning was invisible and the race-prone configuration is how cross-request state-leak bugs ship to production. Fail loud, fail fast:
 
-- `superglobals(true) + enableCoroutine(true)` — process-wide `$_GET`/`$_POST`/`$_SESSION` arrays will race across concurrent coroutines (this is exactly the bug per-coroutine `$g` was designed to avoid).
+- `superglobals(true) + enableCoroutine(true)` — process-wide `$_GET`/`$_POST`/`$_SESSION` arrays would race across concurrent coroutines (this is exactly the bug per-coroutine `$g` was designed to avoid).
 - `superglobals(true) + hookAll(non-zero)` — hooked I/O can yield mid-request, exposing process-wide superglobal mutations to other coroutines.
+
+Apps that need to run one of these for security-audit / debugging purposes can fork and remove the throw at `App::validateLifecycleCombination()`. The supported matrix above covers every safe configuration.
 
 The default coupling — `null` everywhere — preserves the historical behaviour for any app that doesn't touch these knobs. The [zealphp-symfony](https://github.com/sibidharan/zealphp-symfony) bridge uses `superglobals(true) + processIsolation(false) + sessionLifecycle(false)` to get the Mixed-mode lifecycle.
 

@@ -113,8 +113,13 @@ class RequestContext
         if (App::$superglobals) {
             if (in_array($key, ['get', 'post', 'cookie', 'files', 'server', 'request', 'env', 'session'], true)) {
                 $superglobalKey = '_' . strtoupper($key);
+                // v0.2.27 — initialize to [] not null. The superglobals are
+                // array-typed; returning null here would cause `$g->session[$k]`
+                // to fatal-error on null array access when read before any
+                // session_*() call. Apache mod_php behaviour: superglobals
+                // are always arrays once populated.
                 if (!isset($GLOBALS[$superglobalKey])) {
-                    $GLOBALS[$superglobalKey] = null;
+                    $GLOBALS[$superglobalKey] = [];
                 }
                 return $GLOBALS[$superglobalKey];
             }
@@ -153,6 +158,20 @@ class RequestContext
     public function __set($key, $value)
     {
         if (App::$superglobals) {
+            // v0.2.27 — symmetric with __get's superglobal-key mapping.
+            // Writing $g->session = $newArray in superglobals mode must hit
+            // $GLOBALS['_SESSION'], not $GLOBALS['session'] (which would
+            // create a useless global named "session"). The pre-v0.2.27
+            // mapping silently dropped writes for the seven superglobal
+            // names; now they round-trip correctly through both __get and
+            // __set when the declared typed property has been unset() (e.g.,
+            // by SessionManager establishing the $g->session ↔ $_SESSION
+            // alias). All other keys still go to $GLOBALS[$key] for legacy
+            // `$g->custom = $val` patterns.
+            if (in_array($key, ['get', 'post', 'cookie', 'files', 'server', 'request', 'env', 'session'], true)) {
+                $GLOBALS['_' . strtoupper($key)] = $value;
+                return;
+            }
             $GLOBALS[$key] = $value;
             return;
         }

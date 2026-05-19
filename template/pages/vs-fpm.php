@@ -8,7 +8,7 @@
 
 <div class="bench-method" style="margin-top:1.5rem">
   <strong>TL;DR</strong> &nbsp;|&nbsp;
-  In coroutine mode, ZealPHP routes a request in microseconds — there's no fork, no IPC, no nginx hop. In legacy CGI mode (the one that runs unmodified WordPress), you pay a per-include fork cost that's comparable to FPM's per-request handoff cost. The difference: with ZealPHP you only pay it for the legacy file; routing, middleware, API, WebSocket, and streaming stay in-process.
+  In coroutine mode, ZealPHP routes a request in microseconds — there's no fork, no IPC, no nginx hop. The current legacy CGI bridge (for unmodified WordPress) pays a per-include <code>proc_open</code> cost (~30–50 ms) that's an order of magnitude slower than FPM today — Apache/FPM keep the PHP interpreter alive between requests, we don't yet. The roadmap fix is a built-in persistent CGI worker pool (v0.3.0) that brings legacy-mode performance to FPM parity. Coroutine-mode performance is already 5–10× FPM.
 </div>
 
 <!-- ────────────────────────────────────────────────────────────── -->
@@ -109,14 +109,57 @@ browser</code></pre>
 <!-- 3. The CGI bridge — why it exists, what it costs               -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 style="margin:3rem 0 1rem">The CGI bridge is the price of compatibility</h2>
+<h2 style="margin:3rem 0 1rem">Why Apache/FPM don't pay this cost (and how the CGI bridge will catch up)</h2>
 
 <p style="color:#cbd5e1;line-height:1.65">
-  When you set <code>App::superglobals(true)</code>, ZealPHP turns OFF the coroutine scheduler and switches <code>App::include()</code> to dispatch each legacy <code>public/*.php</code> file through a child process via <code>proc_open</code> (<a href="https://github.com/sibidharan/zealphp/blob/master/src/cgi_worker.php"><code>src/cgi_worker.php</code></a>). That's exactly how Apache's prefork MPM runs PHP. It exists for one reason: <strong>unmodified WordPress, Drupal, and other <code>define()</code>-heavy code that assumes a fresh process per request just works.</strong>
+  The first version of this page implied <strong>"~30–50 ms is the same order of magnitude as FPM"</strong>. That was wrong, and worth correcting honestly. FPM's per-request cost is closer to <strong>~1–3 ms</strong> — an order of magnitude less than our current CGI bridge. The reason isn't that FPM is doing anything magical; it's that Apache + FPM are <em>not spawning a PHP interpreter per request</em>. Three architectures, three startup stories:
+</p>
+
+<table class="ztable">
+  <tr>
+    <th style="text-align:left">Stack</th>
+    <th style="text-align:left">PHP interpreter lifecycle</th>
+    <th style="text-align:right">Per-request startup cost</th>
+  </tr>
+  <tr>
+    <td><strong>Apache + mod_php</strong></td>
+    <td>PHP loaded INTO the Apache worker as a shared library. Interpreter already in memory when request arrives.</td>
+    <td style="text-align:right;color:#fde68a">~0 ms (no spawn)</td>
+  </tr>
+  <tr style="background:rgba(255,255,255,.02)">
+    <td><strong>nginx + PHP-FPM</strong></td>
+    <td>Pool of pre-forked, long-lived PHP workers. Each handles M requests then recycles (<code>pm.max_requests</code>). nginx hands the request to an idle worker via FastCGI socket.</td>
+    <td style="text-align:right;color:#fde68a">~1–3 ms (FCGI handshake)</td>
+  </tr>
+  <tr>
+    <td><strong>ZealPHP CGI bridge today</strong></td>
+    <td><code>proc_open</code> spawns a <strong>fresh PHP interpreter per request</strong>. Kernel fork + exec + PHP startup + opcache check + autoload + include + execute.</td>
+    <td style="text-align:right;color:#fca5a5">~30–50 ms</td>
+  </tr>
+</table>
+
+<p style="color:#cbd5e1;line-height:1.65;margin-top:1rem">
+  So the bridge cost isn't because legacy code is slow — it's because we're paying PHP's startup cost on every request. Apache and FPM amortise that startup across thousands of requests by keeping the interpreter alive. <strong>We can do the same.</strong>
+</p>
+
+<div style="margin-top:1rem;padding:1rem 1.2rem;background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.25);border-left:3px solid var(--accent);border-radius:var(--radius)">
+  <strong style="color:#fde68a">Roadmap — built-in CGI worker pool (v0.3.0)</strong>
+  <p style="margin:.5rem 0 0;color:#cbd5e1;line-height:1.6;font-size:.95rem">
+    The plan: replace the per-request <code>proc_open</code> with a pool of <em>persistent</em> PHP subprocesses spawned at server start, talking to the main ZealPHP master over Unix sockets. Each worker keeps its PHP interpreter alive between requests, resets globals at the start of each one, and recycles after N requests (the FPM <code>pm.max_requests</code> trick) to prevent <code>define()</code>/class leaks. Expected bridge cost after: <strong>~1–3 ms</strong>, on par with FPM. WordPress and Drupal still get the per-request isolation they need; you just don't pay 30 ms for it.
+  </p>
+  <p style="margin:.6rem 0 0;color:#94a3b8;line-height:1.55;font-size:.85rem">
+    Tracking issue: <a href="https://github.com/sibidharan/zealphp/issues" target="_blank">github.com/sibidharan/zealphp/issues</a>. The current <a href="https://github.com/sibidharan/zealphp/blob/master/src/cgi_worker.php"><code>src/cgi_worker.php</code></a> already does the heavy lifting (env injection, output capture, return-value protocol over stderr) — the change is making the worker long-lived and pool-managed.
+  </p>
+</div>
+
+<h2 style="margin:3rem 0 1rem">Until v0.3.0 — what the CGI bridge buys you today</h2>
+
+<p style="color:#cbd5e1;line-height:1.65">
+  Even with the current 30–50 ms hit, the bridge has an honest place: it exists so <strong>unmodified WordPress, Drupal, and other <code>define()</code>-heavy code that assumes a fresh process per request just works.</strong> Set <code>App::superglobals(true)</code>, ZealPHP turns OFF the coroutine scheduler and switches <code>App::include()</code> to dispatch each legacy <code>public/*.php</code> file through a child process via <code>proc_open</code> (<a href="https://github.com/sibidharan/zealphp/blob/master/src/cgi_worker.php"><code>src/cgi_worker.php</code></a>). Apache prefork MPM semantics.
 </p>
 
 <p style="color:#cbd5e1;line-height:1.65;margin-top:.7rem">
-  This adds ~30–50 ms <code>proc_open</code> latency per legacy file. That's the same order of magnitude as FPM's per-request overhead — and you're getting roughly the same thing: process isolation per request. The honest framing is: <strong>for legacy code, ZealPHP's CGI bridge costs about what FPM costs, not less.</strong> What changes is everything around it:
+  The trade-off is honest: <strong>you pay 30–50 ms only on the legacy file</strong>. Everything else stays in-process at sub-millisecond cost:
 </p>
 
 <ul style="color:#cbd5e1;line-height:1.7;font-size:.95rem;margin-top:.5rem;padding-left:1.5rem">
@@ -128,8 +171,59 @@ browser</code></pre>
 </ul>
 
 <p style="color:#cbd5e1;line-height:1.65;margin-top:.7rem">
-  In other words: <strong>you pay FPM-equivalent cost only on the legacy files</strong>. Everything new you write runs on the fast path. With FPM, every request — new code, old code, an API health check, a static asset proxy — pays the FCGI hop.
+  In other words: <strong>you pay the bridge cost only on the legacy files</strong>. Everything new you write runs on the fast path. With FPM, every request — new code, old code, an API health check, a static asset proxy — pays the FCGI hop.
 </p>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<!-- 3b. The simplest fix: don't use the bridge — be FPM             -->
+<!-- ────────────────────────────────────────────────────────────── -->
+
+<h2 style="margin:3rem 0 1rem">The simplest fix today: Mixed-mode = an FPM pool, minus the operations</h2>
+
+<p style="color:#cbd5e1;line-height:1.65">
+  Here's the part most people miss: <strong>if your legacy app doesn't actually need fresh-process-per-request isolation, you don't need the CGI bridge at all.</strong> Turn off process isolation and run the workers synchronously — ZealPHP becomes a PHP-FPM pool that happens to have an HTTP server built in. No <code>proc_open</code>, no FastCGI socket, no nginx in front. Zero bridge cost, available now (no waiting for the v0.3.0 worker pool).
+</p>
+
+<?php App::render('/components/_code', [
+  'lang' => 'php',
+  'code' => '<?php
+// app.php — ZealPHP configured as a PHP-FPM-equivalent pool
+use ZealPHP\App;
+
+App::superglobals(true);      // $_GET / $_POST / $_SESSION populated (v0.2.27)
+App::processIsolation(false); // no proc_open per include — saves ~30-50ms/req
+App::enableCoroutine(false);  // one request at a time per worker (FPM semantics)
+App::hookAll(0);              // blocking I/O stays blocking (no scheduler)
+
+$app = App::init(\'0.0.0.0\', 8080);
+$app->run();
+
+// Run with a worker count, exactly like pm.max_children:
+//   ZEALPHP_WORKERS=32 php app.php
+',
+]); ?>
+
+<table class="ztable">
+  <tr><th>PHP-FPM</th><th>ZealPHP Mixed-mode</th></tr>
+  <tr><td><code>pm.max_children = 32</code></td><td><code>ZEALPHP_WORKERS=32</code></td></tr>
+  <tr style="background:rgba(255,255,255,.02)"><td>Worker handles one request at a time</td><td><code>enableCoroutine(false)</code> — scheduler off</td></tr>
+  <tr><td>Worker process stays warm between requests</td><td>OpenSwoole workers are long-lived</td></tr>
+  <tr style="background:rgba(255,255,255,.02)"><td>No PHP fork per request (interpreter pre-loaded)</td><td><code>processIsolation(false)</code> — in-process include, <strong>~0 ms</strong></td></tr>
+  <tr><td><code>pm.max_requests = 500</code> (recycle for hygiene)</td><td>OpenSwoole <code>max_request</code> setting</td></tr>
+  <tr style="background:rgba(255,255,255,.02)"><td><code>$_GET</code> / <code>$_SESSION</code> native</td><td>Populated per request (v0.2.27)</td></tr>
+  <tr><td>Needs nginx/Apache in front for HTTP</td><td style="color:var(--accent);font-weight:700">HTTP server built in — no front proxy needed</td></tr>
+</table>
+
+<p style="color:#cbd5e1;line-height:1.65;margin-top:1rem">
+  This is the apples-to-apples FPM comparison and ZealPHP wins it cleanly: <strong>same per-request execution model, same worker semantics, but no FastCGI socket hop and no separate web server to run.</strong> The 30–50 ms CGI bridge cost was never mandatory — it's the price of <em>true process isolation per request</em>, which only WordPress/Drupal-class apps with <code>define()</code> collisions actually need.
+</p>
+
+<div style="margin-top:1rem;padding:1rem 1.2rem;background:rgba(148,163,184,.08);border-left:3px solid #94a3b8;border-radius:var(--radius)">
+  <strong style="color:#cbd5e1">When you still need the CGI bridge</strong>
+  <p style="margin:.5rem 0 0;color:#94a3b8;line-height:1.55;font-size:.9rem">
+    Mixed-mode reuses the worker's PHP heap across requests, so <code>define()</code>, declared classes, and <code>ini_set()</code> changes from request N persist into request N+1 on the same worker. For unmodified WordPress / Drupal that re-<code>define()</code> constants every request, you need <code>processIsolation(true)</code> (the CGI bridge) so each request gets a clean interpreter — OR lean on OpenSwoole <code>max_request</code> recycling + <a href="/middleware">IniIsolationMiddleware</a>. SNA Labs runs Mixed-mode in production with worker recycling; see the <a href="/case-studies/sna-labs#phase-2-superglobals">case study</a>.
+  </p>
+</div>
 
 <!-- ────────────────────────────────────────────────────────────── -->
 <!-- 4. PHP-FPM worker count vs ZealPHP worker count                -->
