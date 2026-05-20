@@ -7,6 +7,12 @@ namespace ZealPHP\Session\Handler;
  * Reads/writes session data using the same key format as PHP's phpredis
  * session handler (PHPREDIS_SESSION:{session_id}), so sessions created
  * by Apache/mod_php are readable by ZealPHP and vice versa.
+ *
+ * Every method requires a live Redis connection, so it is verified against a
+ * real server rather than unit tests — excluded from coverage measurement
+ * (no offline seam without shipping a Redis mock).
+ *
+ * @codeCoverageIgnore
  */
 class RedisSessionHandler implements \SessionHandlerInterface
 {

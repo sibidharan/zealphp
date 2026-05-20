@@ -7,6 +7,12 @@
 //
 // Protocol: metadata is written to stderr FIRST (as a single JSON line),
 // then body streams to stdout. This enables SSE and streaming responses.
+//
+// This is a standalone subprocess entry point (not a class), already excluded
+// from PHPStan; its body runs in a forked `php cgi_worker.php` process and is
+// verified by the integration suite + tests/Unit/CgiWorkerTest, not measured
+// as a coverage unit.
+// @codeCoverageIgnoreStart
 
 // Load the Composer autoloader so the included file has the SAME class /
 // global-function surface it would in fork mode (which inherits the warm
@@ -332,3 +338,5 @@ try {
     $__z_status = 500;
     echo '<pre>' . htmlspecialchars($__z_err->getMessage()) . "\n" . htmlspecialchars($__z_err->getTraceAsString()) . '</pre>';
 }
+
+// @codeCoverageIgnoreEnd

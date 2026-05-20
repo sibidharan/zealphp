@@ -3026,6 +3026,12 @@ class App
      * without a confirmation line (prior behaviour), never silently broken.
      *
      * @param string $verb e.g. "Restarted" or "Started ZealPHP in detached mode"
+     *
+     * Forks + polls the daemon PID file and exits in the child — neither
+     * unit-testable in-process (pcntl_fork/exit kills the test runner) nor
+     * dumpable as a subprocess (the OpenSwoole server suppresses the PHP
+     * shutdown coverage flush). Verified manually + by the CLI behaviour.
+     * @codeCoverageIgnore
      */
     private static function forkStartupReporter(string $pidFile, int $port, string $verb): void
     {

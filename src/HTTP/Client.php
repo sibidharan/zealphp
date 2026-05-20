@@ -8,6 +8,13 @@ use ZealPHP\HTTP\Client\NetworkException;
 use ZealPHP\HTTP\Client\RequestException;
 use OpenSwoole\Core\Psr\Response;
 
+/**
+ * Coroutine HTTP client (PSR-18). Every method performs real network I/O via
+ * OpenSwoole's coroutine client, so it is exercised by live integration use,
+ * not unit tests — excluded from coverage measurement (no offline seam).
+ *
+ * @codeCoverageIgnore
+ */
 class Client implements ClientInterface
 {
     private int $timeout;
