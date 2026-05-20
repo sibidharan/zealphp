@@ -1,0 +1,6 @@
+# local virtualenv — recreate with: python3 -m venv .venv && .venv/bin/pip install aiohttp
+.venv/
+# scratch forum-reply draft — never commit/push
+reply-to-deep.md
+# sample dumps from --csv runs
+*.csv
