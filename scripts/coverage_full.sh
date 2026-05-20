@@ -77,6 +77,9 @@ run_pass() {
     fi
     if [ "$runner" = suite ]; then
         ZEALPHP_TEST_PORT="$PORT" php vendor/bin/phpunit tests/Integration/ >/dev/null 2>&1 || true
+        # Exercise WebSocket endpoints (no integration tests cover them) so the
+        # onOpen/onMessage/onClose dispatch closures count.
+        "${PHP[@]}" scripts/ws_exercise.php "$PORT" >/dev/null 2>&1 || true
     else
         local jar; jar="$(mktemp)"
         for path in "${SAFE_PATHS[@]}"; do
