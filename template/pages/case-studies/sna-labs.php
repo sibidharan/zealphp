@@ -5,7 +5,7 @@
     <p style="font-size:.85rem;color:#a8a29e;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem;font-weight:600">Case study · Production migration</p>
     <h1 class="section-title" style="font-size:2.1rem;margin-bottom:.5rem;color:#fff;letter-spacing:-.01em">From Apache to ZealPHP: How We Made the Same PHP Codebase Run on Two Servers Simultaneously</h1>
     <p class="section-desc" style="font-size:1.05rem;max-width:780px;color:var(--text-light);font-style:italic">
-      41 commits. 806 files changed. One custom Rust extension. Zero downtime.
+      41 commits. ~2,300 lines of app code. One custom Rust extension. Zero downtime.
     </p>
   </div>
 </section>
@@ -95,16 +95,41 @@ PHP,
 <p>This is where the migration gets interesting.</p>
 <p>In Apache's process-per-request model, PHP superglobals (<code>$_SESSION</code>, <code>$_SERVER</code>, <code>$_GET</code>, <code>$_POST</code>) are naturally isolated. Each request gets its own process with its own copy of these variables. When the request ends, the process dies and everything is garbage collected.</p>
 <p>In ZealPHP's shared-process model, <strong>all requests share the same PHP process</strong>. If request A writes to <code>$_SESSION['username'] = 'alice'</code> and request B reads <code>$_SESSION['username']</code>, they'd get each other's data. This is a catastrophic data leak.</p>
-<p>The solution: the <code>$g</code> context bridge.</p>
+<p>The solution was already built into ZealPHP: <code>$g</code> — the <code>RequestContext</code>.</p>
 
-<h3 style="margin:1.5rem 0 .5rem">The <code>$g</code> bridge pattern</h3>
-<p>In <code>load.php</code> — the file included by every page and API endpoint — we added one critical line:</p>
+<h3 style="margin:1.5rem 0 .5rem">The <code>$g</code> context — ZealPHP's RequestContext</h3>
+<p>ZealPHP's <code>RequestContext</code> (aliased as <code>$g</code>) provides per-coroutine isolated properties that mirror PHP's superglobals:</p>
 <?php App::render('/components/_code', [
-  'label' => 'load.php — one line that makes Apache parity work',
+  'label' => 'ZealPHP RequestContext — declared properties',
+  'code'  => <<<'PHP'
+public array $server  = [];
+public array $get     = [];
+public array $post    = [];
+public array $request = [];
+public array $cookie  = [];
+public array $files   = [];
+public array $session = [];
+PHP,
+]); ?>
+<p>In coroutine mode, <code>RequestContext::instance()</code> returns a per-coroutine instance from <code>Coroutine::getContext()</code> — each request gets its own <code>$g</code> with isolated state, automatically freed when the coroutine ends.</p>
+<p>A natural question: <strong>doesn't <code>$g->get</code> already refer to <code>$_GET</code> automatically?</strong> No. These are <em>declared</em> public properties — plain arrays. ZealPHP populates them from the OpenSwoole request object on every incoming request:</p>
+<?php App::render('/components/_code', [
+  'label' => 'Inside ZealPHP App.php on("request") handler',
+  'code'  => <<<'PHP'
+$g->get    = $request->get    ?? [];
+$g->post   = $request->post   ?? [];
+$g->cookie = $request->cookie ?? [];
+$g->server = /* built from $request->server + $request->header */;
+PHP,
+]); ?>
+<p><code>$_GET</code> is never involved. The <code>RequestContext</code> class does have a <code>__get</code> magic method that maps to <code>$GLOBALS['_GET']</code> in superglobals mode — but that only fires for <em>undeclared</em> properties. Since <code>get</code>, <code>post</code>, <code>server</code> etc. are declared properties, PHP accesses them directly and the magic method never runs.</p>
+<p>So under ZealPHP, <code>$g->get</code> works natively — the framework handles everything. But <strong>under Apache, ZealPHP isn't loaded at all.</strong> There's no <code>RequestContext</code> class, no OpenSwoole, no coroutines. We needed a shim:</p>
+<?php App::render('/components/_code', [
+  'label' => 'load.php — the dual-runtime shim (Apache fallback is the only "bridge" part)',
   'code'  => <<<'PHP'
 $GLOBALS['g'] = $g = class_exists('\ZealPHP\RequestContext', false)
-    ? \ZealPHP\RequestContext::instance()
-    : (object)[
+    ? \ZealPHP\RequestContext::instance()    // ZealPHP: populated by framework
+    : (object)[                               // Apache: references to superglobals
         "get"     => &$_GET,
         "post"    => &$_POST,
         "server"  => &$_SERVER,
@@ -115,8 +140,8 @@ $GLOBALS['g'] = $g = class_exists('\ZealPHP\RequestContext', false)
       ];
 PHP,
 ]); ?>
-<p>This single line is the foundation of Apache parity. When running under Apache, <code>$g->get</code> is literally a reference to <code>$_GET</code> — zero overhead, identical behavior. When running under ZealPHP, <code>$g->get</code> is a per-coroutine property from <code>RequestContext::instance()</code> — isolated, safe, and scoped to the current request.</p>
-<p>Application code that previously did <code>$_GET['id']</code> now does <code>$g->get['id']</code>. It works identically in both environments.</p>
+<p>The Apache fallback creates a plain PHP object where <code>$g->get</code> is a <em>reference</em> to <code>$_GET</code> — so reads and writes pass through to the superglobal. Under ZealPHP, <code>$g->get</code> is a per-coroutine array populated from the async request. Same API, completely different mechanisms underneath.</p>
+<p>The bulk of the migration work was replacing every <code>$_GET</code>, <code>$_POST</code>, <code>$_SERVER</code>, and <code>$_SESSION</code> reference with <code>$g->get</code>, <code>$g->post</code>, <code>$g->server</code>, and <code>$g->session</code>. That's 35 commits of mechanical changes — the code moved <em>toward</em> ZealPHP's native pattern, and the 5-line Apache shim kept backward compatibility.</p>
 <p>Similarly, <code>$_SESSION</code> access was wrapped in a <code>Session</code> class:</p>
 <?php App::render('/components/_code', [
   'label' => 'Session class — same API, two runtime backings',
@@ -126,17 +151,12 @@ Session::set('username', $v)  // maps to $GLOBALS['g']->session['username'] = $v
 Session::isset('username')    // maps to isset($GLOBALS['g']->session['username'])
 PHP,
 ]); ?>
-<p><strong>Is <code>$g</code> an anti-pattern?</strong> No. It's a pragmatic bridge pattern. The alternatives were:</p>
-<ol style="margin:.5rem 0 1rem;padding-left:1.4rem">
-  <li><strong>Rewrite every file to use <code>$request</code>/<code>$response</code> objects</strong> — thousands of changes, all at once, no incremental path</li>
-  <li><strong>Use ZealPHP's superglobals mode</strong> — emulates <code>$_GET</code>/<code>$_POST</code> but breaks down under concurrent requests</li>
-  <li><strong>The <code>$g</code> bridge</strong> — one change per access site, works in both modes, incrementally adoptable</li>
-</ol>
-<p>The <code>$g</code> pattern let us migrate file by file over 35 commits instead of needing a single big-bang rewrite.</p>
+<p><strong>Is <code>$g</code> an anti-pattern?</strong> No — <code>$g</code> is ZealPHP's native request context. The application code was already moving <em>toward</em> the framework's design, not away from it. The only "bridge" part is the 5-line Apache fallback object, which exists solely so the same code runs when ZealPHP isn't loaded.</p>
+<p>ZealPHP also offers a superglobals mode (<code>App::superglobals(true)</code>) that auto-populates <code>$_GET</code>/<code>$_POST</code> etc. per request — but that breaks under concurrent coroutines and defeats the purpose of async. Using <code>$g->get</code> directly is the recommended pattern. The migration happened file by file over 35 commits — no big-bang rewrite needed.</p>
 
 <div style="margin:1.25rem 0;padding:1rem 1.25rem;background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.25);border-left:3px solid #f59e0b;border-radius:8px">
-  <strong style="color:#fde68a">This bridge is now a first-class ZealPHP pattern.</strong>
-  <p style="margin:.5rem 0 0;line-height:1.6">What started as our <code>load.php</code> hack is now shipped and documented in the framework as the canonical <strong>dual-runtime Apache-parity bridge</strong> — a standalone, dependency-free <code>compat/g.php</code> (with a drift-guard test) that any project running on both Apache and ZealPHP can drop in. It's not a workaround for a limitation; it's the only design that <em>can</em> work across the "with ZealPHP / without ZealPHP" boundary, because on Apache the framework simply isn't loaded. See <a href="/legacy-apps#dual-runtime">the dual-runtime guide</a> for the full pattern and why it can't be a runtime feature. (Note: this is the <strong>coroutine-mode</strong> story — distinct from v0.2.27's <a href="/vs-fpm">superglobals(true) drop-in LAMP mode</a>, where ZealPHP-only apps can read <code>$_GET</code>/<code>$_SESSION</code> directly and skip the shim.)</p>
+  <strong style="color:#fde68a">The Apache fallback is now a first-class ZealPHP artifact.</strong>
+  <p style="margin:.5rem 0 0;line-height:1.6">What started as our <code>load.php</code> shim is now shipped and documented in the framework as the canonical <strong>dual-runtime Apache-parity bridge</strong> — a standalone, dependency-free <code>compat/g.php</code> (with a drift-guard test) that any project running on both Apache and ZealPHP can drop in. It's not a workaround for a limitation; it's the only design that <em>can</em> work across the "with ZealPHP / without ZealPHP" boundary, because on Apache the framework simply isn't loaded. See <a href="/legacy-apps#dual-runtime">the dual-runtime guide</a> for the full pattern and why it can't be a runtime feature. (Note: this is the <strong>coroutine-mode</strong> story — distinct from v0.2.27's <a href="/vs-fpm">superglobals(true) drop-in LAMP mode</a>, where ZealPHP-only apps can read <code>$_GET</code>/<code>$_SESSION</code> directly and skip the shim.)</p>
 </div>
 
 <h2 id="phase-3-die" style="margin:2rem 0 .75rem">Phase 3: Killing <code>die()</code> and <code>exit()</code></h2>
@@ -400,19 +420,21 @@ PHP,
 </ul>
 
 <h2 style="margin:2rem 0 .75rem">The numbers</h2>
-<table class="ztable" style="margin-bottom:1.5rem">
+<table class="ztable" style="margin-bottom:1rem">
   <tr><th>Metric</th><th>Value</th></tr>
   <tr><td>labs-dashboard-web commits</td><td>41 (since origin/master)</td></tr>
   <tr><td>labs-devops commits</td><td>9</td></tr>
-  <tr><td>Files changed (dashboard)</td><td>806</td></tr>
-  <tr><td>Lines added</td><td>84,112</td></tr>
-  <tr><td>Lines removed</td><td>1,299</td></tr>
+  <tr><td><strong>App code changed</strong></td><td><strong>237 files, +2,298 / −1,189 lines</strong></td></tr>
+  <tr><td>Vendor dependencies added</td><td>563 files, +77,764 lines (ZealPHP framework, openswoole stubs, composer.lock)</td></tr>
+  <tr><td>Docs &amp; migration plans</td><td>6 files, +4,050 lines</td></tr>
+  <tr><td>Total (all categories)</td><td>806 files, +84,112 / −1,299 lines</td></tr>
   <tr><td>SSE endpoints migrated</td><td>7</td></tr>
   <tr><td>Reverts during migration</td><td>3</td></tr>
   <tr><td>Custom extensions built</td><td>1 (zealphp-mongodb, Rust)</td></tr>
   <tr><td><code>die()</code>/<code>exit()</code> calls eliminated</td><td>All on HTTP hot paths</td></tr>
   <tr><td><code>$_SESSION</code> references replaced</td><td>All</td></tr>
 </table>
+<p style="color:var(--text-muted);font-size:.92rem;margin-bottom:1.5rem">The headline number (84K lines) is 92% vendor — the ZealPHP framework and its dependencies committed into the repo. The actual migration work touched <strong>237 files with ~2,300 lines of app code changes</strong>.</p>
 
 <h2 style="margin:2rem 0 .75rem">Where it runs today</h2>
 <p>Both servers are live right now on the same machine (labsdev — 172.30.0.3):</p>
