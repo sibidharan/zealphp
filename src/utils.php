@@ -230,6 +230,14 @@ function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
         return null;
     }
 
+    // The async sink spawns a detached `go()` consumer that loops on
+    // Channel::pop() until the channel closes. It only runs when async logging
+    // is enabled inside a live coroutine scheduler — never reached by the unit
+    // suite (no scheduler) and deliberately disabled in every coverage server
+    // pass (ZEALPHP_LOG_ASYNC=0), since exercising the consumer risks a
+    // pop()-loop deadlock at coverage-dump time. Verified by live integration
+    // use, not measured as a coverage unit.
+    // @codeCoverageIgnoreStart
     $queue = new \OpenSwoole\Coroutine\Channel(8192);
     $sinks[$path] = $queue;
 
@@ -265,6 +273,7 @@ function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
     }
 
     return $queue;
+    // @codeCoverageIgnoreEnd
 }
 
 function log_write(string $message, string $kind = 'debug'): void
@@ -351,6 +360,12 @@ function coprocess($taskLogic, $wait = true)
     if(App::$superglobals == false){
         throw new \Exception("Superglobals are disabled which enables coroutines, cannot use coprocess inside coroutine, use coroutines directly.");
     }
+    // The body forks a child OpenSwoole\Process with its own coroutine runtime.
+    // It only runs in superglobals(true)+enableCoroutine(false) mode and cannot
+    // be exercised in-process by the coverage harness (the coroutine pass — the
+    // assertion gate — is exactly the mode where coprocess() is refused above;
+    // the mixed/cgi exercise passes never call it). Verified by live use.
+    // @codeCoverageIgnoreStart
     $worker = new Process(function (Process $worker) use ($taskLogic) {
         try{
             ob_start();
@@ -381,11 +396,17 @@ function coprocess($taskLogic, $wait = true)
         $data   = '';
     }
     return $data;
+    // @codeCoverageIgnoreEnd
 }
 
 /**
+ * Thin alias for {@see coprocess()} — same fork-a-coroutine-child semantics, so
+ * it shares coprocess()'s untestability (forks a child process; only valid in
+ * the superglobals(true)+enableCoroutine(false) mode the coverage gate excludes).
+ *
  * @param callable $taskLogic
  * @return mixed
+ * @codeCoverageIgnore
  */
 function coproc($taskLogic){
     return coprocess($taskLogic);
