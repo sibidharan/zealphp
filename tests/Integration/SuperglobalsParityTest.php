@@ -168,6 +168,16 @@ class SuperglobalsParityTest extends PhpUnitTestCase
             '$g->session and $_SESSION must be the same array in superglobals mode');
     }
 
+    public function testGetAliasMutationCrosses(): void
+    {
+        // issue #17 — $g->get must be a LIVE reference to $_GET in superglobals
+        // mode, not a per-request snapshot. Mutating either after dispatch must
+        // be visible through the other.
+        $r = $this->probe('foo=bar');
+        $this->assertTrue((bool) $r['json']['get_is_aliased'],
+            'Writes via $_GET must be visible through $g->get and vice versa (issue #17)');
+    }
+
     public function testSessionCounterPersistsAcrossRequests(): void
     {
         $jar = tempnam(sys_get_temp_dir(), 'zsg_jar_');

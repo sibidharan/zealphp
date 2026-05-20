@@ -2,16 +2,23 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.30] - 2026-05-20
+
+Closes the rest of [issue #17](https://github.com/sibidharan/zealphp/issues/17) (GURU PRASANTH M, v0.2.29): the proc-mode CGI autoloader gap, the CLI `restart`/`start -d` output races, and — the headline — full superglobal aliasing so `$g->get` is genuinely the same array as `$_GET` in superglobals mode (not a per-request snapshot).
 
 ### Fixed
 
+- **`$g->get` / `$g->post` / `$g->cookie` / `$g->files` / `$g->server` / `$g->request` are now LIVE ALIASES of the superglobals in `superglobals(true)` mode** ([#17](https://github.com/sibidharan/zealphp/issues/17)). Previously the declared `public array $get = []` property shadowed `RequestContext::__get()`, so the per-request handler populated `$g->get` and `$GLOBALS['_GET']` as **separate arrays** — mutating `$_GET` after dispatch wasn't visible through `$g->get` (and vice versa). The handler now `unset()`s those declared slots after populating the `$GLOBALS['_*']` family, so reads AND writes route through the `__get`/`__set` proxy by reference — the same live-alias mechanism `$g->session` has had since v0.2.27. In superglobals mode the two names are now genuinely the same array. (Coroutine mode is unchanged: superglobals stay unpopulated, `$g->X` is the per-coroutine source of truth.) Pinned by `testGetAliasMutationCrosses` in `tests/Integration/SuperglobalsParityTest.php`. *(Supersedes the initial "working as designed" triage on the issue — the reporter was right that separate arrays are wrong for superglobals mode.)*
 - **Proc-mode CGI worker now loads the Composer autoloader** ([#17](https://github.com/sibidharan/zealphp/issues/17)). `src/cgi_worker.php` (the `proc_open` subprocess used by `cgiMode('proc')`) never required `vendor/autoload.php`, so `\ZealPHP\App` and other project classes were undefined inside legacy `public/*.php` files dispatched through it. Fork mode (`cgiMode('fork')`) already had them via copy-on-write inheritance of the warm worker — this closes the inconsistency. Resolves both repo-root and installed-as-dependency vendor layouts; missing autoloader stays non-fatal (unmodified WordPress/Drupal ships its own bootstrap). Guarded by `tests/Unit/CgiWorkerAutoloadTest.php`.
 - **CLI `restart` no longer prints its confirmation over the next shell prompt** ([#17](https://github.com/sibidharan/zealphp/issues/17)). The watcher was a detached child that outlived the terminal-attached parent, which daemonized and exited first — so `Restarted (pid X, port Y)` landed after the prompt returned. The fork is now flipped: the terminal-attached process polls for the new daemon's PID file and prints the confirmation last, while the child boots the (self-daemonizing) server.
 
 ### Added
 
 - **`start -d` / `--daemonize` now prints a confirmation** ([#17](https://github.com/sibidharan/zealphp/issues/17)): `Started ZealPHP in detached mode (pid X, port Y).` Previously detached starts returned silently. Shares the same `forkStartupReporter()` path as the `restart` fix above.
+
+### Tests
+
+- 400 unit + 157 integration tests pass (new `testGetAliasMutationCrosses`). PHPStan level 10 clean.
 
 ## [0.2.29] - 2026-05-20
 

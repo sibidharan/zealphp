@@ -3886,6 +3886,18 @@ HELP;
                 $GLOBALS['_FILES']   = $files;
                 $GLOBALS['_SERVER']  = $srvFinal;
                 $GLOBALS['_REQUEST'] = $g->request;
+                // v0.2.30 (issue #17) — make $g->get/post/cookie/files/server/
+                // request LIVE ALIASES of the superglobals, not per-request
+                // snapshots. A declared `public array $get` is accessed
+                // directly and shadows __get/__set, so a $_GET mutation after
+                // dispatch wasn't visible through $g->get (and vice versa).
+                // unset() the declared typed slots so reads/writes route
+                // through RequestContext::__get()/__set(), which proxy to
+                // $GLOBALS['_GET'] etc. by reference — the same live-alias
+                // mechanism the session manager already applies to
+                // $g->session. In superglobals mode the two names are now
+                // genuinely the same array.
+                unset($g->get, $g->post, $g->cookie, $g->files, $g->server, $g->request);
             }
 
             $serverRequest  = new \ZealPHP\HTTP\LazyServerRequest($request->parent);

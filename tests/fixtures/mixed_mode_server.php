@@ -52,6 +52,19 @@ $app->route('/__parity_probe', function () {
                 return $matches_a && $matches_b;
             })()
         ),
+        // v0.2.30 (issue #17) — $g->get must be a LIVE alias of $_GET, not a
+        // snapshot. Mutating $_GET after dispatch must show through $g->get
+        // and vice versa.
+        'get_is_aliased'          => (
+            (function () {
+                $g_ctx = \ZealPHP\RequestContext::instance();
+                $_GET['__alias_dollar'] = 'D';
+                $a = ($g_ctx->get['__alias_dollar'] ?? null) === 'D';
+                $g_ctx->get['__alias_g'] = 'G';
+                $b = ($_GET['__alias_g'] ?? null) === 'G';
+                return $a && $b;
+            })()
+        ),
     ];
 });
 
