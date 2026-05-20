@@ -36,7 +36,21 @@ if (!defined('ZEALPHP_ASSET_VERSION')) {
     );
 }
 
-App::superglobals(false);
+// Lifecycle is coroutine-mode by default (the recommended default for new
+// apps). Overridable via env so the same demo can be exercised under the
+// Mixed-mode and legacy-CGI lifecycles too — used by the coverage harness to
+// reach mode-specific server code (SessionManager, the superglobals branches,
+// cgi_worker). Production deployments leave these unset → coroutine mode.
+App::superglobals(env_flag('ZEALPHP_SUPERGLOBALS', false));
+if (($__pi = getenv('ZEALPHP_PROCESS_ISOLATION')) !== false && $__pi !== '') {
+    App::processIsolation(env_flag('ZEALPHP_PROCESS_ISOLATION', false));
+}
+if (($__ec = getenv('ZEALPHP_ENABLE_COROUTINE')) !== false && $__ec !== '') {
+    App::enableCoroutine(env_flag('ZEALPHP_ENABLE_COROUTINE', true));
+}
+if (($__cm = getenv('ZEALPHP_CGI_MODE')) !== false && $__cm !== '') {
+    App::cgiMode($__cm === 'fork' ? 'fork' : 'proc');
+}
 
 $benchMode             = bench_mode_enabled();
 $demoMiddleware        = env_flag('ZEALPHP_DEMO_MIDDLEWARE', false);

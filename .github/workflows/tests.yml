@@ -115,15 +115,7 @@ jobs:
         env:
           ZEALPHP_COMPRESSION_MIDDLEWARE: '1'
           ZEALPHP_HTTP_COMPRESSION: '0'
-          # On the coverage matrix entry, instrument the server process so the
-          # integration tests' execution of the event loop counts toward
-          # coverage (merged with phpunit-process coverage after the run).
-          ZEALPHP_COVERAGE_DIR: ${{ matrix.coverage == 'xdebug' && '/tmp/zcov' || '' }}
-          XDEBUG_MODE: ${{ matrix.coverage == 'xdebug' && 'coverage' || 'off' }}
-          ZEALPHP_WORKERS: ${{ matrix.coverage == 'xdebug' && '1' || '' }}
-          ZEALPHP_LOG_ASYNC: ${{ matrix.coverage == 'xdebug' && '0' || '' }}
         run: |
-          mkdir -p /tmp/zcov
           php app.php >/tmp/zealphp-server.log 2>&1 &
           echo $! > /tmp/zealphp-server.pid
           for i in {1..30}; do
@@ -140,17 +132,14 @@ jobs:
         if: matrix.coverage == 'xdebug'
         env:
           XDEBUG_MODE: coverage
+          COV_PORT: '8094'
+          COVDIR: /tmp/zcov
         run: |
-          mkdir -p /tmp/zcov build/logs
-          ./vendor/bin/phpunit --coverage-php /tmp/zcov/phpunit.cov
-          if [ -f /tmp/zealphp-server.pid ]; then
-            kill -TERM "$(cat /tmp/zealphp-server.pid)" 2>/dev/null || true
-          fi
-          for i in {1..30}; do
-            ls /tmp/zcov/server-*.cov >/dev/null 2>&1 && break
-            sleep 0.5
-          done
-          php scripts/merge_coverage.php /tmp/zcov
+          # Multi-mode coverage harness: unit (in-process) + integration across
+          # coroutine/mixed/cgi server passes, merged. Uses Xdebug (no pcov in CI).
+          # Assertion gating is done by the no-coverage matrix entries (8.4/8.5).
+          bash scripts/coverage_full.sh
+          mkdir -p build/logs
           cp /tmp/zcov/clover.xml build/logs/clover.xml
 
       - name: Run tests (no coverage)
