@@ -2,7 +2,9 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.29] - 2026-05-20
+
+Adds a second CGI bridge backend — `App::cgiMode('fork')` — a warm `OpenSwoole\Process` fork that's ~5× faster than the default `proc_open` path while preserving full per-request isolation. Opt-in; `'proc'` stays the default, so unmodified WordPress/Drupal see no change.
 
 ### Added
 
