@@ -2956,41 +2956,12 @@ class App
                 if ($wasDaemonized && !isset($flags['daemonize'])) {
                     $flags['daemonize'] = true;
                 }
-                // Fork a watcher child whose only job is to poll for the new
-                // PID file and print "Restarted (pid X, port Y)". The actual
-                // start happens in the original process (parent of the fork),
-                // which falls through and eventually calls $server->start() —
-                // that daemonizes internally, so we can't print success from
-                // there. The watcher gives the user clear confirmation that
-                // the new server came up.
-                if (function_exists('pcntl_fork')) {
-                    $port = $flags['port'] ?? (self::$instance ? self::$instance->port : 8080);
-                    $watcherPid = pcntl_fork();
-                    if ($watcherPid === 0) {
-                        // Detach so the watcher survives independently and
-                        // doesn't show up in the parent's process group.
-                        if (function_exists('posix_setsid')) { @posix_setsid(); }
-                        $newPid = 0;
-                        for ($i = 0; $i < 50; $i++) {   // poll up to 5s
-                            usleep(100000);
-                            if (file_exists($pidFile)) {
-                                $candidate = (int)trim(@file_get_contents($pidFile) ?: '');
-                                if ($candidate > 0 && @posix_kill($candidate, 0)) {
-                                    $newPid = $candidate;
-                                    break;
-                                }
-                            }
-                        }
-                        if ($newPid > 0) {
-                            echo "Restarted (pid {$newPid}, port {$port}).\n";
-                        } else {
-                            echo "Restarted but could not confirm — check `php app.php status`.\n";
-                        }
-                        exit(0);
-                    }
-                    // parent (original CLI process) continues to start the server
-                }
-                // fall through to start
+                // The "Restarted (pid X, port Y)" confirmation is printed by
+                // forkStartupReporter() in the shared 'default' start path
+                // below — it forks so the terminal-attached process prints
+                // the message AFTER the new daemon is confirmed up, instead
+                // of the prompt returning first and the message overlapping
+                // the next command (issue #17). Fall through to start.
             default:
                 $pidFile = self::resolvePidFile($flags);
                 if ($command === 'start' && file_exists($pidFile)) {
@@ -3011,8 +2982,66 @@ class App
                 if (isset($flags['daemonize'])) { $overrides['daemonize'] = true; }
                 if (isset($flags['task_worker_num'])) { $overrides['task_worker_num'] = $flags['task_worker_num']; }
                 if (isset($flags['pid_file'])) { $overrides['pid_file'] = $flags['pid_file']; }
+                // Daemonized start/restart: fork so the terminal-attached
+                // parent prints the confirmation AFTER the new daemon is up
+                // (issue #17). The child returns these overrides and goes on
+                // to boot the self-daemonizing server. A foreground start
+                // (no -d) blocks in run() and needs no confirmation line.
+                if (isset($flags['daemonize'])) {
+                    $port = $flags['port'] ?? (self::$instance ? self::$instance->port : 8080);
+                    $verb = $command === 'restart'
+                        ? 'Restarted'
+                        : 'Started ZealPHP in detached mode';
+                    self::forkStartupReporter($pidFile, (int)$port, $verb);
+                }
                 return $overrides;
         }
+    }
+
+    /**
+     * For daemonized start/restart: fork so the terminal-attached parent
+     * polls for the new daemon's PID file and prints a confirmation line
+     * BEFORE the shell prompt returns, while the child goes on to boot the
+     * (self-daemonizing) server. The parent never touches OpenSwoole — it
+     * only watches the PID file and exits, so the confirmation is always the
+     * last thing written to the terminal (fixes the issue #17 race where the
+     * prompt returned first and the message overlapped the next command).
+     *
+     * No-op when pcntl is unavailable or the fork fails: start proceeds
+     * without a confirmation line (prior behaviour), never silently broken.
+     *
+     * @param string $verb e.g. "Restarted" or "Started ZealPHP in detached mode"
+     */
+    private static function forkStartupReporter(string $pidFile, int $port, string $verb): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            return; // proceed to boot in-process — no confirmation possible
+        }
+        $childPid = pcntl_fork();
+        if ($childPid <= 0) {
+            // Child (0) boots the server; -1 (fork failed) also proceeds so
+            // start is never blocked by the inability to report.
+            return;
+        }
+        // Parent (terminal-attached): wait for the daemon to write its PID
+        // file, print the confirmation, then exit so the prompt comes last.
+        $newPid = 0;
+        for ($i = 0; $i < 50; $i++) {   // poll up to 5s
+            usleep(100000);
+            if (file_exists($pidFile)) {
+                $candidate = (int)trim(@file_get_contents($pidFile) ?: '');
+                if ($candidate > 0 && @posix_kill($candidate, 0)) {
+                    $newPid = $candidate;
+                    break;
+                }
+            }
+        }
+        if ($newPid > 0) {
+            echo "{$verb} (pid {$newPid}, port {$port}).\n";
+        } else {
+            echo "{$verb}, but could not confirm — check `php app.php status`.\n";
+        }
+        exit(0);
     }
 
     /**

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Proc-mode CGI worker now loads the Composer autoloader** ([#17](https://github.com/sibidharan/zealphp/issues/17)). `src/cgi_worker.php` (the `proc_open` subprocess used by `cgiMode('proc')`) never required `vendor/autoload.php`, so `\ZealPHP\App` and other project classes were undefined inside legacy `public/*.php` files dispatched through it. Fork mode (`cgiMode('fork')`) already had them via copy-on-write inheritance of the warm worker — this closes the inconsistency. Resolves both repo-root and installed-as-dependency vendor layouts; missing autoloader stays non-fatal (unmodified WordPress/Drupal ships its own bootstrap). Guarded by `tests/Unit/CgiWorkerAutoloadTest.php`.
+- **CLI `restart` no longer prints its confirmation over the next shell prompt** ([#17](https://github.com/sibidharan/zealphp/issues/17)). The watcher was a detached child that outlived the terminal-attached parent, which daemonized and exited first — so `Restarted (pid X, port Y)` landed after the prompt returned. The fork is now flipped: the terminal-attached process polls for the new daemon's PID file and prints the confirmation last, while the child boots the (self-daemonizing) server.
+
+### Added
+
+- **`start -d` / `--daemonize` now prints a confirmation** ([#17](https://github.com/sibidharan/zealphp/issues/17)): `Started ZealPHP in detached mode (pid X, port Y).` Previously detached starts returned silently. Shares the same `forkStartupReporter()` path as the `restart` fix above.
+
 ## [0.2.29] - 2026-05-20
 
 Adds a second CGI bridge backend — `App::cgiMode('fork')` — a warm `OpenSwoole\Process` fork that's ~5× faster than the default `proc_open` path while preserving full per-request isolation. Opt-in; `'proc'` stays the default, so unmodified WordPress/Drupal see no change.
