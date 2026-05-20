@@ -81,6 +81,26 @@ class HeaderMiddlewareTest extends TestCase
         App::$cwd = ZEALPHP_ROOT;
         App::superglobals(true);
 
+        // Establish our own mock response wrapper — the `add` path writes
+        // through $g->zealphp_response->header(). Without this the test
+        // depends on leaked global state from prior tests (ordering-fragile).
+        $g = \ZealPHP\RequestContext::instance();
+        $g->zealphp_response = new class {
+            /** @var array<int, array{0:string,1:string}> */
+            public array $headersList = [];
+            public object $parent;
+            public function __construct()
+            {
+                // `add` semantics use the 3-arg ->parent->header() form.
+                $this->parent = new class {
+                    /** @var array<int, array{0:string,1:string,2:bool}> */
+                    public array $headers = [];
+                    public function header(string $k, string $v, bool $replace = true): void { $this->headers[] = [$k, $v, $replace]; }
+                };
+            }
+            public function header(string $k, string $v, bool $ucwords = true): void { $this->headersList[] = [$k, $v]; }
+        };
+
         $handler = new class($upstreamHeaders) implements RequestHandlerInterface {
             public function __construct(private array $headers) {}
             public function handle(ServerRequestInterface $request): ResponseInterface
