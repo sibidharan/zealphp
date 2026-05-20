@@ -134,8 +134,9 @@ class CacheCoverageTest extends TestCase
         $this->chmodFiles[] = $file;
 
         // gcFiles() iterates the dir; fopen() on the unreadable file returns
-        // false → the `continue` branch runs without error.
+        // false → the `continue` branch skips it. A non-expired entry (ttl
+        // 3600) must NOT be garbage-collected, whether or not it was readable.
         Cache::gcFiles();
-        $this->assertTrue(true);
+        $this->assertFileExists($file, 'gcFiles() must not delete a skipped/non-expired entry');
     }
 }

@@ -235,16 +235,17 @@ class UtilsExtraTest extends TestCase
     {
         $g = RequestContext::instance();
         $g->openswoole_response = null;
-        // No openswoole_response → flush() returns early without error.
+        // No openswoole_response → flush() returns early, emitting nothing.
+        $this->expectOutputString('');
         zflush();
-        $this->assertTrue(true);
     }
 
     public function testObImplicitFlushIsNoop(): void
     {
+        // The uopz override is a pure no-op — it must not emit any output.
+        $this->expectOutputString('');
         ob_implicit_flush(true);
         ob_implicit_flush(false);
-        $this->assertTrue(true);
     }
 
     // ── apache_request_headers / getallheaders / response_headers ────
