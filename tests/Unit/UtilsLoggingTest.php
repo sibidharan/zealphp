@@ -266,6 +266,57 @@ class UtilsLoggingTest extends TestCase
         $this->assertStringContainsString($marker, $contents);
     }
 
+    public function testZlogInvertFilterReturnsEarly(): void
+    {
+        $file = (string)log_file_for('zlog');
+        $marker = 'inverted-' . uniqid();
+        $_SERVER['REQUEST_URI'] = '/invert/here';
+        // Filter matches REQUEST_URI, but invert_filter=true → returns before write.
+        zlog($marker, 'info', 'invert', true);
+        $contents = is_file($file) ? (string)file_get_contents($file) : '';
+        $this->assertStringNotContainsString($marker, $contents);
+    }
+
+    public function testZlogObjectIsPurifiedAndEncoded(): void
+    {
+        if (!debug_logging_enabled()) {
+            $this->markTestSkipped('debug logging disabled in this process');
+        }
+        $file = (string)log_file_for('zlog');
+        $u = uniqid();
+        $obj = new \stdClass();
+        $obj->field = "objval-$u";
+        $_SERVER['REQUEST_URI'] = '/zlog/object';
+        // is_object($log) → purify_array() → is_array → json_encode.
+        zlog($obj, 'debug');
+        $contents = (string)file_get_contents($file);
+        $this->assertStringContainsString("objval-$u", $contents);
+    }
+
+    public function testZlogDefaultsRequestUriToCliWhenUnset(): void
+    {
+        if (!debug_logging_enabled()) {
+            $this->markTestSkipped('debug logging disabled in this process');
+        }
+        $file = (string)log_file_for('zlog');
+        $saved = $_SERVER['REQUEST_URI'] ?? null;
+        unset($_SERVER['REQUEST_URI']);
+        try {
+            $marker = 'cli-uri-' . uniqid();
+            // No REQUEST_URI → zlog sets $_SERVER['REQUEST_URI'] = 'cli'.
+            zlog($marker, 'info');
+            $this->assertSame('cli', $_SERVER['REQUEST_URI']);
+            $contents = (string)file_get_contents($file);
+            $this->assertStringContainsString($marker, $contents);
+        } finally {
+            if ($saved === null) {
+                unset($_SERVER['REQUEST_URI']);
+            } else {
+                $_SERVER['REQUEST_URI'] = $saved;
+            }
+        }
+    }
+
     // ── access_log ───────────────────────────────────────────────
 
     public function testAccessLogWritesFormattedLine(): void
