@@ -144,30 +144,35 @@ browser</code></pre>
     <td style="text-align:right;color:#fde68a">~1–3 ms (FCGI handshake)</td>
   </tr>
   <tr>
-    <td><strong>ZealPHP CGI bridge today</strong></td>
+    <td><strong>ZealPHP CGI bridge — <code>cgiMode('proc')</code></strong> (default)</td>
     <td><code>proc_open</code> spawns a <strong>fresh PHP interpreter per request</strong>. Kernel fork + exec + PHP startup + opcache check + autoload + include + execute.</td>
     <td style="text-align:right;color:#fca5a5">~30–50 ms</td>
+  </tr>
+  <tr style="background:rgba(255,255,255,.02)">
+    <td><strong>ZealPHP CGI bridge — <code>cgiMode('fork')</code></strong> (v0.2.29)</td>
+    <td><code>OpenSwoole\Process</code> forks the <strong>already-booted worker</strong> (copy-on-write). No exec, no PHP startup, no autoload — the interpreter + classmap + opcache are inherited. Runs in function scope.</td>
+    <td style="text-align:right;color:#fde68a">~5 ms (≈5× faster)</td>
   </tr>
 </table>
 
 <p style="color:#cbd5e1;line-height:1.65;margin-top:1rem">
-  So the bridge cost isn't because legacy code is slow — it's because we're paying PHP's startup cost on every request. Apache and FPM amortise that startup across thousands of requests by keeping the interpreter alive. <strong>We can do the same.</strong>
+  So the bridge cost isn't because legacy code is slow — it's because the default <code>'proc'</code> mode pays PHP's startup cost on every request. Apache and FPM amortise that startup by keeping the interpreter alive. <strong>Fork mode does most of that today</strong> (warm fork, no re-exec); a fully warm + global-scope pool is the v0.3.0 finish line.
 </p>
 
 <div style="margin-top:1rem;padding:1rem 1.2rem;background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.25);border-left:3px solid var(--accent);border-radius:var(--radius)">
-  <strong style="color:#fde68a">Roadmap — built-in CGI worker pool (v0.3.0)</strong>
+  <strong style="color:#fde68a">Available now — <code>cgiMode('fork')</code> (v0.2.29)</strong>
   <p style="margin:.5rem 0 0;color:#cbd5e1;line-height:1.6;font-size:.95rem">
-    The plan: replace the per-request <code>proc_open</code> with a pool of <em>persistent</em> PHP subprocesses spawned at server start, talking to the main ZealPHP master over Unix sockets. Each worker keeps its PHP interpreter alive between requests, resets globals at the start of each one, and recycles after N requests (the FPM <code>pm.max_requests</code> trick) to prevent <code>define()</code>/class leaks. Expected bridge cost after: <strong>~1–3 ms</strong>, on par with FPM. WordPress and Drupal still get the per-request isolation they need; you just don't pay 30 ms for it.
+    <code>App::cgiMode('fork')</code> forks the warm worker per request via <code>OpenSwoole\Process</code> instead of <code>proc_open</code>-ing a cold PHP. Measured ~5× faster (814 vs 160 req/s on the trivial probe below). It keeps full per-request isolation — <code>define()</code>, classes, <code>ini_set()</code>, and even <code>die()</code>/<code>exit()</code> die with the child, never the worker. <strong>Caveat:</strong> the file runs in the fork closure's function scope, so a bare top-level <code>$x</code> isn't visible via <code>global $x</code> — unmodified WordPress/Drupal (<code>global $wpdb;</code>) still need <code>'proc'</code>. Fork mode targets "modernised legacy" apps that read request state through superglobals.
   </p>
   <p style="margin:.6rem 0 0;color:#94a3b8;line-height:1.55;font-size:.85rem">
-    Tracking issue: <a href="https://github.com/sibidharan/zealphp/issues" target="_blank">github.com/sibidharan/zealphp/issues</a>. The current <a href="https://github.com/sibidharan/zealphp/blob/master/src/cgi_worker.php"><code>src/cgi_worker.php</code></a> already does the heavy lifting (env injection, output capture, return-value protocol over stderr) — the change is making the worker long-lived and pool-managed.
+    <strong style="color:#cbd5e1">Roadmap — built-in CGI worker pool (v0.3.0):</strong> a pool of <em>persistent</em> global-scope PHP subprocesses spawned at server start (warm interpreter, reset between requests, recycle after N like FPM <code>pm.max_requests</code>). That gets both warmth AND true global scope — ~1–3 ms <em>and</em> unmodified WordPress. Tracking: <a href="https://github.com/sibidharan/zealphp/issues" target="_blank">github.com/sibidharan/zealphp/issues</a>.
   </p>
 </div>
 
 <h2 style="margin:3rem 0 1rem">Until v0.3.0 — what the CGI bridge buys you today</h2>
 
 <p style="color:#cbd5e1;line-height:1.65">
-  Even with the current 30–50 ms hit, the bridge has an honest place: it exists so <strong>unmodified WordPress, Drupal, and other <code>define()</code>-heavy code that assumes a fresh process per request just works.</strong> Set <code>App::superglobals(true)</code>, ZealPHP turns OFF the coroutine scheduler and switches <code>App::include()</code> to dispatch each legacy <code>public/*.php</code> file through a child process via <code>proc_open</code> (<a href="https://github.com/sibidharan/zealphp/blob/master/src/cgi_worker.php"><code>src/cgi_worker.php</code></a>). Apache prefork MPM semantics.
+  Even with the per-request startup hit, the bridge has an honest place: it exists so <strong>unmodified WordPress, Drupal, and other <code>define()</code>-heavy code that assumes a fresh process per request just works.</strong> Set <code>App::superglobals(true)</code>, ZealPHP turns OFF the coroutine scheduler and switches <code>App::include()</code> to dispatch each legacy <code>public/*.php</code> file through a child process — by default via <code>proc_open</code> (<a href="https://github.com/sibidharan/zealphp/blob/master/src/cgi_worker.php"><code>src/cgi_worker.php</code></a>, true global scope, ~30–50 ms), or via <code>cgiMode('fork')</code> (warm fork, ~5 ms, function scope). Apache prefork MPM semantics either way.
 </p>
 
 <p style="color:#cbd5e1;line-height:1.65;margin-top:.7rem">
@@ -235,7 +240,7 @@ $app->run();
 <!-- ────────────────────────────────────────────────────────────── -->
 
 <p style="color:#cbd5e1;line-height:1.65;margin-top:1rem">
-  How much does that <code>proc_open</code> fork actually cost? On this box, turning process isolation off takes the same legacy file from <strong>179 req/s to 12,803 req/s — a ~71× jump</strong>, with nothing else changed. The full measured breakdown (Apache mod_php, ZealPHP coroutine, Mixed-mode, and legacy CGI, all on one machine) is in the <a href="#measured-four-ways">measured table below</a>.
+  How much does that <code>proc_open</code> fork actually cost? On this box, turning process isolation off takes the same legacy file from <strong>160 req/s to 21,964 req/s</strong>, with nothing else changed — and if you do need isolation, <code>cgiMode('fork')</code> recovers ~5× of it (160 → 814 req/s) by forking the warm worker instead of cold-starting PHP. The full measured breakdown (Apache mod_php, ZealPHP coroutine, Mixed-mode, fork CGI, and proc CGI, all on one machine) is in the <a href="#measured-four-ways">measured table below</a>.
 </p>
 
 <div style="margin-top:1rem;padding:1rem 1.2rem;background:rgba(148,163,184,.08);border-left:3px solid #94a3b8;border-radius:var(--radius)">
@@ -324,7 +329,7 @@ $app->run();
 
 <!-- SYNC: this table mirrors /performance "Legacy-file serving". Any change
      to the numbers must update BOTH in lock-step. -->
-<h2 id="measured-four-ways" style="margin:3rem 0 1rem">Measured: four ways to serve the same legacy file</h2>
+<h2 id="measured-four-ways" style="margin:3rem 0 1rem">Measured: five ways to serve the same legacy file</h2>
 
 <p style="color:#cbd5e1;line-height:1.65">
   These are <strong>real numbers</strong>, not illustrative. Same machine, same trivial <code>public/probe.php</code> (<code>echo "ok"</code>), 4 workers each, <code>ab -n 3000 -c 20</code>. The only thing that changes is which server / lifecycle mode serves the file. This is specifically the <em>legacy-file-serving</em> path (implicit <code>public/*.php</code> routing) — the workload that matters when you're migrating an existing app, not ZealPHP's native-route fast path.
@@ -340,40 +345,46 @@ $app->run();
   <tr>
     <td><strong>Apache + mod_php</strong></td>
     <td>Interpreter loaded in-process, warm</td>
-    <td style="text-align:right;color:#fde68a;font-weight:700">46,471</td>
-    <td style="text-align:right">0.43</td>
+    <td style="text-align:right;color:#fde68a;font-weight:700">40,861</td>
+    <td style="text-align:right">0.49</td>
   </tr>
   <tr style="background:rgba(255,255,255,.02)">
     <td><strong>ZealPHP coroutine</strong> (default)</td>
     <td>In-process include, coroutine-per-request</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">19,748</td>
-    <td style="text-align:right">1.01</td>
+    <td style="text-align:right;color:var(--accent);font-weight:700">34,159</td>
+    <td style="text-align:right">0.59</td>
   </tr>
   <tr>
     <td><strong>ZealPHP Mixed-mode</strong><br><small><code>processIsolation(false)</code></small></td>
     <td>In-process include, sequential per worker</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">12,803</td>
-    <td style="text-align:right">1.56</td>
+    <td style="text-align:right;color:var(--accent);font-weight:700">21,964</td>
+    <td style="text-align:right">0.91</td>
   </tr>
   <tr style="background:rgba(255,255,255,.02)">
-    <td><strong>ZealPHP legacy CGI</strong><br><small><code>processIsolation(true)</code></small></td>
+    <td><strong>ZealPHP fork CGI</strong><br><small><code>processIsolation(true)</code> + <code>cgiMode('fork')</code></small></td>
+    <td>OpenSwoole\Process forks the warm worker (COW)</td>
+    <td style="text-align:right;color:var(--accent);font-weight:700">814</td>
+    <td style="text-align:right">24.6</td>
+  </tr>
+  <tr>
+    <td><strong>ZealPHP legacy CGI</strong><br><small><code>processIsolation(true)</code> + <code>cgiMode('proc')</code> (default)</small></td>
     <td><code>proc_open</code> spawns fresh PHP per request</td>
-    <td style="text-align:right;color:#fca5a5;font-weight:700">179</td>
-    <td style="text-align:right;color:#fca5a5">111.2</td>
+    <td style="text-align:right;color:#fca5a5;font-weight:700">160</td>
+    <td style="text-align:right;color:#fca5a5">124.4</td>
   </tr>
 </table>
 
 <p style="margin:.7rem 0 0;color:#94a3b8;font-size:.85rem">
-  AMD Ryzen 9 7900X · PHP 8.3 · 4 workers each · <code style="background:rgba(255,255,255,.06);padding:.1rem .3rem;border-radius:3px">ab -n 3000 -c 20</code>. Apache served <code>/probe.php</code>; ZealPHP served <code>/probe</code> (extensionless implicit route). PHP-FPM wasn't installed on this box — Apache+mod_php is the warm-interpreter baseline and is actually <em>faster</em> than FPM would be (mod_php is in-process; FPM adds a FastCGI socket hop).
+  Intel i9-14900K · PHP 8.3 · 4 workers each · <code style="background:rgba(255,255,255,.06);padding:.1rem .3rem;border-radius:3px">ab -n 3000 -c 20</code> (legacy-CGI row at <code>-n 1500</code>; it's slow). Apache served <code>/probe.php</code>; ZealPHP served <code>/probe</code> (extensionless implicit route). PHP-FPM wasn't installed on this box — Apache+mod_php is the warm-interpreter baseline and is actually <em>faster</em> than FPM would be (mod_php is in-process; FPM adds a FastCGI socket hop). Reproduce with <code>scripts/bench_vs_fpm.sh</code>.
 </p>
 
 <h3 style="margin:2rem 0 .75rem;color:var(--accent)">What these numbers actually say</h3>
 
 <ul style="color:#cbd5e1;line-height:1.7;font-size:.95rem;margin-top:.5rem;padding-left:1.5rem">
-  <li><strong>The CGI bridge is the outlier, by 70–260×.</strong> 179 req/s vs everything else in the 12k–46k range. That gap is <em>entirely</em> the per-request <code>proc_open</code> + PHP-startup cost. If you serve legacy files through <code>processIsolation(true)</code> on a hot path, this is what it costs you.</li>
-  <li><strong>Turning off process isolation recovers ~71×.</strong> Same file, same superglobals semantics, just no fork: 179 → 12,803 req/s. For any legacy app that doesn't need fresh-process-per-request <code>define()</code> isolation, this is free performance.</li>
-  <li><strong>Coroutine mode is fastest for ZealPHP</strong> (19.7k) — but note it keeps superglobals empty, so legacy code must use <code>$g-&gt;X</code>.</li>
-  <li><strong>Honest finding: Apache mod_php (46k) beats ZealPHP on this trivial echo.</strong> For a no-I/O, no-middleware legacy file, a mature in-process C SAPI is hard to beat. ZealPHP's win shows up elsewhere — native routes (116k on <a href="/performance">/performance</a>), coroutine I/O concurrency, WebSocket, SSE, and not needing a separate web server at all. We're not going to pretend otherwise.</li>
+  <li><strong>Don't isolate if you don't have to.</strong> Both in-process modes (coroutine 34k, Mixed-mode 22k) are within striking distance of Apache mod_php (41k) and orders of magnitude past either isolated mode. If your legacy app doesn't need a fresh process per request, run Mixed-mode and pay nothing.</li>
+  <li><strong>If you DO need isolation, <code>cgiMode('fork')</code> is ~5× faster than the proc_open default.</strong> 814 vs 160 req/s (24.6 ms vs 124 ms) — same isolation, same superglobals, but the fork inherits the warm interpreter + autoloader + opcache via copy-on-write instead of cold-starting a fresh PHP per request. Trade-off: fork mode runs the file in function scope, so bare <code>global $wpdb</code> wiring needs <code>cgiMode('proc')</code>; superglobal-driven "modernised legacy" apps use fork.</li>
+  <li><strong>The proc_open bridge is the outlier, by 40–250×.</strong> 160 req/s vs everything else. That gap is <em>entirely</em> per-request PHP startup + autoload. It's the price of true global-scope isolation for unmodified WordPress/Drupal; the v0.3.0 warm worker pool (warm <em>and</em> global scope) is the planned fix.</li>
+  <li><strong>Honest finding: Apache mod_php (41k) edges out ZealPHP on this trivial echo.</strong> For a no-I/O, no-middleware legacy file, a mature in-process C SAPI is hard to beat. ZealPHP's win shows up elsewhere — native routes (<a href="/performance">/performance</a>), coroutine I/O concurrency, WebSocket, SSE, and not needing a separate web server at all. We're not going to pretend otherwise.</li>
 </ul>
 
 <h2 style="margin:2.5rem 0 1rem">Reproduce locally</h2>

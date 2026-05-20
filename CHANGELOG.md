@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`App::cgiMode('fork')`** — a second CGI bridge backend. Where the default `'proc'` mode `proc_open`s a cold PHP interpreter per request (~30–50 ms — true global scope, what unmodified WordPress/Drupal need), `'fork'` mode forks the already-booted worker via `OpenSwoole\Process` (copy-on-write). The interpreter, classmap, and opcache are inherited — no exec, no PHP startup, no autoload. Measured **~5× faster** on a trivial probe (814 vs 160 req/s, 24.6 ms vs 124 ms; `ab -n 3000 -c 20`, Intel i9-14900K). Full per-request isolation is preserved: `define()`, classes, `ini_set()`, and even `die()`/`exit()` die with the child, never the worker. **Trade-off:** the file runs in the fork closure's function scope, so a bare top-level `$x` isn't visible via `global $x` — `cgiMode('fork')` targets "modernised legacy" apps that read request state through superglobals; unmodified `global $wpdb`-style code stays on `'proc'`. IPC uses 4-byte length-prefixed framing (`OpenSwoole\Process::read()` blocks past EOF rather than returning `""`). Configured like the other lifecycle knobs: `App::cgiMode('proc'|'fork')` before `App::init()`; no-arg returns the current value; unknown values throw `InvalidArgumentException`.
+- **`tests/Unit/AppConfigurablesTest.php`** — 3 new cases pinning `cgiMode` defaults to `'proc'`, round-trips the setter, and rejects unknown modes.
+
+### Documentation
+
+- **`/vs-fpm`** — refreshed the measured benchmark from 4 ways to **5 ways** (added fork CGI between Mixed-mode and proc CGI), re-run on one Intel i9-14900K box (`scripts/bench_vs_fpm.sh`). Added the "PHP interpreter lifecycle" fork row, reframed the v0.3.0 roadmap box around `cgiMode('fork')` being available now, and corrected the cost-recovery prose (proc 160 → fork 814 → in-process 21,964 req/s).
+- **`scripts/bench_vs_fpm.sh`** — added the `FORK_CGI_URL` knob and a fork-CGI benchmark section so the 5-way comparison is reproducible.
+
 ## [0.2.28] - 2026-05-19
 
 Documentation + tooling follow-up to v0.2.27. No framework behaviour change — ships the canonical dual-runtime compat shim as a package artifact and grounds the PHP-FPM comparison in real measured numbers.

@@ -22,13 +22,15 @@ set -euo pipefail
 #   REQUESTS       default 50000
 #   ZEAL_URL       default http://127.0.0.1:8080/json
 #   FPM_URL        unset → skipped
-#   LEGACY_CGI_URL unset → skipped
+#   FORK_CGI_URL   unset → skipped (App::cgiMode('fork') instance)
+#   LEGACY_CGI_URL unset → skipped (App::cgiMode('proc') instance)
 #
 
 CONCURRENCY="${CONCURRENCY:-200}"
 REQUESTS="${REQUESTS:-50000}"
 ZEAL_URL="${ZEAL_URL:-http://127.0.0.1:8080/json}"
 FPM_URL="${FPM_URL:-}"
+FORK_CGI_URL="${FORK_CGI_URL:-}"
 LEGACY_CGI_URL="${LEGACY_CGI_URL:-}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -91,17 +93,33 @@ else
     echo ""
 fi
 
-# --- 3. ZealPHP legacy CGI bridge ----------------------------------------
+# --- 3. ZealPHP fork CGI bridge (App::cgiMode('fork')) -------------------
+if [ -n "$FORK_CGI_URL" ]; then
+    if [ "$(probe "$FORK_CGI_URL")" = "200" ]; then
+        run_ab "ZealPHP fork CGI bridge — cgiMode('fork')" "$FORK_CGI_URL"
+    else
+        echo "── ZealPHP fork CGI bridge — cgiMode('fork')"
+        echo "   SKIPPED — $FORK_CGI_URL is not responding 200."
+        echo ""
+    fi
+else
+    echo "── ZealPHP fork CGI bridge — cgiMode('fork')"
+    echo "   SKIPPED — set FORK_CGI_URL to enable. Start a ZealPHP instance with"
+    echo "   App::superglobals(true) + App::processIsolation(true) + App::cgiMode('fork')."
+    echo ""
+fi
+
+# --- 4. ZealPHP legacy CGI bridge (App::cgiMode('proc'), default) --------
 if [ -n "$LEGACY_CGI_URL" ]; then
     if [ "$(probe "$LEGACY_CGI_URL")" = "200" ]; then
-        run_ab "ZealPHP legacy CGI bridge" "$LEGACY_CGI_URL"
+        run_ab "ZealPHP legacy CGI bridge — cgiMode('proc')" "$LEGACY_CGI_URL"
     else
-        echo "── ZealPHP legacy CGI bridge"
+        echo "── ZealPHP legacy CGI bridge — cgiMode('proc')"
         echo "   SKIPPED — $LEGACY_CGI_URL is not responding 200."
         echo ""
     fi
 else
-    echo "── ZealPHP legacy CGI bridge"
+    echo "── ZealPHP legacy CGI bridge — cgiMode('proc')"
     echo "   SKIPPED — set LEGACY_CGI_URL to enable. Start a second ZealPHP"
     echo "   instance with App::superglobals(true) on a different port."
     echo ""
