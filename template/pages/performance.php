@@ -169,31 +169,37 @@
   <tr>
     <td>Apache + mod_php</td>
     <td>warm in-process interpreter</td>
-    <td style="text-align:right;color:#fde68a;font-weight:700">46,471</td>
-    <td style="text-align:right">0.43</td>
+    <td style="text-align:right;color:#fde68a;font-weight:700">40,861</td>
+    <td style="text-align:right">0.49</td>
   </tr>
   <tr style="background:rgba(255,255,255,.02)">
     <td>ZealPHP coroutine (default)</td>
     <td>in-process include, coroutine-per-req</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">19,748</td>
-    <td style="text-align:right">1.01</td>
+    <td style="text-align:right;color:var(--accent);font-weight:700">34,159</td>
+    <td style="text-align:right">0.59</td>
   </tr>
   <tr>
     <td>ZealPHP Mixed-mode <small>(<code>processIsolation(false)</code>)</small></td>
     <td>in-process include, sequential</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">12,803</td>
-    <td style="text-align:right">1.56</td>
+    <td style="text-align:right;color:var(--accent);font-weight:700">21,964</td>
+    <td style="text-align:right">0.91</td>
   </tr>
   <tr style="background:rgba(255,255,255,.02)">
-    <td>ZealPHP legacy CGI <small>(<code>processIsolation(true)</code>)</small></td>
+    <td>ZealPHP fork CGI <small>(<code>processIsolation(true)</code> + <code>cgiMode('fork')</code>)</small></td>
+    <td><code>OpenSwoole\Process</code> forks the warm worker (COW)</td>
+    <td style="text-align:right;color:var(--accent);font-weight:700">814</td>
+    <td style="text-align:right">24.6</td>
+  </tr>
+  <tr>
+    <td>ZealPHP legacy CGI <small>(<code>processIsolation(true)</code> + <code>cgiMode('proc')</code>)</small></td>
     <td><code>proc_open</code> fresh PHP per req</td>
-    <td style="text-align:right;color:#fca5a5;font-weight:700">179</td>
-    <td style="text-align:right;color:#fca5a5">111.2</td>
+    <td style="text-align:right;color:#fca5a5;font-weight:700">160</td>
+    <td style="text-align:right;color:#fca5a5">124.4</td>
   </tr>
 </table>
 
 <p style="margin:.6rem 0 0;color:#94a3b8;font-size:.85rem">
-  Two honest takeaways: (1) the CGI bridge's <code>proc_open</code> fork is the whole story behind the 179 req/s — turning process isolation off recovers ~71× on the same file; (2) Apache mod_php beats ZealPHP on trivial legacy-file serving (a mature in-process C SAPI is hard to beat for no-I/O echo). ZealPHP's win is the native-route numbers above, coroutine I/O concurrency, WebSocket/SSE, and not needing a separate web server. Full analysis + the FPM architecture breakdown: <a href="/vs-fpm#measured-four-ways" style="color:var(--accent)">/vs-fpm</a>.
+  Intel i9-14900K · PHP 8.3 · 4 workers each · <code>ab -n 3000 -c 20</code> — same run as <a href="/vs-fpm#measured-four-ways" style="color:var(--accent)">/vs-fpm</a>. Three honest takeaways: (1) the default CGI bridge's <code>proc_open</code> fork is the whole story behind the 160 req/s — turning process isolation off (Mixed-mode) recovers ~137× on the same file; (2) if you need isolation, <code>cgiMode('fork')</code> is ~5× faster than proc (814 vs 160) by forking the warm worker instead of cold-starting PHP; (3) Apache mod_php edges out ZealPHP on trivial legacy-file serving (a mature in-process C SAPI is hard to beat for no-I/O echo). ZealPHP's win is the native-route numbers above, coroutine I/O concurrency, WebSocket/SSE, and not needing a separate web server. Full analysis + the FPM architecture breakdown: <a href="/vs-fpm#measured-four-ways" style="color:var(--accent)">/vs-fpm</a>.
 </p>
 
 <!-- ────────────────────────────────────────────────────────────── -->

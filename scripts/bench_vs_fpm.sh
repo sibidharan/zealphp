@@ -21,6 +21,9 @@ set -euo pipefail
 #   CONCURRENCY    default 200
 #   REQUESTS       default 50000
 #   ZEAL_URL       default http://127.0.0.1:8080/json
+#   MIXED_URL      unset → skipped (Mixed-mode: superglobals(true) +
+#                  processIsolation(false) + enableCoroutine(false) — the
+#                  apples-to-apples PHP-FPM-equivalent execution model)
 #   FPM_URL        unset → skipped
 #   FORK_CGI_URL   unset → skipped (App::cgiMode('fork') instance)
 #   LEGACY_CGI_URL unset → skipped (App::cgiMode('proc') instance)
@@ -29,6 +32,7 @@ set -euo pipefail
 CONCURRENCY="${CONCURRENCY:-200}"
 REQUESTS="${REQUESTS:-50000}"
 ZEAL_URL="${ZEAL_URL:-http://127.0.0.1:8080/json}"
+MIXED_URL="${MIXED_URL:-}"
 FPM_URL="${FPM_URL:-}"
 FORK_CGI_URL="${FORK_CGI_URL:-}"
 LEGACY_CGI_URL="${LEGACY_CGI_URL:-}"
@@ -74,7 +78,24 @@ else
     echo ""
 fi
 
-# --- 2. Apache + PHP-FPM -------------------------------------------------
+# --- 2. ZealPHP Mixed-mode (FPM-equivalent) ------------------------------
+if [ -n "$MIXED_URL" ]; then
+    if [ "$(probe "$MIXED_URL")" = "200" ]; then
+        run_ab "ZealPHP Mixed-mode — processIsolation(false) + enableCoroutine(false)" "$MIXED_URL"
+    else
+        echo "── ZealPHP Mixed-mode (FPM-equivalent)"
+        echo "   SKIPPED — $MIXED_URL is not responding 200."
+        echo ""
+    fi
+else
+    echo "── ZealPHP Mixed-mode (FPM-equivalent)"
+    echo "   SKIPPED — set MIXED_URL to enable. Start a ZealPHP instance with"
+    echo "   App::superglobals(true) + App::processIsolation(false) + App::enableCoroutine(false)."
+    echo "   This is the apples-to-apples PHP-FPM execution model (in-process, no fork)."
+    echo ""
+fi
+
+# --- 3. Apache + PHP-FPM -------------------------------------------------
 if [ -n "$FPM_URL" ]; then
     if [ "$(probe "$FPM_URL")" = "200" ]; then
         run_ab "Apache + PHP-FPM" "$FPM_URL"
@@ -93,7 +114,7 @@ else
     echo ""
 fi
 
-# --- 3. ZealPHP fork CGI bridge (App::cgiMode('fork')) -------------------
+# --- 4. ZealPHP fork CGI bridge (App::cgiMode('fork')) -------------------
 if [ -n "$FORK_CGI_URL" ]; then
     if [ "$(probe "$FORK_CGI_URL")" = "200" ]; then
         run_ab "ZealPHP fork CGI bridge — cgiMode('fork')" "$FORK_CGI_URL"
@@ -109,7 +130,7 @@ else
     echo ""
 fi
 
-# --- 4. ZealPHP legacy CGI bridge (App::cgiMode('proc'), default) --------
+# --- 5. ZealPHP legacy CGI bridge (App::cgiMode('proc'), default) --------
 if [ -n "$LEGACY_CGI_URL" ]; then
     if [ "$(probe "$LEGACY_CGI_URL")" = "200" ]; then
         run_ab "ZealPHP legacy CGI bridge — cgiMode('proc')" "$LEGACY_CGI_URL"

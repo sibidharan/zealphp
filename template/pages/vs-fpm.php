@@ -124,7 +124,7 @@ browser</code></pre>
 <h2 style="margin:3rem 0 1rem">Why Apache/FPM don't pay this cost (and how the CGI bridge will catch up)</h2>
 
 <p style="color:#cbd5e1;line-height:1.65">
-  The first version of this page implied <strong>"~30–50 ms is the same order of magnitude as FPM"</strong>. That was wrong, and worth correcting honestly. FPM's per-request cost is closer to <strong>~1–3 ms</strong> — an order of magnitude less than our current CGI bridge. The reason isn't that FPM is doing anything magical; it's that Apache + FPM are <em>not spawning a PHP interpreter per request</em>. Three architectures, three startup stories:
+  The first version of this page implied <strong>"~30–50 ms is the same order of magnitude as FPM"</strong>. That was wrong, and worth correcting honestly. FPM's per-request cost is closer to <strong>~1–3 ms</strong> — an order of magnitude less than our current CGI bridge. The reason isn't that FPM is doing anything magical; it's that Apache + FPM are <em>not spawning a PHP interpreter per request</em> — and neither is ZealPHP's in-process <strong>Mixed-mode</strong>. Only the opt-in CGI bridge does. Here's the full startup-cost spectrum:
 </p>
 
 <table class="ztable">
@@ -144,11 +144,16 @@ browser</code></pre>
     <td style="text-align:right;color:#fde68a">~1–3 ms (FCGI handshake)</td>
   </tr>
   <tr>
+    <td><strong>ZealPHP Mixed-mode</strong> — <code>processIsolation(false)</code></td>
+    <td>In-process include into the warm, long-lived OpenSwoole worker. No fork, no exec — the interpreter is already in memory, exactly like mod_php. This is the FPM-equivalent execution model with native <code>$_SESSION</code> (v0.2.27).</td>
+    <td style="text-align:right;color:#fde68a">~0 ms (no spawn)</td>
+  </tr>
+  <tr style="background:rgba(255,255,255,.02)">
     <td><strong>ZealPHP CGI bridge — <code>cgiMode('proc')</code></strong> (default)</td>
     <td><code>proc_open</code> spawns a <strong>fresh PHP interpreter per request</strong>. Kernel fork + exec + PHP startup + opcache check + autoload + include + execute.</td>
     <td style="text-align:right;color:#fca5a5">~30–50 ms</td>
   </tr>
-  <tr style="background:rgba(255,255,255,.02)">
+  <tr>
     <td><strong>ZealPHP CGI bridge — <code>cgiMode('fork')</code></strong> (v0.2.29)</td>
     <td><code>OpenSwoole\Process</code> forks the <strong>already-booted worker</strong> (copy-on-write). No exec, no PHP startup, no autoload — the interpreter + classmap + opcache are inherited. Runs in function scope.</td>
     <td style="text-align:right;color:#fde68a">~5 ms (≈5× faster)</td>
@@ -390,7 +395,18 @@ $app->run();
 <h2 style="margin:2.5rem 0 1rem">Reproduce locally</h2>
 
 <p style="color:#cbd5e1;line-height:1.65">
-  <code>scripts/bench_vs_fpm.sh</code> benches the ZealPHP coroutine endpoint and, if you point it at them, an FPM URL (<code>FPM_URL=</code>) and a legacy-CGI ZealPHP instance (<code>LEGACY_CGI_URL=</code>). It probes each first and skips with a setup hint if it can't reach one — it won't auto-install Apache/FPM.
+  <code>scripts/bench_vs_fpm.sh</code> benches every row of the table above. It always hits the ZealPHP coroutine endpoint (<code>ZEAL_URL</code>); point the other knobs at instances you've started to fill in the rest:
+</p>
+
+<ul style="color:#cbd5e1;line-height:1.7;font-size:.95rem;margin-top:.5rem;padding-left:1.5rem">
+  <li><code>MIXED_URL=</code> — the apples-to-apples row: a ZealPHP instance running <code>superglobals(true) + processIsolation(false) + enableCoroutine(false)</code> (the PHP-FPM-equivalent in-process model).</li>
+  <li><code>FPM_URL=</code> — Apache/nginx + PHP-FPM serving the same trivial file.</li>
+  <li><code>FORK_CGI_URL=</code> — a ZealPHP instance with <code>cgiMode('fork')</code> (warm-fork CGI bridge).</li>
+  <li><code>LEGACY_CGI_URL=</code> — a ZealPHP instance with <code>cgiMode('proc')</code> (the default proc_open bridge).</li>
+</ul>
+
+<p style="color:#cbd5e1;line-height:1.65;margin-top:.7rem">
+  It probes each first and skips with a setup hint if it can't reach one — it won't auto-install Apache/FPM.
 </p>
 
 <!-- ────────────────────────────────────────────────────────────── -->
