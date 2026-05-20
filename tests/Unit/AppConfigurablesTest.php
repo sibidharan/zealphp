@@ -81,6 +81,30 @@ class AppConfigurablesTest extends TestCase
     }
 
     // ─────────────────────────────────────────────────────────────
+    // cgiMode()
+    // ─────────────────────────────────────────────────────────────
+
+    public function testCgiModeDefaultsToProc(): void
+    {
+        $this->assertSame('proc', App::cgiMode());
+        $this->assertSame('proc', App::$cgi_mode);
+    }
+
+    public function testCgiModeSetterRoundtrips(): void
+    {
+        $this->assertSame('fork', App::cgiMode('fork'));
+        $this->assertSame('fork', App::cgiMode());
+        $this->assertSame('fork', App::$cgi_mode);
+        $this->assertSame('proc', App::cgiMode('proc'));
+    }
+
+    public function testCgiModeRejectsUnknownMode(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        App::cgiMode('exec');
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // serverAdmin()
     // ─────────────────────────────────────────────────────────────
 

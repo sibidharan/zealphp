@@ -53,6 +53,31 @@ class App
      */
     public static ?bool $process_isolation = null;
     /**
+     * How a process-isolated legacy include is dispatched, when
+     * processIsolation() is on:
+     *
+     *   'proc' (default) — proc_open() spawns a FRESH PHP interpreter per
+     *                      request (src/cgi_worker.php). True global scope:
+     *                      top-level `$x = ...` is visible via `global $x` in
+     *                      functions, so unmodified WordPress/Drupal work. Cost:
+     *                      cold PHP startup + autoload per request (~tens of ms).
+     *
+     *   'fork' — OpenSwoole\Process forks the already-booted worker (copy-on-
+     *            write: warm interpreter, loaded autoloader, hot opcache). ~5×
+     *            faster than 'proc' because nothing re-execs. TRADE-OFF: the
+     *            file runs in the fork closure's FUNCTION scope, so bare
+     *            top-level vars are NOT visible via the `global` keyword
+     *            (`$wpdb` -style patterns break). Superglobals
+     *            ($_GET/$_POST/$_SESSION/$_SERVER) work normally. Use for
+     *            "modernised legacy" apps that read request state via
+     *            superglobals and don't lean on bare-global wiring; keep 'proc'
+     *            for unmodified WordPress/Drupal.
+     *
+     * Set via App::cgiMode('fork'|'proc'). Default 'proc' — no behaviour change
+     * for existing isolation users.
+     */
+    public static string $cgi_mode = 'proc';
+    /**
      * OpenSwoole `enable_coroutine` server-setting override. `null` means
      * "follow !$superglobals" (true → coroutine-per-request, false → one
      * synchronous request at a time per worker). Set via
@@ -706,6 +731,25 @@ class App
     {
         if (func_num_args() > 0) self::$process_isolation = $on;
         return self::$process_isolation ?? self::$superglobals;
+    }
+
+    /**
+     * Select how a process-isolated legacy include is dispatched: 'proc'
+     * (default, fresh PHP per request via proc_open — true global scope, full
+     * WordPress/Drupal compatibility) or 'fork' (warm OpenSwoole\Process fork
+     * of the booted worker — ~5× faster, but function-scope so bare-`global`
+     * wiring breaks). See App::$cgi_mode for the full trade-off. No-arg call
+     * returns the current mode. Only takes effect when processIsolation() is on.
+     */
+    public static function cgiMode(?string $mode = null): string
+    {
+        if ($mode !== null) {
+            if ($mode !== 'proc' && $mode !== 'fork') {
+                throw new \InvalidArgumentException("App::cgiMode() expects 'proc' or 'fork', got '{$mode}'.");
+            }
+            self::$cgi_mode = $mode;
+        }
+        return self::$cgi_mode;
     }
 
     /**
@@ -2223,7 +2267,9 @@ class App
         $g->server['SCRIPT_FILENAME'] = $absPath;
 
         if (self::$coproc_implicit_request_handler) {
-            return self::cgiSubprocess($absPath);
+            return self::$cgi_mode === 'fork'
+                ? self::cgiFork($absPath)
+                : self::cgiSubprocess($absPath);
         }
         return self::executeFile($absPath, $args);
     }
@@ -2248,7 +2294,9 @@ class App
         // Outside the document root — preserve legacy "trust the caller"
         // semantics while still applying the universal return contract.
         if (self::$coproc_implicit_request_handler) {
-            return self::cgiSubprocess($path);
+            return self::$cgi_mode === 'fork'
+                ? self::cgiFork($path)
+                : self::cgiSubprocess($path);
         }
         return self::executeFile($path, []);
     }
@@ -2434,6 +2482,223 @@ class App
         // not the default 1-from-no-return, return it. The body (echoed
         // output) is folded in only if the return was a string (echo-shell-
         // then-return-body idiom) — exactly matching executeFile().
+        if ($hasReturn && $returnValue !== null && $returnValue !== 1) {
+            if (is_string($returnValue) && $body !== '') {
+                return $body . $returnValue;
+            }
+            return $returnValue;
+        }
+        return $body !== '' ? $body : null;
+    }
+
+    /**
+     * Warm-fork variant of cgiSubprocess(): instead of proc_open()-ing a fresh
+     * PHP interpreter per request, OpenSwoole\Process forks the already-booted
+     * worker (copy-on-write — the interpreter, Composer autoloader, and opcache
+     * are inherited, so PHP startup + autoload are NOT re-paid). ~5× faster than
+     * 'proc' mode on a trivial file.
+     *
+     * Isolation: the child is a fresh process that runs the file and exits, so
+     * define()/class/ini mutations and any die()/exit() die WITH the child — the
+     * worker is never affected (this is actually safer for die()-heavy legacy
+     * code than the in-process executeFile() path).
+     *
+     * TRADE-OFF vs 'proc': the file is included inside the fork closure, so it
+     * runs in FUNCTION scope, not true global scope. Superglobals
+     * ($_GET/$_POST/$_SESSION/$_SERVER) work (they're always global), but a bare
+     * top-level `$x = ...` is NOT visible via `global $x` in a function — so
+     * unmodified WordPress/Drupal (`global $wpdb;`) need 'proc'. See App::$cgi_mode.
+     *
+     * Streaming note: the child runs to completion and ships one buffered
+     * payload back, so incremental SSE does not stream chunk-by-chunk in fork
+     * mode (an infinite event-stream loop would hang). Use 'proc' mode or a
+     * native coroutine SSE route for live streaming.
+     */
+    private static function cgiFork(string $path): mixed
+    {
+        $g = RequestContext::instance();
+
+        // Snapshot the per-request superglobal state to re-assert in the child.
+        // (The child inherits these COW, but re-setting is explicit + guards
+        // against any worker-level residue.)
+        $ctx = [
+            'server' => $g->server,
+            'get'    => $g->get,
+            'post'   => $g->post,
+            'cookie' => $g->cookie,
+            'files'  => $g->files,
+            'env'    => is_array($g->env ?? null) ? $g->env : $_ENV,
+        ];
+
+        $worker = new \OpenSwoole\Process(function (\OpenSwoole\Process $child) use ($path, $ctx) {
+            $cg = RequestContext::instance();
+
+            // Re-assert superglobals at true global scope (superglobals are
+            // always global even when assigned inside this closure).
+            $_SERVER  = array_merge($_SERVER, $ctx['server']);
+            $_GET     = $ctx['get'];
+            $_POST    = $ctx['post'];
+            $_COOKIE  = $ctx['cookie'];
+            $_FILES   = $ctx['files'];
+            $_ENV     = array_merge($_ENV, $ctx['env']);
+            $_REQUEST = array_merge($_GET, $_POST);
+
+            // Reset the inherited response capture buffers so we ship back ONLY
+            // what THIS include adds. header()/setcookie()/http_response_code()
+            // are uopz-overridden (inherited from the worker) to buffer into
+            // $cg->zealphp_response — we read those lists after the include.
+            $resp = $cg->zealphp_response;
+            if ($resp !== null) {
+                $resp->headersList    = [];
+                $resp->cookiesList    = [];
+                $resp->rawCookiesList = [];
+            }
+            $cg->status = 200;
+
+            // Shutdown-safe payload writer: legacy code that calls die()/exit()
+            // still ships its buffered output + metadata back to the parent.
+            $sent = false;
+            $emit = function () use (&$sent, $child, $resp, $cg) {
+                if ($sent) return;
+                $sent = true;
+                $body = ob_get_level() > 0 ? (string) ob_get_clean() : '';
+                $payload = [
+                    'status'     => is_int($cg->status ?? null) ? $cg->status : 200,
+                    'headers'    => $resp !== null ? $resp->headersList : [],
+                    'cookies'    => $resp !== null ? $resp->cookiesList : [],
+                    'rawcookies' => $resp !== null ? $resp->rawCookiesList : [],
+                    'body'       => $body,
+                ];
+                if (isset($GLOBALS['__zeal_fork_return_set']) && $GLOBALS['__zeal_fork_return_set']) {
+                    $payload['return_value'] = $GLOBALS['__zeal_fork_return'] ?? null;
+                }
+                // Length-prefixed frame: a 4-byte big-endian length header then
+                // the JSON. The parent reads exactly that many bytes — never a
+                // post-EOF read, because OpenSwoole\Process::read() BLOCKS (does
+                // not return '') once the child has exited.
+                $json = (string) json_encode($payload, JSON_UNESCAPED_SLASHES);
+                $child->write(pack('N', strlen($json)) . $json);
+            };
+            register_shutdown_function($emit);
+
+            ob_start();
+            try {
+                $result = include $path;
+                // Universal return contract (mirror cgi_worker.php): invoke a
+                // returned Closure, consume a returned Generator into the body,
+                // drop non-serialisable returns.
+                if ($result instanceof \Closure) {
+                    $result = $result();
+                }
+                if ($result instanceof \Generator) {
+                    foreach ($result as $chunk) {
+                        if (is_scalar($chunk)) { echo (string) $chunk; }
+                    }
+                    $result = null;
+                }
+                if (is_resource($result)
+                    || (is_object($result) && !($result instanceof \JsonSerializable) && !($result instanceof \stdClass))) {
+                    $result = null;
+                }
+                $GLOBALS['__zeal_fork_return']     = $result;
+                $GLOBALS['__zeal_fork_return_set'] = true;
+            } catch (HaltException $e) {
+                // Clean per-request halt — buffered output is the body.
+            } catch (\OpenSwoole\ExitException $e) {
+                // Legacy die()/exit(): PHP already echoed any die("msg") string
+                // into the buffer before the exit unwound. Treat as a clean end
+                // — keep the buffered body + whatever status was set, no trace.
+                // (In fork mode this only ends the child; the worker is safe.)
+            } catch (\Throwable $e) {
+                $cg->status = 500;
+                echo '<pre>' . htmlspecialchars($e->getMessage()) . "\n"
+                   . htmlspecialchars($e->getTraceAsString()) . '</pre>';
+            }
+            $emit();
+            $child->exit(0);
+        }, false, SOCK_STREAM, false); // redirect=false, SOCK_STREAM, enable_coroutine=false
+
+        $pid = $worker->start();
+        if ($pid === false) {
+            elog("cgiFork: failed to fork process for $path", "error");
+            return 500;
+        }
+
+        // Read the length-prefixed frame: 4-byte big-endian header, then
+        // exactly that many payload bytes. Reading the exact length (rather
+        // than looping to EOF) is required — OpenSwoole\Process::read() blocks
+        // forever after the child exits instead of returning ''. The parent
+        // drains concurrently with the child writing, so payloads larger than
+        // the pipe buffer stream through without deadlock.
+        $readN = static function (\OpenSwoole\Process $w, int $n): string {
+            $buf = '';
+            while (strlen($buf) < $n) {
+                $chunk = $w->read($n - strlen($buf));
+                if ($chunk === '' || $chunk === false) break;
+                $buf .= $chunk;
+            }
+            return $buf;
+        };
+        $header = $readN($worker, 4);
+        $raw = '';
+        if (strlen($header) === 4) {
+            $lenInfo = unpack('N', $header);
+            $len = (is_array($lenInfo) && isset($lenInfo[1]) && is_int($lenInfo[1])) ? $lenInfo[1] : 0;
+            if ($len > 0) {
+                $raw = $readN($worker, $len);
+            }
+        }
+        \OpenSwoole\Process::wait(true);
+
+        $meta = json_decode($raw, true);
+        if (!is_array($meta)) {
+            return 500;
+        }
+
+        $statusCode = $meta['status'] ?? 200;
+        response_set_status(is_numeric($statusCode) ? (int) $statusCode : 200);
+
+        $respW = $g->zealphp_response;
+        if ($respW !== null) {
+            foreach ((array) ($meta['headers'] ?? []) as $pair) {
+                if (is_array($pair) && count($pair) >= 2
+                    && is_scalar($pair[0]) && is_scalar($pair[1])) {
+                    $respW->header((string) $pair[0], (string) $pair[1]);
+                }
+            }
+            // Cookie tuples round-tripped through JSON come back as mixed —
+            // narrow each positional arg before re-applying (the tuple shape
+            // is Response::cookie's: name, value, expire, path, domain, secure,
+            // httponly, samesite, priority).
+            $applyCookie = static function (callable $fn, mixed $args): void {
+                if (!is_array($args) || !isset($args[0]) || !is_scalar($args[0])) return;
+                $s = static fn(int $i, string $d): string =>
+                    isset($args[$i]) && is_scalar($args[$i]) ? (string) $args[$i] : $d;
+                $b = static fn(int $i): bool => isset($args[$i]) && (bool) $args[$i];
+                $fn(
+                    (string) $args[0],
+                    $s(1, ''),
+                    isset($args[2]) && is_numeric($args[2]) ? (int) $args[2] : 0,
+                    $s(3, '/'),
+                    $s(4, ''),
+                    $b(5),
+                    $b(6),
+                    $s(7, ''),
+                );
+            };
+            foreach ((array) ($meta['cookies'] ?? []) as $args) {
+                $applyCookie([$respW, 'cookie'], $args);
+            }
+            foreach ((array) ($meta['rawcookies'] ?? []) as $args) {
+                $applyCookie([$respW, 'rawCookie'], $args);
+            }
+        }
+
+        $body = is_string($meta['body'] ?? null) ? $meta['body'] : '';
+        $hasReturn   = array_key_exists('return_value', $meta);
+        $returnValue = $meta['return_value'] ?? null;
+
+        // Same return contract as cgiSubprocess()/executeFile().
         if ($hasReturn && $returnValue !== null && $returnValue !== 1) {
             if (is_string($returnValue) && $body !== '') {
                 return $body . $returnValue;
