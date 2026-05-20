@@ -13,15 +13,14 @@ $port = isset($argv[1]) ? (int) $argv[1] : 8080;
 $paths = [
     '/ws/echo',
     '/ws/broadcast',
-    '/ws/rooms',
-    '/ws/counter-demo',
-    '/ws/store-demo',
-    '/ws/tictactoe',
-    '/ws/learn',
-    '/ws/session-counter',
+    '/ws/ticker',
+    '/ws/rooms?room=cov&uid=probe',
+    '/ws/auth?token=secret',
+    '/ws/auth',
+    '/ws/binary',
 ];
 
-\OpenSwoole\Coroutine\run(function () use ($port, $paths) {
+\OpenSwoole\Coroutine::run(function () use ($port, $paths) {
     foreach ($paths as $path) {
         \OpenSwoole\Coroutine::create(function () use ($port, $path) {
             $cli = new \OpenSwoole\Coroutine\Http\Client('127.0.0.1', $port);
