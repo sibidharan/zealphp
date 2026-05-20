@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`App::onWorkerStop(callable $fn)`** — register a per-worker shutdown hook, the mirror of `App::onWorkerStart()`. Runs inside the worker process when it exits (max_request recycle, graceful shutdown, or reload), *before* the process terminates. Unlike `register_shutdown_function`, it fires on OpenSwoole's signal-driven worker stop — the reliable place to flush per-worker state (counters, buffered I/O, coverage dumps). Invoked as `$fn($server, $workerId)`; a throwing hook is caught + logged so it can't abort worker teardown.
+
+### Testing / coverage
+
+- **Massive test-coverage expansion: ~29% → ~73% line coverage.** Added ~600 regression tests across the previously-untested surface — HTTP wrappers (Response/Request/LazyServerRequest), every middleware, the session layer (handlers, managers, `zeal_session_*`), `utils.php` globals, `RequestContext`, `ZealAPI`/`REST`, `IOStreamWrapper`, `cgi_worker.php`, the file-execution family, the in-process `ResponseMiddleware` pipeline, and App.php static helpers (CLI arg parsing, status emission, route registration, error rendering). All run in-process.
+- **Server-process coverage merge** (`scripts/coverage_full.sh` + `scripts/merge_coverage.php`): instruments the live OpenSwoole server (gated `ZEALPHP_COVERAGE_DIR` hook in `app.php`, dumping on `App::onWorkerStop`) so the integration suite's exercise of the event loop — routing, middleware, session managers, WebSocket — counts toward coverage, not just the in-process unit tests. CI now uploads the merged unit+integration clover to Codecov.
+
 ## [0.2.30] - 2026-05-20
 
 Closes the rest of [issue #17](https://github.com/sibidharan/zealphp/issues/17) (GURU PRASANTH M, v0.2.29): the proc-mode CGI autoloader gap, the CLI `restart`/`start -d` output races, and — the headline — full superglobal aliasing so `$g->get` is genuinely the same array as `$_GET` in superglobals mode (not a per-request snapshot).

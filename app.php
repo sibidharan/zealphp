@@ -192,4 +192,43 @@ if (file_exists(__DIR__ . '/route/_error_test.php')) {
 // hits an empty cache and shows just the "★" until the refresh resolves.
 GithubStars::register('sibidharan/zealphp');
 
+// ── Coverage instrumentation (test-only; gated, inert in production) ──
+// When ZEALPHP_COVERAGE_DIR is set AND pcov is loaded, each worker collects
+// line coverage of src/ and dumps a .cov on worker stop. scripts/coverage_full.sh
+// merges these with the unit-test coverage so the long-running server loop
+// (OnRequest, routing, middleware, sessions, WebSocket) — which in-process unit
+// tests can't reach — counts toward the reported total. Inert unless the env is set.
+if (($__covDir = getenv('ZEALPHP_COVERAGE_DIR')) !== false && $__covDir !== ''
+    && class_exists(\SebastianBergmann\CodeCoverage\CodeCoverage::class)) {
+    $__cov = null;
+    App::onWorkerStart(function ($server, $workerId) use (&$__cov) {
+        $filter = new \SebastianBergmann\CodeCoverage\Filter();
+        $rii = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator(__DIR__ . '/src', \FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($rii as $f) {
+            if ($f->isFile() && $f->getExtension() === 'php') {
+                $filter->includeFile($f->getPathname());
+            }
+        }
+        try {
+            // Selector picks whatever coverage driver is active (pcov locally,
+            // Xdebug in CI under XDEBUG_MODE=coverage). If none, skip silently.
+            $driver = (new \SebastianBergmann\CodeCoverage\Driver\Selector())->forLineCoverage($filter);
+        } catch (\Throwable $e) {
+            return;
+        }
+        $__cov = new \SebastianBergmann\CodeCoverage\CodeCoverage($driver, $filter);
+        $__cov->start("worker-$workerId");
+    });
+    App::onWorkerStop(function ($server, $workerId) use (&$__cov, $__covDir) {
+        if ($__cov === null) {
+            return;
+        }
+        $__cov->stop();
+        $file = rtrim($__covDir, '/') . "/server-w{$workerId}-" . getmypid() . '.cov';
+        (new \SebastianBergmann\CodeCoverage\Report\PHP())->process($__cov, $file);
+    });
+}
+
 $app->run($settings);

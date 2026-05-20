@@ -28,6 +28,8 @@ class App
     protected array $ws_routes = [];
     /** @var array<int, callable> */
     protected static array $workerStartHooks = [];
+    /** @var array<int, callable> */
+    protected static array $workerStopHooks = [];
     protected static float $workerStartedAt = 0.0;
     protected string $host;
     protected int $port;
@@ -1373,6 +1375,19 @@ class App
     public static function onWorkerStart(callable $fn): void
     {
         self::$workerStartHooks[] = $fn;
+    }
+
+    /**
+     * Register a per-worker shutdown hook. Runs inside the worker process when
+     * it exits (max_request recycle, graceful shutdown, or reload), BEFORE the
+     * process terminates — the reliable place to flush per-worker state
+     * (counters, buffered I/O, coverage dumps). Unlike register_shutdown_function,
+     * this fires on OpenSwoole's signal-driven worker stop.
+     * Called as: $fn($server, $workerId)
+     */
+    public static function onWorkerStop(callable $fn): void
+    {
+        self::$workerStopHooks[] = $fn;
     }
 
     /**
@@ -4020,6 +4035,16 @@ HELP;
         // peak RSS, and uptime so the max_request backstop is visible in prod
         // logs. Set ZEALPHP_RECYCLE_LOG=0 to silence.
         $server->on('workerStop', function($server, $workerId) {
+            // User-registered per-worker shutdown hooks run first, before the
+            // recycle-log line — so a hook can flush state even if logging is off.
+            foreach (self::$workerStopHooks as $hook) {
+                try {
+                    $hook($server, $workerId);
+                } catch (\Throwable $e) {
+                    // A failing shutdown hook must not abort worker teardown.
+                    \ZealPHP\elog('[workerStop hook] ' . $e->getMessage(), 'warn');
+                }
+            }
             if (\ZealPHP\env_flag('ZEALPHP_RECYCLE_LOG', true) === false) {
                 return;
             }

@@ -399,6 +399,7 @@ The shell script `scripts/zealphp.sh` is an optional higher-level wrapper. All c
 - `onMessage` handler **silently drops PING (9), PONG (10), CONTINUATION (0)** frames — only TEXT (1) and BINARY (2) reach route handlers
 - `onShutdown` sends WebSocket CLOSE frame 1001 (Going Away) to all connections
 - `App::onWorkerStart(callable $fn)` — register per-worker startup hook (timers, warmup, etc.)
+- `App::onWorkerStop(callable $fn)` — register per-worker shutdown hook; runs in the worker before exit (recycle/graceful/reload), the reliable place to flush per-worker state (fires on OpenSwoole's signal-driven stop, unlike `register_shutdown_function`)
 - `getClientList` must be paginated in chunks of 100 (OpenSwoole hard limit)
 
 ### OpenSwoole Adapters
