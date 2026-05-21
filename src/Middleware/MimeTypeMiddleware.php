@@ -7,6 +7,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use ZealPHP\HTTP\MimeResolver;
 use ZealPHP\RequestContext;
 
 /**
@@ -16,6 +17,12 @@ use ZealPHP\RequestContext;
  * handler didn't already set one. Useful for handlers that stream raw bytes
  * for custom file types (`.wasm`, `.glb`, `.usdz`, …) without each handler
  * remembering the right MIME string.
+ *
+ * Multi-suffix aware (Apache mod_mime `find_ct` parity): the type is resolved
+ * by walking every dot-separated suffix left-to-right, so `document.html.gz`
+ * resolves its Content-Type from `html` (the last *type-mapped* suffix wins)
+ * while `gz` contributes no type. Leading-dot basenames (`.png`) are hidden
+ * files with no extension and receive no type. See {@see MimeResolver}.
  *
  * Note: OpenSwoole's static file handler has its own internal MIME map for
  * files served directly off disk via `static_handler_locations`. This
@@ -41,17 +48,12 @@ use ZealPHP\RequestContext;
  */
 class MimeTypeMiddleware implements MiddlewareInterface
 {
-    /** @var array<string, string> */
-    private array $map;
+    private MimeResolver $resolver;
 
-    /** @param array<string, string> $map ext => mime-type */
+    /** @param array<string, string|int> $map ext => mime-type */
     public function __construct(array $map = [])
     {
-        $out = [];
-        foreach ($map as $ext => $mime) {
-            $out[strtolower(ltrim((string)$ext, '.'))] = (string)$mime;
-        }
-        $this->map = $out;
+        $this->resolver = new MimeResolver($map);
     }
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
@@ -62,12 +64,10 @@ class MimeTypeMiddleware implements MiddlewareInterface
             return $response;
         }
 
-        $ext = strtolower(pathinfo($request->getUri()->getPath(), PATHINFO_EXTENSION));
-        if ($ext === '' || !isset($this->map[$ext])) {
+        $mime = $this->resolver->resolve($request->getUri()->getPath())['type'];
+        if ($mime === null) {
             return $response;
         }
-
-        $mime = $this->map[$ext];
 
         $g = RequestContext::instance();
         if ($g->zealphp_response !== null) {
