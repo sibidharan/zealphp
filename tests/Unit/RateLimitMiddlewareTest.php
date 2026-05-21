@@ -573,6 +573,340 @@ class RateLimitMiddlewareTest extends TestCase
         $this->assertSame(0, Store::count($table));
     }
 
+    // ---- proxy-IP keying (B2): App::clientIp() + XFF -------------------
+
+    /**
+     * When $g->server has REMOTE_ADDR set (the normal path), App::clientIp()
+     * returns that value without consulting X-Forwarded-For because no
+     * trusted proxies are configured. The rate-limit key must be that IP.
+     */
+    public function testProxyAwareKeyingUsesGServerRemoteAddr(): void
+    {
+        // No trusted proxies → App::clientIp() returns raw REMOTE_ADDR.
+        App::trustedProxies([]);
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, tableName: $table);
+        $ip = '203.0.113.99';
+
+        $g = RequestContext::instance();
+        $g->server = ['REMOTE_ADDR' => $ip];
+        $g->status = null;
+
+        $request = (new ServerRequest('/', 'GET', '', []))
+            ->withAddedHeader('Host', 'example.test');
+        $this->assertSame(200, $mw->process($request, $this->passHandler())->getStatusCode());
+        // Second request from same IP must be blocked.
+        $g->server = ['REMOTE_ADDR' => $ip];
+        $g->status = null;
+        $blocked = $mw->process($request, $this->passHandler());
+        $this->assertSame(429, $blocked->getStatusCode());
+
+        App::trustedProxies([]);
+    }
+
+    /**
+     * When a trusted proxy is configured and X-Forwarded-For is present,
+     * App::clientIp() walks the chain right-to-left and returns the first
+     * non-trusted IP. The rate-limit key must be that real client IP, not
+     * the proxy's IP.
+     */
+    public function testProxyAwareKeyingHonoursXForwardedFor(): void
+    {
+        $proxyIp  = '10.0.0.1';
+        $clientIp = '203.0.113.77';
+
+        App::trustedProxies([$proxyIp]);
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, tableName: $table);
+
+        $g = RequestContext::instance();
+        $g->server = [
+            'REMOTE_ADDR'          => $proxyIp,
+            'HTTP_X_FORWARDED_FOR' => $clientIp,
+        ];
+        $g->status = null;
+        $request = (new ServerRequest('/', 'GET', '', []))
+            ->withAddedHeader('Host', 'example.test');
+
+        // First request: allowed; must be keyed to $clientIp, not $proxyIp.
+        $this->assertSame(200, $mw->process($request, $this->passHandler())->getStatusCode());
+        $this->assertTrue(Store::exists($table, $clientIp), 'real client IP must be the Store key');
+        $this->assertFalse(Store::exists($table, $proxyIp), 'proxy IP must NOT be the Store key');
+
+        // Second request from same client: blocked.
+        $g->server = [
+            'REMOTE_ADDR'          => $proxyIp,
+            'HTTP_X_FORWARDED_FOR' => $clientIp,
+        ];
+        $g->status = null;
+        $this->assertSame(429, $mw->process($request, $this->passHandler())->getStatusCode());
+
+        App::trustedProxies([]);
+    }
+
+    /**
+     * Two distinct real clients behind the same trusted proxy must have
+     * separate rate-limit buckets.
+     */
+    public function testProxyAwareKeyingDistinguishesTwoClientsBehindsProxy(): void
+    {
+        $proxyIp   = '10.0.0.2';
+        $clientA   = '203.0.113.1';
+        $clientB   = '203.0.113.2';
+
+        App::trustedProxies([$proxyIp]);
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, tableName: $table);
+
+        $g = RequestContext::instance();
+        $request = (new ServerRequest('/', 'GET', '', []))->withAddedHeader('Host', 'example.test');
+
+        // Both clients get their first request allowed.
+        $g->server = ['REMOTE_ADDR' => $proxyIp, 'HTTP_X_FORWARDED_FOR' => $clientA];
+        $g->status = null;
+        $this->assertSame(200, $mw->process($request, $this->passHandler())->getStatusCode());
+
+        $g->server = ['REMOTE_ADDR' => $proxyIp, 'HTTP_X_FORWARDED_FOR' => $clientB];
+        $g->status = null;
+        $this->assertSame(200, $mw->process($request, $this->passHandler())->getStatusCode());
+
+        // Client A is now blocked; Client B should still be at limit (also blocked on next).
+        $g->server = ['REMOTE_ADDR' => $proxyIp, 'HTTP_X_FORWARDED_FOR' => $clientA];
+        $g->status = null;
+        $this->assertSame(429, $mw->process($request, $this->passHandler())->getStatusCode());
+
+        $g->server = ['REMOTE_ADDR' => $proxyIp, 'HTTP_X_FORWARDED_FOR' => $clientB];
+        $g->status = null;
+        $this->assertSame(429, $mw->process($request, $this->passHandler())->getStatusCode());
+
+        App::trustedProxies([]);
+    }
+
+    // ---- burst allowance ---------------------------------------------------
+
+    /**
+     * With burst=2 and limit=2, the effective ceiling is 4 requests per
+     * window. Requests 1..4 pass, request 5 is blocked.
+     */
+    public function testBurstExtendsEffectiveLimitByBurstAmount(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 2, window: 100, burst: 2, tableName: $table);
+        $ip = '203.0.113.100';
+
+        for ($i = 1; $i <= 4; $i++) {
+            $this->assertAllowed($this->hit($mw, $ip), "request #$i (within limit+burst) must be allowed");
+        }
+        $this->assertSame(429, $this->hit($mw, $ip)->getStatusCode(), 'request #5 must be blocked');
+    }
+
+    /**
+     * burst=0 (default) means no extra allowance — the Nth+1 request is
+     * rejected as before.
+     */
+    public function testZeroBurstBehavesAsNoBurst(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 2, window: 100, burst: 0, tableName: $table);
+        $ip = '203.0.113.101';
+
+        $this->assertAllowed($this->hit($mw, $ip));
+        $this->assertAllowed($this->hit($mw, $ip));
+        $this->assertSame(429, $this->hit($mw, $ip)->getStatusCode());
+    }
+
+    /**
+     * nodelay=true does not affect pass/reject decisions — it is a forwarding
+     * hint. Requests within limit+burst still pass, over-limit still blocked.
+     */
+    public function testNodelayCombinedWithBurstAllowsBurstRequests(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, burst: 2, nodelay: true, tableName: $table);
+        $ip = '203.0.113.102';
+
+        // limit(1) + burst(2) = 3 requests allowed, 4th blocked.
+        $this->assertAllowed($this->hit($mw, $ip));
+        $this->assertAllowed($this->hit($mw, $ip));
+        $this->assertAllowed($this->hit($mw, $ip));
+        $this->assertSame(429, $this->hit($mw, $ip)->getStatusCode());
+    }
+
+    // ---- dry-run mode ------------------------------------------------------
+
+    /**
+     * In dry-run mode every request is allowed regardless of count.
+     */
+    public function testDryRunAllowsAllRequestsEvenOverLimit(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, dryRun: true, tableName: $table);
+        $ip = '203.0.113.110';
+
+        // 5 requests — all must pass even though limit=1.
+        for ($i = 0; $i < 5; $i++) {
+            $this->assertAllowed($this->hit($mw, $ip), "dry-run request #$i must be allowed");
+        }
+    }
+
+    /**
+     * Dry-run must still record counts in the Store (accounting runs normally).
+     */
+    public function testDryRunStillRecordsCountsInStore(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, dryRun: true, tableName: $table);
+        $ip = '203.0.113.111';
+
+        $this->hit($mw, $ip);
+        $this->hit($mw, $ip);
+        $this->hit($mw, $ip);
+
+        $row = Store::get($table, $ip);
+        $this->assertIsArray($row);
+        // count should be 3 (all recorded despite dry-run).
+        $this->assertSame(3, $row['count']);
+    }
+
+    /**
+     * Dry-run must log a message when a request would have been blocked.
+     */
+    public function testDryRunLogsWouldHaveBlockedMessage(): void
+    {
+        $path = $this->debugLogPath();
+        if ($path === null || !\ZealPHP\debug_logging_enabled()) {
+            $this->markTestSkipped('debug logging not available in this environment');
+        }
+
+        $table = $this->makeTable();
+        $ip = '203.0.113.112';
+        // Unique IP so we can count occurrences in the log unambiguously.
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, dryRun: true, tableName: $table);
+
+        $this->hit($mw, $ip); // within limit, no block log
+        $this->hit($mw, $ip); // over limit → dry-run log
+
+        $log = $this->readLog($path);
+        $this->assertStringContainsString('[dry-run]', $log);
+        $this->assertStringContainsString($ip, $log);
+        $this->assertStringContainsString('would have blocked', $log);
+    }
+
+    // ---- configurable reject status ----------------------------------------
+
+    /**
+     * Default rejectStatus is 429 (ZealPHP semantic default).
+     */
+    public function testDefaultRejectStatusIs429(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, tableName: $table);
+        $ip = '203.0.113.120';
+
+        $this->hit($mw, $ip);
+        $blocked = $this->hit($mw, $ip);
+        $this->assertSame(429, $blocked->getStatusCode());
+    }
+
+    /**
+     * rejectStatus=503 returns 503 (nginx default, for migration parity).
+     */
+    public function testCustomRejectStatus503(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, rejectStatus: 503, tableName: $table);
+        $ip = '203.0.113.121';
+
+        $this->hit($mw, $ip);
+        $blocked = $this->hit($mw, $ip);
+        $this->assertSame(503, $blocked->getStatusCode());
+    }
+
+    /**
+     * rejectStatus=400 is also accepted (valid 4xx range).
+     */
+    public function testCustomRejectStatus400(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, rejectStatus: 400, tableName: $table);
+        $ip = '203.0.113.122';
+
+        $this->hit($mw, $ip);
+        $blocked = $this->hit($mw, $ip);
+        $this->assertSame(400, $blocked->getStatusCode());
+    }
+
+    /**
+     * rejectStatus outside 400–599 must throw at construction time.
+     */
+    public function testInvalidRejectStatusThrows(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new RateLimitMiddleware(rejectStatus: 200);
+    }
+
+    /**
+     * rejectStatus=599 (upper boundary) must be accepted.
+     */
+    public function testRejectStatus599IsAccepted(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, rejectStatus: 599, tableName: $table);
+        $ip = '203.0.113.123';
+
+        $this->hit($mw, $ip);
+        $blocked = $this->hit($mw, $ip);
+        $this->assertSame(599, $blocked->getStatusCode());
+    }
+
+    // ---- Store-full fail-open logging (B10) --------------------------------
+
+    /**
+     * When Store::set() returns false (table full), the middleware logs a
+     * warning and fails open (request is allowed).
+     *
+     * We use uopz to intercept Store::set() and force it to return false for
+     * the new-IP insertion, avoiding reliance on OpenSwoole Table's internal
+     * hash-table capacity (which is not deterministically exhaustible in a
+     * unit test — the actual ceiling depends on hash collisions).
+     */
+    public function testStoreFullFailsOpenAndLogs(): void
+    {
+        $path = $this->debugLogPath();
+        if ($path === null || !\ZealPHP\debug_logging_enabled()) {
+            $this->markTestSkipped('debug logging not available in this environment');
+        }
+        if (!function_exists('uopz_set_return')) {
+            $this->markTestSkipped('uopz extension not available');
+        }
+
+        // Unique table name so the log assertion is unambiguous.
+        $tableName = 'rl_full_' . str_replace('.', '', uniqid('', true));
+        Store::make($tableName, 64, [
+            'ip'    => [\OpenSwoole\Table::TYPE_STRING, 64],
+            'count' => [\OpenSwoole\Table::TYPE_INT,    4],
+            'reset' => [\OpenSwoole\Table::TYPE_INT,    4],
+        ]);
+
+        $mw = new RateLimitMiddleware(limit: 100, window: 100, tableName: $tableName);
+        $newIp = '192.0.3.201';
+
+        // Intercept Store::set() to return false, simulating a full table.
+        uopz_set_return(\ZealPHP\Store::class, 'set', false);
+        try {
+            $result = $this->hit($mw, $newIp);
+        } finally {
+            uopz_unset_return(\ZealPHP\Store::class, 'set');
+        }
+
+        $this->assertAllowed($result, 'Store-full must fail open (request allowed)');
+
+        // A warning must appear in the debug log for this specific table.
+        $log = $this->readLog($path);
+        $this->assertStringContainsString('is full', $log, 'Store-full warning must be logged');
+        $this->assertStringContainsString($tableName, $log, 'log must identify the table name');
+    }
+
     // ---- constructor validation -------------------------------------------
 
     public function testNegativeLimitThrows(): void
@@ -585,5 +919,11 @@ class RateLimitMiddlewareTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
         new RateLimitMiddleware(window: 0);
+    }
+
+    public function testNegativeBurstThrows(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new RateLimitMiddleware(burst: -1);
     }
 }
