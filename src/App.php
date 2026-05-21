@@ -94,6 +94,19 @@ class App
      */
     public static string $fcgi_address = '127.0.0.1:9000';
     /**
+     * Per-extension CGI backend registry. Apache `AddHandler`/`ProxyPassMatch`
+     * + nginx `fastcgi_pass`-per-location parity.
+     *
+     * Shape: [ '.ext' => ['mode' => 'proc'|'fork'|'fcgi', ...options] ]
+     *
+     * Default: empty — unregistered extensions (including .php) fall through to
+     * App::$cgi_mode (which defaults to 'proc', preserving existing behaviour).
+     * Register additional extensions with App::registerCgiBackend().
+     *
+     * @var array<string, array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>}>
+     */
+    public static array $cgi_backends = [];
+    /**
      * OpenSwoole `enable_coroutine` server-setting override. `null` means
      * "follow !$superglobals" (true → coroutine-per-request, false → one
      * synchronous request at a time per worker). Set via
@@ -955,6 +968,71 @@ class App
             self::$fcgi_address = $address;
         }
         return self::$fcgi_address;
+    }
+
+    /**
+     * Register a per-extension CGI backend. Apache `AddHandler`/`ProxyPassMatch`
+     * + nginx `fastcgi_pass`-per-location parity.
+     *
+     * @param string $extension  File extension including the dot, e.g. '.py', '.pl'.
+     * @param array<string, mixed> $config
+     *   'mode'        — 'proc' | 'fork' | 'fcgi' (required)
+     *   'interpreter' — full path to interpreter binary (proc mode only; null = direct exec via shebang)
+     *   'address'     — FastCGI backend address, "host:port" or "unix:/path" (fcgi mode only)
+     *   'fcgi_params' — extra FCGI params merged into the CGI env after buildCgiEnv() (fcgi mode only)
+     *
+     * @throws \InvalidArgumentException on invalid mode, fork-on-non-PHP, or missing fcgi address.
+     */
+    public static function registerCgiBackend(string $extension, array $config): void
+    {
+        $mode = is_string($config['mode'] ?? null) ? (string)$config['mode'] : '';
+        if ($mode !== 'proc' && $mode !== 'fork' && $mode !== 'fcgi') {
+            throw new \InvalidArgumentException(
+                "App::registerCgiBackend() mode must be 'proc', 'fork', or 'fcgi'; got '{$mode}'."
+            );
+        }
+        if ($mode === 'fork' && $extension !== '.php') {
+            throw new \InvalidArgumentException(
+                "fork mode requires a PHP target; use 'fcgi' (warm pool, language-agnostic) or 'proc' for {$extension}"
+            );
+        }
+        if ($mode === 'fcgi' && empty($config['address'])) {
+            throw new \InvalidArgumentException(
+                "App::registerCgiBackend() fcgi mode requires an 'address' (host:port or unix:/path) for {$extension}."
+            );
+        }
+        $entry = ['mode' => $mode];
+        $interpreter = $config['interpreter'] ?? null;
+        if ($interpreter !== null && is_string($interpreter)) {
+            $entry['interpreter'] = $interpreter;
+        }
+        $address = $config['address'] ?? null;
+        if ($address !== null && is_string($address)) {
+            $entry['address'] = $address;
+        }
+        $fcgiParams = $config['fcgi_params'] ?? null;
+        if (is_array($fcgiParams)) {
+            /** @var array<string, string> $fcgiParams */
+            $entry['fcgi_params'] = $fcgiParams;
+        }
+        self::$cgi_backends[$extension] = $entry;
+    }
+
+    /**
+     * Resolve the CGI backend config for a given file path.
+     *
+     * Looks up the extension in the per-extension registry ($cgi_backends).
+     * Falls back to ['mode' => App::$cgi_mode] for unregistered extensions.
+     *
+     * @return array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>}
+     */
+    public static function resolveCgiBackend(string $path): array
+    {
+        $ext = '.' . strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        if (isset(self::$cgi_backends[$ext])) {
+            return self::$cgi_backends[$ext];
+        }
+        return ['mode' => self::$cgi_mode];
     }
 
     /**
@@ -2586,10 +2664,18 @@ class App
         $g->server['SCRIPT_FILENAME'] = $absPath;
 
         if (self::$coproc_implicit_request_handler) {
-            return match (self::$cgi_mode) {
+            $backend = self::resolveCgiBackend($absPath);
+            return match ($backend['mode']) {
                 'fork' => self::cgiFork($absPath),
-                'fcgi' => self::cgiFcgi($absPath),
-                default => self::cgiSubprocess($absPath),
+                'fcgi' => self::cgiFcgi(
+                    $absPath,
+                    $backend['address'] ?? null,
+                    $backend['fcgi_params'] ?? []
+                ),
+                default => self::cgiSubprocess(
+                    $absPath,
+                    $backend['interpreter'] ?? null
+                ),
             };
         }
         return self::executeFile($absPath, $args);
@@ -2615,10 +2701,18 @@ class App
         // Outside the document root — preserve legacy "trust the caller"
         // semantics while still applying the universal return contract.
         if (self::$coproc_implicit_request_handler) {
-            return match (self::$cgi_mode) {
+            $backend = self::resolveCgiBackend($path);
+            return match ($backend['mode']) {
                 'fork' => self::cgiFork($path),
-                'fcgi' => self::cgiFcgi($path),
-                default => self::cgiSubprocess($path),
+                'fcgi' => self::cgiFcgi(
+                    $path,
+                    $backend['address'] ?? null,
+                    $backend['fcgi_params'] ?? []
+                ),
+                default => self::cgiSubprocess(
+                    $path,
+                    $backend['interpreter'] ?? null
+                ),
             };
         }
         return self::executeFile($path, []);
@@ -2797,8 +2891,13 @@ class App
      * (status, headers, body, stderr) back through the universal return contract.
      *
      * On connection failure or protocol error, logs via elog() and returns 502.
+     *
+     * @param string|null $address     Per-backend FastCGI address override (host:port or unix:/path).
+     *   null → falls back to App::$fcgi_address.
+     * @param array<string,string> $extraParams  Extra FCGI params merged after buildCgiEnv()
+     *   (Apache SetEnvIf / nginx fastcgi_param parity).
      */
-    private static function cgiFcgi(string $path): mixed
+    private static function cgiFcgi(string $path, ?string $address = null, array $extraParams = []): mixed
     {
         $g = RequestContext::instance();
 
@@ -2820,6 +2919,11 @@ class App
             ? '/' . ltrim(substr($path, strlen($docRoot)), '/')
             : $path;
 
+        // Per-backend extra params (nginx fastcgi_param / Apache SetEnvIf parity)
+        foreach ($extraParams as $k => $v) {
+            $env[$k] = $v;
+        }
+
         // Request body (POST data etc.)
         $stdinBody = '';
         try {
@@ -2832,8 +2936,9 @@ class App
             // No body available — proceed with empty stdin
         }
 
+        $fcgiAddress = $address ?? self::$fcgi_address;
         try {
-            $client   = new \ZealPHP\Legacy\FastCgiClient(self::$fcgi_address, self::$cgi_timeout);
+            $client   = new \ZealPHP\Legacy\FastCgiClient($fcgiAddress, self::$cgi_timeout);
             $response = $client->request($env, $stdinBody);
         } catch (\ZealPHP\Legacy\FastCgiException $e) {
             elog("cgiFcgi: FastCGI error for {$path}: " . $e->getMessage(), 'error');
@@ -2874,8 +2979,13 @@ class App
      * this method threads them through to the OpenSwoole response and
      * returns null (the caller signals _streaming and ResponseMiddleware
      * skips its buffering).
+     *
+     * @param string|null $interpreter  Full path to the interpreter binary.
+     *   null (default) → PHP + cgi_worker.php (existing behaviour, uopz captures).
+     *   Non-null → proc_open([$interpreter, $scriptPath]) with buildCgiEnv() env
+     *   (RFC 3875; CGI/1.1 Status: header parsing still works for any interpreter).
      */
-    private static function cgiSubprocess(string $path): mixed
+    private static function cgiSubprocess(string $path, ?string $interpreter = null): mixed
     {
         $g = RequestContext::instance();
 
@@ -2890,15 +3000,24 @@ class App
 
         $env = self::buildCgiEnv($g->server, is_string($ctx) ? $ctx : '{}');
 
-        $cgiWorker = __DIR__ . '/cgi_worker.php';
         $descriptors = [
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
 
+        if ($interpreter === null) {
+            // PHP target: route through cgi_worker.php for uopz header/cookie captures.
+            $cgiWorker = __DIR__ . '/cgi_worker.php';
+            $cmd = PHP_BINARY . ' ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
+        } else {
+            // Non-PHP target: exec interpreter directly with the script path.
+            // The script must output CGI/1.1 headers (Content-Type + blank line + body).
+            $cmd = escapeshellarg($interpreter) . ' ' . escapeshellarg($path);
+        }
+
         $process = proc_open(
-            PHP_BINARY . ' ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path),
+            $cmd,
             $descriptors,
             $pipes,
             self::resolveDocumentRoot(),
