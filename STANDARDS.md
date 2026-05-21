@@ -22,6 +22,7 @@ a perf-regression smoke (`scripts/perf_smoke.sh`) guard against silent erosion.
 |---|---|---|---|
 | **IANA HTTP Status Code Registry** (RFC 9110 §15) | `App::$REASON_PHRASES` + `emitStatus()` / `reasonPhrase()` | **Exhaustive** | `tests/Unit/IanaStatusConformanceTest.php` — every assigned 1xx–5xx code ↔ exact IANA description, both directions, + coercion boundaries |
 | **Status coercion** — three-digit 100–599 (RFC 9110 §15) | `App::coerceStatusCode()` (out-of-range → 500, Apache parity) | **Exhaustive** | `IanaStatusConformanceTest::testStatusCoercionBoundaries`, `AppStaticHelpersTest` |
+| **Message framing & request smuggling** (RFC 9112 §6–§7) | OpenSwoole http parser; ZealPHP owns the conformance claim | **Exhaustive (raw-socket)** | `tests/Integration/Http1FramingConformanceTest.php` — matrix below |
 | **Reason-phrase emission** (RFC 9112 §3.1.2) | `emitStatus()` two-arg form for codes OpenSwoole's C list drops (425/451) | Behavioral | `AppStaticHelpersTest`, `tests/Integration/FileExecutionContractTest.php` |
 | **Conditional requests** — ETag, `If-None-Match`, 304 (RFC 9110 §13, §8.8) | `ETagMiddleware` (weak `W/` ETag) | Behavioral | `tests/Unit/Middleware/ETagMiddlewareTest.php`, `tests/Integration/PublicRoutingTest.php` |
 | **Range requests** — `Range`, 206, `Content-Range`, 416, `Accept-Ranges`, `If-Range` (RFC 9110 §14 / RFC 7233) | `RangeMiddleware` + `Response::sendFile()` | Behavioral | `tests/Unit/RangeMiddlewareTest.php`, `tests/Integration/HttpFeaturesTest.php` |
@@ -29,6 +30,28 @@ a perf-regression smoke (`scripts/perf_smoke.sh`) guard against silent erosion.
 | **Redirects** — 301/302/307/308 + `Location` (RFC 9110 §15.4, §10.2.2) | `Response::redirect()`, auto-302 on `Location` | Behavioral | `tests/Integration/HttpFeaturesTest.php` |
 | **Content-Type / charset** (RFC 9110 §8.3, `default_mimetype`) | `CharsetMiddleware` + `App::$default_mimetype` | Behavioral | `tests/Unit/Middleware/CharsetMiddlewareTest.php` |
 | **IMF-fixdate** — HTTP date: real day/month tokens, literal GMT, UTC round-trip (RFC 9110 §5.6.7) | `ExpiresMiddleware` (`Expires`) | **Exhaustive** | `tests/Unit/ImfDateConformanceTest.php` |
+
+### HTTP/1.1 framing & request-smuggling results (RFC 9112 §6–§7)
+
+The smuggling surface, probed with raw sockets (curl can't emit malformed
+framing) and pinned by `Http1FramingConformanceTest`. The bar: an ambiguous
+message is **never** processed as a normal 200 — it is rejected (4xx or the
+connection is dropped).
+
+| Vector | Result | Verdict |
+|---|---|---|
+| `Content-Length` + `Transfer-Encoding: chunked` (§6.1) | **400 Bad Request** | ✅ rejected |
+| Duplicate `Content-Length` (§6.3) | connection closed | ✅ rejected |
+| Bare-LF line endings (§2.2 requires CRLF) | connection closed | ✅ rejected |
+| Invalid (non-hex) chunk size (§7.1) | connection closed | ✅ rejected |
+| Oversized header block (~70 KB) | **400 Bad Request** | ✅ size-limited |
+| Well-formed chunked body | dechunked → normal response | ✅ correct |
+
+**Known leniencies (documented, not smuggling vectors):**
+- `Host : value` (whitespace before the colon, RFC 9112 §5.1 says reject) is accepted. Not a smuggling vector — the field still parses unambiguously.
+- A very large *count* of header fields (≈2000) is accepted; the per-block *byte* limit (above) is the effective bound.
+
+**HTTP/2** is currently `enable_http2 => true` (OpenSwoole/nghttp2-backed). Conformance is **not yet proven** — the roadmap is to run `h2spec` and publish the score (expected to match Apache mod_http2's nghttp2 baseline, the same handful of upstream-known failures). Until then HTTP/2 is *Documented*, not *Exhaustive*.
 
 ## Auth, cookies, URI
 
