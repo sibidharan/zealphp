@@ -117,3 +117,18 @@ ServerTokens, FileETag, …) — each backed by a middleware unit test.
 RFC 9110 §13 conditional, §14 Range, RFC 6265 cookie-attribute serialization,
 RFC 7617 challenge ABNF, RFC 3986 percent-encoding edge cases, and IMF-fixdate
 (`Date`/`Expires`) — see the conformance plan spec for the full program.
+
+## Advanced testing roadmap — four tools, four failure classes
+
+Mutation testing (Infection) hardens the *code*. Three cousins harden the rest of
+the HTTP stack — each attacks a different layer, zero overlap:
+
+| Layer | Tool | What it does | Status |
+|---|---|---|---|
+| **Code** (test strength) | **Infection** | mutates the source AST, checks tests catch it (MSI gate) | ✅ in CI |
+| **Parser** (wire robustness) | **http-garden** (differential) | sends crafted requests to ZealPHP *and* Apache/nginx, diffs the parse → divergence *is* the smuggling bug; Apache as the oracle | ⏭️ planned — extends the §6–§7 framing suite from hand-picked cases to systematic discovery; CI gates on a committed divergence baseline |
+| **Parser** (mutation) | **Radamsa** | mutates a seed corpus of valid requests (reuse the framing fixtures), pipes mangled variants at the socket → every mutant must get a clean 4xx/parse, never a hang or 500-with-trace | ⏭️ planned — cheapest wire fuzzer |
+| **Reactor** (DoS survival) | **slowhttptest** | slowloris / slow-body drip → proves one stuck client can't starve the coroutine reactor (`mod_reqtimeout` parity) | ⏭️ planned — the coroutine-server-specific risk; **known gap** (a 12s header drip currently gets a 200; needs an OpenSwoole read-timeout) |
+| **Contract** (readable cases) | **Gabbi** | declarative YAML request→expected-response fixtures for the hand-known cases (Host, range, dotfile-403, MIME) | optional — current PHP integration suite already covers these |
+
+Sequencing (credibility-per-hour): **http-garden vs Apache** (the "Infection but for the wire" conformance oracle) → **Radamsa** seeded from the framing fixtures → **slowhttptest** (reactor survival) → Gabbi for declarative contract docs.
