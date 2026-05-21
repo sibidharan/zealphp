@@ -169,4 +169,15 @@ class HttpFeaturesTest extends TestCase
         $this->assertStatus(200, $r);
         $this->assertHeader('accept-ranges', 'none', $r);
     }
+
+    public function testPhpInfoRendersHtml(): void
+    {
+        $r = $this->get('/phpinfo');
+        $this->assertStatus(200, $r);
+        $this->assertHeader('content-type', 'text/html', $r);
+        $this->assertStringContainsString('<!DOCTYPE html>', $r['body']);
+        $this->assertStringContainsString('<table', $r['body']);
+        $this->assertStringContainsString('PHP Version', $r['body']);
+        $this->assertStringContainsString('ZealPHP', $r['body']);
+    }
 }

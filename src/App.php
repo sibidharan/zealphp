@@ -471,6 +471,14 @@ class App
             }
         });
 
+        // Capture native phpinfo(INFO_MODULES) text ONCE before overriding phpinfo,
+        // so PhpInfo can surface extension-specific detail without recursing into
+        // its own override (and without per-request uopz_unset races). \phpinfo here
+        // is still the original built-in — the uopz override is installed below.
+        \ob_start();
+        \phpinfo(INFO_MODULES);
+        \ZealPHP\Diagnostics\PhpInfo::primeModuleText((string) \ob_get_clean());
+
         // Built-ins always present in CLI/OpenSwoole — uopz can override directly.
         \uopz_set_return('header', \Closure::fromCallable('\ZealPHP\header'), true);
         \uopz_set_return('header_remove', \Closure::fromCallable('\ZealPHP\header_remove'), true);
@@ -491,6 +499,7 @@ class App
         \uopz_set_return('output_reset_rewrite_vars', \Closure::fromCallable('\ZealPHP\output_reset_rewrite_vars'), true);
         \uopz_set_return('is_uploaded_file', \Closure::fromCallable('\ZealPHP\is_uploaded_file'), true);
         \uopz_set_return('move_uploaded_file', \Closure::fromCallable('\ZealPHP\move_uploaded_file'), true);
+        \uopz_set_return('phpinfo', \Closure::fromCallable('\ZealPHP\phpinfo'), true);
         // Per-coroutine error/exception/shutdown handler registry.
         \uopz_set_return('set_error_handler', \Closure::fromCallable('\ZealPHP\set_error_handler'), true);
         \uopz_set_return('restore_error_handler', \Closure::fromCallable('\ZealPHP\restore_error_handler'), true);

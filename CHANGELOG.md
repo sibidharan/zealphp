@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Added
 
+- **`phpinfo()` now renders a self-contained styled HTML document** (Apache + mod_php parity) instead of the CLI SAPI's plain-text `key => value` dump. Implemented via the new `ZealPHP\Diagnostics\PhpInfo` renderer and a uopz override of `phpinfo()`; honors the `INFO_*` flag bitmask, escapes every emitted value, and reports `Server API: ZealPHP (OpenSwoole <ver>)`. Module-specific detail is captured once per worker at boot (before the override installs) to surface extension rows `ini_get_all()` can't reach, without recursing into the override. No gating — matches mod_php, so **do not expose `/phpinfo` in production**. First step of the broader Apache/mod_php parity effort (design: `docs/superpowers/specs/2026-05-21-phpinfo-override-and-modphp-parity-design.md`).
 - **`App::onWorkerStop(callable $fn)`** — register a per-worker shutdown hook, the mirror of `App::onWorkerStart()`. Runs inside the worker process when it exits (max_request recycle, graceful shutdown, or reload), *before* the process terminates. Unlike `register_shutdown_function`, it fires on OpenSwoole's signal-driven worker stop — the reliable place to flush per-worker state (counters, buffered I/O, coverage dumps). Invoked as `$fn($server, $workerId)`; a throwing hook is caught + logged so it can't abort worker teardown.
 
 ### Testing / coverage
