@@ -647,11 +647,12 @@ function zeal_session_abort(): bool
 
 function zeal_session_encode(): string
 {
-    /** @var array<string, mixed> $data */
     $data = \ZealPHP\App::$superglobals
         ? ($GLOBALS['_SESSION'] ?? [])
         : RequestContext::instance()->session;
-    return php_session_encode_from_array(is_array($data) ? $data : []);
+    /** @var array<string, mixed> $narrowed */
+    $narrowed = is_array($data) ? $data : [];
+    return php_session_encode_from_array($narrowed);
 }
 
 function zeal_session_decode(string $data): bool
