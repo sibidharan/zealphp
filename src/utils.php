@@ -1028,6 +1028,29 @@ function filter_input_array(int $type, array|int $options = FILTER_DEFAULT, bool
 }
 
 /**
+ * mod_php-parity header_register_callback(): native PHP fires the callback when
+ * the SAPI is about to send headers — which never happens the normal way under
+ * OpenSwoole. ZealPHP stores it per-request (coroutine-safe, in $g->memo) and
+ * invokes it once just before the buffered response headers are flushed, so
+ * header() calls inside the callback still land. Last registration wins (matches
+ * native, which keeps a single callback). Returns false if there's no request
+ * context (e.g. called outside a request).
+ *
+ * Scope note: fires for buffered responses (the common case). Streaming / SSE
+ * paths flush headers eagerly and are intentionally excluded, consistent with
+ * the framework's buffered-vs-streaming split (e.g. Range/ETag middleware).
+ */
+function header_register_callback(callable $callback): bool
+{
+    try {
+        \ZealPHP\RequestContext::instance()->memo['_header_callback'] = $callback;
+        return true;
+    } catch (\Throwable) {
+        return false;
+    }
+}
+
+/**
  * Apache mod_php getallheaders() / apache_request_headers() — return all
  * inbound request headers with canonical (Hyphen-Capitalized) case.
  *

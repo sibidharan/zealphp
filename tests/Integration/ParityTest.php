@@ -51,4 +51,11 @@ class ParityTest extends TestCase
         $this->assertTrue($json['has_request_time']);
         $this->assertTrue($json['has_server_protocol']);
     }
+
+    public function testHeaderRegisterCallbackFiresBeforeFlush(): void
+    {
+        $r = $this->get('/parity/header-callback');
+        $this->assertStatus(200, $r);
+        $this->assertHeader('x-registered-callback', 'fired', $r);
+    }
 }

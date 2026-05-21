@@ -511,6 +511,7 @@ class App
         \uopz_set_return('php_sapi_name', \Closure::fromCallable('\ZealPHP\php_sapi_name'), true);
         \uopz_set_return('filter_input', \Closure::fromCallable('\ZealPHP\filter_input'), true);
         \uopz_set_return('filter_input_array', \Closure::fromCallable('\ZealPHP\filter_input_array'), true);
+        \uopz_set_return('header_register_callback', \Closure::fromCallable('\ZealPHP\header_register_callback'), true);
         // Per-coroutine error/exception/shutdown handler registry.
         \uopz_set_return('set_error_handler', \Closure::fromCallable('\ZealPHP\set_error_handler'), true);
         \uopz_set_return('restore_error_handler', \Closure::fromCallable('\ZealPHP\restore_error_handler'), true);
@@ -4025,6 +4026,17 @@ HELP;
                 }
 
                 if ($response->parent->isWritable()) {
+                    // mod_php header_register_callback() — fire once just before
+                    // headers flush so header() calls inside it still land.
+                    $headerCb = $g->memo['_header_callback'] ?? null;
+                    if (is_callable($headerCb)) {
+                        unset($g->memo['_header_callback']);
+                        try {
+                            $headerCb();
+                        } catch (\Throwable $e) {
+                            elog("header_register_callback threw: " . $e->getMessage(), 'error');
+                        }
+                    }
                     $response->flush();
                     $response->parent->header('X-Powered-By', 'ZealPHP + OpenSwoole');
                     // Threaded emit — use App::emitStatus() instead of vendor

@@ -37,3 +37,12 @@ $app->route('/parity/server', ['methods' => ['GET']], function () {
         'has_server_protocol'=> isset($s['SERVER_PROTOCOL']),
     ];
 });
+
+// header_register_callback() parity — the callback fires just before headers are
+// flushed, so header() calls inside it still land on the buffered response.
+$app->route('/parity/header-callback', ['methods' => ['GET']], function () {
+    header_register_callback(function () {
+        header('X-Registered-Callback: fired');
+    });
+    return ['ok' => true];
+});
