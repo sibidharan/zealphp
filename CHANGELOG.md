@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Nonexistent `.php` URLs now return 404, not 403** ([#25](https://github.com/sibidharan/zealphp/issues/25)). With `ignore_php_ext` on (default), the `*.php` catch-all returned a blanket `403 Forbidden` for every `.php` URL — telling clients "no permission" when the truth was "doesn't exist." It now checks the file on disk (under the document root): an existing `.php` blocked from direct access → **403**, a `.php` URL with no backing file → **404** (Apache parity).
+
 ### Added
 
 - **`ScopedMiddleware` (Apache `<Location>` / `<LocationMatch>` / `<FilesMatch>` parity)** — wrap any middleware so it applies only to matching request paths: `ScopedMiddleware::location($inner, '/admin')` (literal URL-path prefix) or `ScopedMiddleware::match($inner, '#^/api/#')` (PCRE). Out of scope the inner middleware is skipped and the request passes straight through; in scope it runs normally (free to short-circuit). The middleware-composition equivalent of Apache's scoped directive containers — e.g. `BasicAuthMiddleware` only under `/admin`.

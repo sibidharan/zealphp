@@ -3829,7 +3829,17 @@ HELP;
             $this->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
                 $app = App::instance();
                 assert($app !== null);
-                return $app->renderError(403);
+                // Apache parity (#25): a `.php` file that exists on disk but is
+                // blocked from direct access is 403 Forbidden; a `.php` URL with
+                // no backing file is 404 Not Found — "doesn't exist" must not
+                // masquerade as "no permission".
+                $g = \ZealPHP\RequestContext::instance();
+                $reqPath = parse_url((string)($g->server['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+                $reqPath = is_string($reqPath) ? rawurldecode($reqPath) : '';
+                $docRoot = App::resolveDocumentRoot();
+                $abs = realpath($docRoot . '/' . ltrim($reqPath, '/'));
+                $exists = $abs !== false && is_file($abs) && str_starts_with($abs, $docRoot . '/');
+                return $app->renderError($exists ? 403 : 404);
             });
         }
 
