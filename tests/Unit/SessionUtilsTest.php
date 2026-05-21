@@ -9,7 +9,6 @@ use ZealPHP\Tests\TestCase;
 
 use function ZealPHP\Session\zeal_session_encode;
 use function ZealPHP\Session\zeal_session_decode;
-use function ZealPHP\Session\php_session_decode_to_array;
 use function ZealPHP\Session\zeal_session_status;
 use function ZealPHP\Session\zeal_session_name;
 use function ZealPHP\Session\zeal_session_id;
