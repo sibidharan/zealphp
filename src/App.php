@@ -107,6 +107,14 @@ class App
     /** Apache PATH_INFO — when `/script.php/extra/path`, expose `/extra/path` as PATH_INFO. */
     public static bool $path_info = true;
     /**
+     * Apache `AllowEncodedSlashes` — when false (default, matching Apache), a
+     * request whose RAW (pre-decode) path contains an encoded slash (`%2F`/`%2f`)
+     * is refused with 404 before route matching. Apache's `unescape_url()`
+     * forbids `AP_SLASHES` by default; we mirror that. Set true to permit
+     * encoded slashes (they are then decoded to `/` like any other octet).
+     */
+    public static bool $allow_encoded_slashes = false;
+    /**
      * Static handler URL-prefix whitelist. Empty = serve any path under document_root (Apache default).
      * @var array<int, string>
      */
@@ -2461,6 +2469,81 @@ class App
     }
 
     /**
+     * Percent-decode a path repeatedly until it stops changing.
+     *
+     * Apache normalises before each access check, so a double-encoded payload
+     * like `%252e%252e` (which decodes once to `%2e%2e`, then again to `..`)
+     * is caught. A single `rawurldecode()` only peels one layer — leaving the
+     * traversal sequence intact after the first decode. Decoding until stable
+     * closes that gap. The iteration count is capped so a pathological input
+     * (`%2525252525…`) can't spin the CPU; once the cap is hit we return the
+     * partially-decoded form and let the caller's traversal/null-byte checks
+     * run against it (any surviving `..`/`%` is treated conservatively).
+     */
+    public static function decodeUntilStable(string $path, int $maxIterations = 10): string
+    {
+        for ($i = 0; $i < $maxIterations; $i++) {
+            $next = rawurldecode($path);
+            if ($next === $path) {
+                return $path;
+            }
+            $path = $next;
+        }
+        return $path;
+    }
+
+    /**
+     * Normalise a request path the way Apache's `ap_normalize_path()` does
+     * (`server/util.c`): collapse runs of `//` to a single `/` (MergeSlashes,
+     * on by default), drop `/./` segments, and unwind `/segment/../` back over
+     * the preceding segment. A `..` that would climb above root is dropped
+     * (clamped at `/`), matching Apache's behaviour for the routing path.
+     *
+     * Operates on an already percent-decoded, query-stripped path. Returns a
+     * path that always starts with `/` for absolute inputs; a `*` (OPTIONS
+     * asterisk-form) or empty input is returned unchanged.
+     */
+    public static function normalizeRequestPath(string $path): string
+    {
+        if ($path === '' || $path === '*') {
+            return $path;
+        }
+
+        $absolute = $path[0] === '/';
+        $segments = explode('/', $path);
+        /** @var array<int, string> $out */
+        $out = [];
+        foreach ($segments as $segment) {
+            if ($segment === '' || $segment === '.') {
+                // Empty segment = duplicate slash; '.' = current dir. Drop both.
+                continue;
+            }
+            if ($segment === '..') {
+                // Unwind one real segment; clamp at root rather than escaping.
+                if ($out !== [] && end($out) !== '..') {
+                    array_pop($out);
+                } elseif (!$absolute) {
+                    $out[] = '..';
+                }
+                continue;
+            }
+            $out[] = $segment;
+        }
+
+        $normalized = implode('/', $out);
+        if ($absolute) {
+            $normalized = '/' . $normalized;
+        }
+        // Preserve a single trailing slash when the original ended in one and
+        // the result is more than just root, so DirectorySlash handling and
+        // strip-trailing-slash logic see the same shape they did before.
+        if ($normalized !== '/' && substr($path, -1) === '/' && substr($normalized, -1) !== '/') {
+            $normalized .= '/';
+        }
+        return $normalized === '' ? '/' : $normalized;
+    }
+
+    /**
      * Run a PHP file in a separate process at true global scope (CGI-style).
      * Required for legacy apps like WordPress that depend on bare variable
      * assignments and `global` keyword declarations being seen by every file.
@@ -4636,12 +4719,36 @@ class ResponseMiddleware implements MiddlewareInterface
         // Apache rejects these at the URI parse layer; we do the same so encoded
         // attacks (%2e%2e, %00, backslash) can't survive past pattern matching.
         $parsedPath = parse_url($uri, PHP_URL_PATH);
-        $path = is_string($parsedPath) ? $parsedPath : $uri;
-        $decoded = rawurldecode($path);
+        $rawPath = is_string($parsedPath) ? $parsedPath : $uri;
+
+        // Apache AllowEncodedSlashes Off (default): an encoded slash in the RAW
+        // path is refused with 404 before it can be decoded to a real `/`. Check
+        // the pre-decode bytes — once decoded, %2F is indistinguishable from a
+        // literal slash. Gated by App::$allow_encoded_slashes (default false).
+        if (!App::$allow_encoded_slashes && stripos($rawPath, '%2f') !== false) {
+            return $app->renderError(404);
+        }
+
+        // Decode-until-stable: Apache normalises before each access check, so a
+        // double-encoded payload (%252e%252e -> %2e%2e -> ..) is caught. A single
+        // rawurldecode() peels only one layer. Decode repeatedly (capped) then run
+        // the traversal/null-byte/backslash checks against the fully-decoded form.
+        $decoded = App::decodeUntilStable($rawPath);
         if (strpos($decoded, "\0") !== false
             || strpos($decoded, '\\') !== false
             || preg_match('#(^|/)\.\.(/|$)#', $decoded)) {
             return $app->renderError(400);
+        }
+
+        // Apache ap_normalize_path: collapse `//` -> `/` and drop `/./` segments
+        // before route matching, so `//admin//` and `/./admin` cannot bypass a
+        // pattern route guarding `/admin`. Rebuild REQUEST_URI from the normalised
+        // path so every downstream consumer (PATH_INFO, route table) sees one form.
+        $path = App::normalizeRequestPath($rawPath);
+        if ($path !== $rawPath) {
+            $qs = parse_url($uri, PHP_URL_QUERY);
+            $uri = $path . (is_string($qs) && $qs !== '' ? '?' . $qs : '');
+            $g->server['REQUEST_URI'] = $uri;
         }
 
         // RFC 9112 §3.2: an HTTP/1.1 request MUST carry a Host header; a server
