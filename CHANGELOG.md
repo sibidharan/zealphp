@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.37] - 2026-05-21
+
+Mutation-hardening + conformance-audit release. Raises Infection **covered-MSI from 65% to 95%** (1680/1763 covered mutants killed; the 83 survivors are all provably-equivalent, catalogued in `STANDARDS.md`), fixes a real **HTTP Basic Auth APR1 bug** surfaced by that effort, adds an **Apache httpd core-logic diff + non-support register**, and lands **runnable HTTP fuzz harnesses** (radamsa / gabbi / slowhttptest) wired into CI.
+
+### Fixed
+
+- **`BasicAuthMiddleware` could never verify an Apache `htpasswd -m` (APR1) credential.** The `crypt_apr1_md5()` final to64 encoding assembled its base64 groups in **reversed byte order**, so the computed digest was the byte-reverse of a real `$apr1$` hash and `hash_equals()` always failed. Replaced the strtr/reverse trick with the canonical `apr_md5_encode` interleave (`0,6,12 / 1,7,13 / … / 4,10,5 / 11`, emitted LSB-first). Now verifies credentials from Apache `htpasswd`, `openssl passwd -apr1`, and other standard APR1 producers. Pinned against those independent oracles so it can't regress. (bcrypt / SHA-1 / crypt-DES / SHA-512-crypt paths were already correct.)
+
+### Testing / conformance
+
+- **Mutation score: covered-MSI 65% → 95%** (Infection gate ratcheted `minMsi 55/60` → `88/92`). Every file in the mutation scope (`src/Middleware`, `src/HTTP`, `src/Input`, `src/Diagnostics`) driven to its equivalent-mutant ceiling with real, behaviour-pinning assertions — new/extended unit tests for ~30 classes (Basic auth, Referer, BodySize, Range, RateLimit, Cors, SetEnvIf, HostRouter, Header, RequestHeader, IpAccess, Expires, CacheControl, MimeType, Compression, BodyRewrite, Redirect, Concurrency, Return, ETag, Charset, Scoped, BlockPhpExt, MergeSlashes, IniIsolation, PhpInfo, Response, LazyServerRequest, RequestInput, HTTP factories/exceptions). The 83 surviving mutants are all **provably-equivalent** — `STANDARDS.md` gains an equivalent-mutant register (8 equivalence classes with proofs) explaining why 100% is mathematically unreachable by testing and why the project declines to prop it up with `@infection-ignore` pragmas.
+- **Apache httpd core-logic diff** (`STANDARDS.md`) — request-line parsing, header folding, Host enforcement, CL/TE smuggling resolution, the 405/`Allow` path, 404-vs-403, and default request limits, each compared against the Apache httpd 2.5.x source (function cited) and the ZealPHP impl + proving test. Plus the honest **Apache non-support register**: ProxyPass, TLS termination, WebDAV, CGI/FastCGI, full `mod_rewrite`, `.htaccess`/`<Directory>`, content negotiation, SSI, on-the-fly content filters, HTTP cache, LDAP/digest/form/JWT auth, `mod_reqtimeout`, `mod_ratelimit` — each with rationale + substitute.
+- **Runnable HTTP fuzz harnesses** (`scripts/fuzz/`, `tests/gabbi/`, `docs/fuzzing.md`, `.github/workflows/fuzz.yml`) — actually executed, not just configured: **Radamsa** 500 wire mutations → 0 hangs / 0 stack-trace leaks; **Gabbi** 7/7 declarative contract cases; **slowhttptest** confirms the documented OpenSwoole read-timeout gap. http-garden differential-vs-Apache documented (Docker-gated). CI runs radamsa + gabbi as gates.
+
 ## [0.2.36] - 2026-05-21
 
 HTTP/1.1 method-handling conformance + visible mutation metric. Adds **405 Method Not Allowed** with an `Allow` header (RFC 9110 §15.5.6) so a known resource hit with the wrong method is rejected correctly instead of falling through to 404, surfaces the CI-measured Mutation Score Indicator as a README badge, and extends the conformance battery with symlink-escape and chunked-framing edge cases.
