@@ -3862,7 +3862,7 @@ HELP;
         # Implicit route for index.php
 
         $this->route('/',[
-            'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+            'methods' => ['GET', 'POST']
         ], function($response){
             $docRoot = self::resolveDocumentRoot();
             if (file_exists($docRoot . '/index.php')) {
@@ -3874,7 +3874,7 @@ HELP;
 
         # Global route for all files in the root of the public directory
         $this->route(App::$ignore_php_ext ? '/{file}/?' : '/{file}(\.php)?/?', [
-            'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+            'methods' => ['GET', 'POST']
         ], function(string $file, $response){
             # if file ends with .php remove it
             if (substr($file, -4) == '.php') {
@@ -3896,7 +3896,7 @@ HELP;
 
         # Global route for all directories and sub directories in the public directory
         $this->nsPathRoute('{dir}', App::$ignore_php_ext ? '{uri}/?' : '{uri}(\.php)?/?', [
-            'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+            'methods' => ['GET', 'POST']
         ], function(string $dir, string $uri, $response){
             elog("Directory: $dir, URI: $uri");
             # if uri ends with .php remove it
@@ -4740,6 +4740,30 @@ class ResponseMiddleware implements MiddlewareInterface
                 return $this->dispatchRoute($route, $params, $method);
             }
         }
+        // RFC 9110 §15.5.6: the URI matches a registered route for some method
+        // but not this one → 405 Method Not Allowed + an `Allow` header listing
+        // the supported methods (distinct from 404 = "no such resource"). The
+        // implicit static routes are GET/HEAD/POST-only, so PUT/DELETE/PATCH on a
+        // file-style path correctly 405s (Apache's static handler does the same);
+        // a path matching no route at all falls through to the fallback / 404.
+        $allowed = [];
+        foreach ($app->routesByMethod() as $m => $routes) {
+            foreach ($routes as $route) {
+                if (preg_match($route['pattern'], $uri)) {
+                    $allowed[] = $m;
+                    if ($m === 'GET') {
+                        $allowed[] = 'HEAD';
+                    }
+                    break;
+                }
+            }
+        }
+        if ($allowed !== []) {
+            $allowed[] = 'OPTIONS';
+            response_add_header('Allow', implode(', ', array_values(array_unique($allowed))));
+            return $app->renderError(405);
+        }
+
         $fallback = App::getFallback();
         if ($fallback !== null) {
             return $this->dispatchRoute($fallback, [], $method);

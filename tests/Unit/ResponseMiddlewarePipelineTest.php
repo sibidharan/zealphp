@@ -200,8 +200,9 @@ class ResponseMiddlewarePipelineTest extends TestCase
 
     public function testPostOnlyRouteRejectsGet(): void
     {
-        // GET on a POST-only path → not matched for GET → 404.
-        $this->assertSame(404, $this->dispatch('/postonly', 'GET')->getStatusCode());
+        // GET on a POST-only path → resource exists, method not allowed →
+        // 405 Method Not Allowed (RFC 9110 §15.5.6), not 404.
+        $this->assertSame(405, $this->dispatch('/postonly', 'GET')->getStatusCode());
     }
 
     public function testPostOnlyRouteAcceptsPost(): void
