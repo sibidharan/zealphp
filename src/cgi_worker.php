@@ -95,6 +95,23 @@ if (function_exists('uopz_set_return')) {
         if (count($parts) === 2) {
             $name = trim($parts[0]);
             $value = trim($parts[1]);
+            // CGI/1.1 RFC 3875 §6.3.3: Status header sets response code.
+            // mod_cgi parity: ap_scan_script_header_err_brigade_ex() extracts NNN
+            // from "Status: NNN Reason" and uses it as the HTTP status code.
+            if (strcasecmp($name, 'Status') === 0) {
+                $codeStr = strtok($value, ' ');
+                if ($codeStr !== false && ctype_digit($codeStr)) {
+                    $code = (int)$codeStr;
+                    if ($code >= 100 && $code <= 599) {
+                        $__z_status = $code;
+                    }
+                }
+                // Store in headers so the host-side cgiSubprocess() can also see it
+                // and skip forwarding it to the client (Status: is a CGI meta-header,
+                // not an HTTP response header).
+                $__z_headers[] = [$name, $value];
+                return;
+            }
             if ($replace) {
                 $__z_headers = array_values(array_filter(
                     $__z_headers,
