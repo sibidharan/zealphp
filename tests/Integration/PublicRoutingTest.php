@@ -114,4 +114,21 @@ class PublicRoutingTest extends TestCase
         $this->assertArrayHasKey('content-range', $r['headers']);
         $this->assertSame(10, strlen($r['body']));
     }
+
+    // ── Apache parity (#25): .php URL status ───────────────────────────
+
+    public function testNonexistentPhpReturns404(): void
+    {
+        // A `.php` URL with no backing file is "not found", not "forbidden".
+        $r = $this->get('/nonexistent-page.php');
+        $this->assertStatus(404, $r);
+    }
+
+    public function testExistingPhpFileReturns403(): void
+    {
+        // public/home.php exists but direct `.php` access is blocked
+        // (ignore_php_ext serves it as /home) — Apache returns 403 here.
+        $r = $this->get('/home.php');
+        $this->assertStatus(403, $r);
+    }
 }
