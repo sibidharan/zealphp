@@ -420,18 +420,63 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
     $new_session_id = bin2hex(random_bytes(32));
     zeal_session_id($new_session_id);
 
-    // Rename session file if keeping old session data
     $save_path = $g->session_params['save_path'] ?? '';
     assert(is_string($save_path));
-    $old_session_file = $save_path . '/sess_' . $old_session_id;
-    $new_session_file = $save_path . '/sess_' . $new_session_id;
 
-    if (file_exists($old_session_file)) {
-        if ($delete_old_session) {
-            unlink($old_session_file);
-        } else {
-            rename($old_session_file, $new_session_file);
+    // Issue #19: a custom SessionHandlerInterface (Redis/Valkey, etc.) keeps
+    // session data in the handler, NOT on disk — so the file rename below is a
+    // no-op for it. Without migrating the data the regenerated ID points at an
+    // empty session, and anything written afterwards (OAuth `sub`/`tokens`/
+    // `profile`) is stranded under an ID the client may never receive.
+    // mod_php's regenerate copies the current data to the new ID; mirror that.
+    $handler = $g->session_params['handler'] ?? null;
+    if ($handler instanceof \SessionHandlerInterface) {
+        // The live in-memory data is the canonical session contents for the
+        // new ID (it already reflects any writes made before regeneration).
+        $superglobals = \ZealPHP\App::$superglobals;
+        /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
+        $data = $superglobals ? ($GLOBALS['_SESSION'] ?? []) : (isset($g->session) ? $g->session : []);
+        $data = is_array($data) ? $data : [];
+        $handler->write((string) $new_session_id, serialize($data));
+        if ($delete_old_session && is_string($old_session_id) && $old_session_id !== '') {
+            $handler->destroy((string) $old_session_id);
         }
+    } else {
+        // File handler: keep old data by renaming the backing file.
+        $old_session_file = $save_path . '/sess_' . $old_session_id;
+        $new_session_file = $save_path . '/sess_' . $new_session_id;
+        if (file_exists($old_session_file)) {
+            if ($delete_old_session) {
+                unlink($old_session_file);
+            } else {
+                rename($old_session_file, $new_session_file);
+            }
+        }
+    }
+
+    // Issue #19: emit a Set-Cookie for the NEW ID so the client switches over.
+    // Without this the browser keeps sending the old PHPSESSID and never sees
+    // the regenerated session. Gated exactly like zeal_session_start()'s
+    // first-visit cookie: only when the framework owns session lifecycle
+    // (App::$session_lifecycle), cookies are enabled, and the response is
+    // still writable — so the Symfony bridge / manual-cookie apps aren't raced.
+    $useCookies = (bool) ini_get('session.use_cookies');
+    /** @var string $sessionName */
+    $sessionName = $g->session_params['name'] ?? 'PHPSESSID';
+    if (\ZealPHP\App::$session_lifecycle
+        && $useCookies
+        && $g->openswoole_response !== null
+        && $g->openswoole_response->isWritable()) {
+        $cookieParams = zeal_session_get_cookie_params();
+        $g->openswoole_response->cookie(
+            $sessionName,
+            $new_session_id,
+            $cookieParams['lifetime'] ? time() + (int)$cookieParams['lifetime'] : 0,
+            $cookieParams['path'],
+            $cookieParams['domain'],
+            $cookieParams['secure'],
+            $cookieParams['httponly']
+        );
     }
 
     return true;
