@@ -169,7 +169,7 @@ deliberate non-goals of an application framework that expects a real proxy in fr
 |---|---|---|---|
 | Static analysis | PHPStan | **level 10**, zero errors | `phpstan.neon`, CI |
 | Line coverage floor | Codecov | **≥ 80%** project + patch | `codecov.yml`, CI |
-| Mutation score (test effectiveness) | Infection | **MSI 95% / covered-MSI 95%** (gate floor 92) | `infection.json5`, `.github/workflows/mutation.yml` |
+| Mutation score (test effectiveness) | Infection | **Covered-MSI 95%** / plain MSI 91% (gates 92 / 88) | `infection.json5`, `.github/workflows/mutation.yml` |
 | Perf regression | ApacheBench | req/s floor (catastrophe detector) | `scripts/perf_smoke.sh`, `.github/workflows/perf.yml` |
 | Secrets / CVE / code scanning | gitleaks / composer audit / CodeQL | clean | CI |
 
