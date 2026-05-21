@@ -142,6 +142,9 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
   <tr><td><code>limit_req</code> / <code>limit_conn</code> (nginx) / <code>server_name</code> vhosts</td><td>✅ Middleware</td><td>RateLimit / ConcurrencyLimit / HostRouter middleware</td></tr>
   <tr><td><code>Redirect</code> / <code>RedirectMatch</code> (mod_alias)</td><td>✅ Middleware</td><td>RedirectMiddleware — declarative prefix + regex redirects</td></tr>
   <tr><td><code>SetEnvIf</code> / <code>BrowserMatch</code> (mod_setenvif)</td><td>✅ Middleware</td><td>SetEnvIfMiddleware — set request env vars on attribute/regex match</td></tr>
+  <tr><td><code>RequestHeader</code> (mod_headers)</td><td>✅ Middleware</td><td>RequestHeaderMiddleware — set/append/unset inbound headers (<code>$g-&gt;server</code>)</td></tr>
+  <tr><td><code>&lt;Location&gt;</code> / <code>&lt;LocationMatch&gt;</code> / <code>&lt;FilesMatch&gt;</code></td><td>✅ Middleware</td><td>ScopedMiddleware — apply any middleware only to matching paths</td></tr>
+  <tr><td><code>MergeSlashes</code> (core / nginx)</td><td>✅ Middleware</td><td>MergeSlashesMiddleware — collapse <code>//</code> in the path before routing</td></tr>
   <tr><td><code>ServerTokens</code> / <code>ServerSignature</code></td><td>✅ Config</td><td><code>App::serverTokens()</code> controls/omits the <code>X-Powered-By</code> header</td></tr>
   <tr><td><code>FileETag</code></td><td>✅ Config</td><td><code>App::fileETag(false)</code> disables ETag/304 (<code>FileETag None</code>)</td></tr>
   <tr><td><code>DocumentRoot</code> / <code>TraceEnable</code> / <code>ServerAdmin</code> / <code>ServerName</code> / <code>LimitRequest*</code> / <code>CustomLog</code></td><td>✅ Config</td><td><code>App::*</code> fluent setters (set before <code>App::init()</code>)</td></tr>

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`ScopedMiddleware` (Apache `<Location>` / `<LocationMatch>` / `<FilesMatch>` parity)** — wrap any middleware so it applies only to matching request paths: `ScopedMiddleware::location($inner, '/admin')` (literal URL-path prefix) or `ScopedMiddleware::match($inner, '#^/api/#')` (PCRE). Out of scope the inner middleware is skipped and the request passes straight through; in scope it runs normally (free to short-circuit). The middleware-composition equivalent of Apache's scoped directive containers — e.g. `BasicAuthMiddleware` only under `/admin`.
+- **`RequestHeaderMiddleware` (Apache mod_headers `RequestHeader`)** — manipulate inbound request headers before handlers run (`set` / `append` / `add` / `unset`), written into `$g->server` as `HTTP_<NAME>` so `apache_request_headers()` / `getallheaders()` reflect them — the mod_php convention.
+- **`MergeSlashesMiddleware` (Apache `MergeSlashes On` / nginx `merge_slashes`)** — collapse runs of consecutive slashes in the request path before routing (`/a//b///c` → `/a/b/c`), an internal rewrite of `$g->server['REQUEST_URI']`; the query string is preserved.
+
 ## [0.2.33] - 2026-05-21
 
 Coroutine-safety fix for the Redis session handler — resolves session corruption under concurrent load ([#16](https://github.com/sibidharan/zealphp/issues/16)).
