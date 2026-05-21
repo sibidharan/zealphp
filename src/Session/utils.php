@@ -657,23 +657,12 @@ function zeal_session_encode(): string
 
 function zeal_session_decode(string $data): bool
 {
-    // Defensive: unserialize() returns false on malformed input, which would
-    // TypeError on assignment to the typed array property. Match PHP native
-    // session_decode signature — returns bool, true only on successful decode.
     if ($data === '') {
         return false;
     }
-    $decoded = @unserialize($data, ['allowed_classes' => ['stdClass']]);
-    if (!is_array($decoded)) {
+    $sessionData = php_session_decode_to_array($data);
+    if ($sessionData === []) {
         return false;
-    }
-    // Narrow array<mixed,mixed> to array<string,mixed> for typed property assignment.
-    /** @var array<string, mixed> $sessionData */
-    $sessionData = [];
-    foreach ($decoded as $k => $v) {
-        if (is_string($k)) {
-            $sessionData[$k] = $v;
-        }
     }
     RequestContext::instance()->session = $sessionData;
     if (\ZealPHP\App::$superglobals) {

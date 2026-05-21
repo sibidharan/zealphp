@@ -10,6 +10,7 @@ use ZealPHP\Tests\TestCase;
 use function ZealPHP\Session\zeal_session_start;
 use function ZealPHP\Session\zeal_session_status;
 use function ZealPHP\Session\zeal_session_encode;
+use function ZealPHP\Session\php_session_decode_to_array;
 use function ZealPHP\Session\zeal_session_unset;
 use function ZealPHP\Session\zeal_session_abort;
 use function ZealPHP\Session\zeal_session_id;
@@ -199,7 +200,7 @@ class SessionUtilsCoverageTest extends TestCase
         $prop = new \ReflectionProperty(RequestContext::class, 'session');
         $prop->setValue($g, ['co' => 'data']);
         $encoded = zeal_session_encode();
-        $this->assertSame(['co' => 'data'], unserialize($encoded));
+        $this->assertSame(['co' => 'data'], php_session_decode_to_array($encoded));
     }
 
     public function testUnsetEmptiesSuperglobalSession(): void
