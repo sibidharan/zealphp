@@ -34,7 +34,7 @@ a perf-regression smoke (`scripts/perf_smoke.sh`) guard against silent erosion.
 | Standard / clause | ZealPHP | Level | Proving test |
 |---|---|---|---|
 | **HTTP Basic Auth** — `WWW-Authenticate: Basic realm=`, 401 (RFC 7617) | `BasicAuthMiddleware` (htpasswd + callback) | Behavioral | `tests/Unit/Middleware/BasicAuthMiddlewareTest.php`, `BasicAuthFileTest.php` |
-| **Cookies** — `Set-Cookie` attributes, `SameSite`, `Secure`, `HttpOnly` (RFC 6265) | `setcookie()` override (7-arg + samesite) | Behavioral | `tests/Integration/HttpFeaturesTest.php` (`testCookieSameSite`) |
+| **Cookies** — cookie-name token rule (§4.1.1), CRLF/NUL injection defense, attribute propagation, `SameSite`/`Secure`/`HttpOnly` (RFC 6265) | `setcookie()` override (7-arg + samesite) | **Exhaustive** | `tests/Unit/Rfc6265CookieConformanceTest.php` + `tests/Integration/HttpFeaturesTest.php` |
 | **URI** — dot-segment / null-byte / encoded-traversal rejection (RFC 3986) | `ResponseMiddleware` pre-routing guard → 400 | Behavioral | `tests/Unit/SecurityTest.php`, `tests/Unit/ResponseMiddlewarePipelineTest.php` |
 
 ## Content, compression, real-time
