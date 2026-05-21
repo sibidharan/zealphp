@@ -156,7 +156,7 @@ class BasicAuthMiddleware implements MiddlewareInterface
         // crypt() $5$ / $6$ hashes start with '$5$' or '$6$'.
         // Anything else — no dollar-sign prefix, no {SHA}, wrong length for DES
         // — is plaintext and must be refused.
-        $isCryptDes     = strlen($hash) === 13 && ctype_alnum(substr($hash, 0, 2));
+        $isCryptDes     = strlen($hash) === 13 && preg_match('#^[./0-9A-Za-z]{2}#', $hash) === 1;
         $isCryptSha256  = str_starts_with($hash, '$5$');
         $isCryptSha512  = str_starts_with($hash, '$6$');
         $isCryptMd5     = str_starts_with($hash, '$1$');  // glibc MD5 imported files

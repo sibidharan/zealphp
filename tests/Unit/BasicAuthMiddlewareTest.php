@@ -322,6 +322,23 @@ class BasicAuthMiddlewareTest extends TestCase
         $this->assertSame(200, $this->htpasswdAuth('u:' . $des8, 'u', 'abcdefghIJK'));
     }
 
+    /**
+     * Regression pin: DES salt alphabet is [./0-9A-Za-z] — it includes `.`
+     * and `/`, which ctype_alnum() rejects. A 13-char DES hash whose 2-char
+     * salt contains `.` or `/` must NOT be wrongly classified as plaintext
+     * and refused. crypt("secret", "./") yields a salt starting with "./",
+     * so the correct password must authenticate (200), not 401.
+     */
+    public function testDesCryptDotSlashSaltAuthenticates(): void
+    {
+        $des = crypt('secret', './');               // salt "./" — non-alnum chars
+        $this->assertSame('.', $des[0]);            // confirm vector exercises the bug
+        $this->assertSame('/', $des[1]);
+        $this->assertSame(200, $this->htpasswdAuth('u:' . $des, 'u', 'secret'));
+        // Wrong password against the same `./`-salted hash still rejects.
+        $this->assertSame(401, $this->htpasswdAuth('u:' . $des, 'u', 'nope'));
+    }
+
     // ----- L2: bcrypt result cache — SKIP NOTE --------------------------
     // Apache caches the last bcrypt result in r->connection->notes (util.c:3520).
     // This per-connection cache is NOT implemented here: storing a (hash, result)
