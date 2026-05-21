@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Testing / conformance
+
+- **HTTP/1.1 framing & request-smuggling conformance** (RFC 9112 §6–§7) — a raw-socket suite (`tests/Integration/Http1FramingConformanceTest.php`) that *proves* the smuggling surface is closed: `Content-Length`+`Transfer-Encoding` → 400, duplicate `Content-Length` / bare-LF / invalid chunk size → connection dropped, oversized header block → 400, well-formed chunked → parsed. Results + the two documented leniencies are published in `STANDARDS.md`. (HTTP/2 h2spec is the next conformance step; currently *Documented*, not yet *Exhaustive*.)
+
 ### Fixed
 
 - **Nonexistent `.php` URLs now return 404, not 403** ([#25](https://github.com/sibidharan/zealphp/issues/25)). With `ignore_php_ext` on (default), the `*.php` catch-all returned a blanket `403 Forbidden` for every `.php` URL — telling clients "no permission" when the truth was "doesn't exist." It now checks the file on disk (under the document root): an existing `.php` blocked from direct access → **403**, a `.php` URL with no backing file → **404** (Apache parity).
