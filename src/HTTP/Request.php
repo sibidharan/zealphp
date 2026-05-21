@@ -104,5 +104,58 @@ class Request extends \OpenSwoole\HTTP\Request
         }
     }
 
-    // Add your custom methods or override existing ones here
+    // ---- htmx HX-* request header helpers ----------------------------------
+
+    /** Returns true when the request carries `HX-Request: true`. */
+    public function isHtmx(): bool
+    {
+        return ($this->header['hx-request'] ?? '') === 'true';
+    }
+
+    /** Returns true when the request was issued via `hx-boost`. */
+    public function isBoosted(): bool
+    {
+        return ($this->header['hx-boosted'] ?? '') === 'true';
+    }
+
+    /** Returns true when the request is a history-restoration miss. */
+    public function isHistoryRestoreRequest(): bool
+    {
+        return ($this->header['hx-history-restore-request'] ?? '') === 'true';
+    }
+
+    /** Returns the `HX-Target` element id, or null if absent. */
+    public function htmxTarget(): ?string
+    {
+        $v = $this->header['hx-target'] ?? null;
+        return is_string($v) && $v !== '' ? $v : null;
+    }
+
+    /** Returns the `HX-Trigger` element id, or null if absent. */
+    public function htmxTrigger(): ?string
+    {
+        $v = $this->header['hx-trigger'] ?? null;
+        return is_string($v) && $v !== '' ? $v : null;
+    }
+
+    /** Returns the `HX-Trigger-Name` element name, or null if absent. */
+    public function htmxTriggerName(): ?string
+    {
+        $v = $this->header['hx-trigger-name'] ?? null;
+        return is_string($v) && $v !== '' ? $v : null;
+    }
+
+    /** Returns the `HX-Current-URL` browser URL, or null if absent. */
+    public function htmxCurrentUrl(): ?string
+    {
+        $v = $this->header['hx-current-url'] ?? null;
+        return is_string($v) && $v !== '' ? $v : null;
+    }
+
+    /** Returns the `HX-Prompt` user response string, or null if absent. */
+    public function htmxPrompt(): ?string
+    {
+        $v = $this->header['hx-prompt'] ?? null;
+        return is_string($v) && $v !== '' ? $v : null;
+    }
 }
