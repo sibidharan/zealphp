@@ -48,6 +48,11 @@ class FileExecutionFamilyTest extends TestCase
         $this->assertSame(['ok' => true, 'n' => 7], App::render('return_array', [], self::DIR));
     }
 
+    public function testVoidReturnSurfacesBufferedOutput(): void
+    {
+        $this->assertSame('hello-void', App::render('void_return', [], self::DIR));
+    }
+
     public function testEchoThenReturnConcatenatesInWireOrder(): void
     {
         $this->assertSame('SHELL-BODY', App::render('echo_and_return', [], self::DIR));
