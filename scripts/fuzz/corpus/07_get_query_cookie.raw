@@ -1,0 +1,5 @@
+GET /json?a=1&b=two&c[]=x HTTP/1.1
+Host: x
+Cookie: PHPSESSID=abc123; pref=dark
+Connection: close
+

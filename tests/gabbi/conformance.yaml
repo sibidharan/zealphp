@@ -1,0 +1,74 @@
+# gabbi declarative HTTP contract suite for ZealPHP.
+#
+# Run against a live server:
+#   gabbi-run 127.0.0.1:8080 < tests/gabbi/conformance.yaml
+# or with the venv module form (gabbi >= 4 ships no console_script in some envs):
+#   python -m gabbi.runner 127.0.0.1:8080 < tests/gabbi/conformance.yaml
+#
+# Each case pins one observable HTTP contract the framework promises. These are
+# the human-readable, declarative complement to the raw-socket framing fixtures
+# in tests/Integration/Http1FramingConformanceTest.php — gabbi can't emit
+# malformed framing, so it covers the well-formed contract surface (methods,
+# status codes, Allow headers, dotfile policy) instead.
+#
+# Expectations below were verified against the live server on 2026-05-21; any
+# value that differed from a naive guess is annotated.
+
+tests:
+  # GET /json -> 200 application/json. The canonical liveness endpoint.
+  - name: GET /json returns 200 JSON
+    GET: /json
+    status: 200
+    response_headers:
+      content-type: /application/json/
+    response_json_paths:
+      $.ok: true
+      $.service: zealphp
+
+  # HEAD on a GET route is auto-mapped (body stripped, status preserved).
+  - name: HEAD /json returns 200 no body
+    HEAD: /json
+    status: 200
+
+  # PUT on a GET/POST-only route -> 405 with an Allow header enumerating the
+  # supported methods. Observed Allow: "GET, HEAD, POST, OPTIONS".
+  - name: PUT /json returns 405 with Allow
+    PUT: /json
+    status: 405
+    response_headers:
+      allow: /GET/
+    response_strings:
+      - "405 Method Not Allowed"
+
+  # OPTIONS -> 204 No Content + Allow listing every method for the URI.
+  # Observed Allow: "OPTIONS, GET, HEAD, POST" (order differs from the 405's
+  # Allow — both are valid, gabbi only asserts membership via regex).
+  - name: OPTIONS /json returns 204 with Allow
+    OPTIONS: /json
+    status: 204
+    response_headers:
+      allow: /OPTIONS/
+
+  # Dotfile policy: a leading-dot path is refused. ZealPHP returns 403
+  # (Forbidden) for /.env — the implicit public-file route blocks dotfiles
+  # rather than 404'ing them. Both 403 and 404 are acceptable per the task
+  # contract; the server's observed-correct behavior is 403.
+  - name: dotfile /.env is forbidden
+    GET: /.env
+    status: 403
+
+  # A path with no matching route or public file -> 404.
+  - name: unknown path returns 404
+    GET: /this-path-does-not-exist-xyz-123
+    status: 404
+
+  # HTTP/1.1 Host requirement is enforced at the OpenSwoole parser layer (a
+  # missing Host on 1.1 -> 400). gabbi always sends a Host header, so the
+  # missing-Host-on-1.1 -> 4xx contract is pinned by the raw-socket fixture
+  # Http1FramingConformanceTest::testHttp11MissingHostRejected instead. This
+  # case documents the positive side: a normal request with Host succeeds.
+  - name: request with Host succeeds (positive Host contract)
+    GET: /json
+    request_headers:
+      host: example.test
+    status: 200

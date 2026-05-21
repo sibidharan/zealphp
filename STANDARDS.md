@@ -93,6 +93,76 @@ ServerTokens, FileETag, …) — each backed by a middleware unit test.
 
 ---
 
+## Apache httpd core-logic diff (verified against source)
+
+The core HTTP/1.1 request-handling logic was diffed against the **Apache httpd 2.5.x
+(trunk)** source — request-line tokenizer, header reader, Host enforcement, CL/TE
+smuggling resolution, the 405/`Allow` path, and the 404-vs-403 file rule. Each row
+cites the httpd function we compared against and the ZealPHP implementation + proving
+test. Where httpd's *default* behaviour and ZealPHP's behaviour agree, it's marked ✅;
+intentional differences are called out.
+
+| Concern | httpd (default, strict) behaviour | ZealPHP behaviour | Match |
+|---|---|---|---|
+| **Missing `Host` on HTTP/1.1** | `ap_check_request_header` → `HTTP_BAD_REQUEST` (`server/protocol.c`, the `proto_num >= HTTP/1.1 && !Host` guard) | `ResponseMiddleware` Host guard → **400** before routing; HTTP/1.0 exempt | ✅ |
+| **`Content-Length` + `Transfer-Encoding`** | `h1_post_read_request` (`modules/http/http_core.c`): chunked+CL → drop CL + force `Connection: close`; non-final/unknown TE → **400** + close (RFC 7230 §3.3.3) | CL+TE → **4xx** (rejected, connection not reused) — pinned in `Http1FramingConformanceTest` | ✅ (we reject; httpd's drop-CL variant is the more lenient of its two RFC-permitted options) |
+| **Invalid `Content-Length` syntax** | `ap_parse_strict_length` → **400** (`server/protocol.c`) | OpenSwoole parser rejects malformed CL → **4xx** | ✅ |
+| **Bare-LF line ending** | strict default (`AP_GETLINE_CRLF`): bare-LF → `APR_EINVAL` → **400**; tolerated only under `HttpProtocolOptions Unsafe` | bare-LF request → **not 200** (rejected) — pinned in framing suite | ✅ |
+| **Duplicate same-name headers** | `apr_table_compress(..., MERGE)` — comma-joined per RFC 9110 §5.3 | OpenSwoole merges duplicate headers at the parser | ✅ |
+| **obs-fold (header line folding)** | accepted + folded to a single SP (RFC 9112 §5.2 permits; fold-before-first-header → 400) | OpenSwoole handles folding at the parser layer | ⚠️ delegated to OpenSwoole parser (not independently asserted) |
+| **405 Method Not Allowed** | `default_handler` (`server/core.c`): non-GET/POST on a static file → `HTTP_METHOD_NOT_ALLOWED`; `make_allow` builds `Allow` from the method mask; `ap_send_error_response` attaches `Allow` on 405/501 | route matches URI but not method → **405** + `Allow` (GET implies HEAD; OPTIONS always listed); implicit doc-root routes scoped to GET/POST | ✅ (RFC 9110 §15.5.6 — `HttpFeaturesTest`, `AppPipelineExtraTest`) |
+| **404 vs 403 for files** | ENOENT → **404** (`default_handler`); EACCES / disallowed symlink / ENOTDIR / non-regular → **403** (`ap_directory_walk`, `server/request.c`) | nonexistent `.php`/file → **404**; existing-but-blocked → **403**; symlink escaping doc-root → 403/404, never leaks ([#25], `StaticServingConformanceTest`) | ✅ |
+| **`Expect: 100-continue`** | sets `expecting_100`; other Expect values → **417** | server-level (OpenSwoole) — not app-layer; documented gap | ⚠️ |
+
+### Default request limits — httpd constants vs ZealPHP knobs
+
+| Limit | httpd default (`include/httpd.h`) | Directive | ZealPHP |
+|---|---|---|---|
+| Request line | **8190** bytes | `LimitRequestLine` | `App::$limit_request_line` + OpenSwoole `package_max_length` transport cap |
+| Per-header field size | **8190** bytes | `LimitRequestFieldSize` | `App::$limit_request_field_size` |
+| Header field count | **100** | `LimitRequestFields` | `App::$limit_request_fields` |
+| Leading blank lines | 10 | (compile-time) | OpenSwoole parser |
+| Request body | **0 = unlimited** | `LimitRequestBody` | `BodySizeLimitMiddleware` (opt-in) + OpenSwoole `package_max_length` |
+
+ZealPHP exposes the same three Apache-named limits as configurable knobs; httpd over-limit
+returns **400** (line/field/count) or **413** (body), which ZealPHP mirrors (`BodySizeLimitMiddleware` → 413).
+
+## Apache non-support register (what httpd has that ZealPHP does not)
+
+httpd ships **~137 bundled modules**. ZealPHP is an application framework on a single
+long-running OpenSwoole process, not a general-purpose reverse proxy / static web server,
+so large swaths of httpd's surface are deliberately out of scope. Honest register of what
+we do **not** provide, with the reason and the recommended substitute:
+
+| httpd capability (module) | Status in ZealPHP | Substitute / rationale |
+|---|---|---|
+| **Reverse/forward proxy** (`mod_proxy`, `_balancer`, `_http`, `_ajp`, `_scgi`, `_uwsgi`, `_connect`, `_express`, `_hcheck`) — incl. **ProxyPass** | ❌ not implemented | Front ZealPHP with a real proxy (Traefik / nginx / Caddy). ZealPHP is the origin, not the gateway. |
+| **TLS termination** (`mod_ssl`, `mod_md` ACME) | ❌ not in-process | Terminate TLS at the proxy. OpenSwoole *can* do TLS (`enable_http2`+certs) but production deploys terminate upstream; ACME is the proxy's job. |
+| **WebDAV** (`mod_dav`, `_dav_fs`, `_dav_lock`) | ❌ not implemented | Out of scope (app framework, not a file server). |
+| **CGI / FastCGI execution** (`mod_cgi`, `mod_cgid`, `mod_proxy_fcgi`) | ❌ no FastCGI gateway | ZealPHP *is* the PHP runtime (OpenSwoole workers), so PHP-FPM-style FastCGI is unnecessary. The CGI-worker subprocess (`cgi_worker.php`) is for legacy global-scope isolation, not a FastCGI server. |
+| **WebSocket proxying** (`mod_proxy_wstunnel`) | ❌ (not as a proxy) | ZealPHP serves WebSocket natively (`App::ws()`); it doesn't *proxy* upstream WS. |
+| **`mod_rewrite`** (full rewrite engine, `RewriteCond`/`RewriteRule`, regex rewrite maps) | ⚠️ partial | `App::setFallback()` + `MergeSlashesMiddleware` + `RedirectMiddleware`/`ReturnMiddleware` cover the common cases; no general per-request rewrite DSL. |
+| **`.htaccess` / `<Directory>` per-dir config** | ❌ by design | Single-process, code-config model — config is PHP at boot, not per-directory files. Documented on the HTTP parity page. |
+| **Content negotiation** (`mod_negotiation`, `Accept-Language`/type-map) | ❌ not automatic | Negotiate in the handler (`Accept` is in `$g->server`). |
+| **SSI** (`mod_include`) | ❌ | Use templates (`App::render()`). |
+| **On-the-fly content filters** (`mod_sed`, `mod_ext_filter`, `mod_brotli`) | ⚠️ partial | `BodyRewriteMiddleware` (mod_substitute parity, single-line); gzip/deflate via OpenSwoole `http_compression`; no brotli. |
+| **Disk/socache caching** (`mod_cache`, `_cache_disk`, `_socache_*`) | ❌ no built-in HTTP cache | `Store` (shared memory) for app-level caching; HTTP caching headers via `CacheControlMiddleware`/`ExpiresMiddleware`/`ETagMiddleware` (let the proxy cache). |
+| **LDAP / DBD auth** (`mod_authnz_ldap`, `mod_dbd`, `mod_authn_dbm`) | ❌ | Pluggable auth hooks (`App::authChecker()` etc.) — wire any backend in app code. |
+| **Digest / form / bearer / JWT auth** (`mod_auth_digest`, `_form`, `_bearer`, `mod_autht_jwt`) | ⚠️ Basic only | `BasicAuthMiddleware` (RFC 7617). Bearer/JWT/digest are app-layer concerns. |
+| **`mod_reqtimeout`** (slow-loris read timeout) | ❌ **known gap** | No app-level read-timeout; a slow header drip is currently accepted. Tracked in the testing roadmap (slowhttptest) — needs an OpenSwoole socket read-timeout. |
+| **`mod_ratelimit`** (bandwidth throttle, KiB/s) | ❌ (rate ≠ bandwidth) | `RateLimitMiddleware` limits *request rate* (nginx `limit_req` parity), not output *bandwidth*. |
+| **`mod_remoteip`** | ✅ equivalent | `App::$trusted_proxies` + `App::clientIp()` (X-Forwarded-For trust). |
+| **`mod_log_config` / `mod_log_json`** | ✅ equivalent | `App::$access_log_format` (Apache `LogFormat` tokens). |
+| **`mod_lua`** (embedded scripting) | n/a | ZealPHP *is* the scripting layer (PHP). |
+| **`mod_session*`** (server-side session framework) | ✅ equivalent | Native session layer (file + Redis handlers, coroutine-safe). |
+
+The directives ZealPHP **does** match are catalogued in the
+[Apache / nginx directive parity](#apache--nginx-directive-parity) section above and the
+`template/pages/http.php#parity` matrix; this register is the honest complement — the
+deliberate non-goals of an application framework that expects a real proxy in front.
+
+---
+
 ## Quality gates (how it stays conformant)
 
 | Gate | Tool | Bar | Where |
@@ -121,14 +191,16 @@ RFC 7617 challenge ABNF, RFC 3986 percent-encoding edge cases, and IMF-fixdate
 ## Advanced testing roadmap — four tools, four failure classes
 
 Mutation testing (Infection) hardens the *code*. Three cousins harden the rest of
-the HTTP stack — each attacks a different layer, zero overlap:
+the HTTP stack — each attacks a different layer, zero overlap. Harnesses live under
+`scripts/fuzz/` + `tests/gabbi/`; full write-up in [`docs/fuzzing.md`](docs/fuzzing.md);
+`.github/workflows/fuzz.yml` runs them in CI.
 
 | Layer | Tool | What it does | Status |
 |---|---|---|---|
 | **Code** (test strength) | **Infection** | mutates the source AST, checks tests catch it (MSI gate) | ✅ in CI |
-| **Parser** (wire robustness) | **http-garden** (differential) | sends crafted requests to ZealPHP *and* Apache/nginx, diffs the parse → divergence *is* the smuggling bug; Apache as the oracle | ⏭️ planned — extends the §6–§7 framing suite from hand-picked cases to systematic discovery; CI gates on a committed divergence baseline |
-| **Parser** (mutation) | **Radamsa** | mutates a seed corpus of valid requests (reuse the framing fixtures), pipes mangled variants at the socket → every mutant must get a clean 4xx/parse, never a hang or 500-with-trace | ⏭️ planned — cheapest wire fuzzer |
-| **Reactor** (DoS survival) | **slowhttptest** | slowloris / slow-body drip → proves one stuck client can't starve the coroutine reactor (`mod_reqtimeout` parity) | ⏭️ planned — the coroutine-server-specific risk; **known gap** (a 12s header drip currently gets a 200; needs an OpenSwoole read-timeout) |
-| **Contract** (readable cases) | **Gabbi** | declarative YAML request→expected-response fixtures for the hand-known cases (Host, range, dotfile-403, MIME) | optional — current PHP integration suite already covers these |
+| **Parser** (mutation) | **Radamsa** | mutates a seed corpus of valid requests (`scripts/fuzz/corpus/`, derived from the framing fixtures), pipes mangled variants at the socket → every mutant must get a clean 4xx/parse, never a hang or 500-with-trace | ✅ **ran** — `scripts/fuzz/radamsa_run.sh`: 500 mutations → 0 hangs, 0 stack-trace leaks (parser robust); gated in `fuzz.yml` |
+| **Contract** (readable cases) | **Gabbi** | declarative YAML request→expected-response fixtures (Host, 405+Allow, dotfile-403, OPTIONS, 404, JSON) | ✅ **ran** — `tests/gabbi/conformance.yaml`: 7/7 pass; gated in `fuzz.yml` |
+| **Reactor** (DoS survival) | **slowhttptest** | slowloris / slow-body drip → proves one stuck client can't starve the coroutine reactor (`mod_reqtimeout` parity) | ⚠️ **ran — confirms a known gap**: `scripts/fuzz/slowhttptest.sh` — 50 slow conns held open for the full 30 s, `closed=0` (OpenSwoole has no per-request read-timeout). Informational in CI; fix needs an OpenSwoole read-timeout. |
+| **Parser** (wire robustness) | **http-garden** (differential) | sends crafted requests to ZealPHP *and* Apache/nginx, diffs the parse → divergence *is* the smuggling bug; Apache as the oracle | ⏭️ planned — **requires Docker** (absent in the current CI image); approach + the ZealPHP target Dockerfile/config documented in `docs/fuzzing.md` §4 |
 
-Sequencing (credibility-per-hour): **http-garden vs Apache** (the "Infection but for the wire" conformance oracle) → **Radamsa** seeded from the framing fixtures → **slowhttptest** (reactor survival) → Gabbi for declarative contract docs.
+Sequencing (credibility-per-hour): Radamsa + Gabbi landed first (cheapest, run in CI); slowhttptest documents the reactor gap; **http-garden vs Apache** is the next step once a Docker-enabled runner is available.
