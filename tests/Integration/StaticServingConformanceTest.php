@@ -110,4 +110,54 @@ class StaticServingConformanceTest extends TestCase
         $this->assertStatus(304, $this->get('/http/sendfile-test', ['If-None-Match' => $etag]));
         $this->assertStatus(304, $this->get('/http/sendfile-test', ['If-Modified-Since' => $lastMod]));
     }
+
+    /**
+     * H2 — double-encoded traversal. `%252e%252e` decodes once to `%2e%2e`
+     * then again to `..`; the pre-routing guard decodes until stable before the
+     * `..` check, so it is rejected with 400 (Apache rejects at the parse layer)
+     * and never reaches /etc/passwd.
+     */
+    public function testDoubleEncodedTraversalIsRejected(): void
+    {
+        $r = $this->get('/css/%252e%252e/%252e%252e/%252e%252e/etc/passwd');
+        $this->assertStatus(400, $r);
+        $this->assertStringNotContainsString('root:', (string) $r['body'], 'no /etc/passwd leak');
+    }
+
+    /**
+     * M1 — path normalization. `//admin//` and `/./` segments are collapsed
+     * before route matching (Apache ap_normalize_path / MergeSlashes), so a
+     * doubled-up or dot-segmented path resolves to the same route as the clean
+     * form rather than slipping past a pattern. The implicit static handler
+     * resolves `//css//zealphp.css//`-style noise to the real asset.
+     */
+    public function testDuplicateSlashAndDotSegmentsAreNormalized(): void
+    {
+        $clean = $this->get('/css/zealphp.css');
+        $this->assertStatus(200, $clean);
+
+        foreach (['//css//zealphp.css', '/css/./zealphp.css', '/./css//zealphp.css'] as $p) {
+            $r = $this->get($p);
+            $this->assertStatus(200, $r, "normalized path should resolve to the asset: $p");
+            $this->assertStringContainsString(
+                strtolower('text/css'),
+                strtolower($r['headers']['content-type'] ?? ''),
+                "normalized $p should serve the CSS asset"
+            );
+        }
+    }
+
+    /**
+     * M9 — encoded slash. With AllowEncodedSlashes off (the default, matching
+     * Apache), a raw `%2F` in the path is refused with 404 before it can decode
+     * to a real `/` and alter routing.
+     */
+    public function testEncodedSlashIsRejected(): void
+    {
+        foreach (['/css/%2fzealphp.css', '/css%2F..%2F..%2Fapp.php'] as $p) {
+            $r = $this->get($p);
+            $this->assertStatus(404, $r, "encoded slash must 404: $p");
+            $this->assertStringNotContainsString('<?php', (string) $r['body'], "no source leak: $p");
+        }
+    }
 }
