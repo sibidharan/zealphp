@@ -77,6 +77,27 @@ class StaticServingConformanceTest extends TestCase
         }
     }
 
+    /**
+     * A symlink inside the document root pointing OUTSIDE it must not serve the
+     * target (Apache `FollowSymLinks` off / `SymLinksIfOwnerMatch` default).
+     * The escaping target (/etc/passwd) must never leak.
+     */
+    public function testSymlinkEscapeIsRefused(): void
+    {
+        $link = ZEALPHP_ROOT . '/public/symlink-escape-conformance';
+        @unlink($link);
+        if (!@symlink('/etc/passwd', $link)) {
+            $this->markTestSkipped('cannot create symlink in this environment');
+        }
+        try {
+            $r = $this->get('/symlink-escape-conformance');
+            $this->assertContains($r['status'], [403, 404], 'escaping symlink must not be served');
+            $this->assertStringNotContainsString('root:', (string) $r['body'], 'symlink target must not leak');
+        } finally {
+            @unlink($link);
+        }
+    }
+
     /** Static assets carry Last-Modified and support conditional 304 (sendFile path). */
     public function testStaticConditionalGet(): void
     {
