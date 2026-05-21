@@ -23,3 +23,9 @@
 /.idea/
 /.vscode/
 *.swp
+
+# Mutation testing logs
+infection.log
+infection-summary.log
+infection.html
+.infection-cache/
