@@ -393,6 +393,25 @@ class App
     ];
 
     /**
+     * Methods ZealPHP recognises. A request whose method is outside this set
+     * gets 501 Not Implemented (Apache: M_INVALID → HTTP_NOT_IMPLEMENTED,
+     * server/protocol.c:1253). Standard RFC 9110 methods plus the common
+     * WebDAV verbs Apache registers in ap_method_registry_init(). A recognised
+     * method that has no matching route still flows through to 404/405/fallback.
+     *
+     * @var array<int, string>
+     */
+    public const KNOWN_METHODS = [
+        'GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'TRACE', 'PATCH',
+        'CONNECT',
+        // WebDAV (RFC 4918 / 3253) — registered by Apache's method registry.
+        'PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK',
+        'VERSION-CONTROL', 'REPORT', 'CHECKOUT', 'CHECKIN', 'UNCHECKOUT',
+        'MKWORKSPACE', 'UPDATE', 'LABEL', 'MERGE', 'BASELINE-CONTROL',
+        'MKACTIVITY', 'ORDERPATCH', 'ACL', 'SEARCH',
+    ];
+
+    /**
      * Coerce a handler's int return value to a valid HTTP status code.
      * Per the universal return contract, ints must be in 100-599 (RFC 7230).
      * Out-of-range values are coerced to 500 with a warning logged via elog()
@@ -2980,6 +2999,10 @@ class App
     {
         $g = RequestContext::instance();
         $reason = self::REASON_PHRASES[$status] ?? '';
+        // HEAD strips the body on error responses too (Apache ap_send_error_response
+        // honours r->header_only). Content-Length still reflects the body that a
+        // GET would have produced, so we compute the body then drop it for HEAD.
+        $isHead = (string)($g->server['REQUEST_METHOD'] ?? 'GET') === 'HEAD';
         $accept = strtolower((string)($g->server['HTTP_ACCEPT'] ?? ''));
         $wantsJson = $accept !== ''
             && str_contains($accept, 'application/json')
@@ -2997,8 +3020,14 @@ class App
             if (self::$server_admin !== null && self::$server_admin !== '') {
                 $errorPayload['contact'] = self::$server_admin;
             }
-            $body = json_encode(['error' => $errorPayload], JSON_UNESCAPED_SLASHES);
-            $resp = (new Response($body))
+            $body = (string)json_encode(['error' => $errorPayload], JSON_UNESCAPED_SLASHES);
+            // HEAD strips the body but keeps Content-Length for the entity a GET
+            // would have produced — emitted via the buffered header list (the
+            // same path the normal HEAD dispatch branches use).
+            if ($isHead) {
+                response_add_header('Content-Length', (string)strlen($body));
+            }
+            $resp = (new Response($isHead ? '' : $body))
                 ->withStatus($status)
                 ->withHeader('Content-Type', 'application/json');
             assert($resp instanceof \Psr\Http\Message\ResponseInterface);
@@ -3014,6 +3043,10 @@ class App
         // <address> block Apache appends when ServerSignature is on.
         if (self::$server_admin !== null && self::$server_admin !== '') {
             $body .= "\n<address>Contact: " . htmlspecialchars(self::$server_admin) . "</address>";
+        }
+        if ($isHead) {
+            response_add_header('Content-Length', (string)strlen($body));
+            return (new Response(''))->withStatus($status);
         }
         return (new Response($body))->withStatus($status);
     }
@@ -4381,6 +4414,14 @@ class ResponseMiddleware implements MiddlewareInterface
                 App::emitStatus($g->openswoole_response, $streamStatus);
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->header('Accept-Ranges', 'none');
+                // HEAD: send headers only, never the streamed body (Apache
+                // strips content buckets via ctx->final_header_only). Streaming
+                // length is unknown/chunked, so no Content-Length is emitted.
+                if ($method === 'HEAD') {
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                    $g->openswoole_response->end();
+                    return (new Response('', $streamStatus));
+                }
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->flush();
                 foreach ($object as $chunk) {
@@ -4503,6 +4544,14 @@ class ResponseMiddleware implements MiddlewareInterface
                 App::emitStatus($g->openswoole_response, $streamStatus);
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->header('Accept-Ranges', 'none');
+                // HEAD: send headers only, never the streamed body (Apache
+                // strips content buckets via ctx->final_header_only). Streaming
+                // length is unknown/chunked, so no Content-Length is emitted.
+                if ($method === 'HEAD') {
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                    $g->openswoole_response->end();
+                    return (new Response('', $streamStatus));
+                }
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->flush();
                 foreach ($object as $chunk) {
@@ -4624,6 +4673,28 @@ class ResponseMiddleware implements MiddlewareInterface
         }
     }
 
+    /**
+     * Reconstruct the request line + headers for a TRACE echo body, mirroring
+     * Apache's ap_send_http_trace() (http_filters.c:1130). Format is the request
+     * line, each header as `Name: value`, then a terminating blank line — the
+     * message/http representation the client sent. Header names/values are
+     * passed through verbatim (TRACE is an introspection echo); CR/LF inside a
+     * value is stripped so a crafted header can't inject extra wire lines.
+     *
+     * @param array<string, string> $headers
+     */
+    public static function buildTraceEcho(string $method, string $uri, string $protocol, array $headers): string
+    {
+        $crlf = "\r\n";
+        $out = $method . ' ' . $uri . ' ' . $protocol . $crlf;
+        foreach ($headers as $name => $value) {
+            $cleanName = str_replace(["\r", "\n"], '', $name);
+            $cleanValue = str_replace(["\r", "\n"], '', $value);
+            $out .= $cleanName . ': ' . $cleanValue . $crlf;
+        }
+        return $out . $crlf;
+    }
+
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $g = RequestContext::instance();
@@ -4652,6 +4723,15 @@ class ResponseMiddleware implements MiddlewareInterface
             return $app->renderError(400);
         }
 
+        // RFC 9110 §15.6.2 / Apache server/protocol.c:1253 — a method the server
+        // does not recognise gets 501 Not Implemented, not 404. This distinguishes
+        // "I don't know this verb" from "no such resource". Known methods (incl.
+        // HEAD/OPTIONS/TRACE and the WebDAV verbs) fall through to normal routing,
+        // where an unmatched-but-known method still resolves to 404/405/fallback.
+        if (!in_array($method, App::KNOWN_METHODS, true)) {
+            return $app->renderError(501);
+        }
+
         // Apache PATH_INFO — `/script.php/extra/path` exposes `/extra/path` to
         // the script and rewrites REQUEST_URI to just the script. Triggers
         // only when the literal `.php/` appears in the URL (WordPress/Drupal
@@ -4676,12 +4756,36 @@ class ResponseMiddleware implements MiddlewareInterface
             }
         }
 
-        // TRACE — disabled by default (XST attack vector). Apache TraceEnable
-        // default is OFF; mirror that. Set App::traceEnabled(true) to allow.
-        if ($method === 'TRACE' && !App::$trace_enabled) {
-            response_set_status(405);
-            response_add_header('Allow', 'GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH');
-            return new Response('', 405);
+        // TRACE — disabled by default (XST attack vector). Apache's compiled
+        // default is On, but ZealPHP ships TraceEnable Off as a hardening choice.
+        // Set App::traceEnabled(true) to opt into the Apache ap_send_http_trace()
+        // behaviour: echo the request back as a message/http body.
+        if ($method === 'TRACE') {
+            if (!App::$trace_enabled) {
+                response_set_status(405);
+                response_add_header('Allow', 'GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH');
+                return new Response('', 405);
+            }
+            $req = $g->zealphp_request;
+            // Apache (non-extended TraceEnable On) refuses a request body with
+            // 413 — only AP_TRACE_EXTENDED echoes it, and ZealPHP's boolean knob
+            // maps to the non-extended mode (http_filters.c:1082).
+            $bodyRaw = $req instanceof \ZealPHP\HTTP\Request ? $req->rawContent() : null;
+            if (is_string($bodyRaw) && $bodyRaw !== '') {
+                return $app->renderError(413);
+            }
+            $headers = ($req instanceof \ZealPHP\HTTP\Request && is_array($req->header))
+                ? $req->header
+                : [];
+            $body = self::buildTraceEcho(
+                $method,
+                $uri,
+                (string)($g->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1'),
+                $headers
+            );
+            response_set_status(200);
+            response_add_header('Content-Type', 'message/http');
+            return new Response($body, 200);
         }
 
         // Apache: RewriteCond %{REQUEST_FILENAME} !-d
@@ -4710,6 +4814,14 @@ class ResponseMiddleware implements MiddlewareInterface
 
         // OPTIONS — return allowed methods for this URI without running a handler
         if ($method === 'OPTIONS') {
+            // RFC 9110 §9.3.7 / Apache http_core.c:336 — `OPTIONS *` is a
+            // server-wide capability probe ("HTTP pong"), not resource-specific:
+            // 200 with an empty body and no Allow header. The request target `*`
+            // arrives as the raw REQUEST_URI (query string never applies to `*`).
+            if ($uri === '*') {
+                response_set_status(200);
+                return new Response('', 200);
+            }
             $allowed = ['OPTIONS'];
             foreach ($app->routesByMethod() as $m => $routes) {
                 foreach ($routes as $route) {

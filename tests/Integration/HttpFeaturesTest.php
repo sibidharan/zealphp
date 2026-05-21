@@ -88,6 +88,74 @@ class HttpFeaturesTest extends TestCase
         $this->assertStringContainsString('OPTIONS', $allow);
     }
 
+    /**
+     * M4 (audit #4) — RFC 9110 §15.6.2: an unrecognised method is 501 Not
+     * Implemented, not 404. Apache returns 501 for M_INVALID (protocol.c:1253).
+     */
+    public function testUnknownMethodReturns501(): void
+    {
+        $r = $this->http('FOOBAR', '/json');
+        $this->assertStatus(501, $r);
+    }
+
+    /**
+     * M6 (audit #4) — HEAD on an error response (404) must carry no body, the
+     * same as HEAD on a 200. Apache's ap_send_error_response honours header_only.
+     */
+    public function testHeadOnNotFoundHasNoBody(): void
+    {
+        $r = $this->http('HEAD', '/no-such-route-zsh-method');
+        $this->assertStatus(404, $r);
+        $this->assertSame('', $r['body'], 'HEAD on 404 must not return a body');
+    }
+
+    /**
+     * M5 (audit #4) — `OPTIONS *` is a server-wide capability probe: Apache
+     * returns 200 with an empty body and no Allow header (http_core.c:336).
+     * curl normalises the `*` target, so this case is driven over a raw socket.
+     */
+    public function testOptionsAsteriskReturns200(): void
+    {
+        $r = $this->rawRequest("OPTIONS * HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        $this->assertStringContainsString('HTTP/1.1 200', $r, "OPTIONS * should be 200, got:\n$r");
+    }
+
+    /**
+     * H8 (audit #4) — TRACE is disabled by default (XST defence): 405 with an
+     * Allow header, no request echo. The demo server does not call
+     * traceEnabled(true), so this pins the hardened default.
+     */
+    public function testTraceDisabledByDefaultReturns405(): void
+    {
+        $r = $this->http('TRACE', '/json');
+        $this->assertStatus(405, $r);
+        $this->assertStringContainsString('GET', $r['headers']['allow'] ?? '');
+    }
+
+    /**
+     * Raw HTTP/1.1 request over a socket — needed for request targets curl
+     * rewrites (e.g. the `*` form of OPTIONS). Returns the full raw response.
+     */
+    private function rawRequest(string $request): string
+    {
+        $parts = parse_url(self::$baseUrl);
+        $host  = $parts['host'] ?? '127.0.0.1';
+        $port  = $parts['port'] ?? 80;
+        $fp = @fsockopen($host, (int)$port, $errno, $errstr, 5);
+        $this->assertNotFalse($fp, "socket connect failed: $errstr ($errno)");
+        fwrite($fp, $request);
+        $resp = '';
+        while (!feof($fp)) {
+            $chunk = fread($fp, 8192);
+            if ($chunk === false) {
+                break;
+            }
+            $resp .= $chunk;
+        }
+        fclose($fp);
+        return $resp;
+    }
+
     public function testCookieSameSite(): void
     {
         $r = $this->get('/http/cookie-test');
