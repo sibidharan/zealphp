@@ -3143,6 +3143,50 @@ class App
     }
 
     /**
+     * Clear previously-accumulated response headers from a handler that then
+     * failed, keeping only the headers that Apache preserves across an error
+     * response (ap_send_error_response: apr_table_clear(r->headers_out) then
+     * re-instate headers required by HTTP protocol for specific status codes).
+     *
+     * Apache parity (http_protocol.c:1246-1292):
+     *   Location        — preserved from err_headers_out for redirect chains.
+     *   WWW-Authenticate — preserved for 401 (mod_auth sets it in err_headers_out,
+     *                      http_request.c:604).
+     *   Allow           — Apache re-adds Allow for 405/501 inside ap_send_error_response
+     *                     after the table clear (http_protocol.c:1289-1292). We preserve
+     *                     any Allow header the framework set before calling renderError()
+     *                     (e.g. the 405 dispatch path) rather than clearing + re-adding.
+     *
+     * Called at the top of renderError() so the policy applies to both custom
+     * handler dispatch and the default error body paths.
+     */
+    private function clearHandlerHeaders(int $status): void
+    {
+        $g = RequestContext::instance();
+        if ($g->zealphp_response === null) {
+            return;
+        }
+        // Always-preserved headers (Apache err_headers_out equivalents):
+        //   location         — redirect chains
+        //   allow            — RFC 9110 §15.5.6: required on 405/501; Apache re-adds
+        //                      after the clear, so we preserve rather than wipe + re-add
+        $preserveNames = ['location', 'allow'];
+        // WWW-Authenticate is only meaningful on 401; preserve it there only so a
+        // handler that happened to set it for a different status can't leak it.
+        if ($status === 401) {
+            $preserveNames[] = 'www-authenticate';
+        }
+        $g->zealphp_response->headersList = array_values(
+            array_filter(
+                $g->zealphp_response->headersList,
+                static function (array $pair) use ($preserveNames): bool {
+                    return in_array(strtolower($pair[0]), $preserveNames, true);
+                }
+            )
+        );
+    }
+
+    /**
      * Render the response for an error status. Dispatches a user-registered
      * handler if one exists (status-specific takes precedence over catch-all);
      * otherwise returns the framework's default body (HTML or JSON per Accept).
@@ -3153,6 +3197,10 @@ class App
     public function renderError(int $status, ?\Throwable $exception = null): \Psr\Http\Message\ResponseInterface
     {
         $g = RequestContext::instance();
+        // Apache ap_send_error_response parity: clear headers the failed handler
+        // accumulated before emitting the error body. Preserves Location (redirect
+        // chains) and, for 401 only, WWW-Authenticate (Basic/Digest challenge).
+        $this->clearHandlerHeaders($status);
         // Recursion guard — if a user-registered error handler itself triggers
         // an error, the nested call falls straight through to the default page
         // instead of looping back into the same handler.

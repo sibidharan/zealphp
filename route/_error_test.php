@@ -261,3 +261,39 @@ $app->route('/__error_test/suppressed-notice', function() {
 $app->route('/__error_test/html-handler-wins', function() {
     return 404;
 });
+
+// ─── Scope D: header-leak (B6) fixtures ────────────────────────────────────
+//
+// Each route sets headers then triggers an error. The integration test verifies
+// that the error response does NOT carry the handler-set headers (except the
+// preserved ones: Location for redirects, WWW-Authenticate for 401).
+
+// Handler sets Content-Type: application/pdf then throws → 500 error body
+// must NOT carry Content-Type: application/pdf.
+$app->route('/__error_test/header-leak-contenttype', function() {
+    header('Content-Type: application/pdf');
+    throw new \RuntimeException('triggered-500');
+});
+
+// Handler sets X-Custom-Leaked then returns 404 status → leaked header must vanish.
+$app->route('/__error_test/header-leak-custom', function() {
+    header('X-Custom-Leaked: should-not-appear');
+    header('Content-Type: text/csv');
+    return 404;
+});
+
+// Handler sets WWW-Authenticate before returning 401 → that header MUST survive.
+$app->route('/__error_test/header-leak-401-preserves-www-auth', function() {
+    header('WWW-Authenticate: Basic realm="test"');
+    header('X-Should-Vanish: yes');
+    return 401;
+});
+
+// Handler sets Location before returning 302 → Location MUST survive.
+// (Redirect path: zealphp_response->redirect() emits inline and closes, so this
+// tests the case where Location is set via header() then a non-3xx error fires.)
+$app->route('/__error_test/header-leak-location-survives', function() {
+    header('Location: /some-target');
+    header('X-Also-Leaked: yes');
+    return 500;
+});
