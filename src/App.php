@@ -147,6 +147,12 @@ class App
      */
     public static string $server_tokens = 'Full';
     /**
+     * Apache `FileETag`. When false, `ETagMiddleware` emits no `ETag` header
+     * and never returns 304 (equivalent to `FileETag None`). Default true.
+     * Set via App::fileETag() before App::init().
+     */
+    public static bool $file_etag = true;
+    /**
      * mod_php-parity SAPI identity for the php_sapi_name() override. Default null
      * returns the real PHP_SAPI ("cli") — no behavior change. Set to a web SAPI
      * string (e.g. 'apache2handler', 'fpm-fcgi') so legacy code branching on
@@ -697,6 +703,16 @@ class App
     {
         if ($tokens !== null) self::$server_tokens = $tokens;
         return self::$server_tokens;
+    }
+
+    /**
+     * Apache `FileETag`. false ⇒ `ETagMiddleware` emits no ETag and never 304s
+     * (`FileETag None`). No-arg call returns the current value.
+     */
+    public static function fileETag(?bool $enabled = null): bool
+    {
+        if ($enabled !== null) self::$file_etag = $enabled;
+        return self::$file_etag;
     }
 
     /**

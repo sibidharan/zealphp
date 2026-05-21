@@ -22,6 +22,7 @@ class ETagMiddlewareTest extends TestCase
     {
         App::$cwd = ZEALPHP_ROOT;
         App::superglobals(true);
+        App::$file_etag = true;
         $this->resp = new class {
             /** @var array<string, string> */
             public array $headers = [];
@@ -31,6 +32,26 @@ class ETagMiddlewareTest extends TestCase
         $g->zealphp_response = $this->resp;
         $g->status = 200;
         $g->_streaming = null;
+    }
+
+    protected function tearDown(): void
+    {
+        App::$file_etag = true;
+        parent::tearDown();
+    }
+
+    public function testFileETagDisabledSkipsEtagAnd304(): void
+    {
+        App::$file_etag = false; // Apache FileETag None
+        $mw   = new ETagMiddleware();
+        $body = 'cacheable content';
+        $etag = 'W/"' . hash('xxh3', $body) . '"';
+        // Even a matching If-None-Match must NOT 304 when ETags are disabled.
+        $req  = (new ServerRequest('/', 'GET'))->withHeader('If-None-Match', $etag);
+        $res  = $mw->process($req, $this->handlerReturning($body));
+
+        $this->assertSame(200, $res->getStatusCode());
+        $this->assertArrayNotHasKey('ETag', $this->resp->headers);
     }
 
     private function handlerReturning(string $body): RequestHandlerInterface

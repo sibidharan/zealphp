@@ -28,6 +28,11 @@ class ETagMiddleware implements MiddlewareInterface
     {
         $response = $handler->handle($request);
 
+        // Apache FileETag None — ETag generation disabled server-wide.
+        if (!\ZealPHP\App::$file_etag) {
+            return $response;
+        }
+
         if ($request->getMethod() !== 'GET') {
             return $response;
         }
