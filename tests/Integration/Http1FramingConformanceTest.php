@@ -193,4 +193,49 @@ class Http1FramingConformanceTest extends TestCase
         $this->assertNotNull($r['status'], 'valid chunked request must yield an HTTP response');
         $this->assertGreaterThanOrEqual(200, $r['status']);
     }
+
+    /**
+     * Apache LimitRequestFields — a request carrying more header fields than the
+     * configured limit (default 100) must be rejected with 400.
+     * Apache: ap_get_mime_headers_core protocol.c:930-940.
+     */
+    public function testExcessHeaderFieldsRejectedWith400(): void
+    {
+        // Build a request with 102 distinct X-Hdr-N headers — over the default
+        // limit of 100. Host counts as one HTTP_ header, so 101 X-Hdr-* headers
+        // would give 102 total, safely above the 100 limit.
+        $extraHeaders = '';
+        for ($i = 1; $i <= 101; $i++) {
+            $extraHeaders .= 'X-Hdr-' . $i . ': v' . self::CRLF;
+        }
+        $r = $this->raw(
+            'GET /json HTTP/1.1' . self::CRLF
+            . 'Host: x' . self::CRLF
+            . $extraHeaders
+            . 'Connection: close' . self::CRLF
+            . self::CRLF
+        );
+        $this->assertSame(400, $r['status'], 'request with > LimitRequestFields headers must be 400');
+    }
+
+    /**
+     * A request within the limit (exactly 100 headers including Host) is accepted.
+     */
+    public function testRequestWithinHeaderLimitIsAccepted(): void
+    {
+        // 99 X-Hdr-* + Host = 100 total HTTP_ headers — exactly at the limit.
+        $extraHeaders = '';
+        for ($i = 1; $i <= 99; $i++) {
+            $extraHeaders .= 'X-Hdr-' . $i . ': v' . self::CRLF;
+        }
+        $r = $this->raw(
+            'GET /json HTTP/1.1' . self::CRLF
+            . 'Host: x' . self::CRLF
+            . $extraHeaders
+            . 'Connection: close' . self::CRLF
+            . self::CRLF
+        );
+        $this->assertNotNull($r['status'], 'request at limit must yield an HTTP response');
+        $this->assertSame(200, $r['status'], 'request within LimitRequestFields must be accepted');
+    }
 }
