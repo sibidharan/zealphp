@@ -87,4 +87,26 @@ class RefererMiddlewareTest extends TestCase
     {
         $this->assertSame(200, $this->check(['example.com'], 'https://example.com:8443/x'));
     }
+
+    /**
+     * ConcatOperandRemoval L144: str_starts_with($host, $base . '.') vs str_starts_with($host, $base).
+     * "examplexyz" (no TLD) starts with "example" but NOT "example." — without the
+     * dot the mutant passes the check then sees remainder "yz" (no dot) → returns true.
+     * Real code: str_starts_with("examplexyz", "example.") = false → returns false (403).
+     */
+    public function testSuffixWildcardRequiresDotBetweenBaseAndLabel(): void
+    {
+        // No TLD: host parses as "examplexyz" — starts with "example" but has no dot separator
+        $this->assertSame(403, $this->check(['example.*'], 'http://examplexyz'));
+    }
+
+    /**
+     * IncrementInteger L147: substr($host, strlen($base) + 1) vs +2.
+     * For host "example.x" (single-char TLD), offset+1 gives "x" (non-empty, no dot → allow).
+     * Offset+2 gives "" (empty → remainder === '' is true → returns false, blocks). Must allow.
+     */
+    public function testSuffixWildcardMatchesSingleCharTld(): void
+    {
+        $this->assertSame(200, $this->check(['example.*'], 'http://example.x/'));
+    }
 }

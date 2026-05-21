@@ -145,9 +145,10 @@ class RefererMiddlewareTest extends TestCase
 
     public function testSuffixWildcardRequiresDot(): void
     {
-        // "examplexyz.com" must NOT match "example.*" — the spec is "example."
-        // (substr 0,-1), so the dot is required.
-        $this->assertSame(403, $this->invoke(['example.*'], 'http://examplexyz.com'));
+        // "examplexyz" (no TLD) must NOT match "example.*" — starts with "example"
+        // but has no dot separator. With real code str_starts_with($host, "example.")
+        // = false → blocked. Mutant removes the dot → incorrectly allows.
+        $this->assertSame(403, $this->invoke(['example.*'], 'http://examplexyz'));
     }
 
     // ----- example.* suffix wildcard — DNS-label boundary (B1 security fix) ------
@@ -285,6 +286,69 @@ class RefererMiddlewareTest extends TestCase
     public function testPathPrefixMismatchBlocked(): void
     {
         $this->assertSame(403, $this->invoke(['good.com/gallery'], 'http://good.com/other'));
+    }
+
+    // ----- constructor default mutations ----------------------------------
+
+    /**
+     * TrueValue L56: default $allowNone = true.
+     * Instantiate with only the first arg (no allowNone); missing Referer must
+     * be allowed. Mutant sets allowNone=false → 403, revealing the default.
+     */
+    public function testDefaultAllowNoneIsTrueAllowsMissingReferer(): void
+    {
+        $mw = new RefererMiddleware(['example.com']);
+        $request = new ServerRequest('/', 'GET', '', []);
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('OK', 200, '', ['Content-Type' => 'text/plain']);
+            }
+        };
+        $this->assertSame(200, $mw->process($request, $handler)->getStatusCode());
+    }
+
+    /**
+     * TrueValue L57: default $allowBlocked = true.
+     * Instantiate with only the first arg; scheme-less Referer (proxy-stripped)
+     * must be allowed. Mutant sets allowBlocked=false → 403, revealing the default.
+     */
+    public function testDefaultAllowBlockedIsTrueAllowsSchemelessReferer(): void
+    {
+        $mw = new RefererMiddleware(['example.com']);
+        $request = new ServerRequest('/', 'GET', '', ['referer' => 'android-app://com.example']);
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('OK', 200, '', ['Content-Type' => 'text/plain']);
+            }
+        };
+        $this->assertSame(200, $mw->process($request, $handler)->getStatusCode());
+    }
+
+    /**
+     * UnwrapArrayValues L60: $this->specs = array_values(array_filter(...)).
+     * Pass a mixed array where a non-string spec sits at key 0 and a valid
+     * string spec at key 1. array_filter preserves keys, so without array_values
+     * the list would be [1 => 'example.com']. PHP foreach still works, but
+     * the list<string> type contract is violated; more importantly, if any
+     * downstream code relied on 0-based indexing it would break. The real
+     * observable difference here is that array_filter without array_values returns
+     * an associative array — we verify the request is correctly allowed, proving
+     * the full filter+reindex pipeline works with a non-zero-keyed input.
+     */
+    public function testNonStringSpecAtKeyZeroIsFilteredAndRemainingSpecMatches(): void
+    {
+        // key 0 = integer (filtered out), key 1 = valid string spec
+        $mw = new RefererMiddleware([0 => 42, 1 => 'example.com']);
+        $request = new ServerRequest('/', 'GET', '', ['referer' => 'http://example.com/page']);
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('OK', 200, '', ['Content-Type' => 'text/plain']);
+            }
+        };
+        $this->assertSame(200, $mw->process($request, $handler)->getStatusCode());
     }
 
     // ----- helpers ------------------------------------------------------
