@@ -50,4 +50,55 @@ class HttpClientTest extends TestCase
         $client = new Client(['timeout' => 10, 'verify_ssl' => false, 'max_redirects' => 0]);
         $this->assertInstanceOf(ClientInterface::class, $client);
     }
+
+    // -- Exception constructor contract (parent::__construct round-trip) --
+
+    /**
+     * Default $code is 0. Kills the Increment (0→1) and Decrement (0→-1)
+     * mutants on RequestException's default code argument.
+     */
+    public function testRequestExceptionDefaultCodeIsZero(): void
+    {
+        $request = new Request('http://example.com', 'GET');
+        $exception = new RequestException($request, 'bad request');
+        $this->assertSame(0, $exception->getCode());
+    }
+
+    /**
+     * parent::__construct() must wire message, code, and previous through to
+     * RuntimeException. Removing that call (MethodCallRemoval) would drop all
+     * three. Asserting an explicit non-zero code + previous pins the call.
+     */
+    public function testRequestExceptionForwardsMessageCodeAndPrevious(): void
+    {
+        $request = new Request('http://example.com', 'GET');
+        $previous = new \RuntimeException('root cause');
+        $exception = new RequestException($request, 'bad request', 422, $previous);
+        $this->assertSame('bad request', $exception->getMessage());
+        $this->assertSame(422, $exception->getCode());
+        $this->assertSame($previous, $exception->getPrevious());
+        $this->assertSame($request, $exception->getRequest());
+    }
+
+    /**
+     * Default $code is 0 on NetworkException too. Kills its Increment /
+     * Decrement default-code mutants.
+     */
+    public function testNetworkExceptionDefaultCodeIsZero(): void
+    {
+        $request = new Request('http://example.com', 'GET');
+        $exception = new NetworkException($request, 'connection failed');
+        $this->assertSame(0, $exception->getCode());
+    }
+
+    public function testNetworkExceptionForwardsMessageCodeAndPrevious(): void
+    {
+        $request = new Request('http://example.com', 'GET');
+        $previous = new \RuntimeException('socket error');
+        $exception = new NetworkException($request, 'connection failed', 503, $previous);
+        $this->assertSame('connection failed', $exception->getMessage());
+        $this->assertSame(503, $exception->getCode());
+        $this->assertSame($previous, $exception->getPrevious());
+        $this->assertSame($request, $exception->getRequest());
+    }
 }
