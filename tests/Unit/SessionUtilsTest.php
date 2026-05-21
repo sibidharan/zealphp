@@ -9,6 +9,7 @@ use ZealPHP\Tests\TestCase;
 
 use function ZealPHP\Session\zeal_session_encode;
 use function ZealPHP\Session\zeal_session_decode;
+use function ZealPHP\Session\php_session_decode_to_array;
 use function ZealPHP\Session\zeal_session_status;
 use function ZealPHP\Session\zeal_session_name;
 use function ZealPHP\Session\zeal_session_id;
@@ -99,7 +100,7 @@ class SessionUtilsTest extends TestCase
     {
         $GLOBALS['_SESSION'] = ['user_id' => 42, 'name' => 'alice'];
         $encoded = zeal_session_encode();
-        $this->assertSame(['user_id' => 42, 'name' => 'alice'], unserialize($encoded));
+        $this->assertSame(['user_id' => 42, 'name' => 'alice'], php_session_decode_to_array($encoded));
     }
 
     public function testDecodePopulatesBothStores(): void

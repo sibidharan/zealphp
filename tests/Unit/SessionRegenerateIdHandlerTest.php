@@ -9,6 +9,7 @@ use ZealPHP\RequestContext;
 use ZealPHP\Tests\TestCase;
 
 use function ZealPHP\Session\zeal_session_regenerate_id;
+use function ZealPHP\Session\php_session_decode_to_array;
 
 /**
  * Regression test for issue #19 — session ID regeneration must be aware of a
@@ -131,7 +132,7 @@ class SessionRegenerateIdHandlerTest extends TestCase
         // @phpstan-ignore-next-line — fake handler exposes ->store
         $this->assertArrayHasKey($newId, $handler->store, 'new ID must be written to the handler');
         // @phpstan-ignore-next-line — fake handler exposes ->store
-        $migrated = unserialize($handler->store[$newId], ['allowed_classes' => false]);
+        $migrated = php_session_decode_to_array($handler->store[$newId]);
         $this->assertSame($this->authData, $migrated, 'auth fields must survive regeneration');
 
         // delete_old_session = true → old ID destroyed in the handler.
@@ -165,7 +166,7 @@ class SessionRegenerateIdHandlerTest extends TestCase
         $this->assertNotSame($this->oldId, $newId);
 
         // @phpstan-ignore-next-line — fake handler exposes ->store
-        $migrated = unserialize($handler->store[$newId], ['allowed_classes' => false]);
+        $migrated = php_session_decode_to_array($handler->store[$newId]);
         $this->assertSame($this->authData, $migrated);
 
         // delete_old_session = false → old ID NOT destroyed.
