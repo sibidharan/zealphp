@@ -29,3 +29,7 @@ infection.log
 infection-summary.log
 infection.html
 .infection-cache/
+
+# Python bytecode (fuzz harness helpers)
+__pycache__/
+*.pyc

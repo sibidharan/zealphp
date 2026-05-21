@@ -21,15 +21,18 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   scan:
     runs-on: ubuntu-latest
+    # Scoped to the scan job (SARIF upload), not the whole workflow.
+    permissions:
+      contents: read
+      security-events: write
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           # Full history so gitleaks scans every commit, not just HEAD.
           # 0 = full clone (default is shallow). Slightly slower on large
@@ -37,7 +40,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           # No GITLEAKS_LICENSE — basic OSS scan is enough.
           # GITHUB_TOKEN allows PR comment annotations on hits.
