@@ -11,8 +11,8 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Least privilege at the workflow level; the badge commit-back job below
-# elevates to contents: write only where it is actually needed.
+# Least privilege at the workflow level; the badge auto-PR job below
+# elevates contents/pull-requests write only where it is actually needed.
 permissions:
   contents: read
 
@@ -20,9 +20,13 @@ jobs:
   infection:
     name: Infection (MSI)
     runs-on: ubuntu-latest
-    # Needed only for the master-push badge commit-back step.
+    # Master is branch-protected, so the badge refresh opens an auto-PR
+    # (via peter-evans/create-pull-request) rather than pushing directly.
+    # `contents: write` lets the action create the side branch + commit;
+    # `pull-requests: write` lets it open/update the PR.
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -62,7 +66,8 @@ jobs:
           # Badge tracks Covered Code MSI (test effectiveness on reachable code).
           echo "MSI=${COV:-}" >> "$GITHUB_ENV"
 
-      - name: Refresh MSI badge (master only)
+      - name: Generate MSI badge JSON (master only)
+        id: badge
         if: github.event_name == 'push' && env.MSI != ''
         run: |
           MSI_INT="${MSI%.*}"
@@ -73,10 +78,32 @@ jobs:
           else COLOR=red
           fi
           printf '{\n  "schemaVersion": 1,\n  "label": "mutation MSI",\n  "message": "%s%%",\n  "color": "%s",\n  "style": "flat-square"\n}\n' "$MSI_INT" "$COLOR" > .github/badges/mutation.json
-          if ! git diff --quiet .github/badges/mutation.json; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .github/badges/mutation.json
-            git commit -m "ci(badge): mutation MSI ${MSI_INT}% [skip ci]"
-            git push
-          fi
+          # Surface the value for the PR body via the step output.
+          echo "msi_int=$MSI_INT" >> "$GITHUB_OUTPUT"
+
+      # Master is branch-protected, so we can't `git push` directly. Open or
+      # update an auto-PR with the badge change instead. The action no-ops when
+      # there is no diff. Single-fixed branch (ci/mutation-msi-badge) means
+      # repeated runs update the same PR rather than spamming new ones; the PR
+      # can be merged with the standard required checks.
+      - name: Open/update badge auto-PR (master only)
+        if: github.event_name == 'push' && env.MSI != '' && steps.badge.outputs.msi_int != ''
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          add-paths: .github/badges/mutation.json
+          branch: ci/mutation-msi-badge
+          delete-branch: true
+          commit-message: "ci(badge): mutation MSI ${{ steps.badge.outputs.msi_int }}% [skip ci]"
+          title: "ci(badge): refresh mutation MSI badge"
+          body: |
+            Automated by the Mutation workflow on a master push.
+
+            **MSI:** ${{ steps.badge.outputs.msi_int }}% (Covered Code MSI — the headline metric).
+
+            This PR updates `.github/badges/mutation.json` so the README badge
+            tracks the latest CI-measured score. Safe to merge once required
+            checks pass; no source changes.
+          labels: ci, automated
+          author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          committer: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
