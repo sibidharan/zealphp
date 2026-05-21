@@ -53,9 +53,10 @@ jobs:
           MSI=$(grep -oiP 'Mutation Score Indicator \(MSI\):\s*\K[0-9.]+' infection-output.log | head -1 || true)
           COV=$(grep -oiP 'Covered Code MSI:\s*\K[0-9.]+' infection-output.log | head -1 || true)
           echo "## Mutation testing" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **MSI:** ${MSI:-unknown}%" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Covered Code MSI:** ${COV:-unknown}%" >> "$GITHUB_STEP_SUMMARY"
-          echo "MSI=${MSI:-}" >> "$GITHUB_ENV"
+          echo "- **Covered Code MSI:** ${COV:-unknown}% (test effectiveness — the headline metric)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Plain MSI:** ${MSI:-unknown}% (includes integration-only uncovered mutants)" >> "$GITHUB_STEP_SUMMARY"
+          # Badge tracks Covered Code MSI (test effectiveness on reachable code).
+          echo "MSI=${COV:-}" >> "$GITHUB_ENV"
 
       - name: Refresh MSI badge (master only)
         if: github.event_name == 'push' && env.MSI != ''
