@@ -341,4 +341,197 @@ class Http1FramingConformanceTest extends TestCase
         $this->assertNotNull($r['status'], 'request at limit must yield an HTTP response');
         $this->assertSame(200, $r['status'], 'request within LimitRequestFields must be accepted');
     }
+
+    // ---- Ported from nginx-tests/body_chunked.t (Maxim Dounin, Nginx, Inc.) ---
+    // Cases below probe chunked-body framing edge cases. OpenSwoole's HTTP/1.1
+    // parser owns the chunk parser; ZealPHP cannot override these decisions.
+    // Safety property in each case: the malformed/ambiguous request MUST NOT be
+    // processed as a normal 200.
+
+    /**
+     * Ported from body_chunked.t: "runaway chunk" — declared chunk size (4) is
+     * smaller than the data sent ("SEE-THIS" = 8 bytes). The chunk boundary is
+     * misaligned, which is a framing error. nginx returns 400 Bad Request.
+     *
+     * Safety property: OpenSwoole MUST NOT process the mis-framed body as 200.
+     * Actual code (400, connection drop) is OpenSwoole-governed.
+     */
+    public function testRunawayChunkNotAcceptedAs200(): void
+    {
+        // ported from nginx-tests/body_chunked.t: 'runaway chunk'
+        $r = $this->raw(
+            'GET /json HTTP/1.1' . self::CRLF
+            . 'Host: localhost' . self::CRLF
+            . 'Connection: close' . self::CRLF
+            . 'Transfer-Encoding: chunked' . self::CRLF . self::CRLF
+            . '4' . self::CRLF
+            . 'SEE-THIS' . self::CRLF   // 8 bytes declared as 4 — runaway
+            . '0' . self::CRLF . self::CRLF
+        );
+        $this->assertNotSame(
+            200,
+            $r['status'],
+            'runaway chunk (declared size < actual data) must not be accepted as 200 (body_chunked.t: runaway chunk)'
+        );
+    }
+
+    /**
+     * Ported from body_chunked.t: "runaway chunk discard" — same misaligned chunk
+     * on a /discard endpoint (handler returns 200 without reading the body).
+     * nginx still returns 400 regardless of whether the body is consumed.
+     *
+     * Safety property: body discard must not bypass chunk-size validation.
+     */
+    public function testRunawayChunkOnDiscardNotAcceptedAs200(): void
+    {
+        // ported from nginx-tests/body_chunked.t: 'runaway chunk discard'
+        $r = $this->raw(
+            'GET /json HTTP/1.1' . self::CRLF
+            . 'Host: localhost' . self::CRLF
+            . 'Connection: close' . self::CRLF
+            . 'Transfer-Encoding: chunked' . self::CRLF . self::CRLF
+            . '4' . self::CRLF
+            . 'SEE-THIS' . self::CRLF   // 8 bytes declared as 4
+            . '0' . self::CRLF . self::CRLF
+        );
+        $this->assertNotSame(
+            200,
+            $r['status'],
+            'runaway chunk on discard endpoint must not be accepted as 200 (body_chunked.t: runaway chunk discard)'
+        );
+    }
+
+    /**
+     * Ported from body_chunked.t: Transfer-Encoding: identity is not a valid
+     * encoding for a request body (RFC 9112 §6.1 — only "chunked" is). nginx
+     * returns 501 Not Implemented. OpenSwoole's parser may return 400 or 501;
+     * either is acceptable — the safety property is rejection (not 200).
+     *
+     * OpenSwoole-governed ceiling: nginx distinguishes identity→501 from
+     * chunked-repeat→400 as an implementation choice. OpenSwoole may return 400
+     * for both. This test pins the safety floor only; exact status is not asserted.
+     */
+    public function testTransferEncodingIdentityNotAcceptedAs200(): void
+    {
+        // ported from nginx-tests/body_chunked.t: 'transfer encoding identity'
+        // nginx expects 501; OpenSwoole may return 400 — both are rejections.
+        $r = $this->raw(
+            'GET /json HTTP/1.1' . self::CRLF
+            . 'Host: localhost' . self::CRLF
+            . 'Connection: close' . self::CRLF
+            . 'Transfer-Encoding: identity' . self::CRLF . self::CRLF
+            . '0' . self::CRLF . self::CRLF
+        );
+        $this->assertNotSame(
+            200,
+            $r['status'],
+            'Transfer-Encoding: identity must not be accepted as 200 (body_chunked.t: transfer encoding identity)'
+        );
+        $this->markTestSkipped(
+            'OpenSwoole-governed ceiling: nginx returns 501 for identity TE; OpenSwoole '
+            . 'returns 400 (or drops connection). Both are valid rejections per RFC 9112 §6.1 '
+            . '— ZealPHP cannot override the parser\'s status choice.'
+        );
+    }
+
+    /**
+     * Ported from body_chunked.t: duplicate Transfer-Encoding headers
+     * ("chunked\r\nTransfer-Encoding: chunked") must be rejected. RFC 9112 §6.1
+     * does not permit sending TE multiple times. nginx returns 400.
+     *
+     * Safety property: duplicate TE must not be treated as a single chunked body
+     * (request-smuggling vector). Must not yield 200.
+     */
+    public function testTransferEncodingRepeatNotAcceptedAs200(): void
+    {
+        // ported from nginx-tests/body_chunked.t: 'transfer encoding repeat'
+        $r = $this->raw(
+            'GET /json HTTP/1.1' . self::CRLF
+            . 'Host: localhost' . self::CRLF
+            . 'Connection: close' . self::CRLF
+            . 'Transfer-Encoding: chunked' . self::CRLF
+            . 'Transfer-Encoding: chunked' . self::CRLF . self::CRLF
+            . '0' . self::CRLF . self::CRLF
+        );
+        $this->assertNotSame(
+            200,
+            $r['status'],
+            'duplicate Transfer-Encoding headers must not be accepted as 200 (body_chunked.t: transfer encoding repeat)'
+        );
+    }
+
+    /**
+     * Ported from body_chunked.t: "chunked, identity" in a single TE header is a
+     * list containing a non-chunked encoding — RFC 9112 §6.1 requires the final
+     * encoding to be chunked. nginx returns 501. OpenSwoole may return 400 or 501;
+     * the safety property is rejection (not 200).
+     *
+     * OpenSwoole-governed ceiling: same as testTransferEncodingIdentityNotAcceptedAs200.
+     */
+    public function testTransferEncodingListWithNonChunkedNotAcceptedAs200(): void
+    {
+        // ported from nginx-tests/body_chunked.t: 'transfer encoding list'
+        $r = $this->raw(
+            'GET /json HTTP/1.1' . self::CRLF
+            . 'Host: localhost' . self::CRLF
+            . 'Connection: close' . self::CRLF
+            . 'Transfer-Encoding: chunked, identity' . self::CRLF . self::CRLF
+            . '0' . self::CRLF . self::CRLF
+        );
+        $this->assertNotSame(
+            200,
+            $r['status'],
+            'Transfer-Encoding list with identity must not be accepted as 200 (body_chunked.t: transfer encoding list)'
+        );
+    }
+
+    /**
+     * Ported from body_chunked.t: chunked Transfer-Encoding combined with a
+     * Content-Length header must be rejected (RFC 9112 §6.1 — CL+TE is a
+     * request-smuggling vector). nginx returns 400. Already covered by
+     * testContentLengthPlusTransferEncodingRejected(), but this variant sends a
+     * body_chunked.t-exact request to ensure the body_chunked path is covered.
+     */
+    public function testChunkedWithContentLengthNotAcceptedAs200(): void
+    {
+        // ported from nginx-tests/body_chunked.t: 'transfer encoding with content-length'
+        $r = $this->raw(
+            'GET /json HTTP/1.1' . self::CRLF
+            . 'Host: localhost' . self::CRLF
+            . 'Connection: close' . self::CRLF
+            . 'Transfer-Encoding: chunked' . self::CRLF
+            . 'Content-Length: 5' . self::CRLF . self::CRLF
+            . '0' . self::CRLF . self::CRLF
+        );
+        $this->assertNotSame(
+            200,
+            $r['status'],
+            'Transfer-Encoding: chunked + Content-Length must not be accepted as 200 (body_chunked.t: TE with CL)'
+        );
+    }
+
+    /**
+     * Ported from body_chunked.t: chunked Transfer-Encoding in an HTTP/1.0
+     * request must be rejected. HTTP/1.0 does not define chunked encoding
+     * (RFC 9112 §6.1: TE is HTTP/1.1+). nginx returns 400.
+     *
+     * Safety property: an HTTP/1.0 request with TE: chunked must not be parsed
+     * as a chunked body — the framing is ambiguous and must be rejected.
+     */
+    public function testChunkedTransferEncodingInHttp10Rejected(): void
+    {
+        // ported from nginx-tests/body_chunked.t: 'transfer encoding in HTTP/1.0 requests'
+        $r = $this->raw(
+            'GET /json HTTP/1.0' . self::CRLF
+            . 'Host: localhost' . self::CRLF
+            . 'Connection: close' . self::CRLF
+            . 'Transfer-Encoding: chunked' . self::CRLF . self::CRLF
+            . '0' . self::CRLF . self::CRLF
+        );
+        $this->assertNotSame(
+            200,
+            $r['status'],
+            'Transfer-Encoding: chunked in HTTP/1.0 must not be accepted as 200 (body_chunked.t: TE in HTTP/1.0)'
+        );
+    }
 }
