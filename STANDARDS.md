@@ -40,7 +40,7 @@ connection is dropped).
 
 | Vector | Result | Verdict |
 |---|---|---|
-| `Content-Length` + `Transfer-Encoding: chunked` (§6.1) | **400 Bad Request** | ✅ rejected |
+| `Content-Length` + `Transfer-Encoding: chunked` (§6.1) | **4xx** (400/404 by build) | ✅ rejected, never smuggled |
 | Duplicate `Content-Length` (§6.3) | connection closed | ✅ rejected |
 | Bare-LF line endings (§2.2 requires CRLF) | connection closed | ✅ rejected |
 | Invalid (non-hex) chunk size (§7.1) | connection closed | ✅ rejected |
