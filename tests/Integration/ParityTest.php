@@ -41,4 +41,14 @@ class ParityTest extends TestCase
         $json = $this->assertJsonResponse($r);
         $this->assertSame('cli', $json['sapi']);
     }
+
+    public function testServerHasModPhpParityKeys(): void
+    {
+        $r = $this->get('/parity/server');
+        $json = $this->assertJsonResponse($r);
+        $this->assertSame('CGI/1.1', $json['GATEWAY_INTERFACE']);
+        $this->assertSame('http', $json['REQUEST_SCHEME']); // plain HTTP on :8080
+        $this->assertTrue($json['has_request_time']);
+        $this->assertTrue($json['has_server_protocol']);
+    }
 }

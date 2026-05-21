@@ -673,6 +673,28 @@ class App
     }
 
     /**
+     * Detect whether the request arrived over TLS, for deriving REQUEST_SCHEME /
+     * HTTPS in the $_SERVER builder. Mirrors the session-cookie secure detection
+     * (src/Session/utils.php): a direct HTTPS=on, an X-Forwarded-Proto: https from
+     * a proxy, or SERVER_PORT 443.
+     *
+     * @param array<string, mixed> $srv
+     */
+    private static function requestIsHttps(array $srv): bool
+    {
+        $https = $srv['HTTPS'] ?? '';
+        if (is_scalar($https) && strtolower((string)$https) === 'on') {
+            return true;
+        }
+        $proto = $srv['HTTP_X_FORWARDED_PROTO'] ?? '';
+        if (is_scalar($proto) && strtolower((string)$proto) === 'https') {
+            return true;
+        }
+        $port = $srv['SERVER_PORT'] ?? '';
+        return is_scalar($port) && (string)$port === '443';
+    }
+
+    /**
      * Toggle ZealPHP's per-request session lifecycle. When disabled, the
      * SessionManager / CoSessionManager OnRequest wrapper skips
      * session_start / cookie emission / session write-close — request-context
@@ -3916,6 +3938,18 @@ HELP;
                         $srv['REMOTE_HOST'] = $host;
                     }
                 }
+            }
+            // mod_php parity: keys OpenSwoole's $request->server doesn't provide.
+            // GATEWAY_INTERFACE is the CGI/1.1 constant mod_php always sets;
+            // REQUEST_SCHEME + HTTPS are derived from the request (honoring
+            // X-Forwarded-Proto behind a trusted proxy). HTTPS is only set under
+            // TLS, matching mod_php (the key is absent on plain HTTP).
+            $srv += ['GATEWAY_INTERFACE' => 'CGI/1.1'];
+            if (self::requestIsHttps($srv)) {
+                $srv['REQUEST_SCHEME'] = 'https';
+                $srv['HTTPS'] = $srv['HTTPS'] ?? 'on';
+            } else {
+                $srv['REQUEST_SCHEME'] = $srv['REQUEST_SCHEME'] ?? 'http';
             }
             /** @var array<string, bool|float|int|string|null> $srvFinal */
             $srvFinal = $srv;

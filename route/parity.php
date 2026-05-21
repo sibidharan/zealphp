@@ -24,3 +24,16 @@ $app->route('/parity/filter-input', ['methods' => ['GET']], function () {
 $app->route('/parity/sapi', ['methods' => ['GET']], function () {
     return ['sapi' => php_sapi_name()];
 });
+
+// mod_php $_SERVER parity — surface the keys mod_php populates that OpenSwoole
+// does not provide out of the box (GATEWAY_INTERFACE, REQUEST_SCHEME), plus a
+// couple OpenSwoole already supplies (REQUEST_TIME presence).
+$app->route('/parity/server', ['methods' => ['GET']], function () {
+    $s = \ZealPHP\G::instance()->server;
+    return [
+        'GATEWAY_INTERFACE'  => $s['GATEWAY_INTERFACE'] ?? null,
+        'REQUEST_SCHEME'     => $s['REQUEST_SCHEME'] ?? null,
+        'has_request_time'   => isset($s['REQUEST_TIME']),
+        'has_server_protocol'=> isset($s['SERVER_PROTOCOL']),
+    ];
+});
