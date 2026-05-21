@@ -94,4 +94,110 @@ class HttpFactoryTest extends TestCase
         $this->assertSame('test.txt', $file->getClientFilename());
         $this->assertSame('text/plain', $file->getClientMediaType());
     }
+
+    /**
+     * Build a StreamInterface stub returning a fixed getSize() value (or null).
+     * Used to exercise UploadedFileFactory's `$size ?? $stream->getSize() ?? 0`
+     * coalesce chain at its edges.
+     */
+    private function sizedStream(?int $size): StreamInterface
+    {
+        return new class ($size) implements StreamInterface {
+            public function __construct(private ?int $size)
+            {
+            }
+            public function getSize(): ?int
+            {
+                return $this->size;
+            }
+            public function __toString(): string
+            {
+                return '';
+            }
+            public function close(): void
+            {
+            }
+            public function detach()
+            {
+                return null;
+            }
+            public function tell(): int
+            {
+                return 0;
+            }
+            public function eof(): bool
+            {
+                return true;
+            }
+            public function isSeekable(): bool
+            {
+                return false;
+            }
+            public function seek(int $offset, int $whence = SEEK_SET): void
+            {
+            }
+            public function rewind(): void
+            {
+            }
+            public function isWritable(): bool
+            {
+                return false;
+            }
+            public function write(string $string): int
+            {
+                return 0;
+            }
+            public function isReadable(): bool
+            {
+                return false;
+            }
+            public function read(int $length): string
+            {
+                return '';
+            }
+            public function getContents(): string
+            {
+                return '';
+            }
+            public function getMetadata(?string $key = null)
+            {
+                return null;
+            }
+        };
+    }
+
+    /**
+     * Explicit $size wins over the stream's reported size. Kills the
+     * `getSize() ?? $size ?? 0` reordering mutant — with that order the
+     * stream's 99 would be used instead of the explicit 13.
+     */
+    public function testUploadedFileExplicitSizeWinsOverStreamSize(): void
+    {
+        $stream = $this->sizedStream(99);
+        $file = (new UploadedFileFactory())->createUploadedFile($stream, 13);
+        $this->assertSame(13, $file->getSize());
+    }
+
+    /**
+     * When $size is null, the stream's getSize() is used. Kills the
+     * `$size ?? 0 ?? getSize()` reordering mutant — that order would yield 0
+     * instead of the stream's 77.
+     */
+    public function testUploadedFileFallsBackToStreamSize(): void
+    {
+        $stream = $this->sizedStream(77);
+        $file = (new UploadedFileFactory())->createUploadedFile($stream, null);
+        $this->assertSame(77, $file->getSize());
+    }
+
+    /**
+     * Both $size and the stream's getSize() are null → the literal 0 fallback.
+     * Kills the Increment (0→1) and Decrement (0→-1) integer mutants.
+     */
+    public function testUploadedFileZeroFallbackWhenNoSize(): void
+    {
+        $stream = $this->sizedStream(null);
+        $file = (new UploadedFileFactory())->createUploadedFile($stream, null);
+        $this->assertSame(0, $file->getSize());
+    }
 }

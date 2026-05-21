@@ -361,4 +361,102 @@ class LazyServerRequestTest extends TestCase
         $this->assertNull($without->getAttribute('user'));
         $this->assertSame('alice', $with->getAttribute('user'));
     }
+
+    // -- Clone-removal kills: each wither must NOT mutate the original.
+    //    `$new = clone $this` mutated to `$new = $this` would alias the
+    //    original; asserting the original's hydrated state is untouched (and
+    //    the returned object is a distinct instance) pins the clone.
+
+    public function testWithAddedHeaderReturnsDistinctInstance(): void
+    {
+        // assertNotSame is the robust clone-removal kill: `$new = clone $this`
+        // mutated to `$new = $this` aliases the original. The added-header
+        // result is also asserted on the returned object.
+        $lazy = $this->makeLazy();
+        $new = $this->silenceHydrationWarning(fn() => $lazy->withAddedHeader('X-Added', 'v'));
+        $this->assertNotSame($lazy, $new);
+        $this->assertSame(['v'], $new->getHeader('X-Added'));
+    }
+
+    public function testWithoutHeaderReturnsDistinctInstance(): void
+    {
+        $lazy = $this->makeLazy();
+        $new = $this->silenceHydrationWarning(fn() => $lazy->withoutHeader('Content-Type'));
+        $this->assertNotSame($lazy, $new);
+        $this->assertFalse($new->hasHeader('Content-Type'));
+    }
+
+    public function testWithRequestTargetDoesNotMutateOriginal(): void
+    {
+        $lazy = $this->makeLazy();
+        $new = $this->silenceHydrationWarning(fn() => $lazy->withRequestTarget('/other'));
+        $this->assertNotSame($lazy, $new);
+        $this->assertSame('/other', $new->getRequestTarget());
+        // Original keeps its native request target.
+        $this->assertSame('/foo/bar', $lazy->getRequestTarget());
+    }
+
+    public function testWithProtocolVersionDoesNotMutateOriginal(): void
+    {
+        $lazy = $this->makeLazy();
+        $new = $this->silenceHydrationWarning(fn() => $lazy->withProtocolVersion('1.0'));
+        $this->assertNotSame($lazy, $new);
+        $this->assertSame('1.0', $new->getProtocolVersion());
+        // The wither hydrates $lazy as a side effect; the original must keep
+        // the UN-withered hydrated protocol (default '1.1'), NOT the withered
+        // '1.0'. Under the clone-removal mutant the two objects alias and the
+        // original would report '1.0'.
+        $this->assertSame('1.1', $lazy->getProtocolVersion());
+    }
+
+    public function testWithCookieParamsDoesNotMutateOriginal(): void
+    {
+        $lazy = $this->makeLazy();
+        $new = $this->silenceHydrationWarning(fn() => $lazy->withCookieParams(['session' => 'xyz']));
+        $this->assertNotSame($lazy, $new);
+        $this->assertSame(['session' => 'xyz'], $new->getCookieParams());
+        // Original keeps its native cookies.
+        $this->assertSame(['sid' => 'abc', 'theme' => 'dark'], $lazy->getCookieParams());
+    }
+
+    public function testWithQueryParamsDoesNotMutateOriginal(): void
+    {
+        $lazy = $this->makeLazy();
+        $new = $this->silenceHydrationWarning(fn() => $lazy->withQueryParams(['k' => 'v']));
+        $this->assertNotSame($lazy, $new);
+        $this->assertSame(['k' => 'v'], $new->getQueryParams());
+        // Original keeps its native query params.
+        $this->assertSame(['q' => '1', 'page' => '2'], $lazy->getQueryParams());
+    }
+
+    public function testWithParsedBodyDoesNotMutateOriginal(): void
+    {
+        $lazy = $this->makeLazy();
+        $new = $this->silenceHydrationWarning(fn() => $lazy->withParsedBody(['form' => 'data']));
+        $this->assertNotSame($lazy, $new);
+        $this->assertSame(['form' => 'data'], $new->getParsedBody());
+        // Original's parsed body is unchanged (hand-built request → null).
+        $this->assertNull($this->silenceHydrationWarning(fn() => $lazy->getParsedBody()));
+    }
+
+    /**
+     * getHeaders() must process EVERY entry past a non-string key — the
+     * `if (!is_string($k)) continue;` guard must `continue`, not `break`.
+     * A numeric-keyed entry sits between two string-keyed headers; under the
+     * break mutant the trailing 'z-last' header would be dropped.
+     */
+    public function testGetHeadersContinuesPastNonStringKey(): void
+    {
+        $native = $this->makeNative();
+        // Numeric key (0) interleaved before a valid string-keyed header.
+        $native->header = ['a-first' => 'one', 0 => 'numeric', 'z-last' => 'three'];
+        $lazy = new LazyServerRequest($native);
+        $headers = $lazy->getHeaders();
+        $this->assertSame(['one'], $headers['a-first']);
+        // Under Continue_->break this trailing header is never reached.
+        $this->assertArrayHasKey('z-last', $headers);
+        $this->assertSame(['three'], $headers['z-last']);
+        // Non-string key skipped entirely.
+        $this->assertArrayNotHasKey(0, $headers);
+    }
 }
