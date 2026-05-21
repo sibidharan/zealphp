@@ -308,8 +308,17 @@ class App
      */
     private static array $error_handlers = [];
     /**
-     * IANA-registered HTTP status reason phrases.
+     * IANA-registered HTTP status reason phrases (RFC 9110 §15).
      * Source: https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml
+     * (registry snapshot 2025-09-15). Phrases match the IANA "Description"
+     * column verbatim — pinned exhaustively by tests/Unit/IanaStatusConformanceTest.
+     *
+     * Documented deviations:
+     *   - 418 'I'm a teapot' — IANA lists "(Unused)"; kept as the RFC 2324 /
+     *     widely-recognised extension phrase.
+     *   - 306 and 418 are the only reserved/"(Unused)" codes; all other entries
+     *     are IANA-assigned. 104 (temporary registration) is intentionally omitted.
+     *
      * Universal return contract: handlers may return any 100-599 status — see
      * template/pages/responses.php#status-range (canonical).
      */
@@ -336,6 +345,7 @@ class App
         302 => 'Found',
         303 => 'See Other',
         304 => 'Not Modified',
+        305 => 'Use Proxy',
         307 => 'Temporary Redirect',
         308 => 'Permanent Redirect',
         // 4xx Client Errors
@@ -352,14 +362,14 @@ class App
         410 => 'Gone',
         411 => 'Length Required',
         412 => 'Precondition Failed',
-        413 => 'Payload Too Large',
+        413 => 'Content Too Large',
         414 => 'URI Too Long',
         415 => 'Unsupported Media Type',
         416 => 'Range Not Satisfiable',
         417 => 'Expectation Failed',
         418 => "I'm a teapot",
         421 => 'Misdirected Request',
-        422 => 'Unprocessable Entity',
+        422 => 'Unprocessable Content',
         423 => 'Locked',
         424 => 'Failed Dependency',
         425 => 'Too Early',
