@@ -75,13 +75,78 @@ class ETagMiddlewareTest extends TestCase
         $this->assertSame($this->expectedEtag(), $g->zealphp_response->headers['ETag'] ?? null);
     }
 
-    public function testSkippedForNonGetMethod(): void
+    public function testNoEtagHeaderForNonGetMethod(): void
     {
+        // ETag is a GET/HEAD representation header; POST without a conditional
+        // header proceeds with 200 and no ETag emitted.
         $g = RequestContext::instance();
         $response = $this->process('POST', []);
 
         $this->assertSame(200, $response->getStatusCode());
         $this->assertArrayNotHasKey('ETag', $g->zealphp_response->headers);
+    }
+
+    public function testHeadRequestGetsEtagHeader(): void
+    {
+        $g = RequestContext::instance();
+        $response = $this->process('HEAD', []);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame($this->expectedEtag(), $g->zealphp_response->headers['ETag'] ?? null);
+    }
+
+    public function testWildcardIfNoneMatchGetReturns304(): void
+    {
+        $g = RequestContext::instance();
+        $response = $this->process('GET', ['if-none-match' => '*']);
+
+        $this->assertSame(304, $response->getStatusCode());
+        $this->assertSame(304, $g->status);
+    }
+
+    public function testWildcardIfNoneMatchNonGetReturns412(): void
+    {
+        $g = RequestContext::instance();
+        $response = $this->process('PUT', ['if-none-match' => '*']);
+
+        $this->assertSame(412, $response->getStatusCode());
+        $this->assertSame('', (string) $response->getBody());
+        $this->assertSame(412, $g->status);
+    }
+
+    public function testIfMatchNoMatchReturns412(): void
+    {
+        $g = RequestContext::instance();
+        $response = $this->process('PUT', ['if-match' => '"nope"']);
+
+        $this->assertSame(412, $response->getStatusCode());
+        $this->assertSame(412, $g->status);
+    }
+
+    public function testWeakRequestTokenMatchesStrongStoredEtag304(): void
+    {
+        // The body-hash ETag is weak; a bare-quoted request token must still
+        // 304 under weak comparison for GET.
+        $bare = ltrim($this->expectedEtag(), 'W/');
+        $g = RequestContext::instance();
+        $response = $this->process('GET', ['if-none-match' => $bare]);
+
+        $this->assertSame(304, $response->getStatusCode());
+        $this->assertSame(304, $g->status);
+    }
+
+    public function testRangeRequestUsesStrongComparisonNo304(): void
+    {
+        // GET + Range demands strong comparison; the weak body-hash ETag cannot
+        // weak-match, so the request proceeds (200) and the range layer runs.
+        $g = RequestContext::instance();
+        $response = $this->process('GET', [
+            'if-none-match' => $this->expectedEtag(),
+            'range' => 'bytes=0-4',
+        ]);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertNull($g->status);
     }
 
     public function testSkippedWhenFileEtagDisabled(): void
