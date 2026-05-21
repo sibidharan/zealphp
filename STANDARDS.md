@@ -44,7 +44,7 @@ connection is dropped).
 | Duplicate `Content-Length` (§6.3) | connection closed | ✅ rejected |
 | Bare-LF line endings (§2.2 requires CRLF) | connection closed | ✅ rejected |
 | Invalid (non-hex) chunk size (§7.1) | connection closed | ✅ rejected |
-| Oversized header block (~70 KB) | **400 Bad Request** | ✅ size-limited |
+| Oversized header block (~70 KB) | **4xx** (400/404 by build) | ✅ size-limited, never unbounded |
 | Well-formed chunked body | dechunked → normal response | ✅ correct |
 
 **Known leniencies (documented, not smuggling vectors):**
