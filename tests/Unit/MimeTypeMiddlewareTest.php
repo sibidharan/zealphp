@@ -142,4 +142,22 @@ class MimeTypeMiddlewareTest extends TestCase
         $response = $this->process('/endpoint', ['wasm' => 'application/wasm']);
         $this->assertFalse($response->hasHeader('Content-Type'));
     }
+
+    public function testMultiSuffixResolvesTypeFromInnerSuffix(): void
+    {
+        // C3: document.html.gz must resolve text/html from the html suffix;
+        // the rightmost gz suffix carries no type. pathinfo() alone would
+        // have returned 'gz' and missed the type entirely.
+        $response = $this->process('/document.html.gz', ['html' => 'text/html']);
+        $this->assertSame('text/html', $response->getHeaderLine('Content-Type'));
+    }
+
+    public function testLeadingDotBasenameGetsNoType(): void
+    {
+        // M12: ".png" is a hidden file named "png", NOT a PNG image. Even with
+        // 'png' mapped, no Content-Type is assigned (Apache dotfile rule).
+        $response = $this->process('/.png', ['png' => 'image/png']);
+        $this->assertFalse($response->hasHeader('Content-Type'));
+        $this->assertCount(0, $this->recorder->calls);
+    }
 }

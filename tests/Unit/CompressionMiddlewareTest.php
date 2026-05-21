@@ -172,6 +172,197 @@ class CompressionMiddlewareTest extends TestCase
         $this->assertFalse($response->hasHeader('Content-Encoding'));
     }
 
+    // --- B5 / parity fixes ---
+
+    /**
+     * Vary: Origin set by a prior middleware must be preserved when
+     * CompressionMiddleware merges Accept-Encoding into it.
+     * withHeader('Vary','Accept-Encoding') would overwrite — the fix uses
+     * mergeVary() which appends instead.
+     */
+    public function testVaryMergePreservesExistingOrigin(): void
+    {
+        $body = str_repeat('a', 2048);
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+        RequestContext::instance()->_streaming = null;
+
+        $middleware = new CompressionMiddleware();
+        $request    = new ServerRequest('/', 'GET', '', ['accept-encoding' => 'gzip']);
+
+        $handler = new class($body) implements RequestHandlerInterface {
+            public function __construct(private string $body) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                // Simulate CorsMiddleware having already set Vary: Origin.
+                return (new Response($this->body, 200, '', ['Content-Type' => 'text/html']))
+                    ->withHeader('Vary', 'Origin');
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertSame('gzip', $response->getHeaderLine('Content-Encoding'));
+        $vary = $response->getHeaderLine('Vary');
+        // Both directives must be present, order is not mandated.
+        $this->assertStringContainsStringIgnoringCase('Origin', $vary);
+        $this->assertStringContainsStringIgnoringCase('Accept-Encoding', $vary);
+        // Must not contain duplicates (Accept-Encoding must appear exactly once).
+        $count = substr_count(strtolower($vary), 'accept-encoding');
+        $this->assertSame(1, $count, 'Accept-Encoding should appear exactly once in Vary');
+    }
+
+    /**
+     * RFC 7231 §5.3.4: Accept-Encoding: gzip;q=0 is an explicit refusal.
+     * The middleware must NOT compress the response in this case.
+     */
+    public function testQValueZeroSkipsCompression(): void
+    {
+        $response = $this->compress(str_repeat('a', 2048), 'gzip;q=0', 'text/html');
+        $this->assertFalse($response->hasHeader('Content-Encoding'));
+        $this->assertFalse($response->hasHeader('Content-Length') &&
+            $response->getHeaderLine('Content-Encoding') === 'gzip');
+    }
+
+    /**
+     * gzip;q=0.000 is also a refusal (Apache mod_deflate parity: strncmp "q=0.000").
+     */
+    public function testQValueZeroPointZeroSkipsCompression(): void
+    {
+        $response = $this->compress(str_repeat('a', 2048), 'gzip;q=0.000', 'text/html');
+        $this->assertFalse($response->hasHeader('Content-Encoding'));
+    }
+
+    /**
+     * gzip;q=0.1 is NOT a refusal — must still compress.
+     */
+    public function testQValueNonZeroCompresses(): void
+    {
+        $response = $this->compress(str_repeat('a', 2048), 'gzip;q=0.1', 'text/html');
+        $this->assertSame('gzip', $response->getHeaderLine('Content-Encoding'));
+    }
+
+    /**
+     * RFC 7232 §2.1: A strong ETag must be weakened when the body undergoes
+     * transformation (compression).  The middleware must prepend W/.
+     */
+    public function testStrongEtagIsWeakenedOnCompress(): void
+    {
+        $body = str_repeat('a', 2048);
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+        RequestContext::instance()->_streaming = null;
+
+        $middleware = new CompressionMiddleware();
+        $request    = new ServerRequest('/', 'GET', '', ['accept-encoding' => 'gzip']);
+
+        $handler = new class($body) implements RequestHandlerInterface {
+            public function __construct(private string $body) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return (new Response($this->body, 200, '', ['Content-Type' => 'text/html']))
+                    ->withHeader('ETag', '"abc123"');
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertSame('gzip', $response->getHeaderLine('Content-Encoding'));
+        $this->assertSame('W/"abc123"', $response->getHeaderLine('ETag'));
+    }
+
+    /**
+     * A weak ETag (W/"…") must be left unchanged — it is already weak.
+     */
+    public function testWeakEtagIsNotDoubleWeakened(): void
+    {
+        $body = str_repeat('a', 2048);
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+        RequestContext::instance()->_streaming = null;
+
+        $middleware = new CompressionMiddleware();
+        $request    = new ServerRequest('/', 'GET', '', ['accept-encoding' => 'gzip']);
+
+        $handler = new class($body) implements RequestHandlerInterface {
+            public function __construct(private string $body) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return (new Response($this->body, 200, '', ['Content-Type' => 'text/html']))
+                    ->withHeader('ETag', 'W/"abc123"');
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertSame('gzip', $response->getHeaderLine('Content-Encoding'));
+        $this->assertSame('W/"abc123"', $response->getHeaderLine('ETag'));
+    }
+
+    /**
+     * Accept-Ranges must be cleared on compressed responses (nginx
+     * ngx_http_clear_accept_ranges parity) — a client cannot satisfy a
+     * byte-range request against a compressed body.
+     */
+    public function testAcceptRangesIsClearedOnCompress(): void
+    {
+        $body = str_repeat('a', 2048);
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+        RequestContext::instance()->_streaming = null;
+
+        $middleware = new CompressionMiddleware();
+        $request    = new ServerRequest('/', 'GET', '', ['accept-encoding' => 'gzip']);
+
+        $handler = new class($body) implements RequestHandlerInterface {
+            public function __construct(private string $body) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return (new Response($this->body, 200, '', ['Content-Type' => 'text/html']))
+                    ->withHeader('Accept-Ranges', 'bytes');
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertSame('gzip', $response->getHeaderLine('Content-Encoding'));
+        $this->assertFalse($response->hasHeader('Accept-Ranges'));
+    }
+
+    /**
+     * Accept-Ranges must not be touched when compression is not applied
+     * (e.g. the client did not send Accept-Encoding).
+     */
+    public function testAcceptRangesPreservedWhenNotCompressed(): void
+    {
+        $body = str_repeat('a', 2048);
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+        RequestContext::instance()->_streaming = null;
+
+        $middleware = new CompressionMiddleware();
+        $request    = new ServerRequest('/', 'GET', '', []);
+
+        $handler = new class($body) implements RequestHandlerInterface {
+            public function __construct(private string $body) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return (new Response($this->body, 200, '', ['Content-Type' => 'text/html']))
+                    ->withHeader('Accept-Ranges', 'bytes');
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertFalse($response->hasHeader('Content-Encoding'));
+        $this->assertSame('bytes', $response->getHeaderLine('Accept-Ranges'));
+    }
+
     /**
      * Compress with explicit defaults so mutations on the constructor defaults
      * are observable. minLength/level are NOT passed, so they take their
@@ -239,5 +430,117 @@ class CompressionMiddlewareTest extends TestCase
     private function body(): string
     {
         return str_repeat(self::BODY, 80);
+    }
+
+    // --- Mutant-killing additions ---
+
+    /**
+     * UnwrapTrim L166: token = trim($segments[0]).
+     * "gzip ;q=1" has a space BEFORE the semicolon — without trim, segments[0]
+     * is "gzip " which !== "gzip", so the token is missed and no compression occurs.
+     */
+    public function testAcceptEncodingWithSpaceBeforeSemicolonIsRecognised(): void
+    {
+        $response = $this->compress(str_repeat('a', 2048), 'gzip ;q=1', 'text/html');
+        $this->assertSame('gzip', $response->getHeaderLine('Content-Encoding'));
+    }
+
+    /**
+     * UnwrapTrim L174: param = trim($segments[$i]).
+     * "gzip; q=0" has a space after the semicolon — without trim on the param,
+     * str_starts_with($param, 'q=') fails (" q=0" doesn't start with "q="),
+     * so the q=0 refusal is missed and the body is compressed instead of skipped.
+     */
+    public function testQZeroWithSpaceAfterSemicolonIsRefused(): void
+    {
+        $response = $this->compress(str_repeat('a', 2048), 'gzip; q=0', 'text/html');
+        $this->assertFalse($response->hasHeader('Content-Encoding'));
+    }
+
+    /**
+     * UnwrapArrayMap 'trim' L208: Vary dedup must trim whitespace around existing values.
+     * "Origin , Accept-Encoding" has spaces — without array_map('trim',...) the values
+     * include spaces so the dedup check misses "Accept-Encoding" and adds a duplicate.
+     */
+    public function testVaryDedupWithSpacePaddedExistingDirective(): void
+    {
+        $body = str_repeat('a', 2048);
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+        RequestContext::instance()->_streaming = null;
+
+        $middleware = new CompressionMiddleware();
+        $request    = new ServerRequest('/', 'GET', '', ['accept-encoding' => 'gzip']);
+        $handler = new class($body) implements RequestHandlerInterface {
+            public function __construct(private string $body) {}
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return (new Response($this->body, 200, '', ['Content-Type' => 'text/html']))
+                    ->withHeader('Vary', 'Origin , Accept-Encoding');
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+        $vary = $response->getHeaderLine('Vary');
+        $count = substr_count(strtolower($vary), 'accept-encoding');
+        $this->assertSame(1, $count, 'Accept-Encoding must not be duplicated when already present with spaces');
+    }
+
+    /**
+     * UnwrapArrayMap 'strtolower' L209: Vary dedup is case-insensitive on existing values.
+     * Vary: "ACCEPT-ENCODING" already present — without strtolower on $parts the dedup
+     * check misses it and adds a duplicate lowercase "Accept-Encoding".
+     */
+    public function testVaryDedupIsCaseInsensitiveOnExistingValues(): void
+    {
+        $body = str_repeat('a', 2048);
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+        RequestContext::instance()->_streaming = null;
+
+        $middleware = new CompressionMiddleware();
+        $request    = new ServerRequest('/', 'GET', '', ['accept-encoding' => 'gzip']);
+        $handler = new class($body) implements RequestHandlerInterface {
+            public function __construct(private string $body) {}
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return (new Response($this->body, 200, '', ['Content-Type' => 'text/html']))
+                    ->withHeader('Vary', 'ACCEPT-ENCODING');
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+        $vary = $response->getHeaderLine('Vary');
+        $count = substr_count(strtolower($vary), 'accept-encoding');
+        $this->assertSame(1, $count, 'Accept-Encoding must not be duplicated when already present in uppercase');
+    }
+
+    /**
+     * UnwrapStrToLower L211: in_array uses strtolower($directive) so mixed-case
+     * directive "Accept-Encoding" matches lowercase existing "accept-encoding".
+     * Without strtolower($directive) the comparison fails and a second copy is added.
+     */
+    public function testVaryDedupIsCaseInsensitiveOnDirective(): void
+    {
+        $body = str_repeat('a', 2048);
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+        RequestContext::instance()->_streaming = null;
+
+        $middleware = new CompressionMiddleware(minLength: 1);
+        $request    = new ServerRequest('/', 'GET', '', ['accept-encoding' => 'gzip']);
+        $handler = new class($body) implements RequestHandlerInterface {
+            public function __construct(private string $body) {}
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return (new Response($this->body, 200, '', ['Content-Type' => 'text/html']))
+                    ->withHeader('Vary', 'accept-encoding');
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+        $vary = $response->getHeaderLine('Vary');
+        $count = substr_count(strtolower($vary), 'accept-encoding');
+        $this->assertSame(1, $count, 'Accept-Encoding must not be duplicated when already present in lowercase');
     }
 }

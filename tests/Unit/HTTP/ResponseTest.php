@@ -538,13 +538,283 @@ class ResponseTest extends TestCase
     {
         $path = $this->makeTempFile('x', 'css');
         $mtime = (int) filemtime($path);
-        $this->setRequestHeaders(['if-modified-since' => gmdate('D, d M Y H:i:s', $mtime + 100) . ' GMT']);
+        // Use the file's exact mtime: it satisfies both bounds — not in the
+        // future (<= now) and not older than the file (>= mtime) → 304.
+        $this->setRequestHeaders(['if-modified-since' => gmdate('D, d M Y H:i:s', $mtime) . ' GMT']);
         $fake = $this->fake();
         $resp = $this->wrap($fake);
 
         $resp->sendFile($path);
 
         $this->assertContains(['status', 304, ''], $fake->log);
+    }
+
+    public function testSendFileMultiRangeEmits206Multipart(): void
+    {
+        $path = $this->makeTempFile('0123456789', 'bin'); // 10 bytes
+        $this->setRequestHeaders(['range' => 'bytes=0-2,5-7']);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        $this->assertContains(['status', 206, ''], $fake->log);
+
+        $ct = null;
+        foreach ($this->headerCalls($fake) as $h) {
+            if ($h[1] === 'Content-Type') {
+                $ct = $h[2];
+            }
+        }
+        $this->assertNotNull($ct);
+        $this->assertStringStartsWith('multipart/byteranges; boundary=zealphp_', (string) $ct);
+
+        // Reconstruct the multipart body from the captured write() calls.
+        $body = '';
+        foreach ($fake->log as $entry) {
+            if (($entry[0] ?? null) === 'write') {
+                $body .= (string) $entry[1];
+            }
+        }
+        // boundary token
+        preg_match('/boundary=(zealphp_[0-9a-f]+)/', (string) $ct, $bm);
+        $boundary = $bm[1];
+
+        $this->assertStringContainsString("--{$boundary}\r\nContent-Type: ", $body);
+        $this->assertStringContainsString("Content-Range: bytes 0-2/10\r\n", $body);
+        $this->assertStringContainsString("Content-Range: bytes 5-7/10\r\n", $body);
+        $this->assertStringContainsString("012", $body); // first slice
+        $this->assertStringContainsString("567", $body); // second slice
+        $this->assertStringEndsWith("\r\n--{$boundary}--\r\n", $body);
+
+        // Declared Content-Length must equal the bytes actually written.
+        $contentLength = null;
+        foreach ($this->headerCalls($fake) as $h) {
+            if ($h[1] === 'Content-Length') {
+                $contentLength = (int) $h[2];
+            }
+        }
+        $this->assertSame(strlen($body), $contentLength);
+    }
+
+    public function testSendFileTooManyRangesServesFullBody(): void
+    {
+        $path = $this->makeTempFile(str_repeat('z', 500), 'bin');
+        // 201 specs > MAX_RANGES (200) → ignore Range, serve full 200.
+        $specs = [];
+        for ($i = 0; $i < 201; $i++) {
+            $specs[] = "{$i}-{$i}";
+        }
+        $this->setRequestHeaders(['range' => 'bytes=' . implode(',', $specs)]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        // No 206/416 status pushed; full sendfile of the whole file.
+        foreach ($fake->log as $entry) {
+            $this->assertNotSame(206, $entry[1] ?? null);
+            $this->assertNotSame(416, $entry[1] ?? null);
+        }
+        $this->assertContains(['sendfile', $path, 0, 500], $fake->log);
+        $this->assertContains(['header', 'Content-Length', '500'], $this->headerCalls($fake));
+    }
+
+    public function testSendFileMultiRangeUnsatisfiableReturns416(): void
+    {
+        $path = $this->makeTempFile(str_repeat('q', 50), 'bin');
+        $this->setRequestHeaders(['range' => 'bytes=100-200,300-400']);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        $this->assertContains(['status', 416, ''], $fake->log);
+        $this->assertContains(['header', 'Content-Range', 'bytes */50'], $this->headerCalls($fake));
+    }
+
+    public function testSendFileIfRangeDateMatchHonoursRange(): void
+    {
+        $path = $this->makeTempFile(str_repeat('m', 100), 'bin');
+        $mtime = (int) filemtime($path);
+        $this->setRequestHeaders([
+            'range'    => 'bytes=0-9',
+            'if-range' => gmdate('D, d M Y H:i:s', $mtime) . ' GMT',
+        ]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        // Validator matches → range honoured (206 slice).
+        $this->assertContains(['status', 206, ''], $fake->log);
+        $this->assertContains(['sendfile', $path, 0, 10], $fake->log);
+    }
+
+    public function testSendFileIfRangeDateMismatchServesFullBody(): void
+    {
+        $path = $this->makeTempFile(str_repeat('m', 100), 'bin');
+        $mtime = (int) filemtime($path);
+        // A date OLDER than the file mtime → file changed since → ignore range.
+        $this->setRequestHeaders([
+            'range'    => 'bytes=0-9',
+            'if-range' => gmdate('D, d M Y H:i:s', $mtime - 3600) . ' GMT',
+        ]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        // Validator stale → full body (200, full sendfile), no 206.
+        foreach ($fake->log as $entry) {
+            $this->assertNotSame(206, $entry[1] ?? null);
+        }
+        $this->assertContains(['sendfile', $path, 0, 100], $fake->log);
+    }
+
+    public function testSendFileIfRangeEtagVerbatimMatchHonoursRange(): void
+    {
+        $path = $this->makeTempFile(str_repeat('m', 100), 'bin');
+        $mtime = (int) filemtime($path);
+        // sendFile's ETag is weak; a verbatim echo matches via strcmp (Apache
+        // ap_condition_if_range does a raw string compare) → honour the range.
+        $etag = 'W/"' . dechex($mtime) . '-' . dechex(100) . '"';
+        $this->setRequestHeaders([
+            'range'    => 'bytes=0-9',
+            'if-range' => $etag,
+        ]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        $this->assertContains(['status', 206, ''], $fake->log);
+        $this->assertContains(['sendfile', $path, 0, 10], $fake->log);
+    }
+
+    public function testSendFileIfRangeEtagMismatchServesFullBody(): void
+    {
+        $path = $this->makeTempFile(str_repeat('m', 100), 'bin');
+        // A different entity-tag → mismatch → ignore range, serve full body.
+        $this->setRequestHeaders([
+            'range'    => 'bytes=0-9',
+            'if-range' => '"some-other-etag"',
+        ]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        foreach ($fake->log as $entry) {
+            $this->assertNotSame(206, $entry[1] ?? null);
+        }
+        $this->assertContains(['sendfile', $path, 0, 100], $fake->log);
+    }
+
+    public function testSendFileFutureIfModifiedSinceDoesNotReturn304(): void
+    {
+        $path = $this->makeTempFile('x', 'css');
+        // A future date is invalid per RFC 9110 — must NOT yield 304.
+        $future = gmdate('D, d M Y H:i:s', time() + 86400) . ' GMT';
+        $this->setRequestHeaders(['if-modified-since' => $future]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        foreach ($fake->log as $entry) {
+            $this->assertNotSame(304, $entry[1] ?? null);
+        }
+        // Full body served instead.
+        $this->assertContains(['sendfile', $path, 0, 1], $fake->log);
+    }
+
+    // ---- parseRange() (static helper) --------------------------------------
+
+    public function testParseRangeBoundedSingle(): void
+    {
+        $this->assertSame(
+            ['status' => 'ok', 'ranges' => [[0, 9]]],
+            ZResponse::parseRange('bytes=0-9', 100)
+        );
+    }
+
+    public function testParseRangeMultipleSpecs(): void
+    {
+        $this->assertSame(
+            ['status' => 'ok', 'ranges' => [[0, 2], [5, 7]]],
+            ZResponse::parseRange('bytes=0-2,5-7', 10)
+        );
+    }
+
+    public function testParseRangeSuffixAndOpenEnd(): void
+    {
+        $this->assertSame(
+            ['status' => 'ok', 'ranges' => [[90, 99]]],
+            ZResponse::parseRange('bytes=-10', 100)
+        );
+        $this->assertSame(
+            ['status' => 'ok', 'ranges' => [[50, 99]]],
+            ZResponse::parseRange('bytes=50-', 100)
+        );
+    }
+
+    public function testParseRangeEndClampedToLastByte(): void
+    {
+        $this->assertSame(
+            ['status' => 'ok', 'ranges' => [[0, 99]]],
+            ZResponse::parseRange('bytes=0-500', 100)
+        );
+    }
+
+    public function testParseRangeUnsatisfiable(): void
+    {
+        $this->assertSame(['status' => 'unsatisfiable', 'ranges' => []], ZResponse::parseRange('bytes=500-600', 100));
+        $this->assertSame(['status' => 'unsatisfiable', 'ranges' => []], ZResponse::parseRange('bytes=100-', 100));
+    }
+
+    public function testParseRangeNonBytesUnitIgnored(): void
+    {
+        $this->assertSame(['status' => 'ignore', 'ranges' => []], ZResponse::parseRange('items=0-9', 100));
+        $this->assertSame(['status' => 'ignore', 'ranges' => []], ZResponse::parseRange('not a range', 100));
+    }
+
+    public function testParseRangeInvalidSpecIgnoresWholeHeader(): void
+    {
+        // RFC 7233 §2.1: a syntactically invalid byte-range-spec invalidates the
+        // whole header. Trailing/leading garbage and bare "-" are rejected.
+        $this->assertSame(['status' => 'ignore', 'ranges' => []], ZResponse::parseRange('bytes=0-9junk', 100));
+        $this->assertSame(['status' => 'ignore', 'ranges' => []], ZResponse::parseRange('bytes=abc,0-4', 100));
+        $this->assertSame(['status' => 'ignore', 'ranges' => []], ZResponse::parseRange('bytes=-', 100));
+    }
+
+    public function testParseRangeSuffixLargerThanFileClampsToFull(): void
+    {
+        // Suffix length > content length → whole representation (clamp start 0).
+        $this->assertSame(
+            ['status' => 'ok', 'ranges' => [[0, 99]]],
+            ZResponse::parseRange('bytes=-150', 100)
+        );
+    }
+
+    public function testParseRangeExceedingMaxRangesIgnored(): void
+    {
+        $specs = [];
+        for ($i = 0; $i < 201; $i++) {
+            $specs[] = "{$i}-{$i}";
+        }
+        $this->assertSame(
+            ['status' => 'ignore', 'ranges' => []],
+            ZResponse::parseRange('bytes=' . implode(',', $specs), 1000)
+        );
+    }
+
+    public function testParseRangeUppercaseBytesUnitMatches(): void
+    {
+        $this->assertSame(
+            ['status' => 'ok', 'ranges' => [[0, 9]]],
+            ZResponse::parseRange('BYTES=0-9', 100)
+        );
     }
 
     public function testSendFileGuessesJsMime(): void

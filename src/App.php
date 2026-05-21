@@ -107,6 +107,14 @@ class App
     /** Apache PATH_INFO — when `/script.php/extra/path`, expose `/extra/path` as PATH_INFO. */
     public static bool $path_info = true;
     /**
+     * Apache `AllowEncodedSlashes` — when false (default, matching Apache), a
+     * request whose RAW (pre-decode) path contains an encoded slash (`%2F`/`%2f`)
+     * is refused with 404 before route matching. Apache's `unescape_url()`
+     * forbids `AP_SLASHES` by default; we mirror that. Set true to permit
+     * encoded slashes (they are then decoded to `/` like any other octet).
+     */
+    public static bool $allow_encoded_slashes = false;
+    /**
      * Static handler URL-prefix whitelist. Empty = serve any path under document_root (Apache default).
      * @var array<int, string>
      */
@@ -281,21 +289,31 @@ class App
     private static ?array $access_log_format_compiled = null;
     /**
      * Apache `LimitRequestFields` — maximum number of request header fields a
-     * single request may carry. Hint to OpenSwoole's parser (currently advisory;
-     * OpenSwoole enforces this implicitly via `http_header_buffer_size`).
+     * single request may carry. Enforced at the PHP application layer: requests
+     * carrying more than this many headers are rejected with 400 before route
+     * dispatch. Set to 0 to disable the check (unlimited). Default 100 matches
+     * Apache's compiled-in default.
      */
     public static int $limit_request_fields = 100;
     /**
-     * Apache `LimitRequestFieldSize` — maximum byte length of one request header
-     * line. Maps to OpenSwoole's `http_header_buffer_size` (8 KiB default).
+     * Apache `LimitRequestFieldSize` — maximum byte length of a single request
+     * header line. **NOT enforced by ZealPHP.** OpenSwoole's C-layer HTTP parser
+     * owns all wire-level framing; ZealPHP only sees the already-parsed
+     * `$request->header` array. The `http_header_buffer_size` option was
+     * explicitly NOT passed to OpenSwoole (its option validator rejects it at
+     * boot — see App::run() ~line 3748). Changing this value has no effect on
+     * the actual per-header byte limit, which is governed by OpenSwoole's global
+     * header-buffer size (~8 KiB default). This property is retained for
+     * documentation and future compatibility only.
      */
     public static int $limit_request_field_size = 8190;
     /**
      * Apache `LimitRequestLine` — maximum byte length of the HTTP request line
-     * (method + URI + protocol). OpenSwoole doesn't expose this independently,
-     * but its `http_header_buffer_size` covers the request line too, so this
-     * value is advisory; setting it above $limit_request_field_size has no
-     * effect.
+     * (method + URI + protocol). **NOT enforced by ZealPHP.** OpenSwoole's C
+     * parser reads the request line before any PHP code runs; there is no
+     * per-request-line cap that ZealPHP can apply after the fact. OpenSwoole's
+     * global `http_header_buffer_size` governs this limit at the wire level.
+     * This property is retained for documentation and future compatibility only.
      */
     public static int $limit_request_line = 8190;
     /** @var array<string, mixed>|null */
@@ -390,6 +408,25 @@ class App
         508 => 'Loop Detected',
         510 => 'Not Extended',
         511 => 'Network Authentication Required',
+    ];
+
+    /**
+     * Methods ZealPHP recognises. A request whose method is outside this set
+     * gets 501 Not Implemented (Apache: M_INVALID → HTTP_NOT_IMPLEMENTED,
+     * server/protocol.c:1253). Standard RFC 9110 methods plus the common
+     * WebDAV verbs Apache registers in ap_method_registry_init(). A recognised
+     * method that has no matching route still flows through to 404/405/fallback.
+     *
+     * @var array<int, string>
+     */
+    public const KNOWN_METHODS = [
+        'GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'TRACE', 'PATCH',
+        'CONNECT',
+        // WebDAV (RFC 4918 / 3253) — registered by Apache's method registry.
+        'PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK',
+        'VERSION-CONTROL', 'REPORT', 'CHECKOUT', 'CHECKIN', 'UNCHECKOUT',
+        'MKWORKSPACE', 'UPDATE', 'LABEL', 'MERGE', 'BASELINE-CONTROL',
+        'MKACTIVITY', 'ORDERPATCH', 'ACL', 'SEARCH',
     ];
 
     /**
@@ -2296,25 +2333,126 @@ class App
 
     
     /**
-     * Checks if the given file path is within the public directory.
+     * Boundary-aware containment test: is $candidate the same path as $root, or
+     * a descendant of it?
      *
-     * @param string $abs_file The absolute file path to check.
-     * @return bool Returns true if the file is within the public directory, false otherwise.
+     * Both arguments are expected to already be canonical (realpath'd) absolute
+     * paths — this is the pure decision the symlink-escape guard hangs on, kept
+     * separate so it can be unit-tested without a filesystem.
+     *
+     * A plain `strpos($candidate, $root) === 0` prefix match is unsafe: docroot
+     * `/var/www/public` would wrongly accept the sibling `/var/www/public-data`
+     * (shared string prefix, different directory). We require either an exact
+     * match or that $candidate begins with $root followed by the directory
+     * separator, so only true descendants pass.
+     *
+     * @param string $candidate Canonical absolute path under test.
+     * @param string $root       Canonical absolute document-root path (no trailing slash).
+     */
+    public static function pathWithinRoot(string $candidate, string $root): bool
+    {
+        if ($candidate === '' || $root === '') {
+            return false;
+        }
+        $root = rtrim($root, DIRECTORY_SEPARATOR);
+        if ($candidate === $root) {
+            return true; // the docroot itself
+        }
+        return str_starts_with($candidate, $root . DIRECTORY_SEPARATOR);
+    }
+
+    /**
+     * Checks if the given file path is safe to serve/execute from the document
+     * root. Apache `ap_directory_walk` / `resolve_symlink` parity:
+     *
+     *  - Symlink escape (CRITICAL): we canonicalize BOTH the file and the
+     *    document root with realpath() and require boundary-aware containment.
+     *    realpath() follows every symlink to its target, so a link inside
+     *    docroot pointing outside (e.g. /etc/passwd) resolves to a path that
+     *    fails the containment check and is refused. Apache refuses such links
+     *    at the C level unless `Options +FollowSymLinks` is set; ZealPHP refuses
+     *    them unconditionally on the PHP-served path.
+     *  - Non-regular files: device nodes, FIFOs and sockets are refused
+     *    (Apache request.c:1286-1292 — only REG/DIR pass the directory walk).
+     *  - Dotfile segments (.git, .env, .htaccess, …) are refused when
+     *    App::$block_dotfiles is on.
+     *
+     * Honest limitation: this guard only covers the PHP-served path
+     * (App::include() / serveDirectory() / the implicit file routes). Assets
+     * under the OpenSwoole built-in static handler prefixes (static_handler_
+     * locations — /css/, /js/, …) are served by OpenSwoole's C-level handler
+     * before any PHP runs and have no FollowSymLinks guard; keep those
+     * directories symlink-free in production, or disable enable_static_handler
+     * and route assets through PHP so this check applies.
+     *
+     * @param mixed $abs_file The candidate file path. Callers pass a realpath()
+     *                         result (string|false) or a raw path; the value is
+     *                         validated and re-canonicalized here.
+     * @return bool Returns true if the file is a regular file within the
+     *              document root, false otherwise.
      */
     public function includeCheck($abs_file){
-        $docRoot = self::resolveDocumentRoot();
-        if (!$abs_file || strpos($abs_file, $docRoot) !== 0) {
-            return false; // outside the document root
+        if (!is_string($abs_file) || $abs_file === '') {
+            return false;
+        }
+        // Canonicalize both sides so symlinks are resolved to their real target
+        // before the containment test. realpath() returns false for a path that
+        // does not exist or is unreadable — refuse those too.
+        $realRoot = realpath(self::resolveDocumentRoot());
+        $realFile = realpath($abs_file);
+        if ($realRoot === false || $realFile === false) {
+            return false;
+        }
+        if (!self::pathWithinRoot($realFile, $realRoot)) {
+            return false; // outside the document root (covers symlink escape)
+        }
+        // Apache refuses non-regular files (devices/pipes/sockets) — only
+        // regular files and directories survive the directory walk. Directories
+        // are handled by serveDirectory(); here we require a regular file.
+        if (!is_file($realFile)) {
+            return false;
         }
         if (self::$block_dotfiles) {
-            $relative = substr($abs_file, strlen($docRoot));
-            foreach (explode('/', $relative) as $segment) {
+            $relative = substr($realFile, strlen($realRoot));
+            foreach (explode(DIRECTORY_SEPARATOR, $relative) as $segment) {
                 if ($segment !== '' && $segment[0] === '.') {
                     return false; // dotfile (.git, .env, .htaccess, etc.)
                 }
             }
         }
         return true;
+    }
+
+    /**
+     * ENOTDIR detection for Apache parity (request.c:1244-1250 — "deny rather
+     * than assume not found"). When a path component that should be a directory
+     * is actually a regular file (e.g. /home.php/extra), Apache returns 403, not
+     * 404, deliberately refusing to leak whether the deeper path exists.
+     *
+     * realpath() collapses both ENOENT and ENOTDIR to false, so we walk the
+     * uncanonicalized path: if any non-final ancestor exists and is NOT a
+     * directory, the request hit ENOTDIR. Symlinks are followed by is_dir()/
+     * is_file(), matching the kernel's traversal.
+     *
+     * @param string $absPath The non-canonical absolute path the request mapped to.
+     */
+    public static function isEnotdir(string $absPath): bool
+    {
+        $absPath = rtrim($absPath, DIRECTORY_SEPARATOR);
+        $parent  = dirname($absPath);
+        while ($parent !== '' && $parent !== DIRECTORY_SEPARATOR && $parent !== '.') {
+            if (file_exists($parent)) {
+                // First existing ancestor: if it's a file (not a dir), the
+                // remaining segments could never resolve — that's ENOTDIR.
+                return !is_dir($parent);
+            }
+            $next = dirname($parent);
+            if ($next === $parent) {
+                break;
+            }
+            $parent = $next;
+        }
+        return false;
     }
 
     /**
@@ -2458,6 +2596,81 @@ class App
             return rtrim($root, '/');
         }
         return self::$cwd . '/' . rtrim($root, '/');
+    }
+
+    /**
+     * Percent-decode a path repeatedly until it stops changing.
+     *
+     * Apache normalises before each access check, so a double-encoded payload
+     * like `%252e%252e` (which decodes once to `%2e%2e`, then again to `..`)
+     * is caught. A single `rawurldecode()` only peels one layer — leaving the
+     * traversal sequence intact after the first decode. Decoding until stable
+     * closes that gap. The iteration count is capped so a pathological input
+     * (`%2525252525…`) can't spin the CPU; once the cap is hit we return the
+     * partially-decoded form and let the caller's traversal/null-byte checks
+     * run against it (any surviving `..`/`%` is treated conservatively).
+     */
+    public static function decodeUntilStable(string $path, int $maxIterations = 10): string
+    {
+        for ($i = 0; $i < $maxIterations; $i++) {
+            $next = rawurldecode($path);
+            if ($next === $path) {
+                return $path;
+            }
+            $path = $next;
+        }
+        return $path;
+    }
+
+    /**
+     * Normalise a request path the way Apache's `ap_normalize_path()` does
+     * (`server/util.c`): collapse runs of `//` to a single `/` (MergeSlashes,
+     * on by default), drop `/./` segments, and unwind `/segment/../` back over
+     * the preceding segment. A `..` that would climb above root is dropped
+     * (clamped at `/`), matching Apache's behaviour for the routing path.
+     *
+     * Operates on an already percent-decoded, query-stripped path. Returns a
+     * path that always starts with `/` for absolute inputs; a `*` (OPTIONS
+     * asterisk-form) or empty input is returned unchanged.
+     */
+    public static function normalizeRequestPath(string $path): string
+    {
+        if ($path === '' || $path === '*') {
+            return $path;
+        }
+
+        $absolute = $path[0] === '/';
+        $segments = explode('/', $path);
+        /** @var array<int, string> $out */
+        $out = [];
+        foreach ($segments as $segment) {
+            if ($segment === '' || $segment === '.') {
+                // Empty segment = duplicate slash; '.' = current dir. Drop both.
+                continue;
+            }
+            if ($segment === '..') {
+                // Unwind one real segment; clamp at root rather than escaping.
+                if ($out !== [] && end($out) !== '..') {
+                    array_pop($out);
+                } elseif (!$absolute) {
+                    $out[] = '..';
+                }
+                continue;
+            }
+            $out[] = $segment;
+        }
+
+        $normalized = implode('/', $out);
+        if ($absolute) {
+            $normalized = '/' . $normalized;
+        }
+        // Preserve a single trailing slash when the original ended in one and
+        // the result is more than just root, so DirectorySlash handling and
+        // strip-trailing-slash logic see the same shape they did before.
+        if ($normalized !== '/' && substr($path, -1) === '/' && substr($normalized, -1) !== '/') {
+            $normalized .= '/';
+        }
+        return $normalized === '' ? '/' : $normalized;
     }
 
     /**
@@ -2930,6 +3143,50 @@ class App
     }
 
     /**
+     * Clear previously-accumulated response headers from a handler that then
+     * failed, keeping only the headers that Apache preserves across an error
+     * response (ap_send_error_response: apr_table_clear(r->headers_out) then
+     * re-instate headers required by HTTP protocol for specific status codes).
+     *
+     * Apache parity (http_protocol.c:1246-1292):
+     *   Location        — preserved from err_headers_out for redirect chains.
+     *   WWW-Authenticate — preserved for 401 (mod_auth sets it in err_headers_out,
+     *                      http_request.c:604).
+     *   Allow           — Apache re-adds Allow for 405/501 inside ap_send_error_response
+     *                     after the table clear (http_protocol.c:1289-1292). We preserve
+     *                     any Allow header the framework set before calling renderError()
+     *                     (e.g. the 405 dispatch path) rather than clearing + re-adding.
+     *
+     * Called at the top of renderError() so the policy applies to both custom
+     * handler dispatch and the default error body paths.
+     */
+    private function clearHandlerHeaders(int $status): void
+    {
+        $g = RequestContext::instance();
+        if ($g->zealphp_response === null) {
+            return;
+        }
+        // Always-preserved headers (Apache err_headers_out equivalents):
+        //   location         — redirect chains
+        //   allow            — RFC 9110 §15.5.6: required on 405/501; Apache re-adds
+        //                      after the clear, so we preserve rather than wipe + re-add
+        $preserveNames = ['location', 'allow'];
+        // WWW-Authenticate is only meaningful on 401; preserve it there only so a
+        // handler that happened to set it for a different status can't leak it.
+        if ($status === 401) {
+            $preserveNames[] = 'www-authenticate';
+        }
+        $g->zealphp_response->headersList = array_values(
+            array_filter(
+                $g->zealphp_response->headersList,
+                static function (array $pair) use ($preserveNames): bool {
+                    return in_array(strtolower($pair[0]), $preserveNames, true);
+                }
+            )
+        );
+    }
+
+    /**
      * Render the response for an error status. Dispatches a user-registered
      * handler if one exists (status-specific takes precedence over catch-all);
      * otherwise returns the framework's default body (HTML or JSON per Accept).
@@ -2940,6 +3197,10 @@ class App
     public function renderError(int $status, ?\Throwable $exception = null): \Psr\Http\Message\ResponseInterface
     {
         $g = RequestContext::instance();
+        // Apache ap_send_error_response parity: clear headers the failed handler
+        // accumulated before emitting the error body. Preserves Location (redirect
+        // chains) and, for 401 only, WWW-Authenticate (Basic/Digest challenge).
+        $this->clearHandlerHeaders($status);
         // Recursion guard — if a user-registered error handler itself triggers
         // an error, the nested call falls straight through to the default page
         // instead of looping back into the same handler.
@@ -2980,6 +3241,10 @@ class App
     {
         $g = RequestContext::instance();
         $reason = self::REASON_PHRASES[$status] ?? '';
+        // HEAD strips the body on error responses too (Apache ap_send_error_response
+        // honours r->header_only). Content-Length still reflects the body that a
+        // GET would have produced, so we compute the body then drop it for HEAD.
+        $isHead = (string)($g->server['REQUEST_METHOD'] ?? 'GET') === 'HEAD';
         $accept = strtolower((string)($g->server['HTTP_ACCEPT'] ?? ''));
         $wantsJson = $accept !== ''
             && str_contains($accept, 'application/json')
@@ -2997,8 +3262,14 @@ class App
             if (self::$server_admin !== null && self::$server_admin !== '') {
                 $errorPayload['contact'] = self::$server_admin;
             }
-            $body = json_encode(['error' => $errorPayload], JSON_UNESCAPED_SLASHES);
-            $resp = (new Response($body))
+            $body = (string)json_encode(['error' => $errorPayload], JSON_UNESCAPED_SLASHES);
+            // HEAD strips the body but keeps Content-Length for the entity a GET
+            // would have produced — emitted via the buffered header list (the
+            // same path the normal HEAD dispatch branches use).
+            if ($isHead) {
+                response_add_header('Content-Length', (string)strlen($body));
+            }
+            $resp = (new Response($isHead ? '' : $body))
                 ->withStatus($status)
                 ->withHeader('Content-Type', 'application/json');
             assert($resp instanceof \Psr\Http\Message\ResponseInterface);
@@ -3014,6 +3285,10 @@ class App
         // <address> block Apache appends when ServerSignature is on.
         if (self::$server_admin !== null && self::$server_admin !== '') {
             $body .= "\n<address>Contact: " . htmlspecialchars(self::$server_admin) . "</address>";
+        }
+        if ($isHead) {
+            response_add_header('Content-Length', (string)strlen($body));
+            return (new Response(''))->withStatus($status);
         }
         return (new Response($body))->withStatus($status);
     }
@@ -3891,6 +4166,11 @@ HELP;
                 }
                 return $result;
             }
+            // Apache parity: a path component that is a file rather than a
+            // directory (ENOTDIR) is 403, not 404 — deny rather than leak.
+            if (self::isEnotdir($docRoot . '/' . $file)) {
+                return 403;
+            }
             return $this->invokeFallbackOrNotFound();
         });
 
@@ -3913,6 +4193,10 @@ HELP;
                     return $this->invokeFallbackOrNotFound();
                 }
                 return $result;
+            }
+            // Apache parity: ENOTDIR (a path component is a file) is 403, not 404.
+            if (self::isEnotdir($docRoot . '/' . $dir . '/' . $uri)) {
+                return 403;
             }
             return $this->invokeFallbackOrNotFound();
         });
@@ -4381,6 +4665,14 @@ class ResponseMiddleware implements MiddlewareInterface
                 App::emitStatus($g->openswoole_response, $streamStatus);
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->header('Accept-Ranges', 'none');
+                // HEAD: send headers only, never the streamed body (Apache
+                // strips content buckets via ctx->final_header_only). Streaming
+                // length is unknown/chunked, so no Content-Length is emitted.
+                if ($method === 'HEAD') {
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                    $g->openswoole_response->end();
+                    return (new Response('', $streamStatus));
+                }
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->flush();
                 foreach ($object as $chunk) {
@@ -4503,6 +4795,14 @@ class ResponseMiddleware implements MiddlewareInterface
                 App::emitStatus($g->openswoole_response, $streamStatus);
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->header('Accept-Ranges', 'none');
+                // HEAD: send headers only, never the streamed body (Apache
+                // strips content buckets via ctx->final_header_only). Streaming
+                // length is unknown/chunked, so no Content-Length is emitted.
+                if ($method === 'HEAD') {
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                    $g->openswoole_response->end();
+                    return (new Response('', $streamStatus));
+                }
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->flush();
                 foreach ($object as $chunk) {
@@ -4624,6 +4924,28 @@ class ResponseMiddleware implements MiddlewareInterface
         }
     }
 
+    /**
+     * Reconstruct the request line + headers for a TRACE echo body, mirroring
+     * Apache's ap_send_http_trace() (http_filters.c:1130). Format is the request
+     * line, each header as `Name: value`, then a terminating blank line — the
+     * message/http representation the client sent. Header names/values are
+     * passed through verbatim (TRACE is an introspection echo); CR/LF inside a
+     * value is stripped so a crafted header can't inject extra wire lines.
+     *
+     * @param array<string, string> $headers
+     */
+    public static function buildTraceEcho(string $method, string $uri, string $protocol, array $headers): string
+    {
+        $crlf = "\r\n";
+        $out = $method . ' ' . $uri . ' ' . $protocol . $crlf;
+        foreach ($headers as $name => $value) {
+            $cleanName = str_replace(["\r", "\n"], '', $name);
+            $cleanValue = str_replace(["\r", "\n"], '', $value);
+            $out .= $cleanName . ': ' . $cleanValue . $crlf;
+        }
+        return $out . $crlf;
+    }
+
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $g = RequestContext::instance();
@@ -4636,12 +4958,36 @@ class ResponseMiddleware implements MiddlewareInterface
         // Apache rejects these at the URI parse layer; we do the same so encoded
         // attacks (%2e%2e, %00, backslash) can't survive past pattern matching.
         $parsedPath = parse_url($uri, PHP_URL_PATH);
-        $path = is_string($parsedPath) ? $parsedPath : $uri;
-        $decoded = rawurldecode($path);
+        $rawPath = is_string($parsedPath) ? $parsedPath : $uri;
+
+        // Apache AllowEncodedSlashes Off (default): an encoded slash in the RAW
+        // path is refused with 404 before it can be decoded to a real `/`. Check
+        // the pre-decode bytes — once decoded, %2F is indistinguishable from a
+        // literal slash. Gated by App::$allow_encoded_slashes (default false).
+        if (!App::$allow_encoded_slashes && stripos($rawPath, '%2f') !== false) {
+            return $app->renderError(404);
+        }
+
+        // Decode-until-stable: Apache normalises before each access check, so a
+        // double-encoded payload (%252e%252e -> %2e%2e -> ..) is caught. A single
+        // rawurldecode() peels only one layer. Decode repeatedly (capped) then run
+        // the traversal/null-byte/backslash checks against the fully-decoded form.
+        $decoded = App::decodeUntilStable($rawPath);
         if (strpos($decoded, "\0") !== false
             || strpos($decoded, '\\') !== false
             || preg_match('#(^|/)\.\.(/|$)#', $decoded)) {
             return $app->renderError(400);
+        }
+
+        // Apache ap_normalize_path: collapse `//` -> `/` and drop `/./` segments
+        // before route matching, so `//admin//` and `/./admin` cannot bypass a
+        // pattern route guarding `/admin`. Rebuild REQUEST_URI from the normalised
+        // path so every downstream consumer (PATH_INFO, route table) sees one form.
+        $path = App::normalizeRequestPath($rawPath);
+        if ($path !== $rawPath) {
+            $qs = parse_url($uri, PHP_URL_QUERY);
+            $uri = $path . (is_string($qs) && $qs !== '' ? '?' . $qs : '');
+            $g->server['REQUEST_URI'] = $uri;
         }
 
         // RFC 9112 §3.2: an HTTP/1.1 request MUST carry a Host header; a server
@@ -4650,6 +4996,32 @@ class ResponseMiddleware implements MiddlewareInterface
         // bites malformed/raw requests — the vhost-confusion / smuggling surface.
         if (($g->server['SERVER_PROTOCOL'] ?? '') === 'HTTP/1.1' && !isset($g->server['HTTP_HOST'])) {
             return $app->renderError(400);
+        }
+
+        // RFC 9110 §15.6.2 / Apache server/protocol.c:1253 — a method the server
+        // does not recognise gets 501 Not Implemented, not 404. This distinguishes
+        // "I don't know this verb" from "no such resource". Known methods (incl.
+        // HEAD/OPTIONS/TRACE and the WebDAV verbs) fall through to normal routing,
+        // where an unmatched-but-known method still resolves to 404/405/fallback.
+        if (!in_array($method, App::KNOWN_METHODS, true)) {
+            return $app->renderError(501);
+        }
+
+        // Apache LimitRequestFields — reject requests that carry more header
+        // fields than the configured limit. Apache enforces this at
+        // ap_get_mime_headers_core (protocol.c:930-940) with a 400 response.
+        // We replicate it here at the PHP layer after OpenSwoole has parsed the
+        // header array. A limit of 0 disables the check (unlimited).
+        if (App::$limit_request_fields > 0) {
+            $headerCount = 0;
+            foreach (array_keys($g->server) as $sk) {
+                if (str_starts_with((string)$sk, 'HTTP_')) {
+                    $headerCount++;
+                }
+            }
+            if ($headerCount > App::$limit_request_fields) {
+                return $app->renderError(400);
+            }
         }
 
         // Apache PATH_INFO — `/script.php/extra/path` exposes `/extra/path` to
@@ -4676,12 +5048,36 @@ class ResponseMiddleware implements MiddlewareInterface
             }
         }
 
-        // TRACE — disabled by default (XST attack vector). Apache TraceEnable
-        // default is OFF; mirror that. Set App::traceEnabled(true) to allow.
-        if ($method === 'TRACE' && !App::$trace_enabled) {
-            response_set_status(405);
-            response_add_header('Allow', 'GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH');
-            return new Response('', 405);
+        // TRACE — disabled by default (XST attack vector). Apache's compiled
+        // default is On, but ZealPHP ships TraceEnable Off as a hardening choice.
+        // Set App::traceEnabled(true) to opt into the Apache ap_send_http_trace()
+        // behaviour: echo the request back as a message/http body.
+        if ($method === 'TRACE') {
+            if (!App::$trace_enabled) {
+                response_set_status(405);
+                response_add_header('Allow', 'GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH');
+                return new Response('', 405);
+            }
+            $req = $g->zealphp_request;
+            // Apache (non-extended TraceEnable On) refuses a request body with
+            // 413 — only AP_TRACE_EXTENDED echoes it, and ZealPHP's boolean knob
+            // maps to the non-extended mode (http_filters.c:1082).
+            $bodyRaw = $req instanceof \ZealPHP\HTTP\Request ? $req->rawContent() : null;
+            if (is_string($bodyRaw) && $bodyRaw !== '') {
+                return $app->renderError(413);
+            }
+            $headers = ($req instanceof \ZealPHP\HTTP\Request && is_array($req->header))
+                ? $req->header
+                : [];
+            $body = self::buildTraceEcho(
+                $method,
+                $uri,
+                (string)($g->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1'),
+                $headers
+            );
+            response_set_status(200);
+            response_add_header('Content-Type', 'message/http');
+            return new Response($body, 200);
         }
 
         // Apache: RewriteCond %{REQUEST_FILENAME} !-d
@@ -4710,6 +5106,14 @@ class ResponseMiddleware implements MiddlewareInterface
 
         // OPTIONS — return allowed methods for this URI without running a handler
         if ($method === 'OPTIONS') {
+            // RFC 9110 §9.3.7 / Apache http_core.c:336 — `OPTIONS *` is a
+            // server-wide capability probe ("HTTP pong"), not resource-specific:
+            // 200 with an empty body and no Allow header. The request target `*`
+            // arrives as the raw REQUEST_URI (query string never applies to `*`).
+            if ($uri === '*') {
+                response_set_status(200);
+                return new Response('', 200);
+            }
             $allowed = ['OPTIONS'];
             foreach ($app->routesByMethod() as $m => $routes) {
                 foreach ($routes as $route) {

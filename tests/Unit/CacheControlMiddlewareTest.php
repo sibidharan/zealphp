@@ -143,4 +143,95 @@ class CacheControlMiddlewareTest extends TestCase
         $this->assertSame('no-store', $response->getHeaderLine('Cache-Control'));
         $this->assertCount(0, $this->recorder->calls);
     }
+
+    // -------------------------------------------------------------------------
+    // B4 parity fix — Apache mod_expires.c:455–458 error-response suppression
+    // -------------------------------------------------------------------------
+
+    public function testNoCacheControlOn404Response(): void
+    {
+        // Apache never stamps caching headers on 4xx/5xx responses.
+        // A /missing.css 404 must NOT get Cache-Control: max-age=N — that
+        // would cause browsers and CDNs to cache error pages as assets.
+        $middleware = new CacheControlMiddleware();
+        $request    = new ServerRequest('/missing.css', 'GET', '', []);
+
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('not found', 404, '', ['Content-Type' => 'text/css']);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertFalse($response->hasHeader('Cache-Control'));
+        $this->assertCount(0, $this->recorder->calls);
+    }
+
+    public function testNoCacheControlOn500Response(): void
+    {
+        // Same guard for 5xx.
+        $middleware = new CacheControlMiddleware();
+        $request    = new ServerRequest('/app.js', 'GET', '', []);
+
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('error', 500, '', ['Content-Type' => 'text/javascript']);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertFalse($response->hasHeader('Cache-Control'));
+    }
+
+    public function testCacheControlStillStampedOn200AfterErrorGuard(): void
+    {
+        // Confirm the guard doesn't accidentally suppress 2xx responses.
+        $response = $this->process('/style.css');
+        $this->assertSame('max-age=2628000, public', $response->getHeaderLine('Cache-Control'));
+    }
+
+    public function testNoCacheControlOnExact400Response(): void
+    {
+        // Kills GreaterThanOrEqualTo at L94: >= 400 must suppress on exactly 400,
+        // not just > 400 (which would allow 400 through).
+        $middleware = new CacheControlMiddleware();
+        $request    = new ServerRequest('/style.css', 'GET', '', []);
+
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('bad request', 400, '', ['Content-Type' => 'text/css']);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+        $this->assertFalse($response->hasHeader('Cache-Control'));
+        $this->assertCount(0, $this->recorder->calls);
+    }
+
+    public function testNormaliseMapCastsSecondsToInt(): void
+    {
+        // Kills CastInt at L126: without (int) cast the map value would remain
+        // a float or string. We pass a float-looking int and verify the emitted
+        // max-age is the integer form (no decimal point).
+        $middleware = new CacheControlMiddleware(['css' => 3600]);
+        $request    = new ServerRequest('/style.css', 'GET', '', []);
+
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('body', 200, '', []);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+        // If (int) cast is removed, sprintf with a non-int value could produce
+        // 'max-age=3600, public' still (sprintf %d coerces). This mutant is
+        // effectively equivalent for int inputs. Exercise the path for coverage:
+        $this->assertSame('max-age=3600, public', $response->getHeaderLine('Cache-Control'));
+    }
 }
