@@ -474,10 +474,14 @@ class AppPipelineExtraTest extends TestCase
     public function testTraceAllowedWhenEnabled(): void
     {
         App::traceEnabled(true);
-        // With TRACE enabled it's no longer short-circuited by the XST guard;
-        // the path matches a GET route but has no TRACE handler, so it's now a
-        // proper 405 Method Not Allowed (RFC 9110 §15.5.6) rather than a 404.
-        $this->assertSame(405, $this->dispatch('/xtra/str', 'TRACE')->getStatusCode());
+        // With TRACE enabled the framework runs the Apache-parity handler
+        // (ap_send_http_trace): 200 + a message/http body echoing the request
+        // line and headers — not a 405 or a route lookup. (H8, audit #4.)
+        $res = $this->dispatch('/xtra/str', 'TRACE');
+        $this->assertSame(200, $res->getStatusCode());
+        $this->assertSame('message/http', $this->headerValue('Content-Type'));
+        $this->assertStringStartsWith('TRACE /xtra/str HTTP/1.1', (string) $res->getBody());
+        App::traceEnabled(false);
     }
 
     // ── strip_trailing_slash redirect ─────────────────────────────────
