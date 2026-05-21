@@ -29,7 +29,6 @@ use ZealPHP\RequestContext;
  * gadget. `DateTime` for example has `__wakeup` and is therefore
  * deliberately excluded.
  *
- * @return array<string, mixed>
  */
 /**
  * Encode an array into PHP's native 'php' session serialize format
@@ -47,6 +46,9 @@ function php_session_encode_from_array(array $data): string
     return $encoded;
 }
 
+/**
+ * @return array<string, mixed>
+ */
 function php_session_decode_to_array(string $data): array
 {
     $decoded = @unserialize($data, ['allowed_classes' => ['stdClass']]);
@@ -366,8 +368,10 @@ function zeal_session_write_close(): bool
                     $data = $current;
                 }
             }
+            /** @var array<string, mixed> $data */
             $wHandler->write((string) $session_id, php_session_encode_from_array($data));
         } else {
+            /** @var array<string, mixed> $data */
             file_put_contents($session_file, php_session_encode_from_array($data));
         }
 
@@ -467,6 +471,7 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
         $superglobals = \ZealPHP\App::$superglobals;
         /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
         $data = $superglobals ? ($GLOBALS['_SESSION'] ?? []) : (isset($g->session) ? $g->session : []);
+        /** @var array<string, mixed> $data */
         $data = is_array($data) ? $data : [];
         $handler->write((string) $new_session_id, php_session_encode_from_array($data));
         if ($delete_old_session && is_string($old_session_id) && $old_session_id !== '') {
@@ -642,6 +647,7 @@ function zeal_session_abort(): bool
 
 function zeal_session_encode(): string
 {
+    /** @var array<string, mixed> $data */
     $data = \ZealPHP\App::$superglobals
         ? ($GLOBALS['_SESSION'] ?? [])
         : RequestContext::instance()->session;
