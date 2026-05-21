@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`RedisSessionHandler` is now coroutine-safe — fixes session corruption under concurrent load** ([#16](https://github.com/sibidharan/zealphp/issues/16)). The handler held a single `\Redis` connection; sharing one instance across coroutines (the `onWorkerStart` pattern) multiplexed concurrent commands onto the same socket, and phpredis is not coroutine-safe — interleaved request/response frames made `read()` return the wrong/empty session, which `write_close()` then persisted (a 24-key session collapsing to a few keys under a rapid request sweep). The handler now keeps **one connection per coroutine** (stored in the coroutine context, reaped on coroutine end); outside a coroutine it uses a single fallback connection created at construction. Constructor behaviour is unchanged (still connects eagerly to validate config). High-throughput deployments should front this with a connection pool to avoid per-request connection churn. *(Root cause was the shared socket, not the `write_close()` merge; the file-handler default was never affected.)*
+
 ## [0.2.32] - 2026-05-21
 
 A second Apache/mod_php parity wave: new built-in overrides (`php_sapi_name`, `filter_input`/`filter_input_array`, `header_register_callback`, `error_log`), `$_SERVER` completeness (`GATEWAY_INTERFACE`/`REQUEST_SCHEME`/`HTTPS`), new directive middleware (`RedirectMiddleware`, `SetEnvIfMiddleware`) and config (`ServerTokens`, `FileETag`, `default_mimetype`) — plus two session/output correctness fixes ([#20](https://github.com/sibidharan/zealphp/issues/20), [#21](https://github.com/sibidharan/zealphp/issues/21)).
