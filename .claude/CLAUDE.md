@@ -659,20 +659,37 @@ Also remember to bump:
 
 ### Commit, tag, push (main repo)
 
+**`master` is branch-protected** (since the v0.2.37 Scorecard hardening): direct
+`git push origin master` is **rejected** (PR required + status checks + admin
+enforcement). Releases go through a PR, then the tag is cut on the merged commit.
+
 ```bash
+# 1. Branch + commit the version bumps
+git checkout -b release/vX.Y.Z
 git add -A <bumped files>
 git commit -m "chore: release vX.Y.Z — <one-line summary>"
+
+# 2. Push the branch to BOTH remotes and open the PR (github = origin1)
+git push origin release/vX.Y.Z && git push origin1 release/vX.Y.Z
+gh pr create --base master --head release/vX.Y.Z --title "chore: release vX.Y.Z" --body "<highlights>"
+
+# 3. Wait for all required checks green, then merge (rebase keeps linear history)
+gh pr merge <N> --rebase --delete-branch
+
+# 4. Fast-forward local master, sync the private mirror, THEN tag the merged commit
+git checkout master && git pull origin1 master --ff-only && git push origin master
 git tag -a vX.Y.Z -m "Release vX.Y.Z
 
 <bullet-point highlights of headline changes>"
-
-# Push to EVERY configured remote — check `git remote -v`. Typical layout:
-#   origin    → private mirror (push first)
-#   origin1   → public GitHub (push second — triggers Packagist webhook)
-for remote in $(git remote); do
-  git push $remote master && git push $remote vX.Y.Z
-done
+# Tags are NOT branch-protected — push the tag to both remotes directly.
+git push origin vX.Y.Z && git push origin1 vX.Y.Z
 ```
+
+> The required PR checks are: `validate`, `static-analysis`, `phpunit (PHP 8.3)`,
+> `phpunit (PHP 8.4)`, `Infection (MSI)`, `Analyze (actions)`,
+> `Analyze (javascript-typescript)`, `scan`. `phpunit (PHP 8.5)` (experimental)
+> and the master-only jobs (`Scorecard analysis`, `CycloneDX SBOM`) are NOT
+> required. To change protection: `gh api repos/sibidharan/zealphp/branches/master/protection`.
 
 Verify Packagist picked up the tag: `curl -sS https://repo.packagist.org/p2/sibidharan/zealphp.json | python3 -c "import json,sys; print(json.load(sys.stdin)['packages']['sibidharan/zealphp'][0]['version'])"` should return `vX.Y.Z`.
 
