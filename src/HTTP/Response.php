@@ -609,6 +609,21 @@ class Response
         $this->parent->end();
     }
 
+    /**
+     * Returns a fluent HtmxResponse builder that queues HX-* headers into
+     * this response. Each call returns the same builder instance (one per
+     * Response object) so callers can chain or call multiple times.
+     */
+    public function htmx(): HtmxResponse
+    {
+        if (!isset($this->htmxBuilder)) {
+            $this->htmxBuilder = new HtmxResponse($this);
+        }
+        return $this->htmxBuilder;
+    }
+
+    private ?HtmxResponse $htmxBuilder = null;
+
     public function flush(): bool
     {
         if ($this->parent->isWritable()) {
