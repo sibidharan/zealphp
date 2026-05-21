@@ -89,13 +89,18 @@ class HttpFeaturesTest extends TestCase
     }
 
     /**
-     * M4 (audit #4) — RFC 9110 §15.6.2: an unrecognised method is 501 Not
-     * Implemented, not 404. Apache returns 501 for M_INVALID (protocol.c:1253).
+     * M4 (audit #4) — OpenSwoole-governed. RFC 9110 §15.6.2 says an unrecognised
+     * method should be 501 (Apache returns 501 for M_INVALID, protocol.c:1253).
+     * In this runtime OpenSwoole's C HTTP parser rejects an unknown verb with
+     * 400 *before* PHP runs, so the framework's 501 path (the App::KNOWN_METHODS
+     * guard, kept as defense-in-depth) is unreachable. The safety property — an
+     * unknown verb is refused, never processed as 200 — holds. See
+     * docs/apache-parity-audit.md (M4) and STANDARDS.md (OpenSwoole-governed surfaces).
      */
-    public function testUnknownMethodReturns501(): void
+    public function testUnknownMethodRejected(): void
     {
         $r = $this->http('FOOBAR', '/json');
-        $this->assertStatus(501, $r);
+        $this->assertStatus(400, $r);
     }
 
     /**
@@ -121,15 +126,18 @@ class HttpFeaturesTest extends TestCase
     }
 
     /**
-     * H8 (audit #4) — TRACE is disabled by default (XST defence): 405 with an
-     * Allow header, no request echo. The demo server does not call
-     * traceEnabled(true), so this pins the hardened default.
+     * H8 (audit #4) — OpenSwoole-governed. TRACE must be refused (XST defence).
+     * OpenSwoole's parser rejects TRACE with 400 before PHP runs, so the
+     * framework's 405-default and the opt-in traceEnabled(true) echo handler
+     * (both kept as defense-in-depth) are unreachable in this runtime. The
+     * security property that matters — TRACE is refused and never echoes the
+     * request back — holds via the 400. See docs/apache-parity-audit.md (H8).
      */
-    public function testTraceDisabledByDefaultReturns405(): void
+    public function testTraceRefusedByDefault(): void
     {
         $r = $this->http('TRACE', '/json');
-        $this->assertStatus(405, $r);
-        $this->assertStringContainsString('GET', $r['headers']['allow'] ?? '');
+        $this->assertStatus(400, $r);
+        $this->assertStringNotContainsString('TRACE', (string) $r['body'], 'TRACE must never echo the request back');
     }
 
     /**

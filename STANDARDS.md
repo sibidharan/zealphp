@@ -126,6 +126,24 @@ intentional differences are called out.
 
 Honest enforcement note: of the three Apache-named request-header limits, only **`LimitRequestFields` is enforced at the ZealPHP layer** (400 on excess fields). `LimitRequestLine` and `LimitRequestFieldSize` are **OpenSwoole-governed** — the C parser owns wire-level framing and ZealPHP cannot intercept it, so those two knobs are advisory documentation, not active limits. `LimitRequestBody` is enforced (413) by the opt-in `BodySizeLimitMiddleware`, now covering chunked uploads as well.
 
+### OpenSwoole-governed surfaces (parity ceiling)
+
+ZealPHP runs behind OpenSwoole's C HTTP server. Two request surfaces are decided by
+that C layer *before* the PHP pipeline runs, so framework-layer Apache parity cannot
+reach them. Both are documented honestly here and pinned by integration tests:
+
+| Surface | Apache behaviour | OpenSwoole/ZealPHP reality | Safe? |
+|---|---|---|---|
+| **Unrecognised HTTP method** | 501 Not Implemented (`protocol.c:1253`) | OpenSwoole's parser rejects the verb with **400** before PHP runs. ZealPHP keeps an `App::KNOWN_METHODS`→501 guard as defense-in-depth, but it is unreachable for verbs OpenSwoole refuses. | ✅ refused, never processed |
+| **TRACE** | configurable; `TraceEnable Off` → 405 | OpenSwoole rejects TRACE with **400** before PHP. The framework's 405-default and opt-in `traceEnabled(true)` echo handler are unreachable. | ✅ XST-safe (never echoed) |
+| **Static-handler prefixes** (`/css`, `/js`, `/img` via `enable_static_handler`) | served by httpd with `ap_normalize_path` + `AllowEncodedSlashes off` + `FollowSymLinks` checks | OpenSwoole's C static handler serves matching files **directly**, bypassing the PHP-layer path normalization (M1), encoded-slash rejection (M9) and realpath symlink-containment (C1). Those guards apply to **PHP-routed** paths only. | ⚠️ keep static dirs symlink-free / no user-controlled filenames, or narrow `App::$static_handler_locations` / disable `enable_static_handler` to route through PHP |
+
+The PHP-layer guards (path normalization, `%2F` rejection, double-decoded-traversal
+400, realpath docroot-containment) are real and enforced for every **PHP-routed**
+request — proven in `tests/Integration/StaticServingConformanceTest.php`. The
+static-handler bypass is the documented trade for OpenSwoole's zero-copy static
+serving; see `docs/apache-parity-audit.md`.
+
 ## Apache non-support register (what httpd has that ZealPHP does not)
 
 httpd ships **~137 bundled modules**. ZealPHP is an application framework on a single
