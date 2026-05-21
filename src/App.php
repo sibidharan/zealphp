@@ -2296,25 +2296,126 @@ class App
 
     
     /**
-     * Checks if the given file path is within the public directory.
+     * Boundary-aware containment test: is $candidate the same path as $root, or
+     * a descendant of it?
      *
-     * @param string $abs_file The absolute file path to check.
-     * @return bool Returns true if the file is within the public directory, false otherwise.
+     * Both arguments are expected to already be canonical (realpath'd) absolute
+     * paths — this is the pure decision the symlink-escape guard hangs on, kept
+     * separate so it can be unit-tested without a filesystem.
+     *
+     * A plain `strpos($candidate, $root) === 0` prefix match is unsafe: docroot
+     * `/var/www/public` would wrongly accept the sibling `/var/www/public-data`
+     * (shared string prefix, different directory). We require either an exact
+     * match or that $candidate begins with $root followed by the directory
+     * separator, so only true descendants pass.
+     *
+     * @param string $candidate Canonical absolute path under test.
+     * @param string $root       Canonical absolute document-root path (no trailing slash).
+     */
+    public static function pathWithinRoot(string $candidate, string $root): bool
+    {
+        if ($candidate === '' || $root === '') {
+            return false;
+        }
+        $root = rtrim($root, DIRECTORY_SEPARATOR);
+        if ($candidate === $root) {
+            return true; // the docroot itself
+        }
+        return str_starts_with($candidate, $root . DIRECTORY_SEPARATOR);
+    }
+
+    /**
+     * Checks if the given file path is safe to serve/execute from the document
+     * root. Apache `ap_directory_walk` / `resolve_symlink` parity:
+     *
+     *  - Symlink escape (CRITICAL): we canonicalize BOTH the file and the
+     *    document root with realpath() and require boundary-aware containment.
+     *    realpath() follows every symlink to its target, so a link inside
+     *    docroot pointing outside (e.g. /etc/passwd) resolves to a path that
+     *    fails the containment check and is refused. Apache refuses such links
+     *    at the C level unless `Options +FollowSymLinks` is set; ZealPHP refuses
+     *    them unconditionally on the PHP-served path.
+     *  - Non-regular files: device nodes, FIFOs and sockets are refused
+     *    (Apache request.c:1286-1292 — only REG/DIR pass the directory walk).
+     *  - Dotfile segments (.git, .env, .htaccess, …) are refused when
+     *    App::$block_dotfiles is on.
+     *
+     * Honest limitation: this guard only covers the PHP-served path
+     * (App::include() / serveDirectory() / the implicit file routes). Assets
+     * under the OpenSwoole built-in static handler prefixes (static_handler_
+     * locations — /css/, /js/, …) are served by OpenSwoole's C-level handler
+     * before any PHP runs and have no FollowSymLinks guard; keep those
+     * directories symlink-free in production, or disable enable_static_handler
+     * and route assets through PHP so this check applies.
+     *
+     * @param mixed $abs_file The candidate file path. Callers pass a realpath()
+     *                         result (string|false) or a raw path; the value is
+     *                         validated and re-canonicalized here.
+     * @return bool Returns true if the file is a regular file within the
+     *              document root, false otherwise.
      */
     public function includeCheck($abs_file){
-        $docRoot = self::resolveDocumentRoot();
-        if (!$abs_file || strpos($abs_file, $docRoot) !== 0) {
-            return false; // outside the document root
+        if (!is_string($abs_file) || $abs_file === '') {
+            return false;
+        }
+        // Canonicalize both sides so symlinks are resolved to their real target
+        // before the containment test. realpath() returns false for a path that
+        // does not exist or is unreadable — refuse those too.
+        $realRoot = realpath(self::resolveDocumentRoot());
+        $realFile = realpath($abs_file);
+        if ($realRoot === false || $realFile === false) {
+            return false;
+        }
+        if (!self::pathWithinRoot($realFile, $realRoot)) {
+            return false; // outside the document root (covers symlink escape)
+        }
+        // Apache refuses non-regular files (devices/pipes/sockets) — only
+        // regular files and directories survive the directory walk. Directories
+        // are handled by serveDirectory(); here we require a regular file.
+        if (!is_file($realFile)) {
+            return false;
         }
         if (self::$block_dotfiles) {
-            $relative = substr($abs_file, strlen($docRoot));
-            foreach (explode('/', $relative) as $segment) {
+            $relative = substr($realFile, strlen($realRoot));
+            foreach (explode(DIRECTORY_SEPARATOR, $relative) as $segment) {
                 if ($segment !== '' && $segment[0] === '.') {
                     return false; // dotfile (.git, .env, .htaccess, etc.)
                 }
             }
         }
         return true;
+    }
+
+    /**
+     * ENOTDIR detection for Apache parity (request.c:1244-1250 — "deny rather
+     * than assume not found"). When a path component that should be a directory
+     * is actually a regular file (e.g. /home.php/extra), Apache returns 403, not
+     * 404, deliberately refusing to leak whether the deeper path exists.
+     *
+     * realpath() collapses both ENOENT and ENOTDIR to false, so we walk the
+     * uncanonicalized path: if any non-final ancestor exists and is NOT a
+     * directory, the request hit ENOTDIR. Symlinks are followed by is_dir()/
+     * is_file(), matching the kernel's traversal.
+     *
+     * @param string $absPath The non-canonical absolute path the request mapped to.
+     */
+    public static function isEnotdir(string $absPath): bool
+    {
+        $absPath = rtrim($absPath, DIRECTORY_SEPARATOR);
+        $parent  = dirname($absPath);
+        while ($parent !== '' && $parent !== DIRECTORY_SEPARATOR && $parent !== '.') {
+            if (file_exists($parent)) {
+                // First existing ancestor: if it's a file (not a dir), the
+                // remaining segments could never resolve — that's ENOTDIR.
+                return !is_dir($parent);
+            }
+            $next = dirname($parent);
+            if ($next === $parent) {
+                break;
+            }
+            $parent = $next;
+        }
+        return false;
     }
 
     /**
@@ -3891,6 +3992,11 @@ HELP;
                 }
                 return $result;
             }
+            // Apache parity: a path component that is a file rather than a
+            // directory (ENOTDIR) is 403, not 404 — deny rather than leak.
+            if (self::isEnotdir($docRoot . '/' . $file)) {
+                return 403;
+            }
             return $this->invokeFallbackOrNotFound();
         });
 
@@ -3913,6 +4019,10 @@ HELP;
                     return $this->invokeFallbackOrNotFound();
                 }
                 return $result;
+            }
+            // Apache parity: ENOTDIR (a path component is a file) is 403, not 404.
+            if (self::isEnotdir($docRoot . '/' . $dir . '/' . $uri)) {
+                return 403;
             }
             return $this->invokeFallbackOrNotFound();
         });
