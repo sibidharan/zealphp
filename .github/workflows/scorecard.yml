@@ -1,0 +1,54 @@
+name: Scorecard
+
+# OpenSSF Scorecard — supply-chain security posture (branch protection, pinned
+# actions, token permissions, dangerous-workflow patterns, dependency update
+# tooling, etc.). Publishes results so the README badge resolves via
+# api.securityscorecards.dev, and uploads SARIF to the code-scanning tab.
+# No untrusted event input is referenced in any run step (injection-safe).
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: '37 4 * * 1'   # weekly, Mondays 04:37 UTC
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+# Least privilege at the top; the analysis job elevates only what it needs.
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # upload SARIF to code-scanning
+      id-token: write          # publish results to the OpenSSF API (badge)
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard analysis
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Admin-read PAT so the Branch-Protection check can read the rules
+          # (the default GITHUB_TOKEN cannot). See .github/dependabot.yml note.
+          repo_token: ${{ secrets.SCORECARD_TOKEN }}
+          publish_results: true
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload SARIF to code-scanning
+        uses: github/codeql-action/upload-sarif@bc0b696b4103f5fe60f15749af68a046868d511a # codeql-bundle-v2.25.4
+        with:
+          sarif_file: results.sarif

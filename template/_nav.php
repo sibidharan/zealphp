@@ -4,8 +4,10 @@ $active ??= 'home';
 $links = [
   'home'            => ['/',              'Home'],
   'why-zealphp'     => ['/why-zealphp',   'Why?'],
+  'case-studies'    => ['/case-studies/sna-labs', 'Case Study'],
   'migration'       => ['/migration',     'Migration'],
   'performance'     => ['/performance',   'Benchmarks'],
+  'vs-fpm'          => ['/vs-fpm',         'vs FPM'],
   'design-tradeoffs'=> ['/design-tradeoffs','Trade-offs'],
   'getting-started' => ['/getting-started','Get Started'],
   'learn'           => ['/learn',          'Learn'],
@@ -34,17 +36,21 @@ $links = [
   </label>
   <nav class="nav-links">
     <?php $isActive = function(string $key) use ($active): bool {
-      return $key === 'learn'
-        ? ($active === 'learn' || str_starts_with((string)$active, 'learn/'))
-        : $active === $key;
+      if ($key === 'learn') {
+        return $active === 'learn' || str_starts_with((string)$active, 'learn/');
+      }
+      if ($key === 'case-studies') {
+        return $active === 'case-studies' || str_starts_with((string)$active, 'case-studies/');
+      }
+      return $active === $key;
     }; ?>
     <div class="nav-row nav-row-core">
-      <?php foreach (array_slice($links, 0, 10, true) as $key => [$href, $label]): ?>
+      <?php foreach (array_slice($links, 0, 12, true) as $key => [$href, $label]): ?>
         <a href="<?= $href ?>"<?= $isActive($key) ? ' class="active"' : '' ?>><?= $label ?></a>
       <?php endforeach; ?>
     </div>
     <div class="nav-row nav-row-features">
-      <?php foreach (array_slice($links, 10, null, true) as $key => [$href, $label]): ?>
+      <?php foreach (array_slice($links, 12, null, true) as $key => [$href, $label]): ?>
         <a href="<?= $href ?>"<?= $isActive($key) ? ' class="active"' : '' ?>><?= $label ?></a>
       <?php endforeach; ?>
     </div>

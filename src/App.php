@@ -28,6 +28,8 @@ class App
     protected array $ws_routes = [];
     /** @var array<int, callable> */
     protected static array $workerStartHooks = [];
+    /** @var array<int, callable> */
+    protected static array $workerStopHooks = [];
     protected static float $workerStartedAt = 0.0;
     protected string $host;
     protected int $port;
@@ -52,6 +54,31 @@ class App
      * $coproc_implicit_request_handler flag right before the server starts.
      */
     public static ?bool $process_isolation = null;
+    /**
+     * How a process-isolated legacy include is dispatched, when
+     * processIsolation() is on:
+     *
+     *   'proc' (default) — proc_open() spawns a FRESH PHP interpreter per
+     *                      request (src/cgi_worker.php). True global scope:
+     *                      top-level `$x = ...` is visible via `global $x` in
+     *                      functions, so unmodified WordPress/Drupal work. Cost:
+     *                      cold PHP startup + autoload per request (~tens of ms).
+     *
+     *   'fork' — OpenSwoole\Process forks the already-booted worker (copy-on-
+     *            write: warm interpreter, loaded autoloader, hot opcache). ~5×
+     *            faster than 'proc' because nothing re-execs. TRADE-OFF: the
+     *            file runs in the fork closure's FUNCTION scope, so bare
+     *            top-level vars are NOT visible via the `global` keyword
+     *            (`$wpdb` -style patterns break). Superglobals
+     *            ($_GET/$_POST/$_SESSION/$_SERVER) work normally. Use for
+     *            "modernised legacy" apps that read request state via
+     *            superglobals and don't lean on bare-global wiring; keep 'proc'
+     *            for unmodified WordPress/Drupal.
+     *
+     * Set via App::cgiMode('fork'|'proc'). Default 'proc' — no behaviour change
+     * for existing isolation users.
+     */
+    public static string $cgi_mode = 'proc';
     /**
      * OpenSwoole `enable_coroutine` server-setting override. `null` means
      * "follow !$superglobals" (true → coroutine-per-request, false → one
@@ -80,6 +107,14 @@ class App
     /** Apache PATH_INFO — when `/script.php/extra/path`, expose `/extra/path` as PATH_INFO. */
     public static bool $path_info = true;
     /**
+     * Apache `AllowEncodedSlashes` — when false (default, matching Apache), a
+     * request whose RAW (pre-decode) path contains an encoded slash (`%2F`/`%2f`)
+     * is refused with 404 before route matching. Apache's `unescape_url()`
+     * forbids `AP_SLASHES` by default; we mirror that. Set true to permit
+     * encoded slashes (they are then decoded to `/` like any other octet).
+     */
+    public static bool $allow_encoded_slashes = false;
+    /**
      * Static handler URL-prefix whitelist. Empty = serve any path under document_root (Apache default).
      * @var array<int, string>
      */
@@ -105,6 +140,35 @@ class App
      */
     public static string $default_charset = 'utf-8';
     /**
+     * Apache `DefaultType` / PHP `default_mimetype`. The Content-Type applied by
+     * CharsetMiddleware to a response that doesn't set one itself (mod_php sends
+     * `text/html` by default). Set to '' to leave untyped responses untouched.
+     */
+    public static string $default_mimetype = 'text/html';
+    /**
+     * Apache `ServerTokens`. Controls how much detail the `X-Powered-By`
+     * response header advertises:
+     *   'Full'  (default) → `ZealPHP + OpenSwoole`
+     *   'Prod' / 'Major' / 'Minor' / 'Min' / 'OS' → `ZealPHP`
+     *   'None'  (or '')   → header omitted entirely (info-leak hardening)
+     * Set via App::serverTokens() before App::init().
+     */
+    public static string $server_tokens = 'Full';
+    /**
+     * Apache `FileETag`. When false, `ETagMiddleware` emits no `ETag` header
+     * and never returns 304 (equivalent to `FileETag None`). Default true.
+     * Set via App::fileETag() before App::init().
+     */
+    public static bool $file_etag = true;
+    /**
+     * mod_php-parity SAPI identity for the php_sapi_name() override. Default null
+     * returns the real PHP_SAPI ("cli") — no behavior change. Set to a web SAPI
+     * string (e.g. 'apache2handler', 'fpm-fcgi') so legacy code branching on
+     * php_sapi_name() takes its web path. The PHP_SAPI *constant* is unaffected
+     * (uopz cannot redefine it). Configure via App::sapiName() before App::init().
+     */
+    public static ?string $sapi_name = null;
+    /**
      * Whether ZealPHP's per-request session lifecycle runs. Default true: the
      * SessionManager / CoSessionManager OnRequest wrapper reads the PHPSESSID
      * cookie, calls zeal_session_start(), optionally emits the Set-Cookie
@@ -120,6 +184,26 @@ class App
      * automatically for every request.
      */
     public static bool $session_lifecycle = true;
+    /**
+     * Auth-hook callbacks consulted by `ZealAPI::isAuthenticated()`,
+     * `::isAdmin()`, and `::getUsername()` so the framework's built-in
+     * file-based API layer can delegate auth questions to whatever auth
+     * system the app uses (Symfony Security, Auth0, the SelfMadeNinja stack,
+     * a custom `$_SESSION['user']` check, etc.) without subclassing or
+     * monkey-patching ZealAPI itself.
+     *
+     * Set via the fluent setters `App::authChecker()`, `App::adminChecker()`,
+     * `App::usernameProvider()`. Defaults: null → ZealAPI returns the safe
+     * fail-closed values (`false`, `false`, `null`). See the issue #13
+     * discussion and `/learn/api` for usage.
+     *
+     * @var callable|null
+     */
+    public static $auth_checker = null;
+    /** @var callable|null */
+    public static $admin_checker = null;
+    /** @var callable|null */
+    public static $username_provider = null;
     /**
      * Apache `RewriteCond %{REQUEST_FILENAME} !-d` + `RewriteRule ^(.+)/$ /$1 [R=301,L]`.
      * When true, non-directory URIs ending in `/` are 301-redirected to the no-slash
@@ -205,21 +289,31 @@ class App
     private static ?array $access_log_format_compiled = null;
     /**
      * Apache `LimitRequestFields` — maximum number of request header fields a
-     * single request may carry. Hint to OpenSwoole's parser (currently advisory;
-     * OpenSwoole enforces this implicitly via `http_header_buffer_size`).
+     * single request may carry. Enforced at the PHP application layer: requests
+     * carrying more than this many headers are rejected with 400 before route
+     * dispatch. Set to 0 to disable the check (unlimited). Default 100 matches
+     * Apache's compiled-in default.
      */
     public static int $limit_request_fields = 100;
     /**
-     * Apache `LimitRequestFieldSize` — maximum byte length of one request header
-     * line. Maps to OpenSwoole's `http_header_buffer_size` (8 KiB default).
+     * Apache `LimitRequestFieldSize` — maximum byte length of a single request
+     * header line. **NOT enforced by ZealPHP.** OpenSwoole's C-layer HTTP parser
+     * owns all wire-level framing; ZealPHP only sees the already-parsed
+     * `$request->header` array. The `http_header_buffer_size` option was
+     * explicitly NOT passed to OpenSwoole (its option validator rejects it at
+     * boot — see App::run() ~line 3748). Changing this value has no effect on
+     * the actual per-header byte limit, which is governed by OpenSwoole's global
+     * header-buffer size (~8 KiB default). This property is retained for
+     * documentation and future compatibility only.
      */
     public static int $limit_request_field_size = 8190;
     /**
      * Apache `LimitRequestLine` — maximum byte length of the HTTP request line
-     * (method + URI + protocol). OpenSwoole doesn't expose this independently,
-     * but its `http_header_buffer_size` covers the request line too, so this
-     * value is advisory; setting it above $limit_request_field_size has no
-     * effect.
+     * (method + URI + protocol). **NOT enforced by ZealPHP.** OpenSwoole's C
+     * parser reads the request line before any PHP code runs; there is no
+     * per-request-line cap that ZealPHP can apply after the fact. OpenSwoole's
+     * global `http_header_buffer_size` governs this limit at the wire level.
+     * This property is retained for documentation and future compatibility only.
      */
     public static int $limit_request_line = 8190;
     /** @var array<string, mixed>|null */
@@ -232,8 +326,17 @@ class App
      */
     private static array $error_handlers = [];
     /**
-     * IANA-registered HTTP status reason phrases.
+     * IANA-registered HTTP status reason phrases (RFC 9110 §15).
      * Source: https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml
+     * (registry snapshot 2025-09-15). Phrases match the IANA "Description"
+     * column verbatim — pinned exhaustively by tests/Unit/IanaStatusConformanceTest.
+     *
+     * Documented deviations:
+     *   - 418 'I'm a teapot' — IANA lists "(Unused)"; kept as the RFC 2324 /
+     *     widely-recognised extension phrase.
+     *   - 306 and 418 are the only reserved/"(Unused)" codes; all other entries
+     *     are IANA-assigned. 104 (temporary registration) is intentionally omitted.
+     *
      * Universal return contract: handlers may return any 100-599 status — see
      * template/pages/responses.php#status-range (canonical).
      */
@@ -260,6 +363,7 @@ class App
         302 => 'Found',
         303 => 'See Other',
         304 => 'Not Modified',
+        305 => 'Use Proxy',
         307 => 'Temporary Redirect',
         308 => 'Permanent Redirect',
         // 4xx Client Errors
@@ -276,14 +380,14 @@ class App
         410 => 'Gone',
         411 => 'Length Required',
         412 => 'Precondition Failed',
-        413 => 'Payload Too Large',
+        413 => 'Content Too Large',
         414 => 'URI Too Long',
         415 => 'Unsupported Media Type',
         416 => 'Range Not Satisfiable',
         417 => 'Expectation Failed',
         418 => "I'm a teapot",
         421 => 'Misdirected Request',
-        422 => 'Unprocessable Entity',
+        422 => 'Unprocessable Content',
         423 => 'Locked',
         424 => 'Failed Dependency',
         425 => 'Too Early',
@@ -304,6 +408,25 @@ class App
         508 => 'Loop Detected',
         510 => 'Not Extended',
         511 => 'Network Authentication Required',
+    ];
+
+    /**
+     * Methods ZealPHP recognises. A request whose method is outside this set
+     * gets 501 Not Implemented (Apache: M_INVALID → HTTP_NOT_IMPLEMENTED,
+     * server/protocol.c:1253). Standard RFC 9110 methods plus the common
+     * WebDAV verbs Apache registers in ap_method_registry_init(). A recognised
+     * method that has no matching route still flows through to 404/405/fallback.
+     *
+     * @var array<int, string>
+     */
+    public const KNOWN_METHODS = [
+        'GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'TRACE', 'PATCH',
+        'CONNECT',
+        // WebDAV (RFC 4918 / 3253) — registered by Apache's method registry.
+        'PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK',
+        'VERSION-CONTROL', 'REPORT', 'CHECKOUT', 'CHECKIN', 'UNCHECKOUT',
+        'MKWORKSPACE', 'UPDATE', 'LABEL', 'MERGE', 'BASELINE-CONTROL',
+        'MKACTIVITY', 'ORDERPATCH', 'ACL', 'SEARCH',
     ];
 
     /**
@@ -424,6 +547,14 @@ class App
             }
         });
 
+        // Capture native phpinfo(INFO_MODULES) text ONCE before overriding phpinfo,
+        // so PhpInfo can surface extension-specific detail without recursing into
+        // its own override (and without per-request uopz_unset races). \phpinfo here
+        // is still the original built-in — the uopz override is installed below.
+        \ob_start();
+        \phpinfo(INFO_MODULES);
+        \ZealPHP\Diagnostics\PhpInfo::primeModuleText((string) \ob_get_clean());
+
         // Built-ins always present in CLI/OpenSwoole — uopz can override directly.
         \uopz_set_return('header', \Closure::fromCallable('\ZealPHP\header'), true);
         \uopz_set_return('header_remove', \Closure::fromCallable('\ZealPHP\header_remove'), true);
@@ -444,6 +575,12 @@ class App
         \uopz_set_return('output_reset_rewrite_vars', \Closure::fromCallable('\ZealPHP\output_reset_rewrite_vars'), true);
         \uopz_set_return('is_uploaded_file', \Closure::fromCallable('\ZealPHP\is_uploaded_file'), true);
         \uopz_set_return('move_uploaded_file', \Closure::fromCallable('\ZealPHP\move_uploaded_file'), true);
+        \uopz_set_return('phpinfo', \Closure::fromCallable('\ZealPHP\phpinfo'), true);
+        \uopz_set_return('php_sapi_name', \Closure::fromCallable('\ZealPHP\php_sapi_name'), true);
+        \uopz_set_return('filter_input', \Closure::fromCallable('\ZealPHP\filter_input'), true);
+        \uopz_set_return('filter_input_array', \Closure::fromCallable('\ZealPHP\filter_input_array'), true);
+        \uopz_set_return('header_register_callback', \Closure::fromCallable('\ZealPHP\header_register_callback'), true);
+        \uopz_set_return('error_log', \Closure::fromCallable('\ZealPHP\error_log'), true);
         // Per-coroutine error/exception/shutdown handler registry.
         \uopz_set_return('set_error_handler', \Closure::fromCallable('\ZealPHP\set_error_handler'), true);
         \uopz_set_return('restore_error_handler', \Closure::fromCallable('\ZealPHP\restore_error_handler'), true);
@@ -595,6 +732,84 @@ class App
     }
 
     /**
+     * Apache `DefaultType` / PHP `default_mimetype`. The Content-Type
+     * CharsetMiddleware applies to responses that don't set one. Pass '' to
+     * disable. No-arg call returns the current value.
+     */
+    public static function defaultMimeType(?string $type = null): string
+    {
+        if ($type !== null) self::$default_mimetype = $type;
+        return self::$default_mimetype;
+    }
+
+    /**
+     * Apache `ServerTokens`. Controls the `X-Powered-By` header detail.
+     * No-arg call returns the current setting. See `App::$server_tokens`.
+     */
+    public static function serverTokens(?string $tokens = null): string
+    {
+        if ($tokens !== null) self::$server_tokens = $tokens;
+        return self::$server_tokens;
+    }
+
+    /**
+     * Apache `FileETag`. false ⇒ `ETagMiddleware` emits no ETag and never 304s
+     * (`FileETag None`). No-arg call returns the current value.
+     */
+    public static function fileETag(?bool $enabled = null): bool
+    {
+        if ($enabled !== null) self::$file_etag = $enabled;
+        return self::$file_etag;
+    }
+
+    /**
+     * Resolve the `X-Powered-By` header value for the current `ServerTokens`
+     * setting, or null when the header should be omitted. Consumed at the
+     * response-emission boundary; exposed for introspection/testing.
+     */
+    public static function poweredByHeader(): ?string
+    {
+        return match (strtolower(self::$server_tokens)) {
+            'none', '' => null,
+            'full'     => 'ZealPHP + OpenSwoole',
+            default    => 'ZealPHP',
+        };
+    }
+
+    /**
+     * mod_php-parity SAPI name reported by the php_sapi_name() override.
+     * No-arg call returns the current setting (null = report real PHP_SAPI);
+     * one-arg call opts in to a web SAPI string for legacy-app compatibility.
+     */
+    public static function sapiName(?string $name = null): ?string
+    {
+        if ($name !== null) self::$sapi_name = $name;
+        return self::$sapi_name;
+    }
+
+    /**
+     * Detect whether the request arrived over TLS, for deriving REQUEST_SCHEME /
+     * HTTPS in the $_SERVER builder. Mirrors the session-cookie secure detection
+     * (src/Session/utils.php): a direct HTTPS=on, an X-Forwarded-Proto: https from
+     * a proxy, or SERVER_PORT 443.
+     *
+     * @param array<string, mixed> $srv
+     */
+    private static function requestIsHttps(array $srv): bool
+    {
+        $https = $srv['HTTPS'] ?? '';
+        if (is_scalar($https) && strtolower((string)$https) === 'on') {
+            return true;
+        }
+        $proto = $srv['HTTP_X_FORWARDED_PROTO'] ?? '';
+        if (is_scalar($proto) && strtolower((string)$proto) === 'https') {
+            return true;
+        }
+        $port = $srv['SERVER_PORT'] ?? '';
+        return is_scalar($port) && (string)$port === '443';
+    }
+
+    /**
      * Toggle ZealPHP's per-request session lifecycle. When disabled, the
      * SessionManager / CoSessionManager OnRequest wrapper skips
      * session_start / cookie emission / session write-close — request-context
@@ -609,6 +824,57 @@ class App
     {
         if ($enabled !== null) self::$session_lifecycle = $enabled;
         return self::$session_lifecycle;
+    }
+
+    /**
+     * Register a callback that `ZealAPI::isAuthenticated()` consults.
+     * Signature: `fn(): bool`. The callback decides whether the current
+     * request is authenticated — typically by reading `$_SESSION`,
+     * `$g->session`, or your own auth state.
+     *
+     * Without this hook, `ZealAPI::isAuthenticated()` returns `false`
+     * (fail-closed default), so any API endpoint guarded by
+     * `requirePostAuth()` rejects every request. Fixes the gap surfaced
+     * in [issue #13](https://github.com/sibidharan/zealphp/issues/13).
+     *
+     * Pass `null` (or omit the argument and rely on the existing value)
+     * to read the current checker. Pass a callable to install one.
+     *
+     * Example:
+     *   App::authChecker(fn() => !empty($_SESSION['user_id']));
+     *   App::authChecker(fn() => MyAuth::status() === MyAuth::LOGGED_IN);
+     *
+     * @param callable|null $fn
+     */
+    public static function authChecker(?callable $fn = null): ?callable
+    {
+        if (func_num_args() > 0) self::$auth_checker = $fn;
+        return self::$auth_checker;
+    }
+
+    /**
+     * Register a callback that `ZealAPI::isAdmin()` consults.
+     * Same shape as `authChecker()` — `fn(): bool`, default null.
+     *
+     * @param callable|null $fn
+     */
+    public static function adminChecker(?callable $fn = null): ?callable
+    {
+        if (func_num_args() > 0) self::$admin_checker = $fn;
+        return self::$admin_checker;
+    }
+
+    /**
+     * Register a callback that `ZealAPI::getUsername()` consults.
+     * Signature: `fn(): ?string`. Default null → `getUsername()` returns
+     * null.
+     *
+     * @param callable|null $fn
+     */
+    public static function usernameProvider(?callable $fn = null): ?callable
+    {
+        if (func_num_args() > 0) self::$username_provider = $fn;
+        return self::$username_provider;
     }
 
     /**
@@ -638,6 +904,25 @@ class App
     }
 
     /**
+     * Select how a process-isolated legacy include is dispatched: 'proc'
+     * (default, fresh PHP per request via proc_open — true global scope, full
+     * WordPress/Drupal compatibility) or 'fork' (warm OpenSwoole\Process fork
+     * of the booted worker — ~5× faster, but function-scope so bare-`global`
+     * wiring breaks). See App::$cgi_mode for the full trade-off. No-arg call
+     * returns the current mode. Only takes effect when processIsolation() is on.
+     */
+    public static function cgiMode(?string $mode = null): string
+    {
+        if ($mode !== null) {
+            if ($mode !== 'proc' && $mode !== 'fork') {
+                throw new \InvalidArgumentException("App::cgiMode() expects 'proc' or 'fork', got '{$mode}'.");
+            }
+            self::$cgi_mode = $mode;
+        }
+        return self::$cgi_mode;
+    }
+
+    /**
      * OpenSwoole's `enable_coroutine` server setting — whether each inbound
      * HTTP request is auto-wrapped in its own coroutine. When false,
      * requests run synchronously one at a time per worker (a worker
@@ -649,8 +934,8 @@ class App
      * superglobals mode races the process-wide $_GET/$_POST/$_SESSION
      * arrays across concurrent requests, the original bug ZealPHP's
      * per-coroutine $g context was designed to avoid. **Setting this to
-     * true while $superglobals=true is unsafe — App::run() emits a
-     * [lifecycle] warning to the debug log.**
+     * true while $superglobals=true is REFUSED — App::run() throws
+     * RuntimeException at boot (v0.2.27+).**
      *
      * `null` follows the default coupling.
      */
@@ -670,8 +955,8 @@ class App
      * Default coupling is `!App::$superglobals` (HOOK_ALL when coroutine
      * mode, 0 when superglobals mode). Hooked I/O in superglobals mode is
      * **unsafe** — yields can expose process-wide superglobal mutations
-     * to other concurrent coroutines. App::run() emits a [lifecycle]
-     * warning for that combination.
+     * to other concurrent coroutines. App::run() throws RuntimeException
+     * at boot for that combination (v0.2.27+).
      *
      * Accepts:
      *  - null  → follow default coupling
@@ -694,29 +979,42 @@ class App
     }
 
     /**
-     * Warn about lifecycle combinations that are syntactically allowed but
-     * semantically unsafe. elog() at warn level so the warning lands in
-     * /tmp/zealphp/debug.log; we don't throw — users may have niche
-     * reasons (security audits, debugging). But silently honouring an
-     * override that races $_SESSION across coroutines would be worse than
-     * no API at all.
+     * Refuse to start with lifecycle combinations that race process-wide
+     * superglobals across concurrent coroutines.
+     *
+     * History: pre-v0.2.27 these were elog()'d at warn level so they
+     * landed in /tmp/zealphp/debug.log but didn't refuse — the rationale
+     * was "users may have niche reasons (security audits, debugging)". In
+     * practice the warning was invisible to anyone not actively reading
+     * the debug log, and the unsafe configuration is how cross-request
+     * state-leak bugs ship to production. v0.2.27 changes this to a hard
+     * throw at App::run() boot — fail loud, fail fast, before any
+     * request can be served against a broken contract.
+     *
+     * @throws \RuntimeException When superglobals(true) is combined with
+     *   enableCoroutine(true) or hookAll(non-zero) — both expose
+     *   $_GET/$_POST/$_SESSION (process-wide PHP arrays) to concurrent
+     *   coroutine writes, which races across requests.
      */
     private static function validateLifecycleCombination(bool $sg, int $hookFlags, bool $enableCo): void
     {
         if ($sg && $enableCo) {
-            elog(
-                '[lifecycle] App::superglobals(true) + App::enableCoroutine(true) — '
-                . 'concurrent coroutines will race $_GET/$_POST/$_SESSION (process-wide PHP arrays). '
-                . 'Use superglobals(false) for coroutines, or accept the cross-request state-leak risk.',
-                'warn'
+            throw new \RuntimeException(
+                'ZealPHP lifecycle: App::superglobals(true) + App::enableCoroutine(true) is unsafe. '
+                . 'Concurrent coroutines would race $_GET/$_POST/$_SESSION (process-wide PHP arrays). '
+                . 'Use App::superglobals(false) for coroutine concurrency, or App::enableCoroutine(false) '
+                . 'to keep legacy superglobals semantics with sequential request handling per worker '
+                . '(Apache prefork MPM-style). Refer to /coroutines#lifecycle-modes for the supported '
+                . 'mode matrix.'
             );
         }
         if ($sg && $hookFlags !== 0) {
-            elog(
-                '[lifecycle] App::superglobals(true) + App::hookAll(non-zero) — '
-                . 'hooked I/O can yield mid-request, exposing process-wide superglobal mutations to '
-                . 'concurrent coroutines. Use superglobals(false) when enabling hooks.',
-                'warn'
+            throw new \RuntimeException(
+                'ZealPHP lifecycle: App::superglobals(true) + App::hookAll(non-zero) is unsafe. '
+                . 'Hooked I/O can yield mid-request, exposing process-wide superglobal mutations to '
+                . 'other concurrent coroutines. Use App::superglobals(false) when enabling I/O hooks, '
+                . 'or App::hookAll(0) to keep legacy superglobals semantics. Refer to '
+                . '/coroutines#lifecycle-modes for the supported mode matrix.'
             );
         }
     }
@@ -1248,6 +1546,19 @@ class App
     }
 
     /**
+     * Register a per-worker shutdown hook. Runs inside the worker process when
+     * it exits (max_request recycle, graceful shutdown, or reload), BEFORE the
+     * process terminates — the reliable place to flush per-worker state
+     * (counters, buffered I/O, coverage dumps). Unlike register_shutdown_function,
+     * this fires on OpenSwoole's signal-driven worker stop.
+     * Called as: $fn($server, $workerId)
+     */
+    public static function onWorkerStop(callable $fn): void
+    {
+        self::$workerStopHooks[] = $fn;
+    }
+
+    /**
      * Normalize a methods array (any shape) into a list of uppercase strings.
      *
      * @param array<mixed> $methods
@@ -1579,21 +1890,68 @@ class App
      */
     private static function executeFile(string $absPath, array $args): mixed
     {
+        $g = RequestContext::instance();
+
+        // ── Fragment-mode setup (htmx-essay-style template fragments).
+        // If $args['fragment'] names a region, App::fragment() helpers inside
+        // the template extract it; everything else short-circuits via
+        // HaltException. Save+restore the state slot so nested executeFile()
+        // calls (e.g. App::render() inside a template) compose cleanly.
+        $fragmentName = (isset($args['fragment']) && is_string($args['fragment']))
+            ? $args['fragment']
+            : null;
+        $previousFragmentState = $g->memo['_fragment'] ?? null;
+        if ($fragmentName !== null) {
+            $g->memo['_fragment'] = [
+                'wanted'  => $fragmentName,
+                'matched' => false,
+                'result'  => null,
+            ];
+        }
+
         ob_start();
         $result = null;
         try {
-            $args['g'] = RequestContext::instance();
+            $args['g'] = $g;
             extract($args, EXTR_SKIP);
             $result = include $absPath;
         } catch (HaltException $e) {
-            // Clean halt (redirect, exit) — capture buffered output and return
+            // Clean halt — preserves buffered output as the body (PR #10).
+            // Fragment-capture extension: if App::fragment() matched and the
+            // closure returned a non-null contract-shaped value (int / array
+            // / Generator / Closure / string), surface it as $result so the
+            // universal return contract applies.
+            $haltState = self::getFragmentState();
+            if ($haltState !== null && $haltState['matched'] && $haltState['result'] !== null) {
+                $result = $haltState['result'];
+            } else {
+                // Plain halt (no explicit fragment return) — flag the
+                // buffered echo as the response body via the same code path
+                // PHP's "no explicit return from include" uses ($result === 1).
+                // Without this, the bottom-of-method `return $result` would
+                // throw away the buffered HTML the template echoed before
+                // the halt, defeating the whole point of catching HaltException.
+                $result = 1;
+            }
         } catch (\Throwable $e) {
             @ob_end_clean();
+            self::restoreFragmentState($previousFragmentState);
             throw $e;
         }
         $output = ob_get_clean();
         if ($output === false) {
             $output = '';
+        }
+
+        // Fragment-mode post-flight: requested but no App::fragment('X', ...)
+        // block matched. The template ran to completion and we now have the
+        // full-page output — definitely not what the caller asked for. Per
+        // the universal return contract, surface a 404.
+        $postState = self::getFragmentState();
+        $fragmentMatched = ($postState !== null && $postState['matched']);
+        self::restoreFragmentState($previousFragmentState);
+        if ($fragmentName !== null && !$fragmentMatched) {
+            return 404;
         }
 
         if ($result instanceof \Closure) {
@@ -1622,8 +1980,8 @@ class App
         }
 
         // PHP's `include` returns int(1) when the file has no explicit `return`.
-        // Treat as "no explicit return" — surface the buffered echo (or null).
-        if ($result === 1) {
+        // `return;` (void) yields null. Both should surface buffered output.
+        if ($result === 1 || ($result === null && $output !== '')) {
             return $output !== '' ? $output : null;
         }
 
@@ -1835,6 +2193,129 @@ class App
         yield from self::coerceToStream($result);
     }
 
+    /**
+     * Declare a named region inside a template — the htmx-essay "template
+     * fragment" pattern. The same template renders the full page when called
+     * via `App::render('page', $args)`, and just the named region when called
+     * via `App::render('page', ['fragment' => $name] + $args)`. One file,
+     * two responses — no separate partial file required.
+     *
+     * Three behaviours depending on the parent render's fragment selector:
+     *  - selector is null (normal full-page render) → `$fn()` runs inline,
+     *    its echo flows into the surrounding template, its return value is
+     *    discarded (the parent render's return owns the universal contract).
+     *  - selector matches $name → the page-shell buffer is cleared, `$fn()`
+     *    runs, its return is captured, then `HaltException` short-circuits
+     *    the rest of the template. `executeFile()` propagates the return
+     *    so the closure can `return 404;` / `return ['k'=>'v'];` / yield a
+     *    Generator just like a route handler.
+     *  - selector is set but does not match $name → skipped silently.
+     *
+     * Same return contract as every other entry point: int=status,
+     * array=JSON, string=HTML, Generator=stream, Closure=invoked-and-recursed,
+     * null=use buffered output. See `template/pages/responses.php#return-contract`.
+     *
+     * Example — htmx-style row swap:
+     * ```php
+     * // template/contacts/list.php
+     * <ul>
+     *   <?php foreach ($contacts as $contact): ?>
+     *     <?php App::fragment("contact-{$contact->id}", function() use ($contact) { ?>
+     *       <li id="contact-<?= $contact->id ?>"><?= htmlspecialchars($contact->name) ?></li>
+     *     <?php }); ?>
+     *   <?php endforeach; ?>
+     * </ul>
+     * ```
+     *
+     * Full page: `App::render('contacts/list', ['contacts' => $all])`.
+     * Single row (htmx swap response, same template): `App::render('contacts/list', ['contacts' => $all, 'fragment' => "contact-{$id}"])`.
+     */
+    public static function fragment(string $name, callable $fn): void
+    {
+        $state = self::getFragmentState();
+
+        // Not in fragment-extraction mode — render the region inline as part
+        // of the full page. The callable's return value is discarded; the
+        // parent App::render() / App::include() owns the universal contract.
+        if ($state === null) {
+            $fn();
+            return;
+        }
+
+        if ($state['wanted'] !== $name) {
+            // Fragment-extraction mode, but not this region. Skip silently.
+            return;
+        }
+
+        // Match. Clear the page-shell buffer so only this fragment's output
+        // survives, run the callable, capture its return value, and throw
+        // HaltException to short-circuit the rest of the template.
+        // `executeFile()` catches the throw, surfaces the captured return as
+        // the response's $result, and emits the buffered (fragment-only)
+        // echo as the response body — same universal-return-contract path
+        // every other entry point uses.
+        ob_clean();
+        $state['matched'] = true;
+        $result = $fn();
+        if ($result !== null) {
+            $state['result'] = $result;
+        }
+        // Write the state back as a fresh array. PHPStan can't track nested-
+        // key writes through $g->memo['_fragment']['matched'] because $g->memo
+        // is typed as array<string, mixed>; assigning the whole sub-array
+        // keeps the offset-access checker happy.
+        $g = RequestContext::instance();
+        $g->memo['_fragment'] = $state;
+        throw new HaltException("fragment {$name} captured");
+    }
+
+    /**
+     * Read and narrow the current fragment-extraction state from $g->memo.
+     * `$g->memo` is `array<string, mixed>` so PHPStan can't see the shape of
+     * `$g->memo['_fragment']` without help — this helper does the narrowing
+     * once and returns a typed array (or null when no fragment mode is set).
+     *
+     * @return array{wanted: string, matched: bool, result: mixed}|null
+     */
+    private static function getFragmentState(): ?array
+    {
+        $g = RequestContext::instance();
+        /** @var mixed $state */
+        $state = $g->memo['_fragment'] ?? null;
+        if (!is_array($state)) {
+            return null;
+        }
+        /** @var mixed $wantedRaw */
+        $wantedRaw = $state['wanted'] ?? null;
+        if (!is_string($wantedRaw)) {
+            return null;
+        }
+        return [
+            'wanted'  => $wantedRaw,
+            'matched' => (bool)($state['matched'] ?? false),
+            'result'  => $state['result'] ?? null,
+        ];
+    }
+
+    /**
+     * Restore `$g->memo['_fragment']` to its prior state. Called by
+     * `executeFile()` to undo fragment-mode setup for nested renders and on
+     * error paths. `null` means "no fragment mode was active before" — drop
+     * the slot entirely so the next App::fragment() call falls into the
+     * normal inline-render branch.
+     *
+     * @param mixed $previous
+     */
+    private static function restoreFragmentState($previous): void
+    {
+        $g = RequestContext::instance();
+        if ($previous === null) {
+            unset($g->memo['_fragment']);
+        } else {
+            $g->memo['_fragment'] = $previous;
+        }
+    }
+
     
     /**
      * Returns the current executing script name without extenstion
@@ -1852,25 +2333,126 @@ class App
 
     
     /**
-     * Checks if the given file path is within the public directory.
+     * Boundary-aware containment test: is $candidate the same path as $root, or
+     * a descendant of it?
      *
-     * @param string $abs_file The absolute file path to check.
-     * @return bool Returns true if the file is within the public directory, false otherwise.
+     * Both arguments are expected to already be canonical (realpath'd) absolute
+     * paths — this is the pure decision the symlink-escape guard hangs on, kept
+     * separate so it can be unit-tested without a filesystem.
+     *
+     * A plain `strpos($candidate, $root) === 0` prefix match is unsafe: docroot
+     * `/var/www/public` would wrongly accept the sibling `/var/www/public-data`
+     * (shared string prefix, different directory). We require either an exact
+     * match or that $candidate begins with $root followed by the directory
+     * separator, so only true descendants pass.
+     *
+     * @param string $candidate Canonical absolute path under test.
+     * @param string $root       Canonical absolute document-root path (no trailing slash).
+     */
+    public static function pathWithinRoot(string $candidate, string $root): bool
+    {
+        if ($candidate === '' || $root === '') {
+            return false;
+        }
+        $root = rtrim($root, DIRECTORY_SEPARATOR);
+        if ($candidate === $root) {
+            return true; // the docroot itself
+        }
+        return str_starts_with($candidate, $root . DIRECTORY_SEPARATOR);
+    }
+
+    /**
+     * Checks if the given file path is safe to serve/execute from the document
+     * root. Apache `ap_directory_walk` / `resolve_symlink` parity:
+     *
+     *  - Symlink escape (CRITICAL): we canonicalize BOTH the file and the
+     *    document root with realpath() and require boundary-aware containment.
+     *    realpath() follows every symlink to its target, so a link inside
+     *    docroot pointing outside (e.g. /etc/passwd) resolves to a path that
+     *    fails the containment check and is refused. Apache refuses such links
+     *    at the C level unless `Options +FollowSymLinks` is set; ZealPHP refuses
+     *    them unconditionally on the PHP-served path.
+     *  - Non-regular files: device nodes, FIFOs and sockets are refused
+     *    (Apache request.c:1286-1292 — only REG/DIR pass the directory walk).
+     *  - Dotfile segments (.git, .env, .htaccess, …) are refused when
+     *    App::$block_dotfiles is on.
+     *
+     * Honest limitation: this guard only covers the PHP-served path
+     * (App::include() / serveDirectory() / the implicit file routes). Assets
+     * under the OpenSwoole built-in static handler prefixes (static_handler_
+     * locations — /css/, /js/, …) are served by OpenSwoole's C-level handler
+     * before any PHP runs and have no FollowSymLinks guard; keep those
+     * directories symlink-free in production, or disable enable_static_handler
+     * and route assets through PHP so this check applies.
+     *
+     * @param mixed $abs_file The candidate file path. Callers pass a realpath()
+     *                         result (string|false) or a raw path; the value is
+     *                         validated and re-canonicalized here.
+     * @return bool Returns true if the file is a regular file within the
+     *              document root, false otherwise.
      */
     public function includeCheck($abs_file){
-        $docRoot = self::resolveDocumentRoot();
-        if (!$abs_file || strpos($abs_file, $docRoot) !== 0) {
-            return false; // outside the document root
+        if (!is_string($abs_file) || $abs_file === '') {
+            return false;
+        }
+        // Canonicalize both sides so symlinks are resolved to their real target
+        // before the containment test. realpath() returns false for a path that
+        // does not exist or is unreadable — refuse those too.
+        $realRoot = realpath(self::resolveDocumentRoot());
+        $realFile = realpath($abs_file);
+        if ($realRoot === false || $realFile === false) {
+            return false;
+        }
+        if (!self::pathWithinRoot($realFile, $realRoot)) {
+            return false; // outside the document root (covers symlink escape)
+        }
+        // Apache refuses non-regular files (devices/pipes/sockets) — only
+        // regular files and directories survive the directory walk. Directories
+        // are handled by serveDirectory(); here we require a regular file.
+        if (!is_file($realFile)) {
+            return false;
         }
         if (self::$block_dotfiles) {
-            $relative = substr($abs_file, strlen($docRoot));
-            foreach (explode('/', $relative) as $segment) {
+            $relative = substr($realFile, strlen($realRoot));
+            foreach (explode(DIRECTORY_SEPARATOR, $relative) as $segment) {
                 if ($segment !== '' && $segment[0] === '.') {
                     return false; // dotfile (.git, .env, .htaccess, etc.)
                 }
             }
         }
         return true;
+    }
+
+    /**
+     * ENOTDIR detection for Apache parity (request.c:1244-1250 — "deny rather
+     * than assume not found"). When a path component that should be a directory
+     * is actually a regular file (e.g. /home.php/extra), Apache returns 403, not
+     * 404, deliberately refusing to leak whether the deeper path exists.
+     *
+     * realpath() collapses both ENOENT and ENOTDIR to false, so we walk the
+     * uncanonicalized path: if any non-final ancestor exists and is NOT a
+     * directory, the request hit ENOTDIR. Symlinks are followed by is_dir()/
+     * is_file(), matching the kernel's traversal.
+     *
+     * @param string $absPath The non-canonical absolute path the request mapped to.
+     */
+    public static function isEnotdir(string $absPath): bool
+    {
+        $absPath = rtrim($absPath, DIRECTORY_SEPARATOR);
+        $parent  = dirname($absPath);
+        while ($parent !== '' && $parent !== DIRECTORY_SEPARATOR && $parent !== '.') {
+            if (file_exists($parent)) {
+                // First existing ancestor: if it's a file (not a dir), the
+                // remaining segments could never resolve — that's ENOTDIR.
+                return !is_dir($parent);
+            }
+            $next = dirname($parent);
+            if ($next === $parent) {
+                break;
+            }
+            $parent = $next;
+        }
+        return false;
     }
 
     /**
@@ -1969,7 +2551,9 @@ class App
         $g->server['SCRIPT_FILENAME'] = $absPath;
 
         if (self::$coproc_implicit_request_handler) {
-            return self::cgiSubprocess($absPath);
+            return self::$cgi_mode === 'fork'
+                ? self::cgiFork($absPath)
+                : self::cgiSubprocess($absPath);
         }
         return self::executeFile($absPath, $args);
     }
@@ -1994,7 +2578,9 @@ class App
         // Outside the document root — preserve legacy "trust the caller"
         // semantics while still applying the universal return contract.
         if (self::$coproc_implicit_request_handler) {
-            return self::cgiSubprocess($path);
+            return self::$cgi_mode === 'fork'
+                ? self::cgiFork($path)
+                : self::cgiSubprocess($path);
         }
         return self::executeFile($path, []);
     }
@@ -2010,6 +2596,81 @@ class App
             return rtrim($root, '/');
         }
         return self::$cwd . '/' . rtrim($root, '/');
+    }
+
+    /**
+     * Percent-decode a path repeatedly until it stops changing.
+     *
+     * Apache normalises before each access check, so a double-encoded payload
+     * like `%252e%252e` (which decodes once to `%2e%2e`, then again to `..`)
+     * is caught. A single `rawurldecode()` only peels one layer — leaving the
+     * traversal sequence intact after the first decode. Decoding until stable
+     * closes that gap. The iteration count is capped so a pathological input
+     * (`%2525252525…`) can't spin the CPU; once the cap is hit we return the
+     * partially-decoded form and let the caller's traversal/null-byte checks
+     * run against it (any surviving `..`/`%` is treated conservatively).
+     */
+    public static function decodeUntilStable(string $path, int $maxIterations = 10): string
+    {
+        for ($i = 0; $i < $maxIterations; $i++) {
+            $next = rawurldecode($path);
+            if ($next === $path) {
+                return $path;
+            }
+            $path = $next;
+        }
+        return $path;
+    }
+
+    /**
+     * Normalise a request path the way Apache's `ap_normalize_path()` does
+     * (`server/util.c`): collapse runs of `//` to a single `/` (MergeSlashes,
+     * on by default), drop `/./` segments, and unwind `/segment/../` back over
+     * the preceding segment. A `..` that would climb above root is dropped
+     * (clamped at `/`), matching Apache's behaviour for the routing path.
+     *
+     * Operates on an already percent-decoded, query-stripped path. Returns a
+     * path that always starts with `/` for absolute inputs; a `*` (OPTIONS
+     * asterisk-form) or empty input is returned unchanged.
+     */
+    public static function normalizeRequestPath(string $path): string
+    {
+        if ($path === '' || $path === '*') {
+            return $path;
+        }
+
+        $absolute = $path[0] === '/';
+        $segments = explode('/', $path);
+        /** @var array<int, string> $out */
+        $out = [];
+        foreach ($segments as $segment) {
+            if ($segment === '' || $segment === '.') {
+                // Empty segment = duplicate slash; '.' = current dir. Drop both.
+                continue;
+            }
+            if ($segment === '..') {
+                // Unwind one real segment; clamp at root rather than escaping.
+                if ($out !== [] && end($out) !== '..') {
+                    array_pop($out);
+                } elseif (!$absolute) {
+                    $out[] = '..';
+                }
+                continue;
+            }
+            $out[] = $segment;
+        }
+
+        $normalized = implode('/', $out);
+        if ($absolute) {
+            $normalized = '/' . $normalized;
+        }
+        // Preserve a single trailing slash when the original ended in one and
+        // the result is more than just root, so DirectorySlash handling and
+        // strip-trailing-slash logic see the same shape they did before.
+        if ($normalized !== '/' && substr($path, -1) === '/' && substr($normalized, -1) !== '/') {
+            $normalized .= '/';
+        }
+        return $normalized === '' ? '/' : $normalized;
     }
 
     /**
@@ -2190,6 +2851,223 @@ class App
     }
 
     /**
+     * Warm-fork variant of cgiSubprocess(): instead of proc_open()-ing a fresh
+     * PHP interpreter per request, OpenSwoole\Process forks the already-booted
+     * worker (copy-on-write — the interpreter, Composer autoloader, and opcache
+     * are inherited, so PHP startup + autoload are NOT re-paid). ~5× faster than
+     * 'proc' mode on a trivial file.
+     *
+     * Isolation: the child is a fresh process that runs the file and exits, so
+     * define()/class/ini mutations and any die()/exit() die WITH the child — the
+     * worker is never affected (this is actually safer for die()-heavy legacy
+     * code than the in-process executeFile() path).
+     *
+     * TRADE-OFF vs 'proc': the file is included inside the fork closure, so it
+     * runs in FUNCTION scope, not true global scope. Superglobals
+     * ($_GET/$_POST/$_SESSION/$_SERVER) work (they're always global), but a bare
+     * top-level `$x = ...` is NOT visible via `global $x` in a function — so
+     * unmodified WordPress/Drupal (`global $wpdb;`) need 'proc'. See App::$cgi_mode.
+     *
+     * Streaming note: the child runs to completion and ships one buffered
+     * payload back, so incremental SSE does not stream chunk-by-chunk in fork
+     * mode (an infinite event-stream loop would hang). Use 'proc' mode or a
+     * native coroutine SSE route for live streaming.
+     */
+    private static function cgiFork(string $path): mixed
+    {
+        $g = RequestContext::instance();
+
+        // Snapshot the per-request superglobal state to re-assert in the child.
+        // (The child inherits these COW, but re-setting is explicit + guards
+        // against any worker-level residue.)
+        $ctx = [
+            'server' => $g->server,
+            'get'    => $g->get,
+            'post'   => $g->post,
+            'cookie' => $g->cookie,
+            'files'  => $g->files,
+            'env'    => is_array($g->env ?? null) ? $g->env : $_ENV,
+        ];
+
+        $worker = new \OpenSwoole\Process(function (\OpenSwoole\Process $child) use ($path, $ctx) {
+            $cg = RequestContext::instance();
+
+            // Re-assert superglobals at true global scope (superglobals are
+            // always global even when assigned inside this closure).
+            $_SERVER  = array_merge($_SERVER, $ctx['server']);
+            $_GET     = $ctx['get'];
+            $_POST    = $ctx['post'];
+            $_COOKIE  = $ctx['cookie'];
+            $_FILES   = $ctx['files'];
+            $_ENV     = array_merge($_ENV, $ctx['env']);
+            $_REQUEST = array_merge($_GET, $_POST);
+
+            // Reset the inherited response capture buffers so we ship back ONLY
+            // what THIS include adds. header()/setcookie()/http_response_code()
+            // are uopz-overridden (inherited from the worker) to buffer into
+            // $cg->zealphp_response — we read those lists after the include.
+            $resp = $cg->zealphp_response;
+            if ($resp !== null) {
+                $resp->headersList    = [];
+                $resp->cookiesList    = [];
+                $resp->rawCookiesList = [];
+            }
+            $cg->status = 200;
+
+            // Shutdown-safe payload writer: legacy code that calls die()/exit()
+            // still ships its buffered output + metadata back to the parent.
+            $sent = false;
+            $emit = function () use (&$sent, $child, $resp, $cg) {
+                if ($sent) return;
+                $sent = true;
+                $body = ob_get_level() > 0 ? (string) ob_get_clean() : '';
+                $payload = [
+                    'status'     => is_int($cg->status ?? null) ? $cg->status : 200,
+                    'headers'    => $resp !== null ? $resp->headersList : [],
+                    'cookies'    => $resp !== null ? $resp->cookiesList : [],
+                    'rawcookies' => $resp !== null ? $resp->rawCookiesList : [],
+                    'body'       => $body,
+                ];
+                if (isset($GLOBALS['__zeal_fork_return_set']) && $GLOBALS['__zeal_fork_return_set']) {
+                    $payload['return_value'] = $GLOBALS['__zeal_fork_return'] ?? null;
+                }
+                // Length-prefixed frame: a 4-byte big-endian length header then
+                // the JSON. The parent reads exactly that many bytes — never a
+                // post-EOF read, because OpenSwoole\Process::read() BLOCKS (does
+                // not return '') once the child has exited.
+                $json = (string) json_encode($payload, JSON_UNESCAPED_SLASHES);
+                $child->write(pack('N', strlen($json)) . $json);
+            };
+            register_shutdown_function($emit);
+
+            ob_start();
+            try {
+                $result = include $path;
+                // Universal return contract (mirror cgi_worker.php): invoke a
+                // returned Closure, consume a returned Generator into the body,
+                // drop non-serialisable returns.
+                if ($result instanceof \Closure) {
+                    $result = $result();
+                }
+                if ($result instanceof \Generator) {
+                    foreach ($result as $chunk) {
+                        if (is_scalar($chunk)) { echo (string) $chunk; }
+                    }
+                    $result = null;
+                }
+                if (is_resource($result)
+                    || (is_object($result) && !($result instanceof \JsonSerializable) && !($result instanceof \stdClass))) {
+                    $result = null;
+                }
+                $GLOBALS['__zeal_fork_return']     = $result;
+                $GLOBALS['__zeal_fork_return_set'] = true;
+            } catch (HaltException $e) {
+                // Clean per-request halt — buffered output is the body.
+            } catch (\OpenSwoole\ExitException $e) {
+                // Legacy die()/exit(): PHP already echoed any die("msg") string
+                // into the buffer before the exit unwound. Treat as a clean end
+                // — keep the buffered body + whatever status was set, no trace.
+                // (In fork mode this only ends the child; the worker is safe.)
+            } catch (\Throwable $e) {
+                $cg->status = 500;
+                echo '<pre>' . htmlspecialchars($e->getMessage()) . "\n"
+                   . htmlspecialchars($e->getTraceAsString()) . '</pre>';
+            }
+            $emit();
+            $child->exit(0);
+        }, false, SOCK_STREAM, false); // redirect=false, SOCK_STREAM, enable_coroutine=false
+
+        $pid = $worker->start();
+        if ($pid === false) {
+            elog("cgiFork: failed to fork process for $path", "error");
+            return 500;
+        }
+
+        // Read the length-prefixed frame: 4-byte big-endian header, then
+        // exactly that many payload bytes. Reading the exact length (rather
+        // than looping to EOF) is required — OpenSwoole\Process::read() blocks
+        // forever after the child exits instead of returning ''. The parent
+        // drains concurrently with the child writing, so payloads larger than
+        // the pipe buffer stream through without deadlock.
+        $readN = static function (\OpenSwoole\Process $w, int $n): string {
+            $buf = '';
+            while (strlen($buf) < $n) {
+                $chunk = $w->read($n - strlen($buf));
+                if ($chunk === '' || $chunk === false) break;
+                $buf .= $chunk;
+            }
+            return $buf;
+        };
+        $header = $readN($worker, 4);
+        $raw = '';
+        if (strlen($header) === 4) {
+            $lenInfo = unpack('N', $header);
+            $len = (is_array($lenInfo) && isset($lenInfo[1]) && is_int($lenInfo[1])) ? $lenInfo[1] : 0;
+            if ($len > 0) {
+                $raw = $readN($worker, $len);
+            }
+        }
+        \OpenSwoole\Process::wait(true);
+
+        $meta = json_decode($raw, true);
+        if (!is_array($meta)) {
+            return 500;
+        }
+
+        $statusCode = $meta['status'] ?? 200;
+        response_set_status(is_numeric($statusCode) ? (int) $statusCode : 200);
+
+        $respW = $g->zealphp_response;
+        if ($respW !== null) {
+            foreach ((array) ($meta['headers'] ?? []) as $pair) {
+                if (is_array($pair) && count($pair) >= 2
+                    && is_scalar($pair[0]) && is_scalar($pair[1])) {
+                    $respW->header((string) $pair[0], (string) $pair[1]);
+                }
+            }
+            // Cookie tuples round-tripped through JSON come back as mixed —
+            // narrow each positional arg before re-applying (the tuple shape
+            // is Response::cookie's: name, value, expire, path, domain, secure,
+            // httponly, samesite, priority).
+            $applyCookie = static function (callable $fn, mixed $args): void {
+                if (!is_array($args) || !isset($args[0]) || !is_scalar($args[0])) return;
+                $s = static fn(int $i, string $d): string =>
+                    isset($args[$i]) && is_scalar($args[$i]) ? (string) $args[$i] : $d;
+                $b = static fn(int $i): bool => isset($args[$i]) && (bool) $args[$i];
+                $fn(
+                    (string) $args[0],
+                    $s(1, ''),
+                    isset($args[2]) && is_numeric($args[2]) ? (int) $args[2] : 0,
+                    $s(3, '/'),
+                    $s(4, ''),
+                    $b(5),
+                    $b(6),
+                    $s(7, ''),
+                );
+            };
+            foreach ((array) ($meta['cookies'] ?? []) as $args) {
+                $applyCookie([$respW, 'cookie'], $args);
+            }
+            foreach ((array) ($meta['rawcookies'] ?? []) as $args) {
+                $applyCookie([$respW, 'rawCookie'], $args);
+            }
+        }
+
+        $body = is_string($meta['body'] ?? null) ? $meta['body'] : '';
+        $hasReturn   = array_key_exists('return_value', $meta);
+        $returnValue = $meta['return_value'] ?? null;
+
+        // Same return contract as cgiSubprocess()/executeFile().
+        if ($hasReturn && $returnValue !== null && $returnValue !== 1) {
+            if (is_string($returnValue) && $body !== '') {
+                return $body . $returnValue;
+            }
+            return $returnValue;
+        }
+        return $body !== '' ? $body : null;
+    }
+
+    /**
      * Register a fallback handler for unmatched routes (like Apache's RewriteRule . /index.php [L]).
      */
     public function setFallback(callable $handler): void
@@ -2265,6 +3143,50 @@ class App
     }
 
     /**
+     * Clear previously-accumulated response headers from a handler that then
+     * failed, keeping only the headers that Apache preserves across an error
+     * response (ap_send_error_response: apr_table_clear(r->headers_out) then
+     * re-instate headers required by HTTP protocol for specific status codes).
+     *
+     * Apache parity (http_protocol.c:1246-1292):
+     *   Location        — preserved from err_headers_out for redirect chains.
+     *   WWW-Authenticate — preserved for 401 (mod_auth sets it in err_headers_out,
+     *                      http_request.c:604).
+     *   Allow           — Apache re-adds Allow for 405/501 inside ap_send_error_response
+     *                     after the table clear (http_protocol.c:1289-1292). We preserve
+     *                     any Allow header the framework set before calling renderError()
+     *                     (e.g. the 405 dispatch path) rather than clearing + re-adding.
+     *
+     * Called at the top of renderError() so the policy applies to both custom
+     * handler dispatch and the default error body paths.
+     */
+    private function clearHandlerHeaders(int $status): void
+    {
+        $g = RequestContext::instance();
+        if ($g->zealphp_response === null) {
+            return;
+        }
+        // Always-preserved headers (Apache err_headers_out equivalents):
+        //   location         — redirect chains
+        //   allow            — RFC 9110 §15.5.6: required on 405/501; Apache re-adds
+        //                      after the clear, so we preserve rather than wipe + re-add
+        $preserveNames = ['location', 'allow'];
+        // WWW-Authenticate is only meaningful on 401; preserve it there only so a
+        // handler that happened to set it for a different status can't leak it.
+        if ($status === 401) {
+            $preserveNames[] = 'www-authenticate';
+        }
+        $g->zealphp_response->headersList = array_values(
+            array_filter(
+                $g->zealphp_response->headersList,
+                static function (array $pair) use ($preserveNames): bool {
+                    return in_array(strtolower($pair[0]), $preserveNames, true);
+                }
+            )
+        );
+    }
+
+    /**
      * Render the response for an error status. Dispatches a user-registered
      * handler if one exists (status-specific takes precedence over catch-all);
      * otherwise returns the framework's default body (HTML or JSON per Accept).
@@ -2275,6 +3197,10 @@ class App
     public function renderError(int $status, ?\Throwable $exception = null): \Psr\Http\Message\ResponseInterface
     {
         $g = RequestContext::instance();
+        // Apache ap_send_error_response parity: clear headers the failed handler
+        // accumulated before emitting the error body. Preserves Location (redirect
+        // chains) and, for 401 only, WWW-Authenticate (Basic/Digest challenge).
+        $this->clearHandlerHeaders($status);
         // Recursion guard — if a user-registered error handler itself triggers
         // an error, the nested call falls straight through to the default page
         // instead of looping back into the same handler.
@@ -2315,6 +3241,10 @@ class App
     {
         $g = RequestContext::instance();
         $reason = self::REASON_PHRASES[$status] ?? '';
+        // HEAD strips the body on error responses too (Apache ap_send_error_response
+        // honours r->header_only). Content-Length still reflects the body that a
+        // GET would have produced, so we compute the body then drop it for HEAD.
+        $isHead = (string)($g->server['REQUEST_METHOD'] ?? 'GET') === 'HEAD';
         $accept = strtolower((string)($g->server['HTTP_ACCEPT'] ?? ''));
         $wantsJson = $accept !== ''
             && str_contains($accept, 'application/json')
@@ -2332,8 +3262,14 @@ class App
             if (self::$server_admin !== null && self::$server_admin !== '') {
                 $errorPayload['contact'] = self::$server_admin;
             }
-            $body = json_encode(['error' => $errorPayload], JSON_UNESCAPED_SLASHES);
-            $resp = (new Response($body))
+            $body = (string)json_encode(['error' => $errorPayload], JSON_UNESCAPED_SLASHES);
+            // HEAD strips the body but keeps Content-Length for the entity a GET
+            // would have produced — emitted via the buffered header list (the
+            // same path the normal HEAD dispatch branches use).
+            if ($isHead) {
+                response_add_header('Content-Length', (string)strlen($body));
+            }
+            $resp = (new Response($isHead ? '' : $body))
                 ->withStatus($status)
                 ->withHeader('Content-Type', 'application/json');
             assert($resp instanceof \Psr\Http\Message\ResponseInterface);
@@ -2349,6 +3285,10 @@ class App
         // <address> block Apache appends when ServerSignature is on.
         if (self::$server_admin !== null && self::$server_admin !== '') {
             $body .= "\n<address>Contact: " . htmlspecialchars(self::$server_admin) . "</address>";
+        }
+        if ($isHead) {
+            response_add_header('Content-Length', (string)strlen($body));
+            return (new Response(''))->withStatus($status);
         }
         return (new Response($body))->withStatus($status);
     }
@@ -2437,41 +3377,12 @@ class App
                 if ($wasDaemonized && !isset($flags['daemonize'])) {
                     $flags['daemonize'] = true;
                 }
-                // Fork a watcher child whose only job is to poll for the new
-                // PID file and print "Restarted (pid X, port Y)". The actual
-                // start happens in the original process (parent of the fork),
-                // which falls through and eventually calls $server->start() —
-                // that daemonizes internally, so we can't print success from
-                // there. The watcher gives the user clear confirmation that
-                // the new server came up.
-                if (function_exists('pcntl_fork')) {
-                    $port = $flags['port'] ?? (self::$instance ? self::$instance->port : 8080);
-                    $watcherPid = pcntl_fork();
-                    if ($watcherPid === 0) {
-                        // Detach so the watcher survives independently and
-                        // doesn't show up in the parent's process group.
-                        if (function_exists('posix_setsid')) { @posix_setsid(); }
-                        $newPid = 0;
-                        for ($i = 0; $i < 50; $i++) {   // poll up to 5s
-                            usleep(100000);
-                            if (file_exists($pidFile)) {
-                                $candidate = (int)trim(@file_get_contents($pidFile) ?: '');
-                                if ($candidate > 0 && @posix_kill($candidate, 0)) {
-                                    $newPid = $candidate;
-                                    break;
-                                }
-                            }
-                        }
-                        if ($newPid > 0) {
-                            echo "Restarted (pid {$newPid}, port {$port}).\n";
-                        } else {
-                            echo "Restarted but could not confirm — check `php app.php status`.\n";
-                        }
-                        exit(0);
-                    }
-                    // parent (original CLI process) continues to start the server
-                }
-                // fall through to start
+                // The "Restarted (pid X, port Y)" confirmation is printed by
+                // forkStartupReporter() in the shared 'default' start path
+                // below — it forks so the terminal-attached process prints
+                // the message AFTER the new daemon is confirmed up, instead
+                // of the prompt returning first and the message overlapping
+                // the next command (issue #17). Fall through to start.
             default:
                 $pidFile = self::resolvePidFile($flags);
                 if ($command === 'start' && file_exists($pidFile)) {
@@ -2492,8 +3403,72 @@ class App
                 if (isset($flags['daemonize'])) { $overrides['daemonize'] = true; }
                 if (isset($flags['task_worker_num'])) { $overrides['task_worker_num'] = $flags['task_worker_num']; }
                 if (isset($flags['pid_file'])) { $overrides['pid_file'] = $flags['pid_file']; }
+                // Daemonized start/restart: fork so the terminal-attached
+                // parent prints the confirmation AFTER the new daemon is up
+                // (issue #17). The child returns these overrides and goes on
+                // to boot the self-daemonizing server. A foreground start
+                // (no -d) blocks in run() and needs no confirmation line.
+                if (isset($flags['daemonize'])) {
+                    $port = $flags['port'] ?? (self::$instance ? self::$instance->port : 8080);
+                    $verb = $command === 'restart'
+                        ? 'Restarted'
+                        : 'Started ZealPHP in detached mode';
+                    self::forkStartupReporter($pidFile, (int)$port, $verb);
+                }
                 return $overrides;
         }
+    }
+
+    /**
+     * For daemonized start/restart: fork so the terminal-attached parent
+     * polls for the new daemon's PID file and prints a confirmation line
+     * BEFORE the shell prompt returns, while the child goes on to boot the
+     * (self-daemonizing) server. The parent never touches OpenSwoole — it
+     * only watches the PID file and exits, so the confirmation is always the
+     * last thing written to the terminal (fixes the issue #17 race where the
+     * prompt returned first and the message overlapped the next command).
+     *
+     * No-op when pcntl is unavailable or the fork fails: start proceeds
+     * without a confirmation line (prior behaviour), never silently broken.
+     *
+     * @param string $verb e.g. "Restarted" or "Started ZealPHP in detached mode"
+     *
+     * Forks + polls the daemon PID file and exits in the child — neither
+     * unit-testable in-process (pcntl_fork/exit kills the test runner) nor
+     * dumpable as a subprocess (the OpenSwoole server suppresses the PHP
+     * shutdown coverage flush). Verified manually + by the CLI behaviour.
+     * @codeCoverageIgnore
+     */
+    private static function forkStartupReporter(string $pidFile, int $port, string $verb): void
+    {
+        if (!function_exists('pcntl_fork')) {
+            return; // proceed to boot in-process — no confirmation possible
+        }
+        $childPid = pcntl_fork();
+        if ($childPid <= 0) {
+            // Child (0) boots the server; -1 (fork failed) also proceeds so
+            // start is never blocked by the inability to report.
+            return;
+        }
+        // Parent (terminal-attached): wait for the daemon to write its PID
+        // file, print the confirmation, then exit so the prompt comes last.
+        $newPid = 0;
+        for ($i = 0; $i < 50; $i++) {   // poll up to 5s
+            usleep(100000);
+            if (file_exists($pidFile)) {
+                $candidate = (int)trim(@file_get_contents($pidFile) ?: '');
+                if ($candidate > 0 && @posix_kill($candidate, 0)) {
+                    $newPid = $candidate;
+                    break;
+                }
+            }
+        }
+        if ($newPid > 0) {
+            echo "{$verb} (pid {$newPid}, port {$port}).\n";
+        } else {
+            echo "{$verb}, but could not confirm — check `php app.php status`.\n";
+        }
+        exit(0);
     }
 
     /**
@@ -3129,7 +4104,17 @@ HELP;
             $this->patternRoute('/.*\.php', ['methods' => ['GET', 'POST']], function($response) {
                 $app = App::instance();
                 assert($app !== null);
-                return $app->renderError(403);
+                // Apache parity (#25): a `.php` file that exists on disk but is
+                // blocked from direct access is 403 Forbidden; a `.php` URL with
+                // no backing file is 404 Not Found — "doesn't exist" must not
+                // masquerade as "no permission".
+                $g = \ZealPHP\RequestContext::instance();
+                $reqPath = parse_url((string)($g->server['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+                $reqPath = is_string($reqPath) ? rawurldecode($reqPath) : '';
+                $docRoot = App::resolveDocumentRoot();
+                $abs = realpath($docRoot . '/' . ltrim($reqPath, '/'));
+                $exists = $abs !== false && is_file($abs) && str_starts_with($abs, $docRoot . '/');
+                return $app->renderError($exists ? 403 : 404);
             });
         }
 
@@ -3152,7 +4137,7 @@ HELP;
         # Implicit route for index.php
 
         $this->route('/',[
-            'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+            'methods' => ['GET', 'POST']
         ], function($response){
             $docRoot = self::resolveDocumentRoot();
             if (file_exists($docRoot . '/index.php')) {
@@ -3164,7 +4149,7 @@ HELP;
 
         # Global route for all files in the root of the public directory
         $this->route(App::$ignore_php_ext ? '/{file}/?' : '/{file}(\.php)?/?', [
-            'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+            'methods' => ['GET', 'POST']
         ], function(string $file, $response){
             # if file ends with .php remove it
             if (substr($file, -4) == '.php') {
@@ -3181,12 +4166,17 @@ HELP;
                 }
                 return $result;
             }
+            // Apache parity: a path component that is a file rather than a
+            // directory (ENOTDIR) is 403, not 404 — deny rather than leak.
+            if (self::isEnotdir($docRoot . '/' . $file)) {
+                return 403;
+            }
             return $this->invokeFallbackOrNotFound();
         });
 
         # Global route for all directories and sub directories in the public directory
         $this->nsPathRoute('{dir}', App::$ignore_php_ext ? '{uri}/?' : '{uri}(\.php)?/?', [
-            'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+            'methods' => ['GET', 'POST']
         ], function(string $dir, string $uri, $response){
             elog("Directory: $dir, URI: $uri");
             # if uri ends with .php remove it
@@ -3203,6 +4193,10 @@ HELP;
                     return $this->invokeFallbackOrNotFound();
                 }
                 return $result;
+            }
+            // Apache parity: ENOTDIR (a path component is a file) is 403, not 404.
+            if (self::isEnotdir($docRoot . '/' . $dir . '/' . $uri)) {
+                return 403;
             }
             return $this->invokeFallbackOrNotFound();
         });
@@ -3317,9 +4311,52 @@ HELP;
                     }
                 }
             }
+            // mod_php parity: keys OpenSwoole's $request->server doesn't provide.
+            // GATEWAY_INTERFACE is the CGI/1.1 constant mod_php always sets;
+            // REQUEST_SCHEME + HTTPS are derived from the request (honoring
+            // X-Forwarded-Proto behind a trusted proxy). HTTPS is only set under
+            // TLS, matching mod_php (the key is absent on plain HTTP).
+            $srv += ['GATEWAY_INTERFACE' => 'CGI/1.1'];
+            if (self::requestIsHttps($srv)) {
+                $srv['REQUEST_SCHEME'] = 'https';
+                $srv['HTTPS'] = $srv['HTTPS'] ?? 'on';
+            } else {
+                $srv['REQUEST_SCHEME'] = $srv['REQUEST_SCHEME'] ?? 'http';
+            }
             /** @var array<string, bool|float|int|string|null> $srvFinal */
             $srvFinal = $srv;
             $g->server = $srvFinal;
+
+            // v0.2.27 — superglobals(true) mode populates PHP's $_GET, $_POST,
+            // $_COOKIE, $_FILES, $_SERVER, $_REQUEST from the OpenSwoole request.
+            // Restores v0.1.x behaviour that was lost when G switched to declared
+            // properties (commit 900c18a). Legacy code using $_GET['foo'] works
+            // without rewriting it as $g->get['foo'], which is the entire point
+            // of the `$superglobals = true` flag. Race-safe under the documented
+            // superglobals(true) + enableCoroutine(false) pairing; the unsafe
+            // combination is already flagged at App::run() boot time. $_SESSION
+            // is intentionally NOT touched here — the session manager owns its
+            // own write path (file load + uopz session_start).
+            if (App::$superglobals) {
+                $GLOBALS['_GET']     = $get;
+                $GLOBALS['_POST']    = $post;
+                $GLOBALS['_COOKIE']  = $cookie;
+                $GLOBALS['_FILES']   = $files;
+                $GLOBALS['_SERVER']  = $srvFinal;
+                $GLOBALS['_REQUEST'] = $g->request;
+                // v0.2.30 (issue #17) — make $g->get/post/cookie/files/server/
+                // request LIVE ALIASES of the superglobals, not per-request
+                // snapshots. A declared `public array $get` is accessed
+                // directly and shadows __get/__set, so a $_GET mutation after
+                // dispatch wasn't visible through $g->get (and vice versa).
+                // unset() the declared typed slots so reads/writes route
+                // through RequestContext::__get()/__set(), which proxy to
+                // $GLOBALS['_GET'] etc. by reference — the same live-alias
+                // mechanism the session manager already applies to
+                // $g->session. In superglobals mode the two names are now
+                // genuinely the same array.
+                unset($g->get, $g->post, $g->cookie, $g->files, $g->server, $g->request);
+            }
 
             $serverRequest  = new \ZealPHP\HTTP\LazyServerRequest($request->parent);
 
@@ -3360,8 +4397,23 @@ HELP;
                 }
 
                 if ($response->parent->isWritable()) {
+                    // mod_php header_register_callback() — fire once just before
+                    // headers flush so header() calls inside it still land.
+                    $headerCb = $g->memo['_header_callback'] ?? null;
+                    if (is_callable($headerCb)) {
+                        unset($g->memo['_header_callback']);
+                        try {
+                            $headerCb();
+                        } catch (\Throwable $e) {
+                            elog("header_register_callback threw: " . $e->getMessage(), 'error');
+                        }
+                    }
                     $response->flush();
-                    $response->parent->header('X-Powered-By', 'ZealPHP + OpenSwoole');
+                    // Apache ServerTokens parity — value/omission per App::$server_tokens.
+                    $poweredBy = self::poweredByHeader();
+                    if ($poweredBy !== null) {
+                        $response->parent->header('X-Powered-By', $poweredBy);
+                    }
                     // Threaded emit — use App::emitStatus() instead of vendor
                     // Response::emit()'s one-arg status() call, so codes like
                     // 451 (missing from OpenSwoole's native C list) emit
@@ -3441,6 +4493,16 @@ HELP;
         // peak RSS, and uptime so the max_request backstop is visible in prod
         // logs. Set ZEALPHP_RECYCLE_LOG=0 to silence.
         $server->on('workerStop', function($server, $workerId) {
+            // User-registered per-worker shutdown hooks run first, before the
+            // recycle-log line — so a hook can flush state even if logging is off.
+            foreach (self::$workerStopHooks as $hook) {
+                try {
+                    $hook($server, $workerId);
+                } catch (\Throwable $e) {
+                    // A failing shutdown hook must not abort worker teardown.
+                    \ZealPHP\elog('[workerStop hook] ' . $e->getMessage(), 'warn');
+                }
+            }
             if (\ZealPHP\env_flag('ZEALPHP_RECYCLE_LOG', true) === false) {
                 return;
             }
@@ -3603,6 +4665,14 @@ class ResponseMiddleware implements MiddlewareInterface
                 App::emitStatus($g->openswoole_response, $streamStatus);
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->header('Accept-Ranges', 'none');
+                // HEAD: send headers only, never the streamed body (Apache
+                // strips content buckets via ctx->final_header_only). Streaming
+                // length is unknown/chunked, so no Content-Length is emitted.
+                if ($method === 'HEAD') {
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                    $g->openswoole_response->end();
+                    return (new Response('', $streamStatus));
+                }
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->flush();
                 foreach ($object as $chunk) {
@@ -3725,6 +4795,14 @@ class ResponseMiddleware implements MiddlewareInterface
                 App::emitStatus($g->openswoole_response, $streamStatus);
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->header('Accept-Ranges', 'none');
+                // HEAD: send headers only, never the streamed body (Apache
+                // strips content buckets via ctx->final_header_only). Streaming
+                // length is unknown/chunked, so no Content-Length is emitted.
+                if ($method === 'HEAD') {
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                    $g->openswoole_response->end();
+                    return (new Response('', $streamStatus));
+                }
                 // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
                 $g->zealphp_response->flush();
                 foreach ($object as $chunk) {
@@ -3846,6 +4924,28 @@ class ResponseMiddleware implements MiddlewareInterface
         }
     }
 
+    /**
+     * Reconstruct the request line + headers for a TRACE echo body, mirroring
+     * Apache's ap_send_http_trace() (http_filters.c:1130). Format is the request
+     * line, each header as `Name: value`, then a terminating blank line — the
+     * message/http representation the client sent. Header names/values are
+     * passed through verbatim (TRACE is an introspection echo); CR/LF inside a
+     * value is stripped so a crafted header can't inject extra wire lines.
+     *
+     * @param array<string, string> $headers
+     */
+    public static function buildTraceEcho(string $method, string $uri, string $protocol, array $headers): string
+    {
+        $crlf = "\r\n";
+        $out = $method . ' ' . $uri . ' ' . $protocol . $crlf;
+        foreach ($headers as $name => $value) {
+            $cleanName = str_replace(["\r", "\n"], '', $name);
+            $cleanValue = str_replace(["\r", "\n"], '', $value);
+            $out .= $cleanName . ': ' . $cleanValue . $crlf;
+        }
+        return $out . $crlf;
+    }
+
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $g = RequestContext::instance();
@@ -3858,12 +4958,70 @@ class ResponseMiddleware implements MiddlewareInterface
         // Apache rejects these at the URI parse layer; we do the same so encoded
         // attacks (%2e%2e, %00, backslash) can't survive past pattern matching.
         $parsedPath = parse_url($uri, PHP_URL_PATH);
-        $path = is_string($parsedPath) ? $parsedPath : $uri;
-        $decoded = rawurldecode($path);
+        $rawPath = is_string($parsedPath) ? $parsedPath : $uri;
+
+        // Apache AllowEncodedSlashes Off (default): an encoded slash in the RAW
+        // path is refused with 404 before it can be decoded to a real `/`. Check
+        // the pre-decode bytes — once decoded, %2F is indistinguishable from a
+        // literal slash. Gated by App::$allow_encoded_slashes (default false).
+        if (!App::$allow_encoded_slashes && stripos($rawPath, '%2f') !== false) {
+            return $app->renderError(404);
+        }
+
+        // Decode-until-stable: Apache normalises before each access check, so a
+        // double-encoded payload (%252e%252e -> %2e%2e -> ..) is caught. A single
+        // rawurldecode() peels only one layer. Decode repeatedly (capped) then run
+        // the traversal/null-byte/backslash checks against the fully-decoded form.
+        $decoded = App::decodeUntilStable($rawPath);
         if (strpos($decoded, "\0") !== false
             || strpos($decoded, '\\') !== false
             || preg_match('#(^|/)\.\.(/|$)#', $decoded)) {
             return $app->renderError(400);
+        }
+
+        // Apache ap_normalize_path: collapse `//` -> `/` and drop `/./` segments
+        // before route matching, so `//admin//` and `/./admin` cannot bypass a
+        // pattern route guarding `/admin`. Rebuild REQUEST_URI from the normalised
+        // path so every downstream consumer (PATH_INFO, route table) sees one form.
+        $path = App::normalizeRequestPath($rawPath);
+        if ($path !== $rawPath) {
+            $qs = parse_url($uri, PHP_URL_QUERY);
+            $uri = $path . (is_string($qs) && $qs !== '' ? '?' . $qs : '');
+            $g->server['REQUEST_URI'] = $uri;
+        }
+
+        // RFC 9112 §3.2: an HTTP/1.1 request MUST carry a Host header; a server
+        // MUST reject one that lacks it with 400. HTTP/1.0 is exempt (Host is
+        // optional there). curl-based clients always send Host, so this only
+        // bites malformed/raw requests — the vhost-confusion / smuggling surface.
+        if (($g->server['SERVER_PROTOCOL'] ?? '') === 'HTTP/1.1' && !isset($g->server['HTTP_HOST'])) {
+            return $app->renderError(400);
+        }
+
+        // RFC 9110 §15.6.2 / Apache server/protocol.c:1253 — a method the server
+        // does not recognise gets 501 Not Implemented, not 404. This distinguishes
+        // "I don't know this verb" from "no such resource". Known methods (incl.
+        // HEAD/OPTIONS/TRACE and the WebDAV verbs) fall through to normal routing,
+        // where an unmatched-but-known method still resolves to 404/405/fallback.
+        if (!in_array($method, App::KNOWN_METHODS, true)) {
+            return $app->renderError(501);
+        }
+
+        // Apache LimitRequestFields — reject requests that carry more header
+        // fields than the configured limit. Apache enforces this at
+        // ap_get_mime_headers_core (protocol.c:930-940) with a 400 response.
+        // We replicate it here at the PHP layer after OpenSwoole has parsed the
+        // header array. A limit of 0 disables the check (unlimited).
+        if (App::$limit_request_fields > 0) {
+            $headerCount = 0;
+            foreach (array_keys($g->server) as $sk) {
+                if (str_starts_with((string)$sk, 'HTTP_')) {
+                    $headerCount++;
+                }
+            }
+            if ($headerCount > App::$limit_request_fields) {
+                return $app->renderError(400);
+            }
         }
 
         // Apache PATH_INFO — `/script.php/extra/path` exposes `/extra/path` to
@@ -3890,12 +5048,36 @@ class ResponseMiddleware implements MiddlewareInterface
             }
         }
 
-        // TRACE — disabled by default (XST attack vector). Apache TraceEnable
-        // default is OFF; mirror that. Set App::traceEnabled(true) to allow.
-        if ($method === 'TRACE' && !App::$trace_enabled) {
-            response_set_status(405);
-            response_add_header('Allow', 'GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH');
-            return new Response('', 405);
+        // TRACE — disabled by default (XST attack vector). Apache's compiled
+        // default is On, but ZealPHP ships TraceEnable Off as a hardening choice.
+        // Set App::traceEnabled(true) to opt into the Apache ap_send_http_trace()
+        // behaviour: echo the request back as a message/http body.
+        if ($method === 'TRACE') {
+            if (!App::$trace_enabled) {
+                response_set_status(405);
+                response_add_header('Allow', 'GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH');
+                return new Response('', 405);
+            }
+            $req = $g->zealphp_request;
+            // Apache (non-extended TraceEnable On) refuses a request body with
+            // 413 — only AP_TRACE_EXTENDED echoes it, and ZealPHP's boolean knob
+            // maps to the non-extended mode (http_filters.c:1082).
+            $bodyRaw = $req instanceof \ZealPHP\HTTP\Request ? $req->rawContent() : null;
+            if (is_string($bodyRaw) && $bodyRaw !== '') {
+                return $app->renderError(413);
+            }
+            $headers = ($req instanceof \ZealPHP\HTTP\Request && is_array($req->header))
+                ? $req->header
+                : [];
+            $body = self::buildTraceEcho(
+                $method,
+                $uri,
+                (string)($g->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1'),
+                $headers
+            );
+            response_set_status(200);
+            response_add_header('Content-Type', 'message/http');
+            return new Response($body, 200);
         }
 
         // Apache: RewriteCond %{REQUEST_FILENAME} !-d
@@ -3924,6 +5106,14 @@ class ResponseMiddleware implements MiddlewareInterface
 
         // OPTIONS — return allowed methods for this URI without running a handler
         if ($method === 'OPTIONS') {
+            // RFC 9110 §9.3.7 / Apache http_core.c:336 — `OPTIONS *` is a
+            // server-wide capability probe ("HTTP pong"), not resource-specific:
+            // 200 with an empty body and no Allow header. The request target `*`
+            // arrives as the raw REQUEST_URI (query string never applies to `*`).
+            if ($uri === '*') {
+                response_set_status(200);
+                return new Response('', 200);
+            }
             $allowed = ['OPTIONS'];
             foreach ($app->routesByMethod() as $m => $routes) {
                 foreach ($routes as $route) {
@@ -3954,6 +5144,30 @@ class ResponseMiddleware implements MiddlewareInterface
                 return $this->dispatchRoute($route, $params, $method);
             }
         }
+        // RFC 9110 §15.5.6: the URI matches a registered route for some method
+        // but not this one → 405 Method Not Allowed + an `Allow` header listing
+        // the supported methods (distinct from 404 = "no such resource"). The
+        // implicit static routes are GET/HEAD/POST-only, so PUT/DELETE/PATCH on a
+        // file-style path correctly 405s (Apache's static handler does the same);
+        // a path matching no route at all falls through to the fallback / 404.
+        $allowed = [];
+        foreach ($app->routesByMethod() as $m => $routes) {
+            foreach ($routes as $route) {
+                if (preg_match($route['pattern'], $uri)) {
+                    $allowed[] = $m;
+                    if ($m === 'GET') {
+                        $allowed[] = 'HEAD';
+                    }
+                    break;
+                }
+            }
+        }
+        if ($allowed !== []) {
+            $allowed[] = 'OPTIONS';
+            response_add_header('Allow', implode(', ', array_values(array_unique($allowed))));
+            return $app->renderError(405);
+        }
+
         $fallback = App::getFallback();
         if ($fallback !== null) {
             return $this->dispatchRoute($fallback, [], $method);

@@ -63,20 +63,38 @@ PHP]); ?>
 <p>API handlers get the same parameter injection as route handlers:</p>
 
 <?php App::render('/components/_code', [
-    'label' => 'Magic parameters: $request, $response, $app, $server',
+    'label' => 'Magic parameters: $request, $response, $app, $server (auto-injected by name)',
     'code'  => <<<'PHP'
 <?php
+use ZealPHP\RequestContext;
+
 $get = function($request, $response) {
-    // $request  → ZealPHP\HTTP\Request (incoming request)
-    // $response → ZealPHP\HTTP\Response (outgoing response)
-    // $this     → ZealAPI instance (via Closure::bind)
+    // ZealAPI's dispatcher injects these by parameter name (reflection-cached):
+    //   $request  → ZealPHP\HTTP\Request  (wrapped OpenSwoole request)
+    //   $response → ZealPHP\HTTP\Response (wrapped OpenSwoole response)
+    //   $app      → ZealAPI instance      (same as $this)
+    //   $server   → \OpenSwoole\Http\Server (raw OpenSwoole server handle)
+    //   $this     → ZealAPI instance      (handler runs inside Closure::bind)
+    // Any other named parameter receives its default value (or null if none).
 
-    $id = $this->_request->get['id'] ?? null;
-    if (!$id) return 400;
+    // Pull a query param via the injected request — the cleanest form:
+    $id = $request->get['id'] ?? null;
+    //                  ^ ZealPHP\HTTP\Request->get is the OpenSwoole-parsed
+    //                    query array (per-request, NOT the $_GET superglobal).
 
-    return ['user' => User::find($id)];
+    if (!$id) return 400;                      // int return = HTTP status (universal contract)
+
+    // Need $g (session, cookies, server vars)? Grab it explicitly:
+    $g = RequestContext::instance();
+    if (empty($g->session['user'])) return 401;
+
+    return ['user' => User::find($id)];        // array return = JSON body (universal contract)
 };
 PHP]); ?>
+
+<div class="callout info" style="margin-top:.5rem">
+<strong>Three equivalent ways to read query params</strong> inside an API handler — all are per-request safe (none touch the process-wide <code>$_GET</code> superglobal): <code>$request-&gt;get['id']</code> (injected parameter, cleanest), <code>RequestContext::instance()-&gt;get['id']</code> (useful when you also need <code>$g-&gt;session</code>), or <code>$this-&gt;_request-&gt;get['id']</code> (legacy form — works because the closure is bound to the <code>ZealAPI</code> instance and <code>$_request</code> is the same wrapper). Prefer the injected <code>$request</code> for new code. ZealAPI does NOT auto-inject <code>$g</code> by name — call <code>RequestContext::instance()</code> explicitly when you need it.
+</div>
 
 <h2>Streaming from APIs</h2>
 <p>API handlers can return Generators for streaming responses:</p>
@@ -109,7 +127,74 @@ PHP]); ?>
 <tr><td><code>$this->die($exception)</code></td><td>Handle exception and send error response</td></tr>
 <tr><td><code>$this->get_request_method()</code></td><td>Returns GET, POST, PUT, DELETE</td></tr>
 <tr><td><code>$this->setContentType($type)</code></td><td>Set response content type</td></tr>
+<tr><td><code>$this->isAuthenticated()</code></td><td>Consults <code>App::authChecker()</code>. Default <code>false</code>. See below.</td></tr>
+<tr><td><code>$this->isAdmin()</code></td><td>Consults <code>App::adminChecker()</code>. Default <code>false</code>.</td></tr>
+<tr><td><code>$this->getUsername()</code></td><td>Consults <code>App::usernameProvider()</code>. Default <code>null</code>.</td></tr>
+<tr><td><code>$this->requirePostAuth()</code></td><td>POST + authenticated guard. Returns <code>false</code> and emits <code>403</code> JSON on failure.</td></tr>
 </table>
+
+<h2 id="auth-hooks">Pluggable auth hooks <span class="badge" style="font-size:.65rem;background:#fbbf24;color:#1c1917;padding:.05rem .35rem;border-radius:3px;margin-left:.25rem">v0.2.25</span></h2>
+<p>
+  ZealAPI doesn't know what your auth system looks like — your app might use ZealPHP sessions, a Symfony bundle, the SelfMade Ninja stack, a custom OAuth flow, or JWT in a header. So the framework <strong>doesn't bake an auth check in</strong>. Instead it consults three optional callbacks you register on <code>App</code>. They default to fail-closed values (<code>false</code>, <code>false</code>, <code>null</code>) so endpoints guarded by <code>requirePostAuth()</code> reject everything until you wire them up.
+</p>
+
+<table class="ztable" style="margin-bottom:1rem">
+<tr><th>Setter</th><th>Signature</th><th>Consumed by</th><th>Default</th></tr>
+<tr><td><code>App::authChecker(?callable)</code></td><td><code>fn(): bool</code></td><td><code>ZealAPI::isAuthenticated()</code></td><td><code>false</code></td></tr>
+<tr><td><code>App::adminChecker(?callable)</code></td><td><code>fn(): bool</code></td><td><code>ZealAPI::isAdmin()</code></td><td><code>false</code></td></tr>
+<tr><td><code>App::usernameProvider(?callable)</code></td><td><code>fn(): ?string</code></td><td><code>ZealAPI::getUsername()</code></td><td><code>null</code></td></tr>
+</table>
+
+<p>Wire them <strong>once</strong>, in your app's boot file (or in a framework wrapper's bootstrap if you're shipping a multi-app platform). Every ZealAPI handler downstream inherits the answers — no per-handler boilerplate.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'app.php — wiring ZealAPI auth to your own session',
+    'code'  => <<<'PHP'
+<?php
+use ZealPHP\App;
+
+require __DIR__ . '/vendor/autoload.php';
+
+// Register the three hooks ONCE during boot. ZealPHP doesn't care what
+// auth system you use — it just asks you. Callbacks run on each
+// requirePostAuth() / isAuthenticated() / isAdmin() / getUsername() call,
+// so you can read $_SESSION / $g->session / a JWT header / a global —
+// whatever lives at the moment the API handler dispatches.
+App::authChecker(fn(): bool       => !empty($_SESSION['user_id']));
+App::adminChecker(fn(): bool      => ($_SESSION['role'] ?? '') === 'admin');
+App::usernameProvider(fn(): ?string => $_SESSION['username'] ?? null);
+
+App::superglobals(true);  // because we read $_SESSION above
+$app = App::init('0.0.0.0', 8080);
+$app->run();
+PHP,
+]); ?>
+
+<?php App::render('/components/_code', [
+    'label' => 'api/users/delete.php — handler-side use',
+    'code'  => <<<'PHP'
+<?php
+// File: api/users/delete.php → POST /api/users/delete
+$delete = function() {
+    // POST + authenticated guard. Sends 403 JSON and returns false if
+    // either check fails — short-circuits the handler.
+    if (!$this->requirePostAuth()) return;
+
+    // Admin-only operation? Compose checks naturally:
+    if (!$this->isAdmin()) {
+        return $this->response($this->json(['error' => 'admin_only']), 403);
+    }
+
+    $username = $this->getUsername();   // for audit log
+    User::delete($_POST['id'], $username);
+    return ['ok' => true];
+};
+PHP,
+]); ?>
+
+<div class="callout info" style="margin-top:.5rem">
+<strong>Why three orthogonal setters instead of one auth-provider interface?</strong> Most apps need only <code>isAuthenticated()</code>; a few need <code>isAdmin()</code> too; a smaller subset wants <code>getUsername()</code> for logging. Three closures means the trivial case is one line, the polished case is three. The setters follow the existing <code>App::superglobals()</code> / <code>App::sessionLifecycle()</code> fluent precedent — same shape, same lifecycle (configure before <code>App::init()</code>, queried by ZealAPI at request time). See <a href="/learn/auth">the auth lesson</a> for a worked example with a real session.
+</div>
 
 <h2>Live ZealAPI endpoints</h2>
 <?php
@@ -154,9 +239,9 @@ foreach ($demos as [$id, $title, $url, $code]) {
     'url'   => '/api/bug/bad',
     'code'  => <<<'PHP'
 // api/bug/bad.php
-$bad = function() {
-    if ($this->paramExist(['id'])) {   // ← typo
-        return ['id' => $_GET['id'] ?? 'n/a'];
+$bad = function($request) {
+    if ($this->paramExist(['id'])) {   // ← typo (real method is paramsExists)
+        return ['id' => $request->get['id'] ?? 'n/a'];
     }
 };
 PHP,

@@ -7,19 +7,51 @@ use ZealPHP\RequestContext;
  * Decode PHP 'php' session serialize format (key|serialized_value;key|...).
  * Falls back to unserialize() for php_serialize handler format.
  *
- * SECURITY: both unserialize() calls pass allowed_classes => false to keep
- * the object-injection hardening that commit c43da63 introduced. Sessions
- * are user-controlled storage (tampered cookie, compromised Redis); allowing
+ * SECURITY: every `unserialize()` call in this file is narrowly scoped to
+ * an explicit class whitelist — currently `['stdClass']`. Sessions are
+ * user-controlled storage (tampered cookie, compromised Redis); allowing
  * arbitrary class instantiation here would let an attacker trigger
- * __wakeup() / __destruct() gadgets in any class in the autoload graph.
- * If a future caller genuinely needs to round-trip objects through sessions,
- * that's a separate feature with an explicit class whitelist, not a global flip.
+ * `__wakeup()` / `__destruct()` gadgets in any class on the autoload
+ * graph (the vulnerability commit c43da63 originally fixed by passing
+ * `allowed_classes => false`).
  *
+ * Why `stdClass` is on the whitelist (added v0.2.26, issue #15):
+ *   - `stdClass` has zero methods — no `__wakeup`, no `__destruct`, no
+ *     `__get`/`__set`/`__call`. There is no gadget to chain.
+ *   - `json_decode($x)` (the default mode without the second arg) returns
+ *     a `stdClass` graph, and apps routinely stash that result in
+ *     `$_SESSION['oauth_token']`, `$_SESSION['api_profile']`, etc.
+ *     Refusing to round-trip it broke real apps in v0.2.25 (issue #15).
+ *
+ * Adding more classes to the whitelist requires a SECURITY review for
+ * each one: any magic method that runs on unserialize (`__wakeup`,
+ * `__unserialize`) or destruct (`__destruct`) can be turned into a
+ * gadget. `DateTime` for example has `__wakeup` and is therefore
+ * deliberately excluded.
+ *
+ */
+/**
+ * Encode an array into PHP's native 'php' session serialize format
+ * (key|serialized_value for each key). This matches the format produced by
+ * session.serialize_handler = php (the default in mod_php / phpredis).
+ *
+ * @param array<string, mixed> $data
+ */
+function php_session_encode_from_array(array $data): string
+{
+    $encoded = '';
+    foreach ($data as $key => $value) {
+        $encoded .= $key . '|' . serialize($value);
+    }
+    return $encoded;
+}
+
+/**
  * @return array<string, mixed>
  */
 function php_session_decode_to_array(string $data): array
 {
-    $decoded = @unserialize($data, ['allowed_classes' => false]);
+    $decoded = @unserialize($data, ['allowed_classes' => ['stdClass']]);
     if (is_array($decoded)) {
         /** @var array<string, mixed> $narrowed */
         $narrowed = [];
@@ -38,7 +70,7 @@ function php_session_decode_to_array(string $data): array
         if ($pipe === false) break;
         $key = substr($data, $offset, $pipe - $offset);
         $offset = $pipe + 1;
-        $value = @unserialize(substr($data, $offset), ['allowed_classes' => false]);
+        $value = @unserialize(substr($data, $offset), ['allowed_classes' => ['stdClass']]);
         if ($value === false && substr($data, $offset, 4) !== 'b:0;') {
             $next = strpos($data, ';', $offset);
             if ($next !== false) {
@@ -105,8 +137,51 @@ function zeal_session_start(): bool
         }
     }
 
+    // Detect whether the client already had a session cookie BEFORE we ask
+    // zeal_session_id() — that call generates+stashes a new ID into $g->cookie
+    // when no cookie was present, so checking after would always be true.
+    /** @var string $sessionNameForCookie */
+    $sessionNameForCookie = $g->session_params['name'];
+    $hadIncomingSessionCookie = isset($g->cookie[$sessionNameForCookie]);
+
     // Get session ID from cookie or generate a new one
     $session_id = zeal_session_id();
+
+    // Bug #12: emit Set-Cookie if the session is brand-new (no incoming
+    // PHPSESSID cookie). Without this, a handler that calls session_start()
+    // for a first-time visitor + header('Location: ...') redirects them with
+    // no cookie — the next request sees no PHPSESSID, starts a fresh session,
+    // and the data we just stored (OAuth state, code_verifier, flash msgs)
+    // is gone. Idempotent: $hadIncomingSessionCookie is true on the second
+    // call within the same request, so we don't emit twice. Skipped when
+    // useCookies is off (zeal_session_set_cookie_params 'use_cookies' = 0)
+    // or when the response is no longer writable (already flushed).
+    //
+    // Gated on App::$session_lifecycle (v0.2.22 contract): when set to false,
+    // another framework (e.g. Symfony's NativeSessionStorage via the
+    // zealphp-symfony bridge, or user code that drives session_start() +
+    // $response->cookie() manually) owns cookie emission. We must NOT
+    // race them — auto-emitting here when sessionLifecycle is false caused
+    // duplicate PHPSESSID headers on /session/dump in the Symfony bridge.
+    $useCookies = (bool)ini_get('session.use_cookies');
+    if (!$hadIncomingSessionCookie
+        && \ZealPHP\App::$session_lifecycle
+        && $useCookies
+        && $g->openswoole_response !== null
+        && is_string($session_id)
+        && $session_id !== ''
+        && $g->openswoole_response->isWritable()) {
+        $cookieParams = zeal_session_get_cookie_params();
+        $g->openswoole_response->cookie(
+            $sessionNameForCookie,
+            $session_id,
+            $cookieParams['lifetime'] ? time() + (int)$cookieParams['lifetime'] : 0,
+            $cookieParams['path'],
+            $cookieParams['domain'],
+            $cookieParams['secure'],
+            $cookieParams['httponly']
+        );
+    }
 
     /** @var array<string, mixed> $session_data */
     $session_data = [];
@@ -136,6 +211,10 @@ function zeal_session_start(): bool
     // coroutine-mode code reads/writes via the typed property.
     /** @var array<string, mixed> $session_data */
     $g->session = $session_data;
+    // #21: snapshot the keys present at load so write_close() can tell an
+    // in-request unset() (must delete from store) from a concurrent add
+    // (must survive the merge).
+    $g->session_loaded_keys = array_keys($session_data);
     if (\ZealPHP\App::$superglobals) {
         $GLOBALS['_SESSION'] = $session_data;
     }
@@ -239,7 +318,62 @@ function zeal_session_write_close(): bool
         assert(is_string($save_path));
         $session_file = $save_path . '/sess_' . $session_id;
         $data = $superglobals ? $GLOBALS['_SESSION'] : $g->session;
-        file_put_contents($session_file, serialize($data));
+        $wHandler = $g->session_params['handler'] ?? null;
+        if ($wHandler instanceof \SessionHandlerInterface) {
+            // Merge with stored data to mitigate concurrent-request races.
+            // Apache serialises session access via file locks; ZealPHP
+            // handles requests concurrently, so two requests both reading
+            // the same session and both writing back their own snapshots
+            // means last-write-wins and the loser's changes are lost.
+            // Reading-then-merging before writing keeps top-level keys
+            // added by a concurrent request alive.
+            //
+            // NOTE: array_merge is SHALLOW. If both requests touched the
+            // same NESTED array (e.g. both pushed to $_SESSION['cart']),
+            // the later writer's cart still replaces the earlier one —
+            // last-write-wins survives at that nesting depth. For
+            // OAuth-style flows where each step writes top-level scalars
+            // (oauth_state, code_verifier, user_id) the merge is enough.
+            // Apps with conflicting nested writes should use a database
+            // / Redis hash directly, not session storage.
+            //
+            // Also note: handler-side locking is not assumed. A
+            // SessionHandlerInterface implementation that itself serialises
+            // (e.g. via Redis WATCH/MULTI) is strictly better than this
+            // best-effort merge — but the merge is correct for the file-
+            // handler default and for handlers that don't lock.
+            $existing = $wHandler->read((string) $session_id);
+            if (is_string($existing) && $existing !== '') {
+                $existingData = php_session_decode_to_array($existing);
+                // $data is $GLOBALS['_SESSION'] (mixed) or $g->session (array)
+                // — narrow before the array_merge so PHPStan can verify the
+                // call shape. Non-array $data means somebody outside the
+                // framework reassigned $_SESSION to a scalar; treat that as
+                // empty and let the merge surface the disk state.
+                $current = is_array($data) ? $data : [];
+                if ($existingData !== []) {
+                    $data = array_merge($existingData, $current);
+                    // #21: honor in-request deletions. A key that was loaded
+                    // this request (in session_loaded_keys) but is now absent
+                    // from $current was unset() — it must NOT be resurrected by
+                    // the merge-with-stored mitigation. Keys we never loaded
+                    // (concurrent adds, not in session_loaded_keys) are left
+                    // intact, preserving the cross-request merge guarantee.
+                    foreach ($g->session_loaded_keys as $loadedKey) {
+                        if (!array_key_exists($loadedKey, $current)) {
+                            unset($data[$loadedKey]);
+                        }
+                    }
+                } else {
+                    $data = $current;
+                }
+            }
+            /** @var array<string, mixed> $data */
+            $wHandler->write((string) $session_id, php_session_encode_from_array($data));
+        } else {
+            /** @var array<string, mixed> $data */
+            file_put_contents($session_file, php_session_encode_from_array($data));
+        }
 
         // Mark inactive — in both modes. Unset the typed slot in coroutine
         // mode; clear the superglobal in superglobals mode so the next
@@ -266,12 +400,17 @@ function zeal_session_destroy(): bool
     // Get session ID
     $session_id = zeal_session_id();
 
-    // Delete session file
+    // Delete session data via handler or file
     $save_path = $g->session_params['save_path'] ?? '';
     assert(is_string($save_path));
-    $session_file = $save_path . '/sess_' . $session_id;
-    if (file_exists($session_file)) {
-        unlink($session_file);
+    $dHandler = $g->session_params['handler'] ?? null;
+    if ($dHandler instanceof \SessionHandlerInterface) {
+        $dHandler->destroy((string) $session_id);
+    } else {
+        $session_file = $save_path . '/sess_' . $session_id;
+        if (file_exists($session_file)) {
+            unlink($session_file);
+        }
     }
 
     // Unset session data and cookie — mirror in both storages for the same
@@ -316,18 +455,64 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
     $new_session_id = bin2hex(random_bytes(32));
     zeal_session_id($new_session_id);
 
-    // Rename session file if keeping old session data
     $save_path = $g->session_params['save_path'] ?? '';
     assert(is_string($save_path));
-    $old_session_file = $save_path . '/sess_' . $old_session_id;
-    $new_session_file = $save_path . '/sess_' . $new_session_id;
 
-    if (file_exists($old_session_file)) {
-        if ($delete_old_session) {
-            unlink($old_session_file);
-        } else {
-            rename($old_session_file, $new_session_file);
+    // Issue #19: a custom SessionHandlerInterface (Redis/Valkey, etc.) keeps
+    // session data in the handler, NOT on disk — so the file rename below is a
+    // no-op for it. Without migrating the data the regenerated ID points at an
+    // empty session, and anything written afterwards (OAuth `sub`/`tokens`/
+    // `profile`) is stranded under an ID the client may never receive.
+    // mod_php's regenerate copies the current data to the new ID; mirror that.
+    $handler = $g->session_params['handler'] ?? null;
+    if ($handler instanceof \SessionHandlerInterface) {
+        // The live in-memory data is the canonical session contents for the
+        // new ID (it already reflects any writes made before regeneration).
+        $superglobals = \ZealPHP\App::$superglobals;
+        /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
+        $data = $superglobals ? ($GLOBALS['_SESSION'] ?? []) : (isset($g->session) ? $g->session : []);
+        $data = is_array($data) ? $data : [];
+        /** @var array<string, mixed> $data */
+        $handler->write((string) $new_session_id, php_session_encode_from_array($data));
+        if ($delete_old_session && is_string($old_session_id) && $old_session_id !== '') {
+            $handler->destroy((string) $old_session_id);
         }
+    } else {
+        // File handler: keep old data by renaming the backing file.
+        $old_session_file = $save_path . '/sess_' . $old_session_id;
+        $new_session_file = $save_path . '/sess_' . $new_session_id;
+        if (file_exists($old_session_file)) {
+            if ($delete_old_session) {
+                unlink($old_session_file);
+            } else {
+                rename($old_session_file, $new_session_file);
+            }
+        }
+    }
+
+    // Issue #19: emit a Set-Cookie for the NEW ID so the client switches over.
+    // Without this the browser keeps sending the old PHPSESSID and never sees
+    // the regenerated session. Gated exactly like zeal_session_start()'s
+    // first-visit cookie: only when the framework owns session lifecycle
+    // (App::$session_lifecycle), cookies are enabled, and the response is
+    // still writable — so the Symfony bridge / manual-cookie apps aren't raced.
+    $useCookies = (bool) ini_get('session.use_cookies');
+    /** @var string $sessionName */
+    $sessionName = $g->session_params['name'] ?? 'PHPSESSID';
+    if (\ZealPHP\App::$session_lifecycle
+        && $useCookies
+        && $g->openswoole_response !== null
+        && $g->openswoole_response->isWritable()) {
+        $cookieParams = zeal_session_get_cookie_params();
+        $g->openswoole_response->cookie(
+            $sessionName,
+            $new_session_id,
+            $cookieParams['lifetime'] ? time() + (int)$cookieParams['lifetime'] : 0,
+            $cookieParams['path'],
+            $cookieParams['domain'],
+            $cookieParams['secure'],
+            $cookieParams['httponly']
+        );
     }
 
     return true;
@@ -436,7 +621,7 @@ function zeal_session_abort(): bool
             $session_data = [];
             $contents = @file_get_contents($session_file);
             if (is_string($contents) && $contents !== '') {
-                $decoded = @unserialize($contents, ['allowed_classes' => false]);
+                $decoded = @unserialize($contents, ['allowed_classes' => ['stdClass']]);
                 if (is_array($decoded)) {
                     foreach ($decoded as $k => $v) {
                         if (is_string($k)) {
@@ -462,33 +647,22 @@ function zeal_session_abort(): bool
 
 function zeal_session_encode(): string
 {
-    // In superglobals mode, $_SESSION is the canonical store (Symfony / legacy
-    // code writes here). In coroutine mode, the typed $g->session is.
     $data = \ZealPHP\App::$superglobals
         ? ($GLOBALS['_SESSION'] ?? [])
         : RequestContext::instance()->session;
-    return serialize($data);
+    /** @var array<string, mixed> $narrowed */
+    $narrowed = is_array($data) ? $data : [];
+    return php_session_encode_from_array($narrowed);
 }
 
 function zeal_session_decode(string $data): bool
 {
-    // Defensive: unserialize() returns false on malformed input, which would
-    // TypeError on assignment to the typed array property. Match PHP native
-    // session_decode signature — returns bool, true only on successful decode.
     if ($data === '') {
         return false;
     }
-    $decoded = @unserialize($data, ['allowed_classes' => false]);
-    if (!is_array($decoded)) {
+    $sessionData = php_session_decode_to_array($data);
+    if ($sessionData === []) {
         return false;
-    }
-    // Narrow array<mixed,mixed> to array<string,mixed> for typed property assignment.
-    /** @var array<string, mixed> $sessionData */
-    $sessionData = [];
-    foreach ($decoded as $k => $v) {
-        if (is_string($k)) {
-            $sessionData[$k] = $v;
-        }
     }
     RequestContext::instance()->session = $sessionData;
     if (\ZealPHP\App::$superglobals) {

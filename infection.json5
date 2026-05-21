@@ -1,0 +1,50 @@
+{
+    // Mutation testing config — measures test *effectiveness* (do assertions
+    // actually catch breakage?), not just line coverage.
+    //
+    // Scoped to the pure, fully unit-tested modules so the MSI is meaningful:
+    // middleware, HTTP wrappers, input filtering, diagnostics. App.php's
+    // server/event-loop code is exercised by integration tests (which need a
+    // live server and can't run under per-mutant execution) and is intentionally
+    // out of this baseline; expand the scope as in-process coverage grows.
+    //
+    // Runs Unit suite only (no OpenSwoole server dependency) — see the CI job
+    // .github/workflows/mutation.yml, which provides the xdebug driver.
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    "source": {
+        "directories": [
+            "src/Middleware",
+            "src/HTTP",
+            "src/Input",
+            "src/Diagnostics"
+        ]
+    },
+    "logs": {
+        "text": "infection.log",
+        "summary": "infection-summary.log"
+    },
+    "mutators": {
+        "@default": true
+    },
+    // Ratcheted to the measured ceiling. After the v0.2.37 mutation-hardening
+    // push (CI, full Unit suite, no --only-covered):
+    //   * Covered-MSI       = 95%  (test effectiveness on code the Unit suite reaches)
+    //   * Mutation Code Cov  = 95%  (~83 mutants live on integration-only paths the
+    //                                Unit suite can't execute → counted as uncovered)
+    //   * Plain MSI          = 91%  (covered-MSI dragged down by those uncovered mutants)
+    // The 83 mutants that ARE covered-but-surviving are all provably-equivalent
+    // (redundant (int)/(string) casts guarded by ctype_digit / declared return
+    // types, min(16,$i) vs min(17,$i) on a 16-byte buffer, $i>0 vs $i>=0 that
+    // only adds an empty-string append, ['*'] vs [] both allow-all). No test can
+    // distinguish identical behaviour — see the equivalent-mutant register in
+    // STANDARDS.md. Covered-MSI 95% is the headline; reaching it for plain MSI
+    // too would require unit-covering integration-only code.
+    //
+    // Floors set a few points under each measured value so the gate BITES
+    // against regression without flapping. The suite runs in definition order
+    // (phpunit.xml executionOrder="default"): it carries shared runtime state
+    // (uopz global overrides, App:: static config, per-coroutine G, live
+    // coroutines) and is not random-order-safe by design.
+    "minMsi": 88,
+    "minCoveredMsi": 92
+}

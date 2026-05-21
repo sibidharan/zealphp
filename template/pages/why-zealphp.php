@@ -8,6 +8,10 @@
       ZealPHP brings coroutine-native, real-time server architecture to PHP.
     </p>
 
+    <div style="margin-top:1.5rem;padding:1rem 1.25rem;background:rgba(251,191,36,.08);border-left:4px solid #fbbf24;border-radius:6px;font-size:.9rem;color:var(--text-light)">
+      <strong style="color:#fde68a">Live production proof:</strong> <a href="https://labs.selfmade.ninja" style="color:#fde68a">Selfmade Ninja Labs</a> runs the same PHP/MongoDB codebase on Apache <em>and</em> ZealPHP in production. Two servers, one volume, zero downtime during migration. <a href="/case-studies/sna-labs" style="color:#fde68a;font-weight:600">Read the migration case study →</a>
+    </div>
+
     <div style="margin-top:2.5rem">
       <h2 style="font-size:1.3rem;margin-bottom:1rem;color:#fff">The problem</h2>
       <p style="color:var(--text-light);line-height:1.7;font-size:.95rem">

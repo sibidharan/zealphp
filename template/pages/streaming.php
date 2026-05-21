@@ -4,7 +4,7 @@
 <h1 class="section-title">SSR Streaming</h1>
 <p class="section-desc">Send HTML to the browser progressively as coroutines resolve — like React's <code>renderToPipeableStream</code>, but in PHP. Three APIs, same result: the browser paints content incrementally.</p>
 
-<p style="margin-top:.5rem;color:var(--text-muted);font-size:.92rem">Returning a <code>\Generator</code> from any handler triggers streaming — see the <a href="/responses#return-contract">universal return contract</a> for the full table of return shapes, and the <a href="/templates#file-execution-family">file-execution family</a> for how <code>App::renderStream()</code> composes with <code>render()</code> / <code>renderToString()</code> / <code>include()</code>.</p>
+<p style="margin-top:.5rem;color:var(--text-muted);font-size:.92rem">Returning a <code>\Generator</code> from any handler triggers streaming — see the <a href="/responses#return-contract">universal return contract</a> for the full table of return shapes, and the <a href="/templates#file-execution-family">file-execution family</a> for how <code>App::renderStream()</code> composes with <code>render()</code> / <code>renderToString()</code> / <code>include()</code> / <code>fragment()</code>.</p>
 
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:2rem">
   <div class="card"><div class="card-icon">📤</div><h3>Generator yield</h3><p>Return a <code>\Generator</code> from your handler. Each <code>yield $html</code> flushes immediately. No API changes needed.</p></div>

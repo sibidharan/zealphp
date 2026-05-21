@@ -29,6 +29,31 @@ class HttpFeaturesTest extends TestCase
         $this->assertStatus(307, $r);
     }
 
+    /**
+     * Regression for issue #12 — Set-Cookie missing on 302 redirects when
+     * a new session was started mid-request. OAuth flows that
+     * `session_start(); $_SESSION['state'] = ...; header('Location: ...')`
+     * lost their state on the next request because no PHPSESSID was
+     * emitted. zeal_session_start() now auto-emits Set-Cookie for new
+     * sessions, regardless of whether SessionStartMiddleware is registered.
+     */
+    public function testSessionCookieEmittedOnRedirect(): void
+    {
+        $r = $this->get('/http/session-redirect');
+        $this->assertStatus(302, $r);
+        $this->assertHeader('location', '/http/session-target', $r);
+        $this->assertHeader('set-cookie', 'PHPSESSID=', $r);
+
+        // Pull the session id out of the Set-Cookie header and replay it.
+        // The data we stashed in $_SESSION must round-trip back to us.
+        preg_match('/PHPSESSID=([^;]+)/', $r['headers']['set-cookie'] ?? '', $m);
+        $this->assertNotEmpty($m[1] ?? '', 'PHPSESSID value missing from Set-Cookie');
+        $follow = $this->get('/http/session-target', ['Cookie' => 'PHPSESSID=' . $m[1]]);
+        $this->assertStatus(200, $follow);
+        $json = $this->assertJsonResponse($follow);
+        $this->assertSame('state-xyz', $json['oauth_state']);
+    }
+
     public function testHeadReturnsNoBody(): void
     {
         $r = $this->http('HEAD', '/http/head-test');
@@ -51,6 +76,92 @@ class HttpFeaturesTest extends TestCase
         $this->assertStringContainsString('GET', $allow);
         $this->assertStringContainsString('POST', $allow);
         $this->assertStringContainsString('HEAD', $allow);
+    }
+
+    /** RFC 9110 §15.5.6: wrong method on a known resource → 405 + Allow. */
+    public function testMethodNotAllowedReturns405WithAllow(): void
+    {
+        $r = $this->http('PUT', '/json'); // /json is a GET resource
+        $this->assertStatus(405, $r);
+        $allow = $r['headers']['allow'] ?? '';
+        $this->assertStringContainsString('GET', $allow, 'Allow must list supported methods');
+        $this->assertStringContainsString('OPTIONS', $allow);
+    }
+
+    /**
+     * M4 (audit #4) — OpenSwoole-governed. RFC 9110 §15.6.2 says an unrecognised
+     * method should be 501 (Apache returns 501 for M_INVALID, protocol.c:1253).
+     * In this runtime OpenSwoole's C HTTP parser rejects an unknown verb with
+     * 400 *before* PHP runs, so the framework's 501 path (the App::KNOWN_METHODS
+     * guard, kept as defense-in-depth) is unreachable. The safety property — an
+     * unknown verb is refused, never processed as 200 — holds. See
+     * docs/apache-parity-audit.md (M4) and STANDARDS.md (OpenSwoole-governed surfaces).
+     */
+    public function testUnknownMethodRejected(): void
+    {
+        $r = $this->http('FOOBAR', '/json');
+        $this->assertStatus(400, $r);
+    }
+
+    /**
+     * M6 (audit #4) — HEAD on an error response (404) must carry no body, the
+     * same as HEAD on a 200. Apache's ap_send_error_response honours header_only.
+     */
+    public function testHeadOnNotFoundHasNoBody(): void
+    {
+        $r = $this->http('HEAD', '/no-such-route-zsh-method');
+        $this->assertStatus(404, $r);
+        $this->assertSame('', $r['body'], 'HEAD on 404 must not return a body');
+    }
+
+    /**
+     * M5 (audit #4) — `OPTIONS *` is a server-wide capability probe: Apache
+     * returns 200 with an empty body and no Allow header (http_core.c:336).
+     * curl normalises the `*` target, so this case is driven over a raw socket.
+     */
+    public function testOptionsAsteriskReturns200(): void
+    {
+        $r = $this->rawRequest("OPTIONS * HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        $this->assertStringContainsString('HTTP/1.1 200', $r, "OPTIONS * should be 200, got:\n$r");
+    }
+
+    /**
+     * H8 (audit #4) — OpenSwoole-governed. TRACE must be refused (XST defence).
+     * OpenSwoole's parser rejects TRACE with 400 before PHP runs, so the
+     * framework's 405-default and the opt-in traceEnabled(true) echo handler
+     * (both kept as defense-in-depth) are unreachable in this runtime. The
+     * security property that matters — TRACE is refused and never echoes the
+     * request back — holds via the 400. See docs/apache-parity-audit.md (H8).
+     */
+    public function testTraceRefusedByDefault(): void
+    {
+        $r = $this->http('TRACE', '/json');
+        $this->assertStatus(400, $r);
+        $this->assertStringNotContainsString('TRACE', (string) $r['body'], 'TRACE must never echo the request back');
+    }
+
+    /**
+     * Raw HTTP/1.1 request over a socket — needed for request targets curl
+     * rewrites (e.g. the `*` form of OPTIONS). Returns the full raw response.
+     */
+    private function rawRequest(string $request): string
+    {
+        $parts = parse_url(self::$baseUrl);
+        $host  = $parts['host'] ?? '127.0.0.1';
+        $port  = $parts['port'] ?? 80;
+        $fp = @fsockopen($host, (int)$port, $errno, $errstr, 5);
+        $this->assertNotFalse($fp, "socket connect failed: $errstr ($errno)");
+        fwrite($fp, $request);
+        $resp = '';
+        while (!feof($fp)) {
+            $chunk = fread($fp, 8192);
+            if ($chunk === false) {
+                break;
+            }
+            $resp .= $chunk;
+        }
+        fclose($fp);
+        return $resp;
     }
 
     public function testCookieSameSite(): void
@@ -143,5 +254,16 @@ class HttpFeaturesTest extends TestCase
         $r = $this->get('/stream/ssr');
         $this->assertStatus(200, $r);
         $this->assertHeader('accept-ranges', 'none', $r);
+    }
+
+    public function testPhpInfoRendersHtml(): void
+    {
+        $r = $this->get('/phpinfo');
+        $this->assertStatus(200, $r);
+        $this->assertHeader('content-type', 'text/html', $r);
+        $this->assertStringContainsString('<!DOCTYPE html>', $r['body']);
+        $this->assertStringContainsString('<table', $r['body']);
+        $this->assertStringContainsString('PHP Version', $r['body']);
+        $this->assertStringContainsString('ZealPHP', $r['body']);
     }
 }

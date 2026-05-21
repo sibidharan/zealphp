@@ -21,7 +21,7 @@ class CacheTest extends TestCase
     public static function tearDownAfterClass(): void
     {
         if (is_dir(self::$cacheDir)) {
-            foreach (glob(self::$cacheDir . '/*.cache') as $f) {
+            foreach (glob(self::$cacheDir . '/*.cache') ?: [] as $f) {
                 @unlink($f);
             }
             @rmdir(self::$cacheDir);
@@ -129,5 +129,201 @@ class CacheTest extends TestCase
         sleep(2);
         Cache::gcMemory();
         $this->assertSame(0, Cache::count());
+    }
+
+    // ---------------------------------------------------------------------
+    // Added coverage: branches CacheTest above does not exercise.
+    // ---------------------------------------------------------------------
+
+    public function testDeleteAliasMatchesDel(): void
+    {
+        Cache::set('alias-del', 'value');
+        $this->assertTrue(Cache::has('alias-del'));
+        $this->assertTrue(Cache::delete('alias-del'));
+        $this->assertFalse(Cache::has('alias-del'));
+    }
+
+    public function testDeleteMissingKeyReturnsFalse(): void
+    {
+        // Neither tier holds the key => del()/delete() report no removal.
+        $this->assertFalse(Cache::delete('never-existed-key'));
+    }
+
+    public function testClearAliasReturnsTrueAndEmptiesCache(): void
+    {
+        Cache::set('cl1', 1);
+        Cache::set('cl2', 2);
+        $this->assertTrue(Cache::clear());
+        $this->assertFalse(Cache::has('cl1'));
+        $this->assertFalse(Cache::has('cl2'));
+    }
+
+    public function testFileTierFallbackWhenMemoryEvicted(): void
+    {
+        // Write to both tiers, then drop the memory row directly so get()
+        // must fall through to readFile().
+        Cache::set('two-tier', 'persisted');
+        $hash = md5('two-tier');
+        $table = \ZealPHP\Store::table('__cache');
+        $this->assertNotNull($table);
+        $table->del($hash);
+
+        // Memory miss => file hit.
+        $this->assertSame('persisted', Cache::get('two-tier'));
+    }
+
+    public function testHasFileTierForValidUnexpiredFile(): void
+    {
+        // Memory evicted, valid file remains => has() returns true via the
+        // file-tier fopen/fgets path.
+        Cache::set('has-file', 'x', ttl: 60);
+        $hash = md5('has-file');
+        $table = \ZealPHP\Store::table('__cache');
+        $this->assertNotNull($table);
+        $table->del($hash);
+
+        $this->assertTrue(Cache::has('has-file'));
+    }
+
+    public function testHasFileTierDeletesExpiredFile(): void
+    {
+        Cache::set('has-expired-file', 'x', ttl: 1);
+        $hash = md5('has-expired-file');
+        $table = \ZealPHP\Store::table('__cache');
+        $this->assertNotNull($table);
+        // Evict memory so has() consults the file, then let it expire.
+        $table->del($hash);
+        sleep(2);
+
+        $filePath = self::$cacheDir . '/' . $hash . '.cache';
+        $this->assertFileExists($filePath);
+        $this->assertFalse(Cache::has('has-expired-file'));
+        // Expired file is unlinked as a side effect.
+        $this->assertFileDoesNotExist($filePath);
+    }
+
+    public function testGetExpiredFileReturnsDefault(): void
+    {
+        Cache::set('exp-file', 'value', ttl: 1);
+        $hash = md5('exp-file');
+        $table = \ZealPHP\Store::table('__cache');
+        $this->assertNotNull($table);
+        $table->del($hash);
+        sleep(2);
+
+        // readFile() sees an expired TTL => unlinks and returns null => default.
+        $this->assertSame('fallback', Cache::get('exp-file', 'fallback'));
+    }
+
+    public function testGetCorruptFileWithoutNewlineReturnsDefault(): void
+    {
+        // A cache file with no newline separator is malformed => readFile()
+        // unlinks it and returns null.
+        $hash = md5('corrupt-key');
+        $filePath = self::$cacheDir . '/' . $hash . '.cache';
+        file_put_contents($filePath, 'no-newline-here');
+
+        $this->assertSame('def', Cache::get('corrupt-key', 'def'));
+        $this->assertFileDoesNotExist($filePath);
+    }
+
+    public function testGcFilesCleansExpiredFilesOnly(): void
+    {
+        Cache::set('gc-file-old', 'old', ttl: 1);
+        Cache::set('gc-file-fresh', 'fresh', ttl: 3600);
+        $oldHash = md5('gc-file-old');
+        $freshHash = md5('gc-file-fresh');
+
+        sleep(2);
+        Cache::gcFiles();
+
+        $this->assertFileDoesNotExist(self::$cacheDir . '/' . $oldHash . '.cache');
+        $this->assertFileExists(self::$cacheDir . '/' . $freshHash . '.cache');
+    }
+
+    public function testStatsReflectHitsAndMisses(): void
+    {
+        // Fresh start so counters are predictable.
+        Cache::flush();
+        $before = Cache::stats();
+
+        Cache::set('stat-key', 'v');
+        Cache::get('stat-key');     // memory hit
+        Cache::get('stat-missing'); // miss
+
+        $after = Cache::stats();
+
+        $this->assertArrayHasKey('memory_entries', $after);
+        $this->assertArrayHasKey('hits_memory', $after);
+        $this->assertArrayHasKey('hits_file', $after);
+        $this->assertArrayHasKey('misses', $after);
+        $this->assertArrayHasKey('spills_oversize', $after);
+        $this->assertArrayHasKey('spills_full', $after);
+        $this->assertArrayHasKey('hit_rate', $after);
+
+        $this->assertGreaterThan($before['hits_memory'], $after['hits_memory']);
+        $this->assertGreaterThan($before['misses'], $after['misses']);
+        $this->assertGreaterThanOrEqual(0.0, $after['hit_rate']);
+        $this->assertLessThanOrEqual(1.0, $after['hit_rate']);
+    }
+
+    public function testStatsTracksOversizeSpill(): void
+    {
+        $before = Cache::stats();
+        // Value > 8KB skips the memory tier => spills_oversize increments.
+        Cache::set('oversize', str_repeat('y', 9000));
+        $after = Cache::stats();
+
+        $this->assertGreaterThan($before['spills_oversize'], $after['spills_oversize']);
+    }
+
+    public function testGcFilesNoOpWhenDirMissing(): void
+    {
+        // Point the cache at a non-existent directory; gcFiles() must early
+        // return without error, then restore the real dir for later tests.
+        $missing = self::$cacheDir . '_does_not_exist_' . uniqid();
+        $dirProp = new \ReflectionProperty(Cache::class, 'dir');
+        $dirProp->setAccessible(true);
+        $original = $dirProp->getValue();
+        $dirProp->setValue(null, $missing);
+
+        try {
+            Cache::gcFiles();
+            $this->assertDirectoryDoesNotExist($missing);
+        } finally {
+            $dirProp->setValue(null, $original);
+        }
+    }
+
+    public function testInitConfiguresFreshCacheDir(): void
+    {
+        // Drive the production init() path (distinct from initForTest used by
+        // the rest of the suite). gcIntervalMs: 0 skips the server-bound GC
+        // timer so no running OpenSwoole server is required.
+        $initProp = new \ReflectionProperty(Cache::class, 'initialized');
+        $initProp->setAccessible(true);
+        $initProp->setValue(null, false);
+
+        // An explicit cacheDir is passed, so init() never reads App::$cwd.
+        $freshDir = sys_get_temp_dir() . '/zealphp_cache_init_' . uniqid();
+
+        try {
+            Cache::init(maxRows: 16, cacheDir: $freshDir, gcIntervalMs: 0);
+            $this->assertDirectoryExists($freshDir);
+
+            Cache::set('init-key', 'init-val');
+            $this->assertSame('init-val', Cache::get('init-key'));
+
+            // Second init() is a no-op (already-initialized guard).
+            Cache::init(maxRows: 16, cacheDir: $freshDir, gcIntervalMs: 0);
+        } finally {
+            // Restore the shared test cache so subsequent tests in this class
+            // (and the rest of the suite) keep working.
+            foreach (glob($freshDir . '/*.cache') ?: [] as $f) {
+                @unlink($f);
+            }
+            @rmdir($freshDir);
+            Cache::initForTest(self::$cacheDir);
+        }
     }
 }

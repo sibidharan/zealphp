@@ -3,9 +3,9 @@
 A coroutine-native PHP framework built on **OpenSwoole** for high-concurrency HTTP, WebSocket, streaming, and real-time applications. Start serving existing PHP apps on OpenSwoole today — migrate to full async at your own pace.
 
 [![Packagist Version](https://img.shields.io/packagist/v/sibidharan/zealphp?style=flat-square&color=orange&logo=packagist&logoColor=white)](https://packagist.org/packages/sibidharan/zealphp) [![Packagist Downloads](https://img.shields.io/packagist/dt/sibidharan/zealphp?style=flat-square&logo=packagist&logoColor=white)](https://packagist.org/packages/sibidharan/zealphp) [![License](https://img.shields.io/packagist/l/sibidharan/zealphp?style=flat-square)](https://packagist.org/packages/sibidharan/zealphp)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sibidharan/zealphp) [![GitHub stars](https://img.shields.io/github/stars/sibidharan/zealphp?style=flat-square&logo=github&logoColor=white)](https://github.com/sibidharan/zealphp/stargazers) [![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square&logo=php&logoColor=white)](https://www.php.net/)
-[![CI](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml/badge.svg)](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml) [![CodeQL](https://github.com/sibidharan/zealphp/actions/workflows/codeql.yml/badge.svg)](https://github.com/sibidharan/zealphp/actions/workflows/codeql.yml) [![gitleaks](https://github.com/sibidharan/zealphp/actions/workflows/gitleaks.yml/badge.svg)](https://github.com/sibidharan/zealphp/actions/workflows/gitleaks.yml) [![Coverage](https://codecov.io/gh/sibidharan/zealphp/branch/master/graph/badge.svg)](https://codecov.io/gh/sibidharan/zealphp) [![PHPStan](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsibidharan%2Fzealphp%2Fmaster%2F.github%2Fbadges%2Fphpstan.json)](phpstan.neon)
-[![OpenSwoole](https://img.shields.io/badge/OpenSwoole-22%2B-ff5722?style=flat-square)](https://openswoole.com/) [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa?style=flat-square)](CODE_OF_CONDUCT.md) [![Sponsor](https://img.shields.io/github/sponsors/sibidharan?style=flat-square&logo=github&logoColor=white)](https://github.com/sponsors/sibidharan)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sibidharan/zealphp) [![GitHub stars](https://img.shields.io/github/stars/sibidharan/zealphp?style=flat-square&logo=github&logoColor=white)](https://github.com/sibidharan/zealphp/stargazers) [![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square&logo=php&logoColor=white)](https://www.php.net/) [![PHP tested](https://img.shields.io/badge/tested-PHP%208.3%20%7C%208.4%20%7C%208.5--experimental-777bb4?style=flat-square&logo=php&logoColor=white)](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml) [![Stability](https://img.shields.io/badge/stability-active%20alpha-orange?style=flat-square)](CHANGELOG.md)
+[![CI](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml/badge.svg)](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml) [![CodeQL](https://github.com/sibidharan/zealphp/actions/workflows/codeql.yml/badge.svg)](https://github.com/sibidharan/zealphp/actions/workflows/codeql.yml) [![gitleaks](https://github.com/sibidharan/zealphp/actions/workflows/gitleaks.yml/badge.svg)](https://github.com/sibidharan/zealphp/actions/workflows/gitleaks.yml) [![Coverage](https://codecov.io/gh/sibidharan/zealphp/branch/master/graph/badge.svg)](https://codecov.io/gh/sibidharan/zealphp) [![PHPStan](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsibidharan%2Fzealphp%2Fmaster%2F.github%2Fbadges%2Fphpstan.json)](phpstan.neon) [![Mutation MSI](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsibidharan%2Fzealphp%2Fmaster%2F.github%2Fbadges%2Fmutation.json)](https://github.com/sibidharan/zealphp/actions/workflows/mutation.yml) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/sibidharan/zealphp/badge)](https://securityscorecards.dev/viewer/?uri=github.com/sibidharan/zealphp) [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX-blue?style=flat-square)](https://github.com/sibidharan/zealphp/actions/workflows/sbom.yml)
+[![OpenSwoole](https://img.shields.io/badge/OpenSwoole-22%2B-ff5722?style=flat-square)](https://openswoole.com/) [![Benchmarks](https://img.shields.io/badge/benchmarks-reproducible-success?style=flat-square)](https://github.com/sibidharan/zealphp/tree/master/scripts) [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa?style=flat-square)](CODE_OF_CONDUCT.md) [![Sponsor](https://img.shields.io/github/sponsors/sibidharan?style=flat-square&logo=github&logoColor=white)](https://github.com/sponsors/sibidharan)
 
 **Homepage:** [https://php.zeal.ninja](https://php.zeal.ninja)  
 Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` if you want the rendered example URLs to point somewhere else.
@@ -21,7 +21,7 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **SSR streaming** | Generator `yield`, `$response->stream()`, `$response->sse()` — like React's `renderToPipeableStream` |
 | **WebSocket** | `App::ws($path, $onMessage, $onOpen, $onClose)` — rooms, auth, binary, heartbeat |
 | **Dynamic routing** | `route()`, `nsRoute()`, `nsPathRoute()`, `patternRoute()` with reflection-based parameter injection |
-| **Middleware** | PSR-15 stack — 17 built-ins (CORS, ETag, Range, Compression, SessionStart, IniIsolation, Charset, CacheControl, Expires, Header, BasicAuth, IpAccess, RateLimit, ConcurrencyLimit, BlockPhpExt, MimeType, BodyRewrite, HostRouter) — full Apache `mod_rewrite` / `mod_headers` / `mod_expires` and nginx `limit_req` / `auth_basic` parity |
+| **Middleware** | PSR-15 stack — 18 built-ins (CORS, ETag, Range, Compression, SessionStart, IniIsolation, Charset, CacheControl, Expires, Header, BasicAuth, IpAccess, RateLimit, ConcurrencyLimit, BlockPhpExt, MimeType, BodyRewrite, HostRouter) — full Apache `mod_rewrite` / `mod_headers` / `mod_expires` and nginx `limit_req` / `auth_basic` parity |
 | **HTTP/1.1 compliance** | HEAD, OPTIONS, 301/302/307/308 redirects, Cookie SameSite, ETag, OpenSwoole compression |
 | **Shared memory** | `Store` (OpenSwoole\Table) + `Counter` (OpenSwoole\Atomic) — cross-worker state |
 | **Timers** | `App::tick()`, `App::after()`, `App::onWorkerStart()` — per-worker recurring tasks |
@@ -80,7 +80,7 @@ docker compose up app
 
 ```bash
 # New project
-composer create-project sibidharan/zealphp-project:^0.2.23 my-project
+composer create-project sibidharan/zealphp-project:^0.2.38 my-project
 cd my-project
 php app.php
 # → https://php.zeal.ninja
@@ -202,7 +202,7 @@ $app->setFallback(fn() => App::include('/index.php'));
 $app->run();
 ```
 
-Now your WordPress, Drupal, or custom PHP app runs on OpenSwoole — persistent connections, no cold starts, WebSocket and streaming available when you're ready. ZealPHP's **file-execution family** — `App::render()` / `App::renderToString()` / `App::renderStream()` / `App::include()` — share a single core that runs the file, captures its output, and applies the [universal return contract](https://php.zeal.ninja/responses#return-contract). `App::includeFile()` is the deprecated alias for `App::include()` and still works. See the [legacy apps page](https://php.zeal.ninja/legacy-apps) for the 12 Apache rewrite recipes and the full `.htaccess` / `nginx.conf` coverage matrices.
+Now your WordPress, Drupal, or custom PHP app runs on OpenSwoole — persistent connections, no cold starts, WebSocket and streaming available when you're ready. ZealPHP's **file-execution family** — `App::render()` / `App::renderToString()` / `App::renderStream()` / `App::include()` — share a single core that runs the file, captures its output, and applies the [universal return contract](https://php.zeal.ninja/responses#return-contract). Need htmx-style swap targets without separate partial files? `App::fragment()` (v0.2.24) marks named regions inline so the same `App::render()` call serves either the full page or just one region — see [Template fragments](https://php.zeal.ninja/templates#fragments). `App::includeFile()` is the deprecated alias for `App::include()` and still works. See the [legacy apps page](https://php.zeal.ninja/legacy-apps) for the 12 Apache rewrite recipes and the full `.htaccess` / `nginx.conf` coverage matrices.
 
 ---
 
@@ -413,8 +413,8 @@ App::onWorkerStart(function($server, $workerId) use ($hitCounter) {
 2. Run `composer validate` and confirm tests pass.
 3. Tag both `zealphp` and `zealphp-project` with the same version:
    ```bash
-   git tag -a v0.2.23 -m "Release v0.2.23"
-   git push origin master && git push origin v0.2.23
+   git tag -a v0.2.38 -m "Release v0.2.38"
+   git push origin master && git push origin v0.2.38
    ```
 4. Trigger Packagist webhook for both packages.
 

@@ -1,0 +1,109 @@
+name: Mutation
+
+# Mutation testing (Infection) measures whether the tests actually *catch*
+# breakage, not just execute lines. Runs on PRs and on demand; on master pushes
+# it also refreshes the MSI badge (.github/badges/mutation.json) so the README
+# always shows the latest CI-measured score. Scoped to the Unit suite + the pure
+# modules in infection.json5 (no OpenSwoole server needed).
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege at the workflow level; the badge auto-PR job below
+# elevates contents/pull-requests write only where it is actually needed.
+permissions:
+  contents: read
+
+jobs:
+  infection:
+    name: Infection (MSI)
+    runs-on: ubuntu-latest
+    # Master is branch-protected, so the badge refresh opens an auto-PR
+    # (via peter-evans/create-pull-request) rather than pushing directly.
+    # `contents: write` lets the action create the side branch + commit;
+    # `pull-requests: write` lets it open/update the PR.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup PHP (xdebug for coverage)
+        uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
+        with:
+          php-version: '8.3'
+          extensions: openswoole, uopz
+          coverage: xdebug
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run Infection
+        env:
+          XDEBUG_MODE: coverage
+        # Thresholds come from infection.json5 (minMsi / minCoveredMsi).
+        # --logger-github annotates escaped mutants inline on the PR.
+        run: |
+          set -o pipefail
+          vendor/bin/infection \
+            --threads=4 \
+            --test-framework-options="--testsuite=Unit" \
+            --no-progress \
+            --logger-github 2>&1 | tee infection-output.log
+
+      - name: Report MSI to job summary
+        if: always()
+        run: |
+          MSI=$(grep -oiP 'Mutation Score Indicator \(MSI\):\s*\K[0-9.]+' infection-output.log | head -1 || true)
+          COV=$(grep -oiP 'Covered Code MSI:\s*\K[0-9.]+' infection-output.log | head -1 || true)
+          echo "## Mutation testing" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Covered Code MSI:** ${COV:-unknown}% (test effectiveness — the headline metric)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Plain MSI:** ${MSI:-unknown}% (includes integration-only uncovered mutants)" >> "$GITHUB_STEP_SUMMARY"
+          # Badge tracks Covered Code MSI (test effectiveness on reachable code).
+          echo "MSI=${COV:-}" >> "$GITHUB_ENV"
+
+      - name: Generate MSI badge JSON (master only)
+        id: badge
+        if: github.event_name == 'push' && env.MSI != ''
+        run: |
+          MSI_INT="${MSI%.*}"
+          if   [ "$MSI_INT" -ge 80 ]; then COLOR=brightgreen
+          elif [ "$MSI_INT" -ge 70 ]; then COLOR=green
+          elif [ "$MSI_INT" -ge 60 ]; then COLOR=yellow
+          elif [ "$MSI_INT" -ge 40 ]; then COLOR=orange
+          else COLOR=red
+          fi
+          printf '{\n  "schemaVersion": 1,\n  "label": "mutation MSI",\n  "message": "%s%%",\n  "color": "%s",\n  "style": "flat-square"\n}\n' "$MSI_INT" "$COLOR" > .github/badges/mutation.json
+          # Surface the value for the PR body via the step output.
+          echo "msi_int=$MSI_INT" >> "$GITHUB_OUTPUT"
+
+      # Master is branch-protected, so we can't `git push` directly. Open or
+      # update an auto-PR with the badge change instead. The action no-ops when
+      # there is no diff. Single-fixed branch (ci/mutation-msi-badge) means
+      # repeated runs update the same PR rather than spamming new ones; the PR
+      # can be merged with the standard required checks.
+      - name: Open/update badge auto-PR (master only)
+        if: github.event_name == 'push' && env.MSI != '' && steps.badge.outputs.msi_int != ''
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          add-paths: .github/badges/mutation.json
+          branch: ci/mutation-msi-badge
+          delete-branch: true
+          commit-message: "ci(badge): mutation MSI ${{ steps.badge.outputs.msi_int }}% [skip ci]"
+          title: "ci(badge): refresh mutation MSI badge"
+          body: |
+            Automated by the Mutation workflow on a master push.
+
+            **MSI:** ${{ steps.badge.outputs.msi_int }}% (Covered Code MSI — the headline metric).
+
+            This PR updates `.github/badges/mutation.json` so the README badge
+            tracks the latest CI-measured score. Safe to merge once required
+            checks pass; no source changes.
+          labels: ci, automated
+          author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          committer: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"

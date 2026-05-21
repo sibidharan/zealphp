@@ -105,6 +105,30 @@ class IniIsolationMiddlewareTest extends TestCase
         $this->assertTrue($reached, 'handler should still run when keys list is empty');
     }
 
+    public function testCustomKeysListOnlyRestoresThoseKeys(): void
+    {
+        // Snapshot ONLY date.timezone. The handler also mutates `precision`,
+        // which is NOT in the custom list, so it must NOT be restored.
+        // Kills the Coalesce mutant (`DEFAULT_KEYS ?? $keys`) which would
+        // ignore the custom list and snapshot+restore DEFAULT_KEYS (incl.
+        // precision), reverting the precision change.
+        $originalPrecision = ini_get('precision');
+        $this->assertNotSame('5', $originalPrecision, 'precondition: precision must differ from the value we set');
+
+        $mw = new IniIsolationMiddleware(['date.timezone']);
+        $handler = $this->handlerThat(function () {
+            ini_set('precision', '5');
+            return $this->mockResponse();
+        });
+
+        $mw->process($this->mockRequest(), $handler);
+
+        $this->assertSame('5', ini_get('precision'), 'precision is outside the custom key list → left as the handler set it');
+
+        // cleanup
+        ini_set('precision', (string) $originalPrecision);
+    }
+
     public function testDefaultKeysListIncludesExpectedSettings(): void
     {
         // Pin the contract: these are the per-request mutation targets we

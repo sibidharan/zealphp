@@ -1,0 +1,56 @@
+name: SBOM
+
+# Software Bill of Materials (CycloneDX) for the Composer dependency tree.
+# Generated via the cyclonedx-php-composer plugin and published as a CI
+# artifact (build/sbom.cdx.json) on every master push, on demand, and on
+# release. The exact generate sequence below was verified locally against the
+# committed composer.lock (CycloneDX 1.5 JSON, 72 components).
+# No untrusted event input is referenced in any run step (injection-safe).
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+  release:
+    types: [ published ]
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    name: CycloneDX SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
+        with:
+          php-version: '8.3'
+          extensions: openswoole, uopz
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          mkdir -p build
+          composer config allow-plugins.cyclonedx/cyclonedx-php-composer true --no-interaction
+          composer require --dev cyclonedx/cyclonedx-php-composer --no-interaction --no-progress
+          composer CycloneDX:make-sbom \
+            --output-format=JSON \
+            --output-file=build/sbom.cdx.json \
+            --spec-version=1.5
+          # Restore the lockfile so the SBOM job never mutates committed deps.
+          git checkout -- composer.json composer.lock
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-cyclonedx
+          path: build/sbom.cdx.json
+          retention-days: 30

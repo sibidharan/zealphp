@@ -285,6 +285,95 @@ class Response
     }
 
     /**
+     * Maximum number of comma-separated range specs honoured in a single
+     * Range header. Mirrors Apache's AP_DEFAULT_MAX_RANGES (byterange_filter.c).
+     * Beyond this the Range header is ignored and the full body is served (200),
+     * matching Apache's CVE-2011-3192 mitigation.
+     */
+    private const MAX_RANGES = 200;
+
+    /**
+     * Parse a Range header value into a normalised list of [start, end] byte
+     * ranges (inclusive, clamped to the resource size).
+     *
+     * Mirrors RangeMiddleware's spec handling so both the buffered and the
+     * zero-copy file paths agree on suffix / open-end / bounded semantics.
+     *
+     * Returns one of:
+     *  - ['status' => 'ignore', 'ranges' => []]
+     *        Header is not a `bytes=` range, contains a syntactically invalid
+     *        spec (RFC 7233 §2.1: an invalid spec invalidates the whole header),
+     *        or the range count exceeds {@see MAX_RANGES} (CVE-2011-3192
+     *        mitigation). Caller serves the full body (200).
+     *  - ['status' => 'unsatisfiable', 'ranges' => []]
+     *        Every well-formed spec is out of bounds (416).
+     *  - ['status' => 'ok', 'ranges' => array<int, array{0: int, 1: int}>]
+     *
+     * @return array{status: 'ignore'|'unsatisfiable'|'ok', ranges: array<int, array{0: int, 1: int}>}
+     */
+    public static function parseRange(string $rangeHeader, int $total): array
+    {
+        if (!preg_match('/^bytes=(.+)$/i', $rangeHeader, $m)) {
+            return ['status' => 'ignore', 'ranges' => []];
+        }
+
+        $specs = explode(',', $m[1]);
+        if (count($specs) > self::MAX_RANGES) {
+            return ['status' => 'ignore', 'ranges' => []];
+        }
+
+        $ranges = [];
+        foreach ($specs as $spec) {
+            $spec = trim($spec);
+            if ($spec === '') {
+                continue;
+            }
+
+            // Strict byte-range-spec grammar (RFC 7233 §2.1):
+            //   suffix:  "-" 1*DIGIT          (bytes=-N)
+            //   open:    1*DIGIT "-"          (bytes=N-)
+            //   bounded: 1*DIGIT "-" 1*DIGIT  (bytes=N-M)
+            // Any other shape (trailing/leading garbage, multiple dashes) makes
+            // the whole header invalid → ignore it and serve the full body.
+            if (!preg_match('/^(\d*)-(\d*)$/', $spec, $sm) || ($sm[1] === '' && $sm[2] === '')) {
+                return ['status' => 'ignore', 'ranges' => []];
+            }
+
+            if ($sm[1] === '') {
+                // Suffix range: bytes=-N → last N bytes. A suffix longer than
+                // the file means "the entire representation" (RFC 7233 §2.1) —
+                // clamp the start to 0 rather than treating it as unsatisfiable.
+                $suffixLen = (int) $sm[2];
+                if ($suffixLen <= 0) {
+                    return ['status' => 'unsatisfiable', 'ranges' => []];
+                }
+                $ranges[] = [max(0, $total - $suffixLen), $total - 1];
+            } elseif ($sm[2] === '') {
+                // Open-end range: bytes=N-
+                $start = (int) $sm[1];
+                if ($start >= $total) {
+                    return ['status' => 'unsatisfiable', 'ranges' => []];
+                }
+                $ranges[] = [$start, $total - 1];
+            } else {
+                // Bounded range: bytes=N-M
+                $start = (int) $sm[1];
+                $end   = (int) $sm[2];
+                if ($start > $end || $start >= $total) {
+                    return ['status' => 'unsatisfiable', 'ranges' => []];
+                }
+                $ranges[] = [$start, min($end, $total - 1)];
+            }
+        }
+
+        if ($ranges === []) {
+            return ['status' => 'unsatisfiable', 'ranges' => []];
+        }
+
+        return ['status' => 'ok', 'ranges' => $ranges];
+    }
+
+    /**
      * Serve a file with Range request support using OpenSwoole's zero-copy sendfile.
      *
      * @param string $path     Absolute path to the file
@@ -360,8 +449,12 @@ class Response
                 }
             }
         } elseif ($ifModifiedSince !== '') {
+            // Apache ap_condition_if_modified_since: a future-dated
+            // If-Modified-Since (later than the request time) is invalid and
+            // must NOT yield a 304 — otherwise a client can force spurious 304s
+            // by sending a date past "now". Guard with $since <= time().
             $since = strtotime($ifModifiedSince);
-            if ($since !== false && $since >= $mtime) {
+            if ($since !== false && $since <= time() && $since >= $mtime) {
                 $notModified = true;
             }
         }
@@ -377,38 +470,143 @@ class Response
             $rangeHeader = '';
         }
 
-        if ($rangeHeader !== '' && preg_match('/^bytes=(\d*)-(\d*)$/', $rangeHeader, $m)) {
-            $start = $m[1] !== '' ? (int) $m[1] : null;
-            $end   = $m[2] !== '' ? (int) $m[2] : null;
-
-            if ($start === null && $end !== null) {
-                $start = max(0, $total - $end);
-                $end = $total - 1;
-            } elseif ($start !== null && $end === null) {
-                $end = $total - 1;
+        // If-Range (RFC 9110 §13.1.5): only honour the Range if the validator
+        // still matches. A leading `"` (or `W/"`) marks an entity-tag form,
+        // otherwise it is an HTTP-date compared against the file mtime (strong:
+        // exact second match required). On mismatch we ignore the Range and
+        // serve the full body — never a 412 here.
+        if ($rangeHeader !== '') {
+            $ifRange = $reqHeaders['if-range'] ?? '';
+            if (!is_string($ifRange)) {
+                $ifRange = '';
             }
+            if ($ifRange !== '' && !$this->ifRangeMatches($ifRange, $etag, $mtime)) {
+                $rangeHeader = '';
+            }
+        }
 
-            if ($start === null || $start >= $total || $start > $end) {
-                $this->status(416);
-                $this->header('Content-Range', "bytes */{$total}");
+        $parsed = $rangeHeader !== ''
+            ? self::parseRange($rangeHeader, $total)
+            : ['status' => 'ignore', 'ranges' => []];
+
+        if ($parsed['status'] === 'unsatisfiable') {
+            $this->status(416);
+            $this->header('Content-Range', "bytes */{$total}");
+            $this->flush();
+            $this->parent->end('');
+            return;
+        }
+
+        if ($parsed['status'] === 'ok') {
+            $ranges = $parsed['ranges'];
+            if (count($ranges) === 1) {
+                [$start, $end] = $ranges[0];
+                $length = $end - $start + 1;
+
+                $this->status(206);
+                $this->header('Content-Range', "bytes {$start}-{$end}/{$total}");
+                $this->header('Content-Length', (string) $length);
                 $this->flush();
-                $this->parent->end('');
+                $this->parent->sendfile($path, $start, $length);
                 return;
             }
 
-            $end = min($end, $total - 1);
-            $length = $end - $start + 1;
-
-            $this->status(206);
-            $this->header('Content-Range', "bytes {$start}-{$end}/{$total}");
-            $this->header('Content-Length', (string) $length);
-            $this->flush();
-            $this->parent->sendfile($path, $start, $length);
-        } else {
-            $this->header('Content-Length', (string) $total);
-            $this->flush();
-            $this->parent->sendfile($path, 0, $total);
+            $this->sendMultipart($path, $ranges, $total, $mime);
+            return;
         }
+
+        // status === 'ignore' — full body (200).
+        $this->header('Content-Length', (string) $total);
+        $this->flush();
+        $this->parent->sendfile($path, 0, $total);
+    }
+
+    /**
+     * Evaluate an If-Range header value against the resource's validators.
+     *
+     * @param string $ifRange Raw If-Range header value
+     * @param string $etag    The resource's current ETag (entity-tag form)
+     * @param int    $mtime   The resource's last-modified time (unix seconds)
+     * @return bool true → the validator still matches, honour the Range
+     */
+    private function ifRangeMatches(string $ifRange, string $etag, int $mtime): bool
+    {
+        $ifRange = trim($ifRange);
+        if ($ifRange === '') {
+            return true;
+        }
+
+        // Entity-tag form: starts with `"` or `W/"`. Strong comparison only —
+        // a weak validator must not be used to short-circuit a Range request,
+        // so a `W/`-prefixed If-Range never matches (mirrors Apache's
+        // ap_condition_if_range, which compares the raw strings).
+        if (str_starts_with($ifRange, '"') || str_starts_with($ifRange, 'W/"')) {
+            return $ifRange === $etag;
+        }
+
+        // HTTP-date form: honour the Range only if the file has not been
+        // modified since the supplied date (exact-second strong match).
+        $when = strtotime($ifRange);
+        return $when !== false && $when === $mtime;
+    }
+
+    /**
+     * Emit a 206 multipart/byteranges response for two or more ranges,
+     * streaming each slice straight from the file. Body framing mirrors
+     * RangeMiddleware so both paths produce byte-identical multipart output.
+     *
+     * @param array<int, array{0: int, 1: int}> $ranges
+     */
+    private function sendMultipart(string $path, array $ranges, int $total, string $mime): void
+    {
+        $boundary = 'zealphp_' . bin2hex(random_bytes(16));
+
+        // Pre-compute the exact Content-Length: each part's framing plus its
+        // slice length, the inter-part CRLF separators, and the closing
+        // delimiter — matching the wire bytes written below.
+        $length = 0;
+        $partHeaders = [];
+        foreach ($ranges as $i => [$start, $end]) {
+            $header = "--{$boundary}\r\n"
+                . "Content-Type: {$mime}\r\n"
+                . "Content-Range: bytes {$start}-{$end}/{$total}\r\n"
+                . "\r\n";
+            $partHeaders[$i] = $header;
+            $length += strlen($header) + ($end - $start + 1);
+            if ($i > 0) {
+                $length += 2; // inter-part "\r\n"
+            }
+        }
+        $closing = "\r\n--{$boundary}--\r\n";
+        $length += strlen($closing);
+
+        $this->header('Content-Type', "multipart/byteranges; boundary={$boundary}");
+        $this->header('Content-Length', (string) $length);
+        $this->status(206);
+        $this->flush();
+
+        $fh = fopen($path, 'rb');
+        if ($fh === false) {
+            $this->parent->end('');
+            return;
+        }
+        foreach ($ranges as $i => [$start, $end]) {
+            $part = ($i > 0 ? "\r\n" : '') . $partHeaders[$i];
+            $this->parent->write($part);
+            $remaining = $end - $start + 1;
+            fseek($fh, $start);
+            while ($remaining > 0) {
+                $chunk = fread($fh, min(8192, $remaining));
+                if ($chunk === false || $chunk === '') {
+                    break;
+                }
+                $this->parent->write($chunk);
+                $remaining -= strlen($chunk);
+            }
+        }
+        fclose($fh);
+        $this->parent->write($closing);
+        $this->parent->end();
     }
 
     public function flush(): bool

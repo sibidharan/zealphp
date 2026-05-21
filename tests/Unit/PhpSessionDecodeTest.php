@@ -9,6 +9,18 @@ use ZealPHP\Tests\TestCase;
 use function ZealPHP\Session\php_session_decode_to_array;
 
 /**
+ * A custom class used by the security tests. NOT on the unserialize
+ * whitelist — instantiation from session storage must be refused so a
+ * tampered cookie / compromised Redis blob can't trigger gadget chains
+ * (the c43da63 / issue #15 design constraint). Promoted to a real named
+ * class so PHPStan can see the property without dynamic-property warnings.
+ */
+final class PhpSessionDecodeTestNonWhitelistedFake
+{
+    public string $payload = '';
+}
+
+/**
  * Unit tests for ZealPHP\Session\php_session_decode_to_array().
  *
  * The function decodes two session-handler wire formats:
@@ -91,43 +103,83 @@ class PhpSessionDecodeTest extends TestCase
     }
 
     // ──────────────────────────────────────────────────────────────
-    // SECURITY — allowed_classes must be FALSE in both branches
+    // SECURITY — explicit class whitelist (stdClass only as of v0.2.26)
     // ──────────────────────────────────────────────────────────────
 
-    public function testObjectInPhpSerializeBranchIsRejected(): void
+    public function testStdClassRoundTripsInPhpSerializeBranch(): void
     {
-        // A serialized object would normally instantiate when unserialized.
-        // With allowed_classes => false, PHP returns __PHP_Incomplete_Class —
-        // is_array() check then fails and the function falls through to the
-        // pipe-format parser, which finds no `|` and returns [].
-        $payload = serialize(new \stdClass());
+        // json_decode($x) without the second arg returns a stdClass graph,
+        // which apps routinely stash in $_SESSION (OAuth token responses,
+        // API profile payloads, etc.). v0.2.25's blanket allowed_classes
+        // => false converted these to __PHP_Incomplete_Class on read,
+        // breaking property access. v0.2.26 issue #15 narrowly whitelists
+        // stdClass (zero methods, no gadget surface) so this round-trips.
+        $token = new \stdClass();
+        $token->access_token  = 'gho_xyz';
+        $token->token_type    = 'bearer';
+        $token->expires_in    = 3600;
+        $payload = serialize(['oauth_token' => $token]);
+
         $decoded = php_session_decode_to_array($payload);
-        // Either an empty array (fall-through to pipe parser which finds no |)
-        // OR a single-key array whose value is __PHP_Incomplete_Class. Neither
-        // is the original \stdClass — the security property is "no arbitrary
-        // class instantiation".
-        if ($decoded !== []) {
-            foreach ($decoded as $v) {
-                $this->assertNotInstanceOf(\stdClass::class, $v);
-                if (is_object($v)) {
-                    $this->assertInstanceOf(\__PHP_Incomplete_Class::class, $v);
-                }
-            }
+        $this->assertArrayHasKey('oauth_token', $decoded);
+        $this->assertInstanceOf(\stdClass::class, $decoded['oauth_token'],
+            'stdClass must round-trip as a live stdClass, not __PHP_Incomplete_Class');
+        $this->assertSame('gho_xyz', $decoded['oauth_token']->access_token);
+        $this->assertSame('bearer',  $decoded['oauth_token']->token_type);
+        $this->assertSame(3600,      $decoded['oauth_token']->expires_in);
+    }
+
+    public function testStdClassRoundTripsInPhpHandlerBranch(): void
+    {
+        $profile = new \stdClass();
+        $profile->id   = 42;
+        $profile->name = 'jane';
+        $payload = 'profile|' . serialize($profile) . ';';
+
+        $decoded = php_session_decode_to_array($payload);
+        $this->assertArrayHasKey('profile', $decoded);
+        $this->assertInstanceOf(\stdClass::class, $decoded['profile']);
+        $this->assertSame(42, $decoded['profile']->id);
+        $this->assertSame('jane', $decoded['profile']->name);
+    }
+
+    public function testNonWhitelistedClassIsBlockedInPhpSerializeBranch(): void
+    {
+        // Custom user class — NOT on the whitelist. The point of whitelisting
+        // stdClass narrowly is that arbitrary classes (which might have
+        // __wakeup/__destruct gadgets) still can't be instantiated from
+        // session storage. This payload must NOT come back as a live
+        // PhpSessionDecodeTestNonWhitelistedFake instance.
+        $obj = new PhpSessionDecodeTestNonWhitelistedFake();
+        $obj->payload = 'pretend this triggers a gadget';
+        $payload = serialize(['malicious' => $obj]);
+
+        $decoded = php_session_decode_to_array($payload);
+        // The 'malicious' key might be present (as __PHP_Incomplete_Class)
+        // OR the whole decode might have failed and fallen through to the
+        // pipe parser which returns [] — either is acceptable. The
+        // invariant we pin: NO live instance of the custom class.
+        if (isset($decoded['malicious'])) {
+            $this->assertNotInstanceOf(
+                PhpSessionDecodeTestNonWhitelistedFake::class,
+                $decoded['malicious']
+            );
         }
         $this->assertTrue(true);
     }
 
-    public function testObjectInPhpHandlerBranchIsRejected(): void
+    public function testNonWhitelistedClassIsBlockedInPhpHandlerBranch(): void
     {
-        // Pipe-format with a serialized object as the value.
-        $payload = 'obj|' . serialize(new \stdClass()) . ';';
+        $obj = new PhpSessionDecodeTestNonWhitelistedFake();
+        $obj->payload = 'pretend this triggers a gadget';
+        $payload = 'malicious|' . serialize($obj) . ';';
+
         $decoded = php_session_decode_to_array($payload);
-        // The value, if present, must NOT be a live \stdClass instance.
-        if (isset($decoded['obj'])) {
-            $this->assertNotInstanceOf(\stdClass::class, $decoded['obj']);
-            if (is_object($decoded['obj'])) {
-                $this->assertInstanceOf(\__PHP_Incomplete_Class::class, $decoded['obj']);
-            }
+        if (isset($decoded['malicious'])) {
+            $this->assertNotInstanceOf(
+                PhpSessionDecodeTestNonWhitelistedFake::class,
+                $decoded['malicious']
+            );
         }
         $this->assertTrue(true);
     }

@@ -164,6 +164,58 @@ lesson_counter|i:5;cart|a:2:{...}</code></pre>
       'body'    => '<p>Tempting: <code>UserState::$counter = 5;</code>. Don&rsquo;t. Static class properties live in the worker process — they survive across requests but are <em>shared by every user the worker handles</em>. The next request from a different user sees the same value. Always use sessions (or a database) for per-user state.</p>',
     ]); ?>
 
+    <h3 style="margin-top:1.5rem">First-visit cookie: redirects work after <code>session_start()</code> too</h3>
+    <p>
+      In a long-running OpenSwoole process, "set cookie on first
+      <code>session_start()</code>" is more subtle than it looks. Until v0.2.24,
+      this pattern would silently break for first-time visitors:
+    </p>
+    <?php App::render('/components/_code', [
+      'label' => 'OAuth handoff — broken in &lt;= v0.2.23 for first-time visitors',
+      'code'  => <<<'PHP'
+$app->route('/oauth/start', function($request, $response, $g) {
+    session_start();
+    $g->session['oauth_state']    = bin2hex(random_bytes(16));
+    $g->session['code_verifier']  = bin2hex(random_bytes(32));
+
+    // Redirect to the OAuth provider. The Set-Cookie MUST go out with
+    // this 302 — otherwise the callback request arrives with no PHPSESSID,
+    // the framework starts a fresh session, and oauth_state is lost.
+    return $response->redirect('https://provider.example/oauth/authorize?...', 302);
+});
+PHP,
+    ]); ?>
+    <p>
+      <strong>Symptom:</strong> the redirect went out, but with no
+      <code>Set-Cookie</code> header. On the callback hit, the client had no
+      <code>PHPSESSID</code>, the framework minted a new session, and the
+      <code>oauth_state</code> stashed in the original request was gone &mdash;
+      OAuth would always fail the state check.
+    </p>
+    <p>
+      <strong>Fix (v0.2.24, PR <a href="https://github.com/sibidharan/zealphp/pull/12" target="_blank" rel="noopener">#12</a>):</strong>
+      <code>session_start()</code> now auto-emits <code>Set-Cookie</code> when
+      the request had no incoming <code>PHPSESSID</code>. Idempotent (only fires
+      once per request), respects <code>session.use_cookies = 0</code>, and
+      skips when the response is already flushed. Nothing changes on the user
+      side &mdash; handlers that do <code>session_start()</code> + write +
+      <code>redirect()</code> just work now, exactly the way they would under
+      mod_php.
+    </p>
+    <p>
+      Two visitor paths covered:
+    </p>
+    <ul style="margin:.5rem 0;line-height:1.7">
+      <li><strong>First-time visitor</strong> (no incoming cookie) &mdash; the
+        new auto-emit fires inside <code>session_start()</code>, redirect carries
+        the cookie, callback finds the session.</li>
+      <li><strong>Returning visitor</strong> (already has a cookie) &mdash;
+        <code>CoSessionManager</code> handles the refresh as before,
+        <code>session_start()</code> sees the cookie already present and skips the
+        emit. Still exactly one <code>Set-Cookie</code> on the wire (was two
+        before in some edge cases).</li>
+    </ul>
+
     <h2>What you built</h2>
     <p>
       A counter that survives a reload, follows you across tabs, and uses no database — just

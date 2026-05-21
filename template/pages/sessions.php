@@ -2,7 +2,7 @@
 <section class="section">
 <div class="container">
 <h1 class="section-title">Sessions</h1>
-<p class="section-desc">ZealPHP overrides all <code>session_*()</code> functions via uopz at startup. Your code calls the same PHP functions — they write to the coroutine-local <code>RequestContext::instance()-&gt;session</code> instead of the global <code>$_SESSION</code>. (<code>G</code> remains as a <code>class_alias</code> for <code>RequestContext</code> since v0.2.6 — both names resolve to the same class, examples here use whichever reads more naturally.)</p>
+<p class="section-desc">ZealPHP overrides every <code>session_*()</code> function via uopz at startup — those calls route through the coroutine-local <code>RequestContext::instance()-&gt;session</code>. <strong>Direct writes to the <code>$_SESSION</code> superglobal are NOT intercepted</strong> — PHP has no hook for variable assignment, so <code>$_SESSION['k'] = $v</code> always lands in the process-wide PHP array. In coroutine mode that array leaks across concurrent requests; in <code>App::superglobals(true)</code> mode it's bridged through <code>$GLOBALS</code> per the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a>. <strong>Always read and write through <code>$g-&gt;session</code></strong> — it's the only form that's per-coroutine safe in both modes. (<code>G</code> remains as a <code>class_alias</code> for <code>RequestContext</code> since v0.2.6 — both names resolve to the same class.)</p>
 
 <?php App::render('/components/_code', [
     'label' => 'How it works under the hood',
@@ -13,11 +13,15 @@
 \uopz_set_return('session_write_close', \Closure::fromCallable('ZealPHP\Session\zeal_session_write_close'));
 // ... + 15 more functions
 
-// Your code stays unchanged:
-session_start();
-$_SESSION['user'] = ['id' => 42, 'name' => 'alice'];
-session_write_close();
-// → writes to G::instance()->session, not $GLOBALS['_SESSION']
+// Use $g->session for per-coroutine safety in both modes:
+$g = \ZealPHP\RequestContext::instance();
+session_start();                                          // zeal_session_start — loads disk → $g->session
+$g->session['user'] = ['id' => 42, 'name' => 'alice'];    // safe in both modes
+session_write_close();                                    // zeal_session_write_close — serializes $g->session
+
+// AVOID direct $_SESSION writes — they hit the process-wide superglobal and
+// leak across concurrent requests in coroutine mode. The framework cannot
+// intercept the assignment, only the session_*() function calls around it.
 PHP]); ?>
 
 <h2 style="margin:1.5rem 0 .5rem">Overridden functions</h2>
@@ -65,6 +69,46 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <code>RequestContext::instance()-&gt;session</code> via <code>Coroutine::getContext()</code> —
   no data leaks between concurrent requests. See the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a> for the cross-mode story (when <code>$_SESSION</code> is safe vs. when only <code>$g-&gt;session</code> works).
 </div>
+
+<h2 id="objects-in-session" style="margin:1.75rem 0 .5rem">Storing objects in sessions — the <code>stdClass</code> whitelist</h2>
+<p>
+  PHP's <code>unserialize()</code> can be turned into a remote-code-execution vector when fed
+  attacker-controlled data — any class on the autoload graph with <code>__wakeup()</code> /
+  <code>__destruct()</code> magic methods becomes a "gadget". Sessions are user-controlled
+  storage (tampered cookie, compromised Redis), so since v0.2.25 ZealPHP's session decode
+  refuses to instantiate arbitrary classes on read.
+</p>
+<p>
+  v0.2.26 (<a href="https://github.com/sibidharan/zealphp/issues/15" target="_blank" rel="noopener">issue #15</a>) narrowed the policy to an explicit whitelist:
+</p>
+<table class="ztable" style="margin-bottom:1rem">
+<tr><th>Stored as</th><th>Read back as</th><th>Why</th></tr>
+<tr><td>Scalar (string, int, float, bool, null)</td><td>Same scalar</td><td>No instantiation needed; trivially safe.</td></tr>
+<tr><td>Array (assoc or list)</td><td>Same array</td><td>Same — recursive scalars only by default.</td></tr>
+<tr><td><code>stdClass</code></td><td>Live <code>stdClass</code></td><td>Zero magic methods (<code>__wakeup</code>, <code>__destruct</code>, <code>__get</code>, etc.) — no gadget chain. <code>json_decode()</code> output rides this path: OAuth token responses, API profile data, anything from <code>json_decode($x)</code> without the assoc flag.</td></tr>
+<tr><td>Any other class (<code>DateTime</code>, your <code>User</code>, …)</td><td><code>__PHP_Incomplete_Class</code></td><td>Property access prints a warning and yields nulls. The class is <em>refused</em> at unserialize time. Add it to the whitelist only after a security review of its magic methods.</td></tr>
+</table>
+
+<?php App::render('/components/_code', [
+    'label' => 'In practice: storing an OAuth token from json_decode',
+    'code'  => <<<'PHP'
+$g = \ZealPHP\RequestContext::instance();
+session_start();
+
+$tokenResponse = json_decode($curl_body);   // returns stdClass
+$g->session['oauth_token'] = $tokenResponse;
+session_write_close();
+
+// On the next request:
+session_start();
+echo $g->session['oauth_token']->access_token;  // ✓ works — stdClass round-trips
+echo $g->session['oauth_token']->expires_in;
+PHP,
+]); ?>
+
+<p style="font-size:.9rem;color:var(--text-muted)">
+  Need another class on the whitelist (rare)? Audit its <code>__wakeup</code> / <code>__unserialize</code> / <code>__destruct</code> first — those are the gadget surfaces — then patch the four <code>unserialize()</code> calls in <code>src/Session/utils.php</code>. The function-level docblock at <code>php_session_decode_to_array()</code> documents the constraint.
+</p>
 
 <h2 style="margin:1.75rem 0 .5rem">What else gets reset per request</h2>
 <p style="color:var(--text-muted)">In <strong>coroutine mode</strong>, the entire <code>RequestContext</code> instance is per-coroutine — when the coroutine ends, every field on it is freed. That includes session data, response headers/cookies pending emission (on the Response wrapper), and the handler stacks pushed by <code>set_error_handler()</code> / <code>set_exception_handler()</code> / <code>register_shutdown_function()</code>. Legacy code that calls those per-request without restoring them can't accumulate handlers across requests in this mode.</p>

@@ -2,6 +2,349 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.38] - 2026-05-21
+
+Apache + nginx parity release. Two source-diff audits (httpd 2.5.1 + nginx 1.31.1) drove a wave of security fixes, conformance fixes, and new APIs across the HTTP core and the middleware stack. PR #38.
+
+### Security
+
+- **Referer `example.*` no longer matches `example.evil.com`** — `RefererMiddleware` now uses DNS-label-boundary matching (mirrors nginx `dns_wc_head`); previously `str_starts_with($host, "example.")` allowed `example.evil.com` through the allow-list.
+- **Symlink-escape via static file serving** closed — `App::includeCheck()` now realpath()-canonicalizes both the file and the document root with boundary-aware containment (`pathWithinRoot()`), refusing symlinks that escape docroot. Non-regular files (FIFO/device/socket) are rejected; ENOTDIR returns 403 (matches Apache "deny rather than assume not found").
+- **APR1 (`$apr1$`) htpasswd digest encoding** now matches Apache exactly (the prior native PHP md5 was non-Apache-compatible); pinned against `openssl passwd -apr1` oracle vectors. DES-salt allow-list now matches the real `[./0-9A-Za-z]` alphabet (previously `ctype_alnum` would 401 legitimate DES hashes whose salt contained `.` or `/`).
+- **Double-encoded traversal (`%252e%252e`)** rejected with 400 — pre-routing guard now decodes-until-stable before checking for `..`.
+- **`mod_expires` no longer stamps `Cache-Control: max-age=N` on error responses** — 4xx/5xx are skipped (Apache parity); past-expiry clamped to `max-age=0`.
+- **`enable_static_handler`** is now documented as OpenSwoole-governed (a parity ceiling): the C-level static handler serves `/css`,`/js`,`/img` before PHP, so the PHP-layer normalization/%2F-reject/symlink-containment guards do NOT apply to those prefixes. Deploy guidance added to `STANDARDS.md`.
+- **Multi-range DoS cap** added to `RangeMiddleware` and `Response::sendFile()` — bounded at 200 ranges (matches Apache `AP_DEFAULT_MAX_RANGES`, CVE-2011-3192 class).
+- **Plaintext htpasswd** now refused with an explicit prefix guard (previously rejected only by `crypt()` happening to fail).
+- **Error responses no longer leak handler-set headers** — `App::renderError()` clears prior `Content-Type`/custom headers before emitting an error body; preserves `Location`, `Allow`, `WWW-Authenticate` (Apache `apr_table_clear(headers_out)` parity).
+
+### Added
+
+- **`ZealPHP\HTTP\ConditionalRequest`** — new shared evaluator implementing Apache's `ap_meets_conditions` precedence (If-Match → If-Unmodified-Since → If-None-Match → If-Modified-Since), weak/strong ETag comparison, `*` wildcard, 412 outcomes. Wired into `ETagMiddleware`; If-Match and If-Unmodified-Since are now supported (REST PUT/DELETE optimistic-locking works).
+- **`ZealPHP\HTTP\MimeResolver`** — multi-suffix content-type resolver mirroring Apache `mod_mime` `find_ct`: walks all dot-separated suffixes left-to-right accumulating Content-Type + Content-Encoding + Content-Language. `document.html.gz` now correctly emits `Content-Type: text/html` + `Content-Encoding: gzip`. Dotfile rule fixed (`.png` is a hidden file with no type).
+- **`ContentEncodingMiddleware`** (Apache `AddEncoding`) and **`ContentLanguageMiddleware`** (Apache `AddLanguage`) — additive, opt-in, driven by the same multi-suffix resolver.
+- **`RangeMiddleware`**: `If-Range` HTTP-date support (parsed via `strtotime`, compared to `Last-Modified` with Apache's 1-minute clock-skew rule); invalid spec now invalidates the WHOLE Range header per RFC 7233 §2.1.
+- **`Response::sendFile()`**: full multi-range support (206 multipart/byteranges with boundary framing matching `RangeMiddleware`); `If-Modified-Since` future-date guard; `If-Range` entity-tag + HTTP-date.
+- **`ConcurrencyLimitMiddleware`**: per-key concurrency limiting (Store-backed, keyed by `App::clientIp()` — proxy-aware), opt-in `dryRun` (observe + `elog`, no enforcement), configurable `rejectStatus` (default 503, nginx parity).
+- **`RateLimitMiddleware`**: per-rule `burst=`, `nodelay=`, configurable `rejectStatus`, opt-in `dryRun`. Bucket keying now uses `App::clientIp()` (X-Forwarded-For + trusted proxies) instead of raw `REMOTE_ADDR`.
+- **`HostRouterMiddleware`**: trailing-wildcard (`www.*`) and regex (`~^…`) server_name support, full nginx precedence (exact > leading-wc > trailing-wc > regex > default), HTTP/1.1 missing/duplicate/invalid-Host → 400, trailing-dot normalization, correct IPv6 host+port parsing (`[::1]:80`).
+- **`HeaderMiddleware`**: nginx `add_header` status-conditional default (per-rule `always` opt-out). See note in Changed.
+- **`App::KNOWN_METHODS`** + 501 guard for unrecognised verbs; real `TRACE` handler (echoes request as `message/http` with 413 guard) when `traceEnabled(true)` — note both are defense-in-depth; OpenSwoole's C parser intercepts unknown methods + `TRACE` with 400 before PHP runs (documented in `STANDARDS.md` "OpenSwoole-governed surfaces").
+- **`App::$limit_request_fields`** is now actually enforced — `ResponseMiddleware` counts `HTTP_*` keys per request and returns **400** over the limit.
+- **`ExpiresMiddleware`**: optional `emitCacheControl` (dual Expires + Cache-Control atomic emission); `base: 'M'` (modification-time) in addition to access-time; suppresses both headers on 4xx/5xx; clamps past expiry to `max-age=0`.
+
+### Changed
+
+- **`HeaderMiddleware` default** is now nginx-style status-conditional (`add_header` applies only to 2xx/3xx unless `always=true` per rule) — **mild BC change**, see the rule's `always` flag to restore the prior unconditional behaviour.
+- **`Store::set()`** now catches `OpenSwoole\Exception` on table-full and returns `false` (matches its declared `bool` return); previously threw.
+- **`BodySizeLimitMiddleware`** now enforces the cap on chunked / no-Content-Length uploads (Apache `LimitRequestBody` parity); a limit of `0` correctly means **unlimited** (was rejecting all non-empty bodies).
+- **`RedirectMiddleware`**: when the redirect target already contains `?`, the incoming request query string is now merged with `&` (Apache `QSA` parity); previously dropped.
+- **`CompressionMiddleware`**: `Vary` header now merges (preserves `Vary: Origin` from CORS) instead of replacing; `Accept-Encoding: q=0` correctly refuses compression (RFC 7231 §5.3.4); strong ETags are weakened (`W/` prefix) on compressed responses (RFC 7232 §2.1); `Accept-Ranges` cleared when compression fires.
+- **`ETagMiddleware`** uses the new shared `ConditionalRequest` evaluator: full RFC 9110 precondition precedence, weak/strong compare, `*` wildcard, 412 outcomes, GET+HEAD ETag generation.
+- **`OPTIONS *`** returns **200** with empty body (Apache parity) instead of 204.
+- **HEAD body strip** now applied on error and streaming response paths (was previously normal-response-only).
+
+### Fixed
+
+- All ten bugs (B1–B10) catalogued in `docs/nginx-parity-audit.md`: referer wildcard over-match, rate-limit proxy-IP keying, body-limit `0` semantics, mod_expires error-caching, compression Vary overwrite, error-header leak, regex case-sensitivity, IPv6 host parse, redirect QSA query-drop, fail-open logging.
+- ETag path consistency documented (audit gap H7): both paths emit **weak** ETags; `ETagMiddleware` bails on streaming/empty bodies so it never clobbers `sendFile()`'s stat-based ETag; mutually exclusive per response.
+
+### Documentation
+
+- **`docs/apache-parity-audit.md`** — source-diff audit of 10 HTTP-core subsystems against `httpd 2.5.1` with a severity-ranked gap register and per-lane evidence-cited reports.
+- **`docs/nginx-parity-audit.md`** — source-diff audit of nginx-parity middleware against `nginx 1.31.1` + deeper Apache edge-case lanes (`mod_rewrite`, `ErrorDocument`, `mod_deflate`, `mod_expires`) with 10 bug findings and structural gap analysis.
+- **`STANDARDS.md`** — new **OpenSwoole-governed surfaces** table documenting the parity ceiling (method-line 400-not-501 and the static-handler bypass for `/css,/js,/img`); honest `LimitRequest*` enforcement table marking which knobs are enforced (`Fields`) vs OpenSwoole-governed (`Line`/`FieldSize`).
+
+### Tests
+
+- New unit suites: `ConditionalRequestTest`, `MimeResolverTest`, `RangeMiddlewareConformanceTest`, `UriSecurityConformanceTest`, `IncludeCheckSecurityTest`, `ContentEncodingMiddlewareTest`, `ContentLanguageMiddlewareTest`, `MethodSemanticsTest`. Extended `ETagMiddlewareTest`, `BasicAuthMiddlewareTest`, `BodySizeLimitMiddlewareTest`, `MimeTypeMiddlewareTest`, `HTTP/ResponseTest`, `AppPipelineExtraTest`.
+- Mutation-coverage hardening: 154 escaped mutants triaged across 9 middleware (97 killed by targeted assertions, 57 catalogued as provably-equivalent with one-line rationales each); both gates pass (MSI 90%/floor 88, Covered-MSI 93%/floor 92).
+- New integration cases: HostRouter validation, conditional-request precedence end-to-end, multi-range sendFile, double-encoded-traversal, encoded-slash rejection on PHP-routed paths, error-header isolation (`ErrorHeaderLeakTest`).
+
+## [0.2.37] - 2026-05-21
+
+Mutation-hardening + conformance-audit release. Raises Infection **covered-MSI from 65% to 95%** (1680/1763 covered mutants killed; the 83 survivors are all provably-equivalent, catalogued in `STANDARDS.md`), fixes a real **HTTP Basic Auth APR1 bug** surfaced by that effort, adds an **Apache httpd core-logic diff + non-support register**, and lands **runnable HTTP fuzz harnesses** (radamsa / gabbi / slowhttptest) wired into CI.
+
+### Fixed
+
+- **`BasicAuthMiddleware` could never verify an Apache `htpasswd -m` (APR1) credential.** The `crypt_apr1_md5()` final to64 encoding assembled its base64 groups in **reversed byte order**, so the computed digest was the byte-reverse of a real `$apr1$` hash and `hash_equals()` always failed. Replaced the strtr/reverse trick with the canonical `apr_md5_encode` interleave (`0,6,12 / 1,7,13 / … / 4,10,5 / 11`, emitted LSB-first). Now verifies credentials from Apache `htpasswd`, `openssl passwd -apr1`, and other standard APR1 producers. Pinned against those independent oracles so it can't regress. (bcrypt / SHA-1 / crypt-DES / SHA-512-crypt paths were already correct.)
+
+### Testing / conformance
+
+- **Mutation score: covered-MSI 65% → 95%** (Infection gate ratcheted `minMsi 55/60` → `88/92`). Every file in the mutation scope (`src/Middleware`, `src/HTTP`, `src/Input`, `src/Diagnostics`) driven to its equivalent-mutant ceiling with real, behaviour-pinning assertions — new/extended unit tests for ~30 classes (Basic auth, Referer, BodySize, Range, RateLimit, Cors, SetEnvIf, HostRouter, Header, RequestHeader, IpAccess, Expires, CacheControl, MimeType, Compression, BodyRewrite, Redirect, Concurrency, Return, ETag, Charset, Scoped, BlockPhpExt, MergeSlashes, IniIsolation, PhpInfo, Response, LazyServerRequest, RequestInput, HTTP factories/exceptions). The 83 surviving mutants are all **provably-equivalent** — `STANDARDS.md` gains an equivalent-mutant register (8 equivalence classes with proofs) explaining why 100% is mathematically unreachable by testing and why the project declines to prop it up with `@infection-ignore` pragmas.
+- **Apache httpd core-logic diff** (`STANDARDS.md`) — request-line parsing, header folding, Host enforcement, CL/TE smuggling resolution, the 405/`Allow` path, 404-vs-403, and default request limits, each compared against the Apache httpd 2.5.x source (function cited) and the ZealPHP impl + proving test. Plus the honest **Apache non-support register**: ProxyPass, TLS termination, WebDAV, CGI/FastCGI, full `mod_rewrite`, `.htaccess`/`<Directory>`, content negotiation, SSI, on-the-fly content filters, HTTP cache, LDAP/digest/form/JWT auth, `mod_reqtimeout`, `mod_ratelimit` — each with rationale + substitute.
+- **Runnable HTTP fuzz harnesses** (`scripts/fuzz/`, `tests/gabbi/`, `docs/fuzzing.md`, `.github/workflows/fuzz.yml`) — actually executed, not just configured: **Radamsa** 500 wire mutations → 0 hangs / 0 stack-trace leaks; **Gabbi** 7/7 declarative contract cases; **slowhttptest** confirms the documented OpenSwoole read-timeout gap. http-garden differential-vs-Apache documented (Docker-gated). CI runs radamsa + gabbi as gates.
+
+## [0.2.36] - 2026-05-21
+
+HTTP/1.1 method-handling conformance + visible mutation metric. Adds **405 Method Not Allowed** with an `Allow` header (RFC 9110 §15.5.6) so a known resource hit with the wrong method is rejected correctly instead of falling through to 404, surfaces the CI-measured Mutation Score Indicator as a README badge, and extends the conformance battery with symlink-escape and chunked-framing edge cases.
+
+### Added
+
+- **405 Method Not Allowed + `Allow` header (RFC 9110 §15.5.6)** — a request whose URI matches a registered route but whose method does not now returns **405** with an `Allow` header listing the supported methods (`GET` implies `HEAD`; `OPTIONS` always included), instead of a misleading 404. To make this correct for static-style URLs, the three implicit document-root routes (`/`, `/{file}`, `/{dir}/{uri}`) are now scoped to `GET`/`POST` (Apache static-handler parity) — `PUT`/`DELETE`/`PATCH` on a static path now reach the 405 path rather than being silently absorbed. These implicit routes remain user-overridable defaults.
+- **Mutation Score Indicator badge** — the README now shows the CI-measured MSI (shields-endpoint badge backed by `.github/badges/mutation.json`); the `Mutation` workflow refreshes it on every `master` push so the displayed score always reflects the latest run.
+
+### Testing / conformance
+
+- **Symlink-escape refusal** (`StaticServingConformanceTest`) — a symlink under the document root pointing outside it (`→ /etc/passwd`) is refused (403/404) and never leaks target content.
+- **Chunked-framing edge cases** (`Http1FramingConformanceTest`) — chunk extensions, trailers, and leading-zero chunk sizes are handled without misframing.
+- `STANDARDS.md` gains an **advanced-testing roadmap** mapping each tool class to its role: Infection (code mutation), http-garden (parser differential vs Apache/nginx), Radamsa (wire fuzzing), slowhttptest (reactor/slowloris), and Gabbi (declarative contract).
+
+## [0.2.35] - 2026-05-21
+
+HTTP/1.1 + static-serving conformance hardening: enforces the RFC 9112 §3.2 `Host` rule (missing Host on HTTP/1.1 → 400), and adds proven conformance suites for static document-root serving (traversal corpus, dotfile protection, autoindex-off, MIME, conditional 304), Host rules, and response-splitting (`header()` CR/LF/NUL). `STANDARDS.md` gains the request-line/Host/static matrix + an honest OpenSwoole-parser deviation register.
+
+### Added
+
+- **HTTP/1.1 `Host` enforcement (RFC 9112 §3.2)** — an HTTP/1.1 request without a `Host` header is now rejected with **400** (`ResponseMiddleware` guard, before routing); HTTP/1.0 stays exempt. Closes a vhost-confusion / smuggling gap (OpenSwoole previously accepted it as 200).
+
+### Testing / conformance
+
+- **Static document-root serving conformance** (`tests/Integration/StaticServingConformanceTest.php`) — proves the "serve a directory safely" surface: a directory-traversal corpus (encoded / double-encoded / backslash / null-byte) never escapes the document root, dotfiles (`.env`/`.git`/`.htaccess`/`.ssh`) are never served, a bare directory never leaks a listing (autoindex off), and common assets get correct MIME types + conditional 304.
+- **HTTP/1.1 `Host`-rule conformance** added to `Http1FramingConformanceTest` (missing-Host → 400, with-Host → 200, HTTP/1.0 exempt).
+- **Response-splitting / header-injection conformance** (`tests/Unit/ResponseSplittingConformanceTest.php`) — `header()` refuses CR/LF/NUL (including `Location:` from tainted input), pinning the no-response-splitting guarantee.
+- `STANDARDS.md` expanded with the request-line/`Host`/static matrix and the honest OpenSwoole-parser deviation register (`%00` truncation, duplicate-`Host` merge, generic-4xx-not-`431`/`414`, `Expect`/keep-alive as server settings).
+
+## [0.2.34] - 2026-05-21
+
+A standards-conformance + Apache/nginx-parity release. Adds a documented, gated conformance program (`STANDARDS.md`): exhaustive IANA status-code, RFC 6265 cookie, and RFC 9110 §5.6.7 IMF-date suites; a raw-socket HTTP/1.1 framing & request-smuggling proof (RFC 9112 §6–§7); a live directory-traversal proof; plus CI gates — an 80% coverage floor, Infection mutation testing (ratcheted to the measured baseline), and a perf-regression smoke. Ships six new directive middleware (Scoped / RequestHeader / MergeSlashes / BodySizeLimit / Referer / Return), session-format cross-server parity ([#23](https://github.com/sibidharan/zealphp/issues/23)), and the `.php` 404 fix ([#25](https://github.com/sibidharan/zealphp/issues/25)).
+
+### Testing / conformance
+
+- **HTTP/1.1 framing & request-smuggling conformance** (RFC 9112 §6–§7) — a raw-socket suite (`tests/Integration/Http1FramingConformanceTest.php`) that *proves* the smuggling surface is closed: `Content-Length`+`Transfer-Encoding` → 400, duplicate `Content-Length` / bare-LF / invalid chunk size → connection dropped, oversized header block → 400, well-formed chunked → parsed. Results + the two documented leniencies are published in `STANDARDS.md`. (HTTP/2 h2spec is the next conformance step; currently *Documented*, not yet *Exhaustive*.)
+
+### Fixed
+
+- **Nonexistent `.php` URLs now return 404, not 403** ([#25](https://github.com/sibidharan/zealphp/issues/25)). With `ignore_php_ext` on (default), the `*.php` catch-all returned a blanket `403 Forbidden` for every `.php` URL — telling clients "no permission" when the truth was "doesn't exist." It now checks the file on disk (under the document root): an existing `.php` blocked from direct access → **403**, a `.php` URL with no backing file → **404** (Apache parity).
+
+### Added
+
+- **`ScopedMiddleware` (Apache `<Location>` / `<LocationMatch>` / `<FilesMatch>` parity)** — wrap any middleware so it applies only to matching request paths: `ScopedMiddleware::location($inner, '/admin')` (literal URL-path prefix) or `ScopedMiddleware::match($inner, '#^/api/#')` (PCRE). Out of scope the inner middleware is skipped and the request passes straight through; in scope it runs normally (free to short-circuit). The middleware-composition equivalent of Apache's scoped directive containers — e.g. `BasicAuthMiddleware` only under `/admin`.
+- **`RequestHeaderMiddleware` (Apache mod_headers `RequestHeader`)** — manipulate inbound request headers before handlers run (`set` / `append` / `add` / `unset`), written into `$g->server` as `HTTP_<NAME>` so `apache_request_headers()` / `getallheaders()` reflect them — the mod_php convention.
+- **`MergeSlashesMiddleware` (Apache `MergeSlashes On` / nginx `merge_slashes`)** — collapse runs of consecutive slashes in the request path before routing (`/a//b///c` → `/a/b/c`), an internal rewrite of `$g->server['REQUEST_URI']`; the query string is preserved.
+- **`BodySizeLimitMiddleware` (nginx `client_max_body_size` / Apache `LimitRequestBody` / PHP `post_max_size`)** — refuses requests whose `Content-Length` exceeds a configured cap with `413 Payload Too Large`. Accepts a byte count or an nginx-style size string (`'10m'`, `'512k'`, `'1g'`). OpenSwoole's `package_max_length` remains the transport hard cap; this is the configurable app-level limit with the standard 413.
+- **`RefererMiddleware` (nginx `valid_referers` / `$invalid_referer`)** — hotlink protection: 403s requests whose `Referer` isn't in the allowed set. Mirrors nginx semantics — `none` (missing), `blocked` (scheme-less), exact host, `*.example.com` / `example.*` wildcards (with optional URI prefix, port ignored), and `~regex`.
+- **`ReturnMiddleware` (nginx `return`)** — unconditionally returns a fixed response (status-only, `Location` redirect for 3xx, or a fixed body), like nginx `return` in a `location`. Pair with `ScopedMiddleware` for the `location { return ...; }` shape.
+
+## [0.2.33] - 2026-05-21
+
+Coroutine-safety fix for the Redis session handler — resolves session corruption under concurrent load ([#16](https://github.com/sibidharan/zealphp/issues/16)).
+
+### Fixed
+
+- **`RedisSessionHandler` is now coroutine-safe — fixes session corruption under concurrent load** ([#16](https://github.com/sibidharan/zealphp/issues/16)). The handler held a single `\Redis` connection; sharing one instance across coroutines (the `onWorkerStart` pattern) multiplexed concurrent commands onto the same socket, and phpredis is not coroutine-safe — interleaved request/response frames made `read()` return the wrong/empty session, which `write_close()` then persisted (a 24-key session collapsing to a few keys under a rapid request sweep). The handler now keeps **one connection per coroutine** (stored in the coroutine context, reaped on coroutine end); outside a coroutine it uses a single fallback connection created at construction. Constructor behaviour is unchanged (still connects eagerly to validate config). High-throughput deployments should front this with a connection pool to avoid per-request connection churn. *(Root cause was the shared socket, not the `write_close()` merge; the file-handler default was never affected.)*
+
+## [0.2.32] - 2026-05-21
+
+A second Apache/mod_php parity wave: new built-in overrides (`php_sapi_name`, `filter_input`/`filter_input_array`, `header_register_callback`, `error_log`), `$_SERVER` completeness (`GATEWAY_INTERFACE`/`REQUEST_SCHEME`/`HTTPS`), new directive middleware (`RedirectMiddleware`, `SetEnvIfMiddleware`) and config (`ServerTokens`, `FileETag`, `default_mimetype`) — plus two session/output correctness fixes ([#20](https://github.com/sibidharan/zealphp/issues/20), [#21](https://github.com/sibidharan/zealphp/issues/21)).
+
+### Fixed
+
+- **Void return (`return;`) no longer discards buffered output** ([#20](https://github.com/sibidharan/zealphp/issues/20)). `executeFile()` only treated PHP's `int(1)` (no `return`) as "surface the echoed output"; a bare `return;` yields `null` and fell through to the explicit-return branch, silently dropping all rendered HTML (a common pattern: `echo`/template output followed by `return;`). `$result === null && $output !== ''` is now also treated as the no-explicit-return case — consistent with the universal return contract (`null` = no body override).
+- **`unset($g->session['key'])` now persists through a custom session handler** ([#21](https://github.com/sibidharan/zealphp/issues/21)). `zeal_session_write_close()`'s concurrent-race merge (`array_merge(stored, current)`) resurrected keys that were `unset()` during the request — a merge can't tell "never existed here" from "deleted here". The session's keys are now snapshotted at load (`RequestContext::$session_loaded_keys`); the merge drops keys that were loaded but are now absent (in-request deletions) while preserving keys never loaded here (concurrent adds). Apache `$_SESSION` unset parity. Only affected custom `SessionHandlerInterface` implementations (e.g. Redis); the file-handler default already wrote the live array directly.
+
+### Added
+
+- **Apache `ServerTokens` parity (`App::serverTokens()` / `App::$server_tokens`)** — controls the `X-Powered-By` response header: `'Full'` (default) → `ZealPHP + OpenSwoole`; `'Prod'`/`'Major'`/`'Minor'`/`'Min'`/`'OS'` → `ZealPHP`; `'None'`/`''` → header omitted (info-leak hardening). `App::poweredByHeader()` resolves the value at the emission boundary. Non-breaking default.
+- **`RedirectMiddleware` (Apache mod_alias `Redirect` / `RedirectMatch`)** — declarative URL redirects: prefix (`/old` → `/new`, remainder appended) and regex (with `$n` backreferences). First match short-circuits with a `Location` redirect; query string preserved; default status 302.
+- **`SetEnvIfMiddleware` (Apache mod_setenvif `SetEnvIf` / `BrowserMatch`)** — sets request env vars into `$g->server` (mod_php `$_SERVER`) when a request attribute matches a regex. Apache special attributes (`Remote_Addr`, `Request_Method`, `Request_URI`, `Request_Protocol`, …) plus any header name (`User-Agent` = `BrowserMatch`).
+- **Apache `FileETag` parity (`App::fileETag()` / `App::$file_etag`)** — set `false` for `FileETag None`: `ETagMiddleware` then emits no `ETag` and never returns 304. Default true.
+
+- **`error_log()` override** — Apache/mod_php parity. Native `error_log()` under the CLI SAPI writes to stderr / the php.ini `error_log` path; ZealPHP routes `message_type` 0 (system logger) and 4 (SAPI) into the framework's async log (`debug.log`, falling back to stderr when logging is off) so legacy `error_log()` calls land with the rest of the app's diagnostics. `message_type` 3 (append to file) is honored verbatim; `message_type` 1 (email) is unsupported under the coroutine runtime and returns `false`. As part of this, `log_write()`'s three last-resort fallbacks now write to stderr directly instead of `error_log()` (which is now overridden — avoids a recursion loop).
+- **`default_mimetype` parity (`App::$default_mimetype` / `App::defaultMimeType()`)** — `CharsetMiddleware` now applies a default `Content-Type` (mod_php's `text/html`, configurable; `''` to disable) to responses that don't set one, before appending the charset. Apache `DefaultType` / PHP `default_mimetype` parity. Opt-in via the middleware, consistent with the other Apache-directive middleware.
+
+- **`php_sapi_name()` override + `App::sapiName(?string)`** — Apache/mod_php parity for SAPI identity. Under the CLI SAPI `php_sapi_name()` natively returns `"cli"`, which legacy apps branch on to disable web-only behavior. Opt in with `App::sapiName('apache2handler')` (or `'fpm-fcgi'`) during boot and the override reports that value so such code takes its web path. Default (`App::$sapi_name === null`) returns the real `PHP_SAPI` — **zero behavior change** unless configured. The `PHP_SAPI` *constant* still reads `"cli"` (uopz cannot redefine it — documented limitation).
+- **`header_register_callback()` override** — Apache/mod_php parity. Native PHP fires the callback when the SAPI is about to send headers, which never happens the normal way under OpenSwoole. ZealPHP stores it per-request (coroutine-safe, in `$g->memo`) and invokes it once just before the buffered response headers flush, so `header()` calls inside the callback still land. Last registration wins (matches native's single-callback model). Fires for buffered responses; streaming/SSE paths flush eagerly and are intentionally excluded, consistent with the framework's buffered-vs-streaming split.
+- **`$_SERVER` mod_php-parity keys** — the request `$_SERVER` / `$g->server` now includes `GATEWAY_INTERFACE` (`CGI/1.1`), `REQUEST_SCHEME` (`http`/`https`), and `HTTPS` (`on` under TLS only, absent on plain HTTP) — keys mod_php always populates that OpenSwoole's `$request->server` does not. Scheme is derived from a direct `HTTPS=on`, an `X-Forwarded-Proto: https` (behind a proxy), or `SERVER_PORT` 443, mirroring the session-cookie secure detection. (`REQUEST_TIME`, `REQUEST_TIME_FLOAT`, `SERVER_PROTOCOL`, `REMOTE_PORT`, `SERVER_PORT` were already provided by OpenSwoole.)
+- **`filter_input()` / `filter_input_array()` overrides** — Apache/mod_php parity for input filtering. Native `filter_input()` reads PHP's internal SAPI request tables, which OpenSwoole never populates, so legacy code using `INPUT_GET` / `INPUT_POST` / `INPUT_COOKIE` / `INPUT_SERVER` / `INPUT_ENV` silently received `null`. The overrides resolve the value from `RequestContext` (`$g`) and apply the requested filter via the pure, unit-tested `ZealPHP\Input\RequestInput` helper. Purely additive (CLI returned `null` before) — no breaking change. Part of the Apache/mod_php parity effort (design: `docs/superpowers/specs/2026-05-21-phpinfo-override-and-modphp-parity-design.md`).
+
+## [0.2.31] - 2026-05-21
+
+Apache/mod_php parity continues — `phpinfo()` now renders real HTML — alongside two parity bug fixes ([#18](https://github.com/sibidharan/zealphp/issues/18) DOCUMENT_ROOT, [#19](https://github.com/sibidharan/zealphp/issues/19) session-ID regeneration) and the test-coverage push to ~80% combined.
+
+### Added
+
+- **`phpinfo()` now renders a self-contained styled HTML document** (Apache + mod_php parity) instead of the CLI SAPI's plain-text `key => value` dump. Implemented via the new `ZealPHP\Diagnostics\PhpInfo` renderer and a uopz override of `phpinfo()`; honors the `INFO_*` flag bitmask, escapes every emitted value, and reports `Server API: ZealPHP (OpenSwoole <ver>)`. Module-specific detail is captured once per worker at boot (before the override installs) to surface extension rows `ini_get_all()` can't reach, without recursing into the override. No gating — matches mod_php, so **do not expose `/phpinfo` in production**. First step of the broader Apache/mod_php parity effort (design: `docs/superpowers/specs/2026-05-21-phpinfo-override-and-modphp-parity-design.md`).
+- **`App::onWorkerStop(callable $fn)`** — register a per-worker shutdown hook, the mirror of `App::onWorkerStart()`. Runs inside the worker process when it exits (max_request recycle, graceful shutdown, or reload), *before* the process terminates. Unlike `register_shutdown_function`, it fires on OpenSwoole's signal-driven worker stop — the reliable place to flush per-worker state (counters, buffered I/O, coverage dumps). Invoked as `$fn($server, $workerId)`; a throwing hook is caught + logged so it can't abort worker teardown.
+
+### Fixed
+
+- **API routes no longer clobber `$_SERVER['DOCUMENT_ROOT']`** ([#18](https://github.com/sibidharan/zealphp/issues/18)). `ZealAPI::processApi()` overwrote `DOCUMENT_ROOT` to `<cwd>/api` for module routes, so handlers that include files relative to `DOCUMENT_ROOT` (the mod_php convention, e.g. `require $_SERVER['DOCUMENT_ROOT'].'/src/...'`) resolved to a path under `/api` and 500'd. Apache keeps `DOCUMENT_ROOT` at the web root regardless of which script runs; ZealPHP now does too — it resolves to `App::resolveDocumentRoot()`, with `SCRIPT_NAME`/`PHP_SELF` rooted at the URL (`/api/<module>/<request>.php`) and `SCRIPT_FILENAME` the real handler file. Pinned by `tests/Unit/ZealApiDocumentRootTest.php`.
+- **`session_regenerate_id()` is now custom-handler-aware** ([#19](https://github.com/sibidharan/zealphp/issues/19)). It previously only `rename()`d the on-disk `sess_<id>` file, ignoring a registered `SessionHandlerInterface`. With a Redis/Valkey (phpredis) handler the regenerated ID therefore pointed at an empty session and no `Set-Cookie` was emitted — so OAuth callbacks that regenerate post-login stranded the auth fields (`sub`/`tokens`/`profile`/`username`) under an ID the client never received, and they vanished on the next request. Regeneration now migrates the live session data to the new ID via the handler (and destroys the old ID when `$delete_old_session` is true), and emits the new-ID cookie gated exactly like `zeal_session_start()` (`App::$session_lifecycle` + `use_cookies` + writable response, so the Symfony bridge / manual-cookie apps aren't raced). Pinned by `tests/Unit/SessionRegenerateIdHandlerTest.php`.
+
+### Testing / coverage
+
+- **Massive test-coverage expansion: ~29% → ~80% combined line coverage.** Added ~600 regression tests across the previously-untested surface — HTTP wrappers (Response/Request/LazyServerRequest), every middleware, the session layer (handlers, managers, `zeal_session_*`), `utils.php` globals, `RequestContext`, `ZealAPI`/`REST`, `IOStreamWrapper`, `cgi_worker.php`, the file-execution family, the in-process `ResponseMiddleware` pipeline, and App.php static helpers (CLI arg parsing, status emission, route registration, error rendering) — plus `tests/Integration/WebSocketTest.php`, real assertion-based coverage of all six `route/ws.php` endpoints over a coroutine WS client (the `onOpen`/`onMessage`/`onClose` dispatch closures, previously uncovered).
+- **Server-process coverage merge** (`scripts/coverage_full.sh` + `scripts/merge_coverage.php`): instruments the live OpenSwoole server (gated `ZEALPHP_COVERAGE_DIR` hook in `app.php`, dumping on `App::onWorkerStop`) so the integration suite's exercise of the event loop — routing, middleware, session managers, WebSocket — counts toward coverage, not just the in-process unit tests. CI now uploads the merged unit+integration clover to Codecov. Genuinely-untestable fork/async helpers (`coprocess`/`coproc`, the `log_sink_for` consumer, network clients, the CGI subprocess) carry justified `@codeCoverageIgnore` markers so the figure reflects the testable surface.
+
+## [0.2.30] - 2026-05-20
+
+Closes the rest of [issue #17](https://github.com/sibidharan/zealphp/issues/17) (GURU PRASANTH M, v0.2.29): the proc-mode CGI autoloader gap, the CLI `restart`/`start -d` output races, and — the headline — full superglobal aliasing so `$g->get` is genuinely the same array as `$_GET` in superglobals mode (not a per-request snapshot).
+
+### Fixed
+
+- **`$g->get` / `$g->post` / `$g->cookie` / `$g->files` / `$g->server` / `$g->request` are now LIVE ALIASES of the superglobals in `superglobals(true)` mode** ([#17](https://github.com/sibidharan/zealphp/issues/17)). Previously the declared `public array $get = []` property shadowed `RequestContext::__get()`, so the per-request handler populated `$g->get` and `$GLOBALS['_GET']` as **separate arrays** — mutating `$_GET` after dispatch wasn't visible through `$g->get` (and vice versa). The handler now `unset()`s those declared slots after populating the `$GLOBALS['_*']` family, so reads AND writes route through the `__get`/`__set` proxy by reference — the same live-alias mechanism `$g->session` has had since v0.2.27. In superglobals mode the two names are now genuinely the same array. (Coroutine mode is unchanged: superglobals stay unpopulated, `$g->X` is the per-coroutine source of truth.) Pinned by `testGetAliasMutationCrosses` in `tests/Integration/SuperglobalsParityTest.php`. *(Supersedes the initial "working as designed" triage on the issue — the reporter was right that separate arrays are wrong for superglobals mode.)*
+- **Proc-mode CGI worker now loads the Composer autoloader** ([#17](https://github.com/sibidharan/zealphp/issues/17)). `src/cgi_worker.php` (the `proc_open` subprocess used by `cgiMode('proc')`) never required `vendor/autoload.php`, so `\ZealPHP\App` and other project classes were undefined inside legacy `public/*.php` files dispatched through it. Fork mode (`cgiMode('fork')`) already had them via copy-on-write inheritance of the warm worker — this closes the inconsistency. Resolves both repo-root and installed-as-dependency vendor layouts; missing autoloader stays non-fatal (unmodified WordPress/Drupal ships its own bootstrap). Guarded by `tests/Unit/CgiWorkerAutoloadTest.php`.
+- **CLI `restart` no longer prints its confirmation over the next shell prompt** ([#17](https://github.com/sibidharan/zealphp/issues/17)). The watcher was a detached child that outlived the terminal-attached parent, which daemonized and exited first — so `Restarted (pid X, port Y)` landed after the prompt returned. The fork is now flipped: the terminal-attached process polls for the new daemon's PID file and prints the confirmation last, while the child boots the (self-daemonizing) server.
+
+### Added
+
+- **`start -d` / `--daemonize` now prints a confirmation** ([#17](https://github.com/sibidharan/zealphp/issues/17)): `Started ZealPHP in detached mode (pid X, port Y).` Previously detached starts returned silently. Shares the same `forkStartupReporter()` path as the `restart` fix above.
+
+### Tests
+
+- 400 unit + 157 integration tests pass (new `testGetAliasMutationCrosses`). PHPStan level 10 clean.
+
+## [0.2.29] - 2026-05-20
+
+Adds a second CGI bridge backend — `App::cgiMode('fork')` — a warm `OpenSwoole\Process` fork that's ~5× faster than the default `proc_open` path while preserving full per-request isolation. Opt-in; `'proc'` stays the default, so unmodified WordPress/Drupal see no change.
+
+### Added
+
+- **`App::cgiMode('fork')`** — a second CGI bridge backend. Where the default `'proc'` mode `proc_open`s a cold PHP interpreter per request (~30–50 ms — true global scope, what unmodified WordPress/Drupal need), `'fork'` mode forks the already-booted worker via `OpenSwoole\Process` (copy-on-write). The interpreter, classmap, and opcache are inherited — no exec, no PHP startup, no autoload. Measured **~5× faster** on a trivial probe (814 vs 160 req/s, 24.6 ms vs 124 ms; `ab -n 3000 -c 20`, Intel i9-14900K). Full per-request isolation is preserved: `define()`, classes, `ini_set()`, and even `die()`/`exit()` die with the child, never the worker. **Trade-off:** the file runs in the fork closure's function scope, so a bare top-level `$x` isn't visible via `global $x` — `cgiMode('fork')` targets "modernised legacy" apps that read request state through superglobals; unmodified `global $wpdb`-style code stays on `'proc'`. IPC uses 4-byte length-prefixed framing (`OpenSwoole\Process::read()` blocks past EOF rather than returning `""`). Configured like the other lifecycle knobs: `App::cgiMode('proc'|'fork')` before `App::init()`; no-arg returns the current value; unknown values throw `InvalidArgumentException`.
+- **`tests/Unit/AppConfigurablesTest.php`** — 3 new cases pinning `cgiMode` defaults to `'proc'`, round-trips the setter, and rejects unknown modes.
+
+### Documentation
+
+- **`/vs-fpm`** — refreshed the measured benchmark from 4 ways to **5 ways** (added fork CGI between Mixed-mode and proc CGI), re-run on one Intel i9-14900K box (`scripts/bench_vs_fpm.sh`). Added the "PHP interpreter lifecycle" fork row, reframed the v0.3.0 roadmap box around `cgiMode('fork')` being available now, and corrected the cost-recovery prose (proc 160 → fork 814 → in-process 21,964 req/s).
+- **`scripts/bench_vs_fpm.sh`** — added the `FORK_CGI_URL` knob and a fork-CGI benchmark section so the 5-way comparison is reproducible.
+
+## [0.2.28] - 2026-05-19
+
+Documentation + tooling follow-up to v0.2.27. No framework behaviour change — ships the canonical dual-runtime compat shim as a package artifact and grounds the PHP-FPM comparison in real measured numbers.
+
+### Added
+
+- **`compat/g.php`** — the canonical dual-runtime `$g` compat shim, now shipped inside the package. Lets one source tree run on both Apache+mod_php (no ZealPHP loaded → `$g` built from `&$_GET` references) and ZealPHP (any mode → `RequestContext::instance()`). Standalone, dependency-free, includable without the autoloader: `require_once 'vendor/sibidharan/zealphp/compat/g.php'`. Formalises the pattern SNA Labs ran in production (previously a hand-rolled `load.php` snippet). It is **included by the app, not loaded by the framework** — by design, since on Apache the framework isn't present at all.
+- **`tests/Unit/CompatShimDriftTest.php`** — 4 tests guarding the shim against drift: canonical file exists, Apache-branch keys match the expected request-data surface, the LAMP scaffold copy matches canonical, and every shim key is an array-typed declared property on `RequestContext`.
+
+### Documentation
+
+- **`/vs-fpm`** — replaced illustrative "shape" numbers with a **real measured 4-way benchmark** (Apache+mod_php, ZealPHP coroutine, Mixed-mode, legacy CGI) on one machine, same trivial `public/probe.php`, `ab -n 3000 -c 20`. Honest findings: the CGI bridge's `proc_open` fork is the entire 179 req/s story (turning `processIsolation(false)` recovers ~71×), and Apache mod_php (46k) beats ZealPHP on trivial legacy-file echo — ZealPHP's win is native routes / coroutine I/O / WebSocket / no separate web server. Added the "Mixed-mode = an FPM pool, minus the operations" section and the v0.3.0 built-in CGI worker pool roadmap.
+- **`/performance`** — added "Legacy-file serving — Apache vs ZealPHP lifecycle modes" mirroring the `/vs-fpm` measured table (kept in lock-step via `SYNC:` comments in both files).
+- **`/legacy-apps#dual-runtime`** — new section documenting the dual-runtime pattern, the compat shim, and *why it can't be a framework feature* (the Apache path has no autoloader).
+- **`/case-studies/sna-labs`** — reframed the `$g` bridge from "a workaround" to the first-class, shipped, drift-guarded dual-runtime Apache-parity bridge.
+- **`examples/lamp-scaffold/`** — bootstrap shim points at the canonical `compat/g.php`; README documents both portability styles (`$g->X` vs raw superglobals).
+
+### Tests
+
+- 395 unit (4 new compat-shim drift tests) + 156 integration tests pass. PHPStan level 10 clean.
+
+## [0.2.27] - 2026-05-19
+
+Restore v0.1.x "superglobals just work" behaviour that was silently dropped during the December 2024 declared-property refactor (commits `327e180` + `900c18a`). Under `App::superglobals(true)` the framework was populating `$g->get` / `$g->session` etc. but **NOT** `$_GET` / `$_SESSION` — making the flag's name misleading and forcing every dual-mode app (notably labs) to maintain a compat shim that v0.1.x didn't need. v0.2.27 closes the loop in two places: per-request superglobal population in the request handler, and a `$g->session ↔ $_SESSION` alias via `__get`/`__set` proxy so direct `$_SESSION['k']=v` writes are visible through `$g->session` immediately (the v0.2.22 "mirror at call-points" approach couldn't catch writes between `session_*()` calls because typed declared properties bypass magic methods).
+
+### Fixed
+
+- **`$_GET` / `$_POST` / `$_COOKIE` / `$_FILES` / `$_SERVER` / `$_REQUEST` populated per request in `superglobals(true)` mode** (`src/App.php:3565+`). The OpenSwoole HTTP server doesn't auto-populate these (only CGI/SAPI does); v0.1.x's `G::init()` aliased them via `$_GET = &$context['get']` but the December 2024 refactor to declared properties on `RequestContext` dropped the bridge. The new block writes `$GLOBALS['_GET']`, `$GLOBALS['_POST']`, etc. from the same source data the framework already populates on `$g->get`. Race-safe under the documented `superglobals(true) + enableCoroutine(false)` pairing; the unsafe combination warning at boot already covers `superglobals + coroutines`.
+- **`$g->session` and `$_SESSION` are now the same array** in `superglobals(true)` mode. `SessionManager::__invoke()` calls `unset($g->session)` after `session_start()`, making the declared typed property "uninitialised" so reads/writes route through `RequestContext::__get()` / `__set()` which proxy to `$GLOBALS['_SESSION']`. Mutations through either name are visible through the other immediately — no more "one request behind" drift from v0.2.22's mirror-at-call-points approach. Reference assignment (`$g->session = &$_SESSION`) doesn't work on overloaded objects in PHP; the `unset()` + magic-method approach is the workaround.
+- **`RequestContext::__set` symmetric superglobal-key mapping** (`src/RequestContext.php:155-170`). The pre-v0.2.27 `__set` wrote `$g->session = $newArray` to `$GLOBALS['session']` (creating a useless top-level global) while `__get` correctly returned `$GLOBALS['_SESSION']`. Now both directions map the same seven names (`get`, `post`, `cookie`, `files`, `server`, `request`, `env`, `session`) → `$GLOBALS['_' . strtoupper($key)]`.
+- **`RequestContext::__get` empty-array fallback** (`src/RequestContext.php:113-122`). Initialised missing superglobal slots to `null` — meant `$g->session['x'] = 'y'` would fatal-error on null array access if called before any `session_*()`. Now initialises to `[]`, matching Apache mod_php behaviour where superglobals are always arrays once populated.
+
+### Added
+
+- **`examples/lamp-scaffold/`** — the new home for the "vanilla PHP runs on both servers" pattern (`bootstrap/g.php` compat shim, `apache/vhost.conf.example`, README walking through both portability styles).
+- **`examples/lamp-scaffold/public/classic-php.php`** — demonstrates pure `$_GET` / `$_SESSION` / `$_SERVER` use, no `$g`, no bootstrap. Runs unchanged on Apache mod_php AND ZealPHP Mixed-mode (`superglobals(true) + processIsolation(false)`) thanks to this release.
+- **`tests/Integration/SuperglobalsParityTest.php`** + **`tests/fixtures/mixed_mode_server.php`** — 9 integration tests pinning the Mixed-mode contract: `$_GET` populated from query string, `$_SERVER` keys present, `$_REQUEST = $_GET + $_POST`, `$g->get == $_GET`, `$_SESSION ↔ $g->session` cross-writes, session counter persists across requests, POST body parsing, `session_destroy` clears both names, `session_unset` clears data but keeps id. First test in the codebase that spawns its own dedicated mixed-mode server via `proc_open` array form — pattern reusable for future lifecycle-mode coverage.
+
+### Documentation
+
+- **`/vs-fpm`** — corrects the misleading "CGI bridge cost is same order of magnitude as FPM" framing. Honest accounting: FPM is ~1–3 ms (FastCGI handshake to a long-lived warm worker), Apache mod_php is ~0 ms (PHP loaded in-process), our current CGI bridge is ~30–50 ms (`proc_open` spawns a fresh interpreter per request). Documents the **v0.3.0 roadmap fix**: a built-in persistent CGI worker pool that holds PHP interpreters warm between requests and recycles them after N requests (the FPM `pm.max_requests` trick) — expected to bring legacy-mode performance to FPM parity.
+
+### Changed (breaking)
+
+- **Unsafe lifecycle combinations now throw at `App::run()` boot instead of emitting a warning.** Two configurations race `$_GET`/`$_POST`/`$_SESSION` across coroutines and have no legitimate use case:
+  - `App::superglobals(true) + App::enableCoroutine(true)` — concurrent coroutines clobber process-wide superglobals.
+  - `App::superglobals(true) + App::hookAll(non-zero)` — hooked I/O can yield mid-request, exposing process-wide superglobal mutations to other coroutines.
+  Pre-v0.2.27 these emitted a `[lifecycle]` warning to `debug.log` but didn't refuse; in practice the warning was invisible to anyone not actively reading the debug log. v0.2.27 fails loud at boot with a `RuntimeException` pointing to `/coroutines#lifecycle-modes`. The supported lifecycle matrix is unchanged — only the enforcement got stricter.
+
+### Backwards compatibility
+
+- **`superglobals(false)` (coroutine mode):** unchanged. Superglobals are intentionally not populated (process-wide writes would race across coroutines). All existing coroutine-mode code keeps working.
+- **`superglobals(true)`:** newly populated PHP superglobals are an addition, not a removal. Code that read `$g->get` keeps working; code that read `$_GET` (previously empty) now works too. The `$g->session` alias is a fix to an existing drift bug, not a behaviour change for any code that was already using one consistent name.
+- **Mirror code in `zeal_session_*`** (v0.2.22) is now technically redundant in superglobals mode (both names point at the same array) but kept in place as defense-in-depth and to preserve the existing API contract.
+- **Apps deliberately running an unsafe lifecycle combination (e.g., for security audits)** will now refuse to boot. The supported mode matrix at `/coroutines#lifecycle-modes` covers every safe configuration. Audit tooling that needs the unsafe path can fork and remove the throw temporarily.
+
+### Tests
+
+- 9 new integration tests in `SuperglobalsParityTest` + 6 new unit tests in `AppConfigurablesTest` pinning the lifecycle-refusal contract (3 unsafe-combo throws + 3 safe-combo non-throws).
+- Full suite: 391 unit + 156 integration tests pass. PHPStan level 10 clean.
+
+### Known issues
+
+- **Symfony sessions under `superglobals(false)` coroutine mode are not concurrency-safe (zealphp-symfony bridge).** Sessions round-trip correctly request-to-request in sequential / low-concurrency operation, but concurrent requests carrying *different* `PHPSESSID`s can cross-contaminate (request A observing request B's session). Root cause is architectural, not session-specific: Symfony's container services (`AbstractSessionListener`, security token storage, etc.) are per-worker singletons booted once per worker, and they are not coroutine-aware — when OpenSwoole interleaves coroutines on one worker, those shared singletons race. ZealPHP's own per-coroutine `RequestContext` (`$g`) isolation is correct; the leak is in Symfony's shared service state. **Mitigation until a coroutine-aware container lands:** run the bridge with `App::enableCoroutine(false)` (one request at a time per worker; scale via worker count, FPM-style) — or use Mixed-mode `superglobals(true) + processIsolation(false)` (this release), where native `$_SESSION` is the canonical store and the same per-worker-serialisation applies. Coroutine-per-request concurrency for stateful Symfony apps is tracked for a future release.
+
+## [0.2.26] - 2026-05-19
+
+Closes [issue #15](https://github.com/sibidharan/zealphp/issues/15): v0.2.25's blanket `allowed_classes => false` on session-unserialize converted any `stdClass` (the default `json_decode()` shape) into `__PHP_Incomplete_Class`, breaking real apps that stash OAuth token responses or API profile payloads in `$_SESSION`. The hardening was too tight.
+
+### Fixed
+
+- **Narrowly whitelist `stdClass` in all session `unserialize()` calls** in `src/Session/utils.php` — 4 sites (`php_session_decode_to_array()` array-format branch, `php_session_decode_to_array()` pipe-format branch, `zeal_session_abort()`, `zeal_session_decode()`). `['allowed_classes' => false]` → `['allowed_classes' => ['stdClass']]`. The c43da63 object-injection hardening is preserved for every other class — `stdClass` has zero methods (no `__wakeup`, no `__destruct`, no `__get`/`__set`/`__call`), so there is no gadget to chain. `DateTime` and other classes with magic methods on unserialize remain deliberately excluded; adding any class to the whitelist requires a per-class security review per the docblock at `php_session_decode_to_array()`.
+
+### Tests
+
+- Two new tests pin `stdClass` round-trips through both decoder branches (top-level `serialize()` form and pipe-format `key|value;` form): `testStdClassRoundTripsInPhpSerializeBranch`, `testStdClassRoundTripsInPhpHandlerBranch`.
+- Two existing tests rewritten to use a custom non-whitelisted fixture class (`PhpSessionDecodeTestNonWhitelistedFake`) and pin the security property as "no live instance of a non-whitelisted class": `testNonWhitelistedClassIsBlockedInPhpSerializeBranch`, `testNonWhitelistedClassIsBlockedInPhpHandlerBranch`.
+
+### Backwards compatibility
+
+- Apps that don't store objects in sessions: identical behaviour to v0.2.25.
+- Apps that stored `stdClass` (issue #15): now round-trip correctly (was broken in v0.2.25).
+- Apps that relied on `__PHP_Incomplete_Class` placeholders for non-`stdClass` objects: unchanged — those classes are still refused.
+
+PHPStan level 10 clean. 385 unit + 147 integration tests pass.
+
+## [0.2.25] - 2026-05-19
+
+Closes [issue #13](https://github.com/sibidharan/zealphp/issues/13) with two complementary fixes — one at the symptom layer (`ZealAPI::isAuthenticated()` hardcoded to `false`), one at the underlying-cause layer (session data loss from missing handler-side persistence + concurrent-write races).
+
+### Added — auth hooks
+
+- **`App::authChecker(?callable)`** + backing `App::$auth_checker` static. Consulted by `ZealAPI::isAuthenticated()`. Signature: `fn(): bool`. Apps register a closure that decides whether the current request is authenticated by reading `$_SESSION`, `$g->session`, or their own auth state. Default `null` → `ZealAPI::isAuthenticated()` returns `false` (safe fail-closed).
+- **`App::adminChecker(?callable)`** + backing `App::$admin_checker`. Same shape; consulted by `ZealAPI::isAdmin()`.
+- **`App::usernameProvider(?callable)`** + backing `App::$username_provider`. Signature: `fn(): ?string`; consulted by `ZealAPI::getUsername()`.
+
+Closes the `return false;` stub gap from PR #10 that broke every endpoint guarded by `requirePostAuth()` — even for logged-in users. New `tests/Unit/ZealApiAuthHooksTest.php` pins 15 cases: defaults, callback round-trips, type coercion edge cases, independence of the three hooks, setter introspection.
+
+### Fixed — session handler write/destroy + concurrent merge (PR #14)
+
+- **`zeal_session_write_close()` and `zeal_session_destroy()` now delegate to `\SessionHandlerInterface`** when one is registered in `$g->session_params['handler']`. Previously hardcoded `file_put_contents` / `unlink`, so Redis-backed sessions (added in PR #10) could be READ but never persisted or cleaned up.
+- **Concurrent-write race**: ZealPHP handles requests concurrently (Apache serialises via file lock; we don't). Two requests both reading and writing back the same session used to drop one writer's data. The handler-write path now reads-then-merges via `array_merge` before writing, preserving divergent top-level keys (OAuth state, code_verifier, flash messages, etc.). **Documented limitation**: shallow merge — both requests pushing to the same nested array still last-write-wins for that nested key. Use a locking handler (Redis WATCH/MULTI) or a database hash for stronger guarantees.
+
+New `tests/Unit/SessionHandlerWriteTest.php` (6 tests): handler-write payload correctness, no-handler file-fallback, concurrent merge with divergent keys, top-level collision resolution semantics, handler-destroy delegation, no-handler unlink fallback.
+
+### Backwards compatibility
+
+- 100% — existing apps that don't call `App::authChecker()` see `isAuthenticated()` continue to return `false` (same as before). Existing apps that don't register a session handler see file-based session storage continue to work (same as before). The two fixes only change behaviour when their respective opt-ins are used.
+
+PHPStan level 10 clean. 383 unit + 147 integration tests pass (+15 auth-hook + 6 session-handler-write, 6 cleanly skipped for ext-redis absence).
+
+## [0.2.24] - 2026-05-19
+
+Two features land together: a real session-cookie bug fix for OAuth/redirect flows ([PR #12](https://github.com/sibidharan/zealphp/pull/12)) and the new template-fragment helper for htmx-style single-file partial rendering.
+
+### Added
+
+- **`App::fragment(string $name, callable $fn): void`** — the [htmx-essay template-fragment pattern](https://htmx.org/essays/template-fragments/) without separate partial files. Mark named regions inline inside any template; the same `App::render('page', $args)` call serves the full page (no fragment selector → every `App::fragment()` runs inline), or returns just one region's HTML when called with `['fragment' => 'name']` (matched region's buffer is cleared, only that closure runs, the rest of the template short-circuits via `HaltException`). Missing fragment → HTTP 404 per the universal return contract. The fragment closure rides the full universal return contract — `return 404;` / `return ['k'=>'v'];` / `return (fn(){ yield ...; })();` all propagate exactly like in a route handler. Lives next to `App::render() / renderToString() / renderStream() / include()` as the fifth member of the file-execution family. See [/learn/htmx#fragments](https://php.zeal.ninja/learn/htmx#fragments) for the lesson, [/demo/fragments/contacts](https://php.zeal.ninja/demo/fragments/contacts) for the live demo.
+- New tests: `tests/Unit/FragmentTest.php` (12 tests) pinning full-page rendering, fragment extraction, return-shape propagation (int / array / Generator / string / echo-only), 404-on-missing, nested-render scope isolation, special characters in fragment names, and first-match-wins semantics on repeated names.
+
+### Fixed
+
+- **`session_start()` now auto-emits `Set-Cookie` on first-time visitors** ([PR #12](https://github.com/sibidharan/zealphp/pull/12)). Previously a handler that did `session_start();` + `$_SESSION['x'] = ...;` + `header('Location: …');` on a request with no incoming `PHPSESSID` would 302-redirect *without* a `Set-Cookie` header — the next request started a fresh session and the just-stored data was lost. Broke OAuth flows (state token gone on callback) and any pre-auth redirect pattern. The auto-emit is idempotent (only fires when no inbound `PHPSESSID`), respects `session.use_cookies = 0`, and skips if the response is already flushed. Regression test pinned in `tests/Integration/HttpFeaturesTest::testSessionCookieEmittedOnRedirect`.
+- **`HaltException` no longer discards buffered output** when the caller didn't set a fragment result. The PR #10 path was supposed to preserve `echo "html"; throw new HaltException;` as the response body, but the buffered output was dropped at the `return $result` (null) fall-through. Now treated identically to PHP's `include`-returned-1 case → buffered echo becomes the body. Surfaced by FragmentTest; fix wired into `executeFile()`'s HaltException catch.
+
+### Changed
+
+- `template/pages/learn/htmx.php` extended with a new "Template fragments — one file, two responses" section covering the partial-vs-fragment trade-off, the universal-return-contract integration, and a live demo link.
+- `template/pages/learn/sessions.php` extended with a "First-visit cookie: redirects work after session_start() too" section documenting PR #12's behaviour with the OAuth-handoff example.
+
+### Backwards compatibility
+
+- 100% — existing apps that don't call `App::fragment()` see no behaviour change. The HaltException-buffer-preservation fix only affects code that already throws HaltException; that path was strictly broken before and now works as documented.
+
+PHPStan level 10 clean. 362 unit + 147 integration tests pass (+12 new FragmentTest cases + 1 regression test for PR #12, 6 cleanly skipped for ext-redis absence).
+
 ## [0.2.23] - 2026-05-17
 
 Decouples the four lifecycle decisions that `App::superglobals()` used to bundle into one call. Each is now its own fluent setter, and they default to `null` which resolves to "follow `App::$superglobals`" — so apps that don't touch the new knobs see no behaviour change. Enables the **Mixed-mode / Symfony lifecycle** (`superglobals(true) + processIsolation(false)`): real `$_SESSION` semantics for Symfony's `NativeSessionStorage`, but without the ~30-50 ms `proc_open` + PHP startup + autoloader cost of forking a CGI subprocess on every `App::include()` call.

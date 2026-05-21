@@ -44,10 +44,12 @@ class CharsetMiddlewareTest extends TestCase
         $this->assertSame('image/png', $response->getHeaderLine('Content-Type'));
     }
 
-    public function testSkipsMissingContentType(): void
+    public function testMissingContentTypeGetsDefaultMimeType(): void
     {
         App::$cwd = ZEALPHP_ROOT;
         App::superglobals(true);
+        $prev = App::$default_mimetype;
+        App::$default_mimetype = 'text/html'; // mod_php default
 
         $handler = new class implements RequestHandlerInterface {
             public function handle(ServerRequestInterface $request): ResponseInterface
@@ -57,6 +59,27 @@ class CharsetMiddlewareTest extends TestCase
         };
 
         $response = (new CharsetMiddleware())->process(new ServerRequest('/', 'GET'), $handler);
+        App::$default_mimetype = $prev;
+        // default_mimetype parity: untyped response gets text/html + charset.
+        $this->assertSame('text/html; charset=utf-8', $response->getHeaderLine('Content-Type'));
+    }
+
+    public function testMissingContentTypeLeftUntouchedWhenDefaultDisabled(): void
+    {
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+        $prev = App::$default_mimetype;
+        App::$default_mimetype = ''; // opt out — leave untyped responses alone
+
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('body', 200);
+            }
+        };
+
+        $response = (new CharsetMiddleware())->process(new ServerRequest('/', 'GET'), $handler);
+        App::$default_mimetype = $prev;
         $this->assertSame('', $response->getHeaderLine('Content-Type'));
     }
 

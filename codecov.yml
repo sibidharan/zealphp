@@ -1,0 +1,35 @@
+# Codecov configuration — enforces the coverage floor so it can't silently erode.
+# The combined unit + integration clover is uploaded by .github/workflows/tests.yml.
+coverage:
+  status:
+    project:
+      default:
+        # Whole-project floor. CI's Codecov check fails if coverage drops below
+        # this (the threshold absorbs measurement noise from the merged
+        # unit+integration passes).
+        target: 80%
+        threshold: 1%
+        if_ci_failed: error
+    patch:
+      default:
+        # New/changed lines must be well covered — keeps regressions from
+        # sneaking in under the project average.
+        target: 80%
+        threshold: 5%
+
+# Don't count test scaffolding, vendored code, or the demo site against coverage.
+ignore:
+  - "tests/**"
+  - "vendor/**"
+  - "examples/**"
+  - "bench/**"
+  - "public/**"
+  - "template/**"
+  - "route/**"
+  - "api/**"
+  - "task/**"
+  - "app.php"
+
+comment:
+  layout: "reach, diff, flags, files"
+  require_changes: false

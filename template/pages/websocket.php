@@ -9,6 +9,11 @@
     'code'  => <<<'PHP'
 $app->ws(
     '/ws/chat',
+    // Each handler receives the same 3rd argument: $g — RequestContext::instance()
+    // for the coroutine the handler is dispatched in. Use $g->session for
+    // auth lookups (CoSessionManager seeds it from the upgrade request's
+    // PHPSESSID cookie before onOpen fires), Store/Counter for cross-worker
+    // shared state, or $g->server for the original upgrade request's headers.
     onMessage: function($server, $frame, $g) {
         // $frame->data   — message text
         // $frame->fd     — connection id

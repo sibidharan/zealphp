@@ -144,6 +144,24 @@ class SessionManager
 
             session_start();
 
+            // v0.2.27 — make $g->session and $_SESSION the same array.
+            //
+            // Reference assignment ($g->session = &$_SESSION) doesn't work
+            // because RequestContext has __get/__set ("overloaded object"
+            // forbids reference assignment in PHP). Instead: unset the
+            // declared typed property so the slot becomes "uninitialized,"
+            // which routes reads/writes through the existing __get proxy
+            // (RequestContext.php:111) that returns $GLOBALS['_SESSION'] by
+            // reference. Combined with the symmetric __set superglobal-key
+            // mapping (also added in v0.2.27), $g->session and $_SESSION are
+            // now indistinguishable in superglobals mode — both names point
+            // at the same array, mutations cross over immediately.
+            //
+            // The v0.2.22 mirror code in zeal_session_* stays in place as
+            // belt-and-suspenders for direct $g->session reads before the
+            // first session_*() call.
+            unset($g->session);
+
             if ($this->useCookies) {
                 $cookie = session_get_cookie_params();
                 $response->cookie(

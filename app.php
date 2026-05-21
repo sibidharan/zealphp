@@ -36,7 +36,21 @@ if (!defined('ZEALPHP_ASSET_VERSION')) {
     );
 }
 
-App::superglobals(false);
+// Lifecycle is coroutine-mode by default (the recommended default for new
+// apps). Overridable via env so the same demo can be exercised under the
+// Mixed-mode and legacy-CGI lifecycles too — used by the coverage harness to
+// reach mode-specific server code (SessionManager, the superglobals branches,
+// cgi_worker). Production deployments leave these unset → coroutine mode.
+App::superglobals(env_flag('ZEALPHP_SUPERGLOBALS', false));
+if (($__pi = getenv('ZEALPHP_PROCESS_ISOLATION')) !== false && $__pi !== '') {
+    App::processIsolation(env_flag('ZEALPHP_PROCESS_ISOLATION', false));
+}
+if (($__ec = getenv('ZEALPHP_ENABLE_COROUTINE')) !== false && $__ec !== '') {
+    App::enableCoroutine(env_flag('ZEALPHP_ENABLE_COROUTINE', true));
+}
+if (($__cm = getenv('ZEALPHP_CGI_MODE')) !== false && $__cm !== '') {
+    App::cgiMode($__cm === 'fork' ? 'fork' : 'proc');
+}
 
 $benchMode             = bench_mode_enabled();
 $demoMiddleware        = env_flag('ZEALPHP_DEMO_MIDDLEWARE', false);
@@ -191,5 +205,60 @@ if (file_exists(__DIR__ . '/route/_error_test.php')) {
 // Refreshed every 15 minutes in a background coroutine; first-ever page load
 // hits an empty cache and shows just the "★" until the refresh resolves.
 GithubStars::register('sibidharan/zealphp');
+
+// ── Coverage instrumentation (test-only; gated, inert in production) ──
+// When ZEALPHP_COVERAGE_DIR is set and a coverage driver is active, collect
+// src/ line coverage and dump a .cov per process. scripts/coverage_full.sh
+// merges these with unit-test coverage so the long-running server loop counts.
+// Coverage is started HERE, in the master, just before run() — so run()'s own
+// body (event registration, route compilation, server settings) is captured,
+// not just request handling. Workers inherit the started coverage via fork
+// (copy-on-write) and dump on App::onWorkerStop; the master dumps on normal
+// exit (after run() returns on graceful shutdown). All merged. Inert unless
+// the env var is set.
+if (($__covDir = getenv('ZEALPHP_COVERAGE_DIR')) !== false && $__covDir !== ''
+    && class_exists(\SebastianBergmann\CodeCoverage\CodeCoverage::class)) {
+    $__cov = null;
+    $__filter = new \SebastianBergmann\CodeCoverage\Filter();
+    $__rii = new \RecursiveIteratorIterator(
+        new \RecursiveDirectoryIterator(__DIR__ . '/src', \FilesystemIterator::SKIP_DOTS)
+    );
+    foreach ($__rii as $__f) {
+        if ($__f->isFile() && $__f->getExtension() === 'php') {
+            $__filter->includeFile($__f->getPathname());
+        }
+    }
+    try {
+        // Selector picks whatever driver is active (pcov locally, Xdebug in CI
+        // under XDEBUG_MODE=coverage). If none, skip silently.
+        $__driver = (new \SebastianBergmann\CodeCoverage\Driver\Selector())->forLineCoverage($__filter);
+        $__cov = new \SebastianBergmann\CodeCoverage\CodeCoverage($__driver, $__filter);
+        $__cov->start('zealphp');
+    } catch (\Throwable $e) {
+        $__cov = null;
+    }
+    $__covDump = static function (string $tag) use (&$__cov, $__covDir): void {
+        if ($__cov === null) {
+            return;
+        }
+        try {
+            $__cov->stop();
+            $file = rtrim($__covDir, '/') . "/$tag-" . getmypid() . '.cov';
+            (new \SebastianBergmann\CodeCoverage\Report\PHP())->process($__cov, $file);
+            $__cov = null; // dump once per process
+        } catch (\Throwable $e) {
+            // never let a coverage dump abort shutdown
+        }
+    };
+    // Worker processes (forked): dump request-handling coverage on stop.
+    App::onWorkerStop(function ($server, $workerId) use ($__covDump): void {
+        $__covDump("server-w$workerId");
+    });
+    // Master process: dump on normal exit — run() returns after graceful
+    // shutdown, then PHP shutdown functions fire here. Captures run()'s body.
+    register_shutdown_function(static function () use ($__covDump): void {
+        $__covDump('master');
+    });
+}
 
 $app->run($settings);

@@ -7,6 +7,28 @@
 //
 // Protocol: metadata is written to stderr FIRST (as a single JSON line),
 // then body streams to stdout. This enables SSE and streaming responses.
+//
+// This is a standalone subprocess entry point (not a class), already excluded
+// from PHPStan; its body runs in a forked `php cgi_worker.php` process and is
+// verified by the integration suite + tests/Unit/CgiWorkerTest, not measured
+// as a coverage unit.
+// @codeCoverageIgnoreStart
+
+// Load the Composer autoloader so the included file has the SAME class /
+// global-function surface it would in fork mode (which inherits the warm
+// worker's autoloader via copy-on-write). Without this, `\ZealPHP\App`,
+// the Apache shims, and global helpers are undefined inside proc-mode CGI
+// includes — an inconsistency between the two CGI backends (issue #17).
+// Two layouts: this file as the repo root (vendor/ is a sibling of src/),
+// or installed as a dependency (vendor/sibidharan/zealphp/src/ → the real
+// autoloader is three levels up). First existing wins; missing is non-fatal
+// (unmodified WordPress/Drupal ships its own bootstrap and needs neither).
+foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $__z_autoload) {
+    if (is_file($__z_autoload)) {
+        require_once $__z_autoload;
+        break;
+    }
+}
 
 $__z_ctx = json_decode(getenv('ZEALPHP_REQUEST_CONTEXT') ?: '{}', true);
 
@@ -316,3 +338,5 @@ try {
     $__z_status = 500;
     echo '<pre>' . htmlspecialchars($__z_err->getMessage()) . "\n" . htmlspecialchars($__z_err->getTraceAsString()) . '</pre>';
 }
+
+// @codeCoverageIgnoreEnd

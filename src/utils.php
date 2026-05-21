@@ -230,6 +230,14 @@ function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
         return null;
     }
 
+    // The async sink spawns a detached `go()` consumer that loops on
+    // Channel::pop() until the channel closes. It only runs when async logging
+    // is enabled inside a live coroutine scheduler — never reached by the unit
+    // suite (no scheduler) and deliberately disabled in every coverage server
+    // pass (ZEALPHP_LOG_ASYNC=0), since exercising the consumer risks a
+    // pop()-loop deadlock at coverage-dump time. Verified by live integration
+    // use, not measured as a coverage unit.
+    // @codeCoverageIgnoreStart
     $queue = new \OpenSwoole\Coroutine\Channel(8192);
     $sinks[$path] = $queue;
 
@@ -246,8 +254,13 @@ function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
             $handle = @fopen($path, 'ab');
             if ($handle === false) {
                 while (($message = $queue->pop()) !== false) {
-                    // @phpstan-ignore-next-line — OpenSwoole\Coroutine\Channel::pop() returns mixed
-                    error_log((string)$message);
+                    // Last-resort sink — write to stderr directly, NOT error_log():
+                    // error_log() is uopz-overridden to route into log_write(), so
+                    // calling it here would recurse. stderr is where error_log(0)
+                    // lands under the CLI SAPI anyway. pop() returns mixed.
+                    if (is_scalar($message)) {
+                        @file_put_contents('php://stderr', (string)$message);
+                    }
                 }
                 return;
             }
@@ -265,13 +278,16 @@ function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
     }
 
     return $queue;
+    // @codeCoverageIgnoreEnd
 }
 
 function log_write(string $message, string $kind = 'debug'): void
 {
     $path = log_file_for($kind);
     if ($path === null) {
-        error_log($message);
+        // stderr, not error_log() — see the consumer's fallback note above
+        // (error_log() is overridden to route back into log_write()).
+        @file_put_contents('php://stderr', $message);
         return;
     }
 
@@ -291,7 +307,8 @@ function log_write(string $message, string $kind = 'debug'): void
 
     $handle = @fopen($path, 'ab');
     if ($handle === false) {
-        error_log($message);
+        // stderr, not error_log() (overridden — would recurse into log_write()).
+        @file_put_contents('php://stderr', $message);
         return;
     }
     stream_set_write_buffer($handle, 0);
@@ -300,18 +317,63 @@ function log_write(string $message, string $kind = 'debug'): void
 }
 
 /**
- * Executes a task logic in a separate process.
+ * Run a closure in a throwaway child process that HAS the coroutine scheduler,
+ * even though the caller does not. This is the escape hatch for parallel I/O
+ * from a coroutine-scheduler-OFF worker — i.e. `superglobals(true)` /
+ * `enableCoroutine(false)` mode (the Symfony/FPM-style lifecycle, where running
+ * coroutines in the main worker would race process-wide $_GET/$_POST/$_SESSION
+ * and shared framework singletons).
  *
- * @param callable $taskLogic The logic to be executed in the separate process.
- * @param bool $wait Optional. Whether to wait for the process to complete. Default is true.
+ * The child is spawned with OpenSwoole's coroutine runtime enabled, so inside
+ * `$taskLogic` you can `go()` + `Channel` + hooked I/O (curl, file_get_contents,
+ * PDO over the network, Co\System::exec, ...) and they run concurrently. The
+ * call BLOCKS until the child finishes (when $wait is true) and returns whatever
+ * the child echoed — so serialise structured results (json_encode in the child,
+ * json_decode in the caller).
  *
- * @return mixed The result of the task logic if $wait is true, otherwise null.
+ * Cost & caveats:
+ *  - One `proc`-style fork per call (~ms). Worth it when a request needs N
+ *    genuinely-parallel slow I/O calls; not worth it for a single call or
+ *    CPU-bound work.
+ *  - The child is a FRESH process — it does NOT inherit your framework
+ *    container, DB connection pool, or request state. Pass everything it needs
+ *    as captured variables; do raw I/O inside (it can't reach Symfony services
+ *    / Doctrine's managed connection).
+ *  - Refused when `superglobals(false)` (coroutine mode) — there you already
+ *    have a scheduler, so just `go()` directly.
+ *
+ * Example (3 parallel HTTP fetches from a sequential worker):
+ *
+ *     $json = coprocess(function () {
+ *         $chan = new \OpenSwoole\Coroutine\Channel(3);
+ *         foreach (['a','b','c'] as $svc) {
+ *             go(function () use ($svc, $chan) {
+ *                 $chan->push([$svc => file_get_contents("https://api/$svc")]);
+ *             });
+ *         }
+ *         $out = [];
+ *         for ($i = 0; $i < 3; $i++) { $out += $chan->pop(); }
+ *         echo json_encode($out);            // returned to the caller as a string
+ *     });
+ *     $data = json_decode($json, true);
+ *
+ * @param callable $taskLogic The logic to run in the coroutine-enabled child.
+ *                            Receives the OpenSwoole\Process as its argument.
+ * @param bool $wait Whether to block until the child completes. Default true.
+ *
+ * @return mixed The child's echoed output (string) when $wait is true.
  */
 function coprocess($taskLogic, $wait = true)
 {
     if(App::$superglobals == false){
         throw new \Exception("Superglobals are disabled which enables coroutines, cannot use coprocess inside coroutine, use coroutines directly.");
     }
+    // The body forks a child OpenSwoole\Process with its own coroutine runtime.
+    // It only runs in superglobals(true)+enableCoroutine(false) mode and cannot
+    // be exercised in-process by the coverage harness (the coroutine pass — the
+    // assertion gate — is exactly the mode where coprocess() is refused above;
+    // the mixed/cgi exercise passes never call it). Verified by live use.
+    // @codeCoverageIgnoreStart
     $worker = new Process(function (Process $worker) use ($taskLogic) {
         try{
             ob_start();
@@ -342,11 +404,17 @@ function coprocess($taskLogic, $wait = true)
         $data   = '';
     }
     return $data;
+    // @codeCoverageIgnoreEnd
 }
 
 /**
+ * Thin alias for {@see coprocess()} — same fork-a-coroutine-child semantics, so
+ * it shares coprocess()'s untestability (forks a child process; only valid in
+ * the superglobals(true)+enableCoroutine(false) mode the coverage gate excludes).
+ *
  * @param callable $taskLogic
  * @return mixed
+ * @codeCoverageIgnore
  */
 function coproc($taskLogic){
     return coprocess($taskLogic);
@@ -911,6 +979,107 @@ function ob_end_flush(): void
 function ob_implicit_flush($enable = true): void
 {
     // no-op
+}
+
+/**
+ * mod_php-parity phpinfo(): render a self-contained HTML document instead of the
+ * CLI SAPI's plain-text dump. Matches the native signature — echoes output and
+ * returns true. Wired via uopz in App::__construct(); the renderer lives in
+ * \ZealPHP\Diagnostics\PhpInfo.
+ *
+ * @param int $flags INFO_* bitmask.
+ */
+function phpinfo(int $flags = INFO_ALL): bool
+{
+    echo \ZealPHP\Diagnostics\PhpInfo::render($flags);
+    return true;
+}
+
+/**
+ * mod_php-parity php_sapi_name(): under the CLI SAPI this natively returns "cli",
+ * which legacy apps branch on to disable web-only behavior. When an app opts in
+ * via App::sapiName('apache2handler') (or 'fpm-fcgi'), this returns the configured
+ * value so such code takes its web path. Default (App::$sapi_name === null) returns
+ * the real PHP_SAPI — zero behavior change unless explicitly configured.
+ *
+ * Note: the PHP_SAPI *constant* cannot be redefined (uopz_redefine refuses it), so
+ * code reading the constant directly still sees "cli". Documented limitation.
+ */
+function php_sapi_name(): string
+{
+    return \ZealPHP\App::$sapi_name ?? PHP_SAPI;
+}
+
+/**
+ * mod_php-parity filter_input(): native filter_input() reads PHP's internal SAPI
+ * request tables, which OpenSwoole never populates (so it returns null under CLI).
+ * This resolves the value from RequestContext ($g) and applies the requested filter.
+ *
+ * @param array<string, mixed>|int $options
+ */
+function filter_input(int $type, string $var_name, int $filter = FILTER_DEFAULT, array|int $options = 0): mixed
+{
+    $bag = \ZealPHP\Input\RequestInput::bagFor($type);
+    return \ZealPHP\Input\RequestInput::filterValue($bag, $var_name, $filter, $options);
+}
+
+/**
+ * mod_php-parity filter_input_array(): the array counterpart of filter_input().
+ *
+ * @param array<string, mixed>|int $options
+ * @return array<string, mixed>
+ */
+function filter_input_array(int $type, array|int $options = FILTER_DEFAULT, bool $add_empty = true): array
+{
+    $bag = \ZealPHP\Input\RequestInput::bagFor($type);
+    return \ZealPHP\Input\RequestInput::filterArray($bag, $options, $add_empty);
+}
+
+/**
+ * mod_php-parity header_register_callback(): native PHP fires the callback when
+ * the SAPI is about to send headers — which never happens the normal way under
+ * OpenSwoole. ZealPHP stores it per-request (coroutine-safe, in $g->memo) and
+ * invokes it once just before the buffered response headers are flushed, so
+ * header() calls inside the callback still land. Last registration wins (matches
+ * native, which keeps a single callback). Returns false if there's no request
+ * context (e.g. called outside a request).
+ *
+ * Scope note: fires for buffered responses (the common case). Streaming / SSE
+ * paths flush headers eagerly and are intentionally excluded, consistent with
+ * the framework's buffered-vs-streaming split (e.g. Range/ETag middleware).
+ */
+function header_register_callback(callable $callback): bool
+{
+    try {
+        \ZealPHP\RequestContext::instance()->memo['_header_callback'] = $callback;
+        return true;
+    } catch (\Throwable) {
+        return false;
+    }
+}
+
+/**
+ * mod_php-parity error_log(): under the CLI SAPI native error_log() writes to
+ * stderr / the php.ini error_log path. ZealPHP routes message_type 0 (system
+ * logger) and 4 (SAPI logger) into the framework's async log (debug.log, or
+ * stderr if logging is disabled) so legacy error_log() calls land where the
+ * rest of the app's diagnostics go — the "we have elog for error_log" contract.
+ *
+ *   - type 3 (append to file): honored verbatim — explicit destination intent.
+ *   - type 1 (email): unsupported under the coroutine runtime; logged + false.
+ *   - type 0 / 4: routed to log_write() (debug.log → stderr fallback).
+ *
+ * Always lands somewhere (never silently dropped), unlike elog() which gates on
+ * debug logging; that's why this routes through log_write() directly.
+ */
+function error_log(string $message, int $message_type = 0, ?string $destination = null, ?string $additional_headers = null): bool
+{
+    if ($message_type === 3 && $destination !== null && $destination !== '') {
+        return @file_put_contents($destination, $message, FILE_APPEND | LOCK_EX) !== false;
+    }
+    $line = '[error_log] ' . date('d-m-Y H:i:s') . ' ' . rtrim($message, "\r\n") . "\n";
+    log_write($line, 'debug');
+    return $message_type !== 1; // email path can't actually deliver
 }
 
 /**

@@ -81,6 +81,30 @@ class AppConfigurablesTest extends TestCase
     }
 
     // ─────────────────────────────────────────────────────────────
+    // cgiMode()
+    // ─────────────────────────────────────────────────────────────
+
+    public function testCgiModeDefaultsToProc(): void
+    {
+        $this->assertSame('proc', App::cgiMode());
+        $this->assertSame('proc', App::$cgi_mode);
+    }
+
+    public function testCgiModeSetterRoundtrips(): void
+    {
+        $this->assertSame('fork', App::cgiMode('fork'));
+        $this->assertSame('fork', App::cgiMode());
+        $this->assertSame('fork', App::$cgi_mode);
+        $this->assertSame('proc', App::cgiMode('proc'));
+    }
+
+    public function testCgiModeRejectsUnknownMode(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        App::cgiMode('exec');
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // serverAdmin()
     // ─────────────────────────────────────────────────────────────
 
@@ -471,5 +495,72 @@ class AppConfigurablesTest extends TestCase
 
         App::superglobals(false);
         $this->resetLifecycleOverrides();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // v0.2.27 — unsafe lifecycle combinations refused at boot
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Invoke the private static validator directly so the test doesn't
+     * have to spin up a full server. The validator is the only thing
+     * App::run() does for this check; isolating it keeps the test fast.
+     */
+    private function invokeValidator(bool $sg, int $hookFlags, bool $enableCo): void
+    {
+        $ref = new \ReflectionMethod(App::class, 'validateLifecycleCombination');
+        $ref->setAccessible(true);
+        $ref->invoke(null, $sg, $hookFlags, $enableCo);
+    }
+
+    public function testSuperglobalsTruePlusEnableCoroutineTrueThrows(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/superglobals\(true\) \+ App::enableCoroutine\(true\)/');
+        $this->invokeValidator(true, 0, true);
+    }
+
+    public function testSuperglobalsTruePlusHookAllNonZeroThrows(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/superglobals\(true\) \+ App::hookAll\(non-zero\)/');
+        $this->invokeValidator(true, \OpenSwoole\Runtime::HOOK_ALL, false);
+    }
+
+    public function testSuperglobalsTruePlusBothEnableAndHookErrorsOnFirst(): void
+    {
+        // Both unsafe at once — first check (enableCoroutine) triggers,
+        // hookAll never gets reached. Doesn't matter which fires first; we
+        // just need to confirm SOMETHING refuses to start.
+        $this->expectException(\RuntimeException::class);
+        $this->invokeValidator(true, \OpenSwoole\Runtime::HOOK_ALL, true);
+    }
+
+    public function testCoroutineModeWithHooksAndSchedulerIsSafe(): void
+    {
+        // Default coroutine-mode lifecycle: superglobals=false,
+        // enableCoroutine=true, hookAll=HOOK_ALL. The whole point — no
+        // process-wide superglobals to race. Must NOT throw.
+        $this->invokeValidator(false, \OpenSwoole\Runtime::HOOK_ALL, true);
+        $this->addToAssertionCount(1);
+    }
+
+    public function testMixedModeIsSafe(): void
+    {
+        // superglobals(true) + enableCoroutine(false) + hookAll(0) — the
+        // canonical Mixed-mode lifecycle (Apache prefork MPM semantics).
+        // Sequential request handling per worker, no race. Must NOT throw.
+        $this->invokeValidator(true, 0, false);
+        $this->addToAssertionCount(1);
+    }
+
+    public function testLegacyCgiModeIsSafe(): void
+    {
+        // superglobals(true) + enableCoroutine(false) + hookAll(0) +
+        // (implicit) processIsolation=true. Pre-v0.2.23 default. Must NOT
+        // throw — the CGI bridge gives each request its own process, so
+        // even superglobals can't race.
+        $this->invokeValidator(true, 0, false);
+        $this->addToAssertionCount(1);
     }
 }

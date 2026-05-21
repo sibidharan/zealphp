@@ -954,3 +954,8 @@ pre:hover > .code-copy { opacity: 1; }
  * request is in flight. Subtle dim + progress cursor so the click target
  * acknowledges itself even before the response arrives. */
 .htmx-request { opacity: .6; cursor: progress; transition: opacity .15s ease; }
+
+/* Apache + mod_php parity reference section (template/pages/http.php#parity) */
+.section-subtitle { font-size: 1.35rem; font-weight: 800; margin: 2.5rem 0 .5rem; padding-top: 1.5rem; border-top: 1px solid rgba(245,158,11,.18); }
+.parity-group { font-size: 1.05rem; font-weight: 700; color: var(--accent-dark); margin: 1.5rem 0 .5rem; }
+.parity-table td:nth-child(2) { white-space: nowrap; font-weight: 600; }

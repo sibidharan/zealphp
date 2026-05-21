@@ -75,11 +75,23 @@ class Store
     /**
      * Set a row. $key must be a string.
      *
+     * Returns false when the table does not exist or when the table is full
+     * (OpenSwoole throws \OpenSwoole\Exception in that case; we catch it and
+     * return false so callers can handle overflow without a try/catch).
+     *
      * @param array<string, mixed> $row
      */
     public static function set(string $table, string $key, array $row): bool
     {
-        return (self::$tables[$table] ?? null)?->set($key, $row) ?? false;
+        $t = self::$tables[$table] ?? null;
+        if ($t === null) {
+            return false;
+        }
+        try {
+            return $t->set($key, $row);
+        } catch (\OpenSwoole\Exception) {
+            return false;
+        }
     }
 
     /** Get a row. Returns array|false. */

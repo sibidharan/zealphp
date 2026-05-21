@@ -1,0 +1,8 @@
+{
+    "name": "zealphp/lamp-scaffold",
+    "description": "Vanilla PHP app that runs unchanged on Apache+mod_php and ZealPHP. Demonstrates the $g compat shim pattern.",
+    "type": "project",
+    "require": {
+        "sibidharan/zealphp": "^0.2"
+    }
+}

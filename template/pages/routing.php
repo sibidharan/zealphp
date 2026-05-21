@@ -20,19 +20,22 @@
 <p style="margin:.75rem 0">Inside these files, everything you already know works:</p>
 
 <?php App::render('/components/_code', [
-    'label' => 'public/dashboard.php — plain PHP, nothing new',
+    'label' => 'public/dashboard.php — coroutine-safe form (works in both modes)',
     'code'  => <<<'PHP'
 <?php
+use ZealPHP\RequestContext;
+
+$g = RequestContext::instance();
 session_start();
-if (!$_SESSION['user']) { header('Location: /login'); exit; }
+if (empty($g->session['user'])) { header('Location: /login'); exit; }
 ?>
-<h1>Welcome, <?= htmlspecialchars($_SESSION['user']['name']) ?></h1>
-<p>Your orders: <?= count($_GET['filter'] ?? []) ?> filters active</p>
+<h1>Welcome, <?= htmlspecialchars($g->session['user']['name']) ?></h1>
+<p>Your orders: <?= count($g->get['filter'] ?? []) ?> filters active</p>
 PHP
 ]); ?>
 
 <div class="callout info" style="margin-top:1rem">
-<strong>This is the migration on-ramp.</strong> Drop your existing PHP files into <code>public/</code> and they run on OpenSwoole immediately — <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>$_POST</code>, <code>echo</code> all work unchanged via uopz overrides. <strong>Caveat:</strong> this needs <code>App::superglobals(true)</code>, where state is shared per worker — fine to get running, <em>not</em> per-coroutine isolated. For full async (thousands of concurrent requests per worker), the recommended endpoint is coroutine mode — swap <code>$_GET</code> / <code>$_SESSION</code> / etc. for <code>$g-&gt;get</code> / <code>$g-&gt;session</code> (see the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a> and the <a href="/migration">migration ladder</a>).
+<strong>This is the migration on-ramp.</strong> Drop your existing PHP files into <code>public/</code> and they run on OpenSwoole immediately — <code>session_start()</code>, <code>header()</code>, <code>echo</code> all work unchanged via uopz overrides. The example above uses <code>$g-&gt;session</code> / <code>$g-&gt;get</code> via <code>RequestContext::instance()</code> — the per-coroutine-safe form that works in both modes. <strong>Direct <code>$_SESSION</code> / <code>$_GET</code> access</strong> only works under <code>App::superglobals(true)</code>; in the default coroutine mode it would silently leak across visitors because PHP superglobals are process-wide. See the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a> and the <a href="/migration">migration ladder</a>.
 </div>
 
 <p style="margin:1rem 0">Same convention works for APIs — drop files in <code>api/</code>:</p>

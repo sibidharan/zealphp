@@ -4,6 +4,10 @@
 <h1 class="section-title">Running Legacy PHP Apps</h1>
 <p class="section-desc">ZealPHP runs <strong>unmodified WordPress</strong> — admin dashboard, login, posts, plugins — out of the box. No patches, no forks, no compatibility layers. If it runs on Apache, it runs on ZealPHP.</p>
 
+<div class="callout info" style="margin:1.25rem 0;border-left:4px solid #fbbf24">
+  <strong>Production proof point.</strong> Selfmade Ninja Labs (<a href="https://labs.selfmade.ninja">labs.selfmade.ninja</a>) — a large PHP/MongoDB dashboard with OAuth, SSE streaming, and a custom MongoDB ORM — runs the same codebase on both Apache and ZealPHP in production. Two servers, one volume, zero downtime during migration. <a href="/case-studies/sna-labs">Read the case study →</a>
+</div>
+
 <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin: 2rem 0;">
   <div style="border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-md);">
     <img src="/img/wordpress-home.png" alt="WordPress homepage served by ZealPHP" style="width:100%; display:block;">
@@ -145,6 +149,67 @@ $app = App::init('0.0.0.0', 8080);
 $app->run(['task_worker_num' => 0]);
 // PHP files in public/ are served automatically with process isolation
 PHP]); ?>
+
+<h2 id="dual-runtime" style="margin-top:2.5rem">Dual-runtime — one codebase, Apache AND ZealPHP at once</h2>
+
+<p>The strongest migration story isn't "rewrite for ZealPHP." It's "run the <em>same source tree</em> on both servers simultaneously" — Apache+mod_php for the battle-tested path, ZealPHP for speed and coroutines — and cut over gradually with zero risk. This is exactly how <a href="/case-studies/sna-labs">Selfmade Ninja Labs migrated</a>: one volume, two servers, same files (running on dev today, production cutover next).</p>
+
+<p>The mechanism is a tiny <strong>compat shim</strong> that gives application code a single accessor — <code>$g-&gt;get</code>, <code>$g-&gt;session</code>, etc. — that resolves correctly in whichever runtime is loading the file:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'compat/g.php — shipped with ZealPHP at vendor/sibidharan/zealphp/compat/g.php',
+    'code'  => <<<'PHP'
+<?php
+// Include this ONCE at the top of every entry point — on BOTH servers.
+if (!isset($GLOBALS['g'])) {
+    if (class_exists('\ZealPHP\RequestContext', false)) {
+        // ZealPHP is loaded → use the framework's per-request context.
+        // Coroutine mode: per-coroutine, concurrency-safe. The ONLY safe
+        // accessor there ($_GET/$_SESSION are intentionally empty).
+        $GLOBALS['g'] = \ZealPHP\RequestContext::instance();
+    } else {
+        // Apache + mod_php → ZealPHP isn't here at all. Build $g from
+        // references to PHP's real superglobals so $g->get IS $_GET.
+        $GLOBALS['g'] = (object) [
+            'get'     => &$_GET,    'post'    => &$_POST,
+            'server'  => &$_SERVER, 'cookie'  => &$_COOKIE,
+            'files'   => &$_FILES,  'request' => &$_REQUEST,
+            'session' => &$_SESSION,
+        ];
+    }
+}
+$g = $GLOBALS['g'];
+PHP]); ?>
+
+<p>Then application code uses only <code>$g-&gt;X</code> — never <code>$_GET</code>/<code>$_SESSION</code> directly:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'public/dashboard.php — runs unchanged on Apache and ZealPHP',
+    'code'  => <<<'PHP'
+<?php
+require_once __DIR__ . '/../vendor/sibidharan/zealphp/compat/g.php';
+
+session_start();
+$g->session['hits'] = ($g->session['hits'] ?? 0) + 1;
+$filter = $g->get['filter'] ?? 'all';
+echo "Filter: {$filter}, hits: {$g->session['hits']}";
+PHP]); ?>
+
+<div style="margin:1.25rem 0;padding:1rem 1.25rem;background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.25);border-left:3px solid var(--accent);border-radius:var(--radius)">
+  <strong style="color:#fde68a">Why this can't be a framework feature</strong>
+  <p style="margin:.5rem 0 0;line-height:1.6">
+    The Apache branch of the shim runs <em>precisely when ZealPHP is not loaded</em>. Under Apache+mod_php there's no OpenSwoole, no Composer autoloader bootstrapped, no <code>ZealPHP\</code> namespace — so nothing in the framework's autoloaded <code>src/</code> can execute. The bridge therefore HAS to be a standalone, dependency-free file the app includes unconditionally. ZealPHP ships the canonical copy at <code>compat/g.php</code> (and a test guards it against drift), but it is <em>included by your app</em>, not loaded by the framework. That's not a limitation — it's the only design that can possibly work across the "with ZealPHP / without ZealPHP" boundary.
+  </p>
+</div>
+
+<table class="ztable">
+<tr><th>Runtime</th><th><code>class_exists(RequestContext)</code></th><th><code>$g-&gt;get</code> resolves to</th><th><code>$_GET</code></th></tr>
+<tr><td>ZealPHP — coroutine mode</td><td><code>true</code></td><td>per-coroutine <code>RequestContext::$get</code></td><td>empty (by design)</td></tr>
+<tr><td>ZealPHP — superglobals mode</td><td><code>true</code></td><td><code>RequestContext::$get</code> → bridged to <code>$_GET</code></td><td>populated (v0.2.27+)</td></tr>
+<tr><td>Apache + mod_php</td><td><code>false</code></td><td>shim's <code>&amp;$_GET</code> reference</td><td>populated natively by PHP</td></tr>
+</table>
+
+<p style="margin-top:1rem"><strong>Coroutine-mode dual-runtime apps must use <code>$g-&gt;X</code> and keep the shim permanently</strong> — it's the only accessor that works on both servers (coroutine mode keeps superglobals empty to avoid cross-coroutine races). This is distinct from the <a href="/vs-fpm">drop-in LAMP / Mixed-mode</a> story, where <code>superglobals(true)</code> lets ZealPHP-only apps read <code>$_GET</code>/<code>$_SESSION</code> directly and skip the shim entirely (v0.2.27+).</p>
 
 <h2 style="margin-top:2.5rem">Apache rewrite recipes — the 12 patterns</h2>
 <p>Real <code>.htaccess</code> files are full of <code>RewriteRule</code> destinations that end in <code>.php</code>. Each recipe below shows the Apache directive and its ZealPHP equivalent. Every example uses the <a href="/coroutines#state-parity"><code>$g</code> form</a> for query-string injection — works in both modes, no per-coroutine leak in coroutine mode. The legacy <code>$_GET</code> equivalent appears as a comment for readers porting older code.</p>

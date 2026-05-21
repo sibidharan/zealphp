@@ -171,7 +171,7 @@ The CGI worker communicates a two-channel protocol back to the parent:
 - **stderr line 1** = JSON metadata (status, headers, cookies) sent FIRST.
 - **stdout** = body bytes streamed (supports SSE, chunked output).
 
-The parent's `cgiInclude()` reads metadata, forwards headers/cookies to its OpenSwoole response, then proxies stdout. See `App::cgiInclude()` in [`src/App.php`](../src/App.php).
+The parent's private `cgiSubprocess()` reads metadata, forwards headers/cookies to its OpenSwoole response, then proxies stdout. Public entry point is `App::include()` (or its deprecated alias `App::includeFile()`); see [`src/App.php`](../src/App.php). The dispatch is gated by `App::processIsolation()` (added in v0.2.23) — `true` (default in superglobals mode) forks the subprocess, `false` runs in-process via `App::executeFile()`.
 
 ---
 

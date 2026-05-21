@@ -100,14 +100,16 @@ Every inbound request flows through these layers (defined across multiple files)
 
 `G::instance()` (`src/G.php`) is the per-request global state container. Its behaviour depends on the mode:
 
-| Mode | `G::instance()` returns |
-|------|------------------------|
-| Superglobals ON | A single process-wide singleton; `$g->session` proxies to `$_SESSION`, `$g->get` to `$_GET`, etc. via `$GLOBALS` |
-| Superglobals OFF | A per-coroutine instance stored in `OpenSwoole\Coroutine::getContext()` — each coroutine has isolated state |
+| Mode | `G::instance()` returns | `$_GET` / `$_SESSION` etc. |
+|------|------------------------|----------------------------|
+| Superglobals ON | A single process-wide singleton. `$g->get` / `$g->post` / `$g->cookie` / `$g->files` / `$g->server` / `$g->request` / `$g->session` are all **live aliases** of `$_GET` / `$_POST` / … / `$_SESSION` — the per-request handler populates `$GLOBALS['_GET']` etc. then `unset()`s the declared typed slots so reads AND writes route through the `__get`/`__set` proxy by reference. They're the **same array**: mutating `$_GET['x']` after dispatch is immediately visible via `$g->get['x']` and vice versa (session since v0.2.27; the rest since v0.2.30, issue #17). | Populated per request from OpenSwoole's `$request->*`. Use them directly OR via `$g->X` — both work, both see the same data |
+| Superglobals OFF | A per-coroutine instance stored in `OpenSwoole\Coroutine::getContext()` — each coroutine has isolated state | NOT populated. Process-wide writes would race across coroutines. Use `$g->X` exclusively |
 
-The **demo app uses `superglobals(false)` (coroutine mode)**. This is now the recommended default for new projects.
+The **demo app uses `superglobals(false)` (coroutine mode)**. This is the recommended default for new projects.
 
-**Canonical `$g` vs `$_*` parity rule** — `template/pages/coroutines.php#state-parity` is the single source of truth: **use `$g->get` / `$g->post` / `$g->cookie` / `$g->server` / `$g->session`. It works identically in both modes.** Under `superglobals(true)` the framework bridges `$g->get` to `$GLOBALS['_GET']` so both forms are equivalent; under `superglobals(false)` the superglobals are NOT populated per request (they're process-wide arrays — writes leak across coroutines), so only the `$g->X` form is safe. Recipes and migration examples in the website link to `/coroutines#state-parity` rather than restating this rule.
+**Superglobal contract (v0.2.27 + v0.2.30)** — `App::superglobals(true)` now lives up to its name. Both `$_GET` / `$_SESSION` AND `$g->get` / `$g->session` are populated per request, and **every request-input superglobal is a live alias** — `$_GET ↔ $g->get`, `$_POST ↔ $g->post`, `$_COOKIE`, `$_FILES`, `$_SERVER`, `$_REQUEST`, `$_SESSION` — writes through one are visible through the other immediately. This restores v0.1.x behaviour dropped during the Dec 2024 declared-property refactor (commits `327e180` + `900c18a`). The implementation lives in three places: `src/App.php` per-request handler (populates `$GLOBALS['_GET']` family, then `unset()`s the declared `$g->get`/`post`/`cookie`/`files`/`server`/`request` slots so they proxy by reference — v0.2.30, issue #17), `src/Session/SessionManager.php` (`unset($g->session)` after `session_start()` — v0.2.27), and `src/RequestContext.php` `__get`/`__set` (symmetric superglobal-key mapping `session ↔ _SESSION` etc.). Tests pin the contract: `tests/Integration/SuperglobalsParityTest.php` (`testGetAliasMutationCrosses`, `testSessionAliasMutationCrosses`).
+
+**Canonical `$g` vs `$_*` parity rule** — `template/pages/coroutines.php#state-parity` is the single source of truth: **use `$g->get` / `$g->post` / `$g->cookie` / `$g->server` / `$g->session`. It works identically in both modes.** In `superglobals(true)` mode the framework also populates the matching `$_*` superglobals (v0.2.27), so code reading `$_GET` works too. In `superglobals(false)` mode the superglobals are NOT populated per request (process-wide arrays — writes leak across coroutines), so only the `$g->X` form is safe. Recipes and migration examples link to `/coroutines#state-parity` rather than restating this rule.
 
 ### Lifecycle: static config → `init()` → instance routing → `run()`
 
@@ -149,10 +151,12 @@ Historically `App::superglobals()` bundled four decisions into one flag. As of v
 | **In-process + sync** | true | false | false | 0 | Same shape as Mixed-mode — the "scheduler off, no CGI" combo |
 | **Coroutine without HOOK_ALL** | false | false | true | 0 | Per-request coroutine isolation but no auto I/O hooks (e.g. testing, custom hooks) |
 
-**Unsafe combinations** — `App::run()` emits a `[lifecycle]` warning to the debug log but does not refuse:
+**Unsafe combinations** — `App::run()` **throws `RuntimeException` at boot** (v0.2.27+). Pre-v0.2.27 these emitted a `[lifecycle]` warning to `debug.log` but didn't refuse; in practice the warning was invisible and the race-prone configuration is how cross-request state-leak bugs ship to production. Fail loud, fail fast:
 
-- `superglobals(true) + enableCoroutine(true)` — process-wide `$_GET`/`$_POST`/`$_SESSION` arrays will race across concurrent coroutines (this is exactly the bug per-coroutine `$g` was designed to avoid).
+- `superglobals(true) + enableCoroutine(true)` — process-wide `$_GET`/`$_POST`/`$_SESSION` arrays would race across concurrent coroutines (this is exactly the bug per-coroutine `$g` was designed to avoid).
 - `superglobals(true) + hookAll(non-zero)` — hooked I/O can yield mid-request, exposing process-wide superglobal mutations to other coroutines.
+
+Apps that need to run one of these for security-audit / debugging purposes can fork and remove the throw at `App::validateLifecycleCombination()`. The supported matrix above covers every safe configuration.
 
 The default coupling — `null` everywhere — preserves the historical behaviour for any app that doesn't touch these knobs. The [zealphp-symfony](https://github.com/sibidharan/zealphp-symfony) bridge uses `superglobals(true) + processIsolation(false) + sessionLifecycle(false)` to get the Mixed-mode lifecycle.
 
@@ -164,6 +168,8 @@ At startup (`src/App.php:__construct()`), `uopz_set_return()` permanently replac
 - All `session_*()` functions → implementations in `src/Session/utils.php` that read/write `$g->session` and file-based session storage in `/var/lib/php/sessions`
 
 This lets legacy PHP code call `header()` or `session_start()` unchanged while the framework routes those calls to the correct per-request objects.
+
+**Session unserialize whitelist (v0.2.26, issue #15)** — all four `unserialize()` calls in `src/Session/utils.php` pass `['allowed_classes' => ['stdClass']]`. Scalars and arrays pass through normally. `stdClass` round-trips as a live instance (it has zero magic methods, no gadget surface — makes `json_decode($x)` results storable in `$_SESSION` without breakage). Every other class is refused — read back as `__PHP_Incomplete_Class`. Adding any class to the whitelist requires reviewing its `__wakeup` / `__unserialize` / `__destruct` magic methods first; the function-level docblock at `php_session_decode_to_array()` documents the constraint. Canonical user-facing doc: `template/pages/sessions.php#objects-in-session`.
 
 ### IOStreamWrapper
 
@@ -180,6 +186,14 @@ Routes are registered in this order inside `App::run()` (earlier = higher priori
 5. Implicit public file routes: `/` → `public/index.php`, `/{file}` → `public/{file}.php`, `/{dir}/{uri}` → `public/{dir}/{uri}.php`
 
 **API handler naming rule**: `api/users/get.php` must define `$get = function(...)`. The variable name must match `basename($file, '.php')`. ZealAPI binds it as a closure with `$this` set to the `ZealAPI` instance.
+
+**ZealAPI auth hooks (v0.2.25, issue #13)** — `$this->isAuthenticated()`, `$this->isAdmin()`, `$this->getUsername()`, and the composite `$this->requirePostAuth()` are not hardcoded. They consult three optional callbacks registered on `App`:
+
+- `App::authChecker(?callable)` — `fn(): bool`, consumed by `isAuthenticated()`, default `false` (fail-closed).
+- `App::adminChecker(?callable)` — `fn(): bool`, consumed by `isAdmin()`, default `false`.
+- `App::usernameProvider(?callable)` — `fn(): ?string`, consumed by `getUsername()`, default `null`.
+
+Wire them ONCE during boot — either in the user's `app.php` for single-app deployments, or in a platform wrapper's bootstrap (labs/Symfony bundle/etc.) so every downstream app inherits the answers without per-app glue. The framework deliberately doesn't ship a default checker — ZealPHP doesn't know about your auth system. See `template/pages/api.php#auth-hooks` for the canonical doc, `template/pages/learn/auth.php#wire-zealapi` for a worked example, and `tests/Unit/ZealApiAuthHooksTest.php` for the 15 behaviour cases pinned (defaults, callback round-trip, coercion edges, independence of the three hooks, setter introspection).
 
 ### Parameter Injection
 
@@ -257,7 +271,7 @@ Four streaming patterns via `src/HTTP/Response.php` and `ResponseMiddleware`:
 
 ### File-execution family
 
-All four file-execution methods share a single private core (`App::executeFile()`) that runs the file, captures output, and applies the universal return contract. They differ only on (a) path resolution and (b) what the wrapper does with the result. Canonical reference: `template/pages/templates.php#file-execution-family`.
+The first four methods share a single private core (`App::executeFile()`) that runs the file, captures output, and applies the universal return contract. They differ only on (a) path resolution and (b) what the wrapper does with the result. The fifth — `App::fragment()` (v0.2.24) — runs *inside* a template and marks a named region the framework can extract by name. Canonical reference: `template/pages/templates.php#file-execution-family`.
 
 | Method | Path resolved from | Returns | Notes |
 |--------|--------------------|---------|-------|
@@ -265,12 +279,13 @@ All four file-execution methods share a single private core (`App::executeFile()
 | `App::renderToString($tpl, $args)` | `template/` | `string` | Coerces every shape (Generator consumed, Closure invoked, scalar cast). |
 | `App::renderStream($tpl, $args)` | `template/` | `\Generator` | Yields whatever the template returned, chunk-by-chunk. |
 | `App::include($publicPath, $args = [])` | `public/` (Apache document-root convention — leading `/` optional) | `mixed` — full return contract, never echoed | Apache parity: auto-populates `$_SERVER['PHP_SELF']`, `SCRIPT_NAME`, `SCRIPT_FILENAME` for the included file (mod_php does the same). Applies `includeCheck()` so traversal outside `public/` is refused (returns `403` via the universal contract). In `superglobals(true)` mode dispatches to the CGI subprocess; in coroutine mode runs in-process. `App::includeFile()` is the deprecated alias. |
+| `App::fragment($name, $fn)` (v0.2.24) | N/A — called *inside* a template, not on a path | `void`. The closure's return rides the full return contract when the fragment is extracted (the parent `App::render()` propagates it back through `ResponseMiddleware`). | The htmx-essay "template fragment" pattern. Mark named regions inside any template; `App::render('page', $args)` either runs every `App::fragment()` inline (no selector → full page) or extracts just one region (`$args['fragment'] = 'name'`). State carried in `$g->memo['_fragment']` (save+restored across nested renders). Missing fragment → HTTP 404 — no silent fallback. First match wins on repeated names. |
 
 The 4 implicit-route call sites in `src/App.php` (`serveDirectory()`, implicit `/`, implicit `/{file}`, implicit `/{dir}/{uri}`) all collapse to one-line `return App::include('/...')` calls — `include()` owns the `$_SERVER` preamble and the result-coercion shape that `ResponseMiddleware` consumes.
 
 ### Template Rendering
 
-`App::render() / renderToString() / renderStream()` are three members of the [file-execution family](#file-execution-family) — see that table for the full method comparison.
+`App::render() / renderToString() / renderStream()` are three of the five members of the [file-execution family](#file-execution-family) — see that table for the full method comparison (the other two are `App::include()` for `public/`-rooted files and `App::fragment()` for in-template named regions).
 
 **Streaming templates** — template returns a Closure with named parameters; framework injects by name (same as route handlers):
 
@@ -335,7 +350,7 @@ Non-standard codes have empty reason phrases on the wire (`HTTP/1.1 451\r\n` wit
 
 ### Legacy App Support (CGI Worker)
 
-`App::include($publicPath, $args = [])` is the 4th member of the [file-execution family](#file-execution-family). It runs PHP files from `public/` through the framework:
+`App::include($publicPath, $args = [])` is one of the five members of the [file-execution family](#file-execution-family). It runs PHP files from `public/` through the framework:
 - **Coroutine mode** (`superglobals(false)`): in-process via the shared `App::executeFile()` core.
 - **Superglobals mode** (`superglobals(true)`): dispatches to a CGI subprocess via `proc_open` for true global-scope isolation. This is how unmodified WordPress/Drupal runs on ZealPHP.
 
@@ -384,6 +399,7 @@ The shell script `scripts/zealphp.sh` is an optional higher-level wrapper. All c
 - `onMessage` handler **silently drops PING (9), PONG (10), CONTINUATION (0)** frames — only TEXT (1) and BINARY (2) reach route handlers
 - `onShutdown` sends WebSocket CLOSE frame 1001 (Going Away) to all connections
 - `App::onWorkerStart(callable $fn)` — register per-worker startup hook (timers, warmup, etc.)
+- `App::onWorkerStop(callable $fn)` — register per-worker shutdown hook; runs in the worker before exit (recycle/graceful/reload), the reliable place to flush per-worker state (fires on OpenSwoole's signal-driven stop, unlike `register_shutdown_function`)
 - `getClientList` must be paginated in chunks of 100 (OpenSwoole hard limit)
 
 ### OpenSwoole Adapters
@@ -553,7 +569,7 @@ All ZealPHP usage examples live as first-class project files:
 
 | File | Role |
 |------|------|
-| `App.php` | Framework core: init, route registration, `run()`, `ResponseMiddleware`, file-execution family (`render()`/`renderToString()`/`renderStream()`/`include()` — all sharing a private `executeFile()` core), `setFallback()`, `tick()`/`after()`/`onWorkerStart()`, CLI `parseCliArgs()`. `includeFile()` is a deprecated alias for `include()`. |
+| `App.php` | Framework core: init, route registration, `run()`, `ResponseMiddleware`, file-execution family (`render()`/`renderToString()`/`renderStream()`/`include()` — all sharing a private `executeFile()` core — plus `fragment()` for in-template named regions), `setFallback()`, `tick()`/`after()`/`onWorkerStart()`, CLI `parseCliArgs()`. `includeFile()` is a deprecated alias for `include()`. |
 | `cgi_worker.php` | CGI-style process for legacy apps — true global scope, uopz header/cookie capture, SSE streaming via flush() |
 | `G.php` | Per-request global state; superglobals mode uses static singleton, coroutine mode uses `Coroutine::getContext()` |
 | `Store.php` | `OpenSwoole\Table` adapter — cross-worker shared-memory key-value store |
@@ -643,20 +659,37 @@ Also remember to bump:
 
 ### Commit, tag, push (main repo)
 
+**`master` is branch-protected** (since the v0.2.37 Scorecard hardening): direct
+`git push origin master` is **rejected** (PR required + status checks + admin
+enforcement). Releases go through a PR, then the tag is cut on the merged commit.
+
 ```bash
+# 1. Branch + commit the version bumps
+git checkout -b release/vX.Y.Z
 git add -A <bumped files>
 git commit -m "chore: release vX.Y.Z — <one-line summary>"
+
+# 2. Push the branch to BOTH remotes and open the PR (github = origin1)
+git push origin release/vX.Y.Z && git push origin1 release/vX.Y.Z
+gh pr create --base master --head release/vX.Y.Z --title "chore: release vX.Y.Z" --body "<highlights>"
+
+# 3. Wait for all required checks green, then merge (rebase keeps linear history)
+gh pr merge <N> --rebase --delete-branch
+
+# 4. Fast-forward local master, sync the private mirror, THEN tag the merged commit
+git checkout master && git pull origin1 master --ff-only && git push origin master
 git tag -a vX.Y.Z -m "Release vX.Y.Z
 
 <bullet-point highlights of headline changes>"
-
-# Push to EVERY configured remote — check `git remote -v`. Typical layout:
-#   origin    → private mirror (push first)
-#   origin1   → public GitHub (push second — triggers Packagist webhook)
-for remote in $(git remote); do
-  git push $remote master && git push $remote vX.Y.Z
-done
+# Tags are NOT branch-protected — push the tag to both remotes directly.
+git push origin vX.Y.Z && git push origin1 vX.Y.Z
 ```
+
+> The required PR checks are: `validate`, `static-analysis`, `phpunit (PHP 8.3)`,
+> `phpunit (PHP 8.4)`, `Infection (MSI)`, `Analyze (actions)`,
+> `Analyze (javascript-typescript)`, `scan`. `phpunit (PHP 8.5)` (experimental)
+> and the master-only jobs (`Scorecard analysis`, `CycloneDX SBOM`) are NOT
+> required. To change protection: `gh api repos/sibidharan/zealphp/branches/master/protection`.
 
 Verify Packagist picked up the tag: `curl -sS https://repo.packagist.org/p2/sibidharan/zealphp.json | python3 -c "import json,sys; print(json.load(sys.stdin)['packages']['sibidharan/zealphp'][0]['version'])"` should return `vX.Y.Z`.
 

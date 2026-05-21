@@ -114,4 +114,41 @@ class PublicRoutingTest extends TestCase
         $this->assertArrayHasKey('content-range', $r['headers']);
         $this->assertSame(10, strlen($r['body']));
     }
+
+    // ── Apache parity (#25): .php URL status ───────────────────────────
+
+    public function testNonexistentPhpReturns404(): void
+    {
+        // A `.php` URL with no backing file is "not found", not "forbidden".
+        $r = $this->get('/nonexistent-page.php');
+        $this->assertStatus(404, $r);
+    }
+
+    public function testExistingPhpFileReturns403(): void
+    {
+        // public/home.php exists but direct `.php` access is blocked
+        // (ignore_php_ext serves it as /home) — Apache returns 403 here.
+        $r = $this->get('/home.php');
+        $this->assertStatus(403, $r);
+    }
+
+    /**
+     * Static-path directory traversal (RFC 3986 dot-segments + percent-encoded
+     * + null-byte) must never escape the document root. Live proof on the
+     * static asset path that the pre-routing guard + path resolution hold.
+     */
+    public function testStaticPathTraversalIsRejected(): void
+    {
+        foreach ([
+            '/css/%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd',
+            '/%2e%2e/%2e%2e/etc/passwd',
+            '/css/..%2f..%2fapp.php',
+            '/css/%00/../etc/passwd',
+        ] as $payload) {
+            $r = $this->get($payload);
+            $this->assertContains($r['status'], [400, 404], "traversal must be rejected: $payload");
+            $this->assertStringNotContainsString('root:', (string) $r['body'], "no /etc/passwd leak: $payload");
+            $this->assertStringNotContainsString('<?php', (string) $r['body'], "no source leak: $payload");
+        }
+    }
 }

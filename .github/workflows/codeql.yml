@@ -28,13 +28,16 @@ on:
 
 permissions:
   contents: read
-  security-events: write
-  actions: read
 
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
+    # Scoped to the analysis job (SARIF upload), not the whole workflow.
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -47,10 +50,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@bc0b696b4103f5fe60f15749af68a046868d511a # codeql-bundle-v2.25.4
         with:
           languages: ${{ matrix.language }}
           # security-and-quality includes the default security queries plus
@@ -59,6 +62,6 @@ jobs:
           queries: security-and-quality
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@bc0b696b4103f5fe60f15749af68a046868d511a # codeql-bundle-v2.25.4
         with:
           category: "/language:${{ matrix.language }}"

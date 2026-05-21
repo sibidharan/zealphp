@@ -52,17 +52,25 @@ class CharsetMiddleware implements MiddlewareInterface
         $response = $handler->handle($request);
 
         $ct = $response->getHeaderLine('Content-Type');
-        if ($ct === '') {
-            return $response;
+        $ctWasEmpty = ($ct === '');
+        if ($ctWasEmpty) {
+            // mod_php default_mimetype / Apache DefaultType: give untyped
+            // responses a default Content-Type (text/html) before adding charset.
+            $ct = \ZealPHP\App::$default_mimetype;
+            if ($ct === '') {
+                return $response;
+            }
         }
         if (stripos($ct, 'charset=') !== false) {
             return $response;
         }
-        if (!$this->isTextish($ct)) {
-            return $response;
-        }
 
-        $newCt = $ct . '; charset=' . $this->charset;
+        // Append charset for text-ish types; for a (rare) non-textish default we
+        // still set the bare Content-Type so the response isn't left untyped.
+        $newCt = $this->isTextish($ct) ? $ct . '; charset=' . $this->charset : $ct;
+        if (!$ctWasEmpty && $newCt === $ct) {
+            return $response; // non-textish response that already had a Content-Type
+        }
 
         // Mirror the change onto the underlying OpenSwoole response when
         // available (production path) — the PSR-7 layer alone won't reach
