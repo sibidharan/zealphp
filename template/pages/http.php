@@ -145,6 +145,9 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
   <tr><td><code>RequestHeader</code> (mod_headers)</td><td>✅ Middleware</td><td>RequestHeaderMiddleware — set/append/unset inbound headers (<code>$g-&gt;server</code>)</td></tr>
   <tr><td><code>&lt;Location&gt;</code> / <code>&lt;LocationMatch&gt;</code> / <code>&lt;FilesMatch&gt;</code></td><td>✅ Middleware</td><td>ScopedMiddleware — apply any middleware only to matching paths</td></tr>
   <tr><td><code>MergeSlashes</code> (core / nginx)</td><td>✅ Middleware</td><td>MergeSlashesMiddleware — collapse <code>//</code> in the path before routing</td></tr>
+  <tr><td><code>client_max_body_size</code> (nginx) / <code>LimitRequestBody</code></td><td>✅ Middleware</td><td>BodySizeLimitMiddleware — 413 when <code>Content-Length</code> exceeds the cap</td></tr>
+  <tr><td><code>valid_referers</code> (nginx)</td><td>✅ Middleware</td><td>RefererMiddleware — 403 hotlink protection (none/blocked/host/wildcard/regex)</td></tr>
+  <tr><td><code>return</code> (nginx)</td><td>✅ Middleware</td><td>ReturnMiddleware — fixed status / redirect / body; pair with ScopedMiddleware</td></tr>
   <tr><td><code>ServerTokens</code> / <code>ServerSignature</code></td><td>✅ Config</td><td><code>App::serverTokens()</code> controls/omits the <code>X-Powered-By</code> header</td></tr>
   <tr><td><code>FileETag</code></td><td>✅ Config</td><td><code>App::fileETag(false)</code> disables ETag/304 (<code>FileETag None</code>)</td></tr>
   <tr><td><code>DocumentRoot</code> / <code>TraceEnable</code> / <code>ServerAdmin</code> / <code>ServerName</code> / <code>LimitRequest*</code> / <code>CustomLog</code></td><td>✅ Config</td><td><code>App::*</code> fluent setters (set before <code>App::init()</code>)</td></tr>
