@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.36] - 2026-05-21
+
+HTTP/1.1 method-handling conformance + visible mutation metric. Adds **405 Method Not Allowed** with an `Allow` header (RFC 9110 §15.5.6) so a known resource hit with the wrong method is rejected correctly instead of falling through to 404, surfaces the CI-measured Mutation Score Indicator as a README badge, and extends the conformance battery with symlink-escape and chunked-framing edge cases.
+
+### Added
+
+- **405 Method Not Allowed + `Allow` header (RFC 9110 §15.5.6)** — a request whose URI matches a registered route but whose method does not now returns **405** with an `Allow` header listing the supported methods (`GET` implies `HEAD`; `OPTIONS` always included), instead of a misleading 404. To make this correct for static-style URLs, the three implicit document-root routes (`/`, `/{file}`, `/{dir}/{uri}`) are now scoped to `GET`/`POST` (Apache static-handler parity) — `PUT`/`DELETE`/`PATCH` on a static path now reach the 405 path rather than being silently absorbed. These implicit routes remain user-overridable defaults.
+- **Mutation Score Indicator badge** — the README now shows the CI-measured MSI (shields-endpoint badge backed by `.github/badges/mutation.json`); the `Mutation` workflow refreshes it on every `master` push so the displayed score always reflects the latest run.
+
+### Testing / conformance
+
+- **Symlink-escape refusal** (`StaticServingConformanceTest`) — a symlink under the document root pointing outside it (`→ /etc/passwd`) is refused (403/404) and never leaks target content.
+- **Chunked-framing edge cases** (`Http1FramingConformanceTest`) — chunk extensions, trailers, and leading-zero chunk sizes are handled without misframing.
+- `STANDARDS.md` gains an **advanced-testing roadmap** mapping each tool class to its role: Infection (code mutation), http-garden (parser differential vs Apache/nginx), Radamsa (wire fuzzing), slowhttptest (reactor/slowloris), and Gabbi (declarative contract).
+
 ## [0.2.35] - 2026-05-21
 
 HTTP/1.1 + static-serving conformance hardening: enforces the RFC 9112 §3.2 `Host` rule (missing Host on HTTP/1.1 → 400), and adds proven conformance suites for static document-root serving (traversal corpus, dotfile protection, autoindex-off, MIME, conditional 304), Host rules, and response-splitting (`header()` CR/LF/NUL). `STANDARDS.md` gains the request-line/Host/static matrix + an honest OpenSwoole-parser deviation register.
