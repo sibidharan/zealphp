@@ -445,8 +445,10 @@ Every change to `src/` runs the same two checks CI runs. Run them as you work, f
 | **Unit tests** | `./vendor/bin/phpunit tests/Unit/ --testdox` | All green. New classes get their own test file. |
 | **Integration tests** | `./vendor/bin/phpunit tests/Integration/ --testdox` (server up on :8080) | All green. New routes get coverage in the matching `tests/Integration/` file. |
 | **PHPStan static analysis** | `./vendor/bin/phpstan analyse --no-progress` | **Level 10, zero errors.** No `@phpstan-ignore` comments, no type widening to silence errors, no `assert()` / inline `@var` overrides. Fix the underlying type problem. |
+| **Patch coverage** (codecov target) | `XDEBUG_MODE=coverage ./vendor/bin/phpunit tests/Unit/ --coverage-text=/tmp/cov.txt && grep -A2 '<your touched files>' /tmp/cov.txt` | **≥ 80% of NEWLY-ADDED lines hit by tests.** Codecov's `codecov/patch` gate enforces this on every PR (lesson from PRs #44/#45: shipping ~2k new LOC with 17–69% patch coverage means tests cover the wrong lines — typically tests for already-merged classes instead of the PR's *new* lines). Write the tests for the *new* method bodies you just added; verify locally before opening the PR. pcov is preferred over xdebug for speed; `XDEBUG_MODE=coverage` works for both. |
+| **Mutation testing** (Infection MSI) | `XDEBUG_MODE=coverage ./vendor/bin/infection --threads=4 --test-framework-options="--testsuite=Unit"` | **Plain MSI ≥ 88, Covered-MSI ≥ 92** (gates in `infection.json5`). When MSI drops, run `./vendor/bin/infection --filter=<your-changed-files> -s` to see escaped mutants, then add assertions that *kill* them — distinguish genuinely-equivalent mutants (logging-only, casts on already-narrowed types, branches with identical observable behaviour) and flag those with a one-line rationale rather than forcing kills. |
 
-The PHPStan badge at `.github/badges/phpstan.json` must match `phpstan.neon`'s level. CI's `validate` job fails if they're out of sync.
+The PHPStan badge at `.github/badges/phpstan.json` must match `phpstan.neon`'s level. CI's `validate` job fails if they're out of sync. The Mutation MSI badge at `.github/badges/mutation.json` is refreshed via the auto-PR workflow (`mutation.yml`) on master pushes — it cannot be updated by a direct CI commit because master is branch-protected.
 
 **Common level-10 traps in this codebase** (drawn from real v0.2.21 fixes):
 - Casting `mixed` to string without a `is_scalar()` / `is_string()` / `is_object() + method_exists($_, '__toString')` guard first — PSR-7 `getServerParams()` returns `array<string, mixed>`, so any `$params['REMOTE_ADDR'] ?? ''` needs the guard before `(string)`.
@@ -622,6 +624,43 @@ ZealPHP has two companion repos that must stay aligned with framework releases:
 4. Ask the user. If a companion isn't accessible, surface that in the release summary and skip cleanly — don't fail the whole release.
 
 **Ongoing sync (independent of releases):** when adding new framework APIs, update the scaffold's `.claude/CLAUDE.md` so AI tools assisting devs after `composer create-project` see the latest API. When adding deploy artifacts (systemd units, configs), copy to the scaffold's `deploy/`.
+
+---
+
+## Samples & scaffolds — what to verify before each release
+
+Every release should exercise the full sample surface to catch regressions that unit + integration tests miss (real-app boot, real-app routing, real-app behaviour under load). The Demo app at the repo root **is** the OSS website — it boots from `app.php`, exercises every framework feature, and serves as the canonical smoke test. The companion repos add framework-hosting modes.
+
+**In-repo samples** (under `examples/` and the demo app itself):
+
+| Sample | Path | What it proves works | Pre-release smoke-test command |
+|---|---|---|---|
+| **Demo app / OSS website** | `app.php` + `api/` + `public/` + `template/` + `route/` | The whole framework: routing, middleware, sessions, htmx, fragments, streaming, WebSocket, all parity middleware | `php app.php` → browse `http://localhost:8080` (every nav page renders), open DevTools → confirm 0 console errors |
+| **LAMP scaffold** | `examples/lamp-scaffold/` | Drop-in replacement for an Apache + MySQL + PHP stack (the "ZealPHP can replace LAMP" story) | `cd examples/lamp-scaffold && docker compose up` (or follow that scaffold's README) |
+| **Hello-world** | `examples/hello-world/` | Minimal startup; bare bones first-app onboarding | `cd examples/hello-world && php app.php` |
+| **Streaming SSE** | `examples/streaming-sse/` | `$response->sse()` works end-to-end with `EventSource` clients | `cd examples/streaming-sse && php app.php` → curl SSE endpoint |
+| **WebSocket chat** | `examples/websocket-chat/` | `App::ws()` + WS frame handling + per-worker fd map | `cd examples/websocket-chat && php app.php` → open two browser tabs and chat |
+| **OpenSwoole reference scripts** | `examples/coroutine.php`, `examples/pnctl_*.php`, `examples/std_rdir.php`, `examples/demo_middleware.php`, `examples/test.php` | Low-level OpenSwoole patterns ZealPHP is built on; smoke-test that none break on PHP/OpenSwoole version bumps | `php examples/coroutine.php` (and each other script) — sanity check, not load test |
+| **Python agents** | `examples/agents/{chat,config_converter,convert_sse,notes,streaming}_agent.py` + `examples/agents/skills/` | Cross-process integration: Python AI agents calling ZealPHP HTTP/SSE/WS APIs (e.g., notes app, chat). Verifies the public HTTP API surface from a non-PHP client. Requires `examples/agents/zealphp_reference.txt` to be current with the framework. | Each agent script — see the agent's docstring for invocation. Most need the demo server running. |
+
+**Companion repos** (per the [Companion repos](#companion-repos--keep-in-sync) section above):
+
+| Repo | Composer name | What to verify each release |
+|---|---|---|
+| **Scaffold** | `sibidharan/zealphp-project` | `composer create-project sibidharan/zealphp-project:^X.Y.Z temp-test && cd temp-test && php app.php` boots cleanly + serves the scaffold welcome page on the new tag |
+| **WordPress showcase** | `sibidharan/zealphp-wordpress` | Unmodified WP loads + serves homepage + admin login works under `superglobals(true) + processIsolation(true)` (or via the new `cgi_mode = 'fcgi'` path once wired) |
+| **Symfony bridge** | `sibidharan/zealphp-symfony` | A Symfony skeleton app boots + routes + sessions work via `superglobals(true) + processIsolation(false) + sessionLifecycle(false)` (Mixed-mode lifecycle) |
+
+**Release verification checklist** (in addition to the framework's own Pre-commit gates and the CI matrix):
+
+1. ✅ `php app.php` boots + every page in `template/pages/` renders without console errors (the OSS site is the smoke test).
+2. ✅ `composer create-project sibidharan/zealphp-project:^X.Y.Z temp-test` installs cleanly with the new version.
+3. ✅ Each `examples/*` scaffold's README boot command still works (PHP/OpenSwoole/uopz version-bump regression check).
+4. ✅ WordPress showcase loads in both default and (if wired) `cgiMode('fcgi')` configurations.
+5. ✅ Symfony bridge boots a minimal Symfony app and serves a route.
+6. ✅ Live website (the deployed OSS site) shows the new version in the Quick Start panel + Docker tag — run a hard refresh.
+
+When adding new sample apps or new examples/* directories, **add the corresponding row to the tables above** so the release checklist stays comprehensive.
 
 ---
 
