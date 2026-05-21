@@ -431,4 +431,116 @@ class CompressionMiddlewareTest extends TestCase
     {
         return str_repeat(self::BODY, 80);
     }
+
+    // --- Mutant-killing additions ---
+
+    /**
+     * UnwrapTrim L166: token = trim($segments[0]).
+     * "gzip ;q=1" has a space BEFORE the semicolon — without trim, segments[0]
+     * is "gzip " which !== "gzip", so the token is missed and no compression occurs.
+     */
+    public function testAcceptEncodingWithSpaceBeforeSemicolonIsRecognised(): void
+    {
+        $response = $this->compress(str_repeat('a', 2048), 'gzip ;q=1', 'text/html');
+        $this->assertSame('gzip', $response->getHeaderLine('Content-Encoding'));
+    }
+
+    /**
+     * UnwrapTrim L174: param = trim($segments[$i]).
+     * "gzip; q=0" has a space after the semicolon — without trim on the param,
+     * str_starts_with($param, 'q=') fails (" q=0" doesn't start with "q="),
+     * so the q=0 refusal is missed and the body is compressed instead of skipped.
+     */
+    public function testQZeroWithSpaceAfterSemicolonIsRefused(): void
+    {
+        $response = $this->compress(str_repeat('a', 2048), 'gzip; q=0', 'text/html');
+        $this->assertFalse($response->hasHeader('Content-Encoding'));
+    }
+
+    /**
+     * UnwrapArrayMap 'trim' L208: Vary dedup must trim whitespace around existing values.
+     * "Origin , Accept-Encoding" has spaces — without array_map('trim',...) the values
+     * include spaces so the dedup check misses "Accept-Encoding" and adds a duplicate.
+     */
+    public function testVaryDedupWithSpacePaddedExistingDirective(): void
+    {
+        $body = str_repeat('a', 2048);
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+        RequestContext::instance()->_streaming = null;
+
+        $middleware = new CompressionMiddleware();
+        $request    = new ServerRequest('/', 'GET', '', ['accept-encoding' => 'gzip']);
+        $handler = new class($body) implements RequestHandlerInterface {
+            public function __construct(private string $body) {}
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return (new Response($this->body, 200, '', ['Content-Type' => 'text/html']))
+                    ->withHeader('Vary', 'Origin , Accept-Encoding');
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+        $vary = $response->getHeaderLine('Vary');
+        $count = substr_count(strtolower($vary), 'accept-encoding');
+        $this->assertSame(1, $count, 'Accept-Encoding must not be duplicated when already present with spaces');
+    }
+
+    /**
+     * UnwrapArrayMap 'strtolower' L209: Vary dedup is case-insensitive on existing values.
+     * Vary: "ACCEPT-ENCODING" already present — without strtolower on $parts the dedup
+     * check misses it and adds a duplicate lowercase "Accept-Encoding".
+     */
+    public function testVaryDedupIsCaseInsensitiveOnExistingValues(): void
+    {
+        $body = str_repeat('a', 2048);
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+        RequestContext::instance()->_streaming = null;
+
+        $middleware = new CompressionMiddleware();
+        $request    = new ServerRequest('/', 'GET', '', ['accept-encoding' => 'gzip']);
+        $handler = new class($body) implements RequestHandlerInterface {
+            public function __construct(private string $body) {}
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return (new Response($this->body, 200, '', ['Content-Type' => 'text/html']))
+                    ->withHeader('Vary', 'ACCEPT-ENCODING');
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+        $vary = $response->getHeaderLine('Vary');
+        $count = substr_count(strtolower($vary), 'accept-encoding');
+        $this->assertSame(1, $count, 'Accept-Encoding must not be duplicated when already present in uppercase');
+    }
+
+    /**
+     * UnwrapStrToLower L211: in_array uses strtolower($directive) so mixed-case
+     * directive "Accept-Encoding" matches lowercase existing "accept-encoding".
+     * Without strtolower($directive) the comparison fails and a second copy is added.
+     */
+    public function testVaryDedupIsCaseInsensitiveOnDirective(): void
+    {
+        $body = str_repeat('a', 2048);
+        App::$cwd = ZEALPHP_ROOT;
+        App::superglobals(true);
+        RequestContext::instance()->_streaming = null;
+
+        $middleware = new CompressionMiddleware(minLength: 1);
+        $request    = new ServerRequest('/', 'GET', '', ['accept-encoding' => 'gzip']);
+        $handler = new class($body) implements RequestHandlerInterface {
+            public function __construct(private string $body) {}
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return (new Response($this->body, 200, '', ['Content-Type' => 'text/html']))
+                    ->withHeader('Vary', 'accept-encoding');
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+        $vary = $response->getHeaderLine('Vary');
+        $count = substr_count(strtolower($vary), 'accept-encoding');
+        $this->assertSame(1, $count, 'Accept-Encoding must not be duplicated when already present in lowercase');
+    }
 }
