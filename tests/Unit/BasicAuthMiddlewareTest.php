@@ -251,6 +251,87 @@ class BasicAuthMiddlewareTest extends TestCase
         $this->assertSame(401, $this->htpasswdAuth('u:' . self::DES, 'u', 'secre'));
     }
 
+    // ----- M13: explicit plaintext rejection ----------------------------
+
+    /**
+     * A no-prefix plaintext entry (htpasswd -p / ALG_PLAIN) must be refused
+     * deterministically — not accidentally via crypt() misbehaviour.
+     * The password "hunter2" stored as literal "hunter2" in the file must
+     * never authenticate, regardless of crypt() behaviour on this platform.
+     */
+    public function testPlaintextEntryIsRejectedExplicitly(): void
+    {
+        // Entry has no recognised hash prefix — it IS the plaintext password.
+        $this->assertSame(401, $this->htpasswdAuth('u:hunter2', 'u', 'hunter2'));
+    }
+
+    public function testPlaintextEntryIsRejectedForWrongPassword(): void
+    {
+        $this->assertSame(401, $this->htpasswdAuth('u:hunter2', 'u', 'wrong'));
+    }
+
+    /**
+     * Recognised schemes must still pass through to their verifier after the
+     * plaintext guard — the guard must not over-block.
+     */
+    public function testBcryptPrefixPassesPlaintextGuard(): void
+    {
+        $this->assertSame(200, $this->htpasswdAuth('u:' . self::BCRYPT, 'u', 'secret'));
+    }
+
+    public function testApr1PrefixPassesPlaintextGuard(): void
+    {
+        $this->assertSame(200, $this->htpasswdAuth('u:' . self::APR1['secret'], 'u', 'secret'));
+    }
+
+    public function testSha1PrefixPassesPlaintextGuard(): void
+    {
+        $this->assertSame(200, $this->htpasswdAuth('u:' . self::SHA1, 'u', 'secret'));
+    }
+
+    // ----- L3: DES crypt 8-character truncation pin ---------------------
+
+    /**
+     * DES crypt silently truncates passwords to 8 characters.
+     * This test pins the current behaviour: a password whose first 8 chars
+     * match the DES hash authenticates even if the full password is longer.
+     *
+     * self::DES is crypt("secret", "ab") — the 6-char password "secret".
+     * "secretXY" shares the first 6 chars but DES truncates at 8, so all of
+     * "secretXY" (8 chars) are hashed against crypt("secretXY", "ab").
+     * Since "secret" ≠ "secretXY" at the crypt() level, this must be 401.
+     */
+    public function testDesCryptEightCharTruncationPin(): void
+    {
+        // DES hash for "secret" (6 chars). "secret12" differs beyond char 6
+        // but DES truncation only affects passwords > 8 chars.
+        // Confirm the 6-char password matches, and a 9-char variant does not.
+        $this->assertSame(200, $this->htpasswdAuth('u:' . self::DES, 'u', 'secret'));
+
+        // "secret" + 3 extra chars — crypt() sees all 9 chars, but DES only
+        // uses the first 8, so "secretXYZ" is hashed as "secretXY".
+        // crypt("secretXYZ", "ab") == crypt("secretXY", "ab") ≠ crypt("secret", "ab").
+        $this->assertSame(401, $this->htpasswdAuth('u:' . self::DES, 'u', 'secretXYZ'));
+
+        // Construct a DES hash for "abcdefgh" (exactly 8 chars) and verify
+        // that "abcdefghIJK" (11 chars) authenticates as the same 8-char block.
+        $des8 = crypt('abcdefgh', 'ab');
+        $this->assertSame(200, $this->htpasswdAuth('u:' . $des8, 'u', 'abcdefgh'));
+        // First 8 chars identical — DES truncates to the same 8, so 401 would
+        // mean DES truncation is broken; 200 confirms it is silently happening.
+        $this->assertSame(200, $this->htpasswdAuth('u:' . $des8, 'u', 'abcdefghIJK'));
+    }
+
+    // ----- L2: bcrypt result cache — SKIP NOTE --------------------------
+    // Apache caches the last bcrypt result in r->connection->notes (util.c:3520).
+    // This per-connection cache is NOT implemented here: storing a (hash, result)
+    // pair safely across requests in the coroutine model would require
+    // coroutine-context storage (OpenSwoole\Coroutine::getContext()), but the
+    // connection spans multiple coroutines on a keep-alive connection. A naive
+    // static/instance cache would race across concurrent requests and risk
+    // serving a stale hit to the wrong user. The perf cost (~100 ms per
+    // bcrypt at cost=10) is accepted over the correctness risk.
+
     public function testUnknownUserChallenges(): void
     {
         $this->assertSame(401, $this->htpasswdAuth('u:' . self::BCRYPT, 'ghost', 'secret'));
