@@ -138,6 +138,15 @@ class App
      */
     public static string $default_mimetype = 'text/html';
     /**
+     * Apache `ServerTokens`. Controls how much detail the `X-Powered-By`
+     * response header advertises:
+     *   'Full'  (default) → `ZealPHP + OpenSwoole`
+     *   'Prod' / 'Major' / 'Minor' / 'Min' / 'OS' → `ZealPHP`
+     *   'None'  (or '')   → header omitted entirely (info-leak hardening)
+     * Set via App::serverTokens() before App::init().
+     */
+    public static string $server_tokens = 'Full';
+    /**
      * mod_php-parity SAPI identity for the php_sapi_name() override. Default null
      * returns the real PHP_SAPI ("cli") — no behavior change. Set to a web SAPI
      * string (e.g. 'apache2handler', 'fpm-fcgi') so legacy code branching on
@@ -678,6 +687,30 @@ class App
     {
         if ($type !== null) self::$default_mimetype = $type;
         return self::$default_mimetype;
+    }
+
+    /**
+     * Apache `ServerTokens`. Controls the `X-Powered-By` header detail.
+     * No-arg call returns the current setting. See `App::$server_tokens`.
+     */
+    public static function serverTokens(?string $tokens = null): string
+    {
+        if ($tokens !== null) self::$server_tokens = $tokens;
+        return self::$server_tokens;
+    }
+
+    /**
+     * Resolve the `X-Powered-By` header value for the current `ServerTokens`
+     * setting, or null when the header should be omitted. Consumed at the
+     * response-emission boundary; exposed for introspection/testing.
+     */
+    public static function poweredByHeader(): ?string
+    {
+        return match (strtolower(self::$server_tokens)) {
+            'none', '' => null,
+            'full'     => 'ZealPHP + OpenSwoole',
+            default    => 'ZealPHP',
+        };
     }
 
     /**
@@ -4056,7 +4089,11 @@ HELP;
                         }
                     }
                     $response->flush();
-                    $response->parent->header('X-Powered-By', 'ZealPHP + OpenSwoole');
+                    // Apache ServerTokens parity — value/omission per App::$server_tokens.
+                    $poweredBy = self::poweredByHeader();
+                    if ($poweredBy !== null) {
+                        $response->parent->header('X-Powered-By', $poweredBy);
+                    }
                     // Threaded emit — use App::emitStatus() instead of vendor
                     // Response::emit()'s one-arg status() call, so codes like
                     // 451 (missing from OpenSwoole's native C list) emit
