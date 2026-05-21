@@ -33,3 +33,4 @@ infection.html
 # Python bytecode (fuzz harness helpers)
 __pycache__/
 *.pyc
+.omc
