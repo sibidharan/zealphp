@@ -28,6 +28,7 @@ a perf-regression smoke (`scripts/perf_smoke.sh`) guard against silent erosion.
 | **Methods** — HEAD≡GET sans body, OPTIONS `Allow`, TRACE off (RFC 9110 §9) | `ResponseMiddleware` | Behavioral | `tests/Integration/HttpFeaturesTest.php` |
 | **Redirects** — 301/302/307/308 + `Location` (RFC 9110 §15.4, §10.2.2) | `Response::redirect()`, auto-302 on `Location` | Behavioral | `tests/Integration/HttpFeaturesTest.php` |
 | **Content-Type / charset** (RFC 9110 §8.3, `default_mimetype`) | `CharsetMiddleware` + `App::$default_mimetype` | Behavioral | `tests/Unit/Middleware/CharsetMiddlewareTest.php` |
+| **IMF-fixdate** — HTTP date: real day/month tokens, literal GMT, UTC round-trip (RFC 9110 §5.6.7) | `ExpiresMiddleware` (`Expires`) | **Exhaustive** | `tests/Unit/ImfDateConformanceTest.php` |
 
 ## Auth, cookies, URI
 
