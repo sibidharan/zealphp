@@ -11,14 +11,18 @@ on:
   pull_request:
   workflow_dispatch:
 
-# contents: write is needed only for the master-push badge commit-back below.
+# Least privilege at the workflow level; the badge commit-back job below
+# elevates to contents: write only where it is actually needed.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   infection:
     name: Infection (MSI)
     runs-on: ubuntu-latest
+    # Needed only for the master-push badge commit-back step.
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
