@@ -75,10 +75,24 @@ class App
      *            superglobals and don't lean on bare-global wiring; keep 'proc'
      *            for unmodified WordPress/Drupal.
      *
-     * Set via App::cgiMode('fork'|'proc'). Default 'proc' — no behaviour change
-     * for existing isolation users.
+     * Set via App::cgiMode('fork'|'proc'|'fcgi'). Default 'proc' — no behaviour
+     * change for existing isolation users.
+     *
+     *   'fcgi' — forward to a FastCGI backend (e.g. php-fpm) via the FCGI
+     *            binary protocol over a TCP or Unix socket. The target address
+     *            is configured with App::fcgiAddress(). No child process is
+     *            spawned; the OpenSwoole coroutine socket keeps the event loop
+     *            unblocked. Best choice when ZealPHP sits in front of an
+     *            existing php-fpm pool.
      */
     public static string $cgi_mode = 'proc';
+    /**
+     * FastCGI backend address used when App::cgiMode() === 'fcgi'.
+     * Format: "host:port" for TCP (e.g. "127.0.0.1:9000") or
+     *         "unix:/path/to/php-fpm.sock" for a Unix-domain socket.
+     * Set via App::fcgiAddress(). Default is the standard php-fpm TCP listener.
+     */
+    public static string $fcgi_address = '127.0.0.1:9000';
     /**
      * OpenSwoole `enable_coroutine` server-setting override. `null` means
      * "follow !$superglobals" (true → coroutine-per-request, false → one
@@ -911,22 +925,36 @@ class App
     }
 
     /**
-     * Select how a process-isolated legacy include is dispatched: 'proc'
-     * (default, fresh PHP per request via proc_open — true global scope, full
-     * WordPress/Drupal compatibility) or 'fork' (warm OpenSwoole\Process fork
-     * of the booted worker — ~5× faster, but function-scope so bare-`global`
-     * wiring breaks). See App::$cgi_mode for the full trade-off. No-arg call
-     * returns the current mode. Only takes effect when processIsolation() is on.
+     * Select how a process-isolated legacy include is dispatched:
+     *   'proc' (default) — fresh PHP per request via proc_open (full WordPress/Drupal compat).
+     *   'fork'           — warm OpenSwoole\Process fork (~5× faster; function-scope only).
+     *   'fcgi'           — forward to a FastCGI backend via App::$fcgi_address (no child process).
+     * See App::$cgi_mode for the full trade-off. No-arg call returns the current mode.
+     * Only takes effect when processIsolation() is on.
      */
     public static function cgiMode(?string $mode = null): string
     {
         if ($mode !== null) {
-            if ($mode !== 'proc' && $mode !== 'fork') {
-                throw new \InvalidArgumentException("App::cgiMode() expects 'proc' or 'fork', got '{$mode}'.");
+            if ($mode !== 'proc' && $mode !== 'fork' && $mode !== 'fcgi') {
+                throw new \InvalidArgumentException("App::cgiMode() expects 'proc', 'fork', or 'fcgi', got '{$mode}'.");
             }
             self::$cgi_mode = $mode;
         }
         return self::$cgi_mode;
+    }
+
+    /**
+     * FastCGI backend address for App::cgiMode('fcgi') dispatch.
+     * Accepts "host:port" (TCP) or "unix:/path/to/fpm.sock" (Unix socket).
+     * No-arg call returns the current address; with-arg sets and returns it.
+     * Must be configured before App::run() — changing it mid-request has no effect.
+     */
+    public static function fcgiAddress(?string $address = null): string
+    {
+        if ($address !== null) {
+            self::$fcgi_address = $address;
+        }
+        return self::$fcgi_address;
     }
 
     /**
@@ -2558,9 +2586,11 @@ class App
         $g->server['SCRIPT_FILENAME'] = $absPath;
 
         if (self::$coproc_implicit_request_handler) {
-            return self::$cgi_mode === 'fork'
-                ? self::cgiFork($absPath)
-                : self::cgiSubprocess($absPath);
+            return match (self::$cgi_mode) {
+                'fork' => self::cgiFork($absPath),
+                'fcgi' => self::cgiFcgi($absPath),
+                default => self::cgiSubprocess($absPath),
+            };
         }
         return self::executeFile($absPath, $args);
     }
@@ -2585,9 +2615,11 @@ class App
         // Outside the document root — preserve legacy "trust the caller"
         // semantics while still applying the universal return contract.
         if (self::$coproc_implicit_request_handler) {
-            return self::$cgi_mode === 'fork'
-                ? self::cgiFork($path)
-                : self::cgiSubprocess($path);
+            return match (self::$cgi_mode) {
+                'fork' => self::cgiFork($path),
+                'fcgi' => self::cgiFcgi($path),
+                default => self::cgiSubprocess($path),
+            };
         }
         return self::executeFile($path, []);
     }
@@ -2754,6 +2786,77 @@ class App
         $env['ZEALPHP_CWD'] = self::$cwd;
 
         return $env;
+    }
+
+    /**
+     * Dispatch a legacy include to a FastCGI backend (e.g. php-fpm) via the
+     * FCGI binary protocol. Used when App::cgiMode() === 'fcgi'.
+     *
+     * Builds CGI env via App::buildCgiEnv(), adds SCRIPT_FILENAME / SCRIPT_NAME,
+     * reads the request body, calls FastCgiClient::request(), maps the response
+     * (status, headers, body, stderr) back through the universal return contract.
+     *
+     * On connection failure or protocol error, logs via elog() and returns 502.
+     */
+    private static function cgiFcgi(string $path): mixed
+    {
+        $g = RequestContext::instance();
+
+        $ctx = json_encode([
+            'server' => $g->server,
+            'get'    => $g->get,
+            'post'   => $g->post,
+            'cookie' => $g->cookie,
+            'files'  => $g->files,
+            'env'    => $g->env ?? $_ENV,
+        ], JSON_UNESCAPED_SLASHES);
+
+        $env = self::buildCgiEnv($g->server, is_string($ctx) ? $ctx : '{}');
+
+        // FCGI mandatory vars
+        $env['SCRIPT_FILENAME'] = $path;
+        $docRoot = self::resolveDocumentRoot();
+        $env['SCRIPT_NAME'] = str_starts_with($path, $docRoot)
+            ? '/' . ltrim(substr($path, strlen($docRoot)), '/')
+            : $path;
+
+        // Request body (POST data etc.)
+        $stdinBody = '';
+        try {
+            // @phpstan-ignore-next-line — zealphp_request set by CoSessionManager before any route dispatches
+            $raw = $g->zealphp_request->parent->rawContent();
+            if (is_string($raw)) {
+                $stdinBody = $raw;
+            }
+        } catch (\Throwable) {
+            // No body available — proceed with empty stdin
+        }
+
+        try {
+            $client   = new \ZealPHP\Legacy\FastCgiClient(self::$fcgi_address, self::$cgi_timeout);
+            $response = $client->request($env, $stdinBody);
+        } catch (\ZealPHP\Legacy\FastCgiException $e) {
+            elog("cgiFcgi: FastCGI error for {$path}: " . $e->getMessage(), 'error');
+            return 502;
+        } catch (\Throwable $e) {
+            elog("cgiFcgi: unexpected error for {$path}: " . $e->getMessage(), 'error');
+            return 502;
+        }
+
+        if ($response['stderr'] !== '') {
+            elog("[fcgi] stderr: " . rtrim($response['stderr']), 'fcgi');
+        }
+
+        // Apply status
+        response_set_status($response['status']);
+
+        // Apply headers — $response['headers'] is array<string,string> per FastCgiClient return type
+        foreach ($response['headers'] as $name => $value) {
+            // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+            $g->zealphp_response->header($name, $value);
+        }
+
+        return $response['body'];
     }
 
     /**

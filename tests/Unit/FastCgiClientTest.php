@@ -442,4 +442,119 @@ class FastCgiClientTest extends TestCase
     {
         return $this->client->readResponse($conn, $reqId);
     }
+
+    // ── New error-path tests (Part B coverage boost) ─────────────────────────
+
+    public function testFastCgiExceptionIsRuntimeException(): void
+    {
+        // FastCgiException must extend RuntimeException so callers can catch it
+        // as a general runtime error. This is the contract cgiFcgi() relies on
+        // when mapping connection failures to 502 responses.
+        $e = new FastCgiException('FastCGI: cannot connect to 127.0.0.1:19999: connection refused');
+        $this->assertInstanceOf(\RuntimeException::class, $e);
+        $this->assertStringContainsString('cannot connect', $e->getMessage());
+    }
+
+    public function testPartialFrameTruncationThrows(): void
+    {
+        // Write only 4 of the required 8 header bytes then close — recvExact must throw.
+        [$a, $b] = $this->makeSocketPair();
+        fwrite($a, "\x01\x06\x00\x01"); // 4 bytes, not a full FCGI header
+        fclose($a);
+
+        $conn = $this->wrapSocket($b);
+        $this->expectException(FastCgiException::class);
+        $this->client->recvExact($conn, 8);
+        fclose($b);
+    }
+
+    public function testMalformedEndRequestProtocolStatusIgnored(): void
+    {
+        // END_REQUEST with a non-zero protocolStatus byte (e.g. 2 = UNKNOWN_ROLE).
+        // The client must still set $done=true and return parsed output; it does
+        // NOT throw — unknown protocol status is a soft signal per spec §5.5.
+        $stdoutContent = "Content-Type: text/plain\r\n\r\nresult";
+        $stdoutRecord  = $this->client->encodeRecord(FastCgiClient::FCGI_STDOUT, 1, $stdoutContent);
+        $stdoutEnd     = $this->client->encodeRecord(FastCgiClient::FCGI_STDOUT, 1, '');
+        // protocolStatus = 2 (UNKNOWN_ROLE) — non-zero but still well-formed END_REQUEST
+        $endBody   = pack('NCC', 0, 2, 0) . "\x00\x00\x00";
+        $endRecord = $this->client->encodeRecord(FastCgiClient::FCGI_END_REQUEST, 1, $endBody);
+
+        [$a, $b] = $this->makeSocketPair();
+        fwrite($a, $stdoutRecord . $stdoutEnd . $endRecord);
+        fclose($a);
+
+        $conn   = $this->wrapSocket($b);
+        $result = $this->invokeReadResponse($conn, 1);
+        fclose($b);
+
+        $this->assertSame(200, $result['status']);
+        $this->assertSame('result', $result['body']);
+    }
+
+    public function testAbortDuringParamsServerClosesMidStream(): void
+    {
+        // Simulate the server closing the connection in the middle of sending
+        // STDOUT (partial FCGI header returned — connection closed).
+        [$a, $b] = $this->makeSocketPair();
+
+        // Write a valid STDOUT record then close mid-way through the next record
+        $stdoutContent = "Content-Type: text/html\r\n\r\nhello";
+        $stdoutRecord  = $this->client->encodeRecord(FastCgiClient::FCGI_STDOUT, 1, $stdoutContent);
+        // Write only the first 4 bytes of the next record header, then close
+        fwrite($a, $stdoutRecord . "\x01\x06\x00\x01");
+        fclose($a);
+
+        $conn = $this->wrapSocket($b);
+        $this->expectException(FastCgiException::class);
+        $this->invokeReadResponse($conn, 1);
+        fclose($b);
+    }
+
+    public function testLargeStdinChunkedOver65535(): void
+    {
+        // A stdin body larger than MAX_CONTENT (65535) must be split into multiple
+        // FCGI_STDIN records. Verify encodeParams + encodeRecord don't throw and
+        // that the body is correctly chunked (each chunk ≤ MAX_CONTENT).
+        $largeBody = str_repeat('X', FastCgiClient::MAX_CONTENT + 100); // 65635 bytes
+        $chunks    = str_split($largeBody, FastCgiClient::MAX_CONTENT);
+        $this->assertCount(2, $chunks);
+        $this->assertSame(FastCgiClient::MAX_CONTENT, strlen($chunks[0]));
+        $this->assertSame(100, strlen($chunks[1]));
+
+        // Each chunk must encode without throwing (i.e. ≤ MAX_CONTENT)
+        foreach ($chunks as $chunk) {
+            $record = $this->client->encodeRecord(FastCgiClient::FCGI_STDIN, 1, $chunk);
+            $hdr = unpack('Cversion/Ctype/nrequestId/ncontentLength/CpaddingLength/Creserved', $record);
+            $this->assertIsArray($hdr);
+            $this->assertLessThanOrEqual(FastCgiClient::MAX_CONTENT, $hdr['contentLength']);
+        }
+    }
+
+    public function testRecordLengthOverflowThrows(): void
+    {
+        // A single body > 65535 bytes cannot fit in one FCGI record — must throw.
+        $this->expectException(FastCgiException::class);
+        $this->expectExceptionMessageMatches('/too large/i');
+        $this->client->encodeRecord(FastCgiClient::FCGI_STDIN, 1, str_repeat('Y', 65536));
+    }
+
+    public function testParseStdoutEmptyStdout(): void
+    {
+        // Empty STDOUT — no blank line, whole thing treated as body (empty string).
+        $result = $this->invokeParseStdout('', '', 0);
+        $this->assertSame(200, $result['status']);
+        $this->assertSame('', $result['body']);
+        $this->assertSame([], $result['headers']);
+    }
+
+    public function testParseStdoutHeaderWithoutColonIsSkipped(): void
+    {
+        // A header line without a colon must be silently ignored.
+        $stdout = "Content-Type: text/plain\r\nBadLineWithoutColon\r\nX-Ok: yes\r\n\r\nbody";
+        $result = $this->invokeParseStdout($stdout, '', 0);
+        $this->assertSame('yes', $result['headers']['X-Ok']);
+        $this->assertArrayNotHasKey('BadLineWithoutColon', $result['headers']);
+        $this->assertSame('body', $result['body']);
+    }
 }

@@ -298,4 +298,64 @@ class HtmxResponseTest extends TestCase
         $resp->flush();
         $this->assertArrayNotHasKey('HX-Trigger', $this->headers($fake));
     }
+
+    // ---- Edge branches (Part B coverage boost) ----------------------------
+
+    public function testLocationWithArrayJsonForm(): void
+    {
+        // location() accepts a pre-encoded JSON object string
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+        $json = '{"path":"/dashboard","target":"#main","swap":"innerHTML"}';
+        $resp->htmx()->location($json);
+        $resp->flush();
+        $this->assertSame($json, $this->headers($fake)['HX-Location']);
+    }
+
+    public function testReplaceUrlFalseCancellation(): void
+    {
+        // replaceUrl('false') — the string "false" prevents URL replacement
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+        $resp->htmx()->replaceUrl('false');
+        $resp->flush();
+        $this->assertSame('false', $this->headers($fake)['HX-Replace-Url']);
+    }
+
+    public function testPushUrlFalseCancellation(): void
+    {
+        // pushUrl('false') — the string "false" prevents history push
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+        $resp->htmx()->pushUrl('false');
+        $resp->flush();
+        $this->assertSame('false', $this->headers($fake)['HX-Push-Url']);
+    }
+
+    public function testRefreshFalseQueuesStringFalse(): void
+    {
+        // refresh(false) must queue "false" string — not omit the header
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+        $resp->htmx()->refresh(false);
+        $resp->flush();
+        $this->assertArrayHasKey('HX-Refresh', $this->headers($fake));
+        $this->assertSame('false', $this->headers($fake)['HX-Refresh']);
+    }
+
+    public function testChainOverStreamedResponse(): void
+    {
+        // HtmxResponse must work even on a response marked as streaming
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+        $g = RequestContext::instance();
+        $g->_streaming = true;
+
+        $resp->htmx()->retarget('#output')->trigger('streamDone');
+        $resp->flush();
+
+        $headers = $this->headers($fake);
+        $this->assertSame('#output', $headers['HX-Retarget']);
+        $this->assertSame('streamDone', $headers['HX-Trigger']);
+    }
 }
