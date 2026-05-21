@@ -1,8 +1,9 @@
 # Dependabot — auto-PRs for outdated dependencies.
 #
-# Watching two ecosystems:
+# Watching three ecosystems:
 #   - composer: production + dev dependencies in composer.json/lock
 #   - github-actions: pinned action versions in .github/workflows/*.yml
+#   - docker: the digest-pinned base image in Dockerfile (keeps the pin patched)
 #
 # Weekly schedule (Monday) keeps the noise rate sane while still catching
 # CVE-class updates within a week of disclosure. Security advisories are
@@ -52,3 +53,17 @@ updates:
         update-types:
           - minor
           - patch
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: chore(docker)
