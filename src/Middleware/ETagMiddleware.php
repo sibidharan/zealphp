@@ -28,6 +28,19 @@ use ZealPHP\RequestContext;
  *
  * Streaming responses (SSE, stream(), Generator yield) are skipped — they have
  * no buffered body to hash.
+ *
+ * ETag derivation across paths (audit gap H7): ZealPHP emits **weak** ETags
+ * everywhere, but the validator's *input* depends on how the response is
+ * produced — exactly as Apache differs between static and dynamic content:
+ *   - Buffered / dynamic responses (this middleware): `W/"xxh3(body)"`.
+ *   - Zero-copy file sends ({@see \ZealPHP\HTTP\Response::sendFile()}):
+ *     `W/"mtime-size"` (stat-based, no body hash — Apache never hashes a static
+ *     file body either).
+ * The two paths are **mutually exclusive per response**: this middleware bails on
+ * streaming responses and on an empty buffered body (`sendFile()` streams), so it
+ * never overwrites a stat-based ETag. Because both forms are *weak*, a URL that
+ * switches serving path produces a cache miss (full 200), never a corrupt 304 —
+ * weak comparison can't false-match across the two namespaces.
  */
 class ETagMiddleware implements MiddlewareInterface
 {

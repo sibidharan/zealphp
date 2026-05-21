@@ -116,16 +116,15 @@ intentional differences are called out.
 
 ### Default request limits — httpd constants vs ZealPHP knobs
 
-| Limit | httpd default (`include/httpd.h`) | Directive | ZealPHP |
-|---|---|---|---|
-| Request line | **8190** bytes | `LimitRequestLine` | `App::$limit_request_line` + OpenSwoole `package_max_length` transport cap |
-| Per-header field size | **8190** bytes | `LimitRequestFieldSize` | `App::$limit_request_field_size` |
-| Header field count | **100** | `LimitRequestFields` | `App::$limit_request_fields` |
-| Leading blank lines | 10 | (compile-time) | OpenSwoole parser |
-| Request body | **0 = unlimited** | `LimitRequestBody` | `BodySizeLimitMiddleware` (opt-in) + OpenSwoole `package_max_length` |
+| Limit | httpd default (`include/httpd.h`) | Directive | ZealPHP | Enforced? |
+|---|---|---|---|---|
+| Request line | **8190** bytes | `LimitRequestLine` | `App::$limit_request_line` (advisory) + OpenSwoole `package_max_length` transport cap | ⚠️ **Not at app layer** — OpenSwoole's C parser owns request-line framing; the knob is documentation-only, no independent 414. |
+| Per-header field size | **8190** bytes | `LimitRequestFieldSize` | `App::$limit_request_field_size` (advisory) | ⚠️ **Not at app layer** — `http_header_buffer_size` is not passed to OpenSwoole at boot; the knob has no runtime effect. |
+| Header field count | **100** | `LimitRequestFields` | `App::$limit_request_fields` | ✅ **Enforced** — `ResponseMiddleware` counts `HTTP_*` fields per request and returns **400** over the limit (Apache `ap_get_mime_headers_core` parity). `0` = unlimited. |
+| Leading blank lines | 10 | (compile-time) | OpenSwoole parser | OpenSwoole-owned |
+| Request body | **0 = unlimited** | `LimitRequestBody` | `BodySizeLimitMiddleware` (opt-in) + OpenSwoole `package_max_length` | ✅ **Enforced → 413**, including **chunked / no-Content-Length** uploads (measures the decoded buffered body; `package_max_length` remains the outer transport cap). |
 
-ZealPHP exposes the same three Apache-named limits as configurable knobs; httpd over-limit
-returns **400** (line/field/count) or **413** (body), which ZealPHP mirrors (`BodySizeLimitMiddleware` → 413).
+Honest enforcement note: of the three Apache-named request-header limits, only **`LimitRequestFields` is enforced at the ZealPHP layer** (400 on excess fields). `LimitRequestLine` and `LimitRequestFieldSize` are **OpenSwoole-governed** — the C parser owns wire-level framing and ZealPHP cannot intercept it, so those two knobs are advisory documentation, not active limits. `LimitRequestBody` is enforced (413) by the opt-in `BodySizeLimitMiddleware`, now covering chunked uploads as well.
 
 ## Apache non-support register (what httpd has that ZealPHP does not)
 
