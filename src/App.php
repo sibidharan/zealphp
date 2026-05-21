@@ -289,21 +289,31 @@ class App
     private static ?array $access_log_format_compiled = null;
     /**
      * Apache `LimitRequestFields` — maximum number of request header fields a
-     * single request may carry. Hint to OpenSwoole's parser (currently advisory;
-     * OpenSwoole enforces this implicitly via `http_header_buffer_size`).
+     * single request may carry. Enforced at the PHP application layer: requests
+     * carrying more than this many headers are rejected with 400 before route
+     * dispatch. Set to 0 to disable the check (unlimited). Default 100 matches
+     * Apache's compiled-in default.
      */
     public static int $limit_request_fields = 100;
     /**
-     * Apache `LimitRequestFieldSize` — maximum byte length of one request header
-     * line. Maps to OpenSwoole's `http_header_buffer_size` (8 KiB default).
+     * Apache `LimitRequestFieldSize` — maximum byte length of a single request
+     * header line. **NOT enforced by ZealPHP.** OpenSwoole's C-layer HTTP parser
+     * owns all wire-level framing; ZealPHP only sees the already-parsed
+     * `$request->header` array. The `http_header_buffer_size` option was
+     * explicitly NOT passed to OpenSwoole (its option validator rejects it at
+     * boot — see App::run() ~line 3748). Changing this value has no effect on
+     * the actual per-header byte limit, which is governed by OpenSwoole's global
+     * header-buffer size (~8 KiB default). This property is retained for
+     * documentation and future compatibility only.
      */
     public static int $limit_request_field_size = 8190;
     /**
      * Apache `LimitRequestLine` — maximum byte length of the HTTP request line
-     * (method + URI + protocol). OpenSwoole doesn't expose this independently,
-     * but its `http_header_buffer_size` covers the request line too, so this
-     * value is advisory; setting it above $limit_request_field_size has no
-     * effect.
+     * (method + URI + protocol). **NOT enforced by ZealPHP.** OpenSwoole's C
+     * parser reads the request line before any PHP code runs; there is no
+     * per-request-line cap that ZealPHP can apply after the fact. OpenSwoole's
+     * global `http_header_buffer_size` governs this limit at the wire level.
+     * This property is retained for documentation and future compatibility only.
      */
     public static int $limit_request_line = 8190;
     /** @var array<string, mixed>|null */
@@ -4947,6 +4957,23 @@ class ResponseMiddleware implements MiddlewareInterface
         // where an unmatched-but-known method still resolves to 404/405/fallback.
         if (!in_array($method, App::KNOWN_METHODS, true)) {
             return $app->renderError(501);
+        }
+
+        // Apache LimitRequestFields — reject requests that carry more header
+        // fields than the configured limit. Apache enforces this at
+        // ap_get_mime_headers_core (protocol.c:930-940) with a 400 response.
+        // We replicate it here at the PHP layer after OpenSwoole has parsed the
+        // header array. A limit of 0 disables the check (unlimited).
+        if (App::$limit_request_fields > 0) {
+            $headerCount = 0;
+            foreach (array_keys($g->server) as $sk) {
+                if (str_starts_with((string)$sk, 'HTTP_')) {
+                    $headerCount++;
+                }
+            }
+            if ($headerCount > App::$limit_request_fields) {
+                return $app->renderError(400);
+            }
         }
 
         // Apache PATH_INFO — `/script.php/extra/path` exposes `/extra/path` to
