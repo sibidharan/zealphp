@@ -46,6 +46,20 @@ connection is dropped).
 | Invalid (non-hex) chunk size (§7.1) | connection closed | ✅ rejected |
 | Oversized header block (~70 KB) | **4xx** (400/404 by build) | ✅ size-limited, never unbounded |
 | Well-formed chunked body | dechunked → normal response | ✅ correct |
+| HTTP/1.1 **missing `Host`** (§3.2) | **400** (framework guard) | ✅ rejected |
+| HTTP/1.0 without `Host` | accepted | ✅ correct (1.0 exempt) |
+| Header value with CR/LF/NUL (response splitting) | rejected (`header()`/`setcookie()` guard) | ✅ no splitting |
+| Static-path traversal (encoded/double-encoded/backslash/null-byte) | 400/404, confined to docroot | ✅ no escape |
+| Dotfiles (`.env`/`.git`/`.htaccess`/`.ssh`) | 403/404, never served | ✅ |
+| Directory with no index | 403/404, no listing (autoindex off) | ✅ |
+
+Proving tests: `Http1FramingConformanceTest`, `StaticServingConformanceTest`, `ResponseSplittingConformanceTest`, `PublicRoutingTest`.
+
+**OpenSwoole-parser deviations (documented, not framework-fixable):**
+- **`%00` in the URI** — OpenSwoole truncates the request target at the null byte *before* the framework sees it, then serves the truncated path (e.g. `/css/x.css%00.txt` → `/css/x.css`). It stays inside the document root and all access guards (dotfile, `.php`-block, traversal) still apply, so it is **not** a path-escape — but it returns 200 on the truncated path rather than Apache's 400. Upstream behavior.
+- **Duplicate `Host`** — OpenSwoole merges repeated headers, so a duplicate `Host` can't be distinguished/rejected at the framework layer (missing `Host` *is* rejected, above).
+- **`431`/`414`** — an oversized header block or over-long request target is rejected with a generic 4xx (400/404 by build), not the specific `431`/`414` codes.
+- **`Expect: 100-continue`** and **keep-alive/slowloris timeouts** are governed by OpenSwoole server settings, not the framework; not yet covered by the conformance suite (roadmap).
 
 **Known leniencies (documented, not smuggling vectors):**
 - `Host : value` (whitespace before the colon, RFC 9112 §5.1 says reject) is accepted. Not a smuggling vector — the field still parses unambiguously.

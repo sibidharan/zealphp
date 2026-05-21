@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **HTTP/1.1 `Host` enforcement (RFC 9112 §3.2)** — an HTTP/1.1 request without a `Host` header is now rejected with **400** (`ResponseMiddleware` guard, before routing); HTTP/1.0 stays exempt. Closes a vhost-confusion / smuggling gap (OpenSwoole previously accepted it as 200).
+
+### Testing / conformance
+
+- **Static document-root serving conformance** (`tests/Integration/StaticServingConformanceTest.php`) — proves the "serve a directory safely" surface: a directory-traversal corpus (encoded / double-encoded / backslash / null-byte) never escapes the document root, dotfiles (`.env`/`.git`/`.htaccess`/`.ssh`) are never served, a bare directory never leaks a listing (autoindex off), and common assets get correct MIME types + conditional 304.
+- **HTTP/1.1 `Host`-rule conformance** added to `Http1FramingConformanceTest` (missing-Host → 400, with-Host → 200, HTTP/1.0 exempt).
+- **Response-splitting / header-injection conformance** (`tests/Unit/ResponseSplittingConformanceTest.php`) — `header()` refuses CR/LF/NUL (including `Location:` from tainted input), pinning the no-response-splitting guarantee.
+- `STANDARDS.md` expanded with the request-line/`Host`/static matrix and the honest OpenSwoole-parser deviation register (`%00` truncation, duplicate-`Host` merge, generic-4xx-not-`431`/`414`, `Expect`/keep-alive as server settings).
+
 ## [0.2.34] - 2026-05-21
 
 A standards-conformance + Apache/nginx-parity release. Adds a documented, gated conformance program (`STANDARDS.md`): exhaustive IANA status-code, RFC 6265 cookie, and RFC 9110 §5.6.7 IMF-date suites; a raw-socket HTTP/1.1 framing & request-smuggling proof (RFC 9112 §6–§7); a live directory-traversal proof; plus CI gates — an 80% coverage floor, Infection mutation testing (ratcheted to the measured baseline), and a perf-regression smoke. Ships six new directive middleware (Scoped / RequestHeader / MergeSlashes / BodySizeLimit / Referer / Return), session-format cross-server parity ([#23](https://github.com/sibidharan/zealphp/issues/23)), and the `.php` 404 fix ([#25](https://github.com/sibidharan/zealphp/issues/25)).

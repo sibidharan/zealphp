@@ -4644,6 +4644,14 @@ class ResponseMiddleware implements MiddlewareInterface
             return $app->renderError(400);
         }
 
+        // RFC 9112 §3.2: an HTTP/1.1 request MUST carry a Host header; a server
+        // MUST reject one that lacks it with 400. HTTP/1.0 is exempt (Host is
+        // optional there). curl-based clients always send Host, so this only
+        // bites malformed/raw requests — the vhost-confusion / smuggling surface.
+        if (($g->server['SERVER_PROTOCOL'] ?? '') === 'HTTP/1.1' && !isset($g->server['HTTP_HOST'])) {
+            return $app->renderError(400);
+        }
+
         // Apache PATH_INFO — `/script.php/extra/path` exposes `/extra/path` to
         // the script and rewrites REQUEST_URI to just the script. Triggers
         // only when the literal `.php/` appears in the URL (WordPress/Drupal

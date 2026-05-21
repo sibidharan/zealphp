@@ -124,6 +124,27 @@ class Http1FramingConformanceTest extends TestCase
         $this->assertLessThan(500, $r['status']);
     }
 
+    /** RFC 9112 §3.2: an HTTP/1.1 request without Host MUST be rejected (400). */
+    public function testHttp11MissingHostRejected(): void
+    {
+        $r = $this->raw("GET /json HTTP/1.1\r\nConnection: close\r\n\r\n");
+        $this->assertSame(400, $r['status'], 'HTTP/1.1 without Host must be 400');
+    }
+
+    /** RFC 9112 §3.2: HTTP/1.1 with a Host is accepted. */
+    public function testHttp11WithHostAccepted(): void
+    {
+        $r = $this->raw("GET /json HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        $this->assertSame(200, $r['status']);
+    }
+
+    /** HTTP/1.0 does not require Host (RFC 9112 §3.2 applies to 1.1) — accepted. */
+    public function testHttp10WithoutHostAccepted(): void
+    {
+        $r = $this->raw("GET /json HTTP/1.0\r\nConnection: close\r\n\r\n");
+        $this->assertSame(200, $r['status'], 'HTTP/1.0 without Host is valid');
+    }
+
     /** A well-formed chunked body is dechunked and processed (valid framing). */
     public function testValidChunkedBodyIsParsed(): void
     {
