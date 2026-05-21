@@ -2,7 +2,9 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.35] - 2026-05-21
+
+HTTP/1.1 + static-serving conformance hardening: enforces the RFC 9112 §3.2 `Host` rule (missing Host on HTTP/1.1 → 400), and adds proven conformance suites for static document-root serving (traversal corpus, dotfile protection, autoindex-off, MIME, conditional 304), Host rules, and response-splitting (`header()` CR/LF/NUL). `STANDARDS.md` gains the request-line/Host/static matrix + an honest OpenSwoole-parser deviation register.
 
 ### Added
 
