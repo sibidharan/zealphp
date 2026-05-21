@@ -131,4 +131,24 @@ class PublicRoutingTest extends TestCase
         $r = $this->get('/home.php');
         $this->assertStatus(403, $r);
     }
+
+    /**
+     * Static-path directory traversal (RFC 3986 dot-segments + percent-encoded
+     * + null-byte) must never escape the document root. Live proof on the
+     * static asset path that the pre-routing guard + path resolution hold.
+     */
+    public function testStaticPathTraversalIsRejected(): void
+    {
+        foreach ([
+            '/css/%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd',
+            '/%2e%2e/%2e%2e/etc/passwd',
+            '/css/..%2f..%2fapp.php',
+            '/css/%00/../etc/passwd',
+        ] as $payload) {
+            $r = $this->get($payload);
+            $this->assertContains($r['status'], [400, 404], "traversal must be rejected: $payload");
+            $this->assertStringNotContainsString('root:', (string) $r['body'], "no /etc/passwd leak: $payload");
+            $this->assertStringNotContainsString('<?php', (string) $r['body'], "no source leak: $payload");
+        }
+    }
 }
