@@ -132,6 +132,12 @@ class App
      */
     public static string $default_charset = 'utf-8';
     /**
+     * Apache `DefaultType` / PHP `default_mimetype`. The Content-Type applied by
+     * CharsetMiddleware to a response that doesn't set one itself (mod_php sends
+     * `text/html` by default). Set to '' to leave untyped responses untouched.
+     */
+    public static string $default_mimetype = 'text/html';
+    /**
      * mod_php-parity SAPI identity for the php_sapi_name() override. Default null
      * returns the real PHP_SAPI ("cli") — no behavior change. Set to a web SAPI
      * string (e.g. 'apache2handler', 'fpm-fcgi') so legacy code branching on
@@ -512,6 +518,7 @@ class App
         \uopz_set_return('filter_input', \Closure::fromCallable('\ZealPHP\filter_input'), true);
         \uopz_set_return('filter_input_array', \Closure::fromCallable('\ZealPHP\filter_input_array'), true);
         \uopz_set_return('header_register_callback', \Closure::fromCallable('\ZealPHP\header_register_callback'), true);
+        \uopz_set_return('error_log', \Closure::fromCallable('\ZealPHP\error_log'), true);
         // Per-coroutine error/exception/shutdown handler registry.
         \uopz_set_return('set_error_handler', \Closure::fromCallable('\ZealPHP\set_error_handler'), true);
         \uopz_set_return('restore_error_handler', \Closure::fromCallable('\ZealPHP\restore_error_handler'), true);
@@ -660,6 +667,17 @@ class App
     {
         if ($charset !== null) self::$default_charset = $charset;
         return self::$default_charset;
+    }
+
+    /**
+     * Apache `DefaultType` / PHP `default_mimetype`. The Content-Type
+     * CharsetMiddleware applies to responses that don't set one. Pass '' to
+     * disable. No-arg call returns the current value.
+     */
+    public static function defaultMimeType(?string $type = null): string
+    {
+        if ($type !== null) self::$default_mimetype = $type;
+        return self::$default_mimetype;
     }
 
     /**

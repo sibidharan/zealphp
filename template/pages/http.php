@@ -112,11 +112,13 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
   <tr><td><code>filter_input()</code> / <code>filter_input_array()</code></td><td>✅ Native</td><td>Read <code>INPUT_GET/POST/COOKIE/SERVER/ENV</code> from request state (CLI returns null)</td></tr>
   <tr><td><code>header_register_callback()</code></td><td>✅ Native</td><td>Fires once before buffered headers flush (streaming paths excluded)</td></tr>
   <tr><td><code>is_uploaded_file()</code> / <code>move_uploaded_file()</code></td><td>✅ Native</td><td>Validate against the request's uploaded set</td></tr>
+  <tr><td><code>error_log()</code></td><td>✅ Native</td><td>Routes type 0/4 into the framework log (debug.log → stderr); honors type 3 file append</td></tr>
   <tr><td><code>php_sapi_name()</code></td><td>⚙️ Opt-in</td><td>Default returns real <code>"cli"</code>; set <code>App::sapiName('apache2handler')</code> for legacy parity</td></tr>
   <tr><td><code>PHP_SAPI</code> constant</td><td>⚠️ Gap</td><td>Constants can't be redefined (<code>uopz</code> refuses). Use <code>php_sapi_name()</code> instead</td></tr>
   <tr><td><code>getenv()</code> / <code>putenv()</code> for CGI request vars</td><td>⚠️ Gap</td><td>Not request-scoped. Read request vars from <code>$g-&gt;server</code> / <code>$_SERVER</code></td></tr>
   <tr><td><code>mail()</code></td><td>⚠️ Gap</td><td>Relies on system <code>sendmail</code>; configurable transport planned</td></tr>
-  <tr><td><code>virtual()</code> (Apache subrequest)</td><td>🚫 By design</td><td>Single-process model — use <code>App::include()</code> or call the route handler</td></tr>
+  <tr><td><code>get_browser()</code></td><td>⚠️ Gap</td><td>Needs <code>browscap.ini</code> configured; the no-arg form can't read the UA in coroutine mode. Workaround: pass it — <code>get_browser($g-&gt;server['HTTP_USER_AGENT'])</code></td></tr>
+  <tr><td><code>virtual()</code> (Apache subrequest)</td><td>🚫 By design</td><td>Internal subrequest, not an HTTP call — use <code>App::include()</code> or call the route handler inline (same effect, no socket)</td></tr>
 </table>
 
 <h3 class="parity-group">$_SERVER superglobal</h3>
@@ -148,7 +150,8 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
   <tr><td><code>max_execution_time</code></td><td>🚫 By design</td><td><code>set_time_limit()</code> is a no-op — use OpenSwoole coroutine timeouts</td></tr>
   <tr><td><code>auto_prepend_file</code> / <code>auto_append_file</code></td><td>🚫 By design</td><td>No per-request boot hook — include at your entry point / fallback handler</td></tr>
   <tr><td><code>post_max_size</code> / <code>upload_max_filesize</code></td><td>⚠️ Gap</td><td>Not enforced per directive — OpenSwoole's <code>package_max_length</code> is the real cap; middleware planned</td></tr>
-  <tr><td><code>max_input_vars</code> / <code>default_mimetype</code></td><td>⚠️ Gap</td><td>Not enforced (defaults rarely hit); CharsetMiddleware covers the common mimetype case</td></tr>
+  <tr><td><code>default_mimetype</code></td><td>✅ Middleware</td><td>CharsetMiddleware applies <code>App::$default_mimetype</code> (default <code>text/html</code>) to untyped responses</td></tr>
+  <tr><td><code>max_input_vars</code></td><td>⚠️ Gap</td><td>Not enforced (default 1000 rarely hit)</td></tr>
 </table>
 
 </div>

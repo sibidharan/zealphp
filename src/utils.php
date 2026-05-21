@@ -254,8 +254,13 @@ function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
             $handle = @fopen($path, 'ab');
             if ($handle === false) {
                 while (($message = $queue->pop()) !== false) {
-                    // @phpstan-ignore-next-line — OpenSwoole\Coroutine\Channel::pop() returns mixed
-                    error_log((string)$message);
+                    // Last-resort sink — write to stderr directly, NOT error_log():
+                    // error_log() is uopz-overridden to route into log_write(), so
+                    // calling it here would recurse. stderr is where error_log(0)
+                    // lands under the CLI SAPI anyway. pop() returns mixed.
+                    if (is_scalar($message)) {
+                        @file_put_contents('php://stderr', (string)$message);
+                    }
                 }
                 return;
             }
@@ -280,7 +285,9 @@ function log_write(string $message, string $kind = 'debug'): void
 {
     $path = log_file_for($kind);
     if ($path === null) {
-        error_log($message);
+        // stderr, not error_log() — see the consumer's fallback note above
+        // (error_log() is overridden to route back into log_write()).
+        @file_put_contents('php://stderr', $message);
         return;
     }
 
@@ -300,7 +307,8 @@ function log_write(string $message, string $kind = 'debug'): void
 
     $handle = @fopen($path, 'ab');
     if ($handle === false) {
-        error_log($message);
+        // stderr, not error_log() (overridden — would recurse into log_write()).
+        @file_put_contents('php://stderr', $message);
         return;
     }
     stream_set_write_buffer($handle, 0);
@@ -1048,6 +1056,30 @@ function header_register_callback(callable $callback): bool
     } catch (\Throwable) {
         return false;
     }
+}
+
+/**
+ * mod_php-parity error_log(): under the CLI SAPI native error_log() writes to
+ * stderr / the php.ini error_log path. ZealPHP routes message_type 0 (system
+ * logger) and 4 (SAPI logger) into the framework's async log (debug.log, or
+ * stderr if logging is disabled) so legacy error_log() calls land where the
+ * rest of the app's diagnostics go — the "we have elog for error_log" contract.
+ *
+ *   - type 3 (append to file): honored verbatim — explicit destination intent.
+ *   - type 1 (email): unsupported under the coroutine runtime; logged + false.
+ *   - type 0 / 4: routed to log_write() (debug.log → stderr fallback).
+ *
+ * Always lands somewhere (never silently dropped), unlike elog() which gates on
+ * debug logging; that's why this routes through log_write() directly.
+ */
+function error_log(string $message, int $message_type = 0, ?string $destination = null, ?string $additional_headers = null): bool
+{
+    if ($message_type === 3 && $destination !== null && $destination !== '') {
+        return @file_put_contents($destination, $message, FILE_APPEND | LOCK_EX) !== false;
+    }
+    $line = '[error_log] ' . date('d-m-Y H:i:s') . ' ' . rtrim($message, "\r\n") . "\n";
+    log_write($line, 'debug');
+    return $message_type !== 1; // email path can't actually deliver
 }
 
 /**
