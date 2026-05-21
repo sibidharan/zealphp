@@ -197,4 +197,43 @@ class MimeResolverTest extends TestCase
         $r = new MimeResolver(['num' => 4242]);
         $this->assertSame('4242', $r->resolve('x.num')['type']);
     }
+
+    // ---- Mutant-killing: MimeResolver suffixes() boundary tests -------------
+
+    public function testSuffixesLeadingDotCountBoundary(): void
+    {
+        // Mutant #28: while ($i <= $len) would read $scan[$len] (out of bounds in
+        // PHP returns ''), potentially advancing $i past $len so $firstDot search
+        // starts beyond the string — but strpos still works on the original scan.
+        // The real observable difference: a string made entirely of dots, e.g. "..."
+        // With $i < $len: $i advances to 3 (==$len), loop stops, strpos('.', '.', 3)→false → [].
+        // With $i <= $len: $i advances to 4 (>$len), strpos('.', '.', 4)→false → [].
+        // Same result for all-dots. A more useful case: filename with ONE leading dot
+        // and then a name + extension, e.g. ".foo.html": i starts 0, scan[0]='.', i→1,
+        // scan[1]='f'!='.' → stop. firstDot=strpos('.foo.html', '.', 1)=4. rest='html'.
+        // Both variants agree here. The mutant is most dangerous for a filename that is
+        // EXACTLY $len dots: original exits correctly; mutant goes one extra step reading
+        // $scan[$len]='' which !== '.' so also stops — same $i. Genuinely EQUIVALENT
+        // for the suffix walk, but we assert the correct [] return to pin the behaviour.
+        $r = new MimeResolver(['html' => 'text/html']);
+        $this->assertSame([], $r->suffixes('...'));
+        $this->assertSame([], $r->suffixes('..'));
+    }
+
+    public function testSuffixesFirstDotOffByOne(): void
+    {
+        // Mutant #29: substr($filename, $firstDot + 0) includes the dot itself.
+        // E.g. "file.html": firstDot=4, +1 → "html", +0 → ".html".
+        // explode('.', '.html') → ['', 'html']; empty string is skipped → ['html']. Same!
+        // But for "file.tar.gz": firstDot=4, +1→"tar.gz"→['tar','gz'].
+        //                                    +0→".tar.gz"→['','tar','gz']→['tar','gz']. Same!
+        // Actually the mutant IS equivalent because the leading empty segment from the
+        // dot is always skipped by the `if ($ext === '') continue` guard. Document it.
+        $r = new MimeResolver(['html' => 'text/html', 'tar' => 'application/x-tar']);
+        $this->assertSame(['html'], $r->suffixes('file.html'));
+        $this->assertSame(['tar', 'gz'], $r->suffixes('file.tar.gz'));
+        // Also assert the type resolves correctly to confirm no dot leaks through.
+        $this->assertSame('text/html', $r->resolve('file.html')['type']);
+        $this->assertSame('application/x-tar', $r->resolve('file.tar.gz')['type']);
+    }
 }
