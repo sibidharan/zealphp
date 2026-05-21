@@ -80,4 +80,39 @@ class RedirectMiddlewareTest extends TestCase
         ], '/a');
         $this->assertSame('/first', $r->getHeaderLine('Location'));
     }
+
+    // --- QSA (query-string append) parity tests — Apache mod_rewrite B9 fix ---
+
+    /**
+     * Target already has a query string: incoming query must be merged with &,
+     * not dropped.  Apache mod_rewrite QSA: /new?a=1 + ?b=2 → /new?a=1&b=2.
+     */
+    public function testQsaMergesWithAmpersandWhenTargetHasQuery(): void
+    {
+        $r = $this->invoke([['from' => '/p', 'to' => '/new?a=1', 'status' => 301]], '/p', 'b=2');
+        $this->assertSame(301, $r->getStatusCode());
+        $this->assertSame('/new?a=1&b=2', $r->getHeaderLine('Location'));
+    }
+
+    /**
+     * Target has no query string: incoming query is appended with ?.
+     * Existing behaviour must be preserved.
+     */
+    public function testQsaAppendsWithQuestionMarkWhenTargetHasNoQuery(): void
+    {
+        $r = $this->invoke([['from' => '/p', 'to' => '/new', 'status' => 302]], '/p', 'b=2');
+        $this->assertSame(302, $r->getStatusCode());
+        $this->assertSame('/new?b=2', $r->getHeaderLine('Location'));
+    }
+
+    /**
+     * No incoming query string: target URL is left unchanged regardless of
+     * whether the target itself carries a query component.
+     */
+    public function testQsaNoIncomingQueryLeavesTargetUnchanged(): void
+    {
+        $r = $this->invoke([['from' => '/p', 'to' => '/new?a=1', 'status' => 301]], '/p');
+        $this->assertSame(301, $r->getStatusCode());
+        $this->assertSame('/new?a=1', $r->getHeaderLine('Location'));
+    }
 }

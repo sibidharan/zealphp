@@ -66,8 +66,12 @@ class RedirectMiddleware implements MiddlewareInterface
                 continue;
             }
             $query = $request->getUri()->getQuery();
-            if ($query !== '' && !str_contains($target, '?')) {
-                $target .= '?' . $query;
+            if ($query !== '') {
+                // Apache mod_rewrite QSA: merge incoming query with & when the
+                // target already carries its own query string; otherwise prefix
+                // with ?.  (mod_rewrite.c splitout_queryargs:833 — appends
+                // r->args with & separator when r->args already set.)
+                $target .= str_contains($target, '?') ? '&' . $query : '?' . $query;
             }
             return new Response('', $rule['status'], '', ['Location' => $target]);
         }
