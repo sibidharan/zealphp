@@ -175,6 +175,34 @@ class BodySizeLimitMiddlewareTest extends TestCase
         $this->assertSame(413, $this->invoke(2048, '2049'));
     }
 
+    // ----- B3: limit 0 = unlimited (nginx client_max_body_size 0 parity) ---
+
+    public function testZeroLimitUnlimitedContentLength(): void
+    {
+        // A positive Content-Length that would normally trigger 413 must pass
+        // when the limit is 0 (unlimited). Mirrors nginx's truthiness guard.
+        $this->assertSame(200, $this->invoke(0, '999999999'));
+    }
+
+    public function testZeroLimitUnlimitedLargeBody(): void
+    {
+        // A large chunked-style body with no Content-Length must also pass when
+        // limit is 0. Covers the chunked/body branch of the unlimited guard.
+        $this->assertSame(200, $this->invokeWithBody(0, str_repeat('x', 100_000)));
+    }
+
+    public function testZeroLimitStringUnlimited(): void
+    {
+        // '0' as a string parses via parseSize() to int 0 — same unlimited result.
+        $this->assertSame(200, $this->invoke('0', '999999999'));
+    }
+
+    public function testPositiveLimitStillEnforcesAfterZeroCheck(): void
+    {
+        // Confirm the guard is skipped for non-zero limits so enforcement still works.
+        $this->assertSame(413, $this->invoke(1, '2'));
+    }
+
     // ----- chunked / no Content-Length enforcement (H6) ----------------
     // Apache enforces LimitRequestBody against decoded chunked byte counts via
     // ctx->limit_used (http_filters.c:671-686). In OpenSwoole the chunked

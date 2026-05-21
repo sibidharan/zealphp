@@ -45,14 +45,37 @@ use Psr\Http\Server\RequestHandlerInterface;
 class BodySizeLimitMiddleware implements MiddlewareInterface
 {
     private int $maxBytes;
+    /** True when the configured limit is explicitly 0 (nginx unlimited semantics). */
+    private bool $unlimited;
 
     public function __construct(int|string $max)
     {
-        $this->maxBytes = is_int($max) ? $max : self::parseSize($max);
+        if (is_int($max)) {
+            $this->maxBytes = $max;
+            // nginx `client_max_body_size 0` means unlimited (truthiness guard at
+            // ngx_http_core_module.c:~1008). An explicit int 0 maps to unlimited.
+            $this->unlimited = ($max === 0);
+        } else {
+            $trimmed = trim($max);
+            // The string '0' is the only string representation of unlimited.
+            // Malformed strings (e.g. 'abc') fall through parseSize() to 0 but
+            // are NOT treated as unlimited — they retain fail-closed semantics
+            // (max 0 → any positive Content-Length > 0 → 413).
+            $this->unlimited = ($trimmed === '0');
+            $this->maxBytes  = self::parseSize($max);
+        }
     }
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
+        // nginx `client_max_body_size 0` short-circuits the 413 check entirely
+        // (~ngx_http_core_module.c:1008 truthiness guard). An explicit 0 / '0'
+        // limit means UNLIMITED — pass through without inspecting Content-Length
+        // or body. Malformed strings that happen to parse to 0 are NOT unlimited.
+        if ($this->unlimited) {
+            return $handler->handle($request);
+        }
+
         $header = $request->getHeaderLine('Content-Length');
         if ($header !== '' && ctype_digit($header)) {
             // Fast path: declared Content-Length available — check before reading.
