@@ -26,14 +26,13 @@
     "mutators": {
         "@default": true
     },
-    // Baseline run: thresholds at 0 so the FIRST CI run measures and *reports*
-    // the real MSI (annotated on the PR via --logger-github) without failing the
-    // build on an unknown number. Immediately after the baseline lands, ratchet
-    // these to just under the measured value (target: covered-MSI 85+) so the
-    // gate bites. The suite runs in definition order (phpunit.xml
-    // executionOrder="default") — it carries shared runtime state (uopz global
-    // overrides, App:: static config, per-coroutine G, live coroutines) and is
-    // not random-order-safe by design.
-    "minMsi": 0,
-    "minCoveredMsi": 0
+    // Ratcheted to just under the measured baseline (first CI run: MSI 59%,
+    // Covered-MSI 65%, 91% mutation coverage over 1786 mutants) so the gate now
+    // BITES against regression without flapping. Keep raising these as tests
+    // harden — target Covered-MSI 85+. The suite runs in definition order
+    // (phpunit.xml executionOrder="default"): it carries shared runtime state
+    // (uopz global overrides, App:: static config, per-coroutine G, live
+    // coroutines) and is not random-order-safe by design.
+    "minMsi": 55,
+    "minCoveredMsi": 60
 }
