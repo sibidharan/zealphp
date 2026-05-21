@@ -223,9 +223,11 @@ class Http1FramingConformanceTest extends TestCase
      */
     public function testRequestWithinHeaderLimitIsAccepted(): void
     {
-        // 99 X-Hdr-* + Host = 100 total HTTP_ headers — exactly at the limit.
+        // Host(1) + 98 X-Hdr-* + Connection(1) = 100 total HTTP_ headers — exactly
+        // at the limit. The Connection: close header appended below by every test
+        // in this file counts toward LimitRequestFields, so the loop stops at 98.
         $extraHeaders = '';
-        for ($i = 1; $i <= 99; $i++) {
+        for ($i = 1; $i <= 98; $i++) {
             $extraHeaders .= 'X-Hdr-' . $i . ': v' . self::CRLF;
         }
         $r = $this->raw(
