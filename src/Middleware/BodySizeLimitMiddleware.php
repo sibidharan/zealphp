@@ -14,7 +14,7 @@ use Psr\Http\Server\RequestHandlerInterface;
  * `LimitRequestBody` / PHP `post_max_size` parity.
  *
  * Rejects requests whose `Content-Length` exceeds a configured maximum with
- * `413 Payload Too Large` (nginx returns 413 here too). OpenSwoole's
+ * `413 Content Too Large` (nginx returns 413 here too). OpenSwoole's
  * `package_max_length` is the transport-level hard cap; this is the
  * configurable application-level limit with the standard 413 response, so
  * legacy code that expects oversized uploads to be refused behaves as it would
@@ -44,7 +44,7 @@ class BodySizeLimitMiddleware implements MiddlewareInterface
         if ($header !== '' && ctype_digit($header)) {
             $length = (int) $header;
             if ($length > $this->maxBytes) {
-                return new Response('Payload Too Large', 413, '', ['Content-Type' => 'text/plain']);
+                return new Response('Content Too Large', 413, '', ['Content-Type' => 'text/plain']);
             }
         }
         return $handler->handle($request);
