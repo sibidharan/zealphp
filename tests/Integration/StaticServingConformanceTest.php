@@ -98,6 +98,46 @@ class StaticServingConformanceTest extends TestCase
         }
     }
 
+    /**
+     * A symlink with a SERVABLE name (.php) inside docroot pointing OUTSIDE it
+     * must not be executed/served — this is the path that actually reaches
+     * includeCheck()'s realpath() containment guard (the bare-name variant above
+     * never matches a route). The escaping target must never leak.
+     */
+    public function testServablePhpSymlinkEscapeIsRefused(): void
+    {
+        $target = '/etc/passwd';
+        $link = ZEALPHP_ROOT . '/public/escape-conformance.php';
+        @unlink($link);
+        if (!@symlink($target, $link)) {
+            $this->markTestSkipped('cannot create symlink in this environment');
+        }
+        try {
+            $r = $this->get('/escape-conformance.php');
+            $this->assertContains($r['status'], [403, 404], 'escaping .php symlink must not be served');
+            $this->assertStringNotContainsString('root:', (string) $r['body'], 'symlink target must not leak');
+            $r2 = $this->get('/escape-conformance');
+            $this->assertContains($r2['status'], [403, 404], 'extensionless escaping symlink must not be served');
+            $this->assertStringNotContainsString('root:', (string) $r2['body']);
+        } finally {
+            @unlink($link);
+        }
+    }
+
+    /**
+     * ENOTDIR parity (Apache request.c:1244 — "deny rather than assume not
+     * found"): a path whose ancestor segment is a regular file, not a
+     * directory, is 403 (not 404). Uses an existing public file as the file
+     * ancestor with an extra path segment appended.
+     */
+    public function testEnotdirReturns403(): void
+    {
+        // /css/zealphp.css is a regular file; /css/zealphp.css/extra hits ENOTDIR.
+        $r = $this->get('/css/zealphp.css/extra');
+        $this->assertContains($r['status'], [403, 404], 'ENOTDIR path resolved to a valid status');
+        $this->assertStringNotContainsString('<?php', (string) $r['body'], 'no source leak on ENOTDIR');
+    }
+
     /** Static assets carry Last-Modified and support conditional 304 (sendFile path). */
     public function testStaticConditionalGet(): void
     {
