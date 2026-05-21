@@ -1821,8 +1821,8 @@ class App
         }
 
         // PHP's `include` returns int(1) when the file has no explicit `return`.
-        // Treat as "no explicit return" — surface the buffered echo (or null).
-        if ($result === 1) {
+        // `return;` (void) yields null. Both should surface buffered output.
+        if ($result === 1 || ($result === null && $output !== '')) {
             return $output !== '' ? $output : null;
         }
 
