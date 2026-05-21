@@ -471,8 +471,8 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
         $superglobals = \ZealPHP\App::$superglobals;
         /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
         $data = $superglobals ? ($GLOBALS['_SESSION'] ?? []) : (isset($g->session) ? $g->session : []);
-        /** @var array<string, mixed> $data */
         $data = is_array($data) ? $data : [];
+        /** @var array<string, mixed> $data */
         $handler->write((string) $new_session_id, php_session_encode_from_array($data));
         if ($delete_old_session && is_string($old_session_id) && $old_session_id !== '') {
             $handler->destroy((string) $old_session_id);
