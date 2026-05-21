@@ -36,6 +36,9 @@ jobs:
         with:
           results_file: results.sarif
           results_format: sarif
+          # Admin-read PAT so the Branch-Protection check can read the rules
+          # (the default GITHUB_TOKEN cannot). See .github/dependabot.yml note.
+          repo_token: ${{ secrets.SCORECARD_TOKEN }}
           publish_results: true
 
       - name: Upload SARIF artifact
