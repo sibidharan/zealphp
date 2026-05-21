@@ -358,9 +358,13 @@ class AppPipelineExtraTest extends TestCase
         $this->assertStringContainsString('OPTIONS', $this->headerValue('Allow'));
     }
 
-    public function testGetOnPostOnlyIs404(): void
+    public function testGetOnPostOnlyIs405(): void
     {
-        $this->assertSame(404, $this->dispatch('/xtra/postonly', 'GET')->getStatusCode());
+        // RFC 9110 §15.5.6: the resource exists (POST route) but GET isn't
+        // allowed → 405 Method Not Allowed + an Allow header.
+        $res = $this->dispatch('/xtra/postonly', 'GET');
+        $this->assertSame(405, $res->getStatusCode());
+        $this->assertStringContainsString('POST', $this->headerValue('Allow'));
     }
 
     public function testUnmatchedWithoutFallbackIs404(): void
@@ -470,9 +474,10 @@ class AppPipelineExtraTest extends TestCase
     public function testTraceAllowedWhenEnabled(): void
     {
         App::traceEnabled(true);
-        // With TRACE enabled the request is no longer short-circuited to 405;
-        // there is no matching TRACE route so it falls through to 404.
-        $this->assertSame(404, $this->dispatch('/xtra/str', 'TRACE')->getStatusCode());
+        // With TRACE enabled it's no longer short-circuited by the XST guard;
+        // the path matches a GET route but has no TRACE handler, so it's now a
+        // proper 405 Method Not Allowed (RFC 9110 §15.5.6) rather than a 404.
+        $this->assertSame(405, $this->dispatch('/xtra/str', 'TRACE')->getStatusCode());
     }
 
     // ── strip_trailing_slash redirect ─────────────────────────────────

@@ -78,6 +78,16 @@ class HttpFeaturesTest extends TestCase
         $this->assertStringContainsString('HEAD', $allow);
     }
 
+    /** RFC 9110 §15.5.6: wrong method on a known resource → 405 + Allow. */
+    public function testMethodNotAllowedReturns405WithAllow(): void
+    {
+        $r = $this->http('PUT', '/json'); // /json is a GET resource
+        $this->assertStatus(405, $r);
+        $allow = $r['headers']['allow'] ?? '';
+        $this->assertStringContainsString('GET', $allow, 'Allow must list supported methods');
+        $this->assertStringContainsString('OPTIONS', $allow);
+    }
+
     public function testCookieSameSite(): void
     {
         $r = $this->get('/http/cookie-test');
