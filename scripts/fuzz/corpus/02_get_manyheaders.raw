@@ -1,0 +1,13 @@
+GET /json HTTP/1.1
+Host: x
+User-Agent: fuzz/1.0
+Accept: */*
+Accept-Language: en-US
+Accept-Encoding: gzip, deflate
+Cache-Control: no-cache
+X-Custom-1: a
+X-Custom-2: b
+X-Custom-3: c
+Referer: http://x/
+Connection: close
+

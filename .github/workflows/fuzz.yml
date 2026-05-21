@@ -1,0 +1,97 @@
+name: Fuzz
+
+# HTTP robustness / fuzzing harness — the adversarial complement to the
+# deterministic framing fixtures in tests/Integration/Http1FramingConformanceTest.php.
+# Runs on demand and on PRs. See docs/fuzzing.md for what each tool proves.
+on:
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
+        with:
+          php-version: '8.3'
+          extensions: openswoole, uopz
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      # slowhttptest from apt (1.9.x); radamsa built from source (self-contained
+      # binary, needs only make+gcc); gabbi via pip into a venv (PEP 668 hosts).
+      - name: Install fuzzing tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y slowhttptest gcc make
+          git clone --depth 1 https://gitlab.com/akihe/radamsa /tmp/radamsa
+          make -C /tmp/radamsa
+          /tmp/radamsa/bin/radamsa --version
+          python3 -m venv /tmp/gabbi-venv
+          /tmp/gabbi-venv/bin/pip install --quiet gabbi
+          /tmp/gabbi-venv/bin/python -m gabbi.runner --help >/dev/null
+
+      - name: Start ZealPHP
+        run: |
+          php app.php >/tmp/zealphp-server.log 2>&1 &
+          echo $! > /tmp/zealphp-server.pid
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8080/json >/dev/null; then
+              echo "server up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Server failed to start"
+          cat /tmp/zealphp-server.log
+          exit 1
+
+      # GATE: declarative HTTP contract. Fails the job on any contract drift.
+      - name: Gabbi contract suite
+        run: |
+          /tmp/gabbi-venv/bin/python -m gabbi.runner 127.0.0.1:8080 \
+            < tests/gabbi/conformance.yaml
+
+      # GATE: wire-mutation fuzz. Bounded 300 iters for CI wall-clock; fails the
+      # job on any hang/timeout or 5xx-with-stack-trace leak.
+      - name: Radamsa wire-mutation fuzz
+        env:
+          RADAMSA: /tmp/radamsa/bin/radamsa
+          TIMEOUT: '4'
+        run: |
+          bash scripts/fuzz/radamsa_run.sh 300 127.0.0.1 8080
+
+      # INFORMATIONAL (non-gating): slow-drip survival. The no-read-timeout gap
+      # is expected/architectural (see docs/fuzzing.md section 1); we capture the
+      # survival stats in the log rather than failing on them.
+      - name: slowhttptest (informational)
+        continue-on-error: true
+        env:
+          DURATION: '20'
+          CONNS: '40'
+          OUTDIR: /tmp/slowhttp
+        run: |
+          bash scripts/fuzz/slowhttptest.sh both 127.0.0.1 8080
+          echo "=== slow_headers.csv ==="; cat /tmp/slowhttp/slow_headers.csv || true
+          echo "=== slow_body.csv ===";    cat /tmp/slowhttp/slow_body.csv || true
+
+      - name: Server log on failure
+        if: failure()
+        run: cat /tmp/zealphp-server.log || true
+
+      - name: Stop ZealPHP
+        if: always()
+        run: |
+          if [ -f /tmp/zealphp-server.pid ]; then
+            kill "$(cat /tmp/zealphp-server.pid)" 2>/dev/null || true
+          fi
