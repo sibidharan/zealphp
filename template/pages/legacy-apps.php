@@ -1079,5 +1079,104 @@ BASH, 'lang' => 'bash']); ?>
 <p><strong>Hybrid approach:</strong> Mix native routes (coroutine mode, high performance) with legacy PHP file serving (CGI mode) in the same app. Explicit <code>$app-&gt;route()</code> handlers run directly in the worker.</p>
 </div>
 
+<h2 id="cgi-backends" style="margin-top:2.5rem">CGI backends — host any language</h2>
+<p>ZealPHP can serve files written in <strong>any language</strong> that speaks CGI/1.1 — Perl, Python, Ruby, shell scripts, or compiled binaries — side-by-side with your PHP app. Register per-extension backends with <code>App::registerCgiBackend()</code> before <code>$app-&gt;run()</code>.</p>
+
+<h3 style="margin-top:1.25rem">Apache / nginx parity table</h3>
+<table class="ztable">
+<tr><th>Mode</th><th>Apache equivalent</th><th>nginx equivalent</th><th>ZealPHP</th></tr>
+<tr>
+  <td><code>'proc'</code></td>
+  <td><code>AddHandler cgi-script .pl</code> + <code>Options +ExecCGI</code></td>
+  <td>—</td>
+  <td><code>App::registerCgiBackend('.pl', ['mode'=&gt;'proc', 'interpreter'=&gt;'/usr/bin/perl'])</code></td>
+</tr>
+<tr>
+  <td><code>'proc'</code> (shebang)</td>
+  <td><code>AddHandler cgi-script .cgi</code> — relies on <code>#!</code> line</td>
+  <td>—</td>
+  <td><code>App::registerCgiBackend('.cgi', ['mode'=&gt;'proc'])</code></td>
+</tr>
+<tr>
+  <td><code>'fcgi'</code></td>
+  <td><code>ProxyPassMatch ^/(.+\.py)$ fcgi://127.0.0.1:9001/…</code></td>
+  <td><code>location ~ \.py$ { fastcgi_pass 127.0.0.1:9001; }</code></td>
+  <td><code>App::registerCgiBackend('.py', ['mode'=&gt;'fcgi', 'address'=&gt;'127.0.0.1:9001'])</code></td>
+</tr>
+<tr>
+  <td><code>'fork'</code></td>
+  <td>— (no direct equivalent; warm-fork is ZealPHP-specific)</td>
+  <td>—</td>
+  <td><code>App::registerCgiBackend('.php', ['mode'=&gt;'fork'])</code> — <strong>.php only</strong></td>
+</tr>
+</table>
+
+<h3 style="margin-top:1.25rem">Worked examples</h3>
+
+<?php App::render('/components/_code', [
+    'label' => '.php — default (no registration needed)',
+    'code'  => <<<'PHP'
+// .php falls through to App::$cgi_mode (default 'proc').
+// No registration needed — this is the existing behaviour.
+App::processIsolation(true); // enables CGI mode
+$app->setFallback(fn() => App::include('/index.php'));
+PHP]); ?>
+
+<?php App::render('/components/_code', [
+    'label' => '.pl — Perl via proc with interpreter',
+    'code'  => <<<'PHP'
+App::registerCgiBackend('.pl', [
+    'mode'        => 'proc',
+    'interpreter' => '/usr/bin/perl',
+]);
+// public/info.pl is now executed via /usr/bin/perl
+// with the same RFC 3875 CGI env ZealPHP builds for PHP scripts.
+PHP]); ?>
+
+<?php App::render('/components/_code', [
+    'label' => '.py — Python FastCGI (warm pool, language-agnostic)',
+    'code'  => <<<'PHP'
+App::registerCgiBackend('.py', [
+    'mode'        => 'fcgi',
+    'address'     => '127.0.0.1:9001',       // or 'unix:/run/python-fpm.sock'
+    'fcgi_params' => ['APP_ENV' => 'prod'],   // merged into CGI env (nginx fastcgi_param parity)
+]);
+// Requests to /hello.py are proxied to the FastCGI server — no process spawn per request.
+PHP]); ?>
+
+<?php App::render('/components/_code', [
+    'label' => '.cgi — direct shebang execution',
+    'code'  => <<<'PHP'
+App::registerCgiBackend('.cgi', ['mode' => 'proc']);
+// ZealPHP calls proc_open(['path/to/script.cgi']) — the OS reads the #! line.
+// Script must output CGI/1.1 headers: Content-Type + blank line + body.
+PHP]); ?>
+
+<h3 style="margin-top:1.25rem">fork mode — PHP only constraint</h3>
+<div class="callout warn" style="margin:1rem 0">
+  <p><strong>Why fork is PHP-only.</strong> <code>'fork'</code> uses <code>OpenSwoole\Process</code> to clone the already-booted PHP worker. The forked child inherits the PHP interpreter, loaded autoloader, and warm opcache — which is why it is ~5× faster than <code>'proc'</code>. This clone-and-run mechanism is specific to the PHP runtime. For other languages, use <code>'fcgi'</code> (warm pool managed by the language runtime) or <code>'proc'</code> (spawn on demand).</p>
+  <p>Attempting <code>App::registerCgiBackend('.py', ['mode' =&gt; 'fork'])</code> throws <code>\InvalidArgumentException</code> with the message: <em>"fork mode requires a PHP target; use 'fcgi' (warm pool, language-agnostic) or 'proc' for .py"</em>.</p>
+</div>
+
+<h3 style="margin-top:1.25rem">Reader: App::resolveCgiBackend()</h3>
+<p><code>App::resolveCgiBackend(string $path): array</code> looks up the file extension in the registry and returns the config array. Unregistered extensions fall back to <code>['mode' =&gt; App::$cgi_mode]</code>. You can call it directly to inspect what backend a path would use:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Inspect backend resolution',
+    'code'  => <<<'PHP'
+App::registerCgiBackend('.py', ['mode' => 'fcgi', 'address' => '127.0.0.1:9001']);
+
+$backend = App::resolveCgiBackend('/var/www/app/hello.py');
+// ['mode' => 'fcgi', 'address' => '127.0.0.1:9001']
+
+$backend = App::resolveCgiBackend('/var/www/app/index.php');
+// ['mode' => 'proc']  ← falls back to App::$cgi_mode
+PHP]); ?>
+
+<p>See <code>examples/multi-lang-cgi/</code> for a runnable demo registering <code>.pl</code> (proc/Perl) alongside the default PHP backend.</p>
+
+<h2 style="margin-top:2.5rem">Performance &amp; Hybrid Mode (continued)</h2>
+<p>For the full performance picture including CGI backends, see the <a href="/performance">performance page</a>.</p>
+
 </div>
 </section>
