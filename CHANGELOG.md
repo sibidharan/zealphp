@@ -2,6 +2,65 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.38] - 2026-05-21
+
+Apache + nginx parity release. Two source-diff audits (httpd 2.5.1 + nginx 1.31.1) drove a wave of security fixes, conformance fixes, and new APIs across the HTTP core and the middleware stack. PR #38.
+
+### Security
+
+- **Referer `example.*` no longer matches `example.evil.com`** — `RefererMiddleware` now uses DNS-label-boundary matching (mirrors nginx `dns_wc_head`); previously `str_starts_with($host, "example.")` allowed `example.evil.com` through the allow-list.
+- **Symlink-escape via static file serving** closed — `App::includeCheck()` now realpath()-canonicalizes both the file and the document root with boundary-aware containment (`pathWithinRoot()`), refusing symlinks that escape docroot. Non-regular files (FIFO/device/socket) are rejected; ENOTDIR returns 403 (matches Apache "deny rather than assume not found").
+- **APR1 (`$apr1$`) htpasswd digest encoding** now matches Apache exactly (the prior native PHP md5 was non-Apache-compatible); pinned against `openssl passwd -apr1` oracle vectors. DES-salt allow-list now matches the real `[./0-9A-Za-z]` alphabet (previously `ctype_alnum` would 401 legitimate DES hashes whose salt contained `.` or `/`).
+- **Double-encoded traversal (`%252e%252e`)** rejected with 400 — pre-routing guard now decodes-until-stable before checking for `..`.
+- **`mod_expires` no longer stamps `Cache-Control: max-age=N` on error responses** — 4xx/5xx are skipped (Apache parity); past-expiry clamped to `max-age=0`.
+- **`enable_static_handler`** is now documented as OpenSwoole-governed (a parity ceiling): the C-level static handler serves `/css`,`/js`,`/img` before PHP, so the PHP-layer normalization/%2F-reject/symlink-containment guards do NOT apply to those prefixes. Deploy guidance added to `STANDARDS.md`.
+- **Multi-range DoS cap** added to `RangeMiddleware` and `Response::sendFile()` — bounded at 200 ranges (matches Apache `AP_DEFAULT_MAX_RANGES`, CVE-2011-3192 class).
+- **Plaintext htpasswd** now refused with an explicit prefix guard (previously rejected only by `crypt()` happening to fail).
+- **Error responses no longer leak handler-set headers** — `App::renderError()` clears prior `Content-Type`/custom headers before emitting an error body; preserves `Location`, `Allow`, `WWW-Authenticate` (Apache `apr_table_clear(headers_out)` parity).
+
+### Added
+
+- **`ZealPHP\HTTP\ConditionalRequest`** — new shared evaluator implementing Apache's `ap_meets_conditions` precedence (If-Match → If-Unmodified-Since → If-None-Match → If-Modified-Since), weak/strong ETag comparison, `*` wildcard, 412 outcomes. Wired into `ETagMiddleware`; If-Match and If-Unmodified-Since are now supported (REST PUT/DELETE optimistic-locking works).
+- **`ZealPHP\HTTP\MimeResolver`** — multi-suffix content-type resolver mirroring Apache `mod_mime` `find_ct`: walks all dot-separated suffixes left-to-right accumulating Content-Type + Content-Encoding + Content-Language. `document.html.gz` now correctly emits `Content-Type: text/html` + `Content-Encoding: gzip`. Dotfile rule fixed (`.png` is a hidden file with no type).
+- **`ContentEncodingMiddleware`** (Apache `AddEncoding`) and **`ContentLanguageMiddleware`** (Apache `AddLanguage`) — additive, opt-in, driven by the same multi-suffix resolver.
+- **`RangeMiddleware`**: `If-Range` HTTP-date support (parsed via `strtotime`, compared to `Last-Modified` with Apache's 1-minute clock-skew rule); invalid spec now invalidates the WHOLE Range header per RFC 7233 §2.1.
+- **`Response::sendFile()`**: full multi-range support (206 multipart/byteranges with boundary framing matching `RangeMiddleware`); `If-Modified-Since` future-date guard; `If-Range` entity-tag + HTTP-date.
+- **`ConcurrencyLimitMiddleware`**: per-key concurrency limiting (Store-backed, keyed by `App::clientIp()` — proxy-aware), opt-in `dryRun` (observe + `elog`, no enforcement), configurable `rejectStatus` (default 503, nginx parity).
+- **`RateLimitMiddleware`**: per-rule `burst=`, `nodelay=`, configurable `rejectStatus`, opt-in `dryRun`. Bucket keying now uses `App::clientIp()` (X-Forwarded-For + trusted proxies) instead of raw `REMOTE_ADDR`.
+- **`HostRouterMiddleware`**: trailing-wildcard (`www.*`) and regex (`~^…`) server_name support, full nginx precedence (exact > leading-wc > trailing-wc > regex > default), HTTP/1.1 missing/duplicate/invalid-Host → 400, trailing-dot normalization, correct IPv6 host+port parsing (`[::1]:80`).
+- **`HeaderMiddleware`**: nginx `add_header` status-conditional default (per-rule `always` opt-out). See note in Changed.
+- **`App::KNOWN_METHODS`** + 501 guard for unrecognised verbs; real `TRACE` handler (echoes request as `message/http` with 413 guard) when `traceEnabled(true)` — note both are defense-in-depth; OpenSwoole's C parser intercepts unknown methods + `TRACE` with 400 before PHP runs (documented in `STANDARDS.md` "OpenSwoole-governed surfaces").
+- **`App::$limit_request_fields`** is now actually enforced — `ResponseMiddleware` counts `HTTP_*` keys per request and returns **400** over the limit.
+- **`ExpiresMiddleware`**: optional `emitCacheControl` (dual Expires + Cache-Control atomic emission); `base: 'M'` (modification-time) in addition to access-time; suppresses both headers on 4xx/5xx; clamps past expiry to `max-age=0`.
+
+### Changed
+
+- **`HeaderMiddleware` default** is now nginx-style status-conditional (`add_header` applies only to 2xx/3xx unless `always=true` per rule) — **mild BC change**, see the rule's `always` flag to restore the prior unconditional behaviour.
+- **`Store::set()`** now catches `OpenSwoole\Exception` on table-full and returns `false` (matches its declared `bool` return); previously threw.
+- **`BodySizeLimitMiddleware`** now enforces the cap on chunked / no-Content-Length uploads (Apache `LimitRequestBody` parity); a limit of `0` correctly means **unlimited** (was rejecting all non-empty bodies).
+- **`RedirectMiddleware`**: when the redirect target already contains `?`, the incoming request query string is now merged with `&` (Apache `QSA` parity); previously dropped.
+- **`CompressionMiddleware`**: `Vary` header now merges (preserves `Vary: Origin` from CORS) instead of replacing; `Accept-Encoding: q=0` correctly refuses compression (RFC 7231 §5.3.4); strong ETags are weakened (`W/` prefix) on compressed responses (RFC 7232 §2.1); `Accept-Ranges` cleared when compression fires.
+- **`ETagMiddleware`** uses the new shared `ConditionalRequest` evaluator: full RFC 9110 precondition precedence, weak/strong compare, `*` wildcard, 412 outcomes, GET+HEAD ETag generation.
+- **`OPTIONS *`** returns **200** with empty body (Apache parity) instead of 204.
+- **HEAD body strip** now applied on error and streaming response paths (was previously normal-response-only).
+
+### Fixed
+
+- All ten bugs (B1–B10) catalogued in `docs/nginx-parity-audit.md`: referer wildcard over-match, rate-limit proxy-IP keying, body-limit `0` semantics, mod_expires error-caching, compression Vary overwrite, error-header leak, regex case-sensitivity, IPv6 host parse, redirect QSA query-drop, fail-open logging.
+- ETag path consistency documented (audit gap H7): both paths emit **weak** ETags; `ETagMiddleware` bails on streaming/empty bodies so it never clobbers `sendFile()`'s stat-based ETag; mutually exclusive per response.
+
+### Documentation
+
+- **`docs/apache-parity-audit.md`** — source-diff audit of 10 HTTP-core subsystems against `httpd 2.5.1` with a severity-ranked gap register and per-lane evidence-cited reports.
+- **`docs/nginx-parity-audit.md`** — source-diff audit of nginx-parity middleware against `nginx 1.31.1` + deeper Apache edge-case lanes (`mod_rewrite`, `ErrorDocument`, `mod_deflate`, `mod_expires`) with 10 bug findings and structural gap analysis.
+- **`STANDARDS.md`** — new **OpenSwoole-governed surfaces** table documenting the parity ceiling (method-line 400-not-501 and the static-handler bypass for `/css,/js,/img`); honest `LimitRequest*` enforcement table marking which knobs are enforced (`Fields`) vs OpenSwoole-governed (`Line`/`FieldSize`).
+
+### Tests
+
+- New unit suites: `ConditionalRequestTest`, `MimeResolverTest`, `RangeMiddlewareConformanceTest`, `UriSecurityConformanceTest`, `IncludeCheckSecurityTest`, `ContentEncodingMiddlewareTest`, `ContentLanguageMiddlewareTest`, `MethodSemanticsTest`. Extended `ETagMiddlewareTest`, `BasicAuthMiddlewareTest`, `BodySizeLimitMiddlewareTest`, `MimeTypeMiddlewareTest`, `HTTP/ResponseTest`, `AppPipelineExtraTest`.
+- Mutation-coverage hardening: 154 escaped mutants triaged across 9 middleware (97 killed by targeted assertions, 57 catalogued as provably-equivalent with one-line rationales each); both gates pass (MSI 90%/floor 88, Covered-MSI 93%/floor 92).
+- New integration cases: HostRouter validation, conditional-request precedence end-to-end, multi-range sendFile, double-encoded-traversal, encoded-slash rejection on PHP-routed paths, error-header isolation (`ErrorHeaderLeakTest`).
+
 ## [0.2.37] - 2026-05-21
 
 Mutation-hardening + conformance-audit release. Raises Infection **covered-MSI from 65% to 95%** (1680/1763 covered mutants killed; the 83 survivors are all provably-equivalent, catalogued in `STANDARDS.md`), fixes a real **HTTP Basic Auth APR1 bug** surfaced by that effort, adds an **Apache httpd core-logic diff + non-support register**, and lands **runnable HTTP fuzz harnesses** (radamsa / gabbi / slowhttptest) wired into CI.
