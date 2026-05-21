@@ -31,6 +31,22 @@ use ZealPHP\RequestContext;
  *
  * @return array<string, mixed>
  */
+/**
+ * Encode an array into PHP's native 'php' session serialize format
+ * (key|serialized_value for each key). This matches the format produced by
+ * session.serialize_handler = php (the default in mod_php / phpredis).
+ *
+ * @param array<string, mixed> $data
+ */
+function php_session_encode_from_array(array $data): string
+{
+    $encoded = '';
+    foreach ($data as $key => $value) {
+        $encoded .= $key . '|' . serialize($value);
+    }
+    return $encoded;
+}
+
 function php_session_decode_to_array(string $data): array
 {
     $decoded = @unserialize($data, ['allowed_classes' => ['stdClass']]);
@@ -350,9 +366,9 @@ function zeal_session_write_close(): bool
                     $data = $current;
                 }
             }
-            $wHandler->write((string) $session_id, serialize($data));
+            $wHandler->write((string) $session_id, php_session_encode_from_array($data));
         } else {
-            file_put_contents($session_file, serialize($data));
+            file_put_contents($session_file, php_session_encode_from_array($data));
         }
 
         // Mark inactive — in both modes. Unset the typed slot in coroutine
@@ -452,7 +468,7 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
         /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
         $data = $superglobals ? ($GLOBALS['_SESSION'] ?? []) : (isset($g->session) ? $g->session : []);
         $data = is_array($data) ? $data : [];
-        $handler->write((string) $new_session_id, serialize($data));
+        $handler->write((string) $new_session_id, php_session_encode_from_array($data));
         if ($delete_old_session && is_string($old_session_id) && $old_session_id !== '') {
             $handler->destroy((string) $old_session_id);
         }
@@ -626,12 +642,10 @@ function zeal_session_abort(): bool
 
 function zeal_session_encode(): string
 {
-    // In superglobals mode, $_SESSION is the canonical store (Symfony / legacy
-    // code writes here). In coroutine mode, the typed $g->session is.
     $data = \ZealPHP\App::$superglobals
         ? ($GLOBALS['_SESSION'] ?? [])
         : RequestContext::instance()->session;
-    return serialize($data);
+    return php_session_encode_from_array(is_array($data) ? $data : []);
 }
 
 function zeal_session_decode(string $data): bool
