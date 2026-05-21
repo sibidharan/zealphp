@@ -34,9 +34,11 @@ use ZealPHP\RequestContext;
  *   - SHA-1  ({SHA}base64)      — `htpasswd -s` (legacy; insecure, accepted)
  *   - crypt() (anything else)   — `htpasswd -d` (legacy DES)
  *
- * Plain text passwords are NEVER accepted from the file — a missing prefix
- * is treated as an opaque crypt() hash, which means setting `user:hunter2`
- * literally in the file will not authenticate `hunter2`.
+ * Plain text passwords are NEVER accepted from the file. An explicit prefix
+ * guard (M13) refuses any hash whose prefix is not one of the recognised
+ * schemes before crypt() is ever called — relying on accidental crypt()
+ * failure is not sufficient. Setting `user:hunter2` literally in the file
+ * will not authenticate `hunter2`.
  *
  * Usage in app.php:
  *
@@ -144,9 +146,28 @@ class BasicAuthMiddleware implements MiddlewareInterface
             $expected = '{SHA}' . base64_encode(sha1($pass, true));
             return hash_equals($hash, $expected);
         }
+        // Explicit plaintext guard (M13): a hash with no recognised prefix
+        // ($apr1$, $2y$/$2a$/$2b$, {SHA}, or a crypt() DES/SHA-256/SHA-512
+        // salt) is refused deterministically.  Apache stores plaintext entries
+        // via htpasswd -p (ALG_PLAIN, passwd_common.c:223); on Linux crypt()
+        // happens to reject them, but we must not rely on that accident.
+        //
+        // crypt() DES hashes are exactly 13 chars: 2-char salt + 11-char body.
+        // crypt() $5$ / $6$ hashes start with '$5$' or '$6$'.
+        // Anything else — no dollar-sign prefix, no {SHA}, wrong length for DES
+        // — is plaintext and must be refused.
+        $isCryptDes     = strlen($hash) === 13 && preg_match('#^[./0-9A-Za-z]{2}#', $hash) === 1;
+        $isCryptSha256  = str_starts_with($hash, '$5$');
+        $isCryptSha512  = str_starts_with($hash, '$6$');
+        $isCryptMd5     = str_starts_with($hash, '$1$');  // glibc MD5 imported files
+        if (!$isCryptDes && !$isCryptSha256 && !$isCryptSha512 && !$isCryptMd5) {
+            // No recognised scheme: reject deterministically (never plaintext).
+            return false;
+        }
         // Fallback: crypt() with whatever salt the hash encodes (legacy DES,
-        // SHA-256 $5$, SHA-512 $6$, etc.). crypt() returns the input on
-        // unsupported algorithms, so hash_equals still correctly rejects.
+        // SHA-256 $5$, SHA-512 $6$, glibc $1$, etc.). crypt() returns the
+        // input on unsupported algorithms, so hash_equals still correctly
+        // rejects any remnant edge-cases.
         $computed = crypt($pass, $hash);
         return hash_equals($hash, $computed);
     }
