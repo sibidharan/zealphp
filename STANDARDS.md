@@ -59,7 +59,8 @@ connection is dropped).
 |---|---|---|---|
 | **HTTP Basic Auth** — `WWW-Authenticate: Basic realm=`, 401 (RFC 7617) | `BasicAuthMiddleware` (htpasswd + callback) | Behavioral | `tests/Unit/Middleware/BasicAuthMiddlewareTest.php`, `BasicAuthFileTest.php` |
 | **Cookies** — cookie-name token rule (§4.1.1), CRLF/NUL injection defense, attribute propagation, `SameSite`/`Secure`/`HttpOnly` (RFC 6265) | `setcookie()` override (7-arg + samesite) | **Exhaustive** | `tests/Unit/Rfc6265CookieConformanceTest.php` + `tests/Integration/HttpFeaturesTest.php` |
-| **URI** — dot-segment / null-byte / encoded-traversal rejection (RFC 3986) | `ResponseMiddleware` pre-routing guard → 400 | Behavioral | `tests/Unit/SecurityTest.php`, `tests/Unit/ResponseMiddlewarePipelineTest.php` |
+| **URI** — dot-segment / null-byte / encoded-traversal rejection (RFC 3986) | `ResponseMiddleware` pre-routing guard → 400 | **Exhaustive** | `tests/Unit/SecurityTest.php`, `tests/Unit/ResponseMiddlewarePipelineTest.php`, `tests/Integration/PublicRoutingTest.php::testStaticPathTraversalIsRejected` (live, incl. static path) |
+| **Static file serving** — extension→MIME, `Last-Modified`, ETag, conditional 304, Range, `DirectoryIndex`, traversal-hardened | `Response::sendFile()` + implicit public routes + `App::$directory_index` | Behavioral | `tests/Integration/PublicRoutingTest.php` (sendFile ETag/304/Range, DirectoryIndex, traversal) |
 
 ## Content, compression, real-time
 
