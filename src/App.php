@@ -132,6 +132,14 @@ class App
      */
     public static string $default_charset = 'utf-8';
     /**
+     * mod_php-parity SAPI identity for the php_sapi_name() override. Default null
+     * returns the real PHP_SAPI ("cli") — no behavior change. Set to a web SAPI
+     * string (e.g. 'apache2handler', 'fpm-fcgi') so legacy code branching on
+     * php_sapi_name() takes its web path. The PHP_SAPI *constant* is unaffected
+     * (uopz cannot redefine it). Configure via App::sapiName() before App::init().
+     */
+    public static ?string $sapi_name = null;
+    /**
      * Whether ZealPHP's per-request session lifecycle runs. Default true: the
      * SessionManager / CoSessionManager OnRequest wrapper reads the PHPSESSID
      * cookie, calls zeal_session_start(), optionally emits the Set-Cookie
@@ -500,6 +508,9 @@ class App
         \uopz_set_return('is_uploaded_file', \Closure::fromCallable('\ZealPHP\is_uploaded_file'), true);
         \uopz_set_return('move_uploaded_file', \Closure::fromCallable('\ZealPHP\move_uploaded_file'), true);
         \uopz_set_return('phpinfo', \Closure::fromCallable('\ZealPHP\phpinfo'), true);
+        \uopz_set_return('php_sapi_name', \Closure::fromCallable('\ZealPHP\php_sapi_name'), true);
+        \uopz_set_return('filter_input', \Closure::fromCallable('\ZealPHP\filter_input'), true);
+        \uopz_set_return('filter_input_array', \Closure::fromCallable('\ZealPHP\filter_input_array'), true);
         // Per-coroutine error/exception/shutdown handler registry.
         \uopz_set_return('set_error_handler', \Closure::fromCallable('\ZealPHP\set_error_handler'), true);
         \uopz_set_return('restore_error_handler', \Closure::fromCallable('\ZealPHP\restore_error_handler'), true);
@@ -648,6 +659,17 @@ class App
     {
         if ($charset !== null) self::$default_charset = $charset;
         return self::$default_charset;
+    }
+
+    /**
+     * mod_php-parity SAPI name reported by the php_sapi_name() override.
+     * No-arg call returns the current setting (null = report real PHP_SAPI);
+     * one-arg call opts in to a web SAPI string for legacy-app compatibility.
+     */
+    public static function sapiName(?string $name = null): ?string
+    {
+        if ($name !== null) self::$sapi_name = $name;
+        return self::$sapi_name;
     }
 
     /**

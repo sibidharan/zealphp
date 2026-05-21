@@ -4,9 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
-- **`unset($g->session['key'])` now persists through a custom session handler** ([#21](https://github.com/sibidharan/zealphp/issues/21)). `zeal_session_write_close()`'s concurrent-race merge (`array_merge(stored, current)`) resurrected keys that were `unset()` during the request — a merge can't tell "never existed here" from "deleted here". Session keys are now snapshotted at load (`RequestContext::$session_loaded_keys`); the merge drops keys that were loaded but are now absent (in-request deletions) while preserving keys never loaded here (concurrent adds). Apache `$_SESSION` unset parity. Only affected custom `SessionHandlerInterface` implementations (e.g. Redis); the file-handler default already wrote the live array directly.
+- **`php_sapi_name()` override + `App::sapiName(?string)`** — Apache/mod_php parity for SAPI identity. Under the CLI SAPI `php_sapi_name()` natively returns `"cli"`, which legacy apps branch on to disable web-only behavior. Opt in with `App::sapiName('apache2handler')` (or `'fpm-fcgi'`) during boot and the override reports that value so such code takes its web path. Default (`App::$sapi_name === null`) returns the real `PHP_SAPI` — **zero behavior change** unless configured. The `PHP_SAPI` *constant* still reads `"cli"` (uopz cannot redefine it — documented limitation).
+- **`filter_input()` / `filter_input_array()` overrides** — Apache/mod_php parity for input filtering. Native `filter_input()` reads PHP's internal SAPI request tables, which OpenSwoole never populates, so legacy code using `INPUT_GET` / `INPUT_POST` / `INPUT_COOKIE` / `INPUT_SERVER` / `INPUT_ENV` silently received `null`. The overrides resolve the value from `RequestContext` (`$g`) and apply the requested filter via the pure, unit-tested `ZealPHP\Input\RequestInput` helper. Purely additive (CLI returned `null` before) — no breaking change. Part of the Apache/mod_php parity effort (design: `docs/superpowers/specs/2026-05-21-phpinfo-override-and-modphp-parity-design.md`).
 
 ## [0.2.31] - 2026-05-21
 

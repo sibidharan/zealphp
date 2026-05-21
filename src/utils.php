@@ -988,6 +988,46 @@ function phpinfo(int $flags = INFO_ALL): bool
 }
 
 /**
+ * mod_php-parity php_sapi_name(): under the CLI SAPI this natively returns "cli",
+ * which legacy apps branch on to disable web-only behavior. When an app opts in
+ * via App::sapiName('apache2handler') (or 'fpm-fcgi'), this returns the configured
+ * value so such code takes its web path. Default (App::$sapi_name === null) returns
+ * the real PHP_SAPI — zero behavior change unless explicitly configured.
+ *
+ * Note: the PHP_SAPI *constant* cannot be redefined (uopz_redefine refuses it), so
+ * code reading the constant directly still sees "cli". Documented limitation.
+ */
+function php_sapi_name(): string
+{
+    return \ZealPHP\App::$sapi_name ?? PHP_SAPI;
+}
+
+/**
+ * mod_php-parity filter_input(): native filter_input() reads PHP's internal SAPI
+ * request tables, which OpenSwoole never populates (so it returns null under CLI).
+ * This resolves the value from RequestContext ($g) and applies the requested filter.
+ *
+ * @param array<string, mixed>|int $options
+ */
+function filter_input(int $type, string $var_name, int $filter = FILTER_DEFAULT, array|int $options = 0): mixed
+{
+    $bag = \ZealPHP\Input\RequestInput::bagFor($type);
+    return \ZealPHP\Input\RequestInput::filterValue($bag, $var_name, $filter, $options);
+}
+
+/**
+ * mod_php-parity filter_input_array(): the array counterpart of filter_input().
+ *
+ * @param array<string, mixed>|int $options
+ * @return array<string, mixed>
+ */
+function filter_input_array(int $type, array|int $options = FILTER_DEFAULT, bool $add_empty = true): array
+{
+    $bag = \ZealPHP\Input\RequestInput::bagFor($type);
+    return \ZealPHP\Input\RequestInput::filterArray($bag, $options, $add_empty);
+}
+
+/**
  * Apache mod_php getallheaders() / apache_request_headers() — return all
  * inbound request headers with canonical (Hyphen-Capitalized) case.
  *
