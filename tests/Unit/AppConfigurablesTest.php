@@ -104,6 +104,41 @@ class AppConfigurablesTest extends TestCase
         App::cgiMode('exec');
     }
 
+    public function testCgiModeAcceptsFcgi(): void
+    {
+        $orig = App::$cgi_mode;
+        $this->assertSame('fcgi', App::cgiMode('fcgi'));
+        $this->assertSame('fcgi', App::cgiMode());
+        $this->assertSame('fcgi', App::$cgi_mode);
+        App::$cgi_mode = $orig;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // fcgiAddress()
+    // ─────────────────────────────────────────────────────────────
+
+    public function testFcgiAddressDefaultsTcp9000(): void
+    {
+        $this->assertSame('127.0.0.1:9000', App::fcgiAddress());
+        $this->assertSame('127.0.0.1:9000', App::$fcgi_address);
+    }
+
+    public function testFcgiAddressSetterRoundtrips(): void
+    {
+        $orig = App::$fcgi_address;
+        $this->assertSame('unix:/run/php/php-fpm.sock', App::fcgiAddress('unix:/run/php/php-fpm.sock'));
+        $this->assertSame('unix:/run/php/php-fpm.sock', App::fcgiAddress());
+        App::$fcgi_address = $orig;
+    }
+
+    public function testFcgiAddressNoArgReturnsCurrent(): void
+    {
+        $orig = App::$fcgi_address;
+        App::$fcgi_address = '10.0.0.1:9001';
+        $this->assertSame('10.0.0.1:9001', App::fcgiAddress());
+        App::$fcgi_address = $orig;
+    }
+
     // ─────────────────────────────────────────────────────────────
     // serverAdmin()
     // ─────────────────────────────────────────────────────────────

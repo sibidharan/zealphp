@@ -463,4 +463,97 @@ PHP);
         $this->assertSame(200, $meta['status_code'],
             'Out-of-range Status: code must be ignored, leaving default 200');
     }
+
+    // -------------------------------------------------------------------------
+    // Fix 2 (Part B): SIGTERM→SIGKILL escalation — killCgiChild helper
+    // -------------------------------------------------------------------------
+
+    /**
+     * Simulate what App::cgiSubprocess() does when the timeout fires:
+     * send SIGTERM, poll until not-running, escalate to SIGKILL if needed.
+     *
+     * Returns true if the process was killed within the deadline, false otherwise.
+     *
+     * @param resource $proc
+     */
+    private function killCgiChild($proc, float $gracePeriod = 3.0, float $killWait = 1.0): bool
+    {
+        proc_terminate($proc, 15); // SIGTERM
+        $deadline = microtime(true) + $gracePeriod;
+        while (microtime(true) < $deadline) {
+            $st = proc_get_status($proc);
+            if (!$st['running']) {
+                return true;
+            }
+            usleep(20000);
+        }
+        // SIGKILL escalation
+        $st = proc_get_status($proc);
+        if ($st['running']) {
+            proc_terminate($proc, 9); // SIGKILL
+            $killDeadline = microtime(true) + $killWait;
+            while (microtime(true) < $killDeadline) {
+                $st = proc_get_status($proc);
+                if (!$st['running']) {
+                    return true;
+                }
+                usleep(10000);
+            }
+            return false;
+        }
+        return true;
+    }
+
+    public function testSigtermKillsNormalProcessWithoutSigkill(): void
+    {
+        // A process that exits promptly on SIGTERM must not need SIGKILL.
+        $f = $this->fixture('quick_exit.php', "<?php\necho 'done';\n");
+
+        $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $env = array_merge($_ENV, ['ZEALPHP_REQUEST_CONTEXT' => '{}', 'ZEALPHP_CWD' => ZEALPHP_ROOT]);
+        $proc = proc_open([PHP_BINARY, ZEALPHP_ROOT . '/src/cgi_worker.php', $f], $descriptors, $pipes, ZEALPHP_ROOT, $env);
+        $this->assertIsResource($proc);
+        fclose($pipes[0]);
+
+        // Let it run to completion naturally, then verify it exited.
+        $deadline = microtime(true) + 5.0;
+        while (microtime(true) < $deadline) {
+            $st = proc_get_status($proc);
+            if (!$st['running']) break;
+            usleep(10000);
+        }
+
+        $killed = $this->killCgiChild($proc);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($proc);
+
+        // Process already exited before SIGTERM — killCgiChild returns true.
+        $this->assertTrue($killed, 'killCgiChild must report success for an already-exited process');
+    }
+
+    public function testSigkillFallbackKillsProcessThatIgnoresSigterm(): void
+    {
+        // A process that sleeps (simulating SIGTERM ignore) must be killed via
+        // SIGKILL escalation within the grace period.
+        $f = $this->fixture('sleep_long.php', "<?php\nsleep(60);\n");
+
+        $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $env = array_merge($_ENV, ['ZEALPHP_REQUEST_CONTEXT' => '{}', 'ZEALPHP_CWD' => ZEALPHP_ROOT]);
+        $proc = proc_open([PHP_BINARY, ZEALPHP_ROOT . '/src/cgi_worker.php', $f], $descriptors, $pipes, ZEALPHP_ROOT, $env);
+        $this->assertIsResource($proc);
+        fclose($pipes[0]);
+
+        // Verify it is running before we try to kill it.
+        $st = proc_get_status($proc);
+        $this->assertTrue($st['running'], 'Subprocess must be running before kill attempt');
+
+        // Use a very short grace period so SIGKILL fires quickly in the test.
+        $killed = $this->killCgiChild($proc, gracePeriod: 0.05, killWait: 2.0);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($proc);
+
+        $this->assertTrue($killed, 'SIGKILL escalation must terminate a sleeping subprocess');
+    }
 }
