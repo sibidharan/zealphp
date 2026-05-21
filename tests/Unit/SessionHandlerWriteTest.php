@@ -161,6 +161,44 @@ class SessionHandlerWriteTest extends TestCase
             'keys the concurrent request added survive');
     }
 
+    public function testUnsetKeyIsNotResurrectedByMerge(): void
+    {
+        // #21: a key loaded this request and then unset() must NOT come back
+        // via the merge-with-stored mitigation. Store has {rdir, user_id};
+        // this request loaded both, deleted rdir, kept user_id.
+        $existing = serialize(['rdir' => '/old/path', 'user_id' => 7]);
+        $h = new FakeSessionHandlerSpy($existing);
+
+        $g = RequestContext::instance();
+        $g->session_params['handler'] = $h;
+        $g->session_loaded_keys = ['rdir', 'user_id']; // snapshot at load time
+        $g->session = ['user_id' => 7];                 // rdir was unset() this request
+
+        $this->assertTrue(zeal_session_write_close());
+        $stored = php_session_decode_to_array($h->stored);
+        $this->assertArrayNotHasKey('rdir', $stored,
+            'unset() key must not be resurrected by the merge');
+        $this->assertSame(7, $stored['user_id'], 'kept key survives');
+    }
+
+    public function testConcurrentAddSurvivesEvenWithDeletionTracking(): void
+    {
+        // A key we NEVER loaded (added by a concurrent request) must still be
+        // preserved — deletion tracking only removes keys we loaded then dropped.
+        $existing = serialize(['flash' => 'from-B']);
+        $h = new FakeSessionHandlerSpy($existing);
+
+        $g = RequestContext::instance();
+        $g->session_params['handler'] = $h;
+        $g->session_loaded_keys = ['cart']; // we only loaded cart
+        $g->session = ['cart' => ['x']];    // cart kept; flash never loaded here
+
+        $this->assertTrue(zeal_session_write_close());
+        $stored = php_session_decode_to_array($h->stored);
+        $this->assertArrayHasKey('flash', $stored, 'concurrent add must survive');
+        $this->assertArrayHasKey('cart', $stored);
+    }
+
     public function testHandlerDestroyIsCalled(): void
     {
         $h = new FakeSessionHandlerSpy('user_id|i:7;');

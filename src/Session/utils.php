@@ -193,6 +193,10 @@ function zeal_session_start(): bool
     // coroutine-mode code reads/writes via the typed property.
     /** @var array<string, mixed> $session_data */
     $g->session = $session_data;
+    // #21: snapshot the keys present at load so write_close() can tell an
+    // in-request unset() (must delete from store) from a concurrent add
+    // (must survive the merge).
+    $g->session_loaded_keys = array_keys($session_data);
     if (\ZealPHP\App::$superglobals) {
         $GLOBALS['_SESSION'] = $session_data;
     }
@@ -331,6 +335,17 @@ function zeal_session_write_close(): bool
                 $current = is_array($data) ? $data : [];
                 if ($existingData !== []) {
                     $data = array_merge($existingData, $current);
+                    // #21: honor in-request deletions. A key that was loaded
+                    // this request (in session_loaded_keys) but is now absent
+                    // from $current was unset() — it must NOT be resurrected by
+                    // the merge-with-stored mitigation. Keys we never loaded
+                    // (concurrent adds, not in session_loaded_keys) are left
+                    // intact, preserving the cross-request merge guarantee.
+                    foreach ($g->session_loaded_keys as $loadedKey) {
+                        if (!array_key_exists($loadedKey, $current)) {
+                            unset($data[$loadedKey]);
+                        }
+                    }
                 } else {
                     $data = $current;
                 }

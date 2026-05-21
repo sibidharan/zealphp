@@ -36,6 +36,14 @@ class RequestContext
     public array $files = [];
     /** @var array<string, mixed> */
     public array $session = [];
+    /**
+     * Keys present in $g->session at session-load time. Lets
+     * zeal_session_write_close() distinguish an in-request unset() (key was
+     * loaded then removed → must be deleted from the store) from a concurrent
+     * add (key never loaded here → must be preserved through the merge). #21.
+     * @var list<string>
+     */
+    public array $session_loaded_keys = [];
     /** @var array<string, mixed> */
     public array $session_params = [];
     public ?int $status = null;
