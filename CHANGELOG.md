@@ -2,10 +2,13 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.32] - 2026-05-21
+
+A second Apache/mod_php parity wave: new built-in overrides (`php_sapi_name`, `filter_input`/`filter_input_array`, `header_register_callback`, `error_log`), `$_SERVER` completeness (`GATEWAY_INTERFACE`/`REQUEST_SCHEME`/`HTTPS`), new directive middleware (`RedirectMiddleware`, `SetEnvIfMiddleware`) and config (`ServerTokens`, `FileETag`, `default_mimetype`) — plus two session/output correctness fixes ([#20](https://github.com/sibidharan/zealphp/issues/20), [#21](https://github.com/sibidharan/zealphp/issues/21)).
 
 ### Fixed
 
+- **Void return (`return;`) no longer discards buffered output** ([#20](https://github.com/sibidharan/zealphp/issues/20)). `executeFile()` only treated PHP's `int(1)` (no `return`) as "surface the echoed output"; a bare `return;` yields `null` and fell through to the explicit-return branch, silently dropping all rendered HTML (a common pattern: `echo`/template output followed by `return;`). `$result === null && $output !== ''` is now also treated as the no-explicit-return case — consistent with the universal return contract (`null` = no body override).
 - **`unset($g->session['key'])` now persists through a custom session handler** ([#21](https://github.com/sibidharan/zealphp/issues/21)). `zeal_session_write_close()`'s concurrent-race merge (`array_merge(stored, current)`) resurrected keys that were `unset()` during the request — a merge can't tell "never existed here" from "deleted here". The session's keys are now snapshotted at load (`RequestContext::$session_loaded_keys`); the merge drops keys that were loaded but are now absent (in-request deletions) while preserving keys never loaded here (concurrent adds). Apache `$_SESSION` unset parity. Only affected custom `SessionHandlerInterface` implementations (e.g. Redis); the file-handler default already wrote the live array directly.
 
 ### Added
