@@ -238,6 +238,13 @@ class App
      */
     public static bool $hostname_lookups = false;
     /**
+     * Maximum seconds to wait for a CGI subprocess (proc mode) to produce
+     * its metadata line on stderr. After this deadline the child receives
+     * SIGTERM; if it does not exit within 5 s it receives SIGKILL. Matches
+     * Apache's `CGIScriptTimeout` directive. Default 60 s.
+     */
+    public static int $cgi_timeout = 60;
+    /**
      * CIDR list of proxy IPs whose `X-Forwarded-For` / `X-Real-IP` headers
      * App::clientIp() will trust. Empty (the default) means no proxies trusted
      * — App::clientIp() always returns `REMOTE_ADDR`. Critical for production
@@ -2674,6 +2681,82 @@ class App
     }
 
     /**
+     * Build the OS-level environment array passed to the CGI subprocess.
+     *
+     * Extracted as a public static method so unit tests can assert the exact
+     * env without spawning a process (reflection is not needed). Apache parity
+     * reference: util_script.c ap_add_common_vars() + ap_add_cgi_vars().
+     *
+     * @param array<string, mixed> $server  $g->server (OpenSwoole-populated)
+     * @param string               $ctx     JSON-encoded ZEALPHP_REQUEST_CONTEXT
+     * @return array<string, string>
+     */
+    public static function buildCgiEnv(array $server, string $ctx): array
+    {
+        $env = [];
+        $allowedPrefixes = ['HTTP_', 'REQUEST_', 'SERVER_', 'SCRIPT_', 'DOCUMENT_', 'CONTENT_', 'REMOTE_', 'QUERY_', 'PATH_', 'AUTH_'];
+        foreach ($server as $k => $v) {
+            if (!is_string($v)) continue;
+            if ($k === 'HTTPS') {
+                $env[$k] = $v;
+                continue;
+            }
+            // SECURITY: strip HTTP_PROXY to prevent the httpoxy CVE-class attack.
+            // A client-supplied "Proxy:" request header maps to HTTP_PROXY in the
+            // subprocess env, which many HTTP client libraries read as proxy config.
+            // Apache's fix: util_script.c:224-227 skips the "Proxy" header entirely.
+            if ($k === 'HTTP_PROXY') {
+                continue;
+            }
+            foreach ($allowedPrefixes as $prefix) {
+                if (str_starts_with($k, $prefix)) {
+                    $env[$k] = $v;
+                    break;
+                }
+            }
+        }
+
+        // RFC 3875 mandatory vars absent from OpenSwoole's $request->server.
+        if (!isset($env['GATEWAY_INTERFACE'])) {
+            $env['GATEWAY_INTERFACE'] = 'CGI/1.1';
+        }
+        if (!isset($env['SERVER_SOFTWARE'])) {
+            $env['SERVER_SOFTWARE'] = 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion();
+        }
+        if (!isset($env['DOCUMENT_ROOT'])) {
+            $env['DOCUMENT_ROOT'] = self::resolveDocumentRoot();
+        }
+        if (!isset($env['SERVER_ADMIN']) && self::$server_admin !== null && self::$server_admin !== '') {
+            $env['SERVER_ADMIN'] = self::$server_admin;
+        }
+        // AUTH_TYPE / REMOTE_USER — carry from $server if present (set by BasicAuthMiddleware);
+        // already included via the AUTH_ prefix above, but add explicit fallback keys.
+        if (!isset($env['AUTH_TYPE'])) {
+            $authHeader = $server['HTTP_AUTHORIZATION'] ?? $server['AUTHORIZATION'] ?? '';
+            if (is_string($authHeader) && stripos($authHeader, 'Basic ') === 0) {
+                $env['AUTH_TYPE'] = 'Basic';
+            }
+        }
+        if (!isset($env['REMOTE_USER']) && isset($server['REMOTE_USER']) && is_string($server['REMOTE_USER'])) {
+            $env['REMOTE_USER'] = $server['REMOTE_USER'];
+        }
+        if (!isset($env['REMOTE_PORT']) && isset($server['REMOTE_PORT'])) {
+            $rp = $server['REMOTE_PORT'];
+            if (is_scalar($rp)) {
+                $env['REMOTE_PORT'] = (string)$rp;
+            }
+        }
+        if (!isset($env['PATH_TRANSLATED']) && isset($env['PATH_INFO']) && $env['PATH_INFO'] !== '') {
+            $env['PATH_TRANSLATED'] = self::resolveDocumentRoot() . $env['PATH_INFO'];
+        }
+
+        $env['ZEALPHP_REQUEST_CONTEXT'] = $ctx;
+        $env['ZEALPHP_CWD'] = self::$cwd;
+
+        return $env;
+    }
+
+    /**
      * Run a PHP file in a separate process at true global scope (CGI-style).
      * Required for legacy apps like WordPress that depend on bare variable
      * assignments and `global` keyword declarations being seen by every file.
@@ -2702,23 +2785,7 @@ class App
             'env'    => $g->env ?? $_ENV,
         ], JSON_UNESCAPED_SLASHES);
 
-        $env = [];
-        $allowedPrefixes = ['HTTP_', 'REQUEST_', 'SERVER_', 'SCRIPT_', 'DOCUMENT_', 'CONTENT_', 'REMOTE_', 'QUERY_', 'PATH_'];
-        foreach ($g->server as $k => $v) {
-            if (!is_string($v)) continue;
-            if ($k === 'HTTPS') {
-                $env[$k] = $v;
-                continue;
-            }
-            foreach ($allowedPrefixes as $prefix) {
-                if (str_starts_with($k, $prefix)) {
-                    $env[$k] = $v;
-                    break;
-                }
-            }
-        }
-        $env['ZEALPHP_REQUEST_CONTEXT'] = $ctx;
-        $env['ZEALPHP_CWD'] = self::$cwd;
+        $env = self::buildCgiEnv($g->server, is_string($ctx) ? $ctx : '{}');
 
         $cgiWorker = __DIR__ . '/cgi_worker.php';
         $descriptors = [
@@ -2749,59 +2816,122 @@ class App
 
         // Protocol: CGI worker sends metadata as a single JSON line on stderr
         // BEFORE streaming body on stdout. This enables SSE and streaming.
-        $metaLine = fgets($pipes[2]);
+        // Apply a configurable read timeout (App::$cgi_timeout seconds) so a
+        // hung subprocess never blocks the OpenSwoole worker indefinitely.
+        // Apache parity: CGIScriptTimeout / apr_file_pipe_timeout_set() (mod_cgi.c:437,444).
+        stream_set_blocking($pipes[2], false);
+        $deadline = microtime(true) + self::$cgi_timeout;
+        $metaLine = '';
+        while (microtime(true) < $deadline) {
+            $line = fgets($pipes[2]);
+            if ($line !== false) {
+                $metaLine = $line;
+                break;
+            }
+            if (feof($pipes[2])) {
+                break;
+            }
+            usleep(5000);
+        }
+        if ($metaLine === '') {
+            // Subprocess timed out or died without metadata — kill it.
+            proc_terminate($process, 15); // SIGTERM
+            $killDeadline = microtime(true) + 5.0;
+            while (microtime(true) < $killDeadline) {
+                $st = proc_get_status($process);
+                if (!$st['running']) break;
+                usleep(50000);
+            }
+            $st = proc_get_status($process);
+            if ($st['running']) {
+                proc_terminate($process, 9); // SIGKILL
+            }
+            // Drain remaining stderr for visibility.
+            stream_set_blocking($pipes[2], true);
+            $stderrRemainder = stream_get_contents($pipes[2]);
+            fclose($pipes[2]);
+            fclose($pipes[1]);
+            proc_close($process);
+            if (is_string($stderrRemainder) && $stderrRemainder !== '') {
+                elog("[cgi_worker] (timeout) stderr: " . rtrim($stderrRemainder), "cgi_worker");
+            }
+            elog("cgiSubprocess: timeout after " . self::$cgi_timeout . "s for $path", "error");
+            return 500;
+        }
+
+        // Drain any remaining stderr after the metadata line and route via elog
+        // so PHP fatal errors / warnings from the subprocess are visible.
+        // Apache parity: cgi_common.h:103-126 log_script_err() reads child stderr line-by-line.
+        stream_set_blocking($pipes[2], true);
+        $stderrRemainder = stream_get_contents($pipes[2]);
         fclose($pipes[2]);
+        if (is_string($stderrRemainder) && $stderrRemainder !== '') {
+            elog("[cgi_worker] stderr: " . rtrim($stderrRemainder), "cgi_worker");
+        }
 
         $streaming   = false;
         $returnValue = null;
         $hasReturn   = false;
-        if ($metaLine) {
-            $meta = json_decode(trim($metaLine), true);
-            if (is_array($meta)) {
-                $statusCode = $meta['status_code'] ?? 200;
-                response_set_status(is_numeric($statusCode) ? (int)$statusCode : 200);
-                $metaHeaders = is_array($meta['headers'] ?? null) ? $meta['headers'] : [];
-                foreach ($metaHeaders as $pair) {
-                    if (is_array($pair) && count($pair) >= 2) {
-                        $p0 = is_scalar($pair[0]) ? (string)$pair[0] : '';
-                        $p1 = is_scalar($pair[1]) ? (string)$pair[1] : '';
-                        // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                        $g->zealphp_response->header($p0, $p1);
-                    }
-                }
-                $metaCookies = is_array($meta['cookies'] ?? null) ? $meta['cookies'] : [];
-                foreach ($metaCookies as $args) {
-                    if (is_array($args) && !empty($args)) {
-                        // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                        $g->zealphp_response->cookie(...$args);
-                    }
-                }
-                $metaRawCookies = is_array($meta['rawcookies'] ?? null) ? $meta['rawcookies'] : [];
-                foreach ($metaRawCookies as $args) {
-                    if (is_array($args) && !empty($args)) {
-                        // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                        $g->zealphp_response->rawCookie(...$args);
-                    }
-                }
-                // Detect streaming content types (SSE, chunked, event-stream)
-                foreach ($metaHeaders as $pair) {
-                    if (is_array($pair) && count($pair) >= 2) {
-                        $p0 = is_scalar($pair[0]) ? (string)$pair[0] : '';
-                        $p1 = is_scalar($pair[1]) ? (string)$pair[1] : '';
-                        if (strcasecmp($p0, 'Content-Type') === 0
-                            && stripos($p1, 'text/event-stream') !== false) {
-                            $streaming = true;
+        $meta = json_decode(trim($metaLine), true);
+        if (is_array($meta)) {
+            $statusCode = $meta['status_code'] ?? 200;
+            response_set_status(is_numeric($statusCode) ? (int)$statusCode : 200);
+            $metaHeaders = is_array($meta['headers'] ?? null) ? $meta['headers'] : [];
+
+            foreach ($metaHeaders as $pair) {
+                if (!is_array($pair) || count($pair) < 2) continue;
+                $p0 = is_scalar($pair[0]) ? (string)$pair[0] : '';
+                $p1 = is_scalar($pair[1]) ? (string)$pair[1] : '';
+
+                // mod_cgi parity: CGI/1.1 RFC 3875 §6.3.3 — "Status: NNN Reason"
+                // sets the HTTP response code. Apache: ap_scan_script_header_err_brigade_ex().
+                // Strip the Status: pseudo-header so it never reaches the client.
+                if (strcasecmp($p0, 'Status') === 0) {
+                    $codeStr = strtok($p1, ' ');
+                    if ($codeStr !== false && ctype_digit($codeStr)) {
+                        $parsed = (int)$codeStr;
+                        if ($parsed >= 100 && $parsed <= 599) {
+                            response_set_status($parsed);
                         }
                     }
+                    continue;
                 }
-                // Universal return contract: the subprocess captures the file's
-                // return value (int / array / string / null) and ships it here.
-                // Generator/Closure returns are consumed inside the subprocess
-                // and stream out as body — they appear as a `streamed` marker.
-                if (array_key_exists('return_value', $meta)) {
-                    $hasReturn   = true;
-                    $returnValue = $meta['return_value'];
+
+                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+                $g->zealphp_response->header($p0, $p1);
+            }
+            $metaCookies = is_array($meta['cookies'] ?? null) ? $meta['cookies'] : [];
+            foreach ($metaCookies as $args) {
+                if (is_array($args) && !empty($args)) {
+                    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+                    $g->zealphp_response->cookie(...$args);
                 }
+            }
+            $metaRawCookies = is_array($meta['rawcookies'] ?? null) ? $meta['rawcookies'] : [];
+            foreach ($metaRawCookies as $args) {
+                if (is_array($args) && !empty($args)) {
+                    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+                    $g->zealphp_response->rawCookie(...$args);
+                }
+            }
+            // Detect streaming content types (SSE, chunked, event-stream)
+            foreach ($metaHeaders as $pair) {
+                if (is_array($pair) && count($pair) >= 2) {
+                    $p0 = is_scalar($pair[0]) ? (string)$pair[0] : '';
+                    $p1 = is_scalar($pair[1]) ? (string)$pair[1] : '';
+                    if (strcasecmp($p0, 'Content-Type') === 0
+                        && stripos($p1, 'text/event-stream') !== false) {
+                        $streaming = true;
+                    }
+                }
+            }
+            // Universal return contract: the subprocess captures the file's
+            // return value (int / array / string / null) and ships it here.
+            // Generator/Closure returns are consumed inside the subprocess
+            // and stream out as body — they appear as a `streamed` marker.
+            if (array_key_exists('return_value', $meta)) {
+                $hasReturn   = true;
+                $returnValue = $meta['return_value'];
             }
         }
 
