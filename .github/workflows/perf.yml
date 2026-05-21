@@ -1,0 +1,49 @@
+name: Perf
+
+# Perf-regression smoke — catches catastrophic throughput regressions (broken
+# hot path, accidental blocking call, per-request leak). NOT a micro-benchmark;
+# the real numbers come from the offline Docker harness (bench/, PERF.md).
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  perf-smoke:
+    name: Perf smoke (req/s floor)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: openswoole, uopz
+          tools: composer:v2
+
+      - name: Install ApacheBench
+        run: sudo apt-get update && sudo apt-get install -y apache2-utils
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Start ZealPHP
+        run: |
+          php app.php >/tmp/zealphp-server.log 2>&1 &
+          echo $! > /tmp/zealphp-server.pid
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/json >/dev/null 2>&1; then
+              echo "server up"; break
+            fi
+            sleep 1
+          done
+
+      - name: Perf smoke
+        env:
+          PERF_MIN_RPS: '1500'
+        run: bash scripts/perf_smoke.sh
+
+      - name: Stop ZealPHP
+        if: always()
+        run: kill "$(cat /tmp/zealphp-server.pid)" 2>/dev/null || true
