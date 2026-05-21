@@ -26,13 +26,21 @@
     "mutators": {
         "@default": true
     },
-    // Ratcheted to just under the measured baseline (first CI run: MSI 59%,
-    // Covered-MSI 65%, 91% mutation coverage over 1786 mutants) so the gate now
-    // BITES against regression without flapping. Keep raising these as tests
-    // harden — target Covered-MSI 85+. The suite runs in definition order
+    // Ratcheted to the measured ceiling. After the v0.2.37 mutation-hardening
+    // push, MSI = 95% / Covered-MSI 95% / 100% mutation coverage over ~1763
+    // covered mutants. The 83 surviving mutants are ALL provably-equivalent
+    // (mutations that yield semantically identical behaviour — e.g. redundant
+    // (int)/(string) casts guarded by ctype_digit / declared return types,
+    // min(16,$i) vs min(17,$i) on a 16-byte buffer, $i>0 vs $i>=0 that only
+    // adds an empty-string append, ['*'] vs [] both allow-all). These are the
+    // mathematical ceiling: no test can distinguish identical behaviour. The
+    // equivalent-mutant catalogue is documented in STANDARDS.md.
+    //
+    // Floor set 3 points under the measured 95% so the gate BITES against any
+    // regression without flapping. The suite runs in definition order
     // (phpunit.xml executionOrder="default"): it carries shared runtime state
     // (uopz global overrides, App:: static config, per-coroutine G, live
     // coroutines) and is not random-order-safe by design.
-    "minMsi": 55,
-    "minCoveredMsi": 60
+    "minMsi": 92,
+    "minCoveredMsi": 92
 }

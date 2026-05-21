@@ -169,9 +169,36 @@ deliberate non-goals of an application framework that expects a real proxy in fr
 |---|---|---|---|
 | Static analysis | PHPStan | **level 10**, zero errors | `phpstan.neon`, CI |
 | Line coverage floor | Codecov | **≥ 80%** project + patch | `codecov.yml`, CI |
-| Mutation score (test effectiveness) | Infection | minMSI 70 / covered-MSI 85 (ratcheting) | `infection.json5`, `.github/workflows/mutation.yml` |
+| Mutation score (test effectiveness) | Infection | **MSI 95% / covered-MSI 95%** (gate floor 92) | `infection.json5`, `.github/workflows/mutation.yml` |
 | Perf regression | ApacheBench | req/s floor (catastrophe detector) | `scripts/perf_smoke.sh`, `.github/workflows/perf.yml` |
 | Secrets / CVE / code scanning | gitleaks / composer audit / CodeQL | clean | CI |
+
+### Why mutation score is 95%, not 100% — the equivalent-mutant blocker
+
+Covered-MSI sits at **95%**: of ~1763 covered mutants, 1680 are killed and **83 survive**.
+Every one of the 83 is a *provably-equivalent mutant* — a source mutation that produces
+**semantically identical behaviour**, so by construction **no test can kill it** (there is
+no input for which the original and mutant differ). 100% MSI is therefore mathematically
+unreachable by adding tests; it could only be reported by annotating these lines with
+`@infection-ignore` — which this project deliberately does **not** do, because a clean
+"95% with an honest equivalent-mutant register" beats a "100%" propped up by ignore
+pragmas. The recurring equivalence classes:
+
+| Equivalence class | Example | Why no test distinguishes it |
+|---|---|---|
+| Redundant cast under a type guard | `(int) $header` after `ctype_digit($header)`; `(string) $k` array key | the guard / PHP's key-normalization already guarantees the type → cast is a no-op |
+| Redundant cast under a declared return type | `(string) $ip` in a `: string` method | PHP coerces the return value identically with or without the cast |
+| Buffer-capped `substr`/`min` | `min(16, $i)` → `min(17, $i)` on a 16-byte MD5 | `substr` caps at the string length → identical bytes |
+| Empty-iteration loop bound | `for(...; $i > 0; ...)` → `$i >= 0` where the extra pass appends `''` | the extra iteration is a no-op on the accumulator |
+| Unreachable defensive branch | `filemtime()/fopen()/gzencode() === false` → `=== true` | the function never returns `true`; both forms skip the dead branch |
+| Equivalent allow-all configs | `['*']` → `[]` in an IP/host allow-list | both make the allow-check pass everything |
+| Stacked `case`/`default` fallthrough | dropping `case 'set':` when it shares `default:`'s body | control reaches the same body |
+| `explode($s, $d, 2)` → `, 3)` with 2-var destructure | `[$a, $b] = explode(...)` | only the first two parts bind; the limit is invisible |
+
+Each surviving mutant is catalogued with its proof in the per-file test docblocks and the
+commit messages for the `tests/Unit/*MiddlewareTest.php` mutation-hardening series. The
+gate floor is 92 (3 points under the measured 95) so it bites against regression without
+flapping.
 
 ---
 
