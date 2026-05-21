@@ -145,6 +145,42 @@ class Http1FramingConformanceTest extends TestCase
         $this->assertSame(200, $r['status'], 'HTTP/1.0 without Host is valid');
     }
 
+    /** Chunk extensions (`5;ext=val`, RFC 9112 §7.1.1) handled safely (parsed or rejected, never mis-framed/hung). */
+    public function testChunkExtensionHandledSafely(): void
+    {
+        $r = $this->raw(
+            'POST /json HTTP/1.1' . self::CRLF . 'Host: x' . self::CRLF
+            . 'Transfer-Encoding: chunked' . self::CRLF . 'Connection: close' . self::CRLF
+            . self::CRLF . '5;ext=val' . self::CRLF . 'hello' . self::CRLF . '0' . self::CRLF . self::CRLF
+        );
+        $this->assertNotNull($r['status'], 'chunk extension must yield a definite HTTP response, not hang');
+    }
+
+    /** Trailer headers after the last chunk (RFC 9112 §7.1.2) are parsed, not mishandled. */
+    public function testChunkTrailerParsed(): void
+    {
+        $r = $this->raw(
+            'POST /json HTTP/1.1' . self::CRLF . 'Host: x' . self::CRLF
+            . 'Transfer-Encoding: chunked' . self::CRLF . 'Connection: close' . self::CRLF
+            . self::CRLF . '5' . self::CRLF . 'hello' . self::CRLF . '0' . self::CRLF
+            . 'X-Trailer: v' . self::CRLF . self::CRLF
+        );
+        $this->assertNotNull($r['status']);
+        $this->assertGreaterThanOrEqual(200, $r['status'], 'valid trailers must parse to a response');
+    }
+
+    /** Leading-zero chunk size (`0005`) is parsed as hex 5 (RFC 9112 §7.1). */
+    public function testChunkLeadingZerosParsed(): void
+    {
+        $r = $this->raw(
+            'POST /json HTTP/1.1' . self::CRLF . 'Host: x' . self::CRLF
+            . 'Transfer-Encoding: chunked' . self::CRLF . 'Connection: close' . self::CRLF
+            . self::CRLF . '0005' . self::CRLF . 'hello' . self::CRLF . '0' . self::CRLF . self::CRLF
+        );
+        $this->assertNotNull($r['status']);
+        $this->assertGreaterThanOrEqual(200, $r['status']);
+    }
+
     /** A well-formed chunked body is dechunked and processed (valid framing). */
     public function testValidChunkedBodyIsParsed(): void
     {
