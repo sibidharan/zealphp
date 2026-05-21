@@ -974,6 +974,20 @@ function ob_implicit_flush($enable = true): void
 }
 
 /**
+ * mod_php-parity phpinfo(): render a self-contained HTML document instead of the
+ * CLI SAPI's plain-text dump. Matches the native signature — echoes output and
+ * returns true. Wired via uopz in App::__construct(); the renderer lives in
+ * \ZealPHP\Diagnostics\PhpInfo.
+ *
+ * @param int $flags INFO_* bitmask.
+ */
+function phpinfo(int $flags = INFO_ALL): bool
+{
+    echo \ZealPHP\Diagnostics\PhpInfo::render($flags);
+    return true;
+}
+
+/**
  * Apache mod_php getallheaders() / apache_request_headers() — return all
  * inbound request headers with canonical (Hyphen-Capitalized) case.
  *
