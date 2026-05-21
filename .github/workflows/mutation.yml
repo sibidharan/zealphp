@@ -1,15 +1,19 @@
 name: Mutation
 
 # Mutation testing (Infection) measures whether the tests actually *catch*
-# breakage, not just execute lines. Runs on PRs and on demand. Scoped to the
-# Unit suite + the pure modules in infection.json5 (no OpenSwoole server needed).
+# breakage, not just execute lines. Runs on PRs and on demand; on master pushes
+# it also refreshes the MSI badge (.github/badges/mutation.json) so the README
+# always shows the latest CI-measured score. Scoped to the Unit suite + the pure
+# modules in infection.json5 (no OpenSwoole server needed).
 on:
+  push:
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
-# Least-privilege GITHUB_TOKEN (CodeQL: limit workflow permissions).
+# contents: write is needed only for the master-push badge commit-back below.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   infection:
@@ -35,9 +39,39 @@ jobs:
           XDEBUG_MODE: coverage
         # Thresholds come from infection.json5 (minMsi / minCoveredMsi).
         # --logger-github annotates escaped mutants inline on the PR.
-        run: >
-          vendor/bin/infection
-          --threads=4
-          --test-framework-options="--testsuite=Unit"
-          --no-progress
-          --logger-github
+        run: |
+          set -o pipefail
+          vendor/bin/infection \
+            --threads=4 \
+            --test-framework-options="--testsuite=Unit" \
+            --no-progress \
+            --logger-github 2>&1 | tee infection-output.log
+
+      - name: Report MSI to job summary
+        if: always()
+        run: |
+          MSI=$(grep -oiP 'Mutation Score Indicator \(MSI\):\s*\K[0-9.]+' infection-output.log | head -1 || true)
+          COV=$(grep -oiP 'Covered Code MSI:\s*\K[0-9.]+' infection-output.log | head -1 || true)
+          echo "## Mutation testing" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **MSI:** ${MSI:-unknown}%" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Covered Code MSI:** ${COV:-unknown}%" >> "$GITHUB_STEP_SUMMARY"
+          echo "MSI=${MSI:-}" >> "$GITHUB_ENV"
+
+      - name: Refresh MSI badge (master only)
+        if: github.event_name == 'push' && env.MSI != ''
+        run: |
+          MSI_INT="${MSI%.*}"
+          if   [ "$MSI_INT" -ge 80 ]; then COLOR=brightgreen
+          elif [ "$MSI_INT" -ge 70 ]; then COLOR=green
+          elif [ "$MSI_INT" -ge 60 ]; then COLOR=yellow
+          elif [ "$MSI_INT" -ge 40 ]; then COLOR=orange
+          else COLOR=red
+          fi
+          printf '{\n  "schemaVersion": 1,\n  "label": "mutation MSI",\n  "message": "%s%%",\n  "color": "%s",\n  "style": "flat-square"\n}\n' "$MSI_INT" "$COLOR" > .github/badges/mutation.json
+          if ! git diff --quiet .github/badges/mutation.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/badges/mutation.json
+            git commit -m "ci(badge): mutation MSI ${MSI_INT}% [skip ci]"
+            git push
+          fi
