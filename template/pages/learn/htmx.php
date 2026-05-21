@@ -445,10 +445,138 @@ PHP,
               .  'And <a href="/demo/fragments/contacts?fragment=does-not-exist" target="_blank" rel="noopener" style="color:#fbbf24">/demo/fragments/contacts?fragment=does-not-exist</a> returns HTTP 404 — the framework refuses to fall back to the full page when the named fragment doesn\'t exist.</p>',
     ]); ?>
 
+    <h2 id="server-side">Server-side: detect htmx, drive client behaviour, compose with <code>App::fragment()</code></h2>
+    <p>
+      htmx flows have <strong>two sides</strong>: the client decides what to swap (<code>hx-*</code> attributes,
+      shown above), and the server decides <em>what HTML to return</em> AND <em>what htmx should do after the swap</em>.
+      ZealPHP gives you a thin layer over both — <code>App::fragment()</code> for the body
+      (<a href="/templates#fragments">one file, two responses</a>) and a fluent
+      <code>$response->htmx()</code> builder for the response headers htmx reads. The two compose cleanly because
+      they're orthogonal: <strong>fragment writes the body, <code>htmx()</code> writes the metadata.</strong>
+    </p>
+
+    <h3 id="hx-request">Read htmx context from the request</h3>
+    <p>Available on every <code>ZealPHP\HTTP\Request</code> — no need to dig through <code>$g->server['HTTP_HX_*']</code>:</p>
+    <pre><code class="language-php">use ZealPHP\App;
+
+$app->route('/notes/{id}', function ($request, $response, $id) {
+    $note = Notes::find((int) $id);
+
+    if ($request->isHtmx()) {
+        // htmx swap — return just the card fragment
+        return App::renderToString('pages/notes', [
+            'note'     => $note,
+            'fragment' => 'note-card',   // App::fragment('note-card', ...) inside the template
+        ]);
+    }
+
+    // Plain navigation / bookmark / search-engine — full page
+    return App::render('_master', ['page' => 'note', 'note' => $note]);
+});</code></pre>
+
+    <p style="margin-top:.75rem;font-size:.9rem;color:#9ca3af">
+      Also: <code>isBoosted()</code>, <code>isHistoryRestoreRequest()</code>,
+      <code>htmxTarget()</code>, <code>htmxTrigger()</code>, <code>htmxTriggerName()</code>,
+      <code>htmxCurrentUrl()</code>, <code>htmxPrompt()</code>.
+    </p>
+
+    <h3 id="hx-response">Drive client behaviour with <code>$response->htmx()</code></h3>
+    <p>
+      11 HX-* response headers htmx reads after a swap — events, browser history,
+      target/swap override, refresh, redirect. Fluent, chained:
+    </p>
+    <pre><code class="language-php">$app->route('/api/notes', function ($request, $response) {
+    $note = Notes::create($request->getParsedBody());
+
+    return $response->htmx()
+        ->trigger('note-saved')                   // HX-Trigger: fire JS event
+        ->triggerAfterSwap('focus-next-input')    // HX-Trigger-After-Swap
+        ->pushUrl("/notes/{$note->id}")           // HX-Push-Url: browser history
+        ->reswap('beforeend')                     // HX-Reswap: override target swap
+        ->response()                              // → underlying Response
+        ->withHeader('Content-Type', 'text/html')
+        ->withBody(\GuzzleHttp\Psr7\Utils::streamFor(
+            App::renderToString('partials/note_card', ['note' => $note])
+        ));
+});</code></pre>
+
+    <p style="margin-top:.75rem;font-size:.9rem;color:#9ca3af">
+      Full surface: <code>trigger()</code>, <code>triggerAfterSwap()</code>, <code>triggerAfterSettle()</code>,
+      <code>reswap()</code>, <code>retarget()</code>, <code>reselect()</code>,
+      <code>refresh()</code>, <code>location()</code>, <code>pushUrl()</code>, <code>replaceUrl()</code>,
+      <code>redirect()</code>. Each returns the builder; <code>response()</code> hands you back the underlying <code>Response</code>.
+    </p>
+
+    <h3 id="hx-oob">Out-of-band swaps — update multiple regions in one response</h3>
+    <p>
+      Sometimes one action should refresh more than the targeted element — e.g. saving a note also bumps an
+      unread-counter badge in the nav. <code>HtmxResponse::oob()</code> emits a marked fragment you concat into
+      the response body; htmx swaps it into its own <code>id</code>-matched region client-side:
+    </p>
+    <pre><code class="language-php">use ZealPHP\HTTP\HtmxResponse;
+
+$body = App::renderToString('partials/note_card', ['note' => $note])         // primary swap (hx-target)
+      . HtmxResponse::oob('unread-badge', '&lt;span&gt;' . $unread . '&lt;/span&gt;')         // OOB: replace #unread-badge
+      . HtmxResponse::oob('toast', '&lt;div&gt;Saved!&lt;/div&gt;', swap: 'beforeend'); // OOB: append to #toast
+
+return $response->htmx()->trigger('note-saved')->response()
+       ->withHeader('Content-Type', 'text/html')
+       ->withBody(\GuzzleHttp\Psr7\Utils::streamFor($body));</code></pre>
+
+    <h3 id="hx-compose">Putting it together: one template, two responses, one HX-Trigger</h3>
+    <p>
+      This is the punchline. The <em>same</em> route handler serves the full page on plain navigation and the
+      named fragment on htmx swap — and on the htmx response, fires a client event so a toast component picks up:
+    </p>
+    <pre><code class="language-php">// template/pages/notes.php — fragments and full page from one file
+&lt;?php use ZealPHP\App; ?&gt;
+&lt;section&gt;
+  &lt;h1&gt;Notes&lt;/h1&gt;
+  &lt;?php App::fragment('note-list', function () use ($notes) { ?&gt;
+    &lt;ul id="note-list" hx-target="this" hx-swap="outerHTML"&gt;
+      &lt;?php foreach ($notes as $note): ?&gt;
+        &lt;li&gt;&lt;?= htmlspecialchars($note-&gt;title) ?&gt;&lt;/li&gt;
+      &lt;?php endforeach; ?&gt;
+    &lt;/ul&gt;
+  &lt;?php }); ?&gt;
+&lt;/section&gt;</code></pre>
+    <pre><code class="language-php">// route handler — branch by request type, fire event on save
+use ZealPHP\App;
+
+$app->route('/notes', function ($request, $response) {
+    if ($request->getMethod() === 'POST') {
+        Notes::create($request->getParsedBody());
+        // After save, return just the updated list AND fire the toast event.
+        $body = App::renderToString('pages/notes', [
+            'notes'    => Notes::all(),
+            'fragment' => 'note-list',
+        ]);
+        return $response->htmx()->trigger('note-saved')->response()
+               ->withHeader('Content-Type', 'text/html')
+               ->withBody(\GuzzleHttp\Psr7\Utils::streamFor($body));
+    }
+    // GET — full page on plain nav, just #note-list on htmx swap.
+    return App::render('_master', [
+        'page'     => 'notes',
+        'notes'   => Notes::all(),
+        'fragment' => $request->isHtmx() ? 'note-list' : null,
+    ]);
+});</code></pre>
+
+    <p style="margin-top:.75rem;font-size:.9rem;color:#9ca3af">
+      <strong>Why this design:</strong> body and metadata are orthogonal concerns. <code>App::render*()</code> /
+      <code>App::include()</code> / <code>App::fragment()</code> own the body (the
+      <a href="/responses#return-contract">universal return contract</a> covers every shape). Response
+      headers are not body content; pushing them into the rendering API would conflate two unrelated axes and break
+      the contract that "what the file/template returns is the body." The builder lives on <code>Response</code>
+      because that's where headers actually go.
+    </p>
+
     <?php App::render('/components/_keytakeaways', ['items' => [
       'htmx turns any HTML element into an AJAX trigger with just HTML attributes',
       'The server returns HTML fragments, not JSON — no client-side rendering needed',
       'Four attributes (<code>hx-post</code>, <code>hx-target</code>, <code>hx-swap</code>, <code>hx-trigger</code>) cover 95% of use cases',
+      'Server side: <code>$request->isHtmx()</code> + <code>$response->htmx()->trigger()->pushUrl()</code> + <code>App::fragment()</code> compose into one handler that serves full page <em>and</em> partial swap',
       'Progressive enhancement: forms still work without JavaScript',
     ]]); ?>
 
