@@ -224,19 +224,28 @@ class BasicAuthMiddleware implements MiddlewareInterface
             $bin  = md5($new, true);
         }
 
-        $tmp = '';
-        for ($i = 0; $i < 5; $i++) {
-            $k = $i + 6;
-            $j = $i + 12;
-            if ($j === 16) $j = 5;
-            $tmp = $bin[$i] . $bin[$k] . $bin[$j] . $tmp;
-        }
-        $tmp = "\x00\x00" . $bin[11] . $tmp;
-        $encoded = strtr(
-            substr(base64_encode($tmp), 2),
-            'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/',
-            './0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
-        );
+        // Final to64 encoding — the canonical apr_md5_encode byte interleave.
+        // Each group is emitted LSB-first (6 bits at a time); the byte order
+        // (0,6,12 / 1,7,13 / … / 4,10,5 / 11) is fixed by the reference impl.
+        // (Earlier revisions reversed the group order, producing a digest that
+        //  never matched a real `htpasswd -m` hash — issue surfaced by pinning
+        //  against Apache's own htpasswd as the oracle.)
+        $itoa64 = './0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+        $to64 = static function (int $value, int $count) use ($itoa64): string {
+            $out = '';
+            while ($count-- > 0) {
+                $out  .= $itoa64[$value & 0x3f];
+                $value >>= 6;
+            }
+            return $out;
+        };
+        $b = array_map('ord', str_split($bin));
+        $encoded  = $to64(($b[0] << 16) | ($b[6] << 8) | $b[12], 4);
+        $encoded .= $to64(($b[1] << 16) | ($b[7] << 8) | $b[13], 4);
+        $encoded .= $to64(($b[2] << 16) | ($b[8] << 8) | $b[14], 4);
+        $encoded .= $to64(($b[3] << 16) | ($b[9] << 8) | $b[15], 4);
+        $encoded .= $to64(($b[4] << 16) | ($b[10] << 8) | $b[5], 4);
+        $encoded .= $to64($b[11], 2);
 
         return '$apr1$' . $salt . '$' . $encoded;
     }
