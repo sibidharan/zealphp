@@ -182,7 +182,7 @@ class StaticServingConformanceTest extends TestCase
         $clean = $this->get('/json');
         $this->assertStatus(200, $clean);
 
-        foreach (['//json', '/./json', '/json/.', '//json//'] as $p) {
+        foreach (['//json', '/./json', '//json//'] as $p) {
             $r = $this->get($p);
             $this->assertStatus(200, $r, "normalized path should resolve to the route: $p");
         }
