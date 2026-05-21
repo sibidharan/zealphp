@@ -4,7 +4,16 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`unset($g->session['key'])` now persists through a custom session handler** ([#21](https://github.com/sibidharan/zealphp/issues/21)). `zeal_session_write_close()`'s concurrent-race merge (`array_merge(stored, current)`) resurrected keys that were `unset()` during the request — a merge can't tell "never existed here" from "deleted here". The session's keys are now snapshotted at load (`RequestContext::$session_loaded_keys`); the merge drops keys that were loaded but are now absent (in-request deletions) while preserving keys never loaded here (concurrent adds). Apache `$_SESSION` unset parity. Only affected custom `SessionHandlerInterface` implementations (e.g. Redis); the file-handler default already wrote the live array directly.
+
 ### Added
+
+- **Apache `ServerTokens` parity (`App::serverTokens()` / `App::$server_tokens`)** — controls the `X-Powered-By` response header: `'Full'` (default) → `ZealPHP + OpenSwoole`; `'Prod'`/`'Major'`/`'Minor'`/`'Min'`/`'OS'` → `ZealPHP`; `'None'`/`''` → header omitted (info-leak hardening). `App::poweredByHeader()` resolves the value at the emission boundary. Non-breaking default.
+- **`RedirectMiddleware` (Apache mod_alias `Redirect` / `RedirectMatch`)** — declarative URL redirects: prefix (`/old` → `/new`, remainder appended) and regex (with `$n` backreferences). First match short-circuits with a `Location` redirect; query string preserved; default status 302.
+- **`SetEnvIfMiddleware` (Apache mod_setenvif `SetEnvIf` / `BrowserMatch`)** — sets request env vars into `$g->server` (mod_php `$_SERVER`) when a request attribute matches a regex. Apache special attributes (`Remote_Addr`, `Request_Method`, `Request_URI`, `Request_Protocol`, …) plus any header name (`User-Agent` = `BrowserMatch`).
+- **Apache `FileETag` parity (`App::fileETag()` / `App::$file_etag`)** — set `false` for `FileETag None`: `ETagMiddleware` then emits no `ETag` and never returns 304. Default true.
 
 - **`error_log()` override** — Apache/mod_php parity. Native `error_log()` under the CLI SAPI writes to stderr / the php.ini `error_log` path; ZealPHP routes `message_type` 0 (system logger) and 4 (SAPI) into the framework's async log (`debug.log`, falling back to stderr when logging is off) so legacy `error_log()` calls land with the rest of the app's diagnostics. `message_type` 3 (append to file) is honored verbatim; `message_type` 1 (email) is unsupported under the coroutine runtime and returns `false`. As part of this, `log_write()`'s three last-resort fallbacks now write to stderr directly instead of `error_log()` (which is now overridden — avoids a recursion loop).
 - **`default_mimetype` parity (`App::$default_mimetype` / `App::defaultMimeType()`)** — `CharsetMiddleware` now applies a default `Content-Type` (mod_php's `text/html`, configurable; `''` to disable) to responses that don't set one, before appending the charset. Apache `DefaultType` / PHP `default_mimetype` parity. Opt-in via the middleware, consistent with the other Apache-directive middleware.

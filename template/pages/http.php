@@ -140,6 +140,10 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
   <tr><td><code>&lt;FilesMatch&gt; Cache-Control</code> / <code>mod_substitute</code></td><td>✅ Middleware</td><td>CacheControl / BodyRewrite middleware</td></tr>
   <tr><td><code>AuthType Basic</code> + <code>AuthUserFile</code> / <code>Allow,Deny</code> / <code>Require ip</code></td><td>✅ Middleware</td><td>BasicAuth / IpAccess middleware</td></tr>
   <tr><td><code>limit_req</code> / <code>limit_conn</code> (nginx) / <code>server_name</code> vhosts</td><td>✅ Middleware</td><td>RateLimit / ConcurrencyLimit / HostRouter middleware</td></tr>
+  <tr><td><code>Redirect</code> / <code>RedirectMatch</code> (mod_alias)</td><td>✅ Middleware</td><td>RedirectMiddleware — declarative prefix + regex redirects</td></tr>
+  <tr><td><code>SetEnvIf</code> / <code>BrowserMatch</code> (mod_setenvif)</td><td>✅ Middleware</td><td>SetEnvIfMiddleware — set request env vars on attribute/regex match</td></tr>
+  <tr><td><code>ServerTokens</code> / <code>ServerSignature</code></td><td>✅ Config</td><td><code>App::serverTokens()</code> controls/omits the <code>X-Powered-By</code> header</td></tr>
+  <tr><td><code>FileETag</code></td><td>✅ Config</td><td><code>App::fileETag(false)</code> disables ETag/304 (<code>FileETag None</code>)</td></tr>
   <tr><td><code>DocumentRoot</code> / <code>TraceEnable</code> / <code>ServerAdmin</code> / <code>ServerName</code> / <code>LimitRequest*</code> / <code>CustomLog</code></td><td>✅ Config</td><td><code>App::*</code> fluent setters (set before <code>App::init()</code>)</td></tr>
   <tr><td>Trusted proxies / <code>X-Forwarded-For</code></td><td>✅ Config</td><td><code>App::$trusted_proxies</code> + <code>App::clientIp()</code></td></tr>
 </table>
