@@ -231,4 +231,213 @@ class ExpiresMiddlewareTest extends TestCase
         $response = $this->process(['text/css' => '+1 year'], null, 'text/css');
         $this->assertTrue($response->hasHeader('Expires'));
     }
+
+    // -------------------------------------------------------------------------
+    // B4 parity fixes — Apache mod_expires.c behaviour
+    // -------------------------------------------------------------------------
+
+    public function testNoExpiresOn404Response(): void
+    {
+        // Apache mod_expires.c:455–458: headers are never stamped on 4xx/5xx.
+        // A 404 response must pass through unchanged even when the CT matches.
+        $middleware = new ExpiresMiddleware(['text/css' => '+1 year'], '+5 minutes');
+
+        $request = new ServerRequest('/', 'GET', '', []);
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('not found', 404, '', ['Content-Type' => 'text/css']);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertFalse($response->hasHeader('Expires'));
+        $this->assertCount(0, $this->recorder->calls);
+    }
+
+    public function testNoExpiresOn500Response(): void
+    {
+        // Same guard applies to 5xx responses.
+        $middleware = new ExpiresMiddleware(['text/html' => '+1 hour'], '+5 minutes');
+
+        $request = new ServerRequest('/', 'GET', '', []);
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('error', 500, '', ['Content-Type' => 'text/html']);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertFalse($response->hasHeader('Expires'));
+    }
+
+    public function testNegativeOffsetClampsToMaxAgeZero(): void
+    {
+        // Apache mod_expires.c:429–431: if computed expiry < request_time,
+        // clamp to request_time (=> max-age=0). A past-pointing relative date
+        // must NOT emit a past Expires timestamp; it must be set to ~now.
+        $middleware = new ExpiresMiddleware(['text/css' => '-1 hour'], null, 'A', true);
+
+        $request = new ServerRequest('/', 'GET', '', []);
+        $before   = time();
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('body', 200, '', ['Content-Type' => 'text/css']);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+        $after = time();
+
+        $this->assertTrue($response->hasHeader('Expires'));
+
+        // The clamped Expires must not be in the past.
+        $expiresTs = strtotime($response->getHeaderLine('Expires'));
+        $this->assertIsInt($expiresTs);
+        $this->assertGreaterThanOrEqual($before, $expiresTs);
+        $this->assertLessThanOrEqual($after + 1, $expiresTs);
+
+        // max-age must be 0 (clamped), not negative.
+        $this->assertTrue($response->hasHeader('Cache-Control'));
+        $this->assertSame('max-age=0, public', $response->getHeaderLine('Cache-Control'));
+    }
+
+    public function testDualHeaderEmissionConsistent(): void
+    {
+        // Apache set_expiration_fields() (mod_expires.c:432–437) always emits
+        // both Expires and Cache-Control: max-age=N derived from the same delta.
+        // With emitCacheControl=true, max-age must equal expires - now (to the
+        // second) — they must be in sync, not independently configured.
+        $middleware = new ExpiresMiddleware(['text/css' => '+1 hour'], null, 'A', true);
+
+        $request = new ServerRequest('/', 'GET', '', []);
+        $before   = time();
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('body', 200, '', ['Content-Type' => 'text/css']);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+        $after = time();
+
+        $this->assertTrue($response->hasHeader('Expires'));
+        $this->assertTrue($response->hasHeader('Cache-Control'));
+
+        $expiresTs = strtotime($response->getHeaderLine('Expires'));
+        $this->assertIsInt($expiresTs);
+
+        // max-age must be derived from the same expiry timestamp.
+        preg_match('/max-age=(\d+)/', $response->getHeaderLine('Cache-Control'), $m);
+        $this->assertNotEmpty($m);
+        $maxAge = (int)$m[1];
+
+        // max-age = expires - now; allow ±2 s for execution time.
+        $this->assertGreaterThanOrEqual(3598, $maxAge);
+        $this->assertLessThanOrEqual(3602, $maxAge);
+
+        // Expires and max-age must agree: expiresTs ≈ now + maxAge.
+        $this->assertEqualsWithDelta($expiresTs - $before, $maxAge, 2);
+    }
+
+    public function testDualHeaderNotEmittedWhenFlagOff(): void
+    {
+        // Default (emitCacheControl=false): only Expires is set.
+        $response = $this->process(['text/css' => '+1 year'], null, 'text/css');
+
+        $this->assertTrue($response->hasHeader('Expires'));
+        $this->assertFalse($response->hasHeader('Cache-Control'));
+    }
+
+    public function testDualHeaderDoesNotOverwriteExistingCacheControl(): void
+    {
+        // emitCacheControl=true must respect a pre-existing Cache-Control header.
+        $middleware = new ExpiresMiddleware(['text/css' => '+1 hour'], null, 'A', true);
+
+        $request = new ServerRequest('/', 'GET', '', []);
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('body', 200, '', [
+                    'Content-Type'  => 'text/css',
+                    'Cache-Control' => 'no-store',
+                ]);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertTrue($response->hasHeader('Expires'));
+        $this->assertSame('no-store', $response->getHeaderLine('Cache-Control'));
+    }
+
+    public function testMBaseUsesLastModifiedForExpiry(): void
+    {
+        // M base: expiry = Last-Modified + offset.
+        // Set Last-Modified to exactly 1 hour ago; with '+2 hours' relative,
+        // the expiry should be ~1 hour from now (mtime + 2h - 1h elapsed).
+        $mtime     = time() - 3600; // 1 hour ago
+        $lastMod   = gmdate('D, d M Y H:i:s', $mtime) . ' GMT';
+
+        $middleware = new ExpiresMiddleware(['text/html' => '+2 hours'], null, 'M');
+
+        $request = new ServerRequest('/', 'GET', '', []);
+        $before   = time();
+        $handler = new class($lastMod) implements RequestHandlerInterface {
+            public function __construct(private string $lastMod) {}
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('body', 200, '', [
+                    'Content-Type'  => 'text/html',
+                    'Last-Modified' => $this->lastMod,
+                ]);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+        $after = time();
+
+        $this->assertTrue($response->hasHeader('Expires'));
+
+        $expiresTs = strtotime($response->getHeaderLine('Expires'));
+        $this->assertIsInt($expiresTs);
+
+        // mtime + 2h = (now - 3600) + 7200 = now + 3600 ≈ 1 hour from now.
+        $this->assertGreaterThanOrEqual($before + 3598, $expiresTs);
+        $this->assertLessThanOrEqual($after  + 3602, $expiresTs);
+    }
+
+    public function testMBaseWithNoLastModifiedFallsBackToAccessTime(): void
+    {
+        // M base with no Last-Modified header: falls back to access-time (now).
+        // Result should match A-base behaviour.
+        $middleware = new ExpiresMiddleware(['text/html' => '+1 hour'], null, 'M');
+
+        $request = new ServerRequest('/', 'GET', '', []);
+        $before   = time();
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                // No Last-Modified header.
+                return new Response('body', 200, '', ['Content-Type' => 'text/html']);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+        $after = time();
+
+        $this->assertTrue($response->hasHeader('Expires'));
+
+        $expiresTs = strtotime($response->getHeaderLine('Expires'));
+        $this->assertIsInt($expiresTs);
+
+        // Should be ~1 hour from now (access-time fallback).
+        $this->assertGreaterThanOrEqual($before + 3598, $expiresTs);
+        $this->assertLessThanOrEqual($after  + 3602, $expiresTs);
+    }
 }

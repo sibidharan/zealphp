@@ -33,6 +33,11 @@ use ZealPHP\RequestContext;
  * Pass `$publicCache = false` to emit `private` instead of `public` — useful
  * when you serve per-user assets that intermediate caches must not store.
  *
+ * **Error-response suppression:**
+ * Apache mod_expires (and the FilesMatch + Header set equivalent) never
+ * stamps caching headers on 4xx/5xx responses. Responses with status >= 400
+ * are returned unchanged, matching Apache behaviour (mod_expires.c:455–458).
+ *
  * Usage in app.php:
  *
  *   // defaults — 30d for css/js/images/fonts
@@ -84,6 +89,11 @@ class CacheControlMiddleware implements MiddlewareInterface
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $response = $handler->handle($request);
+
+        // Apache mod_expires.c:455–458: never stamp caching headers on error responses.
+        if ($response->getStatusCode() >= 400) {
+            return $response;
+        }
 
         if ($response->hasHeader('Cache-Control')) {
             return $response;

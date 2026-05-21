@@ -143,4 +143,54 @@ class CacheControlMiddlewareTest extends TestCase
         $this->assertSame('no-store', $response->getHeaderLine('Cache-Control'));
         $this->assertCount(0, $this->recorder->calls);
     }
+
+    // -------------------------------------------------------------------------
+    // B4 parity fix — Apache mod_expires.c:455–458 error-response suppression
+    // -------------------------------------------------------------------------
+
+    public function testNoCacheControlOn404Response(): void
+    {
+        // Apache never stamps caching headers on 4xx/5xx responses.
+        // A /missing.css 404 must NOT get Cache-Control: max-age=N — that
+        // would cause browsers and CDNs to cache error pages as assets.
+        $middleware = new CacheControlMiddleware();
+        $request    = new ServerRequest('/missing.css', 'GET', '', []);
+
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('not found', 404, '', ['Content-Type' => 'text/css']);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertFalse($response->hasHeader('Cache-Control'));
+        $this->assertCount(0, $this->recorder->calls);
+    }
+
+    public function testNoCacheControlOn500Response(): void
+    {
+        // Same guard for 5xx.
+        $middleware = new CacheControlMiddleware();
+        $request    = new ServerRequest('/app.js', 'GET', '', []);
+
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('error', 500, '', ['Content-Type' => 'text/javascript']);
+            }
+        };
+
+        $response = $middleware->process($request, $handler);
+
+        $this->assertFalse($response->hasHeader('Cache-Control'));
+    }
+
+    public function testCacheControlStillStampedOn200AfterErrorGuard(): void
+    {
+        // Confirm the guard doesn't accidentally suppress 2xx responses.
+        $response = $this->process('/style.css');
+        $this->assertSame('max-age=2628000, public', $response->getHeaderLine('Cache-Control'));
+    }
 }
