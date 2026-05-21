@@ -123,7 +123,11 @@ class ZealAPI extends REST
         } else {
             if ($module !== '') {
                 $dir = $this->cwd.'/api'.$module;
-                $g->server['DOCUMENT_ROOT'] = App::$cwd . '/api';
+                // Apache parity (issue #18): DOCUMENT_ROOT is ALWAYS the web
+                // root, never the /api subdirectory. Handlers that include
+                // files relative to $_SERVER['DOCUMENT_ROOT'] (the mod_php
+                // convention) must resolve against htdocs, not htdocs/api.
+                $g->server['DOCUMENT_ROOT'] = App::resolveDocumentRoot();
                 $file = $dir.'/'.$request.'.php';
 
                 $apiBase = realpath($this->cwd . '/api');
@@ -138,13 +142,21 @@ class ZealAPI extends REST
                     try {
                         /** @var \Closure $closureToBind */
                         $closureToBind = ${$func};
-                        $this->api_rpc = \Closure::bind($closureToBind, $this, get_class());
+                        $this->api_rpc = \Closure::bind($closureToBind, $this, get_class($this));
                     } catch (\TypeError $e) {
                         elog(jTraceEx($e), "error");
                         $this->response($this->json(['error'=>'method_not_found']), 404);
                         return;
                     }
-                    $g->server['PHP_SELF'] = $module.'/'.$request.'.php';
+                    // Apache parity (issue #18): the script path is rooted at
+                    // the URL ('/api/<module>/<request>.php'), and
+                    // SCRIPT_FILENAME is the absolute path mod_php would have
+                    // resolved — i.e. the real handler file, not DOCUMENT_ROOT
+                    // concatenated with a /api-less PHP_SELF.
+                    $scriptName = '/api'.$module.'/'.$request.'.php';
+                    $g->server['PHP_SELF']        = $scriptName;
+                    $g->server['SCRIPT_NAME']     = $scriptName;
+                    $g->server['SCRIPT_FILENAME'] = $realFile;
                     $handler = $this->api_rpc;
                     $cacheKey = $file . ':' . $func;
                     if (!isset(self::$reflectionCache[$cacheKey])) {
