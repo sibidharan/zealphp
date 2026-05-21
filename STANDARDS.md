@@ -172,6 +172,8 @@ deliberate non-goals of an application framework that expects a real proxy in fr
 | Mutation score (test effectiveness) | Infection | **Covered-MSI 95%** / plain MSI 91% (gates 92 / 88) | `infection.json5`, `.github/workflows/mutation.yml` |
 | Perf regression | ApacheBench | req/s floor (catastrophe detector) | `scripts/perf_smoke.sh`, `.github/workflows/perf.yml` |
 | Secrets / CVE / code scanning | gitleaks / composer audit / CodeQL | clean | CI |
+| Supply-chain posture | OpenSSF Scorecard | published (badge) + SARIF to code-scanning | `.github/workflows/scorecard.yml` |
+| Dependency transparency | CycloneDX SBOM | `build/sbom.cdx.json` artifact (CycloneDX 1.5) | `.github/workflows/sbom.yml` |
 
 ### Why mutation score is 95%, not 100% — the equivalent-mutant blocker
 
