@@ -175,6 +175,72 @@ class BodySizeLimitMiddlewareTest extends TestCase
         $this->assertSame(413, $this->invoke(2048, '2049'));
     }
 
+    // ----- chunked / no Content-Length enforcement (H6) ----------------
+    // Apache enforces LimitRequestBody against decoded chunked byte counts via
+    // ctx->limit_used (http_filters.c:671-686). In OpenSwoole the chunked
+    // stream is decoded before PHP runs; the middleware measures the buffered
+    // body size via getSize() (fstat on php://memory) instead.
+
+    public function testChunkedUnderLimitPasses(): void
+    {
+        // Body of 50 bytes, limit 100 — no Content-Length header (chunked style).
+        $this->assertSame(200, $this->invokeWithBody(100, str_repeat('x', 50)));
+    }
+
+    public function testChunkedAtLimitPasses(): void
+    {
+        // Exactly at the limit (strictly-greater comparison: equal is allowed).
+        $this->assertSame(200, $this->invokeWithBody(50, str_repeat('x', 50)));
+    }
+
+    public function testChunkedOverLimitRejected(): void
+    {
+        // One byte over the limit must yield 413.
+        $this->assertSame(413, $this->invokeWithBody(50, str_repeat('x', 51)));
+    }
+
+    public function testChunked413ResponseShape(): void
+    {
+        $resp = $this->processWithBody(50, str_repeat('x', 51));
+        $this->assertSame(413, $resp->getStatusCode());
+        $this->assertSame('Content Too Large', (string) $resp->getBody());
+        $this->assertSame('text/plain', $resp->getHeaderLine('Content-Type'));
+    }
+
+    public function testEmptyChunkedBodyPasses(): void
+    {
+        // Zero-byte body (terminating chunk only) — must pass any positive limit.
+        $this->assertSame(200, $this->invokeWithBody(10, ''));
+    }
+
+    public function testChunkedBodyHandlerStillReceivesBody(): void
+    {
+        // When under the limit, downstream handler must receive the body intact.
+        $mw = new BodySizeLimitMiddleware(100);
+        $body = 'hello world';
+        $stream = \OpenSwoole\Core\Psr\Stream::streamFor($body);
+        // No Content-Length header — simulates a chunked / framing-unknown request.
+        $request = (new ServerRequest('/', 'POST', '', []))->withBody($stream);
+        $captured = null;
+        $handler = new class ($captured) implements RequestHandlerInterface {
+            public mixed $seen = null;
+            public function handle(ServerRequestInterface $req): ResponseInterface
+            {
+                $this->seen = (string) $req->getBody();
+                return new Response('OK', 200, '', ['Content-Type' => 'text/plain']);
+            }
+        };
+        $mw->process($request, $handler);
+        $this->assertSame($body, $handler->seen);
+    }
+
+    public function testChunkedNgxStyleLimitEnforced(): void
+    {
+        // '1k' == 1024 bytes. A 1025-byte body without Content-Length → 413.
+        $this->assertSame(413, $this->invokeWithBody('1k', str_repeat('y', 1025)));
+        $this->assertSame(200, $this->invokeWithBody('1k', str_repeat('y', 1024)));
+    }
+
     // ----- helpers ------------------------------------------------------
 
     private function invoke(int|string $max, ?string $contentLength): int
@@ -187,6 +253,27 @@ class BodySizeLimitMiddlewareTest extends TestCase
         $mw = new BodySizeLimitMiddleware($max);
         $headers = $contentLength === null ? [] : ['content-length' => $contentLength];
         $request = new ServerRequest('/', 'POST', '', $headers);
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('OK', 200, '', ['Content-Type' => 'text/plain']);
+            }
+        };
+        return $mw->process($request, $handler);
+    }
+
+    /** Invoke with an explicit body string and NO Content-Length header (chunked-style). */
+    private function invokeWithBody(int|string $max, string $bodyContent): int
+    {
+        return $this->processWithBody($max, $bodyContent)->getStatusCode();
+    }
+
+    private function processWithBody(int|string $max, string $bodyContent): ResponseInterface
+    {
+        $mw = new BodySizeLimitMiddleware($max);
+        $stream = \OpenSwoole\Core\Psr\Stream::streamFor($bodyContent);
+        // Deliberately no Content-Length header so the chunked branch is exercised.
+        $request = (new ServerRequest('/', 'POST', '', []))->withBody($stream);
         $handler = new class implements RequestHandlerInterface {
             public function handle(ServerRequestInterface $request): ResponseInterface
             {
