@@ -1,0 +1,92 @@
+<?php
+namespace ZealPHP\Tests\Integration;
+
+use ZealPHP\Tests\TestCase;
+
+/**
+ * Conformance: static document-root serving — the "Apache *is* a web server"
+ * surface (mod_dir / mod_mime / traversal hardening). Proves that pointing
+ * ZealPHP at public/ serves assets safely:
+ *   - traversal (encoded / double-encoded / backslash / null-byte) never escapes
+ *     the document root;
+ *   - dotfiles are never served;
+ *   - directory requests never leak a listing (autoindex off);
+ *   - common asset extensions get correct MIME types.
+ */
+class StaticServingConformanceTest extends TestCase
+{
+    /**
+     * Directory-traversal corpus: every variant must stay inside docroot —
+     * rejected (400) or not-found (404), and must NEVER leak /etc/passwd or
+     * source. Mutation-friendly: weakening any assertion fails loudly.
+     */
+    public function testTraversalCorpusNeverEscapesDocroot(): void
+    {
+        $payloads = [
+            '/css/../../../../etc/passwd',
+            '/css/%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd',
+            '/css/%252e%252e%2f%252e%252e%2fetc%2fpasswd', // double-encoded
+            '/css/..%2f..%2fapp.php',
+            '/css/..%5c..%5capp.php',                       // backslash
+            '/%2e%2e/%2e%2e/etc/passwd',
+            '/css/%00/../etc/passwd',                       // null-byte + traversal
+            '/..%2fapp.php',
+        ];
+        foreach ($payloads as $p) {
+            $r = $this->get($p);
+            $this->assertContains($r['status'], [400, 404], "must be rejected: $p (got {$r['status']})");
+            $body = (string) $r['body'];
+            $this->assertStringNotContainsString('root:', $body, "no /etc/passwd leak: $p");
+            $this->assertStringNotContainsString('<?php', $body, "no source leak: $p");
+        }
+    }
+
+    /**
+     * Dotfiles (the live-exploit class — scanners hammer these) are never
+     * served: 403 or 404, never 200 with content.
+     */
+    public function testDotfilesAreNeverServed(): void
+    {
+        foreach (['/.env', '/.git/config', '/.htaccess', '/.ssh/id_rsa', '/.aws/credentials'] as $p) {
+            $r = $this->get($p);
+            $this->assertContains($r['status'], [403, 404], "dotfile must not be served: $p (got {$r['status']})");
+        }
+    }
+
+    /** A directory with no index file never leaks a listing (autoindex off). */
+    public function testDirectoryListingIsNotLeaked(): void
+    {
+        $r = $this->get('/css/');
+        $this->assertContains($r['status'], [403, 404], 'bare directory must not autoindex');
+        $this->assertStringNotContainsString('Index of', (string) $r['body']);
+        $this->assertStringNotContainsString('zealphp.css</a>', (string) $r['body'], 'no file listing leaked');
+    }
+
+    /** Correct MIME types for common asset extensions (mod_mime parity). */
+    public function testStaticAssetMimeTypes(): void
+    {
+        $cases = [
+            '/css/zealphp.css' => 'text/css',
+            '/js/learn.js'     => 'javascript', // text/ or application/javascript
+        ];
+        foreach ($cases as $path => $expected) {
+            $r = $this->get($path);
+            $this->assertStatus(200, $r);
+            $ct = strtolower($r['headers']['content-type'] ?? '');
+            $this->assertStringContainsString($expected, $ct, "$path content-type was '$ct'");
+        }
+    }
+
+    /** Static assets carry Last-Modified and support conditional 304 (sendFile path). */
+    public function testStaticConditionalGet(): void
+    {
+        $r = $this->get('/http/sendfile-test');
+        $this->assertStatus(200, $r);
+        $etag = $r['headers']['etag'] ?? '';
+        $lastMod = $r['headers']['last-modified'] ?? '';
+        $this->assertNotSame('', $etag, 'static file must emit ETag');
+        $this->assertNotSame('', $lastMod, 'static file must emit Last-Modified');
+        $this->assertStatus(304, $this->get('/http/sendfile-test', ['If-None-Match' => $etag]));
+        $this->assertStatus(304, $this->get('/http/sendfile-test', ['If-Modified-Since' => $lastMod]));
+    }
+}
