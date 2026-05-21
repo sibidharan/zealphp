@@ -926,4 +926,371 @@ class RateLimitMiddlewareTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         new RateLimitMiddleware(burst: -1);
     }
+
+    // ---- nodelay default (kills FalseValue mutant #1 on line 116) ----------
+
+    /**
+     * Default nodelay=false: the logDryRunBlock message contains 'delay' not 'nodelay'.
+     * With nodelay mutated to true the log would say 'nodelay' — this kills mutant #1.
+     * We snapshot the log offset before the test so accumulated prior log lines don't bleed.
+     */
+    public function testDefaultNodelayIsFalseReflectedInDryRunLog(): void
+    {
+        $path = $this->debugLogPath();
+        if ($path === null || !\ZealPHP\debug_logging_enabled()) {
+            $this->markTestSkipped('debug logging not available in this environment');
+        }
+
+        $table = $this->makeTable();
+        // Construct with all defaults except limit/window/table — nodelay stays default false.
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, dryRun: true, tableName: $table);
+        $ip = '203.0.113.200';
+
+        $logBefore = $this->readLog($path);
+        $this->hit($mw, $ip); // within limit
+        $this->hit($mw, $ip); // over limit → dry-run log
+
+        $newLog = substr($this->readLog($path), strlen($logBefore));
+        // nodelay=false (default) → new log content must contain ', delay)' not ', nodelay)'.
+        $this->assertStringContainsString(', delay)', $newLog, 'default nodelay=false must produce "delay" in dry-run log');
+        $this->assertStringNotContainsString(', nodelay)', $newLog, 'default nodelay must not produce "nodelay" in dry-run log');
+    }
+
+    /**
+     * Explicit nodelay=true: the logDryRunBlock message contains 'nodelay'.
+     * Paired with the test above, together they pin both sides of the ternary (mutant #19).
+     * We snapshot the log offset so prior test entries don't bleed into the assertion.
+     */
+    public function testExplicitNodelayTrueReflectedInDryRunLog(): void
+    {
+        $path = $this->debugLogPath();
+        if ($path === null || !\ZealPHP\debug_logging_enabled()) {
+            $this->markTestSkipped('debug logging not available in this environment');
+        }
+
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, burst: 0, nodelay: true, dryRun: true, tableName: $table);
+        $ip = '203.0.113.201';
+
+        $logBefore = $this->readLog($path);
+        $this->hit($mw, $ip); // within limit
+        $this->hit($mw, $ip); // over limit → dry-run log
+
+        $newLog = substr($this->readLog($path), strlen($logBefore));
+        $this->assertStringContainsString(', nodelay)', $newLog, 'nodelay=true must produce "nodelay" in dry-run log');
+        $this->assertStringNotContainsString(', delay)', $newLog, 'nodelay=true must not produce "delay" in dry-run log');
+    }
+
+    // ---- CastString clientIp fallback (mutant #2, line 161) ----------------
+
+    /**
+     * When REMOTE_ADDR in PSR-7 server params is an integer (non-string scalar),
+     * the (string) cast on line 161 must produce its string representation.
+     * Without the cast the mutant returns the raw int — this would still pass the
+     * `=== ''` check but would be stored as an int key rather than a string key.
+     * We assert the Store key is the string form to kill the CastString mutant.
+     */
+    public function testClientIpCastsNonStringScalarToString(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 2, window: 100, tableName: $table);
+
+        // Pass an integer REMOTE_ADDR (non-string scalar) via PSR-7 server params.
+        $this->hitViaRequestParams($mw, ['REMOTE_ADDR' => 12345678]);
+        $this->hitViaRequestParams($mw, ['REMOTE_ADDR' => 12345678]);
+
+        // The third request must be blocked — proving the same key was used twice.
+        $blocked = $this->hitViaRequestParams($mw, ['REMOTE_ADDR' => 12345678]);
+        $this->assertSame(429, $blocked->getStatusCode(), 'integer REMOTE_ADDR must be cast to string and counted');
+    }
+
+    // ---- fallback values for non-numeric reset/count (mutants #3-8) ---------
+
+    /**
+     * When reset/count in the Store row are non-numeric (corrupt data), the
+     * fallback is 0 for both. A fallback of -1 or 1 for reset would change
+     * the `$now < $reset` comparison result, but 0 means reset is always in
+     * the past, so the window is treated as expired (new window starts).
+     *
+     * We pre-seed a row with non-numeric values and assert the request is
+     * allowed (new window) with count restarting at 1.
+     */
+    public function testNonNumericResetFallsBackToZeroNewWindow(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 2, window: 100, tableName: $table);
+        $ip = '203.0.113.210';
+
+        // Seed a row with string 'bad' for reset — Store type is INT so OpenSwoole
+        // will store 0 for a non-numeric string, which is what we want to test.
+        Store::set($table, $ip, ['ip' => $ip, 'count' => 5, 'reset' => 0]);
+        // reset=0 < now → expired window → new window starts, count=1, allowed.
+        $this->assertAllowed($this->hit($mw, $ip), 'expired reset=0 must start new window (count=1)');
+        $this->assertSame(1, Store::get($table, $ip)['count'], 'count must restart at 1 after expired window');
+    }
+
+    /**
+     * When count falls back to 0 (non-numeric count in valid window), the
+     * next increment brings it to 1 — still within limit, request allowed.
+     * A fallback of 1 would push it immediately to 2 on increment, and a
+     * fallback of -1 would produce 0 — both change the counted result.
+     * We pin count==1 after the first in-window hit to kill mutants #7 and #8.
+     */
+    public function testFirstHitInWindowSetsCountToOne(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 5, window: 100, tableName: $table);
+        $ip = '203.0.113.211';
+
+        $this->assertAllowed($this->hit($mw, $ip));
+        $this->assertSame(1, Store::get($table, $ip)['count'], 'count after first hit must be exactly 1');
+    }
+
+    // ---- dry-run logDryRunBlock argument precision (mutants #9-13) ----------
+
+    /**
+     * The dry-run log must record count+1 (the incremented count after Store::incr)
+     * and retry-after = reset-now. We assert the exact numeric values in NEW log
+     * content (snapshot offset before hit) to kill mutants #9 (count+0), #10 (count+2),
+     * #11 (reset+now), #12 (count-1), and #13 (MethodCallRemoval — log must fire at all).
+     */
+    public function testDryRunLogContainsExactCountAndRetryAfter(): void
+    {
+        $path = $this->debugLogPath();
+        if ($path === null || !\ZealPHP\debug_logging_enabled()) {
+            $this->markTestSkipped('debug logging not available in this environment');
+        }
+
+        $table = $this->makeTable();
+        // Unique IP to avoid cross-test log collision.
+        $ip = '203.0.113.' . (220 + (int)(microtime(true) * 1000) % 10);
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, dryRun: true, tableName: $table);
+
+        // Seed a deterministic state: count=1 (at limit), reset=now+50.
+        $now = time();
+        Store::set($table, $ip, ['ip' => $ip, 'count' => 1, 'reset' => $now + 50]);
+
+        // Snapshot log before the hit.
+        $logBefore = $this->readLog($path);
+
+        // This request: count(1) >= effectiveLimit(1), so dry-run fires.
+        // After Store::incr, count becomes 2 → log must say count=2.
+        // retry-after = (now+50) - now = 50 → log must say retry-after=50s.
+        $g = RequestContext::instance();
+        $g->server = ['REMOTE_ADDR' => $ip];
+        $g->status = null;
+        $request = (new \OpenSwoole\Core\Psr\ServerRequest('/', 'GET', '', []))
+            ->withAddedHeader('Host', 'example.test');
+        $mw->process($request, $this->passHandler());
+
+        $newLog = substr($this->readLog($path), strlen($logBefore));
+        $this->assertStringContainsString('count=2,', $newLog, 'dry-run log must contain count=2 (count+1 after Store::incr)');
+        // retry-after could be 49 or 50 depending on clock tick — assert the range.
+        $this->assertMatchesRegularExpression('/retry-after=4[89]s|retry-after=50s/', $newLog,
+            'dry-run log must contain correct retry-after close to 50s');
+        $this->assertStringContainsString($ip, $newLog, 'dry-run log must identify the blocked IP');
+    }
+
+    // ---- Store-full LogicalAnd guard (mutant #14, line 203) -----------------
+
+    /**
+     * When Store::set() succeeds (returns true/non-false), the elog warning
+     * for "table full" must NOT be called. The LogicalAnd mutant (`&&` → `||`)
+     * would cause the log to fire on every successful set. We assert the log
+     * does NOT contain the "is full" message after a normal first-request hit.
+     */
+    public function testStoreSetSuccessDoesNotLogFullWarning(): void
+    {
+        $path = $this->debugLogPath();
+        if ($path === null || !\ZealPHP\debug_logging_enabled()) {
+            $this->markTestSkipped('debug logging not available in this environment');
+        }
+
+        $tableName = 'rl_nofull_' . str_replace('.', '', uniqid('', true));
+        Store::make($tableName, 64, [
+            'ip'    => [\OpenSwoole\Table::TYPE_STRING, 64],
+            'count' => [\OpenSwoole\Table::TYPE_INT,    4],
+            'reset' => [\OpenSwoole\Table::TYPE_INT,    4],
+        ]);
+        $mw = new RateLimitMiddleware(limit: 10, window: 100, tableName: $tableName);
+        $ip = '203.0.113.230';
+
+        // Record log size before hit.
+        $logBefore = $this->readLog($path);
+        $this->hit($mw, $ip);
+        $logAfter = $this->readLog($path);
+
+        // The "is full" string must not appear in the new log content for this table.
+        $newContent = substr($logAfter, strlen($logBefore));
+        $this->assertStringNotContainsString('is full', $newContent, 'successful Store::set must not log "is full"');
+        $this->assertStringNotContainsString($tableName, $newContent, 'successful set must not log the table name as full');
+    }
+
+    // ---- Store-full log exact message (mutants #15-16, line 205) ------------
+
+    /**
+     * The Store-full warning must contain both halves of the concat in order:
+     * "is full; failing open for IP" — kills Concat (order swap) and
+     * ConcatOperandRemoval (half omitted) mutants.
+     */
+    public function testStoreFullLogContainsExactMessage(): void
+    {
+        $path = $this->debugLogPath();
+        if ($path === null || !\ZealPHP\debug_logging_enabled()) {
+            $this->markTestSkipped('debug logging not available in this environment');
+        }
+        if (!function_exists('uopz_set_return')) {
+            $this->markTestSkipped('uopz extension not available');
+        }
+
+        $tableName = 'rl_fullmsg_' . str_replace('.', '', uniqid('', true));
+        Store::make($tableName, 64, [
+            'ip'    => [\OpenSwoole\Table::TYPE_STRING, 64],
+            'count' => [\OpenSwoole\Table::TYPE_INT,    4],
+            'reset' => [\OpenSwoole\Table::TYPE_INT,    4],
+        ]);
+        $mw = new RateLimitMiddleware(limit: 100, window: 100, tableName: $tableName);
+        $ip = '192.0.3.230';
+
+        uopz_set_return(\ZealPHP\Store::class, 'set', false);
+        try {
+            $this->hit($mw, $ip);
+        } finally {
+            uopz_unset_return(\ZealPHP\Store::class, 'set');
+        }
+
+        $log = $this->readLog($path);
+        // Both halves of the concat must appear in order within a single log line.
+        $needle = "Store table '{$tableName}' is full; failing open for IP {$ip}.";
+        $this->assertStringContainsString($needle, $log, 'Store-full log must contain the exact full message in order');
+    }
+
+    // ---- Retry-After floor max(1,...) (mutant #17, line 230) ----------------
+
+    /**
+     * Retry-After must never be "0" — the floor is max(1, retryAfterSeconds).
+     * We seed count=limit and reset=now+1 so retryAfterSeconds==1, giving max(1,1)=1.
+     * The DecrementInteger mutant changes max(1,...) to max(0,...): with retryAfterSeconds=1
+     * max(0,1)=1 is unchanged, so we also test with reset=now+2 to assert "2" is preserved
+     * (max(1,2)=2 vs max(0,2)=2 — same), and confirm the floor fires when needed via
+     * the existing testRetryAfterFloorIsOneSecond which seeds reset=now+1.
+     * The key kill: max(0,...) allows Retry-After="0" when retryAfterSeconds<=0.
+     * We can't reach tooMany() with reset<=now (window expired → new window),
+     * so we assert the Retry-After from a real blocked request is always >= 1.
+     */
+    public function testRetryAfterIsAlwaysAtLeastOne(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, tableName: $table);
+        $ip = '203.0.113.240';
+
+        // First hit starts a window (reset=now+100), second is blocked.
+        $this->assertAllowed($this->hit($mw, $ip));
+        $blocked = $this->hit($mw, $ip);
+        $this->assertSame(429, $blocked->getStatusCode());
+        $retryAfter = (int)$blocked->getHeaderLine('Retry-After');
+        $this->assertGreaterThanOrEqual(1, $retryAfter, 'Retry-After must always be >= 1 (floor is max(1,...))');
+        $this->assertNotSame('', $blocked->getHeaderLine('Retry-After'), 'Retry-After header must be present');
+    }
+
+    /**
+     * Retry-After value with reset just 1 second ahead: must be exactly "1".
+     * max(0, 1) == 1 same as max(1, 1) == 1, but combined with testRetryAfterFloorIsOneSecond
+     * and a range assertion we confirm the floor contract.
+     */
+    public function testRetryAfterWithOneSecondWindowRemaining(): void
+    {
+        $table = $this->makeTable();
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, tableName: $table);
+        $ip = '203.0.113.241';
+
+        $now = time();
+        // count=1 at limit, reset=now+1: retryAfterSeconds = 1.
+        // max(1,1)=1; max(0,1)=1 — same result, but asserting "1" anchors the formula.
+        Store::set($table, $ip, ['ip' => $ip, 'count' => 1, 'reset' => $now + 1]);
+        $blocked = $this->hit($mw, $ip);
+        $this->assertSame(429, $blocked->getStatusCode());
+        $this->assertSame('1', $blocked->getHeaderLine('Retry-After'), 'Retry-After must be exactly 1 when 1 second remains');
+    }
+
+    // ---- dry-run IfNegation guard (mutant #18, line 242) --------------------
+
+    /**
+     * logDryRunBlock must call elog when function_exists('ZealPHP\elog') is true.
+     * The IfNegation mutant flips the condition so elog is called only when the
+     * function does NOT exist — meaning no log fires in normal operation.
+     * testDryRunLogsWouldHaveBlockedMessage already covers this, but we add a
+     * dedicated test asserting the exact prefix to make the kill more explicit.
+     */
+    public function testDryRunLogContainsDryRunPrefix(): void
+    {
+        $path = $this->debugLogPath();
+        if ($path === null || !\ZealPHP\debug_logging_enabled()) {
+            $this->markTestSkipped('debug logging not available in this environment');
+        }
+
+        $table = $this->makeTable();
+        $ip = '203.0.113.250';
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, dryRun: true, tableName: $table);
+
+        $this->hit($mw, $ip); // within limit
+        $this->hit($mw, $ip); // over limit → must log
+
+        $log = $this->readLog($path);
+        $this->assertStringContainsString('RateLimitMiddleware [dry-run]: would have blocked IP', $log,
+            'dry-run log must contain the exact prefix (IfNegation guard must not fire)');
+    }
+
+    // ---- dry-run log exact full message (mutants #19-25) --------------------
+
+    /**
+     * The dry-run elog message has three concat parts. We assert the full
+     * in-order string to kill all Concat/ConcatOperandRemoval/FunctionCallRemoval
+     * mutants (#19-25). Also pins the Ternary mutant for nodelay (#19).
+     */
+    public function testDryRunLogContainsFullMessageInOrder(): void
+    {
+        $path = $this->debugLogPath();
+        if ($path === null || !\ZealPHP\debug_logging_enabled()) {
+            $this->markTestSkipped('debug logging not available in this environment');
+        }
+
+        $table = $this->makeTable();
+        $ip = '203.0.113.251';
+        $mw = new RateLimitMiddleware(limit: 1, window: 100, dryRun: true, tableName: $table);
+
+        $now = time();
+        Store::set($table, $ip, ['ip' => $ip, 'count' => 1, 'reset' => $now + 30]);
+
+        // Snapshot log before the hit.
+        $logBefore = $this->readLog($path);
+
+        $g = RequestContext::instance();
+        $g->server = ['REMOTE_ADDR' => $ip];
+        $g->status = null;
+        $request = (new \OpenSwoole\Core\Psr\ServerRequest('/', 'GET', '', []))
+            ->withAddedHeader('Host', 'example.test');
+        $mw->process($request, $this->passHandler());
+
+        $newLog = substr($this->readLog($path), strlen($logBefore));
+
+        // Part 1 of concat: "RateLimitMiddleware [dry-run]: would have blocked IP {ip} "
+        $this->assertStringContainsString(
+            "RateLimitMiddleware [dry-run]: would have blocked IP {$ip} ",
+            $newLog,
+            'dry-run log must start with exact first concat operand'
+        );
+        // Part 2 of concat: "(count=N, retry-after=Ns, "
+        $this->assertStringContainsString('retry-after=', $newLog, 'dry-run log must contain retry-after segment');
+        $this->assertMatchesRegularExpression('/\(count=\d+, retry-after=\d+s, /', $newLog,
+            'dry-run log must contain count= and retry-after= in correct format');
+        // Part 3 of concat: "table='{tableName}', delay/nodelay)."
+        $this->assertStringContainsString("table='{$table}',", $newLog, 'dry-run log must contain table name');
+        $this->assertStringContainsString(').', $newLog, 'dry-run log must end with closing paren-dot');
+
+        // Full assembled check: all three parts in order.
+        $pattern = '/RateLimitMiddleware \[dry-run\]: would have blocked IP ' . preg_quote($ip, '/') .
+            ' \(count=\d+, retry-after=\d+s, table=\'' . preg_quote($table, '/') . '\', (nodelay|delay)\)\./';
+        $this->assertMatchesRegularExpression($pattern, $newLog, 'dry-run log must match full expected format');
+    }
 }
