@@ -1,0 +1,34 @@
+{
+    // Mutation testing config — measures test *effectiveness* (do assertions
+    // actually catch breakage?), not just line coverage.
+    //
+    // Scoped to the pure, fully unit-tested modules so the MSI is meaningful:
+    // middleware, HTTP wrappers, input filtering, diagnostics. App.php's
+    // server/event-loop code is exercised by integration tests (which need a
+    // live server and can't run under per-mutant execution) and is intentionally
+    // out of this baseline; expand the scope as in-process coverage grows.
+    //
+    // Runs Unit suite only (no OpenSwoole server dependency) — see the CI job
+    // .github/workflows/mutation.yml, which provides the xdebug driver.
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    "source": {
+        "directories": [
+            "src/Middleware",
+            "src/HTTP",
+            "src/Input",
+            "src/Diagnostics"
+        ]
+    },
+    "logs": {
+        "text": "infection.log",
+        "summary": "infection-summary.log"
+    },
+    "mutators": {
+        "@default": true
+    },
+    // Conservative initial gate — the first CI run reports the real MSI; ratchet
+    // these up toward 90/95 as the suite hardens. min-covered-msi is the strict
+    // one (effectiveness of tests over code they actually exercise).
+    "minMsi": 70,
+    "minCoveredMsi": 85
+}

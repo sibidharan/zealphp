@@ -1,0 +1,39 @@
+name: Mutation
+
+# Mutation testing (Infection) measures whether the tests actually *catch*
+# breakage, not just execute lines. Runs on PRs and on demand. Scoped to the
+# Unit suite + the pure modules in infection.json5 (no OpenSwoole server needed).
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  infection:
+    name: Infection (MSI)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP (xdebug for coverage)
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: openswoole, uopz
+          coverage: xdebug
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run Infection
+        env:
+          XDEBUG_MODE: coverage
+        # Thresholds come from infection.json5 (minMsi / minCoveredMsi).
+        # --logger-github annotates escaped mutants inline on the PR.
+        run: >
+          vendor/bin/infection
+          --threads=4
+          --test-framework-options="--testsuite=Unit"
+          --no-progress
+          --logger-github
