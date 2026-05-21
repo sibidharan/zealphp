@@ -180,6 +180,26 @@ Every override item ships with: unit + integration tests, PHPStan level-10 clean
 
 ---
 
+## Progress log + revised findings (2026-05-21)
+
+**Shipped / done:**
+- ✅ **phpinfo() HTML override** — released in **v0.2.31**.
+- ✅ **`php_sapi_name()` + `App::sapiName(?string)`** — opt-in; default returns real `PHP_SAPI`. Hard constraint discovered: the **`PHP_SAPI` constant cannot be redefined** (`uopz_redefine` refuses it: *"failed to redefine the internal PHP_SAPI, not allowed"*), so only the function is overridable. Documented.
+- ✅ **`filter_input()` / `filter_input_array()`** — read request input from `$g` via pure `ZealPHP\Input\RequestInput`. Purely additive.
+- ✅ **`$_SERVER` parity keys** — added `GATEWAY_INTERFACE`, `REQUEST_SCHEME`, `HTTPS` (via `App::requestIsHttps()`). **Correction to the B.1 matrix:** `REQUEST_TIME`, `REQUEST_TIME_FLOAT`, `SERVER_PROTOCOL`, `REMOTE_PORT`, `SERVER_PORT` were **already present** (OpenSwoole's `$request->server` supplies them) — verified live, not gaps.
+
+**Reclassified as higher-risk than B.5 implied (do NOT rush — would violate "no breaking changes"):**
+- ⚠️ **`getenv()` / `putenv()`** — `getenv()` is called **30+ times inside the framework** (every `ZEALPHP_*` config read in `utils.php`, `App.php`, middleware, `Learn/*`) and **`cgi_worker.php` depends on it** for the per-request context env. A global override hits the recursion trap (calling native `getenv()` inside the override recurses); the only recursion-free fix is a **boot-snapshot**, which changes `getenv` from *live* to *snapshot* semantics for all those internal call sites. Needs a dedicated design + careful test pass, or skip in favor of `$_SERVER`/`$g->server` for request vars. **`putenv()`** mutates process-wide env — unsafe under concurrent coroutines; likely leave unsupported + document.
+- ⚠️ **`mail()`** — same delegation problem: an override can't fall back to native `mail()` without recursing, so it must either require a configured transport (`App::mailer` callback) with **no native fallback**, or reimplement delivery via `sendmail_path`/SMTP. Not a quick win.
+
+**Low-value-but-safe (clean to add any time):**
+- `header_register_callback()` — isolated hook into response emission.
+- `get_browser()`, `default_mimetype`, `error_log()` routing.
+
+**Docs decision (updated per user, 2026-05-21):** **No separate `apache-parity.php` page.** Fold the parity scan into the existing **`template/pages/http.php`** page, and do it **last** (after the override work). B.4's "new page + nav" is superseded; the per-page gap callouts (B.4 item 2) still apply.
+
+---
+
 ## Testing & quality bar (applies to all parts)
 
 - `./vendor/bin/phpunit tests/Unit/ --testdox` — green; new classes get their own test file.
