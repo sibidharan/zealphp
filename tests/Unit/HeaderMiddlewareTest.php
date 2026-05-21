@@ -176,4 +176,141 @@ class HeaderMiddlewareTest extends TestCase
         $this->assertArrayHasKey('X-Powered-By', $rec->sink);
         $this->assertSame('', $rec->sink['X-Powered-By']);
     }
+
+    // -------------------------------------------------------------------------
+    // Status-conditional tests (nginx add_header parity)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Default constructor ($alwaysByDefault=true): set header IS applied on 200.
+     */
+    public function testSetAppliedOn200ByDefault(): void
+    {
+        $response = $this->processWithStatus(['set' => ['X-Frame-Options' => 'DENY']], 200);
+        $this->assertSame('DENY', $response->getHeaderLine('X-Frame-Options'));
+    }
+
+    /**
+     * Default constructor ($alwaysByDefault=true): set header IS applied on 500
+     * (ZealPHP historical behaviour — equivalent to nginx always on every rule).
+     */
+    public function testSetAppliedOn500WhenAlwaysByDefaultTrue(): void
+    {
+        $response = $this->processWithStatus(['set' => ['X-Frame-Options' => 'DENY']], 500);
+        $this->assertSame('DENY', $response->getHeaderLine('X-Frame-Options'));
+    }
+
+    /**
+     * nginx mode ($alwaysByDefault=false): set header is NOT applied on 500.
+     */
+    public function testSetNotAppliedOn500WhenAlwaysByDefaultFalse(): void
+    {
+        $response = $this->processWithStatus(
+            ['set' => ['X-Frame-Options' => 'DENY']],
+            500,
+            alwaysByDefault: false
+        );
+        $this->assertFalse($response->hasHeader('X-Frame-Options'));
+    }
+
+    /**
+     * nginx mode ($alwaysByDefault=false): per-rule always=true overrides the
+     * middleware default — header IS applied on 500.
+     */
+    public function testSetAppliedOn500WhenPerRuleAlwaysTrue(): void
+    {
+        $response = $this->processWithStatus(
+            ['set' => ['X-Frame-Options' => ['value' => 'DENY', 'always' => true]]],
+            500,
+            alwaysByDefault: false
+        );
+        $this->assertSame('DENY', $response->getHeaderLine('X-Frame-Options'));
+    }
+
+    /**
+     * unset is always unconditional — it fires on 500 regardless of $alwaysByDefault.
+     */
+    public function testUnsetIsUnconditionalOn500(): void
+    {
+        $rec = $this->recorder();
+        RequestContext::instance()->zealphp_response = $rec;
+        $mw      = new HeaderMiddleware(['unset' => ['X-Powered-By']], false);
+        $request = new ServerRequest('/', 'GET', '', []);
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('Error', 500, '', ['X-Powered-By' => 'PHP/8.3']);
+            }
+        };
+        $response = $mw->process($request, $handler);
+        $this->assertFalse($response->hasHeader('X-Powered-By'));
+    }
+
+    /**
+     * nginx mode: add rule is skipped on 404.
+     */
+    public function testAddNotAppliedOn404WhenAlwaysByDefaultFalse(): void
+    {
+        $response = $this->processWithStatus(
+            ['add' => ['Link' => '</style.css>; rel=preload']],
+            404,
+            alwaysByDefault: false
+        );
+        $this->assertFalse($response->hasHeader('Link'));
+    }
+
+    /**
+     * nginx mode: append rule is skipped on 503.
+     */
+    public function testAppendNotAppliedOn503WhenAlwaysByDefaultFalse(): void
+    {
+        $response = $this->processWithStatus(
+            ['append' => ['Vary' => 'Accept-Encoding']],
+            503,
+            alwaysByDefault: false
+        );
+        $this->assertFalse($response->hasHeader('Vary'));
+    }
+
+    /**
+     * nginx mode: 301 is a safe status — set IS applied.
+     */
+    public function testSetAppliedOn301InNginxMode(): void
+    {
+        $response = $this->processWithStatus(
+            ['set' => ['X-Robots-Tag' => 'noindex']],
+            301,
+            alwaysByDefault: false
+        );
+        $this->assertSame('noindex', $response->getHeaderLine('X-Robots-Tag'));
+    }
+
+    // -------------------------------------------------------------------------
+    // Helper: process with an arbitrary upstream status code
+    // -------------------------------------------------------------------------
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function processWithStatus(
+        array $config,
+        int $status,
+        bool $alwaysByDefault = true,
+        ?object $rec = null
+    ): ResponseInterface {
+        if ($rec !== null) {
+            RequestContext::instance()->zealphp_response = $rec;
+        }
+        $mw      = new HeaderMiddleware($config, $alwaysByDefault);
+        $request = new ServerRequest('/', 'GET', '', []);
+        $upStatus = $status;
+        $handler = new class($upStatus) implements RequestHandlerInterface {
+            public function __construct(private int $upStatus) {}
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new Response('body', $this->upStatus, '', []);
+            }
+        };
+        return $mw->process($request, $handler);
+    }
 }
