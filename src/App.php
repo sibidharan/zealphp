@@ -684,6 +684,21 @@ class App
         self::$superglobals = $enable;
     }
 
+    /**
+     * Toggle the coroutine-safe exec family hook (backtick / shell_exec / exec /
+     * system / passthru). Pass null (or no arg) to read the current value; pass a
+     * non-null value to set and return it. null = auto = follow coroutine mode
+     * (resolves to `self::$superglobals === false`) at run() time; overriding
+     * these built-ins routes them through coroutine-safe equivalents.
+     */
+    public static function hookExec(?bool $value = null): ?bool
+    {
+        if ($value !== null) {
+            self::$hook_exec = $value;
+        }
+        return self::$hook_exec;
+    }
+
     // -----------------------------------------------------------------------
     // Fluent configuration accessors. The convention: pass null (or no arg)
     // to read the current value; pass a non-null value to set and return it.
@@ -4403,8 +4418,9 @@ HELP;
         // Transparent coroutine-safe exec family. Overriding `shell_exec` ALSO
         // intercepts the backtick operator (`` `cmd` `` compiles to a
         // shell_exec() call), so legacy/user code becomes coroutine-safe with
-        // no source changes. Defaults to coroutine mode (superglobals===false);
-        // App::hookExec(bool) can force it on/off. proc_open/popen are
+        // no source changes. Gated by the $hook_exec property / App::hookExec()
+        // setter; null resolves to coroutine mode (superglobals===false) here,
+        // and a non-null value forces it on/off. proc_open/popen are
         // intentionally NOT overridden — App::rawExec()/cgiSubprocess() rely on
         // proc_open, so routing through it keeps the fallback recursion-safe.
         $hookExec = self::$hook_exec ?? (self::$superglobals === false);
