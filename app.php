@@ -36,44 +36,36 @@ if (!defined('ZEALPHP_ASSET_VERSION')) {
     );
 }
 
-// Auto-build the API reference at /docs/api/ on first boot — downloads the
-// phpDocumentor PHAR (33MB) if missing, then runs it against src/. One-time
-// cost (~30-60 s including download); subsequent boots skip. Gated by argv
-// so `php app.php stop|status|restart|logs` doesn't trigger a build.
+// Auto-build the API reference at /docs/api/ on first boot. The build
+// (PHAR download + phpDocumentor run, ~30-60 s) runs DETACHED via
+// scripts/build-api-docs.sh so it NEVER blocks server startup — the
+// server listens on :8080 immediately and /docs/api/ serves the
+// api-missing fallback until the build lands. Subsequent boots skip
+// (the script exits early when public/docs/api/index.html exists).
+// Gated by argv so `php app.php stop|status|logs` doesn't trigger it;
+// disabled entirely by ZEALPHP_SKIP_DOCS_BUILD=1 (CI sets this — the
+// API ref isn't needed to run tests, and an in-flight build competing
+// for CPU flakes timing-sensitive integration tests like the WS ticker).
 $__cliSub = $argv[1] ?? 'start';
 if (PHP_SAPI === 'cli' && !in_array($__cliSub, ['stop', 'status', 'logs', '--help', '-h'], true)) {
-    $__docsIndex = __DIR__ . '/public/docs/api/index.html';
-    if (!is_file($__docsIndex) && !env_flag('ZEALPHP_SKIP_DOCS_BUILD', false)) {
-        $__phar = __DIR__ . '/tools/phpdoc.phar';
-        if (!is_file($__phar)) {
-            echo "[zealphp] First boot: downloading phpDocumentor PHAR (33 MB, one-time)...\n";
-            if (!is_dir(__DIR__ . '/tools')) {
-                mkdir(__DIR__ . '/tools', 0755, true);
-            }
-            $__url = 'https://github.com/phpDocumentor/phpDocumentor/releases/latest/download/phpDocumentor.phar';
-            $__rc  = 0;
-            passthru('curl -fsSL ' . escapeshellarg($__url) . ' -o ' . escapeshellarg($__phar), $__rc);
-            if ($__rc !== 0 || !is_file($__phar)) {
-                echo "[zealphp] phpDocumentor download failed (curl exit {$__rc}); /docs/api/ will show the fallback page. Set ZEALPHP_SKIP_DOCS_BUILD=1 to silence this.\n";
-            }
-        }
-        if (is_file($__phar)) {
-            echo "[zealphp] Building API docs at /docs/api/ (~30 s, one-time)...\n";
-            $__cmd = sprintf(
-                'php %s -d %s -t %s --title=%s --no-interaction',
-                escapeshellarg($__phar),
-                escapeshellarg(__DIR__ . '/src'),
-                escapeshellarg(__DIR__ . '/public/docs/api'),
-                escapeshellarg('ZealPHP API Reference')
-            );
-            $__rc = 0;
-            passthru($__cmd, $__rc);
-            if ($__rc !== 0) {
-                echo "[zealphp] phpDocumentor build failed (exit {$__rc}); /docs/api/ will show the fallback page.\n";
-            }
+    $__docsIndex   = __DIR__ . '/public/docs/api/index.html';
+    $__buildScript = __DIR__ . '/scripts/build-api-docs.sh';
+    if (!is_file($__docsIndex) && !env_flag('ZEALPHP_SKIP_DOCS_BUILD', false) && is_file($__buildScript)) {
+        $__log = sys_get_temp_dir() . '/zealphp-docs-build.log';
+        // proc_open with an ARRAY command invokes no shell (no injection
+        // surface) and lets the child run detached: we redirect its I/O
+        // to a log file and never proc_close() (which would block-wait).
+        // The long-lived server process parents it for its ~60 s life.
+        $__proc = @proc_open(
+            ['bash', $__buildScript],
+            [0 => ['file', '/dev/null', 'r'], 1 => ['file', $__log, 'w'], 2 => ['file', $__log, 'a']],
+            $__pipes
+        );
+        if (is_resource($__proc)) {
+            echo "[zealphp] Building API docs in the background; /docs/api/ shows a fallback until ready (log: {$__log}).\n";
         }
     }
-    unset($__cliSub, $__docsIndex, $__phar, $__url, $__cmd, $__rc);
+    unset($__cliSub, $__docsIndex, $__buildScript, $__log, $__proc, $__pipes);
 }
 
 // Lifecycle is coroutine-mode by default (the recommended default for new
