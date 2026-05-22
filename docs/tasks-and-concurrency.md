@@ -42,29 +42,6 @@ $app->route('/fanout', function () {
 
 This pattern mirrors `examples/coroutine.php` and `api/php/coroutine_test.php`, which fetch remote resources in parallel.
 
-## Preforked Execution with `prefork_request_handler()`
-
-When superglobals are enabled (`App::superglobals(true)`), ZealPHP restricts coroutine usage in the main request to prevent data races. `prefork_request_handler()` bridges the gap by forking a worker process per request:
-
-```php
-use function ZealPHP\prefork_request_handler;
-
-$app->route('/legacy-report', function () {
-    echo prefork_request_handler(function () {
-        include __DIR__ . '/legacy/report.php';
-    });
-});
-```
-
-The helper:
-
-- Forks a worker via `OpenSwoole\Process`.
-- Re-registers ZealPHP’s stream wrapper (`IOStreamWrapper`) so `php://output` and friends behave consistently.
-- Captures output, status codes, headers, and cookies set inside the child process.
-- Flushes metadata back to the parent response and propagates exceptions.
-
-Use this when executing unmodified legacy code, long-running blocking operations, or scripts that rely heavily on global state.
-
 ## Background Processes with `coproc()` / `coprocess()`
 
 `coproc()` spawns a process with coroutine support and returns its buffered output. It is a lighter-weight alternative to task workers for ad-hoc parallelism:
@@ -81,7 +58,8 @@ $html = coproc(function () {
 
 Requirements:
 
-- Only available when superglobals are enabled. Attempting to call it in coroutine mode throws an exception. The reason: `coproc()` forks a child process, and the `prefork_request_handler` family it sits in was designed *before* per-coroutine `RequestContext` (`$g`) existed — it relies on copying process-wide superglobals into the child. Under `superglobals(false)` each coroutine already has isolated state, so `coproc()` is both redundant (use `go()` for parallelism) and unsafe (the fork would race the parent's process-wide superglobals at the exact moment the framework is *not* maintaining them).
+- Only available when superglobals are enabled. Attempting to call it in coroutine mode throws an exception. The reason: `coproc()` forks a child process, designed *before* per-coroutine `RequestContext` (`$g`) existed — it relies on copying process-wide superglobals into the child. Under `superglobals(false)` each coroutine already has isolated state, so `coproc()` is both redundant (use `go()` for parallelism) and unsafe (the fork would race the parent's process-wide superglobals at the exact moment the framework is *not* maintaining them).
+- For per-request process isolation of legacy `public/*.php` files in superglobals mode, see `App::cgiMode('proc'|'fork'|'fcgi')` instead — that's the supported path now (Apache mod_php-style isolation, with `'fork'` being ~5× faster via warm `OpenSwoole\Process` fork and `'fcgi'` proxying to an upstream php-fpm pool).
 - Data passed to the closure must be serialisable; resources such as database connections should be re-created inside the child process.
 
 ## Task Workers via `$server->task()`
@@ -116,8 +94,8 @@ Reference implementations live in `api/swoole/task.php` and `task/backup.php`, w
 | Scenario | Recommended Tool | Notes |
 |----------|------------------|-------|
 | Non-blocking IO when superglobals are disabled | `go()` coroutines | Ensure drivers support OpenSwoole hooks. |
-| Long-running, blocking operation inside a request | `prefork_request_handler()` | Keeps main worker responsive; returns buffered output. |
-| Standalone computation that can run in parallel | `coproc()` / `coprocess()` | Inherits environment snapshot; no shared memory. |
+| Long-running, blocking work in superglobals mode | `coproc()` / `coprocess()` | Forks a child process; inherits environment snapshot; no shared memory. |
+| Per-request isolation of legacy `public/*.php` files | `App::cgiMode('proc'\|'fork'\|'fcgi')` | Replaces the old `prefork_request_handler()`. `'proc'` is mod_php-style global isolation; `'fork'` is ~5× faster via warm process fork; `'fcgi'` forwards to an upstream FPM pool. |
 | Fire-and-forget asynchronous work | `$server->task()` | Task workers run outside the request context. |
 
 ## Coordination and Shared State

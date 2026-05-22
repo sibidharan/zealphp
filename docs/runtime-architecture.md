@@ -35,7 +35,6 @@ Traditional PHP scripts rely on `$_GET`, `$_POST`, `$_SERVER`, etc. ZealPHP emul
 
 - `zealphp_request` / `zealphp_response` – The wrapped OpenSwoole request/response objects exposed to route and API handlers.
 - `status` – The HTTP status code chosen by the handler (defaults to 200).
-- `response_headers_list`, `response_cookies_list`, `response_rawcookies_list` – Buffers used by `prefork_request_handler()` to flush headers back to the parent process.
 
 ## Request Lifecycle
 
@@ -58,8 +57,8 @@ Traditional PHP scripts rely on `$_GET`, `$_POST`, `$_SERVER`, etc. ZealPHP emul
 
 ZealPHP favours a single-request-per-worker model to protect superglobals. When you need to isolate work:
 
-- `prefork_request_handler(callable $taskLogic)` executes the callback in a forked worker process. It captures buffered output, HTTP status, headers, and cookies, then streams them back to the parent request. Use this for legacy code that assumes blocking semantics or manipulates globals heavily.
-- `coprocess()` / `coproc()` create dedicated processes with coroutine support for longer running workloads that should not block the main worker. These helpers are only available when superglobals are enabled (`coproc` throws otherwise).
+- `App::cgiMode('proc' | 'fork' | 'fcgi')` selects the per-request isolation strategy for legacy `public/*.php` files. `'proc'` forks a fresh PHP interpreter per request via `proc_open` + `cgi_worker.php` (mod_php-style global isolation, ~30–50 ms cold start — what unmodified WordPress/Drupal needs). `'fork'` (v0.2.29) forks the warm worker via `OpenSwoole\Process` for ~5× faster startup at the cost of function-scope semantics. `'fcgi'` (v0.2.39+) forwards to an upstream php-fpm pool via `App::fcgiAddress()` — no child process at all. See [tasks-and-concurrency.md](./tasks-and-concurrency.md) for the trade-off table.
+- `coprocess()` / `coproc()` create dedicated processes with coroutine support for longer-running workloads that should not block the main worker. These helpers are only available when superglobals are enabled (`coproc` throws otherwise).
 
 ## Task Workers
 
