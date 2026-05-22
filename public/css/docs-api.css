@@ -601,6 +601,18 @@
   border-bottom: 1px dashed rgba(0,0,0,.2);
 }
 
+/* ---------- Admonitions (@deprecated / @see notices) ---------- */
+/* phpDocumentor's admonition icon is an inline <svg> with the class on the
+   <svg> itself. It ships at its intrinsic ~800px size; the max-width:3rem cap
+   lives in phpdoc's base.css, which our wrapped pages DON'T load (only
+   template.css + this overlay) — so the @deprecated exclamation rendered
+   enormous. Pin it to a normal inline icon size. */
+.docs-api .phpdocumentor-admonition__icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+}
+
 /* ---------- Responsive: phpDocumentor's grid can overflow our shell ---------- */
 @media (max-width: 900px) {
   .docs-api aside.phpdocumentor-sidebar {
