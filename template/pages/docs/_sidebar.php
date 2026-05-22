@@ -39,18 +39,22 @@ $groups = [
 
 $apiChip = 'phpdoc';
 ?>
-<input type="checkbox" id="docs-sidebar-toggle" class="learn-sidebar-toggle-input">
-<label for="docs-sidebar-toggle" class="learn-sidebar-toggle-btn" aria-label="Toggle docs">&#9776; Docs</label>
-<aside id="docs-sidebar" class="learn-sidebar" aria-label="Documentation navigation" hx-preserve="true">
+<input type="checkbox" id="learn-sidebar-toggle" class="learn-sidebar-toggle-input">
+<label for="learn-sidebar-toggle" class="learn-sidebar-toggle-btn" aria-label="Toggle docs">&#9776; Docs</label>
+<aside id="learn-sidebar" class="learn-sidebar" aria-label="Documentation navigation" hx-preserve="true">
   <div class="learn-sidebar-inner">
     <div class="learn-sidebar-group">
       <h4 class="learn-sidebar-group-title">Overview</h4>
       <ul class="learn-sidebar-list">
         <li class="learn-sidebar-item<?= $current === null ? ' active' : '' ?>" data-num="0">
-          <a href="/docs/" class="learn-sidebar-link">All docs<?php if ($current === null): ?><span class="learn-sidebar-chip">home</span><?php endif; ?></a>
+          <a href="/docs/" class="learn-sidebar-link"
+             hx-get="/api/docs/page?slug=__index__"
+             hx-target=".lesson-content"
+             hx-swap="outerHTML show:.learn-layout:top"
+             hx-push-url="/docs/">All docs<?php if ($current === null): ?><span class="learn-sidebar-chip">home</span><?php endif; ?></a>
         </li>
         <li class="learn-sidebar-item<?= $current === '__api__' ? ' active' : '' ?>" data-num="•">
-          <a href="/docs/api/" class="learn-sidebar-link">API Reference<span class="learn-sidebar-chip"><?= htmlspecialchars($apiChip) ?></span></a>
+          <a href="/docs/api/" class="learn-sidebar-link" hx-boost="false">API Reference<span class="learn-sidebar-chip"><?= htmlspecialchars($apiChip) ?></span></a>
         </li>
       </ul>
     </div>
@@ -63,7 +67,12 @@ $apiChip = 'phpdoc';
           <?php foreach ($items as [$slug, $label]): ?>
             <?php $num++; $isActive = $slug === $current; ?>
             <li class="learn-sidebar-item<?= $isActive ? ' active' : '' ?>" data-num="<?= str_pad((string)$num, 2, '0', STR_PAD_LEFT) ?>">
-              <a href="/docs/guide/<?= htmlspecialchars($slug, ENT_QUOTES) ?>" class="learn-sidebar-link"><?= htmlspecialchars($label, ENT_QUOTES) ?></a>
+              <a href="/docs/guide/<?= htmlspecialchars($slug, ENT_QUOTES) ?>"
+                 class="learn-sidebar-link"
+                 hx-get="/api/docs/page?slug=<?= urlencode($slug) ?>"
+                 hx-target=".lesson-content"
+                 hx-swap="outerHTML show:.learn-layout:top"
+                 hx-push-url="/docs/guide/<?= htmlspecialchars($slug, ENT_QUOTES) ?>"><?= htmlspecialchars($label, ENT_QUOTES) ?></a>
             </li>
           <?php endforeach; ?>
         </ul>
