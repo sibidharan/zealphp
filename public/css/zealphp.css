@@ -1074,15 +1074,19 @@ pre:hover > .code-copy { opacity: 1; }
 /* HR */
 .docs-markdown hr { border: 0; border-top: 1px solid var(--border); margin: 2rem 0; }
 
-/* Footer (under guide) */
+/* Footer (under guide). Override the global dark `footer {}` rule —
+ * this is an in-content footer, not the site chrome footer. */
 .docs-foot {
-  margin-top: 3rem;
-  padding-top: 1rem;
+  background: transparent;
   border-top: 1px solid var(--border);
+  margin: 3rem 0 0;
+  padding: 1rem 0 0;
   font-size: .85rem;
   color: var(--text-muted);
 }
+.docs-foot p { color: var(--text-muted); margin: 0; }
 .docs-foot a { color: var(--accent-dark); }
+.docs-foot a:hover { color: var(--accent); }
 
 /* api-missing fallback — same prose treatment but no sidebar */
 .docs-landing pre {
