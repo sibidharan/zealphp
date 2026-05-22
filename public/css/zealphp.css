@@ -1000,6 +1000,10 @@ pre:hover > .code-copy { opacity: 1; }
   border-top: 1px solid var(--border);
   letter-spacing: -.01em;
 }
+/* An <hr> directly before an <h2> would stack the rule's line with the
+ * h2's own border-top — a double divider. Drop the h2 border in that
+ * case (markdown `---` immediately before a `## heading`). */
+.docs-markdown hr + h2 { border-top: 0; padding-top: 0; margin-top: 0; }
 .docs-markdown h3 { font-size: 1.15rem; margin: 1.6rem 0 .4rem; }
 .docs-markdown h4 { font-size: 1rem; margin: 1.2rem 0 .3rem; color: var(--text-muted); }
 .docs-markdown p { margin: 0 0 1rem; }
