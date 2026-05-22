@@ -17,8 +17,12 @@ function initPageScripts(root) {
     pre.appendChild(btn);
   });
 
-  // Generic demo panel runner
+  // Generic demo panel runner. Bind once per button — initPageScripts may
+  // run again on later settles, and re-adding the listener would stack
+  // duplicate fetches per click.
   document.querySelectorAll('[data-demo-url]').forEach(btn => {
+    if (btn.dataset.demoBound) return;
+    btn.dataset.demoBound = '1';
     const panel = document.getElementById(btn.dataset.target);
     const load = async () => {
       if (panel) panel.innerHTML = '<span class="demo-loading">Loading…</span>';
@@ -46,7 +50,12 @@ function initPageScripts(root) {
   // Re-sync its active-state + page <title> with the current URL after each
   // navigation (htmx swaps .learn-layout, which doesn't touch <head>).
   const sb = document.getElementById('learn-sidebar') || document.getElementById('docs-sidebar');
-  if (sb) {
+  // Idempotency gate: the sidebar is hx-preserved, so its DOM survives
+  // swaps. Only resync (the destructive teardown + rebuild below) when the
+  // page actually changed — otherwise an in-content swap that left the URL
+  // alone would needlessly rebuild the active item and flash its substeps.
+  if (sb && sb.dataset.syncedPath !== location.pathname) {
+    sb.dataset.syncedPath = location.pathname;
     sb.querySelectorAll('li.active').forEach(li => li.classList.remove('active'));
     sb.querySelectorAll('.learn-substeps').forEach(el => el.remove());
     const link = sb.querySelector('a[href="' + location.pathname + '"]');
@@ -205,15 +214,13 @@ function initPageScripts(root) {
   });
 }
 document.addEventListener('DOMContentLoaded', () => initPageScripts());
-document.addEventListener('htmx:afterSettle', (e) => {
-  // Skip when the swap target is the search-results dropdown — that's
-  // an inline suggestion swap, NOT a page navigation. Without this
-  // guard, the substep regeneration tears down + rebuilds the active
-  // sidebar item on every keystroke, which the user perceives as a
-  // blink across the entire sidebar.
-  if (e.target && (e.target.id === 'api-search-results' || e.target.closest?.('#api-search-results'))) {
-    return;
-  }
+document.addEventListener('htmx:afterSettle', () => {
+  // Safe to run on every settle because initPageScripts() is idempotent:
+  // the sidebar sync no-ops when location.pathname is unchanged (see
+  // dataset.syncedPath), highlight skips already-highlighted code, and
+  // demo runners bind exactly once. So in-content swaps — the htmx demos
+  // (counter button, etc.) and the search-results dropdown — re-highlight
+  // any swapped-in code but never rebuild or flash the sidebar.
   initPageScripts();
 });
 
