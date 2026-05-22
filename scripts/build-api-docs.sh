@@ -45,6 +45,7 @@ php "$PHAR" \
   -d "$ROOT/src" \
   -t "$ROOT/public/docs/api" \
   --title="ZealPHP API Reference" \
+  --defaultpackagename="ZealPHP" \
   --no-interaction
 
 echo "[build-api-docs] done."
