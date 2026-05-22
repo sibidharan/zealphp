@@ -39,7 +39,5 @@ ${basename(__FILE__, '.php')} = function () use ($ERROR_MESSAGES) {
         $this->response($this->json(['user_id' => $userId, 'username' => $creds['username']]), 200);
         return;
     }
-    header('HX-Redirect: /learn/notes');
-    header('Location: /learn/notes');
-    http_response_code(302);
+    Auth::redirectAfterAuth($g);
 };
