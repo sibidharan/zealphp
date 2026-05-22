@@ -1,11 +1,15 @@
 /* ====================================================================
- * docs-api.css — amber/dark palette overlay for the phpDocumentor pages
- * served under /docs/api/. Loaded AFTER phpDocumentor's own CSS so
- * these selectors override theirs.
+ * docs-api.css — typography + visual hierarchy for the phpDocumentor
+ * pages served under /docs/api/. Loaded AFTER phpDocumentor's own CSS
+ * so these selectors override theirs.
  *
- * We don't try to re-style phpDocumentor exhaustively — just paint the
- * brand surfaces (links, headers, active items, signatures) so the API
- * reference reads as part of the ZealPHP site, not a green island.
+ * Design intent — make code unmistakable from prose:
+ *   - All identifiers (method names, types, params): Fira Code mono.
+ *   - All signatures: dark code-block treatment (NOT inline chips).
+ *   - All descriptions: Instrument Sans, max-width capped for reading.
+ *   - Each method renders as a CARD with: bold mono title, subtle
+ *     source-link, dark signature block, clean params table, clean
+ *     returns block. Stripe / Linear API docs aesthetic.
  * ==================================================================== */
 
 /* phpDocumentor's hard-coded green palette → CSS variables already
@@ -126,61 +130,330 @@
   text-decoration: none;
 }
 
-/* ---------- SIGNATURES (method/function code blocks) ---------- */
-.docs-api .phpdocumentor-signature,
-.docs-api code,
-.docs-api kbd,
-.docs-api pre {
+/* ---------- METHOD / FUNCTION / CONSTANT CARDS ---------- */
+/* Each phpdoc-element renders as a self-contained card with bold mono
+ * title, subtle source link, dark signature block, params + returns.
+ * Real phpdoc class names: .phpdocumentor-element (the wrapper),
+ * .phpdocumentor-element__name (the H4 method title). */
+.docs-api article.phpdocumentor-element {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem 1.75rem;
+  margin: 1.25rem 0 1.5rem;
+  scroll-margin-top: 5rem;
+}
+.docs-api article.phpdocumentor-element.-class {
+  /* The outer class wrapper is a banner, not a method card. Render
+   * flat — its children (constants, properties, methods sections)
+   * each get their own cards. */
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.docs-api section.phpdocumentor-methods,
+.docs-api section.phpdocumentor-functions,
+.docs-api section.phpdocumentor-constants,
+.docs-api section.phpdocumentor-properties {
+  margin-top: 2.5rem;
+}
+
+/* "Constants" / "Methods" / "Properties" section-level H3 — small caps,
+ * amber-underlined, dominant section header */
+.docs-api .phpdocumentor-elements__header,
+.docs-api section.phpdocumentor-methods > h2,
+.docs-api section.phpdocumentor-functions > h2,
+.docs-api section.phpdocumentor-constants > h2,
+.docs-api section.phpdocumentor-properties > h2 {
+  font-family: var(--font);
+  font-size: .82rem;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--accent-dark);
+  font-weight: 700;
+  padding-bottom: .4rem;
+  border-bottom: 2px solid var(--accent);
+  margin: 2.5rem 0 1rem;
+  border-top: 0;
+  padding-top: 0;
+}
+
+/* Method / function name (h4.phpdocumentor-element__name) — looks
+ * like code, not prose. THIS is the selector that matters. */
+.docs-api .phpdocumentor-element__name,
+.docs-api h4.phpdocumentor-element__name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 1.18rem;
+  color: var(--accent-dark);
+  margin: 0 0 .8rem;
+  letter-spacing: -.01em;
+  border: 0;
+  padding: 0;
+}
+
+/* Content title (the class name banner at the top of the page) */
+.docs-api h2.phpdocumentor-content__title {
+  font-family: var(--font-mono);
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -.02em;
+  border-top: 0;
+  padding-top: 0;
+  margin: 1.5rem 0 .5rem;
+}
+
+/* "Found in App.php : 1728" — subtle inline annotation, NOT a full-
+ * width amber banner. Override phpdoc's default block styling
+ * aggressively. */
+.docs-api aside.phpdocumentor-element-found-in {
+  display: block;
+  background: transparent !important;
+  border: 0 !important;
+  border-left: 0 !important;
+  padding: 0 !important;
+  margin: 0 0 .75rem !important;
+  font-size: .78rem !important;
+  color: var(--text-muted) !important;
+  border-radius: 0 !important;
   font-family: var(--font-mono);
 }
-.docs-api .phpdocumentor-signature {
-  background: var(--code-bg);
-  color: #e7e5e4;
-  padding: .75rem 1rem;
-  border-radius: var(--radius);
-  font-size: .88rem;
-  line-height: 1.55;
-  border: 1px solid #2a201d;
-  overflow-x: auto;
+.docs-api aside.phpdocumentor-element-found-in a,
+.docs-api .phpdocumentor-element-found-in__file a {
+  color: var(--text-muted);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--border);
 }
-.docs-api .phpdocumentor-signature__name {
+.docs-api aside.phpdocumentor-element-found-in a:hover,
+.docs-api .phpdocumentor-element-found-in__file a:hover {
+  color: var(--accent-dark);
+  border-bottom-color: var(--accent);
+}
+.docs-api .phpdocumentor-element-found-in__line {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* ---------- SIGNATURES — the big code block per method ---------- */
+/* phpdoc renders signatures as <code class="phpdocumentor-code phpdocumentor-signature">
+ * which is inline by default. Force block, dark background, syntax-color
+ * the span-children that phpdoc tags. */
+.docs-api code.phpdocumentor-signature,
+.docs-api code.phpdocumentor-code,
+.docs-api .phpdocumentor-signature {
+  display: block !important;
+  font-family: var(--font-mono) !important;
+  background: var(--code-bg) !important;
+  color: #e7e5e4 !important;
+  padding: .9rem 1.1rem !important;
+  border-radius: 6px !important;
+  font-size: .88rem !important;
+  line-height: 1.7 !important;
+  border: 1px solid #2a201d !important;
+  overflow-x: auto;
+  margin: .5rem 0 1.25rem !important;
+  white-space: pre-wrap;
+  word-break: keep-all;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+}
+.docs-api .phpdocumentor-signature__name,
+.docs-api .phpdocumentor-signature a {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
 .docs-api .phpdocumentor-signature__visibility,
-.docs-api .phpdocumentor-signature__return-type {
-  color: #cbd5e1;
+.docs-api .phpdocumentor-signature__static {
+  color: #f87171;
+  font-style: italic;
+  font-weight: 500;
+}
+.docs-api .phpdocumentor-signature__response_type,
+.docs-api .phpdocumentor-signature__argument__type {
+  color: #93c5fd;
 }
 .docs-api .phpdocumentor-signature__argument__name {
   color: #fcd34d;
+  font-weight: 500;
+}
+.docs-api .phpdocumentor-signature__argument__default-value {
+  color: #d1d5db;
 }
 
-/* Inline code (parameter types, etc.) */
-.docs-api .phpdocumentor-element :not(pre) > code,
-.docs-api .phpdocumentor-content code:not(.phpdocumentor-signature) {
+/* Inline code in prose (NOT signature blocks). The signature has both
+ * `.phpdocumentor-signature` and `.phpdocumentor-code` classes — exclude
+ * via :not() on the code itself, not the parent. */
+.docs-api code:not(.phpdocumentor-signature):not(.phpdocumentor-code) {
+  font-family: var(--font-mono);
   background: rgba(245,158,11,.08);
   border: 1px solid rgba(245,158,11,.18);
-  padding: .08em .35em;
+  padding: .1em .4em;
   border-radius: 4px;
   color: var(--accent-dark);
-  font-size: .88em;
+  font-size: .85em;
+  font-weight: 500;
 }
 
-/* ---------- TABLES (parameter lists, return values) ---------- */
+/* ---------- PARAMETERS + RETURN VALUES blocks ---------- */
+/* phpdoc emits these as <h5 class="phpdocumentor-argument-list__heading">
+ * Parameters</h5> + the rendered param list. Real selectors below. */
+.docs-api .phpdocumentor-argument-list__heading,
+.docs-api .phpdocumentor-return-value__heading,
+.docs-api .phpdocumentor-tag-list__heading,
+.docs-api h5[class*="phpdocumentor-"] {
+  font-family: var(--font);
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  color: var(--text-muted);
+  font-weight: 700;
+  margin: 1.25rem 0 .5rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: .25rem;
+}
+
+/* Each parameter row — phpdoc renders these as:
+ *   <dt class="phpdocumentor-argument-list__entry">
+ *     <span class="phpdocumentor-argument-list__argument__name">$format</span>
+ *     :
+ *     <span class="phpdocumentor-argument-list__argument__type">string|null</span>
+ *   </dt>
+ *   <dd>description...</dd>
+ * Render as a definition list with code-styled name + chip-styled type. */
+.docs-api .phpdocumentor-argument-list__entry,
+.docs-api .phpdocumentor-return-value__entry,
+.docs-api dt.phpdocumentor-table-of-contents__entry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .5rem;
+  padding: .55rem 0 .25rem;
+  font-family: var(--font-mono);
+  font-size: .9rem;
+}
+.docs-api dl > dt.phpdocumentor-argument-list__entry + dd,
+.docs-api dl > dt.phpdocumentor-return-value__entry + dd {
+  padding: 0 0 .8rem 0;
+  margin: 0 0 .25rem;
+  border-bottom: 1px dashed rgba(0,0,0,.06);
+  font-family: var(--font);
+  font-size: .9rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+.docs-api dl > dd:last-child { border-bottom: 0; }
+
+.docs-api .phpdocumentor-argument-list__argument__name,
+.docs-api .phpdocumentor-return-value__argument__name {
+  color: var(--accent-dark);
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+.docs-api .phpdocumentor-argument-list__argument__type,
+.docs-api .phpdocumentor-return-value__argument__type,
+.docs-api .phpdocumentor-argument-list__entry > span:nth-of-type(2),
+.docs-api .phpdocumentor-return-value__entry > span:nth-of-type(2) {
+  display: inline-block;
+  padding: .1rem .5rem;
+  background: rgba(147,197,253,.12);
+  border: 1px solid rgba(147,197,253,.3);
+  color: #2563eb;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: .8rem;
+  font-weight: 500;
+}
+
+/* Legacy: phpdoc-label-line is a different structure used for some
+ * elements; keep a defensive baseline. */
+.docs-api .phpdocumentor-label-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .5rem;
+  padding: .35rem 0;
+  font-family: var(--font-mono);
+  font-size: .88rem;
+}
+.docs-api .phpdocumentor-label-line:empty { display: none; }
+.docs-api .phpdocumentor-label-line code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: #fcd34d;
+  font-weight: 600;
+}
+
+/* Type chips — small pill badges for return types + param types */
+.docs-api .phpdocumentor-tag-link,
+.docs-api .phpdocumentor-tag-link a {
+  display: inline-block;
+  padding: .15rem .55rem;
+  background: rgba(147,197,253,.12);
+  border: 1px solid rgba(147,197,253,.3);
+  color: #2563eb;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  font-weight: 500;
+  text-decoration: none;
+  margin-right: .3rem;
+}
+
+/* Summary (one-liner under method title) */
+.docs-api .phpdocumentor-summary {
+  font-family: var(--font);
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: .25rem 0 .75rem;
+  max-width: 70ch;
+}
+
+/* Description (long-form prose) */
+.docs-api .phpdocumentor-description {
+  font-family: var(--font);
+  color: var(--text);
+  font-size: .95rem;
+  line-height: 1.7;
+  margin: .75rem 0;
+  max-width: 75ch;
+}
+.docs-api .phpdocumentor-description p { margin: .5rem 0 .8rem; }
+.docs-api .phpdocumentor-description ul,
+.docs-api .phpdocumentor-description ol { margin: .5rem 0 .8rem; padding-left: 1.5rem; }
+.docs-api .phpdocumentor-description li { margin: .25rem 0; }
+
+/* ---------- TABLES (constant lists, etc.) ---------- */
 .docs-api table {
   width: 100%;
   border-collapse: collapse;
   margin: 1rem 0;
+  font-size: .88rem;
 }
 .docs-api th, .docs-api td {
   border-bottom: 1px solid var(--border);
   padding: .6rem .8rem;
   text-align: left;
+  vertical-align: top;
 }
 .docs-api th {
   background: var(--bg-alt);
   font-weight: 700;
   color: var(--text);
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+}
+.docs-api td code {
+  /* code in table cells stays subtle */
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--accent-dark);
+  font-weight: 500;
 }
 
 /* ---------- SEARCH BAR ---------- */
