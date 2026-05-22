@@ -18,10 +18,16 @@
 use ZealPHP\App;
 
 $v = defined('ZEALPHP_ASSET_VERSION') ? ZEALPHP_ASSET_VERSION : '';
-?>
-<link rel="stylesheet" href="<?= htmlspecialchars($apiCssHref, ENT_QUOTES) ?>">
-<link rel="stylesheet" href="/css/docs-api.css?v=<?= $v ?>">
 
+// htmx attributes that make an API link swap ONLY the .lesson-content
+// region in place (like the guide nav) instead of a full reload. hx-select
+// pulls .lesson-content out of the target page's full HTML. Reused for the
+// breadcrumb here and the phpdoc-internal links (rewritten in route/docs.php).
+$apiHxAttrs = static fn (string $url): string => 'hx-get="' . htmlspecialchars($url, ENT_QUOTES) . '"'
+    . ' hx-target=".lesson-content" hx-select=".lesson-content"'
+    . ' hx-swap="outerHTML show:.learn-layout:top"'
+    . ' hx-push-url="' . htmlspecialchars($url, ENT_QUOTES) . '"';
+?>
 <div class="learn-layout docs-api-layout">
   <?php
   // We DO render our docs sidebar even on API pages so users can jump
@@ -30,6 +36,15 @@ $v = defined('ZEALPHP_ASSET_VERSION') ? ZEALPHP_ASSET_VERSION : '';
   ?>
 
   <article class="lesson-content docs-api">
+    <?php
+    // phpDocumentor's stylesheet + our amber overlay live INSIDE the swapped
+    // region so an inline .lesson-content swap (hx-select) carries the API
+    // styling with it — navigating from a guide into the API ref still loads
+    // the CSS without a full page reload. Browsers accept <link> in <body>;
+    // re-inserting the same href on subsequent swaps is served from cache. ?>
+    <link rel="stylesheet" href="<?= htmlspecialchars($apiCssHref, ENT_QUOTES) ?>">
+    <link rel="stylesheet" href="/css/docs-api.css?v=<?= $v ?>">
+
     <?php App::render('/pages/docs/_search'); ?>
 
     <?php $apiCrumb = $apiCrumb ?? []; if (!empty($apiCrumb)): ?>
@@ -37,7 +52,7 @@ $v = defined('ZEALPHP_ASSET_VERSION') ? ZEALPHP_ASSET_VERSION : '';
         <?php foreach ($apiCrumb as $i => $seg): ?>
           <?php if ($i > 0): ?><span class="sep">›</span><?php endif; ?>
           <?php if (!empty($seg['href'])): ?>
-            <a href="<?= htmlspecialchars($seg['href'], ENT_QUOTES) ?>"><?= htmlspecialchars($seg['label'], ENT_QUOTES) ?></a>
+            <a href="<?= htmlspecialchars($seg['href'], ENT_QUOTES) ?>" <?= $apiHxAttrs($seg['href']) ?>><?= htmlspecialchars($seg['label'], ENT_QUOTES) ?></a>
           <?php else: ?>
             <span class="current"><?= htmlspecialchars($seg['label'], ENT_QUOTES) ?></span>
           <?php endif; ?>

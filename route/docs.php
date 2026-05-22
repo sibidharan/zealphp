@@ -187,7 +187,20 @@ $app->patternRoute('#^/docs/api(/.*)?$#', function ($response) {
             return $base . $val;
         };
         foreach ($xpath->query('.//a[@href]', $mainNode) as $node) {
-            $node->setAttribute('href', $rewriteAttr($node->getAttribute('href')));
+            $href = $rewriteAttr($node->getAttribute('href'));
+            $node->setAttribute('href', $href);
+            // Inline-swap internal API page links (a clean /docs/api/*.html
+            // with no #fragment) so navigating within the reference swaps
+            // .lesson-content in place — no full reload, sidebar preserved —
+            // matching the guide nav. Anchor (#method) links keep plain
+            // behaviour (in-page jumps).
+            if (preg_match('~^/docs/api/[^#?]+\.html$~', $href) === 1) {
+                $node->setAttribute('hx-get', $href);
+                $node->setAttribute('hx-target', '.lesson-content');
+                $node->setAttribute('hx-select', '.lesson-content');
+                $node->setAttribute('hx-swap', 'outerHTML show:.learn-layout:top');
+                $node->setAttribute('hx-push-url', $href);
+            }
         }
         foreach ($xpath->query('.//img[@src]|.//script[@src]', $mainNode) as $node) {
             $node->setAttribute('src', $rewriteAttr($node->getAttribute('src')));

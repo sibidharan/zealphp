@@ -36,13 +36,23 @@ $classCount = array_sum(array_map('count', $apiGroups));
     </header>
 
     <div class="api-index">
+      <?php
+      // Inline-swap nav (matches the guide sidebar): clicking a class swaps
+      // ONLY .lesson-content — hx-select pulls it out of the class page's
+      // full HTML — so the sidebar/nav/footer stay put and there's no full
+      // page reload. The class page's CSS rides along inside .lesson-content.
+      $apiHx = static fn (string $url): string => 'hx-get="' . htmlspecialchars($url, ENT_QUOTES) . '"'
+          . ' hx-target=".lesson-content" hx-select=".lesson-content"'
+          . ' hx-swap="outerHTML show:.learn-layout:top"'
+          . ' hx-push-url="' . htmlspecialchars($url, ENT_QUOTES) . '"';
+      ?>
       <?php foreach ($apiGroups as $group => $classes): ?>
         <section class="api-index-group">
           <h2 class="api-index-group-title"><?= htmlspecialchars($group, ENT_QUOTES) ?></h2>
           <ul class="api-index-list">
             <?php foreach ($classes as $cls): ?>
               <li>
-                <a class="api-index-link" href="<?= htmlspecialchars($cls['href'], ENT_QUOTES) ?>">
+                <a class="api-index-link" href="<?= htmlspecialchars($cls['href'], ENT_QUOTES) ?>" <?= $apiHx($cls['href']) ?>>
                   <code><?= htmlspecialchars($cls['label'], ENT_QUOTES) ?></code>
                 </a>
               </li>
