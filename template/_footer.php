@@ -7,7 +7,7 @@
     <div class="footer-links">
       <a href="https://github.com/sibidharan/zealphp" target="_blank">GitHub</a>
       <a href="https://github.com/sibidharan/zealphp/issues" target="_blank">Issues</a>
-      <a href="/routing">Docs</a>
+      <a href="/docs/">Docs</a>
       <a href="https://openswoole.com" target="_blank">OpenSwoole</a>
     </div>
   </div>
