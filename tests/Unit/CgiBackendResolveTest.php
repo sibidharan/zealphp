@@ -55,4 +55,37 @@ final class CgiBackendResolveTest extends TestCase
         $r = App::resolveCgiBackend('/abs/public/cgi-bins/x.py', '/cgi-bins/x.py');
         $this->assertFalse($r['mayExecute']);
     }
+
+    public function testScriptAliasStoresFullProcConfig(): void
+    {
+        App::cgiScriptAlias('/cgi-bin/', [
+            'mode'        => 'proc',
+            'interpreter' => '/usr/bin/python3',
+        ]);
+        // Trailing slash on the prefix is normalized to a leading-slash, no-trailing key.
+        $this->assertArrayHasKey('/cgi-bin', App::$cgi_script_aliases);
+        $entry = App::$cgi_script_aliases['/cgi-bin'];
+        $this->assertSame('proc', $entry['mode']);
+        $this->assertSame('/usr/bin/python3', $entry['interpreter']);
+    }
+
+    public function testScriptAliasStoresFcgiAddressAndParams(): void
+    {
+        App::cgiScriptAlias('/fcgi', [
+            'mode'        => 'fcgi',
+            'address'     => '127.0.0.1:9001',
+            'fcgi_params' => ['SCRIPT_FILENAME' => '/x'],
+        ]);
+        $entry = App::$cgi_script_aliases['/fcgi'];
+        $this->assertSame('fcgi', $entry['mode']);
+        $this->assertSame('127.0.0.1:9001', $entry['address']);
+        $this->assertSame(['SCRIPT_FILENAME' => '/x'], $entry['fcgi_params']);
+        $this->assertArrayNotHasKey('interpreter', $entry);
+    }
+
+    public function testScriptAliasDefaultsModeToProc(): void
+    {
+        App::cgiScriptAlias('/bin', []);
+        $this->assertSame('proc', App::$cgi_script_aliases['/bin']['mode']);
+    }
 }
