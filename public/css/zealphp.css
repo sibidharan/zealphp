@@ -339,6 +339,12 @@ p  { max-width: 70ch; }
 }
 
 /* ── Buttons ── */
+/* Baseline: every <button> and <summary> is a click target → pointer. Kept at
+   low specificity (element selector) so the intentional overrides still win:
+   .btn:disabled / button:disabled → not-allowed, .htmx-request → progress.
+   Without this, bare buttons that don't carry .btn (chat Send, notes Add note,
+   the login/register submits, the copy buttons) fell back to the UA arrow. */
+button, summary { cursor: pointer; }
 .btn {
   display: inline-flex; align-items: center; gap: .4rem;
   padding: .6rem 1.4rem; border-radius: 7px; font-size: .9rem; font-weight: 600;
