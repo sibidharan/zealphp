@@ -23,8 +23,15 @@ different backends). Both are configured before `$app->run()`.
 | Want warm-interpreter performance without ZealPHP's per-request fork | An external FastCGI pool keeps interpreters warm across requests (~1–3 ms) |
 | New ZealPHP-native code | **Don't** use FastCGI — write native routes / coroutines; FastCGI is for hosting *external* runtimes |
 
-FastCGI mode requires `App::superglobals(true)` + `App::processIsolation(true)`
-(the CGI dispatch path). In coroutine mode, write native handlers instead.
+CGI dispatch works in **every lifecycle mode** — including coroutine mode. A
+registered non-`.php` extension is dispatched through its backend regardless of
+`superglobals` / `processIsolation`; in coroutine mode the `proc` path yields to
+the scheduler (via coroutine-aware `proc_open` / `Coroutine\System::exec()`)
+instead of blocking the worker, and `fcgi` forwarding is non-blocking too. The
+`.php` fast path still uses `cgi_worker.php` under `processIsolation(true)` and
+the in-process `executeFile()` core in coroutine mode. New ZealPHP-native code
+should still prefer native handlers — FastCGI is for hosting *external* runtimes
+— but you no longer have to be in Legacy CGI mode to register a backend.
 
 ---
 
@@ -70,6 +77,7 @@ extension to a backend. Call it once per extension before `$app->run()`. The
 | `address` | `string` | **for `fcgi`** | Upstream socket — `host:port` or `unix:/path.sock`. Throws if missing in `fcgi` mode. |
 | `interpreter` | `string` | no | For `proc` mode — the binary to exec (e.g. `/usr/bin/perl`). Omit to rely on the file's `#!` shebang. |
 | `fcgi_params` | `array<string,string>` | no | Extra CGI environment variables merged into the FastCGI `PARAMS` record. nginx `fastcgi_param` parity. |
+| `exec_paths` | `array<int,string>` | no | **ExecCGI scope.** URL path prefixes (e.g. `['/cgi-bin']`) under which this extension is allowed to execute via an implicit URL. A request for a registered extension **outside** every prefix is neither executed nor served as source — it returns **403** (Apache `Options +ExecCGI` default-off parity). Omit to disable implicit-URL execution entirely (the file stays reachable via `App::include()`). |
 
 ### Python via a FastCGI daemon
 
@@ -101,9 +109,33 @@ Unregistered extensions fall back to the framework-wide `App::$cgi_mode`
 (default `'proc'`). Inspect what a path resolves to:
 
 ```php
-$backend = App::resolveCgiBackend('/var/www/app/report.py');
-// ['mode' => 'fcgi', 'address' => '127.0.0.1:9001', 'fcgi_params' => ['APP_ENV' => 'prod']]
+$resolved = App::resolveCgiBackend('/var/www/app/report.py', '/cgi-bin/report.py');
+// ['backend' => ['mode' => 'fcgi', 'address' => '127.0.0.1:9001', ...], 'mayExecute' => true]
 ```
+
+`resolveCgiBackend()` takes the absolute path **and** the request URL path,
+returning `['backend' => [...], 'mayExecute' => bool]`. `mayExecute` is the
+ExecCGI gate: `true` for any path under a `cgiScriptAlias()` prefix or under one
+of the backend's `exec_paths`; `false` otherwise (the dispatcher then returns
+403 rather than executing or leaking source).
+
+### ScriptAlias-style executable areas
+
+`App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc'])` is the Apache `ScriptAlias`
+parity: every file served under the URL prefix is treated as executable
+regardless of extension. It takes the same `mode` / `interpreter` / `address` /
+`fcgi_params` config as `registerCgiBackend()`.
+
+```php
+App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc', 'interpreter' => '/usr/bin/python3']);
+```
+
+> **Known limitation.** `cgiScriptAlias()` registers the resolution + ExecCGI
+> scope, but URL-level implicit routing is wired **per-extension only**. A
+> ScriptAlias-only setup (no matching `registerCgiBackend()`) is reachable via
+> `App::include()` but does not yet get an automatic `/{file}.<ext>` route.
+> Pair it with a per-extension backend (whose `exec_paths` covers the same
+> prefix) for auto-routed implicit URLs, or add an explicit route. (Follow-up.)
 
 ---
 

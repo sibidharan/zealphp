@@ -970,6 +970,9 @@ BASH, 'lang' => 'bash']); ?>
 
 <h2 id="cgi-backends" class="legacy-mt-xl">CGI backends — host any language</h2>
 <p>ZealPHP can serve files written in <strong>any language</strong> that speaks CGI/1.1 — Perl, Python, Ruby, shell scripts, or compiled binaries — side-by-side with your PHP app. Register per-extension backends with <code>App::registerCgiBackend()</code> before <code>$app-&gt;run()</code>.</p>
+<div class="callout legacy-mt-prose-mb">
+  <p><strong>Works in every lifecycle mode.</strong> CGI dispatch is no longer gated on process-isolation. A registered non-<code>.php</code> extension is dispatched through its backend in <strong>coroutine mode too</strong> — the <code>proc</code> path uses a coroutine-aware <code>proc_open</code> / <code>Coroutine\System::exec()</code> that yields to the scheduler instead of blocking the worker, supports a POST body on the interpreter's stdin, and can stream. The interpreter's RFC 3875 CGI response (headers + blank line + body, with a <code>Status:</code> pseudo-header) is read off stdout via <code>cgiInterpreterResponse()</code> — Apache <code>mod_cgi</code> parity. The <code>.php</code> fast path is unchanged.</p>
+</div>
 
 <h3 class="legacy-mt-sm">Apache / nginx parity table</h3>
 <table class="ztable">
@@ -1035,12 +1038,35 @@ App::registerCgiBackend('.py', [
 PHP]); ?>
 
 <?php App::render('/components/_code', [
-    'label' => '.cgi — direct shebang execution',
+    'label' => '.cgi — direct shebang execution, scoped to /cgi-bin',
     'code'  => <<<'PHP'
-App::registerCgiBackend('.cgi', ['mode' => 'proc']);
+App::registerCgiBackend('.cgi', [
+    'mode'       => 'proc',
+    'exec_paths' => ['/cgi-bin'],   // ExecCGI scope — only execute under /cgi-bin/*
+]);
 // ZealPHP calls proc_open(['path/to/script.cgi']) — the OS reads the #! line.
 // Script must output CGI/1.1 headers: Content-Type + blank line + body.
+// A .cgi requested OUTSIDE /cgi-bin (e.g. an uploaded /uploads/x.cgi) → 403,
+// never executed and never served as source.
 PHP]); ?>
+
+<h3 id="exec-cgi-scope" class="legacy-mt-sm"><code>exec_paths</code> — the ExecCGI scope (default-off)</h3>
+<p>By default a registered extension does <strong>not</strong> execute via an implicit URL. <code>exec_paths</code> opts specific URL path prefixes into execution — ZealPHP's parity for Apache's <code>Options +ExecCGI</code> being off by default. A request whose extension is registered but whose URL falls <strong>outside</strong> every <code>exec_paths</code> prefix is treated as a stray/uploaded script: it is <strong>neither executed nor served as source</strong>, returning <strong>403 Forbidden</strong>. This closes the classic "upload a <code>.py</code> into the docroot and have it execute" hole. Files outside the scope remain reachable via <code>App::include()</code> (which applies its own docroot-containment check).</p>
+
+<h3 id="implicit-url-parity" class="legacy-mt-sm">Implicit URL parity</h3>
+<p>Implicit routes are registered <strong>per registered extension</strong>, so <code>GET /cgi-bin/report.py</code> runs <code>public/cgi-bin/report.py</code> through the <code>.py</code> backend with no explicit <code>$app-&gt;route()</code> — the same shape as Apache serving a script out of a <code>cgi-bin</code> directory.</p>
+
+<h3 id="script-alias" class="legacy-mt-sm"><code>cgiScriptAlias()</code> — Apache <code>ScriptAlias</code> parity</h3>
+<?php App::render('/components/_code', [
+    'label' => 'Mark a whole URL prefix executable, any extension',
+    'code'  => <<<'PHP'
+App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc', 'interpreter' => '/usr/bin/python3']);
+// Any file served under /cgi-bin is executable regardless of its extension.
+// Takes the same mode / interpreter / address / fcgi_params config as registerCgiBackend().
+PHP]); ?>
+<div class="callout warn legacy-mt-prose-mb">
+  <p><strong>Known limitation.</strong> <code>cgiScriptAlias()</code> registers the resolution + ExecCGI scope, but URL-level implicit routing is wired <strong>per-extension only</strong>. A ScriptAlias-only setup (no matching <code>registerCgiBackend()</code>) is reachable via <code>App::include()</code> but does not yet get an automatic <code>/{file}.&lt;ext&gt;</code> route. Pair it with a per-extension backend whose <code>exec_paths</code> covers the same prefix for auto-routed implicit URLs, or add an explicit route. (Follow-up.)</p>
+</div>
 
 <h3 class="legacy-mt-sm">fork mode — PHP only constraint</h3>
 <div class="callout warn legacy-mt-prose-mb">
@@ -1049,18 +1075,25 @@ PHP]); ?>
 </div>
 
 <h3 class="legacy-mt-sm">Reader: App::resolveCgiBackend()</h3>
-<p><code>App::resolveCgiBackend(string $path): array</code> looks up the file extension in the registry and returns the config array. Unregistered extensions fall back to <code>['mode' =&gt; App::$cgi_mode]</code>. You can call it directly to inspect what backend a path would use:</p>
+<p><code>App::resolveCgiBackend(string $absPath, string $urlPath = ''): array</code> resolves the backend config <strong>and</strong> the ExecCGI permission for a path. It returns <code>['backend' =&gt; [...], 'mayExecute' =&gt; bool]</code>. Resolution order: <code>cgiScriptAlias()</code> prefixes first (always executable), then the per-extension registry gated by <code>exec_paths</code>, then an unregistered fallback (<code>['mode' =&gt; App::$cgi_mode]</code>, <code>mayExecute = false</code>). When <code>mayExecute</code> is <code>false</code> the dispatcher returns 403 rather than executing or leaking source.</p>
 
 <?php App::render('/components/_code', [
-    'label' => 'Inspect backend resolution',
+    'label' => 'Inspect backend resolution + ExecCGI gate',
     'code'  => <<<'PHP'
-App::registerCgiBackend('.py', ['mode' => 'fcgi', 'address' => '127.0.0.1:9001']);
+App::registerCgiBackend('.py', [
+    'mode'       => 'fcgi',
+    'address'    => '127.0.0.1:9001',
+    'exec_paths' => ['/cgi-bin'],
+]);
 
-$backend = App::resolveCgiBackend('/var/www/app/hello.py');
-// ['mode' => 'fcgi', 'address' => '127.0.0.1:9001']
+$r = App::resolveCgiBackend('/var/www/app/public/cgi-bin/hello.py', '/cgi-bin/hello.py');
+// ['backend' => ['mode' => 'fcgi', 'address' => '127.0.0.1:9001', ...], 'mayExecute' => true]
 
-$backend = App::resolveCgiBackend('/var/www/app/index.php');
-// ['mode' => 'proc']  ← falls back to App::$cgi_mode
+$r = App::resolveCgiBackend('/var/www/app/public/uploads/hello.py', '/uploads/hello.py');
+// ['backend' => [...], 'mayExecute' => false]  ← outside ExecCGI scope → 403
+
+$r = App::resolveCgiBackend('/var/www/app/public/index.php', '/index.php');
+// ['backend' => ['mode' => 'proc'], 'mayExecute' => false]  ← unregistered, App::$cgi_mode
 PHP]); ?>
 
 <p>See <code>examples/multi-lang-cgi/</code> for a runnable demo registering <code>.pl</code> (proc/Perl) alongside the default PHP backend.</p>
@@ -1106,7 +1139,17 @@ PHP]); ?>
   <li><strong>stderr drained to <code>elog</code></strong> — anything the subprocess writes to fd 2 (PHP warnings, custom debug, uncaught notices) is routed to <code>/tmp/zealphp/debug.log</code> via the <code>cgi_worker</code> log channel, never leaked into the response body. Prevents the classic "PHP warning rendered into the HTML page" disclosure path.</li>
 </ul>
 
-<p>None of these are opt-in — they're always active when <code>App::superglobals(true)</code> + <code>App::processIsolation(true)</code> is set. There is no flag to disable the <code>HTTP_PROXY</code> strip, the timeout has a floor of 1 s rather than an unbounded option, and stderr always lands in <code>elog</code>.</p>
+<p>None of these are opt-in — they're always active on the CGI dispatch path, in every lifecycle mode (the path is no longer gated on <code>processIsolation(true)</code>). There is no flag to disable the <code>HTTP_PROXY</code> strip, the timeout has a floor of 1 s rather than an unbounded option, and stderr always lands in <code>elog</code>.</p>
+
+<h2 id="coroutine-safe-exec" class="legacy-mt-xl">Coroutine-safe <code>exec</code></h2>
+<p>Shelling out (<code>git</code>, <code>ffmpeg</code>, <code>convert</code>, …) with <code>exec()</code> / <code>shell_exec()</code> / <code>system()</code> / <code>passthru()</code> or a backtick blocks the OpenSwoole worker — one slow command stalls every coroutine sharing it. ZealPHP ships a coroutine-aware wrapper plus a transparent override so legacy code gets the safe behaviour for free.</p>
+<table class="ztable">
+<tr><th>API</th><th>What it does</th></tr>
+<tr><td><code>App::exec(string $cmd, ?float $timeout = null): array</code></td><td>Coroutine-safe execution. Inside a coroutine, yields via <code>OpenSwoole\Coroutine\System::exec()</code>; outside one (boot / CLI) falls back to blocking <code>App::rawExec()</code>. Returns <code>['output' =&gt; string, 'code' =&gt; int, 'signal' =&gt; int]</code> either way.</td></tr>
+<tr><td><code>App::rawExec(string $cmd): ?string</code></td><td>Explicit blocking escape hatch — returns captured stdout (or <code>null</code> if the process failed to start). Built on <code>proc_open</code> deliberately (NOT <code>shell_exec</code>/<code>exec</code>/<code>system</code>/<code>passthru</code>/<code>popen</code>), so it stays recursion-safe even with the override on.</td></tr>
+<tr><td><code>App::hookExec(?bool)</code> / <code>App::$hook_exec</code></td><td>Toggles the transparent override. <code>null</code> (default) resolves to <strong>on in coroutine mode</strong> (<code>superglobals === false</code>); a non-null value forces it on/off. When on, <code>shell_exec</code>, <code>exec</code>, <code>system</code>, <code>passthru</code>, and the backtick operator all route through <code>App::exec()</code> via <code>uopz</code> — same override family as <code>header()</code> and <code>session_*()</code>. <code>proc_open</code> / <code>popen</code> are intentionally NOT overridden.</td></tr>
+</table>
+<p>New ZealPHP-native code should still prefer explicit <code>App::exec()</code>, but the override means unmodified legacy code that shells out stops blocking the worker automatically.</p>
 
 <h2 class="legacy-mt-xl">Performance &amp; Hybrid Mode (continued)</h2>
 <p>For the full performance picture including CGI backends, see the <a href="/performance">performance page</a>.</p>
