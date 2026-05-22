@@ -30,7 +30,7 @@ zealphp/
 
 ## Background Execution
 
-- **`task/`** – Contains task worker handlers triggered via `$server->task()` or helper functions such as `prefork_request_handler()` and `coproc()`. Each file exposes a closure identified by file name (e.g., `task/backup.php` defines `$backup`).
+- **`task/`** – Contains task worker handlers triggered via `$server->task()`. Long-running, blocking work can also be offloaded to a child process via `coproc()` when running in superglobals mode. Each file exposes a closure identified by file name (e.g., `task/backup.php` defines `$backup`).
 - **`examples/`** – Not loaded automatically, but offers reference scripts for coroutines, prefork processing, and stream wrappers. Use these as templates when experimenting with concurrency features.
 
 ## Framework Core
@@ -40,7 +40,7 @@ zealphp/
   - `G.php` – Lightweight container that virtualizes PHP superglobals per request.
   - `HTTP/` – Request and response wrappers that provide durable hooks for ZealPHP features while exposing the underlying OpenSwoole objects when needed.
   - `Session/` – Session managers that bridge traditional PHP session semantics with OpenSwoole’s coroutine context.
-  - `utils.php` – Helper functions such as `prefork_request_handler()`, `coproc()`, logging utilities, and stack trace helpers.
+  - `utils.php` – Helper functions: `coproc()` (background-process spawner), logging utilities (`elog()`, `zlog()`, `access_log()`), and stack-trace helpers (`jTraceEx()`).
 
 - **`vendor/`** – Composer-managed dependencies and autoload metadata. Do not edit manually.
 

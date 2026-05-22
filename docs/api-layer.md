@@ -218,7 +218,7 @@ The two compose freely: a middleware can enforce "must be authenticated to reach
 APIs can trigger asynchronous work without blocking the request thread:
 
 - Dispatch a task: see `api/swoole/task.php` for serialising `OpenSwoole\Core\Psr\Response` objects returned by `task/backup.php`.
-- Run coroutines: use `go()` or `co::run()` when superglobals are disabled (`App::superglobals(false)`), or call `coproc()` / `prefork_request_handler()` to isolate blocking logic when superglobals are enabled.
+- Run coroutines: use `go()` or `co::run()` when superglobals are disabled (`App::superglobals(false)`), or call `coproc()` to spawn a background process that can block without affecting the main request when superglobals are enabled.
 
 ## Error Handling
 

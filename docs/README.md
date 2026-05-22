@@ -18,7 +18,7 @@ Welcome to the official documentation set for ZealPHP, a coroutine-aware PHP fra
 ### Surfaces
 - [streaming.md](./streaming.md) — generator-based SSR, `$response->stream()`, and Server-Sent Events via `$response->sse()`.
 - [websocket.md](./websocket.md) — `App::ws()`, the per-worker fd map, frame handling, and CLOSE 1001 shutdown.
-- [tasks-and-concurrency.md](./tasks-and-concurrency.md) — coroutines, `prefork_request_handler()`, `coproc()`, OpenSwoole task workers, and the safe-mode contract that governs each.
+- [tasks-and-concurrency.md](./tasks-and-concurrency.md) — coroutines (`go()`), background processes (`coproc()`), OpenSwoole task workers, and the safe-mode contract that governs each.
 - [middleware-and-authentication.md](./middleware-and-authentication.md) — built-in middleware (CORS, ETag, Range, BasicAuth, IpAccess, RateLimit, ...) and how to compose them.
 
 ### Operations

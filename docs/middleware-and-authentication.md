@@ -133,7 +133,7 @@ If you need to guarantee that a middleware executes after routing (for example, 
 Inside middleware you have full access to the PSR request:
 
 - Read cookies and headers.
-- Perform asynchronous validation using `go()` (when superglobals are disabled) or `prefork_request_handler()` to avoid blocking.
+- Perform asynchronous validation using `go()` (when superglobals are disabled) or `coproc()` to spawn a non-blocking background process when superglobals are enabled.
 - Populate `G::instance()->session` or attach attributes to the PSR request (e.g., `$request = $request->withAttribute('user', $user);` before passing it down).
 
 Your API handlers can then pull attributes from the PSR request via `$request->getAttribute('user')`.
