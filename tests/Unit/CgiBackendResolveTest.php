@@ -6,7 +6,23 @@ use ZealPHP\App;
 
 final class CgiBackendResolveTest extends TestCase
 {
-    protected function setUp(): void { App::resetCgiBackends(); }
+    /** @var array<string, array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>, exec_paths?:array<int,string>}> */
+    private array $savedBackends = [];
+    /** @var array<string, array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>}> */
+    private array $savedAliases = [];
+
+    protected function setUp(): void
+    {
+        $this->savedBackends = App::$cgi_backends;
+        $this->savedAliases  = App::$cgi_script_aliases;
+        App::resetCgiBackends();
+    }
+
+    protected function tearDown(): void
+    {
+        App::$cgi_backends       = $this->savedBackends;
+        App::$cgi_script_aliases = $this->savedAliases;
+    }
 
     public function testExtensionInsideExecPathMayExecute(): void
     {
