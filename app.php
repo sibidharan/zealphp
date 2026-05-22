@@ -25,15 +25,56 @@ if ($tz !== false && $tz !== '') {
 }
 
 // Asset cache-bust key — drives ?v=… on CSS/JS in template/_head.php.
-// Tracks filemtime of the main stylesheet (changes when styling changes); no
-// git dependency (composer installs don't ship .git). Falls back to boot time
-// so a missing file never kills startup.
+// Resolution order (best → fallback):
+//   1. Git commit (read from .git, no shell): bumps on EVERY commit so any
+//      asset change busts caches, and is identical for the same commit across
+//      deploys/nodes — so CDN/browser caches stay valid until a real change.
+//   2. Newest mtime across public/css + public/js (composer installs ship no
+//      .git): covers ALL assets, so JS-only edits bust too — not just one file.
+//   3. Boot time: last resort, so a missing source never kills startup.
 if (!defined('ZEALPHP_ASSET_VERSION')) {
-    $assetSource = __DIR__ . '/public/css/zealphp.css';
-    define(
-        'ZEALPHP_ASSET_VERSION',
-        (string) (is_file($assetSource) ? filemtime($assetSource) : time())
-    );
+    $zealAssetVersion = (static function (string $root): string {
+        // 1. Git commit, read straight from .git (no shell dependency).
+        $head = $root . '/.git/HEAD';
+        if (is_file($head)) {
+            $ref = trim((string) file_get_contents($head));
+            if (str_starts_with($ref, 'ref: ')) {
+                $name    = substr($ref, 5);
+                $refFile = $root . '/.git/' . $name;
+                if (is_file($refFile)) {
+                    return substr(trim((string) file_get_contents($refFile)), 0, 12);
+                }
+                $packed = $root . '/.git/packed-refs';            // packed ref
+                if (is_file($packed)) {
+                    foreach (file($packed, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+                        if (str_ends_with($line, ' ' . $name)) {
+                            return substr($line, 0, 12);
+                        }
+                    }
+                }
+            } elseif (strlen($ref) >= 7) {
+                return substr($ref, 0, 12);                        // detached HEAD = the SHA
+            }
+        }
+        // 2. Newest mtime across all CSS + JS (catches JS-only edits).
+        $newest = 0;
+        foreach (['/public/css', '/public/js'] as $dir) {
+            if (!is_dir($root . $dir)) {
+                continue;
+            }
+            /** @var \SplFileInfo $f */
+            foreach (new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($root . $dir, \FilesystemIterator::SKIP_DOTS)
+            ) as $f) {
+                if ($f->isFile()) {
+                    $newest = max($newest, $f->getMTime());
+                }
+            }
+        }
+        return (string) ($newest > 0 ? $newest : time());          // 3. last resort
+    })(__DIR__);
+
+    define('ZEALPHP_ASSET_VERSION', $zealAssetVersion);
 }
 
 // Auto-build the API reference at /docs/api/ on first boot. The build
