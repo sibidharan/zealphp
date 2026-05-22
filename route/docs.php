@@ -91,6 +91,95 @@ $app->patternRoute('#^/docs/api(/.*)?$#', function ($response) {
         return 404;
     }
 
+    // HTML pages get wrapped in our learn-layout so the API ref reads as
+    // part of the site, not a green phpDocumentor island. Other assets
+    // (CSS, JS, images, fonts) stream as-is via sendFile.
+    if (str_ends_with(strtolower($realTarget), '.html')) {
+        $raw = file_get_contents($realTarget);
+        if ($raw === false) {
+            return 500;
+        }
+
+        // Extract phpDocumentor's <main class="phpdocumentor"> inner HTML
+        // via DOMDocument (regex is brittle for nested structures). Also
+        // pull out the <title> and the first stylesheet href so the
+        // wrapped page renders without phpdoc's own <head>.
+        $libxmlPrev = libxml_use_internal_errors(true);
+        $dom = new DOMDocument();
+        $dom->loadHTML('<?xml encoding="utf-8"?>' . $raw);
+        libxml_clear_errors();
+        libxml_use_internal_errors($libxmlPrev);
+
+        $xpath  = new DOMXPath($dom);
+
+        // phpDocumentor templates: <main class="phpdocumentor">...</main>
+        $mainNodes = $xpath->query('//main[contains(concat(" ", normalize-space(@class), " "), " phpdocumentor ")]');
+        if (!$mainNodes || $mainNodes->length === 0) {
+            // Fall back to raw-file serving if extraction fails — better
+            // a green page than a 500.
+            $response->sendFile($realTarget);
+            $g->_streaming = true;
+            return null;
+        }
+
+        $mainNode = $mainNodes->item(0);
+
+        // Hoist phpDocumentor's own sidebar (Namespaces/Packages/Reports/
+        // Indices tree) into $sidebarHtml so the wrap template can render
+        // it inside a <details> accordion — then remove from the tree.
+        // Also strip phpdoc's top header (we have our own nav) and the
+        // mobile sidebar toggle (orphaned once the sidebar moves).
+        $sidebarHtml = '';
+        foreach ($xpath->query('.//aside[contains(@class, "phpdocumentor-sidebar")]', $mainNode) as $node) {
+            $sidebarHtml = $dom->saveHTML($node);
+            $node->parentNode->removeChild($node);
+        }
+        foreach ($xpath->query('.//header[contains(@class, "phpdocumentor-header")]', $mainNode) as $node) {
+            $node->parentNode->removeChild($node);
+        }
+        foreach ($xpath->query('.//input[@id="sidebar-button"]', $mainNode) as $node) {
+            $node->parentNode->removeChild($node);
+        }
+        foreach ($xpath->query('.//label[@for="sidebar-button"]', $mainNode) as $node) {
+            $node->parentNode->removeChild($node);
+        }
+
+        $apiHtml = '';
+        foreach ($mainNode->childNodes as $child) {
+            $apiHtml .= $dom->saveHTML($child);
+        }
+
+        // Stylesheet — phpdoc emits one <link rel="stylesheet" href="...">
+        // pointing to ./css/template.css (or similar relative path). We
+        // need to make that path absolute under /docs/api/ so it resolves
+        // regardless of which subdirectory the wrapped page lives in.
+        $apiDirRel  = rtrim(dirname('/docs/api' . $rel), '/');
+        $apiCssHref = '/docs/api/css/template.css';  // sensible default
+        foreach ($xpath->query('//link[@rel="stylesheet"]') as $link) {
+            $href = $link->getAttribute('href');
+            if ($href === '' || str_starts_with($href, 'http')) continue;
+            $apiCssHref = (str_starts_with($href, '/') ? '' : $apiDirRel . '/') . ltrim($href, './');
+            break;
+        }
+
+        // Title — strip the trailing " | <project>" suffix phpdoc adds.
+        $titleNodes = $xpath->query('//title');
+        $apiTitle   = $titleNodes && $titleNodes->length
+            ? trim((string) $titleNodes->item(0)->textContent)
+            : 'API Reference';
+
+        App::render('/_master', [
+            'title'        => $apiTitle . ' · ZealPHP API',
+            'page'         => 'docs/api-wrapped',
+            'active'       => 'docs',
+            'apiHtml'      => $apiHtml,
+            'apiSidebar'   => $sidebarHtml,
+            'apiCssHref'   => $apiCssHref,
+            'apiTitle'     => $apiTitle,
+        ]);
+        return null;
+    }
+
     $response->sendFile($realTarget);
     $g->_streaming = true;
     return null;
