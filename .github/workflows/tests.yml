@@ -88,13 +88,12 @@ jobs:
             coverage: 'none'
             upload-coverage: false
             experimental: false
-          # 8.5 is pre-GA at time of writing. openswoole/uopz binaries via
-          # shivammathur/setup-php may not be available yet; continue-on-error
-          # so a missing-extension failure doesn't block master.
+          # 8.5 is a fully supported, REQUIRED target — openswoole/uopz
+          # build from source via shivammathur/setup-php.
           - php: '8.5'
             coverage: 'none'
             upload-coverage: false
-            experimental: true
+            experimental: false
 
     steps:
       - name: Checkout
@@ -115,6 +114,11 @@ jobs:
         env:
           ZEALPHP_COMPRESSION_MIDDLEWARE: '1'
           ZEALPHP_HTTP_COMPRESSION: '0'
+          # Don't build the /docs/api/ reference in CI: the API ref isn't
+          # needed to run tests, and an in-flight phpDocumentor build
+          # competing for CPU flakes timing-sensitive integration tests
+          # (e.g. the WebSocket ticker test on slower 8.5 runners).
+          ZEALPHP_SKIP_DOCS_BUILD: '1'
         run: |
           php app.php >/tmp/zealphp-server.log 2>&1 &
           echo $! > /tmp/zealphp-server.pid
