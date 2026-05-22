@@ -340,10 +340,26 @@ function ensureActiveSidebarVisible(sb) {
       if (pending === 0 && !visible) bar.className = 'htmx-progress';
     }, 280);
   };
-  document.addEventListener('htmx:beforeRequest', start);
-  document.addEventListener('htmx:afterRequest', finish);
-  document.addEventListener('htmx:responseError', finish);
-  document.addEventListener('htmx:sendError', finish);
-  document.addEventListener('htmx:swapError', finish);
-  document.addEventListener('htmx:timeout', finish);
+  // Only NAVIGATION requests drive the bar: full-page swaps (hx-boost), the
+  // .lesson-content swaps (sidebar / lesson chips / API inline nav), or anything
+  // that pushes the URL. In-place widgets — the session counter (hx-target=this),
+  // search-as-you-type, chat, login forms, demo viewers — must NOT flash the top
+  // bar. Filtering finish too keeps `pending` balanced, so an in-place request
+  // completing mid-navigation can't hide the bar early.
+  const isNavRequest = (e) => {
+    const d = e && e.detail;
+    if (!d) return false;
+    if (d.boosted || (d.requestConfig && d.requestConfig.boosted)) return true;
+    const el = d.elt;
+    if (!el || typeof el.getAttribute !== 'function') return false;
+    if (el.getAttribute('hx-target') === '.lesson-content') return true;
+    if (el.hasAttribute('hx-push-url')) return true;
+    return false;
+  };
+  document.addEventListener('htmx:beforeRequest', (e) => { if (isNavRequest(e)) start(); });
+  document.addEventListener('htmx:afterRequest',  (e) => { if (isNavRequest(e)) finish(); });
+  document.addEventListener('htmx:responseError', (e) => { if (isNavRequest(e)) finish(); });
+  document.addEventListener('htmx:sendError',     (e) => { if (isNavRequest(e)) finish(); });
+  document.addEventListener('htmx:swapError',     (e) => { if (isNavRequest(e)) finish(); });
+  document.addEventListener('htmx:timeout',       (e) => { if (isNavRequest(e)) finish(); });
 })();
