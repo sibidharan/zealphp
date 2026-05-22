@@ -24,6 +24,8 @@ $app->run([
 
 ZealPHP merges your configuration with its defaults (`enable_static_handler: true`, `task_worker_num: 4`, `pid_file: /tmp/zealphp.pid`, etc.) and forces `enable_coroutine` based on the superglobal mode.
 
+> **Document root.** The `document_root` shown above is OpenSwoole's underlying static-handler setting. The framework-level way to set it is **`App::documentRoot('public')`** — the Apache `DocumentRoot` equivalent: the folder every implicit route and the static handler resolve against, defaulting to `public/`. Set it (like all `App::*` config) *before* `App::init()`; `App::run()` resolves `App::$document_root` into this `document_root` setting for you, so most apps use the setter and never pass `document_root` by hand. See [routing.md](routing.md) and [directory-structure.md](directory-structure.md).
+
 ## Superglobals and the `G` Container
 
 > **`G` is an alias; `ZealPHP\RequestContext` is the class.** `G` is the short, conventional name for the per-request **G**lobal state container. The class was originally named `G`, renamed to `RequestContext` in v0.2.6, with `class_alias(RequestContext::class, 'ZealPHP\G')` (at the bottom of `RequestContext.php`) keeping the short name working forever. `G::instance()` and the `$g` variable are the everyday accessors — type against `\ZealPHP\G` or `\ZealPHP\RequestContext`, they're literally the same class. In the [API reference](/docs/api/classes/ZealPHP-RequestContext.html) it's documented under its real name, **`RequestContext`**: a runtime `class_alias` has no source declaration of its own, so phpDocumentor can't give `G` a separate page.
