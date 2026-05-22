@@ -269,6 +269,14 @@
 /* Tighten the whitespace phpdoc emits between visibility/static/name */
 .docs-api .phpdocumentor-signature > span { white-space: normal; }
 
+/* Hide empty visibility / static spans (phpdoc emits empty <span> for
+ * elements that have no visibility modifier — namespace-level
+ * functions, free-floating constants, etc.). */
+.docs-api .phpdocumentor-signature__visibility:empty,
+.docs-api .phpdocumentor-signature__static:empty {
+  display: none;
+}
+
 /* Visibility (public/private/protected) — small badge instead of inline color text */
 .docs-api .phpdocumentor-signature__visibility {
   display: inline-block;
