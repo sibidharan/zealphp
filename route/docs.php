@@ -35,17 +35,20 @@ $app->route('/docs/guide/{topic}', function (string $topic) {
         return 404;
     }
 
-    $body = \ZealPHP\Docs\MarkdownRenderer::render((string) file_get_contents($candidate));
+    $markdown = (string) file_get_contents($candidate);
+    $body = \ZealPHP\Docs\MarkdownRenderer::render($markdown);
+    $desc = \ZealPHP\Docs\MarkdownRenderer::summary($markdown);
 
     $title = ucwords(str_replace(['-', '_'], ' ', $topic));
 
     App::render('/_master', [
-        'title'   => $title . ' · ZealPHP Docs',
-        'page'    => 'docs/guide',
-        'active'  => 'docs',
-        'topic'   => $topic,
-        'heading' => $title,
-        'body'    => $body,
+        'title'       => $title . ' · ZealPHP Docs',
+        'description' => $desc !== '' ? $desc : null,
+        'page'        => 'docs/guide',
+        'active'      => 'docs',
+        'topic'       => $topic,
+        'heading'     => $title,
+        'body'        => $body,
     ]);
 });
 

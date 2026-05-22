@@ -2,12 +2,60 @@
 $title       ??= 'ZealPHP';
 $description ??= 'The PHP runtime for AI web applications. Upgrade existing PHP codebases to async — SSR streaming, WebSocket, SSE, coroutines, shared memory. One server, coroutine-native concurrency.';
 $v = defined('ZEALPHP_ASSET_VERSION') ? ZEALPHP_ASSET_VERSION : '';
+
+// Social / link-unfurl metadata (Open Graph + Twitter Card). Derived
+// once here so every page that renders _master gets a correct share
+// preview — Slack/Twitter/Discord/iMessage read these server-side, no
+// JS. The page <title> already appends " · ZealPHP"; the share title
+// mirrors that for consistency.
+$shareTitle = str_contains($title, 'ZealPHP') ? $title : ($title . ' · ZealPHP');
+
+// Canonical absolute URL of the page being served — built from the
+// request so it's correct on any host (php.zeal.ninja, localhost, a
+// preview tunnel). Unfurlers fetch the raw URL, so this reflects the
+// shared page even though htmx swaps don't re-render <head>.
+$__g       = \ZealPHP\G::instance();
+$__srv     = $__g->server ?? [];
+$__https   = (($__srv['HTTPS'] ?? '') === 'on')
+    || (($__srv['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
+    || ((int) ($__srv['SERVER_PORT'] ?? 0) === 443);
+$__scheme  = $__https ? 'https' : 'http';
+$__host    = (string) ($__srv['HTTP_HOST'] ?? $__srv['SERVER_NAME'] ?? 'php.zeal.ninja');
+$__path    = parse_url((string) ($__srv['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/';
+$canonicalUrl = $__scheme . '://' . $__host . $__path;
+
+// Optional share image. Pages may set $og_image (absolute path under
+// the doc root, e.g. "/og.png"); we emit the tag only if the file
+// exists so a missing asset never produces a broken-image card.
+$ogImage = $og_image ?? '/og.png';
+$ogImageExists = is_string($ogImage)
+    && is_file(dirname(__DIR__) . '/public' . parse_url($ogImage, PHP_URL_PATH));
+$ogImageUrl = $ogImageExists ? ($__scheme . '://' . $__host . $ogImage) : null;
 ?>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="<?= htmlspecialchars($description) ?>">
   <title><?= htmlspecialchars($title) ?> · ZealPHP</title>
+  <link rel="canonical" href="<?= htmlspecialchars($canonicalUrl, ENT_QUOTES) ?>">
+
+  <!-- Open Graph (Facebook, Slack, Discord, iMessage, LinkedIn) -->
+  <meta property="og:site_name" content="ZealPHP">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="<?= htmlspecialchars($shareTitle, ENT_QUOTES) ?>">
+  <meta property="og:description" content="<?= htmlspecialchars($description, ENT_QUOTES) ?>">
+  <meta property="og:url" content="<?= htmlspecialchars($canonicalUrl, ENT_QUOTES) ?>">
+  <?php if ($ogImageUrl !== null): ?>
+  <meta property="og:image" content="<?= htmlspecialchars($ogImageUrl, ENT_QUOTES) ?>">
+  <?php endif; ?>
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="<?= $ogImageUrl !== null ? 'summary_large_image' : 'summary' ?>">
+  <meta name="twitter:title" content="<?= htmlspecialchars($shareTitle, ENT_QUOTES) ?>">
+  <meta name="twitter:description" content="<?= htmlspecialchars($description, ENT_QUOTES) ?>">
+  <?php if ($ogImageUrl !== null): ?>
+  <meta name="twitter:image" content="<?= htmlspecialchars($ogImageUrl, ENT_QUOTES) ?>">
+  <?php endif; ?>
   <link rel="stylesheet" href="/css/zealphp.css?v=<?= $v ?>">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
