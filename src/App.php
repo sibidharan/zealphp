@@ -1696,11 +1696,10 @@ class App
     {
         try {
             if (is_array($handler)) {
-                $target = $handler[0];
-                $method = $handler[1];
-                assert(is_object($target) || is_string($target));
-                assert(is_string($method));
-                $reflection = new \ReflectionMethod($target, $method);
+                // $handler is array{0:object|string,1:string} (see @param),
+                // so PHPStan narrows the elements to ReflectionMethod's
+                // expected types directly — no runtime assert() needed.
+                $reflection = new \ReflectionMethod($handler[0], $handler[1]);
             } else {
                 $reflection = new \ReflectionFunction(\Closure::fromCallable($handler));
             }
