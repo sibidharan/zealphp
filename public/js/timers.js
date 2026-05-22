@@ -18,11 +18,23 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  // Reflect connection state on the buttons so the UI is unambiguous:
+  // Connect is disabled while a stream is live (no accidental second
+  // connection), Disconnect is disabled while idle (it was a dead-feeling
+  // no-op before — clicking it with nothing to close did nothing).
+  function setConnected(connected) {
+    document.querySelectorAll('[data-action="timers-sse-start"]')
+      .forEach(b => { b.disabled = connected; });
+    document.querySelectorAll('[data-action="timers-sse-stop"]')
+      .forEach(b => { b.disabled = !connected; });
+  }
+
   function stop() {
     if (eventSource) {
       eventSource.close();
       eventSource = null;
     }
+    setConnected(false);
   }
 
   function start() {
@@ -41,6 +53,7 @@
       appendLine('connection closed', 'done');
       stop();
     };
+    setConnected(true);
   }
 
   function init() {
@@ -51,6 +64,7 @@
       .forEach(btn => btn.addEventListener('click', start));
     document.querySelectorAll('[data-action="timers-sse-stop"]')
       .forEach(btn => btn.addEventListener('click', stop));
+    setConnected(false); // idle until the user connects
   }
 
   document.addEventListener('DOMContentLoaded', init);
