@@ -2,6 +2,8 @@
 
 ZealPHP embraces OpenSwoole’s asynchronous primitives to help you build responsive applications that scale across CPU cores. This document outlines the concurrency toolbox provided by the framework and when to use each option.
 
+> **Lifecycle safety (v0.2.27).** `App::run()` refuses to start when an unsafe mode combination is configured — specifically `superglobals(true) + enableCoroutine(true)` or `superglobals(true) + hookAll(non-zero)`, because concurrent coroutines would race process-wide `$_GET` / `$_POST` / `$_SESSION` arrays. See the "Lifecycle setters" section of [runtime-architecture.md](runtime-architecture.md) for the full mode matrix and the boot-time refusal contract.
+
 ## Coroutines with `go()` and `co::run()`
 
 OpenSwoole exposes coroutine APIs that allow non-blocking HTTP clients, database drivers, and timers. ZealPHP enables coroutine hooks automatically when you disable superglobals:
@@ -79,7 +81,7 @@ $html = coproc(function () {
 
 Requirements:
 
-- Only available when superglobals are enabled. Attempting to call it in coroutine mode throws an exception.
+- Only available when superglobals are enabled. Attempting to call it in coroutine mode throws an exception. The reason: `coproc()` forks a child process, and the `prefork_request_handler` family it sits in was designed *before* per-coroutine `RequestContext` (`$g`) existed — it relies on copying process-wide superglobals into the child. Under `superglobals(false)` each coroutine already has isolated state, so `coproc()` is both redundant (use `go()` for parallelism) and unsafe (the fork would race the parent's process-wide superglobals at the exact moment the framework is *not* maintaining them).
 - Data passed to the closure must be serialisable; resources such as database connections should be re-created inside the child process.
 
 ## Task Workers via `$server->task()`

@@ -218,19 +218,29 @@ Reflection is cached per route at registration time — zero reflection overhead
 - `ETagMiddleware` — `W/"md5"` ETag on GET, returns 304 on `If-None-Match` match
 - `CompressionMiddleware` — reference gzip/deflate implementation for apps that disable OpenSwoole `http_compression`; the demo app does not register it
 - `RangeMiddleware` — RFC 7233 Range requests: `Accept-Ranges: bytes`, 206 single/multi-range, 416 unsatisfiable, `If-Range` ETag support
+- `BodySizeLimitMiddleware` — rejects oversized request bodies with `413 Content Too Large`. nginx `client_max_body_size` / Apache `LimitRequestBody` / PHP `post_max_size` parity.
 - `SessionStartMiddleware` — eagerly starts a session and sends `Set-Cookie` for new visitors. `CoSessionManager` only starts sessions when a `PHPSESSID` cookie already exists (returning visitors); without this middleware, first-time visitors get no session cookie and session state resets every request. The `secure` flag auto-detects HTTPS (via `X-Forwarded-Proto`, `HTTPS`, or port 443) — works behind Traefik/Nginx and on direct HTTP. Override with `ZEALPHP_SESSION_SECURE` env var.
 - `IniIsolationMiddleware` — snapshots `ini_set()` changes per request and restores them on exit. Opt-in defense against ini-value leakage across requests on long-running workers (`ZEALPHP_INI_ISOLATE=1` or explicit registration).
 - `CharsetMiddleware` — auto-appends `; charset=utf-8` (or `App::$default_charset`) to text-ish response `Content-Type` values. Apache `AddDefaultCharset` / `AddCharset` parity.
 - `CacheControlMiddleware` — extension-keyed `Cache-Control: max-age=N, public` for static assets. Apache `<FilesMatch> Header set Cache-Control` parity.
 - `ExpiresMiddleware` — adds legacy `Expires:` header by content type. Apache `mod_expires` (`ExpiresActive`, `ExpiresByType`, `ExpiresDefault`) parity.
 - `HeaderMiddleware` — declarative response-header manipulation: `set/add/unset` with conditional variants. Apache `mod_headers` (`Header set / append / unset / add / merge`) parity.
+- `RequestHeaderMiddleware` — declarative request-header `set/add/unset/edit` written into `$g->server` using the `HTTP_<NAME>` CGI convention, so handlers see the modified headers. Apache `mod_headers RequestHeader` parity.
+- `ContentEncodingMiddleware` — sets response `Content-Encoding` from request URL suffixes (e.g. `.gz` → `Content-Encoding: gzip`). Apache `mod_mime AddEncoding` parity.
+- `ContentLanguageMiddleware` — sets response `Content-Language` from request URL suffixes (e.g. `page.en.html` → `Content-Language: en`); multi-suffix lists accumulate comma-joined. Apache `mod_mime AddLanguage` parity.
 - `BasicAuthMiddleware` — HTTP Basic Auth via htpasswd file or callback verifier. Apache `AuthType Basic` + `AuthUserFile` + `Require`, nginx `auth_basic` parity.
 - `IpAccessMiddleware` — CIDR allow/deny lists with allow-first / deny-first ordering. Apache legacy `Allow from` / `Deny from`, modern `Require ip` parity. Pair with `App::clientIp()` for correct client-IP behind a proxy.
+- `RefererMiddleware` — hotlink protection: refuses requests whose `Referer` header isn't in the allowed set with `403 Forbidden`. nginx `valid_referers` / `$invalid_referer` parity.
 - `RateLimitMiddleware` — sliding-window request rate limiter backed by `Store` (cross-worker shared state). Returns 429 + `Retry-After`. nginx `limit_req` parity.
 - `ConcurrencyLimitMiddleware` — in-flight concurrent-request cap backed by `Counter`. Returns 503 when full. nginx `limit_conn` parity.
 - `BlockPhpExtMiddleware` — refuses `*.php` URLs with 404 for apps that want extensionless URLs as the only public surface. Apache `RewriteRule \.php$ - [F]` parity.
+- `MergeSlashesMiddleware` — collapses runs of consecutive slashes in the request path to a single slash before routing (internal rewrite, no redirect). Apache `MergeSlashes On` / nginx `merge_slashes` parity.
 - `MimeTypeMiddleware` — sets/overrides `Content-Type` on non-static responses by URL extension or pattern. Apache `AddType` / `ForceType` parity.
 - `BodyRewriteMiddleware` — single-line regex substitution on response body. Apache `mod_substitute` parity (multi-line variants on the roadmap).
+- `SetEnvIfMiddleware` — sets request "environment" variables in `$g->server` when an attribute (`Remote_Addr`, header, URI, etc.) matches a regex. Apache `mod_setenvif` parity.
+- `RedirectMiddleware` — declarative URL redirects (prefix + regex shapes, first match short-circuits). Apache `mod_alias` (`Redirect` / `RedirectMatch`) parity.
+- `ReturnMiddleware` — unconditionally returns a fixed status/body (handler never runs); pair with `ScopedMiddleware` for path-scoped responses. nginx `return` directive parity.
+- `ScopedMiddleware` — wraps another middleware so it runs only when the request path matches a literal prefix, regex, or files predicate. Apache `<Location>` / `<LocationMatch>` / `<Files>` container parity.
 - `HostRouterMiddleware` — dispatches per-host routes inside one ZealPHP instance. nginx `server_name a.com b.com` parity; for true isolation prefer one process per host behind a real proxy.
 
 **Server-level configurability** (Apache `httpd.conf` parity — static `App::$*` properties + fluent setters, set BEFORE `App::init()`):

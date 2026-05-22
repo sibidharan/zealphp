@@ -125,6 +125,94 @@ $profile = function () {
 };
 ```
 
+## Authentication hooks (v0.2.25)
+
+Issue #13 introduced three optional callbacks on `App` that ZealAPI consults to answer "who is the current user?". They replace the pre-v0.2.25 hardcoded `return false;` stub on `isAuthenticated()` that 403'd every endpoint guarded by `requirePostAuth()`.
+
+ZealPHP deliberately ships no default checker — the framework doesn't know about your auth system. Wire the callbacks once during boot (in `app.php` for a single app, or in your platform wrapper's bootstrap — labs / Symfony bundle / etc. — so downstream apps inherit the answers without per-app glue).
+
+### The three callbacks
+
+Each follows the getter/setter shape established by `App::superglobals()`: no-arg returns the current callable (or null), one-arg installs it. Pass `null` to clear and restore the default.
+
+| Setter | Callback signature | Default | Consumed by |
+|--------|--------------------|---------|-------------|
+| `App::authChecker(?callable $fn = null): ?callable` | `fn(): bool` | `null` &rarr; `false` (fail-closed) | `$this->isAuthenticated()` |
+| `App::adminChecker(?callable $fn = null): ?callable` | `fn(): bool` | `null` &rarr; `false` | `$this->isAdmin()` |
+| `App::usernameProvider(?callable $fn = null): ?callable` | `fn(): ?string` | `null` &rarr; `null` | `$this->getUsername()` |
+
+Per-callback registration (each is independent — admins and identity don't have to be wired together):
+
+```php
+use ZealPHP\App;
+
+App::authChecker(fn(): bool => isset($_SESSION['user_id']));
+App::adminChecker(fn(): bool => ($_SESSION['role'] ?? null) === 'admin');
+App::usernameProvider(fn(): ?string => $_SESSION['username'] ?? null);
+```
+
+Return-value coercion:
+- `isAuthenticated()` casts the checker's return to `bool` — apps may return any truthy value (a user object, a non-empty session id) without ceremony.
+- `getUsername()` returns the provider's string verbatim (including `''`), but coerces any non-string (`null`, `false`, an int) to `null`.
+
+### The four consumed methods
+
+Available as `$this->X()` inside any ZealAPI handler closure (they live on `ZealAPI`, which extends `REST`):
+
+| Method | Returns | Behaviour |
+|--------|---------|-----------|
+| `$this->isAuthenticated(): bool` | `bool` | Calls the registered `authChecker`. Returns `false` when none is registered. |
+| `$this->isAdmin(): bool` | `bool` | Calls the registered `adminChecker`. Returns `false` when none is registered. Independent of `isAuthenticated()` — an app may be authenticated without being admin. |
+| `$this->getUsername(): ?string` | `?string` | Calls the registered `usernameProvider`. Returns `null` when none is registered, or when the provider returns a non-string. |
+| `$this->requirePostAuth(): bool` | `bool` | Composite guard. Returns `false` and emits a `403 {"error":"Unauthorized"}` JSON response when either `REQUEST_METHOD !== "POST"` or `isAuthenticated()` is false. Returns `true` only when both conditions hold. Use it as a one-line gate at the top of mutating endpoints. |
+
+### End-to-end example
+
+Wire the callbacks once during boot, then any API handler can branch on identity:
+
+```php
+// app.php — bootstrap (runs once at startup)
+use ZealPHP\App;
+
+App::authChecker(fn(): bool => !empty($_SESSION['user_id']));
+App::adminChecker(fn(): bool => ($_SESSION['role'] ?? null) === 'admin');
+App::usernameProvider(fn(): ?string => $_SESSION['username'] ?? null);
+
+App::init();
+$app = new App();
+$app->run();
+```
+
+```php
+<?php
+// api/posts/create.php
+$create = function ($app) {
+    if (!$app->requirePostAuth()) {
+        return; // 403 already emitted; short-circuit
+    }
+
+    $author = $app->getUsername() ?? 'anonymous';
+    $payload = $app->_request;
+
+    return [
+        'created_by' => $author,
+        'is_admin'   => $app->isAdmin(),
+        'title'      => $payload['title'] ?? null,
+    ];
+};
+```
+
+### Hooks vs middleware
+
+Both layers are valid; they answer different questions.
+
+| Layer | Question it answers | When to use |
+|-------|---------------------|-------------|
+| Auth middleware | "Should this request reach the handler at all?" | Deny-all gates — blanket 401 / 403 for the entire `/api/*` surface or a subtree. Runs before the handler and can short-circuit. |
+| Auth hooks (this section) | "Inside a handler, who is the caller?" | Per-handler identity-aware logic — e.g., `if ($app->isAdmin()) { …include hidden fields… }`, audit logging by `$app->getUsername()`, soft-deny on writes via `requirePostAuth()`. |
+
+The two compose freely: a middleware can enforce "must be authenticated to reach this URL," and the handler still uses the hooks to discover *which* authenticated user it's serving.
+
 ## Task Workers and Coroutines from APIs
 
 APIs can trigger asynchronous work without blocking the request thread:
