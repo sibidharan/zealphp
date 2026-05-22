@@ -81,7 +81,7 @@ Expected output:
 ZealPHP server running at http://0.0.0.0:9501 with N routes
 ```
 
-Visit `http://localhost:9501` in your browser to exercise the implicit public routes that map to files in `public/`.
+Visit `http://localhost:9501` in your browser to exercise the implicit public routes that map to files in `public/` — the **document root** (the Apache `DocumentRoot` equivalent). It defaults to `public/`; change it with `App::documentRoot('…')` before `App::init()`.
 
 ## 5. Verifying Health
 

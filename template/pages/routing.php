@@ -166,6 +166,11 @@ foreach ($routeTypes as [$id, $title, $url, $code]) {
 <table class="ztable">
 <tr><th>Apache directive</th><th>ZealPHP behavior</th><th>Flag</th></tr>
 <tr>
+  <td><code>DocumentRoot /path</code></td>
+  <td>The folder every implicit route and the static handler resolve against — defaults to <code>public/</code></td>
+  <td><code>App::documentRoot('public')</code> (set before <code>App::init()</code>)</td>
+</tr>
+<tr>
   <td><code>DirectorySlash On</code></td>
   <td><code>/docs</code> → <code>301 /docs/</code> when <code>docs</code> is a directory under <code>public/</code></td>
   <td><code>App::$directory_slash = true</code></td>

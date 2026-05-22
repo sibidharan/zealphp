@@ -103,6 +103,12 @@ $app->run();</code></pre>
       responds at <code>/about</code>. Static files (CSS, JS, images) work the same way. This is the
       Apache-style convention: filesystem = router.
     </p>
+    <p>
+      <code>public/</code> is your <strong>document root</strong> — the Apache <code>DocumentRoot</code>
+      equivalent that every implicit route and the static handler resolve against. It&rsquo;s the
+      <em>default</em>; point it at a different folder with <code>App::documentRoot('…')</code> before
+      <code>App::init()</code>.
+    </p>
 
     <h3><code>api/</code> — REST endpoints, by method</h3>
     <p>
