@@ -10,22 +10,22 @@ use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
 /**
- * Block .php Extension Middleware
+ * Block `.php` Extension Middleware
  *
- * Refuses any request whose path matches `\.php(\?|$)` with a 404. Useful for
+ * Refuses any request whose path matches `\.php(\?|$)` with a `404`. Useful for
  * apps that want extensionless URLs as the only public surface and don't want
  * `/index.php`, `/admin.php`, etc. to be reachable even when a public file
  * exists.
  *
- * Apache equivalent — the classic .htaccess pattern:
- *   RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s([^.]+)\.php [NC]
- *   RewriteRule ^ - [R=404,L]
+ * Apache equivalent — the classic `.htaccess` pattern:
+ *   `RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s([^.]+)\.php [NC]`
+ *   `RewriteRule ^ - [R=404,L]`
  *
  * nginx equivalent:
- *   location ~ \.php$ { return 404; }
+ *   `location ~ \.php$ { return 404; }`
  *
- * Usage in app.php:
- *   $app->addMiddleware(new \ZealPHP\Middleware\BlockPhpExtMiddleware());
+ * Usage in `app.php`:
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\BlockPhpExtMiddleware());`
  */
 class BlockPhpExtMiddleware implements MiddlewareInterface
 {

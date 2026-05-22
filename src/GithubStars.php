@@ -8,16 +8,16 @@ namespace ZealPHP;
  * GitHub stargazer-count cache.
  *
  * Renders directly into HTML (no client-side fetch, no empty span / number flicker).
- * Shared across workers via a 1-row OpenSwoole Store table; refreshed asynchronously
+ * Shared across workers via a 1-row OpenSwoole `Store` table; refreshed asynchronously
  * via a background coroutine when stale, so requests are never blocked on the
  * remote GitHub call.
  *
  * Usage:
- *   In app.php boot, before $app->run():
- *     \ZealPHP\GithubStars::register('sibidharan/zealphp');
+ *   In `app.php` boot, before `$app->run()`:
+ *     `\ZealPHP\GithubStars::register('sibidharan/zealphp');`
  *
  *   In templates / route handlers:
- *     <span>★ <?= htmlspecialchars(\ZealPHP\GithubStars::format()) ?></span>
+ *     `<span>★ <?= htmlspecialchars(\ZealPHP\GithubStars::format()) ?></span>`
  */
 final class GithubStars
 {
@@ -36,8 +36,8 @@ final class GithubStars
     private static bool $refreshInFlight = false;
 
     /**
-     * Create the shared Store table. Call ONCE before $app->run().
-     * The repo argument selects which github.com/owner/repo to track.
+     * Create the shared `Store` table. Call ONCE before `$app->run()`.
+     * The repo argument selects which `github.com/owner/repo` to track.
      */
     public static function register(string $repo): void
     {
@@ -140,8 +140,8 @@ final class GithubStars
     }
 
     /**
-     * "k"-suffixed formatting that matches the previous client-side script.
-     * 999 → "999"; 1234 → "1.2k"; 12345 → "12k".
+     * `"k"`-suffixed formatting that matches the previous client-side script.
+     * `999` → `"999"`; `1234` → `"1.2k"`; `12345` → `"12k"`.
      */
     private static function formatCount(int $n): string
     {

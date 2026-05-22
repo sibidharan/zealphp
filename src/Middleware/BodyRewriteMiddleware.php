@@ -11,26 +11,26 @@ use Psr\Http\Server\RequestHandlerInterface;
 use ZealPHP\RequestContext;
 
 /**
- * Body Rewrite Middleware (mod_substitute equivalent)
+ * Body Rewrite Middleware (`mod_substitute` equivalent)
  *
  * Applies an ordered list of regex substitutions to text-ish response bodies.
- * Useful for upstream URL rewriting (HTTP -> HTTPS in legacy app HTML),
+ * Useful for upstream URL rewriting (`HTTP` -> `HTTPS` in legacy app HTML),
  * dropping internal hostnames from rendered output, or stamping a build hash
  * onto every page without touching the templates.
  *
- * Apache equivalent (mod_substitute):
- *   AddOutputFilterByType SUBSTITUTE text/html
- *   Substitute "s|http://internal.lan|https://public.example.com|n"
+ * Apache equivalent (`mod_substitute`):
+ *   `AddOutputFilterByType SUBSTITUTE text/html`
+ *   `Substitute "s|http://internal.lan|https://public.example.com|n"`
  *
- * Only fires on text-ish content types (text/*, application/json,
- * application/xml, application/javascript, …). Streaming responses are
+ * Only fires on text-ish content types (`text/*`, `application/json`,
+ * `application/xml`, `application/javascript`, …). Streaming responses are
  * skipped — the body isn't materialised at this layer.
  *
  * Each rule is `['pattern' => $regex, 'replacement' => $replacement]`. The
  * pattern must include delimiters and any modifier flags. Replacement
  * follows PHP `preg_replace()` syntax — `$1`, `$2`, … for capture groups.
  *
- * Usage in app.php:
+ * Usage in `app.php`:
  *
  *   $app->addMiddleware(new \ZealPHP\Middleware\BodyRewriteMiddleware([
  *       ['pattern' => '#http://internal\.lan#', 'replacement' => 'https://example.com'],

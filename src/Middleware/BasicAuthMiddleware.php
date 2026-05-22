@@ -19,28 +19,28 @@ use ZealPHP\RequestContext;
  * credentials are missing or invalid — browsers respond by prompting.
  *
  * Apache equivalent:
- *   AuthType Basic
- *   AuthName "Restricted"
- *   AuthUserFile /etc/apache2/.htpasswd
- *   Require valid-user
+ *   `AuthType Basic`
+ *   `AuthName "Restricted"`
+ *   `AuthUserFile /etc/apache2/.htpasswd`
+ *   `Require valid-user`
  *
  * nginx equivalent:
- *   auth_basic "Restricted";
- *   auth_basic_user_file /etc/nginx/.htpasswd;
+ *   `auth_basic "Restricted";`
+ *   `auth_basic_user_file /etc/nginx/.htpasswd;`
  *
  * Supported htpasswd hash formats:
- *   - bcrypt ($2y$…)            — `htpasswd -B`
- *   - APR1   ($apr1$…)          — `htpasswd -m` (Apache default)
- *   - SHA-1  ({SHA}base64)      — `htpasswd -s` (legacy; insecure, accepted)
- *   - crypt() (anything else)   — `htpasswd -d` (legacy DES)
+ *   - bcrypt (`$2y$…`)            — `htpasswd -B`
+ *   - APR1   (`$apr1$…`)          — `htpasswd -m` (Apache default)
+ *   - SHA-1  (`{SHA}base64`)      — `htpasswd -s` (legacy; insecure, accepted)
+ *   - `crypt()` (anything else)   — `htpasswd -d` (legacy DES)
  *
  * Plain text passwords are NEVER accepted from the file. An explicit prefix
  * guard (M13) refuses any hash whose prefix is not one of the recognised
- * schemes before crypt() is ever called — relying on accidental crypt()
+ * schemes before `crypt()` is ever called — relying on accidental `crypt()`
  * failure is not sufficient. Setting `user:hunter2` literally in the file
  * will not authenticate `hunter2`.
  *
- * Usage in app.php:
+ * Usage in `app.php`:
  *
  *   // File-based
  *   $app->addMiddleware(new \ZealPHP\Middleware\BasicAuthMiddleware(
@@ -56,16 +56,16 @@ use ZealPHP\RequestContext;
  */
 class BasicAuthMiddleware implements MiddlewareInterface
 {
-    /** @var callable|null fn(string $user, string $pass): bool */
+    /** @var callable|null `fn(string $user, string $pass): bool` */
     private $verify;
 
-    /** @var array<string, string>|null user => hash, lazily parsed from htpasswdFile */
+    /** @var array<string, string>|null user => hash, lazily parsed from `$htpasswdFile` */
     private ?array $htpasswdCache = null;
     private ?int $htpasswdMtime  = null;
 
     /**
      * @param string|null   $htpasswdFile  Path to an htpasswd-formatted file
-     * @param callable|null $verify        Alternative: fn(string $user, string $pass): bool
+     * @param callable|null $verify        Alternative: `fn(string $user, string $pass): bool`
      * @param string        $realm         Realm name shown in browser prompt
      */
     public function __construct(

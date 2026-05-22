@@ -12,28 +12,28 @@ use function ZealPHP\response_add_header;
 /**
  * CORS Middleware
  *
- * Handles Cross-Origin Resource Sharing headers and OPTIONS preflight requests.
+ * Handles Cross-Origin Resource Sharing headers and `OPTIONS` preflight requests.
  *
  * Origin resolution order:
  *   1. Constructor `$origins` argument (if not null)
- *   2. ZEALPHP_CORS_ORIGINS env var (comma-separated)
- *   3. Falls back to ['*'] with a one-time warning logged via elog()
+ *   2. `ZEALPHP_CORS_ORIGINS` env var (comma-separated)
+ *   3. Falls back to `['*']` with a one-time warning logged via `elog()`
  *
  * Wildcard (`*`) is a security foot-gun for any API serving credentials or
  * user-scoped data; the warning surfaces this without breaking existing apps.
  * Lock down origins explicitly in production:
  *
- *   $app->addMiddleware(new \ZealPHP\Middleware\CorsMiddleware(
- *       origins:     ['https://myapp.com'],
- *       methods:     ['GET', 'POST', 'PUT', 'DELETE'],
- *       headers:     ['Content-Type', 'Authorization'],
- *       credentials: true,
- *       maxAge:      3600,
- *   ));
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\CorsMiddleware(`
+ *       `origins:     ['https://myapp.com'],`
+ *       `methods:     ['GET', 'POST', 'PUT', 'DELETE'],`
+ *       `headers:     ['Content-Type', 'Authorization'],`
+ *       `credentials: true,`
+ *       `maxAge:      3600,`
+ *   `));`
  *
  * Or, to lock down without touching code:
  *
- *   ZEALPHP_CORS_ORIGINS="https://myapp.com,https://admin.myapp.com" php app.php
+ *   `ZEALPHP_CORS_ORIGINS="https://myapp.com,https://admin.myapp.com" php app.php`
  */
 class CorsMiddleware implements MiddlewareInterface
 {

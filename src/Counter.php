@@ -2,31 +2,31 @@
 namespace ZealPHP;
 
 /**
- * Counter — OpenSwoole\Atomic adapter
+ * `Counter` — `OpenSwoole\Atomic` adapter
  *
  * Lock-free integer counter shared across all worker processes.
  * Uses a spinlock (CAS) internally — safe for concurrent reads/writes
  * from multiple coroutines and workers simultaneously.
  *
- * IMPORTANT: Instantiate BEFORE $app->run() so the shared memory segment
+ * IMPORTANT: Instantiate BEFORE `$app->run()` so the shared memory segment
  * is inherited by all forked workers.
  *
  * Usage:
- *   // Before app->run():
- *   $hits    = new Counter();
- *   $errors  = new Counter(0);
- *   $version = new Counter(1);
+ *   // Before `app->run()`:
+ *   `$hits    = new Counter();`
+ *   `$errors  = new Counter(0);`
+ *   `$version = new Counter(1);`
  *
  *   // Anywhere (all workers share the same value):
- *   $hits->increment();          // +1, returns new value
- *   $hits->increment(5);         // +5
- *   $hits->decrement();          // -1
- *   $hits->get();                // current value
- *   $hits->set(0);               // force-set (not atomic vs concurrent reads)
- *   $hits->reset();              // alias for set(0)
+ *   `$hits->increment();`          // +1, returns new value
+ *   `$hits->increment(5);`         // +5
+ *   `$hits->decrement();`          // -1
+ *   `$hits->get();`                // current value
+ *   `$hits->set(0);`               // force-set (not atomic vs concurrent reads)
+ *   `$hits->reset();`              // alias for `set(0)`
  *
  *   // Conditional update (compare-and-swap):
- *   $hits->compareAndSet($expected, $new); // returns bool
+ *   `$hits->compareAndSet($expected, $new);` // returns bool
  */
 class Counter
 {
@@ -37,13 +37,13 @@ class Counter
         $this->atomic = new \OpenSwoole\Atomic($initial);
     }
 
-    /** Atomically add $by and return the new value. */
+    /** Atomically add `$by` and return the new value. */
     public function increment(int $by = 1): int
     {
         return $this->atomic->add($by);
     }
 
-    /** Atomically subtract $by and return the new value. */
+    /** Atomically subtract `$by` and return the new value. */
     public function decrement(int $by = 1): int
     {
         return $this->atomic->sub($by);
@@ -68,15 +68,15 @@ class Counter
     }
 
     /**
-     * Compare-and-swap: if current value equals $expected, set to $new.
-     * Returns true if the swap happened.
+     * Compare-and-swap: if current value equals `$expected`, set to `$new`.
+     * Returns `true` if the swap happened.
      */
     public function compareAndSet(int $expected, int $new): bool
     {
         return $this->atomic->cmpset($expected, $new);
     }
 
-    /** Return the raw OpenSwoole\Atomic for advanced use. */
+    /** Return the raw `OpenSwoole\Atomic` for advanced use. */
     public function raw(): \OpenSwoole\Atomic
     {
         return $this->atomic;

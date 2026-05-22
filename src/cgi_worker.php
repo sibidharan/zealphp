@@ -1,8 +1,8 @@
 <?php
 // ZealPHP CGI Worker — runs PHP files at true global scope for legacy app compatibility.
 //
-// Usage: php cgi_worker.php /path/to/file.php
-// Input:  stdin = POST body, env ZEALPHP_REQUEST_CONTEXT = JSON context
+// Usage: `php cgi_worker.php /path/to/file.php`
+// Input:  stdin = POST body, env `ZEALPHP_REQUEST_CONTEXT` = JSON context
 // Output: stdout = response body, stderr = JSON metadata (one line, sent before body)
 //
 // Protocol: metadata is written to stderr FIRST (as a single JSON line),
@@ -10,7 +10,7 @@
 //
 // This is a standalone subprocess entry point (not a class), already excluded
 // from PHPStan; its body runs in a forked `php cgi_worker.php` process and is
-// verified by the integration suite + tests/Unit/CgiWorkerTest, not measured
+// verified by the integration suite + `tests/Unit/CgiWorkerTest`, not measured
 // as a coverage unit.
 // @codeCoverageIgnoreStart
 

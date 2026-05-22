@@ -20,48 +20,48 @@ use Psr\Http\Server\RequestHandlerInterface;
  *
  * URL convention
  * --------------
- *   GET  /api/users/get          → api/users/get.php must define $get  = function(...){...}
- *   POST /api/users/create       → api/users/create.php must define $create = function(...){...}
- *   GET  /api/php/sapi_name      → api/php/sapi_name.php must define $sapi_name = function(...){...}
+ *   `GET  /api/users/get`          → `api/users/get.php` must define `$get  = function(...){...}`
+ *   `POST /api/users/create`       → `api/users/create.php` must define `$create = function(...){...}`
+ *   `GET  /api/php/sapi_name`      → `api/php/sapi_name.php` must define `$sapi_name = function(...){...}`
  *
- * The variable name MUST match basename($file, '.php'). The closure is
- * Closure::bind'd to a ZealAPI instance, so inside the handler $this is the
- * ZealAPI object and you can call $this->paramsExists(), $this->die(), etc.
+ * The variable name MUST match `basename($file, '.php')`. The closure is
+ * `Closure::bind`'d to a `ZealAPI` instance, so inside the handler `$this` is the
+ * `ZealAPI` object and you can call `$this->paramsExists()`, `$this->die()`, etc.
  *
  * Parameter injection (by name)
  * -----------------------------
- *   $app      → the ZealAPI instance
- *   $request  → ZealPHP\HTTP\Request
- *   $response → ZealPHP\HTTP\Response
- *   $server   → OpenSwoole server
- *   any other → null (or its declared default value)
+ *   `$app`      → the `ZealAPI` instance
+ *   `$request`  → `ZealPHP\HTTP\Request`
+ *   `$response` → `ZealPHP\HTTP\Response`
+ *   `$server`   → `OpenSwoole` server
+ *   any other   → `null` (or its declared default value)
  *
  * Error responses
  * ---------------
- * All ZealAPI failures emit JSON with an "error" key and an HTTP status:
+ * All `ZealAPI` failures emit JSON with an `"error"` key and an HTTP status:
  *
- *   400  invalid_module        — path component fails the strict regex
- *   400  invalid_request       — method name contains slashes/dots/etc
- *   404  method_not_found      — file or expected variable name missing
- *   404  undefined_method      — handler called $this->X() but X is not a
- *                                 method on ZealAPI/REST. Response includes
- *                                 a "hint" and, if a close match is found via
- *                                 levenshtein, a "did_you_mean" suggestion:
+ *   `400  invalid_module`        — path component fails the strict regex
+ *   `400  invalid_request`       — method name contains slashes/dots/etc
+ *   `404  method_not_found`      — file or expected variable name missing
+ *   `404  undefined_method`      — handler called `$this->X()` but `X` is not a
+ *                                 method on `ZealAPI`/`REST`. Response includes
+ *                                 a `"hint"` and, if a close match is found via
+ *                                 `levenshtein`, a `"did_you_mean"` suggestion:
  *
- *                                   { "error": "undefined_method",
+ *                                   `{ "error": "undefined_method",
  *                                     "method": "paramExist",
  *                                     "hint": "...Did you mean $this->paramsExists()?",
- *                                     "did_you_mean": "paramsExists" }
+ *                                     "did_you_mean": "paramsExists" }`
  *
  *                                 Prior to this change, an undefined-method
- *                                 call inside the handler caused __call to
+ *                                 call inside the handler caused `__call` to
  *                                 re-invoke the same closure → infinite
- *                                 recursion. processApi() now dispatches the
- *                                 closure directly, so __call is only
+ *                                 recursion. `processApi()` now dispatches the
+ *                                 closure directly, so `__call` is only
  *                                 reached on real typos.
  *
- *   500  (PHP exception)       — uncaught throwable inside the handler;
- *                                 stack trace logged via elog().
+ *   `500  (PHP exception)`       — uncaught throwable inside the handler;
+ *                                 stack trace logged via `elog()`.
  */
 class ZealAPI extends REST
 {
@@ -255,7 +255,7 @@ class ZealAPI extends REST
      * `fn(): bool` — typically reads `$_SESSION`, `$g->session`, or your
      * auth system's own state.
      *
-     * See issue #13. Earlier versions hardcoded `return false;`, breaking
+     * See issue `#13`. Earlier versions hardcoded `return false;`, breaking
      * every endpoint guarded by `requirePostAuth()`.
      */
     public function isAuthenticated(): bool
@@ -345,14 +345,14 @@ class ZealAPI extends REST
 
     /**
      * Catch missing-method calls from inside an API handler closure (e.g. a typo
-     * like $this->paramExist instead of $this->paramsExists).
+     * like `$this->paramExist` instead of `$this->paramsExists`).
      *
-     * Previously this proxied to $this->api_rpc — but api_rpc IS the closure
+     * Previously this proxied to `$this->api_rpc` — but `api_rpc` IS the closure
      * we're currently executing, so the proxy re-invoked it and infinitely
-     * recursed until stack overflow. processApi() now invokes the closure
-     * directly, so __call is only reached on actual typos. Surface the typo
+     * recursed until stack overflow. `processApi()` now invokes the closure
+     * directly, so `__call` is only reached on actual typos. Surface the typo
      * loudly with a "did you mean" hint so developers don't waste time
-     * staring at "method_not_callable" wondering what's wrong.
+     * staring at `"method_not_callable"` wondering what's wrong.
      *
      * @param string             $method
      * @param array<int, mixed>  $args

@@ -11,10 +11,10 @@ use ZealPHP\HTTP\MimeResolver;
 use ZealPHP\RequestContext;
 
 /**
- * Content-Language Middleware — Apache mod_mime `AddLanguage` parity.
+ * Content-Language Middleware — Apache `mod_mime` `AddLanguage` parity.
  *
  * Sets the response `Content-Language` header from the request URL's file
- * suffixes. Apache `find_ct` (mod_mime.c:938–946) accumulates a language list
+ * suffixes. Apache `find_ct` (`mod_mime.c:938–946`) accumulates a language list
  * across suffixes — `page.en.html` with `AddLanguage en .en` yields
  * `Content-Language: en`. Multiple language suffixes accumulate in order and
  * are emitted comma-joined (RFC 9110 §8.5 allows a list). The multi-suffix
@@ -25,11 +25,11 @@ use ZealPHP\RequestContext;
  * doesn't already declare one (an explicit handler value wins).
  *
  * Apache equivalent:
- *   AddLanguage en .en
- *   AddLanguage fr .fr
- *   AddLanguage de .de
+ *   `AddLanguage en .en`
+ *   `AddLanguage fr .fr`
+ *   `AddLanguage de .de`
  *
- * Usage in app.php:
+ * Usage in `app.php`:
  *   $app->addMiddleware(new \ZealPHP\Middleware\ContentLanguageMiddleware([
  *       'en' => 'en',
  *       'fr' => 'fr',

@@ -12,24 +12,24 @@ use ZealPHP\RequestContext;
 /**
  * Charset Middleware
  *
- * Appends `; charset=<charset>` to the response Content-Type for text-ish
- * content types (text/html, text/plain, text/css, text/javascript,
- * application/json, application/xml, application/javascript, image/svg+xml,
- * …) when the Content-Type doesn't already declare a charset.
+ * Appends `; charset=<charset>` to the response `Content-Type` for text-ish
+ * content types (`text/html`, `text/plain`, `text/css`, `text/javascript`,
+ * `application/json`, `application/xml`, `application/javascript`, `image/svg+xml`,
+ * …) when the `Content-Type` doesn't already declare a charset.
  *
  * Apache equivalent:
- *   AddDefaultCharset utf-8
- *   AddCharset utf-8 .html .css .js .json
+ *   `AddDefaultCharset utf-8`
+ *   `AddCharset utf-8 .html .css .js .json`
  *
- * Usage in app.php:
- *   $app->addMiddleware(new \ZealPHP\Middleware\CharsetMiddleware());          // utf-8
- *   $app->addMiddleware(new \ZealPHP\Middleware\CharsetMiddleware('iso-8859-1'));
+ * Usage in `app.php`:
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\CharsetMiddleware());`          // utf-8
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\CharsetMiddleware('iso-8859-1'));`
  */
 class CharsetMiddleware implements MiddlewareInterface
 {
     /**
-     * Content-Type prefixes that get a charset appended. Anything else
-     * (image/png, application/octet-stream, application/pdf, …) is left
+     * `Content-Type` prefixes that get a charset appended. Anything else
+     * (`image/png`, `application/octet-stream`, `application/pdf`, …) is left
      * untouched — sending `charset=utf-8` on a binary type is a mild
      * protocol bug some clients log.
      */

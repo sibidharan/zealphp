@@ -14,23 +14,23 @@ use Psr\Http\Server\RequestHandlerInterface;
  * `LimitRequestBody` / PHP `post_max_size` parity.
  *
  * Rejects requests whose body exceeds a configured maximum with
- * `413 Content Too Large` (nginx returns 413 here too). OpenSwoole's
+ * `413 Content Too Large` (nginx returns `413` here too). OpenSwoole's
  * `package_max_length` is the transport-level hard cap; this is the
- * configurable application-level limit with the standard 413 response, so
+ * configurable application-level limit with the standard `413` response, so
  * legacy code that expects oversized uploads to be refused behaves as it would
  * under nginx/Apache.
  *
  * The limit accepts a byte count (`new BodySizeLimitMiddleware(10_485_760)`) or
  * an nginx-style size string (`'10m'`, `'512k'`, `'1g'`).
  *
- * **Content-Length requests:** the declared length is checked before the body
+ * **`Content-Length` requests:** the declared length is checked before the body
  * is read — a fast, zero-copy path that mirrors Apache's `ap_h1_body_in_filter`
  * pre-read guard.
  *
- * **Chunked / no Content-Length requests:** Apache enforces `LimitRequestBody`
+ * **Chunked / no `Content-Length` requests:** Apache enforces `LimitRequestBody`
  * against the decoded chunked byte count via the `ctx->limit_used` accumulator
  * (`http_filters.c:671-686`). In the OpenSwoole runtime the body is already
- * fully decoded and buffered by the time the PSR-7 middleware stack runs — the
+ * fully decoded and buffered by the time the PSR-15 middleware stack runs — the
  * `Transfer-Encoding: chunked` layer is owned by OpenSwoole's C parser and is
  * not re-exposed to PHP. This middleware therefore measures the length of the
  * buffered body string (via `$request->getBody()->getSize()` or a
@@ -39,13 +39,13 @@ use Psr\Http\Server\RequestHandlerInterface;
  * its internal buffer — `package_max_length` is still the outermost transport
  * guard for bodies so large they never reach PHP at all.
  *
- * Usage in app.php:
- *   $app->addMiddleware(new \ZealPHP\Middleware\BodySizeLimitMiddleware('10m'));
+ * Usage in `app.php`:
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\BodySizeLimitMiddleware('10m'));`
  */
 class BodySizeLimitMiddleware implements MiddlewareInterface
 {
     private int $maxBytes;
-    /** True when the configured limit is explicitly 0 (nginx unlimited semantics). */
+    /** True when the configured limit is explicitly `0` (nginx unlimited semantics). */
     private bool $unlimited;
 
     public function __construct(int|string $max)

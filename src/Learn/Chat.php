@@ -7,7 +7,7 @@ use ZealPHP\RequestContext;
 class Chat
 {
     /**
-     * @param \ZealPHP\HTTP\Response $response  Calls $response->sse(callable)
+     * @param \ZealPHP\HTTP\Response $response  Calls `$response->sse(callable)`
      * @param array<string, mixed> $user
      */
     public static function mock($response, array $user, string $message, string $threadId): void
@@ -144,7 +144,7 @@ class Chat
     }
 
     /**
-     * @param \ZealPHP\HTTP\Response $response  Calls $response->sse(callable)
+     * @param \ZealPHP\HTTP\Response $response  Calls `$response->sse(callable)`
      * @param array<string, mixed> $user
      */
     public static function real($response, array $user, string $message, string $threadId, string $apiKey): void

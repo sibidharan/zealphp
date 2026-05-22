@@ -321,15 +321,15 @@ function log_write(string $message, string $kind = 'debug'): void
  * even though the caller does not. This is the escape hatch for parallel I/O
  * from a coroutine-scheduler-OFF worker — i.e. `superglobals(true)` /
  * `enableCoroutine(false)` mode (the Symfony/FPM-style lifecycle, where running
- * coroutines in the main worker would race process-wide $_GET/$_POST/$_SESSION
+ * coroutines in the main worker would race process-wide `$_GET`/`$_POST`/`$_SESSION`
  * and shared framework singletons).
  *
  * The child is spawned with OpenSwoole's coroutine runtime enabled, so inside
- * `$taskLogic` you can `go()` + `Channel` + hooked I/O (curl, file_get_contents,
- * PDO over the network, Co\System::exec, ...) and they run concurrently. The
- * call BLOCKS until the child finishes (when $wait is true) and returns whatever
- * the child echoed — so serialise structured results (json_encode in the child,
- * json_decode in the caller).
+ * `$taskLogic` you can `go()` + `Channel` + hooked I/O (`curl`, `file_get_contents`,
+ * PDO over the network, `Co\System::exec`, ...) and they run concurrently. The
+ * call BLOCKS until the child finishes (when `$wait` is true) and returns whatever
+ * the child echoed — so serialise structured results (`json_encode` in the child,
+ * `json_decode` in the caller).
  *
  * Cost & caveats:
  *  - One `proc`-style fork per call (~ms). Worth it when a request needs N
@@ -358,10 +358,10 @@ function log_write(string $message, string $kind = 'debug'): void
  *     $data = json_decode($json, true);
  *
  * @param callable $taskLogic The logic to run in the coroutine-enabled child.
- *                            Receives the OpenSwoole\Process as its argument.
+ *                            Receives the `OpenSwoole\Process` as its argument.
  * @param bool $wait Whether to block until the child completes. Default true.
  *
- * @return mixed The child's echoed output (string) when $wait is true.
+ * @return mixed The child's echoed output (string) when `$wait` is true.
  */
 function coprocess($taskLogic, $wait = true)
 {
@@ -409,8 +409,8 @@ function coprocess($taskLogic, $wait = true)
 
 /**
  * Thin alias for {@see coprocess()} — same fork-a-coroutine-child semantics, so
- * it shares coprocess()'s untestability (forks a child process; only valid in
- * the superglobals(true)+enableCoroutine(false) mode the coverage gate excludes).
+ * it shares `coprocess()`'s untestability (forks a child process; only valid in
+ * the `superglobals(true)`+`enableCoroutine(false)` mode the coverage gate excludes).
  *
  * @param callable $taskLogic
  * @return mixed
@@ -930,7 +930,7 @@ function header_remove(?string $name = null): void
 /**
  * Force the current output buffer to the client. In main-worker mode, this
  * switches the response into streaming mode (headers flushed, body chunks
- * written via OpenSwoole). Subsequent echo+flush calls stream incrementally.
+ * written via OpenSwoole). Subsequent `echo`+`flush` calls stream incrementally.
  */
 function flush(): void
 {
@@ -982,12 +982,12 @@ function ob_implicit_flush($enable = true): void
 }
 
 /**
- * mod_php-parity phpinfo(): render a self-contained HTML document instead of the
+ * mod_php-parity `phpinfo()`: render a self-contained HTML document instead of the
  * CLI SAPI's plain-text dump. Matches the native signature — echoes output and
- * returns true. Wired via uopz in App::__construct(); the renderer lives in
- * \ZealPHP\Diagnostics\PhpInfo.
+ * returns true. Wired via uopz in `App::__construct()`; the renderer lives in
+ * `\ZealPHP\Diagnostics\PhpInfo`.
  *
- * @param int $flags INFO_* bitmask.
+ * @param int $flags `INFO_*` bitmask.
  */
 function phpinfo(int $flags = INFO_ALL): bool
 {
@@ -996,14 +996,14 @@ function phpinfo(int $flags = INFO_ALL): bool
 }
 
 /**
- * mod_php-parity php_sapi_name(): under the CLI SAPI this natively returns "cli",
+ * mod_php-parity `php_sapi_name()`: under the CLI SAPI this natively returns `"cli"`,
  * which legacy apps branch on to disable web-only behavior. When an app opts in
- * via App::sapiName('apache2handler') (or 'fpm-fcgi'), this returns the configured
- * value so such code takes its web path. Default (App::$sapi_name === null) returns
- * the real PHP_SAPI — zero behavior change unless explicitly configured.
+ * via `App::sapiName('apache2handler')` (or `'fpm-fcgi'`), this returns the configured
+ * value so such code takes its web path. Default (`App::$sapi_name === null`) returns
+ * the real `PHP_SAPI` — zero behavior change unless explicitly configured.
  *
- * Note: the PHP_SAPI *constant* cannot be redefined (uopz_redefine refuses it), so
- * code reading the constant directly still sees "cli". Documented limitation.
+ * Note: the `PHP_SAPI` *constant* cannot be redefined (`uopz_redefine` refuses it), so
+ * code reading the constant directly still sees `"cli"`. Documented limitation.
  */
 function php_sapi_name(): string
 {
@@ -1011,9 +1011,9 @@ function php_sapi_name(): string
 }
 
 /**
- * mod_php-parity filter_input(): native filter_input() reads PHP's internal SAPI
- * request tables, which OpenSwoole never populates (so it returns null under CLI).
- * This resolves the value from RequestContext ($g) and applies the requested filter.
+ * mod_php-parity `filter_input()`: native `filter_input()` reads PHP's internal SAPI
+ * request tables, which OpenSwoole never populates (so it returns `null` under CLI).
+ * This resolves the value from `RequestContext` (`$g`) and applies the requested filter.
  *
  * @param array<string, mixed>|int $options
  */
@@ -1024,7 +1024,7 @@ function filter_input(int $type, string $var_name, int $filter = FILTER_DEFAULT,
 }
 
 /**
- * mod_php-parity filter_input_array(): the array counterpart of filter_input().
+ * mod_php-parity `filter_input_array()`: the array counterpart of `filter_input()`.
  *
  * @param array<string, mixed>|int $options
  * @return array<string, mixed>
@@ -1036,17 +1036,17 @@ function filter_input_array(int $type, array|int $options = FILTER_DEFAULT, bool
 }
 
 /**
- * mod_php-parity header_register_callback(): native PHP fires the callback when
+ * mod_php-parity `header_register_callback()`: native PHP fires the callback when
  * the SAPI is about to send headers — which never happens the normal way under
- * OpenSwoole. ZealPHP stores it per-request (coroutine-safe, in $g->memo) and
+ * OpenSwoole. ZealPHP stores it per-request (coroutine-safe, in `$g->memo`) and
  * invokes it once just before the buffered response headers are flushed, so
- * header() calls inside the callback still land. Last registration wins (matches
- * native, which keeps a single callback). Returns false if there's no request
+ * `header()` calls inside the callback still land. Last registration wins (matches
+ * native, which keeps a single callback). Returns `false` if there's no request
  * context (e.g. called outside a request).
  *
  * Scope note: fires for buffered responses (the common case). Streaming / SSE
  * paths flush headers eagerly and are intentionally excluded, consistent with
- * the framework's buffered-vs-streaming split (e.g. Range/ETag middleware).
+ * the framework's buffered-vs-streaming split (e.g. `Range`/`ETag` middleware).
  */
 function header_register_callback(callable $callback): bool
 {
@@ -1059,18 +1059,18 @@ function header_register_callback(callable $callback): bool
 }
 
 /**
- * mod_php-parity error_log(): under the CLI SAPI native error_log() writes to
- * stderr / the php.ini error_log path. ZealPHP routes message_type 0 (system
- * logger) and 4 (SAPI logger) into the framework's async log (debug.log, or
- * stderr if logging is disabled) so legacy error_log() calls land where the
- * rest of the app's diagnostics go — the "we have elog for error_log" contract.
+ * mod_php-parity `error_log()`: under the CLI SAPI native `error_log()` writes to
+ * stderr / the `php.ini` `error_log` path. ZealPHP routes `message_type` 0 (system
+ * logger) and 4 (SAPI logger) into the framework's async log (`debug.log`, or
+ * stderr if logging is disabled) so legacy `error_log()` calls land where the
+ * rest of the app's diagnostics go — the "we have `elog` for `error_log`" contract.
  *
  *   - type 3 (append to file): honored verbatim — explicit destination intent.
- *   - type 1 (email): unsupported under the coroutine runtime; logged + false.
- *   - type 0 / 4: routed to log_write() (debug.log → stderr fallback).
+ *   - type 1 (email): unsupported under the coroutine runtime; logged + `false`.
+ *   - type 0 / 4: routed to `log_write()` (`debug.log` → stderr fallback).
  *
- * Always lands somewhere (never silently dropped), unlike elog() which gates on
- * debug logging; that's why this routes through log_write() directly.
+ * Always lands somewhere (never silently dropped), unlike `elog()` which gates on
+ * debug logging; that's why this routes through `log_write()` directly.
  */
 function error_log(string $message, int $message_type = 0, ?string $destination = null, ?string $additional_headers = null): bool
 {
@@ -1083,8 +1083,8 @@ function error_log(string $message, int $message_type = 0, ?string $destination 
 }
 
 /**
- * Apache mod_php getallheaders() / apache_request_headers() — return all
- * inbound request headers with canonical (Hyphen-Capitalized) case.
+ * Apache mod_php `getallheaders()` / `apache_request_headers()` — return all
+ * inbound request headers with canonical (`Hyphen-Capitalized`) case.
  *
  * @return array<string, string>
  */
@@ -1125,7 +1125,7 @@ function getallheaders(): array
 }
 
 /**
- * Apache mod_php apache_response_headers() — currently set outbound headers.
+ * Apache mod_php `apache_response_headers()` — currently set outbound headers.
  *
  * @return array<string, string>
  */
@@ -1143,9 +1143,9 @@ function apache_response_headers(): array
 }
 
 /**
- * Apache mod_php per-request env table. Backed by Legacy\ApacheContext on
- * G; lifetime = one request. Lazy — only allocated if legacy code calls
- * apache_setenv/getenv/note.
+ * Apache mod_php per-request env table. Backed by `Legacy\ApacheContext` on
+ * `G`; lifetime = one request. Lazy — only allocated if legacy code calls
+ * `apache_setenv`/`getenv`/`note`.
  */
 function apache_setenv(string $variable, string $value, bool $walk_to_top = false): bool
 {
@@ -1167,7 +1167,7 @@ function apache_getenv(string $variable, bool $walk_to_top = false)
 }
 
 /**
- * Apache mod_php apache_note() — per-request note table. Returns previous value.
+ * Apache mod_php `apache_note()` — per-request note table. Returns previous value.
  */
 function apache_note(string $note_name, ?string $note_value = null): string
 {
@@ -1183,8 +1183,8 @@ function apache_note(string $note_name, ?string $note_value = null): string
 }
 
 /**
- * Apache mod_php virtual() — performs an internal subrequest. Not supported
- * in ZealPHP's single-process model; we log once and return false rather than
+ * Apache mod_php `virtual()` — performs an internal subrequest. Not supported
+ * in ZealPHP's single-process model; we log once and return `false` rather than
  * crashing legacy code.
  */
 function virtual(string $uri): bool
@@ -1194,7 +1194,7 @@ function virtual(string $uri): bool
 }
 
 /**
- * set_time_limit() — OpenSwoole has its own coroutine/worker timeouts and
+ * `set_time_limit()` — OpenSwoole has its own coroutine/worker timeouts and
  * native PHP execution-time limit is irrelevant here. Treated as no-op success.
  */
 function set_time_limit(int $seconds): bool
@@ -1203,8 +1203,8 @@ function set_time_limit(int $seconds): bool
 }
 
 /**
- * ignore_user_abort() — Apache mod_php controls whether the script keeps
- * running after the client disconnects. Tracked in G; with OpenSwoole the
+ * `ignore_user_abort()` — Apache mod_php controls whether the script keeps
+ * running after the client disconnects. Tracked in `G`; with OpenSwoole the
  * coroutine continues regardless, but we honor the API contract.
  */
 /**
@@ -1254,8 +1254,8 @@ function output_reset_rewrite_vars(): bool
 }
 
 /**
- * is_uploaded_file() — verifies that $filename is one of the temp paths
- * registered in this request's $_FILES. Rejects forged paths from user input.
+ * `is_uploaded_file()` — verifies that `$filename` is one of the temp paths
+ * registered in this request's `$_FILES`. Rejects forged paths from user input.
  */
 function is_uploaded_file(string $filename): bool
 {
@@ -1273,8 +1273,8 @@ function is_uploaded_file(string $filename): bool
 }
 
 /**
- * move_uploaded_file() — equivalent of Apache+mod_php behavior, gated by
- * is_uploaded_file() and falling back to copy+unlink across filesystems.
+ * `move_uploaded_file()` — equivalent of Apache+mod_php behavior, gated by
+ * `is_uploaded_file()` and falling back to `copy`+`unlink` across filesystems.
  */
 function move_uploaded_file(string $from, string $to): bool
 {
@@ -1292,8 +1292,8 @@ function move_uploaded_file(string $from, string $to): bool
 }
 
 /**
- * Per-coroutine set_error_handler override. The native PHP handler is
- * installed at boot and delegates to G's per-coroutine stack — this override
+ * Per-coroutine `set_error_handler` override. The native PHP handler is
+ * installed at boot and delegates to `G`'s per-coroutine stack — this override
  * just records the user-space registration without touching the engine.
  */
 function set_error_handler(?callable $callback, int $error_levels = E_ALL): ?callable
@@ -1345,7 +1345,7 @@ function restore_exception_handler(): bool
 /**
  * Per-request shutdown function — fires after the route handler returns and
  * before the PSR response is emitted, so the function can still call
- * echo/header/http_response_code and have those land in the response.
+ * `echo`/`header`/`http_response_code` and have those land in the response.
  */
 function register_shutdown_function(callable $callback, mixed ...$args): void
 {
@@ -1356,7 +1356,7 @@ function register_shutdown_function(callable $callback, mixed ...$args): void
 }
 
 /**
- * Per-coroutine error_reporting. Falls back to the level captured at App boot.
+ * Per-coroutine `error_reporting`. Falls back to the level captured at App boot.
  */
 function error_reporting(?int $error_level = null): int
 {

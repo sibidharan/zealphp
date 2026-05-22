@@ -7,22 +7,22 @@ use ZealPHP\RequestContext;
 use Throwable;
 
 /**
- * Backs the mod_php-parity filter_input() / filter_input_array() overrides.
+ * Backs the mod_php-parity `filter_input()` / `filter_input_array()` overrides.
  *
- * Under the CLI SAPI, PHP's native filter_input() reads the internal SAPI request
- * tables, which OpenSwoole never populates — so legacy code using INPUT_GET /
- * INPUT_POST / INPUT_COOKIE / INPUT_SERVER silently gets null. ZealPHP routes
- * request input through RequestContext ($g) instead; this class resolves the
+ * Under the CLI SAPI, PHP's native `filter_input()` reads the internal SAPI request
+ * tables, which OpenSwoole never populates — so legacy code using `INPUT_GET` /
+ * `INPUT_POST` / `INPUT_COOKIE` / `INPUT_SERVER` silently gets `null`. ZealPHP routes
+ * request input through `RequestContext` (`$g`) instead; this class resolves the
  * right bag and applies the same filters PHP's filter extension would.
  *
  * The filtering methods are pure (bag in, result out) so they unit-test without
- * a server. bagFor() is the only context-dependent method and is fully guarded —
+ * a server. `bagFor()` is the only context-dependent method and is fully guarded —
  * a diagnostics/compat shim must never fatal.
  */
 final class RequestInput
 {
     /**
-     * Resolve a PHP INPUT_* type to the matching request bag from RequestContext.
+     * Resolve a PHP `INPUT_*` type to the matching request bag from `RequestContext`.
      *
      * @return array<string, mixed>
      */
@@ -47,8 +47,8 @@ final class RequestInput
     }
 
     /**
-     * Filter a single value from a bag, mirroring filter_input() semantics:
-     * missing key → null; otherwise filter_var() (false on failed validation).
+     * Filter a single value from a bag, mirroring `filter_input()` semantics:
+     * missing key → `null`; otherwise `filter_var()` (`false` on failed validation).
      *
      * @param array<string, mixed> $bag
      * @param array<string, mixed>|int $options
@@ -62,8 +62,8 @@ final class RequestInput
     }
 
     /**
-     * Filter a whole bag, mirroring filter_input_array() — delegates to the
-     * native filter_var_array() so per-key definitions and add_empty behave
+     * Filter a whole bag, mirroring `filter_input_array()` — delegates to the
+     * native `filter_var_array()` so per-key definitions and `add_empty` behave
      * identically to PHP's filter extension.
      *
      * @param array<string, mixed> $bag
@@ -76,7 +76,7 @@ final class RequestInput
     }
 
     /**
-     * Normalize a bag to string-keyed entries (filter_input addresses by name).
+     * Normalize a bag to string-keyed entries (`filter_input` addresses by name).
      *
      * @param array<array-key, mixed> $bag
      * @return array<string, mixed>

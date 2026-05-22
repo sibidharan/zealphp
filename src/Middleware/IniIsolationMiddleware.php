@@ -9,7 +9,7 @@ use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
 /**
- * Snapshot / restore selected php.ini values around each request.
+ * Snapshot / restore selected `php.ini` values around each request.
  *
  * Long-running PHP workers don't reset `ini_set()` changes between requests.
  * `ini_set('date.timezone', 'Asia/Tokyo')` in request N stays in effect for
@@ -35,7 +35,7 @@ use Psr\Http\Server\RequestHandlerInterface;
  * ```
  *
  * (when `ZEALPHP_INI_ISOLATE=1`, `App::run()` registers this middleware
- * automatically; see App.php for the registration check.)
+ * automatically; see `App.php` for the registration check.)
  */
 class IniIsolationMiddleware implements MiddlewareInterface
 {
@@ -44,7 +44,7 @@ class IniIsolationMiddleware implements MiddlewareInterface
      * we snapshot+restore by default. Anything outside this list is left
      * alone — partly to keep the per-request overhead bounded, partly
      * because keys outside this list are usually intentional process-wide
-     * settings (max_execution_time has no meaning under coroutines anyway,
+     * settings (`max_execution_time` has no meaning under coroutines anyway,
      * and changing extension-loaded settings per-request is incoherent).
      */
     public const DEFAULT_KEYS = [
@@ -68,7 +68,7 @@ class IniIsolationMiddleware implements MiddlewareInterface
 
     /**
      * @param string[]|null $keys INI keys to snapshot+restore. Defaults to
-     *                            self::DEFAULT_KEYS. Pass an extended list
+     *                            `self::DEFAULT_KEYS`. Pass an extended list
      *                            to add app-specific keys; pass an empty
      *                            array to disable (effectively a no-op).
      */

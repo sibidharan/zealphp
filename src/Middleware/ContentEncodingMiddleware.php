@@ -11,10 +11,10 @@ use ZealPHP\HTTP\MimeResolver;
 use ZealPHP\RequestContext;
 
 /**
- * Content-Encoding Middleware — Apache mod_mime `AddEncoding` parity.
+ * Content-Encoding Middleware — Apache `mod_mime` `AddEncoding` parity.
  *
  * Sets the response `Content-Encoding` header from the request URL's file
- * suffixes. Apache `find_ct` (mod_mime.c:947–962) walks every dot-separated
+ * suffixes. Apache `find_ct` (`mod_mime.c:947–962`) walks every dot-separated
  * suffix and accumulates an encoding chain — `archive.tar.gz` with
  * `AddEncoding x-gzip .gz` yields `Content-Encoding: x-gzip`, and a
  * doubly-encoded `data.gz.gz` yields `gzip, gzip` (order preserved, duplicates
@@ -27,11 +27,11 @@ use ZealPHP\RequestContext;
  * middleware that actually encoded the body) always wins.
  *
  * Apache equivalent:
- *   AddEncoding x-gzip   .gz
- *   AddEncoding x-bzip2  .bz2
- *   AddEncoding br       .br
+ *   `AddEncoding x-gzip   .gz`
+ *   `AddEncoding x-bzip2  .bz2`
+ *   `AddEncoding br       .br`
  *
- * Usage in app.php:
+ * Usage in `app.php`:
  *   $app->addMiddleware(new \ZealPHP\Middleware\ContentEncodingMiddleware([
  *       'gz'  => 'gzip',
  *       'br'  => 'br',
