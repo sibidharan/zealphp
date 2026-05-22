@@ -10,7 +10,8 @@ ZealPHP wraps OpenSwoole’s event-driven HTTP server with a framework that feel
 - Records the current working directory and entry script so the framework can build absolute paths later.
 - Prepares the PSR-15 middleware stack (`OpenSwoole\Core\Psr\Middleware\StackHandler`) with `ResponseMiddleware` as the terminal handler.
 - Configures coroutine hooks if superglobals are disabled (see below).
-- Overrides built-in PHP functions via `uopz_set_return()` to route them through ZealPHP shims. This ensures headers, cookies, and response codes cooperate with the PSR response pipeline.
+- Overrides built-in PHP functions via `uopz_set_return()` to route them through ZealPHP shims. This ensures headers, cookies, and response codes cooperate with the PSR response pipeline. The override family covers `header()` / `headers_list()` / `setcookie()` / `http_response_code()`, all `session_*()` functions, and — when the exec hook is on — the **backtick operator**, `shell_exec`, `exec`, `system`, and `passthru` (see below).
+- Optionally installs the **coroutine-safe exec hook**. When `App::hookExec()` resolves to `true` (default-on in coroutine mode), `uopz_set_return()` re-points `shell_exec`, `exec`, `system`, `passthru`, and the backtick operator (the backtick compiles to a `shell_exec()` call, so overriding `shell_exec` intercepts it transparently) at `App::exec()` — so legacy/user code that shells out becomes coroutine-safe with no source changes. `proc_open` / `popen` are intentionally **not** overridden: `App::rawExec()` and the CGI subprocess path rely on `proc_open`, so leaving it untouched keeps the fallback recursion-safe. Toggle with `App::hookExec(bool)`; pass no arg to read the resolved value. See [Coroutine-safe exec](#coroutine-safe-exec) below.
 
 `App::run()` then constructs the OpenSwoole HTTP server, includes custom route files, registers implicit routes, wires session managers, and starts the event loop. Pass an array of OpenSwoole settings to override defaults:
 
@@ -85,7 +86,8 @@ App::registerCgiBackend('.py', [
 ]);
 
 // .cgi via shebang — the OS reads the #! line, no explicit interpreter
-App::registerCgiBackend('.cgi', ['mode' => 'proc']);
+// 'exec_paths' is the ExecCGI scope (see below) — only execute under /cgi-bin
+App::registerCgiBackend('.cgi', ['mode' => 'proc', 'exec_paths' => ['/cgi-bin']]);
 ```
 
 The three `mode` values:
@@ -96,9 +98,103 @@ The three `mode` values:
 | `'fork'` | warm `OpenSwoole\Process` fork (~5× faster than proc) | **`.php` only** — `registerCgiBackend('.py', ['mode' => 'fork'])` throws `InvalidArgumentException` |
 | `'fcgi'` | forwards to a FastCGI daemon at `address` (php-fpm, a Python/Ruby FCGI server, …) — no per-request spawn | any FastCGI/1.0 server |
 
-`App::resolveCgiBackend('/path/file.py')` returns the resolved config for a given path. Full walkthrough — socket forms, `fcgi_params`, multiple upstream pools, 502/timeout behaviour — in the [FastCGI backends guide](fastcgi-backends.md). The framework-wide `'fcgi'` setter (`App::cgiMode('fcgi')` + `App::fcgiAddress()`) is the "front an existing php-fpm pool" shortcut for when **every** `public/*.php` should go to one upstream.
+#### Works in every lifecycle mode
 
-> CGI backends require `superglobals(true) + processIsolation(true)` (the **Legacy CGI** mode in the matrix below). In coroutine mode, write native ZealPHP handlers instead.
+CGI dispatch is **no longer gated on process-isolation**. A registered non-`.php`
+extension is dispatched through its backend in **coroutine mode too** — the
+`proc` path uses `OpenSwoole\Coroutine\System::exec()` (or coroutine-aware
+`proc_open`), which yields to the scheduler instead of blocking the worker,
+supports a POST body on the interpreter's stdin, and can stream. The `.php`
+fast path is unchanged (it still uses `cgi_worker.php` under
+`processIsolation(true)`, and the in-process `executeFile()` core in coroutine
+mode). The `cgiInterpreterResponse()` reader parses a standard RFC 3875 CGI
+response off the interpreter's stdout (headers + blank line + body, with a
+`Status:` pseudo-header setting the HTTP status) — Apache `mod_cgi` parity.
+
+#### `exec_paths` — the ExecCGI scope (default-off)
+
+`exec_paths` lists the URL path prefixes under which a registered extension is
+allowed to execute — ZealPHP's parity for Apache's `Options +ExecCGI` being
+**off by default**. A file whose extension is registered but whose request URL
+falls **outside** every `exec_paths` prefix is treated as a stray/uploaded
+script: it is **neither executed nor served as source** — the framework returns
+**403 Forbidden** (no source-leak). Omit `exec_paths` and the extension never
+executes via an implicit URL (it is still reachable via `App::include()`, which
+applies its own document-root containment check).
+
+```php
+// .py executes ONLY under /cgi-bin/* — an uploaded /uploads/evil.py gets 403
+App::registerCgiBackend('.py', [
+    'mode'       => 'proc',
+    'interpreter' => '/usr/bin/python3',
+    'exec_paths' => ['/cgi-bin'],
+]);
+```
+
+#### Implicit URL parity
+
+Implicit routes are registered **per registered extension**, so
+`GET /cgi-bin/report.py` runs `public/cgi-bin/report.py` through the `.py`
+backend with no explicit `$app->route()` — same shape as Apache serving a
+script out of a `cgi-bin` directory.
+
+#### `cgiScriptAlias()` — Apache `ScriptAlias` parity
+
+`App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc'])` marks a URL prefix as an
+executable area: any file served under it is treated as executable regardless
+of its extension (`mayExecute = true` for the whole prefix). Resolution order in
+`App::resolveCgiBackend($absPath, $urlPath)`: ScriptAlias prefixes first
+(always executable), then the per-extension registry gated by `exec_paths`, then
+an unregistered fallback (`['mode' => App::$cgi_mode]`, `mayExecute = false`).
+
+> **Known limitation.** `cgiScriptAlias()` registers the resolution + ExecCGI
+> scope, but URL-level **implicit routing is wired per-extension only**. A
+> ScriptAlias-only setup (no matching per-extension backend) is reachable via
+> `App::include()` but does **not** yet get an automatic `/{file}.<ext>` route.
+> Pair `cgiScriptAlias()` with a `registerCgiBackend()` for the extensions you
+> want auto-routed, or add an explicit route. (Follow-up.)
+
+`App::resolveCgiBackend('/path/file.py', '/cgi-bin/file.py')` returns
+`['backend' => [...], 'mayExecute' => bool]` for a given path + URL. Full
+walkthrough — socket forms, `fcgi_params`, multiple upstream pools, 502/timeout
+behaviour — in the [FastCGI backends guide](fastcgi-backends.md). The
+framework-wide `'fcgi'` setter (`App::cgiMode('fcgi')` + `App::fcgiAddress()`)
+is the "front an existing php-fpm pool" shortcut for when **every**
+`public/*.php` should go to one upstream.
+
+## Coroutine-safe exec
+
+Long-running shell-outs (`git`, `ffmpeg`, `convert`, …) block the OpenSwoole
+worker if you call `exec()` / `shell_exec()` / `system()` / `passthru()` or a
+backtick directly — one slow command stalls every coroutine sharing that worker.
+ZealPHP provides a coroutine-aware wrapper plus a transparent override so legacy
+code gets the safe behaviour for free.
+
+- **`App::exec(string $cmd, ?float $timeout = null): array{output, code, signal}`**
+  — coroutine-safe command execution. Inside a coroutine
+  (`Coroutine::getCid() >= 0`) it yields to the scheduler via
+  `OpenSwoole\Coroutine\System::exec()`; outside one (boot / CLI) it falls back
+  to the blocking `App::rawExec()` path. The return shape is identical either
+  way: `output` (captured stdout), `code` (exit code), `signal` (terminating
+  signal, `0` if none). `$timeout` is the coroutine-mode budget in seconds
+  (`null` = no timeout).
+- **`App::rawExec(string $cmd): ?string`** — explicit blocking escape hatch.
+  Returns captured stdout (or `null` if the process failed to start). It is
+  built on `proc_open` *deliberately* — never on `shell_exec` / `exec` /
+  `system` / `passthru` / `popen` — because those builtins are uopz-overridden
+  when the exec hook is on; routing through `proc_open` (which is **not**
+  overridden) keeps this escape hatch recursion-safe.
+- **`App::hookExec(?bool)` / `App::$hook_exec`** — toggles the transparent
+  override described in [Bootstrapping](#bootstrapping). `null` (the default)
+  resolves to **on in coroutine mode** (`superglobals === false`); a non-null
+  value forces it on/off. When on, `shell_exec`, `exec`, `system`, `passthru`,
+  and the backtick operator all route through `App::exec()`. Belongs to the same
+  uopz-override family as `header()` and the `session_*()` shims.
+
+> CGI backends and the exec hook work in **all** lifecycle modes. New
+> ZealPHP-native code should still prefer explicit `App::exec()` / native
+> coroutine handlers over shelling out, but the override means unmodified legacy
+> code stops blocking the worker automatically.
 
 ## Task Workers
 
