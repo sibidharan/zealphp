@@ -192,6 +192,9 @@ async def main():
     result = Runner.run_streamed(agent, input=payload["message"], session=session, context=ctx)
 
     tool_names = {}
+    # tool_args events key by item_id, but tool_call/tool_done key by call_id.
+    # Map item_id -> call_id so a tool_args delta can find its tool card.
+    item_call_map = {}
     async for ev in result.stream_events():
         if ev.type == "raw_response_event":
             t = getattr(ev.data, "type", "")
@@ -207,6 +210,7 @@ async def main():
                 name = ev.data.item.name
                 tool_names[item_id] = name
                 tool_names[call_id] = name
+                item_call_map[item_id] = call_id
                 emit("tool_call", {
                     "id": call_id,
                     "name": name,
@@ -214,7 +218,11 @@ async def main():
                 })
             elif t == "response.function_call_arguments.delta":
                 emit("tool_args", {
-                    "id": ev.data.item_id,
+                    # Translate item_id -> call_id so the JS (learn.js) and PHP
+                    # (Chat.php) sides can match this delta to the tool card,
+                    # which was created on the tool_call event keyed by call_id.
+                    # Without this the streamed arguments render (and persist) empty.
+                    "id": item_call_map.get(ev.data.item_id, ev.data.item_id),
                     "delta": ev.data.delta,
                 })
         elif (
