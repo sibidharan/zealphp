@@ -103,7 +103,13 @@
   min-width: 700px;
 }
 
-.why-compare-th {
+/* Scoped under .why-compare-table so this beats the global `.ztable th`
+ * rule (both carry the .ztable class on the <table>): `.ztable th` is
+ * specificity (0,1,1) and was overriding this header's dark background
+ * back to the light --bg-alt, leaving light --code-text on a light
+ * surface (invisible). `.why-compare-table th.why-compare-th` is
+ * (0,2,1), so the dark code-style header wins. */
+.why-compare-table th.why-compare-th {
   background: var(--code-bg);
   color: var(--code-text);
   border-bottom: 2px solid rgba(255,255,255,.15);
