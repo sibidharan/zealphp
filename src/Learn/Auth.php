@@ -134,4 +134,44 @@ class Auth
             || $ip === '::ffff:127.0.0.1'
             || str_starts_with($ip, '127.');
     }
+
+    /**
+     * Emit the post-auth redirect for the shared learn login/register/logout
+     * flow. For an htmx request it sends a clean client-side redirect
+     * (`HX-Redirect` + 200). A bare `302 Location` must NOT be used for htmx:
+     * the XHR follows the 302 transparently, so htmx never sees the redirect
+     * and instead swaps the redirected page into the form's small target —
+     * which wrecks the layout (the reported "sidebar disappears on login"
+     * bug). Non-htmx (no-JS) posts still get a normal 302.
+     *
+     * Redirects back to the page the user acted from — htmx's `HX-Current-URL`,
+     * then `Referer` — so logging in on /learn/tictactoe stays there instead
+     * of always dumping the user on /learn/notes. Only same-site absolute
+     * paths are honoured; anything else falls back to $default.
+     */
+    public static function redirectAfterAuth(RequestContext $g, string $default = '/learn/notes'): void
+    {
+        $candidate = '';
+        foreach (['HTTP_HX_CURRENT_URL', 'HTTP_REFERER'] as $header) {
+            $value = $g->server[$header] ?? null;
+            if (is_string($value) && $value !== '') {
+                $candidate = $value;
+                break;
+            }
+        }
+
+        $path = $candidate !== '' ? (string) (parse_url($candidate, PHP_URL_PATH) ?: '') : '';
+        // Same-site absolute path only: leading "/" but not protocol-relative "//".
+        $target = ($path !== '' && $path[0] === '/' && !str_starts_with($path, '//'))
+            ? $path
+            : $default;
+
+        if (!empty($g->server['HTTP_HX_REQUEST'])) {
+            header('HX-Redirect: ' . $target);
+            http_response_code(200);
+        } else {
+            header('Location: ' . $target);
+            http_response_code(302);
+        }
+    }
 }
