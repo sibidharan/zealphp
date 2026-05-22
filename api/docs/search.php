@@ -101,9 +101,25 @@ $search = function () {
         }
     }
 
-    // Merge — guides first so they appear ahead of API symbols when
-    // both match. Final ordering still goes through the score sort.
-    $combined = array_merge($guides, $index);
+    // `G` is a runtime class_alias of RequestContext (no source declaration),
+    // so phpDocumentor never indexes it — searching "G" would otherwise find
+    // nothing. Prepend a synthetic entry pointing at the RequestContext page.
+    // It MUST come first: "g" is a common substring, so the 100-match
+    // collection ceiling below is hit long before the end of the list —
+    // prepending guarantees it's collected, and its exact-name match scores
+    // 0 so it sorts to the very top.
+    $gAlias = [
+        'fqsen'   => '\\ZealPHP\\G',
+        'name'    => 'G',
+        'summary' => 'Alias of RequestContext — the per-request global state container ($g, G::instance()).',
+        'url'     => '/docs/api/classes/ZealPHP-RequestContext.html',
+        '_kind'   => 'Classes',
+        '_parent' => 'ZealPHP',
+    ];
+
+    // Merge — G alias first, then guides (ahead of API symbols when both
+    // match). Final ordering still goes through the score sort.
+    $combined = array_merge([$gAlias], $guides, $index);
     if (!$combined) {
         $this->response('', 200);
         return;
