@@ -46,33 +46,39 @@ use ZealPHP\Store;
  *
  * Usage — global mode (existing API, no change):
  *
- *   $inflight = new \ZealPHP\Counter();
- *   $app->addMiddleware(new \ZealPHP\Middleware\ConcurrencyLimitMiddleware(
- *       maxConcurrent: 100,
- *       counter:       $inflight,
- *   ));
+ * ```php
+ * $inflight = new \ZealPHP\Counter();
+ * $app->addMiddleware(new \ZealPHP\Middleware\ConcurrencyLimitMiddleware(
+ *     maxConcurrent: 100,
+ *     counter:       $inflight,
+ * ));
+ * ```
  *
  * Usage — per-key mode (nginx limit_conn parity):
  *
- *   Store::make('conn_limit', 4096, [
- *       'count' => [\OpenSwoole\Table::TYPE_INT, 4],
- *   ]);
+ * ```php
+ * Store::make('conn_limit', 4096, [
+ *     'count' => [\OpenSwoole\Table::TYPE_INT, 4],
+ * ]);
  *
- *   $app->addMiddleware(new \ZealPHP\Middleware\ConcurrencyLimitMiddleware(
- *       maxConcurrent: 20,
- *       counter:       null,          // no global counter
- *       tableName:     'conn_limit',  // per-key Store table
- *   ));
+ * $app->addMiddleware(new \ZealPHP\Middleware\ConcurrencyLimitMiddleware(
+ *     maxConcurrent: 20,
+ *     counter:       null,          // no global counter
+ *     tableName:     'conn_limit',  // per-key Store table
+ * ));
+ * ```
  *
  * Usage — per-key + global cap together:
  *
- *   $global = new \ZealPHP\Counter();
- *   $app->addMiddleware(new \ZealPHP\Middleware\ConcurrencyLimitMiddleware(
- *       maxConcurrent: 20,     // per-key cap
- *       counter:       $global, // also enforce global cap (separate Counter)
- *       tableName:     'conn_limit',
- *       globalMax:     500,    // global ceiling across all clients
- *   ));
+ * ```php
+ * $global = new \ZealPHP\Counter();
+ * $app->addMiddleware(new \ZealPHP\Middleware\ConcurrencyLimitMiddleware(
+ *     maxConcurrent: 20,     // per-key cap
+ *     counter:       $global, // also enforce global cap (separate Counter)
+ *     tableName:     'conn_limit',
+ *     globalMax:     500,    // global ceiling across all clients
+ * ));
+ * ```
  *
  * Options:
  *   `rejectStatus`  int           HTTP status on rejection (`400`–`599`, default `503`)

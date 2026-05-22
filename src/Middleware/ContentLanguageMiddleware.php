@@ -30,11 +30,14 @@ use ZealPHP\RequestContext;
  *   `AddLanguage de .de`
  *
  * Usage in `app.php`:
- *   $app->addMiddleware(new \ZealPHP\Middleware\ContentLanguageMiddleware([
- *       'en' => 'en',
- *       'fr' => 'fr',
- *       'de' => 'de',
- *   ]));
+ *
+ * ```php
+ * $app->addMiddleware(new \ZealPHP\Middleware\ContentLanguageMiddleware([
+ *     'en' => 'en',
+ *     'fr' => 'fr',
+ *     'de' => 'de',
+ * ]));
+ * ```
  */
 class ContentLanguageMiddleware implements MiddlewareInterface
 {

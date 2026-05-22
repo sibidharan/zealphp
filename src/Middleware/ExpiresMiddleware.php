@@ -19,10 +19,13 @@ use ZealPHP\RequestContext;
  * common in migrated `.htaccess` files that the name parity matters.
  *
  * Apache equivalent:
- *   `ExpiresActive On`
- *   `ExpiresDefault                    "access plus 5 minutes"`
- *   `ExpiresByType image/jpeg          "access plus 1 month"`
- *   `ExpiresByType text/css            "access plus 1 year"`
+ *
+ * ```
+ * ExpiresActive On
+ * ExpiresDefault                    "access plus 5 minutes"
+ * ExpiresByType image/jpeg          "access plus 1 month"
+ * ExpiresByType text/css            "access plus 1 year"
+ * ```
  *
  * Constructor takes a `Content-Type` prefix => relative-date map. Values are
  * parsed by `strtotime()` so any of these forms work:
@@ -60,30 +63,32 @@ use ZealPHP\RequestContext;
  *
  * Usage in `app.php`:
  *
- *   // Access-time base, `Expires` header only (legacy compat):
- *   `$app->addMiddleware(new \ZealPHP\Middleware\ExpiresMiddleware(`
- *       `byType: [`
- *           `'image/'           => '+30 days',`
- *           `'text/css'         => '+1 year',`
- *           `'text/javascript'  => '+1 year',`
- *           `'font/'            => '+1 year',`
- *       `],`
- *       `default: '+5 minutes',`
- *   `));`
+ * ```php
+ * // Access-time base, Expires header only (legacy compat):
+ * $app->addMiddleware(new \ZealPHP\Middleware\ExpiresMiddleware(
+ *     byType: [
+ *         'image/'           => '+30 days',
+ *         'text/css'         => '+1 year',
+ *         'text/javascript'  => '+1 year',
+ *         'font/'            => '+1 year',
+ *     ],
+ *     default: '+5 minutes',
+ * ));
  *
- *   // Apache-parity: both `Expires` + `Cache-Control: max-age` from one rule:
- *   `$app->addMiddleware(new \ZealPHP\Middleware\ExpiresMiddleware(`
- *       `byType: ['image/' => '+30 days', 'text/css' => '+1 year'],`
- *       `default: '+5 minutes',`
- *       `emitCacheControl: true,`
- *   `));`
+ * // Apache-parity: both Expires + Cache-Control: max-age from one rule:
+ * $app->addMiddleware(new \ZealPHP\Middleware\ExpiresMiddleware(
+ *     byType: ['image/' => '+30 days', 'text/css' => '+1 year'],
+ *     default: '+5 minutes',
+ *     emitCacheControl: true,
+ * ));
  *
- *   // `M` (modification-time) base — expiry relative to `Last-Modified`:
- *   `$app->addMiddleware(new \ZealPHP\Middleware\ExpiresMiddleware(`
- *       `byType: ['text/html' => '+5 minutes'],`
- *       `base: 'M',`
- *       `emitCacheControl: true,`
- *   `));`
+ * // M (modification-time) base — expiry relative to Last-Modified:
+ * $app->addMiddleware(new \ZealPHP\Middleware\ExpiresMiddleware(
+ *     byType: ['text/html' => '+5 minutes'],
+ *     base: 'M',
+ *     emitCacheControl: true,
+ * ));
+ * ```
  *
  * Match is by `Content-Type` prefix (first match wins, longest-prefix-first
  * for determinism). `default` applies when no prefix matches; pass `null`

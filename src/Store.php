@@ -17,23 +17,26 @@ namespace ZealPHP;
  *   `\OpenSwoole\Table::TYPE_STRING` — up to N bytes (specify max length)
  *
  * Usage:
- *   // Before `app->run()`:
- *   `Store::make('sessions', 4096, [
- *       'uid'  => [\OpenSwoole\Table::TYPE_STRING, 64],
- *       'room' => [\OpenSwoole\Table::TYPE_STRING, 32],
- *       'hits' => [\OpenSwoole\Table::TYPE_INT,    4],
- *   ]);`
  *
- *   // Anywhere (all workers share the same data):
- *   `Store::set('sessions', $fd, ['uid' => 'alice', 'room' => 'general', 'hits' => 0]);`
- *   `Store::get('sessions', $fd);`        // `['uid' => 'alice', ...]`
- *   `Store::incr('sessions', $fd, 'hits');`
- *   `Store::del('sessions', $fd);`
- *   `Store::count('sessions');`
+ * ```php
+ * // Before $app->run():
+ * Store::make('sessions', 4096, [
+ *     'uid'  => [\OpenSwoole\Table::TYPE_STRING, 64],
+ *     'room' => [\OpenSwoole\Table::TYPE_STRING, 32],
+ *     'hits' => [\OpenSwoole\Table::TYPE_INT,    4],
+ * ]);
  *
- *   // Or use the `Table` object directly:
- *   `$t = Store::table('sessions');`
- *   `foreach ($t as $key => $row) { ... }`
+ * // Anywhere (all workers share the same data):
+ * Store::set('sessions', $fd, ['uid' => 'alice', 'room' => 'general', 'hits' => 0]);
+ * Store::get('sessions', $fd);        // ['uid' => 'alice', ...]
+ * Store::incr('sessions', $fd, 'hits');
+ * Store::del('sessions', $fd);
+ * Store::count('sessions');
+ *
+ * // Or use the Table object directly:
+ * $t = Store::table('sessions');
+ * foreach ($t as $key => $row) { ... }
+ * ```
  */
 class Store
 {

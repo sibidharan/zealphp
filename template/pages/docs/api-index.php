@@ -42,7 +42,7 @@ $classCount = array_sum(array_map('count', $apiGroups));
           <ul class="api-index-list">
             <?php foreach ($classes as $cls): ?>
               <li>
-                <a class="api-index-link" href="<?= htmlspecialchars($cls['href'], ENT_QUOTES) ?>" hx-boost="false">
+                <a class="api-index-link" href="<?= htmlspecialchars($cls['href'], ENT_QUOTES) ?>">
                   <code><?= htmlspecialchars($cls['label'], ENT_QUOTES) ?></code>
                 </a>
               </li>

@@ -18,12 +18,18 @@ use ZealPHP\RequestContext;
  * …) when the `Content-Type` doesn't already declare a charset.
  *
  * Apache equivalent:
- *   `AddDefaultCharset utf-8`
- *   `AddCharset utf-8 .html .css .js .json`
+ *
+ * ```
+ * AddDefaultCharset utf-8
+ * AddCharset utf-8 .html .css .js .json
+ * ```
  *
  * Usage in `app.php`:
- *   `$app->addMiddleware(new \ZealPHP\Middleware\CharsetMiddleware());`          // utf-8
- *   `$app->addMiddleware(new \ZealPHP\Middleware\CharsetMiddleware('iso-8859-1'));`
+ *
+ * ```php
+ * $app->addMiddleware(new \ZealPHP\Middleware\CharsetMiddleware());          // utf-8
+ * $app->addMiddleware(new \ZealPHP\Middleware\CharsetMiddleware('iso-8859-1'));
+ * ```
  */
 class CharsetMiddleware implements MiddlewareInterface
 {

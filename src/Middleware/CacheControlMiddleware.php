@@ -17,15 +17,21 @@ use ZealPHP\RequestContext;
  * `.htaccess` pattern for "tell the browser to cache static assets for 30 days".
  *
  * Apache equivalent:
- *   `<FilesMatch "\.(css|js|jpe?g|png|gif|svg|ico|woff2?)$">`
- *       `Header set Cache-Control "max-age=2628000, public"`
- *   `</FilesMatch>`
+ *
+ * ```
+ * <FilesMatch "\.(css|js|jpe?g|png|gif|svg|ico|woff2?)$">
+ *     Header set Cache-Control "max-age=2628000, public"
+ * </FilesMatch>
+ * ```
  *
  * nginx equivalent:
- *   `location ~* \.(css|js|jpe?g|png|gif|svg|ico|woff2?)$ {`
- *       `expires 30d;`
- *       `add_header Cache-Control "public, max-age=2628000";`
- *   `}`
+ *
+ * ```
+ * location ~* \.(css|js|jpe?g|png|gif|svg|ico|woff2?)$ {
+ *     expires 30d;
+ *     add_header Cache-Control "public, max-age=2628000";
+ * }
+ * ```
  *
  * Constructor accepts a map of `extension => max-age-seconds`. Defaults
  * cover the common static-asset extensions at 30 days (`2_628_000`s).
@@ -40,14 +46,16 @@ use ZealPHP\RequestContext;
  *
  * Usage in `app.php`:
  *
- *   // defaults — 30d for css/js/images/fonts
- *   `$app->addMiddleware(new \ZealPHP\Middleware\CacheControlMiddleware());`
+ * ```php
+ * // defaults — 30d for css/js/images/fonts
+ * $app->addMiddleware(new \ZealPHP\Middleware\CacheControlMiddleware());
  *
- *   // custom: 1y for fingerprinted hashes, 5m for HTML
- *   `$app->addMiddleware(new \ZealPHP\Middleware\CacheControlMiddleware([`
- *       `'css' => 31536000, 'js' => 31536000, 'woff2' => 31536000,`
- *       `'html' => 300,`
- *   `]));`
+ * // custom: 1y for fingerprinted hashes, 5m for HTML
+ * $app->addMiddleware(new \ZealPHP\Middleware\CacheControlMiddleware([
+ *     'css' => 31536000, 'js' => 31536000, 'woff2' => 31536000,
+ *     'html' => 300,
+ * ]));
+ * ```
  */
 class CacheControlMiddleware implements MiddlewareInterface
 {

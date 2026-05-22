@@ -55,7 +55,7 @@ $apiChip = 'phpdoc';
              hx-push-url="/docs/">All docs<?php if ($current === null): ?><span class="learn-sidebar-chip">home</span><?php endif; ?></a>
         </li>
         <li class="learn-sidebar-item<?= $current === '__api__' ? ' active' : '' ?>" data-num="•">
-          <a href="/docs/api/" class="learn-sidebar-link" hx-boost="false">API Reference<span class="learn-sidebar-chip"><?= htmlspecialchars($apiChip) ?></span></a>
+          <a href="/docs/api/" class="learn-sidebar-link">API Reference<span class="learn-sidebar-chip"><?= htmlspecialchars($apiChip) ?></span></a>
         </li>
       </ul>
     </div>

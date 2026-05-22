@@ -25,10 +25,13 @@ use Psr\Http\Server\RequestHandlerInterface;
  * target doesn't carry its own), matching mod_alias.
  *
  * Usage in app.php:
- *   $app->addMiddleware(new \ZealPHP\Middleware\RedirectMiddleware([
- *       ['from' => '/old', 'to' => '/new', 'status' => 301],
- *       ['match' => '#^/blog/(\d+)$#', 'to' => '/posts/$1', 'status' => 302],
- *   ]));
+ *
+ * ```php
+ * $app->addMiddleware(new \ZealPHP\Middleware\RedirectMiddleware([
+ *     ['from' => '/old', 'to' => '/new', 'status' => 301],
+ *     ['match' => '#^/blog/(\d+)$#', 'to' => '/posts/$1', 'status' => 302],
+ * ]));
+ * ```
  */
 class RedirectMiddleware implements MiddlewareInterface
 {

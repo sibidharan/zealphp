@@ -37,10 +37,13 @@ use Psr\Http\Server\RequestHandlerInterface;
  * and `allowBlocked` to tune the none/blocked token behaviour.
  *
  * Usage in app.php:
- *   $app->addMiddleware(new \ZealPHP\Middleware\RefererMiddleware(
- *       ['example.com', '*.example.com', '~\.google\.'],
- *       serverNames: ['myapp.example.com'],
- *   ));
+ *
+ * ```php
+ * $app->addMiddleware(new \ZealPHP\Middleware\RefererMiddleware(
+ *     ['example.com', '*.example.com', '~\.google\.'],
+ *     serverNames: ['myapp.example.com'],
+ * ));
+ * ```
  */
 class RefererMiddleware implements MiddlewareInterface
 {

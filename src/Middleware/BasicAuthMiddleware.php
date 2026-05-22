@@ -42,17 +42,19 @@ use ZealPHP\RequestContext;
  *
  * Usage in `app.php`:
  *
- *   // File-based
- *   $app->addMiddleware(new \ZealPHP\Middleware\BasicAuthMiddleware(
- *       htpasswdFile: '/etc/zealphp/.htpasswd',
- *       realm:        'Admin Area',
- *   ));
+ * ```php
+ * // File-based
+ * $app->addMiddleware(new \ZealPHP\Middleware\BasicAuthMiddleware(
+ *     htpasswdFile: '/etc/zealphp/.htpasswd',
+ *     realm:        'Admin Area',
+ * ));
  *
- *   // Callback-based (e.g. validate against your DB)
- *   $app->addMiddleware(new \ZealPHP\Middleware\BasicAuthMiddleware(
- *       verify: fn(string $u, string $p): bool => User::verify($u, $p),
- *       realm:  'API',
- *   ));
+ * // Callback-based (e.g. validate against your DB)
+ * $app->addMiddleware(new \ZealPHP\Middleware\BasicAuthMiddleware(
+ *     verify: fn(string $u, string $p): bool => User::verify($u, $p),
+ *     realm:  'API',
+ * ));
+ * ```
  */
 class BasicAuthMiddleware implements MiddlewareInterface
 {

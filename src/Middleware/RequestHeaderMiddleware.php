@@ -24,10 +24,13 @@ use ZealPHP\RequestContext;
  *   - `unset`          — remove the header
  *
  * Usage in app.php:
- *   $app->addMiddleware(new \ZealPHP\Middleware\RequestHeaderMiddleware([
- *       ['op' => 'set',    'name' => 'X-Forwarded-Proto', 'value' => 'https'],
- *       ['op' => 'unset',  'name' => 'X-Debug'],
- *   ]));
+ *
+ * ```php
+ * $app->addMiddleware(new \ZealPHP\Middleware\RequestHeaderMiddleware([
+ *     ['op' => 'set',    'name' => 'X-Forwarded-Proto', 'value' => 'https'],
+ *     ['op' => 'unset',  'name' => 'X-Debug'],
+ * ]));
+ * ```
  */
 class RequestHeaderMiddleware implements MiddlewareInterface
 {

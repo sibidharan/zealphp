@@ -18,14 +18,20 @@ use ZealPHP\RequestContext;
  * response without sprinkling `$response->header(...)` calls through handlers.
  *
  * Apache equivalent (`mod_headers`):
- *   `Header set X-Frame-Options "DENY"`
- *   `Header append Vary "Accept-Encoding"`
- *   `Header unset Server`
- *   `Header add Set-Cookie "..."`
+ *
+ * ```
+ * Header set X-Frame-Options "DENY"
+ * Header append Vary "Accept-Encoding"
+ * Header unset Server
+ * Header add Set-Cookie "..."
+ * ```
  *
  * nginx equivalent:
- *   `add_header X-Frame-Options "DENY" always;`
- *   `more_clear_headers Server;`   # `ngx_headers_more` module
+ *
+ * ```
+ * add_header X-Frame-Options "DENY" always;
+ * more_clear_headers Server;   # ngx_headers_more module
+ * ```
  *
  * ## Status-conditional application (nginx parity)
  *
@@ -64,29 +70,33 @@ use ZealPHP\RequestContext;
  *
  * Usage in `app.php` — current default (all-status, BC-safe):
  *
- *   `$app->addMiddleware(new \ZealPHP\Middleware\HeaderMiddleware([`
- *       `'set' => [`
- *           `'X-Frame-Options'            => 'DENY',`
- *           `'X-Content-Type-Options'     => 'nosniff',`
- *           `'Referrer-Policy'            => 'strict-origin-when-cross-origin',`
- *           `'Strict-Transport-Security'  => 'max-age=31536000; includeSubDomains',`
- *           `'Content-Security-Policy'    => "default-src 'self'",`
- *       `],`
- *       `'append' => ['Vary' => 'Accept-Encoding'],`
- *       `'unset'  => ['Server', 'X-Powered-By'],`
- *   `]));`
+ * ```php
+ * $app->addMiddleware(new \ZealPHP\Middleware\HeaderMiddleware([
+ *     'set' => [
+ *         'X-Frame-Options'            => 'DENY',
+ *         'X-Content-Type-Options'     => 'nosniff',
+ *         'Referrer-Policy'            => 'strict-origin-when-cross-origin',
+ *         'Strict-Transport-Security'  => 'max-age=31536000; includeSubDomains',
+ *         'Content-Security-Policy'    => "default-src 'self'",
+ *     ],
+ *     'append' => ['Vary' => 'Accept-Encoding'],
+ *     'unset'  => ['Server', 'X-Powered-By'],
+ * ]));
+ * ```
  *
  * Usage with nginx semantics (skip on error responses unless `always=true`):
  *
- *   `$app->addMiddleware(new \ZealPHP\Middleware\HeaderMiddleware([`
- *       `'set' => [`
- *           // Skipped on 4xx/5xx (nginx default behaviour).
- *           `'Cache-Control' => 'no-cache',`
- *           // Always applied even on error responses.
- *           `'X-Frame-Options' => ['value' => 'DENY', 'always' => true],`
- *       `],`
- *       `'unset' => ['Server'],`   // `unset` is always unconditional
- *   `], alwaysByDefault: false));`
+ * ```php
+ * $app->addMiddleware(new \ZealPHP\Middleware\HeaderMiddleware([
+ *     'set' => [
+ *         // Skipped on 4xx/5xx (nginx default behaviour).
+ *         'Cache-Control' => 'no-cache',
+ *         // Always applied even on error responses.
+ *         'X-Frame-Options' => ['value' => 'DENY', 'always' => true],
+ *     ],
+ *     'unset' => ['Server'],   // unset is always unconditional
+ * ], alwaysByDefault: false));
+ * ```
  */
 class HeaderMiddleware implements MiddlewareInterface
 {
