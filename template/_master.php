@@ -74,7 +74,10 @@ function initPageScripts(root) {
       const li = link.closest('li');
       li?.classList.add('active');
       const lessonName = (link.firstChild?.textContent || link.textContent).trim();
-      if (lessonName) document.title = 'ZealPHP Learn · ' + lessonName + ' · ZealPHP';
+      if (lessonName) {
+        const section = location.pathname.startsWith('/docs') ? 'Docs' : 'Learn';
+        document.title = 'ZealPHP ' + section + ' · ' + lessonName + ' · ZealPHP';
+      }
       // Inject auto-generated substeps under the active item. Scans the
       // current lesson's .lesson-content for <h2> elements; auto-slugifies
       // any missing ids so anchor links work. Only the active lesson gets
