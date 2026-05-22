@@ -44,7 +44,7 @@ final class CgiBackendRegistryTest extends TestCase
     public function testResolveCgiBackendPhpFallsBackToGlobalModeByDefault(): void
     {
         App::$cgi_mode = 'proc';
-        $backend = App::resolveCgiBackend('/index.php');
+        $backend = App::resolveCgiBackend('/index.php')['backend'];
         $this->assertSame('proc', $backend['mode'],
             '.php with empty registry must fall back to App::$cgi_mode');
     }
@@ -169,7 +169,7 @@ final class CgiBackendRegistryTest extends TestCase
     public function testResolveCgiBackendReturnsRegisteredConfigForExtension(): void
     {
         App::registerCgiBackend('.py', ['mode' => 'fcgi', 'address' => '127.0.0.1:9001']);
-        $backend = App::resolveCgiBackend('/var/www/app/hello.py');
+        $backend = App::resolveCgiBackend('/var/www/app/hello.py')['backend'];
         $this->assertSame('fcgi', $backend['mode']);
         $this->assertSame('127.0.0.1:9001', $backend['address']);
     }
@@ -177,28 +177,28 @@ final class CgiBackendRegistryTest extends TestCase
     public function testResolveCgiBackendFallsBackToGlobalCgiMode(): void
     {
         App::$cgi_mode = 'fcgi';
-        $backend = App::resolveCgiBackend('/var/www/app/script.rb');
+        $backend = App::resolveCgiBackend('/var/www/app/script.rb')['backend'];
         $this->assertSame('fcgi', $backend['mode']);
     }
 
     public function testResolveCgiBackendFallsBackForUnregisteredExtension(): void
     {
         App::$cgi_mode = 'proc';
-        $backend = App::resolveCgiBackend('/srv/app/page.rb');
+        $backend = App::resolveCgiBackend('/srv/app/page.rb')['backend'];
         $this->assertSame('proc', $backend['mode']);
     }
 
     public function testResolveCgiBackendExtensionIsCaseInsensitive(): void
     {
         App::registerCgiBackend('.py', ['mode' => 'fcgi', 'address' => '127.0.0.1:9001']);
-        $backend = App::resolveCgiBackend('/app/script.PY');
+        $backend = App::resolveCgiBackend('/app/script.PY')['backend'];
         $this->assertSame('fcgi', $backend['mode']);
     }
 
     public function testResolveCgiBackendPhpUsesRegisteredEntry(): void
     {
         App::$cgi_backends['.php'] = ['mode' => 'fork'];
-        $backend = App::resolveCgiBackend('/var/www/index.php');
+        $backend = App::resolveCgiBackend('/var/www/index.php')['backend'];
         $this->assertSame('fork', $backend['mode']);
     }
 
@@ -206,7 +206,7 @@ final class CgiBackendRegistryTest extends TestCase
     {
         App::$cgi_mode = 'proc';
         // pathinfo('/app/script', PATHINFO_EXTENSION) returns '' → ext = '.'
-        $backend = App::resolveCgiBackend('/app/script');
+        $backend = App::resolveCgiBackend('/app/script')['backend'];
         $this->assertSame('proc', $backend['mode']);
     }
 }

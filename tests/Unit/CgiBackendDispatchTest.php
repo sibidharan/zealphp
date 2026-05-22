@@ -109,7 +109,7 @@ final class CgiBackendDispatchTest extends TestCase
     public function testResolveCgiBackendReturnsPyFcgiConfig(): void
     {
         App::registerCgiBackend('.py', ['mode' => 'fcgi', 'address' => '127.0.0.1:9002']);
-        $backend = App::resolveCgiBackend('/foo.py');
+        $backend = App::resolveCgiBackend('/foo.py')['backend'];
         $this->assertSame('fcgi', $backend['mode']);
         $this->assertSame('127.0.0.1:9002', $backend['address']);
     }
@@ -117,14 +117,14 @@ final class CgiBackendDispatchTest extends TestCase
     public function testResolveCgiBackendFallsBackToGlobalCgiModeForUnregistered(): void
     {
         App::$cgi_mode = 'proc';
-        $backend = App::resolveCgiBackend('/foo.rb');
+        $backend = App::resolveCgiBackend('/foo.rb')['backend'];
         $this->assertSame('proc', $backend['mode']);
     }
 
     public function testResolveCgiBackendFallsBackWithFcgiGlobalMode(): void
     {
         App::$cgi_mode = 'fcgi';
-        $backend = App::resolveCgiBackend('/foo.rb');
+        $backend = App::resolveCgiBackend('/foo.rb')['backend'];
         $this->assertSame('fcgi', $backend['mode']);
     }
 

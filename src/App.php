@@ -104,9 +104,18 @@ class App
      * `App::$cgi_mode` (which defaults to `'proc'`, preserving existing behaviour).
      * Register additional extensions with `App::registerCgiBackend()`.
      *
-     * @var array<string, array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>}>
+     * @var array<string, array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>, exec_paths?:array<int,string>}>
      */
     public static array $cgi_backends = [];
+    /**
+     * ScriptAlias-style CGI path registry (Apache `ScriptAlias` parity). Maps a
+     * normalised URL prefix (leading slash, no trailing slash) to a backend
+     * config. Any file served under a registered prefix is treated as
+     * executable regardless of its extension.
+     *
+     * @var array<string, array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>}>
+     */
+    public static array $cgi_script_aliases = [];
     /**
      * OpenSwoole `enable_coroutine` server-setting override. `null` means
      * "follow `!$superglobals`" (true → coroutine-per-request, false → one
@@ -1034,24 +1043,99 @@ class App
             /** @var array<string, string> $fcgiParams */
             $entry['fcgi_params'] = $fcgiParams;
         }
+        if (isset($config['exec_paths']) && is_array($config['exec_paths'])) {
+            $entry['exec_paths'] = array_values(array_filter($config['exec_paths'], 'is_string'));
+        }
         self::$cgi_backends[$extension] = $entry;
     }
 
     /**
-     * Resolve the CGI backend config for a given file path.
-     *
-     * Looks up the extension in the per-extension registry (`$cgi_backends`).
-     * Falls back to `['mode' => App::$cgi_mode]` for unregistered extensions.
-     *
-     * @return array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>}
+     * Reset the CGI backend + ScriptAlias registries. Test-support helper —
+     * lets unit tests start from a clean registry without process recycling.
      */
-    public static function resolveCgiBackend(string $path): array
+    public static function resetCgiBackends(): void
     {
-        $ext = '.' . strtolower(pathinfo($path, PATHINFO_EXTENSION));
-        if (isset(self::$cgi_backends[$ext])) {
-            return self::$cgi_backends[$ext];
+        self::$cgi_backends = [];
+        self::$cgi_script_aliases = [];
+    }
+
+    /**
+     * Register a ScriptAlias-style executable URL prefix (Apache `ScriptAlias`
+     * parity). Any file served under `$urlPrefix` is treated as executable,
+     * regardless of its extension or whether a per-extension backend exists.
+     *
+     * @param string $urlPrefix  URL path prefix, e.g. `'/cgi-bin'`.
+     * @param array<string, mixed> $config
+     *   `'mode'`        — `'proc'` | `'fork'` | `'fcgi'` (defaults to `'proc'`)
+     *   `'interpreter'` — full path to interpreter binary (`proc` mode)
+     *   `'address'`     — FastCGI backend address (`fcgi` mode)
+     *   `'fcgi_params'` — extra FCGI params (`fcgi` mode)
+     */
+    public static function cgiScriptAlias(string $urlPrefix, array $config): void
+    {
+        $mode = is_string($config['mode'] ?? null) ? $config['mode'] : 'proc';
+        $entry = ['mode' => $mode];
+        $interpreter = $config['interpreter'] ?? null;
+        if ($interpreter !== null && is_string($interpreter)) {
+            $entry['interpreter'] = $interpreter;
         }
-        return ['mode' => self::$cgi_mode];
+        $address = $config['address'] ?? null;
+        if ($address !== null && is_string($address)) {
+            $entry['address'] = $address;
+        }
+        $fcgiParams = $config['fcgi_params'] ?? null;
+        if (is_array($fcgiParams)) {
+            /** @var array<string, string> $fcgiParams */
+            $entry['fcgi_params'] = $fcgiParams;
+        }
+        self::$cgi_script_aliases['/' . trim($urlPrefix, '/')] = $entry;
+    }
+
+    /**
+     * Resolve the CGI backend config + execution permission for a given path.
+     *
+     * Resolution order (Apache parity):
+     *  1. ScriptAlias prefixes (`$cgi_script_aliases`) — any file under a
+     *     registered URL prefix is executable (`mayExecute = true`).
+     *  2. Per-extension registry (`$cgi_backends`) — the backend is returned,
+     *     but `mayExecute` is true only if the URL falls under one of the
+     *     backend's `exec_paths` (ExecCGI scope).
+     *  3. Unregistered — falls back to `['mode' => App::$cgi_mode]` with
+     *     `mayExecute = false`.
+     *
+     * @return array{backend: array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>, exec_paths?:array<int,string>}, mayExecute: bool}
+     */
+    public static function resolveCgiBackend(string $absPath, string $urlPath = ''): array
+    {
+        $url = '/' . ltrim($urlPath, '/');
+        foreach (self::$cgi_script_aliases as $prefix => $cfg) {
+            if (self::pathUnderPrefix($url, $prefix)) {
+                return ['backend' => $cfg, 'mayExecute' => true];
+            }
+        }
+        $ext = '.' . strtolower(pathinfo($absPath, PATHINFO_EXTENSION));
+        if (isset(self::$cgi_backends[$ext])) {
+            $b = self::$cgi_backends[$ext];
+            $may = false;
+            foreach (($b['exec_paths'] ?? []) as $p) {
+                if (self::pathUnderPrefix($url, '/' . trim((string)$p, '/'))) {
+                    $may = true;
+                    break;
+                }
+            }
+            return ['backend' => $b, 'mayExecute' => $may];
+        }
+        return ['backend' => ['mode' => self::$cgi_mode], 'mayExecute' => false];
+    }
+
+    /**
+     * Boundary-safe URL-prefix test. `$url` is "under" `$prefix` only when it
+     * equals the prefix exactly or begins with `$prefix . '/'` — so `/cgi-bins`
+     * does NOT match the `/cgi-bin` scope.
+     */
+    private static function pathUnderPrefix(string $url, string $prefix): bool
+    {
+        return $url === $prefix || str_starts_with($url, rtrim($prefix, '/') . '/');
     }
 
     /**
@@ -2756,7 +2840,7 @@ class App
         $g->server['SCRIPT_FILENAME'] = $absPath;
 
         if (self::$coproc_implicit_request_handler) {
-            $backend = self::resolveCgiBackend($absPath);
+            $backend = self::resolveCgiBackend($absPath, '/' . $rel)['backend'];
             return match ($backend['mode']) {
                 'fork' => self::cgiFork($absPath),
                 'fcgi' => self::cgiFcgi(
@@ -2793,7 +2877,7 @@ class App
         // Outside the document root — preserve legacy "trust the caller"
         // semantics while still applying the universal return contract.
         if (self::$coproc_implicit_request_handler) {
-            $backend = self::resolveCgiBackend($path);
+            $backend = self::resolveCgiBackend($path, $path)['backend'];
             return match ($backend['mode']) {
                 'fork' => self::cgiFork($path),
                 'fcgi' => self::cgiFcgi(
