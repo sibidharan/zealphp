@@ -52,3 +52,4 @@ __pycache__/
 /.claude/scheduled_tasks.lock
 /.claude/worktrees/
 /.phpdoc/
+/public/css/pages.css
