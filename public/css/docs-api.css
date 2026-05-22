@@ -138,10 +138,15 @@
 .docs-api article.phpdocumentor-element {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1.5rem 1.75rem;
-  margin: 1.25rem 0 1.5rem;
+  border-radius: 10px;
+  padding: 1.25rem 1.4rem 1rem;
+  margin: 1rem 0 1.25rem;
   scroll-margin-top: 5rem;
+  transition: border-color .15s, box-shadow .15s;
+}
+.docs-api article.phpdocumentor-element:hover {
+  border-color: rgba(245,158,11,.35);
+  box-shadow: 0 4px 18px rgba(245,158,11,.06);
 }
 .docs-api article.phpdocumentor-element.-class {
   /* The outer class wrapper is a banner, not a method card. Render
@@ -235,50 +240,104 @@
   font-weight: 600;
 }
 
-/* ---------- SIGNATURES — the big code block per method ---------- */
-/* phpdoc renders signatures as <code class="phpdocumentor-code phpdocumentor-signature">
- * which is inline by default. Force block, dark background, syntax-color
- * the span-children that phpdoc tags. */
+/* ---------- SIGNATURES — modern inline flow, not a heavy slab ---------- */
+/* phpdoc emits <code class="phpdocumentor-code phpdocumentor-signature">
+ * which is inline by default with pre-formatted whitespace from the
+ * source. We render it as a light, flowing monospace line — Stripe /
+ * Mintlify / Linear API docs aesthetic, NOT a 2010 dark-block reference
+ * site. The dark-block reading was overpowering the prose; here the
+ * signature is one tidy line that says exactly what to call, with type
+ * chips, and gets out of the way. */
 .docs-api code.phpdocumentor-signature,
 .docs-api code.phpdocumentor-code,
 .docs-api .phpdocumentor-signature {
   display: block !important;
   font-family: var(--font-mono) !important;
-  background: var(--code-bg) !important;
-  color: #e7e5e4 !important;
-  padding: .9rem 1.1rem !important;
+  background: var(--bg-alt) !important;
+  color: var(--text) !important;
+  padding: .7rem 1rem !important;
   border-radius: 6px !important;
-  font-size: .88rem !important;
-  line-height: 1.7 !important;
-  border: 1px solid #2a201d !important;
+  font-size: .9rem !important;
+  line-height: 1.55 !important;
+  border: 1px solid var(--border) !important;
+  border-left: 3px solid var(--accent) !important;
   overflow-x: auto;
-  margin: .5rem 0 1.25rem !important;
-  white-space: pre-wrap;
-  word-break: keep-all;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+  margin: 0 0 1rem !important;
+  white-space: normal !important;
+  word-spacing: -.1ch;
 }
+/* Tighten the whitespace phpdoc emits between visibility/static/name */
+.docs-api .phpdocumentor-signature > span { white-space: normal; }
+
+/* Visibility (public/private/protected) — small badge instead of inline color text */
+.docs-api .phpdocumentor-signature__visibility {
+  display: inline-block;
+  font-style: normal;
+  font-weight: 600;
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  padding: .1rem .45rem;
+  background: rgba(248,113,113,.1);
+  color: #b91c1c;
+  border: 1px solid rgba(248,113,113,.25);
+  border-radius: 3px;
+  margin-right: .5rem;
+  vertical-align: 1px;
+}
+.docs-api .phpdocumentor-signature__static {
+  display: inline-block;
+  font-style: normal;
+  font-weight: 600;
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  padding: .1rem .45rem;
+  background: rgba(147,197,253,.12);
+  color: #1d4ed8;
+  border: 1px solid rgba(147,197,253,.3);
+  border-radius: 3px;
+  margin-right: .5rem;
+  vertical-align: 1px;
+}
+
+/* Method/function name in the signature — bold amber */
 .docs-api .phpdocumentor-signature__name,
 .docs-api .phpdocumentor-signature a {
-  color: var(--accent);
+  color: var(--accent-dark);
   font-weight: 700;
   text-decoration: none;
 }
-.docs-api .phpdocumentor-signature__visibility,
-.docs-api .phpdocumentor-signature__static {
-  color: #f87171;
-  font-style: italic;
-  font-weight: 500;
+
+/* Return type — sage green chip after the colon */
+.docs-api .phpdocumentor-signature__response_type {
+  display: inline-block;
+  padding: .05rem .4rem;
+  background: rgba(16,185,129,.08);
+  color: #047857;
+  border: 1px solid rgba(16,185,129,.22);
+  border-radius: 3px;
+  font-size: .85em;
+  margin-left: .25rem;
 }
-.docs-api .phpdocumentor-signature__response_type,
+
+/* Argument types/names/defaults — colored inline, NOT chip (would break the
+ * line into too many pills). Stays in the inline flow of the signature. */
 .docs-api .phpdocumentor-signature__argument__type {
-  color: #93c5fd;
+  color: #2563eb;
+  font-weight: 500;
 }
 .docs-api .phpdocumentor-signature__argument__name {
-  color: #fcd34d;
-  font-weight: 500;
+  color: #b45309;
+  font-weight: 600;
 }
 .docs-api .phpdocumentor-signature__argument__default-value {
-  color: #d1d5db;
+  color: var(--text-muted);
+}
+.docs-api .phpdocumentor-signature__argument > span {
+  /* tighten inner-arg span spacing — phpdoc puts a stray space before
+   * the closing bracket */
+  margin-right: 0;
 }
 
 /* Inline code in prose (NOT signature blocks). The signature has both
@@ -350,18 +409,20 @@
   font-weight: 700;
   font-family: var(--font-mono);
 }
+/* Type chips in params + return values — same sage-green as signature
+ * return types for visual consistency. */
 .docs-api .phpdocumentor-argument-list__argument__type,
 .docs-api .phpdocumentor-return-value__argument__type,
 .docs-api .phpdocumentor-argument-list__entry > span:nth-of-type(2),
 .docs-api .phpdocumentor-return-value__entry > span:nth-of-type(2) {
   display: inline-block;
   padding: .1rem .5rem;
-  background: rgba(147,197,253,.12);
-  border: 1px solid rgba(147,197,253,.3);
-  color: #2563eb;
+  background: rgba(16,185,129,.08);
+  border: 1px solid rgba(16,185,129,.22);
+  color: #047857;
   border-radius: 4px;
   font-family: var(--font-mono);
-  font-size: .8rem;
+  font-size: .82rem;
   font-weight: 500;
 }
 
