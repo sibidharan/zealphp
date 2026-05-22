@@ -613,6 +613,29 @@
   flex-shrink: 0;
 }
 
+/* ---------- Breadcrumbs + the "in package X" title suffix ---------- */
+/* base.css resets the breadcrumb <ul> (list-style:none, no margin/padding) and
+   shrinks the .phpdocumentor-element__package label; it isn't loaded on our
+   wrapped pages, so breadcrumbs showed disc bullets and the in-title
+   "in package X" link inherited the 32px h1 size (looked as big as the title).
+   Normalise both to a small, bullet-free inline row. */
+.docs-api .phpdocumentor-element__package {
+  font-size: .8rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-top: .35rem;
+}
+.docs-api .phpdocumentor-breadcrumbs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  font-size: .8rem;
+}
+.docs-api .phpdocumentor-breadcrumbs > li { display: inline; }
+
 /* ---------- Responsive: phpDocumentor's grid can overflow our shell ---------- */
 @media (max-width: 900px) {
   .docs-api aside.phpdocumentor-sidebar {
