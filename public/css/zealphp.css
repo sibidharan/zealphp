@@ -1225,6 +1225,12 @@ input.api-search-input::-webkit-search-cancel-button { -webkit-appearance: none;
   box-shadow: 0 12px 32px rgba(0,0,0,.10), 0 2px 6px rgba(0,0,0,.04);
   max-height: 60vh;
   overflow-y: auto;
+  /* Keep wheel/touch scrolling inside the dropdown — without this the
+   * scroll chains to the page once the list hits its top/bottom edge
+   * (or whenever the cursor is over it), so the whole page moves
+   * instead of the results. */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   z-index: 50;
   scrollbar-width: thin;
 }

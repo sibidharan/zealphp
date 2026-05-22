@@ -5,10 +5,10 @@ namespace ZealPHP\HTTP;
 use function ZealPHP\response_set_status;
 
 /**
- * Thin wrapper around \OpenSwoole\Http\Response. The __call/__get/__set proxies
- * forward to the underlying response — these @method annotations expose the
- * forwarded signatures to static analysis so call sites are statically typed
- * instead of treated as mixed.
+ * Thin wrapper around `\OpenSwoole\Http\Response`. The `__call` / `__get` /
+ * `__set` proxies forward to the underlying response — these `@method`
+ * annotations expose the forwarded signatures to static analysis so call
+ * sites are statically typed instead of treated as mixed.
  *
  * @method bool isWritable()
  * @method bool write(string $content)
