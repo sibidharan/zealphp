@@ -8,6 +8,8 @@ ZealPHP is a PHP web framework library built on **OpenSwoole**. This repo is the
 
 ## Commands
 
+Most common tasks are wrapped in a **`Makefile`** — run `make help` to list them. They're thin wrappers over the commands below and stay in lockstep with this section. The raw commands:
+
 ```bash
 # Install PHP dependencies (including PHPUnit dev dep)
 composer install
