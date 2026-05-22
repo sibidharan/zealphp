@@ -13,6 +13,8 @@ use ZealPHP\App;
   <?php App::render('/pages/docs/_sidebar', ['topic' => $topic]); ?>
 
   <article class="lesson-content docs-guide">
+    <?php App::render('/pages/docs/_search'); ?>
+
     <nav class="docs-breadcrumbs" aria-label="Breadcrumbs">
       <a href="/docs/">Docs</a>
       <span class="sep">›</span>

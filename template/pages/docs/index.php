@@ -40,6 +40,8 @@ $groups = [
   <?php App::render('/pages/docs/_sidebar', ['topic' => null]); ?>
 
   <article class="lesson-content docs-landing">
+    <?php App::render('/pages/docs/_search'); ?>
+
     <header class="lesson-header">
       <nav class="lesson-crumb"><a href="/docs/">Docs</a></nav>
       <h1 class="lesson-title">ZealPHP Documentation</h1>

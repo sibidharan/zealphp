@@ -225,7 +225,17 @@ function initPageScripts(root) {
   });
 }
 document.addEventListener('DOMContentLoaded', () => initPageScripts());
-document.addEventListener('htmx:afterSettle', () => initPageScripts());
+document.addEventListener('htmx:afterSettle', (e) => {
+  // Skip when the swap target is the search-results dropdown — that's
+  // an inline suggestion swap, NOT a page navigation. Without this
+  // guard, the substep regeneration tears down + rebuilds the active
+  // sidebar item on every keystroke, which the user perceives as a
+  // blink across the entire sidebar.
+  if (e.target && (e.target.id === 'api-search-results' || e.target.closest?.('#api-search-results'))) {
+    return;
+  }
+  initPageScripts();
+});
 
 // Center the sidebar's active <li> in its own scroll viewport if it's
 // off-screen. Used by initPageScripts (hard load) and the scroll-restore
@@ -248,12 +258,20 @@ function ensureActiveSidebarVisible(sb) {
 // from the bottom of the sidebar; their old scroll position is irrelevant to
 // the new active item).
 (function () {
+  // Skip sidebar bookkeeping for non-navigation swaps (search dropdown,
+  // and anything else outside .lesson-content). htmx fires beforeSwap
+  // and afterSettle for every swap including the search-as-you-type
+  // suggestions — without this guard the sidebar appears to flicker on
+  // every keystroke.
+  const isNav = (e) => !(e?.target && (e.target.id === 'api-search-results' || e.target.closest?.('#api-search-results')));
   let savedScrollTop = 0;
-  document.addEventListener('htmx:beforeSwap', () => {
+  document.addEventListener('htmx:beforeSwap', (e) => {
+    if (!isNav(e)) return;
     const sb = document.getElementById('learn-sidebar');
     if (sb) savedScrollTop = sb.scrollTop;
   });
-  document.addEventListener('htmx:afterSettle', () => {
+  document.addEventListener('htmx:afterSettle', (e) => {
+    if (!isNav(e)) return;
     const sb = document.getElementById('learn-sidebar');
     if (!sb) return;
     if (savedScrollTop > 0) sb.scrollTop = savedScrollTop;
