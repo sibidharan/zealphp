@@ -36,6 +36,46 @@ if (!defined('ZEALPHP_ASSET_VERSION')) {
     );
 }
 
+// Auto-build the API reference at /docs/api/ on first boot — downloads the
+// phpDocumentor PHAR (33MB) if missing, then runs it against src/. One-time
+// cost (~30-60 s including download); subsequent boots skip. Gated by argv
+// so `php app.php stop|status|restart|logs` doesn't trigger a build.
+$__cliSub = $argv[1] ?? 'start';
+if (PHP_SAPI === 'cli' && !in_array($__cliSub, ['stop', 'status', 'logs', '--help', '-h'], true)) {
+    $__docsIndex = __DIR__ . '/public/docs/api/index.html';
+    if (!is_file($__docsIndex) && !env_flag('ZEALPHP_SKIP_DOCS_BUILD', false)) {
+        $__phar = __DIR__ . '/tools/phpdoc.phar';
+        if (!is_file($__phar)) {
+            echo "[zealphp] First boot: downloading phpDocumentor PHAR (33 MB, one-time)...\n";
+            if (!is_dir(__DIR__ . '/tools')) {
+                mkdir(__DIR__ . '/tools', 0755, true);
+            }
+            $__url = 'https://github.com/phpDocumentor/phpDocumentor/releases/latest/download/phpDocumentor.phar';
+            $__rc  = 0;
+            passthru('curl -fsSL ' . escapeshellarg($__url) . ' -o ' . escapeshellarg($__phar), $__rc);
+            if ($__rc !== 0 || !is_file($__phar)) {
+                echo "[zealphp] phpDocumentor download failed (curl exit {$__rc}); /docs/api/ will show the fallback page. Set ZEALPHP_SKIP_DOCS_BUILD=1 to silence this.\n";
+            }
+        }
+        if (is_file($__phar)) {
+            echo "[zealphp] Building API docs at /docs/api/ (~30 s, one-time)...\n";
+            $__cmd = sprintf(
+                'php %s -d %s -t %s --title=%s --no-interaction',
+                escapeshellarg($__phar),
+                escapeshellarg(__DIR__ . '/src'),
+                escapeshellarg(__DIR__ . '/public/docs/api'),
+                escapeshellarg('ZealPHP API Reference')
+            );
+            $__rc = 0;
+            passthru($__cmd, $__rc);
+            if ($__rc !== 0) {
+                echo "[zealphp] phpDocumentor build failed (exit {$__rc}); /docs/api/ will show the fallback page.\n";
+            }
+        }
+    }
+    unset($__cliSub, $__docsIndex, $__phar, $__url, $__cmd, $__rc);
+}
+
 // Lifecycle is coroutine-mode by default (the recommended default for new
 // apps). Overridable via env so the same demo can be exercised under the
 // Mixed-mode and legacy-CGI lifecycles too — used by the coverage harness to
