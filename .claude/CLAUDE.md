@@ -505,14 +505,9 @@ The site uses **htmx** globally. `_master.php` sets `hx-boost="true"` on `<body>
 - Prefer `hx-get`/`hx-post` + `hx-target` + `hx-swap` over custom `fetch()` for standard interactions
 - For server-push (streaming, real-time), use WebSocket (`App::ws()`) or SSE (`$response->sse()`)
 
-### Known Tech Debt (do NOT copy these patterns)
+### Separation of concerns (formerly tech debt — now enforced)
 
-| Anti-pattern | Worst offenders |
-|-------------|----------------|
-| Inline `style=` attributes (~600 total) | `home.php`, `performance.php`, `why-zealphp.php`, `getting-started.php`, `migration.php` |
-| Inline `<script>` blocks | `home.php` (4 blocks, ~100 lines JS), `streaming.php`, `websocket.php`, `timers.php` |
-
-When modifying these files, extract inline JS/CSS to external files rather than adding more inline code.
+The inline `style=` / inline `<script>` tech debt was fully cleared in the Dec-2024 sweep: ~1200 inline styles → `public/css/pages/*.css`, the inline scripts (incl. `home.php`'s 4 blocks and the `_master.php` nav script) → `public/js/{,pages/}*.js`. **Keep it that way** — templates produce HTML only; CSS goes to `public/css/`, JS to `public/js/`. The single allowed `style=` left in `template/` is inside an escaped `<pre><code>` *sample* (displayed code, not a real attribute). Don't reintroduce inline styles/scripts.
 
 ---
 
@@ -549,7 +544,9 @@ template/
     templates.php, legacy-apps.php
 ```
 
-CSS: `public/css/zealphp.css` — single file, CSS variables, amber accent. Legacy pages still have ~600 inline `style=` attrs (tech debt); new code must use CSS classes only.
+CSS: `public/css/zealphp.css` — global stylesheet, CSS variables, amber accent. Page-specific styles live in `public/css/pages/{page-key}.css` (one per template, `$page` slashes→dashes); they're concatenated at boot into `public/css/pages.css` (gitignored, built in `app.php`) and loaded **eagerly** up front in `_head.php` so hx-boost navigation never flashes unstyled content. **No inline `style=`/`<script>` in templates** — the Dec-2024 sweep extracted all ~1200 inline styles + inline scripts into `public/css/pages/*.css` and `public/js/{,pages/}*.js` (the lone remaining `style=` lives inside an escaped `<pre><code>` sample). New code keeps that contract: CSS classes only, JS in `public/js/`.
+
+**Asset cache-busting** — `ZEALPHP_ASSET_VERSION` (defined in `app.php`, used as `?v=…` on every CSS/JS tag in `_head.php`) resolves in order: (1) the **git commit short hash** read straight from `.git/HEAD` — bumps on every commit and is identical for the same commit across deploys, so caches stay valid until a real change; (2) when there's no `.git` (composer installs), the **newest mtime across `public/css` + `public/js`** — so JS-only edits still bust caches, not just `zealphp.css`; (3) boot `time()` as a last resort. There is **no build step** for assets — they're hand-written static files (only `pages.css` is concatenated at boot).
 
 ### Demo API Endpoints
 

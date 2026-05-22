@@ -468,7 +468,7 @@ p  { max-width: 70ch; }
 .badge-feature { background: #fef3c7; color: #92400e; }
 
 /* ── Table ── */
-.ztable { width: 100%; border-collapse: collapse; font-size: .875rem; margin: 1rem 0; }
+.ztable { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: .875rem; margin: 1rem 0; }
 .ztable th { background: var(--bg-alt); font-weight: 600; padding: .6rem 1rem; text-align: left; border-bottom: 2px solid var(--border); }
 .ztable td { padding: .6rem 1rem; border-bottom: 1px solid var(--border); }
 .ztable tr:last-child td { border-bottom: none; }
@@ -1062,7 +1062,15 @@ pre:hover > .code-copy { opacity: 1; }
 
 /* Tables */
 .docs-markdown table {
-  width: 100%;
+  /* Responsive: size to content but cap at the container width and scroll
+   * horizontally instead of overflowing the page (esp. on mobile). The
+   * display:block + width:max-content + overflow-x:auto trio is the
+   * standard GitHub-markdown approach — the row/cell display values keep
+   * the table layout intact inside the scrollable block. */
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   margin: 1rem 0 1.5rem;
   font-size: .93rem;
