@@ -1,0 +1,200 @@
+/* Page-scoped styles for /performance (extracted from inline style= attrs). */
+
+.perf-container { max-width: 900px; }
+
+.perf-method { margin-top: 2rem; }
+
+.perf-inline-code {
+  background: rgba(255,255,255,.05);
+  padding: .1rem .3rem;
+  border-radius: 3px;
+}
+
+.perf-inline-code-06 {
+  background: rgba(255,255,255,.06);
+  padding: .1rem .3rem;
+  border-radius: 3px;
+}
+
+.perf-h2 { margin: 3rem 0 1rem; }
+
+.perf-findings-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+.perf-finding { padding: 1.1rem 1.3rem; }
+
+.perf-finding-title {
+  margin: 0 0 .35rem;
+  color: var(--accent);
+  font-size: 1.05rem;
+}
+
+.perf-finding-lead {
+  margin: 0 0 .4rem;
+  color: #cbd5e1;
+  font-size: .92rem;
+  line-height: 1.55;
+}
+
+.perf-finding-note {
+  margin: .4rem 0 0;
+  color: #94a3b8;
+  font-size: .82rem;
+}
+
+.perf-finding-table {
+  margin: .4rem 0;
+  font-size: .88rem;
+}
+
+.perf-right { text-align: right; }
+
+.perf-cell-accent {
+  text-align: right;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.perf-cell-accent-plain {
+  text-align: right;
+  color: var(--accent);
+}
+
+.perf-cell-muted {
+  text-align: right;
+  color: #64748b;
+}
+
+.perf-cell-dim {
+  text-align: right;
+  color: #94a3b8;
+}
+
+.perf-cell-amber {
+  text-align: right;
+  color: #fde68a;
+  font-weight: 700;
+}
+
+.perf-cell-danger {
+  text-align: right;
+  color: #fca5a5;
+  font-weight: 700;
+}
+
+.perf-cell-danger-plain {
+  text-align: right;
+  color: #fca5a5;
+}
+
+.perf-lead {
+  margin-bottom: 1rem;
+  color: #cbd5e1;
+}
+
+.perf-th-left { text-align: left; }
+
+.perf-row-tint { background: rgba(255,255,255,.02); }
+
+.perf-section-label {
+  color: #94a3b8;
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-weight: 700;
+}
+
+.perf-row-highlight { background: rgba(245,158,11,.05); }
+
+.perf-row-sweep-peak { background: rgba(245,158,11,.06); }
+
+.perf-cell-zeal {
+  text-align: right;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.perf-zeal-name {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.perf-zeal-sub {
+  color: #64748b;
+  font-weight: 400;
+  font-size: .78rem;
+}
+
+.perf-express-sub {
+  color: #64748b;
+  font-size: .78rem;
+}
+
+.perf-totals {
+  text-align: center;
+  margin-top: .75rem;
+  color: #94a3b8;
+  font-size: .85rem;
+}
+
+.perf-accent-strong { color: var(--accent); }
+
+.perf-para-note {
+  margin: .6rem 0 0;
+  color: #94a3b8;
+  font-size: .85rem;
+}
+
+.perf-link-accent { color: var(--accent); }
+
+.perf-h3-spaced { margin-top: 1.5rem; }
+
+.perf-h3-spaced-2 { margin-top: 2rem; }
+
+.perf-sweep-table { margin: .5rem 0; }
+
+.perf-sweep-summary {
+  margin-top: .75rem;
+  color: #94a3b8;
+  font-size: .85rem;
+  line-height: 1.55;
+}
+
+.perf-csv-links {
+  margin-top: .5rem;
+  color: #64748b;
+  font-size: .78rem;
+}
+
+.perf-recipe-note {
+  margin: .5rem 0;
+  color: #94a3b8;
+  font-size: .88rem;
+}
+
+.perf-install-lead {
+  margin: .5rem 0 .75rem;
+  color: #cbd5e1;
+}
+
+.perf-install-note {
+  margin: .5rem 0 0;
+  color: #94a3b8;
+  font-size: .85rem;
+}
+
+.perf-caveats {
+  color: #cbd5e1;
+  line-height: 1.7;
+  padding-left: 1.2rem;
+  margin: 0;
+}
+
+.perf-source {
+  margin-top: 2rem;
+  color: #64748b;
+  font-size: .85rem;
+}

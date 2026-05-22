@@ -32,16 +32,16 @@ $app->ws(
 );
 PHP]); ?>
 
-<h2 style="margin:2rem 0 1rem">Live demo — 6 endpoints</h2>
+<h2 class="ws-h2">Live demo — 6 endpoints</h2>
 
 <div class="tabs" data-group="ws"><div class="tab-btn active" data-tab="ws-echo" data-group="ws">Echo</div><div class="tab-btn" data-tab="ws-broadcast" data-group="ws">Broadcast</div><div class="tab-btn" data-tab="ws-ticker" data-group="ws">Ticker</div><div class="tab-btn" data-tab="ws-rooms" data-group="ws">Rooms</div><div class="tab-btn" data-tab="ws-auth" data-group="ws">Auth</div><div class="tab-btn" data-tab="ws-binary" data-group="ws">Binary</div></div>
 <div data-panel-group="ws">
   <div class="tab-panel active" id="ws-echo">
-    <p style="font-size:.85rem;margin-bottom:.75rem"><span class="badge badge-ws">WS</span> <code>/ws/echo</code> — mirrors every message back verbatim.</p>
+    <p class="ws-panel-hint"><span class="badge badge-ws">WS</span> <code>/ws/echo</code> — mirrors every message back verbatim.</p>
     <?php App::render('/components/_code', ['code' => '$app->ws(\'/ws/echo\', onMessage: fn($server,$frame) => $server->push($frame->fd, \'echo: \'.$frame->data));']); ?>
   </div>
   <div class="tab-panel" id="ws-broadcast">
-    <p style="font-size:.85rem;margin-bottom:.75rem"><span class="badge badge-ws">WS</span> <code>/ws/broadcast</code> — every message goes to ALL connected clients.</p>
+    <p class="ws-panel-hint"><span class="badge badge-ws">WS</span> <code>/ws/broadcast</code> — every message goes to ALL connected clients.</p>
     <?php App::render('/components/_code', ['code' => <<<'PHP'
 $broadcastClients = [];
 $app->ws('/ws/broadcast',
@@ -57,7 +57,7 @@ $app->ws('/ws/broadcast',
 PHP]); ?>
   </div>
   <div class="tab-panel" id="ws-ticker">
-    <p style="font-size:.85rem;margin-bottom:.75rem"><span class="badge badge-ws">WS</span> <code>/ws/ticker</code> — server pushes every 1s using a spawned coroutine.</p>
+    <p class="ws-panel-hint"><span class="badge badge-ws">WS</span> <code>/ws/ticker</code> — server pushes every 1s using a spawned coroutine.</p>
     <?php App::render('/components/_code', ['code' => <<<'PHP'
 $app->ws('/ws/ticker',
     onMessage: fn($s,$f) => trim($f->data)==='stop' ? $s->close($f->fd) : null,
@@ -75,7 +75,7 @@ $app->ws('/ws/ticker',
 PHP]); ?>
   </div>
   <div class="tab-panel" id="ws-rooms">
-    <p style="font-size:.85rem;margin-bottom:.75rem"><span class="badge badge-ws">WS</span> <code>/ws/rooms?room=general</code> — cross-worker rooms via <code>Store</code> (OpenSwoole\Table). Every worker shares the same client registry.</p>
+    <p class="ws-panel-hint"><span class="badge badge-ws">WS</span> <code>/ws/rooms?room=general</code> — cross-worker rooms via <code>Store</code> (OpenSwoole\Table). Every worker shares the same client registry.</p>
     <?php App::render('/components/_code', ['code' => <<<'PHP'
 // Shared across all workers — created before run()
 Store::make('ws_rooms', 4096, [
@@ -99,7 +99,7 @@ $app->ws('/ws/rooms',
 PHP]); ?>
   </div>
   <div class="tab-panel" id="ws-auth">
-    <p style="font-size:.85rem;margin-bottom:.75rem"><span class="badge badge-ws">WS</span> <code>/ws/auth?token=secret</code> — validates token in onOpen, disconnects with code 4001 if invalid.</p>
+    <p class="ws-panel-hint"><span class="badge badge-ws">WS</span> <code>/ws/auth?token=secret</code> — validates token in onOpen, disconnects with code 4001 if invalid.</p>
     <?php App::render('/components/_code', ['code' => <<<'PHP'
 $app->ws('/ws/auth',
     onOpen: function($server, $request, $g) {
@@ -116,7 +116,7 @@ $app->ws('/ws/auth',
 PHP]); ?>
   </div>
   <div class="tab-panel" id="ws-binary">
-    <p style="font-size:.85rem;margin-bottom:.75rem"><span class="badge badge-ws">WS</span> <code>/ws/binary</code> — checks <code>$frame->opcode</code>, echoes binary as binary. PING/PONG filtered automatically by ZealPHP.</p>
+    <p class="ws-panel-hint"><span class="badge badge-ws">WS</span> <code>/ws/binary</code> — checks <code>$frame->opcode</code>, echoes binary as binary. PING/PONG filtered automatically by ZealPHP.</p>
     <?php App::render('/components/_code', ['code' => <<<'PHP'
 $app->ws('/ws/binary',
     onMessage: function($server, $frame, $g) {
@@ -132,7 +132,7 @@ PHP]); ?>
   </div>
 	</div>
 
-	<h2 style="margin:2rem 0 1rem">Browser JavaScript</h2>
+	<h2 class="ws-h2">Browser JavaScript</h2>
 	<?php App::render('/components/_code', [
 	    'label' => 'HTTPS-aware browser client',
 	    'lang'  => 'javascript',
@@ -159,7 +159,7 @@ PHP]); ?>
 	}
 	JS]); ?>
 
-		<h2 style="margin:2rem 0 1rem">Live browser client</h2>
+		<h2 class="ws-h2">Live browser client</h2>
 	<div class="ws-shell">
 	  <div class="ws-topbar">
 	    <div class="ws-status" id="ws-status" data-state="closed">
@@ -197,125 +197,4 @@ PHP]); ?>
 	</div>
 	</div>
 	</section>
-	<script>
-	let ws2 = null;
-	let wsQueuedMessage = '';
-	const wsStats = { sent: 0, recv: 0 };
-
-	function wsEndpoint() {
-	  const mode = document.getElementById('ws-mode').value;
-	  const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
-	  return scheme + location.host + '/ws/' + mode;
-	}
-
-	function wsSetState(state, text) {
-	  const status = document.getElementById('ws-status');
-	  status.dataset.state = state;
-	  document.getElementById('ws-state-text').textContent = text;
-	  document.getElementById('ws-connect').disabled = state === 'open' || state === 'connecting';
-	  document.getElementById('ws-disconnect').disabled = state !== 'open' && state !== 'connecting';
-	}
-
-	function wsUpdateCounts() {
-	  document.getElementById('ws-counts').textContent = wsStats.sent + ' sent / ' + wsStats.recv + ' received';
-	}
-
-	function wsLog(text, cls) {
-	  const box = document.getElementById('ws-log');
-	  const el = document.createElement('div');
-	  el.className = 'ws-msg ' + (cls||'');
-	  el.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text;
-  box.appendChild(el);
-  box.scrollTop = box.scrollHeight;
-	}
-	function wsConnect() {
-	  if (ws2 && (ws2.readyState === WebSocket.OPEN || ws2.readyState === WebSocket.CONNECTING)) return;
-	  const url = wsEndpoint();
-	  wsSetState('connecting', 'Connecting');
-	  wsLog('Connecting -> ' + url, 'sys');
-	  ws2 = new WebSocket(url);
-	  ws2.binaryType = 'arraybuffer';
-	  ws2.onopen  = () => {
-	    wsSetState('open', 'Connected');
-	    wsLog('Connected', 'sys');
-	    if (wsQueuedMessage) {
-	      const queued = wsQueuedMessage;
-	      wsQueuedMessage = '';
-	      wsSendText(queued);
-	    }
-	  };
-	  ws2.onclose = e => {
-	    wsSetState('closed', 'Disconnected');
-	    wsLog('Closed (' + e.code + ')', 'sys');
-	    ws2 = null;
-	  };
-	  ws2.onerror = () => {
-	    wsSetState('error', 'Error');
-	    wsLog('Connection error', 'err');
-	  };
-	  ws2.onmessage = e => {
-	    if (e.data instanceof ArrayBuffer) {
-	      wsLog('[binary ' + e.data.byteLength + ' bytes]', 'recv');
-	    } else {
-	      try { wsLog(JSON.stringify(JSON.parse(e.data), null, 2), 'recv'); }
-	      catch { wsLog(e.data, 'recv'); }
-	    }
-	    wsStats.recv++;
-	    wsUpdateCounts();
-	  };
-	}
-	function wsDisconnect() {
-	  wsQueuedMessage = '';
-	  if (ws2) ws2.close();
-	  else wsSetState('closed', 'Disconnected');
-	}
-	function wsSend() {
-	  const input = document.getElementById('ws-msg');
-	  const text = input.value.trim();
-	  if (!text) {
-	    wsLog('Type a message or choose a quick message.', 'err');
-	    input.focus();
-	    return;
-	  }
-	  if (!ws2 || ws2.readyState !== WebSocket.OPEN) {
-	    wsQueuedMessage = text;
-	    wsLog('Queued until connected: ' + text, 'sys');
-	    wsConnect();
-	    input.value = '';
-	    return;
-	  }
-	  wsSendText(text);
-	  input.value = '';
-	}
-	function wsSendText(text) {
-	  if (!ws2 || ws2.readyState !== WebSocket.OPEN) return;
-	  ws2.send(text);
-	  wsLog(text, 'sent');
-	  wsStats.sent++;
-	  wsUpdateCounts();
-	}
-	function wsUpdateHint() {
-	  document.getElementById('ws-url').textContent = wsEndpoint().replace(location.origin.replace(/^http/, 'ws'), '');
-	  const input = document.getElementById('ws-msg');
-	  const mode = document.getElementById('ws-mode').value;
-	  input.placeholder = mode.startsWith('ticker') ? 'Send "stop" to close ticker...' : 'Type a message...';
-	  if (ws2 && ws2.readyState === WebSocket.OPEN) {
-	    wsDisconnect();
-	    wsLog('Endpoint changed. Reconnect to use the new route.', 'sys');
-	  }
-	}
-	document.querySelectorAll('.ws-chip').forEach(btn => {
-	  btn.addEventListener('click', () => {
-	    if (btn.dataset.action === 'clear') {
-	      document.getElementById('ws-log').innerHTML = '';
-	      return;
-	    }
-	    const input = document.getElementById('ws-msg');
-	    input.value = btn.dataset.msg || '';
-	    wsSend();
-	  });
-	});
-	wsUpdateHint();
-	wsSetState('closed', 'Disconnected');
-	wsUpdateCounts();
-	</script>
+	<!-- handlers live in /js/pages/websocket.js (auto-loaded by _head.php for this page) -->

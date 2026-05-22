@@ -1,0 +1,43 @@
+/* Page-scoped styles for /coroutines — relocated from inline style= attrs. */
+
+.coro-h2 {
+  margin: 2rem 0 .5rem;
+}
+
+.coro-h2-section {
+  margin: 2.5rem 0 .5rem;
+}
+
+.coro-h3 {
+  margin: 1.5rem 0 .5rem;
+}
+
+.coro-mb {
+  margin-bottom: 1.5rem;
+}
+
+.coro-mt {
+  margin-top: 1.5rem;
+}
+
+.coro-mt-half {
+  margin-top: .5rem;
+}
+
+.coro-callout {
+  margin: 1rem 0 1.5rem;
+}
+
+.coro-m-0 {
+  margin: 0;
+}
+
+.coro-note {
+  color: var(--text-muted);
+  font-size: .92rem;
+}
+
+.coro-warn-list {
+  margin: .5rem 0 0;
+  padding-left: 1.25rem;
+}

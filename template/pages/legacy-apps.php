@@ -4,33 +4,33 @@
 <h1 class="section-title">Running Legacy PHP Apps</h1>
 <p class="section-desc">ZealPHP runs <strong>unmodified WordPress</strong> — admin dashboard, login, posts, plugins — out of the box. No patches, no forks, no compatibility layers. If it runs on Apache, it runs on ZealPHP.</p>
 
-<div class="callout info" style="margin:1.25rem 0;border-left:4px solid #fbbf24">
+<div class="callout info legacy-callout-proof">
   <strong>Production proof point.</strong> Selfmade Ninja Labs (<a href="https://labs.selfmade.ninja">labs.selfmade.ninja</a>) — a large PHP/MongoDB dashboard with OAuth, SSE streaming, and a custom MongoDB ORM — runs the same codebase on both Apache and ZealPHP in production. Two servers, one volume, zero downtime during migration. <a href="/case-studies/sna-labs">Read the case study →</a>
 </div>
 
-<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin: 2rem 0;">
-  <div style="border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-md);">
-    <img src="/img/wordpress-home.png" alt="WordPress homepage served by ZealPHP" style="width:100%; display:block;">
-    <div style="padding: .5rem .75rem; background: var(--bg-alt); font-size: .82rem; color: var(--text-muted); text-align:center;">WordPress front page</div>
+<div class="legacy-screenshots">
+  <div class="legacy-shot">
+    <img src="/img/wordpress-home.png" alt="WordPress homepage served by ZealPHP" class="legacy-shot-img">
+    <div class="legacy-shot-caption">WordPress front page</div>
   </div>
-  <div style="border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-md);">
-    <img src="/img/wordpress-admin.png" alt="WordPress admin dashboard on ZealPHP" style="width:100%; display:block;">
-    <div style="padding: .5rem .75rem; background: var(--bg-alt); font-size: .82rem; color: var(--text-muted); text-align:center;">Admin dashboard — full menu, widgets, Quick Draft</div>
+  <div class="legacy-shot">
+    <img src="/img/wordpress-admin.png" alt="WordPress admin dashboard on ZealPHP" class="legacy-shot-img">
+    <div class="legacy-shot-caption">Admin dashboard — full menu, widgets, Quick Draft</div>
   </div>
-  <div style="border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-md);">
-    <img src="/img/wordpress-posts.png" alt="WordPress posts list on ZealPHP" style="width:100%; display:block;">
-    <div style="padding: .5rem .75rem; background: var(--bg-alt); font-size: .82rem; color: var(--text-muted); text-align:center;">Posts management — CRUD, bulk actions, filters</div>
+  <div class="legacy-shot">
+    <img src="/img/wordpress-posts.png" alt="WordPress posts list on ZealPHP" class="legacy-shot-img">
+    <div class="legacy-shot-caption">Posts management — CRUD, bulk actions, filters</div>
   </div>
 </div>
 
-<div class="callout info" style="margin-bottom: 2rem;">
+<div class="callout info legacy-callout-zero">
 <p><strong>Zero WordPress modifications required.</strong> Login, sessions, cookies, redirects, file uploads, REST API, pretty permalinks — everything works through ZealPHP's CGI worker with true global scope isolation. The same <code>app.php</code> works for Drupal, Laravel, or any traditional PHP application.</p>
 </div>
 
 <h2 id="limitations">Known limitations — things ZealPHP won't do</h2>
 <p>Before going deep, do the 30-second dealbreaker scan. If your app depends on any of the categories marked ❌ below <em>and</em> you can't put a front proxy in front of ZealPHP, this isn't the right runtime. If you pass this gate, the porting story is clean — keep reading.</p>
 
-<h3 style="margin-top:1.25rem">Apache-side features not supported</h3>
+<h3 class="legacy-mt-sm">Apache-side features not supported</h3>
 <table class="ztable">
 <tr><th>Feature</th><th>Why not</th><th>Workaround if any</th></tr>
 <tr><td><strong>Server-Side Includes (SSI)</strong> — <code>Options +Includes</code>, <code>XBitHack</code>, <code>.shtml</code> parsing, <code>&lt;!--#include --&gt;</code></td><td>SSI was Apache's pre-PHP templating system. Anyone porting an SSI site is replacing it with PHP anyway.</td><td>Use <code>App::render()</code> / <code>App::include()</code> — that's what they do.</td></tr>
@@ -48,7 +48,7 @@
 <tr><td><strong>Full mod_autoindex customisation</strong> — <code>AddIcon</code>, <code>AddAlt</code>, <code>IndexStyleSheet</code>, <code>HeaderName</code>, <code>ReadmeName</code></td><td>Basic directory listing is on the roadmap (opt-in only). Apache's icon/description customisation surface is niche and design-heavy.</td><td>Override <code>template/_autoindex.php</code> in your project for custom rendering when basic autoindex ships.</td></tr>
 </table>
 
-<h3 style="margin-top:1.25rem">nginx-side features not supported (or partial)</h3>
+<h3 class="legacy-mt-sm">nginx-side features not supported (or partial)</h3>
 <table class="ztable">
 <tr><th>Feature</th><th>Why / Status</th><th>Workaround</th></tr>
 <tr><td><strong>Name-based virtual hosts</strong> — multiple <code>server { server_name a.com b.com; }</code> blocks</td><td>⚠ Partial. One ZealPHP instance serves all <code>Host</code> values.</td><td>Host-routing middleware that dispatches on <code>$g-&gt;server['HTTP_HOST']</code>, OR run one ZealPHP instance per host behind Caddy/Traefik.</td></tr>
@@ -62,7 +62,7 @@
 <tr><td><strong><code>grpc_pass</code></strong> (gRPC proxy)</td><td>Out of scope.</td><td>Envoy or a real gRPC server.</td></tr>
 </table>
 
-<h3 style="margin-top:1.25rem">ZealPHP internal limitations</h3>
+<h3 class="legacy-mt-sm">ZealPHP internal limitations</h3>
 <table class="ztable">
 <tr><th>Feature</th><th>Why</th><th>Workaround</th></tr>
 <tr><td><code>coprocess()</code> in coroutine mode</td><td>Process-spawning isn't safe inside a coroutine; the API throws <code>Exception</code> (<code>src/utils.php:312</code>). Intentional.</td><td>Use native coroutines (<code>go()</code>) for parallelism in coroutine mode.</td></tr>
@@ -71,12 +71,12 @@
 <tr><td>HTTP/3 (QUIC)</td><td>Not yet supported by OpenSwoole.</td><td>Use a front proxy (Caddy supports HTTP/3); ZealPHP serves over HTTP/1.1 or HTTP/2 internally.</td></tr>
 </table>
 
-<p style="margin-top:1rem"><strong>Headline:</strong> the dealbreakers list is short and the items on it are either (a) dead tech nobody uses anymore (SSI, imagemaps, CERN meta files), (b) protocol-scope mismatches that belong to dedicated servers (WebDAV, SMTP, L4 proxy), or (c) features intentionally delegated to a front proxy (multi-host TLS, load balancing, HTTP/3, reverse proxy). For the ~95% of PHP apps that don't depend on these, the migration is clean.</p>
+<p class="legacy-mt-prose"><strong>Headline:</strong> the dealbreakers list is short and the items on it are either (a) dead tech nobody uses anymore (SSI, imagemaps, CERN meta files), (b) protocol-scope mismatches that belong to dedicated servers (WebDAV, SMTP, L4 proxy), or (c) features intentionally delegated to a front proxy (multi-host TLS, load balancing, HTTP/3, reverse proxy). For the ~95% of PHP apps that don't depend on these, the migration is clean.</p>
 
-<h2 style="margin-top:2.5rem">Migration ergonomics — one-liner Apache parity</h2>
+<h2 class="legacy-mt-xl">Migration ergonomics — one-liner Apache parity</h2>
 <p>Earlier ZealPHP releases needed a 5-line boot preamble to set <code>$_SERVER</code> globals before serving a legacy file. <code>App::include()</code> owns that preamble now: leading slash optional, Apache-document-root convention (paths are relative to <code>public/</code>), and the framework auto-populates <code>$_SERVER['PHP_SELF']</code> / <code>SCRIPT_NAME</code> / <code>SCRIPT_FILENAME</code> exactly as Apache's mod_php does.</p>
 
-<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => 'Before — manual preamble + absolute paths',
@@ -108,7 +108,7 @@ PHP]); ?>
 </div>
 </div>
 
-<h2 style="margin-top:2.5rem">How It Works</h2>
+<h2 class="legacy-mt-xl">How It Works</h2>
 <p>Three framework features enable legacy app compatibility:</p>
 
 <table class="ztable">
@@ -150,7 +150,7 @@ $app->run(['task_worker_num' => 0]);
 // PHP files in public/ are served automatically with process isolation
 PHP]); ?>
 
-<h2 id="dual-runtime" style="margin-top:2.5rem">Dual-runtime — one codebase, Apache AND ZealPHP at once</h2>
+<h2 id="dual-runtime" class="legacy-mt-xl">Dual-runtime — one codebase, Apache AND ZealPHP at once</h2>
 
 <p>The strongest migration story isn't "rewrite for ZealPHP." It's "run the <em>same source tree</em> on both servers simultaneously" — Apache+mod_php for the battle-tested path, ZealPHP for speed and coroutines — and cut over gradually with zero risk. This is exactly how <a href="/case-studies/sna-labs">Selfmade Ninja Labs migrated</a>: one volume, two servers, same files (running on dev today, production cutover next).</p>
 
@@ -195,9 +195,9 @@ $filter = $g->get['filter'] ?? 'all';
 echo "Filter: {$filter}, hits: {$g->session['hits']}";
 PHP]); ?>
 
-<div style="margin:1.25rem 0;padding:1rem 1.25rem;background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.25);border-left:3px solid var(--accent);border-radius:var(--radius)">
-  <strong style="color:#fde68a">Why this can't be a framework feature</strong>
-  <p style="margin:.5rem 0 0;line-height:1.6">
+<div class="legacy-shim-note">
+  <strong class="legacy-shim-note-title">Why this can't be a framework feature</strong>
+  <p class="legacy-shim-note-body">
     The Apache branch of the shim runs <em>precisely when ZealPHP is not loaded</em>. Under Apache+mod_php there's no OpenSwoole, no Composer autoloader bootstrapped, no <code>ZealPHP\</code> namespace — so nothing in the framework's autoloaded <code>src/</code> can execute. The bridge therefore HAS to be a standalone, dependency-free file the app includes unconditionally. ZealPHP ships the canonical copy at <code>compat/g.php</code> (and a test guards it against drift), but it is <em>included by your app</em>, not loaded by the framework. That's not a limitation — it's the only design that can possibly work across the "with ZealPHP / without ZealPHP" boundary.
   </p>
 </div>
@@ -209,13 +209,13 @@ PHP]); ?>
 <tr><td>Apache + mod_php</td><td><code>false</code></td><td>shim's <code>&amp;$_GET</code> reference</td><td>populated natively by PHP</td></tr>
 </table>
 
-<p style="margin-top:1rem"><strong>Coroutine-mode dual-runtime apps must use <code>$g-&gt;X</code> and keep the shim permanently</strong> — it's the only accessor that works on both servers (coroutine mode keeps superglobals empty to avoid cross-coroutine races). This is distinct from the <a href="/vs-fpm">drop-in LAMP / Mixed-mode</a> story, where <code>superglobals(true)</code> lets ZealPHP-only apps read <code>$_GET</code>/<code>$_SESSION</code> directly and skip the shim entirely (v0.2.27+).</p>
+<p class="legacy-mt-prose"><strong>Coroutine-mode dual-runtime apps must use <code>$g-&gt;X</code> and keep the shim permanently</strong> — it's the only accessor that works on both servers (coroutine mode keeps superglobals empty to avoid cross-coroutine races). This is distinct from the <a href="/vs-fpm">drop-in LAMP / Mixed-mode</a> story, where <code>superglobals(true)</code> lets ZealPHP-only apps read <code>$_GET</code>/<code>$_SESSION</code> directly and skip the shim entirely (v0.2.27+).</p>
 
-<h2 style="margin-top:2.5rem">Apache rewrite recipes — the 12 patterns</h2>
+<h2 class="legacy-mt-xl">Apache rewrite recipes — the 12 patterns</h2>
 <p>Real <code>.htaccess</code> files are full of <code>RewriteRule</code> destinations that end in <code>.php</code>. Each recipe below shows the Apache directive and its ZealPHP equivalent. Every example uses the <a href="/coroutines#state-parity"><code>$g</code> form</a> for query-string injection — works in both modes, no per-coroutine leak in coroutine mode. The legacy <code>$_GET</code> equivalent appears as a comment for readers porting older code.</p>
 
-<h3 id="recipe-a" style="margin-top:1.5rem">Recipe A — Strip <code>.php</code> extension (clean URLs)</h3>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<h3 id="recipe-a" class="legacy-mt-md">Recipe A — Strip <code>.php</code> extension (clean URLs)</h3>
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => '.htaccess',
@@ -240,8 +240,8 @@ PHP]); ?>
 </div>
 </div>
 
-<h3 id="recipe-b" style="margin-top:1.5rem">Recipe B — Pretty URL → real <code>.php</code> file (with route param)</h3>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<h3 id="recipe-b" class="legacy-mt-md">Recipe B — Pretty URL → real <code>.php</code> file (with route param)</h3>
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => '.htaccess',
@@ -276,8 +276,8 @@ PHP]); ?>
 </div>
 </div>
 
-<h3 id="recipe-c" style="margin-top:1.5rem">Recipe C — Front controller (WordPress / Drupal / Laravel)</h3>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<h3 id="recipe-c" class="legacy-mt-md">Recipe C — Front controller (WordPress / Drupal / Laravel)</h3>
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => '.htaccess',
@@ -317,8 +317,8 @@ PHP]); ?>
 </div>
 </div>
 
-<h3 id="recipe-d" style="margin-top:1.5rem">Recipe D — API prefix → single front controller</h3>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<h3 id="recipe-d" class="legacy-mt-md">Recipe D — API prefix → single front controller</h3>
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => '.htaccess',
@@ -344,8 +344,8 @@ PHP]); ?>
 </div>
 </div>
 
-<h3 id="recipe-e" style="margin-top:1.5rem">Recipe E — Specific <code>.php</code> file in subdirectory</h3>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<h3 id="recipe-e" class="legacy-mt-md">Recipe E — Specific <code>.php</code> file in subdirectory</h3>
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => '.htaccess',
@@ -367,8 +367,8 @@ PHP]); ?>
 </div>
 </div>
 
-<h3 id="recipe-f" style="margin-top:1.5rem">Recipe F — Block direct access to internal <code>.php</code> files</h3>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<h3 id="recipe-f" class="legacy-mt-md">Recipe F — Block direct access to internal <code>.php</code> files</h3>
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => '.htaccess',
@@ -388,8 +388,8 @@ PHP]); ?>
 </div>
 </div>
 
-<h3 id="recipe-g" style="margin-top:1.5rem">Recipe G — HTTPS canonical scheme</h3>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<h3 id="recipe-g" class="legacy-mt-md">Recipe G — HTTPS canonical scheme</h3>
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => '.htaccess',
@@ -422,8 +422,8 @@ PHP]); ?>
 </div>
 </div>
 
-<h3 id="recipe-h" style="margin-top:1.5rem">Recipe H — Canonical host (www vs apex)</h3>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<h3 id="recipe-h" class="legacy-mt-md">Recipe H — Canonical host (www vs apex)</h3>
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => '.htaccess',
@@ -443,8 +443,8 @@ PHP]); ?>
 </div>
 </div>
 
-<h3 id="recipe-i" style="margin-top:1.5rem">Recipe I — Maintenance mode</h3>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<h3 id="recipe-i" class="legacy-mt-md">Recipe I — Maintenance mode</h3>
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => '.htaccess',
@@ -465,8 +465,8 @@ PHP]); ?>
 </div>
 </div>
 
-<h3 id="recipe-j" style="margin-top:1.5rem">Recipe J — Custom error pages (Apache <code>ErrorDocument</code>)</h3>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<h3 id="recipe-j" class="legacy-mt-md">Recipe J — Custom error pages (Apache <code>ErrorDocument</code>)</h3>
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => '.htaccess',
@@ -491,8 +491,8 @@ PHP]); ?>
 </div>
 </div>
 
-<h3 id="recipe-k" style="margin-top:1.5rem">Recipe K — SEO redirect (old paths to new)</h3>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<h3 id="recipe-k" class="legacy-mt-md">Recipe K — SEO redirect (old paths to new)</h3>
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => '.htaccess',
@@ -515,8 +515,8 @@ PHP]); ?>
 </div>
 </div>
 
-<h3 id="recipe-l" style="margin-top:1.5rem">Recipe L — Trailing-slash enforcement</h3>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0">
+<h3 id="recipe-l" class="legacy-mt-md">Recipe L — Trailing-slash enforcement</h3>
+<div class="legacy-two-col">
 <div>
 <?php App::render('/components/_code', [
     'label' => '.htaccess',
@@ -536,7 +536,7 @@ PHP]); ?>
 </div>
 </div>
 
-<h3 style="margin-top:2rem">Recipe summary</h3>
+<h3 class="legacy-mt-lg">Recipe summary</h3>
 <table class="ztable">
 <tr><th>Pattern</th><th>ZealPHP equivalent</th></tr>
 <tr><td>A — Strip <code>.php</code></td><td>Built-in: <code>App::$ignore_php_ext = true</code></td></tr>
@@ -552,7 +552,7 @@ PHP]); ?>
 <tr><td>L — Trailing slash</td><td>Built-in: <code>App::$directory_slash = true</code></td></tr>
 </table>
 
-<h2 style="margin-top:2.5rem">Real-world full-<code>.htaccess</code> migration — worked example</h2>
+<h2 class="legacy-mt-xl">Real-world full-<code>.htaccess</code> migration — worked example</h2>
 <p>A production-style Q&amp;A platform <code>.htaccess</code> with ~30 rewrite rules, headers, charsets, and caching. Each row maps directly to a ZealPHP construct. ✅ = built-in. ⚠ = small custom middleware (on the roadmap). 💡 = PHP-level idiom.</p>
 
 <table class="ztable">
@@ -582,12 +582,12 @@ PHP]); ?>
 <tr><td><code>RewriteCond ... !-f; RewriteCond ... !-d; RewriteRule ^([^/]+)/?$ "profile.php?username=$1"</code></td><td><code>setFallback</code> with one-segment URL check, return <code>404</code> otherwise</td><td>✅ Recipe C generalised</td></tr>
 </table>
 
-<p style="margin-top:1rem"><strong>Coverage:</strong> ~80% fully supported with no new framework work (every <code>patternRoute</code> + <code>App::include</code> case, redirects, CORS, MIME via static handler, extension resolver, front-controller fallback). ~20% need a small middleware addition or 5-line custom inline.</p>
+<p class="legacy-mt-prose"><strong>Coverage:</strong> ~80% fully supported with no new framework work (every <code>patternRoute</code> + <code>App::include</code> case, redirects, CORS, MIME via static handler, extension resolver, front-controller fallback). ~20% need a small middleware addition or 5-line custom inline.</p>
 
-<h2 style="margin-top:2.5rem">Apache <code>AllowOverride</code> coverage matrix</h2>
+<h2 class="legacy-mt-xl">Apache <code>AllowOverride</code> coverage matrix</h2>
 <p>Every directive that can appear in a <code>.htaccess</code> file (sourced from <a href="https://httpd.apache.org/docs/current/mod/overrides.html" target="_blank">Apache's overrides reference</a>), grouped by <code>AllowOverride</code> category. ✅ built-in / ⚠ custom middleware / 💡 PHP-level / ❌ obsolete or unsupported.</p>
 
-<h3 style="margin-top:1.25rem"><code>AllowOverride All</code> — request shape, server identity, conditionals</h3>
+<h3 class="legacy-mt-sm"><code>AllowOverride All</code> — request shape, server identity, conditionals</h3>
 <table class="ztable">
 <tr><th>Apache</th><th>ZealPHP</th></tr>
 <tr><td><code>&lt;Files&gt;</code>, <code>&lt;FilesMatch&gt;</code></td><td>✅ Route patterns + middleware conditionals on <code>$g-&gt;server['REQUEST_URI']</code></td></tr>
@@ -602,7 +602,7 @@ PHP]); ?>
 <tr><td>SSI directives (<code>SSIErrorMsg</code>, etc.)</td><td>❌ SSI not supported</td></tr>
 </table>
 
-<h3 style="margin-top:1.25rem"><code>AllowOverride AuthConfig</code> — authentication and authorisation</h3>
+<h3 class="legacy-mt-sm"><code>AllowOverride AuthConfig</code> — authentication and authorisation</h3>
 <table class="ztable">
 <tr><th>Apache</th><th>ZealPHP</th></tr>
 <tr><td><code>AuthType Basic</code> + <code>AuthName</code> + <code>AuthUserFile</code> + <code>Require</code></td><td>✅ <a href="/middleware#basic-auth"><code>BasicAuthMiddleware</code></a> — htpasswd file or callback verifier, same DX as <code>CorsMiddleware</code></td></tr>
@@ -617,7 +617,7 @@ PHP]); ?>
 <tr><td><code>CGIPassAuth</code></td><td>✅ Auth headers already in <code>$g-&gt;server['HTTP_AUTHORIZATION']</code></td></tr>
 </table>
 
-<h3 style="margin-top:1.25rem"><code>AllowOverride FileInfo</code> — response headers, content negotiation, rewrites, env vars (the big one)</h3>
+<h3 class="legacy-mt-sm"><code>AllowOverride FileInfo</code> — response headers, content negotiation, rewrites, env vars (the big one)</h3>
 <table class="ztable">
 <tr><th>Apache</th><th>ZealPHP</th></tr>
 <tr><td><code>RewriteEngine</code>, <code>RewriteBase</code>, <code>RewriteCond</code>, <code>RewriteRule</code>, <code>RewriteOptions</code></td><td>✅ Native routing — covered exhaustively by Recipes A–L above</td></tr>
@@ -646,7 +646,7 @@ PHP]); ?>
 <tr><td><code>ISAPI*</code></td><td>✅ N/A (Windows IIS, irrelevant)</td></tr>
 </table>
 
-<h3 style="margin-top:1.25rem"><code>AllowOverride Indexes</code> — directory listings, autoindex, expires headers</h3>
+<h3 class="legacy-mt-sm"><code>AllowOverride Indexes</code> — directory listings, autoindex, expires headers</h3>
 <table class="ztable">
 <tr><th>Apache</th><th>ZealPHP</th></tr>
 <tr><td><code>DirectoryIndex index.php index.html</code></td><td>✅ <code>App::$directory_index = ['index.php', 'index.html']</code></td></tr>
@@ -659,14 +659,14 @@ PHP]); ?>
 <tr><td><code>MetaDir</code>, <code>MetaFiles</code>, <code>MetaSuffix</code> (CERN meta files)</td><td>❌ Dead tech</td></tr>
 </table>
 
-<h3 style="margin-top:1.25rem"><code>AllowOverride Limit</code> — legacy host-based access control</h3>
+<h3 class="legacy-mt-sm"><code>AllowOverride Limit</code> — legacy host-based access control</h3>
 <table class="ztable">
 <tr><th>Apache</th><th>ZealPHP</th></tr>
 <tr><td><code>Allow from X</code>, <code>Deny from Y</code>, <code>Order Allow,Deny</code></td><td>✅ <a href="/middleware#ip-access"><code>IpAccessMiddleware</code></a> — CIDR allow/deny lists with allow-first or deny-first ordering</td></tr>
 <tr><td><code>&lt;Limit METHOD&gt;</code>, <code>&lt;LimitExcept METHOD&gt;</code></td><td>✅ Route <code>methods</code> array</td></tr>
 </table>
 
-<h3 style="margin-top:1.25rem"><code>AllowOverride Options</code> — feature toggles and filter chains</h3>
+<h3 class="legacy-mt-sm"><code>AllowOverride Options</code> — feature toggles and filter chains</h3>
 <table class="ztable">
 <tr><th>Apache</th><th>ZealPHP</th></tr>
 <tr><td><code>Options Indexes</code></td><td>❌ Not supported (basic autoindex on roadmap)</td></tr>
@@ -680,7 +680,7 @@ PHP]); ?>
 <tr><td><code>SSLOptions</code></td><td>💡 OpenSwoole TLS config</td></tr>
 </table>
 
-<h3 style="margin-top:1.25rem">Headline coverage</h3>
+<h3 class="legacy-mt-sm">Headline coverage</h3>
 <table class="ztable">
 <tr><th>Category</th><th>ZealPHP coverage</th></tr>
 <tr><td>Rewrites &amp; redirects (<code>mod_rewrite</code>, <code>mod_alias</code>)</td><td><strong>100% — native routing</strong></td></tr>
@@ -705,12 +705,12 @@ PHP]); ?>
 <tr><td>Dead tech (imap, speling, CERN meta, ISAPI, mod_dav, XBitHack)</td><td><strong>❌ N/A — not goals</strong></td></tr>
 </table>
 
-<p style="margin-top:1rem"><strong>Verdict:</strong> ZealPHP covers the practical 80–90% of <code>.htaccess</code> capability that real PHP apps actually use, has clear middleware-extension paths for another 10%, and explicitly disclaims the dead-tech ~5%.</p>
+<p class="legacy-mt-prose"><strong>Verdict:</strong> ZealPHP covers the practical 80–90% of <code>.htaccess</code> capability that real PHP apps actually use, has clear middleware-extension paths for another 10%, and explicitly disclaims the dead-tech ~5%.</p>
 
-<h2 style="margin-top:2.5rem">nginx coverage matrix</h2>
+<h2 class="legacy-mt-xl">nginx coverage matrix</h2>
 <p>For users porting from <code>nginx.conf</code>. Sourced from <a href="https://nginx.org/en/docs/http/ngx_http_core_module.html" target="_blank">ngx_http_core_module</a> + <a href="https://nginx.org/en/docs/http/ngx_http_rewrite_module.html" target="_blank">ngx_http_rewrite_module</a>.</p>
 
-<h3 style="margin-top:1.25rem">Virtual host &amp; listen</h3>
+<h3 class="legacy-mt-sm">Virtual host &amp; listen</h3>
 <table class="ztable">
 <tr><th>nginx</th><th>ZealPHP / OpenSwoole</th></tr>
 <tr><td><code>server { … }</code></td><td>✅ One <code>App::init(host, port)</code> instance per server block. Multi-app deployments run multiple instances on different ports (PID-file-per-port already supports this)</td></tr>
@@ -718,7 +718,7 @@ PHP]); ?>
 <tr><td><code>server_name a.com b.com;</code> (name-based vhosts)</td><td>✅ <a href="/middleware#host-router"><code>HostRouterMiddleware</code></a> — dispatches on <code>$g-&gt;server['HTTP_HOST']</code> to per-host handlers; OR run one instance per host behind Caddy/Traefik for true isolation</td></tr>
 </table>
 
-<h3 style="margin-top:1.25rem">Routing — the <code>location</code> family</h3>
+<h3 class="legacy-mt-sm">Routing — the <code>location</code> family</h3>
 <table class="ztable">
 <tr><th>nginx</th><th>ZealPHP</th></tr>
 <tr><td><code>location /prefix/ { … }</code></td><td>✅ <code>$app-&gt;route('/prefix/...', ...)</code> or <code>nsPathRoute('prefix', ...)</code></td></tr>
@@ -735,7 +735,7 @@ PHP]); ?>
 <tr><td><code>X-Accel-Redirect</code></td><td>⚠ ZealPHP IS the origin; the offload pattern collapses to <code>$response-&gt;sendFile()</code> after auth</td></tr>
 </table>
 
-<h3 style="margin-top:1.25rem">Rewrite module</h3>
+<h3 class="legacy-mt-sm">Rewrite module</h3>
 <table class="ztable">
 <tr><th>nginx</th><th>ZealPHP</th></tr>
 <tr><td><code>rewrite ^/old$ /new last;</code></td><td>✅ Route <code>/old</code> + <code>App::include('/new.php')</code>, or use <code>patternRoute</code></td></tr>
@@ -748,7 +748,7 @@ PHP]); ?>
 <tr><td><code>set $foo bar;</code></td><td>✅ Plain PHP variable</td></tr>
 </table>
 
-<h3 style="margin-top:1.25rem">Body, headers, transmission, keep-alive, types, cache, logs, rate limits, auth, proxy, TLS</h3>
+<h3 class="legacy-mt-sm">Body, headers, transmission, keep-alive, types, cache, logs, rate limits, auth, proxy, TLS</h3>
 <table class="ztable">
 <tr><th>nginx</th><th>ZealPHP / OpenSwoole</th></tr>
 <tr><td><code>client_max_body_size 100m;</code></td><td>✅ <code>'package_max_length' =&gt; 100 * 1024 * 1024</code></td></tr>
@@ -774,9 +774,9 @@ PHP]); ?>
 <tr><td><code>gzip on;</code> / <code>gzip_types</code></td><td>✅ OpenSwoole <code>http_compression</code></td></tr>
 </table>
 
-<p style="margin-top:1rem"><strong>Headline:</strong> nginx-as-front-controller patterns (<code>try_files</code>, <code>location</code>, <code>rewrite</code>, <code>return</code>, <code>error_page</code>) port 1:1 to ZealPHP's native routing — same way <code>.htaccess</code> rewrites do. The "I serve PHP via FastCGI" half of nginx configs is N/A. The proxy/upstream/load-balancing half is intentionally delegated to a real front proxy.</p>
+<p class="legacy-mt-prose"><strong>Headline:</strong> nginx-as-front-controller patterns (<code>try_files</code>, <code>location</code>, <code>rewrite</code>, <code>return</code>, <code>error_page</code>) port 1:1 to ZealPHP's native routing — same way <code>.htaccess</code> rewrites do. The "I serve PHP via FastCGI" half of nginx configs is N/A. The proxy/upstream/load-balancing half is intentionally delegated to a real front proxy.</p>
 
-<h2 style="margin-top:2.5rem">Rewrite rules — internal vs. external</h2>
+<h2 class="legacy-mt-xl">Rewrite rules — internal vs. external</h2>
 <p>
   Apache <code>RewriteRule</code> has two flavors that get conflated all the time. The flag in
   brackets decides whether the URL bar in the user's browser changes.
@@ -795,7 +795,7 @@ PHP]); ?>
   rule was hiding.
 </p>
 
-<h2 style="margin-top:2.5rem">Custom error pages for legacy apps</h2>
+<h2 class="legacy-mt-xl">Custom error pages for legacy apps</h2>
 <p>Mirror <code>.htaccess</code>'s <code>ErrorDocument 404 /custom-404.php</code> with <code>App::setErrorHandler()</code> — see Recipe J above:</p>
 
 <?php App::render('/components/_code', [
@@ -816,150 +816,39 @@ $app->setErrorHandler(500, function ($exception) {
 });
 PHP]); ?>
 
-<p style="margin-top:.5rem">Handlers receive <code>$status</code>, <code>$exception</code>, <code>$request</code>, <code>$response</code> by param injection — same machinery as regular routes. Returns follow the <a href="/responses#return-contract">universal return contract</a>. See <a href="/responses">Responses</a> for details and the <a href="https://github.com/sibidharan/zealphp/blob/master/docs/error-handling.md"><code>docs/error-handling.md</code></a> deep dive.</p>
+<p class="legacy-mt-half">Handlers receive <code>$status</code>, <code>$exception</code>, <code>$request</code>, <code>$response</code> by param injection — same machinery as regular routes. Returns follow the <a href="/responses#return-contract">universal return contract</a>. See <a href="/responses">Responses</a> for details and the <a href="https://github.com/sibidharan/zealphp/blob/master/docs/error-handling.md"><code>docs/error-handling.md</code></a> deep dive.</p>
 
-<h2 style="margin-top:2.5rem">AI Config Converter</h2>
+<h2 class="legacy-mt-xl">AI Config Converter</h2>
 <p>Paste your <code>.htaccess</code> or nginx config — get a working <code>app.php</code> streamed in real-time. The converter knows about the 12 recipes above, the <a href="#limitations">known limitations matrix</a>, the universal return contract, and the <code>$g</code>-vs-<code>$_*</code> parity rule — so it emits modern <code>App::include()</code> form, refuses unsupported directives explicitly (rather than silently dropping them), and uses <code>$g-&gt;get['x']</code> over <code>$_GET['x']</code>. Powered by gpt-5.4-mini with the full ZealPHP API reference.</p>
 
-<div class="converter-split" style="display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin:1.5rem 0;">
-  <div style="border-right:1px solid var(--border);">
-    <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
+<div class="converter-split">
+  <div class="legacy-convert-left">
+    <div class="legacy-convert-bar">
       <span>Apache / nginx config</span>
-      <select id="convert-preset" style="font-size:.75rem; padding:.2rem .4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg);">
+      <select id="convert-preset" class="legacy-convert-preset">
         <option value="">— paste your own —</option>
         <option value="wordpress">WordPress .htaccess</option>
         <option value="nginx-cms">nginx CMS</option>
         <option value="redirects">Redirect rules</option>
       </select>
     </div>
-    <textarea id="convert-input" style="width:100%; min-height:280px; border:none; padding:.75rem; font-family:var(--font-mono); font-size:.82rem; background:var(--code-bg); color:var(--code-text); resize:vertical; outline:none;" placeholder="Paste your .htaccess or nginx server { } config here..."></textarea>
-    <div style="padding:.5rem .75rem; background:var(--bg-alt); display:flex; align-items:center; gap:.5rem;">
-      <button id="convert-btn" onclick="runConvert()" style="padding:.4rem 1.2rem; background:var(--accent); color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:.82rem; font-weight:600;">Convert →</button>
-      <span id="convert-status" style="font-size:.75rem; color:var(--text-muted);"></span>
+    <textarea id="convert-input" class="legacy-convert-input" placeholder="Paste your .htaccess or nginx server { } config here..."></textarea>
+    <div class="legacy-convert-actions">
+      <button id="convert-btn" onclick="runConvert()" class="legacy-convert-btn">Convert →</button>
+      <span id="convert-status" class="legacy-convert-status"></span>
     </div>
   </div>
   <div>
-    <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
+    <div class="legacy-convert-bar">
       <span>ZealPHP app.php</span>
-      <button onclick="copyOutput()" style="font-size:.72rem; padding:.15rem .5rem; border:1px solid var(--border); border-radius:4px; background:var(--bg); cursor:pointer; color:var(--text-muted);">Copy</button>
+      <button onclick="copyOutput()" class="legacy-convert-copy">Copy</button>
     </div>
-    <pre id="convert-output" style="min-height:280px; padding:.75rem; margin:0; font-family:var(--font-mono); font-size:.82rem; background:var(--code-bg); color:var(--code-text); overflow:auto; white-space:pre-wrap;"><span style="color:var(--text-muted);">// Output will appear here...</span></pre>
-    <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.72rem; color:var(--text-muted);">
+    <pre id="convert-output" class="legacy-convert-output"><span class="legacy-convert-placeholder">// Output will appear here...</span></pre>
+    <div class="legacy-convert-footer">
       Rate limit: 5 conversions per 10 minutes · Powered by gpt-5.4-mini · <a href="https://github.com/sibidharan/zealphp/blob/master/examples/agents/config_converter.py" target="_blank">Source</a>
     </div>
   </div>
 </div>
-
-<style>
-@media (max-width:768px) { .converter-split { grid-template-columns:1fr !important; } }
-</style>
-
-<script>
-const PRESETS = {
-  wordpress: `# BEGIN WordPress
-<IfModule mod_rewrite.c>
-RewriteEngine On
-RewriteBase /
-RewriteRule ^index\\.php$ - [L]
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule . /index.php [L]
-</IfModule>
-# END WordPress`,
-  'nginx-cms': `server {
-    listen 80;
-    server_name example.com;
-    root /var/www/html;
-
-    location / {
-        try_files $uri $uri/ /index.php?$args;
-    }
-    location ~ \\.php$ {
-        fastcgi_pass unix:/run/php/php-fpm.sock;
-        include fastcgi_params;
-    }
-    location ~* \\.(css|js|png|jpg|gif|ico)$ {
-        expires 30d;
-    }
-}`,
-  redirects: `RewriteEngine On
-RewriteRule ^old-page$ /new-page [R=301,L]
-RewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]
-RewriteRule ^docs$ https://docs.example.com [R=301,L]`
-};
-
-document.getElementById('convert-preset').addEventListener('change', function() {
-  if (this.value && PRESETS[this.value]) {
-    document.getElementById('convert-input').value = PRESETS[this.value];
-  }
-});
-
-function runConvert() {
-  const input = document.getElementById('convert-input').value.trim();
-  const output = document.getElementById('convert-output');
-  const status = document.getElementById('convert-status');
-  const btn = document.getElementById('convert-btn');
-
-  if (!input) { status.textContent = 'Paste a config first'; return; }
-
-  btn.disabled = true;
-  btn.textContent = 'Converting...';
-  status.textContent = 'Streaming from gpt-5.4-mini...';
-  output.textContent = '';
-
-  const es = new EventSource('/api/convert?' + new URLSearchParams({_t: Date.now()}));
-  // EventSource is GET-only; use fetch+POST with ReadableStream instead
-  es.close();
-
-  fetch('/api/convert', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({config: input})
-  }).then(response => {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    function read() {
-      reader.read().then(({done, value}) => {
-        if (done) {
-          btn.disabled = false;
-          btn.textContent = 'Convert →';
-          status.textContent = 'Done';
-          return;
-        }
-        buffer += decoder.decode(value, {stream: true});
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const text = line.slice(6);
-            if (text === '[DONE]') continue;
-            output.textContent += text + '\n';
-          }
-        }
-        output.scrollTop = output.scrollHeight;
-        read();
-      });
-    }
-    read();
-  }).catch(err => {
-    output.textContent = '// Error: ' + err.message;
-    btn.disabled = false;
-    btn.textContent = 'Convert →';
-    status.textContent = 'Failed';
-  });
-}
-
-function copyOutput() {
-  const text = document.getElementById('convert-output').textContent;
-  navigator.clipboard.writeText(text).then(() => {
-    const btn = event.target;
-    btn.textContent = 'Copied!';
-    setTimeout(() => btn.textContent = 'Copy', 1500);
-  });
-}
-</script>
 
 <?php App::render('/components/_code', [
     'label' => 'CLI usage (also available as a command-line tool)',
@@ -971,7 +860,7 @@ cat .htaccess | uv run examples/agents/config_converter.py
 uv run examples/agents/config_converter.py
 BASH, 'lang' => 'bash']); ?>
 
-<h2 style="margin-top:2.5rem">WordPress example</h2>
+<h2 class="legacy-mt-xl">WordPress example</h2>
 <p>A complete <code>app.php</code> that runs WordPress on ZealPHP:</p>
 
 <?php App::render('/components/_code', [
@@ -1002,9 +891,9 @@ $app->setFallback(fn() => App::include('/index.php'));
 $app->run(['task_worker_num' => 0]);
 PHP]); ?>
 
-<h2 style="margin-top:2.5rem">Setup Steps</h2>
+<h2 class="legacy-mt-xl">Setup Steps</h2>
 <p>See the full working example: <a href="https://github.com/sibidharan/zealphp-wordpress" target="_blank">github.com/sibidharan/zealphp-wordpress</a></p>
-<ol style="line-height:2">
+<ol class="legacy-list-steps">
   <li>Create a ZealPHP project: <code>composer create-project sibidharan/zealphp-project my-wordpress</code></li>
   <li>Download WordPress into <code>public/</code>: <code>cd my-wordpress/public &amp;&amp; wp core download</code></li>
   <li>Configure <code>public/wp-config.php</code> with your database settings</li>
@@ -1013,7 +902,7 @@ PHP]); ?>
   <li>Visit <code>http://localhost:9501/wp-admin/install.php</code> to complete installation</li>
 </ol>
 
-<h2 style="margin-top:2.5rem">CGI Worker Architecture</h2>
+<h2 class="legacy-mt-xl">CGI Worker Architecture</h2>
 <p><code>App::include()</code> dispatches to two different paths depending on the mode:</p>
 <ul>
   <li><strong>Coroutine mode</strong> (<code>App::superglobals(false)</code>) — runs the file in-process via the shared <code>App::executeFile()</code> core. Captures output, applies the <a href="/responses#return-contract">universal return contract</a>.</li>
@@ -1044,7 +933,7 @@ OpenSwoole Worker (long-lived)          CGI Worker (per-request)
 └─────────────────────────┘             └──────────────────────────┘
 TEXT]); ?>
 
-<h3 style="margin-top:1.25rem">What the CGI worker handles</h3>
+<h3 class="legacy-mt-sm">What the CGI worker handles</h3>
 <table class="ztable">
 <tr><th>Feature</th><th>How</th></tr>
 <tr><td>All HTTP methods</td><td><code>$_SERVER['REQUEST_METHOD']</code> passed via context; request body piped to stdin (<code>php://input</code>)</td></tr>
@@ -1058,7 +947,7 @@ TEXT]); ?>
 <tr><td>File uploads / Sessions</td><td><code>$_FILES</code> via context; PHP native sessions work in CGI process</td></tr>
 </table>
 
-<h2 style="margin-top:2.5rem">CLI Management</h2>
+<h2 class="legacy-mt-xl">CLI Management</h2>
 
 <?php App::render('/components/_code', [
     'label' => 'CLI commands',
@@ -1072,17 +961,17 @@ php app.php start -w 8          # Start with 8 workers
 php app.php --help              # Show all options
 BASH, 'lang' => 'bash']); ?>
 
-<h2 style="margin-top:2.5rem">Performance &amp; Hybrid Mode</h2>
+<h2 class="legacy-mt-xl">Performance &amp; Hybrid Mode</h2>
 <div class="callout warn">
 <p><strong>Performance:</strong> In superglobals mode, each <code>App::include()</code> spawns a CGI subprocess. Static files bypass this (served by OpenSwoole). For high-traffic production, convert hot paths to native ZealPHP routes that run in coroutine mode.</p>
 <p><strong>Streaming:</strong> SSE works in CGI mode via <code>flush()</code>. WebSocket requires native ZealPHP routes (<code>App::ws()</code>).</p>
 <p><strong>Hybrid approach:</strong> Mix native routes (coroutine mode, high performance) with legacy PHP file serving (CGI mode) in the same app. Explicit <code>$app-&gt;route()</code> handlers run directly in the worker.</p>
 </div>
 
-<h2 id="cgi-backends" style="margin-top:2.5rem">CGI backends — host any language</h2>
+<h2 id="cgi-backends" class="legacy-mt-xl">CGI backends — host any language</h2>
 <p>ZealPHP can serve files written in <strong>any language</strong> that speaks CGI/1.1 — Perl, Python, Ruby, shell scripts, or compiled binaries — side-by-side with your PHP app. Register per-extension backends with <code>App::registerCgiBackend()</code> before <code>$app-&gt;run()</code>.</p>
 
-<h3 style="margin-top:1.25rem">Apache / nginx parity table</h3>
+<h3 class="legacy-mt-sm">Apache / nginx parity table</h3>
 <table class="ztable">
 <tr><th>Mode</th><th>Apache equivalent</th><th>nginx equivalent</th><th>ZealPHP</th></tr>
 <tr>
@@ -1111,7 +1000,7 @@ BASH, 'lang' => 'bash']); ?>
 </tr>
 </table>
 
-<h3 style="margin-top:1.25rem">Worked examples</h3>
+<h3 class="legacy-mt-sm">Worked examples</h3>
 
 <?php App::render('/components/_code', [
     'label' => '.php — default (no registration needed)',
@@ -1153,13 +1042,13 @@ App::registerCgiBackend('.cgi', ['mode' => 'proc']);
 // Script must output CGI/1.1 headers: Content-Type + blank line + body.
 PHP]); ?>
 
-<h3 style="margin-top:1.25rem">fork mode — PHP only constraint</h3>
-<div class="callout warn" style="margin:1rem 0">
+<h3 class="legacy-mt-sm">fork mode — PHP only constraint</h3>
+<div class="callout warn legacy-mt-prose-mb">
   <p><strong>Why fork is PHP-only.</strong> <code>'fork'</code> uses <code>OpenSwoole\Process</code> to clone the already-booted PHP worker. The forked child inherits the PHP interpreter, loaded autoloader, and warm opcache — which is why it is ~5× faster than <code>'proc'</code>. This clone-and-run mechanism is specific to the PHP runtime. For other languages, use <code>'fcgi'</code> (warm pool managed by the language runtime) or <code>'proc'</code> (spawn on demand).</p>
   <p>Attempting <code>App::registerCgiBackend('.py', ['mode' =&gt; 'fork'])</code> throws <code>\InvalidArgumentException</code> with the message: <em>"fork mode requires a PHP target; use 'fcgi' (warm pool, language-agnostic) or 'proc' for .py"</em>.</p>
 </div>
 
-<h3 style="margin-top:1.25rem">Reader: App::resolveCgiBackend()</h3>
+<h3 class="legacy-mt-sm">Reader: App::resolveCgiBackend()</h3>
 <p><code>App::resolveCgiBackend(string $path): array</code> looks up the file extension in the registry and returns the config array. Unregistered extensions fall back to <code>['mode' =&gt; App::$cgi_mode]</code>. You can call it directly to inspect what backend a path would use:</p>
 
 <?php App::render('/components/_code', [
@@ -1176,7 +1065,7 @@ PHP]); ?>
 
 <p>See <code>examples/multi-lang-cgi/</code> for a runnable demo registering <code>.pl</code> (proc/Perl) alongside the default PHP backend.</p>
 
-<h2 id="cgi-mode-fcgi" style="margin-top:2.5rem">Framework-wide <code>cgiMode('fcgi')</code> — front an upstream FPM pool</h2>
+<h2 id="cgi-mode-fcgi" class="legacy-mt-xl">Framework-wide <code>cgiMode('fcgi')</code> — front an upstream FPM pool</h2>
 
 <p>The per-extension <code>'fcgi'</code> backend above is for mixing languages. The framework-wide setter <code>App::cgiMode('fcgi')</code> applies the same FastCGI-forwarding behaviour to <strong>every</strong> <code>public/*.php</code> file — turning ZealPHP into a thin HTTP layer in front of an existing php-fpm pool. Same wire protocol as Apache's <code>mod_proxy_fcgi</code> and nginx's <code>fastcgi_pass</code>, so the FastCGI listener you point at can be php-fpm, HHVM, RoadRunner, or any other FCGI 1.0 backend.</p>
 
@@ -1196,7 +1085,7 @@ $app->run();
 PHP]); ?>
 
 <p>When to reach for this:</p>
-<ul style="line-height:1.7">
+<ul class="legacy-list-loose">
   <li>You already operate a tuned php-fpm pool (sized for your workload, hooked into your observability stack) and don't want to retire it — ZealPHP adds OpenSwoole's HTTP / WebSocket / coroutine layer on top.</li>
   <li>You want the v0.3.0 "warm pool" semantics today by letting php-fpm be that pool — the FPM master keeps interpreters warm across requests, so per-request cost is closer to FPM's ~1–3 ms than the bridge's ~30–50 ms.</li>
   <li>You're migrating from an <code>nginx → fastcgi_pass</code> deployment and want a drop-in shape change rather than a code rewrite. The <code>fcgi_params</code> array on <code>App::registerCgiBackend()</code> mirrors nginx's <code>fastcgi_param</code> directive.</li>
@@ -1206,11 +1095,11 @@ PHP]); ?>
 
 <p><strong>Performance:</strong> we don't run PHP at all in this mode — throughput equals whatever your FPM pool delivers minus one local socket hop. We deliberately don't quote a number here: it depends on your FPM <code>pm.max_children</code>, the file under load, and whether you're on Unix sockets vs TCP. The bridge-cost table at <a href="/vs-fpm#measured-four-ways">/vs-fpm</a> compares the in-process modes (<code>'proc'</code> / <code>'fork'</code> / Mixed-mode) and intentionally omits <code>'fcgi'</code> because the answer is "ask your FPM pool."</p>
 
-<h2 id="httpoxy-hardening" style="margin-top:2.5rem">What the CGI bridge does for you (security)</h2>
+<h2 id="httpoxy-hardening" class="legacy-mt-xl">What the CGI bridge does for you (security)</h2>
 
 <p>All three dispatch modes (<code>'proc'</code> / <code>'fork'</code> / <code>'fcgi'</code>) build the CGI/1.1 environment through the same <code>App::buildCgiEnv()</code> path, so the hardening below applies uniformly. Each item ships a corresponding Apache parity rationale rather than being ZealPHP-specific behaviour.</p>
 
-<ul style="line-height:1.7">
+<ul class="legacy-list-loose">
   <li><strong>httpoxy CVE-2016-5385 mitigation</strong> — incoming <code>Proxy:</code> request headers are NOT forwarded as <code>HTTP_PROXY</code> in the CGI env (<code>src/App.php:2830-2836</code>). Apache <code>util_script.c:224-227</code> parity. Prevents the well-known PHP/Go/Python CGI library family that reads <code>HTTP_PROXY</code> to choose an outbound proxy from being hijacked by a hostile client.</li>
   <li><strong>CGI script timeout — <code>App::$cgi_timeout</code> default 60 s</strong> (<code>src/App.php:273</code>). When a CGI subprocess exceeds the budget the worker escalates <code>proc_terminate(SIGTERM)</code> → <code>SIGKILL</code> and returns control to the request handler. Apache <code>CGIScriptTimeout</code> parity. Override by setting the public static property: <code>App::$cgi_timeout = 120;</code> before <code>App::init()</code>.</li>
   <li><strong>CGI <code>Status:</code> header parsed from stdout</strong> (<code>src/cgi_worker.php:101-113</code>) — a legacy script that emits <code>Status: 404 Not Found\r\n</code> sets the response status to 404 and the <code>Status:</code> header itself is NOT forwarded to the client. Range-clamped 100–599; non-numeric or out-of-range values fall back to 200. mod_cgi parity.</li>
@@ -1219,7 +1108,7 @@ PHP]); ?>
 
 <p>None of these are opt-in — they're always active when <code>App::superglobals(true)</code> + <code>App::processIsolation(true)</code> is set. There is no flag to disable the <code>HTTP_PROXY</code> strip, the timeout has a floor of 1 s rather than an unbounded option, and stderr always lands in <code>elog</code>.</p>
 
-<h2 style="margin-top:2.5rem">Performance &amp; Hybrid Mode (continued)</h2>
+<h2 class="legacy-mt-xl">Performance &amp; Hybrid Mode (continued)</h2>
 <p>For the full performance picture including CGI backends, see the <a href="/performance">performance page</a>.</p>
 
 </div>

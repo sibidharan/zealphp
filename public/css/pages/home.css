@@ -1,0 +1,248 @@
+/* ==========================================================================
+   home.css — page-scoped styles for template/pages/home.php
+   Auto-loaded by template/_head.php when $page === 'home'.
+   Extracted from inline style="" attributes + the inline <style> blocks
+   that previously lived in home.php (separation-of-concerns refactor).
+   All .home-* classes; .qs-* classes preserve the names the markup + JS use.
+   ========================================================================== */
+
+/* --- Hero ---------------------------------------------------------------- */
+.home-hero-tagline {
+  font-size: 1.4rem; color: #fef3c7; font-weight: 600;
+  margin: .5rem auto .75rem; position: relative;
+}
+.home-hero-sub {
+  font-size: .95rem; color: #94a3b8; margin-top: .25rem;
+}
+.home-hero-why {
+  font-size: .78rem; color: #a8a29e; margin-top: .5rem;
+}
+.home-hero-why a { color: #fde68a; text-decoration: none; }
+
+.home-hero-code-pre { margin: 0; }
+.home-hero-code-pre code {
+  background: transparent; padding: 0; font-size: .82rem;
+}
+
+/* --- Benchmark intro + table -------------------------------------------- */
+.home-bench-intro {
+  text-align: center; color: #a8a29e; font-size: .92rem;
+  margin: 1.75rem auto 0; max-width: 640px; position: relative;
+}
+.home-bench-method-code {
+  background: rgba(255,255,255,.05); padding: .1rem .25rem; border-radius: 3px;
+}
+
+.home-bench-table-wrap { margin-top: 1.5rem; position: relative; }
+.home-bench-table {
+  margin: 0 auto; border-collapse: collapse; font-size: .78rem;
+  max-width: 740px; width: 100%;
+}
+.home-bench-table tr { border-bottom: 1px solid rgba(255,255,255,.06); }
+.home-bench-table tr.home-bench-head { border-bottom: 1px solid rgba(255,255,255,.1); }
+.home-bench-table tr.home-bench-group { background: rgba(255,255,255,.02); }
+.home-bench-table th {
+  text-align: right; padding: .4rem .6rem; color: #94a3b8; font-weight: 600;
+}
+.home-bench-table th.home-bench-th-left { text-align: left; }
+.home-bench-table td { padding: .35rem .6rem; color: #94a3b8; }
+.home-bench-table td.home-bench-dash { color: #64748b; }
+.home-bench-table td.home-bench-num { text-align: right; }
+.home-bench-table td.home-bench-group-label {
+  color: #64748b; font-size: .65rem; text-transform: uppercase;
+  letter-spacing: .05em; font-weight: 700;
+}
+.home-bench-table td.home-bench-group-label .home-bench-group-note {
+  font-weight: 400; text-transform: none; letter-spacing: 0;
+}
+.home-bench-table tr.home-bench-row-zeal td { padding: .4rem .6rem; }
+.home-bench-table td.home-bench-zeal {
+  color: var(--accent); font-weight: 700;
+}
+.home-bench-table td.home-bench-zeal .home-bench-tag {
+  color: #64748b; font-weight: 400; font-size: .68rem;
+}
+.home-bench-table tr.home-bench-row-express td { padding: .4rem .6rem; }
+.home-bench-table td.home-bench-express { color: #e2e8f0; }
+.home-bench-table td.home-bench-express .home-bench-tag {
+  color: #64748b; font-size: .68rem;
+}
+.home-bench-table tr.home-bench-row-other td { padding: .3rem .6rem; }
+.home-bench-table td.home-bench-other-name { color: #64748b; }
+.home-bench-table td.home-bench-other-num {
+  text-align: right; color: #94a3b8; font-weight: 500; font-size: .75rem;
+}
+
+.home-bench-callout {
+  text-align: center; margin-top: 1.25rem; padding: .85rem 1rem;
+  background: rgba(245,158,11,.05); border: 1px solid rgba(245,158,11,.2);
+  border-radius: 8px; max-width: 760px; margin-left: auto; margin-right: auto;
+}
+.home-bench-callout p {
+  margin: 0 0 .55rem 0; color: #e7e5e4; font-size: .85rem; line-height: 1.55;
+}
+.home-bench-callout p.home-bench-callout-last { margin: 0; }
+.home-bench-callout strong { color: var(--accent); }
+.home-bench-callout strong.home-bench-callout-alt { color: #e2e8f0; }
+.home-bench-perflink {
+  text-align: center; color: #94a3b8; font-size: .85rem; margin-top: 1.25rem;
+}
+.home-bench-perflink a {
+  color: var(--accent); font-weight: 600; text-decoration: none;
+}
+
+/* --- Live AI chat source-toggle ----------------------------------------- */
+.home-chat-source-hint { margin-left: .5rem; color: var(--text-muted); }
+.home-chat-src-hidden { display: none; }
+
+/* --- Section background utilities --------------------------------------- */
+.home-section-altbg { background: var(--bg-alt); }
+.home-section-darkbg {
+  background: var(--bg-dark); color: #e2e8f0;
+  padding-top: 3rem; padding-bottom: 3rem;
+}
+.home-section-migrate { background: var(--bg-dark); color: var(--code-text); }
+.home-section-return { background: var(--bg-alt); }
+
+/* --- Quick Start: fresh-machine one-liner ------------------------------- */
+.home-qs-fresh {
+  background: rgba(245,158,11,.06); border: 1px solid rgba(245,158,11,.22);
+  border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 2rem;
+  max-width: 760px; margin-left: auto; margin-right: auto;
+}
+.home-qs-fresh-head {
+  display: flex; align-items: center; gap: .5rem; margin-bottom: .6rem;
+}
+.home-qs-fresh-head .home-qs-fresh-bolt { font-size: 1.1rem; }
+.home-qs-fresh-head strong { color: #fff; }
+.home-qs-fresh-block {
+  background: #0c0a09; padding: .65rem .85rem; margin: 0; border: none;
+}
+.home-qs-fresh-line {
+  display: flex; align-items: center; gap: .5rem;
+  font-family: var(--font-mono); font-size: .88rem;
+}
+.home-qs-fresh-prompt { color: #a8a29e; }
+.home-qs-fresh-cmd { flex: 1; color: #e7e5e4; }
+.home-qs-fresh-copy {
+  background: rgba(245,158,11,.18); color: var(--accent);
+  border: 1px solid rgba(245,158,11,.32); padding: .2rem .55rem;
+  border-radius: 4px; font-size: .72rem; cursor: pointer;
+}
+.home-qs-fresh-note {
+  margin: .55rem 0 0; font-size: .78rem; color: #94a3b8;
+}
+.home-qs-fresh-note a { color: var(--accent); }
+
+/* --- Quick Start: header + tabs ----------------------------------------- */
+.home-qs-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;
+}
+.home-qs-header h2 { color: #fff; margin-bottom: .25rem; }
+.home-qs-header p { color: #94a3b8; margin: 0; }
+.qs-tabs { display: flex; gap: .5rem; font-size: .78rem; }
+.qs-out-code { color: #fbbf24; }
+
+/* --- Quick Start tabs / panels / blocks (was inline <style>) ------------- */
+.qs-tabs button {
+  background: transparent; color: #94a3b8; border: 1px solid rgba(255,255,255,.1);
+  padding: .45rem .85rem; border-radius: 6px; cursor: pointer; font-weight: 500;
+  font-size: .78rem; transition: all .15s; font-family: var(--font);
+}
+.qs-tabs button:hover { color: #e2e8f0; border-color: rgba(255,255,255,.2); }
+.qs-tabs button.active {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.qs-panel { display: none; }
+.qs-panel.active { display: block; }
+.qs-block {
+  background: #0a0f1e; border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 1rem;
+  font-family: var(--font-mono); font-size: .87rem;
+}
+.qs-line {
+  display: flex; align-items: center; gap: .85rem;
+  padding: .35rem 0; line-height: 1.6;
+}
+.qs-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(99,102,241,.15); color: var(--accent);
+  font-size: .72rem; font-weight: 700; flex-shrink: 0;
+  font-family: var(--font);
+}
+.qs-arrow {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; color: #10b981; font-size: 1rem; flex-shrink: 0;
+}
+.qs-prompt { color: #64748b; margin-right: .4rem; user-select: none; }
+.qs-cmd { color: #e2e8f0; flex: 1; word-break: break-all; }
+.qs-out { color: #94a3b8; font-style: italic; flex: 1; }
+.qs-out a { color: #818cf8; }
+.qs-copy {
+  background: transparent; color: #64748b; border: 1px solid rgba(255,255,255,.08);
+  padding: .15rem .55rem; border-radius: 4px; cursor: pointer; font-size: .68rem;
+  font-family: var(--font); transition: all .15s;
+}
+.qs-copy:hover { color: #e2e8f0; border-color: rgba(255,255,255,.2); background: rgba(255,255,255,.03); }
+.qs-copy.copied { color: #10b981; border-color: #10b981; }
+.qs-note {
+  color: #64748b; font-size: .82rem; padding: .25rem .5rem;
+}
+.qs-note code { background: rgba(255,255,255,.05); padding: .1rem .35rem; border-radius: 3px; color: #cbd5e1; }
+.qs-note a { color: #818cf8; }
+.qs-prereq {
+  margin-top: 1.5rem; padding-top: 1.5rem;
+  border-top: 1px solid rgba(255,255,255,.05);
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  font-size: .78rem;
+}
+.qs-prereq-label { color: #64748b; text-transform: uppercase; letter-spacing: .05em; font-size: .68rem; font-weight: 700; margin-right: .25rem; }
+.qs-prereq code {
+  background: rgba(255,255,255,.04); color: #cbd5e1;
+  padding: .2rem .55rem; border-radius: 4px; font-size: .76rem;
+  border: 1px solid rgba(255,255,255,.06);
+}
+.qs-prereq-link { color: #818cf8; margin-left: auto; font-weight: 500; }
+@media (max-width: 768px) {
+  .qs-tabs { width: 100%; flex-wrap: wrap; }
+  .qs-tabs button { flex: 1; min-width: 0; padding: .4rem .5rem; font-size: .72rem; }
+  .qs-prereq-link { margin-left: 0; width: 100%; margin-top: .5rem; }
+  .qs-cmd { font-size: .78rem; }
+}
+
+/* --- Migrate-your-PHP-codebase section ---------------------------------- */
+.home-migrate-wrap { max-width: 860px; }
+.home-migrate-title { color: #fff; }
+.home-migrate-desc { color: var(--text-light); }
+.home-migrate-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-top: 1.5rem;
+}
+.home-migrate-card {
+  background: var(--code-bg); border: 1px solid var(--border-dark);
+  border-radius: var(--radius); padding: 1.25rem;
+}
+.home-migrate-card.home-migrate-card-accent { border-color: var(--accent); }
+.home-migrate-card h3 {
+  font-size: .95rem; margin-bottom: .75rem;
+}
+.home-migrate-card.home-migrate-card-today h3 { color: var(--danger); }
+.home-migrate-card.home-migrate-card-accent h3 { color: var(--accent); }
+.home-migrate-card.home-migrate-card-accent h3 code { font-size: 1rem; }
+.home-migrate-card p {
+  font-size: .85rem; color: var(--text-light); margin: 0;
+}
+.home-migrate-card.home-migrate-card-accent p { color: var(--code-text); }
+.home-migrate-ladder {
+  margin-top: 1.5rem; color: var(--text-light); font-size: .92rem; line-height: 1.65;
+}
+.home-migrate-ladder a { color: var(--accent); }
+.home-migrate-cta { text-align: center; margin-top: 1.75rem; }
+.home-migrate-cta .home-migrate-cta-wp { margin-left: .5rem; }
+
+/* --- Return-conventions table ------------------------------------------- */
+.home-return-table { margin-top: 1.5rem; }
+.home-return-table th.home-return-col-return { width: 30%; }
+.home-return-table th.home-return-col-result { width: 35%; }
+.home-return-foot { margin-top: 1rem; text-align: center; }

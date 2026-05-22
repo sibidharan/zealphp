@@ -24,8 +24,8 @@ session_write_close();                                    // zeal_session_write_
 // intercept the assignment, only the session_*() function calls around it.
 PHP]); ?>
 
-<h2 style="margin:1.5rem 0 .5rem">Overridden functions</h2>
-<table class="ztable" style="margin-bottom:2rem">
+<h2 class="sess-h2">Overridden functions</h2>
+<table class="ztable sess-table-mb-2">
   <tr><th>Native PHP</th><th>ZealPHP replacement</th><th>Notes</th></tr>
   <tr><td><code>session_start()</code></td><td><code>zeal_session_start()</code></td><td>Reads session file into G::session</td></tr>
   <tr><td><code>session_id()</code></td><td><code>zeal_session_id()</code></td><td>Gets/sets session ID from cookie or G::cookie</td></tr>
@@ -64,13 +64,13 @@ foreach ($demos as [$id, $title, $url, $code]) {
 }
 ?>
 
-<div class="callout warn" style="margin-top:1.5rem">
+<div class="callout warn sess-mt">
   Sessions are per-coroutine in coroutine mode. Each request gets its own isolated
   <code>RequestContext::instance()-&gt;session</code> via <code>Coroutine::getContext()</code> —
   no data leaks between concurrent requests. See the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a> for the cross-mode story (when <code>$_SESSION</code> is safe vs. when only <code>$g-&gt;session</code> works).
 </div>
 
-<h2 id="objects-in-session" style="margin:1.75rem 0 .5rem">Storing objects in sessions — the <code>stdClass</code> whitelist</h2>
+<h2 id="objects-in-session" class="sess-h2-sub">Storing objects in sessions — the <code>stdClass</code> whitelist</h2>
 <p>
   PHP's <code>unserialize()</code> can be turned into a remote-code-execution vector when fed
   attacker-controlled data — any class on the autoload graph with <code>__wakeup()</code> /
@@ -81,7 +81,7 @@ foreach ($demos as [$id, $title, $url, $code]) {
 <p>
   v0.2.26 (<a href="https://github.com/sibidharan/zealphp/issues/15" target="_blank" rel="noopener">issue #15</a>) narrowed the policy to an explicit whitelist:
 </p>
-<table class="ztable" style="margin-bottom:1rem">
+<table class="ztable sess-table-mb-1">
 <tr><th>Stored as</th><th>Read back as</th><th>Why</th></tr>
 <tr><td>Scalar (string, int, float, bool, null)</td><td>Same scalar</td><td>No instantiation needed; trivially safe.</td></tr>
 <tr><td>Array (assoc or list)</td><td>Same array</td><td>Same — recursive scalars only by default.</td></tr>
@@ -106,12 +106,12 @@ echo $g->session['oauth_token']->expires_in;
 PHP,
 ]); ?>
 
-<p style="font-size:.9rem;color:var(--text-muted)">
+<p class="sess-note">
   Need another class on the whitelist (rare)? Audit its <code>__wakeup</code> / <code>__unserialize</code> / <code>__destruct</code> first — those are the gadget surfaces — then patch the four <code>unserialize()</code> calls in <code>src/Session/utils.php</code>. The function-level docblock at <code>php_session_decode_to_array()</code> documents the constraint.
 </p>
 
-<h2 style="margin:1.75rem 0 .5rem">What else gets reset per request</h2>
-<p style="color:var(--text-muted)">In <strong>coroutine mode</strong>, the entire <code>RequestContext</code> instance is per-coroutine — when the coroutine ends, every field on it is freed. That includes session data, response headers/cookies pending emission (on the Response wrapper), and the handler stacks pushed by <code>set_error_handler()</code> / <code>set_exception_handler()</code> / <code>register_shutdown_function()</code>. Legacy code that calls those per-request without restoring them can't accumulate handlers across requests in this mode.</p>
-<p style="color:var(--text-muted)">In <strong>superglobals mode</strong> (the legacy migration bridge), <code>RequestContext</code> is a process-wide singleton, so handler stacks <strong>could</strong> grow unbounded across requests — fixed in v0.2.10 by an explicit reset in <code>SessionManager</code> at request entry. See <a href="/coroutines#what-survives">What survives a request</a> for the full lifecycle matrix.</p>
+<h2 class="sess-h2-sub">What else gets reset per request</h2>
+<p class="sess-muted">In <strong>coroutine mode</strong>, the entire <code>RequestContext</code> instance is per-coroutine — when the coroutine ends, every field on it is freed. That includes session data, response headers/cookies pending emission (on the Response wrapper), and the handler stacks pushed by <code>set_error_handler()</code> / <code>set_exception_handler()</code> / <code>register_shutdown_function()</code>. Legacy code that calls those per-request without restoring them can't accumulate handlers across requests in this mode.</p>
+<p class="sess-muted">In <strong>superglobals mode</strong> (the legacy migration bridge), <code>RequestContext</code> is a process-wide singleton, so handler stacks <strong>could</strong> grow unbounded across requests — fixed in v0.2.10 by an explicit reset in <code>SessionManager</code> at request entry. See <a href="/coroutines#what-survives">What survives a request</a> for the full lifecycle matrix.</p>
 </div>
 </section>

@@ -27,7 +27,7 @@
 
     <?php App::render('/components/_ws_counter_widget'); ?>
 
-    <p style="margin-top:-.5rem;color:#78716c;font-size:.88rem">
+    <p class="lws-subtitle">
       Open <a href="/learn/websocket" target="_blank">/learn/websocket</a> in a second tab. Click +1 here. Watch the second tab count up without reloading.
     </p>
 

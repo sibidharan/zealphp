@@ -1,0 +1,22 @@
+/* Page-scoped styles for /deployment — relocated from inline style= attrs. */
+
+.deploy-h2 {
+  margin: 2rem 0 .5rem;
+}
+
+.deploy-h2-first {
+  margin: 1.5rem 0 .5rem;
+}
+
+.deploy-h3 {
+  margin-top: 1rem;
+}
+
+.deploy-lead {
+  color: var(--text-muted);
+  margin-bottom: .75rem;
+}
+
+.deploy-table {
+  margin-bottom: 1.5rem;
+}

@@ -1,0 +1,32 @@
+/* Page-scoped styles for /middleware — relocated from inline style= attrs. */
+
+.mw-h2 {
+  margin: 1.5rem 0 .5rem;
+}
+
+.mw-h2-demos {
+  margin: 2rem 0 .5rem;
+}
+
+.mw-h2-ref {
+  margin: 2.5rem 0 .5rem;
+}
+
+.mw-h3 {
+  margin-top: 1.5rem;
+}
+
+.mw-table {
+  margin-bottom: 2rem;
+}
+
+.mw-note {
+  color: var(--text-muted);
+  font-size: .9rem;
+  margin-top: .75rem;
+}
+
+.mw-note-custom {
+  color: var(--text-muted);
+  font-size: .92rem;
+}

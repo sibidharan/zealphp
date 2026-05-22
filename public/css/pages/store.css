@@ -1,0 +1,61 @@
+/* Page-scoped styles for /store — relocated from inline style= attrs. */
+
+.store-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.store-grid-tight {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.store-h2 {
+  margin: 2rem 0 .5rem;
+}
+
+.store-h2-section {
+  margin: 2.5rem 0 .5rem;
+}
+
+.store-h3 {
+  margin: 1.5rem 0 .5rem;
+}
+
+.store-lead {
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.store-lead-tight {
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.store-mt-1 {
+  margin-top: 1rem;
+}
+
+.store-mt {
+  margin-top: 1.5rem;
+}
+
+.store-col-good {
+  color: var(--success);
+  margin-bottom: .75rem;
+}
+
+.store-col-bad {
+  color: var(--danger);
+  margin-bottom: .75rem;
+}
+
+.store-col-list {
+  font-size: .9rem;
+  line-height: 1.8;
+  color: var(--text-muted);
+}

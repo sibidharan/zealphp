@@ -46,9 +46,9 @@ $active = $active ?? 'learn/tictactoe';
           <button type="submit">Log in</button>
           <div id="ttt-auth-fb-login"></div>
         </form>
-        <details style="margin-top:1rem">
+        <details class="lttt-details">
           <summary>New here? Register</summary>
-          <form hx-post="/api/learn/register" hx-target="#ttt-auth-fb-reg" hx-swap="innerHTML" style="margin-top:.75rem">
+          <form hx-post="/api/learn/register" hx-target="#ttt-auth-fb-reg" hx-swap="innerHTML" class="lttt-reg-form">
             <input type="text" name="username" placeholder="new username" required minlength="3" maxlength="64">
             <input type="password" name="password" placeholder="new password" required minlength="8">
             <button type="submit" class="auth-toggle">Register</button>
@@ -330,7 +330,7 @@ Store::set('ws_tictactoe_rooms', $room, $update);   // one write</code></pre>
       <a class="lesson-popout-cta" href="/demo/view/tictactoe/play" target="_blank" rel="noopener">
         Open the game in a new tab ↗
       </a>
-      <p style="color:#78716c;font-size:.85rem;margin-top:.25rem">
+      <p class="lttt-note">
         Open this page in a second tab (or use the popout) and join the same room ID — the second
         tab gets the O seat. Click a cell in either tab; both update live. Open a third tab and
         you&rsquo;ll join as a viewer, watching the game without playing.

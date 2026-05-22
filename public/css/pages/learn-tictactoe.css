@@ -1,0 +1,15 @@
+/* Page-scoped styles for /learn/tictactoe — relocated from inline style= attrs. */
+
+.lttt-details {
+  margin-top: 1rem;
+}
+
+.lttt-reg-form {
+  margin-top: .75rem;
+}
+
+.lttt-note {
+  color: #78716c;
+  font-size: .85rem;
+  margin-top: .25rem;
+}

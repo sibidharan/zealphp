@@ -1,0 +1,10 @@
+/* Page-scoped styles for /websocket — relocated from inline style= attrs. */
+
+.ws-h2 {
+  margin: 2rem 0 1rem;
+}
+
+.ws-panel-hint {
+  font-size: .85rem;
+  margin-bottom: .75rem;
+}

@@ -1,0 +1,55 @@
+/* Page-scoped styles for /streaming — relocated from inline style= attrs. */
+
+.stream-note {
+  margin-top: .5rem;
+  color: var(--text-muted);
+  font-size: .92rem;
+}
+
+.stream-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.stream-h2 {
+  margin: 2rem 0 1rem;
+}
+
+.stream-h2-section {
+  margin: 2.5rem 0 1rem;
+}
+
+.stream-case {
+  margin-bottom: 1.5rem;
+}
+
+.stream-case-body {
+  padding: 1rem;
+  background: var(--bg-alt);
+}
+
+.stream-case-hint {
+  font-size: .85rem;
+  margin-bottom: .75rem;
+}
+
+.stream-out {
+  margin-top: .75rem;
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  padding: .75rem;
+  background: var(--code-bg);
+  color: var(--code-text);
+  border-radius: 6px;
+  min-height: 60px;
+}
+
+.stream-sse-out {
+  margin-top: .75rem;
+}
+
+.stream-mt {
+  margin-top: 1.5rem;
+}

@@ -6,8 +6,8 @@
 <p class="section-desc">ZealPHP uses reflection to inject route parameters, <code>$request</code>, <code>$response</code>, and <code>$app</code> into handlers by name — no annotations, no containers.</p>
 
 <!-- File-based routing -->
-<h2 style="margin:2rem 0 .5rem">File-based routing — just like LAMP</h2>
-<p style="margin-bottom:1rem">Drop a <code>.php</code> file in <code>public/</code>. It becomes a route. No config, no registration, no framework code needed.</p>
+<h2 class="route-h2">File-based routing — just like LAMP</h2>
+<p class="route-mb-1">Drop a <code>.php</code> file in <code>public/</code>. It becomes a route. No config, no registration, no framework code needed.</p>
 
 <table class="ztable">
   <tr><th>File</th><th>URL</th><th>Notes</th></tr>
@@ -17,7 +17,7 @@
   <tr><td><code>public/admin/index.php</code></td><td><code>/admin</code></td><td>Directory index</td></tr>
 </table>
 
-<p style="margin:.75rem 0">Inside these files, everything you already know works:</p>
+<p class="route-my-sm">Inside these files, everything you already know works:</p>
 
 <?php App::render('/components/_code', [
     'label' => 'public/dashboard.php — coroutine-safe form (works in both modes)',
@@ -34,11 +34,11 @@ if (empty($g->session['user'])) { header('Location: /login'); exit; }
 PHP
 ]); ?>
 
-<div class="callout info" style="margin-top:1rem">
+<div class="callout info route-mt-1">
 <strong>This is the migration on-ramp.</strong> Drop your existing PHP files into <code>public/</code> and they run on OpenSwoole immediately — <code>session_start()</code>, <code>header()</code>, <code>echo</code> all work unchanged via uopz overrides. The example above uses <code>$g-&gt;session</code> / <code>$g-&gt;get</code> via <code>RequestContext::instance()</code> — the per-coroutine-safe form that works in both modes. <strong>Direct <code>$_SESSION</code> / <code>$_GET</code> access</strong> only works under <code>App::superglobals(true)</code>; in the default coroutine mode it would silently leak across visitors because PHP superglobals are process-wide. See the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a> and the <a href="/migration">migration ladder</a>.
 </div>
 
-<p style="margin:1rem 0">Same convention works for APIs — drop files in <code>api/</code>:</p>
+<p class="route-my-1">Same convention works for APIs — drop files in <code>api/</code>:</p>
 
 <table class="ztable">
   <tr><th>File</th><th>URL</th><th>HTTP method</th></tr>
@@ -47,13 +47,13 @@ PHP
   <tr><td><code>api/orders/get.php</code></td><td><code>GET /api/orders</code></td><td>Directory = resource</td></tr>
 </table>
 
-<p style="margin-top:1rem">Public files ride the <a href="/responses#return-contract">universal return contract</a> — same shapes as a route handler.</p>
+<p class="route-mt-1">Public files ride the <a href="/responses#return-contract">universal return contract</a> — same shapes as a route handler.</p>
 
-<h2 style="margin:2.5rem 0 .5rem">Programmatic routes</h2>
-<p style="margin-bottom:1rem">When you need URL parameters, WebSocket, or middleware — use programmatic routes. File-based routing handles the rest.</p>
+<h2 class="route-h2-section">Programmatic routes</h2>
+<p class="route-mb-1">When you need URL parameters, WebSocket, or middleware — use programmatic routes. File-based routing handles the rest.</p>
 
 <!-- Route types -->
-<h2 style="margin:2rem 0 .5rem">Route types</h2>
+<h2 class="route-h2">Route types</h2>
 <table class="ztable">
   <tr><th>Method</th><th>Example</th><th>Use when</th></tr>
   <tr><td><code>route()</code></td><td><code>/users/{id}</code></td><td>Standard URL with named segments</td></tr>
@@ -64,8 +64,8 @@ PHP
 </table>
 
 <!-- Injection cases -->
-<h2 style="margin:2rem 0 .5rem">Parameter injection — every case</h2>
-<p style="margin-bottom:1.5rem">All panels below auto-run against the live server. The handler signature determines what gets injected.</p>
+<h2 class="route-h2">Parameter injection — every case</h2>
+<p class="route-mb-1-5">All panels below auto-run against the live server. The handler signature determines what gets injected.</p>
 
 <?php
 $cases = [
@@ -123,7 +123,7 @@ foreach ($cases as [$id, $title, $url, $code]) {
 ?>
 
 <!-- Route type demos -->
-<h2 style="margin:2rem 0 .5rem">Live route type demos</h2>
+<h2 class="route-h2">Live route type demos</h2>
 <?php
 $routeTypes = [
   ['rt-1', 'nsRoute — /demo/route/ns/items',                '/demo/route/ns/items',
@@ -144,7 +144,7 @@ foreach ($routeTypes as [$id, $title, $url, $code]) {
 }
 ?>
 
-<h2 style="margin-top:2.5rem">Route priority</h2>
+<h2 class="route-h2-top">Route priority</h2>
 <p>Routes are matched in this order — the first match wins. Earlier in the list = higher priority:</p>
 
 <table class="ztable">
@@ -160,8 +160,8 @@ foreach ($routeTypes as [$id, $title, $url, $code]) {
 <strong>Override implicit routes</strong> by placing a file in <code>route/</code>. For example, to customize <code>/admin/users</code> instead of letting it auto-resolve to <code>public/admin/users.php</code>, define an explicit route in <code>route/admin.php</code> — it loads first and takes precedence.
 </div>
 
-<h2 style="margin-top:2.5rem">Apache parity in public/ routing</h2>
-<p style="margin-bottom:1rem">The implicit <code>public/</code> routes mirror Apache+mod_php's default DocumentRoot behavior — including the subtle directives most developers don't think about until something breaks. Each is on by default and toggleable via a static flag on <code>App</code>:</p>
+<h2 class="route-h2-top">Apache parity in public/ routing</h2>
+<p class="route-mb-1">The implicit <code>public/</code> routes mirror Apache+mod_php's default DocumentRoot behavior — including the subtle directives most developers don't think about until something breaks. Each is on by default and toggleable via a static flag on <code>App</code>:</p>
 
 <table class="ztable">
 <tr><th>Apache directive</th><th>ZealPHP behavior</th><th>Flag</th></tr>
@@ -207,11 +207,11 @@ foreach ($routeTypes as [$id, $title, $url, $code]) {
 </tr>
 </table>
 
-<div class="callout info" style="margin-top:1rem">
+<div class="callout info route-mt-1">
 <strong>For ETag on static assets too</strong>, disable OpenSwoole's built-in static handler (<code>enable_static_handler =&gt; false</code> in <code>$app-&gt;run()</code> settings) and add a wildcard route that calls <code>$response-&gt;sendFile()</code>. The built-in handler emits <code>Last-Modified</code> only — no ETag, no Range. The trade-off is a small per-request PHP hop. See the <a href="https://github.com/sibidharan/zealphp/blob/master/docs/apache-parity.md">Apache parity deep dive</a> in <code>docs/</code>.
 </div>
 
-<h2 style="margin-top:2.5rem">Pattern routes with named regex groups</h2>
+<h2 class="route-h2-top">Pattern routes with named regex groups</h2>
 <p><code>patternRoute</code> accepts any regex with named capture groups (PCRE <code>(?P&lt;name&gt;...)</code> syntax). Captured names are injected as handler parameters:</p>
 
 <?php App::render('/components/_code', [

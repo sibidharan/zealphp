@@ -1,0 +1,173 @@
+/* Page-scoped styles for /legacy-apps (extracted from inline style= attrs + <style> block). */
+
+.legacy-callout-proof {
+  margin: 1.25rem 0;
+  border-left: 4px solid #fbbf24;
+}
+
+.legacy-screenshots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.legacy-shot {
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+
+.legacy-shot-img {
+  width: 100%;
+  display: block;
+}
+
+.legacy-shot-caption {
+  padding: .5rem .75rem;
+  background: var(--bg-alt);
+  font-size: .82rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.legacy-callout-zero { margin-bottom: 2rem; }
+
+/* margin-top heading rhythm utilities (extracted from inline style="margin-top:N"). */
+.legacy-mt-sm { margin-top: 1.25rem; }
+.legacy-mt-md { margin-top: 1.5rem; }
+.legacy-mt-prose { margin-top: 1rem; }
+.legacy-mt-lg { margin-top: 2rem; }
+.legacy-mt-xl { margin-top: 2.5rem; }
+.legacy-mt-half { margin-top: .5rem; }
+.legacy-mt-prose-mb { margin: 1rem 0; }
+
+.legacy-list-loose { line-height: 1.7; }
+.legacy-list-steps { line-height: 2; }
+
+.legacy-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.legacy-shim-note {
+  margin: 1.25rem 0;
+  padding: 1rem 1.25rem;
+  background: rgba(251,191,36,.06);
+  border: 1px solid rgba(251,191,36,.25);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+}
+
+.legacy-shim-note-title { color: #fde68a; }
+
+.legacy-shim-note-body {
+  margin: .5rem 0 0;
+  line-height: 1.6;
+}
+
+/* AI config converter UI */
+.converter-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: 1.5rem 0;
+}
+
+.legacy-convert-left { border-right: 1px solid var(--border); }
+
+.legacy-convert-bar {
+  padding: .5rem .75rem;
+  background: var(--bg-alt);
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.legacy-convert-preset {
+  font-size: .75rem;
+  padding: .2rem .4rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.legacy-convert-input {
+  width: 100%;
+  min-height: 280px;
+  border: none;
+  padding: .75rem;
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  background: var(--code-bg);
+  color: var(--code-text);
+  resize: vertical;
+  outline: none;
+}
+
+.legacy-convert-actions {
+  padding: .5rem .75rem;
+  background: var(--bg-alt);
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.legacy-convert-btn {
+  padding: .4rem 1.2rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: .82rem;
+  font-weight: 600;
+}
+
+.legacy-convert-status {
+  font-size: .75rem;
+  color: var(--text-muted);
+}
+
+.legacy-convert-copy {
+  font-size: .72rem;
+  padding: .15rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.legacy-convert-output {
+  min-height: 280px;
+  padding: .75rem;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  background: var(--code-bg);
+  color: var(--code-text);
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.legacy-convert-placeholder { color: var(--text-muted); }
+
+.legacy-convert-footer {
+  padding: .5rem .75rem;
+  background: var(--bg-alt);
+  font-size: .72rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 768px) {
+  .converter-split { grid-template-columns: 1fr; }
+}

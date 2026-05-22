@@ -92,7 +92,7 @@ $get = function($request, $response) {
 };
 PHP]); ?>
 
-<div class="callout info" style="margin-top:.5rem">
+<div class="callout info apidoc-mt-half">
 <strong>Three equivalent ways to read query params</strong> inside an API handler — all are per-request safe (none touch the process-wide <code>$_GET</code> superglobal): <code>$request-&gt;get['id']</code> (injected parameter, cleanest), <code>RequestContext::instance()-&gt;get['id']</code> (useful when you also need <code>$g-&gt;session</code>), or <code>$this-&gt;_request-&gt;get['id']</code> (legacy form — works because the closure is bound to the <code>ZealAPI</code> instance and <code>$_request</code> is the same wrapper). Prefer the injected <code>$request</code> for new code. ZealAPI does NOT auto-inject <code>$g</code> by name — call <code>RequestContext::instance()</code> explicitly when you need it.
 </div>
 
@@ -133,12 +133,12 @@ PHP]); ?>
 <tr><td><code>$this->requirePostAuth()</code></td><td>POST + authenticated guard. Returns <code>false</code> and emits <code>403</code> JSON on failure.</td></tr>
 </table>
 
-<h2 id="auth-hooks">Pluggable auth hooks <span class="badge" style="font-size:.65rem;background:#fbbf24;color:#1c1917;padding:.05rem .35rem;border-radius:3px;margin-left:.25rem">v0.2.25</span></h2>
+<h2 id="auth-hooks">Pluggable auth hooks <span class="badge apidoc-version-badge">v0.2.25</span></h2>
 <p>
   ZealAPI doesn't know what your auth system looks like — your app might use ZealPHP sessions, a Symfony bundle, the SelfMade Ninja stack, a custom OAuth flow, or JWT in a header. So the framework <strong>doesn't bake an auth check in</strong>. Instead it consults three optional callbacks you register on <code>App</code>. They default to fail-closed values (<code>false</code>, <code>false</code>, <code>null</code>) so endpoints guarded by <code>requirePostAuth()</code> reject everything until you wire them up.
 </p>
 
-<table class="ztable" style="margin-bottom:1rem">
+<table class="ztable apidoc-mb-1">
 <tr><th>Setter</th><th>Signature</th><th>Consumed by</th><th>Default</th></tr>
 <tr><td><code>App::authChecker(?callable)</code></td><td><code>fn(): bool</code></td><td><code>ZealAPI::isAuthenticated()</code></td><td><code>false</code></td></tr>
 <tr><td><code>App::adminChecker(?callable)</code></td><td><code>fn(): bool</code></td><td><code>ZealAPI::isAdmin()</code></td><td><code>false</code></td></tr>
@@ -192,7 +192,7 @@ $delete = function() {
 PHP,
 ]); ?>
 
-<div class="callout info" style="margin-top:.5rem">
+<div class="callout info apidoc-mt-half">
 <strong>Why three orthogonal setters instead of one auth-provider interface?</strong> Most apps need only <code>isAuthenticated()</code>; a few need <code>isAdmin()</code> too; a smaller subset wants <code>getUsername()</code> for logging. Three closures means the trivial case is one line, the polished case is three. The setters follow the existing <code>App::superglobals()</code> / <code>App::sessionLifecycle()</code> fluent precedent — same shape, same lifecycle (configure before <code>App::init()</code>, queried by ZealAPI at request time). See <a href="/learn/auth">the auth lesson</a> for a worked example with a real session.
 </div>
 
@@ -218,8 +218,8 @@ foreach ($demos as [$id, $title, $url, $code]) {
 }
 ?>
 
-<h2 style="margin-top:2.5rem">Error responses</h2>
-<p style="margin-bottom:1rem">All ZealAPI failures emit JSON with an <code>error</code> key and an HTTP status code. Use the <code>error</code> string to branch in client code; the <code>hint</code> is for humans.</p>
+<h2 class="apidoc-mt-2-5">Error responses</h2>
+<p class="apidoc-mb-1">All ZealAPI failures emit JSON with an <code>error</code> key and an HTTP status code. Use the <code>error</code> string to branch in client code; the <code>hint</code> is for humans.</p>
 
 <table class="ztable">
 <tr><th>Status</th><th>error</th><th>When</th></tr>
@@ -230,8 +230,8 @@ foreach ($demos as [$id, $title, $url, $code]) {
 <tr><td><code>500</code></td><td>—</td><td>Uncaught throwable inside the handler — stack trace is logged via <code>elog()</code></td></tr>
 </table>
 
-<h3 style="margin-top:1.5rem">Typo detection — <code>undefined_method</code></h3>
-<p style="margin-bottom:1rem">When you call a method that doesn't exist on <code>$this</code> from inside a handler, ZealAPI no longer hangs (it used to recurse on <code>__call</code> until stack overflow). It returns 404 with a structured error and, when the typo is close to a real method, a <code>did_you_mean</code> hint computed via levenshtein.</p>
+<h3 class="apidoc-mt-1-5">Typo detection — <code>undefined_method</code></h3>
+<p class="apidoc-mb-1">When you call a method that doesn't exist on <code>$this</code> from inside a handler, ZealAPI no longer hangs (it used to recurse on <code>__call</code> until stack overflow). It returns 404 with a structured error and, when the typo is close to a real method, a <code>did_you_mean</code> hint computed via levenshtein.</p>
 
 <?php App::render('/components/_demo', [
     'id'    => 'api-undefined-method',
@@ -247,7 +247,7 @@ $bad = function($request) {
 PHP,
 ]); ?>
 
-<p style="margin-top:.75rem;color:#94a3b8">If the typo is too far from any real method (more than 3 edits, or above 40% of the name length), the <code>did_you_mean</code> field is omitted to avoid misleading suggestions — only the <code>error</code>, <code>method</code>, and a generic hint are returned.</p>
+<p class="apidoc-hint">If the typo is too far from any real method (more than 3 edits, or above 40% of the name length), the <code>did_you_mean</code> field is omitted to avoid misleading suggestions — only the <code>error</code>, <code>method</code>, and a generic hint are returned.</p>
 
 <h2>Implicit public/ file serving</h2>
 <p>Files in <code>public/</code> are served automatically — no route definition needed:</p>
@@ -261,7 +261,7 @@ PHP,
 <tr><td><code>public/css/style.css</code></td><td><code>/css/style.css</code></td><td>Static file (served by OpenSwoole directly)</td></tr>
 </table>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.5rem 0">
+<div class="apidoc-split">
 <div>
 <?php App::render('/components/_code', [
     'label' => 'public/about.php — 3-line page',

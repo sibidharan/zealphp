@@ -1,0 +1,235 @@
+/* Page-scoped styles for /getting-started — extracted from inline
+   style= attributes (separation-of-concerns rule). Visually identical
+   to the prior inline declarations; relocated only. */
+
+.gs-learn-cta {
+  margin: 1.25rem 0;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.gs-learn-cta-end {
+  margin: 2.5rem 0 0;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.gs-muted-sm {
+  font-size: .85rem;
+  color: var(--text-muted);
+}
+
+.gs-tldr {
+  margin: 1.25rem 0 2rem;
+  padding: 1.1rem 1.3rem;
+  border-left: 4px solid var(--accent);
+}
+
+.gs-tldr-head {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .6rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.gs-tldr-bolt {
+  font-size: 1.1rem;
+}
+
+.gs-tldr-platforms {
+  margin-left: auto;
+  font-size: .7rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.gs-qs-block {
+  background: #0c0a09;
+  color: #e7e5e4;
+  padding: .8rem 1rem;
+  margin: 0;
+}
+
+.gs-qs-line {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-family: var(--font-mono);
+  font-size: .92rem;
+}
+
+.gs-qs-prompt {
+  color: #a8a29e;
+}
+
+.gs-qs-cmd {
+  flex: 1;
+}
+
+.gs-qs-copy {
+  background: rgba(245, 158, 11, .15);
+  color: var(--accent);
+  border: 1px solid rgba(245, 158, 11, .3);
+  padding: .25rem .6rem;
+  border-radius: 4px;
+  font-size: .75rem;
+  cursor: pointer;
+}
+
+.gs-tldr-foot {
+  margin: .65rem 0 0;
+  font-size: .82rem;
+  color: var(--text-muted);
+}
+
+.gs-tldr-foot-link {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.gs-arch-compare {
+  margin: 2rem 0 2.5rem;
+}
+
+.gs-arch-fail {
+  margin-top: .75rem;
+  font-size: .78rem;
+  color: #991b1b;
+  font-weight: 600;
+}
+
+.gs-arch-win {
+  margin-top: .75rem;
+  font-size: .78rem;
+  color: #166534;
+  font-weight: 600;
+}
+
+.gs-stepnav {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin: 1.5rem 0;
+  font-size: .82rem;
+}
+
+.gs-step-link {
+  padding: .4rem .8rem;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.gs-h2-mt {
+  margin-top: 2rem;
+}
+
+.gs-h2-mt-lg {
+  margin-top: 2.5rem;
+}
+
+.gs-risk-list {
+  margin: .5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.gs-risk-item {
+  margin-bottom: .35rem;
+}
+
+.gs-callout-mt-sm {
+  margin: .5rem 0 0;
+}
+
+.gs-inline-code-block {
+  display: block;
+  margin-top: .5rem;
+  padding: .5rem .75rem;
+  background: rgba(0, 0, 0, .05);
+  border-radius: 4px;
+  font-size: .85rem;
+}
+
+.gs-p-mt {
+  margin-top: 1.5rem;
+}
+
+.gs-scaffold-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.gs-scaffold-card {
+  border: 1px solid var(--border);
+  padding: 1.25rem;
+}
+
+.gs-card-title {
+  margin-bottom: .5rem;
+}
+
+.gs-card-desc {
+  color: var(--text-muted);
+  font-size: .85rem;
+  margin-bottom: .75rem;
+}
+
+.gs-howitworks {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  margin-top: 2rem;
+}
+
+.gs-howitworks-h3 {
+  margin-bottom: .75rem;
+}
+
+.gs-howitworks-p {
+  color: var(--text-muted);
+  font-size: .9rem;
+  line-height: 1.7;
+  margin-bottom: .75rem;
+}
+
+.gs-table-sm {
+  font-size: .85rem;
+}
+
+.gs-howitworks-foot {
+  color: var(--text-muted);
+  font-size: .85rem;
+  margin-top: .75rem;
+}
+
+.gs-p-mt-sm {
+  margin-top: .75rem;
+}
+
+.gs-visit-list {
+  line-height: 2;
+  margin-left: 1.5rem;
+}
+
+.gs-mt-1 {
+  margin-top: 1rem;
+}
+
+.gs-mt-15 {
+  margin-top: 1.5rem;
+}
+
+.gs-mb-1 {
+  margin-bottom: 1rem;
+}

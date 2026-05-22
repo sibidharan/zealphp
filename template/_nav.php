@@ -58,12 +58,11 @@ $links = [
   </nav>
   <div id="nav-actions" class="actions" hx-preserve="true">
     <a href="https://deepwiki.com/sibidharan/zealphp" target="_blank">DeepWiki ↗</a>
-    <a id="gh-star-link" href="https://github.com/sibidharan/zealphp" target="_blank" rel="noopener"
-       style="display:inline-flex;align-items:center;gap:.35rem">
-      <span style="color:#fbbf24">★</span>
+    <a id="gh-star-link" class="gh-star-link" href="https://github.com/sibidharan/zealphp" target="_blank" rel="noopener">
+      <span class="gh-star-icon">★</span>
       <?php $__ghStars = \ZealPHP\GithubStars::format(); ?>
       <?php if ($__ghStars !== ''): ?>
-        <span id="gh-star-count" style="color:#fbbf24;font-variant-numeric:tabular-nums;font-weight:600"><?= htmlspecialchars($__ghStars, ENT_QUOTES, 'UTF-8') ?></span>
+        <span id="gh-star-count" class="gh-star-count"><?= htmlspecialchars($__ghStars, ENT_QUOTES, 'UTF-8') ?></span>
       <?php endif; ?>
       <span>GitHub ↗</span>
     </a>
