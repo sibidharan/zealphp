@@ -1,5 +1,11 @@
 .phpunit.result.cache
 /bench/results/
+
+# Generated API reference — phpDocumentor output, regenerated on first
+# `php app.php` boot when missing. Tracked composer.lock + phpdoc.xml
+# guarantee reproducible regeneration; the HTML bundle would add ~10MB
+# of binary noise to every release.
+/public/docs/api/
 .env
 *.key
 /.sessions/
