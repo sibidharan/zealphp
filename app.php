@@ -68,6 +68,30 @@ if (PHP_SAPI === 'cli' && !in_array($__cliSub, ['stop', 'status', 'logs', '--hel
     unset($__cliSub, $__docsIndex, $__buildScript, $__log, $__proc, $__pipes);
 }
 
+// Build the page-CSS bundle: concatenate public/css/pages/*.css into one
+// public/css/pages.css served statically and loaded up front in _head.php.
+// Loading page styles eagerly (vs. lazily per page) is what stops hx-boost
+// navigation from flashing unstyled content. Regenerated on every boot so
+// it can't drift from the per-page sources; trivial cost (~47 KB). The
+// /css/ path is owned by OpenSwoole's static handler, so this must be a
+// real file — a PHP route never gets a chance to serve it.
+if (PHP_SAPI === 'cli' && !in_array($argv[1] ?? 'start', ['stop', 'status', 'logs', '--help', '-h'], true)) {
+    $__cssPagesDir = __DIR__ . '/public/css/pages';
+    if (is_dir($__cssPagesDir)) {
+        $__bundle = '';
+        $__cssFiles = glob($__cssPagesDir . '/*.css') ?: [];
+        sort($__cssFiles);
+        foreach ($__cssFiles as $__cssFile) {
+            $__cssBody = file_get_contents($__cssFile);
+            if ($__cssBody !== false) {
+                $__bundle .= '/* ── ' . basename($__cssFile) . " ── */\n" . $__cssBody . "\n";
+            }
+        }
+        @file_put_contents(__DIR__ . '/public/css/pages.css', $__bundle);
+    }
+    unset($__cssPagesDir, $__bundle, $__cssFiles, $__cssFile, $__cssBody);
+}
+
 // Lifecycle is coroutine-mode by default (the recommended default for new
 // apps). Overridable via env so the same demo can be exercised under the
 // Mixed-mode and legacy-CGI lifecycles too — used by the coverage harness to
