@@ -142,6 +142,117 @@ Your API handlers can then pull attributes from the PSR request via `$request->g
 
 While ZealPHP does not yet ship a testing harness, you can instantiate middleware classes directly and feed them mocked `ServerRequestInterface` objects. The repository’s examples demonstrate how to wrap OpenSwoole requests; reuse them in unit tests.
 
+## Built-in Middleware Classes
+
+ZealPHP ships parity middleware for Apache/nginx behaviours. The framework's per-middleware reference table lives in `template/pages/middleware.php` (the website's `/middleware` page). The following entries cover seven additional classes — all opt-in, all PSR-15 — that complete the parity surface.
+
+### `ContentEncodingMiddleware`
+
+Apache `mod_mime AddEncoding` parity. Sets the response `Content-Encoding` header from the request URL's dot-separated file suffixes — `archive.tar.gz` with the map below yields `Content-Encoding: x-gzip`, and a doubly-encoded `data.gz.gz` yields `gzip, gzip` (order preserved, duplicates intentionally kept). The middleware is additive: it never overrides a `Content-Encoding` the handler (or a compression middleware that actually encoded the body) already set.
+
+```php
+use ZealPHP\Middleware\ContentEncodingMiddleware;
+
+$app->addMiddleware(new ContentEncodingMiddleware([
+    'gz'  => 'gzip',
+    'br'  => 'br',
+    'bz2' => 'bzip2',
+]));
+```
+
+### `ContentLanguageMiddleware`
+
+Apache `mod_mime AddLanguage` parity. Sets the response `Content-Language` header from the request URL's dot-separated suffixes — `page.en.html` yields `Content-Language: en`. Multiple language suffixes accumulate in order and are emitted comma-joined (RFC 9110 §8.5 allows a list). The middleware only sets the header when the response doesn't already declare one.
+
+```php
+use ZealPHP\Middleware\ContentLanguageMiddleware;
+
+$app->addMiddleware(new ContentLanguageMiddleware([
+    'en' => 'en',
+    'fr' => 'fr',
+    'de' => 'de',
+]));
+```
+
+### `MergeSlashesMiddleware`
+
+Apache `MergeSlashes On` / nginx `merge_slashes` parity. Collapses runs of consecutive slashes in the request path to a single slash before routing, so `/a//b///c` matches the same route as `/a/b/c`. This is an internal rewrite (no redirect) — it mutates `$g->server['REQUEST_URI']`, which the router reads. The query string is left untouched. Register it ahead of route-dependent middleware.
+
+```php
+use ZealPHP\Middleware\MergeSlashesMiddleware;
+
+$app->addMiddleware(new MergeSlashesMiddleware());
+// Now: /api//users///42 routes the same as /api/users/42
+```
+
+### `RequestHeaderMiddleware`
+
+Apache `mod_headers RequestHeader` parity. Manipulates the request headers the application sees before handlers run. Headers are written into `$g->server` using the mod_php CGI convention (`HTTP_<NAME>`, uppercased, dashes → underscores), so `apache_request_headers()`, `getallheaders()`, and `$g->server['HTTP_*']` all reflect the change. Operations: `set` (replace/create), `append` / `add` (comma-joined append or create), `unset`.
+
+```php
+use ZealPHP\Middleware\RequestHeaderMiddleware;
+
+$app->addMiddleware(new RequestHeaderMiddleware([
+    ['op' => 'set',    'name' => 'X-Forwarded-Proto', 'value' => 'https'],
+    ['op' => 'append', 'name' => 'X-Trace',           'value' => 'edge'],
+    ['op' => 'unset',  'name' => 'X-Debug'],
+]));
+```
+
+### `ReturnMiddleware`
+
+nginx `return` directive parity. Unconditionally returns a fixed response — the route handler never runs. For 3xx statuses the second argument is treated as the redirect target (`Location`); for any other status it is the response body. Pair with `ScopedMiddleware` to limit it to a path (the nginx `location { return ... }` shape).
+
+```php
+use ZealPHP\Middleware\ReturnMiddleware;
+use ZealPHP\Middleware\ScopedMiddleware;
+
+// Outright block a path
+$app->addMiddleware(ScopedMiddleware::location(new ReturnMiddleware(403), '/blocked'));
+
+// Permanent redirect from /old → /new
+$app->addMiddleware(ScopedMiddleware::match(new ReturnMiddleware(301, '/new'), '#^/old$#'));
+
+// Health-check stub
+$app->addMiddleware(ScopedMiddleware::location(new ReturnMiddleware(200, 'pong'), '/ping'));
+```
+
+### `ScopedMiddleware`
+
+Apply another middleware only to matching request paths — the Apache-container equivalent for middleware. Two factory methods:
+
+- `ScopedMiddleware::location($inner, '/admin')` — `<Location "/admin">`: literal URL-path prefix (matches `/admin`, `/admin/x`, and — like Apache — `/administrator`; use a trailing slash or a regex for segment precision).
+- `ScopedMiddleware::match($inner, '#^/api/#')` — `<LocationMatch>` / `<FilesMatch>`: PCRE pattern against the path.
+
+Outside the scope the inner middleware is skipped entirely.
+
+```php
+use ZealPHP\Middleware\ScopedMiddleware;
+use ZealPHP\Middleware\BasicAuthMiddleware;
+use ZealPHP\Middleware\BlockPhpExtMiddleware;
+
+$app->addMiddleware(ScopedMiddleware::location(
+    new BasicAuthMiddleware(realm: 'Admin', htpasswd: __DIR__ . '/.htpasswd'),
+    '/admin'
+));
+
+$app->addMiddleware(ScopedMiddleware::match(new BlockPhpExtMiddleware(), '#\.php$#'));
+```
+
+### `SetEnvIfMiddleware`
+
+Apache `mod_setenvif` parity. Sets request "environment" variables (into `$g->server`, where mod_php code reads them as `$_SERVER`) when an attribute of the request matches a regex. The classic use is tagging bots, internal IPs, or URL areas so downstream middleware / handlers can branch on a simple flag. Attribute names mirror Apache: the special tokens `Remote_Addr`, `Remote_Host`, `Server_Addr`, `Request_Method`, `Request_Protocol`, `Request_URI`; any other name is treated as a request header (so `User-Agent` gives `BrowserMatch` behaviour).
+
+```php
+use ZealPHP\Middleware\SetEnvIfMiddleware;
+
+$app->addMiddleware(new SetEnvIfMiddleware([
+    ['attr' => 'User-Agent',  'regex' => '#bot#i',    'set' => ['IS_BOT' => '1']],
+    ['attr' => 'Request_URI', 'regex' => '#^/admin#', 'set' => ['ADMIN_AREA' => '1']],
+    ['attr' => 'Remote_Addr', 'regex' => '#^10\.#',   'set' => ['INTERNAL' => '1']],
+]));
+```
+
 ## Future Directions
 
 `standards-and-roadmap.md` tracks planned improvements such as:

@@ -32,15 +32,7 @@ Legacy demo pages contain ~600 inline `style=` attributes and 10+ inline `<scrip
 
 ## PSR Interoperability
 
-ZealPHP integrates with the following PSR specifications:
-
-- **PSR-3 (Logging)** – `ZealPHP\Log\Logger` extends `Psr\Log\AbstractLogger` with level filtering, message interpolation, and exception context. Routes output through the existing `log_write()` infrastructure. Accepts any `$minLevel` to suppress lower-severity messages.
-- **PSR-4 (Autoloading)** – Implementation via Composer; required for IDE autocompletion and package interoperability.
-- **PSR-7 (HTTP Messages)** – `OpenSwoole\Core\Psr\ServerRequest` and `OpenSwoole\Core\Psr\Response` underlie ZealPHP’s request/response lifecycle. Handlers can return any PSR-7-compatible response.
-- **PSR-15 (HTTP Server Request Handlers)** – Middleware pipeline is built upon PSR-15, allowing third-party middleware to slot in without modification.
-- **PSR-16 (Simple Cache)** – `ZealPHP\Cache\SimpleCacheAdapter` wraps the static `Cache` class with full `CacheInterface` compliance, including `getMultiple`/`setMultiple`/`deleteMultiple`, `DateInterval` TTL support, and key validation.
-- **PSR-17 (HTTP Factories)** – Six factory classes in `ZealPHP\HTTP\Factory\` (`RequestFactory`, `ResponseFactory`, `StreamFactory`, `UriFactory`, `ServerRequestFactory`, `UploadedFileFactory`) wrap OpenSwoole’s PSR-7 implementations.
-- **PSR-18 (HTTP Client)** – `ZealPHP\HTTP\Client` implements `ClientInterface` using curl. Automatically coroutine-aware via OpenSwoole’s runtime hooks. Configurable timeout, SSL verification, and redirect following.
+ZealPHP implements PSR-3, PSR-4, PSR-7, PSR-11, PSR-15, PSR-16, PSR-17, and PSR-18 — see [STANDARDS.md](../STANDARDS.md) for the complete interoperability table (proving tests, conformance level, implementing class per PSR).
 
 ## Documentation Expectations
 
@@ -52,16 +44,19 @@ Treat Markdown files in `docs/` as canonical documentation. When proposing chang
 - Ensure `composer install` passes without warnings *before* publishing a release.
 - After tagging, trigger Packagist webhooks so the new version is indexed promptly.
 
+## Shipped Highlights
+
+- **Superglobal-less default mode** – `App::superglobals(false)` is the shipped default for new projects: per-coroutine `RequestContext` (`$g`) replaces process-wide `$_GET` / `$_POST` / `$_SESSION` arrays, making the runtime safe to handle concurrent coroutines without cross-request leaks. See [runtime-architecture.md](runtime-architecture.md) for the lifecycle setters that compose around it (`processIsolation`, `enableCoroutine`, `hookAll`, `cgiMode`).
+
 ## Roadmap Highlights
 
 The following initiatives are being researched or actively developed:
 
-1. **Superglobal-less default mode** – Move towards coroutine-first deployments by default, potentially replacing PHP superglobals with ZealPHP-native abstractions. Requires exhaustive testing of session and request isolation.
-2. **Configurable middleware groups** – Allow route-scoped middleware stacks for targeted policies (e.g., apply authentication only to `/api/*` automatically).
-3. **Improved session drivers** – Introduce coroutine-friendly session storage (Redis, custom in-memory pools) to complement the current file-based handler.
-4. **Task orchestration helpers** – Higher-level APIs for scheduling recurring jobs and collecting task results.
-5. **Observability toolkit** – First-class metrics, tracing hooks, and structured request logs to integrate with popular observability platforms.
-6. **Developer tooling** – Command-line installer, project generator, and environment scaffolding to simplify onboarding.
+1. **Configurable middleware groups** – Allow route-scoped middleware stacks for targeted policies (e.g., apply authentication only to `/api/*` automatically).
+2. **Improved session drivers** – Introduce coroutine-friendly session storage (Redis, custom in-memory pools) to complement the current file-based handler.
+3. **Task orchestration helpers** – Higher-level APIs for scheduling recurring jobs and collecting task results.
+4. **Observability toolkit** – First-class metrics, tracing hooks, and structured request logs to integrate with popular observability platforms.
+5. **Developer tooling** – Command-line installer, project generator, and environment scaffolding to simplify onboarding.
 
 Contributions aligned with the roadmap are encouraged. Open issues in the repository or submit a proposal describing the problem space, design sketch, and PSR implications.
 

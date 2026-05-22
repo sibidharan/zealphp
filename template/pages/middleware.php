@@ -30,6 +30,13 @@ $siteUrl = site_url();
   <tr><td><a href="#mime-type"><code>MimeTypeMiddleware</code></a></td><td>Apache <code>AddType</code> / <code>ForceType</code></td><td>Sets/overrides <code>Content-Type</code> on non-static responses by extension or pattern</td></tr>
   <tr><td><a href="#body-rewrite"><code>BodyRewriteMiddleware</code></a></td><td>Apache <code>mod_substitute</code> (<code>Substitute s/x/y/</code>)</td><td>Single-line regex substitution on response body</td></tr>
   <tr><td><a href="#host-router"><code>HostRouterMiddleware</code></a></td><td>nginx <code>server_name a.com b.com</code></td><td>Dispatches per-host routes inside one ZealPHP instance</td></tr>
+  <tr><td><a href="#content-encoding"><code>ContentEncodingMiddleware</code></a></td><td>Apache <code>mod_mime AddEncoding</code></td><td>Sets <code>Content-Encoding</code> from URL file suffixes (e.g. <code>.gz</code>, <code>.br</code>)</td></tr>
+  <tr><td><a href="#content-language"><code>ContentLanguageMiddleware</code></a></td><td>Apache <code>mod_mime AddLanguage</code></td><td>Sets <code>Content-Language</code> from URL file suffixes (e.g. <code>.en</code>, <code>.fr</code>)</td></tr>
+  <tr><td><a href="#merge-slashes"><code>MergeSlashesMiddleware</code></a></td><td>Apache <code>MergeSlashes On</code>, nginx <code>merge_slashes</code></td><td>Collapses runs of consecutive slashes in the request path before routing</td></tr>
+  <tr><td><a href="#request-header"><code>RequestHeaderMiddleware</code></a></td><td>Apache <code>mod_headers RequestHeader</code></td><td><code>set</code> / <code>append</code> / <code>unset</code> on inbound request headers before handlers run</td></tr>
+  <tr><td><a href="#return"><code>ReturnMiddleware</code></a></td><td>nginx <code>return</code> directive</td><td>Unconditionally returns a fixed response — pair with <code>ScopedMiddleware</code></td></tr>
+  <tr><td><a href="#scoped"><code>ScopedMiddleware</code></a></td><td>Apache <code>&lt;Location&gt;</code> / <code>&lt;LocationMatch&gt;</code> containers</td><td>Apply another middleware only to matching request paths</td></tr>
+  <tr><td><a href="#set-env-if"><code>SetEnvIfMiddleware</code></a></td><td>Apache <code>mod_setenvif</code> / <code>BrowserMatch</code></td><td>Set request "env" vars in <code>$g->server</code> when a request attribute matches a regex</td></tr>
 </table>
 
 <?php
@@ -341,6 +348,103 @@ $app->addMiddleware(new HostRouterMiddleware([
     'api.example.com'   => fn($req, $next) =>
         $next->handle($req->withAttribute('app.scope', 'api')),
     '__default'         => fn($req, $next) => $next->handle($req),
+]));
+PHP]); ?>
+
+<h3 id="content-encoding" style="margin-top:1.5rem"><code>ContentEncodingMiddleware</code></h3>
+<p>Sets the response <code>Content-Encoding</code> header from the request URL's dot-separated file suffixes. Apache's <code>find_ct</code> walks every suffix and accumulates an encoding chain — <code>archive.tar.gz</code> with <code>AddEncoding x-gzip .gz</code> yields <code>Content-Encoding: x-gzip</code>, and a doubly-encoded <code>data.gz.gz</code> yields <code>gzip, gzip</code> (order preserved, duplicates intentionally kept). Additive and opt-in: never overrides a <code>Content-Encoding</code> a handler (or a real compression middleware) already set. Apache parity: <code>mod_mime AddEncoding</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\ContentEncodingMiddleware;
+
+$app->addMiddleware(new ContentEncodingMiddleware([
+    'gz'  => 'gzip',
+    'br'  => 'br',
+    'bz2' => 'bzip2',
+]));
+PHP]); ?>
+
+<h3 id="content-language" style="margin-top:1.5rem"><code>ContentLanguageMiddleware</code></h3>
+<p>Sets the response <code>Content-Language</code> header from the request URL's dot-separated suffixes — <code>page.en.html</code> with <code>AddLanguage en .en</code> yields <code>Content-Language: en</code>. Multiple language suffixes accumulate in order and are emitted comma-joined (RFC 9110 §8.5 allows a list). Additive and opt-in: only sets the header when the response doesn't already declare one. Apache parity: <code>mod_mime AddLanguage</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\ContentLanguageMiddleware;
+
+$app->addMiddleware(new ContentLanguageMiddleware([
+    'en' => 'en',
+    'fr' => 'fr',
+    'de' => 'de',
+]));
+PHP]); ?>
+
+<h3 id="merge-slashes" style="margin-top:1.5rem"><code>MergeSlashesMiddleware</code></h3>
+<p>Collapses runs of consecutive slashes in the request path to a single slash before routing, so <code>/a//b///c</code> matches the same route as <code>/a/b/c</code>. Internal rewrite (no redirect) — mutates <code>$g->server['REQUEST_URI']</code>, which the router reads. The query string is left untouched. Register it ahead of route-dependent middleware. Apache parity: <code>MergeSlashes On</code>. nginx parity: <code>merge_slashes on;</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\MergeSlashesMiddleware;
+
+$app->addMiddleware(new MergeSlashesMiddleware());
+// Now: /api//users///42  routes the same as  /api/users/42
+PHP]); ?>
+
+<h3 id="request-header" style="margin-top:1.5rem"><code>RequestHeaderMiddleware</code></h3>
+<p>Manipulates the request headers the application sees, before handlers run. Headers are written into <code>$g->server</code> using the mod_php CGI convention (<code>HTTP_&lt;NAME&gt;</code>, uppercased, dashes → underscores), so <code>apache_request_headers()</code>, <code>getallheaders()</code>, and <code>$g->server['HTTP_*']</code> reflect the change. Operations: <code>set</code> (replace/create), <code>append</code> / <code>add</code> (comma-joined append or create), <code>unset</code> (remove). Apache parity: <code>mod_headers RequestHeader</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\RequestHeaderMiddleware;
+
+$app->addMiddleware(new RequestHeaderMiddleware([
+    ['op' => 'set',    'name' => 'X-Forwarded-Proto', 'value' => 'https'],
+    ['op' => 'append', 'name' => 'X-Trace',           'value' => 'edge'],
+    ['op' => 'unset',  'name' => 'X-Debug'],
+]));
+PHP]); ?>
+
+<h3 id="return" style="margin-top:1.5rem"><code>ReturnMiddleware</code></h3>
+<p>Unconditionally returns a fixed response — the route handler never runs. For 3xx statuses the second argument is the redirect target (<code>Location</code>); for any other status it's the response body. Pair with <a href="#scoped"><code>ScopedMiddleware</code></a> to limit it to a path (the nginx <code>location { return ... }</code> shape). nginx parity: <code>return</code> directive.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\ReturnMiddleware;
+use ZealPHP\Middleware\ScopedMiddleware;
+
+// Outright block a path
+$app->addMiddleware(ScopedMiddleware::location(new ReturnMiddleware(403), '/blocked'));
+
+// Permanent redirect from /old → /new
+$app->addMiddleware(ScopedMiddleware::match(new ReturnMiddleware(301, '/new'), '#^/old$#'));
+
+// Health-check stub
+$app->addMiddleware(ScopedMiddleware::location(new ReturnMiddleware(200, 'pong'), '/ping'));
+PHP]); ?>
+
+<h3 id="scoped" style="margin-top:1.5rem"><code>ScopedMiddleware</code></h3>
+<p>Apply another middleware only to matching request paths — the Apache-container equivalent for middleware. Two factory methods: <code>ScopedMiddleware::location($inner, '/admin')</code> is <code>&lt;Location "/admin"&gt;</code> (literal URL-path prefix — matches <code>/admin</code>, <code>/admin/x</code>, and — like Apache — <code>/administrator</code>; use a trailing slash or a regex for segment precision). <code>ScopedMiddleware::match($inner, '#^/api/#')</code> is <code>&lt;LocationMatch&gt;</code> / <code>&lt;FilesMatch&gt;</code> (PCRE against the path). Outside the scope the inner middleware is skipped entirely.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\ScopedMiddleware;
+use ZealPHP\Middleware\BasicAuthMiddleware;
+use ZealPHP\Middleware\BlockPhpExtMiddleware;
+
+// Scope BasicAuth to /admin only
+$app->addMiddleware(ScopedMiddleware::location(
+    new BasicAuthMiddleware(realm: 'Admin', htpasswd: __DIR__ . '/.htpasswd'),
+    '/admin'
+));
+
+// Refuse *.php URLs anywhere on the host
+$app->addMiddleware(ScopedMiddleware::match(new BlockPhpExtMiddleware(), '#\.php$#'));
+PHP]); ?>
+
+<h3 id="set-env-if" style="margin-top:1.5rem"><code>SetEnvIfMiddleware</code></h3>
+<p>Sets request "environment" variables (into <code>$g->server</code>, where mod_php code reads them as <code>$_SERVER</code>) when an attribute of the request matches a regex. The classic use is tagging bots, internal IPs, or URL areas so downstream middleware / handlers can branch on a simple flag. Attribute names mirror Apache: the special tokens <code>Remote_Addr</code>, <code>Remote_Host</code>, <code>Server_Addr</code>, <code>Request_Method</code>, <code>Request_Protocol</code>, <code>Request_URI</code>; any other name is treated as a request header (so <code>User-Agent</code> gives <code>BrowserMatch</code> behaviour). Apache parity: <code>mod_setenvif</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\SetEnvIfMiddleware;
+
+$app->addMiddleware(new SetEnvIfMiddleware([
+    ['attr' => 'User-Agent',  'regex' => '#bot#i',    'set' => ['IS_BOT' => '1']],
+    ['attr' => 'Request_URI', 'regex' => '#^/admin#', 'set' => ['ADMIN_AREA' => '1']],
+    ['attr' => 'Remote_Addr', 'regex' => '#^10\.#',   'set' => ['INTERNAL' => '1']],
 ]));
 PHP]); ?>
 

@@ -5,8 +5,8 @@ This guide walks through setting up a workstation capable of running ZealPHP, ve
 ## 1. Prerequisites
 
 - **Operating system**: Linux distribution with access to `apt`, or macOS/Homebrew with equivalent packages.
-- **PHP**: >= 8.3 CLI with development headers.
-- **OpenSwoole**: PECL package `openswoole-22.1.2` compiled with coroutine sockets, OpenSSL, HTTP/2, MySQLnd, CURL, and Postgres support.
+- **PHP**: >= 8.3 CLI with development headers. Tested on 8.3 and 8.4; **PHP 8.5 is supported on OpenSwoole 26.2+** (the CI matrix runs `phpunit (PHP 8.5)`).
+- **OpenSwoole**: PECL package, `22.1+` (current channel: `openswoole-22.1.5` or later). `composer.json` pins `ext-openswoole: ">=22.0"`; **OpenSwoole 26.2+ (released Feb 2026) adds PHP 8.5 support**. Compile with coroutine sockets, OpenSSL, HTTP/2, MySQLnd, CURL, and Postgres support.
 - **uopz**: PECL package used to override built-in PHP functions inside the ZealPHP runtime.
 - **Composer**: dependency manager for PHP projects.
 
@@ -19,7 +19,7 @@ sudo apt install gcc php-dev \
   php8.3-mysqlnd postgresql libpq-dev composer
 
 sudo pecl install uopz
-sudo pecl install openswoole-22.1.2
+sudo pecl install openswoole-22.1.5     # or a newer 22.1.x / 26.2+ release
 ```
 
 When prompted during the OpenSwoole build, answer **yes** to the coroutine and protocol questions so that features such as coroutine sockets and HTTP/2 are enabled.
@@ -46,6 +46,8 @@ php -m | grep uopz
 ```
 
 Both commands should print the module name.
+
+> **Session unserialize whitelist (v0.2.26).** When uopz virtualizes `session_start()`, ZealPHP reads `$_SESSION` blobs through `unserialize()` with `['allowed_classes' => ['stdClass']]`. Scalars, arrays, and `stdClass` round-trip normally; any other class read back from session storage becomes `__PHP_Incomplete_Class`. Adding a class to the whitelist requires reviewing its `__wakeup` / `__unserialize` / `__destruct` magic methods first. See `src/Session/utils.php` and the `template/pages/sessions.php#objects-in-session` page for the canonical reference.
 
 ## 2. Clone and Install Dependencies
 

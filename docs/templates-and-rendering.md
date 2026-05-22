@@ -1,106 +1,278 @@
 # Templates and Rendering
 
-ZealPHP promotes server-driven HTML rendering with a lightweight templating system built on native PHP. Templates live under `template/` and are loaded via `App::render()`. This guide explains the folder conventions, how partials are resolved, and how to leverage streaming to build responsive UIs.
+ZealPHP renders HTML on the server with plain PHP — no Blade, no Twig, no compile step. Templates live under `template/`, public-served files live under `public/`, and the framework exposes a small **file-execution family** of methods that runs PHP files through a single private core (`App::executeFile()`) and applies the [universal return contract](#universal-return-contract).
 
-## Template Roots
+This guide covers every member of that family, the htmx-style fragment pattern, and SSR streaming from templates.
 
-`App::render($template, array $data = [], ?string $directory = null)` looks for templates relative to the current route unless a directory is specified.
+## The file-execution family — five ways to run a PHP file
 
-- Default directory: `template/home/`
-- Common files:
-  - `_master.php` – Layout wrapper
-  - `_head.php` – Document head with metadata
-  - `_style.php` – Inline styles or `<link>` references
-  - `content.php` – Primary content block
+The first four methods share a single private core (`App::executeFile()`) that runs the file, captures output, and applies the universal return contract. They differ only in (a) where the path is resolved from and (b) what the wrapper does with the result. The fifth — `App::fragment()` — runs *inside* a template and marks a named region the framework can extract by name.
 
-Example layout (`template/home/_master.php`):
+| Method | Path resolved from | Returns | Use when |
+|--------|--------------------|---------|----------|
+| `App::render($tpl, $args)` | `template/` (with `.php` suffix) | `mixed` — full return contract. **BC:** templates with no explicit `return` have their captured output echoed back. | Direct output in a route handler or inside another template |
+| `App::renderToString($tpl, $args)` | `template/` | `string` — coerces every shape (Generator consumed, Closure invoked, scalar cast) | Need HTML as a value: email body, cache entry, pass into another renderer |
+| `App::renderStream($tpl, $args)` | `template/` | `\Generator` — yields whatever the template returned, chunk-by-chunk | SSR streaming; works with echo templates AND streaming-Closure templates uniformly |
+| `App::include($publicPath, $args = [])` | `public/` (Apache document-root convention — leading `/` optional) | `mixed` — full return contract, never echoed. Auto-populates `$_SERVER['PHP_SELF']`, `SCRIPT_NAME`, `SCRIPT_FILENAME`. | Apache-style rewrites — serve `public/new.php` from a different route URL in-process |
+| `App::fragment($name, $fn)` *(v0.2.24)* | N/A — called *inside* a template | `void`. The closure's return rides the full return contract when extracted. | htmx-style template-fragment pattern — one file, two responses |
+
+`App::includeFile($path)` is a **deprecated** alias for `App::include()` retained for the WordPress showcase and existing scaffolds. New code should use `App::include()`.
+
+## `App::render()` — render a template
 
 ```php
-<?php use ZealPHP\App; ?>
-<!DOCTYPE html>
-<html lang="en">
-<?php App::render('_head', ['title' => $title]); ?>
-<body>
-    <header>
-        <h1><?= $title ?></h1>
-        <p><?= $description ?></p>
-    </header>
-    <?php App::render('content'); ?>
-    <?php App::render('_footer'); ?>
-</body>
-</html>
+public static function render(
+    string $__template_file = 'index',
+    array $__args = [],
+    string $__default_template_dir = 'template'
+): mixed
 ```
 
-## Rendering from Routes
+Paths resolve relative to `template/`. A leading `/` makes the path absolute from `template/`; otherwise the current public file's basename auto-namespaces the lookup (e.g. `App::render('header')` from `public/users.php` looks for `template/users/header.php` first, then `template/header.php`).
 
-Routes and APIs can call `App::render()` to compose HTML fragments:
+Templates receive each key of `$__args` as a local variable via `extract()`. No magic syntax — just PHP.
 
 ```php
-$app->route('/landing', function () {
-    return App::render('_master', [
-        'title' => 'Welcome to ZealPHP',
-        'description' => 'Dynamic streaming powered by OpenSwoole',
+$app->route('/users/{id}', function($id) {
+    $user = User::find($id);
+    if (!$user) return 404;
+
+    return App::render('profile', [
+        'user'    => $user,
+        'posts'   => $user->posts(),
+        'isAdmin' => $user->role === 'admin',
     ]);
 });
 ```
 
-When `App::render()` is executed, ZealPHP:
+**Backwards-compatibility behaviour.** Templates that only echo (no explicit `return`) have their captured output echoed back from `App::render()` — this keeps every existing `App::render('_master', ...)` call site in `public/*.php` working unchanged. Explicit non-string returns flow through to the caller so a route handler can `return App::render(...)` and have the universal contract apply at the response boundary.
 
-1. Determines the template directory (`template/<current-route>/` or the provided directory).
-2. Builds the absolute path and ensures it is inside the project root to prevent directory traversal.
-3. Extracts `$data` into local variables and includes the PHP file.
+### Path resolution
 
-If the template does not exist, `TemplateUnavailableException` is thrown with a helpful message containing the caller file and line number.
+| Call | Resolves to | When |
+|------|-------------|------|
+| `App::render('home')` | `template/home.php` | Top-level template |
+| `App::render('/components/_card')` | `template/components/_card.php` | Leading `/` = absolute from `template/` |
+| `App::render('header')` from `public/users.php` | `template/users/header.php` | Auto-namespaces by current public file |
+| `App::render('header')` (fallback) | `template/header.php` | If the namespaced path does not exist |
 
-## Streaming and Prefork Execution
-
-When ZealPHP runs in superglobals mode, implicit routes use `prefork_request_handler()` to isolate template rendering. This approach:
-
-- Prevents partial responses from leaking when templates throw exceptions.
-- Lets each template emit headers and cookies safely via `header()` and `setcookie()` (overridden by ZealPHP).
-- Ensures the parent process receives the final HTML once rendering completes.
-
-You can opt into the same behaviour in custom routes:
+## `App::renderToString()` — render to a string
 
 ```php
-use function ZealPHP\prefork_request_handler;
+public static function renderToString(
+    string $__template_file = 'index',
+    array $__args = [],
+    string $__default_template_dir = 'template'
+): string
+```
 
-$app->route('/reports', function () {
-    echo prefork_request_handler(function () {
-        App::render('reports/index');
-    });
+Same path resolution as `App::render()`, but the result is coerced to a string regardless of what the template returned: Generators are consumed and concatenated, Closures are invoked with parameter injection, arrays/objects are JSON-encoded, scalars are cast.
+
+```php
+$body = App::renderToString('emails/welcome', [
+    'user' => $user,
+    'url'  => $verifyUrl,
+]);
+
+mail($user->email, 'Welcome', $body);
+```
+
+## `App::renderStream()` — render as a Generator
+
+```php
+public static function renderStream(
+    string $__template_file = 'index',
+    array $__args = [],
+    string $__default_template_dir = 'template'
+): \Generator
+```
+
+Returns a Generator that yields whatever the template returned, chunk by chunk. Compose multiple template streams in a route handler with `yield from`:
+
+```php
+$app->route('/users', function() {
+    return (function() {
+        yield from App::renderStream('shell-open', ['title' => 'Users']);
+        yield from App::renderStream('users/stream', ['users' => User::all()]);
+        yield from App::renderStream('shell-close');
+    })();
 });
 ```
 
-## Accessing the Current Template
+### Three streaming template styles
 
-`App::getCurrentFile()` returns the name of the currently executing public script or the file passed into the helper. This is useful for relative template includes or conditional logic based on the active page.
+`renderStream()` accepts three template shapes — all three compose in the same `yield from` pipeline.
 
-```php
-$file = App::getCurrentFile(); // e.g., "home"
-App::render("{$file}/content");
-```
+| Style | Template code | Best for |
+|-------|---------------|----------|
+| Closure with param injection (cleanest) | `return function($users) { yield ...; };` | New streaming templates — framework injects `$users` from `$args` by name, no `use()` needed |
+| IIFE Generator | `return (function() use ($users) { yield ...; })();` | When you need variables from the include scope via `use()` |
+| Regular echo template | `<h1><?= $title ?></h1>` | Non-streaming templates — output captured and yielded as one chunk |
 
-## Working with Public Directory
-
-Pages served from `public/` can include templates directly:
+Example streaming template (`template/users/stream.php`):
 
 ```php
 <?php
-use ZealPHP\App;
-
-App::render('_master', [
-    'title' => 'Docs',
-    'description' => 'Comprehensive ZealPHP documentation',
-]);
+return function($users) {
+    yield "<section class='users'>";
+    foreach ($users as $user) {
+        yield "<div class='card'>"
+            . htmlspecialchars($user->name)
+            . "</div>\n";
+    }
+    yield "</section>";
+};
 ```
 
-Because implicit routes buffer output, you can mix template rendering with streamed fragments (for example, `flush()` partial results or echo placeholders while coroutines process data).
+The framework injects `$users` from the args array by name, exactly like route parameter injection. Each `yield` flushes to the browser immediately.
 
-## Tips for Template Authors
+## `App::include()` — run a `public/` file through the framework
 
-- Use short open tags (`<?`) consistently; the repository enables `short_open_tag=on`.
+```php
+public static function include(string $publicPath, array $args = []): mixed
+```
+
+Resolves `$publicPath` relative to `public/` (Apache document-root convention — leading `/` optional, so `'/about.php'` and `'about.php'` both work). Auto-populates `$_SERVER['PHP_SELF']`, `SCRIPT_NAME`, and `SCRIPT_FILENAME` for the included file (Apache mod_php parity). Applies `includeCheck()` containment so a traversal attempt outside the document root is refused with HTTP 403 via the universal return contract.
+
+In coroutine mode the file runs in-process via the shared `executeFile()` core. In superglobals mode (legacy apps) it dispatches to a CGI subprocess for true global-scope isolation — the file's return value still flows back through the universal return contract via the metadata channel.
+
+```php
+// Apache-style rewrite — serve public/new.php from /old-page in-process
+$app->route('/old-page', fn() => App::include('/new.php'));
+
+// Pass arguments to the included file (coroutine mode only)
+$app->route('/render/{slug}', fn($slug) => App::include('/article.php', [
+    'slug' => $slug,
+]));
+```
+
+`App::tryInclude($publicPath)` is a variant that returns `null` instead of `403` when the file is missing — useful for chaining extension-resolver patterns without conflating "not found" with "security violation".
+
+## `App::includeFile()` — deprecated alias
+
+```php
+public static function includeFile(string $path): mixed   // @deprecated since 0.2.18
+```
+
+Kept for backward compatibility with the WordPress showcase and existing user scaffolds. Accepts an absolute path. For paths under the document root, delegates to `App::include()` (security check + `$_SERVER` preamble apply). For paths outside (test fixtures, embedded utilities) the call passes straight to the shared core so the return contract still applies but no security gate fires — matching historical behaviour. **New code should call `App::include()` with a public-relative path instead.**
+
+## `App::fragment()` — htmx template fragments *(v0.2.24)*
+
+```php
+public static function fragment(string $name, callable $fn): void
+```
+
+`App::fragment()` turns any template into a dual-mode file: the same `App::render('page', $args)` call serves **either** the complete page (no fragment selector → every `App::fragment()` block runs inline) **or** just one named region (`$args['fragment'] = 'name'` → that region's buffer is cleared, only its closure runs, and the rest of the template short-circuits via `HaltException`). Same template, same route handler, two different responses on the same URL — the [htmx-essay template-fragment](https://htmx.org/essays/template-fragments/) pattern without separate partial files.
+
+```php
+// template/contacts/list.php — one template, both responses
+<ul id="contacts">
+<?php foreach ($contacts as $c): ?>
+  <?php App::fragment("contact-{$c['id']}", function() use ($c) { ?>
+    <li id="contact-<?= $c['id'] ?>"><?= htmlspecialchars($c['name']) ?></li>
+  <?php }); ?>
+<?php endforeach; ?>
+</ul>
+```
+
+```php
+// Route handler — ONE entry, both modes
+$app->route('/contacts', function($g) {
+    return App::render('contacts/list', [
+        'contacts' => Contact::all(),
+        // No selector → full <ul> with every row inline.
+        // ?fragment=contact-2 → just that one <li> on the wire.
+        'fragment' => is_string($g->get['fragment'] ?? null) ? $g->get['fragment'] : null,
+    ]);
+});
+```
+
+Inside the closure, the universal contract applies — `return 404;` for auth, `return ['id' => 1];` for JSON, `return (fn() => yield ...)();` for streaming.
+
+### Three behaviours worth knowing
+
+- **Missing fragment → 404** per the universal return contract. Asking for `?fragment=does-not-exist` does not silently fall back to the full page.
+- **First match wins** when the same name appears twice — the first block extracts, the rest of the template short-circuits.
+- **Nested renders compose** — an `App::render()` called from inside a fragment closure does *not* inherit the parent's fragment selector. Each render's scope is saved + restored in `$g->memo['_fragment']`.
+
+## Universal return contract
+
+One contract, every entry point. Route handler, fallback, error handler, `App::render() / renderToString() / renderStream() / include()`, public file, API closure, streaming-template Closure — every one rides the same return-shape mapping. The shared private core that implements this is `App::executeFile()`.
+
+| The handler / file does | Core sees | `ResponseMiddleware` emits |
+|-------------------------|-----------|----------------------------|
+| `echo "html"; // no explicit return` | `"html"` (buffered) | 200 + HTML body |
+| `return 404;` | `404` (int) | 404 status, empty body |
+| `return ['ok' => true];` | `['ok' => true]` (array) | 200 + JSON (`Content-Type: application/json`) |
+| `return "explicit html";` | `"explicit html"` (string) | HTML body |
+| `echo "shell"; return "body";` | `"shellbody"` (concatenated) | HTML body (wire order preserved) |
+| `return (function() { yield ...; })();` | `\Generator` | SSR stream — each `yield` flushed |
+| `return function($req) { yield ...; };` | `\Closure` (param-injected when invoked) | SSR stream after invocation |
+| `echo "header"; return (function() { yield ...; })();` | `\Generator` wrapping `"header"` + delegated yields | Streamed in source order |
+| `return new Response($body, 200);` | `ResponseInterface` | PSR-7 response used directly (output buffer ignored) |
+
+**Valid HTTP status codes.** When the contract says `int = HTTP status`, the int must be in the range **100–599** (RFC 7230). Codes outside that range are coerced to 500 with a warning logged via `elog()`. `return 1;` is the one special case — PHP's `include` returns `1` when a file has no explicit `return`, so the framework treats it as "no explicit return" inside `App::include() / render() / renderToString() / renderStream()` and surfaces the buffered echo as the response body. If you want HTTP 1 specifically, return `100` instead.
+
+## Yield from everywhere
+
+Generators work in route handlers, public files, API handlers, and template files — anything that runs through the universal return contract.
+
+| Location | How to stream | Example |
+|----------|---------------|---------|
+| Route handler | Return a Generator directly | `return (function() { yield "chunk"; })();` |
+| Public file | Return a Generator from the file | `public/feed.php` → `<?php return (function() { yield "..."; })();` |
+| API handler | Return a Generator from `$get`/`$post` | `$get = function() { return (function() { yield ...; })(); };` |
+| Template (via `renderStream()`) | Return a Closure or Generator | `return function($items) { yield ...; };` |
+| File dispatched via `App::include()` | Same — file's `return` flows through the contract | `return (function() { yield ...; })();` |
+
+```php
+// public/feed.php — a streaming public page
+<?php
+use ZealPHP\App;
+
+return (function() {
+    yield App::renderToString('shell-open', ['title' => 'Live Feed']);
+    yield "<h1>Feed</h1>";
+    foreach (fetchFeedItems() as $item) {
+        yield "<article>{$item->title}</article>\n";
+    }
+    yield App::renderToString('shell-close');
+})();
+```
+
+`$g->_streaming = true` is set by `stream()` / `sse()` so `ResponseMiddleware` knows to skip `ob_get_clean()`.
+
+## Layouts and composition
+
+Components render other components. Build a layout system with one master layout composing smaller components — no template-inheritance syntax, just PHP includes.
+
+```php
+// public/about.php — page entry (3 lines)
+<?php use ZealPHP\App;
+App::render('_master', ['title' => 'About Us', 'page' => 'about']);
+```
+
+```php
+// template/_master.php — layout wrapper
+<!doctype html>
+<html>
+<head><title><?= htmlspecialchars($title) ?></title></head>
+<body>
+  <?php App::render('_nav', ['active' => $page]) ?>
+  <main>
+    <?php App::render("/pages/$page") ?>
+  </main>
+  <?php App::render('_footer') ?>
+</body>
+</html>
+```
+
+This is exactly how the ZealPHP docs site works — every page in `public/` is 3 lines calling `App::render('_master', [...])`. The master renders the nav, the page content, and the footer.
+
+## Tips for template authors
+
+- **Always escape user data** with `htmlspecialchars()`. PHP templates have no auto-escaping — full control, full responsibility.
 - Keep templates free of business logic. Transform data in route handlers or service classes and pass simple view models to `App::render()`.
-- Embrace layout partials (`_head.php`, `_footer.php`) to share common markup.
-- Pair templates with CSS/JS assets in `public/` or load them via CDN—ZealPHP does not prescribe an asset pipeline.
-- For coroutine-enabled deployments (`App::superglobals(false)`), ensure any blocking operations are executed via `go()` or `prefork_request_handler()` before rendering to avoid stalling the event loop.
+- Use the route-handler / public-file / API-closure layers for logic; templates are view-only.
+- Pair templates with CSS/JS assets in `public/` — ZealPHP does not prescribe an asset pipeline.
+- For coroutine-enabled deployments (`App::superglobals(false)`), prefer `App::renderStream()` over blocking renders when the data source is itself async.
