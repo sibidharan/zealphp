@@ -80,6 +80,19 @@ $app->patternRoute('#^/docs/api(/.*)?$#', function ($response) {
         return null;
     }
 
+    // Curated API landing — replace phpDocumentor's flat Table-of-Contents
+    // at the root with a class index grouped by namespace (built from the
+    // generated class pages). Far more navigable than the phpdoc default.
+    if ($rel === '/index.html') {
+        App::render('/_master', [
+            'title'     => 'API Reference · ZealPHP Docs',
+            'page'      => 'docs/api-index',
+            'active'    => 'docs',
+            'apiGroups' => \ZealPHP\Docs\ApiIndex::groups($apiRoot . '/classes'),
+        ]);
+        return null;
+    }
+
     $target = $apiRoot . $rel;
     $realTarget = realpath($target);
     if ($realTarget === false
@@ -246,6 +259,7 @@ $app->patternRoute('#^/docs/api(/.*)?$#', function ($response) {
             'apiSidebar'   => $sidebarHtml,
             'apiCssHref'   => $apiCssHref,
             'apiTitle'     => $apiTitle,
+            'apiCrumb'     => \ZealPHP\Docs\ApiIndex::breadcrumb($rel),
         ]);
         return null;
     }

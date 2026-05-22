@@ -32,6 +32,19 @@ $v = defined('ZEALPHP_ASSET_VERSION') ? ZEALPHP_ASSET_VERSION : '';
   <article class="lesson-content docs-api">
     <?php App::render('/pages/docs/_search'); ?>
 
+    <?php $apiCrumb = $apiCrumb ?? []; if (!empty($apiCrumb)): ?>
+      <nav class="docs-breadcrumbs" aria-label="Breadcrumbs">
+        <?php foreach ($apiCrumb as $i => $seg): ?>
+          <?php if ($i > 0): ?><span class="sep">›</span><?php endif; ?>
+          <?php if (!empty($seg['href'])): ?>
+            <a href="<?= htmlspecialchars($seg['href'], ENT_QUOTES) ?>" hx-boost="false"><?= htmlspecialchars($seg['label'], ENT_QUOTES) ?></a>
+          <?php else: ?>
+            <span class="current"><?= htmlspecialchars($seg['label'], ENT_QUOTES) ?></span>
+          <?php endif; ?>
+        <?php endforeach; ?>
+      </nav>
+    <?php endif; ?>
+
     <?php if (!empty($apiSidebar)): ?>
       <details class="docs-api-index">
         <summary>API Index — Namespaces, Packages, Reports, Indices</summary>

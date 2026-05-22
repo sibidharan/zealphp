@@ -1130,6 +1130,48 @@ pre:hover > .code-copy { opacity: 1; }
   color: inherit;
 }
 
+/* Curated API index — grouped class grid (template/pages/docs/api-index.php) */
+.api-index { margin-top: 1.5rem; }
+.api-index-group { margin-bottom: 2rem; }
+.api-index-group-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0 0 .75rem;
+  padding-bottom: .4rem;
+  border-bottom: 1px solid var(--border);
+  letter-spacing: -.01em;
+}
+.api-index-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: .4rem;
+}
+.api-index-link {
+  display: block;
+  padding: .5rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  text-decoration: none;
+  background: var(--bg);
+  transition: border-color .15s, background .15s;
+}
+.api-index-link:hover {
+  border-color: rgba(245,158,11,.45);
+  background: rgba(245,158,11,.05);
+  text-decoration: none;
+}
+.api-index-link code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: .82rem;
+  color: var(--accent-dark);
+}
+.api-index-link:hover code { color: var(--accent-dark); }
+
 /* ====================================================================
  * API SEARCH — htmx-powered inline suggestions at the top of every
  * /docs/api/ page. The <input> debounces input events and GETs
