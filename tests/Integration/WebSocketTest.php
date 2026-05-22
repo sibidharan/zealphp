@@ -211,10 +211,16 @@ class WebSocketTest extends TestCase
     public function testTickerPushesAndStops(): void
     {
         [$open, $tick, $stopped] = $this->ws('/ws/ticker', function ($cli) {
-            $open = $cli->recv(2.0);         // connected frame
-            $tick = $cli->recv(2.0);         // first server tick (~1s later)
+            // Generous recv windows: the first tick fires a full second
+            // after onOpen (server-side `co::sleep(1)`), and a loaded CI
+            // runner (esp. the from-source openswoole build on PHP 8.5)
+            // can add scheduling jitter on top of the connect + onOpen
+            // round-trip. 5s headroom keeps this timing-sensitive ticker
+            // assertion stable without masking a real hang.
+            $open = $cli->recv(5.0);         // connected frame (immediate)
+            $tick = $cli->recv(5.0);         // first server tick (~1s later)
             $cli->push('stop');
-            $stopped = $cli->recv(2.0);      // stopped frame
+            $stopped = $cli->recv(5.0);      // stopped frame
             return [$open->data ?? null, $tick->data ?? null, $stopped->data ?? null];
         });
 
