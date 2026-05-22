@@ -332,7 +332,9 @@
 .auth-card input { padding: .55rem .7rem; border: 1px solid #d6d3d1; border-radius: 6px; font: inherit; }
 .auth-card button { padding: .55rem 1rem; border: 0; border-radius: 6px; background: var(--accent, #f59e0b); color: #fff; font-weight: 600; cursor: pointer; }
 .auth-card .auth-toggle { background: transparent; color: var(--accent, #f59e0b); border: 1px solid var(--accent, #f59e0b); }
-.auth-error { color: #b91c1c; font-size: .85rem; margin-top: .5rem; }
+/* Specific enough to beat `.auth-card p` / `.lesson-content p` (both 0,1,1),
+   which otherwise repaint the swapped-in error in muted body grey. */
+.lesson-content .auth-error { color: #b91c1c; font-size: .85rem; margin-top: .5rem; font-weight: 600; }
 
 /* Chat */
 /* Chat widget — two-column: notes left, chat right */
