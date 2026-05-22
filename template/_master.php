@@ -8,7 +8,7 @@ $active      ??= $page;
 <!doctype html>
 <html lang="en">
 <?php App::render('/_head', compact('title', 'description', 'page')); ?>
-<body hx-boost="true">
+<body hx-boost="true" hx-ext="head-support">
 <div id="htmx-progress" class="htmx-progress" aria-hidden="true"></div>
 <?php App::render('/_nav', ['active' => $active]); ?>
 <?php App::render('/components/_banner'); ?>

@@ -62,6 +62,11 @@ $ogImageUrl = $ogImageExists ? ($__scheme . '://' . $__host . $ogImage) : null;
   <!-- Instrument Sans — display / heading font; Fira Code — code font -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap">
   <script src="https://unpkg.com/htmx.org@2.0.10" defer></script>
+  <!-- head-support: hx-boost swaps <body> + <title> but NOT <head>; this
+       extension reconciles <head> on boosted navigation so each page's
+       page-scoped CSS/JS module (css/pages/*.css, js/pages/*.js) loads
+       when you navigate INTO it, not just on a full reload. -->
+  <script src="https://unpkg.com/htmx-ext-head-support@2.0.4/head-support.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>
   <script src="/js/mermaid-init.js?v=<?= $v ?>" defer></script>
   <script src="/js/site-nav.js?v=<?= $v ?>" defer></script>
