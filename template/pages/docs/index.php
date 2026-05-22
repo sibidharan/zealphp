@@ -1,85 +1,69 @@
 <?php
 /**
- * /docs/ landing — narrative guides + API reference.
- *
- * Single source of truth for what's surfaced: the docs/*.md files in the repo
- * (Wave 1-3 of the docs-drift-fix sweep brought these in sync with code at
- * HEAD 46a648a, audit at .omc/research/docs-drift-audit-2026-05-22.md).
+ * /docs/ landing — same learn-layout shape (sidebar + main) so the docs
+ * section is visually consistent with /learn/. The main column shows a
+ * brief intro and the same 16-guide index as the sidebar, but with
+ * one-line descriptions so the user can scan-pick a starting point.
  */
+use ZealPHP\App;
 
 $groups = [
     'Getting started' => [
-        ['getting-started',      'Install PHP/OpenSwoole/uopz, boot your first server.'],
-        ['directory-structure',  'Repo layout — where routes, APIs, templates, and src/ live.'],
-        ['runtime-architecture', 'Request lifecycle, lifecycle setters (v0.2.27 safety throw), mode matrix.'],
+        ['getting-started',      'Getting Started',         'Install PHP/OpenSwoole/uopz, boot your first server.'],
+        ['directory-structure',  'Directory Structure',     'Repo layout — where routes, APIs, templates, and src/ live.'],
+        ['runtime-architecture', 'Runtime Architecture',    'Request lifecycle, lifecycle setters (v0.2.27 safety throw), mode matrix.'],
     ],
     'Routing & responses' => [
-        ['routing',                  'route(), nsRoute, nsPathRoute, patternRoute + parameter injection.'],
-        ['api-layer',                'ZealAPI file-based REST, v0.2.25 auth hooks (authChecker, adminChecker, …).'],
-        ['error-handling',           'setErrorHandler, uopz overrides, recursion guard, content-negotiated 5xx.'],
-        ['templates-and-rendering',  'render / renderToString / renderStream / include / fragment — the file-execution family.'],
+        ['routing',                  'Routing',                  'route(), nsRoute, nsPathRoute, patternRoute + parameter injection.'],
+        ['api-layer',                'API Layer',                'ZealAPI file-based REST, v0.2.25 auth hooks.'],
+        ['error-handling',           'Error Handling',           'setErrorHandler, uopz overrides, recursion guard, content-negotiated 5xx.'],
+        ['templates-and-rendering',  'Templates & Rendering',    'render / renderToString / renderStream / include / fragment.'],
     ],
     'Surfaces' => [
-        ['streaming',                    'yield-based SSR, stream(), sse(), renderStream — four streaming patterns.'],
-        ['websocket',                    'App::ws(), per-worker fd map, frame opcodes, cross-worker broadcast via Store.'],
-        ['tasks-and-concurrency',        'go(), task workers, App::tick/after, coproc(), prefork_request_handler.'],
-        ['middleware-and-authentication','All 28 PSR-15 middleware classes + Apache/nginx parity citations.'],
+        ['streaming',                     'Streaming',             'yield-based SSR, stream(), sse(), renderStream.'],
+        ['websocket',                     'WebSocket',             'App::ws(), per-worker fd map, frame opcodes, cross-worker broadcast.'],
+        ['tasks-and-concurrency',         'Tasks & Concurrency',   'go(), task workers, App::tick/after, coproc().'],
+        ['middleware-and-authentication', 'Middleware & Auth',     'All 28 PSR-15 middleware classes + Apache/nginx parity.'],
     ],
     'Operations' => [
-        ['deployment',  'systemd unit, CLI flags, PID files, Docker, OPcache tuning.'],
-        ['fuzzing',     'slowhttptest, radamsa, gabbi — HTTP framing & conformance fuzzing harnesses.'],
+        ['deployment', 'Deployment',  'systemd unit, CLI flags, PID files, Docker, OPcache tuning.'],
+        ['fuzzing',    'Fuzzing',     'slowhttptest, radamsa, gabbi — HTTP framing & conformance fuzzing.'],
     ],
     'Background' => [
-        ['apache-parity',         'What Apache features port (and what doesn\'t) — the migration boundary.'],
-        ['competitive-analysis',  'How ZealPHP positions vs FrankenPHP, RoadRunner, Octane, AMPHP.'],
-        ['standards-and-roadmap', 'PSR conformance + the v0.3.0+ roadmap.'],
+        ['apache-parity',         'Apache Parity',          'What Apache features port — and what doesn\'t.'],
+        ['competitive-analysis',  'Competitive Analysis',   'vs FrankenPHP, RoadRunner, Octane, AMPHP.'],
+        ['standards-and-roadmap', 'Standards & Roadmap',    'PSR conformance + the v0.3.0+ roadmap.'],
     ],
 ];
-
 ?>
-<section class="docs-landing">
-  <header class="docs-hero">
-    <h1>ZealPHP Documentation</h1>
-    <p class="lede">
-      Two surfaces, one source of truth. <strong>Narrative guides</strong> walk
-      through each subsystem with worked examples; the <strong>API reference</strong>
-      is auto-generated from <code>src/</code> docblocks and covers every public
-      method, property, and class.
-    </p>
-  </header>
+<div class="learn-layout">
+  <?php App::render('/pages/docs/_sidebar', ['topic' => null]); ?>
 
-  <div class="docs-grid">
-    <article class="docs-card docs-card--api">
-      <h2><a href="/docs/api/">API Reference →</a></h2>
-      <p>
-        Auto-generated from <code>src/</code> docblocks via phpDocumentor.
-        Bundled PHAR builder lands in the next release — until then,
-        <a href="/docs/api/">/docs/api/</a> shows the local-build recipe.
-        Source docblocks are
-        <a href="https://github.com/sibidharan/zealphp/tree/master/src" target="_blank" rel="noopener">browsable on GitHub</a>
-        meanwhile.
+  <article class="lesson-content docs-landing">
+    <header class="lesson-header">
+      <nav class="lesson-crumb"><a href="/docs/">Docs</a></nav>
+      <h1 class="lesson-title">ZealPHP Documentation</h1>
+      <p class="lesson-subtitle">
+        Two surfaces, one source of truth. <strong>16 narrative guides</strong>
+        walk through each subsystem with worked examples; the
+        <a href="/docs/api/">API reference</a> is auto-generated from
+        <code>src/</code> docblocks and covers every public method, property,
+        and class.
       </p>
-    </article>
+    </header>
 
-    <article class="docs-card docs-card--guides">
-      <h2>Guides</h2>
-      <p>16 markdown-source guides covering the framework from setup to deployment.</p>
-    </article>
-  </div>
-
-  <?php foreach ($groups as $heading => $topics): ?>
-    <section class="docs-group">
-      <h2><?= htmlspecialchars($heading, ENT_QUOTES) ?></h2>
-      <ul class="docs-topics">
-        <?php foreach ($topics as [$slug, $blurb]): ?>
-          <li>
-            <a href="/docs/guide/<?= htmlspecialchars($slug, ENT_QUOTES) ?>">
-              <?= htmlspecialchars(ucwords(str_replace('-', ' ', $slug)), ENT_QUOTES) ?>
-            </a>
-            <span class="docs-blurb"><?= htmlspecialchars($blurb, ENT_QUOTES) ?></span>
-          </li>
-        <?php endforeach; ?>
-      </ul>
-    </section>
-  <?php endforeach; ?>
-</section>
+    <div class="docs-markdown">
+      <?php $totalNum = 0; foreach ($groups as $heading => $items): ?>
+        <h2><?= htmlspecialchars($heading, ENT_QUOTES) ?></h2>
+        <ul class="docs-topics-list">
+          <?php foreach ($items as [$slug, $label, $blurb]): $totalNum++; ?>
+            <li>
+              <a href="/docs/guide/<?= htmlspecialchars($slug, ENT_QUOTES) ?>"><strong><?= htmlspecialchars($label, ENT_QUOTES) ?></strong></a>
+              <span class="docs-topics-blurb"><?= htmlspecialchars($blurb, ENT_QUOTES) ?></span>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+      <?php endforeach; ?>
+    </div>
+  </article>
+</div>

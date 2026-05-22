@@ -6,6 +6,13 @@
 # guarantee reproducible regeneration; the HTML bundle would add ~10MB
 # of binary noise to every release.
 /public/docs/api/
+
+# phpDocumentor PHAR — fetched on first boot if missing (see app.php boot
+# hook). 33MB self-contained binary; not appropriate to commit. The boot
+# hook downloads from the GitHub releases endpoint that's pinned in
+# scripts/install-phpdoc.sh.
+/tools/phpdoc.phar
+/.phpdoc-cache/
 .env
 *.key
 /.sessions/
