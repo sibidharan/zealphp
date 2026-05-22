@@ -27,8 +27,9 @@ $groups = [
         ['middleware-and-authentication', 'Middleware & Auth'],
     ],
     'Operations' => [
-        ['deployment', 'Deployment'],
-        ['fuzzing',    'Fuzzing'],
+        ['deployment',       'Deployment'],
+        ['fastcgi-backends', 'FastCGI Backends'],
+        ['fuzzing',          'Fuzzing'],
     ],
     'Background' => [
         ['apache-parity',         'Apache Parity'],

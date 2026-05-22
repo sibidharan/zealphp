@@ -26,8 +26,9 @@ $groups = [
         ['middleware-and-authentication', 'Middleware & Auth',     'All 28 PSR-15 middleware classes + Apache/nginx parity.'],
     ],
     'Operations' => [
-        ['deployment', 'Deployment',  'systemd unit, CLI flags, PID files, Docker, OPcache tuning.'],
-        ['fuzzing',    'Fuzzing',     'slowhttptest, radamsa, gabbi — HTTP framing & conformance fuzzing.'],
+        ['deployment',       'Deployment',       'systemd unit, CLI flags, PID files, Docker, OPcache tuning.'],
+        ['fastcgi-backends', 'FastCGI Backends', 'Front php-fpm or any FCGI server — cgiMode(\'fcgi\') + registerCgiBackend() for custom upstreams.'],
+        ['fuzzing',          'Fuzzing',          'slowhttptest, radamsa, gabbi — HTTP framing & conformance fuzzing.'],
     ],
     'Background' => [
         ['apache-parity',         'Apache Parity',          'What Apache features port — and what doesn\'t.'],

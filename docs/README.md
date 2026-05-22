@@ -23,6 +23,7 @@ Welcome to the official documentation set for ZealPHP, a coroutine-aware PHP fra
 
 ### Operations
 - [deployment.md](./deployment.md) — systemd unit, Docker image, reverse-proxy guidance, log rotation, and trusted-proxy / `clientIp()` setup.
+- [fastcgi-backends.md](./fastcgi-backends.md) — front php-fpm or any FastCGI/1.0 server; `cgiMode('fcgi')` + `fcgiAddress()` framework-wide and `registerCgiBackend()` per-extension (custom Python/Ruby/Perl upstreams), socket forms, `fcgi_params`, 502/timeout behavior.
 - [fuzzing.md](./fuzzing.md) — Radamsa parser fuzzing, Gabbi contract fixtures, slowhttptest reactor checks, and the http-garden differential roadmap.
 
 ### Background

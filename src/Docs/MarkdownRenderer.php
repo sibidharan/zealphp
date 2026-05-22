@@ -34,7 +34,7 @@ final class MarkdownRenderer
         'getting-started', 'directory-structure', 'runtime-architecture',
         'routing', 'api-layer', 'error-handling', 'templates-and-rendering',
         'streaming', 'websocket', 'tasks-and-concurrency', 'middleware-and-authentication',
-        'deployment', 'fuzzing', 'apache-parity', 'competitive-analysis', 'standards-and-roadmap',
+        'deployment', 'fuzzing', 'fastcgi-backends', 'apache-parity', 'competitive-analysis', 'standards-and-roadmap',
     ];
 
     /** GitHub blob base for `.md` files that aren't surfaced guides. */

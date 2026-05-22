@@ -18,7 +18,7 @@ $page = function () {
         'getting-started', 'directory-structure', 'runtime-architecture',
         'routing', 'api-layer', 'error-handling', 'templates-and-rendering',
         'streaming', 'websocket', 'tasks-and-concurrency', 'middleware-and-authentication',
-        'deployment', 'fuzzing',
+        'deployment', 'fuzzing', 'fastcgi-backends',
         'apache-parity', 'competitive-analysis', 'standards-and-roadmap',
     ];
 
