@@ -50,7 +50,7 @@ your script.php  (in-process include)
 OpenSwoole writes response on the same socket
   ↓
 browser</code></pre>
-    <p class="vsfpm-arch-note-light">Same execution model as FPM — sequential per warm worker, native superglobals — but <strong>no FastCGI socket hop and no separate web server</strong>. The interpreter is pre-loaded; nothing forks per request. Flip on <code>enableCoroutine(true)</code> (the default) and the same worker handles thousands of concurrent connections — the bonus fast path, covered below.</p>
+    <p class="vsfpm-arch-note-light">Same execution model as FPM — sequential per warm worker, native superglobals — but <strong>no FastCGI socket hop and no web server needed to bridge HTTP&nbsp;&harr;&nbsp;FastCGI</strong> (you'll still front it with a reverse proxy for TLS + scaling in production). The interpreter is pre-loaded; nothing forks per request. Flip on <code>enableCoroutine(true)</code> (the default) and the same worker handles thousands of concurrent connections — the bonus fast path, covered below.</p>
   </div>
 </div>
 
@@ -203,7 +203,7 @@ browser</code></pre>
 <h2 class="vsfpm-h2">The simplest fix today: Mixed-mode = an FPM pool, minus the operations</h2>
 
 <p class="vsfpm-prose">
-  Here's the part most people miss: <strong>if your legacy app doesn't actually need fresh-process-per-request isolation, you don't need the CGI bridge at all.</strong> Turn off process isolation and run the workers synchronously — ZealPHP becomes a PHP-FPM pool that happens to have an HTTP server built in. No <code>proc_open</code>, no FastCGI socket, no nginx in front. Zero bridge cost, available now (no waiting for the v0.3.0 worker pool).
+  Here's the part most people miss: <strong>if your legacy app doesn't actually need fresh-process-per-request isolation, you don't need the CGI bridge at all.</strong> Turn off process isolation and run the workers synchronously — ZealPHP becomes a PHP-FPM pool that happens to speak HTTP natively. No <code>proc_open</code>, no FastCGI socket hop, and no separate web server just to translate HTTP&nbsp;&harr;&nbsp;FastCGI the way nginx does for an FPM pool. Zero bridge cost, available now (no waiting for the v0.3.0 worker pool). You'll still put a reverse proxy in front in production &mdash; see the note below.
 </p>
 
 <?php App::render('/components/_code', [
@@ -233,11 +233,15 @@ $app->run();
   <tr class="vsfpm-row-tint"><td>No PHP fork per request (interpreter pre-loaded)</td><td><code>processIsolation(false)</code> — in-process include, <strong>~0 ms</strong></td></tr>
   <tr><td><code>pm.max_requests = 500</code> (recycle for hygiene)</td><td>OpenSwoole <code>max_request</code> setting</td></tr>
   <tr class="vsfpm-row-tint"><td><code>$_GET</code> / <code>$_SESSION</code> native</td><td>Populated per request (v0.2.27)</td></tr>
-  <tr><td>Needs nginx/Apache in front for HTTP</td><td class="vsfpm-cell-accent">HTTP server built in — no front proxy needed</td></tr>
+  <tr><td><strong>Requires</strong> nginx/Apache in front — FPM can't speak HTTP</td><td class="vsfpm-cell-accent">Speaks HTTP natively — a front proxy is <em>optional</em> for one node, recommended for TLS + scaling</td></tr>
 </table>
 
 <p class="vsfpm-prose-mt">
-  This is the apples-to-apples FPM comparison and ZealPHP wins it cleanly: <strong>same per-request execution model, same worker semantics, but no FastCGI socket hop and no separate web server to run.</strong> The 30–50 ms CGI bridge cost was never mandatory — it's the price of <em>true process isolation per request</em>, which only WordPress/Drupal-class apps with <code>define()</code> collisions actually need.
+  This is the apples-to-apples FPM comparison and ZealPHP wins it cleanly: <strong>same per-request execution model, same worker semantics, but no FastCGI socket hop and no web server needed purely to bridge HTTP&nbsp;&harr;&nbsp;FastCGI.</strong> The 30–50 ms CGI bridge cost was never mandatory — it's the price of <em>true process isolation per request</em>, which only WordPress/Drupal-class apps with <code>define()</code> collisions actually need.
+</p>
+
+<p class="vsfpm-prose-mt">
+  <strong>Production still wants a reverse proxy in front.</strong> ZealPHP speaking HTTP natively removes the web server you'd otherwise run <em>just</em> to translate FastCGI — it does not remove the reasons to run a real edge proxy. Put nginx, Caddy, HAProxy, or Traefik (or Apache as <code>mod_proxy</code>) in front for <strong>TLS termination</strong> and, above all, <strong>horizontal scaling</strong>: the proxy load-balances across a pool of ZealPHP nodes (round-robin / least-conn over an upstream of backend addresses), exactly as it would across a pool of FPM or Node services. One built-in HTTP server replaces the per-node web server; it does not replace the load balancer. See <a href="/deployment" class="vsfpm-link-accent">Deployment</a> for the reverse-proxy setup.
 </p>
 
 <!-- ────────────────────────────────────────────────────────────── -->

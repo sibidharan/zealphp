@@ -4,7 +4,7 @@ use ZealPHP\App;
 <section class="section">
 <div class="container">
 <h1 class="section-title">Deploy</h1>
-<p class="section-desc">ZealPHP is a long-lived OpenSwoole server process. One process per port, N workers per process. Run behind a reverse proxy (nginx or Caddy) for TLS, static assets, and request logging.</p>
+<p class="section-desc">ZealPHP is a long-lived OpenSwoole server process. One process per port, N workers per process. Run it behind a reverse proxy (nginx, Caddy, HAProxy, Traefik &mdash; or Apache as <code>mod_proxy</code>) for <strong>TLS termination</strong>, static assets, request logging, and <strong>horizontal scaling</strong>: point the proxy at an upstream pool of ZealPHP backend addresses and it load-balances across them (round-robin / least-conn), exactly as it would across a pool of PHP-FPM or Node services. The built-in HTTP server replaces the per-node web server; the edge proxy is still your load balancer and TLS terminator.</p>
 
 <h2 class="deploy-h2-first">systemd</h2>
 <p>A reference unit is shipped at <code>deploy/zealphp.service</code>. Copy it to <code>/etc/systemd/system/zealphp.service</code>, adjust <code>User</code>, <code>WorkingDirectory</code>, and <code>ExecStart</code>, then:</p>

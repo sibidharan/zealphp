@@ -143,9 +143,9 @@ $siteUrl = site_url();
   <div class="container">
     <h2 class="section-title">The PHP we love. The execution model we needed.</h2>
     <p class="section-desc">
-      LAMP shipped the web &mdash; Apache, mod_php, then PHP-FPM. Twenty-five years of
-      request-per-process: spawn a worker, run the code, die when done. Shared-nothing
-      by design.
+      LAMP shipped the web &mdash; Apache and mod_php, now nginx and PHP-FPM. Twenty-five years of
+      request isolation: a pool of warm workers, each handling one request at a time and reset
+      to a clean slate before the next. Shared-nothing by design.
     </p>
     <p class="section-desc">
       It still works. But it can't stream AI tokens. It can't push WebSocket events.
