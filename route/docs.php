@@ -187,6 +187,26 @@ $app->patternRoute('#^/docs/api(/.*)?$#', function ($response) {
             $apiHtml .= $dom->saveHTML($child);
         }
 
+        // Backtick → <code> rendering. phpdoc preserves backticks as
+        // literal characters in summary/description text (their default
+        // template doesn't run markdown). Convert single-line backtick
+        // pairs to <code> chips, but skip ranges already inside <code>
+        // or <pre> blocks (split on those, transform only the outer
+        // segments). Limits the match to one line so multi-line
+        // ```fences``` aren't accidentally swallowed.
+        $apiHtml = (string) preg_replace_callback(
+            '#(<(?:code|pre|script|style)\b[^>]*>.*?</(?:code|pre|script|style)>)|`([^`\n<>]{1,160})`#si',
+            static function (array $m): string {
+                // If group 1 matched, this is an existing code/pre/script
+                // block — pass through unchanged.
+                if (isset($m[1]) && $m[1] !== '') {
+                    return $m[1];
+                }
+                return '<code>' . $m[2] . '</code>';
+            },
+            $apiHtml
+        );
+
         // Stylesheet — phpdoc emits <link rel="stylesheet" href="css/...">
         // and uses <base href="../"> in <head> to make it resolve to
         // /docs/api/css/... regardless of subpath. We strip the head, so

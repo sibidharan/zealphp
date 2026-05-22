@@ -40,10 +40,75 @@ $search = function () {
         $index = is_array($decoded) ? $decoded : [];
     }
 
-    if (!$index) {
+    // Guide index — scan docs/*.md for H1/H2/H3 headings + the first
+    // paragraph after each as the summary. Cached per worker.
+    static $guides = null;
+    if ($guides === null) {
+        $guides  = [];
+        $docsDir = dirname(__DIR__, 2) . '/docs';
+        // Skip the README + the audit dumps (those aren't surfaced anyway).
+        $skipSlugs = ['README', 'apache-parity-audit', 'nginx-parity-audit'];
+        foreach (glob($docsDir . '/*.md') as $mdFile) {
+            $slug = basename($mdFile, '.md');
+            if (in_array($slug, $skipSlugs, true)) {
+                continue;
+            }
+            $lines = file($mdFile, FILE_IGNORE_NEW_LINES);
+            if (!$lines) {
+                continue;
+            }
+            $inCode = false;
+            $n      = count($lines);
+            for ($i = 0; $i < $n; $i++) {
+                $line = $lines[$i];
+                if (preg_match('/^```/', $line)) {
+                    $inCode = !$inCode;
+                    continue;
+                }
+                if ($inCode) {
+                    continue;
+                }
+                if (!preg_match('/^(#{1,3})\s+(.+?)\s*$/', $line, $m)) {
+                    continue;
+                }
+                $level = strlen($m[1]);
+                $title = trim($m[2]);
+                $anchor = strtolower((string) preg_replace('/[^a-z0-9]+/i', '-', $title));
+                $anchor = trim($anchor, '-');
+                // Summary: first non-empty, non-heading, non-code line.
+                $summary = '';
+                for ($j = $i + 1; $j < min($i + 20, $n); $j++) {
+                    $next = trim((string) $lines[$j]);
+                    if ($next === '' || $next[0] === '#' || str_starts_with($next, '```') || str_starts_with($next, '|') || str_starts_with($next, '---')) {
+                        continue;
+                    }
+                    $summary = (string) preg_replace('/[*`_\[\]]+/', '', strip_tags($next));
+                    if (mb_strlen($summary) > 140) {
+                        $summary = mb_substr($summary, 0, 137) . '…';
+                    }
+                    break;
+                }
+                $url = '/docs/guide/' . $slug . ($level === 1 ? '' : '#' . $anchor);
+                $guides[] = [
+                    'fqsen'   => 'guide:' . $slug . '#' . $anchor,
+                    'name'    => $title,
+                    'summary' => $summary,
+                    'url'     => $url,
+                    '_kind'   => 'Guides',
+                    '_parent' => ucwords(str_replace('-', ' ', $slug)),
+                ];
+            }
+        }
+    }
+
+    // Merge — guides first so they appear ahead of API symbols when
+    // both match. Final ordering still goes through the score sort.
+    $combined = array_merge($guides, $index);
+    if (!$combined) {
         $this->response('', 200);
         return;
     }
+    $index = $combined;
 
     // Substring case-insensitive match. Score: exact > starts-with > contains.
     $qLower = mb_strtolower($q);
@@ -91,8 +156,10 @@ $search = function () {
         return 'Classes';
     };
 
-    // Bucket the top 12 hits by kind.
+    // Bucket the top 12 hits by kind. Guides first — they're usually
+    // the most relevant for a typed query like "lifecycle" or "routing".
     $groups = [
+        'Guides'     => [],
         'Classes'    => [],
         'Methods'    => [],
         'Properties' => [],
@@ -101,12 +168,16 @@ $search = function () {
     ];
     foreach (array_slice($matches, 0, 12) as $hit) {
         $entry = $hit['entry'];
-        $kind  = $inferKind((string) ($entry['fqsen'] ?? ''));
+        $kind  = $entry['_kind'] ?? $inferKind((string) ($entry['fqsen'] ?? ''));
         $groups[$kind][] = $entry;
     }
 
-    // Extract the "parent" — the class name for methods/properties.
+    // Extract the "parent" — class name for methods/properties, guide
+    // title for guide entries.
     $parent = static function (array $entry): string {
+        if (isset($entry['_parent'])) {
+            return (string) $entry['_parent'];
+        }
         $fqsen = (string) ($entry['fqsen'] ?? '');
         if (!str_contains($fqsen, '::')) {
             return '';
@@ -122,7 +193,10 @@ $search = function () {
         <li class="api-search-group">
             <h6 class="api-search-kind"><?= htmlspecialchars($kind, ENT_QUOTES) ?></h6>
             <?php foreach ($entries as $entry):
-                $url   = '/docs/api/' . ltrim((string) ($entry['url'] ?? '#'), './');
+                $rawUrl = (string) ($entry['url'] ?? '#');
+                // Guide entries already carry an absolute /docs/guide/ URL;
+                // phpdoc entries are relative (classes/Foo.html#…) so prepend /docs/api/.
+                $url   = str_starts_with($rawUrl, '/') ? $rawUrl : '/docs/api/' . ltrim($rawUrl, './');
                 $name  = (string) ($entry['name'] ?? '');
                 $sum   = (string) ($entry['summary'] ?? '');
                 $par   = $parent($entry);

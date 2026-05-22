@@ -47,3 +47,8 @@ infection.html
 __pycache__/
 *.pyc
 .omc
+
+# Per-session ephemeral
+/.claude/scheduled_tasks.lock
+/.claude/worktrees/
+/.phpdoc/
