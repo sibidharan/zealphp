@@ -323,6 +323,24 @@ php app.php &
 
 ---
 
+## Make targets
+
+Common dev tasks are wrapped in a `Makefile` — run `make` (or `make help`) to list them. They're thin wrappers over the `composer` / `vendor/bin/*` / `php app.php` / `scripts/*.sh` commands documented above, so they never drift.
+
+```bash
+make help                 # list every target
+make install              # composer install
+make serve / restart / stop / status / logs    # the php app.php server CLI (PORT overridable)
+make unit / integration / test                  # PHPUnit suites
+make stan                 # PHPStan static analysis (level 10)
+make check                # unit + stan — the pre-commit gate
+make coverage / coverage-full / infection        # coverage + mutation testing (MSI)
+make docs / docs-rebuild  # build / force-rebuild the API reference
+make bench / perf-smoke   # benchmarks
+```
+
+---
+
 ## Core Concepts
 
 ### Parameter Injection
