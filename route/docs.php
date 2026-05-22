@@ -13,7 +13,6 @@
  */
 
 use ZealPHP\App;
-use League\CommonMark\GithubFlavoredMarkdownConverter;
 
 $app = App::instance();
 
@@ -36,11 +35,7 @@ $app->route('/docs/guide/{topic}', function (string $topic) {
         return 404;
     }
 
-    $converter = new GithubFlavoredMarkdownConverter([
-        'html_input' => 'strip',
-        'allow_unsafe_links' => false,
-    ]);
-    $body = (string) $converter->convert(file_get_contents($candidate));
+    $body = \ZealPHP\Docs\MarkdownRenderer::render((string) file_get_contents($candidate));
 
     $title = ucwords(str_replace(['-', '_'], ' ', $topic));
 

@@ -7,7 +7,6 @@
 
 use ZealPHP\App;
 use ZealPHP\G;
-use League\CommonMark\GithubFlavoredMarkdownConverter;
 
 $page = function () {
     $g = G::instance();
@@ -58,11 +57,7 @@ $page = function () {
         return;
     }
 
-    $converter = new GithubFlavoredMarkdownConverter([
-        'html_input' => 'strip',
-        'allow_unsafe_links' => false,
-    ]);
-    $body  = (string) $converter->convert((string) file_get_contents($realMd));
+    $body  = \ZealPHP\Docs\MarkdownRenderer::render((string) file_get_contents($realMd));
     $title = ucwords(str_replace(['-', '_'], ' ', $slug));
 
     $html = App::renderToString('/pages/docs/guide', [
