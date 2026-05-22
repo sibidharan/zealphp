@@ -117,6 +117,16 @@
   letter-spacing: .08em;
   font-weight: 700;
 }
+/* phpdoc's "-clean" list modifier (the API tree / table-of-contents
+ * lists) has no backing rule in the bundled template.css, so its items
+ * fall back to default disc bullets — including the empty wrapper <li>
+ * that only holds a nested <ul>, which shows a stray bullet next to
+ * nothing (e.g. on the HaltException page). Strip bullets on -clean
+ * lists; they're meant to be bulletless. */
+.docs-api .phpdocumentor-list.-clean,
+.docs-api .phpdocumentor-list.-clean li {
+  list-style: none;
+}
 .docs-api .phpdocumentor-list a {
   color: var(--text);
   padding: .3rem .6rem;
