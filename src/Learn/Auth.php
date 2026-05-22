@@ -136,38 +136,63 @@ class Auth
     }
 
     /**
-     * Emit the post-auth redirect for the shared learn login/register/logout
-     * flow. For an htmx request it sends a clean client-side redirect
-     * (`HX-Redirect` + 200). A bare `302 Location` must NOT be used for htmx:
-     * the XHR follows the 302 transparently, so htmx never sees the redirect
-     * and instead swaps the redirected page into the form's small target —
-     * which wrecks the layout (the reported "sidebar disappears on login"
-     * bug). Non-htmx (no-JS) posts still get a normal 302.
+     * Resolve the post-auth destination: the page the user acted from
+     * (htmx's `HX-Current-URL`, then `Referer`), so login keeps you in
+     * context instead of always dumping you on /learn/notes. Only a
+     * same-site absolute path is honoured (leading "/" but not the
+     * protocol-relative "//"); anything else falls back to $default. Pure
+     * + side-effect-free so it's unit-testable.
+     */
+    public static function resolveAuthRedirect(?string $hxCurrentUrl, ?string $referer, string $default = '/learn/notes'): string
+    {
+        foreach ([$hxCurrentUrl, $referer] as $candidate) {
+            if (!is_string($candidate) || $candidate === '') {
+                continue;
+            }
+            $path = (string) (parse_url($candidate, PHP_URL_PATH) ?: '');
+            if ($path !== '' && $path[0] === '/' && !str_starts_with($path, '//')) {
+                return $path;
+            }
+        }
+        return $default;
+    }
+
+    /**
+     * Emit the post-auth response for the shared learn login/register/logout
+     * flow.
      *
-     * Redirects back to the page the user acted from — htmx's `HX-Current-URL`,
-     * then `Referer` — so logging in on /learn/tictactoe stays there instead
-     * of always dumping the user on /learn/notes. Only same-site absolute
-     * paths are honoured; anything else falls back to $default.
+     * For an htmx request it sends `HX-Location` — an in-place content swap,
+     * NOT a navigation: htmx fetches the destination, selects its
+     * `.lesson-content`, and swaps it into the current one. No full page
+     * reload, scroll position kept, and the `hx-preserve`d sidebar is left
+     * untouched. (The earlier `HX-Redirect` did a full client-side reload —
+     * correct layout, but it reset scroll and re-fetched the whole page; and
+     * a bare `302 Location` is even worse: the XHR follows it transparently,
+     * so htmx swapped the redirected page into the form's tiny feedback div
+     * and dropped the sidebar — the originally reported bug.)
+     *
+     * Non-htmx (no-JS) posts still get a normal `302 Location`.
      */
     public static function redirectAfterAuth(RequestContext $g, string $default = '/learn/notes'): void
     {
-        $candidate = '';
-        foreach (['HTTP_HX_CURRENT_URL', 'HTTP_REFERER'] as $header) {
-            $value = $g->server[$header] ?? null;
-            if (is_string($value) && $value !== '') {
-                $candidate = $value;
-                break;
-            }
-        }
-
-        $path = $candidate !== '' ? (string) (parse_url($candidate, PHP_URL_PATH) ?: '') : '';
-        // Same-site absolute path only: leading "/" but not protocol-relative "//".
-        $target = ($path !== '' && $path[0] === '/' && !str_starts_with($path, '//'))
-            ? $path
-            : $default;
+        $hxUrl   = $g->server['HTTP_HX_CURRENT_URL'] ?? null;
+        $referer = $g->server['HTTP_REFERER'] ?? null;
+        $target  = self::resolveAuthRedirect(
+            is_string($hxUrl) ? $hxUrl : null,
+            is_string($referer) ? $referer : null,
+            $default
+        );
 
         if (!empty($g->server['HTTP_HX_REQUEST'])) {
-            header('HX-Redirect: ' . $target);
+            header('HX-Location: ' . (string) json_encode([
+                'path'   => $target,
+                'target' => '.lesson-content',
+                'select' => '.lesson-content',
+                // `show:none` keeps htmx from scrolling on the swap, so the
+                // page doesn't jump to the top — the reader stays where they
+                // were (e.g. at the login panel, now showing the logged-in UI).
+                'swap'   => 'outerHTML show:none',
+            ]));
             http_response_code(200);
         } else {
             header('Location: ' . $target);
