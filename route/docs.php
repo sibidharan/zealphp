@@ -93,6 +93,14 @@ $app->patternRoute('#^/docs/api(/.*)?$#', function ($response) {
         return null;
     }
 
+    // `G` is a runtime class_alias of RequestContext, so phpDocumentor emits
+    // no ZealPHP-G.html page. Redirect the old short name to the canonical
+    // class page instead of 404ing, so links/searches for `G` resolve.
+    if ($rel === '/classes/ZealPHP-G.html') {
+        $response->redirect('/docs/api/classes/ZealPHP-RequestContext.html', 301);
+        return null;
+    }
+
     $target = $apiRoot . $rel;
     $realTarget = realpath($target);
     if ($realTarget === false
