@@ -1039,6 +1039,71 @@ class App
     }
 
     /**
+     * Coroutine-safe command execution.
+     *
+     * Inside an OpenSwoole coroutine (`Coroutine::getCid() >= 0`) this yields
+     * to the scheduler via `Coroutine\System::exec()` instead of blocking the
+     * worker. Outside a coroutine (boot / CLI) it falls back to the blocking
+     * `App::rawExec()` implementation. Either way the return shape is the same.
+     *
+     * @param string     $cmd     Shell command to run.
+     * @param float|null $timeout Coroutine-mode timeout in seconds (`null` = no timeout).
+     *
+     * @return array{output:string, code:int, signal:int}
+     */
+    public static function exec(string $cmd, ?float $timeout = null): array
+    {
+        if (\OpenSwoole\Coroutine::getCid() >= 0) {
+            // The ide-helper stub types System::exec()'s 2nd arg as bool and its
+            // return as a bare array; the real ext-openswoole 26.2 takes a float
+            // timeout (-1 = none) and returns {output, code, signal}. See the
+            // documented ignore in phpstan.neon.
+            $r = \OpenSwoole\Coroutine\System::exec($cmd, $timeout ?? -1);
+            if (is_array($r)) {
+                $output = $r['output'] ?? '';
+                $code = $r['code'] ?? 0;
+                $signal = $r['signal'] ?? 0;
+                return [
+                    'output' => is_scalar($output) ? (string) $output : '',
+                    'code' => is_numeric($code) ? (int) $code : 0,
+                    'signal' => is_numeric($signal) ? (int) $signal : 0,
+                ];
+            }
+            return ['output' => '', 'code' => 1, 'signal' => 0];
+        }
+        return ['output' => (string) self::rawExec($cmd), 'code' => 0, 'signal' => 0];
+    }
+
+    /**
+     * Raw blocking command execution via `proc_open`.
+     *
+     * Deliberately uses `proc_open` — NOT `shell_exec`/`exec`/`system`/
+     * `passthru`/`popen` — because those builtins are uopz-overridden by the
+     * CGI layer; routing through `proc_open` keeps this escape hatch
+     * recursion-safe regardless of those overrides.
+     *
+     * @return string|null Captured stdout, or `null` if the process failed to start.
+     */
+    public static function rawExec(string $cmd): ?string
+    {
+        $descriptors = [
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+        /** @var array<int, resource> $pipes */
+        $pipes = [];
+        $p = @\proc_open($cmd, $descriptors, $pipes);
+        if (!is_resource($p)) {
+            return null;
+        }
+        $out = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        \proc_close($p);
+        return $out === false ? '' : $out;
+    }
+
+    /**
      * OpenSwoole's `enable_coroutine` server setting — whether each inbound
      * HTTP request is auto-wrapped in its own coroutine. When false,
      * requests run synchronously one at a time per worker (a worker

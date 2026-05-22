@@ -29,6 +29,13 @@ parameters:
         -
             message: '#enableCoroutine\(\) expects bool, int given\.$#'
             path: src/App.php
+        # OpenSwoole\Coroutine\System::exec()'s 2nd arg is a float timeout
+        # (-1 = none) in the real ext-openswoole 26.2; the ide-helper stub
+        # mis-declares it as bool $get_error_stream. App::exec() passes the
+        # timeout float, which the runtime honours.
+        -
+            message: '#^Parameter \#2 \$get_error_stream of static method OpenSwoole\\Coroutine\\System::exec\(\) expects bool, float\|int given\.$#'
+            path: src/App.php
         # openswoole/ide-helper stubs declare Http\Response::isWritable() and
         # ext-posix declares posix_kill() as constant-return — at runtime
         # both return false on the very condition (client disconnect /
