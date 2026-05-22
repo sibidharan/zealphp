@@ -6,7 +6,7 @@ ZealPHP blends implicit routing (public directory and APIs) with programmable ro
 
 Implicit routes are registered by `App::run()` after all custom route files have been included:
 
-- **Public directory** – Requests map to files under `public/`. Examples:
+- **Public directory** – Requests map to files under `public/`, the **document root** (the Apache `DocumentRoot` equivalent). It defaults to `public/`; change it with `App::documentRoot('…')` before `App::init()`. Examples:
   - `/` → `public/index.php`
   - `/about` → `public/about.php`
   - `/blog/post-1` → `public/blog/post-1.php` (falls back to `public/blog/post-1/index.php` when a directory exists)
