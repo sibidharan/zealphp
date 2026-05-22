@@ -202,6 +202,10 @@
   Intel i9-14900K · PHP 8.3 · 4 workers each · <code>ab -n 3000 -c 20</code> — same run as <a href="/vs-fpm#measured-four-ways" style="color:var(--accent)">/vs-fpm</a>. Three honest takeaways: (1) the default CGI bridge's <code>proc_open</code> fork is the whole story behind the 160 req/s — turning process isolation off (Mixed-mode) recovers ~137× on the same file; (2) if you need isolation, <code>cgiMode('fork')</code> is ~5× faster than proc (814 vs 160) by forking the warm worker instead of cold-starting PHP; (3) Apache mod_php edges out ZealPHP on trivial legacy-file serving (a mature in-process C SAPI is hard to beat for no-I/O echo). ZealPHP's win is the native-route numbers above, coroutine I/O concurrency, WebSocket/SSE, and not needing a separate web server. Full analysis + the FPM architecture breakdown: <a href="/vs-fpm#measured-four-ways" style="color:var(--accent)">/vs-fpm</a>.
 </p>
 
+<p style="margin:.6rem 0 0;color:#94a3b8;font-size:.85rem">
+  <strong>Not shown:</strong> <code>cgiMode('fcgi')</code> — the third dispatch option — forwards each <code>public/*.php</code> file to an upstream php-fpm pool over FastCGI (nginx <code>fastcgi_pass</code> / Apache <code>mod_proxy_fcgi</code> parity). Performance ≈ whatever that pool delivers; we don't run PHP at all in this mode. Walkthrough: <a href="/legacy-apps#cgi-mode-fcgi" style="color:var(--accent)">/legacy-apps#cgi-mode-fcgi</a>.
+</p>
+
 <!-- ────────────────────────────────────────────────────────────── -->
 <!-- 4. Concurrency sweep                                          -->
 <!-- ────────────────────────────────────────────────────────────── -->

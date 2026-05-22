@@ -241,6 +241,36 @@ $app->run();
 </p>
 
 <!-- ────────────────────────────────────────────────────────────── -->
+<!-- 3b'. Alternative path: front an existing FPM pool                -->
+<!-- ────────────────────────────────────────────────────────────── -->
+
+<h2 style="margin:3rem 0 1rem">Or: keep your FPM pool — let ZealPHP front it</h2>
+
+<p style="color:#cbd5e1;line-height:1.65">
+  If you've already invested in a tuned php-fpm pool (sized for your workload, hooked into your observability stack) and don't want to retire it, ZealPHP can speak FastCGI to it directly. Set <code>App::cgiMode('fcgi')</code> + <code>App::fcgiAddress(...)</code>, and every <code>public/*.php</code> file gets forwarded to the upstream pool over the same wire protocol nginx's <code>fastcgi_pass</code> and Apache's <code>mod_proxy_fcgi</code> use. ZealPHP becomes the HTTP / WebSocket / coroutine layer; php-fpm remains the PHP runtime.
+</p>
+
+<?php App::render('/components/_code', [
+  'lang' => 'php',
+  'code' => '<?php
+// app.php — front an existing php-fpm pool instead of running PHP in-process
+use ZealPHP\App;
+
+App::superglobals(true);
+App::processIsolation(true);
+App::cgiMode(\'fcgi\');                   // \'proc\' (default) | \'fork\' | \'fcgi\'
+App::fcgiAddress(\'127.0.0.1:9000\');     // or \'unix:/run/php/php-fpm.sock\'
+
+$app = App::init(\'0.0.0.0\', 8080);
+$app->run();
+',
+]); ?>
+
+<p style="color:#cbd5e1;line-height:1.65;margin-top:1rem">
+  Throughput in this mode equals whatever your FPM pool delivers minus one local socket hop — we don't run PHP at all. That's why the measured table below intentionally <em>omits</em> the <code>'fcgi'</code> row: the answer is "ask your FPM pool" and depends on <code>pm.max_children</code>, the file under load, and Unix-socket vs TCP. Full walkthrough + per-extension form (mix <code>.py</code> + <code>.pl</code> backends in the same app) lives at <a href="/legacy-apps#cgi-mode-fcgi" style="color:var(--accent)">/legacy-apps#cgi-mode-fcgi</a>.
+</p>
+
+<!-- ────────────────────────────────────────────────────────────── -->
 <!-- 3c. Measured: process isolation on vs off                       -->
 <!-- ────────────────────────────────────────────────────────────── -->
 

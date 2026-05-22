@@ -1142,6 +1142,7 @@ App::registerCgiBackend('.py', [
     'fcgi_params' => ['APP_ENV' => 'prod'],   // merged into CGI env (nginx fastcgi_param parity)
 ]);
 // Requests to /hello.py are proxied to the FastCGI server — no process spawn per request.
+// Same machinery as the framework-wide App::cgiMode('fcgi') — see #cgi-mode-fcgi below.
 PHP]); ?>
 
 <?php App::render('/components/_code', [
@@ -1174,6 +1175,49 @@ $backend = App::resolveCgiBackend('/var/www/app/index.php');
 PHP]); ?>
 
 <p>See <code>examples/multi-lang-cgi/</code> for a runnable demo registering <code>.pl</code> (proc/Perl) alongside the default PHP backend.</p>
+
+<h2 id="cgi-mode-fcgi" style="margin-top:2.5rem">Framework-wide <code>cgiMode('fcgi')</code> — front an upstream FPM pool</h2>
+
+<p>The per-extension <code>'fcgi'</code> backend above is for mixing languages. The framework-wide setter <code>App::cgiMode('fcgi')</code> applies the same FastCGI-forwarding behaviour to <strong>every</strong> <code>public/*.php</code> file — turning ZealPHP into a thin HTTP layer in front of an existing php-fpm pool. Same wire protocol as Apache's <code>mod_proxy_fcgi</code> and nginx's <code>fastcgi_pass</code>, so the FastCGI listener you point at can be php-fpm, HHVM, RoadRunner, or any other FCGI 1.0 backend.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Boot — all .php forwarded to 127.0.0.1:9000 (php-fpm default)',
+    'code'  => <<<'PHP'
+use ZealPHP\App;
+
+App::superglobals(true);          // CGI dispatch path (proc / fork / fcgi)
+App::processIsolation(true);
+App::cgiMode('fcgi');             // 'proc' (default) | 'fork' | 'fcgi'
+App::fcgiAddress('127.0.0.1:9000');  // or 'unix:/run/php/php-fpm.sock'
+
+App::init('0.0.0.0', 8080);
+$app = new App();
+$app->run();
+PHP]); ?>
+
+<p>When to reach for this:</p>
+<ul style="line-height:1.7">
+  <li>You already operate a tuned php-fpm pool (sized for your workload, hooked into your observability stack) and don't want to retire it — ZealPHP adds OpenSwoole's HTTP / WebSocket / coroutine layer on top.</li>
+  <li>You want the v0.3.0 "warm pool" semantics today by letting php-fpm be that pool — the FPM master keeps interpreters warm across requests, so per-request cost is closer to FPM's ~1–3 ms than the bridge's ~30–50 ms.</li>
+  <li>You're migrating from an <code>nginx → fastcgi_pass</code> deployment and want a drop-in shape change rather than a code rewrite. The <code>fcgi_params</code> array on <code>App::registerCgiBackend()</code> mirrors nginx's <code>fastcgi_param</code> directive.</li>
+</ul>
+
+<p><strong>Under the hood:</strong> dispatch lives in <code>App::cgiFcgi(string $path, ?string $address = null, array $extraParams = [])</code>, which builds the CGI/1.1 environment via <code>buildCgiEnv()</code>, forwards via <code>ZealPHP\Legacy\FastCgiClient::request($params, $stdinBody)</code>, and applies the upstream's status code + headers to <code>$g-&gt;zealphp_response</code>. A failed connection or <code>FastCgiException</code> from the upstream surfaces as a clean <strong>502 Bad Gateway</strong> — same shape Apache and nginx emit when their FCGI upstream is down.</p>
+
+<p><strong>Performance:</strong> we don't run PHP at all in this mode — throughput equals whatever your FPM pool delivers minus one local socket hop. We deliberately don't quote a number here: it depends on your FPM <code>pm.max_children</code>, the file under load, and whether you're on Unix sockets vs TCP. The bridge-cost table at <a href="/vs-fpm#measured-four-ways">/vs-fpm</a> compares the in-process modes (<code>'proc'</code> / <code>'fork'</code> / Mixed-mode) and intentionally omits <code>'fcgi'</code> because the answer is "ask your FPM pool."</p>
+
+<h2 id="httpoxy-hardening" style="margin-top:2.5rem">What the CGI bridge does for you (security)</h2>
+
+<p>All three dispatch modes (<code>'proc'</code> / <code>'fork'</code> / <code>'fcgi'</code>) build the CGI/1.1 environment through the same <code>App::buildCgiEnv()</code> path, so the hardening below applies uniformly. Each item ships a corresponding Apache parity rationale rather than being ZealPHP-specific behaviour.</p>
+
+<ul style="line-height:1.7">
+  <li><strong>httpoxy CVE-2016-5385 mitigation</strong> — incoming <code>Proxy:</code> request headers are NOT forwarded as <code>HTTP_PROXY</code> in the CGI env (<code>src/App.php:2830-2836</code>). Apache <code>util_script.c:224-227</code> parity. Prevents the well-known PHP/Go/Python CGI library family that reads <code>HTTP_PROXY</code> to choose an outbound proxy from being hijacked by a hostile client.</li>
+  <li><strong>CGI script timeout — <code>App::$cgi_timeout</code> default 60 s</strong> (<code>src/App.php:273</code>). When a CGI subprocess exceeds the budget the worker escalates <code>proc_terminate(SIGTERM)</code> → <code>SIGKILL</code> and returns control to the request handler. Apache <code>CGIScriptTimeout</code> parity. Override by setting the public static property: <code>App::$cgi_timeout = 120;</code> before <code>App::init()</code>.</li>
+  <li><strong>CGI <code>Status:</code> header parsed from stdout</strong> (<code>src/cgi_worker.php:101-113</code>) — a legacy script that emits <code>Status: 404 Not Found\r\n</code> sets the response status to 404 and the <code>Status:</code> header itself is NOT forwarded to the client. Range-clamped 100–599; non-numeric or out-of-range values fall back to 200. mod_cgi parity.</li>
+  <li><strong>stderr drained to <code>elog</code></strong> — anything the subprocess writes to fd 2 (PHP warnings, custom debug, uncaught notices) is routed to <code>/tmp/zealphp/debug.log</code> via the <code>cgi_worker</code> log channel, never leaked into the response body. Prevents the classic "PHP warning rendered into the HTML page" disclosure path.</li>
+</ul>
+
+<p>None of these are opt-in — they're always active when <code>App::superglobals(true)</code> + <code>App::processIsolation(true)</code> is set. There is no flag to disable the <code>HTTP_PROXY</code> strip, the timeout has a floor of 1 s rather than an unbounded option, and stderr always lands in <code>elog</code>.</p>
 
 <h2 style="margin-top:2.5rem">Performance &amp; Hybrid Mode (continued)</h2>
 <p>For the full performance picture including CGI backends, see the <a href="/performance">performance page</a>.</p>
