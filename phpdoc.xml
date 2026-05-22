@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpdocumentor
+    configVersion="3"
+    xmlns="https://www.phpdoc.org"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="https://docs.phpdoc.org/latest/phpdoc.xsd"
+>
+    <title>ZealPHP API Reference</title>
+
+    <paths>
+        <output>public/docs/api</output>
+        <cache>.phpdoc-cache</cache>
+    </paths>
+
+    <version number="latest">
+        <api format="php">
+            <source dsn="file://./">
+                <path>src</path>
+            </source>
+            <ignore>
+                <path>tests/**/*</path>
+                <path>vendor/**/*</path>
+                <path>examples/**/*</path>
+                <path>bench/**/*</path>
+                <path>scripts/**/*</path>
+            </ignore>
+            <extensions>
+                <extension>php</extension>
+            </extensions>
+            <visibility>public</visibility>
+            <default-package-name>ZealPHP</default-package-name>
+            <markers>
+                <marker>TODO</marker>
+                <marker>FIXME</marker>
+            </markers>
+        </api>
+    </version>
+
+</phpdocumentor>

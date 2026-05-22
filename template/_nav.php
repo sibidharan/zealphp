@@ -11,6 +11,7 @@ $links = [
   'design-tradeoffs'=> ['/design-tradeoffs','Trade-offs'],
   'getting-started' => ['/getting-started','Get Started'],
   'learn'           => ['/learn',          'Learn'],
+  'docs'            => ['/docs/',          'Docs'],
   'routing'         => ['/routing',        'Routing'],
   'responses'       => ['/responses',      'Responses'],
   'http'            => ['/http',           'HTTP'],
