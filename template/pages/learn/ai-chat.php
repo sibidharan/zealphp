@@ -166,7 +166,7 @@ data: {"done":true}</code></pre>
       <code>create_note</code> tool call ends up at <em>this same endpoint</em> — there&rsquo;s no
       special path for AI-driven writes:
     </p>
-    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/notes.php" style="color:#f59e0b">api/learn/notes.php</a> — POST handler, after the SQL insert
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/notes.php" class="lai-srclink">api/learn/notes.php</a> — POST handler, after the SQL insert
 $id = Notes::create($db, $u['user_id'], $title, $body);
 WS::broadcast($u['user_id'], [
     'type' =&gt; 'note_changed',
@@ -181,7 +181,7 @@ WS::broadcast($u['user_id'], [
       <code>ws_session_counter_broadcast()</code> from the previous lesson — iterate the per-fd
       <code>Store</code> table, push to every fd whose stored key matches:
     </p>
-    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/WS.php" style="color:#f59e0b">src/Learn/WS.php</a>
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/WS.php" class="lai-srclink">src/Learn/WS.php</a>
 public static function broadcast(int $userId, array $payload): void {
     $server = App::getServer();
     $table  = Store::table('learn_ws_clients');

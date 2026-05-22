@@ -1,0 +1,18 @@
+/* Page-scoped styles for /learn/auth — relocated from inline style= attrs. */
+
+.lauth-srclink {
+  color: #f59e0b;
+}
+
+.lauth-details {
+  margin-top: .75rem;
+}
+
+.lauth-login-form {
+  margin-top: .5rem;
+}
+
+.lauth-note {
+  font-size: .9rem;
+  color: var(--text-muted);
+}

@@ -83,9 +83,9 @@ if (!$user) return;
           <button type="submit">Log in</button>
           <div id="notes-auth-fb-login"></div>
         </form>
-        <details style="margin-top:1rem">
+        <details class="lnotes-details">
           <summary>New here? Register</summary>
-          <form hx-post="/api/learn/register" hx-target="#notes-auth-fb-reg" hx-swap="innerHTML" style="margin-top:.75rem">
+          <form hx-post="/api/learn/register" hx-target="#notes-auth-fb-reg" hx-swap="innerHTML" class="lnotes-reg-form">
             <input type="text" name="username" placeholder="new username" required minlength="3" maxlength="64">
             <input type="password" name="password" placeholder="new password" required minlength="8">
             <button type="submit" class="auth-toggle">Register</button>
@@ -124,7 +124,7 @@ if (!$user) return;
 
     <h3>The data layer</h3>
     <p>Every method takes a <code>$userId</code> parameter. The user can never read or modify another user's notes:</p>
-    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Notes.php" style="color:#f59e0b">src/Learn/Notes.php</a>
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Notes.php" class="lnotes-srclink">src/Learn/Notes.php</a>
 class Notes
 {
     public static function create(\PDO $db, int $userId, string $title, string $body): ?int
@@ -155,7 +155,7 @@ class Notes
       <em>response body</em>. You need the HTML as a string, not echoed to the page. That's
       <code>App::renderToString()</code>:
     </p>
-    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/notes.php" style="color:#f59e0b">api/learn/notes.php</a> — return the rendered note card
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/notes.php" class="lnotes-srclink">api/learn/notes.php</a> — return the rendered note card
 $note = Notes::read($db, $userId, $id);
 $html = App::renderToString('/components/_note_card', $note);
 $this->response($html, 200);</code></pre>

@@ -6,7 +6,7 @@ use ZealPHP\App;
 <h1 class="section-title">Deploy</h1>
 <p class="section-desc">ZealPHP is a long-lived OpenSwoole server process. One process per port, N workers per process. Run behind a reverse proxy (nginx or Caddy) for TLS, static assets, and request logging.</p>
 
-<h2 style="margin:1.5rem 0 .5rem">systemd</h2>
+<h2 class="deploy-h2-first">systemd</h2>
 <p>A reference unit is shipped at <code>deploy/zealphp.service</code>. Copy it to <code>/etc/systemd/system/zealphp.service</code>, adjust <code>User</code>, <code>WorkingDirectory</code>, and <code>ExecStart</code>, then:</p>
 
 <?php
@@ -27,11 +27,11 @@ BASH
 
 <p>The unit is <code>Type=simple</code> — do not pass <code>-d</code> in <code>ExecStart</code>, systemd manages the lifecycle.</p>
 
-<h2 id="env" style="margin:2rem 0 .5rem">Environment variables</h2>
-<p style="color:var(--text-muted);margin-bottom:.75rem">Boolean variables accept <code>1</code>/<code>0</code>, <code>true</code>/<code>false</code>, <code>on</code>/<code>off</code>, <code>yes</code>/<code>no</code>.</p>
+<h2 id="env" class="deploy-h2">Environment variables</h2>
+<p class="deploy-lead">Boolean variables accept <code>1</code>/<code>0</code>, <code>true</code>/<code>false</code>, <code>on</code>/<code>off</code>, <code>yes</code>/<code>no</code>.</p>
 
-<h3 style="margin-top:1rem">Server</h3>
-<table class="ztable" style="margin-bottom:1.5rem">
+<h3 class="deploy-h3">Server</h3>
+<table class="ztable deploy-table">
   <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
   <tr><td><code>ZEALPHP_HOST</code></td><td><code>0.0.0.0</code></td><td>Bind address</td></tr>
   <tr><td><code>ZEALPHP_PORT</code></td><td><code>8080</code></td><td>Listen port</td></tr>
@@ -46,8 +46,8 @@ BASH
   <tr><td><code>ZEALPHP_PID_FILE</code></td><td><code>$LOG_DIR/zealphp_$PORT.pid</code></td><td>PID file location</td></tr>
 </table>
 
-<h3 style="margin-top:1rem">Logging</h3>
-<table class="ztable" style="margin-bottom:1.5rem">
+<h3 class="deploy-h3">Logging</h3>
+<table class="ztable deploy-table">
   <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
   <tr><td><code>ZEALPHP_LOG_DIR</code></td><td><code>/tmp/zealphp</code></td><td>Base directory for all log files</td></tr>
   <tr><td><code>ZEALPHP_LOG_FILE</code></td><td>(per-stream)</td><td>Single-file override for all log streams</td></tr>
@@ -62,8 +62,8 @@ BASH
   <tr><td><code>ZEALPHP_BENCH_MODE</code></td><td><code>0</code></td><td>Disables all logging for benchmarks</td></tr>
 </table>
 
-<h3 style="margin-top:1rem">Middleware &amp; sessions</h3>
-<table class="ztable" style="margin-bottom:1.5rem">
+<h3 class="deploy-h3">Middleware &amp; sessions</h3>
+<table class="ztable deploy-table">
   <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
   <tr><td><code>ZEALPHP_SESSION_SECURE</code></td><td>auto-detect</td><td>Force <code>Secure</code> cookie flag (<code>1</code>/<code>0</code>). Auto-detects HTTPS via <code>HTTPS</code>, <code>HTTP_X_FORWARDED_PROTO</code>, or <code>SERVER_PORT=443</code>.</td></tr>
   <tr><td><code>ZEALPHP_HTTP_COMPRESSION</code></td><td><code>1</code></td><td>Enable OpenSwoole native HTTP compression.</td></tr>
@@ -72,14 +72,14 @@ BASH
   <tr><td><code>ZEALPHP_DEMO_MIDDLEWARE</code></td><td><code>0</code></td><td>Enables the demo authentication/validation middleware in <code>app.php</code>. Off in production.</td></tr>
 </table>
 
-<h3 style="margin-top:1rem">Site</h3>
-<table class="ztable" style="margin-bottom:1.5rem">
+<h3 class="deploy-h3">Site</h3>
+<table class="ztable deploy-table">
   <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
   <tr><td><code>ZEALPHP_SITE_URL</code></td><td>request host</td><td>Canonical site URL used by helpers and absolute-URL generation</td></tr>
   <tr><td><code>ZEALPHP_SITE_HOST</code></td><td>—</td><td>Fallback host if <code>ZEALPHP_SITE_URL</code> is not set</td></tr>
 </table>
 
-<h2 style="margin:2rem 0 .5rem">nginx reverse proxy</h2>
+<h2 class="deploy-h2">nginx reverse proxy</h2>
 
 <?php
 App::render('/components/_code', [
@@ -114,7 +114,7 @@ NGINX
 ]);
 ?>
 
-<h2 style="margin:2rem 0 .5rem">Caddy reverse proxy</h2>
+<h2 class="deploy-h2">Caddy reverse proxy</h2>
 
 <?php
 App::render('/components/_code', [
@@ -130,7 +130,7 @@ CADDY
 ]);
 ?>
 
-<h2 style="margin:2rem 0 .5rem">Docker</h2>
+<h2 class="deploy-h2">Docker</h2>
 <p>The repo ships a <code>Dockerfile</code> and <code>docker-compose.yml</code>. For production:</p>
 
 <?php
@@ -162,7 +162,7 @@ YAML
 ]);
 ?>
 
-<h2 style="margin:2rem 0 .5rem">Production checklist</h2>
+<h2 class="deploy-h2">Production checklist</h2>
 <ul>
   <li>Run as a non-root user; bind to <code>8080</code>, not <code>80</code>.</li>
   <li>Pin OpenSwoole + uopz extension versions in your Dockerfile.</li>
@@ -176,7 +176,7 @@ YAML
   <li>Use <code>php app.php restart</code> for graceful, zero-downtime worker recycling.</li>
 </ul>
 
-<h2 style="margin:2rem 0 .5rem">More</h2>
+<h2 class="deploy-h2">More</h2>
 <p>Detailed write-up: <a href="https://github.com/sibidharan/zealphp/blob/master/docs/deployment.md" target="_blank">docs/deployment.md</a> on GitHub.</p>
 
 </div>

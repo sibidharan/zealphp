@@ -1,7 +1,7 @@
 <?php use ZealPHP\App; ?>
 
 <section class="section section-dark">
-<div class="container" style="max-width:960px">
+<div class="container mig-container">
 
 <h1 class="section-title">Migrate your PHP codebase to async</h1>
 <p class="section-desc">
@@ -15,12 +15,12 @@
 <!-- 1. The before/after stack collapse                             -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 style="margin-top:2.5rem">From several services to one process</h2>
+<h2 class="mig-h2-mt-lg">From several services to one process</h2>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-top:1rem">
-  <div class="qs-block" style="padding:1.25rem 1.5rem">
-    <h3 style="margin:0 0 .85rem;font-size:1rem">Typical PHP stack today</h3>
-    <ul style="list-style:none;padding:0;margin:0;font-size:.88rem;line-height:1.8">
+<div class="mig-stack-grid">
+  <div class="qs-block mig-qs-pad">
+    <h3 class="mig-qs-h3">Typical PHP stack today</h3>
+    <ul class="mig-list-plain">
       <li>Nginx / Apache (front-end)</li>
       <li>PHP-FPM (cold start every request)</li>
       <li>Redis (sessions, cache, pub/sub)</li>
@@ -28,14 +28,14 @@
       <li>Supervisor / cron (background jobs)</li>
       <li>SSE proxy or browser polling</li>
     </ul>
-    <p style="margin:.75rem 0 0;color:#a8a29e;font-size:.78rem">6 services, 6 failure points, 6 sets of config.</p>
+    <p class="mig-stack-note">6 services, 6 failure points, 6 sets of config.</p>
   </div>
-  <div class="qs-block" style="padding:1.25rem 1.5rem;border-color:var(--accent)">
-    <h3 style="margin:0 0 .85rem;font-size:1rem;color:var(--accent)">Same app on ZealPHP</h3>
-    <div style="text-align:center;margin:.5rem 0 1rem">
-      <code style="font-size:1.05rem;color:var(--accent);background:rgba(245,158,11,.1);padding:.4rem .8rem;border-radius:6px">php app.php</code>
+  <div class="qs-block mig-qs-pad-accent">
+    <h3 class="mig-qs-h3-accent">Same app on ZealPHP</h3>
+    <div class="mig-cmd-center">
+      <code class="mig-cmd-pill">php app.php</code>
     </div>
-    <ul style="list-style:none;padding:0;margin:0;font-size:.88rem;line-height:1.8">
+    <ul class="mig-list-plain">
       <li>HTTP + WebSocket + SSE built in</li>
       <li>Coroutine-safe sessions (no Redis)</li>
       <li>Shared memory across workers (Store, Counter)</li>
@@ -43,7 +43,7 @@
       <li>Persistent connections, no cold starts</li>
       <li>WordPress via the CGI bridge — <a href="https://github.com/sibidharan/zealphp-wordpress" target="_blank" rel="noopener">showcase</a></li>
     </ul>
-    <p style="margin:.75rem 0 0;color:#a8a29e;font-size:.78rem">Not every stack fits. Depends on app — see "When migration won't help" below.</p>
+    <p class="mig-stack-note">Not every stack fits. Depends on app — see "When migration won't help" below.</p>
   </div>
 </div>
 
@@ -51,15 +51,15 @@
 <!-- 2. The migration ladder                                        -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 style="margin-top:3rem">The migration ladder — go at your own pace</h2>
+<h2 class="mig-h2-mt-xl">The migration ladder — go at your own pace</h2>
 
-<p style="margin-bottom:1.25rem">
+<p class="mig-ladder-intro">
   Each rung is functional on its own. Stop at the rung that gives you enough
   upside without forcing changes you're not ready for. Most real migrations
   stay between rungs 1 and 3 for months before reaching 4.
 </p>
 
-<div style="display:grid;gap:.75rem">
+<div class="mig-ladder-grid">
 
 <?php
 $rungs = [
@@ -106,17 +106,17 @@ $rungs = [
   ],
 ];
 foreach ($rungs as $r):
-  $border = !empty($r['highlight']) ? 'border-color:var(--accent)' : '';
+  $rungClass = !empty($r['highlight']) ? 'qs-block mig-rung mig-rung-accent' : 'qs-block mig-rung';
 ?>
-  <div class="qs-block" style="padding:1rem 1.25rem;<?= $border ?>">
-    <div style="display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start">
-      <span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:rgba(245,158,11,.18);color:var(--accent);font-size:.85rem;font-weight:700;flex-shrink:0"><?= $r['n'] ?></span>
+  <div class="<?= $rungClass ?>">
+    <div class="mig-rung-row">
+      <span class="mig-rung-num"><?= $r['n'] ?></span>
       <div>
-        <div style="font-weight:700;font-size:1rem;margin-bottom:.4rem"><?= $r['title'] ?></div>
-        <code style="display:block;font-size:.78rem;color:#fde68a;background:rgba(245,158,11,.08);padding:.4rem .6rem;border-radius:4px;margin-bottom:.5rem"><?= $r['code'] ?></code>
-        <p style="margin:0 0 .4rem;font-size:.88rem;line-height:1.6"><?= $r['desc'] ?></p>
-        <p style="margin:.25rem 0 0;font-size:.82rem;line-height:1.5"><strong style="color:var(--accent)">Wins:</strong> <?= $r['wins'] ?></p>
-        <p style="margin:.15rem 0 0;font-size:.82rem;line-height:1.5;color:#a8a29e"><strong>Trade-off:</strong> <?= $r['gives_up'] ?></p>
+        <div class="mig-rung-title"><?= $r['title'] ?></div>
+        <code class="mig-rung-code"><?= $r['code'] ?></code>
+        <p class="mig-rung-desc"><?= $r['desc'] ?></p>
+        <p class="mig-rung-wins"><strong class="mig-rung-wins-label">Wins:</strong> <?= $r['wins'] ?></p>
+        <p class="mig-rung-tradeoff"><strong>Trade-off:</strong> <?= $r['gives_up'] ?></p>
       </div>
     </div>
   </div>
@@ -128,7 +128,7 @@ foreach ($rungs as $r):
 <!-- 3. How the compatibility bridge actually works                 -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 style="margin-top:3rem">How the compatibility bridge works</h2>
+<h2 class="mig-h2-mt-xl">How the compatibility bridge works</h2>
 
 <p>
   PHP-FPM gives you fresh superglobals (<code>$_GET</code>, <code>$_SESSION</code>),
@@ -137,7 +137,7 @@ foreach ($rungs as $r):
   across requests. ZealPHP fixes that via three mechanisms:
 </p>
 
-<ul style="line-height:1.8;margin-top:.5rem">
+<ul class="mig-bridge-list">
   <li>
     <strong>uopz function overrides.</strong> At server boot, <code>header()</code>,
     <code>setcookie()</code>, <code>http_response_code()</code>, and the
@@ -159,15 +159,15 @@ foreach ($rungs as $r):
   </li>
 </ul>
 
-<p style="margin-top:.75rem">
+<p class="mig-p-mt-sm">
   Net effect — at rung 0 and 1, your code can't tell it's running on OpenSwoole.
   At rungs 3 and 4, you opt into the coroutine model where it pays off.
 </p>
 
-<h2 style="margin-top:3rem">Apache+mod_php parity reference</h2>
+<h2 class="mig-h2-mt-xl">Apache+mod_php parity reference</h2>
 <p>What ZealPHP emulates so legacy apps run unchanged. Most of this is invisible — these rows exist to answer "does X work?" without a code-dive.</p>
 
-<h3 style="margin-top:1.5rem;font-size:1.05rem">Function overrides (via uopz)</h3>
+<h3 class="mig-h3-sub">Function overrides (via uopz)</h3>
 <table class="ztable">
   <tr><th>Apache+mod_php function</th><th>ZealPHP behavior</th></tr>
   <tr><td><code>header()</code>, <code>header_remove()</code>, <code>headers_list()</code>, <code>headers_sent()</code></td><td>Per-request via <code>$response-&gt;headersList</code> on the Response wrapper (<code>$g-&gt;zealphp_response</code>). Supports <code>header("HTTP/1.1 404 Not Found")</code> status-line form and the optional <code>$http_response_code</code> param. CRLF/NUL in values rejected to prevent response splitting.</td></tr>
@@ -185,7 +185,7 @@ foreach ($rungs as $r):
   <tr><td><code>set_error_handler()</code>, <code>set_exception_handler()</code>, <code>register_shutdown_function()</code>, <code>error_reporting()</code></td><td>Per-coroutine via <code>G</code> stacks. A native dispatcher installed at boot delegates to the active coroutine's handler stack — isolated despite PHP's process-global semantics. See <a href="/responses">Responses</a>.</td></tr>
 </table>
 
-<h3 style="margin-top:1.5rem;font-size:1.05rem"><code>public/</code> routing (DocumentRoot behavior)</h3>
+<h3 class="mig-h3-sub"><code>public/</code> routing (DocumentRoot behavior)</h3>
 <table class="ztable">
   <tr><th>Apache directive</th><th>ZealPHP</th></tr>
   <tr><td><code>DirectoryIndex index.php index.html index.htm</code></td><td>Same fallback order via <code>App::$directory_index</code>. HTML/HTM served via <code>$response-&gt;sendFile()</code> with ETag + Range.</td></tr>
@@ -199,18 +199,18 @@ foreach ($rungs as $r):
   <tr><td><code>FileETag</code> / conditional GET</td><td><code>$response-&gt;sendFile()</code> emits weak ETag + <code>Last-Modified</code>; honors <code>If-None-Match</code> and <code>If-Modified-Since</code> → 304.</td></tr>
 </table>
 
-<p style="margin-top:1rem">Deeper detail (boot-order tricks, recursion guards, per-coroutine isolation mechanism, source-line references): <a href="https://github.com/sibidharan/zealphp/blob/master/docs/apache-parity.md"><code>docs/apache-parity.md</code></a> and <a href="https://github.com/sibidharan/zealphp/blob/master/docs/error-handling.md"><code>docs/error-handling.md</code></a>.</p>
+<p class="mig-p-mt">Deeper detail (boot-order tricks, recursion guards, per-coroutine isolation mechanism, source-line references): <a href="https://github.com/sibidharan/zealphp/blob/master/docs/apache-parity.md"><code>docs/apache-parity.md</code></a> and <a href="https://github.com/sibidharan/zealphp/blob/master/docs/error-handling.md"><code>docs/error-handling.md</code></a>.</p>
 
 <!-- ────────────────────────────────────────────────────────────── -->
 <!-- 4. When migration is a good fit (and when it isn't)            -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 style="margin-top:3rem">When migration is a good fit</h2>
+<h2 class="mig-h2-mt-xl">When migration is a good fit</h2>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-top:1rem">
-  <div class="qs-block" style="padding:1.25rem 1.5rem;border-color:var(--accent)">
-    <h3 style="margin:0 0 .75rem;font-size:1rem;color:var(--accent)">Good fit</h3>
-    <ul style="list-style:none;padding:0;margin:0;font-size:.88rem;line-height:1.8">
+<div class="mig-stack-grid">
+  <div class="qs-block mig-qs-pad-accent">
+    <h3 class="mig-fit-h3-accent">Good fit</h3>
+    <ul class="mig-list-plain">
       <li>✓ You're already on PHP and the team knows it</li>
       <li>✓ You want WebSocket / SSE / streaming without a separate Node service</li>
       <li>✓ You have I/O-bound endpoints (DB, HTTP fetches) — coroutines fan them out</li>
@@ -219,9 +219,9 @@ foreach ($rungs as $r):
       <li>✓ You want to keep <code>session_start()</code> + <code>header()</code> + <code>echo</code> — not rewrite for an event loop</li>
     </ul>
   </div>
-  <div class="qs-block" style="padding:1.25rem 1.5rem">
-    <h3 style="margin:0 0 .75rem;font-size:1rem">Probably wrong fit</h3>
-    <ul style="list-style:none;padding:0;margin:0;font-size:.88rem;line-height:1.8">
+  <div class="qs-block mig-qs-pad">
+    <h3 class="mig-fit-h3">Probably wrong fit</h3>
+    <ul class="mig-list-plain">
       <li>✗ Workload is purely CPU-bound — coroutines don't help, just buy more cores</li>
       <li>✗ App relies on extensions OpenSwoole's runtime hooks don't cover (rare, but exists)</li>
       <li>✗ You'd accept a full rewrite anyway — Go/Rust/Elixir give bigger ceilings if you can pay the cost</li>
@@ -239,147 +239,38 @@ foreach ($rungs as $r):
 <!-- ────────────────────────────────────────────────────────────── -->
 
 <section class="section">
-<div class="container" style="max-width:960px">
+<div class="container mig-container">
 <h2 class="section-title">Convert your existing config</h2>
 <p class="section-desc">Paste your Apache <code>.htaccess</code> or nginx config — AI converts it to a working <code>app.php</code> in real-time. The same engine that bridges the migration ladder above.</p>
 
-<div class="converter-split" style="display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin:1.5rem 0;">
-  <div style="border-right:1px solid var(--border);">
-    <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
+<div class="converter-split mig-converter-split">
+  <div class="mig-converter-left">
+    <div class="mig-converter-bar">
       <span>Apache / nginx config</span>
-      <select id="convert-preset" style="font-size:.75rem; padding:.2rem .4rem; border-radius:4px; border:1px solid var(--border); background:var(--bg);">
+      <select id="convert-preset" class="mig-converter-preset">
         <option value="">— paste your own —</option>
         <option value="wordpress">WordPress .htaccess</option>
         <option value="nginx-cms">nginx CMS</option>
         <option value="redirects">Redirect rules</option>
       </select>
     </div>
-    <textarea id="convert-input" style="width:100%; min-height:280px; border:none; padding:.75rem; font-family:var(--font-mono); font-size:.82rem; background:var(--code-bg); color:var(--code-text); resize:vertical; outline:none;" placeholder="Paste your .htaccess or nginx server { } config here..."></textarea>
-    <div style="padding:.5rem .75rem; background:var(--bg-alt); display:flex; align-items:center; gap:.5rem;">
-      <button id="convert-btn" onclick="runConvert()" style="padding:.4rem 1.2rem; background:var(--accent); color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:.82rem; font-weight:600;">Convert →</button>
-      <span id="convert-status" style="font-size:.75rem; color:var(--text-muted);"></span>
+    <textarea id="convert-input" class="mig-converter-input" placeholder="Paste your .htaccess or nginx server { } config here..."></textarea>
+    <div class="mig-converter-actions">
+      <button id="convert-btn" onclick="runConvert()" class="mig-converter-btn">Convert →</button>
+      <span id="convert-status" class="mig-converter-status"></span>
     </div>
   </div>
   <div>
-    <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.78rem; font-weight:600; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center;">
+    <div class="mig-converter-bar">
       <span>ZealPHP app.php</span>
-      <button onclick="copyOutput()" style="font-size:.72rem; padding:.15rem .5rem; border:1px solid var(--border); border-radius:4px; background:var(--bg); cursor:pointer; color:var(--text-muted);">Copy</button>
+      <button onclick="copyOutput()" class="mig-converter-copy">Copy</button>
     </div>
-    <pre id="convert-output" style="min-height:280px; padding:.75rem; margin:0; font-family:var(--font-mono); font-size:.82rem; background:var(--code-bg); color:var(--code-text); overflow:auto; white-space:pre-wrap;"><span style="color:var(--text-muted);">// Output will appear here...</span></pre>
-    <div style="padding:.5rem .75rem; background:var(--bg-alt); font-size:.72rem; color:var(--text-muted);">
+    <pre id="convert-output" class="mig-converter-output"><span class="mig-converter-placeholder">// Output will appear here...</span></pre>
+    <div class="mig-converter-foot">
       Rate limit: 5 conversions per 10 minutes · Powered by gpt-5.4-mini · <a href="https://github.com/sibidharan/zealphp/blob/master/examples/agents/config_converter.py" target="_blank">Source</a> · <a href="/legacy-apps">More on legacy apps →</a>
     </div>
   </div>
 </div>
-
-<style>
-@media (max-width:768px) { .converter-split { grid-template-columns:1fr !important; } }
-</style>
-
-<script>
-(function() {
-  const PRESETS = {
-    wordpress: `# BEGIN WordPress
-<IfModule mod_rewrite.c>
-RewriteEngine On
-RewriteBase /
-RewriteRule ^index\\.php$ - [L]
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule . /index.php [L]
-</IfModule>
-# END WordPress`,
-    'nginx-cms': `server {
-    listen 80;
-    server_name example.com;
-    root /var/www/html;
-
-    location / {
-        try_files $uri $uri/ /index.php?$args;
-    }
-    location ~ \\.php$ {
-        fastcgi_pass unix:/run/php/php-fpm.sock;
-        include fastcgi_params;
-    }
-    location ~* \\.(css|js|png|jpg|gif|ico)$ {
-        expires 30d;
-    }
-}`,
-    redirects: `RewriteEngine On
-RewriteRule ^old-page$ /new-page [R=301,L]
-RewriteRule ^blog/(.*)$ /articles/$1 [R=302,L]
-RewriteRule ^docs$ https://docs.example.com [R=301,L]`
-  };
-
-  document.getElementById('convert-preset').addEventListener('change', function() {
-    if (this.value && PRESETS[this.value]) {
-      document.getElementById('convert-input').value = PRESETS[this.value];
-    }
-  });
-
-  window.runConvert = function() {
-    const input = document.getElementById('convert-input').value.trim();
-    const output = document.getElementById('convert-output');
-    const status = document.getElementById('convert-status');
-    const btn = document.getElementById('convert-btn');
-
-    if (!input) { status.textContent = 'Paste a config first'; return; }
-
-    btn.disabled = true;
-    btn.textContent = 'Converting...';
-    status.textContent = 'Streaming from gpt-5.4-mini...';
-    output.textContent = '';
-
-    fetch('/api/convert', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({config: input})
-    }).then(response => {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      function read() {
-        reader.read().then(({done, value}) => {
-          if (done) {
-            btn.disabled = false;
-            btn.textContent = 'Convert →';
-            status.textContent = 'Done';
-            return;
-          }
-          buffer += decoder.decode(value, {stream: true});
-          const lines = buffer.split('\n');
-          buffer = lines.pop();
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const text = line.slice(6);
-              if (text === '[DONE]') continue;
-              output.textContent += text + '\n';
-            }
-          }
-          output.scrollTop = output.scrollHeight;
-          read();
-        });
-      }
-      read();
-    }).catch(err => {
-      output.textContent = '// Error: ' + err.message;
-      btn.disabled = false;
-      btn.textContent = 'Convert →';
-      status.textContent = 'Failed';
-    });
-  };
-
-  window.copyOutput = function() {
-    const text = document.getElementById('convert-output').textContent;
-    navigator.clipboard.writeText(text).then(() => {
-      const btn = event.target;
-      btn.textContent = 'Copied!';
-      setTimeout(() => btn.textContent = 'Copy', 1500);
-    });
-  };
-})();
-</script>
 
 </div>
 </section>
@@ -389,15 +280,15 @@ RewriteRule ^docs$ https://docs.example.com [R=301,L]`
 <!-- ────────────────────────────────────────────────────────────── -->
 
 <section class="section section-dark">
-<div class="container" style="max-width:960px">
+<div class="container mig-container">
 
-<div style="text-align:center">
+<div class="mig-cta-center">
   <a href="/getting-started" class="btn btn-primary">Start the migration →</a>
-  <a href="/legacy-apps" class="btn btn-outline" style="margin-left:.5rem">Legacy apps (WordPress) →</a>
-  <a href="/why-zealphp" class="btn btn-outline" style="margin-left:.5rem">Why ZealPHP →</a>
+  <a href="/legacy-apps" class="btn btn-outline mig-cta-spaced">Legacy apps (WordPress) →</a>
+  <a href="/why-zealphp" class="btn btn-outline mig-cta-spaced">Why ZealPHP →</a>
 </div>
 
-<p style="text-align:center;margin-top:1.5rem;color:#a8a29e;font-size:.85rem">
+<p class="mig-closing-note">
   Performance: <a href="/performance">117K req/s text · 106K JSON · 50K templated</a> at rung 4 (full coroutine mode).<br>
   WordPress + custom CMS migrations: see the <a href="https://github.com/sibidharan/zealphp-wordpress" target="_blank" rel="noopener">showcase repo</a>.
 </p>

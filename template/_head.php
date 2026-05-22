@@ -59,17 +59,32 @@ $ogImageUrl = $ogImageExists ? ($__scheme . '://' . $__host . $ogImage) : null;
   <link rel="stylesheet" href="/css/zealphp.css?v=<?= $v ?>">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <style>
-    /* Instrument Sans — display / heading font */
-    @import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap');
-  </style>
+  <!-- Instrument Sans — display / heading font; Fira Code — code font -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap">
   <script src="https://unpkg.com/htmx.org@2.0.10" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>
-  <script>document.addEventListener('DOMContentLoaded',()=>{if(window.mermaid)mermaid.initialize({startOnLoad:true,theme:'base',themeVariables:{darkMode:false,background:'#ffffff',primaryColor:'#fffbeb',primaryBorderColor:'#f59e0b',primaryTextColor:'#1c1917',secondaryColor:'#f5f5f4',tertiaryColor:'#ecfdf5',lineColor:'#78716c',textColor:'#1c1917',mainBkg:'#fffbeb',nodeBorder:'#d6d3d1',clusterBkg:'#fafaf9',clusterBorder:'#e7e5e4',actorBkg:'#ffffff',actorBorder:'#d6d3d1',actorTextColor:'#1c1917',actorLineColor:'#78716c',signalColor:'#78716c',signalTextColor:'#1c1917',sequenceNumberColor:'#fff',noteBkgColor:'#fffbeb',noteTextColor:'#1c1917',noteBorderColor:'#f59e0b',activationBkgColor:'#f5f5f4',activationBorderColor:'#d6d3d1'}})});function fixMermaid(){document.querySelectorAll('pre.mermaid svg').forEach(s=>{s.style.background='transparent';s.querySelectorAll('rect[fill="#eaeaea"],rect[fill="#ECECFF"]').forEach(r=>r.setAttribute('fill','#f5f5f4'))})};document.addEventListener('htmx:afterSettle',()=>{if(window.mermaid)mermaid.run().then(fixMermaid)});setTimeout(fixMermaid,800)</script>
+  <script src="/js/mermaid-init.js?v=<?= $v ?>" defer></script>
+  <script src="/js/site-nav.js?v=<?= $v ?>" defer></script>
   <link rel="stylesheet" href="/css/learn.css?v=<?= $v ?>">
   <script src="/js/learn.js?v=<?= $v ?>" defer></script>
   <script src="/js/streaming-demos.js?v=<?= $v ?>" defer></script>
   <script src="/js/learn-demo-viewers.js?v=<?= $v ?>" defer></script>
   <script src="/js/learn-tictactoe.js?v=<?= $v ?>" defer></script>
   <script src="/js/timers.js?v=<?= $v ?>" defer></script>
+<?php
+  // Page-scoped CSS/JS modules — the home of styles/scripts extracted
+  // out of the page templates (no inline <style>/<script> in templates,
+  // per the project's separation-of-concerns rule). A page keyed
+  // "$page" (e.g. "performance", "docs/guide", "learn/htmx") gets its
+  // module auto-loaded when the file exists. Slashes flatten to dashes
+  // so "docs/guide" → docs-guide.{css,js}. Existence-gated so a page
+  // without a module emits nothing.
+  $__pageKey  = preg_replace('/[^a-z0-9_-]+/i', '-', (string) ($page ?? ''));
+  $__pubRoot  = dirname(__DIR__) . '/public';
+  if ($__pageKey !== '' && is_file($__pubRoot . '/css/pages/' . $__pageKey . '.css')): ?>
+  <link rel="stylesheet" href="/css/pages/<?= $__pageKey ?>.css?v=<?= $v ?>">
+<?php endif;
+  if ($__pageKey !== '' && is_file($__pubRoot . '/js/pages/' . $__pageKey . '.js')): ?>
+  <script src="/js/pages/<?= $__pageKey ?>.js?v=<?= $v ?>" defer></script>
+<?php endif; ?>
 </head>

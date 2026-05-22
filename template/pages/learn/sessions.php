@@ -27,10 +27,10 @@
 
     <?php App::render('/components/_tryit', [
       'title' => 'Live demo: a session-backed counter (cross-tab synced)',
-      'body'  => '<div style="text-align:center;padding:1.25rem 0">' .
+      'body'  => '<div class="lsess-center">' .
                  App::renderToString('/components/_session_counter', ['n' => (int)($g->session['lesson_counter'] ?? 0)]) .
-                 '<div data-session-counter-status class="ws-counter-status" style="margin-top:.85rem">starting…</div>' .
-                 '<p style="margin:.85rem 0 0;font-size:.85rem;color:#78716c">' .
+                 '<div data-session-counter-status class="ws-counter-status lsess-counter-status">starting…</div>' .
+                 '<p class="lsess-popup-line">' .
                  '<a href="/demo/view/sessions/counter" target="_blank" rel="opener">Open this counter in a popup &rarr;</a>' .
                  ' &middot; open it in multiple windows and watch them all update from any click.' .
                  '</p>' .
@@ -164,7 +164,7 @@ lesson_counter|i:5;cart|a:2:{...}</code></pre>
       'body'    => '<p>Tempting: <code>UserState::$counter = 5;</code>. Don&rsquo;t. Static class properties live in the worker process — they survive across requests but are <em>shared by every user the worker handles</em>. The next request from a different user sees the same value. Always use sessions (or a database) for per-user state.</p>',
     ]); ?>
 
-    <h3 style="margin-top:1.5rem">First-visit cookie: redirects work after <code>session_start()</code> too</h3>
+    <h3 class="lsess-h3">First-visit cookie: redirects work after <code>session_start()</code> too</h3>
     <p>
       In a long-running OpenSwoole process, "set cookie on first
       <code>session_start()</code>" is more subtle than it looks. Until v0.2.24,
@@ -205,7 +205,7 @@ PHP,
     <p>
       Two visitor paths covered:
     </p>
-    <ul style="margin:.5rem 0;line-height:1.7">
+    <ul class="lsess-list">
       <li><strong>First-time visitor</strong> (no incoming cookie) &mdash; the
         new auto-emit fires inside <code>session_start()</code>, redirect carries
         the cookie, callback finds the session.</li>

@@ -1,0 +1,43 @@
+/* Page-scoped styles for /responses — relocated from inline style= attrs. */
+
+.resp-mt-half {
+  margin-top: .5rem;
+}
+
+.resp-mt-1 {
+  margin-top: 1rem;
+}
+
+.resp-mt-2 {
+  margin-top: 2rem;
+}
+
+.resp-mt-2-5 {
+  margin-top: 2.5rem;
+}
+
+.resp-mb-1 {
+  margin-bottom: 1rem;
+}
+
+.resp-mb-2 {
+  margin-bottom: 2rem;
+}
+
+.resp-m-0 {
+  margin: 0;
+}
+
+.resp-callout {
+  margin: 1rem 0 1.5rem;
+}
+
+.resp-list {
+  margin-left: 1.2rem;
+}
+
+.resp-note {
+  margin-top: .5rem;
+  color: var(--text-muted);
+  font-size: .92rem;
+}

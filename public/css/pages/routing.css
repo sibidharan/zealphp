@@ -1,0 +1,33 @@
+/* Page-scoped styles for /routing — relocated from inline style= attrs. */
+
+.route-h2 {
+  margin: 2rem 0 .5rem;
+}
+
+.route-h2-section {
+  margin: 2.5rem 0 .5rem;
+}
+
+.route-h2-top {
+  margin-top: 2.5rem;
+}
+
+.route-mb-1 {
+  margin-bottom: 1rem;
+}
+
+.route-mb-1-5 {
+  margin-bottom: 1.5rem;
+}
+
+.route-mt-1 {
+  margin-top: 1rem;
+}
+
+.route-my-sm {
+  margin: .75rem 0;
+}
+
+.route-my-1 {
+  margin: 1rem 0;
+}

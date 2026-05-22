@@ -1,0 +1,26 @@
+/* Page-scoped styles for /learn/react-vs-php — relocated from inline style= attrs. */
+
+.rvp-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: .88rem;
+}
+
+.rvp-table thead tr {
+  border-bottom: 2px solid #e7e5e4;
+  text-align: left;
+}
+
+.rvp-table tbody tr {
+  border-bottom: 1px solid #f5f5f4;
+}
+
+.rvp-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.rvp-table th,
+.rvp-table td {
+  padding: .55rem;
+}

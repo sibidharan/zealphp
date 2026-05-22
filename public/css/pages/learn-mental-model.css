@@ -1,0 +1,31 @@
+/* Page-scoped styles for /learn/mental-model — relocated from inline style= attrs. */
+
+.lmm-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.25rem 0;
+}
+
+.lmm-mode-title {
+  text-align: center;
+  margin: 0 0 .5rem;
+  font-size: .82rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.lmm-mode-title-coro {
+  color: var(--accent, #f59e0b);
+}
+
+.lmm-mode-title-super {
+  color: #78716c;
+}
+
+.lmm-mode-caption {
+  text-align: center;
+  color: #78716c;
+  font-size: .82rem;
+  margin: .35rem 0 0;
+}

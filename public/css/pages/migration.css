@@ -1,0 +1,300 @@
+/* Page-scoped styles for /migration — extracted from inline style=
+   attributes and the inline <style> block (separation-of-concerns
+   rule). Visually identical to the prior inline declarations. */
+
+.mig-container {
+  max-width: 960px;
+}
+
+.mig-h2-mt-lg {
+  margin-top: 2.5rem;
+}
+
+.mig-h2-mt-xl {
+  margin-top: 3rem;
+}
+
+.mig-stack-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  margin-top: 1rem;
+}
+
+.mig-qs-pad {
+  padding: 1.25rem 1.5rem;
+}
+
+.mig-qs-pad-accent {
+  padding: 1.25rem 1.5rem;
+  border-color: var(--accent);
+}
+
+.mig-qs-h3 {
+  margin: 0 0 .85rem;
+  font-size: 1rem;
+}
+
+.mig-qs-h3-accent {
+  margin: 0 0 .85rem;
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+.mig-list-plain {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: .88rem;
+  line-height: 1.8;
+}
+
+.mig-stack-note {
+  margin: .75rem 0 0;
+  color: #a8a29e;
+  font-size: .78rem;
+}
+
+.mig-cmd-center {
+  text-align: center;
+  margin: .5rem 0 1rem;
+}
+
+.mig-cmd-pill {
+  font-size: 1.05rem;
+  color: var(--accent);
+  background: rgba(245, 158, 11, .1);
+  padding: .4rem .8rem;
+  border-radius: 6px;
+}
+
+.mig-ladder-intro {
+  margin-bottom: 1.25rem;
+}
+
+.mig-ladder-grid {
+  display: grid;
+  gap: .75rem;
+}
+
+.mig-rung {
+  padding: 1rem 1.25rem;
+}
+
+.mig-rung-accent {
+  border-color: var(--accent);
+}
+
+.mig-rung-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.mig-rung-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(245, 158, 11, .18);
+  color: var(--accent);
+  font-size: .85rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.mig-rung-title {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: .4rem;
+}
+
+.mig-rung-code {
+  display: block;
+  font-size: .78rem;
+  color: #fde68a;
+  background: rgba(245, 158, 11, .08);
+  padding: .4rem .6rem;
+  border-radius: 4px;
+  margin-bottom: .5rem;
+}
+
+.mig-rung-desc {
+  margin: 0 0 .4rem;
+  font-size: .88rem;
+  line-height: 1.6;
+}
+
+.mig-rung-wins {
+  margin: .25rem 0 0;
+  font-size: .82rem;
+  line-height: 1.5;
+}
+
+.mig-rung-wins-label {
+  color: var(--accent);
+}
+
+.mig-rung-tradeoff {
+  margin: .15rem 0 0;
+  font-size: .82rem;
+  line-height: 1.5;
+  color: #a8a29e;
+}
+
+.mig-bridge-list {
+  line-height: 1.8;
+  margin-top: .5rem;
+}
+
+.mig-h3-sub {
+  margin-top: 1.5rem;
+  font-size: 1.05rem;
+}
+
+.mig-p-mt {
+  margin-top: 1rem;
+}
+
+.mig-p-mt-sm {
+  margin-top: .75rem;
+}
+
+.mig-fit-h3 {
+  margin: 0 0 .75rem;
+  font-size: 1rem;
+}
+
+.mig-fit-h3-accent {
+  margin: 0 0 .75rem;
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+/* Live config converter */
+.mig-converter-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: 1.5rem 0;
+}
+
+.mig-converter-left {
+  border-right: 1px solid var(--border);
+}
+
+.mig-converter-bar {
+  padding: .5rem .75rem;
+  background: var(--bg-alt);
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mig-converter-preset {
+  font-size: .75rem;
+  padding: .2rem .4rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.mig-converter-input {
+  width: 100%;
+  min-height: 280px;
+  border: none;
+  padding: .75rem;
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  background: var(--code-bg);
+  color: var(--code-text);
+  resize: vertical;
+  outline: none;
+}
+
+.mig-converter-actions {
+  padding: .5rem .75rem;
+  background: var(--bg-alt);
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.mig-converter-btn {
+  padding: .4rem 1.2rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: .82rem;
+  font-weight: 600;
+}
+
+.mig-converter-status {
+  font-size: .75rem;
+  color: var(--text-muted);
+}
+
+.mig-converter-copy {
+  font-size: .72rem;
+  padding: .15rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.mig-converter-output {
+  min-height: 280px;
+  padding: .75rem;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  background: var(--code-bg);
+  color: var(--code-text);
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.mig-converter-placeholder {
+  color: var(--text-muted);
+}
+
+.mig-converter-foot {
+  padding: .5rem .75rem;
+  background: var(--bg-alt);
+  font-size: .72rem;
+  color: var(--text-muted);
+}
+
+.mig-cta-center {
+  text-align: center;
+}
+
+.mig-cta-spaced {
+  margin-left: .5rem;
+}
+
+.mig-closing-note {
+  text-align: center;
+  margin-top: 1.5rem;
+  color: #a8a29e;
+  font-size: .85rem;
+}
+
+@media (max-width: 768px) {
+  .mig-converter-split {
+    grid-template-columns: 1fr;
+  }
+}

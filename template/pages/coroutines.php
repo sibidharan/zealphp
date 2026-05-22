@@ -43,7 +43,7 @@ foreach ($demos as [$id, $title, $url, $code]) {
 }
 ?>
 
-<h2 style="margin:2rem 0 .5rem">How it works</h2>
+<h2 class="coro-h2">How it works</h2>
 <table class="ztable">
   <tr><th>Primitive</th><th>Purpose</th></tr>
   <tr><td><code>go(callable)</code></td><td>Spawn a coroutine. Runs concurrently when current coroutine yields.</td></tr>
@@ -53,19 +53,19 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <tr><td><code>OpenSwoole\Runtime::HOOK_ALL</code></td><td>Makes all PHP I/O — curl, file, PDO, sleep — yield the event loop.</td></tr>
 </table>
 
-<div class="callout info" style="margin-top:1.5rem">
+<div class="callout info coro-mt">
   <strong>App::superglobals(false)</strong> must be called before App::init() to enable coroutine mode.
   In coroutine mode, every request runs in its own coroutine with isolated <code>RequestContext::instance()</code> state (formerly named <code>G</code>; <code>G</code> remains as a class alias for backward compatibility).
 </div>
 
-<h2 id="state-parity" style="margin:2.5rem 0 .5rem"><code>$g</code> vs <code>$_*</code> — request state in both modes</h2>
-<div class="callout info" style="margin:1rem 0 1.5rem">
-  <p style="margin:0"><strong>One-line rule.</strong> Use <code>$g-&gt;get</code>, <code>$g-&gt;post</code>, <code>$g-&gt;cookie</code>, <code>$g-&gt;server</code>, <code>$g-&gt;session</code>, <code>$g-&gt;files</code> (where <code>$g = RequestContext::instance()</code>). It works identically in both <code>App::superglobals(true)</code> and <code>App::superglobals(false)</code>. Reserve <code>$_GET</code>, <code>$_POST</code>, <code>$_SERVER</code>, <code>$_SESSION</code>, <code>$_COOKIE</code>, <code>$_FILES</code> for legacy code that you can't change — and only when you're in superglobals mode.</p>
+<h2 id="state-parity" class="coro-h2-section"><code>$g</code> vs <code>$_*</code> — request state in both modes</h2>
+<div class="callout info coro-callout">
+  <p class="coro-m-0"><strong>One-line rule.</strong> Use <code>$g-&gt;get</code>, <code>$g-&gt;post</code>, <code>$g-&gt;cookie</code>, <code>$g-&gt;server</code>, <code>$g-&gt;session</code>, <code>$g-&gt;files</code> (where <code>$g = RequestContext::instance()</code>). It works identically in both <code>App::superglobals(true)</code> and <code>App::superglobals(false)</code>. Reserve <code>$_GET</code>, <code>$_POST</code>, <code>$_SERVER</code>, <code>$_SESSION</code>, <code>$_COOKIE</code>, <code>$_FILES</code> for legacy code that you can't change — and only when you're in superglobals mode.</p>
 </div>
 
 <p>The two forms diverge on one axis: how the framework populates them per request.</p>
 
-<table class="ztable" style="margin-bottom:1.5rem">
+<table class="ztable coro-mb">
   <tr><th>Mode</th><th><code>$g-&gt;get</code> / <code>$g-&gt;post</code> / …</th><th><code>$_GET</code> / <code>$_POST</code> / …</th></tr>
   <tr>
     <td><code>App::superglobals(true)</code><br><small>legacy / migration mode</small></td>
@@ -79,7 +79,7 @@ foreach ($demos as [$id, $title, $url, $code]) {
   </tr>
 </table>
 
-<p style="margin-top:.5rem"><strong>Why the <code>$g</code> form is always the right answer:</strong> the rule "use <code>$g-&gt;X</code>" composes correctly regardless of which mode you flip to next. If you write a route today against <code>$g-&gt;get['id']</code>, that handler still works the day you decide to migrate from <code>superglobals(true)</code> to coroutine mode — no rewrite. The <code>$_GET</code> form silently breaks at that boundary.</p>
+<p class="coro-mt-half"><strong>Why the <code>$g</code> form is always the right answer:</strong> the rule "use <code>$g-&gt;X</code>" composes correctly regardless of which mode you flip to next. If you write a route today against <code>$g-&gt;get['id']</code>, that handler still works the day you decide to migrate from <code>superglobals(true)</code> to coroutine mode — no rewrite. The <code>$_GET</code> form silently breaks at that boundary.</p>
 
 <?php App::render('/components/_code', [
     'label' => 'The same code, both modes',
@@ -103,11 +103,11 @@ PHP]); ?>
 
 <p>Pages that touch request state link here rather than restating this rule: <a href="/legacy-apps">Legacy Apps</a> (the Apache rewrite recipes), <a href="/sessions">Sessions</a>, <a href="/routing">Routing</a>, and the <a href="/api">API layer</a>.</p>
 
-<h2 id="lifecycle-modes" style="margin:2.5rem 0 .5rem">Lifecycle modes — four knobs, six combinations</h2>
+<h2 id="lifecycle-modes" class="coro-h2-section">Lifecycle modes — four knobs, six combinations</h2>
 
 <p><code>App::superglobals()</code> used to bundle four decisions into one flag. As of v0.2.23 each is exposed as its own fluent setter so you can mix-and-match. Each new knob defaults to <code>null</code> and resolves to "follow <code>App::$superglobals</code>" at <code>App::run()</code> time — apps that don't touch them see no behaviour change.</p>
 
-<table class="ztable" style="margin-bottom:1.5rem">
+<table class="ztable coro-mb">
   <tr><th>Knob</th><th>Setter</th><th><code>null</code> resolves to</th><th>What it controls</th></tr>
   <tr>
     <td><code>$superglobals</code></td>
@@ -141,9 +141,9 @@ PHP]); ?>
   </tr>
 </table>
 
-<h3 style="margin:1.5rem 0 .5rem">Supported mode matrix</h3>
+<h3 class="coro-h3">Supported mode matrix</h3>
 
-<table class="ztable" style="margin-bottom:1.5rem">
+<table class="ztable coro-mb">
   <tr><th>Mode</th><th><code>superglobals</code></th><th><code>processIsolation</code></th><th><code>enableCoroutine</code></th><th><code>hookAll</code></th><th>When to use</th></tr>
   <tr><td><strong>Legacy CGI</strong><br><small>default when <code>superglobals(true)</code></small></td><td>true</td><td>true</td><td>false</td><td>0</td><td>Unmodified WordPress / Drupal — <code>define()</code>-heavy plugins need a fresh process per request.</td></tr>
   <tr><td><strong>Coroutine</strong><br><small>default when <code>superglobals(false)</code></small></td><td>false</td><td>false</td><td>true</td><td>HOOK_ALL</td><td>Modern apps benefiting from concurrent coroutine I/O; OpenSwoole-native code.</td></tr>
@@ -152,9 +152,9 @@ PHP]); ?>
   <tr><td>Coroutine without HOOK_ALL</td><td>false</td><td>false</td><td>true</td><td>0</td><td>Per-request coroutine isolation but no auto I/O hooks (e.g. testing, custom hooks).</td></tr>
 </table>
 
-<div class="callout warn" style="margin-bottom:1.5rem">
+<div class="callout warn coro-mb">
   <strong>Unsafe combinations</strong> — <code>App::run()</code> emits a <code>[lifecycle]</code> warning to the debug log but does not refuse:
-  <ul style="margin:.5rem 0 0;padding-left:1.25rem">
+  <ul class="coro-warn-list">
     <li><code>superglobals(true) + enableCoroutine(true)</code> — process-wide <code>$_GET</code> / <code>$_POST</code> / <code>$_SESSION</code> arrays will race across concurrent coroutines (the bug per-coroutine <code>$g</code> was designed to avoid).</li>
     <li><code>superglobals(true) + hookAll(non-zero)</code> — hooked I/O can yield mid-request, exposing process-wide superglobal mutations to other coroutines.</li>
   </ul>
@@ -162,10 +162,10 @@ PHP]); ?>
 
 <p>The default coupling — <code>null</code> everywhere — preserves the historical behaviour for any app that doesn't touch these knobs. The <a href="https://github.com/sibidharan/zealphp-symfony">zealphp-symfony</a> bridge uses <code>superglobals(true) + processIsolation(false) + sessionLifecycle(false)</code> to get the Mixed-mode lifecycle.</p>
 
-<h2 id="what-survives" style="margin:2.5rem 0 .5rem">What survives a request</h2>
+<h2 id="what-survives" class="coro-h2-section">What survives a request</h2>
 <p class="section-desc">Long-running PHP changes the rules from PHP-FPM. This is the discipline contract you accept when running on ZealPHP — what the framework isolates for you, and what you have to keep clean yourself.</p>
 
-<h3 style="margin:1.5rem 0 .5rem">Isolated per coroutine — framework handles this</h3>
+<h3 class="coro-h3">Isolated per coroutine — framework handles this</h3>
 <p>In coroutine mode (<code>App::superglobals(false)</code>, scaffold default since v0.2.4), <code>RequestContext::instance()</code> returns an instance stored on <code>Coroutine::getContext($cid)</code>. It's allocated when the coroutine starts and freed when it ends. Every field on it is per-request:</p>
 <table class="ztable">
   <tr><th>Field</th><th>Purpose</th></tr>
@@ -178,7 +178,7 @@ PHP]); ?>
   <tr><td><strong>Any local variable inside your handler</strong></td><td>Stack-allocated, dies when the handler returns. Safe.</td></tr>
 </table>
 
-<h3 style="margin:1.5rem 0 .5rem">NOT isolated — lives in worker process memory until the worker recycles</h3>
+<h3 class="coro-h3">NOT isolated — lives in worker process memory until the worker recycles</h3>
 <p>The following survive every coroutine boundary and every request boundary. The framework cannot isolate them. Treat them as worker-lifetime state.</p>
 <table class="ztable">
   <tr><th>Pattern</th><th>Why it leaks</th><th>What to do</th></tr>
@@ -219,11 +219,11 @@ PHP]); ?>
   </tr>
 </table>
 
-<h3 style="margin:1.5rem 0 .5rem">The discipline contract</h3>
+<h3 class="coro-h3">The discipline contract</h3>
 <p>ZealPHP's per-request isolation is a <strong>discipline contract</strong>, not a runtime guarantee. The framework isolates what it owns (everything in <code>RequestContext</code>); it can't isolate what your code puts in <code>static $foo</code> or <code>private static $instance</code>. That state lives in worker process memory and survives every coroutine boundary, until the worker recycles.</p>
 <p>This is the same trade-off every long-running PHP runtime makes. Hyperf and RoadRunner both ship worker recycling for exactly this reason — the surface area of state outside the framework's request-scoped object is too large to audit programmatically. The trust story is <strong>isolation + recycling, not either alone</strong>.</p>
 
-<h3 style="margin:1.5rem 0 .5rem">The backstop — worker recycling (<code>max_request</code>)</h3>
+<h3 class="coro-h3">The backstop — worker recycling (<code>max_request</code>)</h3>
 <p>ZealPHP defaults to <code>max_request=100000</code> since <strong>v0.2.4</strong>. After a worker handles 100,000 requests, OpenSwoole sends it <code>SIGTERM</code>, drains the current request, and the manager process forks a fresh worker. <strong>All process state — static variables, accumulated closures, leaked memory, the lot — is reset to zero.</strong> The TCP listener stays open via the manager, so no requests are dropped during the handoff.</p>
 <p>Tuning knobs:</p>
 <table class="ztable">
@@ -233,8 +233,8 @@ PHP]); ?>
   <tr><td><code>ZEALPHP_MAX_REQUEST=0</code></td><td>Env var</td><td>Disable recycling entirely (don't, unless you're benchmarking)</td></tr>
 </table>
 
-<h3 id="safety-matrix" style="margin:1.5rem 0 .5rem">Safety matrix (per mode)</h3>
-<p style="color:var(--text-muted);font-size:.92rem">The two modes are different runtimes, not different settings on the same runtime. Coroutine mode runs OpenSwoole's coroutine scheduler with <code>HOOK_ALL</code> enabled — every request is its own coroutine, many in flight per worker. Superglobals mode <strong>disables the coroutine scheduler entirely</strong> (<code>enable_coroutine = false</code> on the OpenSwoole server) and runs each request synchronously in the worker process, one at a time per worker — Apache MPM-prefork semantics. Implicit file routes (legacy <code>.php</code> drops) in superglobals mode additionally run through the CGI bridge (<code>App::include()</code> → <code>src/cgi_worker.php</code> via <code>proc_open</code>) for true global-scope process isolation. See the <a href="/templates#file-execution-family">file-execution family</a> for the five entry points and the <a href="/responses#return-contract">universal return contract</a> for the shared return semantics.</p>
+<h3 id="safety-matrix" class="coro-h3">Safety matrix (per mode)</h3>
+<p class="coro-note">The two modes are different runtimes, not different settings on the same runtime. Coroutine mode runs OpenSwoole's coroutine scheduler with <code>HOOK_ALL</code> enabled — every request is its own coroutine, many in flight per worker. Superglobals mode <strong>disables the coroutine scheduler entirely</strong> (<code>enable_coroutine = false</code> on the OpenSwoole server) and runs each request synchronously in the worker process, one at a time per worker — Apache MPM-prefork semantics. Implicit file routes (legacy <code>.php</code> drops) in superglobals mode additionally run through the CGI bridge (<code>App::include()</code> → <code>src/cgi_worker.php</code> via <code>proc_open</code>) for true global-scope process isolation. See the <a href="/templates#file-execution-family">file-execution family</a> for the five entry points and the <a href="/responses#return-contract">universal return contract</a> for the shared return semantics.</p>
 <table class="ztable">
   <tr><th>Concern</th><th>Coroutine mode <br><small>(<code>App::superglobals(false)</code>, scaffold default)</small></th><th>Superglobals mode <br><small>(<code>App::superglobals(true)</code>, migration only)</small></th></tr>
   <tr>
@@ -284,7 +284,7 @@ PHP]); ?>
   </tr>
 </table>
 
-<h3 style="margin:1.5rem 0 .5rem">Common patterns</h3>
+<h3 class="coro-h3">Common patterns</h3>
 <table class="ztable">
   <tr><th>I want to…</th><th>Do this</th><th>Not this</th></tr>
   <tr>
@@ -314,7 +314,7 @@ PHP]); ?>
   </tr>
 </table>
 
-<div class="callout info" style="margin-top:1.5rem">
+<div class="callout info coro-mt">
   <strong>Want to dig deeper?</strong> See <a href="/store">Store &amp; Cache</a> for shared-memory semantics, <a href="/migration">Migration</a> for the lift-and-shift path, and <a href="/deployment">Deploy</a> for production tuning (opcache settings, supervisor config, worker counts).
 </div>
 </div>

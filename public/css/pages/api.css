@@ -1,0 +1,39 @@
+/* Page-scoped styles for /api — relocated from inline style= attrs.
+   Prefix is `apidoc-` to avoid colliding with the global `.api-search*` classes. */
+
+.apidoc-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.apidoc-version-badge {
+  font-size: .65rem;
+  background: #fbbf24;
+  color: #1c1917;
+  padding: .05rem .35rem;
+  border-radius: 3px;
+  margin-left: .25rem;
+}
+
+.apidoc-mb-1 {
+  margin-bottom: 1rem;
+}
+
+.apidoc-mt-half {
+  margin-top: .5rem;
+}
+
+.apidoc-mt-1-5 {
+  margin-top: 1.5rem;
+}
+
+.apidoc-mt-2-5 {
+  margin-top: 2.5rem;
+}
+
+.apidoc-hint {
+  margin-top: .75rem;
+  color: #94a3b8;
+}

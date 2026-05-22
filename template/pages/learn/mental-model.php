@@ -158,9 +158,9 @@
       The other one, <strong>superglobals mode</strong>, exists for one reason: to run unmodified
       WordPress or Drupal without touching their source.
     </p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.25rem 0">
+    <div class="lmm-modes">
       <div>
-        <h4 style="text-align:center;margin:0 0 .5rem;color:var(--accent,#f59e0b);font-size:.82rem;text-transform:uppercase;letter-spacing:.05em">Coroutine mode (default)</h4>
+        <h4 class="lmm-mode-title lmm-mode-title-coro">Coroutine mode (default)</h4>
         <pre class="mermaid">graph TD
     R[Request] --> CO[Coroutine spawned]
     CO --> CTX["RequestContext on coroutine context"]
@@ -168,10 +168,10 @@
     H --> RES[Response]
     style CO fill:#fffbeb,stroke:#f59e0b,stroke-width:2px
     style CTX fill:#ecfdf5,stroke:#059669</pre>
-        <p style="text-align:center;color:#78716c;font-size:.82rem;margin:.35rem 0 0">Per-coroutine state · concurrent · isolated</p>
+        <p class="lmm-mode-caption">Per-coroutine state · concurrent · isolated</p>
       </div>
       <div>
-        <h4 style="text-align:center;margin:0 0 .5rem;color:#78716c;font-size:.82rem;text-transform:uppercase;letter-spacing:.05em">Superglobals mode</h4>
+        <h4 class="lmm-mode-title lmm-mode-title-super">Superglobals mode</h4>
         <pre class="mermaid">graph TD
     R[Request] --> CGI[CGI subprocess]
     CGI --> G["true $_GET, $_POST, $_SESSION"]
@@ -179,7 +179,7 @@
     H --> RES[Response]
     style CGI fill:#fef2f2,stroke:#f87171
     style G fill:#fef2f2,stroke:#f87171</pre>
-        <p style="text-align:center;color:#78716c;font-size:.82rem;margin:.35rem 0 0">Per-request fork · WordPress / Drupal compatibility</p>
+        <p class="lmm-mode-caption">Per-request fork · WordPress / Drupal compatibility</p>
       </div>
     </div>
     <p>

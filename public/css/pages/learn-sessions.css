@@ -1,0 +1,25 @@
+/* Page-scoped styles for /learn/sessions — relocated from inline style= attrs. */
+
+.lsess-center {
+  text-align: center;
+  padding: 1.25rem 0;
+}
+
+.lsess-counter-status {
+  margin-top: .85rem;
+}
+
+.lsess-popup-line {
+  margin: .85rem 0 0;
+  font-size: .85rem;
+  color: #78716c;
+}
+
+.lsess-h3 {
+  margin-top: 1.5rem;
+}
+
+.lsess-list {
+  margin: .5rem 0;
+  line-height: 1.7;
+}

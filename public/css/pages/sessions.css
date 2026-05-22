@@ -1,0 +1,30 @@
+/* Page-scoped styles for /sessions — relocated from inline style= attrs. */
+
+.sess-h2 {
+  margin: 1.5rem 0 .5rem;
+}
+
+.sess-h2-sub {
+  margin: 1.75rem 0 .5rem;
+}
+
+.sess-table-mb-2 {
+  margin-bottom: 2rem;
+}
+
+.sess-table-mb-1 {
+  margin-bottom: 1rem;
+}
+
+.sess-mt {
+  margin-top: 1.5rem;
+}
+
+.sess-note {
+  font-size: .9rem;
+  color: var(--text-muted);
+}
+
+.sess-muted {
+  color: var(--text-muted);
+}

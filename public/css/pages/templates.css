@@ -1,0 +1,60 @@
+/* Page-scoped styles for /templates — relocated from inline style= attrs. */
+
+.tpl-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.tpl-mb {
+  margin-bottom: 1.5rem;
+}
+
+.tpl-version-badge {
+  font-size: .65rem;
+  background: #fbbf24;
+  color: #1c1917;
+  padding: .05rem .35rem;
+  border-radius: 3px;
+  margin-left: .25rem;
+}
+
+.tpl-note {
+  color: var(--text-muted);
+  font-size: .92rem;
+}
+
+.tpl-mt {
+  margin-top: 1.5rem;
+}
+
+.tpl-fragment-list {
+  margin: .5rem 0;
+  line-height: 1.7;
+}
+
+.tpl-tryit-line {
+  margin: .25rem 0;
+}
+
+.tpl-tryit-link {
+  color: #fbbf24;
+}
+
+.tpl-tryit-note {
+  margin: .25rem 0;
+  font-size: .85rem;
+  color: #9ca3af;
+}
+
+.tpl-why-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.tpl-why-card {
+  padding: 1rem;
+}

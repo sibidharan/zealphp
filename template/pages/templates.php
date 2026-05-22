@@ -6,7 +6,7 @@
 
 <h2>Pass data, render a component</h2>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.5rem 0">
+<div class="tpl-split">
 <div>
 <?php App::render('/components/_code', [
     'label' => 'Route handler',
@@ -123,7 +123,7 @@ PHP]); ?>
 <h2 id="file-execution-family">The file-execution family — five ways to run a PHP file through the framework</h2>
 <p>The first four share a single private core (<code>App::executeFile()</code>) that runs the file, captures output, and applies the <a href="/responses#return-contract">universal return contract</a>. They differ only on (a) where the path is resolved from and (b) what the wrapper does with the result. The fifth — <code>App::fragment()</code> — runs <em>inside</em> a template and marks a named region the framework can extract by name. See the <a href="#fragments">fragments section</a> below.</p>
 
-<table class="ztable" style="margin-bottom:1.5rem">
+<table class="ztable tpl-mb">
 <tr><th>Method</th><th>Path resolved from</th><th>Returns</th><th>Use when</th></tr>
 <tr>
   <td><code>App::render($tpl, $args)</code></td>
@@ -150,16 +150,16 @@ PHP]); ?>
   <td>Apache rewrites — <code>$app-&gt;route('/old-page', fn() =&gt; App::include('/new.php'))</code> serves <code>public/new.php</code> in-process with the URL bar still at <code>/old-page</code>. See <a href="/legacy-apps">Legacy Apps</a> for the 12 rewrite recipes</td>
 </tr>
 <tr>
-  <td><code>App::fragment($name, $fn)</code> <span class="badge" style="font-size:.65rem;background:#fbbf24;color:#1c1917;padding:.05rem .35rem;border-radius:3px;margin-left:.25rem">v0.2.24</span></td>
+  <td><code>App::fragment($name, $fn)</code> <span class="badge tpl-version-badge">v0.2.24</span></td>
   <td>N/A — called <em>inside</em> a template, not on a path</td>
   <td><code>void</code>. The closure's return rides the full return contract when the fragment is extracted (the parent <code>App::render()</code> propagates it back through <code>ResponseMiddleware</code>).</td>
   <td>Mark a named region inside a template so the same <code>App::render('page', $args)</code> call can serve either the full page (no selector) or just that one region (<code>$args['fragment'] = 'name'</code>). The htmx-essay <a href="/learn/htmx#fragments">"one file, two responses"</a> pattern.</td>
 </tr>
 </table>
 
-<p style="color:var(--text-muted);font-size:.92rem"><code>App::includeFile()</code> is the deprecated alias for <code>App::include()</code> — kept for backward compatibility (the WordPress showcase and existing scaffolds still call it). New code should use <code>App::include()</code>.</p>
+<p class="tpl-note"><code>App::includeFile()</code> is the deprecated alias for <code>App::include()</code> — kept for backward compatibility (the WordPress showcase and existing scaffolds still call it). New code should use <code>App::include()</code>.</p>
 
-<h3 id="fragments" style="margin-top:1.5rem">Template fragments — one file, two responses</h3>
+<h3 id="fragments" class="tpl-mt">Template fragments — one file, two responses</h3>
 <p>
   <code>App::fragment($name, $fn)</code> turns any template into a dual-mode file: the same <code>App::render('page', $args)</code> call serves <strong>either</strong> the complete page (no fragment selector → every <code>App::fragment()</code> block runs inline) <strong>or</strong> just one named region (<code>$args['fragment'] = 'name'</code> → that region's buffer is cleared, only its closure runs, the rest of the template short-circuits via <code>HaltException</code>). Same template, same route handler, two different responses on the same URL — the <a href="https://htmx.org/essays/template-fragments/" target="_blank" rel="noopener">htmx-essay template-fragment</a> pattern without separate partial files.
 </p>
@@ -193,7 +193,7 @@ PHP,
 
 <p>Inside the closure, the universal contract applies — <code>return 404;</code> for auth, <code>return ['id'=>1];</code> for JSON, <code>return (fn(){ yield ...; })();</code> for streaming. Three behaviours worth knowing:</p>
 
-<ul style="margin:.5rem 0;line-height:1.7">
+<ul class="tpl-fragment-list">
   <li><strong>Missing fragment → 404</strong> per the <a href="/responses#return-contract">universal return contract</a>. Asking for <code>?fragment=does-not-exist</code> doesn't silently fall back to the full page.</li>
   <li><strong>First match wins</strong> when the same name appears twice — the first block extracts, the rest of the template short-circuits.</li>
   <li><strong>Nested renders compose</strong> — an <code>App::render()</code> called from inside a fragment closure does <em>not</em> inherit the parent's fragment selector. Each render's scope is saved+restored.</li>
@@ -201,16 +201,16 @@ PHP,
 
 <?php App::render('/components/_tryit', [
   'title' => 'Live demo — the contacts list',
-  'body'  => '<p style="margin:.25rem 0">'
-          .  '<a href="/demo/fragments/contacts" target="_blank" rel="noopener" style="color:#fbbf24">/demo/fragments/contacts</a>'
+  'body'  => '<p class="tpl-tryit-line">'
+          .  '<a href="/demo/fragments/contacts" target="_blank" rel="noopener" class="tpl-tryit-link">/demo/fragments/contacts</a>'
           .  ' — 4 contacts, each row swaps in place via <code>hx-get="?fragment=contact-N"</code>. Open DevTools → Network → XHR to confirm each click is a single 200 with just the <code>&lt;li&gt;</code> in the body.</p>'
-          .  '<p style="margin:.25rem 0;font-size:.85rem;color:#9ca3af">Full walk-through: <a href="/learn/htmx#fragments" style="color:#fbbf24">Forms &amp; htmx — Template fragments</a>.</p>',
+          .  '<p class="tpl-tryit-note">Full walk-through: <a href="/learn/htmx#fragments" class="tpl-tryit-link">Forms &amp; htmx — Template fragments</a>.</p>',
 ]); ?>
 
 <h2>SSR Streaming — yield from templates</h2>
 <p><code>App::renderStream()</code> returns a Generator. If the template file returns a Generator (via IIFE), it delegates with <code>yield from</code>. If the template echoes normally, the output is captured and yielded as one chunk. <strong>Both patterns compose in the same streaming pipeline.</strong></p>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.5rem 0">
+<div class="tpl-split">
 <div>
 <?php App::render('/components/_code', [
     'label' => 'Streaming template (template/users/stream.php)',
@@ -357,18 +357,18 @@ PHP]); ?>
 <tr><td>JSON encode</td><td><code>&lt;script&gt;const data = &lt;?= json_encode($data) ?&gt;&lt;/script&gt;</code></td></tr>
 </table>
 
-<div class="callout warn" style="margin-top:1.5rem">
+<div class="callout warn tpl-mt">
 <strong>Always escape user data</strong> with <code>htmlspecialchars()</code>. PHP templates have no auto-escaping — you get full control, which means full responsibility.
 </div>
 
 <h2>Why PHP over Blade/Twig/Mustache?</h2>
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-top:1rem">
-  <div class="card" style="padding:1rem"><strong>Zero learning curve</strong><br>No new syntax. If you know PHP, you know the component engine.</div>
-  <div class="card" style="padding:1rem"><strong>Full language power</strong><br>Classes, closures, exceptions, generators — not a subset.</div>
-  <div class="card" style="padding:1rem"><strong>No compile step</strong><br>No cache directory. Components are interpreted directly.</div>
-  <div class="card" style="padding:1rem"><strong>IDE support</strong><br>Autocompletion, type checking, refactoring — all free.</div>
-  <div class="card" style="padding:1rem"><strong>SSR streaming</strong><br>Components can <code>yield</code>. Progressive rendering built in.</div>
-  <div class="card" style="padding:1rem"><strong>Composable</strong><br>Render inside render. No "extends", no "blocks" — just function calls.</div>
+<div class="tpl-why-grid">
+  <div class="card tpl-why-card"><strong>Zero learning curve</strong><br>No new syntax. If you know PHP, you know the component engine.</div>
+  <div class="card tpl-why-card"><strong>Full language power</strong><br>Classes, closures, exceptions, generators — not a subset.</div>
+  <div class="card tpl-why-card"><strong>No compile step</strong><br>No cache directory. Components are interpreted directly.</div>
+  <div class="card tpl-why-card"><strong>IDE support</strong><br>Autocompletion, type checking, refactoring — all free.</div>
+  <div class="card tpl-why-card"><strong>SSR streaming</strong><br>Components can <code>yield</code>. Progressive rendering built in.</div>
+  <div class="card tpl-why-card"><strong>Composable</strong><br>Render inside render. No "extends", no "blocks" — just function calls.</div>
 </div>
 
 </div>

@@ -1,0 +1,266 @@
+/* Page-scoped styles for /why-zealphp (extracted from inline style= attrs). */
+
+.why-section {
+  background: var(--bg-dark);
+  color: var(--code-text);
+}
+
+.why-container { max-width: 860px; }
+
+.why-title {
+  font-size: 2rem;
+  margin-bottom: .5rem;
+  color: #fff;
+}
+
+.why-desc {
+  font-size: 1.1rem;
+  max-width: 700px;
+  color: var(--text-light);
+}
+
+.why-proof {
+  margin-top: 1.5rem;
+  padding: 1rem 1.25rem;
+  background: rgba(251,191,36,.08);
+  border-left: 4px solid #fbbf24;
+  border-radius: 6px;
+  font-size: .9rem;
+  color: var(--text-light);
+}
+
+.why-proof-strong { color: #fde68a; }
+
+.why-proof-link { color: #fde68a; }
+
+.why-proof-link-bold {
+  color: #fde68a;
+  font-weight: 600;
+}
+
+.why-block { margin-top: 2.5rem; }
+
+.why-h2 {
+  font-size: 1.3rem;
+  margin-bottom: 1rem;
+  color: #fff;
+}
+
+.why-h2-wide {
+  font-size: 1.3rem;
+  margin-bottom: 1.25rem;
+  color: #fff;
+}
+
+.why-prose {
+  color: var(--text-light);
+  line-height: 1.7;
+  font-size: .95rem;
+}
+
+.why-prose-spaced {
+  color: var(--text-light);
+  line-height: 1.7;
+  font-size: .95rem;
+  margin-top: .75rem;
+}
+
+.why-cards {
+  display: grid;
+  gap: 1rem;
+}
+
+.why-card {
+  background: var(--code-bg);
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+.why-card-title {
+  color: var(--accent);
+  font-size: .95rem;
+  margin-bottom: .5rem;
+}
+
+.why-card-body {
+  color: var(--text-light);
+  font-size: .88rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.why-note {
+  color: var(--text-light);
+  font-size: .88rem;
+  margin-bottom: 1.25rem;
+}
+
+.why-table-scroll { overflow-x: auto; }
+
+.why-compare-table {
+  font-size: .82rem;
+  min-width: 700px;
+}
+
+.why-compare-th {
+  background: var(--code-bg);
+  color: var(--code-text);
+  border-bottom: 2px solid rgba(255,255,255,.15);
+}
+
+.why-zealphp-row { background: rgba(245,158,11,.08); }
+
+.why-zealphp-cell {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.why-octane-intro {
+  color: var(--text-light);
+  font-size: .88rem;
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.why-octane-list {
+  color: var(--text-light);
+  font-size: .88rem;
+  line-height: 1.6;
+  padding-left: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.why-octane-list-item { margin-bottom: .5rem; }
+
+.why-strong-white { color: #fff; }
+
+.why-octane-outro {
+  color: var(--text-light);
+  font-size: .88rem;
+  line-height: 1.6;
+}
+
+.why-ladder-intro {
+  color: var(--text-light);
+  font-size: .88rem;
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.why-ladder {
+  display: grid;
+  gap: .5rem;
+  margin-bottom: 2rem;
+}
+
+.why-ladder-step {
+  display: flex;
+  gap: .75rem;
+  align-items: baseline;
+  font-size: .88rem;
+}
+
+.why-ladder-num {
+  color: var(--accent);
+  font-weight: 700;
+  min-width: 1.5rem;
+}
+
+.why-ladder-text { color: var(--text-light); }
+
+.why-ladder-text-final {
+  color: #fff;
+  font-weight: 600;
+}
+
+.why-fit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.why-fit-good {
+  color: var(--success);
+  font-size: .9rem;
+  margin-bottom: .75rem;
+}
+
+.why-fit-bad {
+  color: var(--danger);
+  font-size: .9rem;
+  margin-bottom: .75rem;
+}
+
+.why-fit-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: .85rem;
+  color: var(--text-light);
+}
+
+.why-fit-item { padding: .3rem 0; }
+
+.why-fit-note {
+  margin-top: .85rem;
+  color: var(--text-muted);
+  font-size: .78rem;
+  line-height: 1.55;
+}
+
+.why-fit-note-strong { color: #cbd5e1; }
+
+.why-fit-note-link { color: var(--accent); }
+
+.why-bench-intro {
+  color: var(--text-light);
+  font-size: .88rem;
+  line-height: 1.6;
+}
+
+.why-bench-method { margin-top: 1rem; }
+
+.why-bench-inline-code {
+  background: rgba(255,255,255,.05);
+  padding: .1rem .25rem;
+  border-radius: 3px;
+}
+
+.why-bench { margin-top: 1rem; }
+
+.why-bench-reproduce {
+  color: var(--text-muted);
+  font-size: .82rem;
+  margin-top: 1rem;
+}
+
+.why-bench-reproduce-code {
+  background: var(--code-bg);
+  padding: .2rem .5rem;
+  border-radius: 4px;
+  color: var(--text-light);
+}
+
+.why-cta {
+  margin-top: 3rem;
+  text-align: center;
+  padding: 2rem 0;
+  border-top: 1px solid var(--border-dark);
+}
+
+.why-cta-title {
+  font-size: 1.2rem;
+  margin-bottom: .5rem;
+  color: #fff;
+}
+
+.why-cta-desc {
+  color: var(--text-light);
+  margin-bottom: 1.25rem;
+}
+
+.why-cta-btn {
+  font-size: 1rem;
+  padding: .75rem 2rem;
+}

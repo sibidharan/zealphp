@@ -1,0 +1,101 @@
+/* Page-scoped styles for /design-tradeoffs — extracted from inline
+   style= attributes (separation-of-concerns rule). Visually identical
+   to the prior inline declarations; relocated only. */
+
+.tradeoffs-section {
+  background: var(--bg-dark);
+  color: var(--code-text);
+}
+
+.tradeoffs-container {
+  max-width: 920px;
+}
+
+.tradeoffs-title {
+  font-size: 2rem;
+  margin-bottom: .5rem;
+  color: #fff;
+}
+
+.tradeoffs-desc {
+  font-size: 1.05rem;
+  max-width: 760px;
+  color: var(--text-light);
+}
+
+.tradeoffs-reading {
+  margin-top: 1.75rem;
+  padding: 1rem 1.25rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border-dark);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  font-size: .92rem;
+  color: var(--text-light);
+}
+
+.tradeoffs-strong-light {
+  color: #fff;
+}
+
+.tradeoffs-link {
+  color: var(--accent);
+}
+
+.tradeoffs-block {
+  margin-top: 2.5rem;
+}
+
+.tradeoffs-h2 {
+  font-size: 1.3rem;
+  margin-bottom: .75rem;
+  color: #fff;
+}
+
+.tradeoffs-p {
+  color: var(--text-light);
+  line-height: 1.7;
+  font-size: .95rem;
+}
+
+.tradeoffs-p-sm {
+  color: var(--text-light);
+  line-height: 1.7;
+  font-size: .95rem;
+  margin-top: .5rem;
+}
+
+.tradeoffs-list {
+  color: var(--text-light);
+  line-height: 1.7;
+  font-size: .92rem;
+  margin-top: .5rem;
+  padding-left: 1.5rem;
+}
+
+.tradeoffs-closing {
+  margin-top: 3rem;
+  padding: 1.5rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius);
+}
+
+.tradeoffs-closing-h2 {
+  font-size: 1.15rem;
+  margin-bottom: .75rem;
+  color: #fff;
+}
+
+.tradeoffs-closing-p {
+  color: var(--text-light);
+  line-height: 1.7;
+  font-size: .92rem;
+}
+
+.tradeoffs-closing-p-sm {
+  color: var(--text-light);
+  line-height: 1.7;
+  font-size: .92rem;
+  margin-top: .5rem;
+}

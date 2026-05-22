@@ -1,0 +1,13 @@
+/* Page-scoped styles for /learn/notes — relocated from inline style= attrs. */
+
+.lnotes-details {
+  margin-top: 1rem;
+}
+
+.lnotes-reg-form {
+  margin-top: .75rem;
+}
+
+.lnotes-srclink {
+  color: #f59e0b;
+}

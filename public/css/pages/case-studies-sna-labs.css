@@ -1,0 +1,109 @@
+/* Page-scoped styles for /case-studies/sna-labs — extracted from inline
+   style= attributes (separation-of-concerns rule). Visually identical to
+   the prior inline declarations; relocated only. */
+
+.sna-hero-section {
+  background: var(--bg-dark);
+  color: var(--code-text);
+}
+
+.sna-hero-container {
+  max-width: 860px;
+}
+
+.sna-kicker {
+  font-size: .85rem;
+  color: #a8a29e;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  margin-bottom: .5rem;
+  font-weight: 600;
+}
+
+.sna-title {
+  font-size: 2.1rem;
+  margin-bottom: .5rem;
+  color: #fff;
+  letter-spacing: -.01em;
+}
+
+.sna-subtitle {
+  font-size: 1.05rem;
+  max-width: 780px;
+  color: var(--text-light);
+  font-style: italic;
+}
+
+.sna-body-container {
+  max-width: 860px;
+  line-height: 1.75;
+  font-size: 1rem;
+}
+
+.sna-h2 {
+  margin: 2rem 0 .75rem;
+}
+
+.sna-h3 {
+  margin: 1.5rem 0 .5rem;
+}
+
+.sna-list {
+  margin: .5rem 0 1rem;
+  padding-left: 1.4rem;
+}
+
+.sna-callout {
+  margin: 1.25rem 0;
+  padding: 1rem 1.25rem;
+  background: rgba(251, 191, 36, .06);
+  border: 1px solid rgba(251, 191, 36, .25);
+  border-left: 3px solid #f59e0b;
+  border-radius: 8px;
+}
+
+.sna-callout-strong {
+  color: #fde68a;
+}
+
+.sna-callout-p {
+  margin: .5rem 0 0;
+  line-height: 1.6;
+}
+
+.sna-table-mb {
+  margin-bottom: 1rem;
+}
+
+.sna-table-mb-lg {
+  margin-bottom: 1.25rem;
+}
+
+.sna-note {
+  color: var(--text-muted);
+  font-size: .92rem;
+  margin-bottom: 1.5rem;
+}
+
+.sna-note-sm {
+  color: var(--text-muted);
+  font-size: .9rem;
+}
+
+.sna-takeaways {
+  margin: .5rem 0 1.25rem;
+  padding-left: 1.4rem;
+  line-height: 1.85;
+}
+
+.sna-closing {
+  font-style: italic;
+  color: var(--text-muted);
+  margin-top: 1rem;
+}
+
+.sna-hr {
+  margin: 2.5rem 0 1.25rem;
+  border: 0;
+  border-top: 1px solid var(--border);
+}

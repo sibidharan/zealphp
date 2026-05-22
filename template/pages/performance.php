@@ -1,7 +1,7 @@
 <?php use ZealPHP\App; ?>
 
 <section class="section section-dark">
-<div class="container" style="max-width:900px">
+<div class="container perf-container">
 
 <h1 class="section-title">Benchmarks</h1>
 <p class="section-desc">Real machine, full methodology, every CSV linked. Reproduce yourself before quoting.</p>
@@ -10,11 +10,11 @@
 <!-- 1. Headline numbers — same as homepage hero, but with context -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<div class="bench-method" style="margin-top:2rem">
+<div class="bench-method perf-method">
   <strong>Setup</strong> &nbsp;|&nbsp;
   AMD Ryzen 9 7900X (12 cores) · 24 GB RAM · Ubuntu 22.04 (Docker) ·
   PHP 8.3.31 · OpenSwoole 26.2.0 · Node.js 24.11.1 ·
-  <code style="background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px">ab -n 50000 -c 200 -k -l</code>
+  <code class="perf-inline-code">ab -n 50000 -c 200 -k -l</code>
   · 4 workers, each runtime tested alone
 </div>
 
@@ -29,52 +29,52 @@
 <!-- 2. The three surprises                                        -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 style="margin:3rem 0 1rem">Three findings worth highlighting</h2>
+<h2 class="perf-h2">Three findings worth highlighting</h2>
 
-<div style="display:grid;grid-template-columns:1fr;gap:1rem">
-  <div class="qs-block" style="padding:1.1rem 1.3rem">
-    <h3 style="margin:0 0 .35rem;color:var(--accent);font-size:1.05rem">1. OpenSwoole's raw HTTP outperforms Node's</h3>
-    <p style="margin:0 0 .4rem;color:#cbd5e1;font-size:.92rem;line-height:1.55">
+<div class="perf-findings-grid">
+  <div class="qs-block perf-finding">
+    <h3 class="perf-finding-title">1. OpenSwoole's raw HTTP outperforms Node's</h3>
+    <p class="perf-finding-lead">
       Before any framework or middleware loads — bare HTTP server, single handler returning text/JSON:
     </p>
-    <table class="ztable" style="margin:.4rem 0;font-size:.88rem">
-      <tr><th>Runtime</th><th style="text-align:right">/raw/bench (text)</th><th style="text-align:right">/json</th></tr>
-      <tr><td>OpenSwoole raw</td><td style="text-align:right;color:var(--accent);font-weight:700">142,170 req/s</td><td style="text-align:right;color:var(--accent);font-weight:700">137,535 req/s</td></tr>
-      <tr><td>Node.js raw <code>http</code></td><td style="text-align:right">129,091 req/s</td><td style="text-align:right">131,513 req/s</td></tr>
-      <tr><td><strong>Delta</strong></td><td style="text-align:right;color:var(--accent)"><strong>+10.1%</strong></td><td style="text-align:right;color:var(--accent)"><strong>+4.6%</strong></td></tr>
+    <table class="ztable perf-finding-table">
+      <tr><th>Runtime</th><th class="perf-right">/raw/bench (text)</th><th class="perf-right">/json</th></tr>
+      <tr><td>OpenSwoole raw</td><td class="perf-cell-accent">142,170 req/s</td><td class="perf-cell-accent">137,535 req/s</td></tr>
+      <tr><td>Node.js raw <code>http</code></td><td class="perf-right">129,091 req/s</td><td class="perf-right">131,513 req/s</td></tr>
+      <tr><td><strong>Delta</strong></td><td class="perf-cell-accent-plain"><strong>+10.1%</strong></td><td class="perf-cell-accent-plain"><strong>+4.6%</strong></td></tr>
     </table>
-    <p style="margin:.4rem 0 0;color:#94a3b8;font-size:.82rem">
+    <p class="perf-finding-note">
       Counter-intuitive for the "PHP is slow" prior. Both Node and OpenSwoole are C extensions to their language runtimes; their HTTP servers are head-to-head and OpenSwoole is fractionally faster on this workload.
     </p>
   </div>
 
-  <div class="qs-block" style="padding:1.1rem 1.3rem">
-    <h3 style="margin:0 0 .35rem;color:var(--accent);font-size:1.05rem">2. Framework efficiency: ZealPHP retains 82%, Express retains 15%</h3>
-    <p style="margin:0 0 .4rem;color:#cbd5e1;font-size:.92rem;line-height:1.55">
+  <div class="qs-block perf-finding">
+    <h3 class="perf-finding-title">2. Framework efficiency: ZealPHP retains 82%, Express retains 15%</h3>
+    <p class="perf-finding-lead">
       The same workload through a full framework with CORS + ETag + sessions + routing + middleware:
     </p>
-    <table class="ztable" style="margin:.4rem 0;font-size:.88rem">
-      <tr><th>Stack</th><th style="text-align:right">Raw runtime</th><th style="text-align:right">Full framework</th><th style="text-align:right">Retention</th></tr>
-      <tr><td>ZealPHP / OpenSwoole</td><td style="text-align:right">142,170</td><td style="text-align:right">116,851</td><td style="text-align:right;color:var(--accent);font-weight:700">82%</td></tr>
-      <tr><td>Express / Node.js</td><td style="text-align:right">129,091</td><td style="text-align:right">19,994</td><td style="text-align:right">15%</td></tr>
+    <table class="ztable perf-finding-table">
+      <tr><th>Stack</th><th class="perf-right">Raw runtime</th><th class="perf-right">Full framework</th><th class="perf-right">Retention</th></tr>
+      <tr><td>ZealPHP / OpenSwoole</td><td class="perf-right">142,170</td><td class="perf-right">116,851</td><td class="perf-cell-accent">82%</td></tr>
+      <tr><td>Express / Node.js</td><td class="perf-right">129,091</td><td class="perf-right">19,994</td><td class="perf-right">15%</td></tr>
     </table>
-    <p style="margin:.4rem 0 0;color:#94a3b8;font-size:.82rem">
+    <p class="perf-finding-note">
       This is the actual answer to "why does ZealPHP beat Express by 5×". It's not raw speed; it's that each layer added by the framework costs ZealPHP much less throughput than the equivalent layer costs Express.
     </p>
   </div>
 
-  <div class="qs-block" style="padding:1.1rem 1.3rem">
-    <h3 style="margin:0 0 .35rem;color:var(--accent);font-size:1.05rem">3. PHP with full middleware reaches 91% of bare Node http</h3>
-    <p style="margin:0 0 .4rem;color:#cbd5e1;font-size:.92rem;line-height:1.55">
+  <div class="qs-block perf-finding">
+    <h3 class="perf-finding-title">3. PHP with full middleware reaches 91% of bare Node http</h3>
+    <p class="perf-finding-lead">
       Compose findings #1 and #2 — ZealPHP runs on a faster runtime AND keeps more of that runtime under middleware load. Net result, "PHP with everything turned on" vs "Node with nothing":
     </p>
-    <table class="ztable" style="margin:.4rem 0;font-size:.88rem">
-      <tr><th>Comparison</th><th style="text-align:right">Text</th><th style="text-align:right">JSON</th></tr>
-      <tr><td>ZealPHP full PSR-15</td><td style="text-align:right;color:var(--accent);font-weight:700">116,851</td><td style="text-align:right;color:var(--accent);font-weight:700">105,681</td></tr>
-      <tr><td>Node.js raw <code>http</code> (no framework)</td><td style="text-align:right">129,091</td><td style="text-align:right">131,513</td></tr>
-      <tr><td><strong>ZealPHP retains</strong></td><td style="text-align:right;color:var(--accent)"><strong>91%</strong></td><td style="text-align:right;color:var(--accent)"><strong>80%</strong></td></tr>
+    <table class="ztable perf-finding-table">
+      <tr><th>Comparison</th><th class="perf-right">Text</th><th class="perf-right">JSON</th></tr>
+      <tr><td>ZealPHP full PSR-15</td><td class="perf-cell-accent">116,851</td><td class="perf-cell-accent">105,681</td></tr>
+      <tr><td>Node.js raw <code>http</code> (no framework)</td><td class="perf-right">129,091</td><td class="perf-right">131,513</td></tr>
+      <tr><td><strong>ZealPHP retains</strong></td><td class="perf-cell-accent-plain"><strong>91%</strong></td><td class="perf-cell-accent-plain"><strong>80%</strong></td></tr>
     </table>
-    <p style="margin:.4rem 0 0;color:#94a3b8;font-size:.82rem">
+    <p class="perf-finding-note">
       Honest framing: ZealPHP doesn't beat hand-rolled Node http. But it gets within 10–20% of it while serving a full PSR-15 middleware stack with sessions, ETag, and reflection-based routing — features bare Node http doesn't have.
     </p>
   </div>
@@ -84,67 +84,67 @@
 <!-- 3. Head-to-head table                                         -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 style="margin:3rem 0 1rem">Sequential head-to-head — same workload, every stack</h2>
+<h2 class="perf-h2">Sequential head-to-head — same workload, every stack</h2>
 
-<p style="margin-bottom:1rem;color:#cbd5e1">
-  Each runtime gets the full 12-core machine in isolation; we don't run them concurrently because that measures the scheduler instead of the framework. <code style="background:rgba(255,255,255,.06);padding:.1rem .3rem;border-radius:3px">ab -n 50000 -c 200 -k -l</code>, warmed up first.
+<p class="perf-lead">
+  Each runtime gets the full 12-core machine in isolation; we don't run them concurrently because that measures the scheduler instead of the framework. <code class="perf-inline-code-06">ab -n 50000 -c 200 -k -l</code>, warmed up first.
 </p>
 
 <table class="ztable">
   <tr>
-    <th style="text-align:left">Framework</th>
-    <th style="text-align:right">Raw text (/raw/bench)</th>
-    <th style="text-align:right">JSON (/json)</th>
-    <th style="text-align:right">Template (/bench/template)</th>
+    <th class="perf-th-left">Framework</th>
+    <th class="perf-right">Raw text (/raw/bench)</th>
+    <th class="perf-right">JSON (/json)</th>
+    <th class="perf-right">Template (/bench/template)</th>
   </tr>
-  <tr style="background:rgba(255,255,255,.02)">
-    <td colspan="4" style="color:#94a3b8;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700">Runtime (no framework, no middleware)</td>
+  <tr class="perf-row-tint">
+    <td colspan="4" class="perf-section-label">Runtime (no framework, no middleware)</td>
   </tr>
   <tr>
     <td>OpenSwoole raw</td>
-    <td style="text-align:right">141,670</td>
-    <td style="text-align:right">137,535</td>
-    <td style="text-align:right;color:#64748b">—</td>
+    <td class="perf-right">141,670</td>
+    <td class="perf-right">137,535</td>
+    <td class="perf-cell-muted">—</td>
   </tr>
   <tr>
     <td>Node.js raw <code>http</code></td>
-    <td style="text-align:right">129,091</td>
-    <td style="text-align:right">131,513</td>
-    <td style="text-align:right;color:#64748b">—</td>
+    <td class="perf-right">129,091</td>
+    <td class="perf-right">131,513</td>
+    <td class="perf-cell-muted">—</td>
   </tr>
-  <tr style="background:rgba(255,255,255,.02)">
-    <td colspan="4" style="color:#94a3b8;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700">Full framework (CORS + ETag + sessions + routing + templates)</td>
-  </tr>
-  <tr>
-    <td style="color:var(--accent);font-weight:700">ZealPHP <span style="color:#64748b;font-weight:400;font-size:.78rem">built-in PSR-15 stack</span></td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">116,851</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">105,681</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">49,863</td>
+  <tr class="perf-row-tint">
+    <td colspan="4" class="perf-section-label">Full framework (CORS + ETag + sessions + routing + templates)</td>
   </tr>
   <tr>
-    <td>Express.js <span style="color:#64748b;font-size:.78rem">+ cors + etag + express-session + session-file-store + ejs + body-parser</span></td>
-    <td style="text-align:right">19,994</td>
-    <td style="text-align:right">21,741</td>
-    <td style="text-align:right">12,470 <span style="color:#64748b;font-size:.78rem">(EJS)</span></td>
+    <td class="perf-zeal-name">ZealPHP <span class="perf-zeal-sub">built-in PSR-15 stack</span></td>
+    <td class="perf-cell-accent">116,851</td>
+    <td class="perf-cell-accent">105,681</td>
+    <td class="perf-cell-accent">49,863</td>
   </tr>
-  <tr style="background:rgba(245,158,11,.05)">
+  <tr>
+    <td>Express.js <span class="perf-express-sub">+ cors + etag + express-session + session-file-store + ejs + body-parser</span></td>
+    <td class="perf-right">19,994</td>
+    <td class="perf-right">21,741</td>
+    <td class="perf-right">12,470 <span class="perf-express-sub">(EJS)</span></td>
+  </tr>
+  <tr class="perf-row-highlight">
     <td><strong>ZealPHP vs Express</strong></td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">+484% (5.8×)</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">+386% (4.9×)</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">+299% (4.0×)</td>
+    <td class="perf-cell-accent">+484% (5.8×)</td>
+    <td class="perf-cell-accent">+386% (4.9×)</td>
+    <td class="perf-cell-accent">+299% (4.0×)</td>
   </tr>
-  <tr style="background:rgba(255,255,255,.02)">
-    <td colspan="4" style="color:#94a3b8;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700">Other PHP frameworks (community benchmarks, similar workload class)</td>
+  <tr class="perf-row-tint">
+    <td colspan="4" class="perf-section-label">Other PHP frameworks (community benchmarks, similar workload class)</td>
   </tr>
-  <tr><td>Slim 4</td><td colspan="3" style="text-align:right;color:#94a3b8">~4,000 req/s</td></tr>
-  <tr><td>Symfony 7</td><td colspan="3" style="text-align:right;color:#94a3b8">~2,000 req/s</td></tr>
-  <tr><td>Laravel 11</td><td colspan="3" style="text-align:right;color:#94a3b8">~500 req/s</td></tr>
+  <tr><td>Slim 4</td><td colspan="3" class="perf-cell-dim">~4,000 req/s</td></tr>
+  <tr><td>Symfony 7</td><td colspan="3" class="perf-cell-dim">~2,000 req/s</td></tr>
+  <tr><td>Laravel 11</td><td colspan="3" class="perf-cell-dim">~500 req/s</td></tr>
 </table>
 
-<p style="text-align:center;margin-top:.75rem;color:#94a3b8;font-size:.85rem">
-  vs Laravel 11: <strong style="color:var(--accent)">~210×</strong> ·
-  vs Symfony 7: <strong style="color:var(--accent)">~55×</strong> ·
-  vs Slim 4: <strong style="color:var(--accent)">~28×</strong>
+<p class="perf-totals">
+  vs Laravel 11: <strong class="perf-accent-strong">~210×</strong> ·
+  vs Symfony 7: <strong class="perf-accent-strong">~55×</strong> ·
+  vs Slim 4: <strong class="perf-accent-strong">~28×</strong>
 </p>
 
 <!-- ────────────────────────────────────────────────────────────── -->
@@ -153,99 +153,99 @@
 <!-- to the numbers must update BOTH in lock-step.                   -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 style="margin:3rem 0 1rem">Legacy-file serving — Apache vs ZealPHP lifecycle modes</h2>
+<h2 class="perf-h2">Legacy-file serving — Apache vs ZealPHP lifecycle modes</h2>
 
-<p style="margin-bottom:1rem;color:#cbd5e1">
+<p class="perf-lead">
   The numbers above are ZealPHP's <em>native-route</em> fast path. This one is different and matters when you're <strong>migrating an existing app</strong>: serving a plain <code>public/*.php</code> file (implicit routing) through each lifecycle mode, compared against Apache + mod_php. Same trivial <code>probe.php</code> (<code>echo "ok"</code>), 4 workers each, <code>ab -n 3000 -c 20</code>.
 </p>
 
 <table class="ztable">
   <tr>
-    <th style="text-align:left">Stack</th>
-    <th style="text-align:left">How the file runs</th>
-    <th style="text-align:right">req/s</th>
-    <th style="text-align:right">ms/req</th>
+    <th class="perf-th-left">Stack</th>
+    <th class="perf-th-left">How the file runs</th>
+    <th class="perf-right">req/s</th>
+    <th class="perf-right">ms/req</th>
   </tr>
   <tr>
     <td>Apache + mod_php</td>
     <td>warm in-process interpreter</td>
-    <td style="text-align:right;color:#fde68a;font-weight:700">40,861</td>
-    <td style="text-align:right">0.49</td>
+    <td class="perf-cell-amber">40,861</td>
+    <td class="perf-right">0.49</td>
   </tr>
-  <tr style="background:rgba(255,255,255,.02)">
+  <tr class="perf-row-tint">
     <td>ZealPHP coroutine (default)</td>
     <td>in-process include, coroutine-per-req</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">34,159</td>
-    <td style="text-align:right">0.59</td>
+    <td class="perf-cell-accent">34,159</td>
+    <td class="perf-right">0.59</td>
   </tr>
   <tr>
     <td>ZealPHP Mixed-mode <small>(<code>processIsolation(false)</code>)</small></td>
     <td>in-process include, sequential</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">21,964</td>
-    <td style="text-align:right">0.91</td>
+    <td class="perf-cell-accent">21,964</td>
+    <td class="perf-right">0.91</td>
   </tr>
-  <tr style="background:rgba(255,255,255,.02)">
+  <tr class="perf-row-tint">
     <td>ZealPHP fork CGI <small>(<code>processIsolation(true)</code> + <code>cgiMode('fork')</code>)</small></td>
     <td><code>OpenSwoole\Process</code> forks the warm worker (COW)</td>
-    <td style="text-align:right;color:var(--accent);font-weight:700">814</td>
-    <td style="text-align:right">24.6</td>
+    <td class="perf-cell-accent">814</td>
+    <td class="perf-right">24.6</td>
   </tr>
   <tr>
     <td>ZealPHP legacy CGI <small>(<code>processIsolation(true)</code> + <code>cgiMode('proc')</code>)</small></td>
     <td><code>proc_open</code> fresh PHP per req</td>
-    <td style="text-align:right;color:#fca5a5;font-weight:700">160</td>
-    <td style="text-align:right;color:#fca5a5">124.4</td>
+    <td class="perf-cell-danger">160</td>
+    <td class="perf-cell-danger-plain">124.4</td>
   </tr>
 </table>
 
-<p style="margin:.6rem 0 0;color:#94a3b8;font-size:.85rem">
-  Intel i9-14900K · PHP 8.3 · 4 workers each · <code>ab -n 3000 -c 20</code> — same run as <a href="/vs-fpm#measured-four-ways" style="color:var(--accent)">/vs-fpm</a>. Three honest takeaways: (1) the default CGI bridge's <code>proc_open</code> fork is the whole story behind the 160 req/s — turning process isolation off (Mixed-mode) recovers ~137× on the same file; (2) if you need isolation, <code>cgiMode('fork')</code> is ~5× faster than proc (814 vs 160) by forking the warm worker instead of cold-starting PHP; (3) Apache mod_php edges out ZealPHP on trivial legacy-file serving (a mature in-process C SAPI is hard to beat for no-I/O echo). ZealPHP's win is the native-route numbers above, coroutine I/O concurrency, WebSocket/SSE, and not needing a separate web server. Full analysis + the FPM architecture breakdown: <a href="/vs-fpm#measured-four-ways" style="color:var(--accent)">/vs-fpm</a>.
+<p class="perf-para-note">
+  Intel i9-14900K · PHP 8.3 · 4 workers each · <code>ab -n 3000 -c 20</code> — same run as <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>. Three honest takeaways: (1) the default CGI bridge's <code>proc_open</code> fork is the whole story behind the 160 req/s — turning process isolation off (Mixed-mode) recovers ~137× on the same file; (2) if you need isolation, <code>cgiMode('fork')</code> is ~5× faster than proc (814 vs 160) by forking the warm worker instead of cold-starting PHP; (3) Apache mod_php edges out ZealPHP on trivial legacy-file serving (a mature in-process C SAPI is hard to beat for no-I/O echo). ZealPHP's win is the native-route numbers above, coroutine I/O concurrency, WebSocket/SSE, and not needing a separate web server. Full analysis + the FPM architecture breakdown: <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>.
 </p>
 
-<p style="margin:.6rem 0 0;color:#94a3b8;font-size:.85rem">
-  <strong>Not shown:</strong> <code>cgiMode('fcgi')</code> — the third dispatch option — forwards each <code>public/*.php</code> file to an upstream php-fpm pool over FastCGI (nginx <code>fastcgi_pass</code> / Apache <code>mod_proxy_fcgi</code> parity). Performance ≈ whatever that pool delivers; we don't run PHP at all in this mode. Walkthrough: <a href="/legacy-apps#cgi-mode-fcgi" style="color:var(--accent)">/legacy-apps#cgi-mode-fcgi</a>.
+<p class="perf-para-note">
+  <strong>Not shown:</strong> <code>cgiMode('fcgi')</code> — the third dispatch option — forwards each <code>public/*.php</code> file to an upstream php-fpm pool over FastCGI (nginx <code>fastcgi_pass</code> / Apache <code>mod_proxy_fcgi</code> parity). Performance ≈ whatever that pool delivers; we don't run PHP at all in this mode. Walkthrough: <a href="/legacy-apps#cgi-mode-fcgi" class="perf-link-accent">/legacy-apps#cgi-mode-fcgi</a>.
 </p>
 
 <!-- ────────────────────────────────────────────────────────────── -->
 <!-- 4. Concurrency sweep                                          -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 style="margin:3rem 0 1rem">Concurrency sweep — ZealPHP solo across c = 1…1000</h2>
+<h2 class="perf-h2">Concurrency sweep — ZealPHP solo across c = 1…1000</h2>
 
-<p style="margin-bottom:1rem;color:#cbd5e1">
+<p class="perf-lead">
   Same 4 workers, varying simultaneous connections. Shows where each endpoint saturates, how tail latency degrades, and whether throughput holds at heavy load.
 </p>
 
-<h3 style="margin-top:1.5rem"><code>/raw/bench</code> — lean runtime, no demo middleware</h3>
-<table class="ztable" style="margin:.5rem 0">
-  <tr><th>c</th><th style="text-align:right">req/s</th><th style="text-align:right">avg ms</th><th style="text-align:right">p90 ms</th><th style="text-align:right">p99 ms</th><th style="text-align:right">failures</th></tr>
-  <tr><td>1</td><td style="text-align:right">3,883</td><td style="text-align:right">0.26</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">0</td></tr>
-  <tr><td>10</td><td style="text-align:right">30,501</td><td style="text-align:right">0.33</td><td style="text-align:right">0</td><td style="text-align:right">1</td><td style="text-align:right">0</td></tr>
-  <tr><td>50</td><td style="text-align:right">94,888</td><td style="text-align:right">0.53</td><td style="text-align:right">1</td><td style="text-align:right">3</td><td style="text-align:right">0</td></tr>
-  <tr style="background:rgba(245,158,11,.06)"><td><strong>100</strong></td><td style="text-align:right;color:var(--accent);font-weight:700"><strong>110,964</strong></td><td style="text-align:right">0.90</td><td style="text-align:right">1</td><td style="text-align:right">6</td><td style="text-align:right">0</td></tr>
-  <tr><td>200</td><td style="text-align:right">102,156</td><td style="text-align:right">1.96</td><td style="text-align:right">3</td><td style="text-align:right">9</td><td style="text-align:right">0</td></tr>
-  <tr><td>500</td><td style="text-align:right">100,363</td><td style="text-align:right">4.98</td><td style="text-align:right">8</td><td style="text-align:right">20</td><td style="text-align:right">0</td></tr>
-  <tr><td>1000</td><td style="text-align:right">85,001</td><td style="text-align:right">11.77</td><td style="text-align:right">19</td><td style="text-align:right">33</td><td style="text-align:right">0</td></tr>
+<h3 class="perf-h3-spaced"><code>/raw/bench</code> — lean runtime, no demo middleware</h3>
+<table class="ztable perf-sweep-table">
+  <tr><th>c</th><th class="perf-right">req/s</th><th class="perf-right">avg ms</th><th class="perf-right">p90 ms</th><th class="perf-right">p99 ms</th><th class="perf-right">failures</th></tr>
+  <tr><td>1</td><td class="perf-right">3,883</td><td class="perf-right">0.26</td><td class="perf-right">0</td><td class="perf-right">0</td><td class="perf-right">0</td></tr>
+  <tr><td>10</td><td class="perf-right">30,501</td><td class="perf-right">0.33</td><td class="perf-right">0</td><td class="perf-right">1</td><td class="perf-right">0</td></tr>
+  <tr><td>50</td><td class="perf-right">94,888</td><td class="perf-right">0.53</td><td class="perf-right">1</td><td class="perf-right">3</td><td class="perf-right">0</td></tr>
+  <tr class="perf-row-sweep-peak"><td><strong>100</strong></td><td class="perf-cell-accent"><strong>110,964</strong></td><td class="perf-right">0.90</td><td class="perf-right">1</td><td class="perf-right">6</td><td class="perf-right">0</td></tr>
+  <tr><td>200</td><td class="perf-right">102,156</td><td class="perf-right">1.96</td><td class="perf-right">3</td><td class="perf-right">9</td><td class="perf-right">0</td></tr>
+  <tr><td>500</td><td class="perf-right">100,363</td><td class="perf-right">4.98</td><td class="perf-right">8</td><td class="perf-right">20</td><td class="perf-right">0</td></tr>
+  <tr><td>1000</td><td class="perf-right">85,001</td><td class="perf-right">11.77</td><td class="perf-right">19</td><td class="perf-right">33</td><td class="perf-right">0</td></tr>
 </table>
 
-<h3 style="margin-top:1.5rem"><code>/json</code> — full PSR-15 stack (CORS · ETag · Range · sessions · reflection-injected handler)</h3>
-<table class="ztable" style="margin:.5rem 0">
-  <tr><th>c</th><th style="text-align:right">req/s</th><th style="text-align:right">avg ms</th><th style="text-align:right">p90 ms</th><th style="text-align:right">p99 ms</th><th style="text-align:right">failures</th></tr>
-  <tr><td>1</td><td style="text-align:right">4,173</td><td style="text-align:right">0.24</td><td style="text-align:right">0</td><td style="text-align:right">0</td><td style="text-align:right">0</td></tr>
-  <tr><td>10</td><td style="text-align:right">30,840</td><td style="text-align:right">0.32</td><td style="text-align:right">0</td><td style="text-align:right">1</td><td style="text-align:right">0</td></tr>
-  <tr><td>50</td><td style="text-align:right">105,868</td><td style="text-align:right">0.47</td><td style="text-align:right">1</td><td style="text-align:right">4</td><td style="text-align:right">0</td></tr>
-  <tr style="background:rgba(245,158,11,.06)"><td><strong>100</strong></td><td style="text-align:right;color:var(--accent);font-weight:700"><strong>108,086</strong></td><td style="text-align:right">0.93</td><td style="text-align:right">1</td><td style="text-align:right">6</td><td style="text-align:right">0</td></tr>
-  <tr><td>200</td><td style="text-align:right">93,733</td><td style="text-align:right">2.13</td><td style="text-align:right">3</td><td style="text-align:right">9</td><td style="text-align:right">0</td></tr>
-  <tr><td>500</td><td style="text-align:right">95,526</td><td style="text-align:right">5.23</td><td style="text-align:right">8</td><td style="text-align:right">19</td><td style="text-align:right">0</td></tr>
-  <tr><td>1000</td><td style="text-align:right">77,761</td><td style="text-align:right">12.86</td><td style="text-align:right">19</td><td style="text-align:right">81</td><td style="text-align:right">0</td></tr>
+<h3 class="perf-h3-spaced"><code>/json</code> — full PSR-15 stack (CORS · ETag · Range · sessions · reflection-injected handler)</h3>
+<table class="ztable perf-sweep-table">
+  <tr><th>c</th><th class="perf-right">req/s</th><th class="perf-right">avg ms</th><th class="perf-right">p90 ms</th><th class="perf-right">p99 ms</th><th class="perf-right">failures</th></tr>
+  <tr><td>1</td><td class="perf-right">4,173</td><td class="perf-right">0.24</td><td class="perf-right">0</td><td class="perf-right">0</td><td class="perf-right">0</td></tr>
+  <tr><td>10</td><td class="perf-right">30,840</td><td class="perf-right">0.32</td><td class="perf-right">0</td><td class="perf-right">1</td><td class="perf-right">0</td></tr>
+  <tr><td>50</td><td class="perf-right">105,868</td><td class="perf-right">0.47</td><td class="perf-right">1</td><td class="perf-right">4</td><td class="perf-right">0</td></tr>
+  <tr class="perf-row-sweep-peak"><td><strong>100</strong></td><td class="perf-cell-accent"><strong>108,086</strong></td><td class="perf-right">0.93</td><td class="perf-right">1</td><td class="perf-right">6</td><td class="perf-right">0</td></tr>
+  <tr><td>200</td><td class="perf-right">93,733</td><td class="perf-right">2.13</td><td class="perf-right">3</td><td class="perf-right">9</td><td class="perf-right">0</td></tr>
+  <tr><td>500</td><td class="perf-right">95,526</td><td class="perf-right">5.23</td><td class="perf-right">8</td><td class="perf-right">19</td><td class="perf-right">0</td></tr>
+  <tr><td>1000</td><td class="perf-right">77,761</td><td class="perf-right">12.86</td><td class="perf-right">19</td><td class="perf-right">81</td><td class="perf-right">0</td></tr>
 </table>
 
-<p style="margin-top:.75rem;color:#94a3b8;font-size:.85rem;line-height:1.55">
+<p class="perf-sweep-summary">
   Peak at c = 100, sustained well past it. Throughput holds within ~20% of peak at c = 1000 with zero failures — the framework degrades gracefully rather than falling over.<br>
   Low-concurrency throughput (c = 1, c = 10) is bounded by Docker localhost-network round-trip latency, not framework cost. Run on bare metal to see higher c = 1 numbers; the c ≥ 50 figures are unaffected.
 </p>
 
-<p style="margin-top:.5rem;color:#64748b;font-size:.78rem">
+<p class="perf-csv-links">
   Raw CSVs: <a href="https://github.com/sibidharan/zealphp/blob/master/bench/results/ryzen-sweep/raw-bench-ryzen-c1-1000.csv" target="_blank" rel="noopener">/raw/bench</a> ·
   <a href="https://github.com/sibidharan/zealphp/blob/master/bench/results/ryzen-sweep/json-ryzen-c1-1000.csv" target="_blank" rel="noopener">/json</a>
 </p>
@@ -254,15 +254,15 @@
 <!-- 5. Reproduce yourself                                          -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 style="margin:3rem 0 1rem">Reproduce on your own machine</h2>
+<h2 class="perf-h2">Reproduce on your own machine</h2>
 
-<p style="margin-bottom:1rem;color:#cbd5e1">
+<p class="perf-lead">
   Numbers are hardware- and OS-bound. Published figures are a starting point, not a contract. Three harnesses ship with the repo; pick the one that matches the claim you want to verify.
 </p>
 
-<h3 style="margin-top:1.5rem">One-line install (Ubuntu/Debian)</h3>
+<h3 class="perf-h3-spaced">One-line install (Ubuntu/Debian)</h3>
 
-<p style="margin:.5rem 0 .75rem;color:#cbd5e1">
+<p class="perf-install-lead">
   Goes from a fresh box to a benched-ready clone — installs PHP 8.3, OpenSwoole, uopz, composer, wrk, ab, then clones <code>sibidharan/zealphp</code> to <code>~/zealphp</code> and runs <code>composer install</code>:
 </p>
 
@@ -274,12 +274,12 @@ curl -fsSL https://php.zeal.ninja/bench-install.sh | sudo bash
 BASH
 ]); ?>
 
-<p style="margin:.5rem 0 0;color:#94a3b8;font-size:.85rem">
+<p class="perf-install-note">
   Inspect before piping to <code>sudo</code>:
   <code>curl -fsSL https://php.zeal.ninja/bench-install.sh | less</code>
 </p>
 
-<h3 style="margin-top:2rem">Manual install (macOS / inspect-friendly)</h3>
+<h3 class="perf-h3-spaced-2">Manual install (macOS / inspect-friendly)</h3>
 
 <?php App::render('/components/_code', [
     'label' => 'macOS (Homebrew)',
@@ -299,11 +299,11 @@ git clone https://github.com/sibidharan/zealphp && cd zealphp && composer instal
 BASH
 ]); ?>
 
-<p style="margin-top:.5rem;color:#94a3b8;font-size:.85rem">
+<p class="perf-install-note">
   Verify extensions loaded: <code>php -m | grep -E 'openswoole|uopz'</code>
 </p>
 
-<h3 style="margin-top:2rem">Recipe 1 — single-stack concurrency sweep (matches the tables above)</h3>
+<h3 class="perf-h3-spaced-2">Recipe 1 — single-stack concurrency sweep (matches the tables above)</h3>
 
 <?php App::render('/components/_code', [
     'label' => 'scripts/bench.sh',
@@ -315,7 +315,7 @@ scripts/bench.sh --tool ab --requests 50000 \
 BASH
 ]); ?>
 
-<h3 style="margin-top:1.5rem">Recipe 2 — ZealPHP vs raw Node (matches the head-to-head table)</h3>
+<h3 class="perf-h3-spaced">Recipe 2 — ZealPHP vs raw Node (matches the head-to-head table)</h3>
 
 <?php App::render('/components/_code', [
     'label' => 'scripts/bench_compare.sh',
@@ -326,9 +326,9 @@ mkdir -p bench/results && docker compose run --rm --build compare
 BASH
 ]); ?>
 
-<h3 style="margin-top:1.5rem">Recipe 3 — 3-way with sample-to-sample variance (autocannon)</h3>
+<h3 class="perf-h3-spaced">Recipe 3 — 3-way with sample-to-sample variance (autocannon)</h3>
 
-<p style="margin:.5rem 0;color:#94a3b8;font-size:.88rem">
+<p class="perf-recipe-note">
   A single 30s run can hide 10–15% per-sample swings on noisy hardware. This harness runs 10 short samples per stack spread over time and reports mean ± stddev so you can see how stable each stack is.
 </p>
 
@@ -344,7 +344,7 @@ BASH
 <!-- 6. Methodology and caveats                                     -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 style="margin:3rem 0 1rem">Methodology</h2>
+<h2 class="perf-h2">Methodology</h2>
 
 <table class="ztable">
   <tr><th>Field</th><th>Value</th></tr>
@@ -363,7 +363,7 @@ BASH
   <tr><td>Method</td><td>Each runtime tested <strong>alone</strong> with full machine resources — never simultaneously</td></tr>
 </table>
 
-<h3 style="margin-top:2rem">Endpoints under test</h3>
+<h3 class="perf-h3-spaced-2">Endpoints under test</h3>
 
 <table class="ztable">
   <tr><th>Path</th><th>Returns</th><th>What it exercises</th></tr>
@@ -372,9 +372,9 @@ BASH
   <tr><td><code>/bench/template</code></td><td>~6 KB HTML</td><td>Same as <code>/json</code> + template rendering with <code>App::render()</code>.</td></tr>
 </table>
 
-<h2 style="margin:3rem 0 1rem">Caveats — read before quoting</h2>
+<h2 class="perf-h2">Caveats — read before quoting</h2>
 
-<ul style="color:#cbd5e1;line-height:1.7;padding-left:1.2rem;margin:0">
+<ul class="perf-caveats">
   <li><strong>Single-machine numbers.</strong> Your hardware, OS limits, payload size, and middleware set will move these. Quote your own measurements.</li>
   <li><strong>Docker localhost RTT.</strong> c = 1 and c = 10 throughput is bounded by Docker's localhost networking overhead, not framework cost. Bare-metal runs typically post c = 1 closer to 15k-20k req/s.</li>
   <li><strong>4 workers ≈ 4 cores.</strong> Deliberate baseline. The framework is multi-process; doubling workers on a wider machine scales further until you saturate I/O or coroutine context-switching.</li>
@@ -382,7 +382,7 @@ BASH
   <li><strong>"Other PHP frameworks" numbers are community benchmarks</strong>, not measured on this box. They're rough orders of magnitude; we don't claim 1.0% precision.</li>
 </ul>
 
-<p style="margin-top:2rem;color:#64748b;font-size:.85rem">
+<p class="perf-source">
   Source: <a href="https://github.com/sibidharan/zealphp/blob/master/PERF.md" target="_blank" rel="noopener">PERF.md</a> ·
   Raw CSVs: <a href="https://github.com/sibidharan/zealphp/tree/master/bench/results/ryzen-sweep" target="_blank" rel="noopener">bench/results/ryzen-sweep/</a> ·
   Scripts: <a href="https://github.com/sibidharan/zealphp/tree/master/scripts" target="_blank" rel="noopener">scripts/</a> · <a href="https://github.com/sibidharan/zealphp/tree/master/bench/compare-3way" target="_blank" rel="noopener">bench/compare-3way/</a>

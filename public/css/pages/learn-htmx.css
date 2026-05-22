@@ -1,0 +1,39 @@
+/* Page-scoped styles for /learn/htmx — relocated from inline style= attrs. */
+
+.lhx-center {
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.lhx-h2 {
+  margin-top: 2rem;
+}
+
+.lhx-h3 {
+  margin-top: 1.25rem;
+}
+
+.lhx-list {
+  margin: .5rem 0;
+  line-height: 1.7;
+}
+
+.lhx-tryit-line {
+  margin: .25rem 0;
+}
+
+.lhx-tryit-note {
+  margin: .25rem 0;
+  font-size: .85rem;
+  color: #9ca3af;
+}
+
+.lhx-link {
+  color: #fbbf24;
+}
+
+.lhx-note {
+  margin-top: .75rem;
+  font-size: .9rem;
+  color: #9ca3af;
+}

@@ -114,22 +114,22 @@
     style WS2 fill:#ecfdf5,stroke:#059669
     style SSE fill:#ecfdf5,stroke:#059669</pre>
 
-    <table style="width:100%;border-collapse:collapse;margin:1rem 0;font-size:.88rem">
-      <thead><tr style="border-bottom:2px solid #e7e5e4;text-align:left">
-        <th style="padding:.55rem">Concern</th>
-        <th style="padding:.55rem">React + Node</th>
-        <th style="padding:.55rem">ZealPHP + htmx</th>
+    <table class="rvp-table">
+      <thead><tr>
+        <th>Concern</th>
+        <th>React + Node</th>
+        <th>ZealPHP + htmx</th>
       </tr></thead>
       <tbody>
-        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>Languages</strong></td><td style="padding:.55rem">JavaScript + TypeScript + JSX + CSS-in-JS</td><td style="padding:.55rem">PHP + HTML + CSS</td></tr>
-        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>Build step</strong></td><td style="padding:.55rem">Webpack/Vite, 30s–2min</td><td style="padding:.55rem">None. Save and refresh.</td></tr>
-        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>Client JS</strong></td><td style="padding:.55rem">200–500 KB (min+gzip)</td><td style="padding:.55rem">14 KB (htmx) + 0 custom</td></tr>
-        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>Hydration</strong></td><td style="padding:.55rem">Server renders HTML, client re-renders it in JS</td><td style="padding:.55rem">Server renders HTML. Done.</td></tr>
-        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>State management</strong></td><td style="padding:.55rem">Redux / Zustand / Context + hooks</td><td style="padding:.55rem">Server is the state. Session + DB.</td></tr>
-        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>API layer</strong></td><td style="padding:.55rem">REST or GraphQL + client fetching + loading states</td><td style="padding:.55rem">htmx posts, server returns HTML fragment</td></tr>
-        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>Routing</strong></td><td style="padding:.55rem">Client-side router + server routes + code splitting</td><td style="padding:.55rem">File = URL. One router.</td></tr>
-        <tr style="border-bottom:1px solid #f5f5f4"><td style="padding:.55rem"><strong>SEO</strong></td><td style="padding:.55rem">SSR/SSG required (Next.js, Remix)</td><td style="padding:.55rem">Server-rendered by default</td></tr>
-        <tr><td style="padding:.55rem"><strong>Processes</strong></td><td style="padding:.55rem">Node + Redis + queue + maybe Nginx</td><td style="padding:.55rem"><code>php app.php</code></td></tr>
+        <tr><td><strong>Languages</strong></td><td>JavaScript + TypeScript + JSX + CSS-in-JS</td><td>PHP + HTML + CSS</td></tr>
+        <tr><td><strong>Build step</strong></td><td>Webpack/Vite, 30s–2min</td><td>None. Save and refresh.</td></tr>
+        <tr><td><strong>Client JS</strong></td><td>200–500 KB (min+gzip)</td><td>14 KB (htmx) + 0 custom</td></tr>
+        <tr><td><strong>Hydration</strong></td><td>Server renders HTML, client re-renders it in JS</td><td>Server renders HTML. Done.</td></tr>
+        <tr><td><strong>State management</strong></td><td>Redux / Zustand / Context + hooks</td><td>Server is the state. Session + DB.</td></tr>
+        <tr><td><strong>API layer</strong></td><td>REST or GraphQL + client fetching + loading states</td><td>htmx posts, server returns HTML fragment</td></tr>
+        <tr><td><strong>Routing</strong></td><td>Client-side router + server routes + code splitting</td><td>File = URL. One router.</td></tr>
+        <tr><td><strong>SEO</strong></td><td>SSR/SSG required (Next.js, Remix)</td><td>Server-rendered by default</td></tr>
+        <tr><td><strong>Processes</strong></td><td>Node + Redis + queue + maybe Nginx</td><td><code>php app.php</code></td></tr>
       </tbody>
     </table>
 

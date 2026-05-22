@@ -33,7 +33,7 @@ $active = $active ?? 'learn/auth';
       No server to install, no credentials to configure. PHP includes PDO (PHP Data Objects) for talking
       to databases.
     </p>
-    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/DB.php" style="color:#f59e0b">src/Learn/DB.php</a> — open the database and create tables
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/DB.php" class="lauth-srclink">src/Learn/DB.php</a> — open the database and create tables
 $pdo = new \PDO('sqlite:' . __DIR__ . '/../../storage/learn.db');
 $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
 $pdo->query('PRAGMA journal_mode = WAL');
@@ -56,7 +56,7 @@ $pdo->query("CREATE TABLE IF NOT EXISTS users (
       generates a one-way hash that can't be reversed. Even if someone steals your database, they can't
       read the passwords.
     </p>
-    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Auth.php" style="color:#f59e0b">src/Learn/Auth.php</a> — register
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Auth.php" class="lauth-srclink">src/Learn/Auth.php</a> — register
 public static function register(\PDO $db, string $username, string $password): ?int
 {
     $hash = password_hash($password, PASSWORD_DEFAULT);
@@ -73,7 +73,7 @@ public static function register(\PDO $db, string $username, string $password): ?
     </p>
 
     <h2>Step 3: Log in</h2>
-    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Auth.php#L30" style="color:#f59e0b">src/Learn/Auth.php</a> — login
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Auth.php#L30" class="lauth-srclink">src/Learn/Auth.php</a> — login
 public static function login(\PDO $db, string $username, string $password): ?int
 {
     $stmt = $db->prepare('SELECT id, password_hash FROM users WHERE username = ?');
@@ -110,7 +110,7 @@ if (!$user) {
       Notice how the auth logic lives in <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Auth.php" target="_blank"><code>src/Learn/Auth.php</code></a> — a proper class, autoloaded
       via Composer. The API endpoint (<a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/register.php" target="_blank"><code>api/learn/register.php</code></a>) is a thin wrapper:
     </p>
-    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/register.php" style="color:#f59e0b">api/learn/register.php</a> — thin endpoint
+    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/register.php" class="lauth-srclink">api/learn/register.php</a> — thin endpoint
 $register = function () {
     $creds = Auth::readCredentials($this);
     $userId = Auth::register(DB::open(), $creds['username'], $creds['password']);
@@ -131,8 +131,8 @@ $register = function () {
     <button type="submit">Register</button>
     <div id="auth-feedback-reg"></div>
   </form>
-  <details style="margin-top:.75rem"><summary>Already have an account?</summary>
-    <form hx-post="/api/learn/login" hx-target="#auth-feedback-login" hx-swap="innerHTML" style="margin-top:.5rem">
+  <details class="lauth-details"><summary>Already have an account?</summary>
+    <form hx-post="/api/learn/login" hx-target="#auth-feedback-login" hx-swap="innerHTML" class="lauth-login-form">
       <input type="text" name="username" placeholder="username" required autocomplete="username">
       <input type="password" name="password" placeholder="password" required autocomplete="current-password">
       <button type="submit" class="auth-toggle">Log in</button>
@@ -224,7 +224,7 @@ $delete = function() {
 PHP,
     ]); ?>
 
-    <p style="font-size:.9rem;color:var(--text-muted)">
+    <p class="lauth-note">
       No subclassing, no monkey-patching <code>ZealAPI</code>. The framework asks your code at request time via a function pointer — adds no per-request cost when no checker is registered. Full surface: <a href="/api#auth-hooks">Pluggable auth hooks</a> on the API reference page.
     </p>
 

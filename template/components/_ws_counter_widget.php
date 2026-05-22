@@ -7,7 +7,7 @@
 // route/learn.php. No-auth — purely a teaching demo.
 $as_demo ??= false;
 ?>
-<section<?= $as_demo ? '' : ' id="step-tryit"' ?> class="ws-counter-card" style="margin:1.5rem 0">
+<section<?= $as_demo ? '' : ' id="step-tryit"' ?> class="ws-counter-card">
   <div class="ws-counter-value" data-ws-counter-value>0</div>
   <p class="ws-counter-label">connected clients see this value update in real time</p>
   <div class="ws-counter-actions">

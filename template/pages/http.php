@@ -9,7 +9,7 @@ $siteUrl = site_url();
 <h1 class="section-title">HTTP Protocol Features</h1>
 <p class="section-desc">ZealPHP implements the full HTTP/1.1 feature set: conditional requests, content negotiation, proper method handling, and CORS.</p>
 
-<table class="ztable" style="margin-bottom:2rem">
+<table class="ztable http-table">
   <tr><th>Feature</th><th>Status</th><th>How</th></tr>
   <tr><td>HEAD method</td><td>✅ Auto-mapped</td><td>ResponseMiddleware runs GET handler, strips body, adds Content-Length</td></tr>
   <tr><td>OPTIONS method</td><td>✅ Built-in</td><td>Returns 204 + Allow header with all methods registered for that URI</td></tr>

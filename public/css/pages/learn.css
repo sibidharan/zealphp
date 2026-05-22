@@ -1,0 +1,31 @@
+/* Page-scoped styles for /learn — relocated from inline style= attrs. */
+
+.lidx-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.25rem 0;
+}
+
+.lidx-mode-title {
+  text-align: center;
+  margin: 0 0 .5rem;
+  font-size: .82rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.lidx-mode-title-trad {
+  color: #78716c;
+}
+
+.lidx-mode-title-zeal {
+  color: var(--accent, #f59e0b);
+}
+
+.lidx-mode-caption {
+  text-align: center;
+  color: #78716c;
+  font-size: .82rem;
+  margin: .35rem 0 0;
+}

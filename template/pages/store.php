@@ -4,7 +4,7 @@
 <h1 class="section-title">Store &amp; Counter</h1>
 <p class="section-desc">OpenSwoole adapters for cross-worker shared memory. Must be created before <code>$app->run()</code> so all forked workers inherit the same memory segment.</p>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:2rem">
+<div class="store-grid">
   <div class="card">
     <div class="card-icon">🗃️</div>
     <h3>Store — OpenSwoole\Table</h3>
@@ -59,7 +59,7 @@ foreach ($demos as [$id, $title, $url, $code]) {
 }
 ?>
 
-<h2 style="margin:2rem 0 .5rem">Store API reference</h2>
+<h2 class="store-h2">Store API reference</h2>
 <table class="ztable">
   <tr><th>Method</th><th>Returns</th></tr>
   <tr><td><code>Store::make($name, $maxRows, $columns)</code></td><td>OpenSwoole\Table</td></tr>
@@ -73,8 +73,8 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <tr><td><code>Store::table($name)</code></td><td>OpenSwoole\Table (iterate with foreach)</td></tr>
 </table>
 
-<h2 style="margin:2.5rem 0 .5rem">Cache — general-purpose key-value with TTL</h2>
-<p style="color:var(--text-muted);margin-bottom:1.5rem">Tiered cache built on Store. Memory tier (fast, cross-worker) + file tier (persistent, survives restarts). No Redis needed for most apps.</p>
+<h2 class="store-h2-section">Cache — general-purpose key-value with TTL</h2>
+<p class="store-lead">Tiered cache built on Store. Memory tier (fast, cross-worker) + file tier (persistent, survives restarts). No Redis needed for most apps.</p>
 
 <div class="code-block">
 <pre><code class="language-php">// Before $app->run():
@@ -88,7 +88,7 @@ Cache::del('user:42');                             // removes from both tiers
 Cache::flush();                                    // clear everything</code></pre>
 </div>
 
-<table class="ztable" style="margin-top:1rem">
+<table class="ztable store-mt-1">
   <tr><th>Method</th><th>Returns</th><th>Notes</th></tr>
   <tr><td><code>Cache::init($maxRows?, $cacheDir?, $gcIntervalMs?)</code></td><td>void</td><td>Call before <code>$app->run()</code>. Defaults: 4096 rows, <code>.cache/</code>, 60s GC</td></tr>
   <tr><td><code>Cache::set($key, $value, ttl: $seconds)</code></td><td>bool</td><td>Write-through to both tiers. <code>ttl: 0</code> = no expiry</td></tr>
@@ -99,12 +99,12 @@ Cache::flush();                                    // clear everything</code></p
   <tr><td><code>Cache::count()</code></td><td>int</td><td>Memory tier count only</td></tr>
 </table>
 
-<div class="callout info" style="margin-top:1.5rem">
+<div class="callout info store-mt">
   <strong>How it works:</strong> Values are serialized and written to both tiers. Memory tier uses Store (OpenSwoole\Table) — 8KB max per value, values larger than 8KB automatically spill to file-only. File tier writes to <code>.cache/{hash}.cache</code> with TTL header. Expired entries are cleaned lazily on read + a periodic GC sweep every 60s on worker 0.
 </div>
 
-<h2 id="consistency" style="margin:2.5rem 0 .5rem">Consistency semantics — what's atomic, what isn't</h2>
-<p style="color:var(--text-muted);margin-bottom:1rem">Store is shared memory, not a database. The atomicity guarantees are narrow and important to understand before reaching for it in production.</p>
+<h2 id="consistency" class="store-h2-section">Consistency semantics — what's atomic, what isn't</h2>
+<p class="store-lead-tight">Store is shared memory, not a database. The atomicity guarantees are narrow and important to understand before reaching for it in production.</p>
 
 <table class="ztable">
   <tr><th>Operation</th><th>Atomicity</th><th>Notes</th></tr>
@@ -135,7 +135,7 @@ Cache::flush();                                    // clear everything</code></p
   </tr>
 </table>
 
-<h3 style="margin:1.5rem 0 .5rem">What happens on worker crash mid-write</h3>
+<h3 class="store-h3">What happens on worker crash mid-write</h3>
 <p>The honest answer: it depends on how the worker died.</p>
 <table class="ztable">
   <tr><th>Crash type</th><th>Effect</th></tr>
@@ -153,17 +153,17 @@ Cache::flush();                                    // clear everything</code></p
   </tr>
 </table>
 
-<div class="callout warn" style="margin-top:1rem">
+<div class="callout warn store-mt-1">
   <strong>Rule of thumb:</strong> treat Store as a <strong>best-effort, fast, single-server cache</strong>, not as a database. For ACID needs (transactions, durability, multi-row consistency), use Postgres / MySQL / Redis with explicit transaction semantics. Store's job is to make &lt; 5µs reads possible across workers — that's it.
 </div>
 
-<h2 style="margin:2.5rem 0 .5rem">When to use Redis / Valkey</h2>
-<p style="color:var(--text-muted);margin-bottom:1rem">Store and Cache cover most single-server apps. Here's when you'll need an external cache.</p>
+<h2 class="store-h2-section">When to use Redis / Valkey</h2>
+<p class="store-lead-tight">Store and Cache cover most single-server apps. Here's when you'll need an external cache.</p>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:1.5rem">
+<div class="store-grid-tight">
   <div>
-    <h3 style="color:var(--success);margin-bottom:.75rem">Built-in Cache is great for</h3>
-    <ul style="font-size:.9rem;line-height:1.8;color:var(--text-muted)">
+    <h3 class="store-col-good">Built-in Cache is great for</h3>
+    <ul class="store-col-list">
       <li>Single-server deployments (most apps)</li>
       <li>Caching API responses, config, computed values</li>
       <li>Rate limiting and request counting</li>
@@ -172,8 +172,8 @@ Cache::flush();                                    // clear everything</code></p
     </ul>
   </div>
   <div>
-    <h3 style="color:var(--danger);margin-bottom:.75rem">Move to Redis / Valkey when you need</h3>
-    <ul style="font-size:.9rem;line-height:1.8;color:var(--text-muted)">
+    <h3 class="store-col-bad">Move to Redis / Valkey when you need</h3>
+    <ul class="store-col-list">
       <li><strong>Multi-server shared state</strong> — Cache is per-server only</li>
       <li><strong>Large datasets</strong> — memory tier caps at 4096 rows, 8KB/value</li>
       <li><strong>Pub/Sub messaging</strong> — no built-in publish/subscribe between workers or servers</li>

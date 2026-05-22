@@ -9,8 +9,8 @@ $siteUrl = site_url();
 <h1 class="section-title">Middleware</h1>
 <p class="section-desc">ZealPHP uses PSR-15 middleware. Add with <code>$app->addMiddleware()</code>. The last added runs outermost (first to process request, last to process response). Middleware always returns a <code>Psr\Http\Message\ResponseInterface</code> — handlers inside use the <a href="/responses#return-contract">universal return contract</a>; <code>ResponseMiddleware</code> coerces handler returns to PSR-7 before your middleware sees them.</p>
 
-<h2 style="margin:1.5rem 0 .5rem">Built-in middleware</h2>
-<table class="ztable" style="margin-bottom:2rem">
+<h2 class="mw-h2">Built-in middleware</h2>
+<table class="ztable mw-table">
   <tr><th>Class</th><th>Apache / nginx parity</th><th>What it does</th></tr>
   <tr><td><a href="#cors"><code>CorsMiddleware</code></a></td><td>n/a (modern browser feature)</td><td>CORS preflight + Access-Control headers on every response</td></tr>
   <tr><td><a href="#etag"><code>ETagMiddleware</code></a></td><td>Apache <code>FileETag</code>, nginx <code>etag on</code></td><td>Generates <code>W/"md5"</code> ETag, returns 304 on cache hit</td></tr>
@@ -50,9 +50,9 @@ $app->addMiddleware(new AuthMiddleware());         // your custom middleware
 PHP]);
 ?>
 
-<p style="color:var(--text-muted);font-size:.9rem;margin-top:.75rem">Server-level Apache directives map to <code>App::$*</code> static properties + fluent setters (e.g., <code>App::clientIp()</code>, <code>App::canonicalHost()</code>, <code>App::$trusted_proxies</code>, <code>App::$access_log_format</code>). See <a href="/legacy-apps">legacy-apps</a> for the full server-level configurability matrix.</p>
+<p class="mw-note">Server-level Apache directives map to <code>App::$*</code> static properties + fluent setters (e.g., <code>App::clientIp()</code>, <code>App::canonicalHost()</code>, <code>App::$trusted_proxies</code>, <code>App::$access_log_format</code>). See <a href="/legacy-apps">legacy-apps</a> for the full server-level configurability matrix.</p>
 
-<h2 style="margin:2rem 0 .5rem">Live demos</h2>
+<h2 class="mw-h2-demos">Live demos</h2>
 <?php
 $demos = [
   ['mw-cors', 'CORS — Access-Control-Allow-Origin on every response', '/demo/middleware/cors',
@@ -89,9 +89,9 @@ foreach ($demos as [$id, $title, $url, $code]) {
 }
 ?>
 
-<h2 style="margin:2.5rem 0 .5rem">Per-middleware reference</h2>
+<h2 class="mw-h2-ref">Per-middleware reference</h2>
 
-<h3 id="cors" style="margin-top:1.5rem"><code>CorsMiddleware</code></h3>
+<h3 id="cors" class="mw-h3"><code>CorsMiddleware</code></h3>
 <p>CORS preflight (OPTIONS + <code>Origin</code>) plus <code>Access-Control-*</code> headers on every response. There is no Apache/nginx parity here — CORS is a modern browser concern, not a server-config item.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -106,7 +106,7 @@ $app->addMiddleware(new CorsMiddleware(
 ));
 PHP]); ?>
 
-<h3 id="etag" style="margin-top:1.5rem"><code>ETagMiddleware</code></h3>
+<h3 id="etag" class="mw-h3"><code>ETagMiddleware</code></h3>
 <p>Generates <code>W/"md5(body)"</code> on GET responses; returns <code>304 Not Modified</code> when the client's <code>If-None-Match</code> matches. Apache parity: <code>FileETag</code>. nginx parity: <code>etag on;</code> + <code>if_modified_since</code>.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -115,7 +115,7 @@ use ZealPHP\Middleware\ETagMiddleware;
 $app->addMiddleware(new ETagMiddleware());
 PHP]); ?>
 
-<h3 id="compression" style="margin-top:1.5rem"><code>CompressionMiddleware</code></h3>
+<h3 id="compression" class="mw-h3"><code>CompressionMiddleware</code></h3>
 <p>Reference gzip/deflate body compression. <strong>OpenSwoole's <code>http_compression</code> is enabled by default</strong> — only register this middleware if you've disabled it. Apache parity: <code>mod_deflate</code>. nginx parity: <code>gzip on;</code> + <code>gzip_types</code>.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -129,7 +129,7 @@ $app->addMiddleware(new CompressionMiddleware(
 ));
 PHP]); ?>
 
-<h3 id="range" style="margin-top:1.5rem"><code>RangeMiddleware</code></h3>
+<h3 id="range" class="mw-h3"><code>RangeMiddleware</code></h3>
 <p>RFC 7233 Range requests. Adds <code>Accept-Ranges: bytes</code>, returns <code>206 Partial Content</code> for single or multi-range requests, <code>416</code> for unsatisfiable ranges, and honors <code>If-Range</code> ETag pinning. Required for video seeking and resumable downloads. nginx serves this automatically; ZealPHP needs the middleware registered.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -139,7 +139,7 @@ $app->addMiddleware(new RangeMiddleware());
 // Now: curl -r 0-1023 /video.mp4 → 206 Partial Content (first 1024 bytes)
 PHP]); ?>
 
-<h3 id="session-start" style="margin-top:1.5rem"><code>SessionStartMiddleware</code></h3>
+<h3 id="session-start" class="mw-h3"><code>SessionStartMiddleware</code></h3>
 <p>Eagerly starts a session and sends <code>Set-Cookie: PHPSESSID=...</code> for first-time visitors. Without it, <code>CoSessionManager</code> only starts sessions when a <code>PHPSESSID</code> cookie already exists — so first-time visitors see no session cookie and session state resets every request. The <code>secure</code> flag auto-detects HTTPS via <code>X-Forwarded-Proto</code>, <code>HTTPS</code>, or port 443 — works behind Traefik/Nginx and on direct HTTP. Override with <code>ZEALPHP_SESSION_SECURE</code>.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -148,7 +148,7 @@ use ZealPHP\Middleware\SessionStartMiddleware;
 $app->addMiddleware(new SessionStartMiddleware());
 PHP]); ?>
 
-<h3 id="ini-isolation" style="margin-top:1.5rem"><code>IniIsolationMiddleware</code></h3>
+<h3 id="ini-isolation" class="mw-h3"><code>IniIsolationMiddleware</code></h3>
 <p>Snapshots <code>ini_set()</code> changes (<code>timezone</code>, <code>error_reporting</code>, <code>display_errors</code>, <code>memory_limit</code>, etc.) at request start and restores them on exit. Opt-in defence against ini-value leakage across requests on long-running workers — see <a href="/coroutines#what-survives">what survives a request</a>. Enable with <code>ZEALPHP_INI_ISOLATE=1</code> or by registering it explicitly.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -163,7 +163,7 @@ $app->addMiddleware(new IniIsolationMiddleware([
 ]));
 PHP]); ?>
 
-<h3 id="charset" style="margin-top:1.5rem"><code>CharsetMiddleware</code></h3>
+<h3 id="charset" class="mw-h3"><code>CharsetMiddleware</code></h3>
 <p>Auto-appends <code>; charset=utf-8</code> to text-ish response <code>Content-Type</code> values that don't already declare a charset. Reads <code>App::$default_charset</code> (settable via <code>App::defaultCharset('utf-8')</code>). Apache parity: <code>AddDefaultCharset utf-8</code> + <code>AddCharset utf-8 .css .js .html</code>.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -174,7 +174,7 @@ $app->addMiddleware(new CharsetMiddleware());
 // → text/html → text/html; charset=utf-8 (only if not already set)
 PHP]); ?>
 
-<h3 id="cache-control" style="margin-top:1.5rem"><code>CacheControlMiddleware</code></h3>
+<h3 id="cache-control" class="mw-h3"><code>CacheControlMiddleware</code></h3>
 <p>Extension-based <code>Cache-Control: max-age=N, public</code> for static-asset responses. Apache parity: <code>&lt;FilesMatch "\.(css|js|jpg|png)$"&gt; Header set Cache-Control "max-age=2628000"</code>. nginx parity: <code>location ~* \.(css|js)$ { expires 30d; }</code> partial.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -189,7 +189,7 @@ $app->addMiddleware(new CacheControlMiddleware([
 ]));
 PHP]); ?>
 
-<h3 id="expires" style="margin-top:1.5rem"><code>ExpiresMiddleware</code></h3>
+<h3 id="expires" class="mw-h3"><code>ExpiresMiddleware</code></h3>
 <p>Adds the legacy HTTP/1.0 <code>Expires:</code> header by content type. Pairs with <code>CacheControlMiddleware</code> for full Apache <code>mod_expires</code> parity. nginx parity: <code>expires 30d;</code> in a <code>location</code> block.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -204,7 +204,7 @@ $app->addMiddleware(new ExpiresMiddleware([
 ]));
 PHP]); ?>
 
-<h3 id="header" style="margin-top:1.5rem"><code>HeaderMiddleware</code></h3>
+<h3 id="header" class="mw-h3"><code>HeaderMiddleware</code></h3>
 <p>Declarative response-header manipulation: <code>set</code> (overwrite), <code>add</code> (append), <code>unset</code> (remove). Conditional variants run only on specific status codes or content types. Apache parity: <code>Header set / append / unset / add / merge</code> (mod_headers).</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -221,7 +221,7 @@ $app->addMiddleware(
 );
 PHP]); ?>
 
-<h3 id="basic-auth" style="margin-top:1.5rem"><code>BasicAuthMiddleware</code></h3>
+<h3 id="basic-auth" class="mw-h3"><code>BasicAuthMiddleware</code></h3>
 <p>HTTP Basic Auth — htpasswd file or callback verifier. Returns <code>401</code> with <code>WWW-Authenticate: Basic</code> on missing/invalid credentials. Apache parity: <code>AuthType Basic</code> + <code>AuthName</code> + <code>AuthUserFile</code> + <code>Require</code>. nginx parity: <code>auth_basic "Realm"</code> + <code>auth_basic_user_file htpasswd</code>.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -242,7 +242,7 @@ $app->addMiddleware(new BasicAuthMiddleware(
 ));
 PHP]); ?>
 
-<h3 id="ip-access" style="margin-top:1.5rem"><code>IpAccessMiddleware</code></h3>
+<h3 id="ip-access" class="mw-h3"><code>IpAccessMiddleware</code></h3>
 <p>CIDR allow/deny lists. Apache parity: legacy <code>Allow from</code> / <code>Deny from</code> / <code>Order Allow,Deny</code> (mod_access_compat) and modern <code>Require ip</code>. Pairs naturally with <code>App::$trusted_proxies</code> + <code>App::clientIp()</code> for correct client-IP resolution behind a front proxy.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -257,7 +257,7 @@ $app->addMiddleware(new IpAccessMiddleware(
 ));
 PHP]); ?>
 
-<h3 id="rate-limit" style="margin-top:1.5rem"><code>RateLimitMiddleware</code></h3>
+<h3 id="rate-limit" class="mw-h3"><code>RateLimitMiddleware</code></h3>
 <p>Sliding-window request rate limiter using <code>Store</code> for cross-worker shared state. nginx parity: <code>limit_req zone=one rate=10r/s burst=20;</code>. Returns <code>429 Too Many Requests</code> with <code>Retry-After</code> when the window is full.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -278,7 +278,7 @@ $app->addMiddleware(new RateLimitMiddleware(
 ));
 PHP]); ?>
 
-<h3 id="concurrency-limit" style="margin-top:1.5rem"><code>ConcurrencyLimitMiddleware</code></h3>
+<h3 id="concurrency-limit" class="mw-h3"><code>ConcurrencyLimitMiddleware</code></h3>
 <p>In-flight concurrent-request cap. nginx parity: <code>limit_conn zone=one 10;</code>. Backed by <code>OpenSwoole\Atomic</code> (<code>Counter</code>) — increments on entry, decrements in a <code>finally</code>. Returns <code>503</code> when the cap is reached.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -293,7 +293,7 @@ $app->addMiddleware(new ConcurrencyLimitMiddleware(
 ));
 PHP]); ?>
 
-<h3 id="block-php-ext" style="margin-top:1.5rem"><code>BlockPhpExtMiddleware</code></h3>
+<h3 id="block-php-ext" class="mw-h3"><code>BlockPhpExtMiddleware</code></h3>
 <p>Refuses any URL ending in <code>.php</code> with a <code>404</code>. Useful for apps that want extensionless URLs as the only public surface (so scrapers can't enumerate raw files by guessing <code>config.php</code> / <code>admin.php</code>). Apache parity: <code>RewriteCond %{THE_REQUEST} \.php; RewriteRule . - [R=404,L]</code>.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -305,7 +305,7 @@ $app->addMiddleware(new BlockPhpExtMiddleware());
 // /admin           → handled normally (the .php is implicit)
 PHP]); ?>
 
-<h3 id="mime-type" style="margin-top:1.5rem"><code>MimeTypeMiddleware</code></h3>
+<h3 id="mime-type" class="mw-h3"><code>MimeTypeMiddleware</code></h3>
 <p>Sets or overrides <code>Content-Type</code> on non-static responses by URL extension or pattern. Static files are MIME-typed by OpenSwoole's static handler — this middleware fills the gap for handler-generated responses. Apache parity: <code>AddType font/woff2 .woff2</code> and <code>ForceType image/svg+xml</code>.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -318,7 +318,7 @@ $app->addMiddleware(new MimeTypeMiddleware([
 ]));
 PHP]); ?>
 
-<h3 id="body-rewrite" style="margin-top:1.5rem"><code>BodyRewriteMiddleware</code></h3>
+<h3 id="body-rewrite" class="mw-h3"><code>BodyRewriteMiddleware</code></h3>
 <p>Single-line regex substitution on the response body. Useful for late-stage URL rewriting (e.g., serving a CDN-versioned <code>asset.js?v=abc</code>) or hot-patching templates. Apache parity: <code>Substitute "s/foo/bar/"</code> (mod_substitute). Multi-line and streaming variants are on the roadmap.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -332,7 +332,7 @@ $app->addMiddleware(new BodyRewriteMiddleware([
 ], contentTypes: ['text/html', 'application/xhtml+xml']));
 PHP]); ?>
 
-<h3 id="host-router" style="margin-top:1.5rem"><code>HostRouterMiddleware</code></h3>
+<h3 id="host-router" class="mw-h3"><code>HostRouterMiddleware</code></h3>
 <p>Routes by <code>Host</code> header inside one ZealPHP instance. nginx parity: multiple <code>server { server_name a.com; }</code> blocks. For true isolation prefer one ZealPHP process per host behind Caddy/Traefik; use this when ergonomic co-tenancy is the goal.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -351,7 +351,7 @@ $app->addMiddleware(new HostRouterMiddleware([
 ]));
 PHP]); ?>
 
-<h3 id="content-encoding" style="margin-top:1.5rem"><code>ContentEncodingMiddleware</code></h3>
+<h3 id="content-encoding" class="mw-h3"><code>ContentEncodingMiddleware</code></h3>
 <p>Sets the response <code>Content-Encoding</code> header from the request URL's dot-separated file suffixes. Apache's <code>find_ct</code> walks every suffix and accumulates an encoding chain — <code>archive.tar.gz</code> with <code>AddEncoding x-gzip .gz</code> yields <code>Content-Encoding: x-gzip</code>, and a doubly-encoded <code>data.gz.gz</code> yields <code>gzip, gzip</code> (order preserved, duplicates intentionally kept). Additive and opt-in: never overrides a <code>Content-Encoding</code> a handler (or a real compression middleware) already set. Apache parity: <code>mod_mime AddEncoding</code>.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -364,7 +364,7 @@ $app->addMiddleware(new ContentEncodingMiddleware([
 ]));
 PHP]); ?>
 
-<h3 id="content-language" style="margin-top:1.5rem"><code>ContentLanguageMiddleware</code></h3>
+<h3 id="content-language" class="mw-h3"><code>ContentLanguageMiddleware</code></h3>
 <p>Sets the response <code>Content-Language</code> header from the request URL's dot-separated suffixes — <code>page.en.html</code> with <code>AddLanguage en .en</code> yields <code>Content-Language: en</code>. Multiple language suffixes accumulate in order and are emitted comma-joined (RFC 9110 §8.5 allows a list). Additive and opt-in: only sets the header when the response doesn't already declare one. Apache parity: <code>mod_mime AddLanguage</code>.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -377,7 +377,7 @@ $app->addMiddleware(new ContentLanguageMiddleware([
 ]));
 PHP]); ?>
 
-<h3 id="merge-slashes" style="margin-top:1.5rem"><code>MergeSlashesMiddleware</code></h3>
+<h3 id="merge-slashes" class="mw-h3"><code>MergeSlashesMiddleware</code></h3>
 <p>Collapses runs of consecutive slashes in the request path to a single slash before routing, so <code>/a//b///c</code> matches the same route as <code>/a/b/c</code>. Internal rewrite (no redirect) — mutates <code>$g->server['REQUEST_URI']</code>, which the router reads. The query string is left untouched. Register it ahead of route-dependent middleware. Apache parity: <code>MergeSlashes On</code>. nginx parity: <code>merge_slashes on;</code>.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -387,7 +387,7 @@ $app->addMiddleware(new MergeSlashesMiddleware());
 // Now: /api//users///42  routes the same as  /api/users/42
 PHP]); ?>
 
-<h3 id="request-header" style="margin-top:1.5rem"><code>RequestHeaderMiddleware</code></h3>
+<h3 id="request-header" class="mw-h3"><code>RequestHeaderMiddleware</code></h3>
 <p>Manipulates the request headers the application sees, before handlers run. Headers are written into <code>$g->server</code> using the mod_php CGI convention (<code>HTTP_&lt;NAME&gt;</code>, uppercased, dashes → underscores), so <code>apache_request_headers()</code>, <code>getallheaders()</code>, and <code>$g->server['HTTP_*']</code> reflect the change. Operations: <code>set</code> (replace/create), <code>append</code> / <code>add</code> (comma-joined append or create), <code>unset</code> (remove). Apache parity: <code>mod_headers RequestHeader</code>.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -400,7 +400,7 @@ $app->addMiddleware(new RequestHeaderMiddleware([
 ]));
 PHP]); ?>
 
-<h3 id="return" style="margin-top:1.5rem"><code>ReturnMiddleware</code></h3>
+<h3 id="return" class="mw-h3"><code>ReturnMiddleware</code></h3>
 <p>Unconditionally returns a fixed response — the route handler never runs. For 3xx statuses the second argument is the redirect target (<code>Location</code>); for any other status it's the response body. Pair with <a href="#scoped"><code>ScopedMiddleware</code></a> to limit it to a path (the nginx <code>location { return ... }</code> shape). nginx parity: <code>return</code> directive.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -417,7 +417,7 @@ $app->addMiddleware(ScopedMiddleware::match(new ReturnMiddleware(301, '/new'), '
 $app->addMiddleware(ScopedMiddleware::location(new ReturnMiddleware(200, 'pong'), '/ping'));
 PHP]); ?>
 
-<h3 id="scoped" style="margin-top:1.5rem"><code>ScopedMiddleware</code></h3>
+<h3 id="scoped" class="mw-h3"><code>ScopedMiddleware</code></h3>
 <p>Apply another middleware only to matching request paths — the Apache-container equivalent for middleware. Two factory methods: <code>ScopedMiddleware::location($inner, '/admin')</code> is <code>&lt;Location "/admin"&gt;</code> (literal URL-path prefix — matches <code>/admin</code>, <code>/admin/x</code>, and — like Apache — <code>/administrator</code>; use a trailing slash or a regex for segment precision). <code>ScopedMiddleware::match($inner, '#^/api/#')</code> is <code>&lt;LocationMatch&gt;</code> / <code>&lt;FilesMatch&gt;</code> (PCRE against the path). Outside the scope the inner middleware is skipped entirely.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -435,7 +435,7 @@ $app->addMiddleware(ScopedMiddleware::location(
 $app->addMiddleware(ScopedMiddleware::match(new BlockPhpExtMiddleware(), '#\.php$#'));
 PHP]); ?>
 
-<h3 id="set-env-if" style="margin-top:1.5rem"><code>SetEnvIfMiddleware</code></h3>
+<h3 id="set-env-if" class="mw-h3"><code>SetEnvIfMiddleware</code></h3>
 <p>Sets request "environment" variables (into <code>$g->server</code>, where mod_php code reads them as <code>$_SERVER</code>) when an attribute of the request matches a regex. The classic use is tagging bots, internal IPs, or URL areas so downstream middleware / handlers can branch on a simple flag. Attribute names mirror Apache: the special tokens <code>Remote_Addr</code>, <code>Remote_Host</code>, <code>Server_Addr</code>, <code>Request_Method</code>, <code>Request_Protocol</code>, <code>Request_URI</code>; any other name is treated as a request header (so <code>User-Agent</code> gives <code>BrowserMatch</code> behaviour). Apache parity: <code>mod_setenvif</code>.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
@@ -448,8 +448,8 @@ $app->addMiddleware(new SetEnvIfMiddleware([
 ]));
 PHP]); ?>
 
-<h2 style="margin:2.5rem 0 .5rem">Custom middleware</h2>
-<p style="color:var(--text-muted);font-size:.92rem">Middleware always returns a <code>Psr\Http\Message\ResponseInterface</code> — that's PSR-15's contract, not ZealPHP's. Inside the route handler that the middleware wraps, the handler still uses the <a href="/responses#return-contract">universal return contract</a>; ZealPHP's <code>ResponseMiddleware</code> converts the return into a PSR-7 response before your middleware sees it.</p>
+<h2 class="mw-h2-ref">Custom middleware</h2>
+<p class="mw-note-custom">Middleware always returns a <code>Psr\Http\Message\ResponseInterface</code> — that's PSR-15's contract, not ZealPHP's. Inside the route handler that the middleware wraps, the handler still uses the <a href="/responses#return-contract">universal return contract</a>; ZealPHP's <code>ResponseMiddleware</code> converts the return into a PSR-7 response before your middleware sees it.</p>
 
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'

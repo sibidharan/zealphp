@@ -115,7 +115,7 @@ $g = \ZealPHP\G::instance();
     </p>
 
     <?php App::render('/components/_tryit', ['title' => 'Click the counter', 'body' =>
-      '<div style="text-align:center;padding:1rem 0">' .
+      '<div class="lhx-center">' .
       App::renderToString('/components/_counter_button', ['n' => (int)($g->session['demo_counter'] ?? 0)]) .
       '</div>' .
       '<p>Open DevTools → Network tab and watch each click: a POST goes out, an HTML fragment comes back, the button is replaced. No page reload. No JSON parsing. No client-side state management.</p>'
@@ -283,7 +283,7 @@ $g = \ZealPHP\G::instance();
       'body'  => '<p>htmx is request/response. The client asks, the server answers. For scenarios where the <em>server</em> needs to push updates without being asked — live notifications, multi-tab sync, AI token streaming — you need a persistent connection. ZealPHP has WebSocket (<code>App::ws()</code>) and Server-Sent Events (<code>$response->sse()</code>) for those cases. You\'ll use both in Lessons 19 (Real-Time Sync) and 20 (AI Chat).</p>',
     ]); ?>
 
-    <h2 id="fragments" style="margin-top:2rem">Template fragments — one file, two responses</h2>
+    <h2 id="fragments" class="lhx-h2">Template fragments — one file, two responses</h2>
     <p>
       The htmx pattern above has a tension: when a user clicks the
       <strong>Add</strong> button, the server returns a single <code>&lt;li&gt;</code>
@@ -371,7 +371,7 @@ $app->route('/contacts', function($g) {
 PHP,
     ]); ?>
 
-    <h3 style="margin-top:1.25rem">Fragments ride the universal return contract</h3>
+    <h3 class="lhx-h3">Fragments ride the universal return contract</h3>
     <p>
       Inside the closure passed to <code>App::fragment()</code> you can return
       anything a route handler can — the framework propagates it through the
@@ -407,7 +407,7 @@ PHP,
     <p>
       Three other behaviours worth knowing:
     </p>
-    <ul style="margin:.5rem 0;line-height:1.7">
+    <ul class="lhx-list">
       <li>
         <strong>Missing fragment → 404.</strong> Asking for
         <code>?fragment=does-not-exist</code> when no
@@ -426,7 +426,7 @@ PHP,
       </li>
     </ul>
 
-    <h3 style="margin-top:1.25rem">Try it live</h3>
+    <h3 class="lhx-h3">Try it live</h3>
     <p>
       A four-contact list rendered through one template. Each row's "Show
       details" button does <code>hx-get="/demo/fragments/contacts?fragment=contact-{id}"</code> —
@@ -437,12 +437,12 @@ PHP,
 
     <?php App::render('/components/_tryit', [
       'title' => 'Open the contacts demo',
-      'body'  => '<p style="margin:.25rem 0">'
-              .  '<a href="/demo/fragments/contacts" target="_blank" rel="noopener" class="tryit-link" style="color:#fbbf24">/demo/fragments/contacts</a>'
+      'body'  => '<p class="lhx-tryit-line">'
+              .  '<a href="/demo/fragments/contacts" target="_blank" rel="noopener" class="tryit-link lhx-link">/demo/fragments/contacts</a>'
               .  ' — full page, then click any row.</p>'
-              .  '<p style="margin:.25rem 0;font-size:.85rem;color:#9ca3af">'
+              .  '<p class="lhx-tryit-note">'
               .  'Open DevTools → Network → XHR to see each swap is a single 200 response with just one <code>&lt;li&gt;</code> as the body. '
-              .  'And <a href="/demo/fragments/contacts?fragment=does-not-exist" target="_blank" rel="noopener" style="color:#fbbf24">/demo/fragments/contacts?fragment=does-not-exist</a> returns HTTP 404 — the framework refuses to fall back to the full page when the named fragment doesn\'t exist.</p>',
+              .  'And <a href="/demo/fragments/contacts?fragment=does-not-exist" target="_blank" rel="noopener" class="lhx-link">/demo/fragments/contacts?fragment=does-not-exist</a> returns HTTP 404 — the framework refuses to fall back to the full page when the named fragment doesn\'t exist.</p>',
     ]); ?>
 
     <h2 id="server-side">Server-side: detect htmx, drive client behaviour, compose with <code>App::fragment()</code></h2>
@@ -474,7 +474,7 @@ $app->route('/notes/{id}', function ($request, $response, $id) {
     return App::render('_master', ['page' => 'note', 'note' => $note]);
 });</code></pre>
 
-    <p style="margin-top:.75rem;font-size:.9rem;color:#9ca3af">
+    <p class="lhx-note">
       Also: <code>isBoosted()</code>, <code>isHistoryRestoreRequest()</code>,
       <code>htmxTarget()</code>, <code>htmxTrigger()</code>, <code>htmxTriggerName()</code>,
       <code>htmxCurrentUrl()</code>, <code>htmxPrompt()</code>.
@@ -500,7 +500,7 @@ $app->route('/notes/{id}', function ($request, $response, $id) {
         ));
 });</code></pre>
 
-    <p style="margin-top:.75rem;font-size:.9rem;color:#9ca3af">
+    <p class="lhx-note">
       Full surface: <code>trigger()</code>, <code>triggerAfterSwap()</code>, <code>triggerAfterSettle()</code>,
       <code>reswap()</code>, <code>retarget()</code>, <code>reselect()</code>,
       <code>refresh()</code>, <code>location()</code>, <code>pushUrl()</code>, <code>replaceUrl()</code>,
@@ -563,7 +563,7 @@ $app->route('/notes', function ($request, $response) {
     ]);
 });</code></pre>
 
-    <p style="margin-top:.75rem;font-size:.9rem;color:#9ca3af">
+    <p class="lhx-note">
       <strong>Why this design:</strong> body and metadata are orthogonal concerns. <code>App::render*()</code> /
       <code>App::include()</code> / <code>App::fragment()</code> own the body (the
       <a href="/responses#return-contract">universal return contract</a> covers every shape). Response

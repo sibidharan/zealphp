@@ -546,7 +546,7 @@ code.demo-inline { background: var(--bg-alt); padding: .1rem .35rem; border-radi
 .demo-live-output .err   { color: #f87171; }
 
 /* ---------- WebSocket cross-tab counter demo ---------- */
-.ws-counter-card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; text-align: center; }
+.ws-counter-card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; text-align: center; margin: 1.5rem 0; }
 .ws-counter-value { font-size: 4rem; font-weight: 700; color: var(--accent); line-height: 1; font-variant-numeric: tabular-nums; display: inline-block; transition: color .15s; }
 .ws-counter-value.flash { animation: ws-counter-flash .55s ease-out; }
 @keyframes ws-counter-flash { 0% { color: #16a34a; transform: scale(1.2); } 100% { color: var(--accent); transform: scale(1); } }
