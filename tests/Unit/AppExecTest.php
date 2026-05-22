@@ -26,4 +26,21 @@ final class AppExecTest extends TestCase
         $this->assertSame("hi\n", $result['output']);
         $this->assertSame(0, $result['code']);
     }
+
+    public function testBacktickAndShellExecAreOverridable(): void
+    {
+        \uopz_set_return('shell_exec', fn($c) => "OVR[$c]", true);
+        $this->assertSame('OVR[echo hi]', shell_exec('echo hi'));
+        $this->assertSame('OVR[echo hi]', `echo hi`);
+        \uopz_unset_return('shell_exec');
+    }
+
+    public function testHookedBacktickRoutesThroughAppExecInCoroutine(): void
+    {
+        \uopz_set_return('shell_exec', \Closure::fromCallable('\ZealPHP\zeal_shell_exec'), true);
+        $out = null;
+        \OpenSwoole\Coroutine::run(function () use (&$out) { $out = `echo hooked`; });
+        $this->assertSame("hooked\n", $out);
+        \uopz_unset_return('shell_exec');
+    }
 }

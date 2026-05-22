@@ -879,6 +879,74 @@ function http_response_code($code = null) {
 }
 
 /**
+ * Coroutine-safe `shell_exec()` shim — routes through {@see App::exec()}.
+ *
+ * Registered as a uopz override of the `shell_exec` builtin when exec hooking
+ * is enabled (see {@see App::$hook_exec}). Because the PHP backtick operator
+ * compiles down to a `shell_exec()` call, overriding `shell_exec` also makes
+ * `` `cmd` `` coroutine-safe transparently.
+ *
+ * Preserves the builtin's documented return shape: `null` when the command
+ * produced no output and failed, otherwise the captured stdout string.
+ */
+function zeal_shell_exec(string $cmd): ?string {
+    $r = App::exec($cmd);
+    return ($r['output'] === '' && $r['code'] !== 0) ? null : $r['output'];
+}
+
+/**
+ * Coroutine-safe `system()` shim — routes through {@see App::exec()}.
+ *
+ * Echoes the full output (like the builtin) and returns the last line of
+ * output, writing the exit code into `$code` by reference.
+ *
+ * @param int|null $code Exit status, written by reference.
+ * @param-out int  $code
+ */
+function zeal_system(string $cmd, &$code = null): string {
+    $r = App::exec($cmd);
+    $code = $r['code'];
+    echo $r['output'];
+    // explode() always returns at least one element, so end() is safe.
+    $lines = explode("\n", rtrim($r['output'], "\n"));
+    return (string) end($lines);
+}
+
+/**
+ * Coroutine-safe `passthru()` shim — routes through {@see App::exec()}.
+ *
+ * Echoes the raw output and writes the exit code into `$code` by reference.
+ *
+ * @param int|null $code Exit status, written by reference.
+ * @param-out int  $code
+ */
+function zeal_passthru(string $cmd, &$code = null): void {
+    $r = App::exec($cmd);
+    $code = $r['code'];
+    echo $r['output'];
+}
+
+/**
+ * Coroutine-safe `exec()` shim — routes through {@see App::exec()}.
+ *
+ * Appends each output line to `$output` (like the builtin) and writes the
+ * exit code into `$code` by reference. Returns the last line of output.
+ *
+ * @param list<string> $output Output lines, appended by reference.
+ * @param int|null     $code   Exit status, written by reference.
+ * @param-out int      $code
+ */
+function zeal_exec(string $cmd, array &$output = [], &$code = null): string {
+    $r = App::exec($cmd);
+    $code = $r['code'];
+    foreach (explode("\n", rtrim($r['output'], "\n")) as $l) {
+        $output[] = $l;
+    }
+    // $output always has at least one element here (explode yields >=1), so end() is safe.
+    return (string) end($output);
+}
+
+/**
 * Retrieves all HTTP headers sent by the server.
 *
 * This function returns an array of all the HTTP headers that have been sent

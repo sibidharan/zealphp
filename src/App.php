@@ -44,6 +44,7 @@ class App
     /** @var array<int, MiddlewareInterface> */
     public static array $middleware_wait_stack = [];
     public static bool $ignore_php_ext = true;
+    public static ?bool $hook_exec = null; // null => resolves to coroutine-mode (superglobals===false) at run()
     public static bool $coproc_implicit_request_handler = false;
     /**
      * Per-include CGI process-isolation override. `null` means "follow
@@ -4398,6 +4399,22 @@ HELP;
         // process-wide superglobals against concurrent coroutines / hooked
         // I/O. We warn rather than refuse — see App::hookAll() docblock.
         self::validateLifecycleCombination(App::$superglobals, $hookFlags, $enableCoroutine);
+
+        // Transparent coroutine-safe exec family. Overriding `shell_exec` ALSO
+        // intercepts the backtick operator (`` `cmd` `` compiles to a
+        // shell_exec() call), so legacy/user code becomes coroutine-safe with
+        // no source changes. Defaults to coroutine mode (superglobals===false);
+        // App::hookExec(bool) can force it on/off. proc_open/popen are
+        // intentionally NOT overridden — App::rawExec()/cgiSubprocess() rely on
+        // proc_open, so routing through it keeps the fallback recursion-safe.
+        $hookExec = self::$hook_exec ?? (self::$superglobals === false);
+        if ($hookExec) {
+            \uopz_set_return('shell_exec', \Closure::fromCallable('\ZealPHP\zeal_shell_exec'), true);
+            \uopz_set_return('system',     \Closure::fromCallable('\ZealPHP\zeal_system'), true);
+            \uopz_set_return('passthru',   \Closure::fromCallable('\ZealPHP\zeal_passthru'), true);
+            \uopz_set_return('exec',       \Closure::fromCallable('\ZealPHP\zeal_exec'), true);
+            // proc_open intentionally NOT overridden — App::rawExec()/cgiSubprocess() rely on it.
+        }
 
         if ($hookFlags !== 0) {
             co::set(['hook_flags' => $hookFlags]);
