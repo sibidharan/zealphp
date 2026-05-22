@@ -349,6 +349,9 @@ p  { max-width: 70ch; }
 .btn-outline { border: 1px solid rgba(245,158,11,.4); color: #fff; background: transparent; }
 .btn-outline:hover { background: rgba(245,158,11,.1); border-color: var(--accent); color: var(--accent); }
 .btn-sm { padding: .35rem .9rem; font-size: .8rem; }
+/* Leading icon inside a .btn — sized to the text, inherits button colour
+ * via stroke:currentColor. The .btn flex gap handles spacing. */
+.btn-icon { width: 1.05em; height: 1.05em; flex-shrink: 0; }
 .btn-ghost { background: transparent; color: var(--text-muted); }
 .btn-ghost:hover { background: var(--bg-alt); }
 
