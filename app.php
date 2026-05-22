@@ -149,6 +149,19 @@ if (($__cm = getenv('ZEALPHP_CGI_MODE')) !== false && $__cm !== '') {
     App::cgiMode($__cm === 'fork' ? 'fork' : 'proc');
 }
 
+// ─── CGI backends (per-extension, ExecCGI-scoped) ───────────────────
+// Demonstrates non-PHP CGI parity in coroutine mode: scripts under the
+// /cgi-bin URL scope run via their interpreter; the same extension under
+// any other path is refused (no execution, no source leak). Interpreters
+// are detected at boot so this works wherever the box has them. At this
+// point in boot the exec-override isn't active, so shell_exec is the real
+// builtin — fine for one-time interpreter discovery.
+App::registerCgiBackend('.py', ['mode' => 'proc', 'interpreter' => trim((string) shell_exec('command -v python3')) ?: '/usr/bin/python3', 'exec_paths' => ['/cgi-bin']]);
+$perlBin = trim((string) shell_exec('command -v perl'));
+if ($perlBin !== '') {
+    App::registerCgiBackend('.pl', ['mode' => 'proc', 'interpreter' => $perlBin, 'exec_paths' => ['/cgi-bin']]);
+}
+
 $benchMode             = bench_mode_enabled();
 $demoMiddleware        = env_flag('ZEALPHP_DEMO_MIDDLEWARE', false);
 $compressionMiddleware = env_flag('ZEALPHP_COMPRESSION_MIDDLEWARE', false);

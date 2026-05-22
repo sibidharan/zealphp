@@ -3244,6 +3244,16 @@ class App
         } catch (\Throwable $e) {}
         fclose($pipes[0]);
 
+        // ── Non-PHP interpreter path (RFC 3875 CGI) ───────────────────────
+        // A raw Python/Perl/etc. CGI script knows nothing about the cgi_worker
+        // stderr-metadata protocol below — it writes a standard CGI response to
+        // STDOUT: header lines, a blank line, then the body. Parse that directly
+        // (Apache mod_cgi: ap_scan_script_header_err_brigade_ex()). stderr is
+        // drained only for error visibility (cgi_common.h log_script_err()).
+        if ($interpreter !== null) {
+            return self::cgiInterpreterResponse($process, $pipes, $path);
+        }
+
         // Protocol: CGI worker sends metadata as a single JSON line on stderr
         // BEFORE streaming body on stdout. This enables SSE and streaming.
         // Apply a configurable read timeout (App::$cgi_timeout seconds) so a
@@ -3407,6 +3417,160 @@ class App
             }
             return $returnValue;
         }
+        return $body !== '' ? $body : null;
+    }
+
+    /**
+     * Consume a standard RFC 3875 CGI response from a non-PHP interpreter
+     * subprocess: read stdout (header block + blank line + body), apply the
+     * parsed headers / Status: pseudo-header to the response, and return the
+     * body through the universal contract. stderr is drained for error logging.
+     *
+     * Unlike cgiSubprocess()'s PHP/cgi_worker path, there is NO stderr metadata
+     * channel — a Python/Perl script just writes CGI to stdout. text/event-stream
+     * responses stream chunk-by-chunk; everything else returns one buffered body.
+     *
+     * Apache parity: ap_scan_script_header_err_brigade_ex() (header scan + Status:),
+     * log_script_err() (stderr drain), CGIScriptTimeout (read deadline).
+     *
+     * @param resource              $process
+     * @param array<int,resource>   $pipes
+     */
+    private static function cgiInterpreterResponse($process, array $pipes, string $path): mixed
+    {
+        $g = RequestContext::instance();
+
+        // Read the full stdout (headers + body) under the CGI timeout. A trivial
+        // CGI script completes near-instantly; the deadline only guards a hang.
+        stream_set_blocking($pipes[1], false);
+        $deadline = microtime(true) + self::$cgi_timeout;
+        $raw = '';
+        $timedOut = true;
+        while (microtime(true) < $deadline) {
+            $chunk = fread($pipes[1], 8192);
+            if ($chunk !== false && $chunk !== '') {
+                $raw .= $chunk;
+                continue;
+            }
+            if (feof($pipes[1])) {
+                $timedOut = false;
+                break;
+            }
+            usleep(2000);
+        }
+
+        // Drain stderr (non-blocking) for error visibility — Apache logs child
+        // stderr line-by-line; we route it through elog() under the cgi tag.
+        stream_set_blocking($pipes[2], false);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[2]);
+
+        if ($timedOut) {
+            proc_terminate($process, 15);
+            $killDeadline = microtime(true) + 5.0;
+            while (microtime(true) < $killDeadline) {
+                $st = proc_get_status($process);
+                if (!$st['running']) break;
+                usleep(50000);
+            }
+            $st = proc_get_status($process);
+            if ($st['running']) {
+                proc_terminate($process, 9);
+            }
+            fclose($pipes[1]);
+            proc_close($process);
+            if (is_string($stderr) && $stderr !== '') {
+                elog("[cgi] (timeout) stderr: " . rtrim($stderr), "cgi");
+            }
+            elog("cgiInterpreterResponse: timeout after " . self::$cgi_timeout . "s for $path", "error");
+            return 500;
+        }
+
+        fclose($pipes[1]);
+        $exit = proc_get_status($process)['exitcode'];
+        proc_close($process);
+
+        if (is_string($stderr) && $stderr !== '') {
+            elog("[cgi] stderr: " . rtrim($stderr), "cgi");
+        }
+
+        // Split the CGI header block from the body on the first blank line.
+        // Per RFC 3875 the separator is CRLF CRLF, but tolerate bare LF LF too.
+        $sep = "\r\n\r\n";
+        $pos = strpos($raw, $sep);
+        if ($pos === false) {
+            $sep = "\n\n";
+            $pos = strpos($raw, $sep);
+        }
+
+        if ($pos === false) {
+            // No header block at all. If the script produced nothing and exited
+            // non-zero, surface a 500 (mod_cgi: "malformed header from script").
+            if ($raw === '') {
+                if ($exit !== 0) {
+                    elog("cgiInterpreterResponse: empty output, exit code $exit for $path", "error");
+                    return 500;
+                }
+                return null;
+            }
+            elog("cgiInterpreterResponse: malformed CGI header (no blank line) for $path", "error");
+            return 500;
+        }
+
+        $headerBlock = substr($raw, 0, $pos);
+        $body        = substr($raw, $pos + strlen($sep));
+
+        $streaming = false;
+        foreach (preg_split('/\r\n|\n/', $headerBlock) ?: [] as $line) {
+            if ($line === '' || !str_contains($line, ':')) {
+                continue;
+            }
+            [$name, $value] = explode(':', $line, 2);
+            $name  = trim($name);
+            $value = trim($value);
+
+            // RFC 3875 §6.3.3 — "Status: NNN Reason" sets the HTTP status and
+            // must not be forwarded to the client as a header.
+            if (strcasecmp($name, 'Status') === 0) {
+                $codeStr = strtok($value, ' ');
+                if ($codeStr !== false && ctype_digit($codeStr)) {
+                    $parsed = (int)$codeStr;
+                    if ($parsed >= 100 && $parsed <= 599) {
+                        response_set_status($parsed);
+                    }
+                }
+                continue;
+            }
+
+            if (strcasecmp($name, 'Content-Type') === 0
+                && stripos($value, 'text/event-stream') !== false) {
+                $streaming = true;
+            }
+
+            // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+            $g->zealphp_response->header($name, $value);
+        }
+
+        // SSE / event-stream: flush headers + body immediately so EventSource
+        // clients see events without waiting for the whole response.
+        // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+        if ($streaming && $g->openswoole_response->isWritable()) {
+            // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+            $g->zealphp_response->flush();
+            // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+            if ($body !== '' && $g->openswoole_response->isWritable()) {
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                $g->openswoole_response->write($body);
+            }
+            // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+            if ($g->openswoole_response->isWritable()) {
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                $g->openswoole_response->end();
+            }
+            $g->_streaming = true;
+            return null;
+        }
+
         return $body !== '' ? $body : null;
     }
 
@@ -4724,6 +4888,33 @@ HELP;
             return $this->invokeFallbackOrNotFound();
         });
 
+        # Implicit URL parity for registered CGI extensions (e.g. .py, .pl, .cgi).
+        # GET /cgi-bin/report.py → App::include('/cgi-bin/report.py'). App::include()
+        # applies the ExecCGI gate, so a registered-extension URL OUTSIDE an exec
+        # scope returns 403 (no source leak) — no extra guard needed here. The
+        # method shape matches the .php implicit routes below (GET/POST).
+        #
+        # These MUST be registered BEFORE the generic /{file} and /{dir}/{uri}
+        # routes: those carry an OPTIONAL `(\.php)?` suffix, so their {uri} param
+        # would otherwise greedily capture `hello.py` and try to serve a
+        # `hello.py.php` file (404) — stealing the request from the CGI backend.
+        # Earlier registration = higher priority, so the extension-specific route
+        # wins for `.py`/`.pl`/etc. while everything else still falls through.
+        foreach (array_keys(self::$cgi_backends) as $ext) {
+            if ($ext === '.php') { continue; }
+            $e = preg_quote(ltrim($ext, '.'), '#');
+            $this->route('/{cgifile}\.' . $e . '/?', [
+                'methods' => ['GET', 'POST']
+            ], function (string $cgifile) use ($ext) {
+                return App::include('/' . $cgifile . $ext);
+            });
+            $this->nsPathRoute('{cgidir}', '{cgiuri}\.' . $e . '/?', [
+                'methods' => ['GET', 'POST']
+            ], function (string $cgidir, string $cgiuri) use ($ext) {
+                return App::include('/' . $cgidir . '/' . $cgiuri . $ext);
+            });
+        }
+
         # Global route for all files in the root of the public directory
         $this->route(App::$ignore_php_ext ? '/{file}/?' : '/{file}(\.php)?/?', [
             'methods' => ['GET', 'POST']
@@ -4777,26 +4968,6 @@ HELP;
             }
             return $this->invokeFallbackOrNotFound();
         });
-
-        # Implicit URL parity for registered CGI extensions (e.g. .py, .pl, .cgi).
-        # GET /cgi-bin/report.py → App::include('/cgi-bin/report.py'). App::include()
-        # applies the ExecCGI gate, so a registered-extension URL OUTSIDE an exec
-        # scope returns 403 (no source leak) — no extra guard needed here. The
-        # method shape matches the .php implicit routes above (GET/POST).
-        foreach (array_keys(self::$cgi_backends) as $ext) {
-            if ($ext === '.php') { continue; }
-            $e = preg_quote(ltrim($ext, '.'), '#');
-            $this->route('/{cgifile}\.' . $e . '/?', [
-                'methods' => ['GET', 'POST']
-            ], function (string $cgifile) use ($ext) {
-                return App::include('/' . $cgifile . $ext);
-            });
-            $this->nsPathRoute('{cgidir}', '{cgiuri}\.' . $e . '/?', [
-                'methods' => ['GET', 'POST']
-            ], function (string $cgidir, string $cgiuri) use ($ext) {
-                return App::include('/' . $cgidir . '/' . $cgiuri . $ext);
-            });
-        }
 
         if (($effective_settings['task_worker_num'] ?? 0) > 0) {
             $server->on('task', function ($server, $id, $rid, $data) {
