@@ -3421,6 +3421,73 @@ class App
     }
 
     /**
+     * Parse a raw CGI/1.1 interpreter response (RFC 3875) into status, headers
+     * and body — pure, side-effect-free string handling.
+     *
+     * The header block is split from the body on the FIRST blank line. Per RFC
+     * 3875 the separator is CRLF CRLF; a bare LF LF is tolerated as a fallback
+     * (the CRLF CRLF form is searched first regardless of position). Header
+     * lines are parsed `Name: value` (first colon splits; colons in the value
+     * are preserved). The `Status: NNN Reason` pseudo-header (§6.3.3) is
+     * extracted into the returned `status` (only when `NNN` is a valid 100–599
+     * code) and is NOT echoed back as a header. Lines without a colon are
+     * ignored.
+     *
+     * When `$raw` has no blank-line separator at all, the whole input is treated
+     * as the body and `status`/`headers` come back empty — the caller decides
+     * whether that's a malformed-header error (cgiInterpreterResponse() already
+     * does, before calling this) or a bodies-only response.
+     *
+     * @return array{status: int|null, headers: array<string, string>, body: string}
+     */
+    public static function parseCgiResponse(string $raw): array
+    {
+        // Split the CGI header block from the body on the first blank line.
+        // Per RFC 3875 the separator is CRLF CRLF, but tolerate bare LF LF too.
+        $sep = "\r\n\r\n";
+        $pos = strpos($raw, $sep);
+        if ($pos === false) {
+            $sep = "\n\n";
+            $pos = strpos($raw, $sep);
+        }
+
+        if ($pos === false) {
+            return ['status' => null, 'headers' => [], 'body' => $raw];
+        }
+
+        $headerBlock = substr($raw, 0, $pos);
+        $body        = substr($raw, $pos + strlen($sep));
+
+        $status  = null;
+        $headers = [];
+        foreach (preg_split('/\r\n|\n/', $headerBlock) ?: [] as $line) {
+            if ($line === '' || !str_contains($line, ':')) {
+                continue;
+            }
+            [$name, $value] = explode(':', $line, 2);
+            $name  = trim($name);
+            $value = trim($value);
+
+            // RFC 3875 §6.3.3 — "Status: NNN Reason" sets the HTTP status and
+            // must not be forwarded to the client as a header.
+            if (strcasecmp($name, 'Status') === 0) {
+                $codeStr = strtok($value, ' ');
+                if ($codeStr !== false && ctype_digit($codeStr)) {
+                    $code = (int)$codeStr;
+                    if ($code >= 100 && $code <= 599) {
+                        $status = $code;
+                    }
+                }
+                continue;
+            }
+
+            $headers[$name] = $value;
+        }
+
+        return ['status' => $status, 'headers' => $headers, 'body' => $body];
+    }
+
+    /**
      * Consume a standard RFC 3875 CGI response from a non-PHP interpreter
      * subprocess: read stdout (header block + blank line + body), apply the
      * parsed headers / Status: pseudo-header to the response, and return the
@@ -3494,18 +3561,9 @@ class App
             elog("[cgi] stderr: " . rtrim($stderr), "cgi");
         }
 
-        // Split the CGI header block from the body on the first blank line.
-        // Per RFC 3875 the separator is CRLF CRLF, but tolerate bare LF LF too.
-        $sep = "\r\n\r\n";
-        $pos = strpos($raw, $sep);
-        if ($pos === false) {
-            $sep = "\n\n";
-            $pos = strpos($raw, $sep);
-        }
-
-        if ($pos === false) {
-            // No header block at all. If the script produced nothing and exited
-            // non-zero, surface a 500 (mod_cgi: "malformed header from script").
+        // No header block at all. If the script produced nothing and exited
+        // non-zero, surface a 500 (mod_cgi: "malformed header from script").
+        if (strpos($raw, "\r\n\r\n") === false && strpos($raw, "\n\n") === false) {
             if ($raw === '') {
                 if ($exit !== 0) {
                     elog("cgiInterpreterResponse: empty output, exit code $exit for $path", "error");
@@ -3517,31 +3575,16 @@ class App
             return 500;
         }
 
-        $headerBlock = substr($raw, 0, $pos);
-        $body        = substr($raw, $pos + strlen($sep));
+        $parsed  = self::parseCgiResponse($raw);
+        $body    = $parsed['body'];
+        $headers = $parsed['headers'];
+
+        if ($parsed['status'] !== null) {
+            response_set_status($parsed['status']);
+        }
 
         $streaming = false;
-        foreach (preg_split('/\r\n|\n/', $headerBlock) ?: [] as $line) {
-            if ($line === '' || !str_contains($line, ':')) {
-                continue;
-            }
-            [$name, $value] = explode(':', $line, 2);
-            $name  = trim($name);
-            $value = trim($value);
-
-            // RFC 3875 §6.3.3 — "Status: NNN Reason" sets the HTTP status and
-            // must not be forwarded to the client as a header.
-            if (strcasecmp($name, 'Status') === 0) {
-                $codeStr = strtok($value, ' ');
-                if ($codeStr !== false && ctype_digit($codeStr)) {
-                    $parsed = (int)$codeStr;
-                    if ($parsed >= 100 && $parsed <= 599) {
-                        response_set_status($parsed);
-                    }
-                }
-                continue;
-            }
-
+        foreach ($headers as $name => $value) {
             if (strcasecmp($name, 'Content-Type') === 0
                 && stripos($value, 'text/event-stream') !== false) {
                 $streaming = true;

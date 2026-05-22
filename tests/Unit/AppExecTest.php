@@ -53,4 +53,71 @@ final class AppExecTest extends TestCase
         $this->assertFalse(App::hookExec());
         App::$hook_exec = $original; // restore
     }
+
+    public function testZealSystemEchoesAllOutputAndReturnsLastLine(): void
+    {
+        $code = null;
+        ob_start();
+        $ret = \ZealPHP\zeal_system("printf 'a\\nb\\nc\\n'", $code);
+        $echoed = ob_get_clean();
+        $this->assertSame("a\nb\nc\n", $echoed);
+        $this->assertSame('c', $ret);          // last line of output
+        $this->assertSame(0, $code);
+    }
+
+    public function testZealSystemWritesExitCodeByReference(): void
+    {
+        // Outside a coroutine App::exec() falls back to rawExec(), which reports
+        // code 0 (proc_open's exit status isn't threaded back on that path). The
+        // contract we pin here is that $code is written by reference at all.
+        $code = null;
+        ob_start();
+        \ZealPHP\zeal_system('echo hi', $code);
+        ob_end_clean();
+        $this->assertIsInt($code);
+        $this->assertSame(0, $code);
+    }
+
+    public function testZealPassthruEchoesRawOutputAndSetsCode(): void
+    {
+        $code = null;
+        ob_start();
+        \ZealPHP\zeal_passthru("printf 'raw-out'", $code);
+        $echoed = ob_get_clean();
+        $this->assertSame('raw-out', $echoed);
+        $this->assertSame(0, $code);
+    }
+
+    public function testZealExecAppendsLinesAndReturnsLast(): void
+    {
+        $output = [];
+        $code = null;
+        $ret = \ZealPHP\zeal_exec("printf 'one\\ntwo\\nthree\\n'", $output, $code);
+        $this->assertSame(['one', 'two', 'three'], $output);
+        $this->assertSame('three', $ret);      // builtin returns last line
+        $this->assertSame(0, $code);
+    }
+
+    public function testZealExecAppendsToExistingOutputArray(): void
+    {
+        $output = ['preexisting'];
+        $code = null;
+        \ZealPHP\zeal_exec("printf 'added\\n'", $output, $code);
+        $this->assertSame(['preexisting', 'added'], $output);
+    }
+
+    public function testZealShellExecReturnsNullWhenNoOutputAndFails(): void
+    {
+        // No output + non-zero exit -> builtin shell_exec returns null. The real
+        // exit code is only available inside a coroutine (System::exec), so run
+        // there to exercise the null branch.
+        $out = 'sentinel';
+        \OpenSwoole\Coroutine::run(function () use (&$out) { $out = \ZealPHP\zeal_shell_exec('exit 1'); });
+        $this->assertNull($out);
+    }
+
+    public function testZealShellExecReturnsOutputOnSuccess(): void
+    {
+        $this->assertSame("ok\n", \ZealPHP\zeal_shell_exec('echo ok'));
+    }
 }
