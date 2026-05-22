@@ -32,6 +32,12 @@ $titleHtml   = htmlspecialchars($title);
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" defer></script>
   <script src="/js/learn-demo-viewers.js?v=<?= $v ?>" defer></script>
   <script src="/js/learn-tictactoe.js?v=<?= $v ?>" defer></script>
+  <!-- The chat widget's behaviour (initChat → loadHistory + SSE send + notes
+       WS sync) lives in learn.js. This shell renders the same _chat_widget
+       partial as the /learn/ai-chat lesson, so it needs learn.js too — without
+       it the standalone chat never initialised: no history loaded (it shares
+       the lesson's thread_id via localStorage) and a dead Send button. -->
+  <script src="/js/learn.js?v=<?= $v ?>" defer></script>
   <link rel="stylesheet" href="/css/demo-shell.css?v=<?= $v ?>">
   <script src="/js/demo-shell.js?v=<?= $v ?>" defer></script>
 </head>
