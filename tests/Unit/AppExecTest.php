@@ -43,4 +43,14 @@ final class AppExecTest extends TestCase
         $this->assertSame("hooked\n", $out);
         \uopz_unset_return('shell_exec');
     }
+
+    public function testHookExecGetterSetterRoundTrips(): void
+    {
+        $original = App::hookExec();
+        App::hookExec(true);
+        $this->assertTrue(App::hookExec());
+        App::hookExec(false);
+        $this->assertFalse(App::hookExec());
+        App::$hook_exec = $original; // restore
+    }
 }
