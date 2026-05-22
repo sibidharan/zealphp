@@ -152,6 +152,6 @@ fork) instead — see [runtime-architecture.md](runtime-architecture.md) and
 
 - Framework-wide setter: `App::cgiMode()` + `App::fcgiAddress()`
 - Per-extension registry: `App::registerCgiBackend()` / `App::resolveCgiBackend()`
-- FastCGI client: `ZealPHP\Legacy\FastCgiClient` (in the [API reference](../docs/api/))
+- FastCGI client: `ZealPHP\Legacy\FastCgiClient` (in the [API reference](/docs/api/classes/ZealPHP-Legacy-FastCgiClient.html))
 - Runnable demo: `examples/multi-lang-cgi/`
 - Related: [tasks-and-concurrency.md](tasks-and-concurrency.md) (the CGI-mode trade-off table), [runtime-architecture.md](runtime-architecture.md) (lifecycle setters)
