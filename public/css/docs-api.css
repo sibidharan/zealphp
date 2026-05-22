@@ -598,7 +598,7 @@
 }
 .docs-api .phpdocumentor-table-of-contents__entry {
   padding: .3rem 0;
-  border-bottom: 1px dashed rgba(0,0,0,.05);
+  border-bottom: 1px dashed rgba(0,0,0,.2);
 }
 
 /* ---------- Responsive: phpDocumentor's grid can overflow our shell ---------- */
