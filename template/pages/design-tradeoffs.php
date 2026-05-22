@@ -46,20 +46,32 @@
       <p class="tradeoffs-p">
         <code>App::superglobals(false)</code> (recommended default) enables the coroutine scheduler,
         per-coroutine state via <code>Coroutine::getContext()</code>, and <code>HOOK_ALL</code> on PHP's
-        I/O functions. <code>App::superglobals(true)</code> disables all of that and runs each request
-        single-threaded with Apache-mod_php-style global state — the path that lets unmodified
-        WordPress/Drupal run via the CGI bridge.
+        I/O functions. <code>App::superglobals(true)</code> runs each request single-threaded with
+        Apache-mod_php-style process-wide <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code> —
+        the path that gives unmodified WordPress/Drupal real superglobals. Since v0.2.23 the one flag is
+        decomposed into <strong>four independent fluent setters</strong> —
+        <code>superglobals()</code>, <code>processIsolation()</code>, <code>enableCoroutine()</code>,
+        <code>hookAll()</code> — each defaulting to <code>null</code> ("follow <code>superglobals</code>")
+        so existing apps see no change, while advanced users can mix-and-match (e.g. the Symfony bridge runs
+        <code>superglobals(true) + processIsolation(false)</code> for real <code>$_SESSION</code> with no
+        per-include fork cost).
       </p>
       <ul class="tradeoffs-list">
         <li><strong class="tradeoffs-strong-light">What it buys:</strong> greenfield projects get coroutines (thousands
-          of concurrent requests per worker); legacy migrations get a single-runtime path with no rewrite.</li>
-        <li><strong class="tradeoffs-strong-light">What it costs:</strong> two code paths means two surfaces for bugs.
-          A mode-specific bug only fires under one config. Documentation has to explicitly mark which
-          mode each guarantee applies to.</li>
+          of concurrent requests per worker); legacy migrations get a single-runtime path with no rewrite; the
+          four-knob split lets one binary serve a "supported mode matrix" (coroutine, legacy CGI, mixed-mode/Symfony,
+          coroutine-without-hooks) instead of a single take-it-or-leave-it switch.</li>
+        <li><strong class="tradeoffs-strong-light">What it costs:</strong> multiple code paths means multiple surfaces
+          for bugs. A mode-specific bug only fires under one config. Documentation has to explicitly mark which
+          mode each guarantee applies to. Some knob combinations are genuinely unsafe (process-wide superglobals
+          racing across concurrent coroutines).</li>
         <li><strong class="tradeoffs-strong-light">Mitigation:</strong> coroutine mode is the documented default for
-          new projects (scaffold ships it). The
+          new projects (scaffold ships it). Unsafe combinations
+          (<code>superglobals(true) + enableCoroutine(true)</code>, or <code>superglobals(true)</code> with hooked I/O)
+          <strong>throw <code>RuntimeException</code> at <code>App::run()</code> boot</strong> (v0.2.27+) — fail loud,
+          fail fast, before a single request is served against a broken contract. The
           <a href="/coroutines" class="tradeoffs-link">/coroutines</a> page has a side-by-side safety
-          matrix per mode. Most users never touch the superglobals flag.</li>
+          matrix per mode. Most users never touch any flag.</li>
       </ul>
     </div>
 
@@ -115,24 +127,57 @@ PHP]); ?>
 
     <!-- ─── CGI bridge ─── -->
     <div class="tradeoffs-block">
-      <h2 class="tradeoffs-h2">5. CGI bridge for legacy apps</h2>
+      <h2 class="tradeoffs-h2">5. CGI bridge for legacy apps and non-PHP scripts</h2>
       <p class="tradeoffs-p">
-        <code>App::include($publicPath)</code> runs PHP files in a separate process via <code>proc_open</code>
-        (when in superglobals mode), capturing their <code>header()</code> / <code>setcookie()</code> /
-        <code>echo</code> output and stitching them into the OpenSwoole response. The file's return value also
-        flows back through the <a href="/responses#return-contract" class="tradeoffs-link">universal return contract</a>.
-        This is how unmodified WordPress and Drupal run on ZealPHP.
+        ZealPHP ships a genuine Apache-<code>mod_cgi</code>-class bridge, not a toy fork-per-request. It runs
+        legacy PHP <em>and</em> non-PHP scripts (Python, Perl, anything with a shebang or interpreter) with a
+        full RFC 3875 CGI/1.1 environment, then stitches their output into the OpenSwoole response. The
+        executed script's return value (for PHP) flows back through the
+        <a href="/responses#return-contract" class="tradeoffs-link">universal return contract</a>. Three things
+        make it real:
       </p>
       <ul class="tradeoffs-list">
-        <li><strong class="tradeoffs-strong-light">What it buys:</strong> Apache mod_php compatibility for the last mile of
-          migration. <code>App::setFallback(fn() =&gt; App::include('/index.php'))</code> serves
-          WordPress unmodified.</li>
-        <li><strong class="tradeoffs-strong-light">What it costs:</strong> a process per legacy request — no coroutine
-          async, no shared state, fork latency. Slow relative to a main-worker route. Adds maintenance surface
-          (the bridge is 284 lines of glue in <code>src/cgi_worker.php</code>).</li>
-        <li><strong class="tradeoffs-strong-light">Mitigation:</strong> the bridge is opt-in via <code>App::superglobals(true)</code>
-          and only fires when a route falls through to <code>setFallback()</code>. New routes you write run in
-          the main worker at full coroutine speed. Use the bridge for the legacy 20% you can't rewrite yet.</li>
+        <li><strong class="tradeoffs-strong-light">Three dispatch modes</strong> (<code>App::cgiMode()</code>):
+          <code>'proc'</code> spawns a fresh PHP interpreter per request via <code>proc_open</code> (true mod_cgi
+          parity, full WordPress/Drupal global-scope isolation); <code>'fork'</code> warm-forks the already-booted
+          <code>OpenSwoole\Process</code> (~5&times; faster, <code>.php</code>-only, function-scope code); <code>'fcgi'</code>
+          forwards to an upstream php-fpm / FastCGI pool via the bundled <code>FastCgiClient</code> (no per-request
+          spawn at all). Per-extension backends register via <code>App::registerCgiBackend('.py', &hellip;)</code>.</li>
+        <li><strong class="tradeoffs-strong-light">ScriptAlias + ExecCGI scope.</strong>
+          <code>App::cgiScriptAlias('/cgi-bin', &hellip;)</code> (Apache <code>ScriptAlias</code> parity) and per-backend
+          <code>exec_paths</code> (Apache <code>ExecCGI</code> parity) gate <em>which</em> URLs may execute. A stray
+          script outside its declared exec scope is <strong>neither executed nor leaked as source &mdash; it returns
+          <code>403</code></strong> (the security hole Apache leaves when <code>ExecCGI</code> is off).</li>
+        <li><strong class="tradeoffs-strong-light">URL parity.</strong> <code>GET /cgi-bin/report.py</code> runs the
+          script &mdash; implicit routes are auto-registered for every CGI extension, registered <em>before</em> the
+          generic public-file routes so they win. Full RFC 3875 env (httpoxy-stripped: the client
+          <code>Proxy:</code> header never reaches <code>HTTP_PROXY</code>), POST body piped to script stdin,
+          <code>Status:</code>-header parsing, streaming / SSE pass-through, and a <code>CGIScriptTimeout</code>
+          (<code>App::$cgi_timeout</code>, Apache parity).</li>
+      </ul>
+      <p class="tradeoffs-p-sm">
+        Beyond the file bridge, <code>App::exec()</code> runs shell commands coroutine-safely through
+        <code>OpenSwoole\Coroutine\System::exec()</code> (yields to the scheduler instead of blocking the worker),
+        and a transparent uopz override of the <code>shell_exec</code> / <code>exec</code> / <code>system</code> /
+        <code>passthru</code> family (and the backtick operator, which compiles to <code>shell_exec</code>) routes
+        legacy/user code through it with zero source changes (on by default in coroutine mode,
+        <code>App::hookExec()</code> to override).
+      </p>
+      <ul class="tradeoffs-list">
+        <li><strong class="tradeoffs-strong-light">What it buys:</strong> the last mile of migration runs unmodified.
+          <code>App::setFallback(fn() =&gt; App::include('/index.php'))</code> serves WordPress as-is; a polyglot
+          <code>/cgi-bin</code> of Python/Perl reports runs without a separate web server; and <code>'fcgi'</code> mode
+          lets ZealPHP front an existing php-fpm pool with no fork cost at all.</li>
+        <li><strong class="tradeoffs-strong-light">What it costs:</strong> <code>'proc'</code> mode pays a process spawn
+          per request (~30&ndash;50 ms <code>proc_open</code> + PHP startup) &mdash; no coroutine async, no shared state.
+          It's slow relative to a native main-worker route, and the bridge is real maintenance surface
+          (<code>src/cgi_worker.php</code> + the CGI env/dispatch glue in <code>src/App.php</code>).</li>
+        <li><strong class="tradeoffs-strong-light">Mitigation:</strong> CGI-script execution (non-PHP via
+          ScriptAlias / registered extensions) works in <em>any</em> lifecycle mode &mdash; it isn't bolted to
+          <code>processIsolation</code>. For PHP, <code>.php</code> only goes through the subprocess in isolation mode;
+          in coroutine mode it runs in-process at full speed. Pick <code>'fork'</code> or <code>'fcgi'</code> to drop the
+          per-request spawn when your code tolerates it, and keep native routes for everything you've already
+          modernized &mdash; use the bridge for the legacy slice you can't rewrite yet.</li>
       </ul>
     </div>
 
