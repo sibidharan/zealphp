@@ -17,23 +17,23 @@ use ZealPHP\Store;
  *
  * Tracks request counts per client IP in a shared `Store` table. When a
  * single IP exceeds `$limit` requests inside `$window` seconds, further
- * requests receive a configurable HTTP error (default 429 Too Many Requests)
+ * requests receive a configurable HTTP error (default `429 Too Many Requests`)
  * with a `Retry-After` header.
  *
  * ## nginx parity
  *
- *   limit_req_zone $binary_remote_addr zone=one:10m rate=60r/m;
- *   limit_req zone=one burst=5 nodelay;
+ *   `limit_req_zone $binary_remote_addr zone=one:10m rate=60r/m;`
+ *   `limit_req zone=one burst=5 nodelay;`
  *
  * ZealPHP equivalent:
  *
- *   $app->addMiddleware(new RateLimitMiddleware(
- *       limit:        60,
- *       window:       60,
- *       burst:        5,
- *       nodelay:      true,
- *       tableName:    'rate_limit',
- *   ));
+ *   `$app->addMiddleware(new RateLimitMiddleware(`
+ *       `limit:        60,`
+ *       `window:       60,`
+ *       `burst:        5,`
+ *       `nodelay:      true,`
+ *       `tableName:    'rate_limit',`
+ *   `));`
  *
  * ## Algorithm note — fixed window vs leaky bucket
  *
@@ -46,15 +46,15 @@ use ZealPHP\Store;
  * defence the fixed window is sufficient; for billing-grade fairness or tight
  * concurrency control, consider implementing a leaky-bucket variant.
  *
- * ## burst= / nodelay= / delay=
+ * ## `burst=` / `nodelay=` / `delay=`
  *
  * - `burst=N` — allow up to N extra requests above the `limit` per window
  *   before rejecting. Requests within the burst quota are forwarded.
  * - `nodelay=true` — burst requests are forwarded immediately (no artificial
  *   delay). This matches nginx `limit_req ... nodelay`.
- * - Without burst (default burst=0), any request over the limit is rejected.
+ * - Without burst (default `burst=0`), any request over the limit is rejected.
  *
- * ## Trusted-proxy / X-Forwarded-For integration (B2 fix)
+ * ## Trusted-proxy / `X-Forwarded-For` integration (B2 fix)
  *
  * The zone key is now resolved via `App::clientIp()` which honours
  * `App::$trusted_proxies`. Operators deploying behind Traefik/nginx must
@@ -63,7 +63,7 @@ use ZealPHP\Store;
  *
  * ## Store-full failure policy (B10 fix)
  *
- * When the OpenSwoole Table is full, `Store::set()` returns `false`. The
+ * When the OpenSwoole `Table` is full, `Store::set()` returns `false`. The
  * middleware detects this, logs a warning via `elog()`, and **fails open**
  * (passes the request through). This is an explicit policy choice: rejecting
  * an unknown IP because the table is full would be overly aggressive. Operators
@@ -78,31 +78,31 @@ use ZealPHP\Store;
  *
  * ## Configurable reject status
  *
- * `rejectStatus` defaults to 429. Pass 503 for nginx parity (nginx historically
- * uses 503 for rate-limit rejections). Any 4xx/5xx code is accepted.
+ * `rejectStatus` defaults to `429`. Pass `503` for nginx parity (nginx historically
+ * uses `503` for rate-limit rejections). Any 4xx/5xx code is accepted.
  *
  * ## Loopback bypass
  *
- * By default, requests from 127.0.0.1 / ::1 are not rate-limited so the
+ * By default, requests from `127.0.0.1` / `::1` are not rate-limited so the
  * integration test suite can run repeatedly without `php app.php restart`. Set
  * `ZEALPHP_RATE_LIMIT_LOOPBACK=1` to opt in (useful when testing the limiter).
  *
- * ## Store table schema (create before $app->run())
+ * ## `Store` table schema (create before `$app->run()`)
  *
- *   Store::make('rate_limit', 16384, [
- *       'ip'    => [\OpenSwoole\Table::TYPE_STRING, 64],
- *       'count' => [\OpenSwoole\Table::TYPE_INT,    4],
- *       'reset' => [\OpenSwoole\Table::TYPE_INT,    4],
- *   ]);
+ *   `Store::make('rate_limit', 16384, [`
+ *       `'ip'    => [\OpenSwoole\Table::TYPE_STRING, 64],`
+ *       `'count' => [\OpenSwoole\Table::TYPE_INT,    4],`
+ *       `'reset' => [\OpenSwoole\Table::TYPE_INT,    4],`
+ *   `]);`
  *
- *   $app->addMiddleware(new \ZealPHP\Middleware\RateLimitMiddleware(
- *       limit:     60,
- *       window:    60,
- *       tableName: 'rate_limit',
- *   ));
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\RateLimitMiddleware(`
+ *       `limit:     60,`
+ *       `window:    60,`
+ *       `tableName: 'rate_limit',`
+ *   `));`
  *
  * If the table doesn't exist when the request arrives the middleware
- * fails-open (passes the request through) and logs once via elog().
+ * fails-open (passes the request through) and logs once via `elog()`.
  */
 class RateLimitMiddleware implements MiddlewareInterface
 {

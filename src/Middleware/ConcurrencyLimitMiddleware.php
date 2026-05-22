@@ -19,24 +19,24 @@ use ZealPHP\Store;
  * Bounds the number of in-flight requests. Supports two modes:
  *
  * **Global mode** (backward-compatible, original behaviour)
- * A single shared `Counter` (OpenSwoole\Atomic) caps total in-flight
+ * A single shared `Counter` (`OpenSwoole\Atomic`) caps total in-flight
  * requests across all clients. Simple, zero-allocation, but one slow
- * client can exhaust the global cap and 503 everyone else.
+ * client can exhaust the global cap and `503` everyone else.
  *
  * **Per-key mode** (nginx `limit_conn` parity)
- * A `Store` table (OpenSwoole\Table) tracks in-flight counts per key.
+ * A `Store` table (`OpenSwoole\Table`) tracks in-flight counts per key.
  * The default key is the client IP (proxy-aware via `App::clientIp()`),
  * matching nginx `$binary_remote_addr`. A custom key resolver can be
  * supplied for other partitioning schemes (e.g. API key, tenant ID).
  *
  * nginx equivalent:
- *   limit_conn_zone $binary_remote_addr zone=addr:10m;
- *   limit_conn addr 100;
- *   limit_conn_status 503;
- *   limit_conn_dry_run off;
+ *   `limit_conn_zone $binary_remote_addr zone=addr:10m;`
+ *   `limit_conn addr 100;`
+ *   `limit_conn_status 503;`
+ *   `limit_conn_dry_run off;`
  *
  * The counter/store entry is incremented on entry and decremented on exit
- * via try/finally, so handlers that throw still decrement correctly.
+ * via `try/finally`, so handlers that throw still decrement correctly.
  *
  * **Pre-fork footgun** — both the `Counter` and the `Store` table MUST be
  * instantiated/created BEFORE `$app->run()` so all forked workers share
@@ -75,11 +75,11 @@ use ZealPHP\Store;
  *   ));
  *
  * Options:
- *   rejectStatus  int           HTTP status on rejection (400–599, default 503)
- *   dryRun        bool          Observe + log, never enforce (default false)
- *   keyResolver   callable|null fn(ServerRequestInterface): string — override key;
- *                               default uses App::clientIp()
- *   globalMax     int           When > 0 and a $counter is provided, also enforce
+ *   `rejectStatus`  int           HTTP status on rejection (`400`–`599`, default `503`)
+ *   `dryRun`        bool          Observe + log, never enforce (default `false`)
+ *   `keyResolver`   callable|null `fn(ServerRequestInterface): string` — override key;
+ *                               default uses `App::clientIp()`
+ *   `globalMax`     int           When > 0 and a `$counter` is provided, also enforce
  *                               this global ceiling alongside the per-key limit
  */
 class ConcurrencyLimitMiddleware implements MiddlewareInterface
@@ -91,18 +91,18 @@ class ConcurrencyLimitMiddleware implements MiddlewareInterface
 
     /**
      * @param int                                    $maxConcurrent Per-key (or global) in-flight cap.
-     * @param Counter|null                           $counter       Optional global Counter (global mode
-     *                                                              when $tableName is null; optional
+     * @param Counter|null                           $counter       Optional global `Counter` (global mode
+     *                                                              when `$tableName` is null; optional
      *                                                              additional global cap in per-key mode).
-     * @param string|null                            $tableName     Store table for per-key limiting.
-     *                                                              Must be created before $app->run().
-     * @param int                                    $globalMax     Global cap enforced via $counter when
-     *                                                              > 0 and $tableName is set. Ignored
-     *                                                              when $tableName is null (legacy mode
-     *                                                              uses $maxConcurrent as the global cap).
-     * @param int                                    $rejectStatus  HTTP status on rejection (400–599).
+     * @param string|null                            $tableName     `Store` table for per-key limiting.
+     *                                                              Must be created before `$app->run()`.
+     * @param int                                    $globalMax     Global cap enforced via `$counter` when
+     *                                                              > 0 and `$tableName` is set. Ignored
+     *                                                              when `$tableName` is null (legacy mode
+     *                                                              uses `$maxConcurrent` as the global cap).
+     * @param int                                    $rejectStatus  HTTP status on rejection (`400`–`599`).
      * @param bool                                   $dryRun        Log rejections without enforcing.
-     * @param callable(ServerRequestInterface):string|null $keyResolver Override key; default = clientIp().
+     * @param callable(ServerRequestInterface):string|null $keyResolver Override key; default = `clientIp()`.
      */
     public function __construct(
         private int      $maxConcurrent,

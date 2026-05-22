@@ -47,91 +47,91 @@ class App
     public static bool $coproc_implicit_request_handler = false;
     /**
      * Per-include CGI process-isolation override. `null` means "follow
-     * $superglobals" (true → CGI subprocess via cgi_worker.php; false →
-     * in-process via executeFile()), which preserves today's default
-     * coupling. Set via App::processIsolation(bool) — see that method for
-     * the trade-offs. App::run() resolves this into the backing
-     * $coproc_implicit_request_handler flag right before the server starts.
+     * `$superglobals`" (true → CGI subprocess via `cgi_worker.php`; false →
+     * in-process via `executeFile()`), which preserves today's default
+     * coupling. Set via `App::processIsolation(bool)` — see that method for
+     * the trade-offs. `App::run()` resolves this into the backing
+     * `$coproc_implicit_request_handler` flag right before the server starts.
      */
     public static ?bool $process_isolation = null;
     /**
      * How a process-isolated legacy include is dispatched, when
-     * processIsolation() is on:
+     * `processIsolation()` is on:
      *
-     *   'proc' (default) — proc_open() spawns a FRESH PHP interpreter per
-     *                      request (src/cgi_worker.php). True global scope:
+     *   `'proc'` (default) — `proc_open()` spawns a FRESH PHP interpreter per
+     *                      request (`src/cgi_worker.php`). True global scope:
      *                      top-level `$x = ...` is visible via `global $x` in
      *                      functions, so unmodified WordPress/Drupal work. Cost:
      *                      cold PHP startup + autoload per request (~tens of ms).
      *
-     *   'fork' — OpenSwoole\Process forks the already-booted worker (copy-on-
+     *   `'fork'` — `OpenSwoole\Process` forks the already-booted worker (copy-on-
      *            write: warm interpreter, loaded autoloader, hot opcache). ~5×
-     *            faster than 'proc' because nothing re-execs. TRADE-OFF: the
+     *            faster than `'proc'` because nothing re-execs. TRADE-OFF: the
      *            file runs in the fork closure's FUNCTION scope, so bare
      *            top-level vars are NOT visible via the `global` keyword
-     *            (`$wpdb` -style patterns break). Superglobals
-     *            ($_GET/$_POST/$_SESSION/$_SERVER) work normally. Use for
+     *            (`$wpdb`-style patterns break). Superglobals
+     *            (`$_GET`/`$_POST`/`$_SESSION`/`$_SERVER`) work normally. Use for
      *            "modernised legacy" apps that read request state via
-     *            superglobals and don't lean on bare-global wiring; keep 'proc'
+     *            superglobals and don't lean on bare-global wiring; keep `'proc'`
      *            for unmodified WordPress/Drupal.
      *
-     * Set via App::cgiMode('fork'|'proc'|'fcgi'). Default 'proc' — no behaviour
+     * Set via `App::cgiMode('fork'|'proc'|'fcgi')`. Default `'proc'` — no behaviour
      * change for existing isolation users.
      *
-     *   'fcgi' — forward to a FastCGI backend (e.g. php-fpm) via the FCGI
+     *   `'fcgi'` — forward to a FastCGI backend (e.g. `php-fpm`) via the FCGI
      *            binary protocol over a TCP or Unix socket. The target address
-     *            is configured with App::fcgiAddress(). No child process is
+     *            is configured with `App::fcgiAddress()`. No child process is
      *            spawned; the OpenSwoole coroutine socket keeps the event loop
      *            unblocked. Best choice when ZealPHP sits in front of an
-     *            existing php-fpm pool.
+     *            existing `php-fpm` pool.
      */
     public static string $cgi_mode = 'proc';
     /**
-     * FastCGI backend address used when App::cgiMode() === 'fcgi'.
-     * Format: "host:port" for TCP (e.g. "127.0.0.1:9000") or
-     *         "unix:/path/to/php-fpm.sock" for a Unix-domain socket.
-     * Set via App::fcgiAddress(). Default is the standard php-fpm TCP listener.
+     * FastCGI backend address used when `App::cgiMode() === 'fcgi'`.
+     * Format: `"host:port"` for TCP (e.g. `"127.0.0.1:9000"`) or
+     *         `"unix:/path/to/php-fpm.sock"` for a Unix-domain socket.
+     * Set via `App::fcgiAddress()`. Default is the standard `php-fpm` TCP listener.
      */
     public static string $fcgi_address = '127.0.0.1:9000';
     /**
      * Per-extension CGI backend registry. Apache `AddHandler`/`ProxyPassMatch`
      * + nginx `fastcgi_pass`-per-location parity.
      *
-     * Shape: [ '.ext' => ['mode' => 'proc'|'fork'|'fcgi', ...options] ]
+     * Shape: `[ '.ext' => ['mode' => 'proc'|'fork'|'fcgi', ...options] ]`
      *
-     * Default: empty — unregistered extensions (including .php) fall through to
-     * App::$cgi_mode (which defaults to 'proc', preserving existing behaviour).
-     * Register additional extensions with App::registerCgiBackend().
+     * Default: empty — unregistered extensions (including `.php`) fall through to
+     * `App::$cgi_mode` (which defaults to `'proc'`, preserving existing behaviour).
+     * Register additional extensions with `App::registerCgiBackend()`.
      *
      * @var array<string, array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>}>
      */
     public static array $cgi_backends = [];
     /**
      * OpenSwoole `enable_coroutine` server-setting override. `null` means
-     * "follow !$superglobals" (true → coroutine-per-request, false → one
+     * "follow `!$superglobals`" (true → coroutine-per-request, false → one
      * synchronous request at a time per worker). Set via
-     * App::enableCoroutine(bool). Combining true with $superglobals=true
-     * is unsafe — process-wide $_GET/$_POST/$_SESSION will race across
-     * concurrent coroutines; the helper warns at run() time.
+     * `App::enableCoroutine(bool)`. Combining true with `$superglobals=true`
+     * is unsafe — process-wide `$_GET`/`$_POST`/`$_SESSION` will race across
+     * concurrent coroutines; the helper warns at `run()` time.
      */
     public static ?bool $enable_coroutine_override = null;
     /**
      * `OpenSwoole\Runtime::enableCoroutine($flags)` override. Same shape
-     * as App::hookAll() input: `null` → follow !$superglobals (HOOK_ALL when
-     * coroutine mode, 0 in superglobals mode); `true` → HOOK_ALL; `false`
-     * → 0; `int` → explicit bitmask. PDO is intentionally NOT hooked in
+     * as `App::hookAll()` input: `null` → follow `!$superglobals` (`HOOK_ALL` when
+     * coroutine mode, `0` in superglobals mode); `true` → `HOOK_ALL`; `false`
+     * → `0`; `int` → explicit bitmask. PDO is intentionally NOT hooked in
      * OpenSwoole 22.1 / 26.2 regardless of this flag.
      * @var bool|int|null
      */
     public static $hook_all_override = null;
-    /** Apache DirectorySlash equivalent — redirect `/foo` → `/foo/` when foo is a directory. */
+    /** Apache `DirectorySlash` equivalent — redirect `/foo` → `/foo/` when foo is a directory. */
     public static bool $directory_slash = true;
     /**
-     * Apache DirectoryIndex — file names tried in order when a directory is requested.
+     * Apache `DirectoryIndex` — file names tried in order when a directory is requested.
      * @var array<int, string>
      */
     public static array $directory_index = ['index.php', 'index.html', 'index.htm'];
-    /** Apache PATH_INFO — when `/script.php/extra/path`, expose `/extra/path` as PATH_INFO. */
+    /** Apache `PATH_INFO` — when `/script.php/extra/path`, expose `/extra/path` as `PATH_INFO`. */
     public static bool $path_info = true;
     /**
      * Apache `AllowEncodedSlashes` — when false (default, matching Apache), a
@@ -142,28 +142,28 @@ class App
      */
     public static bool $allow_encoded_slashes = false;
     /**
-     * Static handler URL-prefix whitelist. Empty = serve any path under document_root (Apache default).
+     * Static handler URL-prefix whitelist. Empty = serve any path under `document_root` (Apache default).
      * @var array<int, string>
      */
     public static array $static_handler_locations = [];
-    /** Block any path containing a dotfile component (.git, .env, .htaccess, etc.). Apache convention. */
+    /** Block any path containing a dotfile component (`.git`, `.env`, `.htaccess`, etc.). Apache convention. */
     public static bool $block_dotfiles = true;
     /**
-     * Apache DocumentRoot equivalent. Relative values (the default) are
-     * resolved against App::$cwd; absolute values are used as-is. Drives
-     * App::include() path resolution and the implicit /{file}/{dir/uri} routes.
+     * Apache `DocumentRoot` equivalent. Relative values (the default) are
+     * resolved against `App::$cwd`; absolute values are used as-is. Drives
+     * `App::include()` path resolution and the implicit `/{file}/{dir/uri}` routes.
      */
     public static string $document_root = 'public';
     /**
-     * Apache TraceEnable — defaults to OFF for security. When false (default)
-     * ResponseMiddleware refuses HTTP TRACE with 405 regardless of any matching
-     * route definition. Set to true only if you know you need TRACE.
+     * Apache `TraceEnable` — defaults to OFF for security. When false (default)
+     * `ResponseMiddleware` refuses HTTP `TRACE` with `405` regardless of any matching
+     * route definition. Set to true only if you know you need `TRACE`.
      */
     public static bool $trace_enabled = false;
     /**
-     * Apache AddDefaultCharset. Stored here for consumers (e.g. a future
-     * CharsetMiddleware) that want a server-wide default charset to append
-     * to text-ish Content-Type headers.
+     * Apache `AddDefaultCharset`. Stored here for consumers (e.g. a future
+     * `CharsetMiddleware`) that want a server-wide default charset to append
+     * to text-ish `Content-Type` headers.
      */
     public static string $default_charset = 'utf-8';
     /**
@@ -175,39 +175,39 @@ class App
     /**
      * Apache `ServerTokens`. Controls how much detail the `X-Powered-By`
      * response header advertises:
-     *   'Full'  (default) → `ZealPHP + OpenSwoole`
-     *   'Prod' / 'Major' / 'Minor' / 'Min' / 'OS' → `ZealPHP`
-     *   'None'  (or '')   → header omitted entirely (info-leak hardening)
-     * Set via App::serverTokens() before App::init().
+     *   `'Full'`  (default) → `ZealPHP + OpenSwoole`
+     *   `'Prod'` / `'Major'` / `'Minor'` / `'Min'` / `'OS'` → `ZealPHP`
+     *   `'None'`  (or `''`)   → header omitted entirely (info-leak hardening)
+     * Set via `App::serverTokens()` before `App::init()`.
      */
     public static string $server_tokens = 'Full';
     /**
      * Apache `FileETag`. When false, `ETagMiddleware` emits no `ETag` header
-     * and never returns 304 (equivalent to `FileETag None`). Default true.
-     * Set via App::fileETag() before App::init().
+     * and never returns `304` (equivalent to `FileETag None`). Default true.
+     * Set via `App::fileETag()` before `App::init()`.
      */
     public static bool $file_etag = true;
     /**
-     * mod_php-parity SAPI identity for the php_sapi_name() override. Default null
-     * returns the real PHP_SAPI ("cli") — no behavior change. Set to a web SAPI
-     * string (e.g. 'apache2handler', 'fpm-fcgi') so legacy code branching on
-     * php_sapi_name() takes its web path. The PHP_SAPI *constant* is unaffected
-     * (uopz cannot redefine it). Configure via App::sapiName() before App::init().
+     * mod_php-parity SAPI identity for the `php_sapi_name()` override. Default `null`
+     * returns the real `PHP_SAPI` (`"cli"`) — no behavior change. Set to a web SAPI
+     * string (e.g. `'apache2handler'`, `'fpm-fcgi'`) so legacy code branching on
+     * `php_sapi_name()` takes its web path. The `PHP_SAPI` *constant* is unaffected
+     * (uopz cannot redefine it). Configure via `App::sapiName()` before `App::init()`.
      */
     public static ?string $sapi_name = null;
     /**
      * Whether ZealPHP's per-request session lifecycle runs. Default true: the
-     * SessionManager / CoSessionManager OnRequest wrapper reads the PHPSESSID
-     * cookie, calls zeal_session_start(), optionally emits the Set-Cookie
+     * `SessionManager` / `CoSessionManager` OnRequest wrapper reads the `PHPSESSID`
+     * cookie, calls `zeal_session_start()`, optionally emits the `Set-Cookie`
      * header, and closes the session at request end. Set to false when
-     * another framework (e.g. Symfony's NativeSessionStorage via the
+     * another framework (e.g. Symfony's `NativeSessionStorage` via the
      * zealphp-symfony bridge) owns the session lifecycle — ZealPHP then skips
      * the session-specific work but still does request-context setup
-     * ($g->openswoole_request, $g->zealphp_response, error-stack reset, etc.).
+     * (`$g->openswoole_request`, `$g->zealphp_response`, error-stack reset, etc.).
      *
-     * The underlying zeal_session_* uopz-overridden functions remain
+     * The underlying `zeal_session_*` uopz-overridden functions remain
      * installed and callable from user code either way; this toggle only
-     * controls whether the SessionManager wrapper drives the lifecycle
+     * controls whether the `SessionManager` wrapper drives the lifecycle
      * automatically for every request.
      */
     public static bool $session_lifecycle = true;
@@ -217,10 +217,10 @@ class App
      * file-based API layer can delegate auth questions to whatever auth
      * system the app uses (Symfony Security, Auth0, the SelfMadeNinja stack,
      * a custom `$_SESSION['user']` check, etc.) without subclassing or
-     * monkey-patching ZealAPI itself.
+     * monkey-patching `ZealAPI` itself.
      *
      * Set via the fluent setters `App::authChecker()`, `App::adminChecker()`,
-     * `App::usernameProvider()`. Defaults: null → ZealAPI returns the safe
+     * `App::usernameProvider()`. Defaults: `null` → `ZealAPI` returns the safe
      * fail-closed values (`false`, `false`, `null`). See the issue #13
      * discussion and `/learn/api` for usage.
      *
@@ -233,25 +233,25 @@ class App
     public static $username_provider = null;
     /**
      * Apache `RewriteCond %{REQUEST_FILENAME} !-d` + `RewriteRule ^(.+)/$ /$1 [R=301,L]`.
-     * When true, non-directory URIs ending in `/` are 301-redirected to the no-slash
+     * When true, non-directory URIs ending in `/` are `301`-redirected to the no-slash
      * form. Inverse of `$directory_slash`. Default false (keeps current behaviour).
      */
     public static bool $strip_trailing_slash = false;
     /**
      * Apache `ServerAdmin webmaster@example.com`. When set, the framework's default
-     * 500/error page mentions this contact. Null disables the contact line.
+     * `500`/error page mentions this contact. `null` disables the contact line.
      */
     public static ?string $server_admin = null;
     /**
      * Apache `ServerName www.example.com:443`. The canonical host the server
      * advertises in absolute redirects (and other absolute URL builders) when
      * `$use_canonical_name` is true. Include scheme-port if relevant; the raw
-     * value is returned as-is by App::canonicalHost().
+     * value is returned as-is by `App::canonicalHost()`.
      */
     public static ?string $canonical_name = null;
     /**
      * Apache `UseCanonicalName On|Off`. When true and `$canonical_name` is set,
-     * App::canonicalHost() returns the canonical name; otherwise it returns the
+     * `App::canonicalHost()` returns the canonical name; otherwise it returns the
      * request `Host` header. Default false (Apache's default since 2.0).
      */
     public static bool $use_canonical_name = false;
@@ -265,16 +265,16 @@ class App
      */
     public static bool $hostname_lookups = false;
     /**
-     * Maximum seconds to wait for a CGI subprocess (proc mode) to produce
+     * Maximum seconds to wait for a CGI subprocess (`proc` mode) to produce
      * its metadata line on stderr. After this deadline the child receives
-     * SIGTERM; if it does not exit within 5 s it receives SIGKILL. Matches
+     * `SIGTERM`; if it does not exit within 5 s it receives `SIGKILL`. Matches
      * Apache's `CGIScriptTimeout` directive. Default 60 s.
      */
     public static int $cgi_timeout = 60;
     /**
      * CIDR list of proxy IPs whose `X-Forwarded-For` / `X-Real-IP` headers
-     * App::clientIp() will trust. Empty (the default) means no proxies trusted
-     * — App::clientIp() always returns `REMOTE_ADDR`. Critical for production
+     * `App::clientIp()` will trust. Empty (the default) means no proxies trusted
+     * — `App::clientIp()` always returns `REMOTE_ADDR`. Critical for production
      * deploys behind Traefik/Caddy/nginx; without it rate limiters and access
      * logs see the proxy IP instead of the real client.
      *
@@ -285,37 +285,37 @@ class App
      */
     public static array $trusted_proxies = [];
     /**
-     * Apache `LogFormat "..."`. Format string used by access_log() to render
-     * each request line. Tokens (Apache mod_log_config subset):
+     * Apache `LogFormat "..."`. Format string used by `access_log()` to render
+     * each request line. Tokens (Apache `mod_log_config` subset):
      *
-     *   %h          Remote host/IP (uses App::clientIp() when $trusted_proxies set)
-     *   %l          Remote logname (always `-` — RFC 1413 ident is dead)
-     *   %u          Remote user (session username if set, else `-`)
-     *   %t          Time `[17/May/2026:07:30:00 +0000]`
-     *   %r          First line of request "GET /foo HTTP/1.1"
-     *   %>s         Final response status
-     *   %b          Response body bytes (`-` when zero, CLF convention)
-     *   %B          Response body bytes (0 when zero)
-     *   %D          Request duration in microseconds
-     *   %T          Request duration in seconds
-     *   %{NAME}i    Value of request header NAME (e.g. %{Referer}i)
-     *   %{NAME}o    Value of response header NAME
-     *   %{NAME}e    Value of $g->server[NAME] (env)
-     *   %m          Request method
-     *   %U          URL path (no query string)
-     *   %q          Query string (prefixed with `?` if present)
-     *   %H          Request protocol ("HTTP/1.1")
-     *   %v          Server name (from Host header)
+     *   `%h`          Remote host/IP (uses `App::clientIp()` when `$trusted_proxies` set)
+     *   `%l`          Remote logname (always `-` — RFC 1413 ident is dead)
+     *   `%u`          Remote user (session username if set, else `-`)
+     *   `%t`          Time `[17/May/2026:07:30:00 +0000]`
+     *   `%r`          First line of request `"GET /foo HTTP/1.1"`
+     *   `%>s`         Final response status
+     *   `%b`          Response body bytes (`-` when zero, CLF convention)
+     *   `%B`          Response body bytes (`0` when zero)
+     *   `%D`          Request duration in microseconds
+     *   `%T`          Request duration in seconds
+     *   `%{NAME}i`    Value of request header NAME (e.g. `%{Referer}i`)
+     *   `%{NAME}o`    Value of response header NAME
+     *   `%{NAME}e`    Value of `$g->server[NAME]` (env)
+     *   `%m`          Request method
+     *   `%U`          URL path (no query string)
+     *   `%q`          Query string (prefixed with `?` if present)
+     *   `%H`          Request protocol (`"HTTP/1.1"`)
+     *   `%v`          Server name (from `Host` header)
      *
      * Default is Apache's NCSA combined format (the prior hardcoded ZealPHP
      * output — preserving behaviour for existing log parsers). Switch to the
      * shorter Common Log Format via:
-     *   App::accessLogFormat('%h %l %u %t "%r" %>s %b');
+     *   `App::accessLogFormat('%h %l %u %t "%r" %>s %b');`
      */
     public static string $access_log_format = '%h %l %u %t "%r" %>s %b "%{Referer}i" "%{User-Agent}i"';
     /**
-     * Parsed format spec cache (token list). Filled lazily by formatAccessLogLine()
-     * the first time it sees a given format string. Resets when accessLogFormat()
+     * Parsed format spec cache (token list). Filled lazily by `formatAccessLogLine()`
+     * the first time it sees a given format string. Resets when `accessLogFormat()`
      * is reassigned via the fluent setter.
      *
      * @var array<int, array{kind:string, arg?:string}>|null
@@ -324,8 +324,8 @@ class App
     /**
      * Apache `LimitRequestFields` — maximum number of request header fields a
      * single request may carry. Enforced at the PHP application layer: requests
-     * carrying more than this many headers are rejected with 400 before route
-     * dispatch. Set to 0 to disable the check (unlimited). Default 100 matches
+     * carrying more than this many headers are rejected with `400` before route
+     * dispatch. Set to `0` to disable the check (unlimited). Default `100` matches
      * Apache's compiled-in default.
      */
     public static int $limit_request_fields = 100;
@@ -335,7 +335,7 @@ class App
      * owns all wire-level framing; ZealPHP only sees the already-parsed
      * `$request->header` array. The `http_header_buffer_size` option was
      * explicitly NOT passed to OpenSwoole (its option validator rejects it at
-     * boot — see App::run() ~line 3748). Changing this value has no effect on
+     * boot — see `App::run()` ~line 3748). Changing this value has no effect on
      * the actual per-header byte limit, which is governed by OpenSwoole's global
      * header-buffer size (~8 KiB default). This property is retained for
      * documentation and future compatibility only.
@@ -352,7 +352,7 @@ class App
     public static int $limit_request_line = 8190;
     /** @var array<string, mixed>|null */
     private static ?array $fallback_handler = null;
-    /** Initial error_reporting level captured at boot — referenced by the per-coroutine override. */
+    /** Initial `error_reporting` level captured at boot — referenced by the per-coroutine override. */
     public static int $initial_error_reporting = E_ALL;
     /**
      * Status -> custom error handler registry (key 0 = catch-all).
@@ -363,16 +363,16 @@ class App
      * IANA-registered HTTP status reason phrases (RFC 9110 §15).
      * Source: https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml
      * (registry snapshot 2025-09-15). Phrases match the IANA "Description"
-     * column verbatim — pinned exhaustively by tests/Unit/IanaStatusConformanceTest.
+     * column verbatim — pinned exhaustively by `tests/Unit/IanaStatusConformanceTest`.
      *
      * Documented deviations:
-     *   - 418 'I'm a teapot' — IANA lists "(Unused)"; kept as the RFC 2324 /
+     *   - `418` 'I'm a teapot' — IANA lists "(Unused)"; kept as the RFC 2324 /
      *     widely-recognised extension phrase.
-     *   - 306 and 418 are the only reserved/"(Unused)" codes; all other entries
-     *     are IANA-assigned. 104 (temporary registration) is intentionally omitted.
+     *   - `306` and `418` are the only reserved/"(Unused)" codes; all other entries
+     *     are IANA-assigned. `104` (temporary registration) is intentionally omitted.
      *
      * Universal return contract: handlers may return any 100-599 status — see
-     * template/pages/responses.php#status-range (canonical).
+     * `template/pages/responses.php#status-range` (canonical).
      */
     private const REASON_PHRASES = [
         // 1xx Informational
@@ -446,10 +446,10 @@ class App
 
     /**
      * Methods ZealPHP recognises. A request whose method is outside this set
-     * gets 501 Not Implemented (Apache: M_INVALID → HTTP_NOT_IMPLEMENTED,
-     * server/protocol.c:1253). Standard RFC 9110 methods plus the common
-     * WebDAV verbs Apache registers in ap_method_registry_init(). A recognised
-     * method that has no matching route still flows through to 404/405/fallback.
+     * gets `501 Not Implemented` (Apache: `M_INVALID` → `HTTP_NOT_IMPLEMENTED`,
+     * `server/protocol.c:1253`). Standard RFC 9110 methods plus the common
+     * WebDAV verbs Apache registers in `ap_method_registry_init()`. A recognised
+     * method that has no matching route still flows through to `404`/`405`/fallback.
      *
      * @var array<int, string>
      */
@@ -466,9 +466,9 @@ class App
     /**
      * Coerce a handler's int return value to a valid HTTP status code.
      * Per the universal return contract, ints must be in 100-599 (RFC 7230).
-     * Out-of-range values are coerced to 500 with a warning logged via elog()
+     * Out-of-range values are coerced to `500` with a warning logged via `elog()`
      * so the bug surfaces in the debug log instead of silently downgrading.
-     * Matches Apache HTTP server's behavior (out-of-range → 500).
+     * Matches Apache HTTP server's behavior (out-of-range → `500`).
      */
     public static function coerceStatusCode(int $status): int
     {
@@ -485,11 +485,11 @@ class App
 
     /**
      * Look up an IANA reason phrase for the given status code. Used by
-     * emitStatus() to pass an explicit reason to OpenSwoole's two-arg
+     * `emitStatus()` to pass an explicit reason to OpenSwoole's two-arg
      * `$response->status($code, $reason)` — required because the native
      * one-arg form silently rejects codes missing from its internal C
-     * list (notably 451, even on ext 26.x), and the request emits HTTP
-     * 200 instead.
+     * list (notably `451`, even on ext 26.x), and the request emits
+     * `HTTP 200` instead.
      */
     public static function reasonPhrase(int $status): string
     {
@@ -649,8 +649,8 @@ class App
     /**
      * Initializes the application.
      *
-     * @param string $host The host address to bind to. Defaults to '0.0.0.0'.
-     * @param int    $port The port number to bind to. Defaults to 8080.
+     * @param string $host The host address to bind to. Defaults to `'0.0.0.0'`.
+     * @param int    $port The port number to bind to. Defaults to `8080`.
      * @param string $cwd  The current working directory. Defaults to the directory of the script.
      *
      * @return App
@@ -741,8 +741,8 @@ class App
     }
 
     /**
-     * Apache DocumentRoot equivalent. Relative path → resolved against cwd;
-     * absolute path → used as-is. Drives App::include() resolution and the
+     * Apache `DocumentRoot` equivalent. Relative path → resolved against `cwd`;
+     * absolute path → used as-is. Drives `App::include()` resolution and the
      * implicit-route file lookups.
      */
     public static function documentRoot(?string $path = null): string
@@ -751,14 +751,14 @@ class App
         return self::$document_root;
     }
 
-    /** Apache TraceEnable. Default OFF for security (XST attack vector). */
+    /** Apache `TraceEnable`. Default OFF for security (XST attack vector). */
     public static function traceEnabled(?bool $on = null): bool
     {
         if ($on !== null) self::$trace_enabled = $on;
         return self::$trace_enabled;
     }
 
-    /** Apache AddDefaultCharset. Server-wide default. */
+    /** Apache `AddDefaultCharset`. Server-wide default. */
     public static function defaultCharset(?string $charset = null): string
     {
         if ($charset !== null) self::$default_charset = $charset;
@@ -766,8 +766,8 @@ class App
     }
 
     /**
-     * Apache `DefaultType` / PHP `default_mimetype`. The Content-Type
-     * CharsetMiddleware applies to responses that don't set one. Pass '' to
+     * Apache `DefaultType` / PHP `default_mimetype`. The `Content-Type`
+     * `CharsetMiddleware` applies to responses that don't set one. Pass `''` to
      * disable. No-arg call returns the current value.
      */
     public static function defaultMimeType(?string $type = null): string
@@ -787,7 +787,7 @@ class App
     }
 
     /**
-     * Apache `FileETag`. false ⇒ `ETagMiddleware` emits no ETag and never 304s
+     * Apache `FileETag`. false ⇒ `ETagMiddleware` emits no `ETag` and never `304`s
      * (`FileETag None`). No-arg call returns the current value.
      */
     public static function fileETag(?bool $enabled = null): bool
@@ -811,8 +811,8 @@ class App
     }
 
     /**
-     * mod_php-parity SAPI name reported by the php_sapi_name() override.
-     * No-arg call returns the current setting (null = report real PHP_SAPI);
+     * mod_php-parity SAPI name reported by the `php_sapi_name()` override.
+     * No-arg call returns the current setting (`null` = report real `PHP_SAPI`);
      * one-arg call opts in to a web SAPI string for legacy-app compatibility.
      */
     public static function sapiName(?string $name = null): ?string
@@ -822,10 +822,10 @@ class App
     }
 
     /**
-     * Detect whether the request arrived over TLS, for deriving REQUEST_SCHEME /
-     * HTTPS in the $_SERVER builder. Mirrors the session-cookie secure detection
-     * (src/Session/utils.php): a direct HTTPS=on, an X-Forwarded-Proto: https from
-     * a proxy, or SERVER_PORT 443.
+     * Detect whether the request arrived over TLS, for deriving `REQUEST_SCHEME` /
+     * `HTTPS` in the `$_SERVER` builder. Mirrors the session-cookie secure detection
+     * (`src/Session/utils.php`): a direct `HTTPS=on`, an `X-Forwarded-Proto: https` from
+     * a proxy, or `SERVER_PORT 443`.
      *
      * @param array<string, mixed> $srv
      */
@@ -845,13 +845,13 @@ class App
 
     /**
      * Toggle ZealPHP's per-request session lifecycle. When disabled, the
-     * SessionManager / CoSessionManager OnRequest wrapper skips
-     * session_start / cookie emission / session write-close — request-context
-     * init (openswoole_request, zealphp_response, error-stack reset) still
+     * `SessionManager` / `CoSessionManager` OnRequest wrapper skips
+     * `session_start` / cookie emission / session write-close — request-context
+     * init (`openswoole_request`, `zealphp_response`, error-stack reset) still
      * runs unconditionally. Use this when another framework (e.g. Symfony's
-     * NativeSessionStorage via the zealphp-symfony bridge) owns sessions and
-     * you don't want ZealPHP racing it for the PHPSESSID cookie. The
-     * zeal_session_* uopz overrides remain installed and callable from user
+     * `NativeSessionStorage` via the zealphp-symfony bridge) owns sessions and
+     * you don't want ZealPHP racing it for the `PHPSESSID` cookie. The
+     * `zeal_session_*` uopz overrides remain installed and callable from user
      * code either way.
      */
     public static function sessionLifecycle(?bool $enabled = null): bool
@@ -875,8 +875,8 @@ class App
      * to read the current checker. Pass a callable to install one.
      *
      * Example:
-     *   App::authChecker(fn() => !empty($_SESSION['user_id']));
-     *   App::authChecker(fn() => MyAuth::status() === MyAuth::LOGGED_IN);
+     *   `App::authChecker(fn() => !empty($_SESSION['user_id']));`
+     *   `App::authChecker(fn() => MyAuth::status() === MyAuth::LOGGED_IN);`
      *
      * @param callable|null $fn
      */
@@ -914,22 +914,22 @@ class App
     /**
      * Per-include CGI process isolation (Apache mod_php-style fresh process
      * per file). When true (the default in superglobals mode),
-     * App::include() dispatches each .php file through cgi_worker.php via
-     * proc_open() — global state (defined classes, constants, ini_set,
+     * `App::include()` dispatches each `.php` file through `cgi_worker.php` via
+     * `proc_open()` — global state (defined classes, constants, `ini_set`,
      * output handlers) is contained inside the subprocess. When false,
-     * runs in-process via executeFile() — saves the ~30-50ms proc_open +
+     * runs in-process via `executeFile()` — saves the ~30-50ms `proc_open` +
      * PHP startup + autoloader cost per call, but every include shares the
      * worker's PHP arena.
      *
      * Set to false when the legacy code is well-behaved enough to coexist
      * in a shared worker (Symfony, Laravel, modern PHP apps). Keep true
-     * for unmodified WordPress / Drupal where define()-heavy plugins assume
+     * for unmodified WordPress / Drupal where `define()`-heavy plugins assume
      * a fresh process per request.
      *
-     * `null` (default) means "follow App::$superglobals" — preserves the
+     * `null` (default) means "follow `App::$superglobals`" — preserves the
      * historical pairing so callers that don't touch this knob see no
-     * behaviour change. App::run() resolves null into the backing
-     * $coproc_implicit_request_handler bool right before the server starts.
+     * behaviour change. `App::run()` resolves `null` into the backing
+     * `$coproc_implicit_request_handler` bool right before the server starts.
      */
     public static function processIsolation(?bool $on = null): bool
     {
@@ -939,11 +939,11 @@ class App
 
     /**
      * Select how a process-isolated legacy include is dispatched:
-     *   'proc' (default) — fresh PHP per request via proc_open (full WordPress/Drupal compat).
-     *   'fork'           — warm OpenSwoole\Process fork (~5× faster; function-scope only).
-     *   'fcgi'           — forward to a FastCGI backend via App::$fcgi_address (no child process).
-     * See App::$cgi_mode for the full trade-off. No-arg call returns the current mode.
-     * Only takes effect when processIsolation() is on.
+     *   `'proc'` (default) — fresh PHP per request via `proc_open` (full WordPress/Drupal compat).
+     *   `'fork'`           — warm `OpenSwoole\Process` fork (~5× faster; function-scope only).
+     *   `'fcgi'`           — forward to a FastCGI backend via `App::$fcgi_address` (no child process).
+     * See `App::$cgi_mode` for the full trade-off. No-arg call returns the current mode.
+     * Only takes effect when `processIsolation()` is on.
      */
     public static function cgiMode(?string $mode = null): string
     {
@@ -957,10 +957,10 @@ class App
     }
 
     /**
-     * FastCGI backend address for App::cgiMode('fcgi') dispatch.
-     * Accepts "host:port" (TCP) or "unix:/path/to/fpm.sock" (Unix socket).
+     * FastCGI backend address for `App::cgiMode('fcgi')` dispatch.
+     * Accepts `"host:port"` (TCP) or `"unix:/path/to/fpm.sock"` (Unix socket).
      * No-arg call returns the current address; with-arg sets and returns it.
-     * Must be configured before App::run() — changing it mid-request has no effect.
+     * Must be configured before `App::run()` — changing it mid-request has no effect.
      */
     public static function fcgiAddress(?string $address = null): string
     {
@@ -974,12 +974,12 @@ class App
      * Register a per-extension CGI backend. Apache `AddHandler`/`ProxyPassMatch`
      * + nginx `fastcgi_pass`-per-location parity.
      *
-     * @param string $extension  File extension including the dot, e.g. '.py', '.pl'.
+     * @param string $extension  File extension including the dot, e.g. `'.py'`, `'.pl'`.
      * @param array<string, mixed> $config
-     *   'mode'        — 'proc' | 'fork' | 'fcgi' (required)
-     *   'interpreter' — full path to interpreter binary (proc mode only; null = direct exec via shebang)
-     *   'address'     — FastCGI backend address, "host:port" or "unix:/path" (fcgi mode only)
-     *   'fcgi_params' — extra FCGI params merged into the CGI env after buildCgiEnv() (fcgi mode only)
+     *   `'mode'`        — `'proc'` | `'fork'` | `'fcgi'` (required)
+     *   `'interpreter'` — full path to interpreter binary (`proc` mode only; `null` = direct exec via shebang)
+     *   `'address'`     — FastCGI backend address, `"host:port"` or `"unix:/path"` (`fcgi` mode only)
+     *   `'fcgi_params'` — extra FCGI params merged into the CGI env after `buildCgiEnv()` (`fcgi` mode only)
      *
      * @throws \InvalidArgumentException on invalid mode, fork-on-non-PHP, or missing fcgi address.
      */
@@ -1021,8 +1021,8 @@ class App
     /**
      * Resolve the CGI backend config for a given file path.
      *
-     * Looks up the extension in the per-extension registry ($cgi_backends).
-     * Falls back to ['mode' => App::$cgi_mode] for unregistered extensions.
+     * Looks up the extension in the per-extension registry (`$cgi_backends`).
+     * Falls back to `['mode' => App::$cgi_mode]` for unregistered extensions.
      *
      * @return array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>}
      */
@@ -1044,11 +1044,11 @@ class App
      * requests dispatched on the same worker make progress.
      *
      * Default coupling is `!App::$superglobals` — running coroutines in
-     * superglobals mode races the process-wide $_GET/$_POST/$_SESSION
+     * superglobals mode races the process-wide `$_GET`/`$_POST`/`$_SESSION`
      * arrays across concurrent requests, the original bug ZealPHP's
-     * per-coroutine $g context was designed to avoid. **Setting this to
-     * true while $superglobals=true is REFUSED — App::run() throws
-     * RuntimeException at boot (v0.2.27+).**
+     * per-coroutine `$g` context was designed to avoid. **Setting this to
+     * true while `$superglobals=true` is REFUSED — `App::run()` throws
+     * `RuntimeException` at boot (v0.2.27+).**
      *
      * `null` follows the default coupling.
      */
@@ -1060,22 +1060,22 @@ class App
 
     /**
      * `OpenSwoole\Runtime::enableCoroutine($flags)` — process-wide PHP
-     * I/O hooks that make blocking calls (fopen, fread, curl, mysqli,
+     * I/O hooks that make blocking calls (`fopen`, `fread`, `curl`, `mysqli`,
      * etc.) yield to the coroutine scheduler instead of blocking the
      * worker. PDO is intentionally NOT hooked in OpenSwoole 22.1 / 26.2
      * regardless of this flag — Doctrine queries always block.
      *
-     * Default coupling is `!App::$superglobals` (HOOK_ALL when coroutine
-     * mode, 0 when superglobals mode). Hooked I/O in superglobals mode is
+     * Default coupling is `!App::$superglobals` (`HOOK_ALL` when coroutine
+     * mode, `0` when superglobals mode). Hooked I/O in superglobals mode is
      * **unsafe** — yields can expose process-wide superglobal mutations
-     * to other concurrent coroutines. App::run() throws RuntimeException
+     * to other concurrent coroutines. `App::run()` throws `RuntimeException`
      * at boot for that combination (v0.2.27+).
      *
      * Accepts:
-     *  - null  → follow default coupling
-     *  - true  → HOOK_ALL
-     *  - false → 0 (no hooks)
-     *  - int   → explicit flag bitmask (HOOK_TCP | HOOK_FILE | ...)
+     *  - `null`  → follow default coupling
+     *  - `true`  → `HOOK_ALL`
+     *  - `false` → `0` (no hooks)
+     *  - `int`   → explicit flag bitmask (`HOOK_TCP | HOOK_FILE | ...`)
      *
      * Returns the resolved int flag bitmask currently in effect.
      *
@@ -1095,18 +1095,18 @@ class App
      * Refuse to start with lifecycle combinations that race process-wide
      * superglobals across concurrent coroutines.
      *
-     * History: pre-v0.2.27 these were elog()'d at warn level so they
-     * landed in /tmp/zealphp/debug.log but didn't refuse — the rationale
+     * History: pre-v0.2.27 these were `elog()`'d at warn level so they
+     * landed in `/tmp/zealphp/debug.log` but didn't refuse — the rationale
      * was "users may have niche reasons (security audits, debugging)". In
      * practice the warning was invisible to anyone not actively reading
      * the debug log, and the unsafe configuration is how cross-request
      * state-leak bugs ship to production. v0.2.27 changes this to a hard
-     * throw at App::run() boot — fail loud, fail fast, before any
+     * throw at `App::run()` boot — fail loud, fail fast, before any
      * request can be served against a broken contract.
      *
-     * @throws \RuntimeException When superglobals(true) is combined with
-     *   enableCoroutine(true) or hookAll(non-zero) — both expose
-     *   $_GET/$_POST/$_SESSION (process-wide PHP arrays) to concurrent
+     * @throws \RuntimeException When `superglobals(true)` is combined with
+     *   `enableCoroutine(true)` or `hookAll(non-zero)` — both expose
+     *   `$_GET`/`$_POST`/`$_SESSION` (process-wide PHP arrays) to concurrent
      *   coroutine writes, which races across requests.
      */
     private static function validateLifecycleCombination(bool $sg, int $hookFlags, bool $enableCo): void
@@ -1134,8 +1134,8 @@ class App
 
     /**
      * Apache `RewriteCond %{REQUEST_FILENAME} !-d; RewriteRule ^(.+)/$ /$1 [R=301,L]`.
-     * Inverse of directorySlash(). When true, non-directory URIs ending in `/`
-     * 301-redirect to the no-slash form. Default off.
+     * Inverse of `directorySlash()`. When true, non-directory URIs ending in `/`
+     * `301`-redirect to the no-slash form. Default off.
      */
     public static function stripTrailingSlash(?bool $on = null): bool
     {
@@ -1145,7 +1145,7 @@ class App
 
     /**
      * Apache `ServerAdmin`. Contact email/identifier embedded in the framework's
-     * default error pages. Pass null (or '') to clear.
+     * default error pages. Pass `null` (or `''`) to clear.
      */
     public static function serverAdmin(?string $admin = null): ?string
     {
@@ -1157,7 +1157,7 @@ class App
 
     /**
      * Apache `ServerName`. Canonical host advertised in absolute redirects
-     * when useCanonicalName() is on. Pass null/'' to clear.
+     * when `useCanonicalName()` is on. Pass `null`/`''` to clear.
      */
     public static function canonicalName(?string $name = null): ?string
     {
@@ -1167,14 +1167,14 @@ class App
         return self::$canonical_name;
     }
 
-    /** Apache `UseCanonicalName`. See $use_canonical_name docblock. */
+    /** Apache `UseCanonicalName`. See `$use_canonical_name` docblock. */
     public static function useCanonicalName(?bool $on = null): bool
     {
         if ($on !== null) self::$use_canonical_name = $on;
         return self::$use_canonical_name;
     }
 
-    /** Apache `HostnameLookups`. Default false — blocking DNS is a perf cost. */
+    /** Apache `HostnameLookups`. Default `false` — blocking DNS is a perf cost. */
     public static function hostnameLookups(?bool $on = null): bool
     {
         if ($on !== null) self::$hostname_lookups = $on;
@@ -1182,7 +1182,7 @@ class App
     }
 
     /**
-     * Trusted proxy CIDRs consulted by App::clientIp().
+     * Trusted proxy CIDRs consulted by `App::clientIp()`.
      *
      * @param  array<int, string>|null $cidrs
      * @return array<int, string>
@@ -1210,7 +1210,7 @@ class App
         return self::$limit_request_fields;
     }
 
-    /** Apache `LimitRequestFieldSize`. Maps to OpenSwoole http_header_buffer_size. */
+    /** Apache `LimitRequestFieldSize`. Maps to OpenSwoole `http_header_buffer_size`. */
     public static function limitRequestFieldSize(?int $n = null): int
     {
         if ($n !== null) self::$limit_request_field_size = max(0, $n);
@@ -1228,17 +1228,17 @@ class App
      * Resolve the real client IP for the current request, honouring the
      * `$trusted_proxies` allow-list. Behaviour:
      *
-     *   1. Read REMOTE_ADDR from $g->server (the direct peer).
-     *   2. If REMOTE_ADDR is NOT in any trusted_proxies CIDR, return it as-is.
-     *      The peer is untrusted, so any X-Forwarded-* header it sent is a lie.
-     *   3. If REMOTE_ADDR IS in a trusted CIDR, walk X-Forwarded-For right-to-left
-     *      (Apache mod_remoteip semantics) and return the rightmost IP that is
-     *      NOT in trusted_proxies — that's the real client. If every entry is
+     *   1. Read `REMOTE_ADDR` from `$g->server` (the direct peer).
+     *   2. If `REMOTE_ADDR` is NOT in any `trusted_proxies` CIDR, return it as-is.
+     *      The peer is untrusted, so any `X-Forwarded-*` header it sent is a lie.
+     *   3. If `REMOTE_ADDR` IS in a trusted CIDR, walk `X-Forwarded-For` right-to-left
+     *      (Apache `mod_remoteip` semantics) and return the rightmost IP that is
+     *      NOT in `trusted_proxies` — that's the real client. If every entry is
      *      trusted, fall back to the leftmost address.
-     *   4. If X-Forwarded-For is absent but X-Real-IP is present (and the peer
-     *      is trusted), return X-Real-IP.
+     *   4. If `X-Forwarded-For` is absent but `X-Real-IP` is present (and the peer
+     *      is trusted), return `X-Real-IP`.
      *
-     * Returns the empty string when no IP can be determined (REMOTE_ADDR missing
+     * Returns the empty string when no IP can be determined (`REMOTE_ADDR` missing
      * entirely — only happens for non-request contexts like CLI invocation).
      */
     public static function clientIp(): string
@@ -1277,9 +1277,9 @@ class App
     }
 
     /**
-     * Match $ip against every entry in App::$trusted_proxies. Wrapper so the
+     * Match `$ip` against every entry in `App::$trusted_proxies`. Wrapper so the
      * CIDR walk lives in one place; callers pass user-controlled input here so
-     * the per-entry guard inside cidrContains() is the only validation needed.
+     * the per-entry guard inside `cidrContains()` is the only validation needed.
      */
     private static function peerInTrustedProxies(string $ip): bool
     {
@@ -1292,9 +1292,9 @@ class App
     }
 
     /**
-     * Does $ip fall within $cidr? Supports IPv4 and IPv6. A bare IP without
-     * `/prefix` is treated as a single-host range (/32 v4, /128 v6). Returns
-     * false on any parse failure rather than throwing — defensive for header-
+     * Does `$ip` fall within `$cidr`? Supports IPv4 and IPv6. A bare IP without
+     * `/prefix` is treated as a single-host range (`/32` v4, `/128` v6). Returns
+     * `false` on any parse failure rather than throwing — defensive for header-
      * sourced input.
      */
     private static function cidrContains(string $cidr, string $ip): bool
@@ -1328,11 +1328,11 @@ class App
     }
 
     /**
-     * Canonical host for absolute URL building. Returns $canonical_name when
-     * useCanonicalName() is on AND $canonical_name is set; otherwise returns
-     * the request `Host` header (falling back to `SERVER_NAME`, then ''). Used
+     * Canonical host for absolute URL building. Returns `$canonical_name` when
+     * `useCanonicalName()` is on AND `$canonical_name` is set; otherwise returns
+     * the request `Host` header (falling back to `SERVER_NAME`, then `''`). Used
      * by absolute-redirect builders that need to decide between the configured
-     * server name and the client-provided Host.
+     * server name and the client-provided `Host`.
      */
     public static function canonicalHost(): string
     {
@@ -1345,17 +1345,17 @@ class App
     }
 
     /**
-     * Render one access-log line for the current request using App::$access_log_format.
-     * Called by ZealPHP\access_log() — direct callers are rare but the helper is
+     * Render one access-log line for the current request using `App::$access_log_format`.
+     * Called by `ZealPHP\access_log()` — direct callers are rare but the helper is
      * public so user code (e.g. a custom logger middleware) can reuse it.
      *
      * The format spec is compiled to a token list on first use and cached on
-     * App::$access_log_format_compiled; accessLogFormat() clears the cache when
+     * `App::$access_log_format_compiled`; `accessLogFormat()` clears the cache when
      * the format string is changed.
      *
      * @param int        $status   Final HTTP status code (after handler + middleware)
-     * @param int        $length   Response body byte count (0 OK; %b emits '-' per CLF)
-     * @param float|null $durationSec Request duration in seconds; pass null when unknown
+     * @param int        $length   Response body byte count (`0` OK; `%b` emits `'-'` per CLF)
+     * @param float|null $durationSec Request duration in seconds; pass `null` when unknown
      */
     public static function formatAccessLogLine(int $status, int $length, ?float $durationSec = null): string
     {
@@ -1374,12 +1374,12 @@ class App
     }
 
     /**
-     * Compile an Apache LogFormat string into a flat token list. Supported
-     * directive families (Apache mod_log_config subset):
-     *   %h %l %u %t %r %s %>s %b %B %D %T %m %U %q %H %v
-     *   %{NAME}i  %{NAME}o  %{NAME}e
+     * Compile an Apache `LogFormat` string into a flat token list. Supported
+     * directive families (Apache `mod_log_config` subset):
+     *   `%h %l %u %t %r %s %>s %b %B %D %T %m %U %q %H %v`
+     *   `%{NAME}i  %{NAME}o  %{NAME}e`
      * Unknown directives are passed through verbatim (Apache compatibility:
-     * mod_log_config logs '-' for unknown but compatibility matters less than
+     * `mod_log_config` logs `'-'` for unknown but compatibility matters less than
      * surfacing typos to the operator).
      *
      * @return array<int, array{kind:string, arg?:string}>
@@ -1538,19 +1538,19 @@ class App
     }
 
     /**
-     * Like App::include() but returns null instead of 403 when the requested
+     * Like `App::include()` but returns `null` instead of `403` when the requested
      * file does not exist under the document root. Use for "try this file,
      * fall through to something else if missing" patterns:
      *
-     *   $app->route('/{slug}', function($slug) use ($app) {
-     *       $result = App::tryInclude("/articles/{$slug}.php");
-     *       if ($result === null) return App::tryInclude("/legacy/{$slug}.php") ?? 404;
-     *       return $result;
-     *   });
+     *   `$app->route('/{slug}', function($slug) use ($app) {`
+     *       `$result = App::tryInclude("/articles/{$slug}.php");`
+     *       `if ($result === null) return App::tryInclude("/legacy/{$slug}.php") ?? 404;`
+     *       `return $result;`
+     *   `});`
      *
      * Security gating (dotfile/document-root checks) still applies — paths
-     * that exist but fail the security check return 403 just like include().
-     * Only the "file missing" branch is rewritten to null.
+     * that exist but fail the security check return `403` just like `include()`.
+     * Only the "file missing" branch is rewritten to `null`.
      *
      * @param array<string, mixed> $args
      */
@@ -1603,10 +1603,10 @@ class App
     /**
      * Register a WebSocket endpoint.
      *
-     * @param string        $path      URI path, e.g. '/ws/chat'
-     * @param callable      $onMessage function($server, $frame, $g) — called for each message
-     * @param callable|null $onOpen    function($server, $request, $g) — called on connect
-     * @param callable|null $onClose   function($server, $fd, $g)     — called on disconnect
+     * @param string        $path      URI path, e.g. `'/ws/chat'`
+     * @param callable      $onMessage `function($server, $frame, $g)` — called for each message
+     * @param callable|null $onOpen    `function($server, $request, $g)` — called on connect
+     * @param callable|null $onClose   `function($server, $fd, $g)`     — called on disconnect
      */
     public function ws(string $path, callable $onMessage, ?callable $onOpen = null, ?callable $onClose = null): void
     {
@@ -1630,28 +1630,28 @@ class App
     // request handler, or onWorkerStart callback)
     // -----------------------------------------------------------------------
 
-    /** Recurring timer: calls $fn every $ms milliseconds in this worker. */
+    /** Recurring timer: calls `$fn` every `$ms` milliseconds in this worker. */
     public static function tick(int $ms, callable $fn): int
     {
         return \OpenSwoole\Timer::tick($ms, $fn);
     }
 
-    /** One-shot timer: calls $fn once after $ms milliseconds. */
+    /** One-shot timer: calls `$fn` once after `$ms` milliseconds. */
     public static function after(int $ms, callable $fn): int
     {
         return \OpenSwoole\Timer::after($ms, $fn);
     }
 
-    /** Cancel a timer returned by tick() or after(). */
+    /** Cancel a timer returned by `tick()` or `after()`. */
     public static function clearTimer(int $id): void
     {
         \OpenSwoole\Timer::clear($id);
     }
 
     /**
-     * Register a callback to run inside every worker's workerStart event.
+     * Register a callback to run inside every worker's `workerStart` event.
      * Use this to start per-worker timers, warm caches, open connections, etc.
-     * Called as: $fn($server, $workerId)
+     * Called as: `$fn($server, $workerId)`
      */
     public static function onWorkerStart(callable $fn): void
     {
@@ -1660,11 +1660,11 @@ class App
 
     /**
      * Register a per-worker shutdown hook. Runs inside the worker process when
-     * it exits (max_request recycle, graceful shutdown, or reload), BEFORE the
+     * it exits (`max_request` recycle, graceful shutdown, or reload), BEFORE the
      * process terminates — the reliable place to flush per-worker state
-     * (counters, buffered I/O, coverage dumps). Unlike register_shutdown_function,
+     * (counters, buffered I/O, coverage dumps). Unlike `register_shutdown_function`,
      * this fires on OpenSwoole's signal-driven worker stop.
-     * Called as: $fn($server, $workerId)
+     * Called as: `$fn($server, $workerId)`
      */
     public static function onWorkerStop(callable $fn): void
     {
@@ -1746,9 +1746,9 @@ class App
     /**
      * Registers a route with the application.
      *
-     * @param string $path The URL path pattern for the route. Flask-like {param} syntax can be used for named parameters.
+     * @param string $path The URL path pattern for the route. Flask-like `{param}` syntax can be used for named parameters.
      * @param array $options Optional settings for the route, such as HTTP methods.
-     *                       - 'methods' (array): HTTP methods allowed for this route. Defaults to ['GET'].
+     *                       - `'methods'` (array): HTTP methods allowed for this route. Defaults to `['GET']`.
      * @param callable|null $handler The callback function to handle the route.
      *
      * If only two arguments are provided, the second argument is assumed to be the handler, and no options are set.
@@ -1756,9 +1756,9 @@ class App
      * The route pattern is converted to a named regex group for parameter matching.
      *
      * Example usage:
-     * $app->route('/user/{id}', ['methods' => ['GET', 'POST']], function($id) {
-     *     // Handler code here
-     * });
+     * `$app->route('/user/{id}', ['methods' => ['GET', 'POST']], function($id) {`
+     *     `// Handler code here`
+     * `});`
      *
      * @param array<string, mixed>|callable $options
      * @param callable|null $handler

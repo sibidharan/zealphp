@@ -39,9 +39,9 @@ $groups = [
 
 $apiChip = 'phpdoc';
 ?>
-<input type="checkbox" id="learn-sidebar-toggle" class="learn-sidebar-toggle-input">
-<label for="learn-sidebar-toggle" class="learn-sidebar-toggle-btn" aria-label="Toggle docs">&#9776; Docs</label>
-<aside id="learn-sidebar" class="learn-sidebar" aria-label="Documentation navigation" hx-preserve="true">
+<input type="checkbox" id="docs-sidebar-toggle" class="learn-sidebar-toggle-input">
+<label for="docs-sidebar-toggle" class="learn-sidebar-toggle-btn" aria-label="Toggle docs">&#9776; Docs</label>
+<aside id="docs-sidebar" class="learn-sidebar" aria-label="Documentation navigation" hx-preserve="true">
   <div class="learn-sidebar-inner">
     <div class="learn-sidebar-group">
       <h4 class="learn-sidebar-group-title">Overview</h4>

@@ -65,7 +65,7 @@ function initPageScripts(root) {
   // Learn sidebar is hx-preserved across swaps so scroll position stays put.
   // Re-sync its active-state + page <title> with the current URL after each
   // navigation (htmx swaps .learn-layout, which doesn't touch <head>).
-  const sb = document.getElementById('learn-sidebar');
+  const sb = document.getElementById('learn-sidebar') || document.getElementById('docs-sidebar');
   if (sb) {
     sb.querySelectorAll('li.active').forEach(li => li.classList.remove('active'));
     sb.querySelectorAll('.learn-substeps').forEach(el => el.remove());
@@ -267,12 +267,12 @@ function ensureActiveSidebarVisible(sb) {
   let savedScrollTop = 0;
   document.addEventListener('htmx:beforeSwap', (e) => {
     if (!isNav(e)) return;
-    const sb = document.getElementById('learn-sidebar');
+    const sb = document.getElementById('learn-sidebar') || document.getElementById('docs-sidebar');
     if (sb) savedScrollTop = sb.scrollTop;
   });
   document.addEventListener('htmx:afterSettle', (e) => {
     if (!isNav(e)) return;
-    const sb = document.getElementById('learn-sidebar');
+    const sb = document.getElementById('learn-sidebar') || document.getElementById('docs-sidebar');
     if (!sb) return;
     if (savedScrollTop > 0) sb.scrollTop = savedScrollTop;
     ensureActiveSidebarVisible(sb);

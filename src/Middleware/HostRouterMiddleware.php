@@ -15,25 +15,25 @@ use ZealPHP\RequestContext;
  *
  * Dispatches the request to a per-host handler based on the `Host:` request
  * header. The handler is a normal callable returning any of ZealPHP's
- * supported return shapes (string body, PSR-7 Response, Generator,
+ * supported return shapes (string body, PSR-7 `Response`, `Generator`,
  * array → JSON, int → status code).
  *
  * nginx equivalent:
- *   server { server_name a.com; location / { ... } }
- *   server { server_name b.com; location / { ... } }
+ *   `server { server_name a.com; location / { ... } }`
+ *   `server { server_name b.com; location / { ... } }`
  *
  * If no host matches and no `'*'` (catch-all) handler is registered, the
  * middleware **passes through** to the next handler. This lets you mix
  * host-routed and host-agnostic apps inside one ZealPHP instance:
  *
- *   $app->addMiddleware(new \ZealPHP\Middleware\HostRouterMiddleware([
- *       'docs.example.com'  => fn() => 'docs landing page',
- *       'api.example.com'   => fn() => ['status' => 'ok'],
- *       '*.example.com'     => fn() => 'subdomain fallback',
- *       'www.*'             => fn() => 'trailing-wildcard catch',
- *       '~^admin\..+'       => fn() => 'regex match',
- *       '*'                 => fn() => 'default site',
- *   ]));
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\HostRouterMiddleware([`
+ *       `'docs.example.com'  => fn() => 'docs landing page',`
+ *       `'api.example.com'   => fn() => ['status' => 'ok'],`
+ *       `'*.example.com'     => fn() => 'subdomain fallback',`
+ *       `'www.*'             => fn() => 'trailing-wildcard catch',`
+ *       `'~^admin\..+'       => fn() => 'regex match',`
+ *       `'*'                 => fn() => 'default site',`
+ *   `]));`
  *
  * Host matching is case-insensitive and ignores port (`example.com:8080`
  * matches the rule `example.com`). IPv6 literals (`[::1]:80`) are parsed
@@ -46,10 +46,10 @@ use ZealPHP\RequestContext;
  *   4. Regex             `~^pattern` (in registration order)
  *   5. Catch-all         `*`
  *
- * Host validation (nginx parity, only when HostRouterMiddleware is active):
- *   - HTTP/1.1 with missing Host → 400
- *   - Duplicate Host headers → 400
- *   - Invalid Host characters (outside [a-zA-Z0-9:.\-_~!$&'()*+,;=%@[\]]) → 400
+ * Host validation (nginx parity, only when `HostRouterMiddleware` is active):
+ *   - HTTP/1.1 with missing `Host` → `400`
+ *   - Duplicate `Host` headers → `400`
+ *   - Invalid `Host` characters (outside `[a-zA-Z0-9:.\-_~!$&'()*+,;=%@[\]]`) → `400`
  *   - Trailing dot normalised: `example.com.` → `example.com`
  */
 class HostRouterMiddleware implements MiddlewareInterface
@@ -58,17 +58,17 @@ class HostRouterMiddleware implements MiddlewareInterface
     private array $handlers;
     /** @var callable|null */
     private $catchAll;
-    /** @var array<int, array{host: string, handler: callable}> leading-wildcard rules (*.x) in declaration order */
+    /** @var array<int, array{host: string, handler: callable}> leading-wildcard rules (`*.x`) in declaration order */
     private array $wildcards;
-    /** @var array<int, array{host: string, handler: callable}> trailing-wildcard rules (www.*) in declaration order */
+    /** @var array<int, array{host: string, handler: callable}> trailing-wildcard rules (`www.*`) in declaration order */
     private array $trailingWildcards;
     /** @var array<int, array{pattern: string, handler: callable}> regex rules in declaration order */
     private array $regexRules;
 
     /**
-     * @param array<string, mixed> $hosts host => callable, plus optional '*' catch-all.
-     *                                    Marked mixed at the type-level because PHP
-     *                                    can't enforce callable inside an array;
+     * @param array<string, mixed> $hosts host => callable, plus optional `'*'` catch-all.
+     *                                    Marked `mixed` at the type-level because PHP
+     *                                    can't enforce `callable` inside an array;
      *                                    each handler is validated at runtime.
      */
     public function __construct(array $hosts)
@@ -177,13 +177,13 @@ class HostRouterMiddleware implements MiddlewareInterface
     }
 
     /**
-     * Strip the port from a Host header value.
+     * Strip the port from a `Host` header value.
      *
      * Handles:
-     *   example.com:8080  → example.com
-     *   [::1]:8080        → [::1]
-     *   [::1]             → [::1]
-     *   ::1               → ::1  (no brackets, no port)
+     *   `example.com:8080`  → `example.com`
+     *   `[::1]:8080`        → `[::1]`
+     *   `[::1]`             → `[::1]`
+     *   `::1`               → `::1`  (no brackets, no port)
      */
     private function stripPort(string $host): string
     {
@@ -209,10 +209,10 @@ class HostRouterMiddleware implements MiddlewareInterface
     }
 
     /**
-     * Validate a raw Host header value (nginx ngx_http_validate_host parity).
+     * Validate a raw `Host` header value (nginx `ngx_http_validate_host` parity).
      *
-     * Allowed characters: a-zA-Z0-9 : . - _ ~ ! $ & ' ( ) * + , ; = % @ [ ]
-     * Rejects NUL bytes, control characters, <, >, {, }, |, \, ^, `, space, and
+     * Allowed characters: `a-zA-Z0-9 : . - _ ~ ! $ & ' ( ) * + , ; = % @ [ ]`
+     * Rejects NUL bytes, control characters, `<`, `>`, `{`, `}`, `|`, `\`, `^`, `` ` ``, space, and
      * consecutive dots (which nginx also rejects).
      */
     private function isValidHostHeader(string $host): bool
@@ -236,10 +236,10 @@ class HostRouterMiddleware implements MiddlewareInterface
      * Match the normalised (lowercased, port-stripped) host against registered
      * rules in nginx precedence order:
      *   1. Exact
-     *   2. Leading-wildcard  (*.example.com)
-     *   3. Trailing-wildcard (www.*)
-     *   4. Regex             (~^pattern, registration order)
-     *   5. Catch-all         (*)
+     *   2. Leading-wildcard  (`*.example.com`)
+     *   3. Trailing-wildcard (`www.*`)
+     *   4. Regex             (`~^pattern`, registration order)
+     *   5. Catch-all         (`*`)
      */
     private function matchHandler(string $host): ?callable
     {

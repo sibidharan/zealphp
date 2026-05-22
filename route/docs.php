@@ -143,6 +143,16 @@ $app->patternRoute('#^/docs/api(/.*)?$#', function ($response) {
         foreach ($xpath->query('.//label[@for="sidebar-button"]', $mainNode) as $node) {
             $node->parentNode->removeChild($node);
         }
+        // phpdoc's own search UI (we have our own at the top). Two elements
+        // to drop: the search input form AND the search-results modal that
+        // would otherwise render as an empty "Search results" header on
+        // every page (because phpdoc's own search.js isn't running).
+        foreach ($xpath->query('.//section[contains(@class, "phpdocumentor-search-results")]', $mainNode) as $node) {
+            $node->parentNode->removeChild($node);
+        }
+        foreach ($xpath->query('.//section[contains(@class, "phpdocumentor-search") and not(contains(@class, "phpdocumentor-search-results"))]', $mainNode) as $node) {
+            $node->parentNode->removeChild($node);
+        }
 
         // phpdoc uses <base href="../"> in <head> to make relative links
         // resolve to /docs/api/. We strip the <head>, so we must rewrite

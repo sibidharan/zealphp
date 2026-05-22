@@ -91,18 +91,18 @@ class Auth
     }
 
     /**
-     * Increment-and-check sliding window per IP. Returns false when the
-     * window is full (caller should respond with 429).
+     * Increment-and-check sliding window per IP. Returns `false` when the
+     * window is full (caller should respond with `429`).
      *
      * Bypasses:
      * - `$limit <= 0` — explicitly disabled (production knob).
-     * - Loopback clients (127.0.0.1 / ::1 / ::ffff:127.0.0.1) — unless
+     * - Loopback clients (`127.0.0.1` / `::1` / `::ffff:127.0.0.1`) — unless
      *   `ZEALPHP_LEARN_RATE_LIMIT_LOOPBACK=1` is set. Production never sees
      *   loopback traffic (proxied requests carry the real client IP via
-     *   X-Forwarded-For); the bypass exists so the integration test suite
+     *   `X-Forwarded-For`); the bypass exists so the integration test suite
      *   can run repeatedly without `php app.php restart` between runs.
      *   Opt back in via the env var if you're testing the rate limiter
-     *   itself or running phpunit against a non-loopback bind.
+     *   itself or running `phpunit` against a non-loopback bind.
      */
     public static function rateLimit(string $table, string $ip, int $limit, int $window): bool
     {

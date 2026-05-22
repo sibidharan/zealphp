@@ -7,18 +7,18 @@ use ZealPHP\RequestContext;
 use Throwable;
 
 /**
- * Renders phpinfo() as a self-contained HTML document, restoring Apache+mod_php
+ * Renders `phpinfo()` as a self-contained HTML document, restoring Apache+mod_php
  * parity for the CLI SAPI (which otherwise emits a plain-text key => value dump).
  *
  * Pure renderer: no echo, no global writes. The uopz override target
- * \ZealPHP\phpinfo() echoes render() and returns true.
+ * `\ZealPHP\phpinfo()` echoes `render()` and returns `true`.
  *
  * Robustness: a diagnostics page must never fatal. Request-variable collection
- * is guarded so render() works in any context (request handler, CLI, unit test).
+ * is guarded so `render()` works in any context (request handler, CLI, unit test).
  */
 final class PhpInfo
 {
-    /** Boot-captured native phpinfo(INFO_MODULES) text, primed once per worker. */
+    /** Boot-captured native `phpinfo(INFO_MODULES)` text, primed once per worker. */
     private static string $moduleText = '';
 
     /** Store the native module-section text captured before the uopz override. */
@@ -28,8 +28,8 @@ final class PhpInfo
     }
 
     /**
-     * @param int                                           $flags       INFO_* bitmask (matches native phpinfo()).
-     * @param array<string, array<int|string, mixed>>|null  $requestVars Test seam: ['_GET'=>..., '_POST'=>..., '_COOKIE'=>..., '_SERVER'=>...]. Null pulls from G.
+     * @param int                                           $flags       `INFO_*` bitmask (matches native `phpinfo()`).
+     * @param array<string, array<int|string, mixed>>|null  $requestVars Test seam: `['_GET'=>..., '_POST'=>..., '_COOKIE'=>..., '_SERVER'=>...]`. Null pulls from `G`.
      */
     public static function render(int $flags = INFO_ALL, ?array $requestVars = null): string
     {

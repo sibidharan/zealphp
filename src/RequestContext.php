@@ -11,7 +11,7 @@ use ZealPHP\App;
  * superglobals mode it's a process-wide singleton bridging declared
  * properties to PHP's `$_GET` / `$_POST` / `$_SESSION` etc.
  *
- * Previously named `G` — that name remains available via class_alias
+ * Previously named `G` — that name remains available via `class_alias`
  * at the bottom of this file for backward compatibility. New code
  * should reference `RequestContext`.
  */
@@ -37,10 +37,10 @@ class RequestContext
     /** @var array<string, mixed> */
     public array $session = [];
     /**
-     * Keys present in $g->session at session-load time. Lets
-     * zeal_session_write_close() distinguish an in-request unset() (key was
+     * Keys present in `$g->session` at session-load time. Lets
+     * `zeal_session_write_close()` distinguish an in-request `unset()` (key was
      * loaded then removed → must be deleted from the store) from a concurrent
-     * add (key never loaded here → must be preserved through the merge). #21.
+     * add (key never loaded here → must be preserved through the merge). `#21`.
      * @var list<string>
      */
     public array $session_loaded_keys = [];
@@ -49,16 +49,16 @@ class RequestContext
     public ?int $status = null;
     public ?bool $_streaming = null;
     public ?bool $_session_started = null;
-    /** @var \ZealPHP\HTTP\Request|null In tests, this slot may hold a mock — see tests/Unit/RestTest.php */
+    /** @var \ZealPHP\HTTP\Request|null In tests, this slot may hold a mock — see `tests/Unit/RestTest.php` */
     public mixed $zealphp_request = null;
-    /** @var \ZealPHP\HTTP\Response|null In tests, this slot may hold a mock — see tests/Unit/RestTest.php */
+    /** @var \ZealPHP\HTTP\Response|null In tests, this slot may hold a mock — see `tests/Unit/RestTest.php` */
     public mixed $zealphp_response = null;
-    /** @var \OpenSwoole\Http\Request|null In tests, this slot may hold a mock — see tests/Unit/RestTest.php */
+    /** @var \OpenSwoole\Http\Request|null In tests, this slot may hold a mock — see `tests/Unit/RestTest.php` */
     public mixed $openswoole_request = null;
-    /** @var \OpenSwoole\Http\Response|null In tests, this slot may hold a mock — see tests/Unit/RestTest.php */
+    /** @var \OpenSwoole\Http\Response|null In tests, this slot may hold a mock — see `tests/Unit/RestTest.php` */
     public mixed $openswoole_response = null;
-    // Legacy Apache mod_php shim state — only populated by the apache_*()
-    // functions in src/utils.php, used by CGI bridge legacy code. Lazy.
+    // Legacy Apache mod_php shim state — only populated by the `apache_*()`
+    // functions in `src/utils.php`, used by CGI bridge legacy code. Lazy.
     public ?\ZealPHP\Legacy\ApacheContext $apacheContext = null;
     public int $ignore_user_abort_state = 0;
     /** @var array<int, array{0: callable, 1: int}> stack of [callable, levels] */
@@ -151,9 +151,9 @@ class RequestContext
     }
 
     /**
-     * __set fires for undeclared properties AND for declared typed properties
-     * that have been unset() (the slot is "uninitialized" so direct access
-     * routes through __set on assignment). In superglobals mode we keep the
+     * `__set` fires for undeclared properties AND for declared typed properties
+     * that have been `unset()` (the slot is "uninitialized" so direct access
+     * routes through `__set` on assignment). In superglobals mode we keep the
      * legacy bridge to `$GLOBALS[$key]` so pre-coroutine code that stashed
      * values via `$g->custom = $val` keeps working. In coroutine mode the
      * typed properties are the contract; we re-initialize the declared slot
@@ -218,7 +218,7 @@ class RequestContext
      *
      * Safe alternative to `static $cache = []` inside a function. Computes
      * `$fn()` the first time it's called with `$key` in this request, caches
-     * the result on the per-coroutine RequestContext, returns the cached
+     * the result on the per-coroutine `RequestContext`, returns the cached
      * value on subsequent calls. The cache is freed automatically when the
      * coroutine ends — no state survives to the next request.
      *
@@ -240,7 +240,7 @@ class RequestContext
     }
 
     /**
-     * True if once($key, ...) has been computed in this request.
+     * True if `once($key, ...)` has been computed in this request.
      */
     public static function has(string $key): bool
     {
@@ -248,7 +248,7 @@ class RequestContext
     }
 
     /**
-     * Discard the memoized value for $key in this request. The next once()
+     * Discard the memoized value for `$key` in this request. The next `once()`
      * call with the same key will recompute.
      */
     public static function forget(string $key): void
@@ -259,5 +259,5 @@ class RequestContext
 
 // Backward-compatible alias: `\ZealPHP\G` was the original name. Existing
 // code that references `G::instance()` or types against `\ZealPHP\G`
-// continues to work without changes. New code should use RequestContext.
+// continues to work without changes. New code should use `RequestContext`.
 class_alias(RequestContext::class, 'ZealPHP\\G');

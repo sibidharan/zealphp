@@ -19,6 +19,7 @@ $siteUrl = site_url();
     <p style="font-size:.95rem;color:#94a3b8;margin-top:.25rem">Upgrade your existing PHP codebase to async — start without rewriting, migrate at your own pace.</p>
     <div class="cta">
       <a href="/getting-started" class="btn btn-primary">Get Started →</a>
+      <a href="/docs/" class="btn btn-outline">Browse Docs →</a>
       <a href="/why-zealphp" class="btn btn-outline">Why ZealPHP? →</a>
       <a href="https://deepwiki.com/sibidharan/zealphp" class="btn btn-outline" target="_blank" rel="noopener">Ask DeepWiki ↗</a>
     </div>

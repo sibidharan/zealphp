@@ -12,30 +12,30 @@ use OpenSwoole\Core\Psr\Stream;
 use ZealPHP\RequestContext;
 
 /**
- * Compression Middleware (gzip / deflate)
+ * Compression Middleware (`gzip` / `deflate`)
  *
  * Compresses response bodies when the client advertises support via
- * Accept-Encoding. Skips streaming responses (SSE, Generator, stream()),
+ * `Accept-Encoding`. Skips streaming responses (SSE, `Generator`, `stream()`),
  * responses smaller than the threshold, and optionally requests that already
  * came through a reverse proxy such as Traefik.
  *
  * RFC 7231 §5.3.4 compliance:
- *   - Accept-Encoding q=0 is treated as explicit refusal; compression is skipped.
+ *   - `Accept-Encoding` `q=0` is treated as explicit refusal; compression is skipped.
  *
  * RFC 7232 §2.1 compliance:
- *   - Strong ETags on responses that are then compressed are weakened (W/ prefix),
+ *   - Strong `ETag`s on responses that are then compressed are weakened (`W/` prefix),
  *     because the compressed body is not byte-identical to the original.
  *
- * nginx / mod_deflate parity:
- *   - Vary: Accept-Encoding is *merged* with any existing Vary values so that
- *     a prior Vary: Origin from CorsMiddleware is preserved (apr_table_mergen /
- *     ngx_http_header_filter parity).
- *   - Accept-Ranges is cleared on compressed responses because Range requests
- *     cannot be satisfied on a compressed body (ngx_http_clear_accept_ranges
+ * nginx / `mod_deflate` parity:
+ *   - `Vary: Accept-Encoding` is *merged* with any existing `Vary` values so that
+ *     a prior `Vary: Origin` from `CorsMiddleware` is preserved (`apr_table_mergen` /
+ *     `ngx_http_header_filter` parity).
+ *   - `Accept-Ranges` is cleared on compressed responses because `Range` requests
+ *     cannot be satisfied on a compressed body (`ngx_http_clear_accept_ranges`
  *     parity).
  *
- * Reference usage when OpenSwoole http_compression is disabled:
- *   $app->addMiddleware(new \ZealPHP\Middleware\CompressionMiddleware());
+ * Reference usage when OpenSwoole `http_compression` is disabled:
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\CompressionMiddleware());`
  */
 class CompressionMiddleware implements MiddlewareInterface
 {
@@ -113,25 +113,25 @@ class CompressionMiddleware implements MiddlewareInterface
 
     /**
      * Apply the standard post-compression response headers:
-     *   - Content-Encoding
-     *   - Content-Length (actual compressed byte count)
-     *   - Vary: merge Accept-Encoding into any existing values (dedup, case-insensitive)
-     *   - ETag: weaken any strong ETag (RFC 7232 §2.1)
-     *   - Accept-Ranges: clear (compressed body cannot serve byte-range requests)
+     *   - `Content-Encoding`
+     *   - `Content-Length` (actual compressed byte count)
+     *   - `Vary`: merge `Accept-Encoding` into any existing values (dedup, case-insensitive)
+     *   - `ETag`: weaken any strong `ETag` (RFC 7232 §2.1)
+     *   - `Accept-Ranges`: clear (compressed body cannot serve byte-range requests)
      */
     private function applyCompressionHeaders(
         ResponseInterface $response,
         string $encoding,
         string $compressed
     ): ResponseInterface {
-        // Merge Accept-Encoding into Vary, preserving existing directives.
+        // Merge `Accept-Encoding` into `Vary`, preserving existing directives.
         $response = $this->mergeVary($response, 'Accept-Encoding');
 
-        // Weaken any strong ETag (RFC 7232 §2.1: compressed body ≠ original body).
+        // Weaken any strong `ETag` (RFC 7232 §2.1: compressed body ≠ original body).
         $response = $this->weakenEtag($response);
 
-        // Clear Accept-Ranges — a client must not attempt byte-range requests on
-        // a compressed body (nginx ngx_http_clear_accept_ranges parity).
+        // Clear `Accept-Ranges` — a client must not attempt byte-range requests on
+        // a compressed body (nginx `ngx_http_clear_accept_ranges` parity).
         if ($response->hasHeader('Accept-Ranges')) {
             $response = $response->withoutHeader('Accept-Ranges');
         }
@@ -143,12 +143,12 @@ class CompressionMiddleware implements MiddlewareInterface
 
     /**
      * Check whether a given encoding token is accepted by the client, honouring
-     * RFC 7231 §5.3.4 q-value semantics: q=0 (or q=0.000…) means explicit refusal.
+     * RFC 7231 §5.3.4 q-value semantics: `q=0` (or `q=0.000…`) means explicit refusal.
      *
-     * Parses the comma-separated Accept-Encoding field value looking for the
+     * Parses the comma-separated `Accept-Encoding` field value looking for the
      * token (case-insensitive, already lowercased by the caller).  If the token
      * is found and its q-value is absent or > 0, it is accepted.  A q-value of
-     * exactly zero (any number of trailing zeros, e.g. "0", "0.0", "0.000")
+     * exactly zero (any number of trailing zeros, e.g. `"0"`, `"0.0"`, `"0.000"`)
      * means the encoding is explicitly refused.
      */
     private function isAcceptedEncoding(string $accept, string $encoding): bool
@@ -189,12 +189,12 @@ class CompressionMiddleware implements MiddlewareInterface
     }
 
     /**
-     * Merge $directive into the response's Vary header, deduplicating
-     * case-insensitively.  Uses withHeader() on the merged result so the
+     * Merge `$directive` into the response's `Vary` header, deduplicating
+     * case-insensitively.  Uses `withHeader()` on the merged result so the
      * full canonical list is a single header line (RFC 7230 §3.2.2).
      *
-     * Apache parity: apr_table_mergen(r->headers_out, "Vary", "Accept-Encoding")
-     * nginx parity:  ngx_http_header_filter Vary conditional add
+     * Apache parity: `apr_table_mergen(r->headers_out, "Vary", "Accept-Encoding")`
+     * nginx parity:  `ngx_http_header_filter` `Vary` conditional add
      */
     private function mergeVary(ResponseInterface $response, string $directive): ResponseInterface
     {
@@ -218,11 +218,11 @@ class CompressionMiddleware implements MiddlewareInterface
     }
 
     /**
-     * If the response carries a strong ETag, weaken it by prepending W/.
+     * If the response carries a strong `ETag`, weaken it by prepending `W/`.
      * A compressed body is a transformed representation — it is NOT
      * byte-identical to the original, so the strong validator must not survive.
      *
-     * nginx parity:   ngx_http_weak_etag() (ngx_http_core_module.c:1753)
+     * nginx parity:   `ngx_http_weak_etag()` (`ngx_http_core_module.c:1753`)
      * RFC reference:  RFC 7232 §2.1
      */
     private function weakenEtag(ResponseInterface $response): ResponseInterface

@@ -7,14 +7,14 @@ namespace ZealPHP\Legacy;
 use OpenSwoole\Coroutine\Client as CoClient;
 
 /**
- * FastCGI 1.0 RESPONDER client for ZealPHP's legacy-include dispatch path.
+ * FastCGI 1.0 `RESPONDER` client for ZealPHP's legacy-include dispatch path.
  *
- * Implements the FCGI binary protocol (BEGIN_REQUEST → PARAMS → STDIN →
- * STDOUT + STDERR + END_REQUEST) over an OpenSwoole coroutine socket so the
+ * Implements the FCGI binary protocol (`BEGIN_REQUEST` → `PARAMS` → `STDIN` →
+ * `STDOUT` + `STDERR` + `END_REQUEST`) over an OpenSwoole coroutine socket so the
  * call never blocks the event loop.
  *
  * Protocol: https://fastcgi-devkit.org/doc/FCGI_Spec.html
- * Reference implementations: mod_proxy_fcgi.c, ngx_http_fastcgi_module.c
+ * Reference implementations: `mod_proxy_fcgi.c`, `ngx_http_fastcgi_module.c`
  */
 final class FastCgiClient
 {
@@ -42,8 +42,8 @@ final class FastCgiClient
     private int $timeout;
 
     /**
-     * @param string $address  TCP "host:port" or Unix "unix:/path/to/fpm.sock"
-     * @param int    $timeout  Socket timeout in seconds (0 = no timeout)
+     * @param string $address  TCP `"host:port"` or Unix `"unix:/path/to/fpm.sock"`
+     * @param int    $timeout  Socket timeout in seconds (`0` = no timeout)
      */
     public function __construct(
         string $address = '127.0.0.1:9000',
@@ -56,10 +56,10 @@ final class FastCgiClient
     // ── Public API ───────────────────────────────────────────────────────────
 
     /**
-     * Dispatch one FCGI RESPONDER request and return parsed response data.
+     * Dispatch one FCGI `RESPONDER` request and return parsed response data.
      *
-     * @param array<string,string> $params    FCGI PARAMS (CGI environment variables).
-     * @param string               $stdinBody Request body (POST data).
+     * @param array<string,string> $params    FCGI `PARAMS` (CGI environment variables).
+     * @param string               $stdinBody Request body (`POST` data).
      * @return array{status:int,headers:array<string,string>,body:string,stderr:string}
      * @throws FastCgiException on protocol error, timeout, or connection failure.
      */
@@ -114,8 +114,8 @@ final class FastCgiClient
      * Build a complete FCGI record: 8-byte header + body + alignment padding.
      *
      * Header layout (FCGI 1.0 §2.1):
-     *   version(1) type(1) requestIdB1(1) requestIdB0(1)
-     *   contentLengthB1(1) contentLengthB0(1) paddingLength(1) reserved(1)
+     *   `version(1) type(1) requestIdB1(1) requestIdB0(1)`
+     *   `contentLengthB1(1) contentLengthB0(1) paddingLength(1) reserved(1)`
      */
     public function encodeRecord(int $type, int $reqId, string $body): string
     {
@@ -141,10 +141,10 @@ final class FastCgiClient
     }
 
     /**
-     * Send a BEGIN_REQUEST record (role=RESPONDER, flags=0 — no keep-conn).
+     * Send a `BEGIN_REQUEST` record (`role=RESPONDER`, `flags=0` — no keep-conn).
      *
-     * Body layout: roleB1(1) roleB0(1) flags(1) reserved×5
-     * Source: mod_proxy_fcgi.c:321-339, FCGI spec §5.1
+     * Body layout: `roleB1(1) roleB0(1) flags(1) reserved×5`
+     * Source: `mod_proxy_fcgi.c:321-339`, FCGI spec §5.1
      */
     private function sendBeginRequest(CoClient $conn, int $reqId): void
     {
@@ -158,11 +158,11 @@ final class FastCgiClient
     }
 
     /**
-     * Encode and send PARAMS records followed by empty PARAMS terminator.
+     * Encode and send `PARAMS` records followed by empty `PARAMS` terminator.
      *
      * Multiple NV-pairs concatenate into one record body; fragments if total
-     * exceeds MAX_CONTENT.
-     * Source: mod_proxy_fcgi.c:466-525
+     * exceeds `MAX_CONTENT`.
+     * Source: `mod_proxy_fcgi.c:466-525`
      *
      * @param array<string,string> $params
      */
@@ -182,8 +182,8 @@ final class FastCgiClient
     }
 
     /**
-     * Send STDIN record(s) followed by empty STDIN terminator.
-     * Source: mod_proxy_fcgi.c:742-758
+     * Send `STDIN` record(s) followed by empty `STDIN` terminator.
+     * Source: `mod_proxy_fcgi.c:742-758`
      */
     private function sendStdin(CoClient $conn, int $reqId, string $body): void
     {
@@ -198,7 +198,7 @@ final class FastCgiClient
     }
 
     /**
-     * Send ABORT_REQUEST to the backend (client disconnect / error path).
+     * Send `ABORT_REQUEST` to the backend (client disconnect / error path).
      */
     private function sendAbort(CoClient $conn, int $reqId): void
     {
@@ -223,9 +223,9 @@ final class FastCgiClient
     /**
      * Encode name-value pairs per FCGI 1.0 §3.4.
      *
-     * Length encoding (ngx_http_fastcgi_module.c:1092-1102, mod_proxy_fcgi.c:501-503):
-     *   len ≤ 127  → 1 byte
-     *   len ≥ 128  → 4 bytes with MSB set (big-endian, top bit = 1)
+     * Length encoding (`ngx_http_fastcgi_module.c:1092-1102`, `mod_proxy_fcgi.c:501-503`):
+     *   `len ≤ 127`  → 1 byte
+     *   `len ≥ 128`  → 4 bytes with MSB set (big-endian, top bit = 1)
      *
      * @param array<string,string> $params
      */
@@ -242,7 +242,7 @@ final class FastCgiClient
 
     /**
      * Encode a single FCGI length field.
-     * ≤ 127 → 1 byte; ≥ 128 → 4 bytes with MSB set.
+     * `≤ 127` → 1 byte; `≥ 128` → 4 bytes with MSB set.
      */
     public function encodeLength(int $len): string
     {
@@ -259,10 +259,10 @@ final class FastCgiClient
     // ── Response parsing (receive side) ──────────────────────────────────────
 
     /**
-     * Read STDOUT + STDERR + END_REQUEST records and assemble response.
+     * Read `STDOUT` + `STDERR` + `END_REQUEST` records and assemble response.
      *
-     * Header state machine mirrors mod_proxy_fcgi.c:543-594 and
-     * ngx_http_fastcgi_module.c:1690-1857.
+     * Header state machine mirrors `mod_proxy_fcgi.c:543-594` and
+     * `ngx_http_fastcgi_module.c:1690-1857`.
      *
      * @return array{status:int,headers:array<string,string>,body:string,stderr:string}
      */
@@ -337,11 +337,11 @@ final class FastCgiClient
     }
 
     /**
-     * Parse raw STDOUT bytes into status + headers + body.
+     * Parse raw `STDOUT` bytes into status + headers + body.
      *
-     * CGI header block ends at first blank line (CRLFCRLF or LFLF).
-     * Status: header is extracted and removed (nginx: ngx_http_fastcgi_module.c:648-656;
-     * Apache: ap_scan_script_header_err_brigade_ex).
+     * CGI header block ends at first blank line (`CRLFCRLF` or `LFLF`).
+     * `Status:` header is extracted and removed (nginx: `ngx_http_fastcgi_module.c:648-656`;
+     * Apache: `ap_scan_script_header_err_brigade_ex`).
      *
      * @return array{status:int,headers:array<string,string>,body:string,stderr:string}
      */
@@ -397,7 +397,7 @@ final class FastCgiClient
     // ── Socket I/O ───────────────────────────────────────────────────────────
 
     /**
-     * Read exactly $n bytes from the coroutine socket, looping on short reads.
+     * Read exactly `$n` bytes from the coroutine socket, looping on short reads.
      *
      * OpenSwoole sockets can return short reads; this loop ensures the full
      * requested byte count is available before proceeding (partial-frame defence).
@@ -425,8 +425,8 @@ final class FastCgiClient
 }
 
 /**
- * Thrown on protocol or I/O error; triggers 502 Bad Gateway in the
- * App::include() dispatch path.
+ * Thrown on protocol or I/O error; triggers `502 Bad Gateway` in the
+ * `App::include()` dispatch path.
  */
 final class FastCgiException extends \RuntimeException
 {

@@ -13,24 +13,24 @@ use ZealPHP\RequestContext;
  * Header Middleware
  *
  * Declarative response-header manipulation. The most common use case is
- * stamping security headers (X-Frame-Options, CSP, Strict-Transport-Security,
- * X-Content-Type-Options, Referrer-Policy, Permissions-Policy) onto every
+ * stamping security headers (`X-Frame-Options`, `CSP`, `Strict-Transport-Security`,
+ * `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`) onto every
  * response without sprinkling `$response->header(...)` calls through handlers.
  *
- * Apache equivalent (mod_headers):
- *   Header set X-Frame-Options "DENY"
- *   Header append Vary "Accept-Encoding"
- *   Header unset Server
- *   Header add Set-Cookie "..."
+ * Apache equivalent (`mod_headers`):
+ *   `Header set X-Frame-Options "DENY"`
+ *   `Header append Vary "Accept-Encoding"`
+ *   `Header unset Server`
+ *   `Header add Set-Cookie "..."`
  *
  * nginx equivalent:
- *   add_header X-Frame-Options "DENY" always;
- *   more_clear_headers Server;   # ngx_headers_more module
+ *   `add_header X-Frame-Options "DENY" always;`
+ *   `more_clear_headers Server;`   # `ngx_headers_more` module
  *
  * ## Status-conditional application (nginx parity)
  *
  * nginx `add_header` applies headers **only on safe-status responses**
- * (200, 201, 204, 206, 301, 302, 303, 304, 307, 308) unless the `always`
+ * (`200`, `201`, `204`, `206`, `301`, `302`, `303`, `304`, `307`, `308`) unless the `always`
  * keyword is present. ZealPHP mirrors this behaviour through two knobs:
  *
  * 1. **Constructor `$alwaysByDefault`** (default `true`): when `true` every
@@ -50,7 +50,7 @@ use ZealPHP\RequestContext;
  *    rules are always unconditional — they run on every response status.
  *
  * Safe statuses (matching nginx `ngx_http_headers_filter_module.c:217-233`):
- * 200, 201, 204, 206, 301, 302, 303, 304, 307, 308.
+ * `200`, `201`, `204`, `206`, `301`, `302`, `303`, `304`, `307`, `308`.
  *
  * Constructor accepts a config array with four operations:
  *   - `set`:    overwrite the header value (replaces existing)
@@ -60,39 +60,39 @@ use ZealPHP\RequestContext;
  *
  * Each rule value may be a plain string (or array for `add`) or an associative
  * array with `'value'` and optional `'always'` keys:
- *   'set' => ['X-Frame-Options' => ['value' => 'DENY', 'always' => true]]
+ *   `'set' => ['X-Frame-Options' => ['value' => 'DENY', 'always' => true]]`
  *
- * Usage in app.php — current default (all-status, BC-safe):
+ * Usage in `app.php` — current default (all-status, BC-safe):
  *
- *   $app->addMiddleware(new \ZealPHP\Middleware\HeaderMiddleware([
- *       'set' => [
- *           'X-Frame-Options'            => 'DENY',
- *           'X-Content-Type-Options'     => 'nosniff',
- *           'Referrer-Policy'            => 'strict-origin-when-cross-origin',
- *           'Strict-Transport-Security'  => 'max-age=31536000; includeSubDomains',
- *           'Content-Security-Policy'    => "default-src 'self'",
- *       ],
- *       'append' => ['Vary' => 'Accept-Encoding'],
- *       'unset'  => ['Server', 'X-Powered-By'],
- *   ]));
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\HeaderMiddleware([`
+ *       `'set' => [`
+ *           `'X-Frame-Options'            => 'DENY',`
+ *           `'X-Content-Type-Options'     => 'nosniff',`
+ *           `'Referrer-Policy'            => 'strict-origin-when-cross-origin',`
+ *           `'Strict-Transport-Security'  => 'max-age=31536000; includeSubDomains',`
+ *           `'Content-Security-Policy'    => "default-src 'self'",`
+ *       `],`
+ *       `'append' => ['Vary' => 'Accept-Encoding'],`
+ *       `'unset'  => ['Server', 'X-Powered-By'],`
+ *   `]));`
  *
- * Usage with nginx semantics (skip on error responses unless always=true):
+ * Usage with nginx semantics (skip on error responses unless `always=true`):
  *
- *   $app->addMiddleware(new \ZealPHP\Middleware\HeaderMiddleware([
- *       'set' => [
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\HeaderMiddleware([`
+ *       `'set' => [`
  *           // Skipped on 4xx/5xx (nginx default behaviour).
- *           'Cache-Control' => 'no-cache',
+ *           `'Cache-Control' => 'no-cache',`
  *           // Always applied even on error responses.
- *           'X-Frame-Options' => ['value' => 'DENY', 'always' => true],
- *       ],
- *       'unset' => ['Server'],   // unset is always unconditional
- *   ], alwaysByDefault: false));
+ *           `'X-Frame-Options' => ['value' => 'DENY', 'always' => true],`
+ *       `],`
+ *       `'unset' => ['Server'],`   // `unset` is always unconditional
+ *   `], alwaysByDefault: false));`
  */
 class HeaderMiddleware implements MiddlewareInterface
 {
     /**
-     * nginx safe-status set: responses on which add_header fires without `always`.
-     * Source: ngx_http_headers_filter_module.c:221-232.
+     * nginx safe-status set: responses on which `add_header` fires without `always`.
+     * Source: `ngx_http_headers_filter_module.c:221-232`.
      *
      * @var int[]
      */

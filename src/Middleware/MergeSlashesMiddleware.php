@@ -21,8 +21,8 @@ use ZealPHP\RequestContext;
  * Apache enables this by default; ZealPHP matches the raw path unless this
  * middleware is registered.
  *
- * Usage in app.php:
- *   $app->addMiddleware(new \ZealPHP\Middleware\MergeSlashesMiddleware());
+ * Usage in `app.php`:
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\MergeSlashesMiddleware());`
  */
 class MergeSlashesMiddleware implements MiddlewareInterface
 {

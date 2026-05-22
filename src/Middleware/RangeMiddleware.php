@@ -11,42 +11,42 @@ use ZealPHP\RequestContext;
 /**
  * HTTP Range Request Middleware (RFC 7233)
  *
- * Handles Range: bytes=... headers, returning 206 Partial Content for
- * satisfiable single and multi-range requests and 416 Range Not Satisfiable
+ * Handles `Range: bytes=...` headers, returning `206 Partial Content` for
+ * satisfiable single and multi-range requests and `416 Range Not Satisfiable`
  * for out-of-bounds ranges.
  *
- * Also adds Accept-Ranges: bytes to all eligible 200 responses.
+ * Also adds `Accept-Ranges: bytes` to all eligible `200` responses.
  *
- * Only applies to GET responses with a non-empty body.
- * Streaming responses and non-200 upstream responses are passed through.
+ * Only applies to `GET` responses with a non-empty body.
+ * Streaming responses and non-`200` upstream responses are passed through.
  *
  * Security: enforces a maximum number of range specs per request to prevent
  * the CVE-2011-3192 class of multi-range DoS amplification attacks.
- * Default is 200, matching Apache's AP_DEFAULT_MAX_RANGES.  When the spec
- * count exceeds the cap the Range header is ignored and a full 200 response
- * is returned — the same behaviour as Apache (not a 416).
+ * Default is `200`, matching Apache's `AP_DEFAULT_MAX_RANGES`.  When the spec
+ * count exceeds the cap the `Range` header is ignored and a full `200` response
+ * is returned — the same behaviour as Apache (not a `416`).
  *
  * RFC 7233 §2.1 conformance: if any single spec in a multi-range header is
- * syntactically invalid, the ENTIRE Range header is ignored (full 200).
+ * syntactically invalid, the ENTIRE `Range` header is ignored (full `200`).
  *
- * RFC 7233 §3.2 — If-Range HTTP-date: when the If-Range value does not begin
+ * RFC 7233 §3.2 — `If-Range` HTTP-date: when the `If-Range` value does not begin
  * with a double-quote it is treated as an HTTP-date and compared against the
- * upstream Last-Modified header using Apache's one-minute clock-skew rule.
+ * upstream `Last-Modified` header using Apache's one-minute clock-skew rule.
  *
- * Usage in app.php:
- *   $app->addMiddleware(new \ZealPHP\Middleware\RangeMiddleware());
+ * Usage in `app.php`:
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\RangeMiddleware());`
  *
  * To raise or lower the per-request range cap:
- *   $mw = new \ZealPHP\Middleware\RangeMiddleware();
- *   $mw->maxRanges = 50;
- *   $app->addMiddleware($mw);
+ *   `$mw = new \ZealPHP\Middleware\RangeMiddleware();`
+ *   `$mw->maxRanges = 50;`
+ *   `$app->addMiddleware($mw);`
  */
 class RangeMiddleware implements MiddlewareInterface
 {
     /**
      * Maximum number of range specs accepted per request.
-     * Matches Apache's AP_DEFAULT_MAX_RANGES (byterange_filter.c:59).
-     * When exceeded the Range header is ignored and a full 200 is returned.
+     * Matches Apache's `AP_DEFAULT_MAX_RANGES` (`byterange_filter.c:59`).
+     * When exceeded the `Range` header is ignored and a full `200` is returned.
      */
     public int $maxRanges = 200;
 
@@ -290,7 +290,7 @@ class RangeMiddleware implements MiddlewareInterface
 
     /**
      * Queue a response header via the ZealPHP response wrapper (production path).
-     * Guards against null in unit-test contexts where zealphp_response is not set.
+     * Guards against `null` in unit-test contexts where `zealphp_response` is not set.
      */
     private function setHeader(RequestContext $g, string $key, string $value): void
     {

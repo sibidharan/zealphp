@@ -12,24 +12,24 @@ use ZealPHP\RequestContext;
 /**
  * ETag / Conditional-Request Middleware
  *
- * Generates a weak ETag from a hash of the response body and evaluates the
+ * Generates a weak `ETag` from a hash of the response body and evaluates the
  * RFC 9110 conditional-request preconditions in Apache's `ap_meets_conditions`
- * order via {@see ConditionalRequest}: If-Match -> If-Unmodified-Since ->
- * If-None-Match -> If-Modified-Since.
+ * order via {@see ConditionalRequest}: `If-Match` -> `If-Unmodified-Since` ->
+ * `If-None-Match` -> `If-Modified-Since`.
  *
  * Outcomes:
- *   - 304 Not Modified      — GET/HEAD whose validators say "unchanged".
- *   - 412 Precondition Failed — failed If-Match / If-Unmodified-Since, or a
- *     matched If-None-Match on a non-GET/HEAD method.
- *   - otherwise the original response, with an `ETag` header on GET/HEAD.
+ *   - `304 Not Modified`      — `GET`/`HEAD` whose validators say "unchanged".
+ *   - `412 Precondition Failed` — failed `If-Match` / `If-Unmodified-Since`, or a
+ *     matched `If-None-Match` on a non-`GET`/`HEAD` method.
+ *   - otherwise the original response, with an `ETag` header on `GET`/`HEAD`.
  *
- * Usage in app.php:
- *   $app->addMiddleware(new \ZealPHP\Middleware\ETagMiddleware());
+ * Usage in `app.php`:
+ *   `$app->addMiddleware(new \ZealPHP\Middleware\ETagMiddleware());`
  *
- * Streaming responses (SSE, stream(), Generator yield) are skipped — they have
+ * Streaming responses (SSE, `stream()`, `Generator` yield) are skipped — they have
  * no buffered body to hash.
  *
- * ETag derivation across paths (audit gap H7): ZealPHP emits **weak** ETags
+ * `ETag` derivation across paths (audit gap H7): ZealPHP emits **weak** `ETag`s
  * everywhere, but the validator's *input* depends on how the response is
  * produced — exactly as Apache differs between static and dynamic content:
  *   - Buffered / dynamic responses (this middleware): `W/"xxh3(body)"`.
@@ -38,8 +38,8 @@ use ZealPHP\RequestContext;
  *     file body either).
  * The two paths are **mutually exclusive per response**: this middleware bails on
  * streaming responses and on an empty buffered body (`sendFile()` streams), so it
- * never overwrites a stat-based ETag. Because both forms are *weak*, a URL that
- * switches serving path produces a cache miss (full 200), never a corrupt 304 —
+ * never overwrites a stat-based `ETag`. Because both forms are *weak*, a URL that
+ * switches serving path produces a cache miss (full `200`), never a corrupt `304` —
  * weak comparison can't false-match across the two namespaces.
  */
 class ETagMiddleware implements MiddlewareInterface
