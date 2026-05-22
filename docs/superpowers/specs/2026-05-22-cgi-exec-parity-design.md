@@ -93,5 +93,6 @@ Extend the implicit route matcher (currently hardcoded `.php`, `src/App.php:4514
 ## Risks / open questions
 
 - Spike risk (highest): if `proc_open` under HOOK_ALL cannot cleanly stream/POST without stalling the worker, the zero-config coroutine story narrows to "use `fcgi` for streaming CGI in coroutine mode." Design degrades gracefully; the spike decides before we build the rest.
+  - Spike PASSED 2026-05-22 — coroutine proc_open yields + supports POST/stream; existing cgiSubprocess() is the all-modes path. (OpenSwoole 26.2.0, HOOK_ALL: probe_progressed=20 during subprocess, got_post=YES, chunk_count=3 — see `examples/spikes/cgi-coroutine-spike.php`.)
 - uopz overriding `exec`/`system` globally affects vendor code — mitigated by the `App::rawExec()` escape hatch + `App::$hook_exec` opt-out, documented (consistent with existing header/session overrides).
 - `Coroutine\System::exec` API shape/availability differs across OpenSwoole 22.1 vs 26.2 — verify in the spike.
