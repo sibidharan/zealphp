@@ -41,6 +41,46 @@ final class MarkdownRenderer
     private const GITHUB_BLOB = 'https://github.com/sibidharan/zealphp/blob/master/';
 
     /**
+     * Extract a one-line summary from raw Markdown for use as the page
+     * `<meta name="description">` + Open Graph description. Returns the
+     * first real paragraph (skipping the H1 title, headings, code
+     * fences, blockquotes, tables, and list markers), stripped of
+     * Markdown syntax and clamped to ~200 chars. Empty string when no
+     * prose paragraph is found (caller falls back to the site default).
+     */
+    public static function summary(string $markdown): string
+    {
+        $inFence = false;
+        foreach (preg_split('/\R/', $markdown) ?: [] as $line) {
+            $trimmed = trim($line);
+            if (str_starts_with($trimmed, '```')) {
+                $inFence = !$inFence;
+                continue;
+            }
+            if ($inFence || $trimmed === '') {
+                continue;
+            }
+            // Skip headings, blockquotes, table rows, list items, hr.
+            if (preg_match('/^(#|>|\||-{3,}|\*|\d+\.\s|\-\s|\+\s)/', $trimmed)) {
+                continue;
+            }
+            // First prose line — strip inline Markdown to plain text.
+            $text = $trimmed;
+            $text = (string) preg_replace('/\[([^\]]+)\]\([^)]*\)/', '$1', $text); // links → label
+            $text = (string) preg_replace('/[`*_~]+/', '', $text);                  // emphasis/code
+            $text = trim((string) preg_replace('/\s+/', ' ', $text));
+            if ($text === '') {
+                continue;
+            }
+            if (mb_strlen($text) > 200) {
+                $text = rtrim(mb_substr($text, 0, 197)) . '…';
+            }
+            return $text;
+        }
+        return '';
+    }
+
+    /**
      * Convert GitHub-flavoured Markdown to HTML, then rewrite in-doc
      * `.md` links to resolvable URLs.
      */
