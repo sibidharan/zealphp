@@ -1,0 +1,248 @@
+/* ====================================================================
+ * docs-api.css — amber/dark palette overlay for the phpDocumentor pages
+ * served under /docs/api/. Loaded AFTER phpDocumentor's own CSS so
+ * these selectors override theirs.
+ *
+ * We don't try to re-style phpDocumentor exhaustively — just paint the
+ * brand surfaces (links, headers, active items, signatures) so the API
+ * reference reads as part of the ZealPHP site, not a green island.
+ * ==================================================================== */
+
+/* phpDocumentor's hard-coded green palette → CSS variables already
+ * defined globally in zealphp.css. The selectors below target their
+ * specific class names. */
+
+.docs-api {
+  /* Constrain the content column inside our lesson-content shell;
+   * phpDocumentor expects a full-width main area. */
+  max-width: none;
+}
+
+/* ---------- phpDocumentor TOP HEADER — hide it, we have our own nav ---------- */
+.docs-api .phpdocumentor-topnav,
+.docs-api .phpdocumentor-header > a.phpdocumentor-title__link {
+  display: none;
+}
+.docs-api > header.phpdocumentor-header {
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+  padding: 0 0 1rem;
+  margin: 0 0 1.5rem;
+}
+
+/* ---------- LINKS ---------- */
+.docs-api a {
+  color: var(--accent-dark);
+}
+.docs-api a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(245,158,11,.4);
+}
+
+/* ---------- TITLES & TYPOGRAPHY ---------- */
+.docs-api,
+.docs-api .phpdocumentor-content {
+  font-family: var(--font);
+  color: var(--text);
+}
+.docs-api h1, .docs-api .phpdocumentor-title {
+  color: var(--text);
+  letter-spacing: -.02em;
+  font-weight: 700;
+}
+.docs-api h2 {
+  color: var(--text);
+  border-top: 1px solid var(--border);
+  padding-top: 1.5rem;
+  margin-top: 2.2rem;
+}
+.docs-api h3 {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---------- COLLAPSIBLE API INDEX (phpdoc sidebar as accordion) ---------- */
+.docs-api-index {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 1.25rem;
+  margin: 0 0 1.5rem;
+}
+.docs-api-index > summary {
+  font-weight: 600;
+  font-size: .92rem;
+  color: var(--text-muted);
+  padding: .75rem 0;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.docs-api-index > summary::-webkit-details-marker { display: none; }
+.docs-api-index > summary::before {
+  content: "›";
+  display: inline-block;
+  margin-right: .5rem;
+  color: var(--accent);
+  transition: transform .15s;
+}
+.docs-api-index[open] > summary::before { transform: rotate(90deg); }
+.docs-api-index[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: .75rem; }
+.docs-api-index aside.phpdocumentor-sidebar {
+  background: transparent;
+  border: 0;
+  padding: 0 0 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.5rem;
+}
+
+/* ---------- (legacy block — phpdoc sidebar styling if it ever leaks
+ *  out of the accordion — kept defensive) ---------- */
+.docs-api > aside.phpdocumentor-sidebar {
+  background: var(--bg-alt);
+  border-right: 1px solid var(--border);
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius);
+}
+.docs-api .phpdocumentor-sidebar__category-title {
+  color: var(--text-muted);
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 700;
+}
+.docs-api .phpdocumentor-list a {
+  color: var(--text);
+  padding: .3rem .6rem;
+  border-radius: 4px;
+  display: block;
+  transition: background .12s, color .12s;
+}
+.docs-api .phpdocumentor-list a:hover {
+  background: rgba(245,158,11,.06);
+  color: var(--accent-dark);
+  text-decoration: none;
+}
+
+/* ---------- SIGNATURES (method/function code blocks) ---------- */
+.docs-api .phpdocumentor-signature,
+.docs-api code,
+.docs-api kbd,
+.docs-api pre {
+  font-family: var(--font-mono);
+}
+.docs-api .phpdocumentor-signature {
+  background: var(--code-bg);
+  color: #e7e5e4;
+  padding: .75rem 1rem;
+  border-radius: var(--radius);
+  font-size: .88rem;
+  line-height: 1.55;
+  border: 1px solid #2a201d;
+  overflow-x: auto;
+}
+.docs-api .phpdocumentor-signature__name {
+  color: var(--accent);
+  font-weight: 600;
+}
+.docs-api .phpdocumentor-signature__visibility,
+.docs-api .phpdocumentor-signature__return-type {
+  color: #cbd5e1;
+}
+.docs-api .phpdocumentor-signature__argument__name {
+  color: #fcd34d;
+}
+
+/* Inline code (parameter types, etc.) */
+.docs-api .phpdocumentor-element :not(pre) > code,
+.docs-api .phpdocumentor-content code:not(.phpdocumentor-signature) {
+  background: rgba(245,158,11,.08);
+  border: 1px solid rgba(245,158,11,.18);
+  padding: .08em .35em;
+  border-radius: 4px;
+  color: var(--accent-dark);
+  font-size: .88em;
+}
+
+/* ---------- TABLES (parameter lists, return values) ---------- */
+.docs-api table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+.docs-api th, .docs-api td {
+  border-bottom: 1px solid var(--border);
+  padding: .6rem .8rem;
+  text-align: left;
+}
+.docs-api th {
+  background: var(--bg-alt);
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* ---------- SEARCH BAR ---------- */
+.docs-api .phpdocumentor-search {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .5rem .75rem;
+  margin-bottom: 1rem;
+}
+.docs-api .phpdocumentor-search input {
+  font-family: var(--font);
+  background: transparent;
+  border: 0;
+  outline: none;
+  width: 100%;
+  color: var(--text);
+}
+
+/* ---------- "Found in" annotations ---------- */
+.docs-api .phpdocumentor-element-found-in {
+  background: rgba(245,158,11,.04);
+  border-left: 3px solid var(--accent);
+  padding: .5rem .75rem;
+  border-radius: 0 4px 4px 0;
+  margin: 1rem 0;
+  font-size: .85rem;
+  color: var(--text-muted);
+}
+.docs-api .phpdocumentor-element-found-in a {
+  color: var(--accent-dark);
+}
+
+/* ---------- "Back to top" floating button ---------- */
+.docs-api .phpdocumentor-back-to-top {
+  background: var(--accent);
+  color: var(--bg);
+  border: 0;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  box-shadow: 0 4px 14px rgba(245,158,11,.25);
+}
+.docs-api .phpdocumentor-back-to-top:hover {
+  background: var(--accent-dark);
+}
+
+/* ---------- TOC ---------- */
+.docs-api .phpdocumentor-table-of-contents a {
+  color: var(--accent-dark);
+}
+.docs-api .phpdocumentor-table-of-contents__entry {
+  padding: .3rem 0;
+  border-bottom: 1px dashed rgba(0,0,0,.05);
+}
+
+/* ---------- Responsive: phpDocumentor's grid can overflow our shell ---------- */
+@media (max-width: 900px) {
+  .docs-api aside.phpdocumentor-sidebar {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1rem;
+  }
+}
