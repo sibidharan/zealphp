@@ -32,10 +32,12 @@ use ZealPHP\RequestContext;
  *
  * Usage in `app.php`:
  *
- *   $app->addMiddleware(new \ZealPHP\Middleware\BodyRewriteMiddleware([
- *       ['pattern' => '#http://internal\.lan#', 'replacement' => 'https://example.com'],
- *       ['pattern' => '/Powered by Old/i',      'replacement' => 'Powered by ZealPHP'],
- *   ]));
+ * ```php
+ * $app->addMiddleware(new \ZealPHP\Middleware\BodyRewriteMiddleware([
+ *     ['pattern' => '#http://internal\.lan#', 'replacement' => 'https://example.com'],
+ *     ['pattern' => '/Powered by Old/i',      'replacement' => 'Powered by ZealPHP'],
+ * ]));
+ * ```
  */
 class BodyRewriteMiddleware implements MiddlewareInterface
 {

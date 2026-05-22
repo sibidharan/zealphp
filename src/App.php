@@ -875,8 +875,11 @@ class App
      * to read the current checker. Pass a callable to install one.
      *
      * Example:
-     *   `App::authChecker(fn() => !empty($_SESSION['user_id']));`
-     *   `App::authChecker(fn() => MyAuth::status() === MyAuth::LOGGED_IN);`
+     *
+     * ```php
+     * App::authChecker(fn() => !empty($_SESSION['user_id']));
+     * App::authChecker(fn() => MyAuth::status() === MyAuth::LOGGED_IN);
+     * ```
      *
      * @param callable|null $fn
      */
@@ -1755,9 +1758,12 @@ class App
      * The route pattern is converted to a named regex group for parameter matching.
      *
      * Example usage:
-     * `$app->route('/user/{id}', ['methods' => ['GET', 'POST']], function($id) {`
-     *     `// Handler code here`
-     * `});`
+     *
+     * ```php
+     * $app->route('/user/{id}', ['methods' => ['GET', 'POST']], function($id) {
+     *     // Handler code here
+     * });
+     * ```
      *
      * @param array<string, mixed>|callable $options
      * @param callable|null $handler
@@ -1837,10 +1843,13 @@ class App
      * and the actual route will be `/api/{path}` with {path} capturing all trailing segments.
      * 
      * Example:
+     *
+     * ```php
      * $app->nsPathRoute('api', ['methods' => ['GET']], function($path) {
      *     return "Full path under /api: $path";
      * });
-     * 
+     * ```
+     *
      * Accessing /api/devices/set_pref will set $path = "devices/set_pref".
      *
      * @param array<string, mixed>|callable $options
@@ -2288,11 +2297,14 @@ class App
      * buffered output once.
      *
      * Compose multiple template streams with `yield from`:
-     *   return (function() {
-     *       yield from App::renderStream('shell-open', ['title' => 'Users']);
-     *       yield from App::renderStream('users/list', ['users' => $users]);
-     *       yield from App::renderStream('shell-close');
-     *   })();
+     *
+     * ```php
+     * return (function() {
+     *     yield from App::renderStream('shell-open', ['title' => 'Users']);
+     *     yield from App::renderStream('users/list', ['users' => $users]);
+     *     yield from App::renderStream('shell-close');
+     * })();
+     * ```
      *
      * @see App::executeFile() (private core) and the sibling methods (render / renderToString / include).
      *

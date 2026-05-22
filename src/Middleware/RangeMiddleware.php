@@ -37,9 +37,12 @@ use ZealPHP\RequestContext;
  *   `$app->addMiddleware(new \ZealPHP\Middleware\RangeMiddleware());`
  *
  * To raise or lower the per-request range cap:
- *   `$mw = new \ZealPHP\Middleware\RangeMiddleware();`
- *   `$mw->maxRanges = 50;`
- *   `$app->addMiddleware($mw);`
+ *
+ * ```php
+ * $mw = new \ZealPHP\Middleware\RangeMiddleware();
+ * $mw->maxRanges = 50;
+ * $app->addMiddleware($mw);
+ * ```
  */
 class RangeMiddleware implements MiddlewareInterface
 {

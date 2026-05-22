@@ -32,11 +32,14 @@ use ZealPHP\RequestContext;
  *   `AddEncoding br       .br`
  *
  * Usage in `app.php`:
- *   $app->addMiddleware(new \ZealPHP\Middleware\ContentEncodingMiddleware([
- *       'gz'  => 'gzip',
- *       'br'  => 'br',
- *       'bz2' => 'bzip2',
- *   ]));
+ *
+ * ```php
+ * $app->addMiddleware(new \ZealPHP\Middleware\ContentEncodingMiddleware([
+ *     'gz'  => 'gzip',
+ *     'br'  => 'br',
+ *     'bz2' => 'bzip2',
+ * ]));
+ * ```
  */
 class ContentEncodingMiddleware implements MiddlewareInterface
 {

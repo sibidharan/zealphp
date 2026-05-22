@@ -371,6 +371,18 @@
   font-size: .85em;
   font-weight: 500;
 }
+/* …but block code inside a fenced <pre> is NOT an inline chip — the <pre>
+ * already provides the dark code surface. Strip the chip border/bg/padding
+ * so it doesn't draw a stray amber box inside the dark block. Specificity
+ * (0,3,2) beats the inline rule above (0,3,1). */
+.docs-api pre code:not(.phpdocumentor-signature):not(.phpdocumentor-code) {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  color: inherit;
+}
 
 /* ---------- PARAMETERS + RETURN VALUES blocks ---------- */
 /* phpdoc emits these as <h5 class="phpdocumentor-argument-list__heading">

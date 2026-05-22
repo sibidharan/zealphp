@@ -26,7 +26,9 @@ ZealPHP merges your configuration with its defaults (`enable_static_handler: tru
 
 ## Superglobals and the `G` Container
 
-Traditional PHP scripts rely on `$_GET`, `$_POST`, `$_SERVER`, etc. ZealPHP emulates this behaviour while running inside an event loop by funneling state through `ZealPHP\G`:
+> **`G` is an alias; `ZealPHP\RequestContext` is the class.** `G` is the short, conventional name for the per-request **G**lobal state container. The class was originally named `G`, renamed to `RequestContext` in v0.2.6, with `class_alias(RequestContext::class, 'ZealPHP\G')` (at the bottom of `RequestContext.php`) keeping the short name working forever. `G::instance()` and the `$g` variable are the everyday accessors — type against `\ZealPHP\G` or `\ZealPHP\RequestContext`, they're literally the same class. In the [API reference](/docs/api/classes/ZealPHP-RequestContext.html) it's documented under its real name, **`RequestContext`**: a runtime `class_alias` has no source declaration of its own, so phpDocumentor can't give `G` a separate page.
+
+Traditional PHP scripts rely on `$_GET`, `$_POST`, `$_SERVER`, etc. ZealPHP emulates this behaviour while running inside an event loop by funneling state through `ZealPHP\RequestContext` (alias `G`):
 
 - When `App::$superglobals` is **true** (default), each request reconstructs the real PHP superglobals before executing route handlers. The `G` container proxies get/set operations so legacy code “just works.”
 - When `App::superglobals(false)` is called, ZealPHP stops mutating global arrays and instead uses coroutine-safe properties on the `G` instance. In this mode, OpenSwoole coroutine hooks are enabled and you can safely use `go()` from within the main request handler. Access request data through `$g = G::instance(); $g->get`, `$g->server`, etc.
@@ -59,6 +61,42 @@ ZealPHP favours a single-request-per-worker model to protect superglobals. When 
 
 - `App::cgiMode('proc' | 'fork' | 'fcgi')` selects the per-request isolation strategy for legacy `public/*.php` files. `'proc'` forks a fresh PHP interpreter per request via `proc_open` + `cgi_worker.php` (mod_php-style global isolation, ~30–50 ms cold start — what unmodified WordPress/Drupal needs). `'fork'` (v0.2.29) forks the warm worker via `OpenSwoole\Process` for ~5× faster startup at the cost of function-scope semantics. `'fcgi'` (v0.2.39+) forwards to an upstream php-fpm pool via `App::fcgiAddress()` — no child process at all. See [tasks-and-concurrency.md](./tasks-and-concurrency.md) for the trade-off table.
 - `coprocess()` / `coproc()` create dedicated processes with coroutine support for longer-running workloads that should not block the main worker. These helpers are only available when superglobals are enabled (`coproc` throws otherwise).
+
+### Custom CGI backends — host any language
+
+`App::cgiMode()` sets the strategy for **`.php`** files framework-wide. To serve **other languages** — Perl, Python, Ruby, shell, or anything that speaks CGI/1.1 or FastCGI — register a per-extension backend with `App::registerCgiBackend(string $extension, array $config)` before `$app->run()`. Unregistered extensions fall back to `App::$cgi_mode`.
+
+```php
+use ZealPHP\App;
+
+// Perl via proc (Apache `AddHandler cgi-script .pl` parity)
+App::registerCgiBackend('.pl', [
+    'mode'        => 'proc',
+    'interpreter' => '/usr/bin/perl',
+]);
+
+// Python via FastCGI — forward to a warm Python FCGI daemon
+App::registerCgiBackend('.py', [
+    'mode'        => 'fcgi',
+    'address'     => '127.0.0.1:9001',        // or unix:/run/python-fpm.sock
+    'fcgi_params' => ['APP_ENV' => 'prod'],   // merged into the CGI env
+]);
+
+// .cgi via shebang — the OS reads the #! line, no explicit interpreter
+App::registerCgiBackend('.cgi', ['mode' => 'proc']);
+```
+
+The three `mode` values:
+
+| `mode` | What it does | Languages |
+|--------|--------------|-----------|
+| `'proc'` | `proc_open` spawns the interpreter (or reads the `#!` shebang) per request — Apache CGI semantics | any (`interpreter` optional) |
+| `'fork'` | warm `OpenSwoole\Process` fork (~5× faster than proc) | **`.php` only** — `registerCgiBackend('.py', ['mode' => 'fork'])` throws `InvalidArgumentException` |
+| `'fcgi'` | forwards to a FastCGI daemon at `address` (php-fpm, a Python/Ruby FCGI server, …) — no per-request spawn | any FastCGI/1.0 server |
+
+`App::resolveCgiBackend('/path/file.py')` returns the resolved config for a given path. Full walkthrough — socket forms, `fcgi_params`, multiple upstream pools, 502/timeout behaviour — in the [FastCGI backends guide](fastcgi-backends.md). The framework-wide `'fcgi'` setter (`App::cgiMode('fcgi')` + `App::fcgiAddress()`) is the "front an existing php-fpm pool" shortcut for when **every** `public/*.php` should go to one upstream.
+
+> CGI backends require `superglobals(true) + processIsolation(true)` (the **Legacy CGI** mode in the matrix below). In coroutine mode, write native ZealPHP handlers instead.
 
 ## Task Workers
 

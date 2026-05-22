@@ -13,11 +13,18 @@ namespace ZealPHP;
  * remote GitHub call.
  *
  * Usage:
- *   In `app.php` boot, before `$app->run()`:
- *     `\ZealPHP\GithubStars::register('sibidharan/zealphp');`
  *
- *   In templates / route handlers:
- *     `<span>★ <?= htmlspecialchars(\ZealPHP\GithubStars::format()) ?></span>`
+ * In `app.php` boot, before `$app->run()`:
+ *
+ * ```php
+ * \ZealPHP\GithubStars::register('sibidharan/zealphp');
+ * ```
+ *
+ * In templates / route handlers:
+ *
+ * ```php
+ * <span>★ <?= htmlspecialchars(\ZealPHP\GithubStars::format()) ?></span>
+ * ```
  */
 final class GithubStars
 {

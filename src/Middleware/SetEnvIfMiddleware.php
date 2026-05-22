@@ -23,15 +23,21 @@ use ZealPHP\RequestContext;
  * `User-Agent` gives `BrowserMatch` behavior).
  *
  * Apache equivalent:
- *   SetEnvIf User-Agent "bot" IS_BOT=1
- *   SetEnvIf Request_URI "^/admin" ADMIN_AREA=1
- *   BrowserMatch "MSIE" old_browser=1
+ *
+ * ```
+ * SetEnvIf User-Agent "bot" IS_BOT=1
+ * SetEnvIf Request_URI "^/admin" ADMIN_AREA=1
+ * BrowserMatch "MSIE" old_browser=1
+ * ```
  *
  * Usage in app.php:
- *   $app->addMiddleware(new \ZealPHP\Middleware\SetEnvIfMiddleware([
- *       ['attr' => 'User-Agent',  'regex' => '#bot#i',     'set' => ['IS_BOT' => '1']],
- *       ['attr' => 'Request_URI', 'regex' => '#^/admin#',  'set' => ['ADMIN_AREA' => '1']],
- *   ]));
+ *
+ * ```php
+ * $app->addMiddleware(new \ZealPHP\Middleware\SetEnvIfMiddleware([
+ *     ['attr' => 'User-Agent',  'regex' => '#bot#i',     'set' => ['IS_BOT' => '1']],
+ *     ['attr' => 'Request_URI', 'regex' => '#^/admin#',  'set' => ['ADMIN_AREA' => '1']],
+ * ]));
+ * ```
  */
 class SetEnvIfMiddleware implements MiddlewareInterface
 {

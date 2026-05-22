@@ -344,18 +344,20 @@ function log_write(string $message, string $kind = 'debug'): void
  *
  * Example (3 parallel HTTP fetches from a sequential worker):
  *
- *     $json = coprocess(function () {
- *         $chan = new \OpenSwoole\Coroutine\Channel(3);
- *         foreach (['a','b','c'] as $svc) {
- *             go(function () use ($svc, $chan) {
- *                 $chan->push([$svc => file_get_contents("https://api/$svc")]);
- *             });
- *         }
- *         $out = [];
- *         for ($i = 0; $i < 3; $i++) { $out += $chan->pop(); }
- *         echo json_encode($out);            // returned to the caller as a string
- *     });
- *     $data = json_decode($json, true);
+ * ```php
+ * $json = coprocess(function () {
+ *     $chan = new \OpenSwoole\Coroutine\Channel(3);
+ *     foreach (['a','b','c'] as $svc) {
+ *         go(function () use ($svc, $chan) {
+ *             $chan->push([$svc => file_get_contents("https://api/$svc")]);
+ *         });
+ *     }
+ *     $out = [];
+ *     for ($i = 0; $i < 3; $i++) { $out += $chan->pop(); }
+ *     echo json_encode($out);            // returned to the caller as a string
+ * });
+ * $data = json_decode($json, true);
+ * ```
  *
  * @param callable $taskLogic The logic to run in the coroutine-enabled child.
  *                            Receives the `OpenSwoole\Process` as its argument.

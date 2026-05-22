@@ -12,21 +12,24 @@ namespace ZealPHP;
  * is inherited by all forked workers.
  *
  * Usage:
- *   // Before `app->run()`:
- *   `$hits    = new Counter();`
- *   `$errors  = new Counter(0);`
- *   `$version = new Counter(1);`
  *
- *   // Anywhere (all workers share the same value):
- *   `$hits->increment();`          // +1, returns new value
- *   `$hits->increment(5);`         // +5
- *   `$hits->decrement();`          // -1
- *   `$hits->get();`                // current value
- *   `$hits->set(0);`               // force-set (not atomic vs concurrent reads)
- *   `$hits->reset();`              // alias for `set(0)`
+ * ```php
+ * // Before $app->run():
+ * $hits    = new Counter();
+ * $errors  = new Counter(0);
+ * $version = new Counter(1);
  *
- *   // Conditional update (compare-and-swap):
- *   `$hits->compareAndSet($expected, $new);` // returns bool
+ * // Anywhere (all workers share the same value):
+ * $hits->increment();          // +1, returns new value
+ * $hits->increment(5);         // +5
+ * $hits->decrement();          // -1
+ * $hits->get();                // current value
+ * $hits->set(0);               // force-set (not atomic vs concurrent reads)
+ * $hits->reset();              // alias for set(0)
+ *
+ * // Conditional update (compare-and-swap):
+ * $hits->compareAndSet($expected, $new); // returns bool
+ * ```
  */
 class Counter
 {

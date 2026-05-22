@@ -24,8 +24,11 @@ use Psr\Http\Server\RequestHandlerInterface;
  * (`Location`); for any other status it is the response body.
  *
  * Usage in app.php:
- *   $app->addMiddleware(ScopedMiddleware::location(new ReturnMiddleware(403), '/blocked'));
- *   $app->addMiddleware(ScopedMiddleware::match(new ReturnMiddleware(301, '/new'), '#^/old$#'));
+ *
+ * ```php
+ * $app->addMiddleware(ScopedMiddleware::location(new ReturnMiddleware(403), '/blocked'));
+ * $app->addMiddleware(ScopedMiddleware::match(new ReturnMiddleware(301, '/new'), '#^/old$#'));
+ * ```
  */
 class ReturnMiddleware implements MiddlewareInterface
 {

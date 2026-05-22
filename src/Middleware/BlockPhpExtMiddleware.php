@@ -18,8 +18,11 @@ use Psr\Http\Server\RequestHandlerInterface;
  * exists.
  *
  * Apache equivalent — the classic `.htaccess` pattern:
- *   `RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s([^.]+)\.php [NC]`
- *   `RewriteRule ^ - [R=404,L]`
+ *
+ * ```
+ * RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s([^.]+)\.php [NC]
+ * RewriteRule ^ - [R=404,L]
+ * ```
  *
  * nginx equivalent:
  *   `location ~ \.php$ { return 404; }`

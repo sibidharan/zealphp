@@ -27,8 +27,11 @@ use Psr\Http\Server\RequestHandlerInterface;
  * continue via the handler.
  *
  * Usage in app.php:
- *   $app->addMiddleware(ScopedMiddleware::location(new BasicAuthMiddleware(...), '/admin'));
- *   $app->addMiddleware(ScopedMiddleware::match(new BlockPhpExtMiddleware(), '#\.php$#'));
+ *
+ * ```php
+ * $app->addMiddleware(ScopedMiddleware::location(new BasicAuthMiddleware(...), '/admin'));
+ * $app->addMiddleware(ScopedMiddleware::match(new BlockPhpExtMiddleware(), '#\.php$#'));
+ * ```
  */
 final class ScopedMiddleware implements MiddlewareInterface
 {

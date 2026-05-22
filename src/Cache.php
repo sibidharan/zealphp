@@ -12,14 +12,17 @@ namespace ZealPHP;
  * back to file. TTL-based expiry with lazy cleanup + periodic GC timer.
  *
  * Usage:
- *   // Before $app->run():
- *   Cache::init();
  *
- *   // Anywhere (any worker):
- *   Cache::set('user:42', $profile, ttl: 300);
- *   $profile = Cache::get('user:42');
- *   Cache::has('user:42');
- *   Cache::del('user:42');
+ * ```php
+ * // Before $app->run():
+ * Cache::init();
+ *
+ * // Anywhere (any worker):
+ * Cache::set('user:42', $profile, ttl: 300);
+ * $profile = Cache::get('user:42');
+ * Cache::has('user:42');
+ * Cache::del('user:42');
+ * ```
  *
  * LIMITATIONS — when to use Redis/Valkey instead:
  *   - Multi-server: Cache is per-server. Redis shares state across machines.

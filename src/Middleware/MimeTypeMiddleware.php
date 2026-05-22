@@ -31,20 +31,25 @@ use ZealPHP\RequestContext;
  * based `Content-Type` negotiation.
  *
  * Apache equivalent:
- *   `AddType application/wasm           .wasm`
- *   `AddType model/gltf-binary          .glb`
- *   `AddType model/vnd.usdz+zip         .usdz`
+ *
+ * ```
+ * AddType application/wasm           .wasm
+ * AddType model/gltf-binary          .glb
+ * AddType model/vnd.usdz+zip         .usdz
+ * ```
  *
  * Only fires when the upstream response has no `Content-Type` — explicit
  * `$response->header('Content-Type', ...)` calls in the handler always win.
  *
  * Usage in `app.php`:
  *
- *   `$app->addMiddleware(new \ZealPHP\Middleware\MimeTypeMiddleware([`
- *       `'wasm' => 'application/wasm',`
- *       `'glb'  => 'model/gltf-binary',`
- *       `'usdz' => 'model/vnd.usdz+zip',`
- *   `]));`
+ * ```php
+ * $app->addMiddleware(new \ZealPHP\Middleware\MimeTypeMiddleware([
+ *     'wasm' => 'application/wasm',
+ *     'glb'  => 'model/gltf-binary',
+ *     'usdz' => 'model/vnd.usdz+zip',
+ * ]));
+ * ```
  */
 class MimeTypeMiddleware implements MiddlewareInterface
 {

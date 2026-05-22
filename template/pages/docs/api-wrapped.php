@@ -37,7 +37,7 @@ $v = defined('ZEALPHP_ASSET_VERSION') ? ZEALPHP_ASSET_VERSION : '';
         <?php foreach ($apiCrumb as $i => $seg): ?>
           <?php if ($i > 0): ?><span class="sep">›</span><?php endif; ?>
           <?php if (!empty($seg['href'])): ?>
-            <a href="<?= htmlspecialchars($seg['href'], ENT_QUOTES) ?>" hx-boost="false"><?= htmlspecialchars($seg['label'], ENT_QUOTES) ?></a>
+            <a href="<?= htmlspecialchars($seg['href'], ENT_QUOTES) ?>"><?= htmlspecialchars($seg['label'], ENT_QUOTES) ?></a>
           <?php else: ?>
             <span class="current"><?= htmlspecialchars($seg['label'], ENT_QUOTES) ?></span>
           <?php endif; ?>

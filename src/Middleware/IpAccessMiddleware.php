@@ -18,13 +18,19 @@ use ZealPHP\RequestContext;
  * — useful to express "allow everyone except deny list" or "deny by default".
  *
  * Apache 2.2 equivalent (legacy):
- *   `Order Deny,Allow`
- *   `Deny from all`
- *   `Allow from 10.0.0.0/8 127.0.0.1`
+ *
+ * ```
+ * Order Deny,Allow
+ * Deny from all
+ * Allow from 10.0.0.0/8 127.0.0.1
+ * ```
  *
  * Apache 2.4+ / nginx equivalent:
- *   `Require ip 10.0.0.0/8 127.0.0.1`     (Apache 2.4+)
- *   `allow 10.0.0.0/8; allow 127.0.0.1; deny all;`   (nginx)
+ *
+ * ```
+ * Require ip 10.0.0.0/8 127.0.0.1                  # Apache 2.4+
+ * allow 10.0.0.0/8; allow 127.0.0.1; deny all;     # nginx
+ * ```
  *
  * Resolution rules:
  *   1. If `deny` matches the IP → `403` (deny wins ties)
@@ -43,17 +49,19 @@ use ZealPHP\RequestContext;
  *
  * Usage in `app.php`:
  *
- *   // Allow only office network and CI
- *   `$app->addMiddleware(new \ZealPHP\Middleware\IpAccessMiddleware([`
- *       `'allow' => ['203.0.113.0/24', '198.51.100.42'],`
- *       `'deny'  => [],`
- *   `]));`
+ * ```php
+ * // Allow only office network and CI
+ * $app->addMiddleware(new \ZealPHP\Middleware\IpAccessMiddleware([
+ *     'allow' => ['203.0.113.0/24', '198.51.100.42'],
+ *     'deny'  => [],
+ * ]));
  *
- *   // Block a specific abuser, allow the rest
- *   `$app->addMiddleware(new \ZealPHP\Middleware\IpAccessMiddleware([`
- *       `'allow' => ['*'],`
- *       `'deny'  => ['1.2.3.4'],`
- *   `]));`
+ * // Block a specific abuser, allow the rest
+ * $app->addMiddleware(new \ZealPHP\Middleware\IpAccessMiddleware([
+ *     'allow' => ['*'],
+ *     'deny'  => ['1.2.3.4'],
+ * ]));
+ * ```
  */
 class IpAccessMiddleware implements MiddlewareInterface
 {
