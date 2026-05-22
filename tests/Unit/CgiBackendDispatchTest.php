@@ -136,7 +136,7 @@ final class CgiBackendDispatchTest extends TestCase
             $this->markTestSkipped('uopz required');
         }
 
-        App::registerCgiBackend('.pl', ['mode' => 'proc', 'interpreter' => '/usr/bin/perl']);
+        App::registerCgiBackend('.pl', ['mode' => 'proc', 'interpreter' => '/usr/bin/perl', 'exec_paths' => ['/']]);
 
         $called = null;
         uopz_set_return(App::class, 'cgiSubprocess', function (string $p, ?string $interp = null) use (&$called): string {
@@ -168,7 +168,7 @@ final class CgiBackendDispatchTest extends TestCase
             $this->markTestSkipped('uopz required');
         }
 
-        App::registerCgiBackend('.py', ['mode' => 'fcgi', 'address' => '127.0.0.1:9003']);
+        App::registerCgiBackend('.py', ['mode' => 'fcgi', 'address' => '127.0.0.1:9003', 'exec_paths' => ['/']]);
 
         $called = null;
         uopz_set_return(App::class, 'cgiFcgi', function (string $p, ?string $addr = null, array $params = []) use (&$called): string {
@@ -204,6 +204,7 @@ final class CgiBackendDispatchTest extends TestCase
             'mode'        => 'fcgi',
             'address'     => '127.0.0.1:9003',
             'fcgi_params' => ['APP_ENV' => 'test'],
+            'exec_paths'  => ['/'],
         ]);
 
         $called = null;
@@ -236,7 +237,7 @@ final class CgiBackendDispatchTest extends TestCase
             $this->markTestSkipped('uopz required');
         }
 
-        App::registerCgiBackend('.pl', ['mode' => 'proc', 'interpreter' => '/usr/bin/perl']);
+        App::registerCgiBackend('.pl', ['mode' => 'proc', 'interpreter' => '/usr/bin/perl', 'exec_paths' => [self::$tmpDir]]);
 
         $called = null;
         uopz_set_return(App::class, 'cgiSubprocess', function (string $p, ?string $interp = null) use (&$called): string {
@@ -258,7 +259,7 @@ final class CgiBackendDispatchTest extends TestCase
             $this->markTestSkipped('uopz required');
         }
 
-        App::registerCgiBackend('.py', ['mode' => 'fcgi', 'address' => '127.0.0.1:9004']);
+        App::registerCgiBackend('.py', ['mode' => 'fcgi', 'address' => '127.0.0.1:9004', 'exec_paths' => [self::$tmpDir]]);
 
         $calledAddr = null;
         uopz_set_return(App::class, 'cgiFcgi', function (string $p, ?string $addr = null, array $params = []) use (&$calledAddr): string {
@@ -274,7 +275,14 @@ final class CgiBackendDispatchTest extends TestCase
         $this->assertSame('127.0.0.1:9004', $calledAddr);
     }
 
-    public function testIncludeFileUnregisteredExtensionFallsBackToGlobalMode(): void
+    /**
+     * ExecCGI gate (Task 5): an unregistered, non-PHP file is NOT in any exec
+     * scope, so resolveCgiBackend() returns mayExecute=false. The framework must
+     * REFUSE it with 403 — never PHP-parse it via executeFile() and never serve
+     * its source (Apache ExecCGI-off leaks script source; we refuse instead).
+     * It must NOT dispatch to any CGI backend.
+     */
+    public function testIncludeFileUnregisteredExtensionRefusedWith403(): void
     {
         if (!function_exists('uopz_set_return')) {
             $this->markTestSkipped('uopz required');
@@ -291,9 +299,10 @@ final class CgiBackendDispatchTest extends TestCase
 
         App::$coproc_implicit_request_handler = true;
         $fixture = $this->fixture('script.rb', "puts 'hi'\n");
-        App::includeFile($fixture);
+        $result  = App::includeFile($fixture);
 
-        $this->assertTrue($called, 'Unregistered extension must fall back to global cgi_mode dispatch');
+        $this->assertFalse($called, 'Unregistered non-PHP file must NOT dispatch to a CGI backend');
+        $this->assertSame(403, $result, 'Unregistered non-PHP file (no exec scope) must be refused with 403');
     }
 
     // ── fcgi_params merged into env (via FastCgiClient mock) ──────────────────
@@ -308,6 +317,7 @@ final class CgiBackendDispatchTest extends TestCase
             'mode'        => 'fcgi',
             'address'     => '127.0.0.1:9005',
             'fcgi_params' => ['CUSTOM_PARAM' => 'hello'],
+            'exec_paths'  => [self::$tmpDir],
         ]);
 
         $capturedEnv = null;
