@@ -266,6 +266,28 @@ function ensureActiveSidebarVisible(sb) {
   });
 })();
 
+// Show validation errors on the inline auth forms (learn/auth, learn/notes,
+// learn/tictactoe). /api/learn/{login,register} answer failures with an honest
+// 4xx — 409 username taken, 401 bad login, 422 invalid input, 429 rate-limited
+// — and put the human-readable reason in the body as <p class="auth-error">…</p>.
+// But htmx 2.x does NOT swap non-2xx responses by default (responseHandling maps
+// 4xx/5xx to swap:false, error:true), so that fragment was being discarded and
+// the forms showed nothing on error. Opt just those two endpoints back into
+// swapping so the message reaches the form's feedback div. The status codes stay
+// honest on purpose: the JSON clients (the demo widgets) rely on the 4xx to know
+// the attempt failed — so this is fixed on the client, not by downgrading to 200.
+(function () {
+  document.addEventListener('htmx:beforeSwap', (e) => {
+    const cfg = e.detail && e.detail.requestConfig;
+    const path = (cfg && cfg.path) || '';
+    const status = e.detail && e.detail.xhr ? e.detail.xhr.status : 0;
+    if (status >= 400 && /^\/api\/learn\/(login|register)$/.test(path)) {
+      e.detail.shouldSwap = true;  // swap the <p class="auth-error"> into the target
+      e.detail.isError = false;    // a handled validation message, not a console error
+    }
+  });
+})();
+
 // Top-of-page progress bar for in-flight htmx requests. NProgress / Linear /
 // Vercel-docs pattern: a 2px amber strip animated via CSS transform.
 // Two-threshold behavior so it works on BOTH fast and slow connections:

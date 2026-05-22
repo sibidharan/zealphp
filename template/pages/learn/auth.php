@@ -121,6 +121,70 @@ $register = function () {
       the class does the work. This pattern scales — your API files stay under 20 lines each.
     </p>
 
+    <h2 id="showing-errors">Showing errors: <code>register()</code> returns <code>null</code>, and htmx's 2xx rule</h2>
+    <p>
+      Two things go wrong on the way to a new account, and both are easy to swallow silently.
+    </p>
+    <p>
+      <strong>First, the username might be taken.</strong> The <code>users.username</code> column is
+      <code>UNIQUE</code>, so a duplicate <code>INSERT</code> throws a <code>PDOException</code>. That's why
+      <code>register()</code>'s return type is <code>?int</code> — catch the constraint violation and return
+      <code>null</code> so the caller can tell "created" from "already exists":
+    </p>
+    <pre><code class="language-php">// src/Learn/Auth.php — register(), the real version
+public static function register(\PDO $db, string $username, string $password): ?int
+{
+    try {
+        $stmt = $db->prepare(
+            'INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)'
+        );
+        $stmt-&gt;execute([$username, password_hash($password, PASSWORD_DEFAULT), time()]);
+        return (int) $db-&gt;lastInsertId();
+    } catch (\PDOException $e) {
+        return null;          // UNIQUE constraint → username already exists
+    }
+}</code></pre>
+    <p>
+      The endpoint turns that <code>null</code> into an honest HTTP status and a one-line message — a real
+      <code>409 Conflict</code>, not a <code>200</code> with the error buried in the body:
+    </p>
+    <pre><code class="language-php">// api/learn/register.php — fail with the right status
+$userId = Auth::register(DB::open(), $creds['username'], $creds['password']);
+if ($userId === null) {
+    header('Content-Type: text/html; charset=utf-8');
+    return $this-&gt;response('&lt;p class="auth-error"&gt;That username is already taken.&lt;/p&gt;', 409);
+}</code></pre>
+    <p>
+      <strong>Second — the subtle one — htmx won't show that message by default.</strong> The form posts with
+      <code>hx-post</code> and swaps the response into a feedback <code>&lt;div&gt;</code>:
+    </p>
+    <pre><code class="language-html">&lt;form hx-post="/api/learn/register" hx-target="#auth-feedback-reg" hx-swap="innerHTML"&gt;
+  …
+  &lt;div id="auth-feedback-reg"&gt;&lt;/div&gt;
+&lt;/form&gt;</code></pre>
+    <p>
+      htmx 2.x only swaps <code>2xx</code> responses. A <code>4xx</code> is treated as an error: the body is
+      <em>discarded</em> and <code>htmx:responseError</code> fires instead. So the <code>409</code> arrives, the
+      message is right there in the response — and the form shows <em>nothing</em>. Don't "fix" it by returning
+      <code>200</code> (your JSON clients depend on the real status); instead opt these two endpoints back into
+      swapping with a one-time <code>htmx:beforeSwap</code> listener:
+    </p>
+    <pre><code class="language-javascript">// public/js/site-nav.js — let auth errors render in the form
+document.addEventListener('htmx:beforeSwap', (e) =&gt; {
+  const path = (e.detail.requestConfig &amp;&amp; e.detail.requestConfig.path) || '';
+  const status = e.detail.xhr ? e.detail.xhr.status : 0;
+  if (status &gt;= 400 &amp;&amp; /^\/api\/learn\/(login|register)$/.test(path)) {
+    e.detail.shouldSwap = true;  // swap the &lt;p class="auth-error"&gt; into the target
+    e.detail.isError = false;    // a handled validation message, not a console error
+  }
+});</code></pre>
+    <p>
+      Now a duplicate registration — or a wrong password on the login form below — shows a red message in
+      place, no page reload, while the API still returns a correct <code>409</code>/<code>401</code> for
+      non-browser clients. That's the htmx way to do form validation: honest status codes on the wire, a
+      single <code>beforeSwap</code> opt-in on the client.
+    </p>
+
     <?php App::render('/components/_tryit', ['title' => 'Register now', 'body' => $user
       ? '<p>You\'re logged in as <strong>' . htmlspecialchars($user['username']) . '</strong>. <a href="/api/learn/logout">Log out</a> to try registering a new account, or head to <a href="/learn/notes">Lesson 18</a> to start building notes.</p>'
       : '<p>Pick a username and password. This creates a real account stored in SQLite. You\'ll use it in the next three lessons to save notes and chat with the AI.</p>
