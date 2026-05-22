@@ -2839,22 +2839,40 @@ class App
         $g->server['SCRIPT_NAME']     = '/' . $rel;
         $g->server['SCRIPT_FILENAME'] = $absPath;
 
+        $cgi   = self::resolveCgiBackend($absPath, '/' . $rel);
+        $isPhp = str_ends_with(strtolower($absPath), '.php');
+
+        if (!$isPhp) {
+            if ($cgi['mayExecute']) {
+                $b = $cgi['backend'];
+                return match ($b['mode']) {
+                    'fcgi'  => self::cgiFcgi($absPath, $b['address'] ?? null, $b['fcgi_params'] ?? []),
+                    'fork'  => self::cgiFork($absPath),
+                    default => self::cgiSubprocess($absPath, $b['interpreter'] ?? null),
+                };
+            }
+            // SECURITY: a non-PHP file that is NOT in an exec scope must NOT be
+            // PHP-parsed (executeFile would treat it as PHP) and must NOT have its
+            // source served (Apache's ExecCGI-off leaks script source — we refuse).
+            return 403;
+        }
+
+        // .php from here on:
         if (self::$coproc_implicit_request_handler) {
-            $backend = self::resolveCgiBackend($absPath, '/' . $rel)['backend'];
-            return match ($backend['mode']) {
-                'fork' => self::cgiFork($absPath),
-                'fcgi' => self::cgiFcgi(
-                    $absPath,
-                    $backend['address'] ?? null,
-                    $backend['fcgi_params'] ?? []
-                ),
-                default => self::cgiSubprocess(
-                    $absPath,
-                    $backend['interpreter'] ?? null
-                ),
+            // Legacy isolation path — byte-identical to before. .php is always
+            // executable in isolation mode (no ExecCGI gate applied to .php), and
+            // the dispatch honors the resolved backend mode: a registered .php
+            // backend (fork/fcgi, e.g. PHP-FPM) or the global $cgi_mode fallback
+            // routes accordingly; default 'proc' → cgiSubprocess(.., null) →
+            // cgi_worker.php for uopz header/cookie capture.
+            $b = $cgi['backend'];
+            return match ($b['mode']) {
+                'fork'  => self::cgiFork($absPath),
+                'fcgi'  => self::cgiFcgi($absPath, $b['address'] ?? null, $b['fcgi_params'] ?? []),
+                default => self::cgiSubprocess($absPath, $b['interpreter'] ?? null),
             };
         }
-        return self::executeFile($absPath, $args);
+        return self::executeFile($absPath, $args);       // coroutine-mode fast path (unchanged)
     }
 
     /**
@@ -2876,19 +2894,33 @@ class App
         }
         // Outside the document root — preserve legacy "trust the caller"
         // semantics while still applying the universal return contract.
+        $cgi   = self::resolveCgiBackend($path, $path);
+        $isPhp = str_ends_with(strtolower($path), '.php');
+
+        if (!$isPhp) {
+            if ($cgi['mayExecute']) {
+                $b = $cgi['backend'];
+                return match ($b['mode']) {
+                    'fcgi'  => self::cgiFcgi($path, $b['address'] ?? null, $b['fcgi_params'] ?? []),
+                    'fork'  => self::cgiFork($path),
+                    default => self::cgiSubprocess($path, $b['interpreter'] ?? null),
+                };
+            }
+            // SECURITY: a non-PHP file outside an exec scope must NOT be PHP-parsed
+            // by executeFile() nor have its source served. Refuse it.
+            return 403;
+        }
+
+        // .php from here on:
         if (self::$coproc_implicit_request_handler) {
-            $backend = self::resolveCgiBackend($path, $path)['backend'];
-            return match ($backend['mode']) {
-                'fork' => self::cgiFork($path),
-                'fcgi' => self::cgiFcgi(
-                    $path,
-                    $backend['address'] ?? null,
-                    $backend['fcgi_params'] ?? []
-                ),
-                default => self::cgiSubprocess(
-                    $path,
-                    $backend['interpreter'] ?? null
-                ),
+            // Legacy isolation path — byte-identical to before: .php is always
+            // executable in isolation mode and dispatch honors the resolved
+            // backend mode (registered .php backend or global $cgi_mode fallback).
+            $b = $cgi['backend'];
+            return match ($b['mode']) {
+                'fork'  => self::cgiFork($path),
+                'fcgi'  => self::cgiFcgi($path, $b['address'] ?? null, $b['fcgi_params'] ?? []),
+                default => self::cgiSubprocess($path, $b['interpreter'] ?? null),
             };
         }
         return self::executeFile($path, []);
@@ -4745,6 +4777,26 @@ HELP;
             }
             return $this->invokeFallbackOrNotFound();
         });
+
+        # Implicit URL parity for registered CGI extensions (e.g. .py, .pl, .cgi).
+        # GET /cgi-bin/report.py → App::include('/cgi-bin/report.py'). App::include()
+        # applies the ExecCGI gate, so a registered-extension URL OUTSIDE an exec
+        # scope returns 403 (no source leak) — no extra guard needed here. The
+        # method shape matches the .php implicit routes above (GET/POST).
+        foreach (array_keys(self::$cgi_backends) as $ext) {
+            if ($ext === '.php') { continue; }
+            $e = preg_quote(ltrim($ext, '.'), '#');
+            $this->route('/{cgifile}\.' . $e . '/?', [
+                'methods' => ['GET', 'POST']
+            ], function (string $cgifile) use ($ext) {
+                return App::include('/' . $cgifile . $ext);
+            });
+            $this->nsPathRoute('{cgidir}', '{cgiuri}\.' . $e . '/?', [
+                'methods' => ['GET', 'POST']
+            ], function (string $cgidir, string $cgiuri) use ($ext) {
+                return App::include('/' . $cgidir . '/' . $cgiuri . $ext);
+            });
+        }
 
         if (($effective_settings['task_worker_num'] ?? 0) > 0) {
             $server->on('task', function ($server, $id, $rid, $data) {
