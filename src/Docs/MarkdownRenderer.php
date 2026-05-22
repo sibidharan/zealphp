@@ -57,31 +57,51 @@ final class MarkdownRenderer
     }
 
     /**
-     * Rewrite `href="….md"` (with optional `#anchor`) so the link
-     * resolves:
-     *   - sibling guide (`routing.md`, `./routing.md`) → `/docs/guide/routing`
-     *   - any other `.md` (`../STANDARDS.md`)          → GitHub blob URL
-     *   - already-absolute http(s) links               → left untouched
+     * Rewrite in-doc links so they resolve when served at /docs/guide/.
+     * Guides cross-link each other and reference repo source files with
+     * paths that are relative to the `docs/` directory on disk — none of
+     * which map to a servable URL as-is.
+     *
+     *   - sibling guide (`routing.md`, `./routing.md`)        → `/docs/guide/routing`
+     *   - any other repo file (`../src/App.php`, `../STANDARDS.md`,
+     *     `../tests/Foo.php`, `../route/bar.php`)             → GitHub blob URL
+     *   - already-absolute (`http(s)://`, `/site/path`, `#anchor`,
+     *     `mailto:`, `data:`)                                 → left untouched
      */
     private static function rewriteMarkdownLinks(string $html): string
     {
         return (string) preg_replace_callback(
-            '/href="([^"#]+\.md)(#[^"]*)?"/i',
+            '/href="([^"#]+)(#[^"]*)?"/i',
             static function (array $m): string {
                 $path   = $m[1];
                 $anchor = $m[2] ?? '';
 
-                if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+                // Absolute / already-resolvable links — leave untouched.
+                // ($path is always non-empty: the regex group is [^"#]+.)
+                if ($path[0] === '/'
+                    || str_starts_with($path, 'http://')
+                    || str_starts_with($path, 'https://')
+                    || str_starts_with($path, 'mailto:')
+                    || str_starts_with($path, 'data:')
+                    || str_starts_with($path, 'tel:')
+                ) {
                     return $m[0];
                 }
 
-                $slug = basename($path, '.md');
-                if (in_array($slug, self::GUIDE_SLUGS, true)) {
-                    return 'href="/docs/guide/' . $slug . $anchor . '"';
+                // Sibling guide → the served guide URL.
+                if (str_ends_with($path, '.md')) {
+                    $slug = basename($path, '.md');
+                    if (in_array($slug, self::GUIDE_SLUGS, true)) {
+                        return 'href="/docs/guide/' . $slug . $anchor . '"';
+                    }
                 }
 
-                // Non-guide .md — strip leading ./ and ../ and resolve
-                // against the repo root on GitHub.
+                // Any other relative path is a repo file reference
+                // (../src/App.php, ../tests/Foo.php, ../STANDARDS.md, …).
+                // Resolve it against the repo root on GitHub. The docs
+                // live in docs/, so a leading ../ climbs to the repo
+                // root; strip the ./ and ../ segments and prefix the
+                // blob base.
                 $clean = (string) preg_replace('#^(?:\.\./|\./)+#', '', $path);
                 $clean = ltrim($clean, '/');
 
