@@ -1,7 +1,7 @@
 # Pinned by digest for supply-chain reproducibility (OpenSSF Scorecard
 # Pinned-Dependencies). Dependabot's docker ecosystem bumps this digest weekly
 # so security patches keep flowing — see .github/dependabot.yml.
-FROM php:8.3-cli-bookworm@sha256:ed0bdc6dad3aea67fe296d9eea65a11b89677c1cbcf304601a630f4d318be308
+FROM php:8.5-cli-bookworm@sha256:f1c3261b0926b2f7c5a0cb4d7c9e48f43a07c15425edbe311427b1df1e529280
 
 ARG OPENSWOOLE_VERSION=
 ARG UOPZ_VERSION=
