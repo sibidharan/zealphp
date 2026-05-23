@@ -257,10 +257,11 @@ $room-&gt;push($payload);</code></pre>
         <code>WSRouter::room()</code>. <a href="/learn/cross-server-chat">Lesson 23</a> covers this.</li>
     </ul>
 
-    <p class="lesson-popout-cta">
+    <p>
       Source on disk: model at <code>src/Learn/Chatroom.php</code>, WS handler at
-      <code>route/learn_chatroom.php</code>. The full demo at <code>/api/learn/chatroom/lobby</code> is
-      the entrypoint &mdash; explore live.
+      <code>route/learn_chatroom.php</code>. Live entrypoint at <code>/api/learn/chatroom/lobby</code> &mdash;
+      explore the room list, hit <code>/api/learn/chatroom/recent</code> for any room&rsquo;s history,
+      open the WebSocket at <code>/ws/learn/chatroom</code> to chat.
     </p>
   </article>
 </div>

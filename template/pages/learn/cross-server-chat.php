@@ -303,7 +303,7 @@ WSRouter::broadcast('chat:room:42', json_encode(['msg' =&gt; 'lunch!']));
         single-box to multi-node &mdash; sessions, cache, counters, ws routing, the lot.</li>
     </ul>
 
-    <p class="lesson-popout-cta">
+    <p>
       Want the portfolio-page deep dive? See <a href="/pubsub">/pubsub</a> for the API reference + live
       demo, <a href="/ws#scaling">/ws#scaling</a> for the cross-server scaling story, and
       <a href="/store#pubsub">/store#pubsub</a> for the receiver-count semantics.
