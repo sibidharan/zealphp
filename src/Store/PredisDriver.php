@@ -483,8 +483,24 @@ final class PredisDriver implements RedisDriver
             foreach ($r as $i => $row) {
                 $coerced = [];
                 if (is_array($row)) {
-                    foreach ($row as $hk => $hv) {
-                        $coerced[(string) $hk] = is_scalar($hv) ? (string) $hv : '';
+                    // Predis RawCommand('HGETALL') returns the raw multi-bulk
+                    // as a flat indexed array [k0, v0, k1, v1, ...] — predis
+                    // only auto-pairs into assoc form when going through the
+                    // typed hgetall() method, which we can't use here because
+                    // we need pipeline batching. Pair them up ourselves so
+                    // the downstream TypeCodec sees [field => value].
+                    if (array_is_list($row)) {
+                        $n = count($row);
+                        for ($j = 0; $j < $n - 1; $j += 2) {
+                            $f = is_scalar($row[$j])   ? (string) $row[$j]   : '';
+                            $v = is_scalar($row[$j+1]) ? (string) $row[$j+1] : '';
+                            if ($f !== '') { $coerced[$f] = $v; }
+                        }
+                    } else {
+                        // Already-associative (some predis versions / parsers)
+                        foreach ($row as $hk => $hv) {
+                            $coerced[(string) $hk] = is_scalar($hv) ? (string) $hv : '';
+                        }
                     }
                 }
                 $out[(int) $i] = $coerced;
