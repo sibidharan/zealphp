@@ -40,17 +40,37 @@ final class TieredBackend implements StoreBackend
     /** @var array<string, true> */
     private array $invalidationChannels = [];
     private ?RedisPubSub $invalidationRunner = null;
+    /**
+     * C2: Shared HMAC secret for invalidation message authentication.
+     * NULL ⇒ insecure trust mode (any Redis writer can forge an evict).
+     * Set this on every node in the cluster via either constructor arg
+     * or ZEALPHP_TIERED_INVALIDATION_SECRET env var.
+     */
+    private ?string $invalidationSecret;
 
     public function __construct(
         private TableBackend $l1,
         private RedisBackend $l2,
         private int          $l1Ttl = 5,
         ?string $originId = null,
+        ?string $invalidationSecret = null,
     ) {
         if ($l1Ttl < 1) {
             throw new StoreException('TieredBackend l1Ttl must be >= 1 second');
         }
         $this->originId = $originId ?? gethostname() . '-' . getmypid() . '-' . bin2hex(random_bytes(4));
+        // Read secret from env if not explicitly passed. Empty env → null.
+        if ($invalidationSecret === null) {
+            $env = getenv('ZEALPHP_TIERED_INVALIDATION_SECRET');
+            $invalidationSecret = (is_string($env) && $env !== '') ? $env : null;
+        }
+        $this->invalidationSecret = $invalidationSecret;
+    }
+
+    /** True if HMAC verification is active. */
+    public function isInvalidationAuthenticated(): bool
+    {
+        return $this->invalidationSecret !== null;
     }
 
     public function l1(): TableBackend { return $this->l1; }
@@ -98,6 +118,25 @@ final class TieredBackend implements StoreBackend
             $name = is_string($msg['table'] ?? null) ? $msg['table'] : '';
             $key  = is_string($msg['key']   ?? null) ? $msg['key']   : '';
             if ($name === '' || $key === '') { return; }
+
+            // C2: HMAC verification. If a secret is configured, every peer
+            // message MUST carry a matching hmac. Drops silently (warn-log)
+            // on missing/invalid signature — defeats the
+            // "anyone with Redis write access can DoS the cluster's L1"
+            // attack.
+            if ($this->invalidationSecret !== null) {
+                $hmac = is_string($msg['hmac'] ?? null) ? $msg['hmac'] : '';
+                $expected = $this->computeHmac($name, $key, $origin);
+                if ($hmac === '' || !hash_equals($expected, $hmac)) {
+                    if (function_exists('elog')) {
+                        elog(
+                            "TieredBackend: dropped invalidation with bad/missing HMAC for {$name}:{$key} (origin={$origin})",
+                            'warn',
+                        );
+                    }
+                    return;
+                }
+            }
             $this->l1->del($name, $key);
         };
     }
@@ -107,15 +146,32 @@ final class TieredBackend implements StoreBackend
     {
         if (!isset($this->invalidationChannels[$this->channel($table)])) { return; }
         try {
-            $this->l2->publish($this->channel($table), (string) json_encode([
+            $msg = [
                 'table'  => $table,
                 'key'    => $key,
                 'origin' => $this->originId,
-            ]));
+            ];
+            if ($this->invalidationSecret !== null) {
+                $msg['hmac'] = $this->computeHmac($table, $key, $this->originId);
+            }
+            $this->l2->publish($this->channel($table), (string) json_encode($msg));
         } catch (\Throwable $e) {
             // Best-effort — invalidation drop just means peers stay stale up
             // to $l1Ttl. Don't propagate to the caller's write.
         }
+    }
+
+    /**
+     * Deterministic 64-bit truncated HMAC-SHA256 over `table|key|origin`.
+     * 64 bits is plenty for cache-invalidation forgery resistance — an
+     * attacker would need ~2^32 trials to land a collision, infeasible
+     * within any reasonable cache window. We don't need 256-bit MAC
+     * resistance because the payload is not a credential.
+     */
+    private function computeHmac(string $table, string $key, string $origin): string
+    {
+        $secret = $this->invalidationSecret ?? '';
+        return substr(hash_hmac('sha256', "$table|$key|$origin", $secret), 0, 16);
     }
 
     private function channel(string $table): string
