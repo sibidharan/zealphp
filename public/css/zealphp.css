@@ -427,7 +427,10 @@ button, summary { cursor: pointer; }
 .demo-output {
   background: var(--bg-alt); padding: 1.25rem;
   font-family: var(--font-mono); font-size: .82rem;
-  min-height: 120px; max-height: 360px; overflow: auto;
+  /* Was 360px — too tight for widget demos (chatroom, notes, tictactoe).
+     Bumped so full widgets fit without a nested scrollbar. JSON-payload
+     callers still scroll past this point naturally. */
+  min-height: 120px; max-height: min(720px, 80vh); overflow: auto;
   position: relative;
 }
 .demo-output .label {
