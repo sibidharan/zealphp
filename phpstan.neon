@@ -19,11 +19,6 @@ parameters:
         -
             message: '#^Method ZealPHP\\App::(tick|after)\(\) should return int but returns bool\|int\.$#'
             path: src/App.php
-        # OpenSwoole\Atomic::add()/sub() stubs claim bool|int return but at
-        # runtime ext-openswoole always returns the new value (int).
-        -
-            message: '#^Method ZealPHP\\Counter::(increment|decrement)\(\) should return int but returns bool\|int\.$#'
-            path: src/Counter.php
         # OpenSwoole\Runtime::enableCoroutine() accepts int flag (HOOK_ALL etc.)
         # at the C level; ide-helper stub declares it as bool.
         -
