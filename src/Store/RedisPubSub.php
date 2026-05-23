@@ -32,6 +32,7 @@ final class RedisPubSub
     /** Atomic so cross-coroutine mutation by stop() is visible to the runner. */
     private \OpenSwoole\Atomic $running;
     private string $stopChannel;
+    private Stats $stats;
 
     /**
      * @param int $maxAttempts  Bounded reconnect attempts (0 = unlimited, the
@@ -49,7 +50,11 @@ final class RedisPubSub
     ) {
         $this->running = new \OpenSwoole\Atomic(0);
         $this->stopChannel = $this->prefix . ':__pubsub_stop:' . bin2hex(random_bytes(4));
+        $this->stats = new Stats();
     }
+
+    /** Per-worker stats — pubsub_reconnects_total, pubsub_messages_received_total, pubsub_handler_errors_total. */
+    public function stats(): Stats { return $this->stats; }
 
     /**
      * Register a handler. Channels containing '*' are PSUBSCRIBE patterns;
@@ -113,6 +118,7 @@ final class RedisPubSub
                     if ($channel === $this->stopChannel) {
                         throw new PubSubStopException();
                     }
+                    $this->stats->inc('pubsub_messages_received_total');
                     $this->dispatch($payload, $channel, $pattern);
                 });
                 // Driver returned cleanly (PubSubStopException caught) — exit.
@@ -127,6 +133,7 @@ final class RedisPubSub
                     $this->running->set(0);
                     return;
                 }
+                $this->stats->inc('pubsub_reconnects_total');
                 $wait = self::backoffSeconds($attempt++);
                 error_log("RedisPubSub: subscribe loop dropped ({$e->getMessage()}) — backoff {$wait}s");
                 (new \OpenSwoole\Coroutine\Channel(1))->pop($wait);
@@ -149,6 +156,7 @@ final class RedisPubSub
             go(function () use ($handler, $payload, $channel, $pattern): void {
                 try { $handler($payload, $channel, $pattern); }
                 catch (\Throwable $e) {
+                    $this->stats->inc('pubsub_handler_errors_total');
                     error_log("RedisPubSub handler threw on {$channel}: {$e->getMessage()}");
                 }
             });

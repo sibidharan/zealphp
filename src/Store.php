@@ -306,6 +306,21 @@ class Store
     }
 
     /**
+     * Per-worker operational stats — pool acquires, timeouts, clients
+     * created. Empty array on the Table backend (no stats surface).
+     *
+     * @return array<string, int>
+     */
+    public static function stats(): array
+    {
+        $b = self::defaultBackend();
+        if ($b instanceof RedisBackend) {
+            return $b->pool()->stats()->snapshot();
+        }
+        return [];
+    }
+
+    /**
      * Reliable variant via Redis Streams (XADD). Returns the Redis-generated
      * message ID. Durable when Redis has AOF/RDB; at-least-once delivery
      * via consumer groups (one consumer per worker by default).

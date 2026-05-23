@@ -25,6 +25,7 @@ final class RedisConnectionPool
     private ?Channel $ch = null;
     private int $size;
     private ?RedisClient $syncClient = null;
+    private Stats $stats;
 
     /** @param array{prefer?: 'auto'|'phpredis'|'predis'} $opts */
     public function __construct(
@@ -33,7 +34,11 @@ final class RedisConnectionPool
         private array $opts = [],
     ) {
         $this->size = max(1, $size);
+        $this->stats = new Stats();
     }
+
+    /** Per-worker stats — pool_acquires_total, pool_acquire_timeouts_total, pool_clients_created_total. */
+    public function stats(): Stats { return $this->stats; }
 
     /**
      * Pop a client from the pool. In coroutine context, yields up to
@@ -43,15 +48,22 @@ final class RedisConnectionPool
     public function acquire(float $timeout = 5.0): RedisClient
     {
         if (Coroutine::getCid() < 0) {
-            return $this->syncClient ??= new RedisClient($this->url, $this->opts);
+            if ($this->syncClient === null) {
+                $this->syncClient = new RedisClient($this->url, $this->opts);
+                $this->stats->inc('pool_clients_created_total');
+            }
+            $this->stats->inc('pool_acquires_total');
+            return $this->syncClient;
         }
         $ch = $this->ensureChannel();
         $c = $ch->pop($timeout);
         if (!$c instanceof RedisClient) {
+            $this->stats->inc('pool_acquire_timeouts_total');
             throw new StoreException(
                 "RedisConnectionPool: acquire timed out after {$timeout}s (size={$this->size})"
             );
         }
+        $this->stats->inc('pool_acquires_total');
         return $c;
     }
 
@@ -120,6 +132,7 @@ final class RedisConnectionPool
         $ch = new Channel($this->size);
         for ($i = 0; $i < $this->size; $i++) {
             $ch->push(new RedisClient($this->url, $this->opts));
+            $this->stats->inc('pool_clients_created_total');
         }
         $this->ch = $ch;
         return $ch;
