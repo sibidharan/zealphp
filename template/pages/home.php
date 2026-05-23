@@ -344,7 +344,7 @@ $data = Store::get('cache', $key);
 // Or flip to cross-NODE in one line
 Store::defaultBackend(Store::BACKEND_REDIS);
 Store::publish('chat:room', $payload);
-App::onPubSub('chat:room', $handler);</code></pre>
+App::subscribe('chat:room', $handler);</code></pre>
         </div>
         <div class="code-compare-panel">
           <div class="compare-label">FastAPI — single process limits</div>

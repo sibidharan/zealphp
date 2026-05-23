@@ -100,7 +100,7 @@ The cross-node primitives + `TieredBackend` (L1+L2) + `WSRouter` (cross-server W
 
 ```php
 // app.php boot
-App::onPubSub('alerts:critical', function (string $payload, string $channel) {
+App::subscribe('alerts:critical', function (string $payload, string $channel) {
     error_log("ALERT on $channel: $payload");
 });
 
@@ -112,7 +112,7 @@ $count = Store::publish('alerts:critical', json_encode(['err' => 'db-down']));
 ### Try it — reliable Streams (at-least-once)
 
 ```php
-App::onReliableMessage('orders', function (string $payload, string $id, string $stream): bool {
+App::subscribeReliable('orders', function (string $payload, string $id, string $stream): bool {
     $ok = processOrder(json_decode($payload, true));
     return $ok;  // true → XACK; false/throw → leave pending, retried
 });
@@ -160,7 +160,7 @@ WSRouter::broadcast('chat:room:42', json_encode($msg));
 - Streams runner: `src/Store/RedisStreams.php`
 - Tiered: `src/Store/TieredBackend.php`
 - WSRouter: `src/WSRouter.php`
-- App-level facade: `App::onPubSub()`, `App::onReliableMessage()` in `src/App.php`
+- App-level facade: `App::subscribe()`, `App::subscribeReliable()` in `src/App.php`
 
 ### Demo endpoints
 - `GET /demo/pubsub/publish?channel=demo:pubsub&msg=hi` — fire a publish

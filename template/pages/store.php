@@ -259,13 +259,13 @@ $users = Cache::getOrCompute("users:active", fn() =&gt; DB::select(...), ttl: 60
 
 <div class="code-block">
 <pre><code class="language-php">// Fire-and-forget pub/sub
-App::onPubSub('chat:room:42', function (string $payload, string $channel) {
+App::subscribe('chat:room:42', function (string $payload, string $channel) {
     // runs in every worker that's registered; routes to your local fd map
 });
 $receivers = Store::publish('chat:room:42', json_encode($message));
 
 // Reliable variant via Redis Streams (at-least-once via consumer groups)
-App::onReliableMessage('orders', function (string $payload, string $id, string $stream): bool {
+App::subscribeReliable('orders', function (string $payload, string $id, string $stream): bool {
     $ok = processOrder($payload);
     return $ok; // true → XACK; false/throw → leave pending
 });
@@ -456,7 +456,7 @@ $app->route('/health/store', fn() =&gt; Store::stats());
 <h3 id="ph-boot-checks">H6 + H7 — boot-time advisories</h3>
 <ul class="store-col-list">
   <li><strong>H6 (ping):</strong> when <code>ZEALPHP_STORE_BACKEND=redis</code>, <code>App::run()</code> PINGs the pool once at boot. Failure → loud <code>error_log</code> in the master before workers fork. Misconfigured URL surfaces immediately, not after the first request 5 seconds in.</li>
-  <li><strong>H7 (HOOK_ALL + phpredis):</strong> phpredis SUBSCRIBE blocks the worker without <code>OpenSwoole\Runtime::HOOK_ALL</code> — the production default. If you've explicitly disabled HOOK_ALL AND have <code>App::onPubSub</code> handlers registered AND phpredis is the resolved driver, boot emits a warning telling you to either re-enable HOOK_ALL or set <code>ZEALPHP_REDIS_PREFER=predis</code>.</li>
+  <li><strong>H7 (HOOK_ALL + phpredis):</strong> phpredis SUBSCRIBE blocks the worker without <code>OpenSwoole\Runtime::HOOK_ALL</code> — the production default. If you've explicitly disabled HOOK_ALL AND have <code>App::subscribe</code> handlers registered AND phpredis is the resolved driver, boot emits a warning telling you to either re-enable HOOK_ALL or set <code>ZEALPHP_REDIS_PREFER=predis</code>.</li>
 </ul>
 
 <h3 id="ph-exists-cached">H8 — <code>TieredBackend::existsCached()</code></h3>

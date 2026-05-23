@@ -135,7 +135,7 @@ PHP]); ?>
 	<h2 class="ws-h2" id="scaling">Scaling past one server</h2>
 	<p>Everything above lives in one OpenSwoole process tree. Run two ZealPHP instances behind a load balancer and their <code>Store</code> client registries are completely independent — a broadcast in process A doesn&rsquo;t reach clients connected to process B. As of v0.2.39, ZealPHP ships a first-class pub/sub primitive for the cross-server routing fabric:</p>
 	<?php App::render('/components/_code', [
-	    'label' => 'Cross-server WebSocket routing — Store::publish + App::onPubSub',
+	    'label' => 'Cross-server WebSocket routing — Store::publish + App::subscribe',
 	    'lang'  => 'php',
 	    'code'  => <<<'PHP'
 // app.php — flip Store to Redis. ALL nodes share the same view.
@@ -149,7 +149,7 @@ $myServerId = gethostname() . ':' . getmypid();
 
 // Subscribe to YOUR identity channel — only THIS server's subscriber
 // receives messages routed here.
-App::onPubSub("ws:server:$myServerId", function (string $payload) use ($server, $localFds) {
+App::subscribe("ws:server:$myServerId", function (string $payload) use ($server, $localFds) {
     $msg = json_decode($payload, true);
     $fd  = $localFds[$msg['client_id']] ?? null;
     if ($fd !== null && $server->isEstablished($fd)) {
@@ -165,7 +165,7 @@ Store::publish("ws:server:$owner", json_encode([
 ]));
 
 // Or broadcast to a room across all servers:
-App::onPubSub('chat:room:42', function (string $payload) use ($server, $roomMembers) {
+App::subscribe('chat:room:42', function (string $payload) use ($server, $roomMembers) {
     foreach ($roomMembers as $fd) {
         if ($server->isEstablished($fd)) { $server->push($fd, $payload); }
     }
@@ -173,7 +173,7 @@ App::onPubSub('chat:room:42', function (string $payload) use ($server, $roomMemb
 Store::publish('chat:room:42', json_encode(['user' => 'alice', 'text' => 'hi']));
 PHP]); ?>
 	<p>The OpenSwoole <code>$fd</code> is process-local — only the server that accepted the TCP connection can push to it. Redis is the routing fabric: PUBLISH carries the message to the owning server, owner's subscriber translates client_id → local fd → <code>$server-&gt;push()</code>. ~0.5ms loopback, sub-millisecond cross-region (validated in the <a href="https://github.com/sibidharan/zealphp/blob/master/docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md" target="_blank">pub/sub spike</a>). Scales to N servers symmetrically — no peer-to-peer state, every routing decision is one Redis lookup + PUBLISH.</p>
-	<p>For <strong>at-least-once</strong> delivery (work queues, command/event sourcing), pair with <code>Store::publishReliable</code> + <code>App::onReliableMessage</code> — Redis Streams with consumer groups. See <a href="/store#pubsub">/store#pubsub</a> + the deeper walkthrough at <a href="/learn/websocket#cross-server-routing">/learn/websocket#cross-server-routing</a>.</p>
+	<p>For <strong>at-least-once</strong> delivery (work queues, command/event sourcing), pair with <code>Store::publishReliable</code> + <code>App::subscribeReliable</code> — Redis Streams with consumer groups. See <a href="/store#pubsub">/store#pubsub</a> + the deeper walkthrough at <a href="/learn/websocket#cross-server-routing">/learn/websocket#cross-server-routing</a>.</p>
 	<?php App::render('/components/_callout', [
 	    'variant' => 'info',
 	    'title'   => 'Driver choice (both validated)',

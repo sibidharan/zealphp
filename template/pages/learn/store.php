@@ -243,14 +243,14 @@ $users = Cache::getOrCompute('users:active', fn() =&gt; DB::select(...), ttl: 60
       <code>StoreException</code>):
     </p>
     <pre><code class="language-php">// Fire-and-forget pub/sub (best-effort, ~0.5ms loopback)
-App::onPubSub('chat:room:42', function (string $payload, string $channel) {
+App::subscribe('chat:room:42', function (string $payload, string $channel) {
     // every worker on every server with this handler runs the callback
     // — perfect for fan-out broadcast to local WebSocket fds.
 });
 $receivers = Store::publish('chat:room:42', json_encode($message));
 
 // Reliable at-least-once via Redis Streams (consumer groups)
-App::onReliableMessage('orders', function (string $payload, string $id, string $stream): bool {
+App::subscribeReliable('orders', function (string $payload, string $id, string $stream): bool {
     return processOrder($payload); // true → XACK; false/throw → leave pending
 });
 $messageId = Store::publishReliable('orders', json_encode($order));</code></pre>
@@ -269,7 +269,7 @@ $messageId = Store::publishReliable('orders', json_encode($order));</code></pre>
       '<code>Counter</code> is a lock-free atomic integer for the simple "one global counter" case.',
       'Allocate both <em>before</em> <code>$app-&gt;run()</code> so the master shares them on fork.',
       'Need cross-node? One line: <code>Store::defaultBackend(Store::BACKEND_REDIS)</code> — every existing handler routes to Redis with zero changes.',
-      'Cross-node messaging: <code>Store::publish</code> + <code>App::onPubSub</code> for fire-and-forget, <code>Store::publishReliable</code> + <code>App::onReliableMessage</code> for at-least-once.',
+      'Cross-node messaging: <code>Store::publish</code> + <code>App::subscribe</code> for fire-and-forget, <code>Store::publishReliable</code> + <code>App::subscribeReliable</code> for at-least-once.',
     ]]); ?>
 
     <div class="lesson-chips">

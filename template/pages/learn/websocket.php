@@ -151,7 +151,7 @@ ws.send('ping');   // round-trip test</code></pre>
       share their <code>ws_clients</code> tables &mdash; a broadcast in process A doesn&rsquo;t
       reach clients connected to process B. The fix is a shared bus that both processes subscribe
       to. ZealPHP v0.2.39 ships this as a first-class primitive: <code>Store::publish</code> +
-      <code>App::onPubSub</code> on the Redis backend.
+      <code>App::subscribe</code> on the Redis backend.
     </p>
     <pre><code class="language-php">// app.php — flip Store to Redis once. Counter follows automatically.
 Store::defaultBackend(Store::BACKEND_REDIS);
@@ -159,7 +159,7 @@ Store::defaultBackend(Store::BACKEND_REDIS);
 // Each ZealPHP process registers a subscriber at boot. ZealPHP spawns the
 // dedicated subscriber coroutine in onWorkerStart for you; handlers run in
 // go() per message so a slow handler can't block the next read.
-App::onPubSub('counter:bump', function (string $payload) {
+App::subscribe('counter:bump', function (string $payload) {
     $data = json_decode($payload, true);
     broadcast_counter((int) $data['value']);
 });
@@ -188,7 +188,7 @@ Store::publish("ws:server:$owner", json_encode([
 ]));
 
 // Each server's subscriber routes to the local fd.
-App::onPubSub("ws:server:{$myServerId}", function (string $payload) use ($server, $fdMap) {
+App::subscribe("ws:server:{$myServerId}", function (string $payload) use ($server, $fdMap) {
     $msg = json_decode($payload, true);
     $fd = $fdMap[$msg['client_id']] ?? null;
     if ($fd !== null &amp;&amp; $server-&gt;isEstablished($fd)) {
@@ -232,7 +232,7 @@ App::onPubSub("ws:server:{$myServerId}", function (string $payload) use ($server
       '<code>$app-&gt;ws($path, onMessage, onOpen, onClose)</code> — three callbacks handle the lifecycle.',
       'Track open fds in <code>Store</code> so you can broadcast; <code>isEstablished($fd)</code> guards against races.',
       'SSE for push-only, WebSocket for two-way. Don\'t use WebSocket when SSE would do.',
-      'Scale past one server with <code>Store::publish</code> + <code>App::onPubSub</code> on the Redis backend — each process subscribes and re-broadcasts to its local <code>ws_clients</code>. <code>Store::publishReliable</code> for at-least-once via Redis Streams.',
+      'Scale past one server with <code>Store::publish</code> + <code>App::subscribe</code> on the Redis backend — each process subscribes and re-broadcasts to its local <code>ws_clients</code>. <code>Store::publishReliable</code> for at-least-once via Redis Streams.',
     ]]); ?>
 
     <div class="lesson-chips">

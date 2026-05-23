@@ -12,7 +12,7 @@
 
     <?php App::render('/components/_youwilllearn', ['items' => [
       'Why <code>$fd</code> is process-local and what that means for scaling beyond one box',
-      'How <code>Store::publish</code> + <code>App::onPubSub</code> form a cross-server routing fabric',
+      'How <code>Store::publish</code> + <code>App::subscribe</code> form a cross-server routing fabric',
       'The <code>ws_owner</code> pattern: a shared map of client &rarr; server &rarr; fd',
       'How the <code>WSRouter</code> helper bundles the whole pattern in five calls',
     ]]); ?>
@@ -92,12 +92,12 @@ Store::defaultBackend(Store::BACKEND_REDIS);
     </p>
 <pre><code class="language-php">$myId = gethostname() . ':' . getmypid();
 
-App::onPubSub("ws:server:{$myId}", function (string $payload): void {
+App::subscribe("ws:server:{$myId}", function (string $payload): void {
     $msg = json_decode($payload, true);
     // ... deliver locally to $msg['fd'] ...
 });</code></pre>
     <p>
-      <code>App::onPubSub</code> spawns a dedicated subscriber coroutine per worker at
+      <code>App::subscribe</code> spawns a dedicated subscriber coroutine per worker at
       <code>onWorkerStart</code>. Cleanup on shutdown is automatic. See
       <a href="/pubsub#quickstart">/pubsub#quickstart</a>.
     </p>
@@ -148,7 +148,7 @@ App::ws('/chat',
 );</code></pre>
 
     <h3>Step 3: Subscribe to your own inbox</h3>
-<pre><code class="language-php">App::onPubSub("ws:server:{$myId}", function (string $payload) use (&amp;$server): void {
+<pre><code class="language-php">App::subscribe("ws:server:{$myId}", function (string $payload) use (&amp;$server): void {
     $msg = json_decode($payload, true);
     $fd  = (int)($msg['fd'] ?? 0);
     if ($fd &gt; 0 &amp;&amp; $server-&gt;isEstablished($fd)) {
@@ -218,7 +218,7 @@ open http://localhost:9090/chat?user=bob
 <pre><code class="language-php">use ZealPHP\WSRouter;
 
 // app.php (before App::run())
-WSRouter::init();          // wires Store::make('ws_owner'&hellip;) + App::onPubSub('ws:server:&hellip;')
+WSRouter::init();          // wires Store::make('ws_owner'&hellip;) + App::subscribe('ws:server:&hellip;')
 
 App::ws('/chat',
     onMessage: function ($server, $frame) { /* &hellip; */ },
@@ -256,7 +256,7 @@ WSRouter::broadcast('chat:room:42', json_encode(['msg' =&gt; 'lunch!']));
     <p>
       No fan-out service to deploy &mdash; Redis pub/sub does it. For at-least-once delivery (audit
       logs, payments, work queues), swap <code>Store::publish</code> for <code>Store::publishReliable</code>
-      and <code>App::onPubSub</code> for <code>App::onReliableMessage</code> &mdash; same shape, backed by
+      and <code>App::subscribe</code> for <code>App::subscribeReliable</code> &mdash; same shape, backed by
       Redis Streams with consumer groups. See <a href="/pubsub#reliable">/pubsub#reliable</a>.
     </p>
 

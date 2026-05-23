@@ -23,7 +23,7 @@ use ZealPHP\App;
 Store::defaultBackend(Store::BACKEND_REDIS);
 
 // Step 2: register a subscriber at boot. Runs in EVERY worker.
-App::onPubSub('hello:world', function (string $payload, string $channel) {
+App::subscribe('hello:world', function (string $payload, string $channel) {
     error_log("[$channel] received: $payload");
 });
 
@@ -35,7 +35,7 @@ $receivers = Store::publish('hello:world', 'hi from anywhere');
 <h2 class="store-h2-section" id="reliable">Reliable variant &mdash; Redis Streams</h2>
 <p class="store-lead-tight">When &ldquo;might drop during a subscriber reconnect&rdquo; isn&rsquo;t acceptable: switch to the Streams primitive. Same shape; ACK semantics; consumer groups distribute work across workers and servers.</p>
 <div class="code-block">
-<pre><code class="language-php">App::onReliableMessage('orders', function (string $payload, string $id, string $stream): bool {
+<pre><code class="language-php">App::subscribeReliable('orders', function (string $payload, string $id, string $stream): bool {
     $order = json_decode($payload, true);
     $ok = processOrder($order);
     return $ok;  // true → XACK (done); false/throw → leave pending, retried on reconnect
@@ -72,7 +72,7 @@ App::ws('/ws', function ($server, $frame) use (&$localFds) {
 });
 
 // Each server's subscriber only handles its OWN routed messages.
-App::onPubSub("ws:server:$myServerId", function (string $payload) use ($server, &$localFds) {
+App::subscribe("ws:server:$myServerId", function (string $payload) use ($server, &$localFds) {
     $msg = json_decode($payload, true);
     $fd  = $localFds[$msg['client_id']] ?? null;
     if ($fd !== null &amp;&amp; $server-&gt;isEstablished($fd)) {
