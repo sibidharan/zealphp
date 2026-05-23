@@ -980,12 +980,10 @@ class App
      * See `App::$cgi_mode` for the full trade-off. No-arg call returns the current mode.
      * Only takes effect when `processIsolation()` is on.
      */
-    public static function cgiMode(?string $mode = null): string
+    public static function cgiMode(CgiMode|string|null $mode = null): string
     {
         if ($mode !== null) {
-            if ($mode !== 'proc' && $mode !== 'fork' && $mode !== 'fcgi') {
-                throw new \InvalidArgumentException("App::cgiMode() expects 'proc', 'fork', or 'fcgi', got '{$mode}'.");
-            }
+            $mode = CgiMode::coerce($mode)->value;
             self::$cgi_mode = $mode;
         }
         return self::$cgi_mode;

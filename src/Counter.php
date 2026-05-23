@@ -7,7 +7,9 @@ namespace ZealPHP;
 use OpenSwoole\Atomic;
 use ZealPHP\Counter\AtomicBackend;
 use ZealPHP\Counter\CounterBackend;
+use ZealPHP\Counter\CounterBackendKind;
 use ZealPHP\Counter\RedisCounterBackend;
+use ZealPHP\Store\DriverPreference;
 use ZealPHP\Store\RedisConnectionPool;
 use ZealPHP\Store\StoreException;
 
@@ -135,13 +137,11 @@ class Counter
      * @param  ?string                          $kind  'atomic' (default) or 'redis'; null to read current
      * @param  string|array<string,mixed>       $conn  redis URL or ['url'=>, 'pool_size'=>, 'prefix'=>]
      */
-    public static function defaultBackend(?string $kind = null, string|array $conn = []): CounterBackend
+    public static function defaultBackend(CounterBackendKind|string|null $kind = null, string|array $conn = []): CounterBackend
     {
         if ($kind !== null) {
-            if (!in_array($kind, ['atomic', 'redis'], true)) {
-                throw new \InvalidArgumentException("Unknown Counter backend kind: $kind (use 'atomic' or 'redis')");
-            }
-            self::$backendConfig = ['kind' => $kind, 'conn' => $conn];
+            $kindStr = CounterBackendKind::coerce($kind)->value;
+            self::$backendConfig = ['kind' => $kindStr, 'conn' => $conn];
             self::$backend = null;
         }
         return self::$backend ??= self::buildBackend(self::$backendConfig);
@@ -162,10 +162,15 @@ class Counter
         $url    = isset($conn['url']) && is_string($conn['url']) ? $conn['url'] : self::redisUrlFromEnv();
         $size   = isset($conn['pool_size']) && is_int($conn['pool_size']) ? $conn['pool_size'] : 8;
         $prefix = isset($conn['prefix']) && is_string($conn['prefix']) ? $conn['prefix'] : 'zealstore';
-        if (isset($conn['prefer']) && is_string($conn['prefer'])) {
-            $p = strtolower($conn['prefer']);
-            if (in_array($p, ['auto', 'phpredis', 'predis'], true)) {
-                $opts['prefer'] = $p;
+        if (isset($conn['prefer'])) {
+            try {
+                $opts['prefer'] = DriverPreference::coerce(
+                    $conn['prefer'] instanceof DriverPreference || is_string($conn['prefer'])
+                        ? $conn['prefer']
+                        : '',
+                )->value;
+            } catch (\InvalidArgumentException) {
+                /* fall back to env-default */
             }
         }
         return new RedisCounterBackend(new RedisConnectionPool($url, $size, $opts), $prefix);

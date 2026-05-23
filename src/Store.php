@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace ZealPHP;
 
 use OpenSwoole\Table;
+use ZealPHP\Store\DriverPreference;
 use ZealPHP\Store\RedisBackend;
 use ZealPHP\Store\RedisConnectionPool;
 use ZealPHP\Store\StoreBackend;
+use ZealPHP\Store\StoreBackendKind;
 use ZealPHP\Store\StoreException;
 use ZealPHP\Store\TableBackend;
 
@@ -74,16 +76,17 @@ class Store
     /**
      * Get or set the process-wide default backend.
      *
-     * @param  ?string                          $kind  'table' (default) or 'redis'; null to read current
-     * @param  string|array<string,mixed>       $conn  redis URL string, OR ['url'=>, 'pool_size'=>, 'prefix'=>]
+     * Prefers `StoreBackendKind` (type-safe enum) but accepts the bare
+     * string literal forms for BC: `'table'` / `'redis'`.
+     *
+     * @param  StoreBackendKind|string|null     $kind  enum or bare string; null to read current
+     * @param  string|array<string,mixed>       $conn  redis URL string OR ['url'=>, 'pool_size'=>, 'prefix'=>, 'prefer'=>]
      */
-    public static function defaultBackend(?string $kind = null, string|array $conn = []): StoreBackend
+    public static function defaultBackend(StoreBackendKind|string|null $kind = null, string|array $conn = []): StoreBackend
     {
         if ($kind !== null) {
-            if (!in_array($kind, ['table', 'redis'], true)) {
-                throw new \InvalidArgumentException("Unknown Store backend kind: $kind (use 'table' or 'redis')");
-            }
-            self::$backendConfig = ['kind' => $kind, 'conn' => $conn];
+            $kindStr = StoreBackendKind::coerce($kind)->value;
+            self::$backendConfig = ['kind' => $kindStr, 'conn' => $conn];
             self::$backend = null;
         }
         return self::$backend ??= self::buildBackend(self::$backendConfig);
@@ -106,10 +109,17 @@ class Store
         $prefix = isset($conn['prefix']) && is_string($conn['prefix']) ? $conn['prefix'] : 'zealstore';
         $opts   = self::poolOptsFromEnv();
         // Allow ['prefer' => 'phpredis'|'predis'|'auto'] to override the env default.
-        if (isset($conn['prefer']) && is_string($conn['prefer'])) {
-            $p = strtolower($conn['prefer']);
-            if (in_array($p, ['auto', 'phpredis', 'predis'], true)) {
-                $opts['prefer'] = $p;
+        if (isset($conn['prefer'])) {
+            // Accept either the enum or the bare string — both routes go
+            // through DriverPreference::coerce.
+            try {
+                $opts['prefer'] = DriverPreference::coerce(
+                    $conn['prefer'] instanceof DriverPreference || is_string($conn['prefer'])
+                        ? $conn['prefer']
+                        : '',
+                )->value;
+            } catch (\InvalidArgumentException) {
+                /* silently fall back to env-default — invalid prefer is non-fatal */
             }
         }
         return new RedisBackend(new RedisConnectionPool($url, $size, $opts), $prefix);
