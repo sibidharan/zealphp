@@ -2035,12 +2035,16 @@ class App
             $useCo    = $cfg['coroutine'];
             for ($i = 0; $i < $workers; $i++) {
                 $procName = $workers > 1 ? "{$name}-{$i}" : $name;
+                // Process constructor's enable_coroutine=true initializes
+                // coroutine state in the PARENT process — which triggers the
+                // eventLoop early and breaks $server->start(). We set it
+                // false and run the user callable inside Coroutine::run
+                // INSIDE the child instead, getting the same effect without
+                // contaminating the master's event-loop state.
                 $process = new \OpenSwoole\Process(
                     function (\OpenSwoole\Process $p) use ($cb, $procName, $useCo): void {
                         @cli_set_process_title("zealphp:{$procName}");
                         if ($useCo) {
-                            // Run the user callable inside Coroutine::run so
-                            // hooked I/O yields naturally.
                             \OpenSwoole\Coroutine::run(function () use ($cb, $p, $procName): void {
                                 try { $cb($p); }
                                 catch (\Throwable $e) {
@@ -2056,7 +2060,7 @@ class App
                     },
                     /* redirect_stdin_stdout */ false,
                     /* pipe_type */            0,
-                    /* enable_coroutine */     $useCo,
+                    /* enable_coroutine */     false,
                 );
                 $server->addProcess($process);
             }
@@ -5180,9 +5184,11 @@ HELP;
         self::$worker_num = $resolvedWorkers;
         self::$task_worker_num = $resolvedTask;
 
-        // Register master-side signal handlers (workers register their own
-        // inside onWorkerStart).
-        self::applySignalHandlersFor('master');
+        // Master-side signal handlers must register AFTER the server's event
+        // loop is up — otherwise `Process::signal()` initializes the loop
+        // early and `$server->start()` then fails with "eventLoop has
+        // already been created". The actual registration happens inside
+        // `$server->on('start', …)` below; here we just mark intent.
 
         // Reset onProcess wiring flag — wireProcessHandlers actually runs
         // later in run() once $server is built; track here to make the
@@ -5918,6 +5924,15 @@ HELP;
         // no-ops because the master is already in its event loop.
         self::$server = $server;
         self::wireProcessHandlers();
+
+        // Master-side signal handlers wire from inside the on-start callback —
+        // the event loop is alive at that point so Process::signal() doesn't
+        // pre-initialize it.
+        if (self::$signalHandlers !== []) {
+            $server->on('start', function () {
+                self::applySignalHandlersFor('master');
+            });
+        }
 
         elog("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
         $server->start();
