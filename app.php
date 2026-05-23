@@ -162,6 +162,12 @@ if ($perlBin !== '') {
     App::registerCgiBackend('.pl', ['mode' => 'proc', 'interpreter' => $perlBin, 'exec_paths' => ['/cgi-bin']]);
 }
 
+// Apache `ScriptAlias` parity — anything under /cgi-bin/ runs as CGI regardless
+// of extension. For files whose extension has a registered backend (.py/.pl
+// above), the per-extension interpreter wins; everything else runs via its
+// own `#!` shebang (requires the file to be `+x`, like Apache).
+App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc']);
+
 $benchMode             = bench_mode_enabled();
 $demoMiddleware        = env_flag('ZEALPHP_DEMO_MIDDLEWARE', false);
 $compressionMiddleware = env_flag('ZEALPHP_COMPRESSION_MIDDLEWARE', false);

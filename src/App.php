@@ -1218,24 +1218,42 @@ class App
     public static function resolveCgiBackend(string $absPath, string $urlPath = ''): array
     {
         $url = '/' . ltrim($urlPath, '/');
-        foreach (self::$cgi_script_aliases as $prefix => $cfg) {
-            if (self::pathUnderPrefix($url, $prefix)) {
-                return ['backend' => $cfg, 'mayExecute' => true];
-            }
-        }
         $ext = '.' . strtolower(pathinfo($absPath, PATHINFO_EXTENSION));
+
+        // Per-extension registry is the source of truth for *which interpreter*
+        // — it carries the explicit interpreter / address / fcgi_params. Aliases
+        // are deliberately generic (no interpreter), so when both apply the
+        // per-extension config wins; the alias still supplies the ExecCGI scope.
+        $backend = null;
+        $may     = false;
         if (isset(self::$cgi_backends[$ext])) {
-            $b = self::$cgi_backends[$ext];
-            $may = false;
-            foreach (($b['exec_paths'] ?? []) as $p) {
+            $backend = self::$cgi_backends[$ext];
+            foreach (($backend['exec_paths'] ?? []) as $p) {
                 if (self::pathUnderPrefix($url, '/' . trim((string)$p, '/'))) {
                     $may = true;
                     break;
                 }
             }
-            return ['backend' => $b, 'mayExecute' => $may];
         }
-        return ['backend' => ['mode' => self::$cgi_mode], 'mayExecute' => false];
+
+        // Script aliases broaden ExecCGI scope (Apache `ScriptAlias` parity), and
+        // supply a fallback backend config when no per-extension entry matched.
+        if (!$may || $backend === null) {
+            foreach (self::$cgi_script_aliases as $prefix => $cfg) {
+                if (self::pathUnderPrefix($url, $prefix)) {
+                    $may = true;
+                    if ($backend === null) {
+                        $backend = $cfg;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if ($backend === null) {
+            return ['backend' => ['mode' => self::$cgi_mode], 'mayExecute' => false];
+        }
+        return ['backend' => $backend, 'mayExecute' => $may];
     }
 
     /**
@@ -3954,11 +3972,24 @@ class App
         ];
 
         if ($interpreter === null) {
-            // PHP target: route through cgi_worker.php for uopz header/cookie captures.
-            $cgiWorker = __DIR__ . '/cgi_worker.php';
-            $cmd = PHP_BINARY . ' ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
+            $isPhp = str_ends_with(strtolower($path), '.php');
+            if ($isPhp) {
+                // PHP target: route through cgi_worker.php for uopz header/cookie captures.
+                $cgiWorker = __DIR__ . '/cgi_worker.php';
+                $cmd = PHP_BINARY . ' ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
+            } else {
+                // Non-PHP file with no explicit interpreter (the `cgiScriptAlias`-only
+                // path): exec the file directly, relying on its `#!` shebang line.
+                // Apache `ScriptAlias` parity — Apache requires the file to be
+                // executable (+x) for CGI dispatch; we do the same.
+                if (!is_executable($path)) {
+                    elog("cgiSubprocess: file not executable; ScriptAlias dispatch requires +x and a #! shebang: $path", "error");
+                    return 500;
+                }
+                $cmd = escapeshellarg($path);
+            }
         } else {
-            // Non-PHP target: exec interpreter directly with the script path.
+            // Non-PHP target with an explicit interpreter (e.g. `.py` + `/usr/bin/python3`).
             // The script must output CGI/1.1 headers (Content-Type + blank line + body).
             $cmd = escapeshellarg($interpreter) . ' ' . escapeshellarg($path);
         }
@@ -3983,13 +4014,15 @@ class App
         } catch (\Throwable $e) {}
         fclose($pipes[0]);
 
-        // ── Non-PHP interpreter path (RFC 3875 CGI) ───────────────────────
-        // A raw Python/Perl/etc. CGI script knows nothing about the cgi_worker
-        // stderr-metadata protocol below — it writes a standard CGI response to
-        // STDOUT: header lines, a blank line, then the body. Parse that directly
-        // (Apache mod_cgi: ap_scan_script_header_err_brigade_ex()). stderr is
-        // drained only for error visibility (cgi_common.h log_script_err()).
-        if ($interpreter !== null) {
+        // ── Non-PHP CGI path (RFC 3875) ───────────────────────────────────
+        // A raw Python/Perl/etc. CGI script — whether reached via an explicit
+        // `interpreter` registration OR via shebang exec under a `cgiScriptAlias`
+        // — knows nothing about the cgi_worker stderr-metadata protocol below.
+        // It writes a standard CGI response to STDOUT: header lines, a blank
+        // line, then the body. Parse that directly (Apache mod_cgi parity:
+        // ap_scan_script_header_err_brigade_ex()). stderr is drained for error
+        // visibility (cgi_common.h log_script_err()).
+        if ($interpreter !== null || !str_ends_with(strtolower($path), '.php')) {
             return self::cgiInterpreterResponse($process, $pipes, $path);
         }
 

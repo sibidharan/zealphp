@@ -88,4 +88,47 @@ final class CgiBackendResolveTest extends TestCase
         App::cgiScriptAlias('/bin', []);
         $this->assertSame('proc', App::$cgi_script_aliases['/bin']['mode']);
     }
+
+    /**
+     * Apache parity: when a registered extension AND a ScriptAlias both
+     * cover the same URL, the per-extension config wins — it's the source of
+     * truth for the interpreter. The alias still supplies the ExecCGI scope.
+     * (Regression guard: previously the alias shadowed per-ext, causing
+     *  Python/Perl scripts to fall through to the PHP cgi_worker.)
+     */
+    public function testPerExtensionInterpreterWinsOverAliasWhenBothMatch(): void
+    {
+        App::registerCgiBackend('.py', ['mode' => 'proc', 'interpreter' => '/usr/bin/python3', 'exec_paths' => ['/cgi-bin']]);
+        App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc']);
+        $r = App::resolveCgiBackend('/abs/public/cgi-bin/x.py', '/cgi-bin/x.py');
+        $this->assertTrue($r['mayExecute']);
+        $this->assertSame('/usr/bin/python3', $r['backend']['interpreter'] ?? null);
+    }
+
+    /**
+     * Aliases broaden ExecCGI scope: when a per-extension entry exists but
+     * the URL is outside its `exec_paths`, an overlapping alias should still
+     * permit execution (and use the per-extension interpreter).
+     */
+    public function testAliasBroadensExecScopeOfPerExtensionInterpreter(): void
+    {
+        App::registerCgiBackend('.py', ['mode' => 'proc', 'interpreter' => '/usr/bin/python3', 'exec_paths' => ['/cgi-bin']]);
+        App::cgiScriptAlias('/srv-cgi', ['mode' => 'proc']);
+        $r = App::resolveCgiBackend('/abs/public/srv-cgi/x.py', '/srv-cgi/x.py');
+        $this->assertTrue($r['mayExecute'], 'alias supplies scope');
+        $this->assertSame('/usr/bin/python3', $r['backend']['interpreter'] ?? null, 'per-ext interpreter still wins');
+    }
+
+    /**
+     * When no per-extension backend matches but a ScriptAlias does, the
+     * alias config is returned with `mayExecute = true`. The downstream
+     * dispatch in cgiSubprocess shebang-execs the file (interpreter absent).
+     */
+    public function testAliasOnlyReturnsAliasBackendForUnregisteredExtension(): void
+    {
+        App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc']);
+        $r = App::resolveCgiBackend('/abs/public/cgi-bin/hello.sh', '/cgi-bin/hello.sh');
+        $this->assertTrue($r['mayExecute']);
+        $this->assertArrayNotHasKey('interpreter', $r['backend']);
+    }
 }
