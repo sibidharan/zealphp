@@ -463,6 +463,22 @@ The shell script `scripts/zealphp.sh` is an optional higher-level wrapper. All c
 
 **Redis-backed sessions (v0.2.40)** — `ZealPHP\Session\Handler\StoreSessionHandler` rides whichever backend `Store::defaultBackend()` is configured with: Table for single-node, Redis for cross-node sticky-or-not-sticky LB setups, Tiered for both. Register with `StoreSessionHandler::register(int $ttl = 1440)` BEFORE `App::run()` (creates the `zealphp_sessions` Store table with `mode='ttl'` when on Redis so rows expire server-side). Pre-existing `RedisSessionHandler` (ext-redis-direct) stays — works fine for phpredis users; the new handler is for backend-agnostic + works-without-ext-redis ergonomics.
 
+**Production hardening pass (v0.2.41)** — senior-eng review of the Redis backend surface closed 3 critical + 10 medium gaps. Default behaviour preserved across all 13 fixes (no BC break). Reference: `docs/architecture/2026-05-23-redis-backend-review.md`. Highlights:
+- **C1 — FD-reuse race in `WSRouter`:** `ws_owner` table grew a `conn_id` per-connection nonce; subscriber sink verifies before push. Closes a cross-tenant data-leakage vector where a reused `$fd` (lost onClose + OpenSwoole reassignment) could receive a message intended for the previous owner. `WSRouter::own()` returns the nonce; the fd-coherence invariant (only one client per fd) is enforced on every `own()` call.
+- **C2 — HMAC-signed L1 invalidations in `TieredBackend`:** optional shared secret (`ZEALPHP_TIERED_INVALIDATION_SECRET` or constructor arg) HMACs every published `__l1_invalidate` message. Receivers verify before evicting; messages without/wrong HMAC are dropped + warn-logged. Defeats the "any Redis writer DoSes the cluster's L1" attack. Default null → trust mode (BC).
+- **C3 — TLS via `rediss://` / `tls://`:** `PhpredisDriver` parser recognises the scheme + threads `verify_peer=true` stream context to `\Redis::connect`. Predis already accepts `rediss://` natively. Bare `redis://` (no host) now rejected at parse time.
+- **H1 — `mode='tracked' + ttl>0` throws at `RedisBackend::make()`:** silently-ignored TTL on tracked tables would drift the membership SET; surfaces at boot now.
+- **H2 — `Store::getStrict($name, $key, ?$field)`:** null-on-miss variant for new code (legacy `Store::get()` keeps `=== false` BC semantics permanently).
+- **H3 — pipelined `mget`/`mset` + `UNLINK` in `clear()`:** new driver primitives `mhgetall`/`mhsetWithMembership`/`unlink` use phpredis MULTI/PIPELINE and predis `$c->pipeline()` natively. Multi-second clears on 10k-key tables → sub-second; mget(100) → 1 RTT.
+- **H4 — `CircuitBreakerBackend` decorator (opt-in):** 3-state (closed/open/half-open) with sliding-window threshold; reads fall back to optional secondary backend, writes throw when open. Wire via `Store::defaultBackend('redis', ['on_error' => 'fallback_table', 'breaker' => [...]])`. Default (no opt) = no decoration, throws on Redis down (current behaviour).
+- **H5 — `Store::stats(): array<string,int>` per-worker counters:** `pool_acquires_total`, `pool_acquire_timeouts_total`, `pool_clients_created_total`. Pub/sub instances expose `pubsub_reconnects_total`, `pubsub_messages_received_total`, `pubsub_handler_errors_total` via `RedisPubSub::stats()`. Empty array on Table backend.
+- **H6 + H7 — boot-time advisories in `App::run()`:** eager Redis ping (warn on failure), and a HOOK_ALL+phpredis+subscribers compatibility check (warn with the recipe to fix). Both surface misconfigurations before workers fork. `App::redisBootChecks()` is the testable seam.
+- **H8 — `TieredBackend::existsCached()`:** stale-OK opt-in fast path; strict `exists()` always hits L2 (consistency); the new variant returns true from L1 when fresh, saves an RTT on hot paths that tolerate `$l1Ttl`-bounded staleness.
+- **H9 — `PhpredisDriver::close()` logs via `elog('debug')`:** silent-swallow replaced with diagnosable failure trace.
+- **H10 — `RedisPubSub` `$maxAttempts` (default 0 = unlimited):** bounded reconnect attempts for CI workers that should crash if Redis is permanently gone.
+
+The hardening pass is documented end-to-end at `/store#production-hardening`. The senior-eng review notes + risk-by-risk mapping live at `docs/architecture/2026-05-23-redis-backend-review.md`. The plan that drove the work is at `docs/superpowers/plans/2026-05-23-redis-backend-hardening.md`.
+
 **Timers** (via `App::tick/after/clearTimer`):
 - `App::tick(int $ms, callable $fn)` — recurring per-worker timer
 - `App::after(int $ms, callable $fn)` — one-shot timer
