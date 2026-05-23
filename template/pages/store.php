@@ -295,6 +295,121 @@ $driver = new PredisDriver($sentinel);</code></pre>
 </div>
 <p class="store-lead-tight store-mt-1">First-class Store-facade integration (a Store::clusterBackend() / Store::sentinelBackend() helper) is on the v0.2.41 roadmap. Today's path is to construct the Predis\Client + PredisDriver directly and inject into a RedisBackend. phpredis users wanting Cluster/Sentinel should currently use predis (set <code>ZEALPHP_REDIS_PREFER=predis</code>); the <code>RedisCluster</code> phpredis class needs a separate driver shape.</p>
 
+<h2 class="store-h2-section" id="production-hardening">Production hardening (v0.2.41)</h2>
+<p class="store-lead-tight">
+  A senior-eng review of the v0.2.39/v0.2.40 Redis backend surface flagged 3 critical + 10 medium issues — all closed in this pass. Each gets a brief description + the opt-in recipe. Default behaviour is unchanged; nothing on this page is a BC break.
+</p>
+
+<h3 id="ph-tls">C3 — TLS via <code>rediss://</code></h3>
+<p class="store-lead-tight">
+  Cross-region or untrusted-network deployments need encrypted Redis connections. Both drivers now recognise <code>rediss://</code> (and the <code>tls://</code> alias). <code>verify_peer + verify_peer_name</code> are on by default.
+</p>
+<div class="code-block">
+<pre><code class="language-php">Store::defaultBackend(Store::BACKEND_REDIS, 'rediss://cache.prod:6380/0');
+// or  ZEALPHP_REDIS_URL=rediss://cache.prod:6380/0</code></pre>
+</div>
+<p class="store-lead-tight">Bare <code>redis://</code> (no host) is now rejected at parse time — surfaces misconfig at boot instead of after silently defaulting to <code>127.0.0.1</code>.</p>
+
+<h3 id="ph-fd-race">C1 — WSRouter FD-reuse race fix</h3>
+<p class="store-lead-tight">
+  The previous cross-server WS routing pattern was vulnerable to a FD-reuse race: when client A's <code>onClose</code> was lost (kernel reaped the fd, OpenSwoole reassigned it to client B), an in-flight publish to A could land on B's connection — a cross-tenant data-leakage vector.
+</p>
+<p class="store-lead-tight">
+  The fix is a per-connection 16-byte hex nonce stored in <code>ws_owner.conn_id</code> + <code>WSRouter::$localFds[clientId]['conn_id']</code>. <code>WSRouter::sendToClient()</code> carries the nonce in the publish payload; the subscriber on the owning server verifies it matches the local <code>conn_id</code> before pushing. Stale entries with the same fd are evicted on <code>own()</code> (the fd-coherence invariant).
+</p>
+<p class="store-lead-tight">No API change for callers — <code>WSRouter::own($clientId, $fd)</code> still works exactly as before; it now returns the generated <code>conn_id</code> for tests + debug.</p>
+
+<h3 id="ph-hmac">C2 — HMAC-signed L1 invalidation</h3>
+<p class="store-lead-tight">
+  <code>TieredBackend</code> publishes invalidation messages on <code>{prefix}:__l1_invalidate:{table}</code>. Before this fix, anyone with Redis write access could forge invalidations and DoS L1 across the cluster. Now: optional shared secret signs every outbound message; receivers verify before evicting.
+</p>
+<div class="code-block">
+<pre><code class="language-php">// Same secret on every node:
+$tiered = new TieredBackend(
+    l1: new TableBackend(),
+    l2: new RedisBackend(/* … */),
+    invalidationSecret: getenv('ZEALPHP_TIERED_INVALIDATION_SECRET') ?: null,
+);
+// Or via env: ZEALPHP_TIERED_INVALIDATION_SECRET=&lt;32-byte-random-hex&gt;</code></pre>
+</div>
+<p class="store-lead-tight">No secret set → trust mode (any peer message accepted; preserves the v0.2.40 default). When set, messages without a matching truncated HMAC-SHA256 are silently dropped + <code>elog</code>'d at warn level. Same secret on every node, or peers will reject each other's invalidations.</p>
+
+<h3 id="ph-validation">H1 — tracked + TTL combo throws at <code>make()</code></h3>
+<p class="store-lead-tight">
+  Pre-v0.2.41 silently ignored TTL on tracked-mode tables (the membership SET would have drifted). Now it throws at <code>make()</code> with a clear message — fail fast at boot, not silently after the first expiry.
+</p>
+
+<h3 id="ph-getstrict">H2 — <code>Store::getStrict()</code> for new code</h3>
+<p class="store-lead-tight">
+  The legacy <code>Store::get()</code> returns <code>false</code> on miss for BC. New code that wants ??-style fallbacks safely with stored falsy values (0, '', '0') uses the strict variant — returns null on miss.
+</p>
+<div class="code-block">
+<pre><code class="language-php">// Legacy — keep using === false to detect misses:
+$row = Store::get('users', $id);
+if ($row === false) { /* miss */ }
+
+// New code — null on miss, value otherwise:
+$row = Store::getStrict('users', $id);
+$hits = Store::getStrict('users', $id, 'hits') ?? 0;   // 0-stored value preserved</code></pre>
+</div>
+
+<h3 id="ph-pipeline">H3 — pipelined bulk ops + UNLINK</h3>
+<p class="store-lead-tight">
+  <code>Store::mget</code>, <code>Store::mset</code>, and <code>Store::clear</code> on the Redis backend now run in a single MULTI/EXEC pipeline instead of N sequential round-trips. <code>clear()</code> uses <code>UNLINK</code> (non-blocking, Redis 4.0+) so multi-second clears on 10k+-row tables drop to sub-second.
+</p>
+<p class="store-lead-tight">No API change — existing call sites get the speedup automatically.</p>
+
+<h3 id="ph-breaker">H4 — Circuit breaker (opt-in graceful degradation)</h3>
+<p class="store-lead-tight">
+  When Redis is degraded, every <code>Store</code> call previously hit the 5-second pool acquire timeout. The <code>CircuitBreakerBackend</code> decorator adds three-state fail-fast: <em>closed</em> (normal) → <em>open</em> (skip primary) → <em>half-open</em> (one probe). Reads can fall back to a Table backend; writes throw (no fallback semantics for writes — they'd diverge on recovery).
+</p>
+<div class="code-block">
+<pre><code class="language-php">// Opt in via the connection opts:
+Store::defaultBackend(Store::BACKEND_REDIS, [
+    'url'      =&gt; 'redis://cache:6379',
+    'on_error' =&gt; 'fallback_table',   // wraps with CircuitBreakerBackend
+    'breaker'  =&gt; [
+        'failure_threshold'   =&gt; 5,   // failures within window to trip
+        'failure_window_sec'  =&gt; 10,  // sliding window
+        'open_seconds'        =&gt; 30,  // cooldown before half-open probe
+    ],
+]);
+
+// Inspect state for ops dashboards:
+$b = Store::defaultBackend();
+echo $b-&gt;state();  // 'closed' | 'open' | 'half-open'</code></pre>
+</div>
+<p class="store-lead-tight">Default (no opt) — no decoration, throws on Redis down (the v0.2.40 behaviour). Reads use the fallback when OPEN; writes always surface the failure to the caller.</p>
+
+<h3 id="ph-stats">H5 — <code>Store::stats()</code> operational visibility</h3>
+<p class="store-lead-tight">
+  Per-worker counter snapshot — pool acquires, pool acquire timeouts, pool clients created. Pub/sub instances expose <code>pubsub_reconnects_total</code>, <code>pubsub_messages_received_total</code>, <code>pubsub_handler_errors_total</code> via <code>RedisPubSub::stats()</code>. Wire to your monitoring of choice (Prometheus, statsd, plain log line).
+</p>
+<div class="code-block">
+<pre><code class="language-php">// Plumb into a health endpoint:
+$app->route('/health/store', fn() =&gt; Store::stats());
+// → ["pool_acquires_total":1247, "pool_clients_created_total":8, ...]</code></pre>
+</div>
+
+<h3 id="ph-boot-checks">H6 + H7 — boot-time advisories</h3>
+<ul class="store-col-list">
+  <li><strong>H6 (ping):</strong> when <code>ZEALPHP_STORE_BACKEND=redis</code>, <code>App::run()</code> PINGs the pool once at boot. Failure → loud <code>error_log</code> in the master before workers fork. Misconfigured URL surfaces immediately, not after the first request 5 seconds in.</li>
+  <li><strong>H7 (HOOK_ALL + phpredis):</strong> phpredis SUBSCRIBE blocks the worker without <code>OpenSwoole\Runtime::HOOK_ALL</code> — the production default. If you've explicitly disabled HOOK_ALL AND have <code>App::onPubSub</code> handlers registered AND phpredis is the resolved driver, boot emits a warning telling you to either re-enable HOOK_ALL or set <code>ZEALPHP_REDIS_PREFER=predis</code>.</li>
+</ul>
+
+<h3 id="ph-exists-cached">H8 — <code>TieredBackend::existsCached()</code></h3>
+<p class="store-lead-tight">
+  The strict <code>exists()</code> always hits L2 for consistency. <code>existsCached()</code> returns true when L1 has a fresh entry (within <code>$l1Ttl</code>); otherwise defers to L2. Use on hot paths where "probably exists" + <code>$l1Ttl</code>-bounded staleness is acceptable — saves a Redis round-trip.
+</p>
+
+<h3 id="ph-misc">H9 + H10 — operational debug</h3>
+<ul class="store-col-list">
+  <li><strong>H9:</strong> <code>PhpredisDriver::close()</code> exceptions now route through <code>elog</code> at debug level instead of being swallowed silently — diagnosable disconnect bugs.</li>
+  <li><strong>H10:</strong> <code>RedisPubSub</code> takes an optional <code>$maxAttempts</code> param (default 0 = unlimited, preserving the existing eventually-reconnect behaviour). Set to N&gt;0 to fail loudly after N consecutive reconnect cycles — useful for CI workers that should crash if Redis disappears.</li>
+</ul>
+
+<p class="store-lead-tight store-mt-1">Full review notes + the original risk-by-risk mapping: <a href="https://github.com/sibidharan/zealphp/blob/master/docs/architecture/2026-05-23-redis-backend-review.md" target="_blank">docs/architecture/2026-05-23-redis-backend-review.md</a>.</p>
+
 <h2 class="store-h2-section">When to use Redis / Valkey</h2>
 <p class="store-lead-tight">Store and Cache cover most single-server apps. Here's when you'll need an external cache.</p>
 
