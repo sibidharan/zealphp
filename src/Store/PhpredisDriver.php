@@ -353,6 +353,37 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    public function xautoclaim(
+        string $stream,
+        string $group,
+        string $consumer,
+        int $minIdleMs,
+        string $start = '0-0',
+        int $count = 16,
+    ): array {
+        try {
+            // phpredis exposes xAutoClaim($stream, $group, $consumer, $minIdle, $start, $count).
+            $raw = $this->c->xAutoClaim($stream, $group, $consumer, $minIdleMs, $start, $count);
+            if (!is_array($raw) || count($raw) < 2) {
+                return ['0-0', []];
+            }
+            $nextCursor = is_string($raw[0]) ? $raw[0] : '0-0';
+            $entries = $raw[1];
+            if (!is_array($entries)) { return [$nextCursor, []]; }
+            $list = [];
+            foreach ($entries as $id => $payload) {
+                $idStr = (string) $id;
+                if (!is_array($payload)) { continue; }
+                $coerced = [];
+                foreach ($payload as $k => $v) {
+                    $coerced[(string) $k] = is_scalar($v) ? (string) $v : '';
+                }
+                $list[] = ['id' => $idStr, 'payload' => $coerced];
+            }
+            return [$nextCursor, $list];
+        } catch (\RedisException $e) { throw $this->wrap($e); }
+    }
+
     private function wrap(\RedisException $e): StoreException
     {
         return new StoreException('phpredis: ' . $e->getMessage(), 0, $e);

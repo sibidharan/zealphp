@@ -100,6 +100,27 @@ interface RedisDriver
     /** @return int ids actually ACK'd */
     public function xack(string $stream, string $group, string ...$ids): int;
 
+    /**
+     * XAUTOCLAIM — atomically claim messages that have been pending in the
+     * group for longer than `$minIdleMs` and assign them to `$consumer`.
+     * Used for stale-consumer recovery: when a consumer crashes mid-processing,
+     * its pending messages stay pending forever; a healthy peer steals them
+     * after the idle threshold.
+     *
+     * Returns a tuple of [next-cursor, claimed-entries]. Iterate `$start`
+     * with the next-cursor until it comes back as '0-0' to drain.
+     *
+     * @return array{0:string, 1:list<array{id:string, payload:array<string, string>}>}
+     */
+    public function xautoclaim(
+        string $stream,
+        string $group,
+        string $consumer,
+        int $minIdleMs,
+        string $start = '0-0',
+        int $count = 16,
+    ): array;
+
     // ── lifecycle ───────────────────────────────────────────────────────
     public function ping(): bool;
     public function close(): void;

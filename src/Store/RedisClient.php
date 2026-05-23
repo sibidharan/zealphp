@@ -124,4 +124,18 @@ final class RedisClient
 
     public function xack(string $stream, string $group, string ...$ids): int
     { return $this->driver->xack($stream, $group, ...$ids); }
+
+    /**
+     * @return array{0:string, 1:list<array{id:string, payload:array<string, string>}>}
+     */
+    public function xautoclaim(
+        string $stream,
+        string $group,
+        string $consumer,
+        int $minIdleMs,
+        string $start = '0-0',
+        int $count = 16,
+    ): array {
+        return $this->driver->xautoclaim($stream, $group, $consumer, $minIdleMs, $start, $count);
+    }
 }

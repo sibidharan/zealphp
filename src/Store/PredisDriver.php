@@ -372,6 +372,47 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    public function xautoclaim(
+        string $stream,
+        string $group,
+        string $consumer,
+        int $minIdleMs,
+        string $start = '0-0',
+        int $count = 16,
+    ): array {
+        try {
+            $cmd = ['XAUTOCLAIM', $stream, $group, $consumer, (string) $minIdleMs, $start, 'COUNT', (string) $count];
+            /** @var mixed $raw */
+            $raw = $this->c->executeRaw($cmd);
+            // Redis 7 returns [<next-cursor>, [<entries>], [<deleted-ids>]];
+            // Redis 6 returns [<next-cursor>, [<entries>]]. We just need the
+            // first two elements.
+            if (!is_array($raw) || count($raw) < 2) {
+                return ['0-0', []];
+            }
+            $nextCursor = is_string($raw[0]) ? $raw[0] : '0-0';
+            $entries = $raw[1];
+            if (!is_array($entries)) { return [$nextCursor, []]; }
+            $list = [];
+            foreach ($entries as $entry) {
+                if (!is_array($entry) || count($entry) < 2) { continue; }
+                $id = is_scalar($entry[0]) ? (string) $entry[0] : '';
+                $flat = $entry[1];
+                if ($id === '' || !is_array($flat)) { continue; }
+                $payload = [];
+                $kv = array_values($flat);
+                for ($i = 0; $i + 1 < count($kv); $i += 2) {
+                    $k = is_scalar($kv[$i])     ? (string) $kv[$i]     : null;
+                    $v = is_scalar($kv[$i + 1]) ? (string) $kv[$i + 1] : null;
+                    if ($k === null || $v === null) { continue; }
+                    $payload[$k] = $v;
+                }
+                $list[] = ['id' => $id, 'payload' => $payload];
+            }
+            return [$nextCursor, $list];
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
     public function pipeline(callable $batch): array
     {
         try {
