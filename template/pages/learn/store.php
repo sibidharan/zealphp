@@ -163,12 +163,68 @@ $app-&gt;route('/api/expensive', function ($request) {
       ],
     ]); ?>
 
+    <h2 id="step-redis">Going cross-node: pluggable Redis backend</h2>
+    <p>
+      Workers in one process tree share <code>Store</code> via shared memory. Two ZealPHP servers
+      on different machines don&rsquo;t &mdash; their <code>Store</code> instances are completely
+      separate. When you actually need cross-node visibility (a chat app where users hit different
+      load-balanced servers, an admin dashboard summing counters from N hosts), flip
+      <code>Store</code> to the Redis backend with one line:
+    </p>
+    <pre><code class="language-php">// app.php — before $app->run()
+Store::defaultBackend(Store::BACKEND_REDIS);              // ZEALPHP_REDIS_URL env
+// or explicit:
+Store::defaultBackend(Store::BACKEND_REDIS, [
+    'url'    => 'redis://cache.internal:6379/0',
+    'prefer' => Store::PREFER_PREDIS,  // see /store#phpredis-pubsub-caveat
+]);
+
+// Every existing Store::set / get / incr / count call now routes to Redis.
+// Counter::defaultBackend follows automatically when the env var is used.</code></pre>
+    <p>
+      Backend-pluggable means every existing handler keeps working unchanged. The trade-off:
+      Redis is ~50&micro;s loopback vs <code>OpenSwoole\Table</code>&rsquo;s ~ns &mdash; orders of
+      magnitude slower, but cross-node and persistent (with AOF/RDB). Pick Table for ns hot paths,
+      Redis when you need the cross-node guarantee. Mixing is OK: most tables on Table, the few
+      that need cross-node visibility get their own Redis-backed instance via per-table
+      <code>$opts</code>. See <a href="/store#backends">/store#backends</a> for the comparison
+      table.
+    </p>
+
+    <h2 id="step-pubsub">Cross-node messaging: pub/sub + Streams</h2>
+    <p>
+      Redis backend also unlocks two new public primitives for cross-worker AND cross-host
+      messaging. Both are no-ops on the Table backend (they throw a clear
+      <code>StoreException</code>):
+    </p>
+    <pre><code class="language-php">// Fire-and-forget pub/sub (best-effort, ~0.5ms loopback)
+App::onPubSub('chat:room:42', function (string $payload, string $channel) {
+    // every worker on every server with this handler runs the callback
+    // — perfect for fan-out broadcast to local WebSocket fds.
+});
+$receivers = Store::publish('chat:room:42', json_encode($message));
+
+// Reliable at-least-once via Redis Streams (consumer groups)
+App::onReliableMessage('orders', function (string $payload, string $id, string $stream): bool {
+    return processOrder($payload); // true → XACK; false/throw → leave pending
+});
+$messageId = Store::publishReliable('orders', json_encode($order));</code></pre>
+    <p>
+      Pick <code>publish</code> for cache invalidation, WebSocket fan-out, presence beats &mdash;
+      drops are tolerable. Pick <code>publishReliable</code> for command/event sourcing, work
+      queues, anything that must not drop. Both require the Redis backend; pattern channels
+      (<code>'chat:*'</code>) and pattern handlers (PSUBSCRIBE) work transparently. See
+      <a href="/store#pubsub">/store#pubsub</a> for the full comparison and the production driver
+      note.
+    </p>
+
     <?php App::render('/components/_keytakeaways', ['items' => [
       'Workers don’t share PHP heaps — isolation by default, sharing by opt-in.',
       '<code>Store::make()</code> allocates a typed, fixed-size table in shared memory — every worker can read/write rows by key.',
       '<code>Counter</code> is a lock-free atomic integer for the simple "one global counter" case.',
       'Allocate both <em>before</em> <code>$app-&gt;run()</code> so the master shares them on fork.',
-      'Use Redis only when you outgrow in-process: multi-host, surviving restarts, external consumers.',
+      'Need cross-node? One line: <code>Store::defaultBackend(Store::BACKEND_REDIS)</code> — every existing handler routes to Redis with zero changes.',
+      'Cross-node messaging: <code>Store::publish</code> + <code>App::onPubSub</code> for fire-and-forget, <code>Store::publishReliable</code> + <code>App::onReliableMessage</code> for at-least-once.',
     ]]); ?>
 
     <div class="lesson-chips">
