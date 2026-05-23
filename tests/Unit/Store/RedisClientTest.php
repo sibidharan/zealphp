@@ -151,6 +151,7 @@ final class RedisClientTest extends RedisTestCase
 
     public function testSubscribeReceivesPublishViaChannel(): void
     {
+        $this->requireYieldingSubscribe();
         \OpenSwoole\Coroutine::run(function (): void {
             $sub  = new RedisClient($this->url);
             $pub  = new RedisClient($this->url);
@@ -177,6 +178,7 @@ final class RedisClientTest extends RedisTestCase
 
     public function testSubscribePatternReceivesMatchingPublish(): void
     {
+        $this->requireYieldingSubscribe();
         \OpenSwoole\Coroutine::run(function (): void {
             $sub  = new RedisClient($this->url);
             $pub  = new RedisClient($this->url);

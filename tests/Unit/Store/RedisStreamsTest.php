@@ -19,6 +19,7 @@ final class RedisStreamsTest extends RedisTestCase
 
     public function testHandlerReceivesMessageAndAcks(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $stream = $this->freshStream();
             $group  = 'g1';
@@ -53,6 +54,7 @@ final class RedisStreamsTest extends RedisTestCase
 
     public function testHandlerReturningFalseLeavesPending(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $stream = $this->freshStream();
             $group  = 'g1';
@@ -86,6 +88,7 @@ final class RedisStreamsTest extends RedisTestCase
 
     public function testHandlerThrowLeavesPending(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $stream = $this->freshStream();
             $group  = 'g1';
@@ -116,6 +119,7 @@ final class RedisStreamsTest extends RedisTestCase
 
     public function testConsumerGroupCreateIsIdempotent(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $stream = $this->freshStream();
             $group  = 'g1';
@@ -139,6 +143,7 @@ final class RedisStreamsTest extends RedisTestCase
 
     public function testStopHaltsTheRunner(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $stream = $this->freshStream();
             $streams = new RedisStreams($this->url, 'unit-stop-test');

@@ -1802,12 +1802,46 @@ class App
     }
 
     /**
-     * Register a WebSocket endpoint.
+     * Register a WebSocket endpoint. Returns void — the OpenSwoole
+     * `WebSocket\Server` is owned by the framework lifecycle, not the
+     * route registration. To push to a client you have **two** ways to
+     * reach the server object:
+     *
+     * 1. **Inside any callback** — the first argument IS the server:
+     *
+     *    ```php
+     *    $app->ws('/ws/chat',
+     *        onMessage: function (\OpenSwoole\WebSocket\Server $server, $frame) {
+     *            $server->push($frame->fd, "echo: {$frame->data}");
+     *        },
+     *    );
+     *    ```
+     *
+     * 2. **From anywhere else** (route handlers, App::subscribe handlers,
+     *    sidecar processes, etc.) — call `App::getServer()`:
+     *
+     *    ```php
+     *    App::subscribe('chat:broadcast', function (string $payload) {
+     *        $server = App::getServer();
+     *        if ($server instanceof \OpenSwoole\WebSocket\Server) {
+     *            foreach (yourLocalFds() as $fd) {
+     *                if ($server->isEstablished($fd)) {
+     *                    $server->push($fd, $payload);
+     *                }
+     *            }
+     *        }
+     *    });
+     *    ```
+     *
+     * For cluster-wide messaging across multiple ZealPHP processes,
+     * use the higher-level `WSRouter::sendToClient($clientId, $payload)`
+     * + `WSRouter::room($name)->push($msg)` — they handle the
+     * server-lookup + cross-node routing for you.
      *
      * @param string        $path      URI path, e.g. `'/ws/chat'`
-     * @param callable      $onMessage `function($server, $frame, $g)` — called for each message
-     * @param callable|null $onOpen    `function($server, $request, $g)` — called on connect
-     * @param callable|null $onClose   `function($server, $fd, $g)`     — called on disconnect
+     * @param callable      $onMessage `function(\OpenSwoole\WebSocket\Server $server, OpenSwoole\WebSocket\Frame $frame, G $g)` — called for each message
+     * @param callable|null $onOpen    `function(\OpenSwoole\WebSocket\Server $server, OpenSwoole\Http\Request $request, G $g)` — called on connect
+     * @param callable|null $onClose   `function(\OpenSwoole\WebSocket\Server $server, int $fd, G $g)`     — called on disconnect
      */
     public function ws(string $path, callable $onMessage, ?callable $onOpen = null, ?callable $onClose = null): void
     {
@@ -2478,6 +2512,27 @@ class App
     }
 
     /**
+     * Return the underlying OpenSwoole server. Use this when you need to
+     * push to a WebSocket client from a context that didn't receive
+     * `$server` as a callback argument — e.g. from an `App::subscribe`
+     * pub/sub handler, an `App::tick` timer, or a sidecar process
+     * registered via `App::addProcess`.
+     *
+     * Returns `WebSocket\Server` when any `App::ws()` route was registered
+     * (the framework upgrades from `Http\Server` automatically), `Http\Server`
+     * for pure HTTP apps, or `null` BEFORE `App::run()` constructs it.
+     *
+     * ```php
+     * $server = App::getServer();
+     * if ($server instanceof \OpenSwoole\WebSocket\Server && $server->isEstablished($fd)) {
+     *     $server->push($fd, $payload);
+     * }
+     * ```
+     *
+     * For cluster-wide pushes prefer `WSRouter::sendToClient($clientId, $payload)`
+     * — it owns the cross-node routing fabric so you don't have to thread
+     * `$server` references around your code.
+     *
      * @return \OpenSwoole\WebSocket\Server|\OpenSwoole\Http\Server|null
      */
     public static function getServer()

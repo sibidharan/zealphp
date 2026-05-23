@@ -29,6 +29,7 @@ final class TieredBackendInvalidationTest extends RedisTestCase
 
     public function testPeerInstanceL1IsEvictedOnRemoteWrite(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $prefix = 'zptest-tier-inval-' . bin2hex(random_bytes(4));
             $a = $this->instance($prefix, 'A');
@@ -73,6 +74,7 @@ final class TieredBackendInvalidationTest extends RedisTestCase
 
     public function testSelfPublishesAreSkipped(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $prefix = 'zptest-tier-inval-self-' . bin2hex(random_bytes(4));
             $a = $this->instance($prefix, 'A');
@@ -99,6 +101,7 @@ final class TieredBackendInvalidationTest extends RedisTestCase
 
     public function testInvalidationOnDelEvictsPeerL1(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $prefix = 'zptest-tier-inval-del-' . bin2hex(random_bytes(4));
             $a = $this->instance($prefix, 'A');

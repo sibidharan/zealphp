@@ -17,6 +17,7 @@ final class RedisStreamsAutoclaimTest extends RedisTestCase
 {
     public function testAutoclaimStealsStalePendingFromDeadConsumer(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $stream   = 't:autoclaim:' . bin2hex(random_bytes(4));
             $group    = 'g1';
@@ -48,6 +49,7 @@ final class RedisStreamsAutoclaimTest extends RedisTestCase
 
     public function testAutoclaimReturnsEmptyWhenNothingQualifies(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $stream = 't:autoclaim-empty:' . bin2hex(random_bytes(4));
             $c = new RedisClient($this->url);

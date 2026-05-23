@@ -20,6 +20,7 @@ final class RedisPubSubTest extends RedisTestCase
 {
     public function testExactChannelHandlerReceivesPublish(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $rendezvous = new Channel(1);
             $pubsub = new RedisPubSub($this->url, 'zptest-pubsub');
@@ -44,6 +45,7 @@ final class RedisPubSubTest extends RedisTestCase
 
     public function testPatternHandlerCatchesMatchingPublish(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $rendezvous = new Channel(1);
             $pubsub = new RedisPubSub($this->url, 'zptest-pubsub');
@@ -69,6 +71,7 @@ final class RedisPubSubTest extends RedisTestCase
 
     public function testMultipleHandlersAllFireForOneMessage(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $rendezvous = new Channel(3);
             $pubsub = new RedisPubSub($this->url, 'zptest-pubsub');
@@ -95,6 +98,7 @@ final class RedisPubSubTest extends RedisTestCase
 
     public function testHandlerThrowDoesNotCrashRunner(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $second = new Channel(1);
             $pubsub = new RedisPubSub($this->url, 'zptest-pubsub');
@@ -118,6 +122,7 @@ final class RedisPubSubTest extends RedisTestCase
 
     public function testStopHaltsTheRunner(): void
     {
+        $this->requireYieldingSubscribe();
         Coroutine::run(function (): void {
             $pubsub = new RedisPubSub($this->url, 'zptest-pubsub');
             $pubsub->register('t:stoptest', function (): void {});
