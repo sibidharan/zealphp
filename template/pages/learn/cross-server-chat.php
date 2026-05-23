@@ -252,14 +252,55 @@ WSRouter::broadcast('chat:room:42', json_encode(['hello' =&gt; 'everyone']));</c
       Room object</strong> &mdash; cluster-wide membership, presence events, fan-out broadcast, and a
       handler registry, all behind 4 verbs:
     </p>
+
+    <h3 id="rooms-identity">First: how is the user identified?</h3>
+    <p>
+      The framework <strong>doesn&rsquo;t impose a user-identity scheme</strong> &mdash; you supply a
+      stable string <code>$clientId</code> (session ID, user ID, email, JWT subject) and it&rsquo;s used
+      consistently across the routing fabric. The typical wiring inside <code>onOpen</code>:
+    </p>
+<pre><code class="language-php">App::ws('/chat',
+    onOpen: function ($server, $request) {
+        // 1. Identify the user — pick ONE pattern that suits your app:
+        //    a) Cookie session (Apache/PHP-mod parity, default in ZealPHP):
+        $sessionId = $request-&gt;cookie['PHPSESSID'] ?? null;
+        $username  = $_SESSION['username'] ?? 'guest';   // or via $g-&gt;session
+        //    b) Query param (demos / quick tests): $request-&gt;get['user']
+        //    c) JWT in `Sec-WebSocket-Protocol` header / Authorization: parse + verify
+        if ($username === 'guest') { $server-&gt;disconnect($request-&gt;fd, WSRouter::CLOSE_AUTH_REQUIRED); return; }
+
+        // 2. Register cluster-wide ownership using THAT identifier.
+        //    $clientId is the value you'll thread through every send below.
+        WSRouter::own($username, $request-&gt;fd);
+
+        // 3. Join whatever rooms the user belongs to.
+        WSRouter::room('chat:room:42')-&gt;join($username);
+    },
+    onClose: function ($server, $fd) {
+        // Find which user owned this fd + release on disconnect:
+        // (a `WSRouter::releaseByFd($fd)` helper is on the roadmap; for now
+        //  apps store the reverse-map in $g-&gt;openswoole_request data.)
+    },
+);</code></pre>
+    <p>
+      Use <code>WSRouter::CLOSE_AUTH_REQUIRED</code> (4001) / <code>CLOSE_AUTH_INVALID</code> (4002) /
+      <code>CLOSE_FORBIDDEN</code> (4003) when refusing the upgrade &mdash; clients can react to those
+      codes specifically. The full set lives at <code>WSRouter::CLOSE_*</code>.
+    </p>
+
+    <h3>The 4 Room verbs (post-identity)</h3>
 <pre><code class="language-php">use ZealPHP\WSRouter;
 
-// On the worker that holds the connection:
+// In your handlers, $username is the SAME identifier you passed to WSRouter::own():
 $room = WSRouter::room('chat:room:42');
-$room-&gt;join($clientId);                 // SADD-equivalent + presence event broadcast cluster-wide
+$room-&gt;join($username);                 // SADD-equivalent + presence event broadcast cluster-wide
 
-// From anywhere on any server:
-$room-&gt;push(['from' =&gt; 'bob', 'text' =&gt; 'lunch!']);   // fan-out across the cluster
+// From anywhere on any server. Payload schema is APP-DEFINED — the
+// framework doesn't enforce a 'from' key. Common convention:
+$room-&gt;push(
+    ['from' =&gt; $username, 'text' =&gt; 'lunch!', 'ts' =&gt; time()],
+    fromClientId: $username,            // optional — wires WS-4 per-client rate limit
+);
 $room-&gt;size();                                         // cluster-wide member count (SCARD)
 $room-&gt;members();                                      // cluster-wide roster (SSCAN-drained)
 $room-&gt;membersPaged($cursor, 100);                     // paginated roster for very large rooms
@@ -272,10 +313,11 @@ $room-&gt;onMessage(function (array $msg, string $room) {
 });
 $room-&gt;onPresence(function (array $event, string $room) {
     // $event = ['type' =&gt; 'join'|'leave', 'client_id' =&gt; '...', 'ts' =&gt; ...]
+    // — the 'client_id' here IS the value you passed to join().
 });
 
 // Cleanup:
-$room-&gt;leave($clientId);</code></pre>
+$room-&gt;leave($username);</code></pre>
     <p>
       <strong>How it federates.</strong> A single <code>PSUBSCRIBE ws:room:*</code> pattern subscriber
       per worker covers every room you ever create &mdash; no per-room subscriber explosion. Membership
