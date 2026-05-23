@@ -157,6 +157,41 @@ Cache::flush();                                    // clear everything</code></p
   <strong>Rule of thumb:</strong> treat Store as a <strong>best-effort, fast, single-server cache</strong>, not as a database. For ACID needs (transactions, durability, multi-row consistency), use Postgres / MySQL / Redis with explicit transaction semantics. Store's job is to make &lt; 5µs reads possible across workers — that's it.
 </div>
 
+<h2 class="store-h2-section" id="backends">Pluggable backends — Table (default) + Redis/Valkey</h2>
+<p class="store-lead-tight">As of v0.3.0, <code>Store</code> and <code>Counter</code> are <strong>backend-agnostic</strong>. The default <code>OpenSwoole\Table</code>/<code>Atomic</code> backend stays your hot path (nanosecond reads, lock-free). When you need <strong>cross-node shared state</strong> or <strong>persistence across restarts</strong>, flip to Redis/Valkey with one line in <code>app.php</code> &mdash; every <code>Store::set/get/incr/count</code> call works unchanged.</p>
+
+<div class="card-code-block">
+<pre><code class="language-php">// app.php &mdash; one-line switch
+Store::defaultBackend('redis');                                    // ZEALPHP_REDIS_URL env
+// or:
+Store::defaultBackend('redis', 'redis://cache.internal:6379/1');   // explicit URL
+// or set ZEALPHP_STORE_BACKEND=redis in the environment before App::run()</code></pre>
+</div>
+
+<table class="store-compare-tbl store-mt-1">
+  <thead><tr><th>Backend</th><th>Latency</th><th>Cross-node</th><th>Persistence</th><th>When to pick</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>'table'</code> (default)</td>
+      <td>~ns (in-memory, lock-free)</td>
+      <td>No &mdash; per process tree</td>
+      <td>No &mdash; volatile</td>
+      <td>Single-node hot path. Millions of ops/sec. 95% of apps.</td>
+    </tr>
+    <tr>
+      <td><code>'redis'</code></td>
+      <td>~tens of &micro;s local, ~ms cross-node</td>
+      <td>Yes &mdash; any number of nodes</td>
+      <td>Yes (Redis AOF/RDB)</td>
+      <td>Horizontal scaling, persistent state, existing Redis infra.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="store-lead-tight store-mt-1"><strong>Two table modes</strong> at <code>make()</code>: <code>'tracked'</code> (default) keeps a membership SET so <code>count()</code> is O(1); <code>'ttl'</code> supports per-key expiry but <code>count()</code> falls back to O(N) <code>SCAN</code>. Pick one per table. The connection pool is per-worker (default 8 clients) &mdash; concurrent coroutines never share a socket.</p>
+
+<p class="store-lead-tight store-mt-1"><strong>Client lib</strong>: auto-detects phpredis (preferred when <code>ext-redis</code> is loaded) or predis (pure-PHP fallback, shipped as a dev dep). User code never imports a phpredis/predis symbol &mdash; the single <code>ZealPHP\Store\RedisClient</code> adapter is the only place either lib is referenced.</p>
+
 <h2 class="store-h2-section">When to use Redis / Valkey</h2>
 <p class="store-lead-tight">Store and Cache cover most single-server apps. Here's when you'll need an external cache.</p>
 
