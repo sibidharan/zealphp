@@ -218,7 +218,14 @@ open http://localhost:9090/chat?user=bob
 <pre><code class="language-php">use ZealPHP\WSRouter;
 
 // app.php (before App::run())
-WSRouter::init();          // wires Store::make('ws_owner'&hellip;) + App::subscribe('ws:server:&hellip;')
+// Defaults are demo-grade: 4,096 owner rows + 16,384 room-member rows. Bump
+// inline for production (HARD CAPS on the Table backend; informational on Redis):
+WSRouter::init(
+    ownerCapacity:       200_000,    // max concurrent WS connections cluster-wide
+    roomMembersCapacity: 1_000_000,  // max (room × member) pairs cluster-wide
+    slowConsumerBytes:   4 * 1024 * 1024,  // per-fd send-queue drop threshold
+);
+// Or call WSRouter::initOptions(...) BEFORE init() — same setters, different shape.
 
 App::ws('/chat',
     onMessage: function ($server, $frame) { /* &hellip; */ },
@@ -262,6 +269,22 @@ WSRouter::broadcast('chat:room:42', json_encode(['msg' =&gt; 'lunch!']));
 
     <h2 id="production">Production notes</h2>
     <ul>
+      <li>
+        <strong>Capacity defaults are demo-grade.</strong> <code>WSRouter::init()</code> creates
+        <code>ws_owner</code> sized for <strong>4,096 rows</strong> (max concurrent WS connections
+        cluster-wide) and <code>ws_room_members</code> sized for <strong>16,384 rows</strong>
+        (max <code>(room × member)</code> pairs). On the Table backend these are HARD CAPS
+        allocated at master fork — bump inline for production:
+<pre><code class="language-php">WSRouter::init(
+    ownerCapacity:        200_000,
+    roomMembersCapacity:  1_000_000,
+    slowConsumerBytes:    4 * 1024 * 1024,   // per-fd backpressure threshold
+);</code></pre>
+        On the Redis backend these are informational only (Redis is global KV with no per-table cap);
+        set Redis-server <code>maxmemory</code> + <code>maxmemory-policy allkeys-lru</code> for
+        cluster-wide bound there. Filling a capped table throws <code>WS\CapacityException</code>
+        with an actionable hint — the framework refuses to silently drop owners.
+      </li>
       <li>
         <strong>Driver choice.</strong> Both phpredis (preferred when <code>ext-redis</code> is loaded) and
         predis SUBSCRIBE loops yield correctly under <code>HOOK_ALL</code>. phpredis is ~2&times; faster on

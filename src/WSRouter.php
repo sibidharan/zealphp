@@ -301,8 +301,55 @@ final class WSRouter
         return $inner;
     }
 
-    public static function init(?string $serverId = null, ?callable $clientSink = null): void
-    {
+    /**
+     * One-time WSRouter bootstrap. Wires the cluster-wide ownership table,
+     * room-membership table, per-server identity subscriber, and per-worker
+     * lifecycle hooks (heartbeat + GC + graceful sweep). Idempotent —
+     * subsequent calls are no-ops.
+     *
+     * MUST be called BEFORE `App::run()` so the Store tables can be
+     * allocated in the master process before workers fork. The Redis
+     * backend is also acceptable (state lives in Redis instead of Table).
+     *
+     * Capacity + tunable options can be passed inline; alternatively call
+     * `WSRouter::initOptions()` BEFORE `init()` (same setters, different
+     * ergonomic shape — pick whichever reads cleaner).
+     *
+     * ```php
+     * // Inline (most concise):
+     * WSRouter::init(
+     *     ownerCapacity:        200_000,
+     *     roomMembersCapacity:  1_000_000,
+     *     slowConsumerBytes:    8 * 1024 * 1024,
+     * );
+     *
+     * // Or split (when you want a custom serverId / sink + tuning):
+     * WSRouter::initOptions(ownerCapacity: 200_000, roomMembersCapacity: 1_000_000);
+     * WSRouter::init('node-A', $myCustomSink);
+     * ```
+     *
+     * @param ?string        $serverId             Cluster-unique server id; defaults to `hostname:pid`.
+     * @param ?callable      $clientSink           Inbound-routed-message handler; defaults to a backpressure-aware `$server->push`.
+     * @param ?int           $ownerCapacity        Max concurrent WS connections cluster-wide (default 4096, Table HARD CAP).
+     * @param ?int           $roomMembersCapacity  Max `(room, member)` pairs cluster-wide (default 16384, Table HARD CAP).
+     * @param ?int           $slowConsumerBytes    Per-fd send_queue_bytes threshold above which `pushWithBackpressure` drops + tracks (default 4 MB).
+     */
+    public static function init(
+        ?string   $serverId = null,
+        ?callable $clientSink = null,
+        ?int      $ownerCapacity = null,
+        ?int      $roomMembersCapacity = null,
+        ?int      $slowConsumerBytes = null,
+    ): void {
+        // Inline options route through initOptions() for validation + storage —
+        // single source of truth, no logic duplication.
+        if ($ownerCapacity !== null || $roomMembersCapacity !== null || $slowConsumerBytes !== null) {
+            self::initOptions(
+                ownerCapacity:       $ownerCapacity,
+                roomMembersCapacity: $roomMembersCapacity,
+                slowConsumerBytes:   $slowConsumerBytes,
+            );
+        }
         self::$serverId   = $serverId ?? gethostname() . ':' . getmypid();
         self::$stats     ??= new \ZealPHP\Store\Stats();
         self::$clientSink = $clientSink ?? function (string $clientId, int $fd, string $payload): void {
