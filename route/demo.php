@@ -919,3 +919,27 @@ $app->route('/demo/view/tictactoe/play', ['methods' => ['GET']], function () {
         'learn/tictactoe', 'Tic-Tac-Toe'
     );
 });
+
+$app->route('/demo/view/chatroom/widget', ['methods' => ['GET']], function () {
+    $u = \ZealPHP\Learn\Auth::currentUser();
+    if (!$u) {
+        return demo_render(
+            'Multi-Room Group Chat',
+            'Log in below to chat. Same auth as Notes / Tic-Tac-Toe — one account, all the demos.',
+            [['heading' => '',
+              'body'    => App::renderToString('/components/_demo_login_card', [
+                  'intro' => 'The chat tags each message with your username so the other tabs know who said it. Sign in or create one — the widget loads in place.',
+              ])]],
+            'learn/chatroom', 'Multi-Room Group Chat'
+        );
+    }
+    return demo_render(
+        'Multi-Room Group Chat',
+        'Same <code class="demo-inline">_chatroom_widget</code> partial that renders inline in the <a href="/learn/chatroom">lesson</a>. SQLite-backed history persists across reloads; open in two tabs to chat with yourself. <a href="/learn/chatroom">Read the build</a>.',
+        [
+            ['heading' => '',
+             'body'    => App::renderToString('/components/_chatroom_widget', ['user' => $u])],
+        ],
+        'learn/chatroom', 'Multi-Room Group Chat'
+    );
+});

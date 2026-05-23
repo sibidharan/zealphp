@@ -1,4 +1,7 @@
-<?php use ZealPHP\App; ?>
+<?php
+use ZealPHP\App;
+$user = $user ?? \ZealPHP\Learn\Auth::currentUser();
+?>
 <div class="learn-layout">
   <?php App::render('/_learn_sidebar', ['active' => 'learn/chatroom']); ?>
   <article class="lesson-content">
@@ -196,20 +199,38 @@ $app-&gt;route('/api/learn/chatroom/recent',
       assets across navigations, so this lesson&rsquo;s widget is just markup + a tiny <code>&lt;script&gt;</code>.
     </p>
 
-    <h2 id="try-it">Try it live</h2>
+    <h2 id="try-it">Try it &mdash; right here</h2>
     <p>
-      The chatroom backend is wired into the demo. Open two browser tabs (different usernames helps),
-      enter a room name, and chat:
+      The widget below uses your logged-in <code>username</code> from the same session that powers the
+      Personal Notes + Tic-Tac-Toe lessons. Same auth, no separate sign-in. Type a room name (or pick
+      one from the lobby), click <strong>Join</strong>, send messages. Open the popout in a second
+      tab to chat with yourself; open it in a friend&rsquo;s browser to chat across the network.
     </p>
+
+    <?php if (!$user): ?>
+      <?php App::render('/components/_callout', [
+        'variant' => 'warn',
+        'title'   => 'Log in to chat',
+        'body'    => '<p><a href="/learn/auth">Register or log in</a> first, then come back here.</p>',
+      ]); ?>
+    <?php else: ?>
+      <?php App::render('/components/_chatroom_widget', ['user' => $user]); ?>
+      <a class="lesson-popout-cta" href="/demo/view/chatroom/widget" target="_blank" rel="noopener">
+        Open the chat in a new tab ↗
+      </a>
+      <p class="lttt-note">
+        Reload the page &mdash; history persists. Refresh in three tabs &mdash; everyone sees the same backlog.
+        That&rsquo;s SQLite earning its keep. Open the popout in a friend&rsquo;s browser and they&rsquo;ll
+        join the same room with their own logged-in username.
+      </p>
+    <?php endif; ?>
+
+    <h3 id="api">API surface (for hacking)</h3>
     <ul class="store-col-list">
       <li><code>GET /api/learn/chatroom/lobby</code> &mdash; what rooms exist right now</li>
       <li><code>GET /api/learn/chatroom/recent?room=general</code> &mdash; last 50 messages in <code>#general</code></li>
       <li><code>ws://&lt;host&gt;:8080/ws/learn/chatroom</code> &mdash; the WebSocket endpoint (frames described above)</li>
     </ul>
-    <p>
-      Reload the page &mdash; history persists. Refresh in three tabs &mdash; everyone sees the same backlog.
-      That&rsquo;s SQLite earning its keep.
-    </p>
 
     <h2 id="scaling">Going multi-server &mdash; one swap, federated chat</h2>
     <p>
