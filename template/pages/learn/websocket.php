@@ -145,34 +145,69 @@ ws.send('ping');   // round-trip test</code></pre>
       that handles long-lived HTTP, no upgrade handshake).
     </p>
 
-    <h3>Scaling past one server: Pub/Sub bridge</h3>
+    <h3 id="cross-server-routing">Scaling past one server: Pub/Sub bridge</h3>
     <p>
       Everything above lives in one process. Two ZealPHP servers behind a load balancer don&rsquo;t
-      share their <code>ws_clients</code> tables — a broadcast in process A doesn&rsquo;t reach
-      clients connected to process B. The fix is a shared bus that both processes subscribe to:
+      share their <code>ws_clients</code> tables &mdash; a broadcast in process A doesn&rsquo;t
+      reach clients connected to process B. The fix is a shared bus that both processes subscribe
+      to. ZealPHP v0.2.39 ships this as a first-class primitive: <code>Store::publish</code> +
+      <code>App::onPubSub</code> on the Redis backend.
     </p>
-    <pre><code class="language-php">// Each ZealPHP process subscribes to "counter:bump" on Redis at startup.
-App::onWorkerStart(function () {
-    $redis = new Redis();
-    $redis->connect('redis.internal', 6379);
-    $redis->subscribe(['counter:bump'], function ($_, $channel, $msg) {
-        $payload = json_decode($msg, true);
-        broadcast_counter((int)$payload['value']);
-    });
+    <pre><code class="language-php">// app.php — flip Store to Redis once. Counter follows automatically.
+Store::defaultBackend(Store::BACKEND_REDIS);
+
+// Each ZealPHP process registers a subscriber at boot. ZealPHP spawns the
+// dedicated subscriber coroutine in onWorkerStart for you; handlers run in
+// go() per message so a slow handler can't block the next read.
+App::onPubSub('counter:bump', function (string $payload) {
+    $data = json_decode($payload, true);
+    broadcast_counter((int) $data['value']);
 });
 
-// In the +1 endpoint — instead of broadcasting directly, publish to Redis.
+// In the +1 endpoint — publish instead of broadcasting directly.
 $app-&gt;route('/api/counter/bump', ['methods' =&gt; ['POST']], function () use ($counter) {
     $new = $counter-&gt;increment();
-    (new Redis())-&gt;publish('counter:bump', json_encode(['value' =&gt; $new]));
+    Store::publish('counter:bump', json_encode(['value' =&gt; $new]));
     return ['value' =&gt; $new];
 });</code></pre>
     <p>
-      Now process B&rsquo;s subscribers see the message and broadcast to their own local
+      Now process B&rsquo;s subscriber sees the message and broadcasts to its own local
       <code>ws_clients</code>. Every connected tab sees the update, no matter which process is
-      holding their socket. This is the classic chat-app pattern; same idea works for any
-      cross-process broadcasting.
+      holding their socket. Same idea works for chat fan-out, presence, any cross-process event.
     </p>
+    <p>
+      <strong>Point-to-point routing</strong> (rather than broadcast): store
+      <code>client_id → server_id</code> in the same Redis-backed Store. Each server subscribes to
+      its identity channel (<code>ws:server:{ID}</code>). To message client X:
+    </p>
+    <pre><code class="language-php">// Anywhere — message a specific client by id.
+$owner = Store::get('client_locations', $clientId, 'server');
+Store::publish("ws:server:$owner", json_encode([
+    'client_id' => $clientId,
+    'data'      => $payload,
+]));
+
+// Each server's subscriber routes to the local fd.
+App::onPubSub("ws:server:{$myServerId}", function (string $payload) use ($server, $fdMap) {
+    $msg = json_decode($payload, true);
+    $fd = $fdMap[$msg['client_id']] ?? null;
+    if ($fd !== null &amp;&amp; $server-&gt;isEstablished($fd)) {
+        $server-&gt;push($fd, $msg['data']);
+    }
+});</code></pre>
+    <p>
+      ZealPHP&rsquo;s WebSocket fd is process-local &mdash; only the owning server can push to it.
+      Redis is the routing fabric that says &ldquo;hey, owner: here&rsquo;s something to push.&rdquo;
+      Sub-millisecond loopback, ~ms cross-region. See
+      <a href="/store#pubsub">/store#pubsub</a> for the at-least-once <code>publishReliable</code>
+      variant (Redis Streams) when drops aren&rsquo;t acceptable.
+    </p>
+
+    <?php App::render('/components/_callout', [
+      'variant' => 'warn',
+      'title'   => 'Pub/sub driver caveat (production)',
+      'body'    => '<p>The predis SUBSCRIBE-under-HOOK_ALL spike validated yielding behaviour; phpredis hasn\'t been benched in this config. For pub/sub subscribers under load, set <code>ZEALPHP_REDIS_PREFER=predis</code> (or pass <code>[\'prefer\' =&gt; Store::PREFER_PREDIS]</code> in your connection opts) until you\'ve benched phpredis in your environment. Hot CRUD paths are unaffected. See <a href="/store#phpredis-pubsub-caveat">/store#phpredis-pubsub-caveat</a>.</p>',
+    ]); ?>
 
     <?php App::render('/components/_callout', [
       'variant' => 'warn',
@@ -197,7 +232,7 @@ $app-&gt;route('/api/counter/bump', ['methods' =&gt; ['POST']], function () use 
       '<code>$app-&gt;ws($path, onMessage, onOpen, onClose)</code> — three callbacks handle the lifecycle.',
       'Track open fds in <code>Store</code> so you can broadcast; <code>isEstablished($fd)</code> guards against races.',
       'SSE for push-only, WebSocket for two-way. Don\'t use WebSocket when SSE would do.',
-      'Scale past one server with Redis Pub/Sub — each process subscribes and re-broadcasts to its local <code>ws_clients</code>.',
+      'Scale past one server with <code>Store::publish</code> + <code>App::onPubSub</code> on the Redis backend — each process subscribes and re-broadcasts to its local <code>ws_clients</code>. <code>Store::publishReliable</code> for at-least-once via Redis Streams.',
     ]]); ?>
 
     <div class="lesson-chips">
