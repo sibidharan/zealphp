@@ -55,10 +55,18 @@ class Counter
     public function __construct(int $initial = 0, ?string $name = null)
     {
         $this->name = $name ?? '__anon_' . (++self::$anonSerial);
-        // Reset to $initial unconditionally so a fresh Counter always
-        // starts from a clean slot (the backend may already hold state
-        // for this name, or — with $initial=0 — the slot may be brand new).
-        self::defaultBackend()->set($this->name, $initial);
+        // Touch the backend only when we actually have state to write —
+        // (a) any explicit name (force-reset to $initial), or
+        // (b) anonymous with non-zero $initial.
+        // Anonymous + 0 is a brand-new slot that the backend reads as 0
+        // anyway, so we can skip the backend round-trip. This matters at
+        // route-load time on the Redis backend: route/*.php often does
+        // `new Counter(0)` in the master process (no coroutine context),
+        // which would otherwise eagerly open a predis connection through
+        // a hooked stream_socket_client and crash boot.
+        if ($name !== null || $initial !== 0) {
+            self::defaultBackend()->set($this->name, $initial);
+        }
     }
 
     /** Atomically add `$by` and return the new value. */
