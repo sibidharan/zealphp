@@ -48,3 +48,15 @@
 @media (max-width: 720px) {
   .chatroom-widget { grid-template-columns: 1fr; }
 }
+
+/* Standalone view (/demo/view/chatroom/widget) — fit within viewport without
+   forcing the user to scroll the whole page. The lesson page (inline use)
+   already lives inside a longer document and scrolls naturally; the popout
+   shell has only breadcrumb + title + the widget so we make the messages
+   pane viewport-aware. */
+.demo-shell-body .chatroom-widget { margin: 0; }
+.demo-shell-body .chatroom-main { min-height: 0; }
+.demo-shell-body .chatroom-messages {
+  max-height: calc(100vh - 380px);
+  min-height: 180px;
+}
