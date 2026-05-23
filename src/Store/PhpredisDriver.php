@@ -247,6 +247,63 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    public function mhgetall(array $keys): array
+    {
+        if ($keys === []) { return []; }
+        try {
+            $p = $this->c->multi(\Redis::PIPELINE);
+            foreach ($keys as $k) { $p->hGetAll($k); }
+            $r = $p->exec();
+            if (!is_array($r)) { return []; }
+            $out = [];
+            foreach ($r as $i => $row) {
+                $coerced = [];
+                if (is_array($row)) {
+                    foreach ($row as $hk => $hv) {
+                        $coerced[(string) $hk] = is_scalar($hv) ? (string) $hv : '';
+                    }
+                }
+                $out[(int) $i] = $coerced;
+            }
+            return $out;
+        } catch (\RedisException $e) { throw $this->wrap($e); }
+    }
+
+    public function mhsetWithMembership(array $writes, ?string $setKey = null, ?int $ttl = null): void
+    {
+        if ($writes === []) { return; }
+        try {
+            $p = $this->c->multi(\Redis::PIPELINE);
+            $newMembers = [];
+            foreach ($writes as $w) {
+                $p->hMSet($w['rk'], $w['fields']);
+                if ($ttl !== null && $ttl > 0) {
+                    $p->expire($w['rk'], $ttl);
+                }
+                if ($setKey !== null && isset($w['sk'])) {
+                    $newMembers[] = $w['sk'];
+                }
+            }
+            if ($setKey !== null && $newMembers !== []) {
+                // sAdd is variadic in phpredis; pass each member as a separate arg.
+                $p->sAdd($setKey, ...$newMembers);
+            }
+            $p->exec();
+        } catch (\RedisException $e) { throw $this->wrap($e); }
+    }
+
+    public function unlink(string ...$keys): int
+    {
+        if ($keys === []) { return 0; }
+        try {
+            $r = $this->c->unlink($keys);
+            if (!is_int($r)) {
+                throw new StoreException('phpredis unlink: expected int, got ' . get_debug_type($r));
+            }
+            return $r;
+        } catch (\RedisException $e) { throw $this->wrap($e); }
+    }
+
     public function publish(string $channel, string $payload): int
     {
         try {

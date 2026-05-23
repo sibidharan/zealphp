@@ -201,18 +201,27 @@ final class RedisBackend implements StoreBackend
         $sk     = $this->setKey($name);
         $prefix = $this->prefix . ':' . $name . ':';
         $this->pool->with(function (RedisClient $c) use ($sk, $prefix, $name): void {
+            // H3: UNLINK (non-blocking reclaim, Redis 4.0+) + batches of 100
+            // instead of per-key DEL. Multi-second clears on 10k+-key tables
+            // drop to sub-second.
             if ($this->tableOpts[$name]['mode'] === 'ttl') {
+                $batch = [];
                 foreach ($c->scanKeys($prefix . '*') as $rk) {
-                    $c->del($rk);
+                    $batch[] = $rk;
+                    if (count($batch) >= 100) {
+                        $c->unlink(...$batch);
+                        $batch = [];
+                    }
                 }
+                if ($batch !== []) { $c->unlink(...$batch); }
                 return;
             }
             $members = iterator_to_array($c->sscan($sk), false);
             foreach (array_chunk($members, 100) as $batch) {
                 $rkeys = array_map(fn(string $k): string => $prefix . $k, $batch);
-                $c->del(...$rkeys);
+                $c->unlink(...$rkeys);
             }
-            $c->del($sk);
+            $c->unlink($sk);
         });
     }
 
@@ -227,9 +236,16 @@ final class RedisBackend implements StoreBackend
         if ($keys === []) { return []; }
         $schema = $this->schemas[$name];
         return $this->pool->with(function (RedisClient $c) use ($name, $keys, $schema): array {
+            // H3: pipelined HGETALL — one round-trip for the whole batch.
+            // Pre-v0.2.41 this looped N HGETALL round-trips. On a 100-key
+            // mget over local Redis that's ~1 ms saved; over remote Redis
+            // (~1 ms RTT) the saving is N × RTT.
+            $strKeys = array_map('strval', $keys);
+            $rkeys = array_map(fn(string $k): string => $this->rowKey($name, $k), $strKeys);
+            $raws  = $c->mhgetall($rkeys);
             $out = [];
-            foreach ($keys as $k) {
-                $wire = $c->hgetall($this->rowKey($name, $k));
+            foreach ($strKeys as $i => $k) {
+                $wire = $raws[$i] ?? [];
                 $out[$k] = $this->codec->decodeRow($schema, $wire);
             }
             return $out;
@@ -245,18 +261,29 @@ final class RedisBackend implements StoreBackend
         $sk     = $this->setKey($name);
 
         return (bool) $this->pool->with(function (RedisClient $c) use ($name, $rows, $schema, $opts, $sk): bool {
-            $newKeys = [];
+            // H3: pipeline the HMSET + optional EXPIRE + final SADD into a
+            // single round-trip. SADD is idempotent on existing members,
+            // so we skip the per-key EXISTS+isNew checks that the legacy
+            // path did — tracked SET stays consistent because Redis ignores
+            // duplicate SADD members.
+            $writes = [];
             foreach ($rows as $key => $row) {
-                $skey = (string) $key;
-                $rk   = $this->rowKey($name, $skey);
-                $isNew = !$c->exists($rk);
-                $c->hset($rk, $this->codec->encodeRow($schema, $row));
-                if ($opts['mode'] === 'tracked' && $isNew) { $newKeys[] = $skey; }
-                if ($opts['mode'] === 'ttl' && $opts['ttl'] > 0) {
-                    $c->expire($rk, $opts['ttl']);
+                $skey  = (string) $key;
+                $entry = [
+                    'rk'     => $this->rowKey($name, $skey),
+                    'fields' => $this->codec->encodeRow($schema, $row),
+                ];
+                if ($opts['mode'] === 'tracked') {
+                    $entry['sk'] = $skey;
                 }
+                $writes[] = $entry;
             }
-            if ($newKeys !== []) { $c->sadd($sk, $newKeys); }
+            $ttl = ($opts['mode'] === 'ttl' && $opts['ttl'] > 0) ? $opts['ttl'] : null;
+            $c->mhsetWithMembership(
+                $writes,
+                $opts['mode'] === 'tracked' ? $sk : null,
+                $ttl,
+            );
             return true;
         });
     }

@@ -96,6 +96,21 @@ final class RedisClient
     /** @return list<mixed> */
     public function pipeline(callable $batch): array { return $this->driver->pipeline($batch); }
 
+    // ── bulk primitives (H3) ────────────────────────────────────────────
+    /**
+     * @param array<int, string> $keys
+     * @return array<int, array<string, string>>
+     */
+    public function mhgetall(array $keys): array { return $this->driver->mhgetall($keys); }
+
+    /** @param array<int, array{rk:string, fields:array<string,string>, sk?:string}> $writes */
+    public function mhsetWithMembership(array $writes, ?string $setKey = null, ?int $ttl = null): void
+    {
+        $this->driver->mhsetWithMembership($writes, $setKey, $ttl);
+    }
+
+    public function unlink(string ...$keys): int { return $this->driver->unlink(...$keys); }
+
     // ── pub/sub ─────────────────────────────────────────────────────────
     public function publish(string $channel, string $payload): int { return $this->driver->publish($channel, $payload); }
 

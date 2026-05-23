@@ -438,6 +438,76 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    public function mhgetall(array $keys): array
+    {
+        if ($keys === []) { return []; }
+        try {
+            // Use the typed executeCommand(CommandInterface) path on the
+            // Pipeline. Predis's __call shortcut isn't visible to PHPStan
+            // (no @method tags on ClientContextInterface), so we construct
+            // RawCommand explicitly — same wire bytes, type-safe.
+            /** @var mixed $r */
+            $r = $this->c->pipeline(function (\Predis\Pipeline\Pipeline $pipe) use ($keys): void {
+                foreach ($keys as $k) {
+                    $pipe->executeCommand(new \Predis\Command\RawCommand('HGETALL', [$k]));
+                }
+            });
+            if (!is_array($r)) { return []; }
+            $out = [];
+            foreach ($r as $i => $row) {
+                $coerced = [];
+                if (is_array($row)) {
+                    foreach ($row as $hk => $hv) {
+                        $coerced[(string) $hk] = is_scalar($hv) ? (string) $hv : '';
+                    }
+                }
+                $out[(int) $i] = $coerced;
+            }
+            return $out;
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function mhsetWithMembership(array $writes, ?string $setKey = null, ?int $ttl = null): void
+    {
+        if ($writes === []) { return; }
+        try {
+            $this->c->pipeline(function (\Predis\Pipeline\Pipeline $pipe) use ($writes, $setKey, $ttl): void {
+                $newMembers = [];
+                foreach ($writes as $w) {
+                    // HMSET key field1 value1 field2 value2 ...
+                    $hmsetArgs = [$w['rk']];
+                    foreach ($w['fields'] as $f => $v) {
+                        $hmsetArgs[] = $f;
+                        $hmsetArgs[] = $v;
+                    }
+                    $pipe->executeCommand(new \Predis\Command\RawCommand('HMSET', $hmsetArgs));
+                    if ($ttl !== null && $ttl > 0) {
+                        $pipe->executeCommand(new \Predis\Command\RawCommand('EXPIRE', [$w['rk'], (string) $ttl]));
+                    }
+                    if ($setKey !== null && isset($w['sk'])) {
+                        $newMembers[] = $w['sk'];
+                    }
+                }
+                if ($setKey !== null && $newMembers !== []) {
+                    // SADD key member [member ...]
+                    $pipe->executeCommand(new \Predis\Command\RawCommand('SADD', array_merge([$setKey], $newMembers)));
+                }
+            });
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function unlink(string ...$keys): int
+    {
+        if ($keys === []) { return 0; }
+        try {
+            // executeRaw is on the typed Client surface — bypasses __call's
+            // magic that PHPStan can't see.
+            /** @var mixed $r */
+            $r = $this->c->executeRaw(array_merge(['UNLINK'], $keys));
+            return $this->asInt($r, 'unlink');
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
     // ── narrowing helpers ─────────────────────────────────────────────────
 
     private function isOkStatus(mixed $r, string $expect = 'OK'): bool

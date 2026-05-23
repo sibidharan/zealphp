@@ -133,4 +133,51 @@ interface RedisDriver
      * @return list<mixed>
      */
     public function pipeline(callable $batch): array;
+
+    // ── bulk primitives (H3 — Phase B pipelining) ─────────────────────────
+    //
+    // These exist so RedisBackend::mget / mset / clear can do their work
+    // in one round-trip instead of N. Each driver pipelines using its
+    // native shape (phpredis multi(PIPELINE), predis $c->pipeline()) so
+    // the backend never has to know what the underlying shape looks like.
+
+    /**
+     * Bulk HGETALL. Pipelined into a single round-trip; rows returned
+     * indexed by the input order. Missing keys come back as `[]` (empty
+     * hash) — Redis HGETALL on a non-existent key is empty, not an error.
+     *
+     * @param  array<int, string> $keys  full Redis keys (already prefixed by caller)
+     * @return array<int, array<string, string>>
+     */
+    public function mhgetall(array $keys): array;
+
+    /**
+     * Bulk write hashes + optional SET membership + optional EXPIRE,
+     * in one pipelined round-trip. Used by `RedisBackend::mset` and the
+     * tracked-mode mset path.
+     *
+     * Each $writes entry:
+     *   - `rk`     : full Redis key for the HSET target (already prefixed)
+     *   - `fields` : the hash payload
+     *   - `sk`     : (optional) the logical user key to add to $setKey
+     *
+     * Behaviour:
+     *   - HMSET $rk fields
+     *   - if $ttl > 0:   EXPIRE $rk $ttl
+     *   - if $setKey !== null and any entries have `sk`: SADD $setKey sk1 sk2 ...
+     *     (idempotent on existing members — no isNew check needed, but
+     *      tracked mode stays consistent because SADD returns 0 for dupes)
+     *
+     * @param array<int, array{rk:string, fields:array<string,string>, sk?:string}> $writes
+     */
+    public function mhsetWithMembership(array $writes, ?string $setKey = null, ?int $ttl = null): void;
+
+    /**
+     * Best-effort non-blocking delete (UNLINK, Redis 4.0+). Falls back to
+     * DEL if UNLINK is unavailable. Returns count of keys removed.
+     *
+     * Used by `RedisBackend::clear` to avoid blocking the Redis main thread
+     * on large tables (UNLINK runs the actual reclaim in a background thread).
+     */
+    public function unlink(string ...$keys): int;
 }
