@@ -210,6 +210,46 @@ final class RedisBackend implements StoreBackend
         return array_keys($this->schemas);
     }
 
+    public function mget(string $name, array $keys): array
+    {
+        $this->assertMade($name);
+        if ($keys === []) { return []; }
+        $schema = $this->schemas[$name];
+        return $this->pool->with(function (RedisClient $c) use ($name, $keys, $schema): array {
+            $out = [];
+            foreach ($keys as $k) {
+                $wire = $c->hgetall($this->rowKey($name, $k));
+                $out[$k] = $this->codec->decodeRow($schema, $wire);
+            }
+            return $out;
+        });
+    }
+
+    public function mset(string $name, array $rows): bool
+    {
+        $this->assertMade($name);
+        if ($rows === []) { return true; }
+        $schema = $this->schemas[$name];
+        $opts   = $this->tableOpts[$name];
+        $sk     = $this->setKey($name);
+
+        return (bool) $this->pool->with(function (RedisClient $c) use ($name, $rows, $schema, $opts, $sk): bool {
+            $newKeys = [];
+            foreach ($rows as $key => $row) {
+                $skey = (string) $key;
+                $rk   = $this->rowKey($name, $skey);
+                $isNew = !$c->exists($rk);
+                $c->hset($rk, $this->codec->encodeRow($schema, $row));
+                if ($opts['mode'] === 'tracked' && $isNew) { $newKeys[] = $skey; }
+                if ($opts['mode'] === 'ttl' && $opts['ttl'] > 0) {
+                    $c->expire($rk, $opts['ttl']);
+                }
+            }
+            if ($newKeys !== []) { $c->sadd($sk, $newKeys); }
+            return true;
+        });
+    }
+
     /** Health check via PING — `Store::ping()` (Task 11) delegates here. */
     public function ping(): bool
     {
