@@ -173,12 +173,11 @@ $app-&gt;route('/api/expensive', function ($request) {
       type-safety + IDE autocomplete:
     </p>
     <pre><code class="language-php">use ZealPHP\Store;
-use ZealPHP\Store\StoreBackendKind;
 
 // app.php — before $app->run()
-Store::defaultBackend(StoreBackendKind::Redis);                  // ZEALPHP_REDIS_URL env
+Store::defaultBackend(Store::BACKEND_REDIS);                  // ZEALPHP_REDIS_URL env
 // or explicit:
-Store::defaultBackend(StoreBackendKind::Redis, [
+Store::defaultBackend(Store::BACKEND_REDIS, [
     'url' => 'redis://cache.internal:6379/0',
 ]);
 
@@ -198,12 +197,12 @@ Store::defaultBackend(Store::BACKEND_REDIS);
 
     <h3 id="step-tiered">Want both? Tiered backend (L1 Table + L2 Redis)</h3>
     <p>
-      <code>StoreBackendKind::Tiered</code> pairs a TableBackend (L1, ns latency, bounded-staleness
+      <code>Store::BACKEND_TIERED</code> pairs a TableBackend (L1, ns latency, bounded-staleness
       via <code>l1_ttl</code>) with a RedisBackend (L2, source of truth, cross-node). Reads return
       L1 if fresh, else fetch L2 + populate L1. Writes write-through to L2 + refresh L1. Optional
       HMAC-signed cross-node L1 invalidation keeps every node&rsquo;s L1 in sync sub-millisecond.
     </p>
-    <pre><code class="language-php">Store::defaultBackend(StoreBackendKind::Tiered, [
+    <pre><code class="language-php">Store::defaultBackend(Store::BACKEND_TIERED, [
     'url'                 =&gt; 'redis://cache:6379',
     'l1_ttl'              =&gt; 5,                              // L1 freshness window (seconds)
     'invalidation_secret' =&gt; getenv('ZEALPHP_TIERED_INVALIDATION_SECRET') ?: null,

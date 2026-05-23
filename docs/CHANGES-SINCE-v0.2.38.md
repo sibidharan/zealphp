@@ -66,10 +66,9 @@ Default behaviour is unchanged. Apps that don't touch the backend stay on `OpenS
 
 ```php
 use ZealPHP\Store;
-use ZealPHP\Store\StoreBackendKind;
 
 // In app.php — BEFORE App::init()
-Store::defaultBackend(StoreBackendKind::Redis, 'redis://cache:6379/0');
+Store::defaultBackend(Store::BACKEND_REDIS, 'redis://cache:6379/0');
 
 // OR via env (no code change):
 ZEALPHP_STORE_BACKEND=redis php app.php
@@ -125,7 +124,7 @@ $msgId = Store::publishReliable('orders', json_encode($order));
 ### Try it — Tiered backend (L1 Table + L2 Redis)
 
 ```php
-Store::defaultBackend(StoreBackendKind::Tiered, [
+Store::defaultBackend(Store::BACKEND_TIERED, [
     'url'                 => 'redis://cache:6379',
     'l1_ttl'              => 5,                              // L1 freshness window (seconds)
     'invalidation_secret' => getenv('ZEALPHP_TIERED_INVALIDATION_SECRET') ?: null,
@@ -140,7 +139,7 @@ Store::defaultBackend(StoreBackendKind::Tiered, [
 use ZealPHP\WSRouter;
 
 // app.php
-Store::defaultBackend(StoreBackendKind::Redis);
+Store::defaultBackend(Store::BACKEND_REDIS);
 WSRouter::init('node-A');  // or auto: hostname:pid
 
 $app->ws('/chat',
@@ -186,7 +185,7 @@ The senior-eng review at `docs/architecture/2026-05-23-redis-backend-review.md` 
 |---|---|---|
 | **C1** | `WSRouter` FD-reuse race — `conn_id` nonce | `WSRouter::own()` now returns a 16-byte hex `conn_id`. Subscriber sink verifies the nonce before pushing — prevents cross-tenant message leakage when a client disconnects ungracefully + fd is reused. |
 | **C2** | HMAC-signed L1 invalidation in `TieredBackend` | `new TieredBackend($l1, $l2, invalidationSecret: getenv('ZEALPHP_TIERED_INVALIDATION_SECRET'))`. Same secret on every node; peers verify before evicting. |
-| **C3** | TLS via `rediss://` | `Store::defaultBackend(StoreBackendKind::Redis, 'rediss://cache:6380/0')` — `verify_peer=true` by default. |
+| **C3** | TLS via `rediss://` | `Store::defaultBackend(Store::BACKEND_REDIS, 'rediss://cache:6380/0')` — `verify_peer=true` by default. |
 
 ### Medium fixes
 
@@ -195,7 +194,7 @@ The senior-eng review at `docs/architecture/2026-05-23-redis-backend-review.md` 
 | **H1** | `tracked + ttl>0` throws at `make()` | `Store::make('t', 1024, [...], ['mode'=>'tracked','ttl'=>60])` now throws clearly instead of silently dropping TTL. |
 | **H2** | `Store::getStrict()` — null on miss | `$row = Store::getStrict('users', $id) ?? $default;` — works correctly with stored falsy values (0, '', false). |
 | **H3** | Pipelined `mget`/`mset` + `UNLINK` clear | `Store::mget('cache', $keys)` is now 1 round-trip instead of N. `Store::clear()` uses UNLINK. Just call as before. |
-| **H4** | Opt-in circuit breaker | `Store::defaultBackend(StoreBackendKind::Redis, ['url'=>'...', 'on_error'=>'fallback_table'])` — when Redis is down, reads degrade to a Table cache; writes throw. |
+| **H4** | Opt-in circuit breaker | `Store::defaultBackend(Store::BACKEND_REDIS, ['url'=>'...', 'on_error'=>'fallback_table'])` — when Redis is down, reads degrade to a Table cache; writes throw. |
 | **H5** | `Store::stats()` per-worker counters | `curl /some-route` that returns `Store::stats()` — see pool acquires, timeouts, clients created. |
 | **H6** | Boot-time Redis ping advisory | Just boot with `ZEALPHP_STORE_BACKEND=redis`. If Redis is unreachable, you'll see a loud warning in master logs before workers fork. |
 | **H7** | HOOK_ALL + phpredis subscriber warning | If you disable `HOOK_ALL` explicitly AND have phpredis as the resolved driver AND have pubsub handlers registered, boot warns you to either re-enable or `ZEALPHP_REDIS_PREFER=predis`. |
@@ -225,7 +224,7 @@ The senior-eng review at `docs/architecture/2026-05-23-redis-backend-review.md` 
 ### Try it — Tiered facade via `Store::defaultBackend()`
 
 ```php
-Store::defaultBackend(StoreBackendKind::Tiered, [
+Store::defaultBackend(Store::BACKEND_TIERED, [
     'url' => 'redis://cache:6379',
     'l1_ttl' => 10,
     'invalidation_secret' => 'shared-cluster-secret',
@@ -285,7 +284,7 @@ Cross-server / cross-host room abstraction on top of the v0.2.40 Store + pub/sub
 use ZealPHP\Store;
 use ZealPHP\WSRouter;
 
-Store::defaultBackend(StoreBackendKind::Redis);
+Store::defaultBackend(Store::BACKEND_REDIS);
 WSRouter::init();                            // wires the pattern subscriber
 
 $room = WSRouter::room('chat:42');

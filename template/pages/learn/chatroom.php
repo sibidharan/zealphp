@@ -249,7 +249,7 @@ broadcast_to_room($server, $roomFds, $room, $payload);</code></pre>
       </div>
       <div>
         <h3 class="store-col-bad">Multi-server (Lesson 23)</h3>
-        <pre><code class="language-php">Store::defaultBackend(StoreBackendKind::Redis);
+        <pre><code class="language-php">Store::defaultBackend(Store::BACKEND_REDIS);
 WSRouter::init();
 // onMessage handler:
 $room = WSRouter::room('chat:' . $name);

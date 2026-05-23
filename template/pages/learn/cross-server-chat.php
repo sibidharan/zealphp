@@ -60,10 +60,9 @@
       That&rsquo;s fast (nanoseconds) but stops at the process boundary. Flip to Redis with one line:
     </p>
 <pre><code class="language-php">use ZealPHP\Store;
-use ZealPHP\Store\StoreBackendKind;
 
 // In app.php, BEFORE $app-&gt;run() or App::run():
-Store::defaultBackend(StoreBackendKind::Redis);
+Store::defaultBackend(Store::BACKEND_REDIS);
 // Or via env: ZEALPHP_STORE_BACKEND=redis ZEALPHP_REDIS_URL=redis://cache:6379</code></pre>
     <p>
       Every existing <code>Store::make()</code>, <code>Store::set()</code>, <code>Store::get()</code> call
@@ -112,9 +111,8 @@ App::onPubSub("ws:server:{$myId}", function (string $payload): void {
     <h3>Step 1: Switch the Store backend</h3>
 <pre><code class="language-php">// app.php, near the top
 use ZealPHP\Store;
-use ZealPHP\Store\StoreBackendKind;
 
-Store::defaultBackend(StoreBackendKind::Redis);
+Store::defaultBackend(Store::BACKEND_REDIS);
 
 // Existing Store tables (chat history, presence, &hellip;) keep working unchanged.</code></pre>
 
@@ -299,7 +297,7 @@ WSRouter::broadcast('chat:room:42', json_encode(['msg' =&gt; 'lunch!']));
         <code>Store::publishReliable</code> is at-least-once via Redis Streams (orders, audit, work queues).</li>
       <li><code>WSRouter</code> bundles the &ldquo;owner of fd pushes; everyone else publishes&rdquo; pattern
         in five calls. Use the helper for new code; the manual four-step build is the mental model.</li>
-      <li>One <code>Store::defaultBackend(StoreBackendKind::Redis)</code> line takes the WHOLE app from
+      <li>One <code>Store::defaultBackend(Store::BACKEND_REDIS)</code> line takes the WHOLE app from
         single-box to multi-node &mdash; sessions, cache, counters, ws routing, the lot.</li>
     </ul>
 

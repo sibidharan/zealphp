@@ -162,12 +162,11 @@ Cache::flush();                                    // clear everything</code></p
 
 <div class="code-block">
 <pre><code class="language-php">use ZealPHP\Store;
-use ZealPHP\Store\StoreBackendKind;
 
 // Recommended — type-safe enum (IDE autocomplete + refactor-safe):
-Store::defaultBackend(StoreBackendKind::Table);                                // default
-Store::defaultBackend(StoreBackendKind::Redis, 'redis://cache.internal:6379'); // cross-node
-Store::defaultBackend(StoreBackendKind::Tiered, [                              // ns reads + cross-node truth
+Store::defaultBackend(Store::BACKEND_TABLE);                                // default
+Store::defaultBackend(Store::BACKEND_REDIS, 'redis://cache.internal:6379'); // cross-node
+Store::defaultBackend(Store::BACKEND_TIERED, [                              // ns reads + cross-node truth
     'url'                 =&gt; 'redis://cache.internal:6379',
     'l1_ttl'              =&gt; 5,                              // L1 freshness window (seconds)
     'invalidation_secret' =&gt; getenv('ZEALPHP_TIERED_INVALIDATION_SECRET') ?: null,
@@ -182,7 +181,7 @@ Store::defaultBackend(Store::BACKEND_TIERED, 'redis://cache:6379');</code></pre>
   <thead><tr><th>Backend</th><th>Latency</th><th>Cross-node</th><th>Persistence</th><th>Bounded growth</th><th>When to pick</th></tr></thead>
   <tbody>
     <tr>
-      <td><code>StoreBackendKind::Table</code> (default)</td>
+      <td><code>Store::BACKEND_TABLE</code> (default)</td>
       <td>~ns (lock-free shared memory)</td>
       <td>No &mdash; one OpenSwoole server</td>
       <td>No &mdash; volatile</td>
@@ -190,7 +189,7 @@ Store::defaultBackend(Store::BACKEND_TIERED, 'redis://cache:6379');</code></pre>
       <td>Single-node hot path. Millions of ops/sec. 95% of apps.</td>
     </tr>
     <tr>
-      <td><code>StoreBackendKind::Redis</code></td>
+      <td><code>Store::BACKEND_REDIS</code></td>
       <td>~tens of &micro;s local, ~ms cross-node</td>
       <td>Yes &mdash; any number of nodes</td>
       <td>Yes (Redis AOF/RDB)</td>
@@ -198,7 +197,7 @@ Store::defaultBackend(Store::BACKEND_TIERED, 'redis://cache:6379');</code></pre>
       <td>Horizontal scaling, persistent state, existing Redis infra.</td>
     </tr>
     <tr>
-      <td><code>StoreBackendKind::Tiered</code></td>
+      <td><code>Store::BACKEND_TIERED</code></td>
       <td>~ns on L1 hit, ~ms on L1 miss (L2)</td>
       <td>Yes (via L2)</td>
       <td>Yes (via L2)</td>
@@ -301,9 +300,9 @@ $messageId = Store::publishReliable('orders', json_encode($order));</code></pre>
   </ul>
   <strong>Pick phpredis when you can</strong> &mdash; it&rsquo;s faster across the board. Force predis only if you can&rsquo;t install <code>ext-redis</code>:
   <div class="code-block">
-<pre><code class="language-php">Store::defaultBackend(StoreBackendKind::Redis, [
+<pre><code class="language-php">Store::defaultBackend(Store::BACKEND_REDIS, [
     'url'    => 'redis://cache:6379/0',
-    'prefer' => DriverPreference::Predis,   // or Phpredis (default when ext loaded)
+    'prefer' => Store::PREFER_PREDIS,   // or Phpredis (default when ext loaded)
 ]);
 // Or via env: ZEALPHP_REDIS_PREFER=predis</code></pre>
   </div>

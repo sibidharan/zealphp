@@ -35,7 +35,7 @@ No `src/` changes. No new demo routes. No test churn.
 1. **Hook — the problem** (1 short para + ASCII diagram). Single-server chat works. Add a second `php app.php` on `:9090`. User A on `:8080`, user B on `:9090`. A sends → B never sees it. Why?
 2. **Mental model: `$fd` is process-local.** Each OpenSwoole worker holds its own `$fd → connection` table. Only the owning worker on the owning process can `$server->push($fd, …)`. A `$fd=12` on server 1 is meaningless on server 2.
 3. **The three primitives.** One short code block + 1 sentence each:
-   - **Shared Store backend.** `Store::defaultBackend(StoreBackendKind::Redis)` — flips storage from local Table to Redis with zero handler changes.
+   - **Shared Store backend.** `Store::defaultBackend(Store::BACKEND_REDIS)` — flips storage from local Table to Redis with zero handler changes.
    - **An ownership map.** A Store table `ws_owner` keyed by `client_id`, columns `server_id` + `fd`.
    - **A per-server inbox.** `App::onPubSub("ws:server:$myId", …)` — each server subscribes to its own identity channel.
 4. **Build it — 4 bite-sized steps with full working code:**
@@ -125,7 +125,7 @@ App::render('_master', [
 - [ ] **Step 3:** Write Section 2 (mental model). One paragraph: "`$fd` is a per-process integer handle into OpenSwoole's worker-local connection table. Worker A's `$fd=12` is not the same handle on worker B, and on a different OpenSwoole *process* the integer is meaningless." Inline code block showing `var_dump($server->getClientInfo($fd))` returning false on a different process.
 
 - [ ] **Step 4:** Write Section 3 (three primitives). One `<h3>` per primitive with a 3-5 line code block underneath:
-  - **Shared Store backend**: `Store::defaultBackend(StoreBackendKind::Redis)`.
+  - **Shared Store backend**: `Store::defaultBackend(Store::BACKEND_REDIS)`.
   - **Ownership map**: `Store::make('ws_owner', 4096, ['server' => [Store::TYPE_STRING, 64]])`.
   - **Per-server inbox**: `App::onPubSub("ws:server:$myId", function ($payload) { ... })`.
 
@@ -180,7 +180,7 @@ App::render('_master', [
   single-server WebSocket chat to one that survives across N OpenSwoole
   servers, exercising the v0.2.39 primitives end-to-end:
 
-    - Store::defaultBackend(StoreBackendKind::Redis) — backend switch
+    - Store::defaultBackend(Store::BACKEND_REDIS) — backend switch
     - ws_owner Store table — client → server mapping
     - App::onPubSub("ws:server:$myId", …) — per-server inbox
     - WSRouter helper — bundles the pattern in 5 calls
