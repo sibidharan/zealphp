@@ -2,11 +2,11 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.39] - 2026-05-23
+## [0.2.40] - 2026-05-23
 
-Pluggable Store/Counter backends — Phase 1. `Store` and `Counter` now delegate to backend instances behind their existing static/instance APIs. `OpenSwoole\Table` / `OpenSwoole\Atomic` remain the default (the nanosecond hot path); flip to **Redis/Valkey** for cross-node shared state with one line in `app.php` or the `ZEALPHP_STORE_BACKEND=redis` env var. Every existing handler call site keeps working unchanged.
+Production-grade pluggable backends + federated WebSocket fabric. Includes the previously-authored v0.2.39 plumbing (Pluggable Store/Counter backends — Phase 1) plus the production-hardening pass that landed on top of it: cross-host federated rooms, per-room SET optimisation, HMAC-signed pub/sub, stampede-gated cache, Lua-backed atomic transactions, paginated iteration for large Redis tables, Memcached as a fourth backend, aggregated `App::stats()`, and six early v0.3.0 helpers (`App::parallel`, `App::onSignal`, `App::onProcess`, `App::stats`, typed outbound HTTP, federated WS rooms).
 
-The Phase 3 pub/sub design (deferred to a future release) is empirically de-risked in this release via three committed spikes — in-process, cross-process, and cross-host — proving predis `SUBSCRIBE` yields under `HOOK_ALL` and the dedicated-subscriber-cor + Redis-routing architecture delivers sub-millisecond message visibility across hosts.
+Cross-host federation validated end-to-end against two physical hosts sharing a Valkey via wireguard — alice writes, bob reads on a different host, both see the same `Room::members()` roster, `Cache::invalidateTag` drops keys cluster-wide.
 
 PR #83.
 
@@ -45,13 +45,64 @@ PR #83.
 - New demo routes: `/demo/pubsub/publish`, `/demo/pubsub/publish-reliable`, `/demo/pubsub/log` exercise the API end-to-end against the running server.
 - Three Phase 3 validation spikes shipped as artifacts: in-process (`scripts/spike-predis-subscribe.php` — predis SUBSCRIBE yields under HOOK_ALL), cross-process (`scripts/spike-crossnode-server.php` — two ZealPHP servers exchange via shared valkey, ~0.3 ms one-way), cross-host (`scripts/spike-crosshost-{publish,subscribe}.php` — subscriber on a remote box via wireguard tunnel, 0.53 ms median end-to-end). Documented in `docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md`.
 
+### Added — production-hardening pass (this release)
+
+- **`Counter` N-1..N-4** — `CounterBackend::setIfAbsent` (atomic SETNX on Redis, fresh-map check on Atomic) so `new Counter(0, 'foo')` no longer clobbers existing per-room/per-user counters. `Counter::incrementBounded(int $by, int $max): ?int` — bounded atomic increment (Lua-server-side on Redis). `Counter::expire(int $seconds): bool` — TTL on counter keys (Redis only; no-op on Atomic). `Counter::mincr(array)` — pipelined batch increment.
+- **`Store` S-1/S-2/S-3** — `Store::evalScript($script, $keys, $args)` — atomic Redis Lua execution (the canonical replacement for MULTI/EXEC). `Store::compareAndSet($table, $key, $field, $expected, $new)` — optimistic CAS on a single Store row+column. `Store::iteratePaged($name, $cursor='0', $count=100): {cursor, rows}` — paginated SSCAN/SCAN-MATCH iteration for large Redis tables. Set primitives `Store::sadd/srem/scard/sscanCursor/sdel` exposed for power-user SET workloads (and the framework's own Room layer). `Store::hasSetOps()` guard for backend-portable code.
+- **`Cache` C-1/C-2/C-3** — `Cache::getOrCompute()` now elects a single lock-holder via `Counter::compareAndSet` so concurrent misses don't all run `$compute` (stampede protection). Losers wait up to 200ms in 20ms increments (yielded via `usleep` under HOOK_ALL). `Cache::init($maxFiles)` — file-tier eviction cap (oldest-mtime-first beyond the cap) for unbounded-TTL workloads. `Cache::set($k, $v, $ttl, $tags = [])` + `Cache::invalidateTag($tag)` — bulk invalidation via per-tag Redis SET (requires Redis/Tiered backend). New `stats()` counters: `stampede_blocked`, `file_rotations`, `tag_invalidations`.
+- **`WSRouter` WS-1/2/3/4/5** — sendToClient default sink now routes through `pushWithBackpressure` (`pushes_dropped_slow_consumer` surfaced for slow consumers; pre-WS-1 only `Room::push` fan-out had the guard). Per-room Redis SET maintained by `Room::join`/`leave`: O(1) `Room::size()` via SCARD, paginated `Room::members()` + new `Room::membersPaged($cursor, $count)`. `WSRouter::setChannelHmacSecret($secret)` — shared HMAC-SHA256 over every `ws:server:*` and `ws:room:*` publish; subscribers verify on receive (mismatch dropped + `hmac_verify_failures_total` bumped). `WSRouter::setClientRateLimit($n, $windowSec)` + `checkClientRate($id)` — per-client sliding-window rate limit. WebSocket close-code constants (RFC 6455 1000–1099 + ZealPHP app range 4001/4002/4003/4013/4029/4040).
+- **`App::stats()` X-4** — aggregated framework snapshot adds `cache`, `ws_router`, `backends.{store_kind,counter_kind}` keys. Each subsystem wrapped in `safeStats` so a single subsystem failure (e.g. WSRouter uninitialised at /healthz time) returns `{_error: ...}` instead of crashing the snapshot. Prom-friendly array shape.
+- **WSRouter production hardening (foundational)** — `WSRouter::initOptions(ownerCapacity, roomMembersCapacity, slowConsumerBytes)`. `CapacityException extends StoreException` raised by `own()` and `Room::join()` when the cluster-wide tables fill. Per-room rate limit via `WSRouter::setRoomRateLimit($n, $windowSec)`. Server registry table with heartbeat + GC sweep (`SERVER_HEARTBEAT_INTERVAL_MS` / `SERVER_GC_INTERVAL_MS` / `SERVER_STALE_AFTER_SEC`). `WSRouter::onlineCount()` / `onlineByServer()` cluster-wide connection counts. `WSRouter::stats(): Stats` with 14 counters surfaced via snapshot().
+- **Memcached backend** — fourth `StoreBackend` + third `CounterBackend`. Wired via `Store::BACKEND_MEMCACHED` / `Counter::BACKEND_MEMCACHED` constants + `StoreBackendKind::Memcached` / `CounterBackendKind::Memcached` enum cases. Store: per-row serialize on `set/get/del/exists/incr/decr/mget/mset` works end-to-end; throws StoreException with a "use Redis for this" message on `iterate`/`count`/`clear`/Set ops/pub-sub (Memcached has no SCAN, SET type, pub/sub, or Lua). Counter: native server-side atomic `increment`/`decrement` (lazy-init via `add+0`), `compareAndSet` via gets/cas, bounded-increment via CAS retry loop. `ZEALPHP_MEMCACHED_SERVERS` env var bootstraps the default backend.
+- **Tiered backend (Phase 2 — `TableBackend` L1 + `RedisBackend` L2)** — `ZealPHP\Store\TieredBackend` with bounded `l1_ttl` staleness window + synthetic `__cached_at` per-row column. `enableInvalidation()` enables cross-node L1 eviction via origin-tagged pub/sub on `__l1_invalidate:{table}`. `TieredBackend::existsCached()` — stale-OK opt-in fast path (H8). Optional HMAC-signed invalidation messages (`ZEALPHP_TIERED_INVALIDATION_SECRET`) — C2 hardening defeats the "anyone with Redis write access DoSes the cluster's L1" attack.
+- **Production hardening pass (v0.2.41 review)** — 3 critical + 10 medium gaps closed across the Redis stack. `WSRouter` per-fd `conn_id` nonce defeats fd-reuse races (C1). `RedisBackend::make()` rejects `mode='tracked' + ttl>0` at boot (H1). `Store::getStrict()` null-on-miss variant for new code (H2). Pipelined `mhgetall`/`mhsetWithMembership`/`unlink` driver primitives — `mget(100)` → 1 RTT; 10k-key `clear()` → sub-second (H3). Opt-in `CircuitBreakerBackend` decorator with 3-state machine (closed/open/half-open) + sliding-window threshold (H4). `Store::stats()` per-worker pool counters (H5). Boot-time advisories: eager Redis ping + HOOK_ALL+phpredis+subscribers compatibility check (H6+H7). `PhpredisDriver::close()` diagnoseable failure trace via `elog('debug')` (H9). `RedisPubSub::$maxAttempts` bounded reconnect for CI workers (H10). TLS via `rediss://` / `tls://` schemes (C3).
+- **Federated WebSocket Rooms (v0.3.0 P1.1, landed early)** — `WSRouter::room($name): Room` — first-class room abstraction on top of v0.2.40 Store + pub/sub fabric. Membership in cluster-wide `ws_room_members` Store table; one PSUBSCRIBE pattern subscriber per worker covers every room; per-worker local-membership cache populated from presence events. API: `$r->join/leave/isMember/size/members/membersPaged/push/onMessage/onPresence`. Cross-host federation validated against two physical ZealPHP instances + shared Valkey.
+- **Early v0.3.0 helpers (landed in this release)** — `App::parallel(array $tasks): array` + `App::parallelLimit(array, callable, int $concurrency): array` (P1.4, fork-join + bounded fan-out via `Coroutine\Channel` — `WaitGroup` isn't in OpenSwoole 22.x). `App::onSignal(int $signal, callable $handler, bool $workerOnly = false)` (P1.12, master vs worker scoping). `App::stats(): array` (P1.10 partial; full `/healthz` Middleware + Prometheus exposition queued). `ZealPHP\HTTP::get/post/put/delete/request/all` + `ZealPHP\HTTPResponse` (P1.11, typed outbound HTTP wrapper over `OpenSwoole\Coroutine\Http\Client`). `App::onProcess(string $name, callable $fn, int $workers = 1, bool $coroutine = true)` (P2.1, sidecar long-running process registration, `cli_set_process_title("zealphp:{$name}")`).
+- **`Cache::getOrCompute($key, $compute, $ttl)`** — read-through cache helper that also caches `null` via internal sentinel (distinguishes "stored null" from "miss"). Pair with `Cache::init(maxRows: …, ttlSeconds: …)` for bounded growth on the Redis backend.
+- **Three-backend Store facade** — `Store::defaultBackend()` accepts `Store::BACKEND_TABLE` / `BACKEND_REDIS` / `BACKEND_TIERED` / `BACKEND_MEMCACHED` (canonical class constants — bare strings work too for BC).
+- **Pub/sub WebSocket helper** — `ZealPHP\WSRouter` bundles the cross-server WS routing pattern: `init($serverId?, $sink?)`, `own($clientId, $fd)`, `release($clientId)`, `sendToClient($id, $payload)`, `broadcast($channel, $payload)`. Stores `client_id → server_id` in the cluster-wide `ws_owner` Store table; each server subscribes to its identity channel `ws:server:{ID}`.
+- **Cluster-wide WebSocket rooms** — `WSRouter::room('chat:42')->join/leave/push/members/onMessage/onPresence` (federated via Store + pub/sub).
+- **Streams `XAUTOCLAIM`** — `RedisClient::xautoclaim` for orphan-message recovery from dead consumers.
+- **Redis-backed sessions** — `ZealPHP\Session\Handler\StoreSessionHandler` rides whichever backend `Store::defaultBackend()` is configured with (Table for single-node, Redis for cross-node, Tiered for both).
+
+### Documentation (this release)
+
+- `docs/WSROUTER-PRODUCTION.md` — comprehensive WSRouter production-hardening guide (capacity, heartbeat/GC, backpressure, metrics, rate-limiting, ordering, trust model, auth + reconnect docs).
+- `docs/architecture/2026-05-23-redis-backend-review.md` — senior-engineer production-readiness review of the Redis backend surface; risk-by-risk mapping for the 13 hardening fixes.
+- `docs/architecture/2026-05-23-v0.3.0-roadmap.md` — v0.3.0 scope plan, marking P1.1/P1.4/P1.10/P1.11/P1.12/P2.1 SHIPPED in this release.
+- `docs/superpowers/plans/2026-05-23-auth-system.md` — Phase 1 auth design plan (P1.3, queued for v0.3.0 implementation pass).
+- `docs/superpowers/plans/2026-05-23-redis-backend-hardening.md` — the plan that drove the production-hardening pass.
+- `scripts/smoke-v0.2.40.php` + `scripts/smoke-federation.php` — cross-host federation smoke scripts (this release's validation harness).
+
+### Changed (this release)
+
+- `Counter::__construct(int $initial = 0, ?string $name = null)` no longer overwrites an existing same-named counter. Previously every `new Counter(0, 'foo')` invocation called `set($name, 0)`, clobbering existing state — hidden footgun for per-room / per-user monotonic counters. Now uses `setIfAbsent` (SETNX on Redis, fresh-map check on Atomic). Explicit `Counter->reset()` keeps the old behaviour available.
+- `Cache::stats()` returns 3 new keys: `stampede_blocked`, `file_rotations`, `tag_invalidations`. The shape stays backwards-compatible (no key removals).
+- `App::stats()` shape extended with `cache`, `ws_router`, `backends` keys.
+- `ZealPHP\Http` → `ZealPHP\HTTP` (class rename to match the `ZealPHP\HTTP\Request` namespace convention). PHP allows the same identifier as both class and namespace; existing `ZealPHP\HTTP\Request` / `Response` keep working. Same for `HttpResponse` → `HTTPResponse`.
+- `StoreException` is no longer `final` so `WS\CapacityException` can extend it.
+- All in-tree demo/tutorial code (`route/*.php`, `app.php`, `template/pages/**/*.php`, `README.md`, `docs/websocket.md`) migrated from `OpenSwoole\Table::TYPE_*` to the new `Store::TYPE_*` constants. Old constants still work — `Store::TYPE_INT === OpenSwoole\Table::TYPE_INT` by value, every existing user-app schema keeps passing through unchanged.
+
+### Documentation (foundational — pluggable backends)
+
+- `template/pages/store.php` — new `#backends` section with backend comparison table (latency / cross-node / persistence / use-case) + one-line adoption snippet.
+- `README.md` Features table — new "Pluggable Store/Counter" row.
+- `docs/superpowers/specs/2026-05-22-store-redis-backend-design.md` — full spec.
+- `docs/superpowers/plans/2026-05-23-store-redis-phase-1.md` — task-by-task implementation plan.
+- `docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md` — three-layer spike validation (in-process predis-subscribe yields under HOOK_ALL, cross-process two-server pub/sub, cross-host pub/sub via wireguard hop @ 0.53ms median).
+- `predis/predis` added under `require-dev` (pure-PHP fallback so the suite stays green where `ext-redis` is absent).
+- **Pub/sub + Streams primitives.** `Store::publish($channel, $payload): int` + `App::onPubSub($channelOrPattern, callable)` for fire-and-forget Redis pub/sub. `Store::publishReliable($stream, $payload, ?$maxLen): string` + `App::onReliableMessage($stream, callable, ?$group, $blockMs, $batchSize)` for Streams-backed at-least-once via consumer groups. Patterns (PSUBSCRIBE) supported. Default consumer group name = `'zealphp-' + sha1(canonicalHost())[:8]` so a cluster shares one group.
+- `ZealPHP\Store\RedisPubSub` and `ZealPHP\Store\RedisStreams` lifecycle classes — dedicated subscriber coroutine per worker, `go()` per message for concurrent dispatch, bounded exponential reconnect backoff (capped 5 s), sentinel-channel clean shutdown (RedisPubSub) / atomic-flag shutdown (RedisStreams via natural BLOCK timeout). Auto-spawned in `onWorkerStart` when handlers are registered AND backend is Redis.
+- `App::onPubSub` / `App::onReliableMessage` / `App::offPubSub` — public registration API.
+- `Store::publish` / `Store::publishReliable` — public facade methods (throw `StoreException` on Table backend).
+- New demo routes: `/demo/pubsub/publish`, `/demo/pubsub/publish-reliable`, `/demo/pubsub/log` exercise the API end-to-end against the running server.
+- Three Phase 3 validation spikes shipped as artifacts: in-process (`scripts/spike-predis-subscribe.php` — predis SUBSCRIBE yields under HOOK_ALL), cross-process (`scripts/spike-crossnode-server.php` — two ZealPHP servers exchange via shared valkey, ~0.3 ms one-way), cross-host (`scripts/spike-crosshost-{publish,subscribe}.php` — subscriber on a remote box via wireguard tunnel, 0.53 ms median end-to-end). Documented in `docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md`.
+
 ### Out of scope (deferred)
 
-- Tiered `TableBackend` L1 + `RedisBackend` L2 with bounded `l1_ttl` staleness.
-- Pub/sub-based L1 invalidation built on top of the pub/sub primitive shipped here (Phase 3-as-cache-invalidation; the primitive is in this release, the L1-invalidation consumer is not yet wired).
-- Pipelined `mget`/`mset` via a driver-shaped Pipeline proxy.
-- Opt-in `$opts['on_error' => 'fallback_table']` per-table degrade hook.
-- Redis Cluster / Sentinel topologies; Redis-backed sessions (separate spec).
+- Pipelined `mget`/`mset` via a driver-shaped Pipeline proxy (basic batching landed; the driver-shaped Pipeline proxy is queued for v0.2.41).
+- Redis Cluster / Sentinel topologies as a first-class facade (works today via pre-wired Predis Client + Phase 1 `PredisDriver`; `Store::clusterBackend()` / `sentinelBackend()` ergonomic helpers queued).
+- MULTI/EXEC + WATCH via the driver protocol — every documented use case is covered atomically by `Store::evalScript` in one round-trip; will revisit if a workload surfaces that genuinely needs deferred-pipeline shape.
 
 ## [0.2.38] - 2026-05-21
 
