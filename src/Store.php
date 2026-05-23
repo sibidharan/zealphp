@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZealPHP;
 
 use OpenSwoole\Table;
+use ZealPHP\Store\CircuitBreakerBackend;
 use ZealPHP\Store\DriverPreference;
 use ZealPHP\Store\RedisBackend;
 use ZealPHP\Store\RedisConnectionPool;
@@ -122,7 +123,28 @@ class Store
                 /* silently fall back to env-default — invalid prefer is non-fatal */
             }
         }
-        return new RedisBackend(new RedisConnectionPool($url, $size, $opts), $prefix);
+        $backend = new RedisBackend(new RedisConnectionPool($url, $size, $opts), $prefix);
+
+        // H4 — opt-in circuit breaker. When the user passes
+        //   ['on_error' => 'fallback_table']  (optionally with a 'breaker'
+        //   sub-array tuning the thresholds), wrap the Redis backend in a
+        //   CircuitBreakerBackend whose fallback is a fresh TableBackend.
+        // Default behaviour (no opt) — no decoration, throws on Redis down.
+        $onError = $conn['on_error'] ?? null;
+        if ($onError === 'fallback_table') {
+            $breakerOpts = isset($conn['breaker']) && is_array($conn['breaker']) ? $conn['breaker'] : [];
+            $threshold   = isset($breakerOpts['failure_threshold']) && is_int($breakerOpts['failure_threshold']) ? $breakerOpts['failure_threshold'] : 5;
+            $windowSec   = isset($breakerOpts['failure_window_sec']) && is_int($breakerOpts['failure_window_sec']) ? $breakerOpts['failure_window_sec'] : 10;
+            $openSec     = isset($breakerOpts['open_seconds']) && is_int($breakerOpts['open_seconds']) ? $breakerOpts['open_seconds'] : 30;
+            return new CircuitBreakerBackend(
+                primary:          $backend,
+                fallback:         new TableBackend(),
+                failureThreshold: $threshold,
+                failureWindowSec: $windowSec,
+                openDurationSec:  $openSec,
+            );
+        }
+        return $backend;
     }
 
     private static function redisUrlFromEnv(): string
