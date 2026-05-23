@@ -33,8 +33,20 @@ final class RedisPubSub
     private \OpenSwoole\Atomic $running;
     private string $stopChannel;
 
-    public function __construct(private string $url, private string $prefix = 'zealstore')
-    {
+    /**
+     * @param int $maxAttempts  Bounded reconnect attempts (0 = unlimited, the
+     *                          default; preserves pre-H10 behaviour). When set
+     *                          to N > 0, the runner gives up after N consecutive
+     *                          backoff cycles and logs a final error. Use this
+     *                          when "keep trying forever" isn't acceptable —
+     *                          e.g. a CI worker that should fail loudly if its
+     *                          Redis disappears.
+     */
+    public function __construct(
+        private string $url,
+        private string $prefix = 'zealstore',
+        private int $maxAttempts = 0,
+    ) {
         $this->running = new \OpenSwoole\Atomic(0);
         $this->stopChannel = $this->prefix . ':__pubsub_stop:' . bin2hex(random_bytes(4));
     }
@@ -109,6 +121,12 @@ final class RedisPubSub
             } catch (StoreException $e) {
                 // Indirect read so PHPStan doesn't constant-fold the atomic.
                 if (self::atomicIsZero($this->running)) { return; }
+                // H10: bounded retries. maxAttempts=0 → loop forever (default).
+                if ($this->maxAttempts > 0 && $attempt >= $this->maxAttempts) {
+                    error_log("RedisPubSub: giving up after {$this->maxAttempts} attempts ({$e->getMessage()})");
+                    $this->running->set(0);
+                    return;
+                }
                 $wait = self::backoffSeconds($attempt++);
                 error_log("RedisPubSub: subscribe loop dropped ({$e->getMessage()}) — backoff {$wait}s");
                 (new \OpenSwoole\Coroutine\Channel(1))->pop($wait);

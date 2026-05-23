@@ -223,7 +223,18 @@ final class PhpredisDriver implements RedisDriver
 
     public function close(): void
     {
-        try { $this->c->close(); } catch (\Throwable $e) { /* tolerant */ }
+        try {
+            $this->c->close();
+        } catch (\Throwable $e) {
+            // Tolerant on shutdown (most callers don't care), but emit at
+            // debug level so genuine disconnect bugs are diagnosable in
+            // production. H9 — pre-v0.2.41 this caught and dropped.
+            if (function_exists('ZealPHP\\elog')) {
+                \ZealPHP\elog('PhpredisDriver::close failed: ' . $e->getMessage(), 'debug');
+            } elseif (function_exists('elog')) {
+                elog('PhpredisDriver::close failed: ' . $e->getMessage(), 'debug');
+            }
+        }
     }
 
     public function pipeline(callable $batch): array
