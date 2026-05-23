@@ -19,10 +19,23 @@ final class PredisDriver implements RedisDriver
 {
     private PredisClient $c;
 
-    public function __construct(string $url)
+    /**
+     * Construct from EITHER:
+     *  - a `redis://...` URL string (single-node, default path), OR
+     *  - a pre-built `Predis\Client` (for Cluster / Sentinel / advanced
+     *    pre-wired configurations — see `Store::fromPredisClient()`).
+     *
+     * Cluster:   `new PredisClient(['tcp://n1:7000', 'tcp://n2:7000'], ['cluster' => 'redis'])`
+     * Sentinel:  `new PredisClient(['tcp://sentinel1:26379', ...], ['replication' => 'sentinel', 'service' => 'mymaster'])`
+     */
+    public function __construct(string|PredisClient $urlOrClient)
     {
         try {
-            $this->c = new PredisClient($url);
+            if ($urlOrClient instanceof PredisClient) {
+                $this->c = $urlOrClient;
+            } else {
+                $this->c = new PredisClient($urlOrClient);
+            }
             $this->c->connect();
         } catch (PredisException $e) {
             throw new StoreException('predis connect failed: ' . $e->getMessage(), 0, $e);

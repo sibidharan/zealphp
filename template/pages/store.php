@@ -267,6 +267,37 @@ ZEALPHP_REDIS_PREFER=predis</code></pre>
   <p class="store-demo-hint">Endpoints: <code>/demo/store-roundtrip</code>, <code>/demo/pubsub/publish</code>, <code>/demo/pubsub/publish-reliable</code>, <code>/demo/pubsub/log</code>. See <a href="/pubsub">/pubsub</a> for the multi-tab walkthrough.</p>
 </div>
 
+<h2 class="store-h2-section" id="cluster">Redis Cluster / Sentinel</h2>
+<p class="store-lead-tight">For HA topologies that span multiple Redis nodes (Cluster) or use a failover monitor (Sentinel), drive the driver with a pre-wired <code>Predis\Client</code> instead of a URL string. Predis natively supports both topologies via its constructor parameters — ZealPHP&rsquo;s adapter accepts the prebuilt client and uses it as-is for the connection pool.</p>
+<div class="code-block">
+<pre><code class="language-php">use Predis\Client as PredisClient;
+use ZealPHP\Store\{RedisBackend, RedisConnectionPool, PredisDriver};
+
+// === Cluster (3-node, key-slot routing) ===
+$cluster = new PredisClient(
+    ['tcp://node1:7000', 'tcp://node2:7000', 'tcp://node3:7000'],
+    ['cluster' => 'redis'],
+);
+// Wire as the Store backend (pool of 1 because Cluster manages its own connections):
+$backend = new RedisBackend(
+    new RedisConnectionPool(
+        url: 'unused-for-cluster',
+        size: 1,
+        opts: ['prefer' => Store::PREFER_PREDIS],   // phpredis Cluster needs RedisCluster — future v0.2.41
+    ),
+);
+// Or simpler — bypass the URL+pool layer:
+$driver = new PredisDriver($cluster);
+
+// === Sentinel (master/slave failover) ===
+$sentinel = new PredisClient(
+    ['tcp://sentinel1:26379', 'tcp://sentinel2:26379'],
+    ['replication' => 'sentinel', 'service' => 'mymaster'],
+);
+$driver = new PredisDriver($sentinel);</code></pre>
+</div>
+<p class="store-lead-tight store-mt-1">First-class Store-facade integration (a Store::clusterBackend() / Store::sentinelBackend() helper) is on the v0.2.41 roadmap. Today's path is to construct the Predis\Client + PredisDriver directly and inject into a RedisBackend. phpredis users wanting Cluster/Sentinel should currently use predis (set <code>ZEALPHP_REDIS_PREFER=predis</code>); the <code>RedisCluster</code> phpredis class needs a separate driver shape.</p>
+
 <h2 class="store-h2-section">When to use Redis / Valkey</h2>
 <p class="store-lead-tight">Store and Cache cover most single-server apps. Here's when you'll need an external cache.</p>
 
