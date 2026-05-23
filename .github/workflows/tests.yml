@@ -95,6 +95,23 @@ jobs:
             upload-coverage: false
             experimental: false
 
+    services:
+      # Redis/Valkey service for the Store/Counter Redis-backend parity tests.
+      # phpunit.xml pins ZEALPHP_REDIS_URL=redis://127.0.0.1:16379/0 — the port
+      # mapping below makes that URL resolve to this container. Tests that need
+      # Redis skip gracefully when the URL is unreachable (RedisTestCase
+      # markTestSkipped), so a missing valkey is non-fatal — but the service
+      # is wired so the CI matrix actually runs them.
+      valkey:
+        image: valkey/valkey:7-alpine
+        ports:
+          - 16379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
