@@ -43,6 +43,51 @@ final class AtomicBackend implements CounterBackend
         return true;
     }
 
+    public function setIfAbsent(string $name, int $value): bool
+    {
+        // "Already exists" = we've previously instantiated the Atomic.
+        // Atomic shared memory has no first-write detection; this map's
+        // presence IS the marker. Note: per-process — different worker
+        // processes see independent maps but all point at the same
+        // shared-memory slot (the value is preserved across processes
+        // even when the map is fresh; that's the documented Atomic
+        // behaviour). For "set if absent" we trust the map: if we
+        // haven't touched the name, we initialize.
+        if (isset($this->counters[$name])) { return false; }
+        $this->counters[$name] = new Atomic($value);
+        return true;
+    }
+
+    public function incrBounded(string $name, int $by, int $maxBound): ?int
+    {
+        // Atomic::cmpset gives us optimistic CAS — load + check + set in
+        // a retry loop. Bounded by 100 attempts to avoid infinite spin
+        // under heavy contention.
+        $a = $this->atomic($name);
+        for ($i = 0; $i < 100; $i++) {
+            $cur = $a->get();
+            $next = $cur + $by;
+            if ($next > $maxBound) { return null; }
+            if ($a->cmpset($cur, $next)) { return $next; }
+        }
+        return null;   // contention loss
+    }
+
+    public function expire(string $name, int $seconds): bool
+    {
+        // Atomic has no TTL — shared memory lives with the master.
+        return false;
+    }
+
+    public function mincr(array $deltas): array
+    {
+        $out = [];
+        foreach ($deltas as $name => $by) {
+            $out[$name] = $this->incr((string) $name, (int) $by);
+        }
+        return $out;
+    }
+
     public function incr(string $name, int $by = 1): int
     {
         // OpenSwoole\Atomic::add() is stubbed as bool|int by ide-helper;

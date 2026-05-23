@@ -44,6 +44,16 @@ interface RedisDriver
     /** @return \Generator<int, string> */
     public function sscan(string $key, int $batch = 100): \Generator;
 
+    /**
+     * One-batch cursor-based SSCAN (S-3). Returns [nextCursor, members].
+     * `$cursor === '0'` starts a fresh scan; when the returned next-cursor
+     * is `'0'` the scan is exhausted. Use when iterating large SETs without
+     * blocking on a full generator drain — required for paginated UIs.
+     *
+     * @return array{0:string, 1:list<string>}
+     */
+    public function sscanCursor(string $key, string $cursor, int $count): array;
+
     // ── counters ────────────────────────────────────────────────────────
     public function incrby(string $key, int $by): int;
     public function decrby(string $key, int $by): int;
@@ -57,6 +67,14 @@ interface RedisDriver
 
     /** @return \Generator<int, string> */
     public function scanKeys(string $match, int $batch = 200): \Generator;
+
+    /**
+     * One-batch cursor-based SCAN MATCH (S-3). Same semantics as
+     * `sscanCursor` but against the keyspace via SCAN.
+     *
+     * @return array{0:string, 1:list<string>}
+     */
+    public function scanCursor(string $match, string $cursor, int $count): array;
 
     // ── pub/sub ─────────────────────────────────────────────────────────
     /** @return int receivers Redis delivered to */

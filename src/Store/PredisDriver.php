@@ -210,6 +210,19 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    public function sscanCursor(string $key, string $cursor, int $count): array
+    {
+        try {
+            $cur = (int) $cursor;
+            /** @var mixed $res */
+            $res = $this->c->sscan($key, $cur, ['count' => $count]);
+            [$nextInt, $members] = $this->scanResult($res, 'sscan');
+            $out = [];
+            foreach ($members as $m) { $out[] = $this->asString($m, 'sscan.member'); }
+            return [(string) $nextInt, $out];
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
     public function incrby(string $key, int $by): int
     {
         try {
@@ -248,6 +261,19 @@ final class PredisDriver implements RedisDriver
                 [$cursor, $keys] = $this->scanResult($res, 'scan');
                 foreach ($keys as $k) { yield $this->asString($k, 'scan.key'); }
             } while ($cursor !== 0);
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function scanCursor(string $match, string $cursor, int $count): array
+    {
+        try {
+            $cur = (int) $cursor;
+            /** @var mixed $res */
+            $res = $this->c->scan($cur, ['match' => $match, 'count' => $count]);
+            [$nextInt, $keys] = $this->scanResult($res, 'scan');
+            $out = [];
+            foreach ($keys as $k) { $out[] = $this->asString($k, 'scan.key'); }
+            return [(string) $nextInt, $out];
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 

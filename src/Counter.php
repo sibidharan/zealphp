@@ -64,16 +64,21 @@ class Counter
     {
         $this->name = $name ?? '__anon_' . (++self::$anonSerial);
         // Touch the backend only when we actually have state to write —
-        // (a) any explicit name (force-reset to $initial), or
-        // (b) anonymous with non-zero $initial.
+        // (a) any explicit name, or (b) anonymous with non-zero $initial.
         // Anonymous + 0 is a brand-new slot that the backend reads as 0
         // anyway, so we can skip the backend round-trip. This matters at
         // route-load time on the Redis backend: route/*.php often does
         // `new Counter(0)` in the master process (no coroutine context),
         // which would otherwise eagerly open a predis connection through
         // a hooked stream_socket_client and crash boot.
+        //
+        // N-1 — use setIfAbsent (atomic SETNX on Redis, fresh-map check on
+        // Atomic) so subsequent `new Counter(0, 'foo')` constructions
+        // DON'T reset existing counters. Pre-N-1, this was force-set —
+        // hidden footgun for callers building per-room / per-user
+        // monotonic counters.
         if ($name !== null || $initial !== 0) {
-            self::defaultBackend()->set($this->name, $initial);
+            self::defaultBackend()->setIfAbsent($this->name, $initial);
         }
     }
 
@@ -114,6 +119,50 @@ class Counter
     public function compareAndSet(int $expected, int $new): bool
     {
         return self::defaultBackend()->compareAndSet($this->name, $expected, $new);
+    }
+
+    /**
+     * Bounded atomic increment (N-2). Increments only if the result would
+     * stay within `$maxBound`. Returns the new value, or NULL when the
+     * cap would be exceeded.
+     *
+     *     $slots = new Counter(0, 'free_slots');
+     *     if ($slots->incrementBounded(1, 100) === null) {
+     *         return 'pool full';
+     *     }
+     */
+    public function incrementBounded(int $by = 1, int $maxBound = PHP_INT_MAX): ?int
+    {
+        return self::defaultBackend()->incrBounded($this->name, $by, $maxBound);
+    }
+
+    /**
+     * Set TTL on the underlying key (N-3).
+     *
+     * Atomic backend: no-op, returns false. Shared memory has no TTL —
+     * the counter survives until the OpenSwoole master dies.
+     * Redis backend: applies EXPIRE on the counter's key. Returns true
+     * if the TTL was set; false if the key doesn't exist.
+     */
+    public function expire(int $seconds): bool
+    {
+        return self::defaultBackend()->expire($this->name, $seconds);
+    }
+
+    /**
+     * Batch atomic increment (N-4). Pipelined on Redis (one round-trip
+     * for the whole batch); sequential on Atomic.
+     *
+     *     $hits = Counter::mincr(['page:home' => 1, 'page:about' => 1]);
+     *     //  ['page:home' => 142, 'page:about' => 87]
+     *
+     * @param  array<string, int> $deltas  name → delta
+     * @return array<string, int> name → new value
+     */
+    public static function mincr(array $deltas): array
+    {
+        if ($deltas === []) { return []; }
+        return self::defaultBackend()->mincr($deltas);
     }
 
     /**

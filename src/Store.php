@@ -321,6 +321,30 @@ class Store
         yield from self::defaultBackend()->iterate($name);
     }
 
+    /**
+     * Paginated iteration (S-3). Returns one batch + an opaque next-cursor.
+     * Use for large tables where draining the full generator is impractical
+     * (e.g. paginated UI over a 100k-member room roster). When the returned
+     * `cursor` is `'0'` the scan is complete.
+     *
+     *     $next = '0';
+     *     do {
+     *         $page = Store::iteratePaged('rooms:lobby:members', $next, 100);
+     *         foreach ($page['rows'] as $key => $row) { ... }
+     *         $next = $page['cursor'];
+     *     } while ($next !== '0');
+     *
+     * Cursors are NOT stable across schema changes or clear(); resume
+     * within a single logically-consistent window. See StoreBackend
+     * interface for full contract.
+     *
+     * @return array{cursor: string, rows: array<string, array<string, scalar>>}
+     */
+    public static function iteratePaged(string $name, string $cursor = '0', int $count = 100): array
+    {
+        return self::defaultBackend()->iteratePaged($name, $cursor, $count);
+    }
+
     public static function clear(string $name): void
     {
         self::defaultBackend()->clear($name);

@@ -76,6 +76,8 @@ final class RedisClient
     public function scard(string $key): int { return $this->driver->scard($key); }
     /** @return \Generator<int, string> */
     public function sscan(string $key, int $batch = 100): \Generator { yield from $this->driver->sscan($key, $batch); }
+    /** @return array{0:string, 1:list<string>} */
+    public function sscanCursor(string $key, string $cursor, int $count): array { return $this->driver->sscanCursor($key, $cursor, $count); }
 
     // ── counters ────────────────────────────────────────────────────────
     public function incrby(string $key, int $by): int { return $this->driver->incrby($key, $by); }
@@ -90,6 +92,8 @@ final class RedisClient
 
     /** @return \Generator<int, string> */
     public function scanKeys(string $match, int $batch = 200): \Generator { yield from $this->driver->scanKeys($match, $batch); }
+    /** @return array{0:string, 1:list<string>} */
+    public function scanCursor(string $match, string $cursor, int $count): array { return $this->driver->scanCursor($match, $cursor, $count); }
 
     public function ping(): bool { return $this->driver->ping(); }
     public function close(): void { $this->driver->close(); }

@@ -213,6 +213,22 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    public function sscanCursor(string $key, string $cursor, int $count): array
+    {
+        try {
+            // phpredis sScan takes cursor by reference (int|null). Drive it
+            // exactly once and return whatever cursor it leaves in place.
+            $cur = $cursor === '0' || $cursor === '' ? null : (int) $cursor;
+            $batchRes = $this->c->sScan($key, $cur, '*', $count);
+            if ($batchRes === false) { return ['0', []]; }
+            $out = [];
+            foreach ($batchRes as $m) { $out[] = (string) $m; }
+            // After the by-ref call, $cur is whatever phpredis set; coerce
+            // through is_int() to satisfy phpstan + handle the null end-of-scan.
+            return [is_int($cur) ? (string) $cur : '0', $out];
+        } catch (\RedisException $e) { throw $this->wrap($e); }
+    }
+
     public function incrby(string $key, int $by): int
     {
         try { return $this->c->incrBy($key, $by); }
@@ -240,6 +256,18 @@ final class PhpredisDriver implements RedisDriver
                 if ($keys === false) { break; }
                 foreach ($keys as $k) { yield (string) $k; }
             } while ($cursor > 0);
+        } catch (\RedisException $e) { throw $this->wrap($e); }
+    }
+
+    public function scanCursor(string $match, string $cursor, int $count): array
+    {
+        try {
+            $cur = $cursor === '0' || $cursor === '' ? null : (int) $cursor;
+            $keys = $this->c->scan($cur, $match, $count);
+            if ($keys === false) { return ['0', []]; }
+            $out = [];
+            foreach ($keys as $k) { $out[] = (string) $k; }
+            return [is_int($cur) ? (string) $cur : '0', $out];
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 

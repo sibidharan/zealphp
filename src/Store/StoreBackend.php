@@ -49,6 +49,25 @@ interface StoreBackend
     /** @return \Generator<string, array<string, scalar>> */
     public function iterate(string $name): \Generator;
 
+    /**
+     * Paginated iteration (S-3). Returns one batch + an opaque cursor for
+     * the next batch. Use for large tables where a full `iterate()` drain
+     * is impractical (e.g. rendering a single page of a 100k-member room
+     * roster, exposing cursors over HTTP).
+     *
+     * Contract:
+     *  - `$cursor === '0'` (or '') starts a fresh scan.
+     *  - When the returned `cursor` field is `'0'` the scan is exhausted.
+     *  - `$count` is a HINT (Redis SCAN convention) — the batch returned
+     *    may contain fewer rows on tracked-mode SETs with sparse hits, or
+     *    more than `$count` on small SETs (single-batch returns).
+     *  - Cursors are NOT stable across schema/clear changes; resume only
+     *    within a logically-consistent window.
+     *
+     * @return array{cursor: string, rows: array<string, array<string, scalar>>}
+     */
+    public function iteratePaged(string $name, string $cursor = '0', int $count = 100): array;
+
     public function clear(string $name): void;
 
     /** @return list<string> */

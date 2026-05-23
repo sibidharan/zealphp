@@ -299,6 +299,16 @@ final class CircuitBreakerBackend implements StoreBackend
         }
     }
 
+    public function iteratePaged(string $name, string $cursor = '0', int $count = 100): array
+    {
+        /** @var array{cursor: string, rows: array<string, array<string, scalar>>} $r */
+        $r = $this->callRead(
+            fn(): array => $this->primary->iteratePaged($name, $cursor, $count),
+            fn(): array => $this->fallback?->iteratePaged($name, $cursor, $count) ?? ['cursor' => '0', 'rows' => []],
+        );
+        return $r;
+    }
+
     public function clear(string $name): void
     {
         $this->callWrite(function () use ($name): bool {

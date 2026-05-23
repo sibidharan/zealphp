@@ -311,6 +311,12 @@ final class TieredBackend implements StoreBackend
         yield from $this->l2->iterate($name);
     }
 
+    public function iteratePaged(string $name, string $cursor = '0', int $count = 100): array
+    {
+        // Defer to L2 — same reasoning as iterate(): authoritative + complete.
+        return $this->l2->iteratePaged($name, $cursor, $count);
+    }
+
     public function clear(string $name): void
     {
         $this->l1->clear($name);

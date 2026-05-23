@@ -195,6 +195,43 @@ final class RedisBackend implements StoreBackend
         } finally { $this->pool->release($client); }
     }
 
+    public function iteratePaged(string $name, string $cursor = '0', int $count = 100): array
+    {
+        $this->assertMade($name);
+        $schema = $this->schemas[$name];
+        $sk     = $this->setKey($name);
+        $prefix = $this->prefix . ':' . $name . ':';
+        $mode   = $this->tableOpts[$name]['mode'];
+        if ($cursor === '') { $cursor = '0'; }
+
+        // ttl mode: SCAN MATCH $prefix*; tracked mode: SSCAN $sk.
+        // Both return one Redis batch + the server's next cursor; we hydrate
+        // the rows server-side via mhgetall (pipelined HGETALL) so the
+        // round-trip cost stays at 2 (one SCAN + one pipelined HGETALL).
+        return $this->pool->with(function (RedisClient $c) use ($name, $cursor, $count, $sk, $prefix, $mode, $schema): array {
+            if ($mode === 'ttl') {
+                [$nextCursor, $rowKeys] = $c->scanCursor($prefix . '*', $cursor, $count);
+                $rowKeys = array_values(array_filter($rowKeys, fn (string $k): bool => $k !== $sk));
+                $keys    = array_map(fn (string $rk): string => substr($rk, strlen($prefix)), $rowKeys);
+            } else {
+                [$nextCursor, $keys] = $c->sscanCursor($sk, $cursor, $count);
+                $rowKeys = array_map(fn (string $k): string => $this->rowKey($name, $k), $keys);
+            }
+            if ($rowKeys === []) {
+                return ['cursor' => $nextCursor, 'rows' => []];
+            }
+            $raws = $c->mhgetall($rowKeys);
+            $rows = [];
+            foreach ($keys as $i => $k) {
+                $wire = $raws[$i] ?? [];
+                if ($wire === []) { continue; }   // key was deleted between SCAN and HGETALL
+                $decoded = $this->codec->decodeRow($schema, $wire);
+                if (is_array($decoded)) { $rows[$k] = $decoded; }
+            }
+            return ['cursor' => $nextCursor, 'rows' => $rows];
+        });
+    }
+
     public function clear(string $name): void
     {
         $this->assertMade($name);

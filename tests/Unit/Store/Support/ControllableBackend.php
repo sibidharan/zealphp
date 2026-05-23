@@ -99,6 +99,23 @@ final class ControllableBackend implements StoreBackend
         }
     }
 
+    public function iteratePaged(string $name, string $cursor = '0', int $count = 100): array
+    {
+        $this->trip();
+        $skip = max(0, (int) $cursor);
+        $rows = [];
+        $i = 0;
+        $taken = 0;
+        foreach ($this->rows[$name] ?? [] as $k => $r) {
+            if ($i++ < $skip) { continue; }
+            $rows[(string) $k] = $r;
+            if (++$taken >= $count) {
+                return ['cursor' => (string) ($skip + $taken), 'rows' => $rows];
+            }
+        }
+        return ['cursor' => '0', 'rows' => $rows];
+    }
+
     public function clear(string $name): void
     {
         $this->trip();
