@@ -17,54 +17,37 @@ abstract class RedisTestCase extends TestCase
         $url = getenv('ZEALPHP_REDIS_URL');
         $this->url = is_string($url) && $url !== '' ? $url : 'redis://127.0.0.1:16379/0';
 
-        // SUBSCRIBE-loop tests (RedisPubSub, RedisStreams, TieredBackend
-        // invalidation) need OpenSwoole HOOK_ALL active so their blocking
-        // socket reads yield to the scheduler. HOOK_ALL is process-wide
-        // and persists across tests once any earlier test enables it.
-        //
-        // Side effect: once HOOK_ALL is on, predis's `stream_socket_client`
-        // call REQUIRES a coroutine context — otherwise PHP throws
-        // "OpenSwoole\Error: API must be called in the coroutine".
-        //
-        // We solve both by running setUp's predis ops inside Coroutine::run
-        // when we're at the top level (no coroutine yet). The run() body
-        // executes synchronously when HOOK_ALL is off — zero overhead.
-        $this->runRedis(function (): void {
-            try {
-                $this->client = new PredisClient($this->url);
-                $this->client->ping();
-            } catch (\Throwable $e) {
-                $this->client = null;
-                $this->markTestSkipped('Redis/Valkey not available at ' . $this->url . ' (' . $e->getMessage() . ')');
-            }
-            $this->client->flushdb();
-        });
-
-        // Note: HOOK_ALL is NOT enabled here — many tests (RedisBackendTest,
-        // TableBackendTest, etc.) construct ZealPHP-internal Redis clients
-        // OUTSIDE a coroutine context. Enabling HOOK_ALL process-wide would
-        // break those tests with "API must be called in the coroutine".
-        //
-        // The SUBSCRIBE-loop tests (RedisPubSub, RedisStreams, TieredBackend
-        // invalidation) call `$this->enableHookAll()` themselves at the top
-        // of their test bodies INSIDE Coroutine::run — see those classes.
-        // Once HOOK_ALL flips on (process-wide), subsequent tests' setUp /
-        // tearDown automatically wraps predis ops via runRedis().
+        // Connect at TOP LEVEL (not via Coroutine::run). Reasons:
+        //   1. markTestSkipped() throws SkippedWithMessageException, which
+        //      PHPUnit's setUp wrapper catches to mark the test as skipped.
+        //      If we throw from INSIDE Coroutine::run, OpenSwoole doesn't
+        //      re-throw it cleanly — it escapes as an uncaught fatal at
+        //      {main}, crashing the WHOLE PHPUnit process. Mutation CI
+        //      (no Redis service container) hit this.
+        //   2. HOOK_ALL is OFF at setUp time. Subscriber-loop tests turn
+        //      it on inside their own Coroutine::run via
+        //      requireYieldingSubscribe(); tearDown disables it again so
+        //      the next test's setUp is back to plain PHP.
+        try {
+            $this->client = new PredisClient($this->url);
+            $this->client->ping();
+        } catch (\Throwable $e) {
+            $this->client = null;
+            $this->markTestSkipped('Redis/Valkey not available at ' . $this->url . ' (' . $e->getMessage() . ')');
+        }
+        $this->client->flushdb();
     }
 
     protected function tearDown(): void
     {
-        if ($this->client !== null) {
-            $client = $this->client;
-            $this->runRedis(function () use ($client): void {
-                try { $client->flushdb(); }   catch (\Throwable $e) {}
-                try { $client->disconnect(); } catch (\Throwable $e) {}
-            });
-        }
-        // Auto-disable HOOK_ALL if this test enabled it — otherwise other
-        // tests in the same PHPUnit run inherit the process-wide flag and
-        // their non-coroutine RedisClient construction fails.
+        // Disable HOOK_ALL FIRST so the predis disconnect below runs in
+        // plain PHP — otherwise the hooked stream_socket close needs a
+        // coroutine context and the cleanup throws.
         $this->disableHookAll();
+        if ($this->client !== null) {
+            try { $this->client->flushdb(); }   catch (\Throwable $e) {}
+            try { $this->client->disconnect(); } catch (\Throwable $e) {}
+        }
     }
 
     /**

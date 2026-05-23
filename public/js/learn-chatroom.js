@@ -30,8 +30,13 @@
     // Typing-presence state — keyed by username (other users only).
     // Per-user "they stopped typing" timeout in case the 'off' frame is dropped
     // (network blip, browser tab close). Auto-clears after TYPING_TIMEOUT_MS.
+    //
+    // Uses Map (not a plain object) — usernames come from the network and
+    // CodeQL's js/remote-property-injection rule flags any attacker-controlled
+    // string used as an object property key (even on Object.create(null)).
+    // Map keys are NOT property accesses, so the same code is safe + clear.
     var TYPING_TIMEOUT_MS = 4000;
-    var typingUsers = Object.create(null);   // username -> timeoutId
+    var typingUsers = new Map();   // username -> timeoutId
     // Outbound debounce: send 'on' once + reset on every keystroke; send 'off'
     // when input is empty OR after TYPING_IDLE_MS of inactivity.
     var TYPING_IDLE_MS = 2500;
@@ -94,7 +99,7 @@
 
     function renderTyping() {
       if (!typing) return;
-      var names = Object.keys(typingUsers);
+      var names = Array.from(typingUsers.keys());
       if (!names.length) { typing.textContent = ''; return; }
       var label;
       if (names.length === 1)      { label = names[0] + ' is typing…'; }
@@ -104,16 +109,17 @@
     }
 
     function handleTypingEvent(user, state) {
-      if (!user || user === username) return;   // ignore self-echoes
-      if (typingUsers[user]) { clearTimeout(typingUsers[user]); }
+      if (!user || typeof user !== 'string' || user === username) return;   // ignore self-echoes + non-strings
+      if (typingUsers.has(user)) { clearTimeout(typingUsers.get(user)); }
       if (state === 'on') {
         // Auto-clear after timeout in case the matching 'off' is dropped.
-        typingUsers[user] = setTimeout(function () {
-          delete typingUsers[user];
+        var tid = setTimeout(function () {
+          typingUsers.delete(user);
           renderTyping();
         }, TYPING_TIMEOUT_MS);
+        typingUsers.set(user, tid);
       } else {
-        delete typingUsers[user];
+        typingUsers.delete(user);
       }
       renderTyping();
     }
