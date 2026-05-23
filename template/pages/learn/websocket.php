@@ -42,7 +42,7 @@
       <strong>WebSocket</strong> upgrades the HTTP connection to a long-lived bidirectional channel.
       The server can push at any time. The client can send at any time. The same TCP socket carries
       both directions. ZealPHP&rsquo;s OpenSwoole engine handles thousands of concurrent WebSocket
-      connections per worker — coroutines (<a href="/learn/async">Lesson 23, Async Patterns</a>
+      connections per worker — coroutines (<a href="/learn/async">Lesson 24, Async Patterns</a>
       covers them) mean each one costs ~5&nbsp;KB of memory and zero worker-time while idle.
     </p>
 
