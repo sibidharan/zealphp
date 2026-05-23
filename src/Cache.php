@@ -126,6 +126,49 @@ class Cache
     }
 
     /**
+     * Read-through helper: if `$key` exists, return it; otherwise call
+     * `$compute()`, store the result, and return it.
+     *
+     * The fall-through-on-miss-then-compute pattern is the canonical
+     * way to cache expensive lookups (DB queries, API calls, derived
+     * values). Without this helper users write the same 3 lines:
+     *
+     *     $v = Cache::get($k);
+     *     if ($v === null) { $v = expensiveLookup($k); Cache::set($k, $v, $ttl); }
+     *     return $v;
+     *
+     * `getOrCompute()` collapses that to one call:
+     *
+     *     $v = Cache::getOrCompute($k, fn() => expensiveLookup($k), $ttl);
+     *
+     * Storage semantics are identical to set()+get() — the value goes
+     * to BOTH the memory tier (Store table, capped at MAX_MEM_SIZE) AND
+     * the file tier (large values + overflow). Subsequent calls within
+     * `$ttl` short-circuit to the cached read.
+     *
+     * @template T
+     * @param  callable(): T $compute
+     * @return T
+     */
+    public static function getOrCompute(string $key, callable $compute, int $ttl = 0): mixed
+    {
+        // Distinguish "stored null" from "cache miss" with a private
+        // sentinel that no caller can ever produce. Cache::get($key, $default)
+        // returns $default on miss; if we pass our sentinel, an actual stored
+        // null comes back as null (a real hit), and a miss comes back as the
+        // sentinel object.
+        static $sentinel;
+        $sentinel ??= new \stdClass();
+        $found = self::get($key, $sentinel);
+        if ($found !== $sentinel) {
+            return $found;
+        }
+        $value = $compute();
+        self::set($key, $value, $ttl);
+        return $value;
+    }
+
+    /**
      * Store a value. Writes to both memory and file tiers.
      * Values larger than 8KB are stored in file tier only.
      */

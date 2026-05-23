@@ -18,8 +18,9 @@ namespace ZealPHP\Store;
  */
 enum StoreBackendKind: string
 {
-    case Table = 'table';
-    case Redis = 'redis';
+    case Table  = 'table';
+    case Redis  = 'redis';
+    case Tiered = 'tiered';
 
     /**
      * Normalise a mixed-typed input (enum, string, or null) into an
@@ -30,7 +31,7 @@ enum StoreBackendKind: string
         if ($kind instanceof self) { return $kind; }
         $enum = self::tryFrom(strtolower($kind));
         if ($enum === null) {
-            throw new \InvalidArgumentException("Unknown Store backend kind: '$kind' (use 'table' or 'redis')");
+            throw new \InvalidArgumentException("Unknown Store backend kind: '$kind' (use 'table', 'redis', or 'tiered')");
         }
         return $enum;
     }

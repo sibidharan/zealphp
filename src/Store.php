@@ -13,6 +13,7 @@ use ZealPHP\Store\StoreBackend;
 use ZealPHP\Store\StoreBackendKind;
 use ZealPHP\Store\StoreException;
 use ZealPHP\Store\TableBackend;
+use ZealPHP\Store\TieredBackend;
 
 /**
  * `Store` — backend-agnostic key-value store.
@@ -62,8 +63,9 @@ class Store
     // Backend kind constants — prefer over bare strings:
     //   Store::defaultBackend(Store::BACKEND_REDIS)  ← IDE-autocompleted, refactor-safe
     //   Store::defaultBackend('redis')              ← also works (BC).
-    public const BACKEND_TABLE = 'table';
-    public const BACKEND_REDIS = 'redis';
+    public const BACKEND_TABLE  = 'table';
+    public const BACKEND_REDIS  = 'redis';
+    public const BACKEND_TIERED = 'tiered';
 
     // Driver-prefer constants for $conn['prefer'] / ZEALPHP_REDIS_PREFER:
     public const PREFER_AUTO     = 'auto';
@@ -96,6 +98,9 @@ class Store
     /** @param array{kind:string, conn?: string|array<string,mixed>} $cfg */
     private static function buildBackend(array $cfg): StoreBackend
     {
+        if ($cfg['kind'] === 'tiered') {
+            return self::buildTieredBackend($cfg['conn'] ?? []);
+        }
         if ($cfg['kind'] !== 'redis') {
             return new TableBackend();
         }
@@ -145,6 +150,45 @@ class Store
             );
         }
         return $backend;
+    }
+
+    /**
+     * Tiered backend facade: L1=TableBackend (in-process, ns latency) +
+     * L2=RedisBackend (cross-node, source of truth). The L2 build path
+     * reuses the same conn-opts shape as `'redis'` so users only need to
+     * learn one config dialect.
+     *
+     * Recognised opts:
+     *   - 'url' / pool_size / prefix / prefer  → forwarded to the L2 RedisBackend (same as 'redis')
+     *   - 'l1_ttl' (int seconds, default 5)    → L1 freshness window
+     *   - 'invalidation_secret' (string|null)  → cross-node L1 invalidation HMAC secret
+     *                                            (defaults to env ZEALPHP_TIERED_INVALIDATION_SECRET)
+     *
+     * @param string|array<string,mixed> $conn
+     */
+    private static function buildTieredBackend(string|array $conn): TieredBackend
+    {
+        // Re-use the 'redis' building blocks to build L2 — same conn shape.
+        $url    = is_string($conn) ? ($conn !== '' ? $conn : self::redisUrlFromEnv())
+                                   : (isset($conn['url']) && is_string($conn['url']) ? $conn['url'] : self::redisUrlFromEnv());
+        $size   = is_array($conn) && isset($conn['pool_size']) && is_int($conn['pool_size']) ? $conn['pool_size'] : 8;
+        $prefix = is_array($conn) && isset($conn['prefix']) && is_string($conn['prefix']) ? $conn['prefix'] : 'zealstore';
+        $opts   = self::poolOptsFromEnv();
+        if (is_array($conn) && isset($conn['prefer'])) {
+            try {
+                $opts['prefer'] = DriverPreference::coerce(
+                    $conn['prefer'] instanceof DriverPreference || is_string($conn['prefer'])
+                        ? $conn['prefer']
+                        : '',
+                )->value;
+            } catch (\InvalidArgumentException) { /* fall back to env-default */ }
+        }
+        $l2 = new RedisBackend(new RedisConnectionPool($url, $size, $opts), $prefix);
+
+        $l1Ttl  = is_array($conn) && isset($conn['l1_ttl']) && is_int($conn['l1_ttl']) ? $conn['l1_ttl'] : 5;
+        $secret = is_array($conn) && isset($conn['invalidation_secret']) && is_string($conn['invalidation_secret']) ? $conn['invalidation_secret'] : null;
+
+        return new TieredBackend(new TableBackend(), $l2, l1Ttl: $l1Ttl, invalidationSecret: $secret);
     }
 
     private static function redisUrlFromEnv(): string
