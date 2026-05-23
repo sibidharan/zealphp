@@ -81,21 +81,21 @@ $active = $active ?? 'learn/tictactoe';
     </p>
     <pre><code class="language-php">// route/learn.php — boot scope, before $app->run()
 Store::make('ws_tictactoe_rooms', 1024, [
-    'board'   => [Table::TYPE_STRING, 9],   // '_________' 9 chars: '_' | 'X' | 'O'
-    'turn'    => [Table::TYPE_STRING, 2],   // 'X' | 'O' | '' when finished
-    'winner'  => [Table::TYPE_STRING, 8],   // '' | 'X' | 'O' | 'draw'
-    'px_fd'   => [Table::TYPE_INT,    8],   // 0 = X seat empty
-    'po_fd'   => [Table::TYPE_INT,    8],
-    'px_name' => [Table::TYPE_STRING, 32],
-    'po_name' => [Table::TYPE_STRING, 32],
-    'starter' => [Table::TYPE_STRING, 2],   // alternates each new round
-    'rounds'  => [Table::TYPE_INT,    4],
+    'board'   => [Store::TYPE_STRING, 9],   // '_________' 9 chars: '_' | 'X' | 'O'
+    'turn'    => [Store::TYPE_STRING, 2],   // 'X' | 'O' | '' when finished
+    'winner'  => [Store::TYPE_STRING, 8],   // '' | 'X' | 'O' | 'draw'
+    'px_fd'   => [Store::TYPE_INT,    8],   // 0 = X seat empty
+    'po_fd'   => [Store::TYPE_INT,    8],
+    'px_name' => [Store::TYPE_STRING, 32],
+    'po_name' => [Store::TYPE_STRING, 32],
+    'starter' => [Store::TYPE_STRING, 2],   // alternates each new round
+    'rounds'  => [Store::TYPE_INT,    4],
 ]);
 Store::make('ws_tictactoe_clients', 4096, [
-    'room'   => [Table::TYPE_STRING, 32],
-    'name'   => [Table::TYPE_STRING, 32],
-    'symbol' => [Table::TYPE_STRING, 2],
-    'joined' => [Table::TYPE_INT,    8],
+    'room'   => [Store::TYPE_STRING, 32],
+    'name'   => [Store::TYPE_STRING, 32],
+    'symbol' => [Store::TYPE_STRING, 2],
+    'joined' => [Store::TYPE_INT,    8],
 ]);</code></pre>
     <p>
       The board is a 9-character string (<code>"_________"</code>, then
@@ -255,9 +255,9 @@ Store::make('ws_tictactoe_clients', 4096, [
     <pre><code class="language-php">// route/learn.php — extending the existing Store::make call from step 2
 Store::make('ws_tictactoe_rooms', 1024, [
     // …existing columns…
-    'x_wins' =&gt; [Table::TYPE_INT, 4],
-    'o_wins' =&gt; [Table::TYPE_INT, 4],
-    'draws'  =&gt; [Table::TYPE_INT, 4],
+    'x_wins' =&gt; [Store::TYPE_INT, 4],
+    'o_wins' =&gt; [Store::TYPE_INT, 4],
+    'draws'  =&gt; [Store::TYPE_INT, 4],
 ]);</code></pre>
 
     <h3>Mutate where you already mutate</h3>

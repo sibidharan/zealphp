@@ -259,12 +259,17 @@ WSRouter::broadcast('chat:room:42', json_encode(['hello' =&gt; 'everyone']));</c
       stable string <code>$clientId</code> (session ID, user ID, email, JWT subject) and it&rsquo;s used
       consistently across the routing fabric. The typical wiring inside <code>onOpen</code>:
     </p>
-<pre><code class="language-php">App::ws('/chat',
+<pre><code class="language-php">use ZealPHP\G;
+
+App::ws('/chat',
     onOpen: function ($server, $request) {
+        $g = G::instance();   // canonical per-coroutine context; works in BOTH
+                              // superglobals modes. Raw $_SESSION races across
+                              // coroutines in coroutine mode — always use $g.
         // 1. Identify the user — pick ONE pattern that suits your app:
         //    a) Cookie session (Apache/PHP-mod parity, default in ZealPHP):
         $sessionId = $request-&gt;cookie['PHPSESSID'] ?? null;
-        $username  = $_SESSION['username'] ?? 'guest';   // or via $g-&gt;session
+        $username  = $g-&gt;session['username'] ?? 'guest';
         //    b) Query param (demos / quick tests): $request-&gt;get['user']
         //    c) JWT in `Sec-WebSocket-Protocol` header / Authorization: parse + verify
         if ($username === 'guest') { $server-&gt;disconnect($request-&gt;fd, WSRouter::CLOSE_AUTH_REQUIRED); return; }

@@ -282,7 +282,11 @@ $delete = function() {
     if (!$this->requirePostAuth()) return;
 
     $userId = \App\Auth::currentUserId();
-    Note::delete((int)$_POST['note_id'], $userId);
+    // $g is the canonical per-coroutine request context. It works in BOTH
+    // App::superglobals(true) and (false) modes — raw $_POST is unsafe in
+    // coroutine mode (process-wide array races across requests).
+    $g = \ZealPHP\G::instance();
+    Note::delete((int)$g->post['note_id'], $userId);
     return ['ok' => true];
 };
 PHP,

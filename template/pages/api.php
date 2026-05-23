@@ -160,11 +160,11 @@ require __DIR__ . '/vendor/autoload.php';
 // requirePostAuth() / isAuthenticated() / isAdmin() / getUsername() call,
 // so you can read $_SESSION / $g->session / a JWT header / a global —
 // whatever lives at the moment the API handler dispatches.
-App::authChecker(fn(): bool       => !empty($_SESSION['user_id']));
-App::adminChecker(fn(): bool      => ($_SESSION['role'] ?? '') === 'admin');
-App::usernameProvider(fn(): ?string => $_SESSION['username'] ?? null);
+// Canonical: read via $g — works in BOTH App::superglobals modes.
+App::authChecker(fn(): bool       => !empty(\ZealPHP\G::instance()->session['user_id']));
+App::adminChecker(fn(): bool      => (\ZealPHP\G::instance()->session['role'] ?? '') === 'admin');
+App::usernameProvider(fn(): ?string => \ZealPHP\G::instance()->session['username'] ?? null);
 
-App::superglobals(true);  // because we read $_SESSION above
 $app = App::init('0.0.0.0', 8080);
 $app->run();
 PHP,
@@ -186,7 +186,8 @@ $delete = function() {
     }
 
     $username = $this->getUsername();   // for audit log
-    User::delete($_POST['id'], $username);
+    $g = \ZealPHP\G::instance();        // per-coroutine; safe in both modes
+    User::delete($g->post['id'], $username);
     return ['ok' => true];
 };
 PHP,
