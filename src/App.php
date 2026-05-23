@@ -674,6 +674,20 @@ class App
      */
     public static function init($host = '0.0.0.0', $port = 8080, $cwd=null): App
     {
+        // ZEALPHP_STORE_BACKEND=redis flips Store + Counter to the Redis backend
+        // BEFORE app.php's Store::make() calls run. This was previously in
+        // App::run(), which fired AFTER app.php had already made its tables
+        // on the (then-default) Table backend — and the flip threw those
+        // schemas away. Now the env-var resolves at init() time so make() lands
+        // on the right backend the first time. HOOK_ALL hasn't been enabled
+        // yet at this point (the enableCoroutine call is below), so the
+        // defaultBackend() call is lazy + safe.
+        $envKind = getenv('ZEALPHP_STORE_BACKEND');
+        if (is_string($envKind) && $envKind !== '') {
+            \ZealPHP\Store::defaultBackend($envKind);
+            \ZealPHP\Counter::defaultBackend($envKind === 'redis' ? 'redis' : 'atomic');
+        }
+
         if ($cwd === null) {
             $php_self = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1)[0]['file'] ?? '';
             $file_name = '/'.basename($php_self);
@@ -4877,17 +4891,9 @@ HELP;
      */
     public function run(?array $settings = null): void
     {
-        // ZEALPHP_STORE_BACKEND=redis flips both Store and Counter to the Redis
-        // backend before workers fork — gets the "deploy-time switch with no
-        // code change" story from the spec without polluting app.php. The
-        // Store/Counter facades are happy with multiple defaultBackend() calls
-        // (the cached backend resets when config changes), so a manual call
-        // later in app.php can still override.
-        $envKind = getenv('ZEALPHP_STORE_BACKEND');
-        if (is_string($envKind) && $envKind !== '') {
-            \ZealPHP\Store::defaultBackend($envKind);
-            \ZealPHP\Counter::defaultBackend($envKind === 'redis' ? 'redis' : 'atomic');
-        }
+        // (env-var → backend flip moved to App::init() so app.php's
+        // Store::make() calls land on the resolved backend the first time.
+        // See the commit "fix github_stars boot-order".)
 
         // H6 + H7 — boot-time self-checks. Surface misconfigurations BEFORE
         // workers fork so the message is visible in master logs (and not
