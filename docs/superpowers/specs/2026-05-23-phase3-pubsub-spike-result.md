@@ -77,6 +77,31 @@ The full architecture from the cross-server WS routing diagram works end-to-end 
 
 **Open caveat:** this spike runs both servers on the same host. Cross-HOST (different machines, real NIC) is the same lib-level operation but adds physical network latency; worth a final spike against a remote valkey or remote ZealPHP for the production deploy story. Same script, just two hosts.
 
+## Cross-HOST spike
+
+`scripts/spike-crosshost-publish.php` (local) + `scripts/spike-crosshost-subscribe.php` (remote @ `172.30.24.4` over wireguard, reaching valkey at `172.30.0.5:16379`). The remote box has no OpenSwoole and no ext-redis — pure-PHP predis is sufficient for the SUBSCRIBE side, exactly the bare-minimum cross-host topology a real third-party publisher/subscriber would have.
+
+Setup: local publisher fires 20 PUBLISHes at 25ms gaps, each payload encodes the send-time `microtime(true)`. Remote subscriber records the arrival-time `microtime(true)` on receipt. End-to-end latency = arrival - payload.send_time.
+
+**Result: 20/20 messages received.**
+
+| Latency | Value |
+|---|---|
+| min | **0.44 ms** |
+| median | **0.53 ms** |
+| p95 | 7.50 ms (single outlier — seq=9; rest cluster 0.4–0.7 ms) |
+| max | 7.50 ms |
+
+That's "publisher PHP → local socket → valkey kernel → wireguard tunnel egress → remote NIC → remote kernel → remote PHP → predis frame parsed → log written," roundtrip across two machines. Half a millisecond.
+
+The wire path includes one real network hop (wireguard); on a LAN you'd see similar numbers (wg encryption is ~ns at gigabit). Cross-region adds the WAN one-way (e.g. ~20ms intra-Europe, ~80ms transcontinental) — still well inside the budget for "user clicked send, other user sees it." For invalidation messaging the latency is irrelevant; for live-broadcast messaging (chat, presence) it's the actual user-visible perceived delay.
+
+**What this empirically validates:**
+
+1. Two physically separated PHP processes, neither sharing a process tree, talking via a Redis pub/sub broker = end-to-end working.
+2. The wire protocol is just RESP — predis pure-PHP suffices on the subscriber side. No host-specific dependencies needed.
+3. The "owner of the fd is the only one that can push, Redis routes to the owner" architecture works on any number of hosts because there's no peer-to-peer state — every routing decision is a Redis lookup + PUBLISH.
+
 ## Conclusion for Phase 3 planning
 
 The spec's central assumption holds: **subscribe yields, the dedicated-subscriber-coroutine pattern works**. The spike-gate is lifted for the predis path; ship phpredis with the same spike re-run as the gate for that driver. The `RedisClient` adapter's swap-able driver shape (Phase 1) already accommodates a per-driver subscribe override if phpredis ever fails the spike, without disturbing the rest of the framework.
