@@ -33,6 +33,7 @@ $groups = [
     ['learn/websocket',        'Real-Time Sync', 'realtime',     'websocket/counter'],
     ['learn/ai-chat',          'AI Chat',        'sse + stream', 'chat/widget'],
     ['learn/tictactoe',        'Tic-Tac-Toe',    'multiplayer',  'tictactoe/play'],
+    ['learn/cross-server-chat','Cross-Server Chat','scale + pubsub'],
   ],
   'Under the Hood' => [
     ['learn/routing',          'Routes & APIs'],

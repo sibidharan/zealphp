@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 23,
+      'number'   => 24,
       'title'    => 'Async Patterns',
       'subtitle' => 'Channels, error handling, task workers, race conditions. Foundations covers the model.',
       'prev'     => ['slug' => 'learn/routing',     'title' => 'Routes & APIs'],

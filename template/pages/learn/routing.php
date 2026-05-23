@@ -3,10 +3,10 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 22,
+      'number'   => 23,
       'title'    => 'Routes & APIs: Advanced Patterns',
       'subtitle' => 'Regex, namespace groups, fallbacks, and the route-ordering edge cases. Foundations covers the basics.',
-      'prev'     => ['slug' => 'learn/tictactoe', 'title' => 'Tic-Tac-Toe'],
+      'prev'     => ['slug' => 'learn/cross-server-chat', 'title' => 'Cross-Server Chat'],
       'next'     => ['slug' => 'learn/async',     'title' => 'Async & Coroutines'],
     ]); ?>
 
