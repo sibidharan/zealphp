@@ -540,13 +540,26 @@ class Store
     }
 
     /**
-     * Fire-and-forget pub/sub. Returns the number of receivers Redis
-     * delivered the message to. Throws StoreException when the default
-     * backend is not Redis (Table has no pub/sub semantics).
+     * Fire-and-forget Redis pub/sub.
      *
-     * Pair with App::subscribe() to register handlers. Messages published
-     * while a subscriber is mid-reconnect are LOST — use publishReliable()
-     * for at-least-once delivery.
+     * **Scope = the entire cluster.** Every app instance connected to
+     * the same Redis (every ZealPHP process on every host) that has
+     * called `App::subscribe('<this-channel>', ...)` receives the
+     * message. That's Redis pub/sub's native PUBLISH semantics —
+     * there's no "local mode" or per-host limiting. If you only want a
+     * specific server to receive the message, route by channel name
+     * (e.g. `ws:server:<server-id>` — the pattern `WSRouter::sendToClient`
+     * uses).
+     *
+     * Returns the receiver count Redis itself reported — typically
+     * `(subscribed workers per instance) × (instances in the cluster)`.
+     * A return of 0 means no subscriber was listening when the message
+     * was published. Throws `StoreException` when the default backend
+     * is not Redis (Table has no pub/sub semantics).
+     *
+     * Pair with `App::subscribe()` to register handlers. Messages
+     * published while a subscriber is mid-reconnect are **LOST** —
+     * use `publishReliable()` for at-least-once delivery via Streams.
      */
     public static function publish(string $channel, string $payload): int
     {

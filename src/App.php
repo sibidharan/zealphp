@@ -2295,16 +2295,30 @@ class App
     }
 
     /**
-     * Fire-and-forget pub/sub publish. Returns the receiver count Redis
-     * reported. Pairs symmetrically with `App::subscribe` — "App publishes,
-     * App subscribes" — so the framework's pub/sub surface reads as a
-     * single coherent API.
+     * Fire-and-forget Redis pub/sub publish.
      *
-     * Thin delegate to `Store::publish` (the lower-level primitive that
-     * owns the Redis I/O wire); use whichever reads better in your code.
-     * Throws `StoreException` on the Table backend (no pub/sub semantics).
+     * **Scope = the entire cluster.** When the Store backend is Redis,
+     * EVERY app instance on EVERY host that has `App::subscribe`'d to
+     * the channel receives the message — that's Redis pub/sub's native
+     * PUBLISH semantics. There's no "this server only" mode; route by
+     * channel name if you need per-server delivery (e.g. the
+     * `ws:server:<id>` pattern `WSRouter::sendToClient` uses).
+     *
+     * Returns the receiver count Redis itself reported (typically
+     * `subscribed workers × cluster instances`). A return of 0 means no
+     * subscriber was listening at publish time. Throws `StoreException`
+     * on the Table backend (no pub/sub semantics; Table is single-server
+     * shared memory).
+     *
+     * Pairs symmetrically with `App::subscribe` — "App publishes, App
+     * subscribes" — so the framework's pub/sub surface reads as one
+     * coherent API. Thin delegate to `Store::publish` (the lower-level
+     * primitive that owns the Redis I/O wire); use whichever shape reads
+     * better in your code.
      *
      * ```php
+     * // Cross-cluster broadcast — every subscribed worker on every host
+     * // wakes up with this payload:
      * $count = App::publish('chat:42', json_encode(['user' => 'alice', 'msg' => 'hi']));
      * ```
      */
@@ -2326,13 +2340,24 @@ class App
     }
 
     /**
-     * Register a pub/sub handler. Channels containing `*` are PSUBSCRIBE
-     * patterns (Redis glob); everything else is SUBSCRIBE exact. Multiple
-     * handlers per channel are allowed and all fire on each message.
+     * Register a Redis pub/sub handler — runs once for every message
+     * `App::publish` (or any other Redis client) sends on the channel.
      *
-     * The handler signature is `function(string $payload, string $channel, ?string $pattern): void`.
-     * Each invocation runs in its own go() so a slow handler can't block
-     * the next message. Throws inside the handler are caught + logged.
+     * **Cluster-wide delivery.** Once subscribed, THIS worker receives
+     * every message any app instance on any host publishes to the
+     * channel via the shared Redis. That's how cross-server WebSocket
+     * routing, federated chat rooms, and cluster-wide cache
+     * invalidation all work in ZealPHP — one process publishes, every
+     * subscribed process across the cluster picks it up.
+     *
+     * Channels containing `*` are PSUBSCRIBE patterns (Redis glob);
+     * everything else is SUBSCRIBE exact. Multiple handlers per channel
+     * are allowed and all fire on each message.
+     *
+     * Handler signature: `function(string $payload, string $channel, ?string $pattern): void`.
+     * Each invocation runs in its own `go()` so a slow handler can't
+     * block the next message. Throws inside the handler are caught +
+     * logged via `elog`.
      *
      * Pairs symmetrically with `App::publish` ("App publishes, App
      * subscribes"). The companion `App::publish` is a thin delegate to
@@ -2344,7 +2369,8 @@ class App
      * Requires the Redis backend (Store::defaultBackend('redis') OR
      * ZEALPHP_STORE_BACKEND=redis env). If the backend is still Table
      * at worker-start time, the subscriber is not spawned and a warning
-     * is logged.
+     * is logged (Table backend is single-server shared memory — no
+     * pub/sub semantics).
      */
     public static function subscribe(string $channelOrPattern, callable $handler): void
     {
