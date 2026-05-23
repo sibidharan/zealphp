@@ -245,21 +245,51 @@ WSRouter::broadcast('chat:room:42', json_encode(['hello' =&gt; 'everyone']));</c
       new code; the four-step manual build above is for <em>understanding</em> what the helper is doing.
     </p>
 
-    <h2 id="rooms">Beyond two servers &mdash; broadcast rooms</h2>
+    <h2 id="rooms">Beyond two servers &mdash; first-class rooms</h2>
     <p>
       Direct send (<code>sendToClient</code>) routes to <em>one</em> client. For &ldquo;every member of room
-      42&rdquo; (chat rooms, presence, live leaderboards), publish on a room channel and let every server
-      with members in that room fan out locally:
+      42&rdquo; (chat rooms, presence, live leaderboards), the framework ships a <strong>first-class
+      Room object</strong> &mdash; cluster-wide membership, presence events, fan-out broadcast, and a
+      handler registry, all behind 4 verbs:
     </p>
-<pre><code class="language-php">// Each server registers ONE handler that knows its local members:
-WSRouter::onRoom('chat:room:42', function (string $payload) {
-    // Helper iterates ws_owner for clients in this room (you'd add a 'rooms' column),
-    // and pushes to each local fd.
+<pre><code class="language-php">use ZealPHP\WSRouter;
+
+// On the worker that holds the connection:
+$room = WSRouter::room('chat:room:42');
+$room-&gt;join($clientId);                 // SADD-equivalent + presence event broadcast cluster-wide
+
+// From anywhere on any server:
+$room-&gt;push(['from' =&gt; 'bob', 'text' =&gt; 'lunch!']);   // fan-out across the cluster
+$room-&gt;size();                                         // cluster-wide member count (SCARD)
+$room-&gt;members();                                      // cluster-wide roster (SSCAN-drained)
+$room-&gt;membersPaged($cursor, 100);                     // paginated roster for very large rooms
+
+// Optional: handlers on EACH server that receive the broadcast + fan out
+// to each server's locally-owned fds. Registered ONCE at boot.
+$room-&gt;onMessage(function (array $msg, string $room) {
+    // $msg is the decoded payload; push to your local fds here, e.g.
+    // foreach (yourLocalFdsFor($room) as $fd) { $server-&gt;push($fd, json_encode($msg)); }
+});
+$room-&gt;onPresence(function (array $event, string $room) {
+    // $event = ['type' =&gt; 'join'|'leave', 'client_id' =&gt; '...', 'ts' =&gt; ...]
 });
 
-// Anywhere:
-WSRouter::broadcast('chat:room:42', json_encode(['msg' =&gt; 'lunch!']));
-// Returns the receiver count across the cluster (one per worker on each subscribed server).</code></pre>
+// Cleanup:
+$room-&gt;leave($clientId);</code></pre>
+    <p>
+      <strong>How it federates.</strong> A single <code>PSUBSCRIBE ws:room:*</code> pattern subscriber
+      per worker covers every room you ever create &mdash; no per-room subscriber explosion. Membership
+      lives in the cluster-wide <code>ws_room_members</code> Store table; size + roster lookups go via
+      a per-room Redis SET (O(1) <code>SCARD</code>; paginated <code>SSCAN</code> for very large rooms).
+      Server-side enforcement: filling a capped membership table throws <code>WS\CapacityException</code>
+      with an actionable bump hint &mdash; the framework refuses to silently drop joins.
+    </p>
+    <p>
+      <strong>The lower-level primitives</strong> (<code>WSRouter::broadcast($channel, $payload)</code>
+      + <code>App::subscribe('your:channel:*', fn ...)</code>) are still available for cases that don&rsquo;t
+      fit the Room shape &mdash; presence-only feeds, cross-app event buses, telemetry. They&rsquo;re what
+      <code>WSRouter::room()</code> uses under the hood.
+    </p>
     <p>
       No fan-out service to deploy &mdash; Redis pub/sub does it. For at-least-once delivery (audit
       logs, payments, work queues), swap <code>Store::publish</code> for <code>Store::publishReliable</code>
