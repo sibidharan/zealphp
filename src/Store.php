@@ -220,4 +220,39 @@ class Store
         $b = self::defaultBackend();
         return $b instanceof RedisBackend ? $b->ping() : true;
     }
+
+    /**
+     * Fire-and-forget pub/sub. Returns the number of receivers Redis
+     * delivered the message to. Throws StoreException when the default
+     * backend is not Redis (Table has no pub/sub semantics).
+     *
+     * Pair with App::onPubSub() to register handlers. Messages published
+     * while a subscriber is mid-reconnect are LOST — use publishReliable()
+     * for at-least-once delivery.
+     */
+    public static function publish(string $channel, string $payload): int
+    {
+        $b = self::defaultBackend();
+        if (!($b instanceof RedisBackend)) {
+            throw new StoreException("Store::publish requires the redis backend (current: " . self::$backendConfig['kind'] . ")");
+        }
+        return $b->publish($channel, $payload);
+    }
+
+    /**
+     * Reliable variant via Redis Streams (XADD). Returns the Redis-generated
+     * message ID. Durable when Redis has AOF/RDB; at-least-once delivery
+     * via consumer groups (one consumer per worker by default).
+     *
+     * Pair with App::onReliableMessage() to register a consumer group
+     * handler. Throws StoreException when backend is not Redis.
+     */
+    public static function publishReliable(string $stream, string $payload, ?int $maxLen = null): string
+    {
+        $b = self::defaultBackend();
+        if (!($b instanceof RedisBackend)) {
+            throw new StoreException("Store::publishReliable requires the redis backend (current: " . self::$backendConfig['kind'] . ")");
+        }
+        return $b->publishReliable($stream, $payload, $maxLen);
+    }
 }

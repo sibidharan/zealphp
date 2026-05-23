@@ -256,6 +256,26 @@ final class RedisBackend implements StoreBackend
         return (bool) $this->pool->with(fn(RedisClient $c): bool => $c->ping());
     }
 
+    /** Pub/sub publish through the pool; returns receivers Redis delivered to. */
+    public function publish(string $channel, string $payload): int
+    {
+        return $this->pool->with(fn(RedisClient $c): int => $c->publish($channel, $payload));
+    }
+
+    /**
+     * Streams append. Auto-MAXLEN-trims when $maxLen is set. Payload is
+     * stored under the 'payload' field; matches the consumer-side
+     * convention in RedisStreams.
+     */
+    public function publishReliable(string $stream, string $payload, ?int $maxLen = null): string
+    {
+        return $this->pool->with(fn(RedisClient $c): string => $c->xadd($stream, ['payload' => $payload], $maxLen));
+    }
+
+    public function url(): string { return $this->pool->url(); }
+    public function pool(): RedisConnectionPool { return $this->pool; }
+    public function prefix(): string { return $this->prefix; }
+
     private function countViaScan(string $name): int
     {
         $sk     = $this->setKey($name);

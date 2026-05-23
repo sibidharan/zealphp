@@ -82,6 +82,7 @@ final class RedisConnectionPool
     }
 
     public function size(): int { return $this->size; }
+    public function url(): string { return $this->url; }
 
     /**
      * Tear down every connection. The channel is drained with a tiny
