@@ -68,8 +68,8 @@ if ($demoCounter === null) {
 
 // Shared demo store
 Store::make('demo_store', 128, [
-    'name'  => [\OpenSwoole\Table::TYPE_STRING, 64],
-    'score' => [\OpenSwoole\Table::TYPE_INT,    8],
+    'name'  => [Store::TYPE_STRING, 64],
+    'score' => [Store::TYPE_INT,    8],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -566,10 +566,10 @@ $app->route('/demo/view/store/set-get', ['methods' => ['GET']], function() {
             ['heading' => 'How it works', 'body' =>
                 '<pre class="demo-payload">// route/learn.php — boot
 Store::make(\'ws_store_demo_data\', 32, [
-    \'n\'    =&gt; [Table::TYPE_INT,    8],
-    \'name\' =&gt; [Table::TYPE_STRING, 64],
-    \'who\'  =&gt; [Table::TYPE_STRING, 64],
-    \'ts\'   =&gt; [Table::TYPE_INT,    8],
+    \'n\'    =&gt; [Store::TYPE_INT,    8],
+    \'name\' =&gt; [Store::TYPE_STRING, 64],
+    \'who\'  =&gt; [Store::TYPE_STRING, 64],
+    \'ts\'   =&gt; [Store::TYPE_INT,    8],
 ]);
 
 // POST /api/learn/demo/store-write

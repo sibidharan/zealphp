@@ -23,8 +23,8 @@ $demos = [
    <<<'PHP'
 // Before app->run():
 Store::make('demo_table', 128, [
-    'name'  => [\OpenSwoole\Table::TYPE_STRING, 64],
-    'score' => [\OpenSwoole\Table::TYPE_INT,    4],
+    'name'  => [Store::TYPE_STRING, 64],
+    'score' => [Store::TYPE_INT,    4],
 ]);
 
 // In any route (any worker):

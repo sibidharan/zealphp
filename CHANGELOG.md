@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.39] - 2026-05-23
+
+Pluggable Store/Counter backends — Phase 1. `Store` and `Counter` now delegate to backend instances behind their existing static/instance APIs. `OpenSwoole\Table` / `OpenSwoole\Atomic` remain the default (the nanosecond hot path); flip to **Redis/Valkey** for cross-node shared state with one line in `app.php` or the `ZEALPHP_STORE_BACKEND=redis` env var. Every existing handler call site keeps working unchanged.
+
+The Phase 3 pub/sub design (deferred to a future release) is empirically de-risked in this release via three committed spikes — in-process, cross-process, and cross-host — proving predis `SUBSCRIBE` yields under `HOOK_ALL` and the dedicated-subscriber-cor + Redis-routing architecture delivers sub-millisecond message visibility across hosts.
+
+PR #83.
+
+### Added
+
+- `ZealPHP\Store\StoreBackend` interface + `TableBackend` (default, wraps `OpenSwoole\Table`) + `RedisBackend` (Redis/Valkey, supports tracked + ttl modes).
+- `ZealPHP\Counter\CounterBackend` interface + `AtomicBackend` (default, wraps `OpenSwoole\Atomic`) + `RedisCounterBackend` (Lua-script `compareAndSet` for cross-node atomic CAS).
+- `Store::defaultBackend(?string $kind, string|array $conn = [])` and `Counter::defaultBackend(...)` — fluent getter/setter for the process-wide default. Accepts `'table'`/`'atomic'` or `'redis'` plus a connection URL/array (`redis://[:pass@]host:port/db`, `valkey://...` alias, unix sockets supported).
+- `Store::TYPE_INT` / `TYPE_FLOAT` / `TYPE_STRING` constants — backend-neutral; existing `OpenSwoole\Table::TYPE_*` keeps working (constants are int-identical).
+- `Store::mget()` / `Store::mset()` — bulk read/write on every backend (sequential round-trip; pipelined wire-batching deferred to a future release).
+- `Store::iterate()`, `Store::clear()`, `Store::ping()` — surface the full `StoreBackend` contract through the facade.
+- `ZealPHP\Store\RedisClient` adapter (preferred = phpredis when `ext-redis` is loaded; pure-PHP predis fallback). The only place either lib's symbols are referenced.
+- `ZealPHP\Store\RedisConnectionPool` — per-worker `Coroutine\Channel` of N (default 8) clients. Two coroutines can't share a socket without interleaving RESP frames; this is the framework's defence.
+- `ZealPHP\Store\TypeCodec` — backend-neutral row (de)serialization across the Redis byte-string wire.
+- `ZEALPHP_STORE_BACKEND` env var bootstraps the default backend in `App::run()` before workers fork. `ZEALPHP_REDIS_URL` feeds the connection URL (default `redis://127.0.0.1:6379`).
+- `make valkey-up` / `make valkey-down` test-harness targets boot an isolated `valkey-server` on port 16379 for the unit-test suite.
+- CI workflow spins up a `valkey/valkey:7-alpine` service container per PHPUnit matrix job and installs `ext-redis` so both driver paths get coverage.
+- `/demo/store-roundtrip` demo route exercises the full Store API through whichever backend is configured; integration test asserts the round-trip on both backends.
+
+### Changed
+
+- All in-tree demo/tutorial code (`route/*.php`, `app.php`, `template/pages/**/*.php`, `README.md`, `docs/websocket.md`) migrated from `OpenSwoole\Table::TYPE_*` to the new `Store::TYPE_*` constants. Old constants still work — `Store::TYPE_INT === OpenSwoole\Table::TYPE_INT` by value, every existing user-app schema keeps passing through unchanged.
+
+### Documentation
+
+- `template/pages/store.php` — new `#backends` section with backend comparison table (latency / cross-node / persistence / use-case) + one-line adoption snippet.
+- `README.md` Features table — new "Pluggable Store/Counter" row.
+- `docs/superpowers/specs/2026-05-22-store-redis-backend-design.md` — full spec.
+- `docs/superpowers/plans/2026-05-23-store-redis-phase-1.md` — task-by-task implementation plan.
+- `docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md` — three-layer spike validation (in-process predis-subscribe yields under HOOK_ALL, cross-process two-server pub/sub, cross-host pub/sub via wireguard hop @ 0.53ms median).
+- `predis/predis` added under `require-dev` (pure-PHP fallback so the suite stays green where `ext-redis` is absent).
+
+### Out of scope (deferred)
+
+- Tiered `TableBackend` L1 + `RedisBackend` L2 with bounded `l1_ttl` staleness.
+- Pub/sub-based L1 invalidation (spike-validated in this release; implementation lands separately).
+- Pipelined `mget`/`mset` via a driver-shaped Pipeline proxy.
+- Opt-in `$opts['on_error' => 'fallback_table']` per-table degrade hook.
+- Redis Cluster / Sentinel topologies; Redis-backed sessions (separate spec).
+
 ## [0.2.38] - 2026-05-21
 
 Apache + nginx parity release. Two source-diff audits (httpd 2.5.1 + nginx 1.31.1) drove a wave of security fixes, conformance fixes, and new APIs across the HTTP core and the middleware stack. PR #38.

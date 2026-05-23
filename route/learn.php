@@ -7,6 +7,7 @@
 
 use ZealPHP\App;
 use ZealPHP\G;
+use ZealPHP\Store;
 use ZealPHP\Learn\DB;
 use ZealPHP\Learn\Auth;
 use ZealPHP\Learn\Notes;
@@ -15,24 +16,24 @@ $app = App::instance();
 
 // ── Rate-limit Store tables ──────────────────────────────────────────
 \ZealPHP\Store::make('learn_login_rl', 1024, [
-    'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],
-    'count' => [\OpenSwoole\Table::TYPE_INT, 4],
-    'reset' => [\OpenSwoole\Table::TYPE_INT, 4],
+    'ip'    => [Store::TYPE_STRING, 45],
+    'count' => [Store::TYPE_INT, 4],
+    'reset' => [Store::TYPE_INT, 4],
 ]);
 \ZealPHP\Store::make('learn_register_rl', 1024, [
-    'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],
-    'count' => [\OpenSwoole\Table::TYPE_INT, 4],
-    'reset' => [\OpenSwoole\Table::TYPE_INT, 4],
+    'ip'    => [Store::TYPE_STRING, 45],
+    'count' => [Store::TYPE_INT, 4],
+    'reset' => [Store::TYPE_INT, 4],
 ]);
 \ZealPHP\Store::make('learn_chat_rl', 1024, [
-    'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],
-    'count' => [\OpenSwoole\Table::TYPE_INT, 4],
-    'reset' => [\OpenSwoole\Table::TYPE_INT, 4],
+    'ip'    => [Store::TYPE_STRING, 45],
+    'count' => [Store::TYPE_INT, 4],
+    'reset' => [Store::TYPE_INT, 4],
 ]);
 
 // ── WebSocket cross-tab notes sync ───────────────────────────────────
 \ZealPHP\Store::make('learn_ws_clients', 4096, [
-    'user_id' => [\OpenSwoole\Table::TYPE_INT, 8],
+    'user_id' => [Store::TYPE_INT, 8],
 ]);
 
 $app->ws('/ws/learn',
@@ -61,7 +62,7 @@ function learn_ws_broadcast(int $userId, array $payload): void
 // A single global counter that any open tab can bump; all tabs see the
 // updated value over WebSocket. No auth — purely a teaching demo.
 \ZealPHP\Store::make('ws_counter_demo_clients', 4096, [
-    'connected_at' => [\OpenSwoole\Table::TYPE_INT, 8],
+    'connected_at' => [Store::TYPE_INT, 8],
 ]);
 $wsCounterDemo = new \ZealPHP\Counter(0);
 
@@ -100,9 +101,9 @@ function ws_counter_demo_broadcast(int $value): void
 // Limit: 30 writes per IP per minute — orders of magnitude above what
 // the live widgets need, far below sustained abuse.
 \ZealPHP\Store::make('demo_rate_limits', 10000, [
-    'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],   // IPv6 max
-    'count' => [\OpenSwoole\Table::TYPE_INT,    4],
-    'reset' => [\OpenSwoole\Table::TYPE_INT,    4],
+    'ip'    => [Store::TYPE_STRING, 45],   // IPv6 max
+    'count' => [Store::TYPE_INT,    4],
+    'reset' => [Store::TYPE_INT,    4],
 ]);
 
 /**
@@ -215,7 +216,7 @@ $app->route('/api/learn/demo/check', ['methods' => ['POST']], function () {
 // swaps the button for the clicking tab; the WebSocket pushes the new
 // button HTML to every other tab open in the same session.
 \ZealPHP\Store::make('ws_session_counter_clients', 4096, [
-    'session_id' => [\OpenSwoole\Table::TYPE_STRING, 64],
+    'session_id' => [Store::TYPE_STRING, 64],
 ]);
 
 $app->ws('/ws/session-counter',
@@ -294,13 +295,13 @@ $app-&gt;route(\'/api/learn/demo/session-bump\', ...
 // Store::incr() and Store::set/get() with the same cross-tab feedback
 // loop the websocket-lesson counter uses.
 \ZealPHP\Store::make('ws_store_demo_clients', 4096, [
-    'connected_at' => [\OpenSwoole\Table::TYPE_INT, 8],
+    'connected_at' => [Store::TYPE_INT, 8],
 ]);
 \ZealPHP\Store::make('ws_store_demo_data', 32, [
-    'n'    => [\OpenSwoole\Table::TYPE_INT,    8],
-    'name' => [\OpenSwoole\Table::TYPE_STRING, 64],
-    'who'  => [\OpenSwoole\Table::TYPE_STRING, 64],
-    'ts'   => [\OpenSwoole\Table::TYPE_INT,    8],
+    'n'    => [Store::TYPE_INT,    8],
+    'name' => [Store::TYPE_STRING, 64],
+    'who'  => [Store::TYPE_STRING, 64],
+    'ts'   => [Store::TYPE_INT,    8],
 ]);
 
 $app->ws('/ws/store-demo',
@@ -388,26 +389,26 @@ $app->route('/api/learn/demo/store-write', ['methods' => ['POST']], function () 
 // for moves), so the server can trust fd→symbol mapping without a
 // separate auth token.
 \ZealPHP\Store::make('ws_tictactoe_clients', 4096, [
-    'room'   => [\OpenSwoole\Table::TYPE_STRING, 32],
-    'name'   => [\OpenSwoole\Table::TYPE_STRING, 32],
-    'symbol' => [\OpenSwoole\Table::TYPE_STRING, 2],   // 'X' | 'O' | 'S'
-    'joined' => [\OpenSwoole\Table::TYPE_INT,    8],
+    'room'   => [Store::TYPE_STRING, 32],
+    'name'   => [Store::TYPE_STRING, 32],
+    'symbol' => [Store::TYPE_STRING, 2],   // 'X' | 'O' | 'S'
+    'joined' => [Store::TYPE_INT,    8],
 ]);
 \ZealPHP\Store::make('ws_tictactoe_rooms', 1024, [
-    'board'   => [\OpenSwoole\Table::TYPE_STRING, 9],
-    'turn'    => [\OpenSwoole\Table::TYPE_STRING, 2],
-    'winner'  => [\OpenSwoole\Table::TYPE_STRING, 8],
-    'px_fd'   => [\OpenSwoole\Table::TYPE_INT,    8],
-    'po_fd'   => [\OpenSwoole\Table::TYPE_INT,    8],
-    'px_name' => [\OpenSwoole\Table::TYPE_STRING, 32],
-    'po_name' => [\OpenSwoole\Table::TYPE_STRING, 32],
-    'starter' => [\OpenSwoole\Table::TYPE_STRING, 2],
-    'rounds'  => [\OpenSwoole\Table::TYPE_INT,    4],
+    'board'   => [Store::TYPE_STRING, 9],
+    'turn'    => [Store::TYPE_STRING, 2],
+    'winner'  => [Store::TYPE_STRING, 8],
+    'px_fd'   => [Store::TYPE_INT,    8],
+    'po_fd'   => [Store::TYPE_INT,    8],
+    'px_name' => [Store::TYPE_STRING, 32],
+    'po_name' => [Store::TYPE_STRING, 32],
+    'starter' => [Store::TYPE_STRING, 2],
+    'rounds'  => [Store::TYPE_INT,    4],
     // Running scoreboard for the room — wins per symbol + draws. Persists
     // across Reset clicks; only cleared by an explicit {type:'reset_score'}.
-    'x_wins'  => [\OpenSwoole\Table::TYPE_INT,    4],
-    'o_wins'  => [\OpenSwoole\Table::TYPE_INT,    4],
-    'draws'   => [\OpenSwoole\Table::TYPE_INT,    4],
+    'x_wins'  => [Store::TYPE_INT,    4],
+    'o_wins'  => [Store::TYPE_INT,    4],
+    'draws'   => [Store::TYPE_INT,    4],
 ]);
 
 function ttt_sanitize_room(string $room): string

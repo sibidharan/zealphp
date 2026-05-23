@@ -393,8 +393,8 @@ class TimingMiddleware implements MiddlewareInterface {
 ```php
 // Create BEFORE $app->run() — shared across all forked workers
 $clientTable = Store::make('clients', 4096, [
-    'room' => [\OpenSwoole\Table::TYPE_STRING, 64],
-    'uid'  => [\OpenSwoole\Table::TYPE_STRING, 128],
+    'room' => [Store::TYPE_STRING, 64],
+    'uid'  => [Store::TYPE_STRING, 128],
 ]);
 $hitCounter = new Counter(0);
 

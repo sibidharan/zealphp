@@ -28,9 +28,9 @@ $tickCounter    = new Counter(0);   // incremented by the tick timer in each wor
 
 // Per-worker metric table
 Store::make('worker_metrics', 64, [
-    'pid'      => [\OpenSwoole\Table::TYPE_INT,    4],
-    'requests' => [\OpenSwoole\Table::TYPE_INT,    8],
-    'ticks'    => [\OpenSwoole\Table::TYPE_INT,    8],
+    'pid'      => [Store::TYPE_INT,    4],
+    'requests' => [Store::TYPE_INT,    8],
+    'ticks'    => [Store::TYPE_INT,    8],
 ]);
 
 // Each worker registers a 2-second tick timer on startup

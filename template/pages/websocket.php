@@ -79,8 +79,8 @@ PHP]); ?>
     <?php App::render('/components/_code', ['code' => <<<'PHP'
 // Shared across all workers — created before run()
 Store::make('ws_rooms', 4096, [
-    'room' => [\OpenSwoole\Table::TYPE_STRING, 64],
-    'uid'  => [\OpenSwoole\Table::TYPE_STRING, 128],
+    'room' => [Store::TYPE_STRING, 64],
+    'uid'  => [Store::TYPE_STRING, 128],
 ]);
 
 $app->ws('/ws/rooms',

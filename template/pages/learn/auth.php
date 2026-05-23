@@ -219,7 +219,7 @@ document.addEventListener('htmx:beforeSwap', (e) =&gt; {
       'title' => 'Challenge 2: rate-limit failed logins',
       'body'  => '<p>Right now <code>/api/learn/login</code> happily accepts unlimited password guesses. Add a per-IP rate limit: after 5 failed attempts in 60 seconds, return 429 for that IP for the next 5 minutes. Use <code>Store</code> for the counter — see Foundations &rarr; <a href="/learn/store">Sharing State</a> for the table-allocation pattern.</p>',
       'hints' => [
-        'Allocate the table at boot: <code>Store::make(\'login_fails\', 10000, [\'count\' =&gt; [\OpenSwoole\Table::TYPE_INT, 4], \'reset_at\' =&gt; [\OpenSwoole\Table::TYPE_INT, 4]])</code>',
+        'Allocate the table at boot: <code>Store::make(\'login_fails\', 10000, [\'count\' =&gt; [Store::TYPE_INT, 4], \'reset_at\' =&gt; [Store::TYPE_INT, 4]])</code>',
         'Key by <code>$request-&gt;server[\'REMOTE_ADDR\']</code>. Bump <code>count</code> only when the password check fails — never on success.',
         'On lockout, return <code>$response-&gt;status(429)-&gt;header(\'Retry-After\', \'300\')-&gt;end()</code>',
       ],
