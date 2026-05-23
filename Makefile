@@ -16,7 +16,7 @@ PORT      ?= 8080
 
 .PHONY: help install serve start restart stop status logs \
         test unit integration stan check coverage coverage-full infection \
-        docs docs-rebuild bench perf-smoke
+        docs docs-rebuild bench perf-smoke valkey-up valkey-down
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -80,3 +80,10 @@ bench: ## Local performance sweep (16 workers, concurrency up to 1000)
 
 perf-smoke: ## Perf-regression smoke test (requires the server on :8080)
 	bash scripts/perf_smoke.sh
+
+# ---- Redis/Valkey for Store backend tests ----
+valkey-up: ## Start an isolated valkey-server for Store/Counter tests (port 16379)
+	bash scripts/test-valkey-start.sh
+
+valkey-down: ## Stop the test-only valkey-server
+	bash scripts/test-valkey-stop.sh
