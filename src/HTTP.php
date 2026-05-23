@@ -11,7 +11,7 @@ namespace ZealPHP;
  * directly. `json()` decodes the body once (no caching — small enough
  * cost; cache yourself if a hot loop reads it many times).
  */
-final class HttpResponse
+final class HTTPResponse
 {
     /** @param array<string, string> $headers */
     public function __construct(
@@ -50,22 +50,22 @@ final class HttpResponse
  * For the common case — JSON request/response, short timeout, a handful
  * of headers — this is one call:
  *
- *     $r = Http::get('https://api.example.com/users', ['Authorization' => 'Bearer ...']);
+ *     $r = HTTP::get('https://api.example.com/users', ['Authorization' => 'Bearer ...']);
  *     if ($r->ok()) { return $r->json(); }
  *
- *     $r = Http::post('https://hooks.slack.com/...', json: ['text' => 'hi']);
+ *     $r = HTTP::post('https://hooks.slack.com/...', json: ['text' => 'hi']);
  *
- * For concurrent fan-out (N requests in parallel), use Http::all() —
+ * For concurrent fan-out (N requests in parallel), use HTTP::all() —
  * built on App::parallel().
  *
  * For complex multipart uploads / streaming bodies, drop down to
  * `OpenSwoole\Coroutine\Http\Client` directly — this wrapper is
  * deliberately small.
  */
-final class Http
+final class HTTP
 {
     /** @param array<string, string> $headers */
-    public static function get(string $url, array $headers = [], float $timeout = 30.0): HttpResponse
+    public static function get(string $url, array $headers = [], float $timeout = 30.0): HTTPResponse
     {
         return self::request('GET', $url, null, $headers, $timeout);
     }
@@ -78,33 +78,33 @@ final class Http
      *
      * @param array<string, string> $headers
      */
-    public static function post(string $url, mixed $body = null, array $headers = [], float $timeout = 30.0): HttpResponse
+    public static function post(string $url, mixed $body = null, array $headers = [], float $timeout = 30.0): HTTPResponse
     {
         return self::request('POST', $url, $body, $headers, $timeout);
     }
 
     /** @param array<string, string> $headers */
-    public static function put(string $url, mixed $body = null, array $headers = [], float $timeout = 30.0): HttpResponse
+    public static function put(string $url, mixed $body = null, array $headers = [], float $timeout = 30.0): HTTPResponse
     {
         return self::request('PUT', $url, $body, $headers, $timeout);
     }
 
     /** @param array<string, string> $headers */
-    public static function delete(string $url, array $headers = [], float $timeout = 30.0): HttpResponse
+    public static function delete(string $url, array $headers = [], float $timeout = 30.0): HTTPResponse
     {
         return self::request('DELETE', $url, null, $headers, $timeout);
     }
 
     /**
      * Send a request. Arbitrary method. Network errors (DNS, connect,
-     * TLS, timeout) come back as an HttpResponse with `status=0` +
+     * TLS, timeout) come back as an HTTPResponse with `status=0` +
      * `error=<Throwable>` rather than throwing — handlers can check
      * `$r->failed()` once at the top of the response-processing block
      * instead of try-catching every call.
      *
      * @param array<string, string> $headers
      */
-    public static function request(string $method, string $url, mixed $body = null, array $headers = [], float $timeout = 30.0): HttpResponse
+    public static function request(string $method, string $url, mixed $body = null, array $headers = [], float $timeout = 30.0): HTTPResponse
     {
         if (\OpenSwoole\Coroutine::getCid() < 0) {
             // Outside coroutine — wrap in Coroutine::run so the hooked
@@ -116,14 +116,14 @@ final class Http
                 catch (\Throwable $e) { $err = $e; }
             });
             if ($err !== null) {
-                return new HttpResponse(0, '', [], $err);
+                return new HTTPResponse(0, '', [], $err);
             }
-            return $r instanceof HttpResponse ? $r : new HttpResponse(0, '', [], new \RuntimeException('Http::request: coroutine wrap returned null'));
+            return $r instanceof HTTPResponse ? $r : new HTTPResponse(0, '', [], new \RuntimeException('HTTP::request: coroutine wrap returned null'));
         }
 
         $parts = parse_url($url);
         if ($parts === false || !isset($parts['host'])) {
-            return new HttpResponse(0, '', [], new \InvalidArgumentException("Http::request: invalid url: $url"));
+            return new HTTPResponse(0, '', [], new \InvalidArgumentException("HTTP::request: invalid url: $url"));
         }
         $scheme   = strtolower((string) ($parts['scheme'] ?? 'http'));
         $tls      = $scheme === 'https';
@@ -145,8 +145,8 @@ final class Http
         } elseif (is_string($body)) {
             $bodyStr = $body;
         } elseif ($body !== null) {
-            return new HttpResponse(0, '', [], new \InvalidArgumentException(
-                'Http::request: $body must be null, string, or array; got ' . get_debug_type($body)
+            return new HTTPResponse(0, '', [], new \InvalidArgumentException(
+                'HTTP::request: $body must be null, string, or array; got ' . get_debug_type($body)
             ));
         }
 
@@ -160,9 +160,9 @@ final class Http
             if (!$ok) {
                 /** @var mixed $errMsgRaw */
                 $errMsgRaw = $client->errMsg ?? '';
-                $errMsg = is_string($errMsgRaw) && $errMsgRaw !== '' ? $errMsgRaw : 'Http::request: client->execute returned false';
+                $errMsg = is_string($errMsgRaw) && $errMsgRaw !== '' ? $errMsgRaw : 'HTTP::request: client->execute returned false';
                 $client->close();
-                return new HttpResponse(0, '', [], new \RuntimeException($errMsg));
+                return new HTTPResponse(0, '', [], new \RuntimeException($errMsg));
             }
             /** @var mixed $statusRaw */ $statusRaw = $client->statusCode ?? 0;
             $status = is_int($statusRaw) ? $statusRaw : (is_numeric($statusRaw) ? (int) $statusRaw : 0);
@@ -176,26 +176,26 @@ final class Http
                 }
             }
             $client->close();
-            return new HttpResponse($status, $respBody, $respHeaders);
+            return new HTTPResponse($status, $respBody, $respHeaders);
         } catch (\Throwable $e) {
-            return new HttpResponse(0, '', [], $e);
+            return new HTTPResponse(0, '', [], $e);
         }
     }
 
     /**
      * Concurrent fan-out. Each entry in `$requests` is a callable that
-     * returns an HttpResponse — typically a thunk like
-     * `fn() => Http::get('...')`. Results in input order. Uses
+     * returns an HTTPResponse — typically a thunk like
+     * `fn() => HTTP::get('...')`. Results in input order. Uses
      * `App::parallel()` under the hood — every request gets its own
      * coroutine.
      *
-     * @param  list<callable(): HttpResponse> $requests
-     * @return list<HttpResponse>
+     * @param  list<callable(): HTTPResponse> $requests
+     * @return list<HTTPResponse>
      */
     public static function all(array $requests): array
     {
         if ($requests === []) { return []; }
-        /** @var list<HttpResponse> $r */
+        /** @var list<HTTPResponse> $r */
         $r = App::parallel($requests);
         return $r;
     }

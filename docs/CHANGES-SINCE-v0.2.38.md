@@ -371,7 +371,7 @@ These are conceptually Phase 1 of the v0.3.0 roadmap but landed in `release/v0.2
 ```php
 $results = App::parallelLimit(
     $userIds,
-    fn(int $id) => Http::get("https://api.example.com/users/$id")->json(),
+    fn(int $id) => HTTP::get("https://api.example.com/users/$id")->json(),
     concurrency: 10,
 );
 // At most 10 in-flight requests; rest queue. Keys preserved.
@@ -399,21 +399,21 @@ $app->route('/healthz', fn() => App::stats());
 // Returns: {workers: {...}, store: {...}, memory: {...}, uptime_sec: N, php: '8.3.6'}
 ```
 
-### Try it — `Http::get/post/all`
+### Try it — `HTTP::get/post/all`
 
 ```php
-$r = Http::get('https://api.example.com/users', ['Authorization' => 'Bearer ...']);
+$r = HTTP::get('https://api.example.com/users', ['Authorization' => 'Bearer ...']);
 if ($r->ok()) { return $r->json(); }
 if ($r->failed()) { error_log("transport error: " . $r->error->getMessage()); }
 
 // JSON body auto-encoded:
-$r = Http::post('https://hooks.slack.com/...', body: ['text' => 'hi']);
+$r = HTTP::post('https://hooks.slack.com/...', body: ['text' => 'hi']);
 
 // Concurrent fan-out:
-$results = Http::all([
-    fn() => Http::get('https://a.example.com/'),
-    fn() => Http::get('https://b.example.com/'),
-    fn() => Http::get('https://c.example.com/'),
+$results = HTTP::all([
+    fn() => HTTP::get('https://a.example.com/'),
+    fn() => HTTP::get('https://b.example.com/'),
+    fn() => HTTP::get('https://c.example.com/'),
 ]);
 ```
 
@@ -440,7 +440,7 @@ App::onProcess('log-shipper', function (\OpenSwoole\Process $p): void {
 mkdir -p /tmp/zealphp-smoke/public
 cat > /tmp/zealphp-smoke/app.php <<'PHP'
 <?php require '/var/labsstorage/home/sibidharan/zealphp/vendor/autoload.php';
-use ZealPHP\App; use ZealPHP\Http;
+use ZealPHP\App; use ZealPHP\HTTP;
 App::superglobals(false);
 App::onProcess('heartbeat', function() {
     while (true) { file_put_contents('/tmp/zealphp-smoke/heartbeat.log', date('c')."\n", FILE_APPEND); usleep(500000); }
@@ -449,14 +449,14 @@ App::onSignal(SIGHUP, fn() => file_put_contents('/tmp/zealphp-smoke/sighup.log',
 $app = App::init('0.0.0.0', 8095);
 $app->route('/p',  fn() => App::parallel([fn()=>usleep(100000)?:'a', fn()=>usleep(100000)?:'b', fn()=>usleep(100000)?:'c']));
 $app->route('/s',  fn() => App::stats());
-$app->route('/h',  fn() => Http::get('http://127.0.0.1:8095/s')->json());
+$app->route('/h',  fn() => HTTP::get('http://127.0.0.1:8095/s')->json());
 $app->run();
 PHP
 php /tmp/zealphp-smoke/app.php &
 sleep 3
 curl http://127.0.0.1:8095/s     # App::stats
 curl http://127.0.0.1:8095/p     # App::parallel
-curl http://127.0.0.1:8095/h     # Http::get (self-fetch)
+curl http://127.0.0.1:8095/h     # HTTP::get (self-fetch)
 cat /tmp/zealphp-smoke/heartbeat.log    # App::onProcess sidecar
 kill -HUP $!                              # App::onSignal
 sleep 1
