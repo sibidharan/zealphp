@@ -41,23 +41,26 @@ final class RedisConnectionPoolTest extends RedisTestCase
     }
 
     /**
-     * Two cors share a pool of size 1: both complete via `with()` and the
-     * data written by the first is visible to the second (proving they
-     * actually serialized on the SAME client, which got recycled). The
-     * stronger "cor B blocked until A released" assertion lives in
-     * testAcquireTimesOutInsideCoroutineWhenPoolStarves below.
+     * Two cors share a pool of size 1: A writes, then signals via a Channel
+     * that B is allowed to read. Without HOOK_ALL the predis blocking I/O
+     * makes the bare go()→go() spawn order racy at the system-call boundary;
+     * the explicit Channel gate makes the data-flow deterministic without
+     * depending on Runtime::enableCoroutine(HOOK_ALL) (process-global).
      */
     public function testTwoCoroutinesShareOneConnPool(): void
     {
         $pool = new RedisConnectionPool($this->url, 1);
         $bRead = null;
         \OpenSwoole\Coroutine::run(function () use ($pool, &$bRead): void {
-            $done = new \OpenSwoole\Coroutine\Channel(2);
-            go(function () use ($pool, $done): void {
+            $signal = new \OpenSwoole\Coroutine\Channel(1);
+            $done   = new \OpenSwoole\Coroutine\Channel(2);
+            go(function () use ($pool, $signal, $done): void {
                 $pool->with(fn(RedisClient $c) => $c->set('shared', 'wrote-by-A'));
+                $signal->push(1);  // safe for B to read now
                 $done->push(1);
             });
-            go(function () use ($pool, $done, &$bRead): void {
+            go(function () use ($pool, $signal, $done, &$bRead): void {
+                $signal->pop(2.0);  // block until A finished its set
                 $pool->with(function (RedisClient $c) use (&$bRead): void {
                     $bRead = $c->get('shared');
                 });

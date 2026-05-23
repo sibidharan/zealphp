@@ -4698,6 +4698,18 @@ HELP;
      */
     public function run(?array $settings = null): void
     {
+        // ZEALPHP_STORE_BACKEND=redis flips both Store and Counter to the Redis
+        // backend before workers fork — gets the "deploy-time switch with no
+        // code change" story from the spec without polluting app.php. The
+        // Store/Counter facades are happy with multiple defaultBackend() calls
+        // (the cached backend resets when config changes), so a manual call
+        // later in app.php can still override.
+        $envKind = getenv('ZEALPHP_STORE_BACKEND');
+        if (is_string($envKind) && $envKind !== '') {
+            \ZealPHP\Store::defaultBackend($envKind);
+            \ZealPHP\Counter::defaultBackend($envKind === 'redis' ? 'redis' : 'atomic');
+        }
+
         $cliOverrides = self::parseCliArgs();
         if (isset($cliOverrides['_host'])) {
             // @phpstan-ignore-next-line — cliOverrides is array<string, mixed>; _host coerced to string at boundary
