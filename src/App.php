@@ -1917,6 +1917,55 @@ class App
     }
 
     /**
+     * H6 + H7 — boot-time self-checks for the Redis backend.
+     *
+     * Returns an array of warning strings to surface via error_log.
+     * Empty array means everything is fine. Extracted into its own
+     * method so the Redis-misconfiguration surface is unit-testable.
+     *
+     *  H6 — eager ping. If the Redis backend is active, PING the pool
+     *       once at boot; surface a warning when it fails so the user
+     *       sees the misconfiguration BEFORE the first request (instead
+     *       of after a 5s acquire timeout deep inside a worker handler).
+     *
+     *  H7 — phpredis + HOOK_ALL=0 deadlock guard. phpredis SUBSCRIBE
+     *       blocks the worker without HOOK_ALL because the underlying
+     *       socket read is C-side. Detect the unsafe combo at boot and
+     *       tell the user how to fix it.
+     *
+     * @return list<string>
+     * @internal — public for tests; not part of the user-facing API.
+     */
+    public static function redisBootChecks(): array
+    {
+        $warnings = [];
+        $backend = \ZealPHP\Store::defaultBackend();
+        if (!($backend instanceof \ZealPHP\Store\RedisBackend)) {
+            return $warnings;
+        }
+        // H6 — eager ping
+        try {
+            if (!$backend->ping()) {
+                $warnings[] = 'Store(H6): Redis backend ping returned false at boot — workers may fail on first request';
+            }
+        } catch (\Throwable $e) {
+            $warnings[] = 'Store(H6): Redis backend ping FAILED at boot: ' . $e->getMessage();
+        }
+        // H7 — phpredis + HOOK_ALL=0 deadlock guard
+        $hasSubscribers = self::$pubsubRegistry !== [] || self::$reliableRegistry !== [];
+        if ($hasSubscribers && self::hookAll() === 0) {
+            $preferEnv = strtolower((string) getenv('ZEALPHP_REDIS_PREFER'));
+            $willUsePhpredis = $preferEnv === 'phpredis'
+                || (($preferEnv === '' || $preferEnv === 'auto') && extension_loaded('redis'));
+            if ($willUsePhpredis) {
+                $warnings[] = 'Store(H7): phpredis SUBSCRIBE blocks the worker WITHOUT HOOK_ALL — pub/sub will deadlock. ' .
+                    'Either re-enable HOOK_ALL (default in coroutine mode) OR set ZEALPHP_REDIS_PREFER=predis for subscribers.';
+            }
+        }
+        return $warnings;
+    }
+
+    /**
      * One-time hook into onWorkerStart that builds + starts the
      * RedisPubSub and RedisStreams runners based on what's in the
      * registries. Re-callable; only wires once.
@@ -4827,6 +4876,13 @@ HELP;
         if (is_string($envKind) && $envKind !== '') {
             \ZealPHP\Store::defaultBackend($envKind);
             \ZealPHP\Counter::defaultBackend($envKind === 'redis' ? 'redis' : 'atomic');
+        }
+
+        // H6 + H7 — boot-time self-checks. Surface misconfigurations BEFORE
+        // workers fork so the message is visible in master logs (and not
+        // hidden behind a 5s acquire timeout in some worker minutes later).
+        foreach (self::redisBootChecks() as $warning) {
+            error_log($warning);
         }
 
         $cliOverrides = self::parseCliArgs();
