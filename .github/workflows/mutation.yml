@@ -35,16 +35,14 @@ jobs:
         uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
         with:
           php-version: '8.3'
-          extensions: openswoole, uopz
-          coverage: xdebug
+          extensions: openswoole, uopz, pcov
+          coverage: pcov
           tools: composer:v2
 
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist
 
       - name: Run Infection
-        env:
-          XDEBUG_MODE: coverage
         # Thresholds come from infection.json5 (minMsi / minCoveredMsi).
         # --logger-github annotates escaped mutants inline on the PR.
         run: |
