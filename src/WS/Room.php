@@ -206,13 +206,20 @@ final class Room
      *
      * @param array<string,mixed>|string $payload
      */
-    public function push(array|string $payload): int
+    public function push(array|string $payload, ?string $fromClientId = null): int
     {
         // Per-room rate limit (configured via WSRouter::setRoomRateLimit).
         // Sliding-window counter keyed by `{room}:{window-id}` — increments
         // an atomic counter (Atomic on Table backend, Redis INCR on Redis).
         if (!$this->checkRoomRateLimit()) {
             WSRouter::stats()->inc('rate_limit_drops_total');
+            return 0;
+        }
+        // WS-4: when a from-client is attributed AND a client rate limit is
+        // configured, apply it. Lets apps gate per-user message floods.
+        // Calls without $fromClientId are server-originated broadcasts —
+        // no per-client cap applied (only the per-room one above).
+        if ($fromClientId !== null && !WSRouter::checkClientRate($fromClientId)) {
             return 0;
         }
         WSRouter::stats()->inc('room_pushes_total');
@@ -263,7 +270,10 @@ final class Room
     /** @param array<string,mixed> $envelope */
     private function publish(array $envelope): int
     {
-        return Store::publish(WSRouter::roomChannelPrefix() . $this->name, (string) json_encode($envelope));
+        // WS-3: sign the envelope when a channel HMAC secret is configured;
+        // passthrough otherwise. Subscribers verify on receive (init()).
+        $signed = WSRouter::signPayload((string) json_encode($envelope));
+        return Store::publish(WSRouter::roomChannelPrefix() . $this->name, $signed);
     }
 
     /** Composite key shape used in the ws_room_members Store table. */

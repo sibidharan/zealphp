@@ -55,6 +55,41 @@ final class WSRouter
     private const SERVER_GC_INTERVAL_MS        = 60_000;
     private const SERVER_STALE_AFTER_SEC       = 90;
 
+    // ── WS-5: WebSocket close-code constants ────────────────────────────
+    //
+    // Standard codes (1000-1099 — RFC 6455 + IANA) for normal lifecycle:
+    /** Normal closure (peer is closing as expected). */
+    public const CLOSE_NORMAL              = 1000;
+    /** Server is going down (or client is navigating away). */
+    public const CLOSE_GOING_AWAY          = 1001;
+    /** Peer sent a malformed frame / protocol violation. */
+    public const CLOSE_PROTOCOL_ERROR      = 1002;
+    /** Peer sent a frame of a type the endpoint can't accept. */
+    public const CLOSE_UNSUPPORTED         = 1003;
+    /** Peer sent a message that violates server policy. */
+    public const CLOSE_POLICY_VIOLATION    = 1008;
+    /** Message too big for the receiver to process. */
+    public const CLOSE_MESSAGE_TOO_BIG     = 1009;
+    /** Server is temporarily overloaded — client should retry later. */
+    public const CLOSE_TRY_AGAIN_LATER     = 1013;
+    /** Server hit an internal error processing the request. */
+    public const CLOSE_INTERNAL_ERROR      = 1011;
+    //
+    // Application range (4000-4999) — owned by ZealPHP / your app. Use
+    // these for semantic close reasons clients can react to specifically:
+    /** Auth required: client connected but never authenticated. */
+    public const CLOSE_AUTH_REQUIRED       = 4001;
+    /** Auth failed: bad token, expired session, etc. */
+    public const CLOSE_AUTH_INVALID        = 4002;
+    /** Authenticated but lacking permission for this operation. */
+    public const CLOSE_FORBIDDEN           = 4003;
+    /** Server is over capacity (paired with CapacityException). */
+    public const CLOSE_CAPACITY            = 4013;
+    /** Client breached the per-client rate limit (WS-4). */
+    public const CLOSE_RATE_LIMITED        = 4029;
+    /** Connection idle / heartbeat missed beyond threshold. */
+    public const CLOSE_IDLE                = 4040;
+
     /** Max connections per cluster — bump via initOptions() for prod. */
     private static int $ownerCapacity = 4096;
     /** Max (room × member) pairs per cluster — bump via initOptions() for prod. */
@@ -70,6 +105,11 @@ final class WSRouter
     /** Per-room rate limit — 0 disables. Set via `setRoomRateLimit($n, $windowSec)`. */
     private static int $roomRateLimitN = 0;
     private static int $roomRateLimitWindowSec = 60;
+    /** Per-client rate limit (WS-4) — 0 disables. Set via `setClientRateLimit`. */
+    private static int $clientRateLimitN = 0;
+    private static int $clientRateLimitWindowSec = 60;
+    /** Per-channel HMAC secret (WS-3) — null disables. Set via `setChannelHmacSecret`. */
+    private static ?string $channelHmacSecret = null;
     /** Per-worker counter struct. Surfaced via `WSRouter::stats()`. */
     private static ?\ZealPHP\Store\Stats $stats = null;
 
@@ -161,6 +201,106 @@ final class WSRouter
         self::$roomRateLimitWindowSec = $windowSec;
     }
 
+    /**
+     * WS-4 — per-client rate limit. Throttles `sendToClient` AND `Room::push`
+     * attributed to a single client. Sliding-window backed by `Counter`.
+     * 0 (default) disables. Pair with the `setRoomRateLimit` per-room cap.
+     *
+     *     WSRouter::setClientRateLimit(50, 10);  // 50 ops / 10s / client
+     */
+    public static function setClientRateLimit(int $n, int $windowSec = 60): void
+    {
+        if ($n < 0) {
+            throw new \InvalidArgumentException('setClientRateLimit: $n must be >= 0');
+        }
+        if ($windowSec < 1) {
+            throw new \InvalidArgumentException('setClientRateLimit: $windowSec must be >= 1');
+        }
+        self::$clientRateLimitN = $n;
+        self::$clientRateLimitWindowSec = $windowSec;
+    }
+
+    /** @internal — used by Room::push to gate per-client rate */
+    public static function clientRateLimitN(): int { return self::$clientRateLimitN; }
+
+    /**
+     * Returns true when the client is under the rate limit (or limits
+     * disabled). Increments the bucket counter atomically.
+     */
+    public static function checkClientRate(string $clientId): bool
+    {
+        $n = self::$clientRateLimitN;
+        if ($n === 0 || $clientId === '') { return true; }
+        $window = self::$clientRateLimitWindowSec;
+        $bucket = (int) (time() / $window);
+        $name   = '_wsrouter_cl_' . substr(sha1($clientId . ':' . $bucket), 0, 16);
+        $c      = new \ZealPHP\Counter(0, $name);
+        $now    = $c->increment();
+        if ($now > $n) {
+            self::stats()->inc('client_rate_limit_drops_total');
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * WS-3 — set a shared HMAC secret for pub/sub channel authentication.
+     * Every server in the cluster MUST share the same secret. Once set:
+     *   - `sendToClient` + `Room::push` publishes are wrapped in a signed
+     *     envelope `{v:1, hmac, payload}`.
+     *   - Receivers (the per-server + per-room subscribers) verify the
+     *     HMAC and silently drop messages with bad/missing signatures
+     *     (bumps `hmac_verify_failures_total` in stats).
+     *
+     * Defeats the "anyone with Redis write access can forge a routed
+     * message" attack: a peer that doesn't know the secret cannot
+     * spoof messages onto `ws:server:*` or `ws:room:*` channels.
+     *
+     * Pass `null` to disable (default). Read via env in your app.php:
+     *
+     *     WSRouter::setChannelHmacSecret(getenv('ZEALPHP_WS_HMAC') ?: null);
+     */
+    public static function setChannelHmacSecret(?string $secret): void
+    {
+        self::$channelHmacSecret = ($secret === '' || $secret === null) ? null : $secret;
+    }
+
+    /** @internal — sign a payload for publish. Passthrough when secret unset. */
+    public static function signPayload(string $payload): string
+    {
+        if (self::$channelHmacSecret === null) { return $payload; }
+        $mac = substr(hash_hmac('sha256', $payload, self::$channelHmacSecret), 0, 32);
+        return (string) json_encode(['v' => 1, 'hmac' => $mac, 'payload' => $payload]);
+    }
+
+    /**
+     * @internal — verify a published envelope. Returns the inner payload
+     * when valid (or when no secret is configured — passthrough); returns
+     * NULL when the envelope is signed-but-mismatched and the caller
+     * should drop the message.
+     */
+    public static function verifyPayload(string $envelope): ?string
+    {
+        if (self::$channelHmacSecret === null) { return $envelope; }
+        $msg = json_decode($envelope, true);
+        if (!is_array($msg) || ($msg['v'] ?? null) !== 1) {
+            self::stats()->inc('hmac_verify_failures_total');
+            return null;
+        }
+        $mac   = is_string($msg['hmac']    ?? null) ? $msg['hmac']    : '';
+        $inner = is_string($msg['payload'] ?? null) ? $msg['payload'] : '';
+        if ($mac === '' || $inner === '') {
+            self::stats()->inc('hmac_verify_failures_total');
+            return null;
+        }
+        $expected = substr(hash_hmac('sha256', $inner, self::$channelHmacSecret), 0, 32);
+        if (!hash_equals($expected, $mac)) {
+            self::stats()->inc('hmac_verify_failures_total');
+            return null;
+        }
+        return $inner;
+    }
+
     public static function init(?string $serverId = null, ?callable $clientSink = null): void
     {
         self::$serverId   = $serverId ?? gethostname() . ':' . getmypid();
@@ -171,8 +311,12 @@ final class WSRouter
             // the HTTP-only return is unreachable here in practice (WS routes
             // require the WS server) but the instanceof keeps PHPStan honest.
             if (!($server instanceof \OpenSwoole\WebSocket\Server)) { return; }
-            if (!$server->isEstablished($fd)) { return; }
-            $server->push($fd, $payload);
+            // WS-1: route through the backpressure-aware push. A slow / dead
+            // consumer's accumulated TCP send queue can't push the server
+            // toward OOM, and the drop is surfaced in stats
+            // (pushes_dropped_slow_consumer). Pre-WS-1, sendToClient'd
+            // payloads bypassed this guard — only Room::push fan-out used it.
+            self::pushWithBackpressure($server, $fd, $payload);
         };
 
         if (self::$initialized) { return; }
@@ -210,14 +354,21 @@ final class WSRouter
         // subscriber proliferation. Handler dispatches to user-registered
         // message/presence handlers + maintains the per-worker local
         // membership cache.
-        App::onPubSub(self::ROOM_CHANNEL_PREFIX . '*', function (string $payload, string $channel): void {
+        App::onPubSub(self::ROOM_CHANNEL_PREFIX . '*', function (string $envelope, string $channel): void {
+            // WS-3: unwrap signed envelope when a secret is configured;
+            // drop silently (with stats bump) on bad/missing signature.
+            $payload = self::verifyPayload($envelope);
+            if ($payload === null) { return; }
             self::handleRoomMessage($channel, $payload);
         });
 
         // Subscribe to OUR identity channel. Inbound messages have
         // {client_id, conn_id, payload}; the configured sink does the
         // local push iff the conn_id matches the currently-held connection.
-        App::onPubSub('ws:server:' . self::$serverId, function (string $payload): void {
+        App::onPubSub('ws:server:' . self::$serverId, function (string $envelope): void {
+            // WS-3 verification (mirror of the room subscriber above).
+            $payload = self::verifyPayload($envelope);
+            if ($payload === null) { return; }
             $msg = json_decode($payload, true);
             if (!is_array($msg)) { return; }
             $clientId = is_string($msg['client_id'] ?? null) ? $msg['client_id'] : '';
@@ -342,6 +493,12 @@ final class WSRouter
      */
     public static function sendToClient(string $clientId, string $payload): bool
     {
+        // WS-4: per-client rate limit check BEFORE the lookup. Drops loud
+        // clients early without spending a Store::get round-trip on every
+        // throttled send.
+        if (!self::checkClientRate($clientId)) {
+            return false;
+        }
         $owner = Store::get(self::TABLE, $clientId);
         if (!is_array($owner)) {
             self::stats()->inc('sendToClient_owner_missing');
@@ -353,11 +510,13 @@ final class WSRouter
             self::stats()->inc('sendToClient_owner_missing');
             return false;
         }
-        Store::publish('ws:server:' . $serverId, (string) json_encode([
+        $json = (string) json_encode([
             'client_id' => $clientId,
             'conn_id'   => $connId,
             'payload'   => $payload,
-        ]));
+        ]);
+        // WS-3: sign the envelope if a channel HMAC secret is configured.
+        Store::publish('ws:server:' . $serverId, self::signPayload($json));
         self::stats()->inc('sendToClient_total');
         return true;
     }
