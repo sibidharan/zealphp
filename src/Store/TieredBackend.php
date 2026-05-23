@@ -199,6 +199,32 @@ final class TieredBackend implements StoreBackend
         return $this->l2->exists($name, $key);
     }
 
+    /**
+     * Stale-OK exists check (H8).
+     *
+     * Returns `true` if L1 has a fresh entry (within `$l1Ttl` of now);
+     * otherwise defers to L2 (the strict authoritative check). Use when
+     * "probably exists" is good enough — saves a Redis round-trip on
+     * hot read paths where the caller already tolerates `$l1Ttl`-bounded
+     * staleness for `get()`.
+     *
+     * The strict `exists()` always hits L2 (consistency); this variant
+     * trades that consistency for speed at the caller's explicit request.
+     * Never returns a false positive (L1 entries are always set after a
+     * confirmed L2 set/get; stale-but-still-present is the only window).
+     */
+    public function existsCached(string $name, string $key): bool
+    {
+        $l1Row = $this->l1->get($name, $key);
+        if (is_array($l1Row)) {
+            $cachedAt = is_numeric($l1Row[self::CACHED_AT] ?? null) ? (int) $l1Row[self::CACHED_AT] : 0;
+            if ($cachedAt > 0 && (time() - $cachedAt) < $this->l1Ttl) {
+                return true;
+            }
+        }
+        return $this->l2->exists($name, $key);
+    }
+
     public function incr(string $name, string $key, string $col, int|float $by = 1): int|float
     {
         $new = $this->l2->incr($name, $key, $col, $by);

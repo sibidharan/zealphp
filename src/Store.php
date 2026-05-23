@@ -197,6 +197,25 @@ class Store
         return $v === null ? false : $v;
     }
 
+    /**
+     * Strict variant of get() — returns null on miss instead of false.
+     *
+     * Recommended for new code. The legacy `get()` keeps returning `false`
+     * on miss for BC with code written before v0.2.39 that uses `=== false`
+     * to detect misses; that BC contract is permanent.
+     *
+     * New code that wants the unambiguous null-or-value contract — e.g. to
+     * use `??`-style fallbacks safely with stored falsy values — should
+     * call `getStrict()` instead.
+     *
+     * Returns null on miss; the scalar when `$field` is set and the row exists;
+     * the row array (`array<string, scalar>`) otherwise.
+     */
+    public static function getStrict(string $name, string $key, ?string $field = null): mixed
+    {
+        return self::defaultBackend()->get($name, $key, $field);
+    }
+
     public static function del(string $name, string $key): bool
     {
         return self::defaultBackend()->del($name, $key);
