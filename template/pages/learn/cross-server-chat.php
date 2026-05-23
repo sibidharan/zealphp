@@ -348,19 +348,28 @@ $room-&gt;leave($username);</code></pre>
     <ul>
       <li>
         <strong>Capacity defaults are demo-grade.</strong> <code>WSRouter::init()</code> creates
-        <code>ws_owner</code> sized for <strong>4,096 rows</strong> (max concurrent WS connections
-        cluster-wide) and <code>ws_room_members</code> sized for <strong>16,384 rows</strong>
-        (max <code>(room × member)</code> pairs). On the Table backend these are HARD CAPS
-        allocated at master fork — bump inline for production:
+        <code>ws_owner</code> sized for <strong>4,096 rows</strong> and
+        <code>ws_room_members</code> sized for <strong>16,384 rows</strong> &mdash; with two
+        different meanings depending on the backend:
+        <ul>
+          <li><strong>Table backend (single OpenSwoole process):</strong> these are HARD CAPS on
+            shared memory allocated at master fork. Scope = <em>workers within THIS process</em>,
+            NOT cross-host. So <code>ws_owner</code> at 4,096 means &ldquo;max concurrent WS
+            connections this one server can hold.&rdquo;</li>
+          <li><strong>Redis backend:</strong> the numbers are informational only. Redis is a global
+            KV with no per-table cap, and the rows are visible across every server in the
+            cluster. Bound disk/memory growth via Redis-server
+            <code>maxmemory</code> + <code>maxmemory-policy allkeys-lru</code>. The
+            &ldquo;cluster-wide capacity&rdquo; promise is the Redis story.</li>
+        </ul>
+        Bump inline for production:
 <pre><code class="language-php">WSRouter::init(
     ownerCapacity:        200_000,
     roomMembersCapacity:  1_000_000,
-    slowConsumerBytes:    4 * 1024 * 1024,   // per-fd backpressure threshold
+    slowConsumerBytes:    4 * 1024 * 1024,   // per-fd backpressure threshold (default)
 );</code></pre>
-        On the Redis backend these are informational only (Redis is global KV with no per-table cap);
-        set Redis-server <code>maxmemory</code> + <code>maxmemory-policy allkeys-lru</code> for
-        cluster-wide bound there. Filling a capped table throws <code>WS\CapacityException</code>
-        with an actionable hint — the framework refuses to silently drop owners.
+        Filling a capped Table throws <code>WS\CapacityException</code> with an actionable hint &mdash;
+        the framework refuses to silently drop owners.
       </li>
       <li>
         <strong>Driver choice.</strong> Both phpredis (preferred when <code>ext-redis</code> is loaded) and
