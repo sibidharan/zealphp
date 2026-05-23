@@ -73,8 +73,22 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <tr><td><code>Store::table($name)</code></td><td>OpenSwoole\Table (iterate with foreach)</td></tr>
 </table>
 
-<h2 class="store-h2-section">Cache — general-purpose key-value with TTL</h2>
+<h2 id="cache" class="store-h2-section">Cache — general-purpose key-value with TTL</h2>
 <p class="store-lead">Tiered cache built on Store. Memory tier (fast, cross-worker) + file tier (persistent, survives restarts). No Redis needed for most apps.</p>
+
+<div class="callout info">
+  <strong>Cache follows whichever Store backend is configured.</strong> Internally <code>Cache::*</code>
+  delegates to <code>Store::set</code>/<code>get</code>/<code>del</code>/<code>iterate</code> against
+  an internal <code>__cache</code> table. Flip the backend and Cache follows automatically:
+  <ul>
+    <li><code>Store::defaultBackend(Store::BACKEND_TABLE)</code> &rarr; in-memory shared via OpenSwoole\Table (single-server, ns latency)</li>
+    <li><code>Store::defaultBackend(Store::BACKEND_REDIS)</code> &rarr; cross-node Redis/Valkey</li>
+    <li><code>Store::defaultBackend(Store::BACKEND_TIERED)</code> &rarr; L1 Table + L2 Redis (bounded-staleness fast read + cluster-wide truth)</li>
+    <li><code>Store::defaultBackend(Store::BACKEND_MEMCACHED)</code> &rarr; flat KV cache over Memcached</li>
+  </ul>
+  The Cache file tier (<code>.cache/</code> directory) is a SEPARATE layer that works alongside whichever
+  Store backend you've picked &mdash; it persists across restarts; Store memory state doesn't.
+</div>
 
 <div class="code-block">
 <pre><code class="language-php">// Before $app->run():
