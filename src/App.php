@@ -2184,6 +2184,37 @@ class App
     }
 
     /**
+     * Fire-and-forget pub/sub publish. Returns the receiver count Redis
+     * reported. Pairs symmetrically with `App::subscribe` — "App publishes,
+     * App subscribes" — so the framework's pub/sub surface reads as a
+     * single coherent API.
+     *
+     * Thin delegate to `Store::publish` (the lower-level primitive that
+     * owns the Redis I/O wire); use whichever reads better in your code.
+     * Throws `StoreException` on the Table backend (no pub/sub semantics).
+     *
+     * ```php
+     * $count = App::publish('chat:42', json_encode(['user' => 'alice', 'msg' => 'hi']));
+     * ```
+     */
+    public static function publish(string $channel, string $payload): int
+    {
+        return \ZealPHP\Store::publish($channel, $payload);
+    }
+
+    /**
+     * Reliable publish via Redis Streams (XADD) — at-least-once delivery
+     * via consumer groups. Returns the Redis-generated message id.
+     *
+     * Symmetric pair with `App::subscribeReliable`. Thin delegate to
+     * `Store::publishReliable`. Throws `StoreException` on Table backend.
+     */
+    public static function publishReliable(string $stream, string $payload, ?int $maxLen = null): string
+    {
+        return \ZealPHP\Store::publishReliable($stream, $payload, $maxLen);
+    }
+
+    /**
      * Register a pub/sub handler. Channels containing `*` are PSUBSCRIBE
      * patterns (Redis glob); everything else is SUBSCRIBE exact. Multiple
      * handlers per channel are allowed and all fire on each message.
@@ -2191,6 +2222,10 @@ class App
      * The handler signature is `function(string $payload, string $channel, ?string $pattern): void`.
      * Each invocation runs in its own go() so a slow handler can't block
      * the next message. Throws inside the handler are caught + logged.
+     *
+     * Pairs symmetrically with `App::publish` ("App publishes, App
+     * subscribes"). The companion `App::publish` is a thin delegate to
+     * `Store::publish` — use whichever side of the layering reads better.
      *
      * MUST be called BEFORE App::run() — calling after worker start is
      * a documented no-op with an elog warning.
