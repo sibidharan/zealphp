@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZealPHP;
 
 use ZealPHP\Store\StoreException;
+use ZealPHP\WS\CapacityException;
 use ZealPHP\WS\Room;
 
 /**
@@ -48,7 +49,16 @@ final class WSRouter
 {
     private const TABLE = 'ws_owner';
     private const ROOM_TABLE = 'ws_room_members';
+    private const SERVERS_TABLE = 'ws_servers';
     private const ROOM_CHANNEL_PREFIX = 'ws:room:';
+    private const SERVER_HEARTBEAT_INTERVAL_MS = 30_000;
+    private const SERVER_GC_INTERVAL_MS        = 60_000;
+    private const SERVER_STALE_AFTER_SEC       = 90;
+
+    /** Max connections per cluster — bump via initOptions() for prod. */
+    private static int $ownerCapacity = 4096;
+    /** Max (room × member) pairs per cluster — bump via initOptions() for prod. */
+    private static int $roomMembersCapacity = 16384;
 
     private static string $serverId = '';
     /** @var array<string, array{fd:int, conn_id:string}> client_id → {fd, conn_id} */
@@ -81,6 +91,32 @@ final class WSRouter
      * `App::getServer()->push($fd, $payload)` (skipping with elog
      * when the client isn't local OR the fd is no longer established).
      */
+    /**
+     * Bump the per-cluster capacity caps BEFORE init() — these size the
+     * underlying `OpenSwoole\Table` segments allocated at master fork.
+     * Defaults (4096 owners / 16384 room members) are demo-grade; production
+     * deployments should size these against expected peak.
+     *
+     * Example:
+     *     WSRouter::initOptions(ownerCapacity: 200_000, roomMembersCapacity: 1_000_000);
+     *     WSRouter::init();
+     */
+    public static function initOptions(?int $ownerCapacity = null, ?int $roomMembersCapacity = null): void
+    {
+        if ($ownerCapacity !== null) {
+            if ($ownerCapacity < 1) {
+                throw new \InvalidArgumentException('WSRouter::initOptions: $ownerCapacity must be >= 1');
+            }
+            self::$ownerCapacity = $ownerCapacity;
+        }
+        if ($roomMembersCapacity !== null) {
+            if ($roomMembersCapacity < 1) {
+                throw new \InvalidArgumentException('WSRouter::initOptions: $roomMembersCapacity must be >= 1');
+            }
+            self::$roomMembersCapacity = $roomMembersCapacity;
+        }
+    }
+
     public static function init(?string $serverId = null, ?callable $clientSink = null): void
     {
         self::$serverId   = $serverId ?? gethostname() . ':' . getmypid();
@@ -99,7 +135,7 @@ final class WSRouter
 
         // Shared ownership table. conn_id is a per-connection nonce — see
         // own() + sendToClient() for the FD-reuse-race fix (C1).
-        Store::make(self::TABLE, 4096, [
+        Store::make(self::TABLE, self::$ownerCapacity, [
             'server_id' => [Store::TYPE_STRING, 64],
             'conn_id'   => [Store::TYPE_STRING, 32],
         ]);
@@ -107,11 +143,22 @@ final class WSRouter
         // Room membership table — cluster-wide. Keyed by `{room}:{client_id}`
         // so Store::iterate + filter-by-row['room'] gives a roster + size
         // per room. See WSRouter\Room for the user-facing API.
-        Store::make(self::ROOM_TABLE, 16384, [
+        Store::make(self::ROOM_TABLE, self::$roomMembersCapacity, [
             'room'      => [Store::TYPE_STRING, 64],
             'client_id' => [Store::TYPE_STRING, 64],
             'server_id' => [Store::TYPE_STRING, 64],
             'joined_at' => [Store::TYPE_INT, 8],
+        ]);
+
+        // Server registry — each server writes its own row at boot + refreshes
+        // it every SERVER_HEARTBEAT_INTERVAL_MS. The GC sweep drops rows older
+        // than SERVER_STALE_AFTER_SEC (default 90s) and reaps the ws_owner /
+        // ws_room_members rows that referenced them. Covers BOTH graceful
+        // shutdown (via onWorkerStop) AND hard crashes (via the periodic GC).
+        Store::make(self::SERVERS_TABLE, 256, [
+            'last_seen' => [Store::TYPE_INT, 8],
+            'host'      => [Store::TYPE_STRING, 128],
+            'pid'       => [Store::TYPE_INT, 8],
         ]);
 
         // Single PSUBSCRIBE pattern covers every room — no per-room
@@ -149,6 +196,33 @@ final class WSRouter
                 (self::$clientSink)($clientId, $local['fd'], $data);
             }
         });
+
+        // Per-worker lifecycle hooks — heartbeat + GC + graceful sweep.
+        // onWorkerStart runs IN a coroutine (HOOK_ALL active) so Store ops yield.
+        App::onWorkerStart(function (int $workerId): void {
+            // Register THIS process in the server registry. Refresh row on
+            // every heartbeat tick — GC drops rows older than SERVER_STALE_AFTER_SEC.
+            self::writeServerRegistryRow();
+            App::tick(self::SERVER_HEARTBEAT_INTERVAL_MS, function (): void {
+                self::writeServerRegistryRow();
+            });
+            // ONE worker per server runs the GC sweep — avoid N workers all
+            // scanning simultaneously. Worker 0 by convention.
+            if ($workerId === 0) {
+                App::tick(self::SERVER_GC_INTERVAL_MS, function (): void {
+                    self::runStaleServerGC();
+                });
+            }
+        });
+
+        // Graceful-stop sweeper — drop this server's rows AND its server-
+        // registry row when worker 0 shuts down cleanly. Hard crashes are
+        // covered by the periodic GC above.
+        App::onWorkerStop(function (int $workerId): void {
+            if ($workerId === 0) {
+                self::sweepThisServer();
+            }
+        });
     }
 
     /** Returns the configured server id (hostname:pid by default). */
@@ -183,10 +257,20 @@ final class WSRouter
         }
 
         self::$localFds[$clientId] = ['fd' => $fd, 'conn_id' => $connId];
-        Store::set(self::TABLE, $clientId, [
+        $ok = Store::set(self::TABLE, $clientId, [
             'server_id' => self::$serverId,
             'conn_id'   => $connId,
         ]);
+        if (!$ok) {
+            // Table backend full — surface this as a typed exception so
+            // app handlers can return a clear "server at capacity" close
+            // to the WS client instead of silently dropping the connection.
+            unset(self::$localFds[$clientId]);   // roll back local map
+            throw new CapacityException(
+                "WSRouter: ws_owner table full at " . self::$ownerCapacity . " connections — " .
+                "bump via WSRouter::initOptions(ownerCapacity: N) BEFORE init(), or flip to Redis backend"
+            );
+        }
         return $connId;
     }
 
@@ -364,4 +448,87 @@ final class WSRouter
      * @return array<string, array<string, true>>
      */
     public static function localRoomMembership(): array { return self::$localRoomMembership; }
+
+    // ── ServerRegistry: stale-server GC for hard-crash recovery ───────────
+    //
+    // Each ZealPHP process registers itself in `ws_servers` (server_id →
+    // last_seen). A per-worker tick refreshes that row every 30s. The GC
+    // tick (one server, worker 0) scans for rows older than 90s, drops them,
+    // and reaps the ws_owner + ws_room_members rows that referenced those
+    // dead server_ids.
+    //
+    // Covers:
+    //   - planned shutdown — onWorkerStop's sweep drops own + server rows
+    //   - hard crash       — GC eventually notices + reaps within ~2× heartbeat
+    //
+    // Skipped on Table backend (single-server; if the master is dead the
+    // shared memory dies with it, no cleanup possible or needed).
+
+    /** @internal — refresh this server's row in the registry. */
+    public static function writeServerRegistryRow(): void
+    {
+        if (self::$serverId === '') { return; }
+        Store::set(self::SERVERS_TABLE, self::$serverId, [
+            'last_seen' => time(),
+            'host'      => (string) gethostname(),
+            'pid'       => getmypid(),
+        ]);
+    }
+
+    /** @internal — drop rows for servers we haven't heard from in $staleAfter sec. */
+    public static function runStaleServerGC(int $staleAfter = self::SERVER_STALE_AFTER_SEC): int
+    {
+        $threshold = time() - $staleAfter;
+        $dead      = [];
+        foreach (Store::iterate(self::SERVERS_TABLE) as $serverId => $row) {
+            $seen = is_numeric($row['last_seen'] ?? null) ? (int) $row['last_seen'] : 0;
+            if ($seen < $threshold) {
+                $dead[] = (string) $serverId;
+            }
+        }
+        if ($dead === []) { return 0; }
+        $reaped = 0;
+        // Drop dependent rows in ws_owner + ws_room_members.
+        foreach (Store::iterate(self::TABLE) as $clientId => $row) {
+            if (in_array((string) ($row['server_id'] ?? ''), $dead, true)) {
+                Store::del(self::TABLE, (string) $clientId);
+                $reaped++;
+            }
+        }
+        foreach (Store::iterate(self::ROOM_TABLE) as $key => $row) {
+            if (in_array((string) ($row['server_id'] ?? ''), $dead, true)) {
+                Store::del(self::ROOM_TABLE, (string) $key);
+                $reaped++;
+            }
+        }
+        // Drop the server-registry rows themselves last.
+        foreach ($dead as $serverId) {
+            Store::del(self::SERVERS_TABLE, $serverId);
+        }
+        if (function_exists('elog')) {
+            elog("WSRouter GC: reaped " . count($dead) . " dead servers, $reaped dependent rows", 'info');
+        }
+        return $reaped;
+    }
+
+    /** @internal — graceful onWorkerStop sweep: drop THIS server's footprint. */
+    public static function sweepThisServer(): int
+    {
+        if (self::$serverId === '') { return 0; }
+        $reaped = 0;
+        foreach (Store::iterate(self::TABLE) as $clientId => $row) {
+            if (($row['server_id'] ?? '') === self::$serverId) {
+                Store::del(self::TABLE, (string) $clientId);
+                $reaped++;
+            }
+        }
+        foreach (Store::iterate(self::ROOM_TABLE) as $key => $row) {
+            if (($row['server_id'] ?? '') === self::$serverId) {
+                Store::del(self::ROOM_TABLE, (string) $key);
+                $reaped++;
+            }
+        }
+        Store::del(self::SERVERS_TABLE, self::$serverId);
+        return $reaped;
+    }
 }

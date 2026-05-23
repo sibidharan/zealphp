@@ -8,6 +8,7 @@ use ZealPHP\App;
 use ZealPHP\Store;
 use ZealPHP\Store\StoreException;
 use ZealPHP\WSRouter;
+use ZealPHP\WS\CapacityException;
 
 /**
  * A first-class WebSocket room — cluster-wide membership, presence,
@@ -59,12 +60,18 @@ final class Room
      */
     public function join(string $clientId): void
     {
-        Store::set(WSRouter::roomTable(), self::compositeKey($this->name, $clientId), [
+        $ok = Store::set(WSRouter::roomTable(), self::compositeKey($this->name, $clientId), [
             'room'      => $this->name,
             'client_id' => $clientId,
             'server_id' => $this->serverId,
             'joined_at' => time(),
         ]);
+        if (!$ok) {
+            throw new CapacityException(
+                "WSRouter\\Room({$this->name}): ws_room_members table full — " .
+                "bump via WSRouter::initOptions(roomMembersCapacity: N) BEFORE init(), or flip to Redis backend"
+            );
+        }
         $this->publish([
             'type'      => 'join',
             'client_id' => $clientId,

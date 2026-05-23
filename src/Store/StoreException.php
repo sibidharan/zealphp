@@ -9,7 +9,12 @@ namespace ZealPHP\Store;
  *
  * Wraps phpredis \RedisException and \Predis\PredisException so user code
  * never imports a client-lib symbol; catch StoreException everywhere.
+ *
+ * NOT final — typed subclasses (e.g. `WSRouter\CapacityException`) extend
+ * this so existing `catch (StoreException)` blocks still catch them while
+ * new code can pattern-match on the specific subtype for differentiated
+ * recovery (cap-exceeded → 1013 close; transient Redis failure → retry).
  */
-final class StoreException extends \RuntimeException
+class StoreException extends \RuntimeException
 {
 }
