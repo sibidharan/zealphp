@@ -50,14 +50,30 @@ class Cache
     /**
      * Initialize the cache. Must be called before $app->run().
      *
-     * @param int         $maxRows     Max entries in memory tier (default 4096)
-     * @param string|null $cacheDir    File tier directory (default: .cache/ in project root)
+     * @param int         $maxRows      Max entries in memory tier (default 4096).
+     *                                  HARD CAP on the Table backend (OpenSwoole\Table
+     *                                  allocates a fixed-size shared-memory segment).
+     *                                  NOT ENFORCED on the Redis backend — Redis is a
+     *                                  global key-value store with no per-table size cap.
+     *                                  Pair with `$ttlSeconds` OR configure
+     *                                  Redis-server `maxmemory` + `maxmemory-policy` for
+     *                                  bounded growth there. See the warning emitted at
+     *                                  init() when this combo is misused.
+     * @param string|null $cacheDir     File tier directory (default: .cache/ in project root)
      * @param int         $gcIntervalMs GC sweep interval in ms (default 60000)
+     * @param ?int        $ttlSeconds   Per-key TTL hint (default null).
+     *                                  On the Redis backend, setting this flips the
+     *                                  underlying Store table to `mode='ttl'` so keys
+     *                                  auto-expire server-side (Cache::set's per-key
+     *                                  `$ttl` still wins as a per-call override; this
+     *                                  is the DEFAULT TTL for keys whose set() doesn't
+     *                                  pass one).
      */
     public static function init(
         int $maxRows = 4096,
         ?string $cacheDir = null,
         int $gcIntervalMs = 60000,
+        ?int $ttlSeconds = null,
     ): void {
         if (self::$initialized) {
             return;
@@ -68,11 +84,33 @@ class Cache
             mkdir(self::$dir, 0755, true);
         }
 
+        // Backend asymmetry surfaced at init():
+        //   Table backend → $maxRows is HARD CAP (set() returns false when full
+        //     and Cache spills to the file tier).
+        //   Redis backend → $maxRows has no equivalent (Redis is global KV;
+        //     eviction is server-side `maxmemory` + `maxmemory-policy`).
+        //     Setting $ttlSeconds flips the Store table to TTL mode so keys
+        //     auto-expire — the recommended pattern for cache workloads on Redis.
+        $backend = Store::defaultBackend();
+        $isRedis = $backend instanceof \ZealPHP\Store\RedisBackend
+                || $backend instanceof \ZealPHP\Store\CircuitBreakerBackend;
+        $makeOpts = [];
+        if ($isRedis && $ttlSeconds !== null && $ttlSeconds > 0) {
+            $makeOpts = ['mode' => 'ttl', 'ttl' => $ttlSeconds];
+        }
+        if ($isRedis && $maxRows !== 4096 && $ttlSeconds === null) {
+            error_log(
+                'Cache::init(maxRows=' . $maxRows . ') is NOT enforced on the Redis backend ' .
+                '(Redis has no per-table size cap). Either pass $ttlSeconds for per-key auto-expiry, ' .
+                'or configure Redis-server `maxmemory` + `maxmemory-policy allkeys-lru` for cluster-wide bound.'
+            );
+        }
+
         Store::make(self::TABLE, $maxRows, [
             'val' => [\OpenSwoole\Table::TYPE_STRING, self::MAX_MEM_SIZE],
             'ttl' => [\OpenSwoole\Table::TYPE_INT, 4],
             'crc' => [\OpenSwoole\Table::TYPE_INT, 4],
-        ]);
+        ], $makeOpts);
 
         self::$hitsMem = new Counter(0);
         self::$hitsFile = new Counter(0);

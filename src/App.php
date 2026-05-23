@@ -1943,9 +1943,20 @@ class App
         if (!($backend instanceof \ZealPHP\Store\RedisBackend)) {
             return $warnings;
         }
-        // H6 — eager ping
+        // H6 — eager ping. Boot-time runs may already have HOOK_ALL active
+        // (the framework's default in coroutine mode), in which case
+        // phpredis's hooked connect() requires a coroutine context. Wrap
+        // in Coroutine::run so the ping always has one.
         try {
-            if (!$backend->ping()) {
+            $ok = null;
+            $err = null;
+            \OpenSwoole\Coroutine::run(function () use ($backend, &$ok, &$err) {
+                try { $ok = $backend->ping(); }
+                catch (\Throwable $e) { $err = $e; }
+            });
+            if ($err !== null) {
+                $warnings[] = 'Store(H6): Redis backend ping FAILED at boot: ' . $err->getMessage();
+            } elseif ($ok === false) {
                 $warnings[] = 'Store(H6): Redis backend ping returned false at boot — workers may fail on first request';
             }
         } catch (\Throwable $e) {
