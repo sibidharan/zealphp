@@ -53,6 +53,17 @@ final class RedisBackend implements StoreBackend
         if ($mode === 'ttl' && $ttl < 1) {
             throw new StoreException("RedisBackend::make: 'ttl' mode requires \$opts['ttl'] >= 1 second");
         }
+        // H1: tracked + ttl>0 silently ignored ttl pre-v0.2.41 (membership SET would drift —
+        // an expired key can't fire SREM on the tracked SET, so count()/iterate() would lie).
+        // Throw at make() so the conflict surfaces at boot, not after the first expiry.
+        if ($mode === 'tracked' && $ttl > 0) {
+            throw new StoreException(
+                "RedisBackend::make: 'tracked' mode does not support TTL " .
+                "(expired keys cannot fire SREM on the membership set — " .
+                "the tracked SET would drift and count()/iterate() would lie). " .
+                "Use mode='ttl' for per-key expiry."
+            );
+        }
         $this->schemas[$name]   = $columns;
         $this->tableOpts[$name] = ['mode' => $mode, 'ttl' => $ttl];
     }
