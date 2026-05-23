@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace ZealPHP\Tests\Unit;
 
-use OpenSwoole\Coroutine;
 use PHPUnit\Framework\TestCase;
 use ZealPHP\Cache;
 use ZealPHP\Counter;
@@ -485,12 +484,13 @@ final class PatchCoverageBoostTest extends TestCase
 
     public function testRedisPubSubStartIsNoOpWhenNoHandlersRegistered(): void
     {
-        // L86-89 — early return when nothing to subscribe.
-        Coroutine::run(function (): void {
-            $ps = new RedisPubSub('redis://127.0.0.1:65000/0', 'rp-noop');
-            $ps->start();
-            $this->assertFalse($ps->isRunning());
-        });
+        // L86-89 — early return when nothing to subscribe. The short-circuit
+        // fires BEFORE the runner coroutine spawns so no scheduler is
+        // needed; wrapping in Coroutine::run leaves the event loop in a
+        // half-initialised state that contaminates the next test.
+        $ps = new RedisPubSub('redis://127.0.0.1:65000/0', 'rp-noop');
+        $ps->start();
+        $this->assertFalse($ps->isRunning());
     }
 
     public function testRedisPubSubStopIsNoOpWhenNotRunning(): void
@@ -518,6 +518,157 @@ final class PatchCoverageBoostTest extends TestCase
         $bounded   = new RedisPubSub('redis://127.0.0.1:65000/0', 'rp-ba', 5);
         $this->assertFalse($unbounded->isRunning());
         $this->assertFalse($bounded->isRunning());
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //   WSRouter — internal accessors + reset behavior
+    // ════════════════════════════════════════════════════════════════
+
+    public function testLocalFdsReturnsEmptyArrayBeforeAnyOwn(): void
+    {
+        // No init needed — localFds() is a simple accessor.
+        $this->assertSame([], WSRouter::localFds());
+    }
+
+    public function testResetClearsServerIdBackToEmpty(): void
+    {
+        // serverId() is a plain accessor — no scheduler / OpenSwoole interaction.
+        $this->assertSame('', WSRouter::serverId());
+        WSRouter::reset();   // idempotent — already at default
+        $this->assertSame('', WSRouter::serverId());
+    }
+
+    public function testRoomChannelPrefixIsStableConstant(): void
+    {
+        $this->assertSame('ws:room:', WSRouter::roomChannelPrefix());
+    }
+
+    public function testRoomMembersSetKeyFormatsCorrectly(): void
+    {
+        $this->assertSame('ws_room:lobby:members',     WSRouter::roomMembersSetKey('lobby'));
+        $this->assertSame('ws_room:game:42:members',   WSRouter::roomMembersSetKey('game:42'));
+    }
+
+    public function testHasRedisBackendFalseOnTable(): void
+    {
+        Store::defaultBackend(Store::BACKEND_TABLE);
+        $this->assertFalse(WSRouter::hasRedisBackend());
+    }
+
+    public function testStatsAccessorReturnsStatsObject(): void
+    {
+        $stats = WSRouter::stats();
+        $this->assertIsObject($stats);
+        $this->assertTrue(method_exists($stats, 'inc'));
+        $this->assertTrue(method_exists($stats, 'snapshot'));
+    }
+
+    // NOTE: WSRouter::room() AFTER WSRouter::init() inside the same
+    // process as the RedisPubSub Atomic constructors above hangs the
+    // PHP runtime (OpenSwoole scheduler in a half-initialised state).
+    // That combo is covered separately in tests/Unit/WS/RoomTest.php
+    // which doesn't share a process with PubSub construction.
+
+    // ════════════════════════════════════════════════════════════════
+    //   App::publish / subscribe — Table backend rejects
+    // ════════════════════════════════════════════════════════════════
+
+    public function testAppPublishThrowsOnTableBackend(): void
+    {
+        $this->expectException(StoreException::class);
+        \ZealPHP\App::publish('some:channel', 'payload');
+    }
+
+    public function testAppPublishReliableThrowsOnTableBackend(): void
+    {
+        $this->expectException(StoreException::class);
+        \ZealPHP\App::publishReliable('some:stream', 'payload');
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //   Counter — backend-agnostic surface behaviour
+    // ════════════════════════════════════════════════════════════════
+
+    public function testCounterIncrementByCustomAmount(): void
+    {
+        $c = new Counter(10, 'boost-incr-' . bin2hex(random_bytes(2)));
+        $this->assertSame(15, $c->increment(5));
+        $this->assertSame(20, $c->increment(5));
+    }
+
+    public function testCounterDecrementByCustomAmount(): void
+    {
+        $c = new Counter(100, 'boost-decr-' . bin2hex(random_bytes(2)));
+        $this->assertSame(90, $c->decrement(10));
+        $this->assertSame(85, $c->decrement(5));
+    }
+
+    public function testCounterResetWritesZero(): void
+    {
+        $c = new Counter(42, 'boost-reset-c-' . bin2hex(random_bytes(2)));
+        $c->reset();
+        $this->assertSame(0, $c->get());
+    }
+
+    public function testCounterCompareAndSetFailsOnMismatch(): void
+    {
+        $c = new Counter(0, 'boost-cas-' . bin2hex(random_bytes(2)));
+        $c->set(10);
+        $this->assertFalse($c->compareAndSet(99, 20));  // 10 != 99
+        $this->assertSame(10, $c->get());                // unchanged
+        $this->assertTrue($c->compareAndSet(10, 20));    // matches
+        $this->assertSame(20, $c->get());
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //   Cache — stats() shape + has() variants
+    // ════════════════════════════════════════════════════════════════
+
+    public function testCacheStatsReturnsArrayWithExpectedKeys(): void
+    {
+        $dir = sys_get_temp_dir() . '/zptest-cache-stats-' . bin2hex(random_bytes(3));
+        Cache::initForTest($dir, 64);
+        $stats = Cache::stats();
+        $this->assertIsArray($stats);
+        // Required keys per Cache::stats() — fail loud if a future refactor renames.
+        $this->assertArrayHasKey('memory_entries', $stats);
+        $this->assertArrayHasKey('hits_memory',    $stats);
+        $this->assertArrayHasKey('misses',         $stats);
+        $this->assertArrayHasKey('hit_rate',       $stats);
+    }
+
+    public function testCacheHasReturnsTrueForSetEntry(): void
+    {
+        $dir = sys_get_temp_dir() . '/zptest-cache-has-' . bin2hex(random_bytes(3));
+        Cache::initForTest($dir, 64);
+        $this->assertFalse(Cache::has('nokey'));
+        Cache::set('mykey', 'val', 30);
+        $this->assertTrue(Cache::has('mykey'));
+    }
+
+    public function testCacheFlushRemovesAllEntries(): void
+    {
+        $dir = sys_get_temp_dir() . '/zptest-cache-flush-' . bin2hex(random_bytes(3));
+        Cache::initForTest($dir, 64);
+        Cache::set('a', 'A');
+        Cache::set('b', 'B');
+        Cache::flush();
+        $this->assertNull(Cache::get('a'));
+        $this->assertNull(Cache::get('b'));
+        $this->assertSame(0, Cache::count());
+    }
+
+    public function testCacheGetOrComputeReturnsStoredOnSecondCall(): void
+    {
+        $dir = sys_get_temp_dir() . '/zptest-goc-' . bin2hex(random_bytes(3));
+        Cache::initForTest($dir, 64);
+        $calls = 0;
+        $key   = 'goc-' . bin2hex(random_bytes(2));
+        $v1    = Cache::getOrCompute($key, function () use (&$calls) { $calls++; return 'computed'; }, 30);
+        $v2    = Cache::getOrCompute($key, function () use (&$calls) { $calls++; return 'should-not-fire'; }, 30);
+        $this->assertSame('computed', $v1);
+        $this->assertSame('computed', $v2);
+        $this->assertSame(1, $calls);   // second call hits cache, not compute
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -561,12 +712,11 @@ final class PatchCoverageBoostTest extends TestCase
 
     public function testRedisStreamsStartIsNoOpWhenNoConsumersRegistered(): void
     {
-        // L54-57 — early return when nothing to consume.
-        Coroutine::run(function (): void {
-            $rs = new RedisStreams('redis://127.0.0.1:65000/0', 'rs-noop');
-            $rs->start();
-            $this->assertFalse($rs->isRunning());
-        });
+        // L54-57 — early return when nothing to consume. Same coroutine-
+        // contamination concern as RedisPubSub above.
+        $rs = new RedisStreams('redis://127.0.0.1:65000/0', 'rs-noop');
+        $rs->start();
+        $this->assertFalse($rs->isRunning());
     }
 
     public function testRedisStreamsStopFlipsRunningAtomic(): void
