@@ -158,7 +158,7 @@ Cache::flush();                                    // clear everything</code></p
 </div>
 
 <h2 class="store-h2-section" id="backends">Pluggable backends — Table (default) + Redis/Valkey</h2>
-<p class="store-lead-tight">As of v0.3.0, <code>Store</code> and <code>Counter</code> are <strong>backend-agnostic</strong>. The default <code>OpenSwoole\Table</code>/<code>Atomic</code> backend stays your hot path (nanosecond reads, lock-free). When you need <strong>cross-node shared state</strong> or <strong>persistence across restarts</strong>, flip to Redis/Valkey with one line in <code>app.php</code> &mdash; every <code>Store::set/get/incr/count</code> call works unchanged.</p>
+<p class="store-lead-tight">As of v0.2.39, <code>Store</code> and <code>Counter</code> are <strong>backend-agnostic</strong>. The default <code>OpenSwoole\Table</code>/<code>Atomic</code> backend stays your hot path (nanosecond reads, lock-free). When you need <strong>cross-node shared state</strong> or <strong>persistence across restarts</strong>, flip to Redis/Valkey with one line in <code>app.php</code> &mdash; every <code>Store::set/get/incr/count</code> call works unchanged.</p>
 
 <div class="card-code-block">
 <pre><code class="language-php">// app.php &mdash; one-line switch
