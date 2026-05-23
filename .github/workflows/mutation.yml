@@ -20,6 +20,25 @@ jobs:
   infection:
     name: Infection (MSI)
     runs-on: ubuntu-latest
+    services:
+      valkey:
+        image: valkey/valkey:7-alpine
+        ports:
+          - 16379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      memcached:
+        image: memcached:1.6-alpine
+        ports:
+          - 11211:11211
+        options: >-
+          --health-cmd "nc -z localhost 11211 || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
     # Master is branch-protected, so the badge refresh opens an auto-PR
     # (via peter-evans/create-pull-request) rather than pushing directly.
     # `contents: write` lets the action create the side branch + commit;
@@ -35,7 +54,7 @@ jobs:
         uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
         with:
           php-version: '8.3'
-          extensions: openswoole, uopz, pcov
+          extensions: openswoole, uopz, pcov, memcached
           coverage: pcov
           tools: composer:v2
 

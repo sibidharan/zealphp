@@ -60,7 +60,7 @@ jobs:
         uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
         with:
           php-version: '8.3'
-          extensions: openswoole, uopz, redis
+          extensions: openswoole, uopz, redis, memcached
           tools: composer:v2
 
       - name: Install dependencies
@@ -112,6 +112,20 @@ jobs:
           --health-timeout 3s
           --health-retries 5
 
+      # Memcached service for Store::BACKEND_MEMCACHED + Counter backend tests.
+      # phpunit.xml pins ZEALPHP_MEMCACHED_SERVERS=127.0.0.1:11211 so the
+      # tests connect here. Same graceful-skip pattern as the valkey block:
+      # tests skip when unreachable, run when the service is up.
+      memcached:
+        image: memcached:1.6-alpine
+        ports:
+          - 11211:11211
+        options: >-
+          --health-cmd "nc -z localhost 11211 || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -120,7 +134,7 @@ jobs:
         uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: openswoole, uopz, redis
+          extensions: openswoole, uopz, redis, memcached
           coverage: ${{ matrix.coverage }}
           tools: composer:v2
 
