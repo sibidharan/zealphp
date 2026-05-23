@@ -169,15 +169,21 @@ $app-&gt;route('/api/expensive', function ($request) {
       on different machines don&rsquo;t &mdash; their <code>Store</code> instances are completely
       separate. When you actually need cross-node visibility (a chat app where users hit different
       load-balanced servers, an admin dashboard summing counters from N hosts), flip
-      <code>Store</code> to the Redis backend with one line:
+      <code>Store</code> to the Redis backend with one line. Use the <strong>enum</strong> form for
+      type-safety + IDE autocomplete:
     </p>
-    <pre><code class="language-php">// app.php — before $app->run()
-Store::defaultBackend(Store::BACKEND_REDIS);              // ZEALPHP_REDIS_URL env
+    <pre><code class="language-php">use ZealPHP\Store;
+use ZealPHP\Store\StoreBackendKind;
+
+// app.php — before $app->run()
+Store::defaultBackend(StoreBackendKind::Redis);                  // ZEALPHP_REDIS_URL env
 // or explicit:
-Store::defaultBackend(Store::BACKEND_REDIS, [
-    'url'    => 'redis://cache.internal:6379/0',
-    'prefer' => Store::PREFER_PREDIS,  // see /store#phpredis-pubsub-caveat
+Store::defaultBackend(StoreBackendKind::Redis, [
+    'url' => 'redis://cache.internal:6379/0',
 ]);
+
+// Bare string still works for BC (also: ZEALPHP_STORE_BACKEND=redis env):
+Store::defaultBackend(Store::BACKEND_REDIS);
 
 // Every existing Store::set / get / incr / count call now routes to Redis.
 // Counter::defaultBackend follows automatically when the env var is used.</code></pre>
@@ -185,10 +191,50 @@ Store::defaultBackend(Store::BACKEND_REDIS, [
       Backend-pluggable means every existing handler keeps working unchanged. The trade-off:
       Redis is ~50&micro;s loopback vs <code>OpenSwoole\Table</code>&rsquo;s ~ns &mdash; orders of
       magnitude slower, but cross-node and persistent (with AOF/RDB). Pick Table for ns hot paths,
-      Redis when you need the cross-node guarantee. Mixing is OK: most tables on Table, the few
-      that need cross-node visibility get their own Redis-backed instance via per-table
-      <code>$opts</code>. See <a href="/store#backends">/store#backends</a> for the comparison
-      table.
+      Redis when you need the cross-node guarantee. Both phpredis (preferred when
+      <code>ext-redis</code> is loaded) and predis SUBSCRIBE loops yield correctly under
+      <code>HOOK_ALL</code> &mdash; either driver is production-validated.
+    </p>
+
+    <h3 id="step-tiered">Want both? Tiered backend (L1 Table + L2 Redis)</h3>
+    <p>
+      <code>StoreBackendKind::Tiered</code> pairs a TableBackend (L1, ns latency, bounded-staleness
+      via <code>l1_ttl</code>) with a RedisBackend (L2, source of truth, cross-node). Reads return
+      L1 if fresh, else fetch L2 + populate L1. Writes write-through to L2 + refresh L1. Optional
+      HMAC-signed cross-node L1 invalidation keeps every node&rsquo;s L1 in sync sub-millisecond.
+    </p>
+    <pre><code class="language-php">Store::defaultBackend(StoreBackendKind::Tiered, [
+    'url'                 =&gt; 'redis://cache:6379',
+    'l1_ttl'              =&gt; 5,                              // L1 freshness window (seconds)
+    'invalidation_secret' =&gt; getenv('ZEALPHP_TIERED_INVALIDATION_SECRET') ?: null,
+]);</code></pre>
+    <p>
+      The <code>invalidation_secret</code> is shared across every node in the cluster so peers
+      verify each other&rsquo;s evictions (without it, anyone with Redis access could DoS the
+      cluster&rsquo;s L1). Same secret everywhere, or peers reject each other&rsquo;s messages.
+      See <a href="/store#backends">/store#backends</a> for the full comparison table +
+      <a href="/store#backend-memory">/store#backend-memory</a> for the Table RAM-cost math.
+    </p>
+
+    <h3 id="step-cache-getorcompute"><code>Cache::getOrCompute</code> &mdash; the canonical read-through helper</h3>
+    <p>
+      Cache &mdash; Store&rsquo;s higher-level cousin with a memory tier + file tier &mdash; ships
+      a <code>getOrCompute()</code> helper that collapses the "miss-then-compute-then-store"
+      boilerplate into one call:
+    </p>
+    <pre><code class="language-php">// Before:
+$users = Cache::get('users:active');
+if ($users === null) {
+    $users = DB::select(...);     // expensive
+    Cache::set('users:active', $users, ttl: 60);
+}
+
+// After:
+$users = Cache::getOrCompute('users:active', fn() =&gt; DB::select(...), ttl: 60);</code></pre>
+    <p>
+      Null is cached as a valid stored value (sentinel-based miss detection &mdash; "stored null"
+      is distinct from "no key"). Useful when a lookup legitimately returns null and you don&rsquo;t
+      want to re-execute it on every request.
     </p>
 
     <h2 id="step-pubsub">Cross-node messaging: pub/sub + Streams</h2>

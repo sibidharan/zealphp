@@ -157,40 +157,103 @@ Cache::flush();                                    // clear everything</code></p
   <strong>Rule of thumb:</strong> treat Store as a <strong>best-effort, fast, single-server cache</strong>, not as a database. For ACID needs (transactions, durability, multi-row consistency), use Postgres / MySQL / Redis with explicit transaction semantics. Store's job is to make &lt; 5µs reads possible across workers — that's it.
 </div>
 
-<h2 class="store-h2-section" id="backends">Pluggable backends — Table (default) + Redis/Valkey</h2>
-<p class="store-lead-tight">As of v0.2.39, <code>Store</code> and <code>Counter</code> are <strong>backend-agnostic</strong>. The default <code>OpenSwoole\Table</code>/<code>Atomic</code> backend stays your hot path (nanosecond reads, lock-free). When you need <strong>cross-node shared state</strong> or <strong>persistence across restarts</strong>, flip to Redis/Valkey with one line in <code>app.php</code> &mdash; every <code>Store::set/get/incr/count</code> call works unchanged.</p>
+<h2 class="store-h2-section" id="backends">Pluggable backends — Table / Redis / Tiered</h2>
+<p class="store-lead-tight">As of v0.2.39, <code>Store</code> and <code>Counter</code> are <strong>backend-agnostic</strong>. Three backends ship in-tree; pick by scope. Every <code>Store::set/get/incr/count</code> call works unchanged across all three.</p>
 
 <div class="code-block">
-<pre><code class="language-php">// app.php &mdash; one-line switch
-Store::defaultBackend('redis');                                    // ZEALPHP_REDIS_URL env
-// or:
-Store::defaultBackend('redis', 'redis://cache.internal:6379/1');   // explicit URL
-// or set ZEALPHP_STORE_BACKEND=redis in the environment before App::run()</code></pre>
+<pre><code class="language-php">use ZealPHP\Store;
+use ZealPHP\Store\StoreBackendKind;
+
+// Recommended — type-safe enum (IDE autocomplete + refactor-safe):
+Store::defaultBackend(StoreBackendKind::Table);                                // default
+Store::defaultBackend(StoreBackendKind::Redis, 'redis://cache.internal:6379'); // cross-node
+Store::defaultBackend(StoreBackendKind::Tiered, [                              // ns reads + cross-node truth
+    'url'                 =&gt; 'redis://cache.internal:6379',
+    'l1_ttl'              =&gt; 5,                              // L1 freshness window (seconds)
+    'invalidation_secret' =&gt; getenv('ZEALPHP_TIERED_INVALIDATION_SECRET') ?: null,
+]);
+
+// Bare strings still work for BC (also: ZEALPHP_STORE_BACKEND=redis|tiered env):
+Store::defaultBackend(Store::BACKEND_REDIS);
+Store::defaultBackend(Store::BACKEND_TIERED, 'redis://cache:6379');</code></pre>
 </div>
 
 <table class="store-compare-tbl store-mt-1">
-  <thead><tr><th>Backend</th><th>Latency</th><th>Cross-node</th><th>Persistence</th><th>When to pick</th></tr></thead>
+  <thead><tr><th>Backend</th><th>Latency</th><th>Cross-node</th><th>Persistence</th><th>Bounded growth</th><th>When to pick</th></tr></thead>
   <tbody>
     <tr>
-      <td><code>'table'</code> (default)</td>
-      <td>~ns (in-memory, lock-free)</td>
-      <td>No &mdash; per process tree</td>
+      <td><code>StoreBackendKind::Table</code> (default)</td>
+      <td>~ns (lock-free shared memory)</td>
+      <td>No &mdash; one OpenSwoole server</td>
       <td>No &mdash; volatile</td>
+      <td>HARD: <code>maxRows</code> at <code>make()</code></td>
       <td>Single-node hot path. Millions of ops/sec. 95% of apps.</td>
     </tr>
     <tr>
-      <td><code>'redis'</code></td>
+      <td><code>StoreBackendKind::Redis</code></td>
       <td>~tens of &micro;s local, ~ms cross-node</td>
       <td>Yes &mdash; any number of nodes</td>
       <td>Yes (Redis AOF/RDB)</td>
+      <td>Server-side <code>maxmemory</code> + <code>maxmemory-policy</code></td>
       <td>Horizontal scaling, persistent state, existing Redis infra.</td>
+    </tr>
+    <tr>
+      <td><code>StoreBackendKind::Tiered</code></td>
+      <td>~ns on L1 hit, ~ms on L1 miss (L2)</td>
+      <td>Yes (via L2)</td>
+      <td>Yes (via L2)</td>
+      <td>L1 capped by Table; L2 via Redis policy</td>
+      <td>Hot keys with ns reads + cross-node visibility for cold keys + tolerate <code>l1_ttl</code>-bounded staleness.</td>
     </tr>
   </tbody>
 </table>
 
-<p class="store-lead-tight store-mt-1"><strong>Two table modes</strong> at <code>make()</code>: <code>'tracked'</code> (default) keeps a membership SET so <code>count()</code> is O(1); <code>'ttl'</code> supports per-key expiry but <code>count()</code> falls back to O(N) <code>SCAN</code>. Pick one per table. The connection pool is per-worker (default 8 clients) &mdash; concurrent coroutines never share a socket.</p>
+<p class="store-lead-tight store-mt-1"><strong>Two table modes</strong> at <code>make()</code>: <code>'tracked'</code> (default) keeps a membership SET so <code>count()</code> is O(1); <code>'ttl'</code> supports per-key expiry but <code>count()</code> falls back to O(N) <code>SCAN</code>. Pick one per table. Mixing tracked + ttl throws at boot (v0.2.41 hardening — H1). The connection pool is per-worker (default 8 clients) &mdash; concurrent coroutines never share a socket.</p>
 
 <p class="store-lead-tight store-mt-1"><strong>Client lib</strong>: auto-detects phpredis (preferred when <code>ext-redis</code> is loaded) or predis (pure-PHP fallback, shipped as a dev dep). User code never imports a phpredis/predis symbol &mdash; the single <code>ZealPHP\Store\RedisClient</code> adapter is the only place either lib is referenced.</p>
+
+<h3 id="backend-scope">Backend scope — what "single process" really means</h3>
+<p class="store-lead-tight"><code>OpenSwoole\Table</code> is shared memory allocated by the master process BEFORE fork, inherited by all worker processes of that server. So the Table backend is:</p>
+<ul class="store-col-list">
+  <li>Shared across <strong>coroutines</strong> in one worker ✓</li>
+  <li>Shared across <strong>workers</strong> in one OpenSwoole server ✓ (the whole point)</li>
+  <li>NOT shared across two <code>php app.php</code> invocations on the same machine ✗ (different mmap segments)</li>
+  <li>NOT shared across <strong>machines</strong> ✗</li>
+</ul>
+<p class="store-lead-tight">For cross-server state, use Redis or Tiered. For cross-tab/cross-tenant WS routing where state must survive node death, see <a href="/pubsub#ws-routing">/pubsub#ws-routing</a>.</p>
+
+<h3 id="backend-memory">Memory math for the Table backend</h3>
+<p class="store-lead-tight"><code>maxRows</code> is allocated UP FRONT at the OpenSwoole master fork, not lazily. Empirically (PHP 8.3 + OpenSwoole 22.x):</p>
+<table class="store-compare-tbl">
+  <thead><tr><th>Rows</th><th>Schema</th><th>Allocated</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>1,024</td><td>1 × STRING(32)</td><td>~290 KB</td><td>Hash overhead dominates at small sizes</td></tr>
+    <tr><td>1,000,000</td><td>1 × STRING(32)</td><td>~280 MB</td><td>Roughly 280 B/row including overcommit + per-row mutex/metadata</td></tr>
+    <tr><td><code>PHP_INT_MAX</code></td><td>any</td><td>OOM-killed</td><td>No artificial cap; the kernel decides</td></tr>
+  </tbody>
+</table>
+<p class="store-lead-tight"><strong>Rule of thumb:</strong> <code>RAM ≈ maxRows × (4 × Σ column sizes + ~32 B/row)</code>. The 4× factor is OpenSwoole's open-addressed-hash overcommit. For <code>Cache::init(4096)</code> with the default 8 KB value column: ~130 MB reserved per worker server. When you'd say "tens of millions of rows", flip to Redis (server-side bound) or Tiered (L1 stays small, L2 grows).</p>
+
+<h3 id="backend-cache-asymmetry">Cache::init &amp; the <code>maxRows</code> chokepoint</h3>
+<p class="store-lead-tight"><code>Cache::init($maxRows, $cacheDir, $gcIntervalMs, $ttlSeconds)</code> behaves differently across backends &mdash; flagged at boot when misconfigured (v0.2.41 hardening):</p>
+<ul class="store-col-list">
+  <li><strong>Table backend:</strong> <code>$maxRows</code> is a HARD CAP. Cache spills oversize / overflow to the file tier automatically.</li>
+  <li><strong>Redis backend:</strong> <code>$maxRows</code> has NO equivalent &mdash; Redis is a global KV store. Pair with <code>$ttlSeconds</code> for per-key auto-expiry, OR configure Redis-server <code>maxmemory</code> + <code>maxmemory-policy allkeys-lru</code> for cluster-wide bound. If you pass a non-default <code>$maxRows</code> without a TTL on the Redis backend, <code>Cache::init()</code> emits a one-line warning telling you so.</li>
+  <li><strong>Tiered backend:</strong> L1 honours <code>$maxRows</code> (Table); L2 (Redis) ignores it as above.</li>
+</ul>
+<div class="code-block">
+<pre><code class="language-php">// Recommended Redis-backed Cache config — bounded by per-key TTL:
+Cache::init(
+    maxRows:    4096,      // HARD CAP on Table; informational on Redis
+    cacheDir:   '/var/cache',
+    ttlSeconds: 3600,      // On Redis → mode='ttl' auto-expiry
+);
+
+// Read-through pattern — canonical helper (no more get-then-compute boilerplate):
+$users = Cache::getOrCompute("users:active", fn() =&gt; DB::select(...), ttl: 60);
+// First call computes + caches; subsequent calls within TTL short-circuit to the cached read.
+// Null is cached as a valid value (sentinel-based miss detection).</code></pre>
+</div>
 
 <h2 class="store-h2-section" id="pubsub">Pub/sub + Streams (cross-node messaging)</h2>
 <p class="store-lead-tight">Two public primitives on top of the Redis backend for cross-worker AND cross-host messaging. Both require <code>Store::defaultBackend(Store::BACKEND_REDIS)</code>.</p>

@@ -479,6 +479,20 @@ The shell script `scripts/zealphp.sh` is an optional higher-level wrapper. All c
 
 The hardening pass is documented end-to-end at `/store#production-hardening`. The senior-eng review notes + risk-by-risk mapping live at `docs/architecture/2026-05-23-redis-backend-review.md`. The plan that drove the work is at `docs/superpowers/plans/2026-05-23-redis-backend-hardening.md`.
 
+**Three-backend Store facade (v0.2.41)** — `Store::defaultBackend()` now accepts THREE kinds via `StoreBackendKind` enum (preferred) or bare string (BC):
+- `StoreBackendKind::Table` (default) — `OpenSwoole\Table` shared memory. Ns latency. Scope: ONE OpenSwoole server (cross-worker, NOT cross-machine, NOT cross-php-process). `maxRows` is a HARD CAP allocated at master fork: `RAM ≈ maxRows × (4 × Σ column sizes + ~32 B/row)`. 1M × 32-B-string column = ~280 MB. PHP_INT_MAX → OOM-killed. Use for single-node hot paths.
+- `StoreBackendKind::Redis` — Redis/Valkey via the pluggable RedisBackend. Cross-node, persistent. `maxRows` IS NOT ENFORCED (Redis is a global KV; configure server-side `maxmemory` + `maxmemory-policy` for cluster-wide bound, OR pair with `Cache::init(ttlSeconds: ...)` for per-key auto-expiry). Hot CRUD via phpredis (~ext-redis) or predis (pure PHP fallback); both drivers validated for SUBSCRIBE under HOOK_ALL.
+- `StoreBackendKind::Tiered` — L1 TableBackend + L2 RedisBackend. Ns reads on L1 hit; L1 miss → fetch L2 + repopulate L1 + return. Optional `'invalidation_secret'` (or `ZEALPHP_TIERED_INVALIDATION_SECRET` env) enables HMAC-signed cross-node L1 invalidation (C2 hardening — receiver-side verify; default trust mode if null). Conn opts: `'url'/'pool_size'/'prefix'/'prefer'` (forwarded to L2) + `'l1_ttl'` (default 5s) + `'invalidation_secret'`. **Recipe:** `Store::defaultBackend(StoreBackendKind::Tiered, ['url' => '...', 'l1_ttl' => 5, 'invalidation_secret' => $secret])`. Facade builds the L1+L2 pair lazily; no Redis connection at construction time.
+
+**Cache::getOrCompute (v0.2.41)** — `Cache::getOrCompute(string $key, callable $compute, int $ttl = 0): mixed` is the canonical read-through cache helper. Collapses the `Cache::get` → `if null compute` → `Cache::set` boilerplate to a single call. Null is cached as a valid value via internal sentinel object — distinguishes "stored null" from "miss". Pair with `Cache::init(maxRows: …, ttlSeconds: …)` for bounded growth on the Redis backend; the Table backend honours `maxRows` as a HARD cap (spills oversize/overflow to the file tier automatically). Boot-time warning emitted by `Cache::init()` if you pass non-default `$maxRows` on Redis without a `$ttlSeconds` — surfaces the chokepoint where Table's hard-cap semantic doesn't translate to Redis.
+
+**Enum-first API surface (v0.2.41)** — every `defaultBackend()`-shaped call accepts a typed enum:
+- `ZealPHP\Store\StoreBackendKind::{Table, Redis, Tiered}`
+- `ZealPHP\Counter\CounterBackendKind::{Atomic, Redis}` (autoloaded from `src/Counter/`)
+- `ZealPHP\Store\DriverPreference::{Auto, Phpredis, Predis}`
+- `ZealPHP\Store\CgiMode::{Proc, Fork, Fcgi}` (used by `App::cgiMode()`)
+Bare strings still work for BC via each enum's `coerce()` method; new code should use the enum form. The `Store::BACKEND_TABLE / BACKEND_REDIS / BACKEND_TIERED` and `Store::PREFER_AUTO / PREFER_PHPREDIS / PREFER_PREDIS` constants are kept and equal the corresponding enum `->value` for trivial migration.
+
 **Timers** (via `App::tick/after/clearTimer`):
 - `App::tick(int $ms, callable $fn)` — recurring per-worker timer
 - `App::after(int $ms, callable $fn)` — one-shot timer
