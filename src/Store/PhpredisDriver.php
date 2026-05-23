@@ -33,22 +33,52 @@ final class PhpredisDriver implements RedisDriver
     {
         $parts = self::parseUrl($url);
         $r = new \Redis();
-        $r->connect($parts['host'], $parts['port'], 2.0);
+        if ($parts['tls']) {
+            // C3: rediss:// or tls:// — pass an explicit stream context.
+            // verify_peer=true by default; user can layer additional context
+            // via the URL's reserved query string (NOT YET parsed — defer
+            // to v0.2.42 when a real config surface lands). Default is the
+            // secure path; weakening it requires explicit user action.
+            $r->connect(
+                $parts['host'],
+                $parts['port'],
+                2.0,
+                null,
+                0,
+                0,
+                ['stream' => ['verify_peer' => true, 'verify_peer_name' => true]],
+            );
+        } else {
+            $r->connect($parts['host'], $parts['port'], 2.0);
+        }
         if ($parts['pass'] !== null) { $r->auth($parts['pass']); }
         if ($parts['db'] !== 0)      { $r->select($parts['db']); }
         return $r;
     }
 
-    /** @return array{host:string,port:int,pass:?string,db:int} */
+    /**
+     * Parse a redis:// or rediss:// (TLS) URL. Predis also accepts tls://
+     * as a synonym for rediss://; phpredis is consistent with that.
+     *
+     * @return array{scheme:string,host:string,port:int,pass:?string,db:int,tls:bool}
+     */
     private static function parseUrl(string $url): array
     {
         $p = parse_url($url);
-        if ($p === false) { throw new StoreException("invalid redis url: $url"); }
+        if ($p === false || !isset($p['scheme'], $p['host'])) {
+            throw new StoreException("invalid redis url: $url (expected scheme://host[:port][/db])");
+        }
+        $scheme = strtolower((string) $p['scheme']);
+        if (!in_array($scheme, ['redis', 'rediss', 'tls'], true)) {
+            throw new StoreException("unsupported redis scheme: $scheme (expected redis | rediss | tls)");
+        }
         return [
-            'host' => (string) ($p['host'] ?? '127.0.0.1'),
-            'port' => (int)    ($p['port'] ?? 6379),
-            'pass' => isset($p['pass']) ? (string) $p['pass'] : null,
-            'db'   => isset($p['path']) ? (int) ltrim((string) $p['path'], '/') : 0,
+            'scheme' => $scheme,
+            'host'   => (string) $p['host'],
+            'port'   => (int)    ($p['port'] ?? 6379),
+            'pass'   => isset($p['pass']) ? (string) $p['pass'] : null,
+            'db'     => isset($p['path']) ? (int) ltrim((string) $p['path'], '/') : 0,
+            'tls'    => $scheme === 'rediss' || $scheme === 'tls',
         ];
     }
 
