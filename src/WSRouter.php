@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZealPHP;
 
 use ZealPHP\Store\StoreException;
+use ZealPHP\WS\Room;
 
 /**
  * Cross-server WebSocket routing helper.
@@ -46,6 +47,8 @@ use ZealPHP\Store\StoreException;
 final class WSRouter
 {
     private const TABLE = 'ws_owner';
+    private const ROOM_TABLE = 'ws_room_members';
+    private const ROOM_CHANNEL_PREFIX = 'ws:room:';
 
     private static string $serverId = '';
     /** @var array<string, array{fd:int, conn_id:string}> client_id → {fd, conn_id} */
@@ -54,6 +57,22 @@ final class WSRouter
     private static $clientSink = null;
     /** True once init() has wired the subscriber. */
     private static bool $initialized = false;
+
+    // Room state — per-worker.
+    //
+    // $localRoomMembership[$room][$clientId] = true   (clients in this room
+    //   that ARE locally owned by this worker — push targets when a
+    //   message arrives). Populated via presence events delivered to the
+    //   pattern subscriber.
+    //
+    // $roomMessageHandlers[$room][] = callable    (user-registered)
+    // $roomPresenceHandlers[$room][] = callable   (user-registered)
+    /** @var array<string, array<string, true>> */
+    private static array $localRoomMembership = [];
+    /** @var array<string, list<callable>> */
+    private static array $roomMessageHandlers = [];
+    /** @var array<string, list<callable>> */
+    private static array $roomPresenceHandlers = [];
 
     /**
      * One-time setup. Pass a server id (defaults to hostname:pid) +
@@ -84,6 +103,24 @@ final class WSRouter
             'server_id' => [Store::TYPE_STRING, 64],
             'conn_id'   => [Store::TYPE_STRING, 32],
         ]);
+
+        // Room membership table — cluster-wide. Keyed by `{room}:{client_id}`
+        // so Store::iterate + filter-by-row['room'] gives a roster + size
+        // per room. See WSRouter\Room for the user-facing API.
+        Store::make(self::ROOM_TABLE, 16384, [
+            'room'      => [Store::TYPE_STRING, 64],
+            'client_id' => [Store::TYPE_STRING, 64],
+            'server_id' => [Store::TYPE_STRING, 64],
+            'joined_at' => [Store::TYPE_INT, 8],
+        ]);
+
+        // Single PSUBSCRIBE pattern covers every room — no per-room
+        // subscriber proliferation. Handler dispatches to user-registered
+        // message/presence handlers + maintains the per-worker local
+        // membership cache.
+        App::onPubSub(self::ROOM_CHANNEL_PREFIX . '*', function (string $payload, string $channel): void {
+            self::handleRoomMessage($channel, $payload);
+        });
 
         // Subscribe to OUR identity channel. Inbound messages have
         // {client_id, conn_id, payload}; the configured sink does the
@@ -209,10 +246,13 @@ final class WSRouter
     /** @internal — testing hook to reset module state between cases. */
     public static function reset(): void
     {
-        self::$serverId    = '';
-        self::$localFds    = [];
-        self::$clientSink  = null;
-        self::$initialized = false;
+        self::$serverId            = '';
+        self::$localFds            = [];
+        self::$clientSink          = null;
+        self::$initialized         = false;
+        self::$localRoomMembership = [];
+        self::$roomMessageHandlers = [];
+        self::$roomPresenceHandlers= [];
     }
 
     /**
@@ -220,4 +260,108 @@ final class WSRouter
      * @return array<string, array{fd:int, conn_id:string}>
      */
     public static function localFds(): array { return self::$localFds; }
+
+    /**
+     * Construct a Room handle. The Room itself is a value object that
+     * delegates to WSRouter's static state for actual lifecycle.
+     */
+    public static function room(string $name): Room
+    {
+        if (self::$serverId === '') {
+            throw new StoreException('WSRouter::init() must be called before WSRouter::room()');
+        }
+        return new Room($name, self::$serverId);
+    }
+
+    /** @internal — name of the cluster-wide membership table. */
+    public static function roomTable(): string { return self::ROOM_TABLE; }
+
+    /** @internal — channel prefix used for room pub/sub. */
+    public static function roomChannelPrefix(): string { return self::ROOM_CHANNEL_PREFIX; }
+
+    /**
+     * @internal — register a user-side handler for ROOM messages.
+     * Called from `Room::onMessage()`.
+     * @param callable(array<string,mixed> $msg, string $room): void $handler
+     */
+    public static function registerRoomMessageHandler(string $room, callable $handler): void
+    {
+        self::$roomMessageHandlers[$room][] = $handler;
+    }
+
+    /**
+     * @internal — register a user-side handler for join/leave events.
+     * Called from `Room::onPresence()`.
+     * @param callable(array<string,mixed> $event, string $room): void $handler
+     */
+    public static function registerRoomPresenceHandler(string $room, callable $handler): void
+    {
+        self::$roomPresenceHandlers[$room][] = $handler;
+    }
+
+    /**
+     * @internal — dispatch a received room-channel pub/sub message. The
+     * pattern subscriber spawned in `init()` calls this with the resolved
+     * channel name + raw payload.
+     */
+    public static function handleRoomMessage(string $channel, string $payload): void
+    {
+        $prefix = self::ROOM_CHANNEL_PREFIX;
+        if (!str_starts_with($channel, $prefix)) { return; }
+        $roomName = substr($channel, strlen($prefix));
+
+        $msg = json_decode($payload, true);
+        if (!is_array($msg)) { return; }
+
+        $type = is_string($msg['type'] ?? null) ? $msg['type'] : 'message';
+
+        if ($type === 'join' || $type === 'leave') {
+            $cid = is_string($msg['client_id'] ?? null) ? $msg['client_id'] : '';
+            if ($cid !== '' && isset(self::$localFds[$cid])) {
+                if ($type === 'join') {
+                    self::$localRoomMembership[$roomName][$cid] = true;
+                } else {
+                    unset(self::$localRoomMembership[$roomName][$cid]);
+                    if (isset(self::$localRoomMembership[$roomName]) && self::$localRoomMembership[$roomName] === []) {
+                        unset(self::$localRoomMembership[$roomName]);
+                    }
+                }
+            }
+            // Fire user presence handlers.
+            foreach (self::$roomPresenceHandlers[$roomName] ?? [] as $fn) {
+                try { $fn($msg, $roomName); }
+                catch (\Throwable $e) {
+                    error_log("WSRouter room presence handler for {$roomName}: " . $e->getMessage());
+                }
+            }
+            return;
+        }
+
+        // Regular room message — fire user handlers + push to local members.
+        foreach (self::$roomMessageHandlers[$roomName] ?? [] as $fn) {
+            try { $fn($msg, $roomName); }
+            catch (\Throwable $e) {
+                error_log("WSRouter room message handler for {$roomName}: " . $e->getMessage());
+            }
+        }
+
+        // Push to local members of this room (this worker's local fds).
+        $localMembers = self::$localRoomMembership[$roomName] ?? [];
+        if ($localMembers === []) { return; }
+        $server = App::getServer();
+        if (!($server instanceof \OpenSwoole\WebSocket\Server)) { return; }
+        $data = (string) json_encode($msg);
+        foreach (array_keys($localMembers) as $cid) {
+            $local = self::$localFds[$cid] ?? null;
+            if ($local !== null && $server->isEstablished($local['fd'])) {
+                $server->push($local['fd'], $data);
+            }
+        }
+    }
+
+    /**
+     * @internal — current per-worker local-room cache snapshot (for tests).
+     * @return array<string, array<string, true>>
+     */
+    public static function localRoomMembership(): array { return self::$localRoomMembership; }
 }

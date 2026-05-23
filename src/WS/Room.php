@@ -1,0 +1,181 @@
+<?php
+
+declare(strict_types=1);
+
+namespace ZealPHP\WS;
+
+use ZealPHP\App;
+use ZealPHP\Store;
+use ZealPHP\Store\StoreException;
+use ZealPHP\WSRouter;
+
+/**
+ * A first-class WebSocket room — cluster-wide membership, presence,
+ * fan-out + handler registration. Built on the existing v0.2.40 Store +
+ * pub/sub fabric:
+ *
+ *   - Membership lives in the shared `ws_room_members` Store table
+ *     (visible to every worker on every node).
+ *   - Push / presence events flow over `ws:room:{name}` pub/sub channel.
+ *   - One PSUBSCRIBE per worker covers EVERY room (no per-room subscriber
+ *     proliferation).
+ *
+ * Construct via `WSRouter::room('chat:42')` — don't `new` directly
+ * (instances need WSRouter::init() to have wired the PSUBSCRIBE).
+ *
+ * Usage:
+ *
+ *     $room = WSRouter::room('chat:42');
+ *     $room->join('alice');                            // SADD-equivalent + presence broadcast
+ *     $room->push(['from' => 'alice', 'msg' => 'hi']); // fans out across cluster
+ *     $room->size();                                   // cluster-wide member count
+ *     $room->members();                                // cluster-wide roster
+ *     $room->onMessage(function (array $msg) { ... }); // user-side handler
+ *     $room->onPresence(function (array $event) { ... }); // join/leave events
+ *     $room->leave('alice');                           // SREM-equivalent + presence broadcast
+ *
+ * Federation: a publish from server-A reaches every server's PSUBSCRIBE.
+ * Each worker pushes to its local members (those in WSRouter's per-worker
+ * fd map). No double-delivery: workers without local members of this room
+ * skip the push entirely.
+ */
+final class Room
+{
+    public function __construct(
+        private string $name,
+        private string $serverId,
+    ) {
+        if (WSRouter::serverId() === '') {
+            throw new StoreException('WSRouter::init() must be called before constructing a Room');
+        }
+    }
+
+    public function name(): string { return $this->name; }
+
+    /**
+     * Add a client to this room. Idempotent — re-joining is cheap.
+     * Broadcasts a presence event to every server's room subscriber so
+     * each worker can refresh its local-membership cache.
+     */
+    public function join(string $clientId): void
+    {
+        Store::set(WSRouter::roomTable(), self::compositeKey($this->name, $clientId), [
+            'room'      => $this->name,
+            'client_id' => $clientId,
+            'server_id' => $this->serverId,
+            'joined_at' => time(),
+        ]);
+        $this->publish([
+            'type'      => 'join',
+            'client_id' => $clientId,
+            'ts'        => time(),
+        ]);
+    }
+
+    /**
+     * Remove a client from this room. Idempotent. Broadcasts the leave
+     * event so peers update their local caches.
+     */
+    public function leave(string $clientId): void
+    {
+        Store::del(WSRouter::roomTable(), self::compositeKey($this->name, $clientId));
+        $this->publish([
+            'type'      => 'leave',
+            'client_id' => $clientId,
+            'ts'        => time(),
+        ]);
+    }
+
+    /** True if `$clientId` is a current member (cluster-wide check). */
+    public function isMember(string $clientId): bool
+    {
+        return Store::exists(WSRouter::roomTable(), self::compositeKey($this->name, $clientId));
+    }
+
+    /**
+     * Cluster-wide member count.
+     *
+     * Cost note: iterates the `ws_room_members` Store table and filters
+     * by `row['room'] === $this->name` — O(total members across ALL rooms).
+     * Fine for moderate scale (tens of thousands of cluster-wide members).
+     * For very large clusters, prefer direct Redis SET semantics via the
+     * RedisBackend pool — `WSRouter::roomTable()` returns the table name
+     * so power users can `SCARD zealstore:ws_room_members:__keys__` etc.
+     */
+    public function size(): int
+    {
+        $count = 0;
+        foreach (Store::iterate(WSRouter::roomTable()) as $row) {
+            if (($row['room'] ?? '') === $this->name) {
+                $count++;
+            }
+        }
+        return $count;
+    }
+
+    /**
+     * Cluster-wide roster — list of client ids currently joined.
+     * Same O(total members) cost as size().
+     *
+     * @return list<string>
+     */
+    public function members(): array
+    {
+        $out = [];
+        foreach (Store::iterate(WSRouter::roomTable()) as $row) {
+            if (($row['room'] ?? '') === $this->name) {
+                $cid = $row['client_id'] ?? '';
+                if (is_string($cid) && $cid !== '') { $out[] = $cid; }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Broadcast a message to every member of this room across the
+     * cluster. Returns the receivers count Redis reported (1 per
+     * subscribed worker × every server with a pattern subscriber).
+     *
+     * Payload is JSON-encoded when array; sent as-is when string.
+     *
+     * @param array<string,mixed>|string $payload
+     */
+    public function push(array|string $payload): int
+    {
+        return $this->publish(is_array($payload) ? $payload : ['type' => 'message', 'data' => $payload]);
+    }
+
+    /**
+     * Register a handler for messages broadcast to this room.
+     * Multiple handlers per room are allowed; all fire in order.
+     *
+     * @param callable(array<string,mixed> $msg, string $room): void $handler
+     */
+    public function onMessage(callable $handler): void
+    {
+        WSRouter::registerRoomMessageHandler($this->name, $handler);
+    }
+
+    /**
+     * Register a handler for join/leave events on this room. The handler
+     * is called with the full event object: `{type, client_id, ts}`.
+     *
+     * @param callable(array<string,mixed> $event, string $room): void $handler
+     */
+    public function onPresence(callable $handler): void
+    {
+        WSRouter::registerRoomPresenceHandler($this->name, $handler);
+    }
+
+    /** @param array<string,mixed> $envelope */
+    private function publish(array $envelope): int
+    {
+        return Store::publish(WSRouter::roomChannelPrefix() . $this->name, (string) json_encode($envelope));
+    }
+
+    /** Composite key shape used in the ws_room_members Store table. */
+    private static function compositeKey(string $room, string $clientId): string
+    {
+        return $room . ':' . $clientId;
+    }
+}
