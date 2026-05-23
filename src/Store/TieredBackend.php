@@ -33,25 +33,107 @@ final class TieredBackend implements StoreBackend
 {
     private const CACHED_AT = '__cached_at';
 
+    /** Origin tag stamped on every invalidation publish — the receiver skips messages
+     *  that originated from itself so writers don't re-evict their own freshly-written L1. */
+    private string $originId;
+    /** Per-table set of channels we've registered an invalidation subscriber on. */
+    /** @var array<string, true> */
+    private array $invalidationChannels = [];
+    private ?RedisPubSub $invalidationRunner = null;
+
     public function __construct(
         private TableBackend $l1,
         private RedisBackend $l2,
         private int          $l1Ttl = 5,
+        ?string $originId = null,
     ) {
         if ($l1Ttl < 1) {
             throw new StoreException('TieredBackend l1Ttl must be >= 1 second');
         }
+        $this->originId = $originId ?? gethostname() . '-' . getmypid() . '-' . bin2hex(random_bytes(4));
     }
 
     public function l1(): TableBackend { return $this->l1; }
     public function l2(): RedisBackend { return $this->l2; }
     public function l1Ttl(): int       { return $this->l1Ttl; }
+    public function originId(): string { return $this->originId; }
+
+    /**
+     * Turn on cross-node L1 invalidation. After this, every write through
+     * TieredBackend (set/del/incr/decr/clear) PUBLISHes an origin-tagged
+     * invalidation message on `{prefix}:__l1_invalidate:{table}`; peer
+     * TieredBackend instances on other nodes receive it and evict the
+     * matching L1 entry. Self-publishes are skipped via the origin tag.
+     *
+     * MUST be called inside a coroutine context (spawns the subscriber cor).
+     * Idempotent — repeated calls are no-ops; new tables registered after
+     * enable() automatically subscribe themselves.
+     */
+    public function enableInvalidation(): void
+    {
+        if ($this->invalidationRunner !== null) { return; }
+        $this->invalidationRunner = new RedisPubSub($this->l2->url(), $this->l2->prefix());
+        // Pre-register subscribers for any tables already made().
+        foreach ($this->invalidationChannels as $channel => $_) {
+            $this->invalidationRunner->register((string) $channel, $this->invalidationHandler());
+        }
+        $this->invalidationRunner->start();
+    }
+
+    public function stopInvalidation(): void
+    {
+        if ($this->invalidationRunner === null) { return; }
+        $this->invalidationRunner->stop();
+        $this->invalidationRunner = null;
+    }
+
+    /** Handler that evicts the local L1 entry for the message's key (unless self-publish). */
+    private function invalidationHandler(): callable
+    {
+        return function (string $payload) {
+            $msg = json_decode($payload, true);
+            if (!is_array($msg)) { return; }
+            $origin = is_string($msg['origin'] ?? null) ? $msg['origin'] : '';
+            if ($origin === $this->originId) { return; }      // skip self-publishes
+            $name = is_string($msg['table'] ?? null) ? $msg['table'] : '';
+            $key  = is_string($msg['key']   ?? null) ? $msg['key']   : '';
+            if ($name === '' || $key === '') { return; }
+            $this->l1->del($name, $key);
+        };
+    }
+
+    /** Publish an invalidation marker after a successful L2 write. */
+    private function publishInvalidation(string $table, string $key): void
+    {
+        if (!isset($this->invalidationChannels[$this->channel($table)])) { return; }
+        try {
+            $this->l2->publish($this->channel($table), (string) json_encode([
+                'table'  => $table,
+                'key'    => $key,
+                'origin' => $this->originId,
+            ]));
+        } catch (\Throwable $e) {
+            // Best-effort — invalidation drop just means peers stay stale up
+            // to $l1Ttl. Don't propagate to the caller's write.
+        }
+    }
+
+    private function channel(string $table): string
+    {
+        return '__l1_invalidate:' . $table;
+    }
 
     public function make(string $name, int $maxRows, array $columns, array $opts = []): void
     {
         $l1Columns = $columns + [self::CACHED_AT => [Table::TYPE_INT, 8]];
         $this->l1->make($name, $maxRows, $l1Columns, $opts);
         $this->l2->make($name, $maxRows, $columns, $opts);
+        // Track the invalidation channel for this table; if the runner is
+        // already up, register the subscriber now.
+        $this->invalidationChannels[$this->channel($name)] = true;
+        if ($this->invalidationRunner !== null) {
+            $this->invalidationRunner->register($this->channel($name), $this->invalidationHandler());
+        }
     }
 
     public function set(string $name, string $key, array $row): bool
@@ -59,6 +141,7 @@ final class TieredBackend implements StoreBackend
         $ok = $this->l2->set($name, $key, $row);
         if ($ok) {
             $this->l1->set($name, $key, $row + [self::CACHED_AT => time()]);
+            $this->publishInvalidation($name, $key);
         }
         return $ok;
     }
@@ -105,7 +188,9 @@ final class TieredBackend implements StoreBackend
     public function del(string $name, string $key): bool
     {
         $this->l1->del($name, $key);
-        return $this->l2->del($name, $key);
+        $ok = $this->l2->del($name, $key);
+        if ($ok) { $this->publishInvalidation($name, $key); }
+        return $ok;
     }
 
     public function exists(string $name, string $key): bool
@@ -120,6 +205,7 @@ final class TieredBackend implements StoreBackend
         // L1 might hold a stale view of this row; evict so the next get
         // re-fetches the authoritative value from L2.
         $this->l1->del($name, $key);
+        $this->publishInvalidation($name, $key);
         return $new;
     }
 
@@ -127,6 +213,7 @@ final class TieredBackend implements StoreBackend
     {
         $new = $this->l2->decr($name, $key, $col, $by);
         $this->l1->del($name, $key);
+        $this->publishInvalidation($name, $key);
         return $new;
     }
 
