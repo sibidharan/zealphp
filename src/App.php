@@ -43,7 +43,7 @@ class App
     // metadata used by App::stats. Initialised lazily on first registration.
     /** @var array<int, list<array{handler:callable, worker_only:bool}>> */
     protected static array $signalHandlers = [];
-    /** @var array<string, array{callable: callable, workers: int}> */
+    /** @var array<string, array{callable: callable, workers: int, coroutine: bool}> */
     protected static array $processHandlers = [];
     /** True once the onWorkerStart hook for process-pool is wired. */
     protected static bool $processBootWired = false;
@@ -1973,6 +1973,92 @@ class App
                         error_log('App::onSignal handler threw: ' . $e->getMessage());
                     }
                 });
+            }
+        }
+    }
+
+    /**
+     * Register a long-running sidecar process — runs alongside the HTTP/WS
+     * server, managed by the OpenSwoole master (same fate-sharing: dies when
+     * the server stops, respawned on graceful reload). Different from task
+     * workers (which are queue consumers) and worker hooks (which run inside
+     * HTTP workers); these are independent processes for background work
+     * like log shippers, file watchers, scheduled-job runners, OAuth token
+     * refreshers, etc.
+     *
+     *     App::onProcess('log-shipper', function (\OpenSwoole\Process $p): void {
+     *         while (!$p->name && $line = fgets(STDIN)) {  // example loop
+     *             shipToS3($line);
+     *         }
+     *     }, workers: 1, coroutine: true);
+     *
+     * The $fn receives the OpenSwoole\Process instance (call $p->exit() to
+     * shut down cleanly; respawn happens automatically when configured).
+     *
+     * `$workers` spawns N independent copies under the same name (suffixed
+     * with index 0..N-1 internally). `$coroutine` enables OpenSwoole's
+     * coroutine runtime inside the sidecar — `true` by default so the same
+     * `usleep`/curl/PDO yield semantics work that the HTTP workers get.
+     *
+     * Must be called BEFORE `App::run()` so registrations are visible at
+     * server-build time.
+     */
+    public static function onProcess(string $name, callable $callable, int $workers = 1, bool $coroutine = true): void
+    {
+        if ($workers < 1) {
+            throw new \InvalidArgumentException('onProcess: $workers must be >= 1');
+        }
+        if (isset(self::$processHandlers[$name])) {
+            throw new \InvalidArgumentException("onProcess: process name '$name' already registered");
+        }
+        self::$processHandlers[$name] = [
+            'callable' => $callable,
+            'workers'  => $workers,
+            'coroutine'=> $coroutine,
+        ];
+    }
+
+    /**
+     * Internal: wire registered sidecar processes into the OpenSwoole
+     * server via $server->addProcess(). Called from App::run() after
+     * the server is constructed but before start().
+     */
+    private static function wireProcessHandlers(): void
+    {
+        if (self::$processBootWired) { return; }
+        self::$processBootWired = true;
+        $server = self::$server;
+        if ($server === null) { return; }
+        foreach (self::$processHandlers as $name => $cfg) {
+            $cb       = $cfg['callable'];
+            $workers  = $cfg['workers'];
+            $useCo    = $cfg['coroutine'];
+            for ($i = 0; $i < $workers; $i++) {
+                $procName = $workers > 1 ? "{$name}-{$i}" : $name;
+                $process = new \OpenSwoole\Process(
+                    function (\OpenSwoole\Process $p) use ($cb, $procName, $useCo): void {
+                        @cli_set_process_title("zealphp:{$procName}");
+                        if ($useCo) {
+                            // Run the user callable inside Coroutine::run so
+                            // hooked I/O yields naturally.
+                            \OpenSwoole\Coroutine::run(function () use ($cb, $p, $procName): void {
+                                try { $cb($p); }
+                                catch (\Throwable $e) {
+                                    error_log("App::onProcess({$procName}) threw: " . $e->getMessage());
+                                }
+                            });
+                        } else {
+                            try { $cb($p); }
+                            catch (\Throwable $e) {
+                                error_log("App::onProcess({$procName}) threw: " . $e->getMessage());
+                            }
+                        }
+                    },
+                    /* redirect_stdin_stdout */ false,
+                    /* pipe_type */            0,
+                    /* enable_coroutine */     $useCo,
+                );
+                $server->addProcess($process);
             }
         }
     }
@@ -5098,6 +5184,11 @@ HELP;
         // inside onWorkerStart).
         self::applySignalHandlersFor('master');
 
+        // Reset onProcess wiring flag — wireProcessHandlers actually runs
+        // later in run() once $server is built; track here to make the
+        // ordering explicit.
+        self::$processBootWired = false;
+
         $cliOverrides = self::parseCliArgs();
         if (isset($cliOverrides['_host'])) {
             // @phpstan-ignore-next-line — cliOverrides is array<string, mixed>; _host coerced to string at boundary
@@ -5820,6 +5911,13 @@ HELP;
                 }
             }
         });
+
+        // Wire registered sidecar processes via $server->addProcess() so they
+        // share fate with the server (managed by master; respawn on reload).
+        // Must run BEFORE $server->start() — after start(), addProcess silently
+        // no-ops because the master is already in its event loop.
+        self::$server = $server;
+        self::wireProcessHandlers();
 
         elog("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
         $server->start();
