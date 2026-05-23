@@ -23,6 +23,15 @@ final class AtomicBackend implements CounterBackend
         return $this->counters[$name] ??= new Atomic(0);
     }
 
+    /**
+     * Return the underlying Atomic for a named counter — used by the
+     * Counter facade's `raw()` BC method.
+     */
+    public function atomicFor(string $name): Atomic
+    {
+        return $this->atomic($name);
+    }
+
     public function get(string $name): int
     {
         return $this->atomic($name)->get();
