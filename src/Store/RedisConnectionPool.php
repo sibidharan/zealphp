@@ -69,6 +69,10 @@ final class RedisConnectionPool
     /**
      * Acquire + use + release in one call. Exception-safe via try/finally;
      * the client always goes back into the pool even when $fn throws.
+     *
+     * @template T
+     * @param  callable(RedisClient): T $fn
+     * @return T
      */
     public function with(callable $fn): mixed
     {
