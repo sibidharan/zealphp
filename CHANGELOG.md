@@ -38,11 +38,17 @@ PR #83.
 - `docs/superpowers/plans/2026-05-23-store-redis-phase-1.md` — task-by-task implementation plan.
 - `docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md` — three-layer spike validation (in-process predis-subscribe yields under HOOK_ALL, cross-process two-server pub/sub, cross-host pub/sub via wireguard hop @ 0.53ms median).
 - `predis/predis` added under `require-dev` (pure-PHP fallback so the suite stays green where `ext-redis` is absent).
+- **Pub/sub + Streams primitives.** `Store::publish($channel, $payload): int` + `App::onPubSub($channelOrPattern, callable)` for fire-and-forget Redis pub/sub. `Store::publishReliable($stream, $payload, ?$maxLen): string` + `App::onReliableMessage($stream, callable, ?$group, $blockMs, $batchSize)` for Streams-backed at-least-once via consumer groups. Patterns (PSUBSCRIBE) supported. Default consumer group name = `'zealphp-' + sha1(canonicalHost())[:8]` so a cluster shares one group.
+- `ZealPHP\Store\RedisPubSub` and `ZealPHP\Store\RedisStreams` lifecycle classes — dedicated subscriber coroutine per worker, `go()` per message for concurrent dispatch, bounded exponential reconnect backoff (capped 5 s), sentinel-channel clean shutdown (RedisPubSub) / atomic-flag shutdown (RedisStreams via natural BLOCK timeout). Auto-spawned in `onWorkerStart` when handlers are registered AND backend is Redis.
+- `App::onPubSub` / `App::onReliableMessage` / `App::offPubSub` — public registration API.
+- `Store::publish` / `Store::publishReliable` — public facade methods (throw `StoreException` on Table backend).
+- New demo routes: `/demo/pubsub/publish`, `/demo/pubsub/publish-reliable`, `/demo/pubsub/log` exercise the API end-to-end against the running server.
+- Three Phase 3 validation spikes shipped as artifacts: in-process (`scripts/spike-predis-subscribe.php` — predis SUBSCRIBE yields under HOOK_ALL), cross-process (`scripts/spike-crossnode-server.php` — two ZealPHP servers exchange via shared valkey, ~0.3 ms one-way), cross-host (`scripts/spike-crosshost-{publish,subscribe}.php` — subscriber on a remote box via wireguard tunnel, 0.53 ms median end-to-end). Documented in `docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md`.
 
 ### Out of scope (deferred)
 
 - Tiered `TableBackend` L1 + `RedisBackend` L2 with bounded `l1_ttl` staleness.
-- Pub/sub-based L1 invalidation (spike-validated in this release; implementation lands separately).
+- Pub/sub-based L1 invalidation built on top of the pub/sub primitive shipped here (Phase 3-as-cache-invalidation; the primitive is in this release, the L1-invalidation consumer is not yet wired).
 - Pipelined `mget`/`mset` via a driver-shaped Pipeline proxy.
 - Opt-in `$opts['on_error' => 'fallback_table']` per-table degrade hook.
 - Redis Cluster / Sentinel topologies; Redis-backed sessions (separate spec).
