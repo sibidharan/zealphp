@@ -213,12 +213,12 @@ class Cache
      */
     public static function flush(): void
     {
-        $table = Store::table(self::TABLE);
-        if ($table) {
-            foreach ($table as $key => $row) {
-                if ($key !== null) {
-                    $table->del($key);
-                }
+        // Backend-agnostic: works on TableBackend and RedisBackend alike.
+        // Store::iterate() yields (key, row) pairs from whichever backend is
+        // configured; Store::del() targets the same backend.
+        foreach (Store::iterate(self::TABLE) as $key => $_row) {
+            if ($key !== '') {
+                Store::del(self::TABLE, $key);
             }
         }
 
@@ -335,18 +335,13 @@ class Cache
     /** @internal */
     public static function gcMemory(): void
     {
-        $table = Store::table(self::TABLE);
-        if (!$table) {
-            return;
-        }
+        // Backend-agnostic (TableBackend + RedisBackend); same shape as flush().
         $now = time();
-        foreach ($table as $key => $row) {
-            if (is_array($row)) {
-                $ttl = $row['ttl'] ?? 0;
-                $ttlInt = is_numeric($ttl) ? (int)$ttl : 0;
-                if ($ttlInt > 0 && $ttlInt < $now && $key !== null) {
-                    $table->del($key);
-                }
+        foreach (Store::iterate(self::TABLE) as $key => $row) {
+            $ttl = $row['ttl'] ?? 0;
+            $ttlInt = is_numeric($ttl) ? (int)$ttl : 0;
+            if ($ttlInt > 0 && $ttlInt < $now && $key !== '') {
+                Store::del(self::TABLE, $key);
             }
         }
     }
