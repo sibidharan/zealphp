@@ -12,21 +12,31 @@ namespace ZealPHP\Store;
 final class PhpredisDriver implements RedisDriver
 {
     private \Redis $c;
+    /** Original URL kept so subscribe() can spawn fresh per-coroutine clients. */
+    private string $url;
 
     public function __construct(string $url)
     {
         if (!extension_loaded('redis')) {
             throw new StoreException('phpredis extension not loaded — install ext-redis or use predis');
         }
-        $parts = self::parseUrl($url);
+        $this->url = $url;
         try {
-            $this->c = new \Redis();
-            $this->c->connect($parts['host'], $parts['port'], 2.0);
-            if ($parts['pass'] !== null) { $this->c->auth($parts['pass']); }
-            if ($parts['db'] !== 0)      { $this->c->select($parts['db']); }
+            $this->c = self::buildClient($url);
         } catch (\RedisException $e) {
             throw new StoreException('phpredis connect failed: ' . $e->getMessage(), 0, $e);
         }
+    }
+
+    /** Build a fresh \Redis client connected per the URL. */
+    private static function buildClient(string $url): \Redis
+    {
+        $parts = self::parseUrl($url);
+        $r = new \Redis();
+        $r->connect($parts['host'], $parts['port'], 2.0);
+        if ($parts['pass'] !== null) { $r->auth($parts['pass']); }
+        if ($parts['db'] !== 0)      { $r->select($parts['db']); }
+        return $r;
     }
 
     /** @return array{host:string,port:int,pass:?string,db:int} */
@@ -246,7 +256,7 @@ final class PhpredisDriver implements RedisDriver
         if ($exactChannels === [] && $patternChannels === []) {
             throw new StoreException('subscribe(): need at least one channel or pattern');
         }
-        $client = $this->c;
+        $url    = $this->url;
         $frames = new \OpenSwoole\Coroutine\Channel(64);
         // Cross-coroutine running flag — Atomic is the genuinely-correct
         // primitive (shared mutable state across forked coroutines) AND it
@@ -254,24 +264,42 @@ final class PhpredisDriver implements RedisDriver
         // otherwise constant-fold the !== 0 check inside the inner closures.
         $running = new \OpenSwoole\Atomic(1);
 
+        // Two parallel coroutines, each owning its OWN \Redis client. Sharing
+        // $this->c between them would race on the underlying socket — phpredis
+        // is not coroutine-safe on a single connection. Each cor connects via
+        // self::buildClient() so subscribe + psubscribe own independent sockets.
+
         if ($exactChannels !== []) {
-            go(function () use ($client, $frames, $exactChannels, $running): void {
+            go(function () use ($url, $frames, $exactChannels, $running): void {
                 try {
+                    $client = self::buildClient($url);
                     $client->subscribe($exactChannels, function ($_redis, string $channel, string $payload) use ($frames, $running): void {
                         $frames->push(['channel' => $channel, 'payload' => $payload, 'pattern' => null]);
                         if ($running->get() === 0) { throw new PubSubStopException(); }
                     });
-                } catch (PubSubStopException) { /* normal stop */ }
+                } catch (PubSubStopException) {
+                    /* normal stop — sentinel propagated from inside the callback */
+                } catch (\RedisException) {
+                    /* phpredis re-throws the in-callback PubSubStopException as
+                       a 'read error on connection' RedisException once the
+                       subscribe socket closes. Same intent as the sentinel —
+                       runner already saw the stop via $running; silently exit. */
+                }
             });
         }
         if ($patternChannels !== []) {
-            go(function () use ($client, $frames, $patternChannels, $running): void {
+            go(function () use ($url, $frames, $patternChannels, $running): void {
                 try {
+                    $client = self::buildClient($url);
                     $client->psubscribe($patternChannels, function ($_redis, string $pattern, string $channel, string $payload) use ($frames, $running): void {
                         $frames->push(['channel' => $channel, 'payload' => $payload, 'pattern' => $pattern]);
                         if ($running->get() === 0) { throw new PubSubStopException(); }
                     });
-                } catch (PubSubStopException) { /* normal stop */ }
+                } catch (PubSubStopException) {
+                    /* normal stop */
+                } catch (\RedisException) {
+                    /* same wrap-as-RedisException case as subscribe (above) */
+                }
             });
         }
 

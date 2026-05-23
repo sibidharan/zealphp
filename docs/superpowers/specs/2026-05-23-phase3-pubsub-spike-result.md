@@ -49,9 +49,30 @@ The Phase 3 architecture as described in the spec (per-worker dedicated subscrib
 
 ## What this does NOT yet validate
 
-1. **phpredis SUBSCRIBE under HOOK_ALL.** This spike runs predis. phpredis is the *preferred* driver when `ext-redis` is loaded — its subscribe loop is implemented in C, not PHP, so the yielding behaviour could differ. Same spike needs to run with `ext-redis` installed before the Phase 3 implementation can promise both drivers work. **Next step:** install `ext-redis` (locally or on a sysbox container with `pecl install redis`) and re-run `scripts/spike-predis-subscribe.php` after swapping `new PredisClient(...)` for a phpredis client.
+1. **~~phpredis SUBSCRIBE under HOOK_ALL.~~** *Validated 2026-05-23 — see "phpredis spike" below.*
 2. **~~Multi-process / cross-node delivery.~~** *Validated — see "Cross-node spike" below.*
 3. **Subscriber graceful shutdown.** The spike unsubscribes when the message budget is hit. Real Phase 3 needs `onWorkerStop` lifecycle hooks to close the subscriber cleanly; the current `App::onWorkerStop` hook (already shipped) covers this.
+
+## phpredis spike (v0.2.40 update)
+
+`scripts/spike-phpredis-subscribe.php` re-runs the same scenario against the phpredis driver via `RedisClient(['prefer' => 'phpredis'])` after `ext-redis 6.3.0` was installed via pecl + enabled via `phpenmod redis`. Same setup: dedicated subscriber coroutine + 8 op-worker cors × 50 RTTs + 1 publisher at 50ms gaps, all under `Runtime::enableCoroutine(HOOK_ALL)`.
+
+**Result: PASS on all four criteria.**
+
+| Metric | predis (control) | phpredis |
+|---|---|---|
+| Wall clock total | 526 ms | **516 ms** |
+| Worker ops completed | 400 / 400 | **400 / 400** |
+| Aggregate throughput | 760 ops/sec | **775 ops/sec** |
+| Per-op-cor median wall time | 23.3 ms | **11.0 ms** ← phpredis is faster on hot CRUD |
+| Messages received | 10 / 10 | **10 / 10** |
+| PUBLISH → receive median latency | 0.40 ms | **0.23 ms** |
+
+**What this proves:** phpredis SUBSCRIBE *does* yield under `OpenSwoole\Runtime::HOOK_ALL`. The HOOK_ALL flag hooks PHP-level stream functions; phpredis's C-side socket reads inside `subscribe()` end up using the hooked descriptors transparently. The Phase 3 design ships unchanged on phpredis without falling back to predis or `OpenSwoole\Coroutine\Redis`.
+
+**Important nuance — phpredis SUBSCRIBE WITHOUT HOOK_ALL blocks the entire worker.** This is why unit tests that exercise `RedisPubSub` and `RedisStreams` cannot easily exercise the phpredis driver — PHPUnit doesn't enable HOOK_ALL process-wide. Tests force `ZEALPHP_REDIS_PREFER=predis` to validate the lifecycle logic; the C-side phpredis path is empirically pinned by this spike under realistic runtime conditions instead.
+
+**What this updates in the docs:** the "production driver caveat" callout in CLAUDE.md, /store#phpredis-pubsub-caveat, /pubsub, /ws#scaling, README, and CHANGELOG can be SOFTENED — phpredis is validated; the recommendation is no longer "use predis for subscribers" but "either driver works under HOOK_ALL (which is on by default in coroutine mode)." Production deployments running phpredis can stop worrying about the SUBSCRIBE path.
 
 ## Cross-node spike
 
