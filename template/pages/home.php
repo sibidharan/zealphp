@@ -337,9 +337,14 @@ $app->route('/api/chat', ['methods' => ['POST']],
 // Each coroutine yields on I/O automatically
 ZEALPHP_WORKERS=16 php app.php
 
-// Store: cross-worker shared state
+// Store: cross-worker shared state (1 process)
 Store::set('cache', $key, $data);
-$data = Store::get('cache', $key);</code></pre>
+$data = Store::get('cache', $key);
+
+// Or flip to cross-NODE in one line
+Store::defaultBackend(Store::BACKEND_REDIS);
+Store::publish('chat:room', $payload);
+App::onPubSub('chat:room', $handler);</code></pre>
         </div>
         <div class="code-compare-panel">
           <div class="compare-label">FastAPI — single process limits</div>
