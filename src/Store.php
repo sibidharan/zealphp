@@ -321,6 +321,74 @@ class Store
         yield from self::defaultBackend()->iterate($name);
     }
 
+    // ── Direct Redis SET primitives (WS-2) ──────────────────────────────
+    //
+    // SADD / SREM / SCARD / SSCAN — usable from user code AND by the WS
+    // Room class for per-room rosters. Backend semantics:
+    //   - RedisBackend  : native SET ops (O(1) SCARD, paginated SSCAN).
+    //   - TieredBackend : delegates to the L2 RedisBackend.
+    //   - TableBackend  : throws StoreException — these are inherently
+    //                     cross-node primitives. Use the existing
+    //                     iterate()/count() against a tracked table on
+    //                     Table; the user-facing Room class auto-detects
+    //                     and falls back.
+    //
+    // Keys here are NOT prefixed by Store; caller owns the namespace.
+
+    public static function sadd(string $key, string ...$members): int
+    {
+        $b = self::redisOrThrow('sadd');
+        return $b->sadd($key, ...$members);
+    }
+
+    public static function srem(string $key, string ...$members): int
+    {
+        $b = self::redisOrThrow('srem');
+        return $b->srem($key, ...$members);
+    }
+
+    public static function scard(string $key): int
+    {
+        $b = self::redisOrThrow('scard');
+        return $b->scard($key);
+    }
+
+    /**
+     * Paginated SSCAN. Returns one batch + an opaque next-cursor — same
+     * cursor protocol as `iteratePaged`. Cursor '0' starts a fresh scan;
+     * a returned cursor of '0' signals end-of-scan.
+     *
+     * @return array{cursor: string, members: list<string>}
+     */
+    public static function sscanCursor(string $key, string $cursor = '0', int $count = 100): array
+    {
+        $b = self::redisOrThrow('sscanCursor');
+        [$next, $members] = $b->sscanCursor($key, $cursor, $count);
+        return ['cursor' => $next, 'members' => $members];
+    }
+
+    public static function sdel(string $key): bool
+    {
+        $b = self::redisOrThrow('sdel');
+        return $b->sdel($key);
+    }
+
+    /**
+     * Resolve the active backend to a RedisBackend (directly, or as the L2
+     * of a Tiered/CircuitBreaker decorator). Throws when the active backend
+     * is Table — set ops require cross-node Redis primitives.
+     */
+    private static function redisOrThrow(string $op): RedisBackend
+    {
+        $b = self::defaultBackend();
+        if ($b instanceof RedisBackend) { return $b; }
+        if ($b instanceof TieredBackend) { return $b->l2(); }
+        throw new StoreException(
+            "Store::$op requires the Redis or Tiered backend (current: " . self::$backendConfig['kind'] . "). " .
+            "Set ops are inherently cross-node primitives; use iterate()/count() against a tracked table on the Table backend."
+        );
+    }
+
     /**
      * Paginated iteration (S-3). Returns one batch + an opaque next-cursor.
      * Use for large tables where draining the full generator is impractical

@@ -73,6 +73,15 @@ final class Room
                 "bump via WSRouter::initOptions(roomMembersCapacity: N) BEFORE init(), or flip to Redis backend"
             );
         }
+        // WS-2: also maintain a per-room Redis SET so size()/members() can
+        // use O(1) SCARD + paginated SSCAN instead of scanning the full
+        // ws_room_members table. Best-effort: a SADD failure (Redis blip)
+        // doesn't roll back the metadata write — eventual reconciliation
+        // happens on the next presence event or via the iterate fallback.
+        if (WSRouter::hasRedisBackend()) {
+            try { Store::sadd(WSRouter::roomMembersSetKey($this->name), $clientId); }
+            catch (StoreException) { /* keep join — metadata is authoritative */ }
+        }
         WSRouter::stats()->inc('room_joins_total');
         $this->publish([
             'type'      => 'join',
@@ -88,6 +97,11 @@ final class Room
     public function leave(string $clientId): void
     {
         Store::del(WSRouter::roomTable(), self::compositeKey($this->name, $clientId));
+        // WS-2: keep the per-room SET in sync. Idempotent SREM.
+        if (WSRouter::hasRedisBackend()) {
+            try { Store::srem(WSRouter::roomMembersSetKey($this->name), $clientId); }
+            catch (StoreException) { /* metadata table already removed */ }
+        }
         WSRouter::stats()->inc('room_leaves_total');
         $this->publish([
             'type'      => 'leave',
@@ -103,17 +117,21 @@ final class Room
     }
 
     /**
-     * Cluster-wide member count.
+     * Cluster-wide member count (WS-2 hardened).
      *
-     * Cost note: iterates the `ws_room_members` Store table and filters
-     * by `row['room'] === $this->name` — O(total members across ALL rooms).
-     * Fine for moderate scale (tens of thousands of cluster-wide members).
-     * For very large clusters, prefer direct Redis SET semantics via the
-     * RedisBackend pool — `WSRouter::roomTable()` returns the table name
-     * so power users can `SCARD zealstore:ws_room_members:__keys__` etc.
+     * Redis / Tiered backend: O(1) SCARD on the per-room SET maintained
+     * by join/leave. Sub-millisecond regardless of cluster size.
+     *
+     * Table backend: O(total members across ALL rooms) — iterates the
+     * ws_room_members metadata table and filters by room. Fine for
+     * single-node deployments where the iterate is in-process.
      */
     public function size(): int
     {
+        if (WSRouter::hasRedisBackend()) {
+            try { return Store::scard(WSRouter::roomMembersSetKey($this->name)); }
+            catch (StoreException) { /* fall through to the iterate path */ }
+        }
         $count = 0;
         foreach (Store::iterate(WSRouter::roomTable()) as $row) {
             if (($row['room'] ?? '') === $this->name) {
@@ -125,12 +143,30 @@ final class Room
 
     /**
      * Cluster-wide roster — list of client ids currently joined.
-     * Same O(total members) cost as size().
+     *
+     * Redis / Tiered backend: drains the per-room SET via SSCAN. For very
+     * large rooms (>10k members), use `membersPaged()` instead to avoid
+     * loading the full roster into memory.
+     *
+     * Table backend: iterates the metadata table.
      *
      * @return list<string>
      */
     public function members(): array
     {
+        if (WSRouter::hasRedisBackend()) {
+            try {
+                $key   = WSRouter::roomMembersSetKey($this->name);
+                $next  = '0';
+                $out   = [];
+                do {
+                    $page  = Store::sscanCursor($key, $next, 500);
+                    $out   = array_merge($out, $page['members']);
+                    $next  = $page['cursor'];
+                } while ($next !== '0');
+                return $out;
+            } catch (StoreException) { /* fall through */ }
+        }
         $out = [];
         foreach (Store::iterate(WSRouter::roomTable()) as $row) {
             if (($row['room'] ?? '') === $this->name) {
@@ -139,6 +175,26 @@ final class Room
             }
         }
         return $out;
+    }
+
+    /**
+     * Paginated roster — returns one SSCAN batch + an opaque next-cursor
+     * (WS-2). Use for very large rooms where `members()` would be too
+     * heavy. Cursor `'0'` starts a fresh walk; the returned cursor `'0'`
+     * signals end-of-scan.
+     *
+     * Only useful on Redis / Tiered backends — on Table backend the
+     * iterate path returns the full roster in one batch (cursor '0').
+     *
+     * @return array{cursor: string, members: list<string>}
+     */
+    public function membersPaged(string $cursor = '0', int $count = 100): array
+    {
+        if (WSRouter::hasRedisBackend()) {
+            try { return Store::sscanCursor(WSRouter::roomMembersSetKey($this->name), $cursor, $count); }
+            catch (StoreException) { /* fall through */ }
+        }
+        return ['cursor' => '0', 'members' => $this->members()];
     }
 
     /**

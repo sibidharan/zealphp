@@ -458,6 +458,29 @@ final class WSRouter
     /** @internal — channel prefix used for room pub/sub. */
     public static function roomChannelPrefix(): string { return self::ROOM_CHANNEL_PREFIX; }
 
+    /**
+     * @internal — WS-2: per-room Redis SET key for O(1) SCARD + paginated
+     * SSCAN. Maintained alongside the ws_room_members metadata table when
+     * the active Store backend is Redis (or Tiered). Falls back gracefully
+     * on Table backend (Room::size/members iterate the metadata table).
+     */
+    public static function roomMembersSetKey(string $room): string
+    {
+        return 'ws_room:' . $room . ':members';
+    }
+
+    /**
+     * @internal — true when the active Store backend supports direct
+     * Redis SET ops (Redis or Tiered). Room class uses this to choose
+     * the per-room SET fast path vs the iterate fallback.
+     */
+    public static function hasRedisBackend(): bool
+    {
+        $b = Store::defaultBackend();
+        return $b instanceof \ZealPHP\Store\RedisBackend
+            || $b instanceof \ZealPHP\Store\TieredBackend;
+    }
+
     /** @internal — rate-limit threshold accessor (used by WSRouter\Room::push). */
     public static function roomRateLimitN(): int { return self::$roomRateLimitN; }
 

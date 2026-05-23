@@ -331,6 +331,44 @@ final class RedisBackend implements StoreBackend
         return (bool) $this->pool->with(fn(RedisClient $c): bool => $c->ping());
     }
 
+    // ── Direct Redis SET primitives (WS-2) ──────────────────────────────
+    //
+    // These expose SADD / SREM / SCARD / SSCAN against caller-provided
+    // absolute keys. Used by Room::join/leave/size/members so the
+    // per-room roster is a real Redis SET (O(1) SCARD, paginated SSCAN
+    // members) instead of a full table scan. The keys are NOT prefixed by
+    // this backend's `$prefix` — caller fully owns the namespace.
+
+    public function sadd(string $key, string ...$members): int
+    {
+        if ($members === []) { return 0; }
+        $list = array_values($members);
+        return $this->pool->with(fn(RedisClient $c): int => $c->sadd($key, $list));
+    }
+
+    public function srem(string $key, string ...$members): int
+    {
+        if ($members === []) { return 0; }
+        $list = array_values($members);
+        return $this->pool->with(fn(RedisClient $c): int => $c->srem($key, $list));
+    }
+
+    public function scard(string $key): int
+    {
+        return $this->pool->with(fn(RedisClient $c): int => $c->scard($key));
+    }
+
+    /** @return array{0:string, 1:list<string>} */
+    public function sscanCursor(string $key, string $cursor, int $count): array
+    {
+        return $this->pool->with(fn(RedisClient $c): array => $c->sscanCursor($key, $cursor, $count));
+    }
+
+    public function sdel(string $key): bool
+    {
+        return (bool) $this->pool->with(fn(RedisClient $c): bool => $c->unlink($key) > 0);
+    }
+
     /** Pub/sub publish through the pool; returns receivers Redis delivered to. */
     public function publish(string $channel, string $payload): int
     {
