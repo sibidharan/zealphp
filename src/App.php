@@ -54,18 +54,95 @@ class App
     protected static int $task_worker_num = 0;
     protected string $host;
     protected int $port;
+    /**
+     * Absolute working directory the framework boots in. Resolved at boot
+     * via `realpath(__DIR__ . '/..')` and exposed read-only for handlers
+     * that need to build paths relative to the project root (e.g.
+     * `App::$cwd . '/.cache'` for the file-tier cache directory).
+     */
     public static string $cwd;
-    /** @var \OpenSwoole\WebSocket\Server|\OpenSwoole\Http\Server|null */
+    /**
+     * The active OpenSwoole server instance after `App::run()` constructs
+     * it; `null` before `run()`. Returned as a `WebSocket\Server` when any
+     * `App::ws()` route was registered (the framework upgrades from
+     * `Http\Server` automatically), `Http\Server` for pure HTTP apps.
+     * Use `App::getServer()` for the public accessor.
+     *
+     * @var \OpenSwoole\WebSocket\Server|\OpenSwoole\Http\Server|null
+     */
     public static $server;
+    /**
+     * Override value for `$_SERVER['PHP_SELF']` and friends. `null` means
+     * "use the request URI verbatim", which is the normal Apache/nginx
+     * convention. Apps that need a stable `PHP_SELF` (legacy WordPress
+     * plugins, etc.) can pin it here.
+     */
     public static ?string $default_php_self = null;
     private static ?self $instance = null;
+    /**
+     * When `true`, framework error pages render the captured exception +
+     * stack trace inline (development default). Set `false` in production
+     * via `App::displayErrors(false)` so 5xx pages show a friendly message
+     * instead of leaking traces.
+     */
     public static bool $display_errors = true;
+    /**
+     * Per-request lifecycle mode (the dial that picks `$g` storage +
+     * SessionManager + `enable_coroutine` + HOOK_ALL default). See the
+     * "Lifecycle modes" matrix in CLAUDE.md — short version:
+     *
+     *   - `true` (default): `$g` lives in process-wide PHP superglobals
+     *     (`$_GET`/`$_POST`/`$_SESSION` etc.) — Apache mod_php parity.
+     *     One request at a time per worker; coroutine scheduler OFF
+     *     by default. Unmodified WordPress / Drupal work here.
+     *   - `false`: per-coroutine `$g` via `Coroutine::getContext()`.
+     *     Concurrent coroutine handling enabled; superglobals NOT
+     *     populated. Modern apps that want OpenSwoole concurrency
+     *     pick this.
+     *
+     * Set via `App::superglobals(bool)` BEFORE `App::init()`.
+     */
     public static bool $superglobals = true;
+    /**
+     * The PSR-15 middleware stack handler, built during `App::run()` from
+     * the registered middleware list. `null` before `run()`. Generally
+     * read via the public `App::middleware()` accessor; this property is
+     * public for advanced introspection (e.g. /healthz dumps).
+     */
     public static ?StackHandler $middleware_stack = null;
-    /** @var array<int, MiddlewareInterface> */
+    /**
+     * Middleware queued via `App::addMiddleware()` BEFORE `App::run()`.
+     * Reversed at boot so the last-added middleware wraps outermost;
+     * `ResponseMiddleware` (router) always runs innermost. Public for
+     * apps that want to inspect / mutate the stack at boot time.
+     *
+     * @var array<int, MiddlewareInterface>
+     */
     public static array $middleware_wait_stack = [];
+    /**
+     * When `true` (default), URLs ending in `.php` get a 403. The framework
+     * encourages extensionless URLs as the canonical public surface (matches
+     * Apache `RewriteRule \.php$ - [F]` parity). Set `false` to allow direct
+     * `*.php` routing — useful when porting an existing app that links to
+     * `/foo.php` from external sources.
+     */
     public static bool $ignore_php_ext = true;
-    public static ?bool $hook_exec = null; // null => resolves to coroutine-mode (superglobals===false) at run()
+    /**
+     * Toggle the uopz override of the exec family (backtick / `shell_exec`
+     * / `exec` / `system` / `passthru`) so they yield via OpenSwoole's
+     * coroutine scheduler instead of blocking the worker.
+     *
+     * `null` (default) resolves to "on when coroutine mode" (`!$superglobals`)
+     * at `App::run()` — matches the production-safe expectation. Set via
+     * `App::hookExec(bool)` for an explicit override.
+     */
+    public static ?bool $hook_exec = null;
+    /**
+     * Enable the legacy CGI request handler for `public/*.php` paths.
+     * Resolved from `$process_isolation` at `App::run()`; you generally
+     * don't set this directly. See `App::processIsolation()` and the
+     * Lifecycle-modes matrix in CLAUDE.md.
+     */
     public static bool $coproc_implicit_request_handler = false;
     /**
      * Per-include CGI process-isolation override. `null` means "follow
