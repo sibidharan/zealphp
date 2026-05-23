@@ -74,15 +74,16 @@ final class AppV040HelpersTest extends TestCase
         $this->assertFalse($fired);
     }
 
-    public function testApplySignalHandlersForMasterContext(): void
+    public function testApplySignalHandlersForMethodExists(): void
     {
+        // Reflection-only check. Actually CALLING applySignalHandlersFor
+        // invokes OpenSwoole\Process::signal which spawns the event loop —
+        // contaminates subsequent Coroutine::run-using tests in the same
+        // PHPUnit process. So we don't invoke it here; the method's
+        // behaviour is exercised inside a real App::run() event-loop
+        // context (integration tests + the live server).
         $r = new \ReflectionClass(App::class);
         $this->assertTrue($r->hasMethod('applySignalHandlersFor'));
-        // Idempotent + safe to call from outside a real OpenSwoole process
-        // context — won't actually fire OpenSwoole\Process::signal in the
-        // unit-test environment but exercises the iteration path.
-        App::applySignalHandlersFor('master');
-        $this->assertTrue(true);   // exception-free is the success signal
     }
 
     // ── App::clearTimer guard ──────────────────────────────────────────
