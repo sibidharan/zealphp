@@ -233,6 +233,29 @@ $app->route('/demo/store/incr', ['methods' => ['GET']], function() {
     return ['after_incr_1' => $v1, 'after_incr_2' => $v2, 'after_incr_5' => $v3, 'worker_pid' => getmypid()];
 });
 
+// Backend-agnostic roundtrip: exercises the full Store API through whichever
+// backend is configured (env var ZEALPHP_STORE_BACKEND or App::run). Used by
+// tests/Integration/StoreBackendIntegrationTest.php to prove the same
+// call shapes work end-to-end whether storage is local Table or remote Redis.
+$app->route('/demo/store-roundtrip', ['methods' => ['GET']], function() {
+    $key = 'rt_' . bin2hex(random_bytes(4));
+    Store::set('demo_store', $key, ['name' => $key, 'score' => 42]);
+    $afterSet = Store::get('demo_store', $key);
+    Store::incr('demo_store', $key, 'score', 8);
+    $afterIncr = Store::get('demo_store', $key);
+    $existed  = Store::exists('demo_store', $key);
+    Store::del('demo_store', $key);
+    $afterDel = Store::get('demo_store', $key);
+    return [
+        'backend'    => get_class(Store::defaultBackend()),
+        'set'        => $afterSet,
+        'incr'       => $afterIncr,
+        'existed'    => $existed,
+        'after_del'  => $afterDel,
+        'worker_pid' => getmypid(),
+    ];
+});
+
 $app->route('/demo/counter/increment', ['methods' => ['GET']], function() use ($demoCounter) {
     $new = $demoCounter->increment();
     return [
