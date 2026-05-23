@@ -192,6 +192,66 @@ Store::defaultBackend('redis', 'redis://cache.internal:6379/1');   // explicit U
 
 <p class="store-lead-tight store-mt-1"><strong>Client lib</strong>: auto-detects phpredis (preferred when <code>ext-redis</code> is loaded) or predis (pure-PHP fallback, shipped as a dev dep). User code never imports a phpredis/predis symbol &mdash; the single <code>ZealPHP\Store\RedisClient</code> adapter is the only place either lib is referenced.</p>
 
+<h2 class="store-h2-section" id="pubsub">Pub/sub + Streams (cross-node messaging)</h2>
+<p class="store-lead-tight">Two public primitives on top of the Redis backend for cross-worker AND cross-host messaging. Both require <code>Store::defaultBackend(Store::BACKEND_REDIS)</code>.</p>
+
+<div class="card-code-block">
+<pre><code class="language-php">// Fire-and-forget pub/sub
+App::onPubSub('chat:room:42', function (string $payload, string $channel) {
+    // runs in every worker that's registered; routes to your local fd map
+});
+$receivers = Store::publish('chat:room:42', json_encode($message));
+
+// Reliable variant via Redis Streams (at-least-once via consumer groups)
+App::onReliableMessage('orders', function (string $payload, string $id, string $stream): bool {
+    $ok = processOrder($payload);
+    return $ok; // true → XACK; false/throw → leave pending
+});
+$messageId = Store::publishReliable('orders', json_encode($order));</code></pre>
+</div>
+
+<table class="store-compare-tbl store-mt-1">
+  <thead><tr><th>Primitive</th><th>Latency</th><th>Durability</th><th>Delivery</th><th>When to pick</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>Store::publish</code></td>
+      <td>~0.5 ms loopback</td>
+      <td>None (fire-and-forget)</td>
+      <td>Best-effort &mdash; lost during subscriber reconnect window</td>
+      <td>Cache invalidation, WebSocket fan-out, presence beats &mdash; drops are tolerable, speed matters.</td>
+    </tr>
+    <tr>
+      <td><code>Store::publishReliable</code></td>
+      <td>~1&ndash;2 ms (XADD + ACK)</td>
+      <td>AOF/RDB-backed</td>
+      <td>At-least-once via consumer groups</td>
+      <td>Command/event sourcing, work queues, must-not-drop business events.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout warn store-mt-1" id="phpredis-pubsub-caveat">
+  <strong>Driver caveat (production-relevant).</strong> phpredis is the preferred driver when <code>ext-redis</code> is loaded &mdash; it's faster than predis for hot CRUD paths. <strong>However, the SUBSCRIBE + HOOK_ALL coroutine spike has so far only been benched against predis</strong> (see <a href="https://github.com/sibidharan/zealphp/blob/master/docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md" target="_blank">spike result</a> &mdash; predis subscribe yields cleanly under OpenSwoole HOOK_ALL, sub-millisecond delivery confirmed across hosts). phpredis's subscribe loop is C-side and has not been validated in this configuration. Production deployments using pub/sub subscribers should either:
+  <ol>
+    <li><strong>Force predis</strong> for subscribers until the phpredis spike is re-run in your environment:
+      <div class="card-code-block">
+<pre><code class="language-php">// Per-instance:
+Store::defaultBackend(Store::BACKEND_REDIS, [
+    'url'    => 'redis://cache:6379/0',
+    'prefer' => Store::PREFER_PREDIS,
+]);
+
+// Or via env (deployment-time switch):
+ZEALPHP_REDIS_PREFER=predis</code></pre>
+      </div>
+    </li>
+    <li><strong>Bench phpredis under HOOK_ALL load</strong> in staging first &mdash; the spike script (<code>scripts/spike-predis-subscribe.php</code>) is parameterised so swapping the client lib is a small change.</li>
+  </ol>
+  Hot CRUD paths (HGETALL, INCRBY, mget, etc.) are unaffected &mdash; phpredis vs predis is purely a perf trade-off there, both work correctly under HOOK_ALL.
+</div>
+
+<p class="store-lead-tight store-mt-1"><strong>Receiver count semantics:</strong> <code>Store::publish</code> delivers ONE copy to every worker (across every node) running a matching subscriber. So 32 workers per node &times; 2 nodes = <code>receivers: 64</code> for one PUBLISH. That's correct Redis pub/sub &mdash; matches the cross-server WebSocket routing pattern where each worker owns a subset of fds.</p>
+
 <h2 class="store-h2-section">When to use Redis / Valkey</h2>
 <p class="store-lead-tight">Store and Cache cover most single-server apps. Here's when you'll need an external cache.</p>
 
