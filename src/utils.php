@@ -292,7 +292,11 @@ function log_write(string $message, string $kind = 'debug'): void
     }
 
     $sink = log_sink_for($path);
-    if ($sink instanceof \OpenSwoole\Coroutine\Channel) {
+    // Channel::push requires a coroutine context — guard via Coroutine::getCid
+    // before pushing. Falls through to the synchronous fopen+fwrite path below
+    // when called outside a coroutine (e.g. from a unit test harness, a CLI
+    // script, or any sync-mode boot code).
+    if ($sink instanceof \OpenSwoole\Coroutine\Channel && \OpenSwoole\Coroutine::getCid() >= 0) {
         if ($sink->push($message, 0.001)) {
             return;
         }
