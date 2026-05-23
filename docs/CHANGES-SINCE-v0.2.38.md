@@ -275,6 +275,81 @@ If you pass non-default `maxRows` to Redis without `ttlSeconds`, a one-line warn
 
 ---
 
+## v0.3.0 — Federated WebSocket Rooms (P1.1)
+
+Cross-server / cross-host room abstraction on top of the v0.2.40 Store + pub/sub fabric. Membership is cluster-wide; pushes fan out via a single `ws:room:*` PSUBSCRIBE pattern (no per-room subscriber proliferation).
+
+### Try it — federated chat in five lines
+
+```php
+use ZealPHP\Store;
+use ZealPHP\WSRouter;
+
+Store::defaultBackend(StoreBackendKind::Redis);
+WSRouter::init();                            // wires the pattern subscriber
+
+$room = WSRouter::room('chat:42');
+$room->join('alice');                        // SADD-equivalent + presence broadcast
+$room->push(['from' => 'alice', 'data' => 'hi']);  // fan-out cluster-wide
+echo $room->size();                          // cluster-wide member count
+```
+
+### Federation — verified cross-host
+
+```bash
+# 1. Alice joins on server A:
+curl 'http://node-a/demo/rooms/join?room=chat:42&client=alice'
+
+# 2. Bob joins on server B:
+curl 'http://node-b/demo/rooms/join?room=chat:42&client=bob'
+
+# 3. Both nodes see the SAME roster:
+curl 'http://node-a/demo/rooms/members?room=chat:42'
+# → {"size":2,"members":["bob","alice"]}
+curl 'http://node-b/demo/rooms/members?room=chat:42'
+# → {"size":2,"members":["bob","alice"]}     ← cross-host visibility
+
+# 4. Broadcast from any node → every other node's local members receive:
+curl 'http://node-a/demo/rooms/push?room=chat:42&msg=federated-hello'
+# → {"receivers":64}     ← 16 workers × 2 servers × 2 (pattern + log)
+```
+
+### API
+
+| Method | What it does |
+|---|---|
+| `WSRouter::room($name): Room` | Get a Room handle |
+| `$room->join($clientId)` | Add client to room + broadcast presence event |
+| `$room->leave($clientId)` | Remove client + broadcast presence event |
+| `$room->isMember($clientId)` | Cluster-wide check |
+| `$room->size(): int` | Cluster-wide member count |
+| `$room->members(): list<string>` | Cluster-wide roster |
+| `$room->push($payload): int` | Broadcast to all members; returns receiver count |
+| `$room->onMessage($handler)` | Register a server-side message handler |
+| `$room->onPresence($handler)` | Register a join/leave event handler |
+
+### Storage layout
+
+| What | Where |
+|---|---|
+| Membership | Shared Store table `ws_room_members` (Store::defaultBackend) — rows keyed by `{room}:{clientId}` |
+| Message channel | `zealstore:ws:room:{name}` Redis pub/sub channel |
+| Subscriber | One PSUBSCRIBE `ws:room:*` per worker (covers every room) |
+| Per-worker push targets | `WSRouter::$localRoomMembership[room][clientId]` — only locally-owned clients are populated, via presence events |
+
+### Code paths
+- `src/WS/Room.php` — Room class (join/leave/size/members/push/onMessage/onPresence)
+- `src/WSRouter.php` — `room()`, `roomTable()`, `handleRoomMessage()`, registries, pattern subscriber wiring in `init()`
+- `route/demo_rooms.php` — `/demo/rooms/{join,leave,members,push,state}` live endpoints
+
+### Tests
+```bash
+./vendor/bin/phpunit tests/Unit/WS/RoomTest.php tests/Unit/WSRouterTest.php
+# → 18 tests (10 Room + 8 WSRouter), 53 assertions, all pass
+```
+
+---
+
 ## v0.3.0 early — 5 framework helpers (no engineering debt left)
 
 These are conceptually Phase 1 of the v0.3.0 roadmap but landed in `release/v0.2.39` because the half-cooked surface wouldn't go away on its own.
