@@ -35,6 +35,12 @@ use ZealPHP\Store\StoreException;
  */
 class Counter
 {
+    // Backend kind constants — prefer over bare strings:
+    //   Counter::defaultBackend(Counter::BACKEND_REDIS) ← IDE-autocompleted
+    //   Counter::defaultBackend('redis')                ← also works (BC).
+    public const BACKEND_ATOMIC = 'atomic';
+    public const BACKEND_REDIS  = 'redis';
+
     private static ?CounterBackend $backend = null;
     /** @var array{kind:string, conn?: string|array<string,mixed>} */
     private static array $backendConfig = ['kind' => 'atomic'];
@@ -148,19 +154,36 @@ class Counter
             return new AtomicBackend();
         }
         $conn = $cfg['conn'] ?? [];
+        $opts = self::poolOptsFromEnv();
         if (is_string($conn)) {
             $url = $conn !== '' ? $conn : self::redisUrlFromEnv();
-            return new RedisCounterBackend(new RedisConnectionPool($url));
+            return new RedisCounterBackend(new RedisConnectionPool($url, 8, $opts));
         }
         $url    = isset($conn['url']) && is_string($conn['url']) ? $conn['url'] : self::redisUrlFromEnv();
         $size   = isset($conn['pool_size']) && is_int($conn['pool_size']) ? $conn['pool_size'] : 8;
         $prefix = isset($conn['prefix']) && is_string($conn['prefix']) ? $conn['prefix'] : 'zealstore';
-        return new RedisCounterBackend(new RedisConnectionPool($url, $size), $prefix);
+        if (isset($conn['prefer']) && is_string($conn['prefer'])) {
+            $p = strtolower($conn['prefer']);
+            if (in_array($p, ['auto', 'phpredis', 'predis'], true)) {
+                $opts['prefer'] = $p;
+            }
+        }
+        return new RedisCounterBackend(new RedisConnectionPool($url, $size, $opts), $prefix);
     }
 
     private static function redisUrlFromEnv(): string
     {
         $env = getenv('ZEALPHP_REDIS_URL');
         return is_string($env) && $env !== '' ? $env : 'redis://127.0.0.1:6379';
+    }
+
+    /** @return array{prefer?: 'auto'|'phpredis'|'predis'} */
+    private static function poolOptsFromEnv(): array
+    {
+        $prefer = getenv('ZEALPHP_REDIS_PREFER');
+        if (!is_string($prefer) || $prefer === '') { return []; }
+        $prefer = strtolower($prefer);
+        if (!in_array($prefer, ['auto', 'phpredis', 'predis'], true)) { return []; }
+        return ['prefer' => $prefer];
     }
 }

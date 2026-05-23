@@ -56,6 +56,17 @@ class Store
     public const TYPE_FLOAT  = Table::TYPE_FLOAT;
     public const TYPE_STRING = Table::TYPE_STRING;
 
+    // Backend kind constants — prefer over bare strings:
+    //   Store::defaultBackend(Store::BACKEND_REDIS)  ← IDE-autocompleted, refactor-safe
+    //   Store::defaultBackend('redis')              ← also works (BC).
+    public const BACKEND_TABLE = 'table';
+    public const BACKEND_REDIS = 'redis';
+
+    // Driver-prefer constants for $conn['prefer'] / ZEALPHP_REDIS_PREFER:
+    public const PREFER_AUTO     = 'auto';
+    public const PREFER_PHPREDIS = 'phpredis';
+    public const PREFER_PREDIS   = 'predis';
+
     private static ?StoreBackend $backend = null;
     /** @var array{kind:string, conn?: string|array<string,mixed>} */
     private static array $backendConfig = ['kind' => 'table'];
@@ -86,19 +97,45 @@ class Store
         }
         $conn = $cfg['conn'] ?? [];
         if (is_string($conn)) {
-            $url = $conn !== '' ? $conn : self::redisUrlFromEnv();
-            return new RedisBackend(new RedisConnectionPool($url));
+            $url  = $conn !== '' ? $conn : self::redisUrlFromEnv();
+            $opts = self::poolOptsFromEnv();
+            return new RedisBackend(new RedisConnectionPool($url, 8, $opts));
         }
         $url    = isset($conn['url']) && is_string($conn['url']) ? $conn['url'] : self::redisUrlFromEnv();
         $size   = isset($conn['pool_size']) && is_int($conn['pool_size']) ? $conn['pool_size'] : 8;
         $prefix = isset($conn['prefix']) && is_string($conn['prefix']) ? $conn['prefix'] : 'zealstore';
-        return new RedisBackend(new RedisConnectionPool($url, $size), $prefix);
+        $opts   = self::poolOptsFromEnv();
+        // Allow ['prefer' => 'phpredis'|'predis'|'auto'] to override the env default.
+        if (isset($conn['prefer']) && is_string($conn['prefer'])) {
+            $p = strtolower($conn['prefer']);
+            if (in_array($p, ['auto', 'phpredis', 'predis'], true)) {
+                $opts['prefer'] = $p;
+            }
+        }
+        return new RedisBackend(new RedisConnectionPool($url, $size, $opts), $prefix);
     }
 
     private static function redisUrlFromEnv(): string
     {
         $env = getenv('ZEALPHP_REDIS_URL');
         return is_string($env) && $env !== '' ? $env : 'redis://127.0.0.1:6379';
+    }
+
+    /**
+     * Build pool options from environment. ZEALPHP_REDIS_PREFER picks the
+     * client lib — 'auto' (default), 'phpredis', or 'predis'. Use 'predis'
+     * for pub/sub subscribers in production until the phpredis SUBSCRIBE +
+     * HOOK_ALL spike has been benched in your environment.
+     *
+     * @return array{prefer?: 'auto'|'phpredis'|'predis'}
+     */
+    private static function poolOptsFromEnv(): array
+    {
+        $prefer = getenv('ZEALPHP_REDIS_PREFER');
+        if (!is_string($prefer) || $prefer === '') { return []; }
+        $prefer = strtolower($prefer);
+        if (!in_array($prefer, ['auto', 'phpredis', 'predis'], true)) { return []; }
+        return ['prefer' => $prefer];
     }
 
     /**
