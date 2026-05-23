@@ -53,4 +53,23 @@ interface StoreBackend
 
     /** @return list<string> */
     public function names(): array;
+
+    /**
+     * Bulk read. Returns `[key => row]`; rows are `null` for missing keys
+     * (NOT omitted) so callers can distinguish "not found" from "empty
+     * row". RedisBackend pipelines this into one round-trip; TableBackend
+     * loops.
+     *
+     * @param  list<string> $keys
+     * @return array<string, array<string, scalar>|null>
+     */
+    public function mget(string $name, array $keys): array;
+
+    /**
+     * Bulk write. Returns true on full success, false if any individual
+     * row failed (TableBackend overflow). The Redis impl is pipelined.
+     *
+     * @param array<string, array<string, scalar>> $rows
+     */
+    public function mset(string $name, array $rows): bool;
 }

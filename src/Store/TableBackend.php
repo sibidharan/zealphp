@@ -110,6 +110,34 @@ final class TableBackend implements StoreBackend
         return array_keys($this->tables);
     }
 
+    public function mget(string $name, array $keys): array
+    {
+        $out = [];
+        foreach ($keys as $k) {
+            $row = $this->get($name, $k);
+            if (!is_array($row)) { $out[$k] = null; continue; }
+            $coerced = [];
+            foreach ($row as $col => $val) {
+                if (is_scalar($val)) {
+                    $coerced[(string) $col] = $val;
+                }
+                // Non-scalar values can't reach here for a Table-stored row,
+                // but skip defensively rather than coercing nulls/arrays to ''.
+            }
+            $out[$k] = $coerced;
+        }
+        return $out;
+    }
+
+    public function mset(string $name, array $rows): bool
+    {
+        $allOk = true;
+        foreach ($rows as $key => $row) {
+            if (!$this->set($name, (string) $key, $row)) { $allOk = false; }
+        }
+        return $allOk;
+    }
+
     /**
      * Direct access to the underlying Table — used by the Store facade
      * to keep `Store::table($name)` working under the table backend.
