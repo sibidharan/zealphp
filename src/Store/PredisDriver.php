@@ -252,6 +252,124 @@ final class PredisDriver implements RedisDriver
         try { $this->c->disconnect(); } catch (\Throwable $e) { /* tolerant */ }
     }
 
+    public function publish(string $channel, string $payload): int
+    {
+        try {
+            /** @var mixed $r */
+            $r = $this->c->publish($channel, $payload);
+            return $this->asInt($r, 'publish');
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function subscribe(array $exactChannels, array $patternChannels, callable $consumer): void
+    {
+        if ($exactChannels === [] && $patternChannels === []) {
+            throw new StoreException('subscribe(): need at least one channel or pattern');
+        }
+        try {
+            $loop = $this->c->pubSubLoop();
+            if ($loop === null) { throw new StoreException('predis pubSubLoop returned null'); }
+            if ($exactChannels   !== []) { $loop->subscribe(...$exactChannels); }
+            if ($patternChannels !== []) { $loop->psubscribe(...$patternChannels); }
+            foreach ($loop as $frame) {
+                /** @var mixed $frame */
+                if (!is_object($frame) || !property_exists($frame, 'kind')) { continue; }
+                $kind = is_scalar($frame->kind) ? (string) $frame->kind : '';
+                if ($kind !== 'message' && $kind !== 'pmessage') { continue; }
+                $channel = property_exists($frame, 'channel') && is_scalar($frame->channel) ? (string) $frame->channel : '';
+                $payload = property_exists($frame, 'payload') && is_scalar($frame->payload) ? (string) $frame->payload : '';
+                $pattern = null;
+                if ($kind === 'pmessage' && property_exists($frame, 'pattern') && is_scalar($frame->pattern)) {
+                    $pattern = (string) $frame->pattern;
+                }
+                try { $consumer($payload, $channel, $pattern); }
+                catch (PubSubStopException) { $loop->unsubscribe(); return; }
+            }
+        } catch (PubSubStopException) {
+            return;
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function xadd(string $stream, array $fields, ?int $maxLen = null): string
+    {
+        if ($fields === []) {
+            throw new StoreException('xadd(): fields must be non-empty');
+        }
+        try {
+            $cmd = ['XADD', $stream];
+            if ($maxLen !== null) { array_push($cmd, 'MAXLEN', '~', (string) $maxLen); }
+            $cmd[] = '*';
+            foreach ($fields as $k => $v) { $cmd[] = (string) $k; $cmd[] = (string) $v; }
+            /** @var mixed $id */
+            $id = $this->c->executeRaw($cmd);
+            return $this->asString($id, 'xadd');
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function xgroupCreate(string $stream, string $group, string $id = '$', bool $mkStream = true): bool
+    {
+        try {
+            $cmd = ['XGROUP', 'CREATE', $stream, $group, $id];
+            if ($mkStream) { $cmd[] = 'MKSTREAM'; }
+            $this->c->executeRaw($cmd);
+            return true;
+        } catch (PredisException $e) {
+            if (str_contains($e->getMessage(), 'BUSYGROUP')) { return false; }
+            throw $this->wrap($e);
+        }
+    }
+
+    public function xreadGroup(string $group, string $consumer, array $streams, int $count, int $blockMs): array
+    {
+        if ($streams === []) { return []; }
+        try {
+            $cmd = ['XREADGROUP', 'GROUP', $group, $consumer, 'COUNT', (string) $count, 'BLOCK', (string) $blockMs, 'STREAMS'];
+            foreach ($streams as $s) { $cmd[] = $s; }
+            foreach ($streams as $_) { $cmd[] = '>'; }
+            /** @var mixed $raw */
+            $raw = $this->c->executeRaw($cmd);
+            // raw: null on timeout, otherwise [ [ <stream>, [ [<id>, [<f>,<v>,<f>,<v>...]], ... ] ], ... ]
+            if (!is_array($raw)) { return []; }
+            $out = [];
+            foreach ($raw as $streamBlock) {
+                if (!is_array($streamBlock) || count($streamBlock) < 2) { continue; }
+                $streamName = is_scalar($streamBlock[0]) ? (string) $streamBlock[0] : '';
+                $entries = $streamBlock[1];
+                if (!is_array($entries) || $streamName === '') { continue; }
+                $list = [];
+                foreach ($entries as $entry) {
+                    if (!is_array($entry) || count($entry) < 2) { continue; }
+                    $id = is_scalar($entry[0]) ? (string) $entry[0] : '';
+                    $flat = $entry[1];
+                    if ($id === '' || !is_array($flat)) { continue; }
+                    $payload = [];
+                    $kv = array_values($flat);
+                    for ($i = 0; $i + 1 < count($kv); $i += 2) {
+                        $k = is_scalar($kv[$i])     ? (string) $kv[$i]     : null;
+                        $v = is_scalar($kv[$i + 1]) ? (string) $kv[$i + 1] : null;
+                        if ($k === null || $v === null) { continue; }
+                        $payload[$k] = $v;
+                    }
+                    $list[] = ['id' => $id, 'payload' => $payload];
+                }
+                $out[$streamName] = $list;
+            }
+            return $out;
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function xack(string $stream, string $group, string ...$ids): int
+    {
+        if ($ids === []) { return 0; }
+        try {
+            $cmd = ['XACK', $stream, $group];
+            foreach ($ids as $id) { $cmd[] = $id; }
+            /** @var mixed $r */
+            $r = $this->c->executeRaw($cmd);
+            return $this->asInt($r, 'xack');
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
     public function pipeline(callable $batch): array
     {
         try {
