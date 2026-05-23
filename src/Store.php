@@ -544,7 +544,7 @@ class Store
      * delivered the message to. Throws StoreException when the default
      * backend is not Redis (Table has no pub/sub semantics).
      *
-     * Pair with App::onPubSub() to register handlers. Messages published
+     * Pair with App::subscribe() to register handlers. Messages published
      * while a subscriber is mid-reconnect are LOST — use publishReliable()
      * for at-least-once delivery.
      */
@@ -577,7 +577,7 @@ class Store
      * message ID. Durable when Redis has AOF/RDB; at-least-once delivery
      * via consumer groups (one consumer per worker by default).
      *
-     * Pair with App::onReliableMessage() to register a consumer group
+     * Pair with App::subscribeReliable() to register a consumer group
      * handler. Throws StoreException when backend is not Redis.
      */
     public static function publishReliable(string $stream, string $payload, ?int $maxLen = null): string

@@ -269,14 +269,14 @@ if (Store::defaultBackend() instanceof \ZealPHP\Store\RedisBackend) {
         'ts'      => [Store::TYPE_INT,    8],
     ]);
 
-    App::onPubSub('demo:pubsub', function (string $payload, string $channel, ?string $pattern): void {
+    App::subscribe('demo:pubsub', function (string $payload, string $channel, ?string $pattern): void {
         $id = 'm_' . bin2hex(random_bytes(4));
         Store::set('demo_pubsub_log', $id, [
             'channel' => $channel, 'payload' => $payload,
             'pattern' => $pattern ?? '', 'ts' => time(),
         ]);
     });
-    App::onPubSub('demo:pubsub:*', function (string $payload, string $channel, ?string $pattern): void {
+    App::subscribe('demo:pubsub:*', function (string $payload, string $channel, ?string $pattern): void {
         $id = 'm_' . bin2hex(random_bytes(4));
         Store::set('demo_pubsub_log', $id, [
             'channel' => $channel, 'payload' => $payload,

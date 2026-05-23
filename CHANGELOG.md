@@ -76,6 +76,7 @@ PR #83.
 
 ### Changed (this release)
 
+- **Pub/sub API renamed for clarity** — `App::onPubSub` → `App::subscribe`, `App::offPubSub` → `App::unsubscribe`, `App::onReliableMessage` → `App::subscribeReliable`. The new names pair symmetrically with `Store::publish` / `Store::publishReliable` ("Store publishes, App subscribes"). The old `on*`/`off*` names are kept as BC aliases — existing call sites keep working — but new code should use the verb-form names. All in-tree call sites (route/demo.php, src/WSRouter.php, src/Store.php docblocks) migrated.
 - `Counter::__construct(int $initial = 0, ?string $name = null)` no longer overwrites an existing same-named counter. Previously every `new Counter(0, 'foo')` invocation called `set($name, 0)`, clobbering existing state — hidden footgun for per-room / per-user monotonic counters. Now uses `setIfAbsent` (SETNX on Redis, fresh-map check on Atomic). Explicit `Counter->reset()` keeps the old behaviour available.
 - `Cache::stats()` returns 3 new keys: `stampede_blocked`, `file_rotations`, `tag_invalidations`. The shape stays backwards-compatible (no key removals).
 - `App::stats()` shape extended with `cache`, `ws_router`, `backends` keys.

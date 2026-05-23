@@ -2177,7 +2177,7 @@ class App
      * at worker-start time, the subscriber is not spawned and a warning
      * is logged.
      */
-    public static function onPubSub(string $channelOrPattern, callable $handler): void
+    public static function subscribe(string $channelOrPattern, callable $handler): void
     {
         self::$pubsubRegistry[$channelOrPattern][] = $handler;
         self::wirePubSubBoot();
@@ -2188,7 +2188,7 @@ class App
      * removes every registered handler for that channel. Returns the
      * count removed.
      */
-    public static function offPubSub(string $channelOrPattern, ?callable $handler = null): int
+    public static function unsubscribe(string $channelOrPattern, ?callable $handler = null): int
     {
         if (!isset(self::$pubsubRegistry[$channelOrPattern])) { return 0; }
         if ($handler === null) {
@@ -2205,6 +2205,23 @@ class App
     }
 
     /**
+     * BC alias for `subscribe()`. The original on*-prefixed name was a
+     * misnomer — the act IS subscribing, not an event. New code should
+     * call `App::subscribe()` directly; pairs symmetrically with
+     * `Store::publish()`.
+     */
+    public static function onPubSub(string $channelOrPattern, callable $handler): void
+    {
+        self::subscribe($channelOrPattern, $handler);
+    }
+
+    /** BC alias for `unsubscribe()`. See `onPubSub` docblock. */
+    public static function offPubSub(string $channelOrPattern, ?callable $handler = null): int
+    {
+        return self::unsubscribe($channelOrPattern, $handler);
+    }
+
+    /**
      * Register a Redis Streams consumer-group handler. At-least-once
      * delivery via XREADGROUP. Handler signature:
      *   `function(string $payload, string $messageId, string $stream, array $fields): bool`
@@ -2215,9 +2232,9 @@ class App
      * in a cluster share one group → round-robin load balancing across
      * machines and workers.
      *
-     * Same backend requirement as onPubSub.
+     * Same backend requirement as subscribe().
      */
-    public static function onReliableMessage(
+    public static function subscribeReliable(
         string $stream,
         callable $handler,
         ?string $group = null,
@@ -2230,6 +2247,17 @@ class App
             'blockMs' => $blockMs, 'batchSize' => $batchSize,
         ];
         self::wirePubSubBoot();
+    }
+
+    /** BC alias for `subscribeReliable()`. See `onPubSub` docblock. */
+    public static function onReliableMessage(
+        string $stream,
+        callable $handler,
+        ?string $group = null,
+        int $blockMs = 1000,
+        int $batchSize = 16,
+    ): void {
+        self::subscribeReliable($stream, $handler, $group, $blockMs, $batchSize);
     }
 
     /**

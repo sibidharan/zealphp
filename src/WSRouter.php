@@ -43,7 +43,7 @@ use ZealPHP\WS\Room;
  * - Room broadcasts are plain pub/sub on a user-chosen channel.
  *
  * Lifecycle hooks must be wired before App::run() — same constraint as
- * App::onPubSub.
+ * App::subscribe.
  */
 final class WSRouter
 {
@@ -354,7 +354,7 @@ final class WSRouter
         // subscriber proliferation. Handler dispatches to user-registered
         // message/presence handlers + maintains the per-worker local
         // membership cache.
-        App::onPubSub(self::ROOM_CHANNEL_PREFIX . '*', function (string $envelope, string $channel): void {
+        App::subscribe(self::ROOM_CHANNEL_PREFIX . '*', function (string $envelope, string $channel): void {
             // WS-3: unwrap signed envelope when a secret is configured;
             // drop silently (with stats bump) on bad/missing signature.
             $payload = self::verifyPayload($envelope);
@@ -365,7 +365,7 @@ final class WSRouter
         // Subscribe to OUR identity channel. Inbound messages have
         // {client_id, conn_id, payload}; the configured sink does the
         // local push iff the conn_id matches the currently-held connection.
-        App::onPubSub('ws:server:' . self::$serverId, function (string $envelope): void {
+        App::subscribe('ws:server:' . self::$serverId, function (string $envelope): void {
             // WS-3 verification (mirror of the room subscriber above).
             $payload = self::verifyPayload($envelope);
             if ($payload === null) { return; }
@@ -523,7 +523,7 @@ final class WSRouter
 
     /**
      * Publish to a room channel. Every server with a matching
-     * `App::onPubSub($channel, ...)` handler fans out to its local
+     * `App::subscribe($channel, ...)` handler fans out to its local
      * clients. Returns the receiver count Redis reported.
      */
     public static function broadcast(string $channel, string $payload): int
@@ -532,13 +532,13 @@ final class WSRouter
     }
 
     /**
-     * Sugar over `App::onPubSub($channel, ...)` — use when you want
+     * Sugar over `App::subscribe($channel, ...)` — use when you want
      * the room-channel registration to read more naturally alongside
      * the routing calls above.
      */
     public static function onRoom(string $channel, callable $handler): void
     {
-        App::onPubSub($channel, $handler);
+        App::subscribe($channel, $handler);
     }
 
     /** @internal — testing hook to reset module state between cases. */
