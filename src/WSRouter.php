@@ -401,6 +401,12 @@ final class WSRouter
             'pid'       => [Store::TYPE_INT, 8],
         ]);
 
+        // Land our own row IMMEDIATELY so callers (e.g. an explicit
+        // App::stats() between init() and run()) see a populated registry.
+        // The onWorkerStart hook below adds a periodic refresh; this just
+        // closes the boot-window gap.
+        self::writeServerRegistryRow();
+
         // Single PSUBSCRIBE pattern covers every room — no per-room
         // subscriber proliferation. Handler dispatches to user-registered
         // message/presence handlers + maintains the per-worker local
@@ -677,6 +683,12 @@ final class WSRouter
 
     /** @internal — name of the cluster-wide membership table. */
     public static function roomTable(): string { return self::ROOM_TABLE; }
+
+    /** @internal — name of the cluster-wide ownership table (client_id → server_id, conn_id). */
+    public static function ownerTable(): string { return self::TABLE; }
+
+    /** @internal — name of the server-registry table (server_id → last_seen, host, pid). */
+    public static function serverTable(): string { return self::SERVERS_TABLE; }
 
     /** @internal — channel prefix used for room pub/sub. */
     public static function roomChannelPrefix(): string { return self::ROOM_CHANNEL_PREFIX; }
