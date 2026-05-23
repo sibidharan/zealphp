@@ -24,6 +24,7 @@ $links = [
   'middleware'      => ['/middleware',      'Middleware'],
   'sessions'        => ['/sessions',       'Sessions'],
   'store'           => ['/store',          'Store & Cache'],
+  'pubsub'          => ['/pubsub',         'Pub/Sub'],
   'timers'          => ['/timers',         'Timers'],
   'deployment'      => ['/deployment',     'Deploy'],
 ];

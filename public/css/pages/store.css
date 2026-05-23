@@ -1,61 +1,54 @@
-/* Page-scoped styles for /store — relocated from inline style= attrs. */
-
-.store-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
-  margin-bottom: 2rem;
+/* Live demo widget styles for /store + /pubsub */
+.store-demo-panel {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--c-border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--c-bg-card, rgba(255, 255, 255, 0.02));
 }
-
-.store-grid-tight {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
-  margin-bottom: 1.5rem;
+.store-demo-panel h3 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
 }
-
-.store-h2 {
-  margin: 2rem 0 .5rem;
+.store-demo-panel-lead {
+  font-size: 0.9rem;
+  opacity: 0.75;
+  margin-bottom: 0.75rem;
 }
-
-.store-h2-section {
-  margin: 2.5rem 0 .5rem;
+.store-demo-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
 }
-
-.store-h3 {
-  margin: 1.5rem 0 .5rem;
+.store-demo-controls button {
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.75rem;
 }
-
-.store-lead {
-  color: var(--text-muted);
-  margin-bottom: 1.5rem;
+.demo-json-pane {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  background: var(--c-code-bg, #111);
+  color: var(--c-code-fg, #d4d4d4);
+  font-family: var(--ff-mono, ui-monospace, monospace);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 6rem;
+  max-height: 24rem;
+  overflow: auto;
 }
-
-.store-lead-tight {
-  color: var(--text-muted);
-  margin-bottom: 1rem;
+.demo-json-pane.is-error {
+  color: #f87171;
+  border: 1px solid #b91c1c;
 }
-
-.store-mt-1 {
-  margin-top: 1rem;
-}
-
-.store-mt {
-  margin-top: 1.5rem;
-}
-
-.store-col-good {
-  color: var(--success);
-  margin-bottom: .75rem;
-}
-
-.store-col-bad {
-  color: var(--danger);
-  margin-bottom: .75rem;
-}
-
-.store-col-list {
-  font-size: .9rem;
-  line-height: 1.8;
-  color: var(--text-muted);
+.store-demo-hint {
+  font-size: 0.8rem;
+  opacity: 0.6;
+  margin-top: 0.5rem;
 }

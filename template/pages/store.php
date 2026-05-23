@@ -160,7 +160,7 @@ Cache::flush();                                    // clear everything</code></p
 <h2 class="store-h2-section" id="backends">Pluggable backends — Table (default) + Redis/Valkey</h2>
 <p class="store-lead-tight">As of v0.2.39, <code>Store</code> and <code>Counter</code> are <strong>backend-agnostic</strong>. The default <code>OpenSwoole\Table</code>/<code>Atomic</code> backend stays your hot path (nanosecond reads, lock-free). When you need <strong>cross-node shared state</strong> or <strong>persistence across restarts</strong>, flip to Redis/Valkey with one line in <code>app.php</code> &mdash; every <code>Store::set/get/incr/count</code> call works unchanged.</p>
 
-<div class="card-code-block">
+<div class="code-block">
 <pre><code class="language-php">// app.php &mdash; one-line switch
 Store::defaultBackend('redis');                                    // ZEALPHP_REDIS_URL env
 // or:
@@ -195,7 +195,7 @@ Store::defaultBackend('redis', 'redis://cache.internal:6379/1');   // explicit U
 <h2 class="store-h2-section" id="pubsub">Pub/sub + Streams (cross-node messaging)</h2>
 <p class="store-lead-tight">Two public primitives on top of the Redis backend for cross-worker AND cross-host messaging. Both require <code>Store::defaultBackend(Store::BACKEND_REDIS)</code>.</p>
 
-<div class="card-code-block">
+<div class="code-block">
 <pre><code class="language-php">// Fire-and-forget pub/sub
 App::onPubSub('chat:room:42', function (string $payload, string $channel) {
     // runs in every worker that's registered; routes to your local fd map
@@ -234,7 +234,7 @@ $messageId = Store::publishReliable('orders', json_encode($order));</code></pre>
   <strong>Driver caveat (production-relevant).</strong> phpredis is the preferred driver when <code>ext-redis</code> is loaded &mdash; it's faster than predis for hot CRUD paths. <strong>However, the SUBSCRIBE + HOOK_ALL coroutine spike has so far only been benched against predis</strong> (see <a href="https://github.com/sibidharan/zealphp/blob/master/docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md" target="_blank">spike result</a> &mdash; predis subscribe yields cleanly under OpenSwoole HOOK_ALL, sub-millisecond delivery confirmed across hosts). phpredis's subscribe loop is C-side and has not been validated in this configuration. Production deployments using pub/sub subscribers should either:
   <ol>
     <li><strong>Force predis</strong> for subscribers until the phpredis spike is re-run in your environment:
-      <div class="card-code-block">
+      <div class="code-block">
 <pre><code class="language-php">// Per-instance:
 Store::defaultBackend(Store::BACKEND_REDIS, [
     'url'    => 'redis://cache:6379/0',
@@ -251,6 +251,21 @@ ZEALPHP_REDIS_PREFER=predis</code></pre>
 </div>
 
 <p class="store-lead-tight store-mt-1"><strong>Receiver count semantics:</strong> <code>Store::publish</code> delivers ONE copy to every worker (across every node) running a matching subscriber. So 32 workers per node &times; 2 nodes = <code>receivers: 64</code> for one PUBLISH. That's correct Redis pub/sub &mdash; matches the cross-server WebSocket routing pattern where each worker owns a subset of fds.</p>
+
+<h2 class="store-h2-section" id="demo">Live demo &mdash; this very server</h2>
+<p class="store-lead-tight">Each button below fires a real HTTP request against the running ZealPHP instance. Output panel shows the JSON the server returned. Most useful with <code>ZEALPHP_STORE_BACKEND=redis</code>; on the default Table backend the pub/sub buttons surface a clean <code>StoreException</code> error in JSON.</p>
+<div class="store-demo-panel">
+  <h3>Try it</h3>
+  <p class="store-demo-panel-lead">Each click rolls a fresh random message so you can see the receiver count + message ID change.</p>
+  <div class="store-demo-controls">
+    <button class="btn btn-primary btn-sm" type="button" data-action="store-demo-roundtrip">Set + Get + Incr (round-trip)</button>
+    <button class="btn btn-primary btn-sm" type="button" data-action="store-demo-publish">Publish (fire-and-forget)</button>
+    <button class="btn btn-primary btn-sm" type="button" data-action="store-demo-publish-reliable">Publish (Streams &mdash; reliable)</button>
+    <button class="btn btn-ghost btn-sm"   type="button" data-action="store-demo-pubsub-log">Read pubsub log</button>
+  </div>
+  <pre class="demo-json-pane">Click a button above to fire a request. The response JSON will land here.</pre>
+  <p class="store-demo-hint">Endpoints: <code>/demo/store-roundtrip</code>, <code>/demo/pubsub/publish</code>, <code>/demo/pubsub/publish-reliable</code>, <code>/demo/pubsub/log</code>. See <a href="/pubsub">/pubsub</a> for the multi-tab walkthrough.</p>
+</div>
 
 <h2 class="store-h2-section">When to use Redis / Valkey</h2>
 <p class="store-lead-tight">Store and Cache cover most single-server apps. Here's when you'll need an external cache.</p>
