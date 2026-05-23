@@ -107,9 +107,9 @@ function sendToClient(string $clientId, string $data): void {
   <p class="store-demo-hint">Routes wired in <code>route/demo.php</code>. The 'receivers' field on Publish typically equals your worker count &mdash; each worker has its own subscriber cor.</p>
 </div>
 
-<h2 class="store-h2-section">Production driver note</h2>
-<div class="callout warn">
-  <strong>For pub/sub subscribers under load, set <code>ZEALPHP_REDIS_PREFER=predis</code></strong> (or pass <code>['prefer' =&gt; Store::PREFER_PREDIS]</code> in your conn opts). The predis SUBSCRIBE-under-HOOK_ALL spike validated yielding behaviour; phpredis is C-side and hasn't been benched in this configuration yet. Hot CRUD paths (HGETALL, INCRBY, mget, &hellip;) are unaffected &mdash; phpredis stays the default for those. See <a href="/store#phpredis-pubsub-caveat">/store#phpredis-pubsub-caveat</a>.
+<h2 class="store-h2-section">Driver choice (both validated)</h2>
+<div class="callout info">
+  Both phpredis (preferred when <code>ext-redis</code> is loaded) and predis SUBSCRIBE loops yield correctly under <code>HOOK_ALL</code> &mdash; the production default. phpredis is ~2&times; faster on hot CRUD; predis works without the ext. Pick phpredis when available. See <a href="/store#phpredis-pubsub-caveat">/store#phpredis-pubsub-caveat</a> for the comparison.
 </div>
 
 <h2 class="store-h2-section">Further reading</h2>

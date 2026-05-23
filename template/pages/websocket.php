@@ -175,9 +175,9 @@ PHP]); ?>
 	<p>The OpenSwoole <code>$fd</code> is process-local — only the server that accepted the TCP connection can push to it. Redis is the routing fabric: PUBLISH carries the message to the owning server, owner's subscriber translates client_id → local fd → <code>$server-&gt;push()</code>. ~0.5ms loopback, sub-millisecond cross-region (validated in the <a href="https://github.com/sibidharan/zealphp/blob/master/docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md" target="_blank">pub/sub spike</a>). Scales to N servers symmetrically — no peer-to-peer state, every routing decision is one Redis lookup + PUBLISH.</p>
 	<p>For <strong>at-least-once</strong> delivery (work queues, command/event sourcing), pair with <code>Store::publishReliable</code> + <code>App::onReliableMessage</code> — Redis Streams with consumer groups. See <a href="/store#pubsub">/store#pubsub</a> + the deeper walkthrough at <a href="/learn/websocket#cross-server-routing">/learn/websocket#cross-server-routing</a>.</p>
 	<?php App::render('/components/_callout', [
-	    'variant' => 'warn',
-	    'title'   => 'Production driver note',
-	    'body'    => '<p>For pub/sub subscribers under load, set <code>ZEALPHP_REDIS_PREFER=predis</code> until you bench phpredis SUBSCRIBE under HOOK_ALL in your environment. Hot CRUD paths (HGETALL, INCRBY, mget, …) are unaffected. See <a href="/store#phpredis-pubsub-caveat">/store#phpredis-pubsub-caveat</a>.</p>',
+	    'variant' => 'info',
+	    'title'   => 'Driver choice (both validated)',
+	    'body'    => '<p>Both phpredis (preferred when <code>ext-redis</code> is loaded) and predis SUBSCRIBE loops yield under <code>HOOK_ALL</code> — the production default. phpredis is ~2× faster on hot CRUD; predis works without the ext. Spike results: <a href="/store#phpredis-pubsub-caveat">/store#phpredis-pubsub-caveat</a>.</p>',
 	]); ?>
 
 	<h2 class="ws-h2">Browser JavaScript</h2>

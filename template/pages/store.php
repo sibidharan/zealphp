@@ -230,24 +230,21 @@ $messageId = Store::publishReliable('orders', json_encode($order));</code></pre>
   </tbody>
 </table>
 
-<div class="callout warn store-mt-1" id="phpredis-pubsub-caveat">
-  <strong>Driver caveat (production-relevant).</strong> phpredis is the preferred driver when <code>ext-redis</code> is loaded &mdash; it's faster than predis for hot CRUD paths. <strong>However, the SUBSCRIBE + HOOK_ALL coroutine spike has so far only been benched against predis</strong> (see <a href="https://github.com/sibidharan/zealphp/blob/master/docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md" target="_blank">spike result</a> &mdash; predis subscribe yields cleanly under OpenSwoole HOOK_ALL, sub-millisecond delivery confirmed across hosts). phpredis's subscribe loop is C-side and has not been validated in this configuration. Production deployments using pub/sub subscribers should either:
-  <ol>
-    <li><strong>Force predis</strong> for subscribers until the phpredis spike is re-run in your environment:
-      <div class="code-block">
-<pre><code class="language-php">// Per-instance:
-Store::defaultBackend(Store::BACKEND_REDIS, [
+<div class="callout info store-mt-1" id="phpredis-pubsub-caveat">
+  <strong>Driver choice (both validated as of v0.2.40).</strong> Both phpredis (preferred when <code>ext-redis</code> is loaded) and predis (pure-PHP fallback) SUBSCRIBE loops yield correctly under <code>OpenSwoole\Runtime::HOOK_ALL</code> &mdash; the production default in coroutine mode. Empirical results <a href="https://github.com/sibidharan/zealphp/blob/master/docs/superpowers/specs/2026-05-23-phase3-pubsub-spike-result.md" target="_blank">(spike doc)</a>:
+  <ul>
+    <li><strong>predis:</strong> 760 ops/sec aggregate, 0.40 ms PUBLISH receive median.</li>
+    <li><strong>phpredis:</strong> 775 ops/sec aggregate, 0.23 ms PUBLISH receive median, ~2&times; faster on hot CRUD per-op (11 ms vs 23 ms for 50-RTT batches).</li>
+  </ul>
+  <strong>Pick phpredis when you can</strong> &mdash; it&rsquo;s faster across the board. Force predis only if you can&rsquo;t install <code>ext-redis</code>:
+  <div class="code-block">
+<pre><code class="language-php">Store::defaultBackend(StoreBackendKind::Redis, [
     'url'    => 'redis://cache:6379/0',
-    'prefer' => Store::PREFER_PREDIS,
+    'prefer' => DriverPreference::Predis,   // or Phpredis (default when ext loaded)
 ]);
-
-// Or via env (deployment-time switch):
-ZEALPHP_REDIS_PREFER=predis</code></pre>
-      </div>
-    </li>
-    <li><strong>Bench phpredis under HOOK_ALL load</strong> in staging first &mdash; the spike script (<code>scripts/spike-predis-subscribe.php</code>) is parameterised so swapping the client lib is a small change.</li>
-  </ol>
-  Hot CRUD paths (HGETALL, INCRBY, mget, etc.) are unaffected &mdash; phpredis vs predis is purely a perf trade-off there, both work correctly under HOOK_ALL.
+// Or via env: ZEALPHP_REDIS_PREFER=predis</code></pre>
+  </div>
+  <strong>One nuance to remember:</strong> phpredis SUBSCRIBE blocks the worker WITHOUT HOOK_ALL (C-side socket read). HOOK_ALL is on by default in coroutine mode (<code>App::superglobals(false)</code>); if you&rsquo;ve disabled it explicitly, force predis for subscribers OR re-enable HOOK_ALL.
 </div>
 
 <p class="store-lead-tight store-mt-1"><strong>Receiver count semantics:</strong> <code>Store::publish</code> delivers ONE copy to every worker (across every node) running a matching subscriber. So 32 workers per node &times; 2 nodes = <code>receivers: 64</code> for one PUBLISH. That's correct Redis pub/sub &mdash; matches the cross-server WebSocket routing pattern where each worker owns a subset of fds.</p>

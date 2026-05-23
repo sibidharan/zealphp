@@ -204,9 +204,9 @@ App::onPubSub("ws:server:{$myServerId}", function (string $payload) use ($server
     </p>
 
     <?php App::render('/components/_callout', [
-      'variant' => 'warn',
-      'title'   => 'Pub/sub driver caveat (production)',
-      'body'    => '<p>The predis SUBSCRIBE-under-HOOK_ALL spike validated yielding behaviour; phpredis hasn\'t been benched in this config. For pub/sub subscribers under load, set <code>ZEALPHP_REDIS_PREFER=predis</code> (or pass <code>[\'prefer\' =&gt; Store::PREFER_PREDIS]</code> in your connection opts) until you\'ve benched phpredis in your environment. Hot CRUD paths are unaffected. See <a href="/store#phpredis-pubsub-caveat">/store#phpredis-pubsub-caveat</a>.</p>',
+      'variant' => 'info',
+      'title'   => 'Pub/sub driver choice (both validated)',
+      'body'    => '<p>Both phpredis (preferred when <code>ext-redis</code> is loaded) and predis SUBSCRIBE loops yield correctly under <code>HOOK_ALL</code> — the production default in coroutine mode. phpredis is ~2× faster on hot CRUD per the v0.2.40 spike; predis works without the extension. See <a href="/store#phpredis-pubsub-caveat">/store#phpredis-pubsub-caveat</a>.</p>',
     ]); ?>
 
     <?php App::render('/components/_callout', [
