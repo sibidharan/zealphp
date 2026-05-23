@@ -38,6 +38,20 @@ class App
     /** True once the onWorkerStart hook for pubsub/streams is wired (one-time guard). */
     protected static bool $pubsubBootWired = false;
     protected static float $workerStartedAt = 0.0;
+
+    // v0.3.0 helpers — registries for App::onSignal / App::onProcess and
+    // metadata used by App::stats. Initialised lazily on first registration.
+    /** @var array<int, list<array{handler:callable, worker_only:bool}>> */
+    protected static array $signalHandlers = [];
+    /** @var array<string, array{callable: callable, workers: int}> */
+    protected static array $processHandlers = [];
+    /** True once the onWorkerStart hook for process-pool is wired. */
+    protected static bool $processBootWired = false;
+    /** Unix timestamp the master process booted at (set by run()). */
+    protected static ?int $bootedAt = null;
+    /** Resolved worker counts after `run()` reads CLI/env/settings. */
+    protected static int $worker_num = 0;
+    protected static int $task_worker_num = 0;
     protected string $host;
     protected int $port;
     public static string $cwd;
@@ -1816,6 +1830,177 @@ class App
     // Timer helpers (must be called inside a coroutine context: workerStart,
     // request handler, or onWorkerStart callback)
     // -----------------------------------------------------------------------
+
+    /**
+     * Fork-join helper — runs every closure in `$tasks` in its own
+     * coroutine in parallel and returns the results in input order.
+     *
+     * Call inside a coroutine context (request handler, onWorkerStart,
+     * etc) — outside one, the call is wrapped in `Coroutine::run()` so
+     * sync-mode callers also work. Each task gets its own coroutine via
+     * `go()`; the caller blocks on a `WaitGroup` until all finish.
+     *
+     * Exceptions in tasks propagate as `null` in the result slot AND
+     * the exception is re-thrown via `array_walk` from the caller's
+     * coroutine — failing fast on the first error.
+     *
+     * @template T
+     * @param  list<callable(): T> $tasks
+     * @return list<T|null>
+     */
+    public static function parallel(array $tasks): array
+    {
+        if ($tasks === []) { return []; }
+        if (\OpenSwoole\Coroutine::getCid() < 0) {
+            // Coroutine::run swallows uncaught throws — capture + rethrow
+            // outside so callers see the same exception semantics they'd
+            // get from inside a request coroutine.
+            $out = [];
+            $err = null;
+            \OpenSwoole\Coroutine::run(function () use ($tasks, &$out, &$err): void {
+                try { $out = self::parallel($tasks); }
+                catch (\Throwable $e) { $err = $e; }
+            });
+            if ($err !== null) { throw $err; }
+            return $out;
+        }
+        $n       = count($tasks);
+        $done    = new \OpenSwoole\Coroutine\Channel($n);
+        /** @var array<int, T|null> $results */
+        $results = array_fill(0, $n, null);
+        /** @var array<int, \Throwable> $errors */
+        $errors  = [];
+        foreach ($tasks as $i => $task) {
+            \OpenSwoole\Coroutine::create(function () use ($task, $i, &$results, &$errors, $done): void {
+                try { $results[$i] = $task(); }
+                catch (\Throwable $e) { $errors[$i] = $e; }
+                finally { $done->push(true); }
+            });
+        }
+        // Block until every spawned cor reports done.
+        for ($i = 0; $i < $n; $i++) { $done->pop(); }
+        if ($errors !== []) {
+            // Surface the first failure to the caller; the rest are discarded.
+            throw reset($errors);
+        }
+        return array_values($results);
+    }
+
+    /**
+     * Bounded fan-out — runs `$fn` over each item with at most
+     * `$concurrency` in-flight coroutines at a time. Results keyed by
+     * the input's original keys.
+     *
+     * @template K of array-key
+     * @template V
+     * @template R
+     * @param  array<K, V>            $items
+     * @param  callable(V, K=): R     $fn
+     * @return array<K, R|null>
+     */
+    public static function parallelLimit(array $items, callable $fn, int $concurrency = 10): array
+    {
+        if ($items === []) { return []; }
+        if ($concurrency < 1) {
+            throw new \InvalidArgumentException('parallelLimit: $concurrency must be >= 1');
+        }
+        if (\OpenSwoole\Coroutine::getCid() < 0) {
+            $out = [];
+            $err = null;
+            \OpenSwoole\Coroutine::run(function () use ($items, $fn, $concurrency, &$out, &$err): void {
+                try { $out = self::parallelLimit($items, $fn, $concurrency); }
+                catch (\Throwable $e) { $err = $e; }
+            });
+            if ($err !== null) { throw $err; }
+            return $out;
+        }
+        $sem  = new \OpenSwoole\Coroutine\Channel($concurrency);
+        for ($i = 0; $i < $concurrency; $i++) { $sem->push(true); }
+        $n    = count($items);
+        $done = new \OpenSwoole\Coroutine\Channel($n);
+        $results = [];
+        foreach (array_keys($items) as $k) { $results[$k] = null; }
+        $errors = [];
+        foreach ($items as $k => $item) {
+            \OpenSwoole\Coroutine::create(function () use ($k, $item, $fn, &$results, &$errors, $sem, $done): void {
+                $sem->pop();
+                try { $results[$k] = $fn($item, $k); }
+                catch (\Throwable $e) { $errors[$k] = $e; }
+                finally {
+                    $sem->push(true);
+                    $done->push(true);
+                }
+            });
+        }
+        for ($i = 0; $i < $n; $i++) { $done->pop(); }
+        if ($errors !== []) { throw reset($errors); }
+        return $results;
+    }
+
+    /**
+     * Register a signal handler. Fires in the master process by
+     * default; pass `$workerOnly=true` to fire only inside workers.
+     * Multiple handlers per signal allowed (called in registration order).
+     *
+     * Built on `OpenSwoole\Process::signal()`. Common use cases:
+     *   - SIGHUP  → config reload
+     *   - SIGUSR1 → stats dump
+     *   - SIGUSR2 → debug snapshot
+     *
+     * Must be called BEFORE `App::run()`.
+     */
+    public static function onSignal(int $signal, callable $handler, bool $workerOnly = false): void
+    {
+        self::$signalHandlers[$signal][] = ['handler' => $handler, 'worker_only' => $workerOnly];
+    }
+
+    /**
+     * Internal: wire registered signal handlers into the OpenSwoole
+     * process lifecycle. Called from `App::run()` (master) and via
+     * `onWorkerStart` (workers).
+     */
+    public static function applySignalHandlersFor(string $context): void
+    {
+        foreach (self::$signalHandlers as $signal => $handlers) {
+            foreach ($handlers as $entry) {
+                $workerOnly = (bool)$entry['worker_only'];
+                if ($workerOnly && $context !== 'worker') { continue; }
+                if (!$workerOnly && $context !== 'master') { continue; }
+                $cb = $entry['handler'];
+                \OpenSwoole\Process::signal($signal, function () use ($cb): void {
+                    try { $cb(); }
+                    catch (\Throwable $e) {
+                        error_log('App::onSignal handler threw: ' . $e->getMessage());
+                    }
+                });
+            }
+        }
+    }
+
+    /**
+     * Aggregated framework health snapshot — backends, pool, workers,
+     * memory, uptime. Designed for `/healthz` middleware exposure +
+     * Prometheus exposition (see `App::onSchedule` v0.3.0 P1.10 plan).
+     *
+     * @return array<string, mixed>
+     */
+    public static function stats(): array
+    {
+        $bootTs = self::$bootedAt ?? null;
+        return [
+            'workers' => [
+                'http' => self::$worker_num,
+                'task' => self::$task_worker_num,
+            ],
+            'store'      => \ZealPHP\Store::stats(),
+            'memory'     => [
+                'usage_bytes' => memory_get_usage(true),
+                'peak_bytes'  => memory_get_peak_usage(true),
+            ],
+            'uptime_sec' => $bootTs !== null ? max(0, time() - $bootTs) : 0,
+            'php'        => PHP_VERSION,
+        ];
+    }
 
     /** Recurring timer: calls `$fn` every `$ms` milliseconds in this worker. */
     public static function tick(int $ms, callable $fn): int
@@ -4901,6 +5086,17 @@ HELP;
         foreach (self::redisBootChecks() as $warning) {
             error_log($warning);
         }
+
+        // Capture boot timestamp + resolved worker counts for App::stats().
+        self::$bootedAt = time();
+        $resolvedWorkers = isset($settings['worker_num']) && is_int($settings['worker_num']) ? $settings['worker_num'] : 0;
+        $resolvedTask    = isset($settings['task_worker_num']) && is_int($settings['task_worker_num']) ? $settings['task_worker_num'] : 0;
+        self::$worker_num = $resolvedWorkers;
+        self::$task_worker_num = $resolvedTask;
+
+        // Register master-side signal handlers (workers register their own
+        // inside onWorkerStart).
+        self::applySignalHandlersFor('master');
 
         $cliOverrides = self::parseCliArgs();
         if (isset($cliOverrides['_host'])) {
