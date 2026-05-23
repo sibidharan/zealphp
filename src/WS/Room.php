@@ -67,11 +67,13 @@ final class Room
             'joined_at' => time(),
         ]);
         if (!$ok) {
+            WSRouter::stats()->inc('capacity_exceeded_room_total');
             throw new CapacityException(
                 "WSRouter\\Room({$this->name}): ws_room_members table full — " .
                 "bump via WSRouter::initOptions(roomMembersCapacity: N) BEFORE init(), or flip to Redis backend"
             );
         }
+        WSRouter::stats()->inc('room_joins_total');
         $this->publish([
             'type'      => 'join',
             'client_id' => $clientId,
@@ -86,6 +88,7 @@ final class Room
     public function leave(string $clientId): void
     {
         Store::del(WSRouter::roomTable(), self::compositeKey($this->name, $clientId));
+        WSRouter::stats()->inc('room_leaves_total');
         $this->publish([
             'type'      => 'leave',
             'client_id' => $clientId,
@@ -149,7 +152,34 @@ final class Room
      */
     public function push(array|string $payload): int
     {
+        // Per-room rate limit (configured via WSRouter::setRoomRateLimit).
+        // Sliding-window counter keyed by `{room}:{window-id}` — increments
+        // an atomic counter (Atomic on Table backend, Redis INCR on Redis).
+        if (!$this->checkRoomRateLimit()) {
+            WSRouter::stats()->inc('rate_limit_drops_total');
+            return 0;
+        }
+        WSRouter::stats()->inc('room_pushes_total');
         return $this->publish(is_array($payload) ? $payload : ['type' => 'message', 'data' => $payload]);
+    }
+
+    /**
+     * Per-room rate limit check. True = allowed, false = drop.
+     *
+     * Sliding window via floor(time() / window) bucket — each window has
+     * its own counter; old counters age out naturally without explicit
+     * deletion. Disabled when WSRouter::$roomRateLimitN === 0.
+     */
+    private function checkRoomRateLimit(): bool
+    {
+        $n      = WSRouter::roomRateLimitN();
+        if ($n === 0) { return true; }
+        $window = WSRouter::roomRateLimitWindowSec();
+        $bucket = (int) (time() / $window);
+        $name   = '_wsrouter_rl_' . substr(sha1($this->name . ':' . $bucket), 0, 16);
+        $c      = new \ZealPHP\Counter(0, $name);
+        $now    = $c->increment();
+        return $now <= $n;
     }
 
     /**

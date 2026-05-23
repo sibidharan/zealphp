@@ -59,6 +59,19 @@ final class WSRouter
     private static int $ownerCapacity = 4096;
     /** Max (room × member) pairs per cluster — bump via initOptions() for prod. */
     private static int $roomMembersCapacity = 16384;
+    /**
+     * Slow-consumer threshold. If `$server->getClientInfo($fd)['send_queue_bytes']`
+     * exceeds this, the framework DROPS the message for that fd instead of
+     * letting the kernel/OpenSwoole buffer grow unbounded. Tracked in
+     * `stats()['pushes_dropped_slow_consumer']`. Default 4 MB; tune via
+     * `initOptions(slowConsumerBytes: N)`.
+     */
+    private static int $slowConsumerBytes = 4 * 1024 * 1024;
+    /** Per-room rate limit — 0 disables. Set via `setRoomRateLimit($n, $windowSec)`. */
+    private static int $roomRateLimitN = 0;
+    private static int $roomRateLimitWindowSec = 60;
+    /** Per-worker counter struct. Surfaced via `WSRouter::stats()`. */
+    private static ?\ZealPHP\Store\Stats $stats = null;
 
     private static string $serverId = '';
     /** @var array<string, array{fd:int, conn_id:string}> client_id → {fd, conn_id} */
@@ -101,8 +114,11 @@ final class WSRouter
      *     WSRouter::initOptions(ownerCapacity: 200_000, roomMembersCapacity: 1_000_000);
      *     WSRouter::init();
      */
-    public static function initOptions(?int $ownerCapacity = null, ?int $roomMembersCapacity = null): void
-    {
+    public static function initOptions(
+        ?int $ownerCapacity = null,
+        ?int $roomMembersCapacity = null,
+        ?int $slowConsumerBytes = null,
+    ): void {
         if ($ownerCapacity !== null) {
             if ($ownerCapacity < 1) {
                 throw new \InvalidArgumentException('WSRouter::initOptions: $ownerCapacity must be >= 1');
@@ -115,11 +131,40 @@ final class WSRouter
             }
             self::$roomMembersCapacity = $roomMembersCapacity;
         }
+        if ($slowConsumerBytes !== null) {
+            if ($slowConsumerBytes < 1024) {
+                throw new \InvalidArgumentException('WSRouter::initOptions: $slowConsumerBytes must be >= 1024');
+            }
+            self::$slowConsumerBytes = $slowConsumerBytes;
+        }
+    }
+
+    /**
+     * Configure per-room push rate limiting. Default is unlimited.
+     *
+     *     WSRouter::setRoomRateLimit(100, 60);   // 100 pushes / 60s / room
+     *     WSRouter::setRoomRateLimit(0);          // disable
+     *
+     * Counts live in a Store counter keyed `{room}:rl:{window}` — cluster-wide
+     * when the Store backend is Redis. Returns true when push allowed.
+     * Drops increment `rate_limit_drops_total` in `stats()`.
+     */
+    public static function setRoomRateLimit(int $n, int $windowSec = 60): void
+    {
+        if ($n < 0) {
+            throw new \InvalidArgumentException('setRoomRateLimit: $n must be >= 0');
+        }
+        if ($windowSec < 1) {
+            throw new \InvalidArgumentException('setRoomRateLimit: $windowSec must be >= 1');
+        }
+        self::$roomRateLimitN = $n;
+        self::$roomRateLimitWindowSec = $windowSec;
     }
 
     public static function init(?string $serverId = null, ?callable $clientSink = null): void
     {
         self::$serverId   = $serverId ?? gethostname() . ':' . getmypid();
+        self::$stats     ??= new \ZealPHP\Store\Stats();
         self::$clientSink = $clientSink ?? function (string $clientId, int $fd, string $payload): void {
             $server = App::getServer();
             // Only the WebSocket\Server variant has isEstablished + push;
@@ -266,11 +311,13 @@ final class WSRouter
             // app handlers can return a clear "server at capacity" close
             // to the WS client instead of silently dropping the connection.
             unset(self::$localFds[$clientId]);   // roll back local map
+            self::stats()->inc('capacity_exceeded_owner_total');
             throw new CapacityException(
                 "WSRouter: ws_owner table full at " . self::$ownerCapacity . " connections — " .
                 "bump via WSRouter::initOptions(ownerCapacity: N) BEFORE init(), or flip to Redis backend"
             );
         }
+        self::stats()->inc('owns_total');
         return $connId;
     }
 
@@ -279,6 +326,7 @@ final class WSRouter
     {
         unset(self::$localFds[$clientId]);
         Store::del(self::TABLE, $clientId);
+        self::stats()->inc('releases_total');
     }
 
     /**
@@ -295,15 +343,22 @@ final class WSRouter
     public static function sendToClient(string $clientId, string $payload): bool
     {
         $owner = Store::get(self::TABLE, $clientId);
-        if (!is_array($owner)) { return false; }
+        if (!is_array($owner)) {
+            self::stats()->inc('sendToClient_owner_missing');
+            return false;
+        }
         $serverId = is_string($owner['server_id'] ?? null) ? $owner['server_id'] : '';
         $connId   = is_string($owner['conn_id']   ?? null) ? $owner['conn_id']   : '';
-        if ($serverId === '') { return false; }
+        if ($serverId === '') {
+            self::stats()->inc('sendToClient_owner_missing');
+            return false;
+        }
         Store::publish('ws:server:' . $serverId, (string) json_encode([
             'client_id' => $clientId,
             'conn_id'   => $connId,
             'payload'   => $payload,
         ]));
+        self::stats()->inc('sendToClient_total');
         return true;
     }
 
@@ -362,6 +417,12 @@ final class WSRouter
 
     /** @internal — channel prefix used for room pub/sub. */
     public static function roomChannelPrefix(): string { return self::ROOM_CHANNEL_PREFIX; }
+
+    /** @internal — rate-limit threshold accessor (used by WSRouter\Room::push). */
+    public static function roomRateLimitN(): int { return self::$roomRateLimitN; }
+
+    /** @internal — rate-limit window accessor (used by WSRouter\Room::push). */
+    public static function roomRateLimitWindowSec(): int { return self::$roomRateLimitWindowSec; }
 
     /**
      * @internal — register a user-side handler for ROOM messages.
@@ -437,10 +498,64 @@ final class WSRouter
         $data = (string) json_encode($msg);
         foreach (array_keys($localMembers) as $cid) {
             $local = self::$localFds[$cid] ?? null;
-            if ($local !== null && $server->isEstablished($local['fd'])) {
-                $server->push($local['fd'], $data);
-            }
+            if ($local === null) { continue; }
+            $fd = $local['fd'];
+            // Each push runs in its own coroutine so a slow consumer's
+            // back-pressure (TCP buffer full → push waits) can't block the
+            // others. The push call itself is non-blocking in OpenSwoole,
+            // but getClientInfo + the dispatch path are not free; the go()
+            // wrap keeps fan-out parallel.
+            \OpenSwoole\Coroutine::create(function () use ($server, $fd, $data): void {
+                self::pushWithBackpressure($server, $fd, $data);
+            });
         }
+    }
+
+    /**
+     * Backpressure-aware push. Drops the message for this fd when the
+     * outbound send queue is over `$slowConsumerBytes` — a slow / dead
+     * consumer can't drag the server into OOM by accumulating per-fd
+     * buffers forever. Tracks drops in stats.
+     *
+     * @internal — also used by sendToClient + future Room push paths.
+     */
+    public static function pushWithBackpressure(\OpenSwoole\WebSocket\Server $server, int $fd, string $data): bool
+    {
+        if (!$server->isEstablished($fd)) {
+            self::stats()->inc('pushes_to_dead_fd_total');
+            return false;
+        }
+        $info = $server->getClientInfo($fd);
+        $queued = is_array($info) && isset($info['send_queue_bytes']) && is_numeric($info['send_queue_bytes'])
+            ? (int) $info['send_queue_bytes']
+            : 0;
+        if ($queued > self::$slowConsumerBytes) {
+            self::stats()->inc('pushes_dropped_slow_consumer');
+            return false;
+        }
+        $ok = $server->push($fd, $data);
+        self::stats()->inc($ok ? 'pushes_total' : 'pushes_failed_total');
+        return (bool) $ok;
+    }
+
+    /**
+     * Per-worker WSRouter counter struct. Call `->snapshot()` to read
+     * the current counters as `array<string,int>`. Pair with
+     * `Store::stats()` for pool/pubsub-side metrics + `App::stats()` for
+     * worker/memory state.
+     *
+     * Counters surfaced:
+     *   owns_total / releases_total
+     *   sendToClient_total / sendToClient_owner_missing
+     *   room_joins_total / room_leaves_total / room_pushes_total
+     *   pushes_total / pushes_failed_total
+     *   pushes_dropped_slow_consumer / pushes_to_dead_fd_total
+     *   capacity_exceeded_owner_total / capacity_exceeded_room_total
+     *   rate_limit_drops_total
+     */
+    public static function stats(): \ZealPHP\Store\Stats
+    {
+        return self::$stats ??= new \ZealPHP\Store\Stats();
     }
 
     /**
