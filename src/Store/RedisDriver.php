@@ -58,6 +58,48 @@ interface RedisDriver
     /** @return \Generator<int, string> */
     public function scanKeys(string $match, int $batch = 200): \Generator;
 
+    // ── pub/sub ─────────────────────────────────────────────────────────
+    /** @return int receivers Redis delivered to */
+    public function publish(string $channel, string $payload): int;
+
+    /**
+     * Block in a SUBSCRIBE+PSUBSCRIBE loop. The consumer is invoked once per
+     * inbound message frame with `(string $payload, string $channel, ?string $pattern)`.
+     * Throwing `PubSubStopException` from inside the consumer is the clean
+     * stop signal — drivers MUST catch it, UNSUBSCRIBE, return.
+     *
+     * @param array<int, string> $exactChannels    channels for SUBSCRIBE
+     * @param array<int, string> $patternChannels  patterns for PSUBSCRIBE (Redis * glob)
+     * @param callable(string $payload, string $channel, ?string $pattern): void $consumer
+     */
+    public function subscribe(array $exactChannels, array $patternChannels, callable $consumer): void;
+
+    // ── streams ─────────────────────────────────────────────────────────
+    /**
+     * Append a message; auto-generated ID via `*`. Returns the generated ID.
+     *
+     * @param array<string, string> $fields    field=>value pairs forming the stream entry
+     * @param ?int                  $maxLen    if set, applied as `MAXLEN ~` trimming
+     */
+    public function xadd(string $stream, array $fields, ?int $maxLen = null): string;
+
+    /**
+     * Idempotent group create. Returns true if newly created, false if it already
+     * existed (BUSYGROUP). MKSTREAM ensures the stream is created if absent.
+     */
+    public function xgroupCreate(string $stream, string $group, string $id = '$', bool $mkStream = true): bool;
+
+    /**
+     * XREADGROUP COUNT N BLOCK ms STREAMS s1 s2 ... > >.
+     *
+     * @param array<int, string> $streams
+     * @return array<string, list<array{id: string, payload: array<string, string>}>>  keyed by stream
+     */
+    public function xreadGroup(string $group, string $consumer, array $streams, int $count, int $blockMs): array;
+
+    /** @return int ids actually ACK'd */
+    public function xack(string $stream, string $group, string ...$ids): int;
+
     // ── lifecycle ───────────────────────────────────────────────────────
     public function ping(): bool;
     public function close(): void;
