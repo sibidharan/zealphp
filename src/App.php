@@ -2069,8 +2069,13 @@ class App
 
     /**
      * Aggregated framework health snapshot — backends, pool, workers,
-     * memory, uptime. Designed for `/healthz` middleware exposure +
-     * Prometheus exposition (see `App::onSchedule` v0.3.0 P1.10 plan).
+     * memory, uptime, plus per-subsystem counters (X-4). Designed for
+     * `/healthz` middleware exposure + Prometheus exposition (see
+     * `App::onSchedule` v0.3.0 P1.10 plan).
+     *
+     * Subsystems are queried defensively — each one is wrapped in a
+     * try/catch so a single subsystem's failure (e.g. WSRouter not
+     * initialised yet) doesn't take down /healthz.
      *
      * @return array<string, mixed>
      */
@@ -2082,14 +2087,36 @@ class App
                 'http' => self::$worker_num,
                 'task' => self::$task_worker_num,
             ],
-            'store'      => \ZealPHP\Store::stats(),
+            'store'      => self::safeStats(fn(): array => \ZealPHP\Store::stats()),
+            'cache'      => self::safeStats(fn(): array => \ZealPHP\Cache::stats()),
+            'ws_router'  => self::safeStats(fn(): array => \ZealPHP\WSRouter::stats()->snapshot()),
             'memory'     => [
                 'usage_bytes' => memory_get_usage(true),
                 'peak_bytes'  => memory_get_peak_usage(true),
             ],
             'uptime_sec' => $bootTs !== null ? max(0, time() - $bootTs) : 0,
             'php'        => PHP_VERSION,
+            'backends'   => self::safeStats(fn(): array => [
+                'store_kind'   => self::backendKind(\ZealPHP\Store::defaultBackend()),
+                'counter_kind' => self::backendKind(\ZealPHP\Counter::defaultBackend()),
+            ]),
         ];
+    }
+
+    /**
+     * @param  callable(): array<string, mixed> $fn
+     * @return array<string, mixed>
+     */
+    private static function safeStats(callable $fn): array
+    {
+        try { return $fn(); } catch (\Throwable $e) { return ['_error' => $e->getMessage()]; }
+    }
+
+    private static function backendKind(object $backend): string
+    {
+        $cls = $backend::class;
+        $base = strrchr($cls, '\\');
+        return $base === false ? $cls : substr($base, 1);
     }
 
     /** Recurring timer: calls `$fn` every `$ms` milliseconds in this worker. */
