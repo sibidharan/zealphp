@@ -83,3 +83,12 @@ $app->route('/demo/rooms/state', ['methods' => ['GET']], function () {
         'local_fds'              => WSRouter::localFds(),
     ];
 });
+
+$app->route('/demo/rooms/online', ['methods' => ['GET']], function () {
+    return [
+        'ok'         => true,
+        'total'      => WSRouter::onlineCount(),
+        'by_server'  => WSRouter::onlineByServer(),
+        'stats'      => WSRouter::stats()->snapshot(),
+    ];
+});

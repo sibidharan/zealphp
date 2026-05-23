@@ -160,6 +160,45 @@ final class WSRouterTest extends TestCase
         });
     }
 
+    public function testOnlineCountReflectsOwnedClients(): void
+    {
+        // Shared Redis ws_owner can carry rows from prior test runs — use
+        // unique ids per test + DELTA assertions instead of absolutes.
+        $this->skipIfNoRedis();
+        Coroutine::run(function (): void {
+            WSRouter::init('test-server-online');
+            $base = WSRouter::onlineCount();
+            $cid = fn (string $tag) => 'oc-' . $tag . '-' . bin2hex(random_bytes(3));
+            $a = $cid('a'); $b = $cid('b'); $c = $cid('c');
+            WSRouter::own($a, 11);
+            WSRouter::own($b, 12);
+            WSRouter::own($c, 13);
+            self::assertSame($base + 3, WSRouter::onlineCount(), '3 owned');
+            WSRouter::release($a);
+            self::assertSame($base + 2, WSRouter::onlineCount(), '1 released');
+            WSRouter::release($b);
+            WSRouter::release($c);
+        });
+    }
+
+    public function testOnlineByServerGroupsCorrectly(): void
+    {
+        $this->skipIfNoRedis();
+        Coroutine::run(function (): void {
+            $serverId = 'grp-' . bin2hex(random_bytes(3));
+            WSRouter::init($serverId);
+            $a = 'obs-a-' . bin2hex(random_bytes(3));
+            $b = 'obs-b-' . bin2hex(random_bytes(3));
+            WSRouter::own($a, 21);
+            WSRouter::own($b, 22);
+            $by = WSRouter::onlineByServer();
+            self::assertArrayHasKey($serverId, $by);
+            self::assertSame(2, $by[$serverId], 'this server has exactly 2 owns');
+            WSRouter::release($a);
+            WSRouter::release($b);
+        });
+    }
+
     public function testBroadcastDelegatesToStorePublish(): void
     {
         $this->skipIfNoRedis();

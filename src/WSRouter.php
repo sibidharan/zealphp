@@ -412,6 +412,46 @@ final class WSRouter
         return new Room($name, self::$serverId);
     }
 
+    /**
+     * Total connected clients across the cluster.
+     *
+     * O(1) on both backends — `Store::count()` reads the membership-set
+     * cardinality (Atomic counter on Table, SCARD on Redis). Cheap enough
+     * to call from `/healthz` on every request.
+     *
+     * NOTE: a "client" here is one row in `ws_owner` — one logical
+     * connection. A user with 3 open tabs counts as 3.
+     */
+    public static function onlineCount(): int
+    {
+        if (self::$serverId === '') {
+            throw new StoreException('WSRouter::init() must be called before onlineCount()');
+        }
+        return Store::count(self::TABLE);
+    }
+
+    /**
+     * Per-server connection counts. Iterates `ws_owner` once and groups by
+     * `server_id` — O(N_total_clients). Useful for dashboards / debugging
+     * load-balancer imbalance; pricier than `onlineCount()`, so don't call
+     * on every request.
+     *
+     * @return array<string, int>  server_id → count
+     */
+    public static function onlineByServer(): array
+    {
+        if (self::$serverId === '') {
+            throw new StoreException('WSRouter::init() must be called before onlineByServer()');
+        }
+        $out = [];
+        foreach (Store::iterate(self::TABLE) as $_clientId => $row) {
+            $sid = is_string($row['server_id'] ?? null) ? $row['server_id'] : '';
+            if ($sid === '') { continue; }
+            $out[$sid] = ($out[$sid] ?? 0) + 1;
+        }
+        return $out;
+    }
+
     /** @internal — name of the cluster-wide membership table. */
     public static function roomTable(): string { return self::ROOM_TABLE; }
 
