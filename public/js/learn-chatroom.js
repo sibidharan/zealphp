@@ -19,12 +19,24 @@
     var lobby      = document.getElementById('chatroom-lobby');
     var status     = document.getElementById('chatroom-status');
     var messages   = document.getElementById('chatroom-messages');
+    var typing     = document.getElementById('chatroom-typing');
     var form       = document.getElementById('chatroom-form');
     var body       = document.getElementById('chatroom-body');
     var sendBtn    = form ? form.querySelector('button') : null;
 
     var ws = null;
     var currentRoom = '';
+
+    // Typing-presence state — keyed by username (other users only).
+    // Per-user "they stopped typing" timeout in case the 'off' frame is dropped
+    // (network blip, browser tab close). Auto-clears after TYPING_TIMEOUT_MS.
+    var TYPING_TIMEOUT_MS = 4000;
+    var typingUsers = Object.create(null);   // username -> timeoutId
+    // Outbound debounce: send 'on' once + reset on every keystroke; send 'off'
+    // when input is empty OR after TYPING_IDLE_MS of inactivity.
+    var TYPING_IDLE_MS = 2500;
+    var lastTypingSentState = 'off';
+    var typingIdleTimer = null;
 
     function setStatus(state, label) {
       if (!status) return;
@@ -80,6 +92,50 @@
       });
     }
 
+    function renderTyping() {
+      if (!typing) return;
+      var names = Object.keys(typingUsers);
+      if (!names.length) { typing.textContent = ''; return; }
+      var label;
+      if (names.length === 1)      { label = names[0] + ' is typing…'; }
+      else if (names.length === 2) { label = names[0] + ' and ' + names[1] + ' are typing…'; }
+      else                         { label = names.length + ' people are typing…'; }
+      typing.textContent = label;
+    }
+
+    function handleTypingEvent(user, state) {
+      if (!user || user === username) return;   // ignore self-echoes
+      if (typingUsers[user]) { clearTimeout(typingUsers[user]); }
+      if (state === 'on') {
+        // Auto-clear after timeout in case the matching 'off' is dropped.
+        typingUsers[user] = setTimeout(function () {
+          delete typingUsers[user];
+          renderTyping();
+        }, TYPING_TIMEOUT_MS);
+      } else {
+        delete typingUsers[user];
+      }
+      renderTyping();
+    }
+
+    function sendTypingState(state) {
+      if (!ws || ws.readyState !== 1) return;
+      if (lastTypingSentState === state) return;   // dedup repeats
+      lastTypingSentState = state;
+      try { ws.send(JSON.stringify({ type: 'typing', state: state })); } catch (_) {}
+    }
+
+    function noteOutboundKeystroke() {
+      if (body && body.value.length === 0) {
+        sendTypingState('off');
+        if (typingIdleTimer) { clearTimeout(typingIdleTimer); typingIdleTimer = null; }
+        return;
+      }
+      sendTypingState('on');
+      if (typingIdleTimer) { clearTimeout(typingIdleTimer); }
+      typingIdleTimer = setTimeout(function () { sendTypingState('off'); }, TYPING_IDLE_MS);
+    }
+
     function loadLobby() {
       fetch('/api/learn/chatroom/lobby').then(function (r) { return r.json(); })
         .then(function (j) { if (j.ok) renderLobby(j.rooms || []); })
@@ -113,6 +169,11 @@
         if (m.type === 'message' && m.message) {
           renderMsg(m.message);
           loadLobby();
+          return;
+        }
+        if (m.type === 'typing') {
+          handleTypingEvent(m.user, m.state);
+          return;
         }
       };
       ws.onclose = function () {
@@ -137,7 +198,16 @@
         if (!ws || ws.readyState !== 1 || !body || !body.value.trim()) return;
         ws.send(JSON.stringify({ type: 'message', body: body.value.trim() }));
         body.value = '';
+        // Sending a message ends the typing burst — let peers know immediately.
+        sendTypingState('off');
+        if (typingIdleTimer) { clearTimeout(typingIdleTimer); typingIdleTimer = null; }
       });
+    }
+
+    if (body) {
+      // Per-keystroke: emit 'on' once, refresh the 2.5s idle timer; auto 'off'
+      // when the input becomes empty.
+      body.addEventListener('input', noteOutboundKeystroke);
     }
 
     if (lobby) {

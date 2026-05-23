@@ -76,6 +76,21 @@ $app->ws('/ws/learn/chatroom', function ($server, $frame) {
         broadcast_to_room($server, (string) $meta['room'], ['type' => 'message', 'message' => $row]);
         return;
     }
+
+    // Typing presence — ephemeral, NOT persisted. Fan-out to room members
+    // EXCLUDING the sender (the sender's own keystrokes shouldn't echo back).
+    if ($type === 'typing') {
+        $meta = Store::get('chatroom_fds', (string) $frame->fd);
+        if (!is_array($meta)) { return; }
+        $state = ($msg['state'] ?? '') === 'on' ? 'on' : 'off';
+        broadcast_to_room(
+            $server,
+            (string) $meta['room'],
+            ['type' => 'typing', 'user' => (string) $meta['username'], 'state' => $state],
+            excludeFd: (int) $frame->fd,
+        );
+        return;
+    }
 }, onClose: function ($server, $fd) {
     $meta = Store::get('chatroom_fds', (string) $fd);
     Store::del('chatroom_fds', (string) $fd);
@@ -94,13 +109,14 @@ $app->ws('/ws/learn/chatroom', function ($server, $frame) {
  *
  * @param array<string, mixed> $payload
  */
-function broadcast_to_room($server, string $room, array $payload): void
+function broadcast_to_room($server, string $room, array $payload, int $excludeFd = 0): void
 {
     if (!($server instanceof \OpenSwoole\WebSocket\Server)) { return; }
     $data = (string) json_encode($payload);
     foreach (Store::iterate('chatroom_fds') as $fd => $info) {
         if (($info['room'] ?? null) !== $room) { continue; }
         $fdInt = (int) $fd;
+        if ($fdInt === $excludeFd) { continue; }   // typing-presence skips sender
         if ($server->isEstablished($fdInt)) {
             $server->push($fdInt, $data);
         }

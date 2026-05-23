@@ -39,6 +39,12 @@
 .chatroom-msg.system { font-style: italic; color: #64748b; font-size: .82rem; }
 .chatroom-msg.system .chatroom-msg-user { color: #94a3b8; font-weight: 500; }
 
+.chatroom-typing {
+  font-size: .8rem; color: #94a3b8; font-style: italic;
+  padding: .15rem .25rem;
+  min-height: 1.1rem;   /* reserves space so layout doesn't shift when text appears */
+}
+
 .chatroom-form { display: flex; gap: .25rem; padding-top: .5rem; border-top: 1px solid #e2e8f0; }
 .chatroom-form input { flex: 1; padding: .5rem .7rem; border: 1px solid #cbd5e1; border-radius: 4px; font-size: .9rem; }
 .chatroom-form input:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }

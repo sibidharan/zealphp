@@ -200,6 +200,90 @@ $app-&gt;route('/api/learn/chatroom/recent',
       assets across navigations, so this lesson&rsquo;s widget is just markup + a tiny <code>&lt;script&gt;</code>.
     </p>
 
+    <h2 id="typing">Typing indicator &mdash; ephemeral presence in 3 small parts</h2>
+    <p>
+      &ldquo;<em>alice is typing&hellip;</em>&rdquo; needs three pieces. None of them touch SQLite &mdash;
+      typing is <strong>presence</strong>, not history. It lives only while the WebSocket is open.
+    </p>
+
+    <h3>1. Client: debounced send on input</h3>
+    <p>
+      Each keystroke schedules a <code>typing: 'on'</code> frame (sent once, deduped); after 2.5 s
+      of inactivity OR an empty input OR a sent message, send <code>typing: 'off'</code>.
+    </p>
+<pre><code class="language-javascript">// Single 'on' burst, refreshed every keystroke; 'off' on idle / empty / send.
+const TYPING_IDLE_MS = 2500;
+let lastSent = 'off';
+let idleTimer = null;
+
+function sendTyping(state) {
+    if (lastSent === state) return;        // dedup repeats
+    lastSent = state;
+    ws.send(JSON.stringify({ type: 'typing', state }));
+}
+
+body.addEventListener('input', () =&gt; {
+    if (body.value.length === 0) { sendTyping('off'); clearTimeout(idleTimer); return; }
+    sendTyping('on');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() =&gt; sendTyping('off'), TYPING_IDLE_MS);
+});
+form.addEventListener('submit', () =&gt; { sendTyping('off'); clearTimeout(idleTimer); /* …send msg… */ });</code></pre>
+
+    <h3>2. Server: ephemeral fan-out (no SQLite, skip sender)</h3>
+    <p>
+      Treat <code>typing</code> like a message except: <strong>don&rsquo;t persist</strong>, and
+      <strong>don&rsquo;t echo to the sender</strong>. The <code>excludeFd</code> parameter on
+      <code>broadcast_to_room</code> does the latter.
+    </p>
+<pre><code class="language-php">if ($type === 'typing') {
+    $meta = Store::get('chatroom_fds', (string) $frame-&gt;fd);
+    if (!is_array($meta)) { return; }
+    $state = ($msg['state'] ?? '') === 'on' ? 'on' : 'off';
+    broadcast_to_room(
+        $server,
+        (string) $meta['room'],
+        ['type' =&gt; 'typing', 'user' =&gt; (string) $meta['username'], 'state' =&gt; $state],
+        excludeFd: (int) $frame-&gt;fd,   // skip the sender's own echo
+    );
+    return;
+}</code></pre>
+
+    <h3>3. Client: per-user state map + auto-clear timeout</h3>
+    <p>
+      Track a per-user typing flag with a watchdog timeout (4 s) so a dropped <code>off</code> frame
+      doesn&rsquo;t leave &ldquo;alice is typing&hellip;&rdquo; on the screen forever. Render comma-joined names.
+    </p>
+<pre><code class="language-javascript">const TYPING_TIMEOUT_MS = 4000;
+const typingUsers = Object.create(null);
+
+function handleTypingEvent(user, state) {
+    if (!user || user === selfUsername) return;     // ignore self-echoes (server already skipped)
+    clearTimeout(typingUsers[user]);
+    if (state === 'on') {
+        typingUsers[user] = setTimeout(() =&gt; { delete typingUsers[user]; renderTyping(); }, TYPING_TIMEOUT_MS);
+    } else {
+        delete typingUsers[user];
+    }
+    renderTyping();
+}
+
+function renderTyping() {
+    const names = Object.keys(typingUsers);
+    typingIndicator.textContent =
+        names.length === 0 ? '' :
+        names.length === 1 ? `${names[0]} is typing…` :
+        names.length === 2 ? `${names[0]} and ${names[1]} are typing…` :
+        `${names.length} people are typing…`;
+}</code></pre>
+    <p>
+      <strong>Why this scales.</strong> The whole thing runs on the existing WebSocket &mdash; no extra
+      connection, no extra Redis key, no extra SQLite row. Typing events <em>are</em> the only
+      cluster-wide thing that&rsquo;s OK to lose (a dropped &ldquo;off&rdquo; clears on the 4-second
+      watchdog), so we don&rsquo;t need at-least-once delivery. Goes federated automatically on the
+      Redis backend &mdash; same one-line swap as message broadcast.
+    </p>
+
     <h2 id="try-it">Try it &mdash; right here</h2>
     <p>
       The widget below uses your logged-in <code>username</code> from the same session that powers the

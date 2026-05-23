@@ -24,6 +24,7 @@ $username = (string) $user['username'];
     <div id="chatroom-messages" class="chatroom-messages">
       <p class="chatroom-empty">Pick a room and click <strong>Join</strong> to start chatting.</p>
     </div>
+    <div id="chatroom-typing" class="chatroom-typing" aria-live="polite"></div>
     <form id="chatroom-form" class="chatroom-form" hx-boost="false" autocomplete="off">
       <input id="chatroom-body" name="body" placeholder="Type a message…" maxlength="2000" disabled />
       <button type="submit" disabled>Send</button>
