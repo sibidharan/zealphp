@@ -28,8 +28,9 @@ $user = $user ?? \ZealPHP\Learn\Auth::currentUser();
       shows who&rsquo;s here right now. Every real chat product is this pattern.
     </p>
     <p>
-      In Lesson 19 you built a real-time chat that worked while you were connected; reload the page and
-      everything was gone. In <a href="/learn/tictactoe">Lesson 21</a> you shared per-board state through
+      In <a href="/learn/websocket">Lesson 19</a> you built a real-time counter that broadcast +1 to
+      every open tab &mdash; it worked while you were connected, but a reload wiped the state. In
+      <a href="/learn/tictactoe">Lesson 21</a> you shared per-board state through
       <code>OpenSwoole\Table</code>. This lesson puts the two ideas together: <strong>rooms with
       persistent history</strong>. The whole stack is PHP + SQLite. SQLite ships <em>inside PHP</em> &mdash;
       you don&rsquo;t install anything; it&rsquo;s already there.

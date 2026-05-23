@@ -19,7 +19,7 @@
 
     <h2 id="problem">The single-server chat hits a wall</h2>
     <p>
-      In <a href="/learn/websocket">Lesson 19</a> you built a real-time chat on one <code>php app.php</code>
+      In <a href="/learn/chatroom">Lesson 22</a> you built a multi-room chat on one <code>php app.php</code>
       instance. Every connected browser talks to the same OpenSwoole process; a message sent by user A
       lands in worker N and is pushed to user B&rsquo;s <code>$fd</code> right there. No coordination needed.
     </p>
@@ -104,8 +104,8 @@ App::onPubSub("ws:server:{$myId}", function (string $payload): void {
 
     <h2 id="build">Build it &mdash; four small deltas</h2>
     <p>
-      Start from the Lesson 19 chat. The four changes below are isolated &mdash; you can apply them
-      one at a time and rerun your chat between each step.
+      Start from the <a href="/learn/chatroom">Lesson 22</a> chat. The four changes below are isolated &mdash;
+      you can apply them one at a time and rerun your chat between each step.
     </p>
 
     <h3>Step 1: Switch the Store backend</h3>
