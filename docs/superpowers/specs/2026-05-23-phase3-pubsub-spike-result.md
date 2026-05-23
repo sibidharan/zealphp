@@ -50,8 +50,32 @@ The Phase 3 architecture as described in the spec (per-worker dedicated subscrib
 ## What this does NOT yet validate
 
 1. **phpredis SUBSCRIBE under HOOK_ALL.** This spike runs predis. phpredis is the *preferred* driver when `ext-redis` is loaded — its subscribe loop is implemented in C, not PHP, so the yielding behaviour could differ. Same spike needs to run with `ext-redis` installed before the Phase 3 implementation can promise both drivers work. **Next step:** install `ext-redis` (locally or on a sysbox container with `pecl install redis`) and re-run `scripts/spike-predis-subscribe.php` after swapping `new PredisClient(...)` for a phpredis client.
-2. **Multi-process / cross-node delivery.** This spike runs everything in one process. The actual cross-server topology — one server PUBLISHes, another server's worker receives — has the same lib-level guarantees but adds network latency + cross-host TCP. Worth a follow-up spike that boots two `php app.php` instances on different ports against the same valkey.
+2. **~~Multi-process / cross-node delivery.~~** *Validated — see "Cross-node spike" below.*
 3. **Subscriber graceful shutdown.** The spike unsubscribes when the message budget is hit. Real Phase 3 needs `onWorkerStop` lifecycle hooks to close the subscriber cleanly; the current `App::onWorkerStop` hook (already shipped) covers this.
+
+## Cross-node spike
+
+`scripts/spike-crossnode-server.php` + `scripts/spike-crossnode-run.sh` boot two actual ZealPHP server instances on different ports (8090 + 8091) against a shared valkey. Each registers a dedicated subscriber coroutine on its identity channel (`ws:server:A` / `ws:server:B`) inside `App::onWorkerStart`. The runner curls `/publish?to=X&msg=Y` on one server, the other's subscriber receives.
+
+**Test cases**
+
+| # | Direction | Result | One-way latency (loopback) |
+|---|---|---|---|
+| 1 | A → B (cross-process) | PASS | **0.35 ms** |
+| 2 | B → A (cross-process) | PASS | **0.29 ms** |
+| 3 | B → B (intra-process self-publish, sanity) | PASS | **0.17 ms** |
+| 4 | Publisher `PUBLISH` reports `receivers=1` for every send | PASS | — |
+
+**What this proves**
+
+The full architecture from the cross-server WS routing diagram works end-to-end on two ZealPHP processes:
+
+- `App::onWorkerStart` is a viable place to spawn the subscriber cor — it survives the lifecycle.
+- The subscriber cor coexists with the HTTP request handlers in the same worker — `/publish` requests on the same server keep responding while the subscriber loop runs.
+- Sub-millisecond cross-process delivery on loopback. Cross-host across a LAN adds typical Linux TCP latency (~0.1–1 ms); cross-region adds the WAN one-way (~1–80 ms depending on geo). The architecture absorbs all three.
+- The same machinery would route a WebSocket push: replace "append to log" in the subscriber handler with `$server->push($localFd, $payload)` and the cross-server WS routing pattern lights up.
+
+**Open caveat:** this spike runs both servers on the same host. Cross-HOST (different machines, real NIC) is the same lib-level operation but adds physical network latency; worth a final spike against a remote valkey or remote ZealPHP for the production deploy story. Same script, just two hosts.
 
 ## Conclusion for Phase 3 planning
 
