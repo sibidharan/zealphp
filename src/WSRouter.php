@@ -371,8 +371,12 @@ final class WSRouter
 
         // Shared ownership table. conn_id is a per-connection nonce — see
         // own() + sendToClient() for the FD-reuse-race fix (C1).
+        // server_id is `hostname:pid` by default; FQDNs + k8s pod names
+        // + long PIDs blow past 64 chars — size at 192 to cover common
+        // production cases (k8s pod hash + namespace + cluster suffix +
+        // pid easily reaches 100+).
         Store::make(self::TABLE, self::$ownerCapacity, [
-            'server_id' => [Store::TYPE_STRING, 64],
+            'server_id' => [Store::TYPE_STRING, 192],
             'conn_id'   => [Store::TYPE_STRING, 32],
         ]);
 
@@ -381,8 +385,8 @@ final class WSRouter
         // per room. See WSRouter\Room for the user-facing API.
         Store::make(self::ROOM_TABLE, self::$roomMembersCapacity, [
             'room'      => [Store::TYPE_STRING, 64],
-            'client_id' => [Store::TYPE_STRING, 64],
-            'server_id' => [Store::TYPE_STRING, 64],
+            'client_id' => [Store::TYPE_STRING, 128],
+            'server_id' => [Store::TYPE_STRING, 192],
             'joined_at' => [Store::TYPE_INT, 8],
         ]);
 
@@ -505,15 +509,28 @@ final class WSRouter
             'conn_id'   => $connId,
         ]);
         if (!$ok) {
-            // Table backend full — surface this as a typed exception so
-            // app handlers can return a clear "server at capacity" close
-            // to the WS client instead of silently dropping the connection.
+            // Two cases yield Store::set === false on Table backend:
+            //   (a) table actually full — Table::count() at $ownerCapacity.
+            //   (b) row didn't fit — a column value exceeded its declared
+            //       size (TableRow::set_value logs "string value is too
+            //       long" to stderr; OpenSwoole returns false rather than
+            //       truncating). Common cause: $serverId derives from
+            //       gethostname() . ':' . getmypid() and FQDNs / k8s pod
+            //       names blow past the column's declared length.
+            // Distinguish the two so the error message is actionable.
             unset(self::$localFds[$clientId]);   // roll back local map
             self::stats()->inc('capacity_exceeded_owner_total');
-            throw new CapacityException(
-                "WSRouter: ws_owner table full at " . self::$ownerCapacity . " connections — " .
-                "bump via WSRouter::initOptions(ownerCapacity: N) BEFORE init(), or flip to Redis backend"
-            );
+            $count = Store::count(self::TABLE);
+            $isFull = $count >= self::$ownerCapacity;
+            $detail = $isFull
+                ? "table full at " . self::$ownerCapacity . " connections — " .
+                  "bump via WSRouter::init(ownerCapacity: N), WSRouter::initOptions(), or flip to Redis backend"
+                : "row didn't fit (table at $count/" . self::$ownerCapacity . ") — " .
+                  "likely a column value exceeded its declared size. server_id='" . self::$serverId .
+                  "' (length " . strlen(self::$serverId) . "). On Table backend the column is 192 chars; " .
+                  "very long pod names + namespaces may exceed this. Flip to Redis backend " .
+                  "(`Store::defaultBackend(Store::BACKEND_REDIS)`) for unlimited row sizing.";
+            throw new CapacityException("WSRouter: ws_owner $detail");
         }
         self::stats()->inc('owns_total');
         return $connId;
