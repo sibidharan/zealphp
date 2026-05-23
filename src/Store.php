@@ -401,6 +401,72 @@ class Store
     }
 
     /**
+     * S-1 — execute a Redis Lua script atomically. Redis executes EVAL
+     * server-side as a single atomic operation: no other client can
+     * observe an intermediate state, no other command interleaves.
+     * This is the canonical "transaction" primitive on Redis — every
+     * MULTI/EXEC + WATCH pattern has a more efficient Lua equivalent.
+     *
+     * Use cases:
+     *   - Atomic "get current value, derive new value, set" without
+     *     race windows (the CAS pattern, server-side).
+     *   - Multi-key atomic updates (the MULTI/EXEC use case).
+     *   - Conditional ops ("set only if condition holds").
+     *
+     *     // Atomic compare-and-swap on a hash field:
+     *     Store::evalScript(
+     *         "local v = redis.call('HGET', KEYS[1], ARGV[1]); " .
+     *         "if v == ARGV[2] then return redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]); end; " .
+     *         "return 0;",
+     *         ['zealstore:mytable:rowkey'],
+     *         ['col', 'expected_old', 'new_value'],
+     *     );
+     *
+     * Throws StoreException on Table backend (Lua is Redis-server-side).
+     *
+     * MULTI/EXEC + WATCH via the driver protocol is intentionally NOT
+     * exposed yet — the Lua approach above covers every documented use
+     * case more atomically (one round-trip, server-atomic) and works on
+     * both drivers without protocol-level glue. If your workload genuinely
+     * needs the deferred-pipeline shape, file an issue with the use case.
+     *
+     * @param  array<int, string> $keys  Redis keys the script accesses (cluster-routing hint)
+     * @param  array<int, string> $args  ARGV values
+     */
+    public static function evalScript(string $script, array $keys = [], array $args = []): mixed
+    {
+        $b = self::redisOrThrow('evalScript');
+        return $b->pool()->with(fn(\ZealPHP\Store\RedisClient $c): mixed => $c->evalScript($script, $keys, $args));
+    }
+
+    /**
+     * S-2 — optimistic compare-and-swap on a single Store row+column.
+     * Atomic across nodes (Lua-backed); returns true if the swap landed
+     * (current value matched `$expected`), false otherwise.
+     *
+     *     // Increment 'hits' by 1 only if it's still at 42:
+     *     Store::compareAndSet('counters', 'user:42', 'hits', '42', '43');
+     *
+     * Use when the "natural" Counter::compareAndSet shape doesn't fit
+     * (e.g., a Store row with mixed-type columns, not a standalone counter).
+     * Throws on Table backend.
+     */
+    public static function compareAndSet(string $table, string $key, string $field, string $expected, string $new): bool
+    {
+        $b = self::redisOrThrow('compareAndSet');
+        $prefix = $b->prefix();
+        $rowKey = $prefix . ':' . $table . ':' . $key;
+        $r = self::evalScript(
+            "local v = redis.call('HGET', KEYS[1], ARGV[1]); " .
+            "if v == ARGV[2] then redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]); return 1; end; " .
+            "return 0;",
+            [$rowKey],
+            [$field, $expected, $new],
+        );
+        return is_int($r) ? $r === 1 : (is_string($r) && $r === '1');
+    }
+
+    /**
      * Paginated iteration (S-3). Returns one batch + an opaque next-cursor.
      * Use for large tables where draining the full generator is impractical
      * (e.g. paginated UI over a 100k-member room roster). When the returned
