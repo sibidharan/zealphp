@@ -3,10 +3,10 @@
   <?php App::render('/_learn_sidebar', ['active' => 'learn/cross-server-chat']); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 22,
+      'number'   => 23,
       'title'    => 'Cross-Server Chat',
       'subtitle' => 'Take a single-server WebSocket chat and scale it to N OpenSwoole servers. The marquee v0.2.39 feature, hands-on.',
-      'prev'     => ['slug' => 'learn/tictactoe', 'title' => 'Tic-Tac-Toe'],
+      'prev'     => ['slug' => 'learn/chatroom', 'title' => 'Multi-Room Group Chat'],
       'next'     => ['slug' => 'learn/routing',   'title' => 'Routes & APIs'],
     ]); ?>
 

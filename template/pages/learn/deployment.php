@@ -3,7 +3,7 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 25,
+      'number'   => 26,
       'title'    => 'Ship It',
       'subtitle' => 'From localhost to production. Plus: when to use ZealPHP and when not to.',
       'prev'     => ['slug' => 'learn/async', 'title' => 'Async & Coroutines'],

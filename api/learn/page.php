@@ -16,6 +16,7 @@ ${basename(__FILE__, '.php')} = function () {
         'learn/responses', 'learn/middleware', 'learn/streaming', 'learn/store',
         'learn/components', 'learn/react-vs-php', 'learn/htmx', 'learn/sessions', 'learn/auth',
         'learn/notes', 'learn/ai-chat', 'learn/websocket', 'learn/tictactoe',
+        'learn/chatroom',
         'learn/cross-server-chat',
         'learn/routing', 'learn/async', 'learn/deployment'];
 

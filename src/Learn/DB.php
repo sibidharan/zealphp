@@ -38,6 +38,10 @@ class DB
         $pdo->query("CREATE TABLE IF NOT EXISTS chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, thread_id TEXT NOT NULL, role TEXT NOT NULL, items_json TEXT NOT NULL, created_at INTEGER NOT NULL)");
         $pdo->query("CREATE INDEX IF NOT EXISTS idx_chat_user_thread_time ON chat_history(user_id, thread_id, created_at)");
 
+        // Lesson 22 — multi-room group chat (PHP + SQLite, no Redis required).
+        $pdo->query("CREATE TABLE IF NOT EXISTS chatroom_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, room TEXT NOT NULL, username TEXT NOT NULL, body TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'message', created_at INTEGER NOT NULL)");
+        $pdo->query("CREATE INDEX IF NOT EXISTS idx_chatroom_room_time ON chatroom_messages(room, created_at)");
+
         self::$cache[$path] = $pdo;
         return $pdo;
     }

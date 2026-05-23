@@ -10,7 +10,7 @@ $active = $active ?? 'learn/tictactoe';
       'title'    => 'Multiplayer Tic-Tac-Toe',
       'subtitle' => 'Two players, one room ID, real-time gameplay over WebSocket. The Build-the-App capstone.',
       'prev'     => ['slug' => 'learn/ai-chat', 'title' => 'AI Chat'],
-      'next'     => ['slug' => 'learn/cross-server-chat', 'title' => 'Cross-Server Chat'],
+      'next'     => ['slug' => 'learn/chatroom', 'title' => 'Multi-Room Group Chat'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
