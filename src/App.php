@@ -30,6 +30,13 @@ class App
     protected static array $workerStartHooks = [];
     /** @var array<int, callable> */
     protected static array $workerStopHooks = [];
+
+    /** @var array<string, list<callable>> channel/pattern → handlers */
+    protected static array $pubsubRegistry = [];
+    /** @var array<string, list<array{group:string, handler:callable, blockMs:int, batchSize:int}>> stream → consumers */
+    protected static array $reliableRegistry = [];
+    /** True once the onWorkerStart hook for pubsub/streams is wired (one-time guard). */
+    protected static bool $pubsubBootWired = false;
     protected static float $workerStartedAt = 0.0;
     protected string $host;
     protected int $port;
@@ -1837,6 +1844,120 @@ class App
     public static function onWorkerStop(callable $fn): void
     {
         self::$workerStopHooks[] = $fn;
+    }
+
+    /**
+     * Register a pub/sub handler. Channels containing `*` are PSUBSCRIBE
+     * patterns (Redis glob); everything else is SUBSCRIBE exact. Multiple
+     * handlers per channel are allowed and all fire on each message.
+     *
+     * The handler signature is `function(string $payload, string $channel, ?string $pattern): void`.
+     * Each invocation runs in its own go() so a slow handler can't block
+     * the next message. Throws inside the handler are caught + logged.
+     *
+     * MUST be called BEFORE App::run() — calling after worker start is
+     * a documented no-op with an elog warning.
+     *
+     * Requires the Redis backend (Store::defaultBackend('redis') OR
+     * ZEALPHP_STORE_BACKEND=redis env). If the backend is still Table
+     * at worker-start time, the subscriber is not spawned and a warning
+     * is logged.
+     */
+    public static function onPubSub(string $channelOrPattern, callable $handler): void
+    {
+        self::$pubsubRegistry[$channelOrPattern][] = $handler;
+        self::wirePubSubBoot();
+    }
+
+    /**
+     * Unregister handlers for a channel/pattern. With $handler null,
+     * removes every registered handler for that channel. Returns the
+     * count removed.
+     */
+    public static function offPubSub(string $channelOrPattern, ?callable $handler = null): int
+    {
+        if (!isset(self::$pubsubRegistry[$channelOrPattern])) { return 0; }
+        if ($handler === null) {
+            $n = count(self::$pubsubRegistry[$channelOrPattern]);
+            unset(self::$pubsubRegistry[$channelOrPattern]);
+            return $n;
+        }
+        $before = self::$pubsubRegistry[$channelOrPattern];
+        self::$pubsubRegistry[$channelOrPattern] = array_values(array_filter(
+            $before,
+            fn(callable $h): bool => $h !== $handler,
+        ));
+        return count($before) - count(self::$pubsubRegistry[$channelOrPattern]);
+    }
+
+    /**
+     * Register a Redis Streams consumer-group handler. At-least-once
+     * delivery via XREADGROUP. Handler signature:
+     *   `function(string $payload, string $messageId, string $stream, array $fields): bool`
+     * Return true to XACK (message removed from pending). Return false
+     * OR throw to leave pending (retried on consumer recovery).
+     *
+     * Default group name derives from canonicalHost() so all servers
+     * in a cluster share one group → round-robin load balancing across
+     * machines and workers.
+     *
+     * Same backend requirement as onPubSub.
+     */
+    public static function onReliableMessage(
+        string $stream,
+        callable $handler,
+        ?string $group = null,
+        int $blockMs = 1000,
+        int $batchSize = 16,
+    ): void {
+        $group ??= 'zealphp-' . substr(sha1((string) (self::$canonical_name ?? gethostname())), 0, 8);
+        self::$reliableRegistry[$stream][] = [
+            'group' => $group, 'handler' => $handler,
+            'blockMs' => $blockMs, 'batchSize' => $batchSize,
+        ];
+        self::wirePubSubBoot();
+    }
+
+    /**
+     * One-time hook into onWorkerStart that builds + starts the
+     * RedisPubSub and RedisStreams runners based on what's in the
+     * registries. Re-callable; only wires once.
+     */
+    private static function wirePubSubBoot(): void
+    {
+        if (self::$pubsubBootWired) { return; }
+        self::$pubsubBootWired = true;
+
+        self::onWorkerStart(function () {
+            $backend = \ZealPHP\Store::defaultBackend();
+            if (!($backend instanceof \ZealPHP\Store\RedisBackend)) {
+                if (self::$pubsubRegistry !== [] || self::$reliableRegistry !== []) {
+                    error_log('App::onPubSub / onReliableMessage handlers are registered but the Store backend is not redis — runners NOT spawned. Set ZEALPHP_STORE_BACKEND=redis or Store::defaultBackend(\'redis\').');
+                }
+                return;
+            }
+            $url    = $backend->url();
+            $prefix = $backend->prefix();
+
+            if (self::$pubsubRegistry !== []) {
+                $pubsub = new \ZealPHP\Store\RedisPubSub($url, $prefix);
+                foreach (self::$pubsubRegistry as $channel => $handlers) {
+                    foreach ($handlers as $h) { $pubsub->register((string) $channel, $h); }
+                }
+                $pubsub->start();
+                self::onWorkerStop(function () use ($pubsub) { $pubsub->stop(); });
+            }
+            if (self::$reliableRegistry !== []) {
+                $streams = new \ZealPHP\Store\RedisStreams($url);
+                foreach (self::$reliableRegistry as $stream => $entries) {
+                    foreach ($entries as $entry) {
+                        $streams->register((string) $stream, $entry['group'], $entry['handler'], $entry['blockMs'], $entry['batchSize']);
+                    }
+                }
+                $streams->start();
+                self::onWorkerStop(function () use ($streams) { $streams->stop(); });
+            }
+        });
     }
 
     /**
