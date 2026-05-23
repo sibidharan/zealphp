@@ -60,7 +60,7 @@ jobs:
         uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
         with:
           php-version: '8.3'
-          extensions: openswoole, uopz
+          extensions: openswoole, uopz, redis
           tools: composer:v2
 
       - name: Install dependencies
@@ -120,7 +120,7 @@ jobs:
         uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: openswoole, uopz
+          extensions: openswoole, uopz, redis
           coverage: ${{ matrix.coverage }}
           tools: composer:v2
 
