@@ -63,9 +63,10 @@ class Store
     // Backend kind constants — prefer over bare strings:
     //   Store::defaultBackend(Store::BACKEND_REDIS)  ← IDE-autocompleted, refactor-safe
     //   Store::defaultBackend('redis')              ← also works (BC).
-    public const BACKEND_TABLE  = 'table';
-    public const BACKEND_REDIS  = 'redis';
-    public const BACKEND_TIERED = 'tiered';
+    public const BACKEND_TABLE     = 'table';
+    public const BACKEND_REDIS     = 'redis';
+    public const BACKEND_TIERED    = 'tiered';
+    public const BACKEND_MEMCACHED = 'memcached';
 
     // Driver-prefer constants for $conn['prefer'] / ZEALPHP_REDIS_PREFER:
     public const PREFER_AUTO     = 'auto';
@@ -100,6 +101,16 @@ class Store
     {
         if ($cfg['kind'] === 'tiered') {
             return self::buildTieredBackend($cfg['conn'] ?? []);
+        }
+        if ($cfg['kind'] === 'memcached') {
+            $conn = $cfg['conn'] ?? '';
+            if (is_string($conn)) {
+                $servers = $conn !== '' ? $conn : self::memcachedServersFromEnv();
+                return new \ZealPHP\Store\MemcachedBackend($servers);
+            }
+            $servers = isset($conn['servers']) && is_string($conn['servers']) ? $conn['servers'] : self::memcachedServersFromEnv();
+            $prefix  = isset($conn['prefix']) && is_string($conn['prefix']) ? $conn['prefix'] : 'zealstore';
+            return new \ZealPHP\Store\MemcachedBackend($servers, $prefix);
         }
         if ($cfg['kind'] !== 'redis') {
             return new TableBackend();
@@ -195,6 +206,12 @@ class Store
     {
         $env = getenv('ZEALPHP_REDIS_URL');
         return is_string($env) && $env !== '' ? $env : 'redis://127.0.0.1:6379';
+    }
+
+    private static function memcachedServersFromEnv(): string
+    {
+        $env = getenv('ZEALPHP_MEMCACHED_SERVERS');
+        return is_string($env) && $env !== '' ? $env : '127.0.0.1:11211';
     }
 
     /**

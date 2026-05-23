@@ -40,8 +40,9 @@ class Counter
     // Backend kind constants — prefer over bare strings:
     //   Counter::defaultBackend(Counter::BACKEND_REDIS) ← IDE-autocompleted
     //   Counter::defaultBackend('redis')                ← also works (BC).
-    public const BACKEND_ATOMIC = 'atomic';
-    public const BACKEND_REDIS  = 'redis';
+    public const BACKEND_ATOMIC    = 'atomic';
+    public const BACKEND_REDIS     = 'redis';
+    public const BACKEND_MEMCACHED = 'memcached';
 
     private static ?CounterBackend $backend = null;
     /** @var array{kind:string, conn?: string|array<string,mixed>} */
@@ -199,6 +200,16 @@ class Counter
     /** @param array{kind:string, conn?: string|array<string,mixed>} $cfg */
     private static function buildBackend(array $cfg): CounterBackend
     {
+        if ($cfg['kind'] === 'memcached') {
+            $conn = $cfg['conn'] ?? '';
+            if (is_string($conn)) {
+                $servers = $conn !== '' ? $conn : self::memcachedServersFromEnv();
+                return new \ZealPHP\Counter\MemcachedCounterBackend($servers);
+            }
+            $servers = isset($conn['servers']) && is_string($conn['servers']) ? $conn['servers'] : self::memcachedServersFromEnv();
+            $prefix  = isset($conn['prefix']) && is_string($conn['prefix']) ? $conn['prefix'] : 'zealstore';
+            return new \ZealPHP\Counter\MemcachedCounterBackend($servers, $prefix);
+        }
         if ($cfg['kind'] !== 'redis') {
             return new AtomicBackend();
         }
@@ -229,6 +240,12 @@ class Counter
     {
         $env = getenv('ZEALPHP_REDIS_URL');
         return is_string($env) && $env !== '' ? $env : 'redis://127.0.0.1:6379';
+    }
+
+    private static function memcachedServersFromEnv(): string
+    {
+        $env = getenv('ZEALPHP_MEMCACHED_SERVERS');
+        return is_string($env) && $env !== '' ? $env : '127.0.0.1:11211';
     }
 
     /** @return array{prefer?: 'auto'|'phpredis'|'predis'} */
