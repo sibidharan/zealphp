@@ -417,11 +417,11 @@ $results = HTTP::all([
 ]);
 ```
 
-### Try it — `App::onProcess` (sidecar processes)
+### Try it — `App::addProcess` (sidecar processes)
 
 ```php
 // app.php — BEFORE App::init()
-App::onProcess('log-shipper', function (\OpenSwoole\Process $p): void {
+App::addProcess('log-shipper', function (\OpenSwoole\Process $p): void {
     while (true) {
         flushLogsToS3();
         usleep(60_000_000);  // 60s
@@ -442,7 +442,7 @@ cat > /tmp/zealphp-smoke/app.php <<'PHP'
 <?php require '/var/labsstorage/home/sibidharan/zealphp/vendor/autoload.php';
 use ZealPHP\App; use ZealPHP\HTTP;
 App::superglobals(false);
-App::onProcess('heartbeat', function() {
+App::addProcess('heartbeat', function() {
     while (true) { file_put_contents('/tmp/zealphp-smoke/heartbeat.log', date('c')."\n", FILE_APPEND); usleep(500000); }
 });
 App::onSignal(SIGHUP, fn() => file_put_contents('/tmp/zealphp-smoke/sighup.log', "fired\n", FILE_APPEND));
@@ -457,7 +457,7 @@ sleep 3
 curl http://127.0.0.1:8095/s     # App::stats
 curl http://127.0.0.1:8095/p     # App::parallel
 curl http://127.0.0.1:8095/h     # HTTP::get (self-fetch)
-cat /tmp/zealphp-smoke/heartbeat.log    # App::onProcess sidecar
+cat /tmp/zealphp-smoke/heartbeat.log    # App::addProcess sidecar
 kill -HUP $!                              # App::onSignal
 sleep 1
 cat /tmp/zealphp-smoke/sighup.log

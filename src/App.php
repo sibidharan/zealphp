@@ -39,7 +39,7 @@ class App
     protected static bool $pubsubBootWired = false;
     protected static float $workerStartedAt = 0.0;
 
-    // v0.3.0 helpers — registries for App::onSignal / App::onProcess and
+    // v0.3.0 helpers — registries for App::onSignal / App::addProcess and
     // metadata used by App::stats. Initialised lazily on first registration.
     /** @var array<int, list<array{handler:callable, worker_only:bool}>> */
     protected static array $signalHandlers = [];
@@ -1943,9 +1943,16 @@ class App
      * Multiple handlers per signal allowed (called in registration order).
      *
      * Built on `OpenSwoole\Process::signal()`. Common use cases:
-     *   - SIGHUP  → config reload
-     *   - SIGUSR1 → stats dump
-     *   - SIGUSR2 → debug snapshot
+     *
+     *   - `SIGHUP`  → config reload
+     *   - `SIGUSR1` → stats dump
+     *   - `SIGUSR2` → debug snapshot
+     *
+     * ```php
+     * App::onSignal(SIGHUP, function (): void {
+     *     // reload routing or config
+     * });
+     * ```
      *
      * Must be called BEFORE `App::run()`.
      */
@@ -1986,36 +1993,52 @@ class App
      * like log shippers, file watchers, scheduled-job runners, OAuth token
      * refreshers, etc.
      *
-     *     App::onProcess('log-shipper', function (\OpenSwoole\Process $p): void {
-     *         while (!$p->name && $line = fgets(STDIN)) {  // example loop
-     *             shipToS3($line);
-     *         }
-     *     }, workers: 1, coroutine: true);
+     * ```php
+     * App::addProcess('log-shipper', function (\OpenSwoole\Process $p): void {
+     *     while ($line = fgets(STDIN)) {
+     *         shipToS3($line);
+     *     }
+     * }, workers: 1, coroutine: true);
+     * ```
      *
-     * The $fn receives the OpenSwoole\Process instance (call $p->exit() to
-     * shut down cleanly; respawn happens automatically when configured).
+     * The `$callable` receives the `OpenSwoole\Process` instance (call
+     * `$p->exit()` to shut down cleanly; respawn happens automatically when
+     * configured).
      *
      * `$workers` spawns N independent copies under the same name (suffixed
-     * with index 0..N-1 internally). `$coroutine` enables OpenSwoole's
+     * with index `0..N-1` internally). `$coroutine` enables OpenSwoole's
      * coroutine runtime inside the sidecar — `true` by default so the same
-     * `usleep`/curl/PDO yield semantics work that the HTTP workers get.
+     * `usleep` / curl / PDO yield semantics work that the HTTP workers get.
      *
      * Must be called BEFORE `App::run()` so registrations are visible at
      * server-build time.
+     *
+     * Mirrors `$server->addProcess()` from the OpenSwoole API.
      */
-    public static function onProcess(string $name, callable $callable, int $workers = 1, bool $coroutine = true): void
+    public static function addProcess(string $name, callable $callable, int $workers = 1, bool $coroutine = true): void
     {
         if ($workers < 1) {
-            throw new \InvalidArgumentException('onProcess: $workers must be >= 1');
+            throw new \InvalidArgumentException('addProcess: $workers must be >= 1');
         }
         if (isset(self::$processHandlers[$name])) {
-            throw new \InvalidArgumentException("onProcess: process name '$name' already registered");
+            throw new \InvalidArgumentException("addProcess: process name '$name' already registered");
         }
         self::$processHandlers[$name] = [
             'callable' => $callable,
             'workers'  => $workers,
             'coroutine'=> $coroutine,
         ];
+    }
+
+    /**
+     * BC alias for `addProcess()`. The on*-prefixed name was a misnomer
+     * (this method REGISTERS a process — it isn't an event). New code
+     * should call `App::addProcess()`; pairs symmetrically with
+     * OpenSwoole's `$server->addProcess()` API.
+     */
+    public static function onProcess(string $name, callable $callable, int $workers = 1, bool $coroutine = true): void
+    {
+        self::addProcess($name, $callable, $workers, $coroutine);
     }
 
     /**
@@ -2048,13 +2071,13 @@ class App
                             \OpenSwoole\Coroutine::run(function () use ($cb, $p, $procName): void {
                                 try { $cb($p); }
                                 catch (\Throwable $e) {
-                                    error_log("App::onProcess({$procName}) threw: " . $e->getMessage());
+                                    error_log("App::addProcess({$procName}) threw: " . $e->getMessage());
                                 }
                             });
                         } else {
                             try { $cb($p); }
                             catch (\Throwable $e) {
-                                error_log("App::onProcess({$procName}) threw: " . $e->getMessage());
+                                error_log("App::addProcess({$procName}) threw: " . $e->getMessage());
                             }
                         }
                     },
