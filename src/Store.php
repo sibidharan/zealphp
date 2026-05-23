@@ -390,6 +390,17 @@ class Store
     }
 
     /**
+     * True when the active backend supports direct SET primitives
+     * (sadd/srem/scard/sscanCursor/sdel). Use as the BC-safe guard before
+     * calling Set ops from generic / backend-portable code.
+     */
+    public static function hasSetOps(): bool
+    {
+        $b = self::defaultBackend();
+        return $b instanceof RedisBackend || $b instanceof TieredBackend;
+    }
+
+    /**
      * Paginated iteration (S-3). Returns one batch + an opaque next-cursor.
      * Use for large tables where draining the full generator is impractical
      * (e.g. paginated UI over a 100k-member room roster). When the returned

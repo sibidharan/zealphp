@@ -40,12 +40,20 @@ class Cache
 
     private static string $dir = '';
     private static bool $initialized = false;
+    /** C-2: cap on file-tier entries — oldest-first eviction beyond this. 0 = unlimited. */
+    private static int $maxFiles = 0;
 
     private static ?Counter $hitsMem = null;
     private static ?Counter $hitsFile = null;
     private static ?Counter $misses = null;
     private static ?Counter $spillsFile = null;
     private static ?Counter $spillsFull = null;
+    /** C-1: stampede gate — count of getOrCompute losers that waited then served from cache. */
+    private static ?Counter $stampedeBlocked = null;
+    /** C-2: count of file-tier evictions due to maxFiles cap (oldest-first). */
+    private static ?Counter $fileRotations = null;
+    /** C-3: count of tag invalidations performed. */
+    private static ?Counter $tagInvalidations = null;
 
     /**
      * Initialize the cache. Must be called before $app->run().
@@ -74,6 +82,7 @@ class Cache
         ?string $cacheDir = null,
         int $gcIntervalMs = 60000,
         ?int $ttlSeconds = null,
+        int $maxFiles = 0,
     ): void {
         if (self::$initialized) {
             return;
@@ -83,6 +92,12 @@ class Cache
         if (!is_dir(self::$dir)) {
             mkdir(self::$dir, 0755, true);
         }
+        // C-2: file-tier cap. 0 (default) = unlimited; gcFiles() will only
+        // drop expired files. Non-zero = also LRU-evict oldest files when
+        // count exceeds the cap (atime-based; modify-time as fallback).
+        // Set this when TTLs are 0 (no expiry) but you still want bounded
+        // disk usage — otherwise the file tier grows monotonically.
+        self::$maxFiles = max(0, $maxFiles);
 
         // Backend asymmetry surfaced at init():
         //   Table backend → $maxRows is HARD CAP (set() returns false when full
@@ -117,6 +132,9 @@ class Cache
         self::$misses = new Counter(0);
         self::$spillsFile = new Counter(0);
         self::$spillsFull = new Counter(0);
+        self::$stampedeBlocked = new Counter(0);
+        self::$fileRotations = new Counter(0);
+        self::$tagInvalidations = new Counter(0);
 
         if ($gcIntervalMs > 0) {
             self::registerGc($gcIntervalMs);
@@ -163,16 +181,58 @@ class Cache
         if ($found !== $sentinel) {
             return $found;
         }
-        $value = $compute();
-        self::set($key, $value, $ttl);
-        return $value;
+        // C-1: stampede gate. Without this, N concurrent misses on the same
+        // hot key all run $compute() simultaneously — bad when $compute is
+        // expensive (DB query, external API). Elect a single lock-holder
+        // via Counter::compareAndSet (atomic across workers, server-wide on
+        // Atomic backend; cluster-wide on Redis). Losers wait briefly (up
+        // to 200ms in 20ms increments) for the winner's write, then retry
+        // the cache read; on continued miss they compute themselves (worst
+        // case = double compute, not the herd).
+        $lockName = '__cache_lock_' . md5($key);
+        $lock     = new Counter(0, $lockName);
+        if (!$lock->compareAndSet(0, 1)) {
+            for ($i = 0; $i < 10; $i++) {
+                // Under HOOK_ALL (coroutine-mode default) usleep yields to
+                // the scheduler — other coroutines run while we wait. In
+                // sync mode (HOOK_ALL off) it blocks the worker briefly,
+                // matching the rest of the sync request path.
+                usleep(20_000);
+                $found = self::get($key, $sentinel);
+                if ($found !== $sentinel) {
+                    self::$stampedeBlocked?->increment();
+                    return $found;
+                }
+            }
+            // Winner is taking >200ms — let this caller compute too. Better
+            // than blocking the request indefinitely. compareAndSet keeps
+            // the next miss waiting too if the original winner hasn't
+            // released; the lock auto-clears below.
+            return $compute();
+        }
+        try {
+            // Double-check after acquire — someone else's set() might have
+            // landed between our initial get and the CAS win.
+            $found = self::get($key, $sentinel);
+            if ($found !== $sentinel) { return $found; }
+            $value = $compute();
+            self::set($key, $value, $ttl);
+            return $value;
+        } finally {
+            $lock->set(0);
+        }
     }
 
     /**
      * Store a value. Writes to both memory and file tiers.
      * Values larger than 8KB are stored in file tier only.
+     *
+     * @param list<string> $tags  C-3: optional tags for bulk invalidation
+     *                             via `Cache::invalidateTag($tag)`. Tag
+     *                             index requires Redis-capable backend
+     *                             (Redis / Tiered); ignored otherwise.
      */
-    public static function set(string $key, mixed $value, int $ttl = 0): bool
+    public static function set(string $key, mixed $value, int $ttl = 0, array $tags = []): bool
     {
         $serialized = serialize($value);
         $expires = $ttl > 0 ? time() + $ttl : 0;
@@ -194,7 +254,60 @@ class Cache
         }
 
         $inFile = self::writeFile($hash, $serialized, $expires);
+
+        // C-3: index for tag-based invalidation. Best-effort: failures
+        // don't roll back the write (the value is correctly cached even
+        // if its tag membership entry didn't land).
+        if ($tags !== [] && Store::hasSetOps()) {
+            foreach ($tags as $tag) {
+                try { Store::sadd('__cache_tag:' . $tag, $hash); }
+                catch (\ZealPHP\Store\StoreException) { /* best effort */ }
+            }
+        }
+
         return $inMemory || $inFile;
+    }
+
+    /**
+     * C-3 — invalidate every key that was set() with the given tag.
+     * Drops the entries from both memory + file tiers in a single sweep.
+     * Returns the count of keys invalidated.
+     *
+     * Requires Redis or Tiered backend (the tag→keys SET lives in Redis).
+     * On Table backend this is a no-op + warns to error_log; for
+     * single-node cache groups, prefer keying with a versioned prefix
+     * (e.g. `Cache::set("user:42:v$ver", ...)` + bump $ver to invalidate).
+     */
+    public static function invalidateTag(string $tag): int
+    {
+        if (!Store::hasSetOps()) {
+            error_log(
+                "Cache::invalidateTag('$tag') requires Redis/Tiered backend; current is Table. " .
+                "Use a versioned key prefix for single-node cache groups instead."
+            );
+            return 0;
+        }
+        $setKey = '__cache_tag:' . $tag;
+        $count  = 0;
+        $next   = '0';
+        try {
+            do {
+                $page = Store::sscanCursor($setKey, $next, 200);
+                foreach ($page['members'] as $hash) {
+                    Store::del(self::TABLE, $hash);
+                    $path = self::filePath($hash);
+                    if (file_exists($path)) { @unlink($path); }
+                    $count++;
+                }
+                $next = $page['cursor'];
+            } while ($next !== '0');
+            Store::sdel($setKey);
+        } catch (\ZealPHP\Store\StoreException) {
+            // Best-effort — partial sweep is acceptable for cache
+            // invalidation (stale entries TTL-expire naturally).
+        }
+        self::$tagInvalidations?->increment();
+        return $count;
     }
 
     /**
@@ -330,16 +443,20 @@ class Cache
      * Cache performance stats. All counters are cross-worker (atomic).
      *
      * Returns: [
-     *   'memory_entries' => int,   // current rows in memory tier
-     *   'hits_memory'    => int,   // get() served from memory
-     *   'hits_file'      => int,   // get() served from file (memory miss)
-     *   'misses'         => int,   // get() found nothing
-     *   'spills_oversize' => int,  // set() skipped memory (value > 8KB)
-     *   'spills_full'    => int,   // set() skipped memory (table full)
-     *   'hit_rate'       => float, // hits / (hits + misses), 0.0–1.0
+     *   'memory_entries'   => int,   // current rows in memory tier
+     *   'hits_memory'      => int,   // get() served from memory
+     *   'hits_file'        => int,   // get() served from file (memory miss)
+     *   'misses'           => int,   // get() found nothing
+     *   'spills_oversize'  => int,   // set() skipped memory (value > 8KB)
+     *   'spills_full'      => int,   // set() skipped memory (table full)
+     *   'stampede_blocked' => int,   // C-1 — getOrCompute losers that
+     *                                //       waited then served cached
+     *   'file_rotations'   => int,   // C-2 — file evictions by maxFiles cap
+     *   'tag_invalidations'=> int,   // C-3 — Cache::invalidateTag calls
+     *   'hit_rate'         => float, // hits / (hits + misses), 0.0–1.0
      * ]
      *
-     * @return array{memory_entries: int, hits_memory: int, hits_file: int, misses: int, spills_oversize: int, spills_full: int, hit_rate: float}
+     * @return array{memory_entries: int, hits_memory: int, hits_file: int, misses: int, spills_oversize: int, spills_full: int, stampede_blocked: int, file_rotations: int, tag_invalidations: int, hit_rate: float}
      */
     public static function stats(): array
     {
@@ -349,13 +466,16 @@ class Cache
         $total = $hitsMem + $hitsFile + $misses;
 
         return [
-            'memory_entries'  => Store::count(self::TABLE),
-            'hits_memory'     => $hitsMem,
-            'hits_file'       => $hitsFile,
-            'misses'          => $misses,
-            'spills_oversize' => self::$spillsFile?->get() ?? 0,
-            'spills_full'     => self::$spillsFull?->get() ?? 0,
-            'hit_rate'        => $total > 0 ? round(($hitsMem + $hitsFile) / $total, 4) : 0.0,
+            'memory_entries'   => Store::count(self::TABLE),
+            'hits_memory'      => $hitsMem,
+            'hits_file'        => $hitsFile,
+            'misses'           => $misses,
+            'spills_oversize'  => self::$spillsFile?->get() ?? 0,
+            'spills_full'      => self::$spillsFull?->get() ?? 0,
+            'stampede_blocked' => self::$stampedeBlocked?->get() ?? 0,
+            'file_rotations'   => self::$fileRotations?->get() ?? 0,
+            'tag_invalidations'=> self::$tagInvalidations?->get() ?? 0,
+            'hit_rate'         => $total > 0 ? round(($hitsMem + $hitsFile) / $total, 4) : 0.0,
         ];
     }
 
@@ -435,6 +555,7 @@ class Cache
         }
         $now = time();
         $files = glob(self::$dir . '/*.cache') ?: [];
+        $alive = [];   // surviving file paths, for the maxFiles trim below
         foreach ($files as $file) {
             $f = @fopen($file, 'r');
             if (!$f) {
@@ -444,6 +565,23 @@ class Cache
             fclose($f);
             if ($ttl > 0 && $ttl < $now) {
                 @unlink($file);
+                continue;
+            }
+            $alive[] = $file;
+        }
+        // C-2: enforce maxFiles cap. After expired-file cleanup above, if
+        // the surviving count still exceeds the cap, evict oldest-first
+        // (by mtime) until under the cap. Required when TTLs are 0 (no
+        // expiry) but bounded disk usage is desired.
+        if (self::$maxFiles > 0 && count($alive) > self::$maxFiles) {
+            // Sort surviving files by mtime ascending (oldest first).
+            usort($alive, function (string $a, string $b): int {
+                return (int) filemtime($a) <=> (int) filemtime($b);
+            });
+            $overage = count($alive) - self::$maxFiles;
+            for ($i = 0; $i < $overage; $i++) {
+                @unlink($alive[$i]);
+                self::$fileRotations?->increment();
             }
         }
     }
@@ -468,6 +606,9 @@ class Cache
         self::$misses = new Counter(0);
         self::$spillsFile = new Counter(0);
         self::$spillsFull = new Counter(0);
+        self::$stampedeBlocked = new Counter(0);
+        self::$fileRotations = new Counter(0);
+        self::$tagInvalidations = new Counter(0);
         self::$initialized = true;
     }
 }
