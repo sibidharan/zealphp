@@ -56,14 +56,19 @@ final class WSRouterTest extends TestCase
             });
             $this->assertSame('node-A', WSRouter::serverId());
 
-            // own() registers the local fd
-            WSRouter::own('alice', 42);
-            $this->assertSame(['alice' => 42], WSRouter::localFds());
+            // own() returns the conn_id; localFds carries {fd, conn_id}.
+            $connId = WSRouter::own('alice', 42);
+            $this->assertNotSame('', $connId);
+            $this->assertSame(
+                ['alice' => ['fd' => 42, 'conn_id' => $connId]],
+                WSRouter::localFds(),
+            );
 
             // The Store row is also visible across the cluster
             $row = Store::get('ws_owner', 'alice');
             $this->assertIsArray($row);
             $this->assertSame('node-A', $row['server_id']);
+            $this->assertSame($connId, $row['conn_id']);
         });
     }
 
@@ -72,14 +77,55 @@ final class WSRouterTest extends TestCase
         $this->skipIfNoRedis();
         Coroutine::run(function (): void {
             WSRouter::init('node-B');
-            WSRouter::own('bob', 17);
-            WSRouter::own('carol', 99);
+            $bobConn   = WSRouter::own('bob', 17);
+            $carolConn = WSRouter::own('carol', 99);
             $this->assertCount(2, WSRouter::localFds());
 
             WSRouter::release('bob');
-            $this->assertSame(['carol' => 99], WSRouter::localFds());
+            $this->assertSame(
+                ['carol' => ['fd' => 99, 'conn_id' => $carolConn]],
+                WSRouter::localFds(),
+            );
             $this->assertFalse(Store::get('ws_owner', 'bob'));
             $this->assertIsArray(Store::get('ws_owner', 'carol'));
+        });
+    }
+
+    public function testOwnEvictsStaleEntryWithSameFd(): void
+    {
+        // C1: FD-reuse race. If 'alice' is locally mapped to fd=12 because
+        // her onClose was lost, and OpenSwoole reassigns fd=12 to 'bob',
+        // own('bob', 12) must drop the stale 'alice' entry — both locally
+        // and in the cluster-wide ws_owner table — so subsequent sends to
+        // alice don't accidentally land on bob's connection.
+        $this->skipIfNoRedis();
+        Coroutine::run(function (): void {
+            WSRouter::init('node-C');
+            WSRouter::own('alice', 12);
+            $this->assertArrayHasKey('alice', WSRouter::localFds());
+
+            // Alice's onClose is missed → bob takes fd=12
+            $bobConn = WSRouter::own('bob', 12);
+            $fds = WSRouter::localFds();
+            $this->assertArrayNotHasKey('alice', $fds, 'stale alice entry must be evicted');
+            $this->assertArrayHasKey('bob', $fds);
+            $this->assertSame($bobConn, $fds['bob']['conn_id']);
+
+            // Cluster-wide ws_owner must also have dropped alice.
+            $this->assertFalse(Store::get('ws_owner', 'alice'));
+            $this->assertIsArray(Store::get('ws_owner', 'bob'));
+        });
+    }
+
+    public function testOwnAcceptsExplicitConnIdForTesting(): void
+    {
+        $this->skipIfNoRedis();
+        Coroutine::run(function (): void {
+            WSRouter::init('node-D');
+            $returned = WSRouter::own('alice', 7, 'test-conn-id');
+            $this->assertSame('test-conn-id', $returned);
+            $this->assertSame('test-conn-id', WSRouter::localFds()['alice']['conn_id']);
+            $this->assertSame('test-conn-id', Store::get('ws_owner', 'alice', 'conn_id'));
         });
     }
 

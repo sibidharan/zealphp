@@ -48,7 +48,7 @@ final class WSRouter
     private const TABLE = 'ws_owner';
 
     private static string $serverId = '';
-    /** @var array<string, int> client_id → local fd */
+    /** @var array<string, array{fd:int, conn_id:string}> client_id → {fd, conn_id} */
     private static array $localFds = [];
     /** @var ?callable(string $clientId, int $fd, string $payload): void */
     private static $clientSink = null;
@@ -78,23 +78,38 @@ final class WSRouter
         if (self::$initialized) { return; }
         self::$initialized = true;
 
-        // Shared ownership table.
+        // Shared ownership table. conn_id is a per-connection nonce — see
+        // own() + sendToClient() for the FD-reuse-race fix (C1).
         Store::make(self::TABLE, 4096, [
             'server_id' => [Store::TYPE_STRING, 64],
+            'conn_id'   => [Store::TYPE_STRING, 32],
         ]);
 
         // Subscribe to OUR identity channel. Inbound messages have
-        // {client_id, payload}; the configured sink does the local push.
+        // {client_id, conn_id, payload}; the configured sink does the
+        // local push iff the conn_id matches the currently-held connection.
         App::onPubSub('ws:server:' . self::$serverId, function (string $payload): void {
             $msg = json_decode($payload, true);
             if (!is_array($msg)) { return; }
             $clientId = is_string($msg['client_id'] ?? null) ? $msg['client_id'] : '';
+            $connId   = is_string($msg['conn_id']   ?? null) ? $msg['conn_id']   : '';
             $data     = is_string($msg['payload']   ?? null) ? $msg['payload']   : '';
             if ($clientId === '') { return; }
-            $fd = self::$localFds[$clientId] ?? null;
-            if ($fd === null) { return; }   // client not local to this worker
+            $local = self::$localFds[$clientId] ?? null;
+            if ($local === null) { return; }
+            // C1: drop if the local connection's conn_id has drifted from
+            // the publisher's view (client reconnected; fd may have been
+            // reused). Without this check, the new owner of the fd would
+            // receive a message intended for the old (now-disconnected)
+            // client — a cross-tenant data-leakage vector.
+            if ($connId !== '' && $local['conn_id'] !== $connId) {
+                if (function_exists('elog')) {
+                    elog("WSRouter: dropped stale publish for {$clientId} (conn_id mismatch)", 'debug');
+                }
+                return;
+            }
             if (self::$clientSink !== null) {
-                (self::$clientSink)($clientId, $fd, $data);
+                (self::$clientSink)($clientId, $local['fd'], $data);
             }
         });
     }
@@ -106,14 +121,36 @@ final class WSRouter
      * Record that this server now owns this client's WS connection.
      * Call from your ws onOpen handler — needs the assigned fd locally
      * AND the cluster-wide mapping in Store.
+     *
+     * Returns the per-connection nonce (conn_id) — a random 16-byte hex
+     * string the framework uses to defeat FD-reuse races. Callers
+     * usually don't need it; the framework manages it internally.
      */
-    public static function own(string $clientId, int $fd): void
+    public static function own(string $clientId, int $fd, ?string $connId = null): string
     {
         if (self::$serverId === '') {
             throw new StoreException('WSRouter::init() must be called before own()');
         }
-        self::$localFds[$clientId] = $fd;
-        Store::set(self::TABLE, $clientId, ['server_id' => self::$serverId]);
+        $connId ??= bin2hex(random_bytes(8));
+
+        // C1 — fd-coherence invariant. If another client in this worker
+        // is mapped to the same fd (the symptom of a lost onClose where
+        // the OS reaped the fd and OpenSwoole already reassigned it),
+        // drop the stale entry first. OpenSwoole binds at most one
+        // connection per fd at any instant; the previous holder is dead.
+        foreach (self::$localFds as $otherId => $row) {
+            if ($otherId !== $clientId && $row['fd'] === $fd) {
+                unset(self::$localFds[$otherId]);
+                Store::del(self::TABLE, $otherId);
+            }
+        }
+
+        self::$localFds[$clientId] = ['fd' => $fd, 'conn_id' => $connId];
+        Store::set(self::TABLE, $clientId, [
+            'server_id' => self::$serverId,
+            'conn_id'   => $connId,
+        ]);
+        return $connId;
     }
 
     /** Clean up when a client disconnects (call from ws onClose). */
@@ -125,15 +162,25 @@ final class WSRouter
 
     /**
      * Send to a specific client by id, regardless of which server holds
-     * them. Returns true if Redis accepted the publish (delivery still
-     * best-effort), false if the client isn't connected anywhere.
+     * them. Returns true if the publish was issued (delivery still
+     * best-effort + subject to the conn_id verification on the receiver),
+     * false if the client isn't connected anywhere we know about.
+     *
+     * The payload carries the conn_id captured at the time of THIS
+     * lookup. If the client reconnects between this publish and its
+     * delivery, the subscriber on the owning server detects the conn_id
+     * mismatch and silently drops the stale message (C1 fix).
      */
     public static function sendToClient(string $clientId, string $payload): bool
     {
-        $owner = Store::get(self::TABLE, $clientId, 'server_id');
-        if (!is_string($owner) || $owner === '') { return false; }
-        Store::publish('ws:server:' . $owner, (string) json_encode([
+        $owner = Store::get(self::TABLE, $clientId);
+        if (!is_array($owner)) { return false; }
+        $serverId = is_string($owner['server_id'] ?? null) ? $owner['server_id'] : '';
+        $connId   = is_string($owner['conn_id']   ?? null) ? $owner['conn_id']   : '';
+        if ($serverId === '') { return false; }
+        Store::publish('ws:server:' . $serverId, (string) json_encode([
             'client_id' => $clientId,
+            'conn_id'   => $connId,
             'payload'   => $payload,
         ]));
         return true;
@@ -168,7 +215,9 @@ final class WSRouter
         self::$initialized = false;
     }
 
-    /** @internal — current local fd-map snapshot (for tests + debug). */
-    /** @return array<string, int> */
+    /**
+     * @internal — current local fd-map snapshot (for tests + debug).
+     * @return array<string, array{fd:int, conn_id:string}>
+     */
     public static function localFds(): array { return self::$localFds; }
 }
