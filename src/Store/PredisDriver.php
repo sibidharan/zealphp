@@ -311,12 +311,14 @@ final class PredisDriver implements RedisDriver
         try {
             $cmd = ['XGROUP', 'CREATE', $stream, $group, $id];
             if ($mkStream) { $cmd[] = 'MKSTREAM'; }
-            $this->c->executeRaw($cmd);
+            /** @var mixed $r */
+            $r = $this->c->executeRaw($cmd);
+            // predis executeRaw returns server error responses as STRINGS (not
+            // throwing) — Redis returns "BUSYGROUP ..." when the group already
+            // exists. Detect and surface that as false (idempotent).
+            if (is_string($r) && str_starts_with($r, 'BUSYGROUP')) { return false; }
             return true;
-        } catch (PredisException $e) {
-            if (str_contains($e->getMessage(), 'BUSYGROUP')) { return false; }
-            throw $this->wrap($e);
-        }
+        } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
     public function xreadGroup(string $group, string $consumer, array $streams, int $count, int $blockMs): array

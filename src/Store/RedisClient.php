@@ -95,4 +95,33 @@ final class RedisClient
     public function close(): void { $this->driver->close(); }
     /** @return list<mixed> */
     public function pipeline(callable $batch): array { return $this->driver->pipeline($batch); }
+
+    // ── pub/sub ─────────────────────────────────────────────────────────
+    public function publish(string $channel, string $payload): int { return $this->driver->publish($channel, $payload); }
+
+    /**
+     * @param array<int, string> $exactChannels
+     * @param array<int, string> $patternChannels
+     * @param callable(string $payload, string $channel, ?string $pattern): void $consumer
+     */
+    public function subscribe(array $exactChannels, array $patternChannels, callable $consumer): void
+    { $this->driver->subscribe($exactChannels, $patternChannels, $consumer); }
+
+    // ── streams ─────────────────────────────────────────────────────────
+    /** @param array<string, string> $fields */
+    public function xadd(string $stream, array $fields, ?int $maxLen = null): string
+    { return $this->driver->xadd($stream, $fields, $maxLen); }
+
+    public function xgroupCreate(string $stream, string $group, string $id = '$', bool $mkStream = true): bool
+    { return $this->driver->xgroupCreate($stream, $group, $id, $mkStream); }
+
+    /**
+     * @param array<int, string> $streams
+     * @return array<string, list<array{id: string, payload: array<string, string>}>>
+     */
+    public function xreadGroup(string $group, string $consumer, array $streams, int $count, int $blockMs): array
+    { return $this->driver->xreadGroup($group, $consumer, $streams, $count, $blockMs); }
+
+    public function xack(string $stream, string $group, string ...$ids): int
+    { return $this->driver->xack($stream, $group, ...$ids); }
 }
