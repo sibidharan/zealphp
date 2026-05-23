@@ -5726,6 +5726,21 @@ HELP;
             });
         }
 
+        # ScriptAlias prefixes (App::cgiScriptAlias) — implicit URL routing for any
+        # file under the prefix regardless of extension (Apache `ScriptAlias` parity).
+        # Mirrors the per-extension loop above but matches by URL PREFIX. Without
+        # this, a ScriptAlias-only setup (no per-extension backend) was reachable
+        # via App::include() but had no automatic URL route — the follow-up
+        # documented in .claude/CLAUDE.md:380. App::include() applies the ExecCGI
+        # gate via resolveCgiBackend(), so this just wires the URL → file path.
+        foreach (array_keys(self::$cgi_script_aliases) as $prefix) {
+            if ($prefix === '' || $prefix === '/') { continue; }
+            $aliasRegex = '#^' . preg_quote($prefix, '#') . '/(?P<rest>.+?)/?$#';
+            $this->patternRoute($aliasRegex, ['methods' => ['GET', 'POST']], function (string $rest) use ($prefix) {
+                return App::include($prefix . '/' . $rest);
+            });
+        }
+
         # Global route for all files in the root of the public directory
         $this->route(App::$ignore_php_ext ? '/{file}/?' : '/{file}(\.php)?/?', [
             'methods' => ['GET', 'POST']
