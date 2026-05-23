@@ -47,12 +47,12 @@ $links = [
       return $active === $key;
     }; ?>
     <div class="nav-row nav-row-core">
-      <?php foreach (array_slice($links, 0, 12, true) as $key => [$href, $label]): ?>
+      <?php foreach (array_slice($links, 0, 13, true) as $key => [$href, $label]): ?>
         <a href="<?= $href ?>"<?= $isActive($key) ? ' class="active"' : '' ?>><?= $label ?></a>
       <?php endforeach; ?>
     </div>
     <div class="nav-row nav-row-features">
-      <?php foreach (array_slice($links, 12, null, true) as $key => [$href, $label]): ?>
+      <?php foreach (array_slice($links, 13, null, true) as $key => [$href, $label]): ?>
         <a href="<?= $href ?>"<?= $isActive($key) ? ' class="active"' : '' ?>><?= $label ?></a>
       <?php endforeach; ?>
     </div>
