@@ -67,8 +67,9 @@ $siteUrl = site_url();
 <!-- The Problem -->
 <section class="section section-problem">
   <div class="container">
-    <h2 class="section-title">For 25 years, the HTTP server was C. PHP was the worker that died.</h2>
+    <h2 class="section-title">The PHP we love. The execution model we needed.</h2>
     <p class="section-desc">
+      For 25 years, the HTTP server was C. PHP was the worker that died.
       Apache + mod_php, nginx + PHP-FPM &mdash; the HTTP server is always a C binary that bridges to
       a PHP process via FastCGI. PHP runs the request, then exits the request context. PHP is the
       <em>language</em>, never the <em>server</em>. That model gave us shared-nothing isolation,
