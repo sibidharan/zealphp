@@ -38,7 +38,7 @@ ZealPHP\App::init('0.0.0.0', 8080)->run();</code></pre>
     </p>
     <p>
       That architecture worked for 25 years. But it can't do WebSocket. It can't stream AI responses
-      token-by-token. It can't share state between requests without Redis. It can't run background tasks
+      token-by-token. It can't share state between requests without bolting on a sidecar service like Redis. It can't run background tasks
       without a queue worker. Every "modern" feature requires bolting on another service.
     </p>
 

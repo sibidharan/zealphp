@@ -14,9 +14,11 @@ $siteUrl = site_url();
     </div>
     <p class="home-hero-tagline">
       The PHP Runtime for AI Web Apps</p>
-    <p>Stream AI responses in 5 lines. WebSocket, SSE, shared memory, task workers —<br>
-       one server, one process. Coroutine-native concurrency with PHP's developer experience.</p>
-    <p class="home-hero-sub">Upgrade your existing PHP codebase to async — start without rewriting, migrate at your own pace.</p>
+    <p>PHP <em>is</em> the HTTP server now &mdash; not a CGI worker behind one.<br>
+       WebSocket, SSE, streaming, coroutines, shared memory, task workers &mdash;
+       first&#8209;class because the server never shuts down between requests.</p>
+    <p class="home-hero-sub">Bring your existing PHP code. New features go async without a separate Node or Go service.</p>
+    <p class="home-hero-stamp">Alpha &middot; v0.2.40 &middot; built on <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a></p>
     <div class="cta">
       <a href="/getting-started" class="btn btn-primary">
         <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
@@ -54,115 +56,32 @@ $siteUrl = site_url();
     </div>
 
     <p class="home-bench-intro">
-      And it's fast — here's the throughput on 4 workers, full middleware stack:
+      On a 4-core box, full PSR-15 stack &mdash; <strong>117k req/s text &middot; 106k JSON &middot; 50k templated</strong>, 0 failures across 150k requests.
+      Reproduce in 60s: <code class="home-bench-method-code">scripts/bench_vs_express.sh</code>.
+      Full concurrency sweep, latency percentiles, methodology, and caveats &mdash;
+      <a href="/performance">/performance</a>.
     </p>
-
-    <div class="bench-method">
-      <strong>Method</strong> &nbsp;|&nbsp;
-      4 workers, full middleware stack, <code class="home-bench-method-code">ab -n 50000 -c 200 -k</code>, same machine, no DB
-      &nbsp;|&nbsp;
-      <a href="https://github.com/sibidharan/zealphp/blob/master/PERF.md" target="_blank" rel="noopener">PERF.md</a>
-      &nbsp;|&nbsp;
-      <a href="https://github.com/sibidharan/zealphp/blob/master/scripts/bench_vs_express.sh" target="_blank" rel="noopener">reproduce locally</a>
-    </div>
-    <div class="bench">
-      <div class="bench-stat"><div class="num">117k</div><div class="label">req/s text</div><div class="sub">avg 1.7 ms</div></div>
-      <div class="bench-stat"><div class="num">106k</div><div class="label">req/s JSON</div><div class="sub">avg 1.9 ms</div></div>
-      <div class="bench-stat"><div class="num">50k</div><div class="label">req/s template</div><div class="sub">avg 4.0 ms</div></div>
-      <div class="bench-stat"><div class="num">0</div><div class="label">failures</div><div class="sub">/ 150k reqs</div></div>
-    </div>
-    <div class="home-bench-table-wrap">
-      <table class="home-bench-table">
-        <tr class="home-bench-head">
-          <th class="home-bench-th-left">Framework</th>
-          <th>Raw text</th>
-          <th>JSON API</th>
-          <th>Template</th>
-        </tr>
-        <tr class="home-bench-group">
-          <td colspan="4" class="home-bench-group-label">Runtime (no framework, no middleware)</td>
-        </tr>
-        <tr>
-          <td>OpenSwoole raw</td>
-          <td class="home-bench-num">142k</td>
-          <td class="home-bench-num">138k</td>
-          <td class="home-bench-num home-bench-dash">—</td>
-        </tr>
-        <tr>
-          <td>Node.js raw http</td>
-          <td class="home-bench-num">129k</td>
-          <td class="home-bench-num">132k</td>
-          <td class="home-bench-num home-bench-dash">—</td>
-        </tr>
-        <tr class="home-bench-group">
-          <td colspan="4" class="home-bench-group-label">Full framework (CORS + ETag + sessions + routing + templates)</td>
-        </tr>
-        <tr class="home-bench-row-zeal">
-          <td class="home-bench-zeal">ZealPHP <span class="home-bench-tag">built-in</span></td>
-          <td class="home-bench-num home-bench-zeal">117k</td>
-          <td class="home-bench-num home-bench-zeal">106k</td>
-          <td class="home-bench-num home-bench-zeal">50k</td>
-        </tr>
-        <tr class="home-bench-row-express">
-          <td class="home-bench-express">Express.js <span class="home-bench-tag">+5 npm pkgs</span></td>
-          <td class="home-bench-num home-bench-express">20k</td>
-          <td class="home-bench-num home-bench-express">22k</td>
-          <td class="home-bench-num home-bench-express">12k</td>
-        </tr>
-        <tr class="home-bench-group">
-          <td colspan="4" class="home-bench-group-label">Other PHP frameworks <span class="home-bench-group-note">(community benchmarks)</span></td>
-        </tr>
-        <tr class="home-bench-row-other">
-          <td class="home-bench-other-name">Slim 4</td>
-          <td colspan="3" class="home-bench-other-num">~4k req/s</td>
-        </tr>
-        <tr class="home-bench-row-other">
-          <td class="home-bench-other-name">Symfony 7</td>
-          <td colspan="3" class="home-bench-other-num">~2k req/s</td>
-        </tr>
-        <tr class="home-bench-row-other">
-          <td class="home-bench-other-name">Laravel 11</td>
-          <td colspan="3" class="home-bench-other-num">~500 req/s</td>
-        </tr>
-      </table>
-      <div class="home-bench-callout">
-        <p>
-          <strong>The runtime is already faster.</strong>
-          OpenSwoole's bare HTTP server hits <strong>142k req/s text · 138k JSON</strong>
-          — versus Node's <strong class="home-bench-callout-alt">129k · 132k</strong>.
-          <strong>+10% on text, +5% on JSON</strong>, before any framework loads.
-        </p>
-        <p class="home-bench-callout-last">
-          <strong>ZealPHP keeps 82%</strong> of that with full PSR-15 middleware on top.
-          <strong class="home-bench-callout-alt">Express keeps 15%</strong> of raw Node's.
-          End result — ZealPHP with full middleware reaches
-          <strong>91% of bare Node http's throughput</strong>.
-        </p>
-      </div>
-      <p class="home-bench-perflink">
-        <a href="/performance">Concurrency sweep, latency percentiles, methodology, reproduction recipes &amp; caveats →</a>
-      </p>
-    </div>
   </div>
 </section>
 
 <!-- The Problem -->
 <section class="section section-problem">
   <div class="container">
-    <h2 class="section-title">The PHP we love. The execution model we needed.</h2>
+    <h2 class="section-title">For 25 years, the HTTP server was C. PHP was the worker that died.</h2>
     <p class="section-desc">
-      LAMP shipped the web &mdash; Apache and mod_php, now nginx and PHP-FPM. Twenty-five years of
-      request isolation: a pool of warm workers, each handling one request at a time and reset
-      to a clean slate before the next. Shared-nothing by design.
-    </p>
-    <p class="section-desc">
-      It still works. But it can't stream AI tokens. It can't push WebSocket events.
-      It can't share state between requests without bolting on Redis. Every
-      &ldquo;real-time&rdquo; feature your customers ask for needs another service.
+      Apache + mod_php, nginx + PHP-FPM &mdash; the HTTP server is always a C binary that bridges to
+      a PHP process via FastCGI. PHP runs the request, then exits the request context. PHP is the
+      <em>language</em>, never the <em>server</em>. That model gave us shared-nothing isolation,
+      cheap workers, and 77% of the web. It also gave us "PHP can't do WebSockets" and a separate
+      Node service for every streaming feature.
     </p>
     <p class="section-desc section-problem-payoff">
-      <strong>ZealPHP keeps the PHP. Swaps the execution model.</strong>
-      One process, coroutines, persistent state &mdash; and your existing PHP codebase still runs.
+      <strong>ZealPHP is what happens when PHP <em>becomes</em> the HTTP server.</strong>
+      Always-on, coroutine-native, owns the event loop, holds the connections. WebSocket, SSE,
+      timers, and shared memory are first-class because the server never shuts down. The on-ramp
+      is real too &mdash; <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>,
+      <code>echo</code> all route through <a href="https://github.com/krakjoe/uopz" target="_blank" rel="noopener">uopz</a>
+      overrides into per-request state, so existing PHP code runs unchanged.
     </p>
   </div>
 </section>
@@ -249,114 +168,101 @@ $app->route('/api/chat', ['methods' => ['POST']],
   </div>
 </section>
 
-<!-- Why Not Just Use [X]? -->
+<!-- What being-the-HTTP-server actually buys you -->
 <section class="section home-section-altbg">
   <div class="container">
-    <h2 class="section-title">Why not just use...?</h2>
-    <p class="section-desc">Bold claims. Real code. You decide.</p>
+    <h2 class="section-title">What being the HTTP server actually buys you</h2>
+    <p class="section-desc">SSE, WebSocket, shared memory, timers &mdash; not bolt-ons. First-class because the server is alive between requests.</p>
 
     <div class="bold-claim">
-      <h3>Node.js needs 30 lines for what ZealPHP does in 5</h3>
-      <p>AI token streaming — the core feature of every LLM app. Compare the implementations.</p>
+      <h3>SSE / token streaming as a first-class response primitive</h3>
+      <p>The server holds the connection. <code>$response-&gt;sse()</code> is the framework primitive &mdash; no framing, no transports library, no separate sidecar.</p>
       <div class="code-compare">
         <div class="code-compare-panel">
-          <div class="compare-label">ZealPHP — 7 lines</div>
+          <div class="compare-label">app.php</div>
 <pre><code>$app->route('/ai/stream', function($response) {
     $response->sse(function($emit) {
-        $ch = curl_init($apiUrl);
-        // ... setup curl streaming
-        curl_exec($ch);
+        foreach (stream_from_upstream() as $token) {
+            $emit($token, 'token');
+        }
     });
 });</code></pre>
         </div>
         <div class="code-compare-panel">
-          <div class="compare-label">Node.js — 25+ lines</div>
-<pre><code>app.get('/ai/stream', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-
-  const response = await fetch(apiUrl, {
-    method: 'POST', body: JSON.stringify({...}),
-  });
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const chunk = decoder.decode(value);
-    // parse SSE lines, extract tokens...
-    res.write(`data: ${token}\n\n`);
-  }
-  res.end();
-});</code></pre>
+          <div class="compare-label">FPM equivalent</div>
+<pre><code>// In an FPM world, the same endpoint pins a worker for
+// the lifetime of the stream — the request-per-process
+// model has no concept of "yield while waiting on I/O."
+// Most teams solve this by running a separate Node or
+// Go service just for streaming endpoints.
+// ZealPHP does it in the same process as the rest of
+// your app, in a coroutine instead of a pinned worker.</code></pre>
         </div>
       </div>
     </div>
 
     <div class="bold-claim">
-      <h3>Expressive PHP with coroutine-grade concurrency</h3>
-      <p>~106k req/s in our 4-worker JSON benchmark, with reflection-based injection, auto-serialization, and no boilerplate. Numbers vary by workload — see methodology below.</p>
+      <h3>Routing &amp; auto-serialization with the LAMP idiom intact</h3>
+      <p>Reflection-based parameter injection. Return whatever shape fits &mdash; int becomes a status, array becomes JSON, generator becomes a stream. No DI container, no <code>$request</code>-first convention. The <a href="/responses#return-contract">universal return contract</a> is one table.</p>
       <div class="code-compare">
         <div class="code-compare-panel">
-          <div class="compare-label">ZealPHP — return anything</div>
+          <div class="compare-label">Return anything &mdash; framework picks the right wire shape</div>
 <pre><code>$app->route('/users/{id}', function($id) {
-    return ['user' => User::find($id)];
-    // auto JSON. auto 200. done.
-});</code></pre>
+    return ['user' => User::find($id)];  // auto JSON, 200
+});
+
+$app->route('/missing', fn() => 404);    // int → status
+
+$app->route('/page', fn() => (function() {
+    yield '&lt;html&gt;&lt;body&gt;';                 // generator → SSR stream
+    yield '&lt;div&gt;...&lt;/div&gt;';
+    yield '&lt;/body&gt;&lt;/html&gt;';
+})());</code></pre>
         </div>
         <div class="code-compare-panel">
-          <div class="compare-label">Go — manual everything</div>
-<pre><code>func getUser(w http.ResponseWriter, r *http.Request) {
-    id := chi.URLParam(r, "id")
-    user, err := FindUser(id)
-    if err != nil {
-        http.Error(w, err.Error(), 500)
-        return
-    }
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(map[string]any{
-        "user": user,
-    })
-}</code></pre>
+          <div class="compare-label">Same return contract for legacy public/*.php files</div>
+<pre><code>// public/users.php — Apache-style file routing,
+// same return contract as $app->route() handlers.
+&lt;?php
+require_once __DIR__ . '/../vendor/autoload.php';
+return ['users' => User::all()];  // → JSON, 200
+
+// public/old-handler.php — buffered echo still works
+// for unmodified legacy code.
+&lt;?php session_start();
+echo "&lt;h1&gt;Hello, {$_SESSION['user']}&lt;/h1&gt;";</code></pre>
         </div>
       </div>
     </div>
 
     <div class="bold-claim">
-      <h3>Multi-process workers, coroutines per worker</h3>
-      <p>ZealPHP inherits OpenSwoole's architecture: <code>N</code> worker processes, each running thousands of coroutines on a single reactor loop. <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> is the runtime; ZealPHP is the framework layer. Real connection counts depend on workload, OS limits, and tuning — measure for your case.</p>
+      <h3>Workers + coroutines + shared state in one PHP application server</h3>
+      <p>OpenSwoole's master/manager/worker model: <code>N</code> worker processes, each running thousands of coroutines on a reactor loop. <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> is the runtime; ZealPHP is the framework layer on top. Cross-worker state ships built-in for one machine; cross-node uses the same API with a Redis backend.</p>
       <div class="code-compare">
         <div class="code-compare-panel">
-          <div class="compare-label">ZealPHP — true parallelism</div>
-<pre><code>// 16 workers × thousands of coroutines
-// Shared memory across workers (no Redis)
-// Each coroutine yields on I/O automatically
+          <div class="compare-label">Cross-worker state on a single node &mdash; built in</div>
+<pre><code>// N workers × thousands of coroutines per worker.
+// Coroutines yield on I/O automatically (HOOK_ALL).
 ZEALPHP_WORKERS=16 php app.php
 
-// Store: cross-worker shared state (1 process)
+// Store: cross-worker shared state, in-process.
+// No Redis needed for one node — OpenSwoole\Table.
 Store::set('cache', $key, $data);
-$data = Store::get('cache', $key);
-
-// Or flip to cross-NODE in one line
-Store::defaultBackend(Store::BACKEND_REDIS);
-Store::publish('chat:room', $payload);
-App::subscribe('chat:room', $handler);</code></pre>
+$data = Store::get('cache', $key);</code></pre>
         </div>
         <div class="code-compare-panel">
-          <div class="compare-label">FastAPI — single process limits</div>
-<pre><code># Single process, async but not parallel
-# Need Gunicorn + multiple workers
-# Need Redis for any shared state
-# Need Celery for background tasks
-gunicorn app:app -w 4 -k uvicorn.workers.UvicornWorker
+          <div class="compare-label">Cross-node &mdash; same API, Redis/Valkey backend</div>
+<pre><code>// Multi-node deploy? Same code, one-line backend flip.
+// Federated WebSocket rooms + pub/sub need Redis;
+// in-memory Table can't reach across machines.
+Store::defaultBackend(Store::BACKEND_REDIS);
 
-# Shared state? Add Redis.
-redis_client = redis.Redis()
-redis_client.set(key, json.dumps(data))</code></pre>
+Store::publish('chat:room', $payload);
+App::subscribe('chat:room', $handler);
+
+// Or run TIERED: L1 = local Table, L2 = Redis,
+// HMAC-signed cross-node L1 invalidations.
+Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
         </div>
       </div>
     </div>
@@ -440,6 +346,70 @@ redis_client.set(key, json.dumps(data))</code></pre>
 </section>
 
 
+<!-- AI-friendly by being boring -->
+<section class="section home-section-ai-friendly">
+  <div class="container">
+    <h2 class="section-title">AI-friendly by being boring</h2>
+    <p class="section-desc">
+      ZealPHP doesn't require a heavy frontend stack to build interactive AI apps.
+      Routes can return HTML. SSE can stream tokens. WebSockets can push live events.
+      Task workers can run long jobs. Templates stay close to backend state.
+      That smaller surface area &mdash; HTML as the interface contract, fewer files between
+      handler and DOM &mdash; makes the app easier to understand, test, and modify, for humans
+      and for AI coding assistants.
+    </p>
+    <p class="section-desc home-ai-friendly-note">
+      It's an architectural note, not a product claim: less architecture is often more accuracy.
+      Build small explicit server flows; let the browser stay browser-shaped.
+      Worked example: the live AI chat above is ~40 lines of PHP + a Python agent,
+      no SPA framework involved.
+    </p>
+  </div>
+</section>
+
+<!-- Engine vs harness — pre-empts the "just use Swoole" attack -->
+<section class="section home-section-engine">
+  <div class="container">
+    <h2 class="section-title">OpenSwoole is the engine. ZealPHP is the harness.</h2>
+    <p class="section-desc home-engine-lead">
+      <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> gives PHP a real long-lived HTTP/WebSocket server with native coroutines, Atomic, and Table. It's the C-extension that makes everything else possible. But raw OpenSwoole leaves the framework problem unsolved &mdash; routing, middleware, sessions, legacy-PHP compatibility, return-shape resolution, CLI tooling. Every team that builds on raw OpenSwoole re-invents the same harness.
+    </p>
+    <div class="home-engine-grid">
+      <div class="home-engine-col home-engine-col-engine">
+        <h3 class="home-engine-col-title">OpenSwoole gives you</h3>
+        <ul class="home-engine-list">
+          <li>HTTP server + WebSocket server primitives</li>
+          <li>Coroutines + Channel + WaitGroup</li>
+          <li><code>Atomic</code> + <code>Table</code> (shared memory)</li>
+          <li>Coroutine\Http\Client + DNS + sleep hooks</li>
+          <li><code>HOOK_ALL</code> &mdash; PHP I/O yields the reactor</li>
+          <li>Process\Pool + master/manager/worker lifecycle</li>
+        </ul>
+      </div>
+      <div class="home-engine-col home-engine-col-harness">
+        <h3 class="home-engine-col-title">ZealPHP adds on top</h3>
+        <ul class="home-engine-list">
+          <li>Routing (<code>route()</code> + <code>nsRoute</code> + <code>patternRoute</code>) with reflection-based parameter injection</li>
+          <li>PSR-15 middleware stack &mdash; 18 built-ins covering common Apache/nginx behaviors</li>
+          <li><code>uopz</code> overrides so <code>session_start()</code>, <code>header()</code>, <code>setcookie()</code>, <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>, <code>echo</code> all just work</li>
+          <li>Coroutine-safe sessions (per-request <code>RequestContext</code>, no process-wide superglobal races)</li>
+          <li>Templating (<code>App::render</code> / <code>renderStream</code> / <code>fragment</code>) with streaming-Generator output</li>
+          <li>Universal return contract (int = status, array = JSON, Generator = SSE/SSR stream)</li>
+          <li>ZealAPI &mdash; file-based REST (drop <code>api/users/get.php</code> &rarr; auto-route)</li>
+          <li>CGI worker bridge for unmodified WordPress / Drupal compatibility</li>
+          <li>Pluggable <code>Store</code> + <code>Counter</code> backends (Table &rarr; Redis/Valkey &rarr; Tiered with HMAC-signed cross-node L1 invalidation)</li>
+          <li>Cross-host pub/sub (<code>App::subscribe</code>) + Streams (<code>App::subscribeReliable</code>) + WSRouter for cross-server WebSocket routing + first-class WS rooms</li>
+          <li>Stream wrapper for <code>php://input</code> so legacy <code>file_get_contents('php://input')</code> just works in long-running workers</li>
+          <li>CLI tooling: <code>php app.php start/stop/restart/status/logs</code> + daemonization + per-port PID files</li>
+        </ul>
+      </div>
+    </div>
+    <p class="home-engine-when-raw">
+      <strong>When raw OpenSwoole is the right choice:</strong> you're building a custom binary-protocol server (your own ASR / database / message broker), you need to avoid <code>uopz</code> entirely (compliance), you're building your own framework. For everything else &mdash; HTTP, WebSocket, SSE, REST, web apps with sessions &mdash; the harness saves you weeks per project.
+    </p>
+  </div>
+</section>
+
 <!-- Feature grid -->
 <section class="section">
   <div class="container">
@@ -455,12 +425,12 @@ redis_client.set(key, json.dumps(data))</code></pre>
         ['🔌', 'WebSocket',    'Real-time agent-to-user comms. Multi-user AI sessions, live collaboration, binary frames.',           '/ws',         'App::ws()'],
         ['🛡️', 'Middleware',  'CORS, ETag/304, gzip. PSR-15 compatible — drop in any middleware package.',                            '/middleware', 'PSR-15'],
         ['🗄️', 'Sessions',   'Coroutine-safe sessions. Your existing session_start() code just works via uopz.',                     '/sessions',   'drop-in'],
-        ['🗃️', 'Store',      'Share AI conversation state across workers. Cross-worker shared memory — no Redis needed.',             '/store',      'OpenSwoole\\Table'],
+        ['🗃️', 'Store',      'Cross-worker shared state on one node via OpenSwoole\\Table; flip to Redis/Valkey for cross-node + persistence. One API.',  '/store',      'pluggable backend'],
         ['⏱️', 'Timers',     'Schedule recurring AI tasks. Polling, cleanup, model warmup, health checks.',                           '/timers',     'tick() · after()'],
         ['🌐', 'HTTP',        'Full HTTP/1.1 compliance. HEAD, OPTIONS, Range, redirects, CORS, ETag, gzip — all built-in.',           '/http',       'HTTP/1.1'],
         ['📝', 'Components',  'SSR streaming components. Compose views with yield from. renderStream() for progressive HTML.',         '/templates',  'renderStream()'],
         ['🔗', 'REST API',    'Drop a PHP file in api/. It becomes a route. File-based REST — the simplest API pattern.',             '/api',        'file-based'],
-        ['🏗️', 'Legacy Apps','Run WordPress unmodified. CGI worker provides true global scope. Apache mod_php compatibility.',        '/legacy-apps','WordPress'],
+        ['🏗️', 'Legacy Apps','WordPress compatibility showcase via the CGI bridge (admin, login, REST API working) — with documented limits and trade-offs.', '/legacy-apps','WordPress'],
       ];
       foreach ($features as [$icon, $title, $body, $href, $badge]) {
         App::render('/components/_card', compact('icon', 'title', 'body', 'href', 'badge'));
@@ -470,34 +440,36 @@ redis_client.set(key, json.dumps(data))</code></pre>
   </div>
 </section>
 
-<!-- Migrate Your PHP Codebase -->
+<!-- Bring your PHP code along -->
 <section class="section home-section-migrate">
   <div class="container home-migrate-wrap">
-    <h2 class="section-title home-migrate-title">Bring your PHP codebase along</h2>
+    <h2 class="section-title home-migrate-title">Bring your PHP code along</h2>
     <p class="section-desc home-migrate-desc">
-      <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>echo</code> —
-      overridden via uopz so existing code runs unchanged inside the coroutine runtime.
-      Move at your own pace: drop your whole app in, or rewrite endpoint-by-endpoint.
+      Many traditional PHP patterns run unchanged in compatibility mode. <code>session_start()</code>,
+      <code>header()</code>, <code>$_GET</code>, <code>$_POST</code>, <code>echo</code>, <code>setcookie()</code>
+      &mdash; all routed through <code>uopz</code> overrides into per-request state, so existing files
+      can sit beside coroutine-native routes in the same app. Compatibility is a migration on-ramp,
+      not a guarantee that every PHP application is safe to drop in without an audit.
     </p>
 
     <div class="home-migrate-grid">
       <div class="home-migrate-card home-migrate-card-today">
-        <h3>Today: Nginx + PHP-FPM + Redis + Socket.io + cron + …</h3>
-        <p>6 services, 6 failure points, 6 sets of config.</p>
+        <h3>Today: nginx + PHP-FPM + Redis + Socket.io + cron + &hellip;</h3>
+        <p>Each tier is mature in isolation, but the per-feature wiring (sessions, real-time, background jobs) lives across several services and config files.</p>
       </div>
       <div class="home-migrate-card home-migrate-card-accent">
         <h3>On ZealPHP: <code>php app.php</code></h3>
-        <p>HTTP + WebSocket + SSE + sessions + shared memory + task workers — one process.</p>
+        <p>HTTP, WebSocket, SSE, sessions, task workers, shared memory, timers &mdash; one PHP application server. Front it with nginx / Caddy / Traefik in production for TLS + load-balancing across instances, exactly as you would an FPM pool.</p>
       </div>
     </div>
 
     <p class="home-migrate-ladder">
-      The migration ladder has 5 rungs (0 → 4). Rung 0 is "drop in your existing app, run <code>php app.php</code>." Rung 4 is full coroutine mode — <a href="/performance">117k req/s on 4 workers</a>. Most teams stay on rungs 1–3 indefinitely; the upgrade path is opt-in, not forced.
+      The <a href="/migration">migration ladder</a> has 5 rungs (0&nbsp;&rarr;&nbsp;4). Rung 0 is &ldquo;drop your existing app in a fallback handler.&rdquo; Rung 4 is full coroutine mode (<a href="/performance">measured throughput on /performance</a>). Most teams stay on rungs 1&ndash;3 indefinitely; the upgrade path is opt-in, not forced. Real-world fit depends on extension coverage, blocking-I/O usage, and how much of the app reaches for global state &mdash; <a href="/why-zealphp#when-to-use-zealphp">honest fit guide</a>.
     </p>
 
     <div class="home-migrate-cta">
       <a href="/migration" class="btn btn-primary">See the full migration path →</a>
-      <a href="/legacy-apps" class="btn btn-outline home-migrate-cta-wp">WordPress on ZealPHP →</a>
+      <a href="/legacy-apps" class="btn btn-outline home-migrate-cta-wp">WordPress compatibility showcase →</a>
     </div>
   </div>
 </section>

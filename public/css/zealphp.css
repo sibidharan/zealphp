@@ -767,20 +767,17 @@ pre:hover > .code-copy { opacity: 1; }
 }
 .code-compare-panel {
   padding: 1.25rem; overflow-x: auto;
+  background: var(--bg-alt);
 }
 .code-compare-panel:first-child {
-  background: #f0fdf4; border-right: 1px solid var(--border);
-}
-.code-compare-panel:last-child {
-  background: #fef2f2;
+  border-right: 1px solid var(--border);
 }
 .code-compare-panel .compare-label {
   font-size: .72rem; font-weight: 700; text-transform: uppercase;
   letter-spacing: .05em; margin-bottom: .75rem;
   display: flex; align-items: center; gap: .5rem;
+  color: var(--text-muted);
 }
-.code-compare-panel:first-child .compare-label { color: #166534; }
-.code-compare-panel:last-child .compare-label { color: #991b1b; }
 .code-compare-panel pre {
   margin: 0; font-size: .78rem; line-height: 1.6; color: #1c1917;
 }
