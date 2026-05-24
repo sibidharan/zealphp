@@ -6,6 +6,8 @@ namespace ZealPHP\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use ZealPHP\App;
+use ZealPHP\Store;
+use ZealPHP\Store\StoreException;
 
 /**
  * Patch-coverage for the v0.2.40 App pub/sub rename. The canonical
@@ -22,6 +24,7 @@ use ZealPHP\App;
  */
 final class AppPubSubAliasesTest extends TestCase
 {
+    /** @var \ReflectionClass<App> */
     private \ReflectionClass $r;
 
     protected function setUp(): void
@@ -79,5 +82,24 @@ final class AppPubSubAliasesTest extends TestCase
         // still return an array (possibly with _error keys), not throw.
         $s = App::stats();
         $this->assertIsArray($s['ws_router'], 'ws_router slot is an array even when uninitialised');
+    }
+
+    // ── behavioural: publish + publishReliable throw on Table backend ───
+    // Pins the Store::publish / Store::publishReliable passthroughs.
+    // Both throw on Table (pub/sub needs Redis); these tests guard
+    // against an accidental future relaxation.
+
+    public function testPublishThrowsOnTableBackend(): void
+    {
+        Store::defaultBackend(Store::BACKEND_TABLE);
+        $this->expectException(StoreException::class);
+        App::publish('some:channel', 'payload');
+    }
+
+    public function testPublishReliableThrowsOnTableBackend(): void
+    {
+        Store::defaultBackend(Store::BACKEND_TABLE);
+        $this->expectException(StoreException::class);
+        App::publishReliable('some:stream', 'payload');
     }
 }
