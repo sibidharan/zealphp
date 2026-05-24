@@ -10,8 +10,8 @@ use ZealPHP\App;
 /**
  * Tests for App::registerCgiBackend() registry and App::resolveCgiBackend().
  *
- * Covers: default .php entry, happy-path registrations (proc/fork/fcgi),
- * fork-on-non-PHP rejection, invalid mode rejection, fcgi-without-address
+ * Covers: default .php entry, happy-path registrations (proc/pool/fcgi),
+ * pool-on-non-PHP rejection, invalid mode rejection, fcgi-without-address
  * rejection, and resolveCgiBackend fallback to global cgi_mode.
  */
 final class CgiBackendRegistryTest extends TestCase
@@ -67,10 +67,10 @@ final class CgiBackendRegistryTest extends TestCase
         $this->assertArrayNotHasKey('interpreter', App::$cgi_backends['.cgi']);
     }
 
-    public function testRegisterForkBackendForPhp(): void
+    public function testRegisterPoolBackendForPhp(): void
     {
-        App::registerCgiBackend('.php', ['mode' => 'fork']);
-        $this->assertSame('fork', App::$cgi_backends['.php']['mode']);
+        App::registerCgiBackend('.php', ['mode' => 'pool']);
+        $this->assertSame('pool', App::$cgi_backends['.php']['mode']);
     }
 
     public function testRegisterFcgiBackendWithTcpAddress(): void
@@ -109,8 +109,8 @@ final class CgiBackendRegistryTest extends TestCase
     public function testRegisterOverwritesExistingExtension(): void
     {
         App::registerCgiBackend('.php', ['mode' => 'proc']);
-        App::registerCgiBackend('.php', ['mode' => 'fork']);
-        $this->assertSame('fork', App::$cgi_backends['.php']['mode']);
+        App::registerCgiBackend('.php', ['mode' => 'pool']);
+        $this->assertSame('pool', App::$cgi_backends['.php']['mode']);
     }
 
     // ── Validation errors ─────────────────────────────────────────────────────
@@ -118,7 +118,7 @@ final class CgiBackendRegistryTest extends TestCase
     public function testInvalidModeThrowsInvalidArgumentException(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessageMatches("/'proc', 'fork', 'fcgi', or 'pool'/");
+        $this->expectExceptionMessageMatches("/'pool', 'proc', or 'fcgi'/");
         App::registerCgiBackend('.rb', ['mode' => 'cgi']);
     }
 
@@ -134,17 +134,17 @@ final class CgiBackendRegistryTest extends TestCase
         App::registerCgiBackend('.rb', []);
     }
 
-    public function testForkOnNonPhpExtensionThrows(): void
+    public function testPoolOnNonPhpExtensionThrows(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessageMatches('/fork mode requires a PHP target/');
-        App::registerCgiBackend('.py', ['mode' => 'fork']);
+        $this->expectExceptionMessageMatches('/pool mode requires a PHP target/');
+        App::registerCgiBackend('.py', ['mode' => 'pool']);
     }
 
-    public function testForkOnNonPhpErrorMessageIncludesExtension(): void
+    public function testPoolOnNonPhpErrorMessageIncludesExtension(): void
     {
         try {
-            App::registerCgiBackend('.pl', ['mode' => 'fork']);
+            App::registerCgiBackend('.pl', ['mode' => 'pool']);
             $this->fail('Expected InvalidArgumentException not thrown');
         } catch (\InvalidArgumentException $e) {
             $this->assertStringContainsString('.pl', $e->getMessage());
@@ -197,9 +197,9 @@ final class CgiBackendRegistryTest extends TestCase
 
     public function testResolveCgiBackendPhpUsesRegisteredEntry(): void
     {
-        App::$cgi_backends['.php'] = ['mode' => 'fork'];
+        App::$cgi_backends['.php'] = ['mode' => 'pool'];
         $backend = App::resolveCgiBackend('/var/www/index.php')['backend'];
-        $this->assertSame('fork', $backend['mode']);
+        $this->assertSame('pool', $backend['mode']);
     }
 
     public function testResolveCgiBackendForFileWithNoExtension(): void

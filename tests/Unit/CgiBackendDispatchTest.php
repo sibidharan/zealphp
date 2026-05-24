@@ -12,7 +12,7 @@ use ZealPHP\RequestContext;
 /**
  * Tests for App::include() / App::includeFile() dispatch via resolveCgiBackend().
  *
- * Verifies that the correct internal dispatch method (cgiSubprocess / cgiFork /
+ * Verifies that the correct internal dispatch method (cgiSubprocess / cgiPool /
  * cgiFcgi) is invoked for each registered extension, and that unregistered
  * extensions fall back to App::$cgi_mode.
  */
