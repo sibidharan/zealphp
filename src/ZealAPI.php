@@ -400,14 +400,21 @@ class ZealAPI extends REST
         throw new \BadMethodCallException("ZealAPI: undefined method \$this->{$method}()");
     }
 
-    /*
-    Encode array into JSON
-    */
+    public function resolveClubParam()
+    {
+        return $this->_request['club'] ?? $this->_request['group'] ?? null;
+    }
+
+    public function failAs(\Throwable $e)
+    {
+        $this->response($this->json(["error" => $e->getMessage()]), 400);
+    }
+
     /**
      * @param mixed $data
      * @return string
      */
-    private function json($data)
+    public function json($data)
     {
         if (is_array($data)) {
             return (string)json_encode($data, JSON_PRETTY_PRINT);
