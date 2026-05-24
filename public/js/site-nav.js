@@ -302,42 +302,74 @@ function ensureActiveSidebarVisible(sb) {
 // SHOW_AFTER tuning: 150ms is the threshold below which users perceive an
 // action as "instant" (Jakob Nielsen). Above that they want feedback.
 (function () {
-  const bar = document.getElementById('htmx-progress');
-  if (!bar) return;
-  const SHOW_AFTER = 150;   // ms before showing the bar at all
-  const CREEP_AFTER = 380;  // ms before transitioning start → mid
+  // Re-query the bar on every event rather than caching, so a navigation that
+  // detaches the original element (e.g. nav into a non-htmx static section
+  // like /docs/api/, OR an hx-boost swap that for some reason replaces the
+  // preserved element) can't leave us holding a stale reference to a node
+  // that's no longer in the DOM. Tiny perf cost; guarantees correctness.
+  const getBar = () => document.getElementById('htmx-progress');
+  if (!getBar()) return;
+  const SHOW_AFTER = 150;    // ms before showing the bar at all
+  const CREEP_AFTER = 380;   // ms before transitioning start → mid
+  const SAFETY_MAX = 4000;   // ms — hard ceiling; force-reset if finish() never fires
   let pending = 0;
   let visible = false;
   let showTimer = null;
   let creepTimer = null;
+  let safetyTimer = null;
+  const forceReset = () => {
+    // Hard reset path used by the safety timer, htmx:historyRestore, and the
+    // ESC keypath. Idempotent — safe to call from any state.
+    pending = 0;
+    visible = false;
+    clearTimeout(showTimer);
+    clearTimeout(creepTimer);
+    clearTimeout(safetyTimer);
+    const b = getBar();
+    if (b) b.className = 'htmx-progress';
+  };
   const reveal = () => {
     visible = true;
-    bar.className = 'htmx-progress start';
+    const b = getBar();
+    if (b) b.className = 'htmx-progress start';
     creepTimer = setTimeout(() => {
-      if (pending > 0) bar.className = 'htmx-progress mid';
+      if (pending > 0) {
+        const b2 = getBar();
+        if (b2) b2.className = 'htmx-progress mid';
+      }
     }, CREEP_AFTER - SHOW_AFTER);
   };
   const start = () => {
     pending++;
     if (pending > 1) return;
+    clearTimeout(showTimer);
+    clearTimeout(safetyTimer);
     // Don't reveal yet — wait SHOW_AFTER ms. Most clicks resolve faster than
     // that on a fiber connection and never need a loading indicator.
-    clearTimeout(showTimer);
     showTimer = setTimeout(reveal, SHOW_AFTER);
+    // Safety net: if finish() never fires (request aborted by browser nav,
+    // missed event, swap into a non-htmx target like /docs/api/, …) snap the
+    // bar back to idle so it can't be permanently stuck at 75%.
+    safetyTimer = setTimeout(forceReset, SAFETY_MAX);
   };
   const finish = () => {
     pending = Math.max(0, pending - 1);
     if (pending > 0) return;
     clearTimeout(showTimer);
     clearTimeout(creepTimer);
+    clearTimeout(safetyTimer);
     if (!visible) {
       // Fast request — never showed the bar, don't show it now either.
       return;
     }
-    bar.className = 'htmx-progress done';
+    const b = getBar();
+    if (b) b.className = 'htmx-progress done';
     visible = false;
     setTimeout(() => {
-      if (pending === 0 && !visible) bar.className = 'htmx-progress';
+      if (pending === 0 && !visible) {
+        const b2 = getBar();
+        if (b2) b2.className = 'htmx-progress';
+      }
     }, 280);
   };
   // Only NAVIGATION requests drive the bar: full-page swaps (hx-boost), the
@@ -362,4 +394,10 @@ function ensureActiveSidebarVisible(sb) {
   document.addEventListener('htmx:sendError',     (e) => { if (isNavRequest(e)) finish(); });
   document.addEventListener('htmx:swapError',     (e) => { if (isNavRequest(e)) finish(); });
   document.addEventListener('htmx:timeout',       (e) => { if (isNavRequest(e)) finish(); });
+  // Browser back/forward (htmx:historyRestore) can land us in a state where
+  // the previous run's mid-state class is restored via bfcache; force-reset
+  // so a stale bar can't survive a history navigation. Same on pageshow for
+  // bfcache-restored pages that pre-date this script.
+  document.addEventListener('htmx:historyRestore', forceReset);
+  window.addEventListener('pageshow', (e) => { if (e.persisted) forceReset(); });
 })();
