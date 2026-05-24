@@ -283,6 +283,19 @@ if (Store::defaultBackend() instanceof \ZealPHP\Store\RedisBackend) {
             'pattern' => $pattern ?? '', 'ts' => time(),
         ]);
     });
+
+    // Reliable variant — drives the Streams runner (XREADGROUP loop).
+    // Handler returns true → XACK (message removed from pending).
+    App::subscribeReliable('demo:reliable', function (string $payload, string $id, string $stream, array $fields): bool {
+        $rowKey = 'r_' . bin2hex(random_bytes(4));
+        Store::set('demo_pubsub_log', $rowKey, [
+            'channel' => 'stream:' . $stream,
+            'payload' => $payload,
+            'pattern' => $id,
+            'ts'      => time(),
+        ]);
+        return true;
+    });
 }
 
 $app->route('/demo/pubsub/publish', ['methods' => ['GET']], function (\ZealPHP\HTTP\Request $request) {
