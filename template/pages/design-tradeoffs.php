@@ -308,9 +308,6 @@ PHP]); ?>
         For framework-level critique with version-by-version traces of how these trade-offs were
         discovered, justified, or fixed, see
         <a href="https://github.com/sibidharan/zealphp/blob/master/CRITIC.md" class="tradeoffs-link">CRITIC.md</a>.
-        For the lesson learned from over-categorizing the level-1 ceiling as "deliberate trade-off"
-        when most of it was actually unwritten annotations, see the "Cite numbers, not categories"
-        entry at the bottom of that file.
       </p>
       <p class="tradeoffs-closing-p-sm">
         Found a design tax we haven't documented?
