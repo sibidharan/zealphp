@@ -118,7 +118,7 @@ final class CgiBackendRegistryTest extends TestCase
     public function testInvalidModeThrowsInvalidArgumentException(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessageMatches("/'proc', 'fork', or 'fcgi'/");
+        $this->expectExceptionMessageMatches("/'proc', 'fork', 'fcgi', or 'pool'/");
         App::registerCgiBackend('.rb', ['mode' => 'cgi']);
     }
 

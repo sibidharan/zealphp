@@ -209,6 +209,30 @@ class App
      */
     public static string $fcgi_address = '127.0.0.1:9000';
     /**
+     * Subprocess count for `cgiMode('pool')` — the native FCGI-style worker
+     * pool. Each OpenSwoole worker process spawns this many persistent PHP
+     * subprocesses on first dispatch (lazy). FPM `pm.max_children` parity:
+     * sets the per-worker concurrency cap. Default 4 — balances spawn cost
+     * with concurrency for typical web workloads.
+     */
+    public static int $cgi_pool_size = 4;
+    /**
+     * Per-subprocess recycle threshold for `cgiMode('pool')`. After this many
+     * requests, the subprocess exits cleanly and the pool spawns a fresh
+     * replacement — FPM `pm.max_requests` parity, bounds memory leak from
+     * long-running plugin code. Set to 1 to recycle every request (true
+     * fresh-process semantics; same isolation as `cgiMode('proc')` but with
+     * the pool managing spawn-cost amortisation).
+     */
+    public static int $cgi_pool_max_requests = 500;
+    /**
+     * Per-worker WorkerPool singleton for `cgiMode('pool')`. Lazy-spawned on
+     * first dispatch in this OpenSwoole worker. Held here (not on a Store)
+     * because each OpenSwoole worker owns its own subprocess pool — proc
+     * resources don't share across workers.
+     */
+    public static ?\ZealPHP\CGI\WorkerPool $cgi_pool_instance = null;
+    /**
      * Per-extension CGI backend registry. Apache `AddHandler`/`ProxyPassMatch`
      * + nginx `fastcgi_pass`-per-location parity.
      *
@@ -1141,6 +1165,31 @@ class App
     }
 
     /**
+     * Worker count for `cgiMode('pool')` — the native FCGI-style subprocess
+     * pool. FPM `pm.max_children` parity. Default 4. Set BEFORE `App::run()`.
+     */
+    public static function cgiPoolSize(?int $size = null): int
+    {
+        if ($size !== null) {
+            self::$cgi_pool_size = max(1, $size);
+        }
+        return self::$cgi_pool_size;
+    }
+
+    /**
+     * Per-subprocess request count before recycle for `cgiMode('pool')`.
+     * FPM `pm.max_requests` parity. Default 500. Set to 1 for fresh-process
+     * semantics every request (slower; same isolation as `cgiMode('proc')`).
+     */
+    public static function cgiPoolMaxRequests(?int $n = null): int
+    {
+        if ($n !== null) {
+            self::$cgi_pool_max_requests = max(1, $n);
+        }
+        return self::$cgi_pool_max_requests;
+    }
+
+    /**
      * FastCGI backend address for `App::cgiMode('fcgi')` dispatch.
      * Accepts `"host:port"` (TCP) or `"unix:/path/to/fpm.sock"` (Unix socket).
      * No-arg call returns the current address; with-arg sets and returns it.
@@ -1170,14 +1219,14 @@ class App
     public static function registerCgiBackend(string $extension, array $config): void
     {
         $mode = is_string($config['mode'] ?? null) ? (string)$config['mode'] : '';
-        if ($mode !== 'proc' && $mode !== 'fork' && $mode !== 'fcgi') {
+        if ($mode !== 'proc' && $mode !== 'fork' && $mode !== 'fcgi' && $mode !== 'pool') {
             throw new \InvalidArgumentException(
-                "App::registerCgiBackend() mode must be 'proc', 'fork', or 'fcgi'; got '{$mode}'."
+                "App::registerCgiBackend() mode must be 'proc', 'fork', 'fcgi', or 'pool'; got '{$mode}'."
             );
         }
-        if ($mode === 'fork' && $extension !== '.php') {
+        if (($mode === 'fork' || $mode === 'pool') && $extension !== '.php') {
             throw new \InvalidArgumentException(
-                "fork mode requires a PHP target; use 'fcgi' (warm pool, language-agnostic) or 'proc' for {$extension}"
+                "{$mode} mode requires a PHP target; use 'fcgi' (warm external pool, language-agnostic) or 'proc' for {$extension}"
             );
         }
         if ($mode === 'fcgi' && empty($config['address'])) {
@@ -3657,6 +3706,7 @@ class App
                 return match ($b['mode']) {
                     'fcgi'  => self::cgiFcgi($absPath, $b['address'] ?? null, $b['fcgi_params'] ?? []),
                     'fork'  => self::cgiFork($absPath),
+                    'pool'  => self::cgiPool($absPath),
                     default => self::cgiSubprocess($absPath, $b['interpreter'] ?? null),
                 };
             }
@@ -3678,6 +3728,7 @@ class App
             return match ($b['mode']) {
                 'fork'  => self::cgiFork($absPath),
                 'fcgi'  => self::cgiFcgi($absPath, $b['address'] ?? null, $b['fcgi_params'] ?? []),
+                'pool'  => self::cgiPool($absPath),
                 default => self::cgiSubprocess($absPath, $b['interpreter'] ?? null),
             };
         }
@@ -3712,6 +3763,7 @@ class App
                 return match ($b['mode']) {
                     'fcgi'  => self::cgiFcgi($path, $b['address'] ?? null, $b['fcgi_params'] ?? []),
                     'fork'  => self::cgiFork($path),
+                    'pool'  => self::cgiPool($path),
                     default => self::cgiSubprocess($path, $b['interpreter'] ?? null),
                 };
             }
@@ -3729,6 +3781,7 @@ class App
             return match ($b['mode']) {
                 'fork'  => self::cgiFork($path),
                 'fcgi'  => self::cgiFcgi($path, $b['address'] ?? null, $b['fcgi_params'] ?? []),
+                'pool'  => self::cgiPool($path),
                 default => self::cgiSubprocess($path, $b['interpreter'] ?? null),
             };
         }
@@ -4649,6 +4702,145 @@ class App
         $returnValue = $meta['return_value'] ?? null;
 
         // Same return contract as cgiSubprocess()/executeFile().
+        if ($hasReturn && $returnValue !== null && $returnValue !== 1) {
+            if (is_string($returnValue) && $body !== '') {
+                return $body . $returnValue;
+            }
+            return $returnValue;
+        }
+        return $body !== '' ? $body : null;
+    }
+
+    /**
+     * `cgiMode('pool')` dispatch — native FCGI-style worker pool.
+     *
+     * Lazily creates a per-OpenSwoole-worker singleton `WorkerPool` with
+     * `$cgi_pool_size` pre-spawned PHP subprocesses, then dispatches the
+     * current request frame to an idle subprocess via Coroutine\Channel.
+     * The subprocess executes the file with mod_php-style isolation
+     * (clean global scope per request — same as `cgiMode('proc')`), then
+     * writes the response frame back through the IPC pipe; the parent
+     * coroutine yields the entire time (HOOK_ALL hooks pipe reads),
+     * letting the OpenSwoole worker serve thousands of other coroutines
+     * in parallel while pool subprocesses execute legacy PHP.
+     *
+     * Response-shape handling mirrors cgiFork() exactly — both consume
+     * the same IPC frame format (status, headers, cookies, rawcookies,
+     * body, return_value) and apply captures to $g->zealphp_response via
+     * the same patterns, so the host response builder treats pool
+     * dispatch identically to proc/fork.
+     *
+     * Auto-respawn on subprocess death (FPM-equivalent recovery
+     * semantics — `proc_get_status(['running' => false])` triggers
+     * `respawn(idx)`) and recycle after `$cgi_pool_max_requests`
+     * (FPM `pm.max_requests` parity).
+     */
+    private static function cgiPool(string $path): mixed
+    {
+        $g = RequestContext::instance();
+
+        if (self::$cgi_pool_instance === null) {
+            try {
+                self::$cgi_pool_instance = new \ZealPHP\CGI\WorkerPool(
+                    size: self::$cgi_pool_size,
+                    maxRequestsPerWorker: self::$cgi_pool_max_requests,
+                );
+            } catch (\Throwable $e) {
+                elog("cgiPool: failed to spawn worker pool: " . $e->getMessage(), 'error');
+                return 500;
+            }
+        }
+
+        // Build the request frame. Same shape as cgiFork's $ctx and
+        // cgi_worker.php's ZEALPHP_REQUEST_CONTEXT env JSON.
+        // RequestContext properties are typed non-nullable arrays — no
+        // need for `?? []` guards.
+        $request = [
+            'file'    => $path,
+            'server'  => $g->server,
+            'get'     => $g->get,
+            'post'    => $g->post,
+            'cookies' => $g->cookie,
+            'files'   => $g->files,
+        ];
+
+        try {
+            $resp = self::$cgi_pool_instance->dispatch($request, self::$cgi_timeout > 0 ? (float) self::$cgi_timeout : 30.0);
+        } catch (\Throwable $e) {
+            elog("cgiPool: dispatch failed for $path: " . $e->getMessage(), 'error');
+            return 500;
+        }
+
+        $statusCode = $resp['status'] ?? 200;
+        response_set_status(is_numeric($statusCode) ? (int) $statusCode : 200);
+
+        $respW = $g->zealphp_response;
+        if ($respW !== null) {
+            foreach ((array) ($resp['headers'] ?? []) as $pair) {
+                if (is_array($pair) && count($pair) >= 2
+                    && is_scalar($pair[0]) && is_scalar($pair[1])) {
+                    $respW->header((string) $pair[0], (string) $pair[1]);
+                }
+            }
+            // Cookie tuples — same shape cgiFork applies; reuse the same
+            // arg-narrowing pattern.
+            $applyCookie = static function (callable $fn, mixed $args): void {
+                if (!is_array($args) || !isset($args[0]) || !is_scalar($args[0])) return;
+                $s = static fn(int $i, string $d): string =>
+                    isset($args[$i]) && is_scalar($args[$i]) ? (string) $args[$i] : $d;
+                $b = static fn(int $i): bool => isset($args[$i]) && (bool) $args[$i];
+                $fn(
+                    (string) $args[0],
+                    $s(1, ''),
+                    isset($args[2]) && is_numeric($args[2]) ? (int) $args[2] : 0,
+                    $s(3, '/'),
+                    $s(4, ''),
+                    $b(5),
+                    $b(6),
+                    $s(7, ''),
+                );
+            };
+            foreach ((array) ($resp['cookies'] ?? []) as $args) {
+                // The cookies from pool_worker may be in two shapes:
+                // associative (from setcookie's $expires=array form) OR
+                // positional (compact()-built); narrow both into the
+                // positional shape applyCookie expects.
+                if (is_array($args) && isset($args['name']) && is_scalar($args['name'])) {
+                    $args = [
+                        (string) $args['name'],
+                        isset($args['value']) && is_scalar($args['value']) ? (string) $args['value'] : '',
+                        isset($args['expires']) && is_numeric($args['expires']) ? (int) $args['expires'] : 0,
+                        isset($args['path']) && is_scalar($args['path']) ? (string) $args['path'] : '/',
+                        isset($args['domain']) && is_scalar($args['domain']) ? (string) $args['domain'] : '',
+                        !empty($args['secure']),
+                        !empty($args['httponly']),
+                        isset($args['samesite']) && is_scalar($args['samesite']) ? (string) $args['samesite'] : '',
+                    ];
+                }
+                $applyCookie([$respW, 'cookie'], $args);
+            }
+            foreach ((array) ($resp['rawcookies'] ?? []) as $args) {
+                if (is_array($args) && isset($args['name']) && is_scalar($args['name'])) {
+                    $args = [
+                        (string) $args['name'],
+                        isset($args['value']) && is_scalar($args['value']) ? (string) $args['value'] : '',
+                        isset($args['expires']) && is_numeric($args['expires']) ? (int) $args['expires'] : 0,
+                        isset($args['path']) && is_scalar($args['path']) ? (string) $args['path'] : '/',
+                        isset($args['domain']) && is_scalar($args['domain']) ? (string) $args['domain'] : '',
+                        !empty($args['secure']),
+                        !empty($args['httponly']),
+                        isset($args['samesite']) && is_scalar($args['samesite']) ? (string) $args['samesite'] : '',
+                    ];
+                }
+                $applyCookie([$respW, 'rawCookie'], $args);
+            }
+        }
+
+        $body        = is_string($resp['body'] ?? null) ? $resp['body'] : '';
+        $hasReturn   = array_key_exists('return_value', $resp);
+        $returnValue = $resp['return_value'] ?? null;
+
+        // Universal return contract — same as cgiSubprocess/cgiFork/executeFile.
         if ($hasReturn && $returnValue !== null && $returnValue !== 1) {
             if (is_string($returnValue) && $body !== '') {
                 return $body . $returnValue;
