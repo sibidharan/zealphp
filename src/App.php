@@ -173,34 +173,35 @@ class App
      * How a process-isolated legacy include is dispatched, when
      * `processIsolation()` is on:
      *
-     *   `'proc'` (default) — `proc_open()` spawns a FRESH PHP interpreter per
-     *                      request (`src/cgi_worker.php`). True global scope:
-     *                      top-level `$x = ...` is visible via `global $x` in
-     *                      functions, so unmodified WordPress/Drupal work. Cost:
-     *                      cold PHP startup + autoload per request (~tens of ms).
+     *   `'pool'` (default) — native FCGI-style worker pool. Each OpenSwoole
+     *                      worker spawns `$cgi_pool_size` persistent PHP
+     *                      subprocesses (FPM `pm.max_children` parity); each
+     *                      subprocess provides mod_php-style isolation per
+     *                      request (clean global scope — top-level `$x = ...`
+     *                      is visible via `global $x`, so unmodified
+     *                      WordPress/Drupal work). Parent dispatches via
+     *                      `Coroutine\Channel` — thousands of coroutines fan
+     *                      out across the pool without blocking the worker.
+     *                      Subprocess recycle after `$cgi_pool_max_requests`
+     *                      (FPM `pm.max_requests` parity).
      *
-     *   `'fork'` — `OpenSwoole\Process` forks the already-booted worker (copy-on-
-     *            write: warm interpreter, loaded autoloader, hot opcache). ~5×
-     *            faster than `'proc'` because nothing re-execs. TRADE-OFF: the
-     *            file runs in the fork closure's FUNCTION scope, so bare
-     *            top-level vars are NOT visible via the `global` keyword
-     *            (`$wpdb`-style patterns break). Superglobals
-     *            (`$_GET`/`$_POST`/`$_SESSION`/`$_SERVER`) work normally. Use for
-     *            "modernised legacy" apps that read request state via
-     *            superglobals and don't lean on bare-global wiring; keep `'proc'`
-     *            for unmodified WordPress/Drupal.
+     *   `'proc'` (legacy fallback) — `proc_open()` spawns a FRESH PHP per
+     *                      request (`src/cgi_worker.php`). Same isolation as
+     *                      `'pool'` but pays cold-PHP startup + autoload
+     *                      EVERY request (~tens of ms). Kept as a fallback
+     *                      for environments where the pool can't be used
+     *                      (e.g. uopz unavailable in the subprocess, or
+     *                      audit / compliance requiring zero pre-warm).
      *
-     * Set via `App::cgiMode('fork'|'proc'|'fcgi')`. Default `'proc'` — no behaviour
-     * change for existing isolation users.
+     *   `'fcgi'` (deployment mode) — forward to an external FastCGI backend
+     *                      (php-fpm, hhvm, roadrunner) via the FCGI binary
+     *                      protocol over TCP or Unix socket. Target address
+     *                      via `App::fcgiAddress()`. Use when ZealPHP fronts
+     *                      an existing FPM pool you don't want to retire.
      *
-     *   `'fcgi'` — forward to a FastCGI backend (e.g. `php-fpm`) via the FCGI
-     *            binary protocol over a TCP or Unix socket. The target address
-     *            is configured with `App::fcgiAddress()`. No child process is
-     *            spawned; the OpenSwoole coroutine socket keeps the event loop
-     *            unblocked. Best choice when ZealPHP sits in front of an
-     *            existing `php-fpm` pool.
+     * Set via `App::cgiMode('pool'|'proc'|'fcgi')`. Default `'pool'`.
      */
-    public static string $cgi_mode = 'proc';
+    public static string $cgi_mode = 'pool';
     /**
      * FastCGI backend address used when `App::cgiMode() === 'fcgi'`.
      * Format: `"host:port"` for TCP (e.g. `"127.0.0.1:9000"`) or
@@ -208,6 +209,50 @@ class App
      * Set via `App::fcgiAddress()`. Default is the standard `php-fpm` TCP listener.
      */
     public static string $fcgi_address = '127.0.0.1:9000';
+    /**
+     * Subprocess count for `cgiMode('pool')` — the native FCGI-style worker
+     * pool. Each OpenSwoole worker process spawns this many persistent PHP
+     * subprocesses on first dispatch (lazy). FPM `pm.max_children` parity:
+     * sets the per-worker concurrency cap. Default 4 — balances spawn cost
+     * with concurrency for typical web workloads.
+     */
+    public static int $cgi_pool_size = 4;
+    /**
+     * Per-subprocess recycle threshold for `cgiMode('pool')`. After this many
+     * requests, the subprocess exits cleanly and the pool spawns a fresh
+     * replacement — FPM `pm.max_requests` parity, bounds memory leak from
+     * long-running plugin code. Set to 1 to recycle every request (true
+     * fresh-process semantics; same isolation as `cgiMode('proc')` but with
+     * the pool managing spawn-cost amortisation).
+     */
+    public static int $cgi_pool_max_requests = 500;
+    /**
+     * Whether `cgi_worker.php` (proc-mode subprocess entry) loads Composer's
+     * `vendor/autoload.php` on startup. Default `false` — restores the pre-
+     * v0.2.20 behaviour where the subprocess runs at true global scope with
+     * NO ZealPHP framework loaded, suitable for unmodified WordPress / Drupal.
+     *
+     * **Why off by default:** the autoloader load costs ~30 ms per subprocess
+     * spawn (measured on Ryzen 9 7900X / PHP 8.3). For WordPress's
+     * `wp_cron()` self-call pattern (a non-blocking HTTP POST to `/wp-cron.php`
+     * with a `timeout` of 0.01 s), that 30 ms upfront cost causes the wp-cron
+     * POSTs to queue at the parent faster than workers can drain them —
+     * eventually deadlocking the pool. Issue #18 (the v0.2.41 WP-on-proc
+     * regression vs v0.2.0).
+     *
+     * **When to set `true`:** your `public/*.php` files need to call
+     * `\ZealPHP\App`, the Apache shims, or any framework class. Modern apps
+     * built ON ZealPHP, NOT migrated TO it. Most legacy apps (WordPress,
+     * Drupal, Joomla, plain PHP) ship their own bootstrap and don't need it.
+     */
+    public static bool $cgi_subprocess_autoload = false;
+    /**
+     * Per-worker WorkerPool singleton for `cgiMode('pool')`. Lazy-spawned on
+     * first dispatch in this OpenSwoole worker. Held here (not on a Store)
+     * because each OpenSwoole worker owns its own subprocess pool — proc
+     * resources don't share across workers.
+     */
+    public static ?\ZealPHP\CGI\WorkerPool $cgi_pool_instance = null;
     /**
      * Per-extension CGI backend registry. Apache `AddHandler`/`ProxyPassMatch`
      * + nginx `fastcgi_pass`-per-location parity.
@@ -1141,6 +1186,49 @@ class App
     }
 
     /**
+     * Worker count for `cgiMode('pool')` — the native FCGI-style subprocess
+     * pool. FPM `pm.max_children` parity. Default 4. Set BEFORE `App::run()`.
+     */
+    public static function cgiPoolSize(?int $size = null): int
+    {
+        if ($size !== null) {
+            self::$cgi_pool_size = max(1, $size);
+        }
+        return self::$cgi_pool_size;
+    }
+
+    /**
+     * Per-subprocess request count before recycle for `cgiMode('pool')`.
+     * FPM `pm.max_requests` parity. Default 500. Set to 1 for fresh-process
+     * semantics every request (slower; same isolation as `cgiMode('proc')`).
+     */
+    public static function cgiPoolMaxRequests(?int $n = null): int
+    {
+        if ($n !== null) {
+            self::$cgi_pool_max_requests = max(1, $n);
+        }
+        return self::$cgi_pool_max_requests;
+    }
+
+    /**
+     * Whether `cgi_worker.php` (proc-mode subprocess entry) loads Composer's
+     * `vendor/autoload.php` on startup. Default `false` — restores pre-v0.2.20
+     * behaviour suitable for unmodified WordPress / Drupal / Joomla / plain
+     * PHP. Set to `true` when your `public/*.php` files explicitly need
+     * `\ZealPHP\App` or framework classes inside the CGI subprocess.
+     *
+     * See the `$cgi_subprocess_autoload` property docblock for the WordPress
+     * wp-cron deadlock rationale (issue #18, v0.2.41 regression fix).
+     */
+    public static function cgiSubprocessAutoload(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$cgi_subprocess_autoload = $on;
+        }
+        return self::$cgi_subprocess_autoload;
+    }
+
+    /**
      * FastCGI backend address for `App::cgiMode('fcgi')` dispatch.
      * Accepts `"host:port"` (TCP) or `"unix:/path/to/fpm.sock"` (Unix socket).
      * No-arg call returns the current address; with-arg sets and returns it.
@@ -1170,14 +1258,14 @@ class App
     public static function registerCgiBackend(string $extension, array $config): void
     {
         $mode = is_string($config['mode'] ?? null) ? (string)$config['mode'] : '';
-        if ($mode !== 'proc' && $mode !== 'fork' && $mode !== 'fcgi') {
+        if ($mode !== 'proc' && $mode !== 'fcgi' && $mode !== 'pool') {
             throw new \InvalidArgumentException(
-                "App::registerCgiBackend() mode must be 'proc', 'fork', or 'fcgi'; got '{$mode}'."
+                "App::registerCgiBackend() mode must be 'pool', 'proc', or 'fcgi'; got '{$mode}'."
             );
         }
-        if ($mode === 'fork' && $extension !== '.php') {
+        if ($mode === 'pool' && $extension !== '.php') {
             throw new \InvalidArgumentException(
-                "fork mode requires a PHP target; use 'fcgi' (warm pool, language-agnostic) or 'proc' for {$extension}"
+                "pool mode requires a PHP target; use 'fcgi' (warm external pool, language-agnostic) or 'proc' for {$extension}"
             );
         }
         if ($mode === 'fcgi' && empty($config['address'])) {
@@ -3656,8 +3744,9 @@ class App
                 $b = $cgi['backend'];
                 return match ($b['mode']) {
                     'fcgi'  => self::cgiFcgi($absPath, $b['address'] ?? null, $b['fcgi_params'] ?? []),
-                    'fork'  => self::cgiFork($absPath),
-                    default => self::cgiSubprocess($absPath, $b['interpreter'] ?? null),
+                    'pool'  => self::cgiPool($absPath),
+                    'proc'  => self::cgiSubprocess($absPath, $b['interpreter'] ?? null),
+                    default => self::cgiPool($absPath),  // default = 'pool' (was 'proc' pre-fork-removal)
                 };
             }
             // SECURITY: a non-PHP file that is NOT in an exec scope must NOT be
@@ -3676,9 +3765,10 @@ class App
             // cgi_worker.php for uopz header/cookie capture.
             $b = $cgi['backend'];
             return match ($b['mode']) {
-                'fork'  => self::cgiFork($absPath),
                 'fcgi'  => self::cgiFcgi($absPath, $b['address'] ?? null, $b['fcgi_params'] ?? []),
-                default => self::cgiSubprocess($absPath, $b['interpreter'] ?? null),
+                'pool'  => self::cgiPool($absPath),
+                'proc'  => self::cgiSubprocess($absPath, $b['interpreter'] ?? null),
+                default => self::cgiPool($absPath),  // default = 'pool'
             };
         }
         return self::executeFile($absPath, $args);       // coroutine-mode fast path (unchanged)
@@ -3711,8 +3801,9 @@ class App
                 $b = $cgi['backend'];
                 return match ($b['mode']) {
                     'fcgi'  => self::cgiFcgi($path, $b['address'] ?? null, $b['fcgi_params'] ?? []),
-                    'fork'  => self::cgiFork($path),
-                    default => self::cgiSubprocess($path, $b['interpreter'] ?? null),
+                    'pool'  => self::cgiPool($path),
+                    'proc'  => self::cgiSubprocess($path, $b['interpreter'] ?? null),
+                    default => self::cgiPool($path),
                 };
             }
             // SECURITY: a non-PHP file outside an exec scope must NOT be PHP-parsed
@@ -3727,9 +3818,10 @@ class App
             // backend mode (registered .php backend or global $cgi_mode fallback).
             $b = $cgi['backend'];
             return match ($b['mode']) {
-                'fork'  => self::cgiFork($path),
                 'fcgi'  => self::cgiFcgi($path, $b['address'] ?? null, $b['fcgi_params'] ?? []),
-                default => self::cgiSubprocess($path, $b['interpreter'] ?? null),
+                'pool'  => self::cgiPool($path),
+                'proc'  => self::cgiSubprocess($path, $b['interpreter'] ?? null),
+                default => self::cgiPool($path),
             };
         }
         return self::executeFile($path, []);
@@ -3895,6 +3987,13 @@ class App
 
         $env['ZEALPHP_REQUEST_CONTEXT'] = $ctx;
         $env['ZEALPHP_CWD'] = self::$cwd;
+        // Gate the Composer autoloader load in cgi_worker.php. Default off
+        // (see App::$cgi_subprocess_autoload docblock — fixes the v0.2.41
+        // WordPress wp-cron deadlock by restoring the v0.2.0 zero-overhead
+        // subprocess start path).
+        if (self::$cgi_subprocess_autoload) {
+            $env['ZEALPHP_CGI_AUTOLOAD'] = '1';
+        }
 
         return $env;
     }
@@ -3904,8 +4003,10 @@ class App
      * FCGI binary protocol. Used when App::cgiMode() === 'fcgi'.
      *
      * Builds CGI env via App::buildCgiEnv(), adds SCRIPT_FILENAME / SCRIPT_NAME,
-     * reads the request body, calls FastCgiClient::request(), maps the response
-     * (status, headers, body, stderr) back through the universal return contract.
+     * reads the request body, calls \ZealPHP\CGI\FastCgiClient::request(), maps
+     * the response (status, headers, body, stderr) back through the universal
+     * return contract. The FastCgiClient socket layer is OpenSwoole-native
+     * (Coroutine\Client) — the call never blocks the worker.
      *
      * On connection failure or protocol error, logs via elog() and returns 502.
      *
@@ -3955,9 +4056,9 @@ class App
 
         $fcgiAddress = $address ?? self::$fcgi_address;
         try {
-            $client   = new \ZealPHP\Legacy\FastCgiClient($fcgiAddress, self::$cgi_timeout);
+            $client   = new \ZealPHP\CGI\FastCgiClient($fcgiAddress, self::$cgi_timeout);
             $response = $client->request($env, $stdinBody);
-        } catch (\ZealPHP\Legacy\FastCgiException $e) {
+        } catch (\ZealPHP\CGI\FastCgiException $e) {
             elog("cgiFcgi: FastCGI error for {$path}: " . $e->getMessage(), 'error');
             return 502;
         } catch (\Throwable $e) {
@@ -4441,185 +4542,80 @@ class App
         return $body !== '' ? $body : null;
     }
 
+
     /**
-     * Warm-fork variant of cgiSubprocess(): instead of proc_open()-ing a fresh
-     * PHP interpreter per request, OpenSwoole\Process forks the already-booted
-     * worker (copy-on-write — the interpreter, Composer autoloader, and opcache
-     * are inherited, so PHP startup + autoload are NOT re-paid). ~5× faster than
-     * 'proc' mode on a trivial file.
+     * `cgiMode('pool')` dispatch — native FCGI-style worker pool.
      *
-     * Isolation: the child is a fresh process that runs the file and exits, so
-     * define()/class/ini mutations and any die()/exit() die WITH the child — the
-     * worker is never affected (this is actually safer for die()-heavy legacy
-     * code than the in-process executeFile() path).
+     * Lazily creates a per-OpenSwoole-worker singleton `WorkerPool` with
+     * `$cgi_pool_size` pre-spawned PHP subprocesses, then dispatches the
+     * current request frame to an idle subprocess via Coroutine\Channel.
+     * The subprocess executes the file with mod_php-style isolation
+     * (clean global scope per request — same as `cgiMode('proc')`), then
+     * writes the response frame back through the IPC pipe; the parent
+     * coroutine yields the entire time (HOOK_ALL hooks pipe reads),
+     * letting the OpenSwoole worker serve thousands of other coroutines
+     * in parallel while pool subprocesses execute legacy PHP.
      *
-     * TRADE-OFF vs 'proc': the file is included inside the fork closure, so it
-     * runs in FUNCTION scope, not true global scope. Superglobals
-     * ($_GET/$_POST/$_SESSION/$_SERVER) work (they're always global), but a bare
-     * top-level `$x = ...` is NOT visible via `global $x` in a function — so
-     * unmodified WordPress/Drupal (`global $wpdb;`) need 'proc'. See App::$cgi_mode.
+     * Response-shape handling mirrors cgiFork() exactly — both consume
+     * the same IPC frame format (status, headers, cookies, rawcookies,
+     * body, return_value) and apply captures to $g->zealphp_response via
+     * the same patterns, so the host response builder treats pool
+     * dispatch identically to proc/fork.
      *
-     * Streaming note: the child runs to completion and ships one buffered
-     * payload back, so incremental SSE does not stream chunk-by-chunk in fork
-     * mode (an infinite event-stream loop would hang). Use 'proc' mode or a
-     * native coroutine SSE route for live streaming.
+     * Auto-respawn on subprocess death (FPM-equivalent recovery
+     * semantics — `proc_get_status(['running' => false])` triggers
+     * `respawn(idx)`) and recycle after `$cgi_pool_max_requests`
+     * (FPM `pm.max_requests` parity).
      */
-    private static function cgiFork(string $path): mixed
+    private static function cgiPool(string $path): mixed
     {
         $g = RequestContext::instance();
 
-        // Snapshot the per-request superglobal state to re-assert in the child.
-        // (The child inherits these COW, but re-setting is explicit + guards
-        // against any worker-level residue.)
-        $ctx = [
-            'server' => $g->server,
-            'get'    => $g->get,
-            'post'   => $g->post,
-            'cookie' => $g->cookie,
-            'files'  => $g->files,
-            'env'    => is_array($g->env ?? null) ? $g->env : $_ENV,
+        if (self::$cgi_pool_instance === null) {
+            try {
+                self::$cgi_pool_instance = new \ZealPHP\CGI\WorkerPool(
+                    size: self::$cgi_pool_size,
+                    maxRequestsPerWorker: self::$cgi_pool_max_requests,
+                );
+            } catch (\Throwable $e) {
+                elog("cgiPool: failed to spawn worker pool: " . $e->getMessage(), 'error');
+                return 500;
+            }
+        }
+
+        // Build the request frame. Same shape as cgiFork's $ctx and
+        // cgi_worker.php's ZEALPHP_REQUEST_CONTEXT env JSON.
+        // RequestContext properties are typed non-nullable arrays — no
+        // need for `?? []` guards.
+        $request = [
+            'file'    => $path,
+            'server'  => $g->server,
+            'get'     => $g->get,
+            'post'    => $g->post,
+            'cookies' => $g->cookie,
+            'files'   => $g->files,
         ];
 
-        $worker = new \OpenSwoole\Process(function (\OpenSwoole\Process $child) use ($path, $ctx) {
-            $cg = RequestContext::instance();
-
-            // Re-assert superglobals at true global scope (superglobals are
-            // always global even when assigned inside this closure).
-            $_SERVER  = array_merge($_SERVER, $ctx['server']);
-            $_GET     = $ctx['get'];
-            $_POST    = $ctx['post'];
-            $_COOKIE  = $ctx['cookie'];
-            $_FILES   = $ctx['files'];
-            $_ENV     = array_merge($_ENV, $ctx['env']);
-            $_REQUEST = array_merge($_GET, $_POST);
-
-            // Reset the inherited response capture buffers so we ship back ONLY
-            // what THIS include adds. header()/setcookie()/http_response_code()
-            // are uopz-overridden (inherited from the worker) to buffer into
-            // $cg->zealphp_response — we read those lists after the include.
-            $resp = $cg->zealphp_response;
-            if ($resp !== null) {
-                $resp->headersList    = [];
-                $resp->cookiesList    = [];
-                $resp->rawCookiesList = [];
-            }
-            $cg->status = 200;
-
-            // Shutdown-safe payload writer: legacy code that calls die()/exit()
-            // still ships its buffered output + metadata back to the parent.
-            $sent = false;
-            $emit = function () use (&$sent, $child, $resp, $cg) {
-                if ($sent) return;
-                $sent = true;
-                $body = ob_get_level() > 0 ? (string) ob_get_clean() : '';
-                $payload = [
-                    'status'     => is_int($cg->status ?? null) ? $cg->status : 200,
-                    'headers'    => $resp !== null ? $resp->headersList : [],
-                    'cookies'    => $resp !== null ? $resp->cookiesList : [],
-                    'rawcookies' => $resp !== null ? $resp->rawCookiesList : [],
-                    'body'       => $body,
-                ];
-                if (isset($GLOBALS['__zeal_fork_return_set']) && $GLOBALS['__zeal_fork_return_set']) {
-                    $payload['return_value'] = $GLOBALS['__zeal_fork_return'] ?? null;
-                }
-                // Length-prefixed frame: a 4-byte big-endian length header then
-                // the JSON. The parent reads exactly that many bytes — never a
-                // post-EOF read, because OpenSwoole\Process::read() BLOCKS (does
-                // not return '') once the child has exited.
-                $json = (string) json_encode($payload, JSON_UNESCAPED_SLASHES);
-                $child->write(pack('N', strlen($json)) . $json);
-            };
-            register_shutdown_function($emit);
-
-            ob_start();
-            try {
-                $result = include $path;
-                // Universal return contract (mirror cgi_worker.php): invoke a
-                // returned Closure, consume a returned Generator into the body,
-                // drop non-serialisable returns.
-                if ($result instanceof \Closure) {
-                    $result = $result();
-                }
-                if ($result instanceof \Generator) {
-                    foreach ($result as $chunk) {
-                        if (is_scalar($chunk)) { echo (string) $chunk; }
-                    }
-                    $result = null;
-                }
-                if (is_resource($result)
-                    || (is_object($result) && !($result instanceof \JsonSerializable) && !($result instanceof \stdClass))) {
-                    $result = null;
-                }
-                $GLOBALS['__zeal_fork_return']     = $result;
-                $GLOBALS['__zeal_fork_return_set'] = true;
-            } catch (HaltException $e) {
-                // Clean per-request halt — buffered output is the body.
-            } catch (\OpenSwoole\ExitException $e) {
-                // Legacy die()/exit(): PHP already echoed any die("msg") string
-                // into the buffer before the exit unwound. Treat as a clean end
-                // — keep the buffered body + whatever status was set, no trace.
-                // (In fork mode this only ends the child; the worker is safe.)
-            } catch (\Throwable $e) {
-                $cg->status = 500;
-                echo '<pre>' . htmlspecialchars($e->getMessage()) . "\n"
-                   . htmlspecialchars($e->getTraceAsString()) . '</pre>';
-            }
-            $emit();
-            $child->exit(0);
-        }, false, SOCK_STREAM, false); // redirect=false, SOCK_STREAM, enable_coroutine=false
-
-        $pid = $worker->start();
-        if ($pid === false) {
-            elog("cgiFork: failed to fork process for $path", "error");
+        try {
+            $resp = self::$cgi_pool_instance->dispatch($request, self::$cgi_timeout > 0 ? (float) self::$cgi_timeout : 30.0);
+        } catch (\Throwable $e) {
+            elog("cgiPool: dispatch failed for $path: " . $e->getMessage(), 'error');
             return 500;
         }
 
-        // Read the length-prefixed frame: 4-byte big-endian header, then
-        // exactly that many payload bytes. Reading the exact length (rather
-        // than looping to EOF) is required — OpenSwoole\Process::read() blocks
-        // forever after the child exits instead of returning ''. The parent
-        // drains concurrently with the child writing, so payloads larger than
-        // the pipe buffer stream through without deadlock.
-        $readN = static function (\OpenSwoole\Process $w, int $n): string {
-            $buf = '';
-            while (strlen($buf) < $n) {
-                $chunk = $w->read($n - strlen($buf));
-                if ($chunk === '' || $chunk === false) break;
-                $buf .= $chunk;
-            }
-            return $buf;
-        };
-        $header = $readN($worker, 4);
-        $raw = '';
-        if (strlen($header) === 4) {
-            $lenInfo = unpack('N', $header);
-            $len = (is_array($lenInfo) && isset($lenInfo[1]) && is_int($lenInfo[1])) ? $lenInfo[1] : 0;
-            if ($len > 0) {
-                $raw = $readN($worker, $len);
-            }
-        }
-        \OpenSwoole\Process::wait(true);
-
-        $meta = json_decode($raw, true);
-        if (!is_array($meta)) {
-            return 500;
-        }
-
-        $statusCode = $meta['status'] ?? 200;
+        $statusCode = $resp['status'] ?? 200;
         response_set_status(is_numeric($statusCode) ? (int) $statusCode : 200);
 
         $respW = $g->zealphp_response;
         if ($respW !== null) {
-            foreach ((array) ($meta['headers'] ?? []) as $pair) {
+            foreach ((array) ($resp['headers'] ?? []) as $pair) {
                 if (is_array($pair) && count($pair) >= 2
                     && is_scalar($pair[0]) && is_scalar($pair[1])) {
                     $respW->header((string) $pair[0], (string) $pair[1]);
                 }
             }
-            // Cookie tuples round-tripped through JSON come back as mixed —
-            // narrow each positional arg before re-applying (the tuple shape
-            // is Response::cookie's: name, value, expire, path, domain, secure,
-            // httponly, samesite, priority).
+            // Cookie tuples — same shape cgiFork applies; reuse the same
+            // arg-narrowing pattern.
             $applyCookie = static function (callable $fn, mixed $args): void {
                 if (!is_array($args) || !isset($args[0]) || !is_scalar($args[0])) return;
                 $s = static fn(int $i, string $d): string =>
@@ -4636,19 +4632,47 @@ class App
                     $s(7, ''),
                 );
             };
-            foreach ((array) ($meta['cookies'] ?? []) as $args) {
+            foreach ((array) ($resp['cookies'] ?? []) as $args) {
+                // The cookies from pool_worker may be in two shapes:
+                // associative (from setcookie's $expires=array form) OR
+                // positional (compact()-built); narrow both into the
+                // positional shape applyCookie expects.
+                if (is_array($args) && isset($args['name']) && is_scalar($args['name'])) {
+                    $args = [
+                        (string) $args['name'],
+                        isset($args['value']) && is_scalar($args['value']) ? (string) $args['value'] : '',
+                        isset($args['expires']) && is_numeric($args['expires']) ? (int) $args['expires'] : 0,
+                        isset($args['path']) && is_scalar($args['path']) ? (string) $args['path'] : '/',
+                        isset($args['domain']) && is_scalar($args['domain']) ? (string) $args['domain'] : '',
+                        !empty($args['secure']),
+                        !empty($args['httponly']),
+                        isset($args['samesite']) && is_scalar($args['samesite']) ? (string) $args['samesite'] : '',
+                    ];
+                }
                 $applyCookie([$respW, 'cookie'], $args);
             }
-            foreach ((array) ($meta['rawcookies'] ?? []) as $args) {
+            foreach ((array) ($resp['rawcookies'] ?? []) as $args) {
+                if (is_array($args) && isset($args['name']) && is_scalar($args['name'])) {
+                    $args = [
+                        (string) $args['name'],
+                        isset($args['value']) && is_scalar($args['value']) ? (string) $args['value'] : '',
+                        isset($args['expires']) && is_numeric($args['expires']) ? (int) $args['expires'] : 0,
+                        isset($args['path']) && is_scalar($args['path']) ? (string) $args['path'] : '/',
+                        isset($args['domain']) && is_scalar($args['domain']) ? (string) $args['domain'] : '',
+                        !empty($args['secure']),
+                        !empty($args['httponly']),
+                        isset($args['samesite']) && is_scalar($args['samesite']) ? (string) $args['samesite'] : '',
+                    ];
+                }
                 $applyCookie([$respW, 'rawCookie'], $args);
             }
         }
 
-        $body = is_string($meta['body'] ?? null) ? $meta['body'] : '';
-        $hasReturn   = array_key_exists('return_value', $meta);
-        $returnValue = $meta['return_value'] ?? null;
+        $body        = is_string($resp['body'] ?? null) ? $resp['body'] : '';
+        $hasReturn   = array_key_exists('return_value', $resp);
+        $returnValue = $resp['return_value'] ?? null;
 
-        // Same return contract as cgiSubprocess()/executeFile().
+        // Universal return contract — same as cgiSubprocess/cgiFork/executeFile.
         if ($hasReturn && $returnValue !== null && $returnValue !== 1) {
             if (is_string($returnValue) && $body !== '') {
                 return $body . $returnValue;

@@ -103,7 +103,7 @@ PHP]); ?>
 
 <p>Pages that touch request state link here rather than restating this rule: <a href="/legacy-apps">Legacy Apps</a> (the Apache rewrite recipes), <a href="/sessions">Sessions</a>, <a href="/routing">Routing</a>, and the <a href="/api">API layer</a>.</p>
 
-<h2 id="lifecycle-modes" class="coro-h2-section">Lifecycle modes — four knobs, six combinations</h2>
+<h2 id="lifecycle-modes" class="coro-h2-section">Lifecycle modes — four knobs, six supported combinations</h2>
 
 <p><code>App::superglobals()</code> used to bundle four decisions into one flag. As of v0.2.23 each is exposed as its own fluent setter so you can mix-and-match. Each new knob defaults to <code>null</code> and resolves to "follow <code>App::$superglobals</code>" at <code>App::run()</code> time — apps that don't touch them see no behaviour change.</p>
 
@@ -119,7 +119,7 @@ PHP]); ?>
     <td><code>$process_isolation</code></td>
     <td><code>App::processIsolation(bool)</code></td>
     <td><code>$superglobals</code></td>
-    <td><code>App::include()</code> dispatch: true → <code>cgi_worker.php</code> subprocess per file (Apache <code>mod_php</code>-style isolation, ~30-50 ms <code>proc_open</code> cost); false → in-process via <code>executeFile()</code>.</td>
+    <td><code>App::include()</code> dispatch: true → subprocess per file via <code>cgiMode()</code> backend (default <code>'pool'</code> — warm FPM-style worker pool, ~1-3 ms per dispatch; <code>'proc'</code> — fresh <code>proc_open</code> per request, ~30-50 ms; <code>'fcgi'</code> — forward to upstream FPM). false → in-process via <code>executeFile()</code> (sub-ms, no isolation).</td>
   </tr>
   <tr>
     <td><code>$enable_coroutine_override</code></td>
@@ -150,15 +150,44 @@ PHP]); ?>
   <tr><td><strong>Mixed-mode / Symfony</strong></td><td>true</td><td><strong>false</strong></td><td>false</td><td>0</td><td>Symfony / Laravel on ZealPHP — real <code>$_SESSION</code> needed, but no per-include CGI fork cost. Sequential request handling per worker → no race risk on superglobals.</td></tr>
   <tr><td>In-process + sync</td><td>true</td><td>false</td><td>false</td><td>0</td><td>Same shape as Mixed-mode — the "scheduler off, no CGI" combo.</td></tr>
   <tr><td>Coroutine without HOOK_ALL</td><td>false</td><td>false</td><td>true</td><td>0</td><td>Per-request coroutine isolation but no auto I/O hooks (e.g. testing, custom hooks).</td></tr>
+  <tr><td><strong>Coroutine + Process Isolation</strong><br><small>the "best of both worlds" hybrid — opt in via explicit <code>processIsolation(true)</code></small></td><td>false</td><td><strong>true</strong></td><td>true</td><td>HOOK_ALL</td><td>Modern app with coroutine concurrency in route handlers / API / middleware, but occasional legacy isolated PHP (a WordPress plugin endpoint, a heritage <code>define()</code>-heavy script). Parent runs coroutines + dispatches concurrently to different pool workers; each <code>public/*.php</code> still gets full subprocess isolation with real superglobals inside. See <a href="#coroutine-isolation-hybrid">the hybrid explainer</a> below.</td></tr>
 </table>
 
 <div class="callout warn coro-mb">
-  <strong>Unsafe combinations</strong> — <code>App::run()</code> emits a <code>[lifecycle]</code> warning to the debug log but does not refuse:
+  <strong>Unsafe combinations</strong> — <code>App::run()</code> <strong>throws <code>RuntimeException</code> at boot</strong> (v0.2.27+; pre-v0.2.27 these emitted invisible warnings, now fail loud, fail fast):
   <ul class="coro-warn-list">
-    <li><code>superglobals(true) + enableCoroutine(true)</code> — process-wide <code>$_GET</code> / <code>$_POST</code> / <code>$_SESSION</code> arrays will race across concurrent coroutines (the bug per-coroutine <code>$g</code> was designed to avoid).</li>
-    <li><code>superglobals(true) + hookAll(non-zero)</code> — hooked I/O can yield mid-request, exposing process-wide superglobal mutations to other coroutines.</li>
+    <li><code>superglobals(true) + enableCoroutine(true)</code> — process-wide <code>$_GET</code> / <code>$_POST</code> / <code>$_SESSION</code> arrays would race across concurrent coroutines (the bug per-coroutine <code>$g</code> was designed to avoid).</li>
+    <li><code>superglobals(true) + hookAll(non-zero)</code> — hooked I/O can yield mid-request, exposing process-wide superglobal mutations to other concurrent coroutines.</li>
   </ul>
+  <p class="coro-mb">Note: both throws are gated on <code>superglobals(true)</code>. The Coroutine + Process Isolation hybrid (<code>sg=false + pi=true + ec=true + ha=HOOK_ALL</code>) is <strong>fully supported</strong> — see the matrix row above and the explainer below.</p>
 </div>
+
+<h3 id="coroutine-isolation-hybrid" class="coro-h3">Mode 6 — Coroutine + Process Isolation (the hybrid)</h3>
+
+<p>The two refused combos above are both gated on <code>superglobals(true)</code>. With <code>superglobals(false)</code> the parent already uses per-coroutine <code>$g</code>, so neither race exists — which means you can legally combine <strong>coroutine concurrency at the parent</strong> with <strong>per-request subprocess isolation</strong>:</p>
+
+<pre><code class="language-php">App::superglobals(false);     // per-coroutine $g (safe — no race)
+App::processIsolation(true);  // public/*.php → CGI pool subprocess
+App::enableCoroutine(true);   // parent runs coroutines (resolved from null)
+App::hookAll(\OpenSwoole\Runtime::HOOK_ALL); // hooks pipe I/O (resolved from null)
+// cgiMode('pool') is the default since v0.2.41 — warm FPM-style worker pool
+</code></pre>
+
+<p>What you get:</p>
+<ul>
+  <li><strong>Parent worker</strong>: N concurrent coroutines in flight, each with its own <code>$g</code> context. Routes, API, middleware run at full coroutine speed.</li>
+  <li><strong>App::include('/wp-login.php')</strong>: the parent pops a pool worker from its <code>Coroutine\Channel</code>, writes the request frame over stdin, and <strong>yields on the pipe read</strong> (HOOK_ALL hooks it). The scheduler runs other coroutines while the subprocess executes.</li>
+  <li><strong>Multiple coroutines dispatch in parallel</strong>: each coroutine pops a different pool worker (channel queue), up to <code>cgiPoolSize</code> (default 4). True request-level concurrency through the CGI path.</li>
+  <li><strong>Inside the subprocess</strong>: real <code>$_GET</code> / <code>$_POST</code> / <code>$_SERVER</code> / <code>$_COOKIE</code> / <code>$_REQUEST</code> populated per request, reset to clean state between requests. Full global-scope isolation per request — <code>define()</code> calls in a WordPress plugin don't leak across requests.</li>
+</ul>
+
+<p>What you do NOT get (honest caveat):</p>
+<ul>
+  <li>Coroutines do <strong>not</strong> run INSIDE the pool subprocess — each subprocess handles one request at a time, sequentially. To scale CGI concurrency, raise <code>cgiPoolSize()</code>, not enable a scheduler inside the subprocess (that would re-introduce the superglobals-race bug at a different layer).</li>
+  <li>This is <strong>not the default</strong>. You must explicitly set <code>App::processIsolation(true)</code> — otherwise <code>processIsolation</code> resolves from <code>null</code> to follow <code>sg=false</code> → <code>pi=false</code> (no isolation). The defaults assume you either want full coroutine speed (no isolation) OR full superglobal compat (Legacy CGI mode); the hybrid is for the modern-mostly-with-legacy-pockets case.</li>
+</ul>
+
+<p>Pinned by 13 lifecycle tests + 12 cgiPool tests at <code>tests/Unit/LifecycleModesMatrixTest.php</code> and <code>tests/Unit/CGI/CgiPoolDispatchTest.php</code>. See also <a href="/legacy-apps#pool-buys">"What cgiMode('pool') buys you"</a> on the legacy-apps page for measured pool overhead.</p>
 
 <p>The default coupling — <code>null</code> everywhere — preserves the historical behaviour for any app that doesn't touch these knobs. The <a href="https://github.com/sibidharan/zealphp-symfony">zealphp-symfony</a> bridge uses <code>superglobals(true) + processIsolation(false) + sessionLifecycle(false)</code> to get the Mixed-mode lifecycle.</p>
 

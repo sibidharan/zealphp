@@ -6,8 +6,8 @@ namespace ZealPHP\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use ZealPHP\App;
-use ZealPHP\Legacy\FastCgiClient;
-use ZealPHP\Legacy\FastCgiException;
+use ZealPHP\CGI\FastCgiClient;
+use ZealPHP\CGI\FastCgiException;
 use ZealPHP\RequestContext;
 
 /**
@@ -165,7 +165,7 @@ class CgiFcgiDispatchTest extends TestCase
     public function testCgiModeRejectsInvalidValues(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessageMatches("/'proc', 'fork', or 'fcgi'/");
+        $this->expectExceptionMessageMatches("/'pool', 'proc', or 'fcgi'/");
         App::cgiMode('cgi');
     }
 
@@ -511,53 +511,6 @@ class CgiFcgiDispatchTest extends TestCase
 
         $this->assertSame('delegated', $result,
             'includeFile() with inside-docroot absolute path must delegate to App::include()');
-    }
-
-    public function testMatchForkArmInIncludeCallsCgiFork(): void
-    {
-        if (!function_exists('uopz_set_return')) {
-            $this->markTestSkipped('uopz_set_return not available');
-        }
-
-        $this->stubResponse();
-
-        uopz_set_return(App::class, 'cgiFork', function (): string {
-            return 'fork-result';
-        }, true);
-
-        App::$cgi_mode = 'fork';
-        App::$coproc_implicit_request_handler = true;
-        $result = App::include('/api.php');
-
-        uopz_unset_return(App::class, 'cgiFork');
-        App::$cgi_mode = 'fcgi';
-
-        $this->assertSame('fork-result', $result,
-            "App::include() match 'fork' arm must call cgiFork");
-    }
-
-    public function testMatchForkArmInIncludeFileCallsCgiFork(): void
-    {
-        if (!function_exists('uopz_set_return')) {
-            $this->markTestSkipped('uopz_set_return not available');
-        }
-
-        $fixture = $this->fixture('forktest.php', "<?php\n");
-        $this->stubResponse();
-
-        uopz_set_return(App::class, 'cgiFork', function (): string {
-            return 'fork-file-result';
-        }, true);
-
-        App::$cgi_mode = 'fork';
-        App::$coproc_implicit_request_handler = true;
-        $result = App::includeFile($fixture);
-
-        uopz_unset_return(App::class, 'cgiFork');
-        App::$cgi_mode = 'fcgi';
-
-        $this->assertSame('fork-file-result', $result,
-            "App::includeFile() match 'fork' arm must call cgiFork");
     }
 
     public function testMatchFcgiBranchTriggeredViaInclude(): void

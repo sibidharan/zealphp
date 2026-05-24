@@ -23,10 +23,25 @@
 // or installed as a dependency (vendor/sibidharan/zealphp/src/ → the real
 // autoloader is three levels up). First existing wins; missing is non-fatal
 // (unmodified WordPress/Drupal ships its own bootstrap and needs neither).
-foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $__z_autoload) {
-    if (is_file($__z_autoload)) {
-        require_once $__z_autoload;
-        break;
+// Default OFF — restores v0.2.0 zero-overhead subprocess start (~15 ms vs
+// ~30 ms with autoloader loaded). Loading Composer's vendor/autoload.php
+// costs measurable time on every subprocess spawn and pulls in the entire
+// ZealPHP framework + uopz + apache_shims, none of which unmodified
+// WordPress / Drupal / Joomla need. The cost matters for apps like
+// WordPress whose wp_cron() fires non-blocking HTTP self-calls with a
+// 10 ms timeout — a 30 ms autoload window causes those POSTs to queue
+// faster than workers can drain, eventually deadlocking the pool
+// (issue #18, the v0.2.41 WP-on-proc regression vs v0.2.0).
+//
+// Opt in via `App::cgiSubprocessAutoload(true)` if your public/*.php files
+// need \ZealPHP\App or framework classes inside the subprocess (modern
+// apps built ON ZealPHP, not legacy apps migrated TO it).
+if (getenv('ZEALPHP_CGI_AUTOLOAD') === '1') {
+    foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $__z_autoload) {
+        if (is_file($__z_autoload)) {
+            require_once $__z_autoload;
+            break;
+        }
     }
 }
 

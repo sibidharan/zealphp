@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace ZealPHP\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
-use ZealPHP\Legacy\FastCgiClient;
-use ZealPHP\Legacy\FastCgiException;
+use ZealPHP\CGI\FastCgiClient;
+use ZealPHP\CGI\FastCgiException;
 
 /**
  * Protocol-layer unit tests for FastCgiClient.

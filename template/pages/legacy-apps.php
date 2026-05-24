@@ -125,8 +125,8 @@ PHP]); ?>
 </tr>
 <tr>
   <td><code>App::include()</code><br><small>(was <code>App::includeFile()</code> — deprecated alias)</small></td>
-  <td>Runs a PHP file from <code>public/</code> through the framework. In superglobals mode, dispatches through the CGI worker for true global-scope isolation; in coroutine mode, runs in-process. Either way, the file's return value flows through the <a href="/responses#return-contract">universal return contract</a>.</td>
-  <td>mod_prefork MPM + CGI</td>
+  <td>Runs a PHP file from <code>public/</code> through the framework. With <code>processIsolation(true)</code>, dispatches through the <code>cgiMode()</code> backend (default <code>'pool'</code> — warm FPM-style worker pool; see <a href="#pool-buys">below</a> for measured cost); with <code>processIsolation(false)</code>, runs in-process via <code>executeFile()</code>. Either way, the file's return value flows through the <a href="/responses#return-contract">universal return contract</a>.</td>
+  <td>mod_prefork MPM + CGI / PHP-FPM</td>
 </tr>
 <tr>
   <td>Auto-<code>$_SERVER</code> preamble</td>
@@ -149,6 +149,183 @@ $app = App::init('0.0.0.0', 8080);
 $app->run(['task_worker_num' => 0]);
 // PHP files in public/ are served automatically with process isolation
 PHP]); ?>
+
+<h2 id="wordpress-tested" class="legacy-mt-xl">WordPress — tested end-to-end</h2>
+
+<p>The companion repo <a href="https://github.com/sibidharan/zealphp-wordpress"><code>sibidharan/zealphp-wordpress</code></a> ships an unmodified WordPress 6.7.1 install bound to ZealPHP via a ~30-line <code>app.php</code> (full WP frontend, wp-admin, REST API, plugin system, htaccess-equivalent rewrites). Tested live against this branch in Chrome:</p>
+
+<table class="ztable legacy-mb">
+<tr><th>Configuration</th><th>Result</th><th>Notes</th></tr>
+<tr>
+  <td><strong>cgiMode('proc')</strong> + <code>App::cgiSubprocessAutoload(false)</code><br><small>(the default)</small></td>
+  <td>200 + 50,719 B on every request, ~165 ms warm</td>
+  <td>5 / 5 requests render the full WP homepage (Blog title, posts, Sample Page link). Matches v0.2.0's behaviour exactly.</td>
+</tr>
+<tr>
+  <td>cgiMode('proc') + <code>App::cgiSubprocessAutoload(true)</code></td>
+  <td>First request OK, 2nd+ deadlock</td>
+  <td>Loading <code>vendor/autoload.php</code> in every subprocess adds ~30 ms, which makes WordPress's <code>wp_cron()</code> 10 ms non-blocking POST queue up at the parent faster than workers can drain. Only opt in if your <code>public/*.php</code> needs <code>\ZealPHP\App</code> inside the subprocess.</td>
+</tr>
+<tr>
+  <td>cgiMode('pool') (default <code>cgiPoolMaxRequests(500)</code>)</td>
+  <td>First request OK (50 KB), 2nd+ return <strong>500 fatal</strong> ("Call to a member function main() on null")</td>
+  <td>WordPress holds <code>$wp</code> (the framework instance) as a global; the pool worker's FPM-style cleanup correctly clears request-scope globals between requests, BUT WordPress's <code>require_once</code> chain caches the bootstrap files (<code>wp-load.php</code>, <code>wp-settings.php</code>) so they don't re-execute on the 2nd request → <code>$wp</code> never gets re-instantiated → null. PHP's <code>require_once</code> is not un-resettable in standard PHP. Use one of the two working configs above OR below.</td>
+</tr>
+<tr>
+  <td>cgiMode('pool') + <code>App::cgiPoolMaxRequests(1)</code></td>
+  <td>200 + 50,719 B on every request, ~175 ms warm</td>
+  <td>Best of both: each pool worker exits after 1 request → fresh subprocess each time → WordPress bootstrap re-runs clean. Trade-off: subprocess respawn cost adds ~10 ms vs pool's normal warm-reuse, but you keep the pool's pre-spawn benefit so first-request latency is bounded.</td>
+</tr>
+</table>
+
+<p><strong>One-line WP config</strong> — drop this in your <code>app.php</code> and unmodified WordPress works:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'app.php — unmodified WordPress on ZealPHP',
+    'code'  => <<<'PHP'
+<?php
+require 'vendor/autoload.php';
+use ZealPHP\App;
+
+App::superglobals(true);                  // mod_php-style superglobals
+App::cgiMode('proc');                     // fresh PHP per request (v0.2.0 parity)
+// App::cgiSubprocessAutoload(false);     // default — DO NOT enable for WP
+App::$ignore_php_ext = false;             // allow /wp-login.php in URLs
+
+$app = App::init('0.0.0.0', 9501);
+
+$app->setFallback(function() {            // WP front controller
+    App::include('/index.php');
+});
+
+$app->run(['task_worker_num' => 0]);
+PHP]); ?>
+
+<h3 id="wordpress-pool-with-recycle" class="legacy-mt-md">Pool mode for WordPress — set <code>cgiPoolMaxRequests(1)</code></h3>
+
+<p>If you specifically want the pool's pre-spawn warm-up benefit for WordPress (e.g., your monitoring expects low p99 first-request latency), pair it with <code>App::cgiPoolMaxRequests(1)</code>. Every pool subprocess exits after one request and the parent respawns it — same fresh-process semantics as <code>cgiMode('proc')</code>, but the parent maintains a queue of pre-spawned subprocesses ready to receive the next request:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'app.php — WordPress on pool with recycle-each-request',
+    'code'  => <<<'PHP'
+<?php
+require 'vendor/autoload.php';
+use ZealPHP\App;
+
+App::superglobals(true);
+App::cgiPoolSize(8);                      // 8 subprocesses pre-spawned per HTTP worker
+App::cgiPoolMaxRequests(1);               // recycle after EVERY request — WP needs fresh boot
+App::$ignore_php_ext = false;
+
+$app = App::init('0.0.0.0', 9501);
+$app->setFallback(function() { App::include('/index.php'); });
+$app->run();
+PHP]); ?>
+
+<p>The framework's pool_worker.php already does FPM-style <code>$GLOBALS</code> snapshot/restore between requests — clears <code>$wp_did_header</code>, <code>$wpdb</code>, <code>$wp_query</code>, etc. — but WordPress's <code>require_once</code> chain caches the bootstrap (<code>wp-load.php</code> → <code>wp-settings.php</code> → <code>new WP()</code> assignments) and PHP can't un-cache require_once entries in standard PHP. Recycling the subprocess every request bypasses this by getting a fresh interpreter where require_once is uncached.</p>
+
+<h3 id="wordpress-autoload-pitfall" class="legacy-mt-md">Why <code>cgiSubprocessAutoload(false)</code> is the default</h3>
+
+<p>Issue #18 (the v0.2.41 WP-on-proc regression vs v0.2.0). Between v0.2.0 and v0.2.20, <code>cgi_worker.php</code> gained a <code>require_once vendor/autoload.php</code> at startup so apps that needed <code>\ZealPHP\App</code> inside the subprocess could use it (issue #17). The autoload load measures <strong>~30 ms</strong> per subprocess spawn on a Ryzen 9 7900X.</p>
+
+<p>For modern apps that don't make 10 ms-timeout self-calls, 30 ms is invisible. But WordPress's <code>wp_cron()</code> fires a non-blocking <code>POST /wp-cron.php</code> with <code>timeout = 0.01</code>. The cgi_worker subprocess takes longer to start than the wp-cron client's timeout window allows — the POST connection arrives at the parent OpenSwoole worker before any worker is free to accept it, accumulating as half-closed sockets. By the 2nd request, the pool is fully blocked.</p>
+
+<p><strong>The fix:</strong> gate the autoload on <code>App::cgiSubprocessAutoload(true)</code> — default off — restoring v0.2.0's zero-overhead subprocess start path. Apps that need ZealPHP classes inside CGI dispatch (rare — most legacy apps ship their own bootstrap) opt in. Pinned by <code>tests/Unit/CgiSubprocessAutoloadTest.php</code> (5 tests including a source-level canary against future regressions).</p>
+
+<h2 id="pool-buys" class="legacy-mt-xl">What <code>cgiMode('pool')</code> buys you — measured</h2>
+
+<p><code>cgiMode('pool')</code> is the default since v0.2.41 — the FPM-style warm worker pool. The numbers below are measured on this machine (Ryzen 9 7900X, OpenSwoole 26.2, PHP 8.3) so you can compare them directly to the bench results elsewhere in the docs.</p>
+
+<table class="ztable legacy-mb">
+<tr><th>Path</th><th>Throughput</th><th>Per-request latency</th><th>What we measured</th></tr>
+<tr>
+  <td><strong>Coroutine mode</strong><br><small>HTTP /json route, no CGI dispatch</small></td>
+  <td>13,210 req/s</td>
+  <td>0.76 ms (mean)</td>
+  <td>Full HTTP stack: middleware + route handler + JSON encode. <code>ab -n 500 -c 10</code> against the live demo server. This is the "modern route" baseline.</td>
+</tr>
+<tr>
+  <td><strong>cgiMode('pool') direct</strong><br><small>4 workers, fixture <code>echo "ok";</code></small></td>
+  <td>10,983 req/s</td>
+  <td>0.091 ms avg<br>p50 0.028 ms · p99 0.047 ms</td>
+  <td><code>scripts/bench-fcgi-pool.php</code> — drives <code>WorkerPool::dispatch()</code> directly with 1000 requests, no HTTP overhead. Measures pure pool round-trip cost (write frame to stdin, subprocess executes, read response).</td>
+</tr>
+<tr>
+  <td><strong>cgiMode('proc')</strong><br><small>fresh <code>proc_open</code> per request</small></td>
+  <td>49 req/s</td>
+  <td>20.2 ms avg<br>p50 19.4 ms · p99 30.8 ms</td>
+  <td><code>scripts/bench-fcgi-proc.php</code> — same fixture as pool bench, single caller, 200 iter. Cold PHP startup dominates the 19.4 ms — each request pays the full interpreter spin-up cost.</td>
+</tr>
+<tr>
+  <td><strong>pool / proc speedup</strong></td>
+  <td colspan="3"><strong>~224× faster</strong> (10,983 / 49). This is the v0.2.41 default-flip justification.</td>
+</tr>
+</table>
+
+<p><strong>Reading the numbers</strong>: the pool itself adds ~90 microseconds of dispatch overhead per request (p50 = 28 μs, p99 = 47 μs). That overhead vanishes inside any non-trivial PHP file — by the time WordPress's autoloader has run, the ~90 μs IPC cost is invisible. The headline difference vs <code>cgiMode('proc')</code> is the <strong>~224× speedup</strong> from skipping the cold PHP startup on every request (proc pays 19.4 ms p50 vs pool's 0.028 ms p50 on the same fixture).</p>
+
+<p>Reproduce locally:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Measure pool vs proc on your own box',
+    'code'  => <<<'BASH'
+# Pool — warm FPM-style subprocesses, IPC-only dispatch
+php scripts/bench-fcgi-pool.php 1000 4 500
+
+# Proc — fresh proc_open per request, full PHP cold-start
+php scripts/bench-fcgi-proc.php 200
+
+# Same fixture (`echo "ok";`) for both → direct comparison.
+BASH]); ?>
+
+<p><strong>vs PHP-FPM</strong>: same semantic model (warm subprocess pool, recycled after N requests), so per-request cost should be in the same ballpark as your FPM pool. We haven't run an apples-to-apples bench against a real FPM install on the same box yet — <a href="/vs-fpm">/vs-fpm</a> covers the measurement story. The honest claim is "FPM-equivalent semantics + ZealPHP-managed (one less daemon to install)."</p>
+
+<h3 class="legacy-mt-md">What you actually get from pool mode (beyond the bench numbers)</h3>
+
+<ul>
+  <li><strong>True global-scope isolation per request.</strong> Each pool subprocess is a fresh exec'd PHP process (NOT a fork of the HTTP worker), so it doesn't inherit ZealPHP's autoloader, classes, or memory. <code>define()</code>-heavy plugins, classes that re-declare in plugin updates, function tables that grow per request — none of it leaks.</li>
+  <li><strong>FPM-style recycling.</strong> <code>cgiPoolMaxRequests(N)</code> (default 500) makes each pool worker exit cleanly after N requests; the parent respawns it. Defense against slow memory leaks in user PHP that would otherwise compound over millions of requests.</li>
+  <li><strong>Per-HTTP-worker private pools.</strong> No global IPC bottleneck — each OpenSwoole HTTP worker owns its own <code>cgiPoolSize</code> subprocesses with a <code>Coroutine\Channel</code> queue. Scales with worker count.</li>
+  <li><strong>Real <code>$_GET</code> / <code>$_POST</code> / <code>$_SERVER</code> / <code>$_COOKIE</code> inside the subprocess.</strong> Pinned by 5 unit tests in <code>tests/Unit/CGI/CgiPoolDispatchTest.php</code> (testPostSuperglobalReachesSubprocess, etc.).</li>
+  <li><strong>Auto-respawn on crash.</strong> <code>proc_get_status</code> polled before each dispatch; dead workers are replaced transparently.</li>
+</ul>
+
+<h3 id="hybrid-with-coroutines" class="legacy-mt-md">The hybrid: parent runs coroutines, public/*.php gets isolation</h3>
+
+<p>The mode-table on the <a href="/coroutines#lifecycle-modes">coroutines page</a> documents this as <strong>Mode 6 — Coroutine + Process Isolation</strong>. It's the "best of both worlds" combo you can opt into when you want the modern app to be concurrent AND have occasional legacy isolated PHP:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Mode 6 — coroutines at the parent, isolated subprocess per public/*.php',
+    'code'  => <<<'PHP'
+<?php
+require 'vendor/autoload.php';
+use ZealPHP\App;
+
+// Modern app — per-coroutine $g in the parent worker (no race)
+App::superglobals(false);
+
+// public/*.php → CGI pool subprocess (true global-scope isolation per request)
+App::processIsolation(true);
+
+// Parent runs coroutines. With HOOK_ALL, the pipe read inside cgiPool
+// YIELDS while the subprocess executes — other coroutines run in parallel.
+// Both default to null → resolve to !sg → these values. Explicit for clarity:
+App::enableCoroutine(true);
+App::hookAll(\OpenSwoole\Runtime::HOOK_ALL);
+
+// cgiMode('pool') is the default since v0.2.41. Tune pool size to your needs:
+App::cgiPoolSize(8);            // 8 isolated PHP subprocesses per HTTP worker
+App::cgiPoolMaxRequests(1000);  // recycle after 1000 requests (FPM parity)
+
+$app = App::init('0.0.0.0', 8080);
+$app->run();
+
+// Route handlers in route/*.php run at full coroutine speed.
+// public/wp-login.php dispatches to the isolated pool.
+// Parent yields on the pipe read → multiple coroutines dispatch in parallel.
+PHP]); ?>
+
+<p>The validator at <code>App::run()</code> would refuse <code>superglobals(true) + enableCoroutine(true)</code> (the race shape) — but with <code>sg=false</code>, both throws are unreachable. Mode 6 is fully supported and pinned by <code>tests/Unit/LifecycleModesMatrixTest.php#testMode6CoroutineIsolatedHybrid</code>.</p>
 
 <h2 id="dual-runtime" class="legacy-mt-xl">Dual-runtime — one codebase, Apache AND ZealPHP at once</h2>
 
@@ -996,10 +1173,10 @@ BASH, 'lang' => 'bash']); ?>
   <td><code>App::registerCgiBackend('.py', ['mode'=&gt;'fcgi', 'address'=&gt;'127.0.0.1:9001'])</code></td>
 </tr>
 <tr>
-  <td><code>'fork'</code></td>
-  <td>— (no direct equivalent; warm-fork is ZealPHP-specific)</td>
+  <td><code>'pool'</code></td>
+  <td>— (no direct equivalent; built-in warm subprocess pool is ZealPHP-specific)</td>
   <td>—</td>
-  <td><code>App::registerCgiBackend('.php', ['mode'=&gt;'fork'])</code> — <strong>.php only</strong></td>
+  <td><code>App::cgiMode('pool')</code> — default; <strong>.php only</strong></td>
 </tr>
 </table>
 
@@ -1068,10 +1245,10 @@ PHP]); ?>
   <p><strong>Known limitation.</strong> <code>cgiScriptAlias()</code> registers the resolution + ExecCGI scope, but URL-level implicit routing is wired <strong>per-extension only</strong>. A ScriptAlias-only setup (no matching <code>registerCgiBackend()</code>) is reachable via <code>App::include()</code> but does not yet get an automatic <code>/{file}.&lt;ext&gt;</code> route. Pair it with a per-extension backend whose <code>exec_paths</code> covers the same prefix for auto-routed implicit URLs, or add an explicit route. (Follow-up.)</p>
 </div>
 
-<h3 class="legacy-mt-sm">fork mode — PHP only constraint</h3>
+<h3 class="legacy-mt-sm">pool mode — PHP only constraint</h3>
 <div class="callout warn legacy-mt-prose-mb">
-  <p><strong>Why fork is PHP-only.</strong> <code>'fork'</code> uses <code>OpenSwoole\Process</code> to clone the already-booted PHP worker. The forked child inherits the PHP interpreter, loaded autoloader, and warm opcache — which is why it is ~5× faster than <code>'proc'</code>. This clone-and-run mechanism is specific to the PHP runtime. For other languages, use <code>'fcgi'</code> (warm pool managed by the language runtime) or <code>'proc'</code> (spawn on demand).</p>
-  <p>Attempting <code>App::registerCgiBackend('.py', ['mode' =&gt; 'fork'])</code> throws <code>\InvalidArgumentException</code> with the message: <em>"fork mode requires a PHP target; use 'fcgi' (warm pool, language-agnostic) or 'proc' for .py"</em>.</p>
+  <p><strong>Why pool is PHP-only.</strong> <code>'pool'</code> pre-spawns PHP subprocesses that inherit the ZealPHP boot environment and reset global scope between requests. This warm-subprocess mechanism is specific to the PHP runtime. For other languages, use <code>'fcgi'</code> (warm pool managed by the language runtime) or <code>'proc'</code> (spawn on demand).</p>
+  <p>Attempting <code>App::registerCgiBackend('.py', ['mode' =&gt; 'pool'])</code> throws <code>\InvalidArgumentException</code> with the message: <em>"pool mode requires a PHP target; use 'fcgi' (warm pool, language-agnostic) or 'proc' for .py"</em>.</p>
 </div>
 
 <h3 class="legacy-mt-sm">Reader: App::resolveCgiBackend()</h3>
@@ -1109,7 +1286,7 @@ use ZealPHP\App;
 
 App::superglobals(true);          // CGI dispatch path (proc / fork / fcgi)
 App::processIsolation(true);
-App::cgiMode('fcgi');             // 'proc' (default) | 'fork' | 'fcgi'
+App::cgiMode('fcgi');             // 'pool' (default) | 'proc' | 'fcgi'
 App::fcgiAddress('127.0.0.1:9000');  // or 'unix:/run/php/php-fpm.sock'
 
 App::init('0.0.0.0', 8080);
@@ -1124,13 +1301,13 @@ PHP]); ?>
   <li>You're migrating from an <code>nginx → fastcgi_pass</code> deployment and want a drop-in shape change rather than a code rewrite. The <code>fcgi_params</code> array on <code>App::registerCgiBackend()</code> mirrors nginx's <code>fastcgi_param</code> directive.</li>
 </ul>
 
-<p><strong>Under the hood:</strong> dispatch lives in <code>App::cgiFcgi(string $path, ?string $address = null, array $extraParams = [])</code>, which builds the CGI/1.1 environment via <code>buildCgiEnv()</code>, forwards via <code>ZealPHP\Legacy\FastCgiClient::request($params, $stdinBody)</code>, and applies the upstream's status code + headers to <code>$g-&gt;zealphp_response</code>. A failed connection or <code>FastCgiException</code> from the upstream surfaces as a clean <strong>502 Bad Gateway</strong> — same shape Apache and nginx emit when their FCGI upstream is down.</p>
+<p><strong>Under the hood:</strong> dispatch lives in <code>App::cgiFcgi(string $path, ?string $address = null, array $extraParams = [])</code>, which builds the CGI/1.1 environment via <code>buildCgiEnv()</code>, forwards via <code>ZealPHP\CGI\FastCgiClient::request($params, $stdinBody)</code>, and applies the upstream's status code + headers to <code>$g-&gt;zealphp_response</code>. A failed connection or <code>FastCgiException</code> from the upstream surfaces as a clean <strong>502 Bad Gateway</strong> — same shape Apache and nginx emit when their FCGI upstream is down.</p>
 
-<p><strong>Performance:</strong> we don't run PHP at all in this mode — throughput equals whatever your FPM pool delivers minus one local socket hop. We deliberately don't quote a number here: it depends on your FPM <code>pm.max_children</code>, the file under load, and whether you're on Unix sockets vs TCP. The bridge-cost table at <a href="/vs-fpm#measured-four-ways">/vs-fpm</a> compares the in-process modes (<code>'proc'</code> / <code>'fork'</code> / Mixed-mode) and intentionally omits <code>'fcgi'</code> because the answer is "ask your FPM pool."</p>
+<p><strong>Performance:</strong> we don't run PHP at all in this mode — throughput equals whatever your FPM pool delivers minus one local socket hop. We deliberately don't quote a number here: it depends on your FPM <code>pm.max_children</code>, the file under load, and whether you're on Unix sockets vs TCP. The bridge-cost table at <a href="/vs-fpm#measured-four-ways">/vs-fpm</a> compares the in-process modes (<code>'pool'</code> / <code>'proc'</code> / Mixed-mode) and intentionally omits <code>'fcgi'</code> because the answer is "ask your FPM pool."</p>
 
 <h2 id="httpoxy-hardening" class="legacy-mt-xl">What the CGI bridge does for you (security)</h2>
 
-<p>All three dispatch modes (<code>'proc'</code> / <code>'fork'</code> / <code>'fcgi'</code>) build the CGI/1.1 environment through the same <code>App::buildCgiEnv()</code> path, so the hardening below applies uniformly. Each item ships a corresponding Apache parity rationale rather than being ZealPHP-specific behaviour.</p>
+<p>All three dispatch modes (<code>'pool'</code> / <code>'proc'</code> / <code>'fcgi'</code>) build the CGI/1.1 environment through the same <code>App::buildCgiEnv()</code> path, so the hardening below applies uniformly. Each item ships a corresponding Apache parity rationale rather than being ZealPHP-specific behaviour.</p>
 
 <ul class="legacy-list-loose">
   <li><strong>httpoxy CVE-2016-5385 mitigation</strong> — incoming <code>Proxy:</code> request headers are NOT forwarded as <code>HTTP_PROXY</code> in the CGI env (<code>src/App.php:2830-2836</code>). Apache <code>util_script.c:224-227</code> parity. Prevents the well-known PHP/Go/Python CGI library family that reads <code>HTTP_PROXY</code> to choose an outbound proxy from being hijacked by a hostile client.</li>

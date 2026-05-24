@@ -14,22 +14,22 @@ final class CgiModeEnumTest extends TestCase
 {
     public function testEnumCases(): void
     {
+        $this->assertSame('pool', CgiMode::Pool->value);
         $this->assertSame('proc', CgiMode::Proc->value);
-        $this->assertSame('fork', CgiMode::Fork->value);
         $this->assertSame('fcgi', CgiMode::Fcgi->value);
     }
 
     public function testCoerceFromEnum(): void
     {
+        $this->assertSame(CgiMode::Pool, CgiMode::coerce(CgiMode::Pool));
         $this->assertSame(CgiMode::Proc, CgiMode::coerce(CgiMode::Proc));
-        $this->assertSame(CgiMode::Fork, CgiMode::coerce(CgiMode::Fork));
         $this->assertSame(CgiMode::Fcgi, CgiMode::coerce(CgiMode::Fcgi));
     }
 
     public function testCoerceFromString(): void
     {
+        $this->assertSame(CgiMode::Pool, CgiMode::coerce('pool'));
         $this->assertSame(CgiMode::Proc, CgiMode::coerce('proc'));
-        $this->assertSame(CgiMode::Fork, CgiMode::coerce('fork'));
         $this->assertSame(CgiMode::Fcgi, CgiMode::coerce('fcgi'));
     }
 

@@ -86,8 +86,8 @@ final class EnumApiTest extends TestCase
 
     public function testCgiModeEnumCases(): void
     {
+        $this->assertSame('pool', CgiMode::Pool->value);
         $this->assertSame('proc', CgiMode::Proc->value);
-        $this->assertSame('fork', CgiMode::Fork->value);
         $this->assertSame('fcgi', CgiMode::Fcgi->value);
         $this->assertSame(CgiMode::Proc, CgiMode::coerce('proc'));
         $this->assertSame(CgiMode::Fcgi, CgiMode::coerce('FCGI'));
@@ -95,16 +95,16 @@ final class EnumApiTest extends TestCase
 
     public function testCgiModeAcceptsEnum(): void
     {
-        App::cgiMode(CgiMode::Fork);
-        $this->assertSame('fork', App::cgiMode());
+        App::cgiMode(CgiMode::Pool);
+        $this->assertSame('pool', App::cgiMode());
         App::cgiMode(CgiMode::Fcgi);
         $this->assertSame('fcgi', App::cgiMode());
     }
 
     public function testCgiModeAcceptsLegacyString(): void
     {
-        App::cgiMode('fork');
-        $this->assertSame('fork', App::cgiMode());
+        App::cgiMode('pool');
+        $this->assertSame('pool', App::cgiMode());
     }
 
     public function testCgiModeRejectsUnknown(): void

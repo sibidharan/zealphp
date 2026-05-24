@@ -44,6 +44,7 @@ class AppConfigurablesTest extends TestCase
     protected function setUp(): void
     {
         // Reset every configurable to its documented default before each test.
+        App::$cgi_mode = 'pool';
         App::stripTrailingSlash(false);
         App::serverAdmin(null);
         App::canonicalName(null);
@@ -84,17 +85,17 @@ class AppConfigurablesTest extends TestCase
     // cgiMode()
     // ─────────────────────────────────────────────────────────────
 
-    public function testCgiModeDefaultsToProc(): void
+    public function testCgiModeDefaultsToPool(): void
     {
-        $this->assertSame('proc', App::cgiMode());
-        $this->assertSame('proc', App::$cgi_mode);
+        $this->assertSame('pool', App::cgiMode());
+        $this->assertSame('pool', App::$cgi_mode);
     }
 
     public function testCgiModeSetterRoundtrips(): void
     {
-        $this->assertSame('fork', App::cgiMode('fork'));
-        $this->assertSame('fork', App::cgiMode());
-        $this->assertSame('fork', App::$cgi_mode);
+        $this->assertSame('pool', App::cgiMode('pool'));
+        $this->assertSame('pool', App::cgiMode());
+        $this->assertSame('pool', App::$cgi_mode);
         $this->assertSame('proc', App::cgiMode('proc'));
     }
 

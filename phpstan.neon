@@ -4,6 +4,7 @@ parameters:
         - src
     excludePaths:
         - src/cgi_worker.php
+        - src/pool_worker.php
     bootstrapFiles:
         - phpstan-stubs.php
         - vendor/autoload.php
