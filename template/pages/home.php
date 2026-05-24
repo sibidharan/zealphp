@@ -346,27 +346,6 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
 </section>
 
 
-<!-- AI-friendly by being boring -->
-<section class="section home-section-ai-friendly">
-  <div class="container">
-    <h2 class="section-title">AI-friendly by being boring</h2>
-    <p class="section-desc">
-      ZealPHP doesn't require a heavy frontend stack to build interactive AI apps.
-      Routes can return HTML. SSE can stream tokens. WebSockets can push live events.
-      Task workers can run long jobs. Templates stay close to backend state.
-      That smaller surface area &mdash; HTML as the interface contract, fewer files between
-      handler and DOM &mdash; makes the app easier to understand, test, and modify, for humans
-      and for AI coding assistants.
-    </p>
-    <p class="section-desc home-ai-friendly-note">
-      It's an architectural note, not a product claim: less architecture is often more accuracy.
-      Build small explicit server flows; let the browser stay browser-shaped.
-      Worked example: the live AI chat above is ~40 lines of PHP + a Python agent,
-      no SPA framework involved.
-    </p>
-  </div>
-</section>
-
 <!-- Engine vs harness — pre-empts the "just use Swoole" attack -->
 <section class="section home-section-engine">
   <div class="container">
@@ -406,6 +385,27 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
     </div>
     <p class="home-engine-when-raw">
       <strong>When raw OpenSwoole is the right choice:</strong> you're building a custom binary-protocol server (your own ASR / database / message broker), you need to avoid <code>uopz</code> entirely (compliance), you're building your own framework. For everything else &mdash; HTTP, WebSocket, SSE, REST, web apps with sessions &mdash; the harness saves you weeks per project.
+    </p>
+  </div>
+</section>
+
+<!-- AI-friendly by being boring -->
+<section class="section home-section-ai-friendly">
+  <div class="container">
+    <h2 class="section-title">AI-friendly by being boring</h2>
+    <p class="section-desc">
+      ZealPHP doesn't require a heavy frontend stack to build interactive AI apps.
+      Routes can return HTML. SSE can stream tokens. WebSockets can push live events.
+      Task workers can run long jobs. Templates stay close to backend state.
+      That smaller surface area &mdash; HTML as the interface contract, fewer files between
+      handler and DOM &mdash; makes the app easier to understand, test, and modify, for humans
+      and for AI coding assistants.
+    </p>
+    <p class="section-desc home-ai-friendly-note">
+      It's an architectural note, not a product claim: less architecture is often more accuracy.
+      Build small explicit server flows; let the browser stay browser-shaped.
+      Worked example: the live AI chat above is ~40 lines of PHP + a Python agent,
+      no SPA framework involved.
     </p>
   </div>
 </section>
