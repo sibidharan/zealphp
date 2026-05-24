@@ -162,7 +162,7 @@ ZEALPHP_LOG_DIR           # Log directory (default: /tmp/zealphp)</code></pre>
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'When ZealPHP isn\'t the right choice',
-      'body'    => '<p><strong>Client-side state management</strong> (optimistic updates, complex drag-and-drop, real-time collaboration) — a frontend framework is the right tool.</p><p><strong>Horizontal scaling across machines</strong> — ZealPHP is one process. It scales vertically well but doesn\'t pretend to be Kubernetes. For multi-server, you\'ll need stateless workers + Redis sessions.</p>',
+      'body'    => '<p><strong>Client-side state management</strong> (optimistic updates, complex drag-and-drop, real-time collaboration) — a frontend framework is the right tool.</p><p><strong>Horizontal scaling across machines</strong> — ZealPHP is one PHP application server per node. It scales vertically well but doesn\'t pretend to be Kubernetes. For multi-server, you\'ll need stateless workers + Redis sessions.</p>',
     ]); ?>
 
     <h2>The boring architecture</h2>

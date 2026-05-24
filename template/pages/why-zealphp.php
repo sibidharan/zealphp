@@ -4,8 +4,8 @@
   <div class="container why-container">
     <h1 class="section-title why-title">Why ZealPHP?</h1>
     <p class="section-desc why-desc">
-      PHP powers 77% of the web. Its execution model is what needs upgrading.<br>
-      ZealPHP brings coroutine-native, real-time server architecture to PHP.
+      PHP powers 77% of the web — always as a worker behind a C-based HTTP server.<br>
+      ZealPHP runs PHP as the HTTP server itself: coroutine-native, always-on, WebSocket/SSE/timers first-class.
     </p>
 
     <div class="why-proof">
@@ -15,11 +15,12 @@
     <div class="why-block">
       <h2 class="why-h2">The problem</h2>
       <p class="why-prose">
-        PHP's traditional request-per-process model (PHP-FPM, mod_php) is fundamentally
-        incompatible with real-time, high-concurrency, and streaming use cases.
+        In the traditional model (PHP-FPM, mod_php), the HTTP server is C — nginx or Apache.
+        PHP is the worker that bridges in via FastCGI and exits per-request.
         Every request starts from scratch — no shared state, no persistent connections,
         no coroutines. Building a WebSocket server, streaming AI responses, or running
         background tasks requires leaving PHP entirely for Node.js, Go, or Python.
+        ZealPHP collapses this: the HTTP server IS PHP, long-lived, with a coroutine per request.
       </p>
       <p class="why-prose-spaced">
         Existing async PHP solutions are either too low-level (raw Swoole, ReactPHP, AMPHP),
@@ -53,15 +54,16 @@
             Drop <code>.php</code> files in <code>public/</code> and they route automatically — just like Apache.
             <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>echo</code>
             all work unchanged via uopz. Drop files in <code>api/</code> and they become REST endpoints.
-            Many existing PHP apps — including WordPress sites — run unchanged through the CGI worker bridge. Migrate at your own pace — file by file, feature by feature.
+            Many traditional PHP patterns — including WordPress — run through the CGI worker bridge in compatibility mode, with documented limits. Migrate at your own pace — file by file, feature by feature.
           </p>
         </div>
         <div class="why-card">
-          <h3 class="why-card-title">Single-process deployment</h3>
+          <h3 class="why-card-title">PHP as the application server</h3>
           <p class="why-card-body">
-            HTTP server, WebSocket server, task workers, timers, shared memory, sessions —
-            all in one <code>php app.php</code>. No Nginx, no Redis, no Supervisor, no cron.
-            Deploy a systemd service and you're done.
+            HTTP, WebSocket, task workers, timers, shared memory, sessions — in one PHP application server,
+            started with <code>php app.php</code>. On one node you can skip the Redis/Supervisor/cron tier;
+            for cross-node deploys, ZealPHP's Store + pub/sub flip to a Redis/Valkey backend with one line of config.
+            Front it with nginx/Caddy/Traefik in production for TLS + horizontal scaling.
           </p>
         </div>
       </div>
@@ -151,6 +153,56 @@
     </div>
 
     <div class="why-block">
+      <h2 id="vs-raw-openswoole" class="why-h2">ZealPHP vs raw OpenSwoole &mdash; engine vs harness</h2>
+      <p class="why-octane-intro">
+        The most common HN-shaped question: <em>&ldquo;it&rsquo;s just OpenSwoole &mdash; why the extra layer?&rdquo;</em>
+        Same shape as &ldquo;it&rsquo;s just Node http &mdash; why Express?&rdquo; You can write raw <code>onRequest</code>
+        handlers and ship them; people do. The catch is that every project that does ends up re-inventing
+        the same 12 things. <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a> is the engine.
+        ZealPHP is the harness that lets you steer it without re-implementing the glue.
+      </p>
+      <div class="why-engine-grid">
+        <div class="why-engine-col why-engine-col-engine">
+          <h3 class="why-engine-col-title">OpenSwoole gives you</h3>
+          <p class="why-engine-col-tag">the runtime &mdash; raw power</p>
+          <ul class="why-engine-list">
+            <li>HTTP server + WebSocket\Server primitives (<code>onRequest</code>, <code>onMessage</code>, <code>onOpen</code>, <code>onClose</code>)</li>
+            <li>Coroutines: <code>go()</code>, <code>Channel</code>, <code>WaitGroup</code>, <code>Coroutine::getContext()</code></li>
+            <li><code>Atomic</code> + <code>Table</code> &mdash; lock-free shared memory across workers</li>
+            <li><code>Coroutine\Http\Client</code> + DNS + sleep + file I/O hooks</li>
+            <li><code>OpenSwoole\Runtime::enableCoroutine(HOOK_ALL)</code> &mdash; PHP I/O yields the reactor automatically</li>
+            <li><code>Process\Pool</code> + master/manager/worker lifecycle</li>
+            <li>Timers: <code>Timer::tick()</code>, <code>Timer::after()</code></li>
+            <li><code>Process</code> for sub-process fork + IPC pipes</li>
+            <li>FastCGI coroutine client (v22.1+)</li>
+          </ul>
+        </div>
+        <div class="why-engine-col why-engine-col-harness">
+          <h3 class="why-engine-col-title">ZealPHP adds on top</h3>
+          <p class="why-engine-col-tag">the harness &mdash; usable surface</p>
+          <ul class="why-engine-list">
+            <li><strong>Routing</strong> &mdash; <code>route()</code> + <code>nsRoute</code> + <code>nsPathRoute</code> + <code>patternRoute</code> with reflection-based parameter injection (<a href="/routing">/routing</a>)</li>
+            <li><strong>PSR-15 middleware stack</strong> &mdash; 18 built-ins (CORS, ETag, Range, Compression, RateLimit, BasicAuth, HostRouter, ScopedMiddleware, &hellip;) covering common Apache mod_*  / nginx behaviors (<a href="/middleware">/middleware</a>)</li>
+            <li><strong><code>uopz</code> overrides</strong> &mdash; <code>session_start()</code>, <code>header()</code>, <code>setcookie()</code>, <code>http_response_code()</code>, <code>headers_list()</code>, the entire <code>session_*()</code> family, <code>flush()</code>, <code>apache_request_headers()</code>, <code>is_uploaded_file()</code> all just work, routing to per-request state instead of mutating process globals</li>
+            <li><strong>Coroutine-safe sessions</strong> &mdash; <code>CoSessionManager</code> with per-coroutine isolation, no <code>$_SESSION</code> races across concurrent requests (<a href="/sessions">/sessions</a>)</li>
+            <li><strong>Templating</strong> &mdash; <code>App::render</code> / <code>renderToString</code> / <code>renderStream</code> / <code>include</code> / <code>fragment</code> &mdash; htmx-style named regions, streaming-Generator output, sub-template composition (<a href="/templates">/templates</a>)</li>
+            <li><strong>Universal return contract</strong> &mdash; <code>int</code> = status, <code>array</code> = JSON, <code>Generator</code> = SSE/SSR stream, <code>string</code> = HTML, <code>Closure</code> = param-injected stream &mdash; one contract across route handler, public file, API closure, fallback, error handler, render(), include() (<a href="/responses#return-contract">/responses#return-contract</a>)</li>
+            <li><strong>ZealAPI</strong> &mdash; file-based REST: drop <code>api/users/get.php</code> &rarr; <code>GET /api/users</code> auto-routes; auth hooks (<code>authChecker</code>, <code>adminChecker</code>, <code>usernameProvider</code>) (<a href="/api">/api</a>)</li>
+            <li><strong>CGI worker bridge</strong> &mdash; <code>cgiMode('proc' | 'fork' | 'fcgi')</code> dispatches legacy <code>public/*.php</code> files with true global-scope isolation (<a href="/legacy-apps">/legacy-apps</a>)</li>
+            <li><strong>Pluggable Store + Counter backends</strong> &mdash; one API, three backends: Table (single-node, nanoseconds), Redis/Valkey (cross-node + persistence, ~ms), Tiered (L1 Table + L2 Redis with HMAC-signed cross-node L1 invalidation) (<a href="/store">/store</a>)</li>
+            <li><strong>Cross-host messaging</strong> &mdash; <code>Store::publish</code> / <code>App::subscribe</code> for fire-and-forget pub/sub, <code>publishReliable</code> / <code>subscribeReliable</code> for Streams-backed at-least-once delivery via consumer groups, <code>WSRouter</code> for cross-server WebSocket routing, first-class WS rooms with federated membership (<a href="/pubsub">/pubsub</a>)</li>
+            <li><strong>Stream wrapper for <code>php://input</code></strong> &mdash; legacy <code>file_get_contents('php://input')</code> in JSON APIs just works in long-running workers</li>
+            <li><strong>CLI tooling</strong> &mdash; <code>php app.php start/stop/restart/status/logs</code> + daemonization + per-port PID files + log filters (<code>--access</code>, <code>--debug</code>, <code>--server</code>, <code>--zlog</code>)</li>
+            <li><strong>Lifecycle validation</strong> &mdash; unsafe combinations (superglobals(true) + enableCoroutine(true)) throw at boot, not silently race in prod (v0.2.27)</li>
+          </ul>
+        </div>
+      </div>
+      <p class="why-octane-outro">
+        <strong>When raw OpenSwoole is the right choice:</strong> you&rsquo;re building a custom binary-protocol server (your own message broker, database driver, ASR pipeline), you can&rsquo;t use <code>uopz</code> (compliance / locked-down host), or you&rsquo;re explicitly building <em>another</em> framework. For everything else &mdash; HTTP, WebSocket, SSE, REST APIs, web apps with sessions, AI-streaming endpoints &mdash; the harness saves you weeks per project and keeps the migration door open to existing PHP code.
+      </p>
+    </div>
+
+    <div class="why-block">
       <h2 id="vs-octane" class="why-h2">ZealPHP vs Laravel Octane</h2>
       <p class="why-octane-intro">Two different problems:</p>
       <ul class="why-octane-list">
@@ -198,7 +250,7 @@
             <li class="why-fit-item">AI/LLM apps with streaming responses</li>
             <li class="why-fit-item">Real-time dashboards and live updates</li>
             <li class="why-fit-item">WebSocket apps (chat, collaboration)</li>
-            <li class="why-fit-item">High-concurrency APIs (10k+ req/s)</li>
+            <li class="why-fit-item">High-concurrency APIs — workloads where the I/O-concurrency-per-worker model pays off (measure before you commit)</li>
             <li class="why-fit-item">Migrating large PHP codebases to async</li>
             <li class="why-fit-item">LAMP-style PHP devs who want async without learning a framework</li>
             <li class="why-fit-item">Single-process deployments (no infra complexity)</li>
@@ -211,6 +263,7 @@
             <li class="why-fit-item">Need shared hosting (requires CLI access)</li>
             <li class="why-fit-item">Building a custom protocol server</li>
             <li class="why-fit-item">Committed to AMPHP / Revolt / ReactPHP — Fiber libraries that drive Revolt's event loop, a separate scheduler from OpenSwoole's reactor (an app picks one)</li>
+            <li class="why-fit-item">Need byte-for-byte Apache/nginx config replacement — ZealPHP covers the common .htaccess/nginx.conf patterns (rewrite, headers, auth, rate limit, MIME, etc.) but is not a drop-in replacement for every directive</li>
           </ul>
           <p class="why-fit-note">
             <strong class="why-fit-note-strong">Note:</strong>
@@ -223,7 +276,7 @@
     <div class="why-block">
       <h2 class="why-h2">Benchmarks</h2>
       <p class="why-bench-intro">
-        Numbers below are from one benchmark setup on a single machine. Real-world performance depends on payload size, I/O, OS limits, and tuning. Reproduce them yourself before you trust them.
+        Headline numbers: 117k req/s text, 106k JSON, 50k templated on a 4-core box with the full PSR-15 middleware stack — 0 failures across 150k requests. Numbers are from one benchmark setup; real-world performance depends on payload size, I/O, OS limits, and tuning. Reproduce in 60s with <code class="why-bench-inline-code">scripts/bench_vs_express.sh</code>. Full methodology, latency percentiles, caveats: <a href="/performance">/performance</a>.
       </p>
       <div class="bench-method why-bench-method">
         <strong>Method</strong> &nbsp;|&nbsp;
@@ -233,16 +286,6 @@
         &nbsp;|&nbsp;
         <a href="https://github.com/sibidharan/zealphp/blob/master/scripts/bench_vs_express.sh" target="_blank" rel="noopener">reproduce locally</a>
       </div>
-      <div class="bench why-bench">
-        <div class="bench-stat"><div class="num">117k</div><div class="label">req/s text</div><div class="sub">avg 1.7 ms</div></div>
-        <div class="bench-stat"><div class="num">106k</div><div class="label">req/s JSON</div><div class="sub">avg 1.9 ms</div></div>
-        <div class="bench-stat"><div class="num">50k</div><div class="label">req/s template</div><div class="sub">avg 4.0 ms</div></div>
-        <div class="bench-stat"><div class="num">0</div><div class="label">failures</div><div class="sub">/ 150k reqs</div></div>
-      </div>
-      <p class="why-bench-reproduce">
-        Don't trust our numbers — run it yourself:
-        <code class="why-bench-reproduce-code">scripts/bench_vs_express.sh</code>
-      </p>
     </div>
 
     <div class="why-cta">

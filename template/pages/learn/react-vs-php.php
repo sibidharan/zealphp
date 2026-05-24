@@ -207,7 +207,7 @@ const handleSubmit = async (e) =&gt; {
       <li>The server has the data and the client displays it</li>
       <li>You want <strong>zero build step</strong> and instant deploys</li>
       <li>You need <strong>SEO</strong> without SSR/SSG complexity</li>
-      <li>You want <strong>one process</strong> instead of six</li>
+      <li>You want <strong>one PHP application server</strong> instead of six tiers</li>
     </ul>
 
     <?php App::render('/components/_concept_check', [
@@ -236,7 +236,7 @@ const handleSubmit = async (e) =&gt; {
       'React solves client-side state management — most web apps don\'t have that problem',
       'Server-rendered HTML + htmx replaces React for forms, tables, lists, and pages',
       'The hidden cost of React: bundler, hydration, state management, API layer, client-side routing',
-      'ZealPHP + htmx: one process, zero build step, 14 KB of JS, server is the single source of truth',
+      'ZealPHP + htmx: one PHP application server, zero build step, 14 KB of JS, server is the single source of truth',
     ]]); ?>
 
     <div class="lesson-chips">

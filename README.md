@@ -1,6 +1,6 @@
-# ZealPHP — Coroutine-Native PHP Framework on OpenSwoole
+# ZealPHP — A PHP HTTP Server (built on OpenSwoole)
 
-A coroutine-native PHP framework built on **OpenSwoole** for high-concurrency HTTP, WebSocket, streaming, and real-time applications. Start serving existing PHP apps on OpenSwoole today — migrate to full async at your own pace.
+ZealPHP runs PHP as the HTTP server itself — not a CGI worker behind one. Built on **OpenSwoole**, it ships HTTP, WebSocket, SSE, coroutines, shared memory, timers, and task workers as first-class primitives because the server stays alive between requests. Existing PHP code runs unchanged via uopz overrides in compatibility mode; new features go async without a separate Node or Go service. Alpha — see stability note below.
 
 [![Packagist Version](https://img.shields.io/packagist/v/sibidharan/zealphp?style=flat-square&color=orange&logo=packagist&logoColor=white)](https://packagist.org/packages/sibidharan/zealphp) [![Packagist Downloads](https://img.shields.io/packagist/dt/sibidharan/zealphp?style=flat-square&logo=packagist&logoColor=white)](https://packagist.org/packages/sibidharan/zealphp) [![License](https://img.shields.io/packagist/l/sibidharan/zealphp?style=flat-square)](https://packagist.org/packages/sibidharan/zealphp)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sibidharan/zealphp) [![GitHub stars](https://img.shields.io/github/stars/sibidharan/zealphp?style=flat-square&logo=github&logoColor=white)](https://github.com/sibidharan/zealphp/stargazers) [![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square&logo=php&logoColor=white)](https://www.php.net/) [![PHP tested](https://img.shields.io/badge/tested-PHP%208.3%20%7C%208.4%20%7C%208.5--experimental-777bb4?style=flat-square&logo=php&logoColor=white)](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml) [![Stability](https://img.shields.io/badge/stability-active%20alpha-orange?style=flat-square)](CHANGELOG.md)
@@ -33,35 +33,33 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **Unit tests** | PHPUnit 11 — 130 unit tests + 46 integration tests, all green |
 | **Benchmarks** | OpenSwoole-powered concurrency with a modular `scripts/bench.sh` runner for wrk/ab sweeps through c=1000 |
 
-> **Performance:** 117K req/s text · 106K JSON · 50K templated — full PSR-15 stack (CORS + ETag + sessions + reflection-injected routing), 4 workers, AMD Ryzen 9 7900X. **Express on the same box: 20K / 22K / 12K — a 5× gap.**
+> **Performance:** 117k req/s text · 106k JSON · 50k templated on a 4-core box, full PSR-15 middleware stack, 0 failures across 150k requests. ZealPHP retains ~82% of OpenSwoole's raw throughput with the framework on top; numbers vary by workload, payload, and hardware.
 >
-> Two surprises in the methodology. **(1)** Raw OpenSwoole hits 142K text / 138K JSON — **+10% over raw Node http (129K / 132K)**, before any framework loads. **(2)** ZealPHP with full PSR-15 middleware still hits **91% of bare Node http's throughput on text, 80% on JSON**. That's because ZealPHP retains **82%** of its runtime's raw throughput; Express retains **15%** of Node's. The 5× gap is a framework-efficiency story, not a raw-runtime one.
->
-> Reproduce: `./scripts/bench_vs_express.sh`. See [PERF.md](PERF.md) for environment, latency sweep, and head-to-head.
+> Reproduce in 60s: `./scripts/bench_vs_express.sh`. Full methodology, latency percentiles, concurrency sweep, and caveats: [PERF.md](PERF.md).
 > **Stability:** Alpha (v0.2.x). API may change between minor versions until v1.0. Pin to a specific version in production.
 
-> **Apache + nginx parity (v0.2.21).** Every common `.htaccess` / `nginx.conf` directive is now covered by a built-in middleware or a server-level `App::$*` setter. 12 new middlewares (`HeaderMiddleware`, `BasicAuthMiddleware`, `RateLimitMiddleware`, `CharsetMiddleware`, `CacheControlMiddleware`, `ExpiresMiddleware`, `IpAccessMiddleware`, `ConcurrencyLimitMiddleware`, `BlockPhpExtMiddleware`, `MimeTypeMiddleware`, `BodyRewriteMiddleware`, `HostRouterMiddleware`) and 8 new configurables (`$server_admin`, `$canonical_name`, `$trusted_proxies` + `App::clientIp()`, `$access_log_format`, `LimitRequestFields` family, `$strip_trailing_slash`, `App::tryInclude()`) landed in v0.2.21. See the [middleware reference](https://php.zeal.ninja/middleware) and the [legacy-apps coverage matrix](https://php.zeal.ninja/legacy-apps) for the full story.
+> **Common Apache + nginx behavior coverage (v0.2.21).** ZealPHP ships built-in middlewares and server-level setters for the common `.htaccess` / `nginx.conf` patterns used by traditional PHP apps — rewrite-style routing, headers, expiry/cache rules, basic auth, IP access, rate limits, MIME types, request limits. This is coverage for migration use cases, not a byte-for-byte server replacement. 12 new middlewares (`HeaderMiddleware`, `BasicAuthMiddleware`, `RateLimitMiddleware`, `CharsetMiddleware`, `CacheControlMiddleware`, `ExpiresMiddleware`, `IpAccessMiddleware`, `ConcurrencyLimitMiddleware`, `BlockPhpExtMiddleware`, `MimeTypeMiddleware`, `BodyRewriteMiddleware`, `HostRouterMiddleware`) and 8 new configurables (`$server_admin`, `$canonical_name`, `$trusted_proxies` + `App::clientIp()`, `$access_log_format`, `LimitRequestFields` family, `$strip_trailing_slash`, `App::tryInclude()`) landed in v0.2.21. See the [middleware reference](https://php.zeal.ninja/middleware) and the [legacy-apps coverage matrix](https://php.zeal.ninja/legacy-apps) for the full story.
 
 ---
 
 ## Why ZealPHP?
 
-**The mission: take your existing PHP code, put it on a long-lived async runtime, and unlock WebSocket, SSE, streaming, coroutines, and shared memory — without rewriting in Node, Go, or Python.**
+**The architectural shift: PHP becomes the HTTP server. The migration story is the on-ramp; the destination is "your existing PHP code, plus WebSockets/SSE/coroutines/shared memory/timers, all in one PHP application server."**
 
-PHP powers 77% of the web, but the default request-per-process model (PHP-FPM, mod_php) cold-starts an interpreter per request, discards in-memory state, and forces WebSocket/SSE into separate sidecar processes. ZealPHP runs on **OpenSwoole** — a long-lived PHP server with native coroutines — and adds a framework layer that:
+PHP powers 77% of the web, but the default request-per-process model (PHP-FPM, mod_php) keeps the interpreter warm yet discards request-local state, and gives PHP no native way to hold a persistent connection — so WebSocket/SSE features land in separate Node/Go sidecar processes. ZealPHP runs on **OpenSwoole** — a long-lived PHP server with native coroutines — and adds a framework layer that:
 
-1. **Accepts your existing PHP code unchanged.** Drop `.php` files in `public/`. `session_start()`, `header()`, `$_GET` all work via uopz overrides. Many WordPress sites run through the CGI worker bridge — see [zealphp-wordpress](https://github.com/sibidharan/zealphp-wordpress) for the showcase and known limits.
+1. **Accepts many traditional PHP patterns unchanged (compatibility mode).** Drop `.php` files in `public/`. `session_start()`, `header()`, `$_GET`, `$_POST`, `setcookie()`, `echo` all route through uopz overrides into per-request state. Many WordPress sites run through the CGI worker bridge — see [zealphp-wordpress](https://github.com/sibidharan/zealphp-wordpress) for the showcase and documented limits. Compatibility is a migration on-ramp, not a guarantee that every PHP application is safe to drop in without an audit.
 2. **Adds async primitives when you want them.** `go()`, `Channel`, WebSocket, SSE, shared memory (`Store` / `Counter`), timers, task workers — all framework-native, no extra services.
 3. **Lets you migrate file by file.** Start with fallback routing on day one; opt into coroutine mode when you're ready. No big-bang rewrite.
 
 ### vs other ways to make PHP async
 
-- **vs PHP-FPM / mod_php** — FPM cold-starts every request. ZealPHP keeps workers warm; caches survive across requests, SSE/WebSocket cost ~0 to keep open.
+- **vs PHP-FPM / mod_php** — FPM keeps workers warm but discards request-local memory and treats PHP as a CGI worker, not the HTTP server. ZealPHP IS the HTTP server: caches survive across requests, and SSE/WebSocket connections are much cheaper to keep open than under request-per-process PHP (real capacity still depends on file descriptors, heartbeat policy, and OS tuning).
 - **vs Laravel Octane** — Octane wraps Swoole inside a Laravel kernel. ZealPHP is framework-agnostic and exposes the runtime primitives directly. If you're on Laravel and want it faster, use Octane.
 - **vs FrankenPHP / RoadRunner** — Go servers fronting PHP. ZealPHP runs native PHP coroutines on OpenSwoole — no Go process in between.
 - **vs ReactPHP / AMPHP** — Library collections you wire together. ZealPHP is the integrated framework on top.
 - **vs raw Swoole / OpenSwoole** — ZealPHP adds routing, PSR-15 middleware, templates, session overrides, and the legacy bridge so you don't write `onRequest` handlers by hand.
-- **vs Node.js** — Node forces `await` / callbacks. ZealPHP coroutines let blocking-looking calls (`$db->query()`) yield under the hood — synchronous PHP idioms still compose.
+- **vs Node.js** — Different language and ecosystem; not the same trade-off space. If you're already in JS, stay in JS. ZealPHP exists for teams that want OpenSwoole-style concurrency without leaving PHP, or that need to bring a PHP codebase along.
 
 [Full comparison →](https://php.zeal.ninja/why-zealphp)
 
@@ -177,7 +175,7 @@ $app->run();
   uopz overrides:          header() · session_start() · setcookie() · $_GET
 ```
 
-The uopz function overrides are the framework's load-bearing trick: legacy PHP code calls `session_start()` or `header()` unchanged, but the calls route to per-coroutine state instead of mutating process globals. This lets unmodified WordPress and other legacy apps run on OpenSwoole's coroutine runtime.
+The uopz function overrides are the framework's load-bearing trick: legacy PHP code calls `session_start()` or `header()` unchanged, but the calls route to per-coroutine state instead of mutating process globals. This lets many traditional PHP patterns — including unmodified WordPress in compatibility mode — run on OpenSwoole's coroutine runtime, with documented limits where the legacy bridge can't fully match Apache's request isolation.
 
 More detail in [docs/runtime-architecture.md](docs/runtime-architecture.md).
 

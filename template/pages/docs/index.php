@@ -23,7 +23,7 @@ $groups = [
         ['streaming',                     'Streaming',             'yield-based SSR, stream(), sse(), renderStream.'],
         ['websocket',                     'WebSocket',             'App::ws(), per-worker fd map, frame opcodes, cross-worker broadcast.'],
         ['tasks-and-concurrency',         'Tasks & Concurrency',   'go(), task workers, App::tick/after, coproc().'],
-        ['middleware-and-authentication', 'Middleware & Auth',     'All 28 PSR-15 middleware classes + Apache/nginx parity.'],
+        ['middleware-and-authentication', 'Middleware & Auth',     'All 28 PSR-15 middleware classes + common Apache/nginx behavior coverage.'],
     ],
     'Operations' => [
         ['deployment',       'Deployment',       'systemd unit, CLI flags, PID files, Docker, OPcache tuning.'],

@@ -22,7 +22,7 @@
       A tiny session-backed feature: a counter that <strong>survives a reload</strong> and
       <strong>follows you across tabs</strong>. Hit the button, see it go up. Open another tab, see
       the same number. Close the browser and come back — still the same number. All with no
-      database, no Redis, no JavaScript state — just a session.
+      database, no Redis on a single node, no JavaScript state — just a session.
     </p>
 
     <?php App::render('/components/_tryit', [

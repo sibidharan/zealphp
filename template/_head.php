@@ -61,7 +61,7 @@ $ogImageUrl = $ogImageExists ? ($__scheme . '://' . $__host . $ogImage) : null;
        Loaded up front, not lazily per page, so hx-boost navigation never
        flashes unstyled content waiting on a per-page stylesheet to fetch. -->
   <link rel="stylesheet" href="/css/pages.css?v=<?= $v ?>">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/monokai.min.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <!-- Instrument Sans — display / heading font; Fira Code — code font -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap">

@@ -2,7 +2,7 @@
 <section class="section">
 <div class="container">
 <h1 class="section-title">Running Legacy PHP Apps</h1>
-<p class="section-desc">ZealPHP runs <strong>unmodified WordPress</strong> — admin dashboard, login, posts, plugins — out of the box. No patches, no forks, no compatibility layers. If it runs on Apache, it runs on ZealPHP.</p>
+<p class="section-desc">WordPress compatibility showcase: admin dashboard, login, posts, REST API working through the ZealPHP CGI worker bridge in compatibility mode &mdash; with <a href="#limitations">documented limits</a> and an honest startup-cost trade-off. The bridge exists so traditional PHP code that assumes a fresh process per request (WordPress, Drupal, define()-heavy plugins) can run on OpenSwoole&apos;s long-lived workers. The same <code>app.php</code> works for Drupal, Laravel-on-FPM-shape, and other traditional PHP applications.</p>
 
 <div class="callout info legacy-callout-proof">
   <strong>Production proof point.</strong> Selfmade Ninja Labs (<a href="https://labs.selfmade.ninja">labs.selfmade.ninja</a>) — a large PHP/MongoDB dashboard with OAuth, SSE streaming, and a custom MongoDB ORM — runs the same codebase on both Apache and ZealPHP in production. Two servers, one volume, zero downtime during migration. <a href="/case-studies/sna-labs">Read the case study →</a>
@@ -24,7 +24,7 @@
 </div>
 
 <div class="callout info legacy-callout-zero">
-<p><strong>Zero WordPress modifications required.</strong> Login, sessions, cookies, redirects, file uploads, REST API, pretty permalinks — everything works through ZealPHP's CGI worker with true global scope isolation. The same <code>app.php</code> works for Drupal, Laravel, or any traditional PHP application.</p>
+<p><strong>Compatibility-mode story.</strong> In the showcase deploy, WordPress runs without source patches: login, sessions, cookies, redirects, file uploads, REST API, and pretty permalinks all work through the CGI worker bridge (<code>App::superglobals(true) + processIsolation(true)</code>). True global-scope isolation is preserved per request via <code>proc_open</code>, at a ~30&ndash;50&nbsp;ms per-request cost &mdash; the price of the isolation that <code>define()</code>-heavy plugins need. The <a href="/vs-fpm">v0.3.0 persistent worker pool</a> is the planned fix for that startup cost. See <a href="#limitations">known limits</a> before betting your production WordPress on it.</p>
 </div>
 
 <h2 id="limitations">Known limitations — things ZealPHP won't do</h2>

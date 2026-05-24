@@ -20,7 +20,7 @@
     <h2 id="step-overview">1. Overview — what you&rsquo;re building</h2>
     <p>
       A counter that <strong>updates in every open tab the moment any tab clicks +1</strong>. No
-      reloads, no polling, no Redis. The server holds a list of open WebSocket connections; the
+      reloads, no polling, no Redis on a single server (cross-server deploys use the Redis-backed federated routing the framework ships — see /websocket#cross-server). The server holds a list of open WebSocket connections; the
       <code>+1</code> button hits a normal HTTP endpoint; that endpoint broadcasts the new value
       back over WebSocket to every connected tab. Try it now — open this URL in another tab first.
     </p>

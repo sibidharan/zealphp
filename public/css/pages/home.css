@@ -19,6 +19,13 @@
 }
 .home-hero-why a { color: #fde68a; text-decoration: none; }
 
+/* Small build-stamp under the hero sub-line — version + runtime credit */
+.home-hero-stamp {
+  font-size: .65rem; color: #78716c; margin-top: .8rem; font-weight: 400;
+}
+.home-hero-stamp a { color: #a8a29e; text-decoration: none; }
+.home-hero-stamp a:hover { color: #fde68a; }
+
 .home-hero-code-pre { margin: 0; }
 .home-hero-code-pre code {
   background: transparent; padding: 0; font-size: .82rem;
@@ -103,6 +110,59 @@
 }
 .home-section-migrate { background: var(--bg-dark); color: var(--code-text); }
 .home-section-return { background: var(--bg-alt); }
+
+/* --- AI-friendly section (sits below the engine/harness section) --------- */
+.home-section-ai-friendly {
+  background: var(--bg-dark); color: #e2e8f0;
+  padding-top: 3rem; padding-bottom: 3rem;
+  border-top: 1px solid rgba(245,158,11,.22);
+  border-bottom: 1px solid rgba(245,158,11,.22);
+}
+.home-section-ai-friendly .section-title { color: #fde68a; }
+.home-section-ai-friendly .section-desc { color: #e2e8f0; }
+.home-ai-friendly-note {
+  font-style: italic; color: #94a3b8;
+  max-width: 760px; margin: 1rem auto 0; font-size: .95rem;
+}
+
+/* --- Engine vs harness section (sits between AI-friendly and Feature grid) - */
+.home-section-engine { background: #fff; padding-top: 3rem; padding-bottom: 3rem; }
+.home-engine-lead { max-width: 760px; margin: 0 auto 2rem; }
+.home-engine-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  overflow: hidden; max-width: 980px; margin: 0 auto;
+}
+.home-engine-col { padding: 1.5rem 1.75rem; }
+.home-engine-col-engine { background: var(--bg-alt); border-right: 1px solid var(--border); }
+.home-engine-col-harness { background: #fffbf4; }
+.home-engine-col-title {
+  font-size: .82rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; margin: 0 0 .9rem; color: var(--text-muted);
+}
+.home-engine-col-harness .home-engine-col-title { color: var(--accent); }
+.home-engine-list {
+  list-style: none; padding: 0; margin: 0;
+  font-size: .88rem; line-height: 1.55;
+}
+.home-engine-list li {
+  padding: .35rem 0; border-bottom: 1px dotted rgba(0,0,0,.05);
+}
+.home-engine-list li:last-child { border-bottom: none; }
+.home-engine-list code {
+  background: rgba(0,0,0,.04); padding: .05rem .25rem; border-radius: 3px;
+  font-size: .85em;
+}
+.home-engine-when-raw {
+  max-width: 760px; margin: 1.5rem auto 0;
+  font-size: .88rem; color: var(--text-muted);
+  padding: .85rem 1rem; background: var(--bg-alt);
+  border-left: 3px solid var(--accent); border-radius: 4px;
+}
+@media (max-width: 768px) {
+  .home-engine-grid { grid-template-columns: 1fr; }
+  .home-engine-col-engine { border-right: none; border-bottom: 1px solid var(--border); }
+}
 
 /* --- Quick Start: fresh-machine one-liner ------------------------------- */
 .home-qs-fresh {

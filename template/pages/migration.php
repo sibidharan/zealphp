@@ -15,7 +15,7 @@
 <!-- 1. The before/after stack collapse                             -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 class="mig-h2-mt-lg">From several services to one process</h2>
+<h2 class="mig-h2-mt-lg">From several services to one PHP application server</h2>
 
 <div class="mig-stack-grid">
   <div class="qs-block mig-qs-pad">
@@ -28,7 +28,7 @@
       <li>Supervisor / cron (background jobs)</li>
       <li>SSE proxy or browser polling</li>
     </ul>
-    <p class="mig-stack-note">6 services, 6 failure points, 6 sets of config.</p>
+    <p class="mig-stack-note">Each tier is mature in isolation, but the per-feature wiring lives across several services and config files.</p>
   </div>
   <div class="qs-block mig-qs-pad-accent">
     <h3 class="mig-qs-h3-accent">Same app on ZealPHP</h3>
@@ -37,7 +37,7 @@
     </div>
     <ul class="mig-list-plain">
       <li>HTTP + WebSocket + SSE built in</li>
-      <li>Coroutine-safe sessions (no Redis)</li>
+      <li>Coroutine-safe sessions (single-node, file-backed; Redis-backed handler available)</li>
       <li>Shared memory across workers (Store, Counter)</li>
       <li>Task workers (no cron / supervisor)</li>
       <li>Persistent connections, no cold starts</li>
@@ -67,7 +67,7 @@ $rungs = [
     'n'    => '0',
     'title' => 'Drop in your entire app, unchanged',
     'code'  => 'App::superglobals(true); $app->setFallback(fn() => App::include(\'/index.php\'));',
-    'desc'  => 'Most existing PHP apps — WordPress, Drupal, custom legacy code — run unchanged on OpenSwoole through the CGI worker bridge. No code edits required to start serving requests faster.',
+    'desc'  => 'Many traditional PHP apps — including unmodified WordPress and Drupal — run through the CGI worker bridge in compatibility mode. Most files require no edits to start; complex apps benefit from a compatibility audit first (see <a href="/legacy-apps#limitations">documented limits</a>).',
     'wins'  => 'Persistent process, no per-request boot. Sub-millisecond TTFB on cached routes.',
     'gives_up' => 'Coroutines, WebSocket, SSE — you\'re still bound by the global-state model.',
   ],
@@ -215,7 +215,7 @@ foreach ($rungs as $r):
       <li>✓ You want WebSocket / SSE / streaming without a separate Node service</li>
       <li>✓ You have I/O-bound endpoints (DB, HTTP fetches) — coroutines fan them out</li>
       <li>✓ You hit PHP-FPM bottlenecks (request rate, cold start latency, FPM pool tuning)</li>
-      <li>✓ You want long-lived sessions or pub/sub without Redis</li>
+      <li>✓ You want cross-worker pub/sub without Redis on one node; cross-node deploys flip to Redis with one line</li>
       <li>✓ You want to keep <code>session_start()</code> + <code>header()</code> + <code>echo</code> — not rewrite for an event loop</li>
     </ul>
   </div>
@@ -227,6 +227,7 @@ foreach ($rungs as $r):
       <li>✗ You'd accept a full rewrite anyway — Go/Rust/Elixir give bigger ceilings if you can pay the cost</li>
       <li>✗ Hard requirement for shared-nothing per-request memory (PHP-FPM's strongest guarantee)</li>
       <li>✗ Production team can't accept alpha (v0.2.x) stability — wait for v1.0</li>
+      <li>✗ You need byte-for-byte Apache/nginx config replacement — ZealPHP covers the common .htaccess / nginx.conf patterns but isn't a drop-in for every directive</li>
     </ul>
   </div>
 </div>
