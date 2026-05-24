@@ -104,6 +104,22 @@ class App
      */
     public static bool $superglobals = true;
     /**
+     * Set true at the top of `App::run()` so the four lifecycle setters
+     * (`superglobals`, `processIsolation`, `enableCoroutine`, `hookAll`)
+     * can refuse mutations made AFTER the server has booted.
+     *
+     * Why: those four knobs decide the SessionManager class, the
+     * `enable_coroutine` server setting, and `OpenSwoole\Runtime::HOOK_ALL`
+     * — all of which are frozen at `run()` boot. But the static-property
+     * backing stores are re-read PER-REQUEST in `executeFile()` and
+     * `App::include()`. Mutating them mid-game leaves the framework in a
+     * Schrödinger state — coroutines still active, but superglobals reads
+     * now say "I'm in CGI mode". Concurrent coroutines race on `$_GET`/
+     * `$_POST`/`$_SESSION`. `validateLifecycleCombination()` only fires
+     * at boot so it doesn't catch this. The guard closes that footgun.
+     */
+    public static bool $run_has_started = false;
+    /**
      * The PSR-15 middleware stack handler, built during `App::run()` from
      * the registered middleware list. `null` before `run()`. Generally
      * read via the public `App::middleware()` accessor; this property is
@@ -800,8 +816,35 @@ class App
         return self::$instance;
     }
 
+    /**
+     * Throw if a lifecycle setter is being called after `App::run()` has
+     * started. The Session-manager class, OpenSwoole's `enable_coroutine`
+     * flag, and `HOOK_ALL` are all frozen at boot — mid-game mutation of
+     * `$superglobals` etc. leaves the framework in a partial state that
+     * races on `$_GET`/`$_POST`/`$_SESSION`. Boot-only is the contract.
+     *
+     * Called from `superglobals`, `processIsolation`, `enableCoroutine`,
+     * `hookAll` setters when they receive a write (not a read).
+     */
+    private static function refuseAfterRun(string $setter): void
+    {
+        if (self::$run_has_started) {
+            throw new \RuntimeException(
+                "ZealPHP lifecycle: $setter() must be called BEFORE App::run(). "
+                . 'These four knobs (superglobals, processIsolation, enableCoroutine, hookAll) '
+                . 'decide the SessionManager class, the enable_coroutine server setting, and '
+                . 'HOOK_ALL — all frozen at run() boot. Mutating them after the server is '
+                . 'serving requests leaves the framework in a Schrödinger state (coroutines '
+                . 'still active, but per-request handlers now read the new superglobals value) '
+                . 'and races on $_GET / $_POST / $_SESSION. Configure these once in app.php '
+                . 'before App::run() and leave them alone.'
+            );
+        }
+    }
+
     public static function superglobals(bool $enable = true): void
     {
+        self::refuseAfterRun('App::superglobals');
         self::$superglobals = $enable;
     }
 
@@ -1073,7 +1116,10 @@ class App
      */
     public static function processIsolation(?bool $on = null): bool
     {
-        if (func_num_args() > 0) self::$process_isolation = $on;
+        if (func_num_args() > 0) {
+            self::refuseAfterRun('App::processIsolation');
+            self::$process_isolation = $on;
+        }
         return self::$process_isolation ?? self::$superglobals;
     }
 
@@ -1350,7 +1396,10 @@ class App
      */
     public static function enableCoroutine(?bool $on = null): bool
     {
-        if (func_num_args() > 0) self::$enable_coroutine_override = $on;
+        if (func_num_args() > 0) {
+            self::refuseAfterRun('App::enableCoroutine');
+            self::$enable_coroutine_override = $on;
+        }
         return self::$enable_coroutine_override ?? !self::$superglobals;
     }
 
@@ -1379,7 +1428,10 @@ class App
      */
     public static function hookAll($on = null): int
     {
-        if (func_num_args() > 0) self::$hook_all_override = $on;
+        if (func_num_args() > 0) {
+            self::refuseAfterRun('App::hookAll');
+            self::$hook_all_override = $on;
+        }
         $v = self::$hook_all_override;
         if ($v === null)  return self::$superglobals ? 0 : \OpenSwoole\Runtime::HOOK_ALL;
         if ($v === true)  return \OpenSwoole\Runtime::HOOK_ALL;
@@ -5470,6 +5522,14 @@ HELP;
      */
     public function run(?array $settings = null): void
     {
+        // Flip the lifecycle-setter guard ON. Any further attempt to set
+        // superglobals / processIsolation / enableCoroutine / hookAll
+        // throws RuntimeException — those four knobs are frozen at boot
+        // (SessionManager class, OpenSwoole enable_coroutine, HOOK_ALL)
+        // and mid-game mutation leaves the framework in a half-coroutine
+        // half-superglobals race state. See refuseAfterRun() docblock.
+        self::$run_has_started = true;
+
         // (env-var → backend flip moved to App::init() so app.php's
         // Store::make() calls land on the resolved backend the first time.
         // See the commit "fix github_stars boot-order".)
