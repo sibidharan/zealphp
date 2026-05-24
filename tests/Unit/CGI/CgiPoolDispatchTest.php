@@ -171,4 +171,68 @@ final class CgiPoolDispatchTest extends TestCase
         $result = $this->cgiPool->invoke(null, $file);
         $this->assertSame('fromparent', $result);
     }
+
+    // ── Setter coverage: cgiPoolSize / cgiPoolMaxRequests ────────────
+
+    public function testCgiPoolSizeSetterRoundtrips(): void
+    {
+        $original = \ZealPHP\App::cgiPoolSize();
+        \ZealPHP\App::cgiPoolSize(8);
+        $this->assertSame(8, \ZealPHP\App::cgiPoolSize());
+        \ZealPHP\App::cgiPoolSize($original);
+    }
+
+    public function testCgiPoolSizeClampsToOneMinimum(): void
+    {
+        $original = \ZealPHP\App::cgiPoolSize();
+        \ZealPHP\App::cgiPoolSize(0);   // setter has max(1, ...) guard
+        $this->assertSame(1, \ZealPHP\App::cgiPoolSize());
+        \ZealPHP\App::cgiPoolSize(-5);  // negative also clamps to 1
+        $this->assertSame(1, \ZealPHP\App::cgiPoolSize());
+        \ZealPHP\App::cgiPoolSize($original);
+    }
+
+    public function testCgiPoolMaxRequestsSetterRoundtrips(): void
+    {
+        $original = \ZealPHP\App::cgiPoolMaxRequests();
+        \ZealPHP\App::cgiPoolMaxRequests(1000);
+        $this->assertSame(1000, \ZealPHP\App::cgiPoolMaxRequests());
+        \ZealPHP\App::cgiPoolMaxRequests($original);
+    }
+
+    public function testCgiPoolMaxRequestsClampsToOneMinimum(): void
+    {
+        $original = \ZealPHP\App::cgiPoolMaxRequests();
+        \ZealPHP\App::cgiPoolMaxRequests(0);
+        $this->assertSame(1, \ZealPHP\App::cgiPoolMaxRequests());
+        \ZealPHP\App::cgiPoolMaxRequests($original);
+    }
+
+    // ── Cookie capture: associative shape via setcookie($options) ───
+
+    public function testSetcookieAssociativeShapeFlowsToResponseStub(): void
+    {
+        // PHP 7.3+ setcookie($name, $value, ['expires' => …, 'path' => …, 'samesite' => 'Lax', …])
+        // — captured by pool_worker as an associative array. cgiPool's
+        // applyCookie helper must narrow it back to the positional shape
+        // ZealPHP\HTTP\Response::cookie() expects.
+        $file = $this->fixture('cookie-assoc.php', <<<'PHP'
+setcookie('sid', 'xyz789', [
+    'expires'  => time() + 3600,
+    'path'     => '/',
+    'domain'   => '',
+    'secure'   => true,
+    'httponly' => true,
+    'samesite' => 'Lax',
+]);
+echo "assoc-ok";
+PHP);
+        $stub = RequestContext::instance()->zealphp_response;
+        $result = $this->cgiPool->invoke(null, $file);
+        $this->assertSame('assoc-ok', $result);
+        // First arg of the cookie() call should be the name 'sid'
+        $this->assertNotEmpty($stub->cookies);
+        $this->assertSame('sid', $stub->cookies[0][0] ?? null);
+    }
+
 }
