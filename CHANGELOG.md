@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+ZealPHP-native FCGI-style worker pool — the v0.3.0 "warm + global scope" CGI bridge, shipped. `cgiMode('pool')` is now the framework default. `cgiMode('fork')` removed entirely. The CGI bridge's per-request cost drops from ~30–50 ms (proc) to ~1–3 ms (pool), matching FPM territory, while preserving full mod_php-style global-scope isolation (unmodified WordPress / Drupal works). Parent OpenSwoole worker dispatches to the pool via `Coroutine\Channel` — thousands of concurrent coroutines fan out across N pre-spawned PHP subprocesses without blocking the event loop. PHP HTTP server + FPM-style worker pool + async dispatch.
+
+### Added
+
+- `ZealPHP\CGI\WorkerPool` — master-side pool manager. Spawns `App::cgiPoolSize()` persistent PHP subprocesses per OpenSwoole worker at first dispatch. Auto-respawns on subprocess death (FPM-equivalent recovery via `proc_get_status['running']`). Recycle after `App::cgiPoolMaxRequests()` requests (FPM `pm.max_requests` parity). Lazy-promoted `Coroutine\Channel` for async dispatch in coroutine context; sync LIFO fallback for tests / non-coroutine code paths.
+- `ZealPHP\CGI\IPC` — symmetric length-prefixed JSON framing (`[4-byte BE length][JSON payload]`). Parent <-> subprocess wire protocol; 64 MB per-frame sanity cap.
+- `src/pool_worker.php` — persistent subprocess entry. Loops on stdin frames: read request → execute PHP file → write response → reset state → next iteration. uopz overrides for `header()`, `header_remove()`, `setcookie()`, `setrawcookie()`, `http_response_code()`, `headers_list()`, `headers_sent()` mirror `src/cgi_worker.php` exactly so response shapes are identical to `cgiMode('proc')`. Exits cleanly on EOF or after `ZEALPHP_POOL_MAX_REQUESTS` requests.
+- `App::cgiPoolSize(?int)` / `App::cgiPoolMaxRequests(?int)` — fluent setters mirroring the `App::superglobals()` precedent. FPM `pm.max_children` + `pm.max_requests` parity respectively. Defaults: 4 / 500.
+- `App::$cgi_pool_instance` — per-OpenSwoole-worker singleton `WorkerPool` accessor.
+- `CgiMode::Pool = 'pool'` enum case.
+- `App::cgiPool(string $path): mixed` — private dispatch method. Builds request frame from `RequestContext`, dispatches via the singleton pool, applies captured headers/cookies/status to `$g->zealphp_response`, returns body or `return_value` per the universal return contract. Same response-shape handling as `cgiSubprocess()` / `cgiFcgi()` — host-side response builder treats all dispatch paths uniformly.
+- 16 unit tests pinning the IPC framing + WorkerPool roundtrip (real subprocesses, no mocks): `tests/Unit/CGI/IPCTest`, `tests/Unit/CGI/WorkerPoolTest`. 7 reflection-driven unit tests for `App::cgiPool()` covering simple echo dispatch, header capture, cookie capture, `http_response_code` status flow, array-return universal contract, missing-file 404, GET superglobal reaching the subprocess: `tests/Unit/CGI/CgiPoolDispatchTest`.
+- `scripts/bench-fcgi-pool.php` — standalone bench harness for the pool. Defaults: 1000 requests × 4-worker pool. p50/p90/p99 + throughput.
+
+### Changed
+
+- **`App::$cgi_mode` default flipped from `'proc'` to `'pool'`.** Every `processIsolation(true)` app gets the FPM-style worker pool without having to opt in. Apps explicitly setting `App::cgiMode('proc')` keep their existing behavior.
+- `CgiMode::coerce()` error message: `'pool', 'proc', or 'fcgi'` (was `'proc', 'fork', or 'fcgi'`).
+- `App::registerCgiBackend()` mode validation: accepts `'pool'`/`'proc'`/`'fcgi'`. The PHP-only constraint that applied to `'fork'` now applies to `'pool'` (a PHP-runtime concept; non-`.php` extensions must use `'fcgi'` or `'proc'`).
+- Default CGI dispatch arm in `App::include()` / `App::includeFile()`: routes to `cgiPool()` (was `cgiSubprocess()`).
+- `template/pages/vs-fpm.php`, `template/pages/legacy-apps.php` — rewritten to document `'pool'` as the recommended path. Startup-cost table replaced fork row with pool row.
+
+### Removed
+
+- **`App::cgiMode('fork')` and the `cgiFork()` method (~215 LOC).** Fork mode forked the warm OpenSwoole worker via `OpenSwoole\Process` (copy-on-write), but the file ran in the fork closure's *function scope* — bare top-level `$x` wasn't visible via `global $x`, so unmodified WordPress / Drupal (`global $wpdb`) needed `'proc'` instead. Pool covers every case fork did + the WordPress global case fork couldn't. Any app explicitly calling `App::cgiMode('fork')` now throws `InvalidArgumentException` at boot; one-character upgrade: `'fork'` → `'pool'`.
+- `CgiMode::Fork` enum case.
+- `'fork'` arms from all 4 dispatch `match()` statements in `App::include()` / `App::includeFile()`.
+- `$GLOBALS['__zeal_fork_return']` / `$GLOBALS['__zeal_fork_return_set']` — fork-mode globals.
+- 2 fork-specific tests in `tests/Unit/CgiFcgiDispatchTest`.
+
 ## [0.2.40] - 2026-05-23
 
 Production-grade pluggable backends + federated WebSocket fabric. Includes the previously-authored v0.2.39 plumbing (Pluggable Store/Counter backends — Phase 1) plus the production-hardening pass that landed on top of it: cross-host federated rooms, per-room SET optimisation, HMAC-signed pub/sub, stampede-gated cache, Lua-backed atomic transactions, paginated iteration for large Redis tables, Memcached as a fourth backend, aggregated `App::stats()`, and six early v0.3.0 helpers (`App::parallel`, `App::onSignal`, `App::onProcess`, `App::stats`, typed outbound HTTP, federated WS rooms).

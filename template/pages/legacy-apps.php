@@ -996,10 +996,10 @@ BASH, 'lang' => 'bash']); ?>
   <td><code>App::registerCgiBackend('.py', ['mode'=&gt;'fcgi', 'address'=&gt;'127.0.0.1:9001'])</code></td>
 </tr>
 <tr>
-  <td><code>'fork'</code></td>
-  <td>— (no direct equivalent; warm-fork is ZealPHP-specific)</td>
+  <td><code>'pool'</code></td>
+  <td>— (no direct equivalent; built-in warm subprocess pool is ZealPHP-specific)</td>
   <td>—</td>
-  <td><code>App::registerCgiBackend('.php', ['mode'=&gt;'fork'])</code> — <strong>.php only</strong></td>
+  <td><code>App::cgiMode('pool')</code> — default; <strong>.php only</strong></td>
 </tr>
 </table>
 
@@ -1068,10 +1068,10 @@ PHP]); ?>
   <p><strong>Known limitation.</strong> <code>cgiScriptAlias()</code> registers the resolution + ExecCGI scope, but URL-level implicit routing is wired <strong>per-extension only</strong>. A ScriptAlias-only setup (no matching <code>registerCgiBackend()</code>) is reachable via <code>App::include()</code> but does not yet get an automatic <code>/{file}.&lt;ext&gt;</code> route. Pair it with a per-extension backend whose <code>exec_paths</code> covers the same prefix for auto-routed implicit URLs, or add an explicit route. (Follow-up.)</p>
 </div>
 
-<h3 class="legacy-mt-sm">fork mode — PHP only constraint</h3>
+<h3 class="legacy-mt-sm">pool mode — PHP only constraint</h3>
 <div class="callout warn legacy-mt-prose-mb">
-  <p><strong>Why fork is PHP-only.</strong> <code>'fork'</code> uses <code>OpenSwoole\Process</code> to clone the already-booted PHP worker. The forked child inherits the PHP interpreter, loaded autoloader, and warm opcache — which is why it is ~5× faster than <code>'proc'</code>. This clone-and-run mechanism is specific to the PHP runtime. For other languages, use <code>'fcgi'</code> (warm pool managed by the language runtime) or <code>'proc'</code> (spawn on demand).</p>
-  <p>Attempting <code>App::registerCgiBackend('.py', ['mode' =&gt; 'fork'])</code> throws <code>\InvalidArgumentException</code> with the message: <em>"fork mode requires a PHP target; use 'fcgi' (warm pool, language-agnostic) or 'proc' for .py"</em>.</p>
+  <p><strong>Why pool is PHP-only.</strong> <code>'pool'</code> pre-spawns PHP subprocesses that inherit the ZealPHP boot environment and reset global scope between requests. This warm-subprocess mechanism is specific to the PHP runtime. For other languages, use <code>'fcgi'</code> (warm pool managed by the language runtime) or <code>'proc'</code> (spawn on demand).</p>
+  <p>Attempting <code>App::registerCgiBackend('.py', ['mode' =&gt; 'pool'])</code> throws <code>\InvalidArgumentException</code> with the message: <em>"pool mode requires a PHP target; use 'fcgi' (warm pool, language-agnostic) or 'proc' for .py"</em>.</p>
 </div>
 
 <h3 class="legacy-mt-sm">Reader: App::resolveCgiBackend()</h3>
@@ -1109,7 +1109,7 @@ use ZealPHP\App;
 
 App::superglobals(true);          // CGI dispatch path (proc / fork / fcgi)
 App::processIsolation(true);
-App::cgiMode('fcgi');             // 'proc' (default) | 'fork' | 'fcgi'
+App::cgiMode('fcgi');             // 'pool' (default) | 'proc' | 'fcgi'
 App::fcgiAddress('127.0.0.1:9000');  // or 'unix:/run/php/php-fpm.sock'
 
 App::init('0.0.0.0', 8080);
@@ -1126,11 +1126,11 @@ PHP]); ?>
 
 <p><strong>Under the hood:</strong> dispatch lives in <code>App::cgiFcgi(string $path, ?string $address = null, array $extraParams = [])</code>, which builds the CGI/1.1 environment via <code>buildCgiEnv()</code>, forwards via <code>ZealPHP\Legacy\FastCgiClient::request($params, $stdinBody)</code>, and applies the upstream's status code + headers to <code>$g-&gt;zealphp_response</code>. A failed connection or <code>FastCgiException</code> from the upstream surfaces as a clean <strong>502 Bad Gateway</strong> — same shape Apache and nginx emit when their FCGI upstream is down.</p>
 
-<p><strong>Performance:</strong> we don't run PHP at all in this mode — throughput equals whatever your FPM pool delivers minus one local socket hop. We deliberately don't quote a number here: it depends on your FPM <code>pm.max_children</code>, the file under load, and whether you're on Unix sockets vs TCP. The bridge-cost table at <a href="/vs-fpm#measured-four-ways">/vs-fpm</a> compares the in-process modes (<code>'proc'</code> / <code>'fork'</code> / Mixed-mode) and intentionally omits <code>'fcgi'</code> because the answer is "ask your FPM pool."</p>
+<p><strong>Performance:</strong> we don't run PHP at all in this mode — throughput equals whatever your FPM pool delivers minus one local socket hop. We deliberately don't quote a number here: it depends on your FPM <code>pm.max_children</code>, the file under load, and whether you're on Unix sockets vs TCP. The bridge-cost table at <a href="/vs-fpm#measured-four-ways">/vs-fpm</a> compares the in-process modes (<code>'pool'</code> / <code>'proc'</code> / Mixed-mode) and intentionally omits <code>'fcgi'</code> because the answer is "ask your FPM pool."</p>
 
 <h2 id="httpoxy-hardening" class="legacy-mt-xl">What the CGI bridge does for you (security)</h2>
 
-<p>All three dispatch modes (<code>'proc'</code> / <code>'fork'</code> / <code>'fcgi'</code>) build the CGI/1.1 environment through the same <code>App::buildCgiEnv()</code> path, so the hardening below applies uniformly. Each item ships a corresponding Apache parity rationale rather than being ZealPHP-specific behaviour.</p>
+<p>All three dispatch modes (<code>'pool'</code> / <code>'proc'</code> / <code>'fcgi'</code>) build the CGI/1.1 environment through the same <code>App::buildCgiEnv()</code> path, so the hardening below applies uniformly. Each item ships a corresponding Apache parity rationale rather than being ZealPHP-specific behaviour.</p>
 
 <ul class="legacy-list-loose">
   <li><strong>httpoxy CVE-2016-5385 mitigation</strong> — incoming <code>Proxy:</code> request headers are NOT forwarded as <code>HTTP_PROXY</code> in the CGI env (<code>src/App.php:2830-2836</code>). Apache <code>util_script.c:224-227</code> parity. Prevents the well-known PHP/Go/Python CGI library family that reads <code>HTTP_PROXY</code> to choose an outbound proxy from being hijacked by a hostile client.</li>
