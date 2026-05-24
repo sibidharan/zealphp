@@ -24,18 +24,26 @@ use ZealPHP\App;
  * at App::run() boot time. The default coupling preserves the historical
  * behaviour for any app that doesn't touch these knobs.
  *
- * The five SUPPORTED modes — every other combination is either redundant
+ * The six SUPPORTED modes — every other combination is either redundant
  * or unsafe (and the unsafe ones throw at boot, see below):
  *
- * ┌─────────────────────┬──────────────┬──────────────────┬─────────────────┬───────────┐
- * │ Mode                │ superglobals │ processIsolation │ enableCoroutine │ hookAll   │
- * ├─────────────────────┼──────────────┼──────────────────┼─────────────────┼───────────┤
- * │ Legacy CGI (def)    │ true         │ true             │ false           │ 0         │
- * │ Coroutine (def)     │ false        │ false            │ true            │ HOOK_ALL  │
- * │ Mixed-mode/Symfony  │ true         │ FALSE            │ false           │ 0         │
- * │ In-process + sync   │ true         │ false            │ false           │ 0         │
- * │ Coroutine, no hooks │ false        │ false            │ true            │ 0         │
- * └─────────────────────┴──────────────┴──────────────────┴─────────────────┴───────────┘
+ * ┌──────────────────────┬──────────────┬──────────────────┬─────────────────┬───────────┐
+ * │ Mode                 │ superglobals │ processIsolation │ enableCoroutine │ hookAll   │
+ * ├──────────────────────┼──────────────┼──────────────────┼─────────────────┼───────────┤
+ * │ 1. Legacy CGI (def)  │ true         │ true             │ false           │ 0         │
+ * │ 2. Coroutine (def)   │ false        │ false            │ true            │ HOOK_ALL  │
+ * │ 3. Mixed-mode/Symf   │ true         │ FALSE            │ false           │ 0         │
+ * │ 4. In-process + sync │ true         │ false            │ false           │ 0         │
+ * │ 5. Coroutine, no hk  │ false        │ false            │ true            │ 0         │
+ * │ 6. CoroutineIsolated │ false        │ TRUE             │ true            │ HOOK_ALL  │
+ * └──────────────────────┴──────────────┴──────────────────┴─────────────────┴───────────┘
+ *
+ * Mode 6 is the "best of both worlds" hybrid — added to the matrix once the
+ * lifecycle validator was proven to ALLOW it (sg=false breaks the validator's
+ * sg+ec / sg+hooks throws). See testMode6CoroutineIsolatedHybrid() for the
+ * full caveat list. The headline win: parent worker runs coroutines (true
+ * request-level concurrency) AND each public/*.php gets full subprocess
+ * isolation with real $_GET / $_POST / $_SESSION inside the subprocess.
  *
  * The two REFUSED combinations (both throw RuntimeException at App::run()):
  *
@@ -278,6 +286,73 @@ final class LifecycleModesMatrixTest extends TestCase
         $this->assertSame(0, App::hookAll(), 'ha=0 explicit — no I/O hooks even in coroutine mode');
 
         $this->assertNull($this->validate(false, 0, true), 'coroutine-no-hooks is supported');
+    }
+
+    /**
+     * Mode 6 — Coroutine + Process Isolation (the "best of both worlds" hybrid).
+     *
+     * Use when: modern app that runs most of its code in the parent worker
+     * with coroutine concurrency, but ALSO needs to occasionally include
+     * legacy isolated PHP (a WordPress plugin endpoint, a third-party admin
+     * panel, a heritage `define()`-heavy script) WITHOUT taking the global-
+     * scope hit at the parent.
+     *
+     * Knob shape: sg=false, pi=TRUE (explicit), ec=true, ha=HOOK_ALL.
+     *
+     * What this delivers:
+     *   • Parent worker: per-coroutine $g (no race), HOOK_ALL hooks pipe I/O,
+     *     enable_coroutine wraps every request in a coroutine. N concurrent
+     *     requests in flight at all times.
+     *   • When a coroutine hits App::include('/wp-login.php'), the parent
+     *     pops a pool worker from its Coroutine\Channel, sends the request
+     *     frame over stdin, and YIELDS on the pipe read. The scheduler runs
+     *     other coroutines while the subprocess is busy.
+     *   • Multiple coroutines dispatch to DIFFERENT pool workers in parallel
+     *     (channel pops one per coroutine — up to `cgiPoolSize`). True
+     *     request-level concurrency through the CGI path.
+     *   • INSIDE each pool subprocess: real $_GET / $_POST / $_SERVER /
+     *     $_COOKIE / $_REQUEST populated per request (pool_worker.php:209),
+     *     reset to clean state between requests (pool_worker.php:265).
+     *     Full global-scope isolation per request — `define()` calls don't
+     *     leak across requests.
+     *
+     * What this does NOT deliver — important to be honest:
+     *   • Coroutines do NOT run INSIDE the pool subprocess. Each subprocess
+     *     handles one request at a time, sequentially. If user PHP code
+     *     spawns coroutines via go() inside the subprocess, there is no
+     *     scheduler running there to execute them. (We could enable a
+     *     scheduler in pool_worker, but that re-introduces the superglobals-
+     *     race-across-coroutines problem inside the subprocess — defeats
+     *     the purpose. Stay sequential per subprocess; scale by adding more
+     *     pool workers via cgiPoolSize().)
+     *   • The CGI dispatch round-trip (pipe write + subprocess execute +
+     *     pipe read) adds ~1-3 ms per included file on top of the PHP code
+     *     itself. Routes/middleware/API in the parent stay sub-ms.
+     *
+     * Caveat: NOT the default. To get this combo you must EXPLICITLY set
+     * `App::processIsolation(true)` — otherwise pi resolves to follow
+     * sg=false → pi=false (no isolation). The defaults assume you either
+     * want full coroutine speed (no isolation) OR full superglobal compat
+     * (Legacy CGI mode); the hybrid is for the modern-mostly-with-legacy-
+     * pockets case.
+     */
+    public function testMode6CoroutineIsolatedHybrid(): void
+    {
+        App::superglobals(false);
+        App::processIsolation(true);   // explicit — the defining knob for Mode 6
+        App::enableCoroutine(null);
+        App::hookAll(null);
+
+        $this->assertFalse(App::$superglobals);
+        $this->assertTrue(App::processIsolation(), 'pi=true explicit — CGI dispatch ON');
+        $this->assertTrue(App::enableCoroutine(), 'ec null → follows !sg → true');
+        $this->assertSame(Runtime::HOOK_ALL, App::hookAll(), 'ha null → follows !sg → HOOK_ALL');
+
+        // The validator MUST pass — sg=false breaks the sg+ec / sg+hooks throws.
+        $this->assertNull(
+            $this->validate(false, Runtime::HOOK_ALL, true),
+            'Mode 6 hybrid is supported: sg=false allows ec=true + ha=HOOK_ALL even with pi=true'
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════

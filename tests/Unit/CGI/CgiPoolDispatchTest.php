@@ -172,6 +172,72 @@ final class CgiPoolDispatchTest extends TestCase
         $this->assertSame('fromparent', $result);
     }
 
+    // ── Mode 6 contract: real superglobals inside the pool subprocess ──
+    // These tests pin the "isolated subprocess still sees real $_GET/POST/
+    // SERVER/COOKIE" promise that makes the Coroutine+Isolation hybrid
+    // (Mode 6 in LifecycleModesMatrixTest) actually useful. Each request
+    // frame's input is unpacked into the subprocess's superglobals at
+    // pool_worker.php:209-217 and reset to clean state at :265-271
+    // between requests — so requests don't leak inputs across each other
+    // AND user PHP code in the included file sees real superglobals.
+
+    public function testPostSuperglobalReachesSubprocess(): void
+    {
+        $file = $this->fixture('post.php', 'echo $_POST["name"] ?? "missing";');
+        $g    = RequestContext::instance();
+        $g->post = ['name' => 'alice'];
+        $result = $this->cgiPool->invoke(null, $file);
+        $this->assertSame('alice', $result);
+    }
+
+    public function testServerSuperglobalReachesSubprocess(): void
+    {
+        // $_SERVER is array_merge'd (not replaced) so SCRIPT_NAME and other
+        // CGI metadata pool_worker sets internally survive — user-provided
+        // entries layer on top.
+        $file = $this->fixture('server.php', 'echo $_SERVER["HTTP_X_TEST"] ?? "missing";');
+        $g    = RequestContext::instance();
+        $g->server = ['REQUEST_METHOD' => 'GET', 'REQUEST_URI' => '/', 'HTTP_X_TEST' => 'ping'];
+        $result = $this->cgiPool->invoke(null, $file);
+        $this->assertSame('ping', $result);
+    }
+
+    public function testCookieSuperglobalReachesSubprocess(): void
+    {
+        $file = $this->fixture('cookies.php', 'echo $_COOKIE["session_id"] ?? "missing";');
+        $g    = RequestContext::instance();
+        $g->cookie = ['session_id' => 'abc.def.ghi'];
+        $result = $this->cgiPool->invoke(null, $file);
+        $this->assertSame('abc.def.ghi', $result);
+    }
+
+    public function testRequestSuperglobalIsMergeOfGetAndPost(): void
+    {
+        // $_REQUEST = array_merge($_GET, $_POST) per pool_worker.php:217.
+        // PHP convention: POST wins on key collision.
+        $file = $this->fixture('req.php', 'echo $_REQUEST["who"] . "|" . $_REQUEST["only_get"] . "|" . $_REQUEST["only_post"];');
+        $g    = RequestContext::instance();
+        $g->get  = ['who' => 'from_get', 'only_get' => 'g'];
+        $g->post = ['who' => 'from_post', 'only_post' => 'p'];  // who wins via POST
+        $result = $this->cgiPool->invoke(null, $file);
+        $this->assertSame('from_post|g|p', $result);
+    }
+
+    public function testSuperglobalsAreResetBetweenRequests(): void
+    {
+        // First request: $_GET['x'] = 'one'. Second request: no GET.
+        // If pool_worker doesn't reset state between dispatches, the
+        // second request would still see $_GET['x'] = 'one'.
+        $file = $this->fixture('reset.php', 'echo $_GET["x"] ?? "none";');
+        $g    = RequestContext::instance();
+
+        $g->get = ['x' => 'one'];
+        $this->assertSame('one', $this->cgiPool->invoke(null, $file), 'first request sees its own GET');
+
+        $g->get = [];  // clean state on the parent side
+        $this->assertSame('none', $this->cgiPool->invoke(null, $file), 'second request sees clean GET (no leak)');
+    }
+
     // ── Setter coverage: cgiPoolSize / cgiPoolMaxRequests ────────────
 
     public function testCgiPoolSizeSetterRoundtrips(): void
