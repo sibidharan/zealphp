@@ -276,7 +276,7 @@
     <div class="why-block">
       <h2 class="why-h2">Benchmarks</h2>
       <p class="why-bench-intro">
-        Headline numbers: 117k req/s text, 106k JSON, 50k templated on a 4-core box with the full PSR-15 middleware stack — 0 failures across 150k requests. Numbers are from one benchmark setup; real-world performance depends on payload size, I/O, OS limits, and tuning. Reproduce in 60s with <code class="why-bench-inline-code">scripts/bench_vs_express.sh</code>. Full methodology, latency percentiles, caveats: <a href="/performance">/performance</a>.
+        Headline numbers: 117k req/s text, 106k JSON, 50k templated with 4 HTTP workers under the full PSR-15 middleware stack — 0 failures across 150k requests. Numbers are from one benchmark setup; real-world performance depends on payload size, I/O, OS limits, and tuning. Reproduce in 60s with <code class="why-bench-inline-code">scripts/bench_vs_express.sh</code>. Full methodology, latency percentiles, caveats: <a href="/performance">/performance</a>.
       </p>
       <div class="bench-method why-bench-method">
         <strong>Method</strong> &nbsp;|&nbsp;
