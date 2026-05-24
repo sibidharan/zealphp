@@ -2,16 +2,24 @@
 
 declare(strict_types=1);
 
-namespace ZealPHP\Legacy;
+namespace ZealPHP\CGI;
 
 use OpenSwoole\Coroutine\Client as CoClient;
 
 /**
- * FastCGI 1.0 `RESPONDER` client for ZealPHP's legacy-include dispatch path.
+ * FastCGI 1.0 `RESPONDER` client for ZealPHP's `cgiMode('fcgi')` dispatch path.
  *
  * Implements the FCGI binary protocol (`BEGIN_REQUEST` → `PARAMS` → `STDIN` →
- * `STDOUT` + `STDERR` + `END_REQUEST`) over an OpenSwoole coroutine socket so the
- * call never blocks the event loop.
+ * `STDOUT` + `STDERR` + `END_REQUEST`) **over an `OpenSwoole\Coroutine\Client`
+ * socket** — every `send()` / `recv()` yields under the OpenSwoole event loop,
+ * so the call never blocks the worker. The protocol framing is hand-written
+ * in PHP; the socket layer is OpenSwoole-native.
+ *
+ * Why hand-rolled framing — `OpenSwoole\Coroutine\FastCGI\Client` does NOT exist
+ * in OpenSwoole 26.2 (upstream Swoole ships `Swoole\Coroutine\FastCGI\Client` but
+ * OpenSwoole forked before that and never ported it). When/if the upstream ext
+ * adds it, this class becomes a drop-in proxy and the ~260 LOC of protocol code
+ * here can shrink to a thin adapter.
  *
  * Protocol: https://fastcgi-devkit.org/doc/FCGI_Spec.html
  * Reference implementations: `mod_proxy_fcgi.c`, `ngx_http_fastcgi_module.c`

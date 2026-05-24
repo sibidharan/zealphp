@@ -146,7 +146,7 @@ environment (via `App::buildCgiEnv()` — the same RFC 3875 variables Apache and
 nginx send: `SCRIPT_FILENAME`, `REQUEST_METHOD`, `QUERY_STRING`, the
 `HTTP_*` headers, etc.), merges your `fcgi_params`, reads the request body as
 the FastCGI `STDIN` stream, and forwards it via the bundled FastCGI client
-(`ZealPHP\Legacy\FastCgiClient` — a standalone FCGI 1.0 implementation:
+(`ZealPHP\CGI\FastCgiClient` — a standalone FCGI 1.0 implementation:
 `BEGIN_REQUEST` → `PARAMS` → `STDIN` → `STDOUT`/`STDERR` → `END_REQUEST`). The
 upstream's response status, headers, and body are applied to the ZealPHP
 response.
@@ -174,9 +174,10 @@ HTTP-upstream proxying, put a real proxy (nginx, Caddy, Traefik) in front of
 ZealPHP, or use a coroutine HTTP client from within a native handler.
 
 For per-request *process* isolation of legacy PHP (no external server), use
-`cgiMode('proc')` (fresh interpreter per request) or `cgiMode('fork')` (warm
-fork) instead — see [runtime-architecture.md](runtime-architecture.md) and
-[legacy-apps](apache-parity.md).
+`cgiMode('pool')` (warm FPM-style subprocess pool — the default) or
+`cgiMode('proc')` (fresh interpreter per request) instead — see
+[runtime-architecture.md](runtime-architecture.md) and
+[legacy-apps](apache-parity.md). `cgiMode('fork')` was removed in v0.2.41+.
 
 ---
 
@@ -184,6 +185,6 @@ fork) instead — see [runtime-architecture.md](runtime-architecture.md) and
 
 - Framework-wide setter: `App::cgiMode()` + `App::fcgiAddress()`
 - Per-extension registry: `App::registerCgiBackend()` / `App::resolveCgiBackend()`
-- FastCGI client: `ZealPHP\Legacy\FastCgiClient` (in the [API reference](/docs/api/classes/ZealPHP-Legacy-FastCgiClient.html))
+- FastCGI client: `ZealPHP\CGI\FastCgiClient` (in the [API reference](/docs/api/classes/ZealPHP-CGI-FastCgiClient.html))
 - Runnable demo: `examples/multi-lang-cgi/`
 - Related: [tasks-and-concurrency.md](tasks-and-concurrency.md) (the CGI-mode trade-off table), [runtime-architecture.md](runtime-architecture.md) (lifecycle setters)

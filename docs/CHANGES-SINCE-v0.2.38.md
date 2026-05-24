@@ -502,7 +502,7 @@ Pointed to the canonical roadmap:
 | **P1.6** | CSRF middleware + form helpers | No built-in CSRF; users roll their own |
 | **P1.7** | Memcached handler (Cache + Session + Store) | Cache+Store pluggable backends are Table + Redis only; add Memcached for installs that don't want to bring up Redis |
 | **P1.8** | `Cache::pipeline()` + `Store::pipeline()` user-facing | Store internal pipelining is done (H3); needs a public Cache/Store pipeline API for explicit batching |
-| **P1.9** | Native FastCGI client migration | Current `src/Legacy/FastCgiClient.php` is hand-rolled (~260 LOC); OpenSwoole ships a native client we can swap to |
+| **P1.9** | FastCGI client namespace cleanup (PART-DONE; native swap blocked upstream) | Hand-rolled `src/Legacy/FastCgiClient.php` MOVED to `src/CGI/FastCgiClient.php` (sibling to `WorkerPool`/`IPC`). The "Legacy" framing was misleading — the socket layer is OpenSwoole-native (`OpenSwoole\Coroutine\Client`), only FCGI 1.0 record framing is hand-written. The original roadmap conflated OpenSwoole with Swoole — `OpenSwoole\Coroutine\FastCGI\Client` does NOT exist in OpenSwoole 26.2 (Swoole 5.x ships it; OpenSwoole forked before that addition and never ported it). When/if upstream lands the class, this becomes a thin proxy. |
 | **P1.10** | `/healthz` middleware + Prometheus exposition | `App::stats()` data is shipped; need a middleware that exposes it as `/healthz` + Prometheus format |
 
 ### Phase 2 (v0.4.0+) — bigger pieces

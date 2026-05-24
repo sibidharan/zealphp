@@ -3958,8 +3958,10 @@ class App
      * FCGI binary protocol. Used when App::cgiMode() === 'fcgi'.
      *
      * Builds CGI env via App::buildCgiEnv(), adds SCRIPT_FILENAME / SCRIPT_NAME,
-     * reads the request body, calls FastCgiClient::request(), maps the response
-     * (status, headers, body, stderr) back through the universal return contract.
+     * reads the request body, calls \ZealPHP\CGI\FastCgiClient::request(), maps
+     * the response (status, headers, body, stderr) back through the universal
+     * return contract. The FastCgiClient socket layer is OpenSwoole-native
+     * (Coroutine\Client) — the call never blocks the worker.
      *
      * On connection failure or protocol error, logs via elog() and returns 502.
      *
@@ -4009,9 +4011,9 @@ class App
 
         $fcgiAddress = $address ?? self::$fcgi_address;
         try {
-            $client   = new \ZealPHP\Legacy\FastCgiClient($fcgiAddress, self::$cgi_timeout);
+            $client   = new \ZealPHP\CGI\FastCgiClient($fcgiAddress, self::$cgi_timeout);
             $response = $client->request($env, $stdinBody);
-        } catch (\ZealPHP\Legacy\FastCgiException $e) {
+        } catch (\ZealPHP\CGI\FastCgiException $e) {
             elog("cgiFcgi: FastCGI error for {$path}: " . $e->getMessage(), 'error');
             return 502;
         } catch (\Throwable $e) {

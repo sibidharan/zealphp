@@ -6,8 +6,8 @@ namespace ZealPHP\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use ZealPHP\App;
-use ZealPHP\Legacy\FastCgiClient;
-use ZealPHP\Legacy\FastCgiException;
+use ZealPHP\CGI\FastCgiClient;
+use ZealPHP\CGI\FastCgiException;
 use ZealPHP\RequestContext;
 
 /**
