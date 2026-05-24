@@ -56,7 +56,7 @@ $siteUrl = site_url();
     </div>
 
     <p class="home-bench-intro">
-      On a 4-core box, full PSR-15 stack &mdash; <strong>117k req/s text &middot; 106k JSON &middot; 50k templated</strong>, 0 failures across 150k requests.
+      With 4 HTTP workers, full PSR-15 stack &mdash; <strong>117k req/s text &middot; 106k JSON &middot; 50k templated</strong>, 0 failures across 150k requests.
       Reproduce in 60s: <code class="home-bench-method-code">scripts/bench_vs_express.sh</code>.
       Full concurrency sweep, latency percentiles, methodology, and caveats &mdash;
       <a href="/performance">/performance</a>.
