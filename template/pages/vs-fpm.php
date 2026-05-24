@@ -121,10 +121,10 @@ browser</code></pre>
 <!-- 3. The CGI bridge — why it exists, what it costs               -->
 <!-- ────────────────────────────────────────────────────────────── -->
 
-<h2 class="vsfpm-h2">Why Apache/FPM don't pay this cost (and how the CGI bridge will catch up)</h2>
+<h2 class="vsfpm-h2">PHP interpreter lifecycle — the startup-cost spectrum</h2>
 
 <p class="vsfpm-prose">
-  The first version of this page implied <strong>"~30–50 ms is the same order of magnitude as FPM"</strong>. That was wrong, and worth correcting honestly. FPM's per-request cost is closer to <strong>~1–3 ms</strong> — an order of magnitude less than our current CGI bridge. The reason isn't that FPM is doing anything magical; it's that Apache + FPM are <em>not spawning a PHP interpreter per request</em> — and neither is ZealPHP's in-process <strong>Mixed-mode</strong>. Only the opt-in CGI bridge does. Here's the full startup-cost spectrum:
+  Apache and FPM keep the PHP interpreter alive across requests — so does ZealPHP's in-process Mixed-mode. The opt-in CGI bridge is the only path here that pays a per-request PHP startup, and that's by design (true global-scope isolation for unmodified WordPress / Drupal). The spectrum:
 </p>
 
 <table class="ztable">
@@ -329,6 +329,63 @@ $app->run();
 
 <p class="vsfpm-prose-mt-08">
   The intuition: an FPM pool of 64 workers can handle 64 concurrent requests. A ZealPHP setup with 8 workers and the coroutine scheduler can handle thousands of concurrent connections — most of them yielding on I/O at any given moment. The benchmark page (<a href="/performance">/performance</a>) confirms it: 4 workers, 116k req/s through the full middleware stack.
+</p>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<!-- 4b. Horizontal scaling — same model as FPM                       -->
+<!-- ────────────────────────────────────────────────────────────── -->
+
+<h2 class="vsfpm-h2">Horizontal scaling — same playbook as FPM</h2>
+
+<p class="vsfpm-prose">
+  PHP-FPM scales horizontally by adding more nodes behind a load balancer and sharing state in a backing store. ZealPHP scales the same way:
+</p>
+
+<table class="ztable">
+  <tr>
+    <th>Concern</th>
+    <th>Apache / FPM</th>
+    <th>ZealPHP</th>
+  </tr>
+  <tr>
+    <td>Per-node workers</td>
+    <td><code>pm.max_children = N</code></td>
+    <td><code>ZEALPHP_WORKERS=N</code> (each worker runs thousands of coroutines)</td>
+  </tr>
+  <tr class="vsfpm-row-tint">
+    <td>Add more nodes</td>
+    <td>nginx / Caddy / Traefik / HAProxy load-balances across N FPM pools</td>
+    <td>Same — load-balance across N <code>php app.php</code> instances behind the same reverse proxy</td>
+  </tr>
+  <tr>
+    <td>Cross-node session store</td>
+    <td>Redis / Memcached / DB session handler</td>
+    <td><code>StoreSessionHandler</code> (Redis-backed) or any PSR-compatible session handler</td>
+  </tr>
+  <tr class="vsfpm-row-tint">
+    <td>Cross-node shared cache</td>
+    <td>Redis / Memcached</td>
+    <td><code>Store::defaultBackend('redis')</code> — same Store API, cross-node visibility (or <code>'tiered'</code> for L1 local + L2 Redis with HMAC-signed invalidation)</td>
+  </tr>
+  <tr>
+    <td>Cross-node pub/sub</td>
+    <td>Sidecar (Socket.io / Pusher) or Redis pub/sub</td>
+    <td><code>Store::publish</code> / <code>App::subscribe</code> (Redis pub/sub) or <code>publishReliable</code> (Redis Streams) — built-in</td>
+  </tr>
+  <tr class="vsfpm-row-tint">
+    <td>Cross-node WebSocket routing</td>
+    <td>Sticky sessions + sidecar (Socket.io / Centrifugo)</td>
+    <td><code>WSRouter</code> — fd-owner registry in Redis, framework pushes to the node that holds the connection (<a href="/store#pubsub">/store#pubsub</a>)</td>
+  </tr>
+  <tr>
+    <td>Database replicas / shards</td>
+    <td>Whatever your driver supports — PDO read/write split, ProxySQL, RDS replicas</td>
+    <td>Same — coroutine-friendly drivers yield on each query (PDO + HOOK_ALL, or coroutine-native MySQL clients)</td>
+  </tr>
+</table>
+
+<p class="vsfpm-prose-mt">
+  The model is identical. What changes is the per-node concurrency profile (FPM = N concurrent requests per node; ZealPHP = thousands per worker × N workers) and what state lives where (FPM almost always offloads to Redis from request one; ZealPHP can keep cross-worker hot state in-process on one node, then flip to Redis with one line of config when you scale out). Either way, the scaling primitives — load balancer in front, shared store at the back — are the same.
 </p>
 
 <!-- ────────────────────────────────────────────────────────────── -->
