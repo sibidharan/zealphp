@@ -167,9 +167,14 @@ PHP]); ?>
   <td>Loading <code>vendor/autoload.php</code> in every subprocess adds ~30 ms, which makes WordPress's <code>wp_cron()</code> 10 ms non-blocking POST queue up at the parent faster than workers can drain. Only opt in if your <code>public/*.php</code> needs <code>\ZealPHP\App</code> inside the subprocess.</td>
 </tr>
 <tr>
-  <td>cgiMode('pool')</td>
-  <td>First request OK (50 KB), 2nd+ return <strong>0 bytes</strong></td>
-  <td><strong>Known limitation</strong> — WordPress's <code>$wp_did_header</code> sentinel persists in the warm subprocess; the bootstrap chain's <code>if (!isset($wp_did_header))</code> gates the entire body render. A FPM-style <code>$GLOBALS</code> snapshot/restore in <code>pool_worker.php</code> would fix it; tracked as v0.3.1. For WordPress today, use <code>cgiMode('proc')</code>.</td>
+  <td>cgiMode('pool') (default <code>cgiPoolMaxRequests(500)</code>)</td>
+  <td>First request OK (50 KB), 2nd+ return <strong>500 fatal</strong> ("Call to a member function main() on null")</td>
+  <td>WordPress holds <code>$wp</code> (the framework instance) as a global; the pool worker's FPM-style cleanup correctly clears request-scope globals between requests, BUT WordPress's <code>require_once</code> chain caches the bootstrap files (<code>wp-load.php</code>, <code>wp-settings.php</code>) so they don't re-execute on the 2nd request → <code>$wp</code> never gets re-instantiated → null. PHP's <code>require_once</code> is not un-resettable in standard PHP. Use one of the two working configs above OR below.</td>
+</tr>
+<tr>
+  <td>cgiMode('pool') + <code>App::cgiPoolMaxRequests(1)</code></td>
+  <td>200 + 50,719 B on every request, ~175 ms warm</td>
+  <td>Best of both: each pool worker exits after 1 request → fresh subprocess each time → WordPress bootstrap re-runs clean. Trade-off: subprocess respawn cost adds ~10 ms vs pool's normal warm-reuse, but you keep the pool's pre-spawn benefit so first-request latency is bounded.</td>
 </tr>
 </table>
 
@@ -195,6 +200,29 @@ $app->setFallback(function() {            // WP front controller
 
 $app->run(['task_worker_num' => 0]);
 PHP]); ?>
+
+<h3 id="wordpress-pool-with-recycle" class="legacy-mt-md">Pool mode for WordPress — set <code>cgiPoolMaxRequests(1)</code></h3>
+
+<p>If you specifically want the pool's pre-spawn warm-up benefit for WordPress (e.g., your monitoring expects low p99 first-request latency), pair it with <code>App::cgiPoolMaxRequests(1)</code>. Every pool subprocess exits after one request and the parent respawns it — same fresh-process semantics as <code>cgiMode('proc')</code>, but the parent maintains a queue of pre-spawned subprocesses ready to receive the next request:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'app.php — WordPress on pool with recycle-each-request',
+    'code'  => <<<'PHP'
+<?php
+require 'vendor/autoload.php';
+use ZealPHP\App;
+
+App::superglobals(true);
+App::cgiPoolSize(8);                      // 8 subprocesses pre-spawned per HTTP worker
+App::cgiPoolMaxRequests(1);               // recycle after EVERY request — WP needs fresh boot
+App::$ignore_php_ext = false;
+
+$app = App::init('0.0.0.0', 9501);
+$app->setFallback(function() { App::include('/index.php'); });
+$app->run();
+PHP]); ?>
+
+<p>The framework's pool_worker.php already does FPM-style <code>$GLOBALS</code> snapshot/restore between requests — clears <code>$wp_did_header</code>, <code>$wpdb</code>, <code>$wp_query</code>, etc. — but WordPress's <code>require_once</code> chain caches the bootstrap (<code>wp-load.php</code> → <code>wp-settings.php</code> → <code>new WP()</code> assignments) and PHP can't un-cache require_once entries in standard PHP. Recycling the subprocess every request bypasses this by getting a fresh interpreter where require_once is uncached.</p>
 
 <h3 id="wordpress-autoload-pitfall" class="legacy-mt-md">Why <code>cgiSubprocessAutoload(false)</code> is the default</h3>
 

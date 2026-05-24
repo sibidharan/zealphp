@@ -168,6 +168,37 @@ while (ob_get_level() > 0) {
     ob_end_clean();
 }
 
+// $GLOBALS snapshot for FPM-style per-request cleanup (issue #18 follow-up).
+// Captures every key in $GLOBALS RIGHT NOW — after autoloader load, after
+// uopz overrides, after `use ZealPHP\CGI\IPC` etc., but BEFORE the first
+// request fires. Everything in this snapshot is "framework / pool-worker
+// scope" and must SURVIVE every iteration. Anything added later (by the
+// included PHP file) is "request scope" and gets unset in
+// pool_reset_request_state().
+//
+// Concretely, this clears WordPress's `$wp_did_header` sentinel between
+// requests — that's the global that gates the entire WP bootstrap chain
+// in wp-blog-header.php (`if (!isset($wp_did_header)) { … wp() … }`). Without
+// this cleanup, the 2nd request finds it set, skips the wp() call, and
+// returns an empty body. FPM's SAPI does this at the C level via
+// PG(symbol_table) tear-down between requests; we do it in PHP here.
+//
+// What this DOES clean:
+//   - $wp_did_header, $wpdb, $wp_query, $post, $wp_filter — any WP global
+//   - Any user-set `global $foo;` from the included file
+//   - Any `$GLOBALS['x'] = ...` direct write
+//
+// What this CAN'T clean (PHP language limitations):
+//   - define()'d constants — PHP has no un-define (would need uopz_undefine).
+//     Apps must use `defined() ?: define()` guards (WordPress does — emits
+//     E_NOTICE on re-define but continues, matching FPM behaviour).
+//   - Class declarations — same story; once loaded, they stay.
+//   - require_once'd files — opcache caches the parsed bytecode; second
+//     require_once is a no-op. That's actually FINE because WordPress
+//     bootstraps via require_once chains and re-entry via plain `require`
+//     gated on $wp_did_header.
+$__pw_globals_snapshot = array_fill_keys(array_keys($GLOBALS), true);
+
 // READY signal on stderr — the framing channel (stdout) stays pure. Parent
 // reads this for boot sync (bounds the dispatch-after-spawn window).
 fwrite(STDERR, "ZEALPHP_POOL_WORKER_READY\n");
@@ -260,7 +291,7 @@ function pool_handle_request(array $req): array
 
 function pool_reset_request_state(): void
 {
-    global $__pw_headers, $__pw_cookies, $__pw_rawcookies, $__pw_status;
+    global $__pw_headers, $__pw_cookies, $__pw_rawcookies, $__pw_status, $__pw_globals_snapshot;
 
     $_SERVER  = [];
     $_GET     = [];
@@ -277,5 +308,26 @@ function pool_reset_request_state(): void
 
     while (ob_get_level() > 0) {
         ob_end_clean();
+    }
+
+    // FPM-style request-scope cleanup. Unset every $GLOBALS key that wasn't
+    // in the boot snapshot. Skip:
+    //   - Anything starting with `_` (superglobals + our `__pw_*` internals
+    //     are all reset above explicitly; PHP-defined `_ENV` etc. stay)
+    //   - `GLOBALS` (self-reference; touching it is a runtime error)
+    // See the snapshot block at boot for the full rationale.
+    if (is_array($__pw_globals_snapshot)) {
+        foreach (array_keys($GLOBALS) as $__pw_key) {
+            if (!is_string($__pw_key)) {
+                continue;
+            }
+            if (isset($__pw_globals_snapshot[$__pw_key])) {
+                continue;
+            }
+            if ($__pw_key === 'GLOBALS' || str_starts_with($__pw_key, '_')) {
+                continue;
+            }
+            unset($GLOBALS[$__pw_key]);
+        }
     }
 }

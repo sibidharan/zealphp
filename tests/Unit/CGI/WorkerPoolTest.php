@@ -112,6 +112,80 @@ final class WorkerPoolTest extends TestCase
         }
     }
 
+    /**
+     * FPM-style $GLOBALS cleanup contract (issue #18 follow-up).
+     *
+     * pool_worker.php snapshots $GLOBALS at boot and unsets any added keys
+     * between requests. This is THE mechanism that PHP-FPM uses at the SAPI
+     * level to prevent request-scoped globals from leaking across requests in
+     * a long-lived process. Without it, anything the first request put into
+     * `global $x` or `$GLOBALS['y']` is visible to the second request — which
+     * is exactly what breaks WordPress's `wp_did_header` sentinel pattern.
+     *
+     * This test pins the contract: a global set in request N is NOT visible
+     * in request N+1 on the same worker.
+     */
+    public function testGlobalsAreCleanedBetweenRequestsFpmStyle(): void
+    {
+        // Request 1 sets $GLOBALS['leak_canary']; request 2 probes for it.
+        $setter = $this->fixture(
+            'set-global.php',
+            '$GLOBALS["leak_canary"] = "from_request_1"; echo "set";'
+        );
+        $reader = $this->fixture(
+            'read-global.php',
+            'echo isset($GLOBALS["leak_canary"]) ? "LEAK:" . $GLOBALS["leak_canary"] : "clean";'
+        );
+        $pool = new WorkerPool(size: 1, maxRequestsPerWorker: 100);
+        try {
+            $resp1 = $pool->dispatch(['file' => $setter]);
+            $this->assertSame('set', $resp1['body'], 'request 1 should set the global');
+
+            $resp2 = $pool->dispatch(['file' => $reader]);
+            $this->assertSame(
+                'clean',
+                $resp2['body'],
+                'request 2 must NOT see request 1\'s $GLOBALS["leak_canary"] — FPM-style cleanup contract'
+            );
+
+            // Same worker handled both (single-worker pool, no recycle yet).
+            $this->assertSame([2], $pool->servedCounts());
+        } finally {
+            $pool->close();
+        }
+    }
+
+    /**
+     * The cleanup must NOT touch superglobals (the pool_worker.php
+     * reset_request_state() explicitly resets those — but the $GLOBALS
+     * cleanup loop must skip them). This test confirms a `$_GET['x']`
+     * set BY THE PARENT'S REQUEST FRAME (not by the included file)
+     * still reaches the subprocess on request N+1 after a different
+     * request N that didn't have it.
+     */
+    public function testSuperglobalsStillFlowAcrossRequestsAfterGlobalsCleanup(): void
+    {
+        $file = $this->fixture(
+            'get-probe.php',
+            'echo $_GET["q"] ?? "missing";'
+        );
+        $pool = new WorkerPool(size: 1, maxRequestsPerWorker: 100);
+        try {
+            $resp1 = $pool->dispatch(['file' => $file, 'get' => ['q' => 'first']]);
+            $this->assertSame('first', $resp1['body']);
+
+            // Request 2 with DIFFERENT GET — must see its own value, not leak from req 1.
+            $resp2 = $pool->dispatch(['file' => $file, 'get' => ['q' => 'second']]);
+            $this->assertSame('second', $resp2['body']);
+
+            // Request 3 with NO GET — must see clean (nothing leaking from req 1 or 2).
+            $resp3 = $pool->dispatch(['file' => $file]);
+            $this->assertSame('missing', $resp3['body']);
+        } finally {
+            $pool->close();
+        }
+    }
+
     public function testMissingFileReturns404(): void
     {
         $pool = new WorkerPool(size: 1);
