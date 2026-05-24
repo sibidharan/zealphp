@@ -311,7 +311,7 @@ function ensureActiveSidebarVisible(sb) {
   if (!getBar()) return;
   const SHOW_AFTER = 150;    // ms before showing the bar at all
   const CREEP_AFTER = 380;   // ms before transitioning start → mid
-  const SAFETY_MAX = 8000;   // ms — hard ceiling; force-reset if finish() never fires
+  const SAFETY_MAX = 4000;   // ms — hard ceiling; force-reset if finish() never fires
   let pending = 0;
   let visible = false;
   let showTimer = null;
