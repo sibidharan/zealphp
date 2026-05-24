@@ -26,10 +26,14 @@ if (!(Store::defaultBackend() instanceof \ZealPHP\Store\RedisBackend)) {
     return;
 }
 
-// Init WSRouter once — must run before App::run() spawns workers.
-// Routes are loaded BEFORE worker fork (per App::run() boot order), so this
-// is the right place. Idempotent.
-WSRouter::init();
+// Defer WSRouter::init to worker start. It writes a row to the
+// `ws_servers` Store table — on the Redis backend that's a network
+// call, and under HOOK_ALL the master process has no coroutine
+// scheduler, so the hooked stream_socket_client throws. onWorkerStart
+// fires per worker with the scheduler up, so the Redis write is safe.
+App::onWorkerStart(function (): void {
+    WSRouter::init();
+});
 
 $app->route('/demo/rooms/join', ['methods' => ['GET']], function (Request $request) {
     $room   = is_string($request->get['room']   ?? null) ? (string) $request->get['room']   : '';
