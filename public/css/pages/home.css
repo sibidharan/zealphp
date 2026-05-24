@@ -127,7 +127,7 @@
 
 /* --- Engine vs harness section (sits between AI-friendly and Feature grid) - */
 .home-section-engine { background: #fff; padding-top: 3rem; padding-bottom: 3rem; }
-.home-engine-lead { max-width: 760px; margin: 0 auto 2rem; }
+.home-engine-lead { max-width: 760px; margin: 0 0 2rem; }
 .home-engine-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 0;
   border: 1px solid var(--border); border-radius: var(--radius);
