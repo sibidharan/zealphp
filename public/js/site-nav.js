@@ -376,8 +376,7 @@ function ensureActiveSidebarVisible(sb) {
   // .lesson-content swaps (sidebar / lesson chips / API inline nav), or anything
   // that pushes the URL. In-place widgets — the session counter (hx-target=this),
   // search-as-you-type, chat, login forms, demo viewers — must NOT flash the top
-  // bar. Filtering finish too keeps `pending` balanced, so an in-place request
-  // completing mid-navigation can't hide the bar early.
+  // bar.
   const isNavRequest = (e) => {
     const d = e && e.detail;
     if (!d) return false;
@@ -388,12 +387,33 @@ function ensureActiveSidebarVisible(sb) {
     if (el.hasAttribute('hx-push-url')) return true;
     return false;
   };
-  document.addEventListener('htmx:beforeRequest', (e) => { if (isNavRequest(e)) start(); });
-  document.addEventListener('htmx:afterRequest',  (e) => { if (isNavRequest(e)) finish(); });
-  document.addEventListener('htmx:responseError', (e) => { if (isNavRequest(e)) finish(); });
-  document.addEventListener('htmx:sendError',     (e) => { if (isNavRequest(e)) finish(); });
-  document.addEventListener('htmx:swapError',     (e) => { if (isNavRequest(e)) finish(); });
-  document.addEventListener('htmx:timeout',       (e) => { if (isNavRequest(e)) finish(); });
+  // Track which htmx requests OUR start() ran for. On afterRequest / *Error /
+  // timeout, htmx mutates `e.detail.elt` to the SWAP TARGET (e.g. the
+  // .lesson-content article), NOT the original triggering link — so
+  // re-evaluating `isNavRequest()` on completion returns false even though
+  // we DID call start() on the same request. That was the live bug: bar
+  // shows on beforeRequest, never gets to finish() on afterRequest, sits
+  // stuck at 75% until the 4 s safety timer. Fix: WeakSet keyed by the
+  // requestConfig reference, populated on start(), consumed on finish().
+  const startedRequests = new WeakSet();
+  const trackedFinish = (e) => {
+    const cfg = e && e.detail && e.detail.requestConfig;
+    if (cfg && startedRequests.has(cfg)) {
+      startedRequests.delete(cfg);
+      finish();
+    }
+  };
+  document.addEventListener('htmx:beforeRequest', (e) => {
+    if (!isNavRequest(e)) return;
+    const cfg = e.detail && e.detail.requestConfig;
+    if (cfg) startedRequests.add(cfg);
+    start();
+  });
+  document.addEventListener('htmx:afterRequest',  trackedFinish);
+  document.addEventListener('htmx:responseError', trackedFinish);
+  document.addEventListener('htmx:sendError',     trackedFinish);
+  document.addEventListener('htmx:swapError',     trackedFinish);
+  document.addEventListener('htmx:timeout',       trackedFinish);
   // Browser back/forward (htmx:historyRestore) can land us in a state where
   // the previous run's mid-state class is restored via bfcache; force-reset
   // so a stale bar can't survive a history navigation. Same on pageshow for
