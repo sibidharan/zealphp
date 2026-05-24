@@ -150,6 +150,60 @@ $app->run(['task_worker_num' => 0]);
 // PHP files in public/ are served automatically with process isolation
 PHP]); ?>
 
+<h2 id="wordpress-tested" class="legacy-mt-xl">WordPress — tested end-to-end</h2>
+
+<p>The companion repo <a href="https://github.com/sibidharan/zealphp-wordpress"><code>sibidharan/zealphp-wordpress</code></a> ships an unmodified WordPress 6.7.1 install bound to ZealPHP via a ~30-line <code>app.php</code> (full WP frontend, wp-admin, REST API, plugin system, htaccess-equivalent rewrites). Tested live against this branch in Chrome:</p>
+
+<table class="ztable legacy-mb">
+<tr><th>Configuration</th><th>Result</th><th>Notes</th></tr>
+<tr>
+  <td><strong>cgiMode('proc')</strong> + <code>App::cgiSubprocessAutoload(false)</code><br><small>(the default)</small></td>
+  <td>200 + 50,719 B on every request, ~165 ms warm</td>
+  <td>5 / 5 requests render the full WP homepage (Blog title, posts, Sample Page link). Matches v0.2.0's behaviour exactly.</td>
+</tr>
+<tr>
+  <td>cgiMode('proc') + <code>App::cgiSubprocessAutoload(true)</code></td>
+  <td>First request OK, 2nd+ deadlock</td>
+  <td>Loading <code>vendor/autoload.php</code> in every subprocess adds ~30 ms, which makes WordPress's <code>wp_cron()</code> 10 ms non-blocking POST queue up at the parent faster than workers can drain. Only opt in if your <code>public/*.php</code> needs <code>\ZealPHP\App</code> inside the subprocess.</td>
+</tr>
+<tr>
+  <td>cgiMode('pool')</td>
+  <td>First request OK (50 KB), 2nd+ return <strong>0 bytes</strong></td>
+  <td><strong>Known limitation</strong> — WordPress's <code>$wp_did_header</code> sentinel persists in the warm subprocess; the bootstrap chain's <code>if (!isset($wp_did_header))</code> gates the entire body render. A FPM-style <code>$GLOBALS</code> snapshot/restore in <code>pool_worker.php</code> would fix it; tracked as v0.3.1. For WordPress today, use <code>cgiMode('proc')</code>.</td>
+</tr>
+</table>
+
+<p><strong>One-line WP config</strong> — drop this in your <code>app.php</code> and unmodified WordPress works:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'app.php — unmodified WordPress on ZealPHP',
+    'code'  => <<<'PHP'
+<?php
+require 'vendor/autoload.php';
+use ZealPHP\App;
+
+App::superglobals(true);                  // mod_php-style superglobals
+App::cgiMode('proc');                     // fresh PHP per request (v0.2.0 parity)
+// App::cgiSubprocessAutoload(false);     // default — DO NOT enable for WP
+App::$ignore_php_ext = false;             // allow /wp-login.php in URLs
+
+$app = App::init('0.0.0.0', 9501);
+
+$app->setFallback(function() {            // WP front controller
+    App::include('/index.php');
+});
+
+$app->run(['task_worker_num' => 0]);
+PHP]); ?>
+
+<h3 id="wordpress-autoload-pitfall" class="legacy-mt-md">Why <code>cgiSubprocessAutoload(false)</code> is the default</h3>
+
+<p>Issue #18 (the v0.2.41 WP-on-proc regression vs v0.2.0). Between v0.2.0 and v0.2.20, <code>cgi_worker.php</code> gained a <code>require_once vendor/autoload.php</code> at startup so apps that needed <code>\ZealPHP\App</code> inside the subprocess could use it (issue #17). The autoload load measures <strong>~30 ms</strong> per subprocess spawn on a Ryzen 9 7900X.</p>
+
+<p>For modern apps that don't make 10 ms-timeout self-calls, 30 ms is invisible. But WordPress's <code>wp_cron()</code> fires a non-blocking <code>POST /wp-cron.php</code> with <code>timeout = 0.01</code>. The cgi_worker subprocess takes longer to start than the wp-cron client's timeout window allows — the POST connection arrives at the parent OpenSwoole worker before any worker is free to accept it, accumulating as half-closed sockets. By the 2nd request, the pool is fully blocked.</p>
+
+<p><strong>The fix:</strong> gate the autoload on <code>App::cgiSubprocessAutoload(true)</code> — default off — restoring v0.2.0's zero-overhead subprocess start path. Apps that need ZealPHP classes inside CGI dispatch (rare — most legacy apps ship their own bootstrap) opt in. Pinned by <code>tests/Unit/CgiSubprocessAutoloadTest.php</code> (5 tests including a source-level canary against future regressions).</p>
+
 <h2 id="pool-buys" class="legacy-mt-xl">What <code>cgiMode('pool')</code> buys you — measured</h2>
 
 <p><code>cgiMode('pool')</code> is the default since v0.2.41 — the FPM-style warm worker pool. The numbers below are measured on this machine (Ryzen 9 7900X, OpenSwoole 26.2, PHP 8.3) so you can compare them directly to the bench results elsewhere in the docs.</p>

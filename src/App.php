@@ -227,6 +227,26 @@ class App
      */
     public static int $cgi_pool_max_requests = 500;
     /**
+     * Whether `cgi_worker.php` (proc-mode subprocess entry) loads Composer's
+     * `vendor/autoload.php` on startup. Default `false` — restores the pre-
+     * v0.2.20 behaviour where the subprocess runs at true global scope with
+     * NO ZealPHP framework loaded, suitable for unmodified WordPress / Drupal.
+     *
+     * **Why off by default:** the autoloader load costs ~30 ms per subprocess
+     * spawn (measured on Ryzen 9 7900X / PHP 8.3). For WordPress's
+     * `wp_cron()` self-call pattern (a non-blocking HTTP POST to `/wp-cron.php`
+     * with a `timeout` of 0.01 s), that 30 ms upfront cost causes the wp-cron
+     * POSTs to queue at the parent faster than workers can drain them —
+     * eventually deadlocking the pool. Issue #18 (the v0.2.41 WP-on-proc
+     * regression vs v0.2.0).
+     *
+     * **When to set `true`:** your `public/*.php` files need to call
+     * `\ZealPHP\App`, the Apache shims, or any framework class. Modern apps
+     * built ON ZealPHP, NOT migrated TO it. Most legacy apps (WordPress,
+     * Drupal, Joomla, plain PHP) ship their own bootstrap and don't need it.
+     */
+    public static bool $cgi_subprocess_autoload = false;
+    /**
      * Per-worker WorkerPool singleton for `cgiMode('pool')`. Lazy-spawned on
      * first dispatch in this OpenSwoole worker. Held here (not on a Store)
      * because each OpenSwoole worker owns its own subprocess pool — proc
@@ -1188,6 +1208,24 @@ class App
             self::$cgi_pool_max_requests = max(1, $n);
         }
         return self::$cgi_pool_max_requests;
+    }
+
+    /**
+     * Whether `cgi_worker.php` (proc-mode subprocess entry) loads Composer's
+     * `vendor/autoload.php` on startup. Default `false` — restores pre-v0.2.20
+     * behaviour suitable for unmodified WordPress / Drupal / Joomla / plain
+     * PHP. Set to `true` when your `public/*.php` files explicitly need
+     * `\ZealPHP\App` or framework classes inside the CGI subprocess.
+     *
+     * See the `$cgi_subprocess_autoload` property docblock for the WordPress
+     * wp-cron deadlock rationale (issue #18, v0.2.41 regression fix).
+     */
+    public static function cgiSubprocessAutoload(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$cgi_subprocess_autoload = $on;
+        }
+        return self::$cgi_subprocess_autoload;
     }
 
     /**
@@ -3949,6 +3987,13 @@ class App
 
         $env['ZEALPHP_REQUEST_CONTEXT'] = $ctx;
         $env['ZEALPHP_CWD'] = self::$cwd;
+        // Gate the Composer autoloader load in cgi_worker.php. Default off
+        // (see App::$cgi_subprocess_autoload docblock — fixes the v0.2.41
+        // WordPress wp-cron deadlock by restoring the v0.2.0 zero-overhead
+        // subprocess start path).
+        if (self::$cgi_subprocess_autoload) {
+            $env['ZEALPHP_CGI_AUTOLOAD'] = '1';
+        }
 
         return $env;
     }

@@ -34,6 +34,18 @@ ZealPHP-native FCGI-style worker pool — the v0.3.0 "warm + global scope" CGI b
 - `$GLOBALS['__zeal_fork_return']` / `$GLOBALS['__zeal_fork_return_set']` — fork-mode globals.
 - 2 fork-specific tests in `tests/Unit/CgiFcgiDispatchTest`.
 
+### Fixed
+
+- **WordPress on `cgiMode('proc')` regression vs v0.2.0** (issue #18). Between v0.2.0 and v0.2.20, `src/cgi_worker.php` gained an unconditional `require_once vendor/autoload.php` at startup (issue #17 — so apps that wanted `\ZealPHP\App` inside the subprocess could use it). The autoload load measures ~30 ms per subprocess spawn (Ryzen 9 7900X, PHP 8.3). For modern apps that's invisible; for WordPress it's catastrophic — `wp_cron()` fires a non-blocking `POST /wp-cron.php` with `timeout=0.01` (10 ms), so the cgi_worker subprocess takes longer to start than the wp-cron client's timeout window. The POSTs accumulate as half-closed sockets at the parent OpenSwoole worker; by the 2nd request the entire pool deadlocks. Verified end-to-end against the `sibidharan/zealphp-wordpress` companion repo: v0.2.0 = 5/5 requests render full WP homepage; v0.2.41-pre-fix = 1st request OK then timeout × 4; v0.2.41-post-fix = 5/5 requests render at ~165 ms warm (matches v0.2.0 exactly).
+- The fix: autoload load gated on `ZEALPHP_CGI_AUTOLOAD=1` env var, which `App::buildCgiEnv()` only sets when `App::cgiSubprocessAutoload(true)` is opted in. Default OFF — restores v0.2.0's zero-overhead subprocess start. Pinned by `tests/Unit/CgiSubprocessAutoloadTest` (5 tests including a source-level canary against future refactors removing the guard).
+
+### Added (post-WP-regression-fix)
+
+- `App::$cgi_subprocess_autoload` — public static bool, default `false`. Controls whether `cgi_worker.php` loads Composer's `vendor/autoload.php` at subprocess startup.
+- `App::cgiSubprocessAutoload(?bool $on = null): bool` — fluent setter. Default false (the regression fix). Opt in (`true`) only when your `public/*.php` files need `\ZealPHP\App` or framework classes inside the CGI subprocess (modern apps built ON ZealPHP, not legacy apps migrated TO it).
+- `ZEALPHP_CGI_AUTOLOAD=1` env var — set by `App::buildCgiEnv()` when `cgiSubprocessAutoload(true)`, read by `cgi_worker.php` to gate the autoloader load.
+- New "WordPress — tested end-to-end" + "Why `cgiSubprocessAutoload(false)` is the default" sections on `/legacy-apps` with the 3-row config matrix (proc-default works, proc+autoload deadlocks, pool returns 0 bytes — known v0.3.1 limit) and copy-paste WP `app.php` config.
+
 ## [0.2.40] - 2026-05-23
 
 Production-grade pluggable backends + federated WebSocket fabric. Includes the previously-authored v0.2.39 plumbing (Pluggable Store/Counter backends — Phase 1) plus the production-hardening pass that landed on top of it: cross-host federated rooms, per-room SET optimisation, HMAC-signed pub/sub, stampede-gated cache, Lua-backed atomic transactions, paginated iteration for large Redis tables, Memcached as a fourth backend, aggregated `App::stats()`, and six early v0.3.0 helpers (`App::parallel`, `App::onSignal`, `App::onProcess`, `App::stats`, typed outbound HTTP, federated WS rooms).
