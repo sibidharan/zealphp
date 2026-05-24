@@ -53,3 +53,8 @@ __pycache__/
 /.claude/worktrees/
 /.phpdoc/
 /public/css/pages.css
+
+# Runtime log directory (access.log, debug.log, zlog.log, server.log,
+# *.pid). ZealPHP writes here per CLAUDE.md; harmless to gitignore the
+# whole subtree because nothing user-curated lives under tmp/.
+/tmp/

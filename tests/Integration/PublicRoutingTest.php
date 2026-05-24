@@ -126,9 +126,11 @@ class PublicRoutingTest extends TestCase
 
     public function testExistingPhpFileReturns403(): void
     {
-        // public/home.php exists but direct `.php` access is blocked
-        // (ignore_php_ext serves it as /home) — Apache returns 403 here.
-        $r = $this->get('/home.php');
+        // public/api.php exists but direct `.php` access is blocked
+        // (ignore_php_ext serves it as /api) — Apache returns 403 here.
+        // (Was /home.php; that file was a stale demo and is no longer
+        // shipped. /api.php is a stable user-facing page.)
+        $r = $this->get('/api.php');
         $this->assertStatus(403, $r);
     }
 

@@ -4,7 +4,7 @@
   <div class="container why-container">
     <h1 class="section-title why-title">Why ZealPHP?</h1>
     <p class="section-desc why-desc">
-      PHP powers 77% of the web — always as a worker behind a C-based HTTP server.<br>
+      PHP powers ~71% of the web (per <a href="https://w3techs.com/technologies/details/pl-php" target="_blank" rel="noopener">W3Techs</a>) — always as a worker behind a C-based HTTP server.<br>
       ZealPHP runs PHP as the HTTP server itself: coroutine-native, always-on, WebSocket/SSE/timers first-class.
     </p>
 

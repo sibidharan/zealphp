@@ -46,11 +46,13 @@ $app->route('/sitemap.xml', function () {
         $urls[] = ['loc' => '/', 'lastmod' => date('Y-m-d', (int) filemtime($indexFile))];
     }
 
-    // 2. Top-level pages: public/*.php (excluding index, partials,
-    //    benchmark scripts, and anything starting with `_`).
+    // 2. Top-level pages: public/*.php (Apache-style implicit routing).
+    //    Skip index (already added as `/`), partials (`_`-prefixed),
+    //    benchmark probes, and `home` (known-stale file from a prior
+    //    iteration — not a real route in any version).
     foreach (glob($cwd . '/public/*.php') ?: [] as $file) {
         $name = basename($file, '.php');
-        if ($name === 'index' || str_starts_with($name, '_') || str_starts_with($name, 'bench')) {
+        if ($name === 'index' || $name === 'home' || str_starts_with($name, '_') || str_starts_with($name, 'bench')) {
             continue;
         }
         $urls[] = [
@@ -59,10 +61,9 @@ $app->route('/sitemap.xml', function () {
         ];
     }
 
-    // 3. Nested sections — walk template/pages/{section}/*.php and map
-    //    each file to /section/<name>. Skip partials (`_`-prefixed) and
-    //    index files (the section root is already on the public/ list).
-    foreach (['learn', 'docs', 'case-studies'] as $section) {
+    // 3. /learn + /case-studies — 1-to-1 file-to-URL mapping per
+    //    route/{section}.php's pattern route. Skip partials + index.
+    foreach (['learn', 'case-studies'] as $section) {
         $dir = $cwd . '/template/pages/' . $section;
         if (!is_dir($dir)) {
             continue;
@@ -79,7 +80,36 @@ $app->route('/sitemap.xml', function () {
         }
     }
 
-    // 4. phpDocumentor index — surfaces the /docs/api/ tree to crawlers.
+    // 4. /docs/guide/{topic} — `route/docs.php` registers a pattern route
+    //    that renders `docs/{topic}.md` via league/commonmark. The
+    //    CANONICAL source of valid topics is `docs/*.md` (NOT
+    //    template/pages/docs/*.php — those are framework partials, not
+    //    routable URLs). Skip UPPERCASE-named docs (CHANGES-SINCE-*,
+    //    README, WSROUTER-PRODUCTION) — they're internal release notes.
+    $docsDir = $cwd . '/docs';
+    if (is_dir($docsDir)) {
+        foreach (glob($docsDir . '/*.md') ?: [] as $file) {
+            $name = basename($file, '.md');
+            if ($name === '' || ctype_upper($name[0])) {
+                continue;
+            }
+            $urls[] = [
+                'loc'     => '/docs/guide/' . $name,
+                'lastmod' => date('Y-m-d', (int) filemtime($file)),
+            ];
+        }
+    }
+
+    // 5. /docs/ landing page.
+    $docsIndex = $cwd . '/template/pages/docs/index.php';
+    if (is_file($docsIndex)) {
+        $urls[] = [
+            'loc'     => '/docs/',
+            'lastmod' => date('Y-m-d', (int) filemtime($docsIndex)),
+        ];
+    }
+
+    // 6. phpDocumentor index — surfaces the /docs/api/ tree to crawlers.
     //    Individual class pages aren't enumerated (would balloon the
     //    sitemap into hundreds of low-priority URLs); the API index
     //    page carries the sitemap weight and crawlers discover the
