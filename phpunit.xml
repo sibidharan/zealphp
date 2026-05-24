@@ -20,5 +20,6 @@
   </source>
   <php>
     <env name="ZEALPHP_REDIS_URL" value="redis://127.0.0.1:16379/0"/>
+    <env name="ZEALPHP_MEMCACHED_SERVERS" value="127.0.0.1:11211"/>
   </php>
 </phpunit>

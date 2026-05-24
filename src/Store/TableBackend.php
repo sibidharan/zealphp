@@ -96,6 +96,35 @@ final class TableBackend implements StoreBackend
         }
     }
 
+    public function iteratePaged(string $name, string $cursor = '0', int $count = 100): array
+    {
+        $t = $this->tables[$name] ?? null;
+        if ($t === null) { return ['cursor' => '0', 'rows' => []]; }
+        // Cursor = decimal offset into a deterministic iteration. Table doesn't
+        // expose a native SCAN, but it iterates in insertion order under the
+        // same worker; we treat the cursor as "how many rows to skip" and
+        // return the next $count. End-of-scan signalled by '0'.
+        //
+        // Note: this is best-effort under concurrent mutations. Insertions
+        // during pagination may or may not appear in the next page (Table
+        // is a fixed-slot hash; iteration order can shift on rehash). The
+        // contract is "no consistency guarantee across cursors" — see the
+        // backend interface docblock.
+        $skip = max(0, (int) $cursor);
+        $i = 0;
+        $taken = 0;
+        $rows = [];
+        /** @var iterable<string, array<string, scalar>> $t */
+        foreach ($t as $key => $row) {
+            if ($i++ < $skip) { continue; }
+            $rows[(string) $key] = $row;
+            if (++$taken >= $count) {
+                return ['cursor' => (string) ($skip + $taken), 'rows' => $rows];
+            }
+        }
+        return ['cursor' => '0', 'rows' => $rows];
+    }
+
     public function clear(string $name): void
     {
         $t = $this->tables[$name] ?? null;

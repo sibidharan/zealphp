@@ -30,21 +30,119 @@ class App
     protected static array $workerStartHooks = [];
     /** @var array<int, callable> */
     protected static array $workerStopHooks = [];
+
+    /** @var array<string, list<callable>> channel/pattern → handlers */
+    protected static array $pubsubRegistry = [];
+    /** @var array<string, list<array{group:string, handler:callable, blockMs:int, batchSize:int}>> stream → consumers */
+    protected static array $reliableRegistry = [];
+    /** True once the onWorkerStart hook for pubsub/streams is wired (one-time guard). */
+    protected static bool $pubsubBootWired = false;
     protected static float $workerStartedAt = 0.0;
+
+    // v0.3.0 helpers — registries for App::onSignal / App::addProcess and
+    // metadata used by App::stats. Initialised lazily on first registration.
+    /** @var array<int, list<array{handler:callable, worker_only:bool}>> */
+    protected static array $signalHandlers = [];
+    /** @var array<string, array{callable: callable, workers: int, coroutine: bool}> */
+    protected static array $processHandlers = [];
+    /** True once the onWorkerStart hook for process-pool is wired. */
+    protected static bool $processBootWired = false;
+    /** Unix timestamp the master process booted at (set by run()). */
+    protected static ?int $bootedAt = null;
+    /** Resolved worker counts after `run()` reads CLI/env/settings. */
+    protected static int $worker_num = 0;
+    protected static int $task_worker_num = 0;
     protected string $host;
     protected int $port;
+    /**
+     * Absolute working directory the framework boots in. Resolved at boot
+     * via `realpath(__DIR__ . '/..')` and exposed read-only for handlers
+     * that need to build paths relative to the project root (e.g.
+     * `App::$cwd . '/.cache'` for the file-tier cache directory).
+     */
     public static string $cwd;
-    /** @var \OpenSwoole\WebSocket\Server|\OpenSwoole\Http\Server|null */
+    /**
+     * The active OpenSwoole server instance after `App::run()` constructs
+     * it; `null` before `run()`. Returned as a `WebSocket\Server` when any
+     * `App::ws()` route was registered (the framework upgrades from
+     * `Http\Server` automatically), `Http\Server` for pure HTTP apps.
+     * Use `App::getServer()` for the public accessor.
+     *
+     * @var \OpenSwoole\WebSocket\Server|\OpenSwoole\Http\Server|null
+     */
     public static $server;
+    /**
+     * Override value for `$_SERVER['PHP_SELF']` and friends. `null` means
+     * "use the request URI verbatim", which is the normal Apache/nginx
+     * convention. Apps that need a stable `PHP_SELF` (legacy WordPress
+     * plugins, etc.) can pin it here.
+     */
     public static ?string $default_php_self = null;
     private static ?self $instance = null;
+    /**
+     * When `true`, framework error pages render the captured exception +
+     * stack trace inline (development default). Set `false` in production
+     * via `App::displayErrors(false)` so 5xx pages show a friendly message
+     * instead of leaking traces.
+     */
     public static bool $display_errors = true;
+    /**
+     * Per-request lifecycle mode (the dial that picks `$g` storage +
+     * SessionManager + `enable_coroutine` + HOOK_ALL default). See the
+     * "Lifecycle modes" matrix in CLAUDE.md — short version:
+     *
+     *   - `true` (default): `$g` lives in process-wide PHP superglobals
+     *     (`$_GET`/`$_POST`/`$_SESSION` etc.) — Apache mod_php parity.
+     *     One request at a time per worker; coroutine scheduler OFF
+     *     by default. Unmodified WordPress / Drupal work here.
+     *   - `false`: per-coroutine `$g` via `Coroutine::getContext()`.
+     *     Concurrent coroutine handling enabled; superglobals NOT
+     *     populated. Modern apps that want OpenSwoole concurrency
+     *     pick this.
+     *
+     * Set via `App::superglobals(bool)` BEFORE `App::init()`.
+     */
     public static bool $superglobals = true;
+    /**
+     * The PSR-15 middleware stack handler, built during `App::run()` from
+     * the registered middleware list. `null` before `run()`. Generally
+     * read via the public `App::middleware()` accessor; this property is
+     * public for advanced introspection (e.g. /healthz dumps).
+     */
     public static ?StackHandler $middleware_stack = null;
-    /** @var array<int, MiddlewareInterface> */
+    /**
+     * Middleware queued via `App::addMiddleware()` BEFORE `App::run()`.
+     * Reversed at boot so the last-added middleware wraps outermost;
+     * `ResponseMiddleware` (router) always runs innermost. Public for
+     * apps that want to inspect / mutate the stack at boot time.
+     *
+     * @var array<int, MiddlewareInterface>
+     */
     public static array $middleware_wait_stack = [];
+    /**
+     * When `true` (default), URLs ending in `.php` get a 403. The framework
+     * encourages extensionless URLs as the canonical public surface (matches
+     * Apache `RewriteRule \.php$ - [F]` parity). Set `false` to allow direct
+     * `*.php` routing — useful when porting an existing app that links to
+     * `/foo.php` from external sources.
+     */
     public static bool $ignore_php_ext = true;
-    public static ?bool $hook_exec = null; // null => resolves to coroutine-mode (superglobals===false) at run()
+    /**
+     * Toggle the uopz override of the exec family (backtick / `shell_exec`
+     * / `exec` / `system` / `passthru`) so they yield via OpenSwoole's
+     * coroutine scheduler instead of blocking the worker.
+     *
+     * `null` (default) resolves to "on when coroutine mode" (`!$superglobals`)
+     * at `App::run()` — matches the production-safe expectation. Set via
+     * `App::hookExec(bool)` for an explicit override.
+     */
+    public static ?bool $hook_exec = null;
+    /**
+     * Enable the legacy CGI request handler for `public/*.php` paths.
+     * Resolved from `$process_isolation` at `App::run()`; you generally
+     * don't set this directly. See `App::processIsolation()` and the
+     * Lifecycle-modes matrix in CLAUDE.md.
+     */
     public static bool $coproc_implicit_request_handler = false;
     /**
      * Per-include CGI process-isolation override. `null` means "follow
@@ -667,6 +765,20 @@ class App
      */
     public static function init($host = '0.0.0.0', $port = 8080, $cwd=null): App
     {
+        // ZEALPHP_STORE_BACKEND=redis flips Store + Counter to the Redis backend
+        // BEFORE app.php's Store::make() calls run. This was previously in
+        // App::run(), which fired AFTER app.php had already made its tables
+        // on the (then-default) Table backend — and the flip threw those
+        // schemas away. Now the env-var resolves at init() time so make() lands
+        // on the right backend the first time. HOOK_ALL hasn't been enabled
+        // yet at this point (the enableCoroutine call is below), so the
+        // defaultBackend() call is lazy + safe.
+        $envKind = getenv('ZEALPHP_STORE_BACKEND');
+        if (is_string($envKind) && $envKind !== '') {
+            \ZealPHP\Store::defaultBackend($envKind);
+            \ZealPHP\Counter::defaultBackend($envKind === 'redis' ? 'redis' : 'atomic');
+        }
+
         if ($cwd === null) {
             $php_self = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1)[0]['file'] ?? '';
             $file_name = '/'.basename($php_self);
@@ -973,12 +1085,10 @@ class App
      * See `App::$cgi_mode` for the full trade-off. No-arg call returns the current mode.
      * Only takes effect when `processIsolation()` is on.
      */
-    public static function cgiMode(?string $mode = null): string
+    public static function cgiMode(CgiMode|string|null $mode = null): string
     {
         if ($mode !== null) {
-            if ($mode !== 'proc' && $mode !== 'fork' && $mode !== 'fcgi') {
-                throw new \InvalidArgumentException("App::cgiMode() expects 'proc', 'fork', or 'fcgi', got '{$mode}'.");
-            }
+            $mode = CgiMode::coerce($mode)->value;
             self::$cgi_mode = $mode;
         }
         return self::$cgi_mode;
@@ -1769,12 +1879,46 @@ class App
     }
 
     /**
-     * Register a WebSocket endpoint.
+     * Register a WebSocket endpoint. Returns void — the OpenSwoole
+     * `WebSocket\Server` is owned by the framework lifecycle, not the
+     * route registration. To push to a client you have **two** ways to
+     * reach the server object:
+     *
+     * 1. **Inside any callback** — the first argument IS the server:
+     *
+     *    ```php
+     *    $app->ws('/ws/chat',
+     *        onMessage: function (\OpenSwoole\WebSocket\Server $server, $frame) {
+     *            $server->push($frame->fd, "echo: {$frame->data}");
+     *        },
+     *    );
+     *    ```
+     *
+     * 2. **From anywhere else** (route handlers, App::subscribe handlers,
+     *    sidecar processes, etc.) — call `App::getServer()`:
+     *
+     *    ```php
+     *    App::subscribe('chat:broadcast', function (string $payload) {
+     *        $server = App::getServer();
+     *        if ($server instanceof \OpenSwoole\WebSocket\Server) {
+     *            foreach (yourLocalFds() as $fd) {
+     *                if ($server->isEstablished($fd)) {
+     *                    $server->push($fd, $payload);
+     *                }
+     *            }
+     *        }
+     *    });
+     *    ```
+     *
+     * For cluster-wide messaging across multiple ZealPHP processes,
+     * use the higher-level `WSRouter::sendToClient($clientId, $payload)`
+     * + `WSRouter::room($name)->push($msg)` — they handle the
+     * server-lookup + cross-node routing for you.
      *
      * @param string        $path      URI path, e.g. `'/ws/chat'`
-     * @param callable      $onMessage `function($server, $frame, $g)` — called for each message
-     * @param callable|null $onOpen    `function($server, $request, $g)` — called on connect
-     * @param callable|null $onClose   `function($server, $fd, $g)`     — called on disconnect
+     * @param callable      $onMessage `function(\OpenSwoole\WebSocket\Server $server, OpenSwoole\WebSocket\Frame $frame, G $g)` — called for each message
+     * @param callable|null $onOpen    `function(\OpenSwoole\WebSocket\Server $server, OpenSwoole\Http\Request $request, G $g)` — called on connect
+     * @param callable|null $onClose   `function(\OpenSwoole\WebSocket\Server $server, int $fd, G $g)`     — called on disconnect
      */
     public function ws(string $path, callable $onMessage, ?callable $onOpen = null, ?callable $onClose = null): void
     {
@@ -1797,6 +1941,317 @@ class App
     // Timer helpers (must be called inside a coroutine context: workerStart,
     // request handler, or onWorkerStart callback)
     // -----------------------------------------------------------------------
+
+    /**
+     * Fork-join helper — runs every closure in `$tasks` in its own
+     * coroutine in parallel and returns the results in input order.
+     *
+     * Call inside a coroutine context (request handler, onWorkerStart,
+     * etc) — outside one, the call is wrapped in `Coroutine::run()` so
+     * sync-mode callers also work. Each task gets its own coroutine via
+     * `go()`; the caller blocks on a `WaitGroup` until all finish.
+     *
+     * Exceptions in tasks propagate as `null` in the result slot AND
+     * the exception is re-thrown via `array_walk` from the caller's
+     * coroutine — failing fast on the first error.
+     *
+     * @template T
+     * @param  list<callable(): T> $tasks
+     * @return list<T|null>
+     */
+    public static function parallel(array $tasks): array
+    {
+        if ($tasks === []) { return []; }
+        if (\OpenSwoole\Coroutine::getCid() < 0) {
+            // Coroutine::run swallows uncaught throws — capture + rethrow
+            // outside so callers see the same exception semantics they'd
+            // get from inside a request coroutine.
+            $out = [];
+            $err = null;
+            \OpenSwoole\Coroutine::run(function () use ($tasks, &$out, &$err): void {
+                try { $out = self::parallel($tasks); }
+                catch (\Throwable $e) { $err = $e; }
+            });
+            if ($err !== null) { throw $err; }
+            return $out;
+        }
+        $n       = count($tasks);
+        $done    = new \OpenSwoole\Coroutine\Channel($n);
+        /** @var array<int, T|null> $results */
+        $results = array_fill(0, $n, null);
+        /** @var array<int, \Throwable> $errors */
+        $errors  = [];
+        foreach ($tasks as $i => $task) {
+            \OpenSwoole\Coroutine::create(function () use ($task, $i, &$results, &$errors, $done): void {
+                try { $results[$i] = $task(); }
+                catch (\Throwable $e) { $errors[$i] = $e; }
+                finally { $done->push(true); }
+            });
+        }
+        // Block until every spawned cor reports done.
+        for ($i = 0; $i < $n; $i++) { $done->pop(); }
+        if ($errors !== []) {
+            // Surface the first failure to the caller; the rest are discarded.
+            throw reset($errors);
+        }
+        return array_values($results);
+    }
+
+    /**
+     * Bounded fan-out — runs `$fn` over each item with at most
+     * `$concurrency` in-flight coroutines at a time. Results keyed by
+     * the input's original keys.
+     *
+     * @template K of array-key
+     * @template V
+     * @template R
+     * @param  array<K, V>            $items
+     * @param  callable(V, K=): R     $fn
+     * @return array<K, R|null>
+     */
+    public static function parallelLimit(array $items, callable $fn, int $concurrency = 10): array
+    {
+        if ($items === []) { return []; }
+        if ($concurrency < 1) {
+            throw new \InvalidArgumentException('parallelLimit: $concurrency must be >= 1');
+        }
+        if (\OpenSwoole\Coroutine::getCid() < 0) {
+            $out = [];
+            $err = null;
+            \OpenSwoole\Coroutine::run(function () use ($items, $fn, $concurrency, &$out, &$err): void {
+                try { $out = self::parallelLimit($items, $fn, $concurrency); }
+                catch (\Throwable $e) { $err = $e; }
+            });
+            if ($err !== null) { throw $err; }
+            return $out;
+        }
+        $sem  = new \OpenSwoole\Coroutine\Channel($concurrency);
+        for ($i = 0; $i < $concurrency; $i++) { $sem->push(true); }
+        $n    = count($items);
+        $done = new \OpenSwoole\Coroutine\Channel($n);
+        $results = [];
+        foreach (array_keys($items) as $k) { $results[$k] = null; }
+        $errors = [];
+        foreach ($items as $k => $item) {
+            \OpenSwoole\Coroutine::create(function () use ($k, $item, $fn, &$results, &$errors, $sem, $done): void {
+                $sem->pop();
+                try { $results[$k] = $fn($item, $k); }
+                catch (\Throwable $e) { $errors[$k] = $e; }
+                finally {
+                    $sem->push(true);
+                    $done->push(true);
+                }
+            });
+        }
+        for ($i = 0; $i < $n; $i++) { $done->pop(); }
+        if ($errors !== []) { throw reset($errors); }
+        return $results;
+    }
+
+    /**
+     * Register a signal handler. Fires in the master process by
+     * default; pass `$workerOnly=true` to fire only inside workers.
+     * Multiple handlers per signal allowed (called in registration order).
+     *
+     * Built on `OpenSwoole\Process::signal()`. Common use cases:
+     *
+     *   - `SIGHUP`  → config reload
+     *   - `SIGUSR1` → stats dump
+     *   - `SIGUSR2` → debug snapshot
+     *
+     * ```php
+     * App::onSignal(SIGHUP, function (): void {
+     *     // reload routing or config
+     * });
+     * ```
+     *
+     * Must be called BEFORE `App::run()`.
+     */
+    public static function onSignal(int $signal, callable $handler, bool $workerOnly = false): void
+    {
+        self::$signalHandlers[$signal][] = ['handler' => $handler, 'worker_only' => $workerOnly];
+    }
+
+    /**
+     * Internal: wire registered signal handlers into the OpenSwoole
+     * process lifecycle. Called from `App::run()` (master) and via
+     * `onWorkerStart` (workers).
+     */
+    public static function applySignalHandlersFor(string $context): void
+    {
+        foreach (self::$signalHandlers as $signal => $handlers) {
+            foreach ($handlers as $entry) {
+                $workerOnly = (bool)$entry['worker_only'];
+                if ($workerOnly && $context !== 'worker') { continue; }
+                if (!$workerOnly && $context !== 'master') { continue; }
+                $cb = $entry['handler'];
+                \OpenSwoole\Process::signal($signal, function () use ($cb): void {
+                    try { $cb(); }
+                    catch (\Throwable $e) {
+                        error_log('App::onSignal handler threw: ' . $e->getMessage());
+                    }
+                });
+            }
+        }
+    }
+
+    /**
+     * Register a long-running sidecar process — runs alongside the HTTP/WS
+     * server, managed by the OpenSwoole master (same fate-sharing: dies when
+     * the server stops, respawned on graceful reload). Different from task
+     * workers (which are queue consumers) and worker hooks (which run inside
+     * HTTP workers); these are independent processes for background work
+     * like log shippers, file watchers, scheduled-job runners, OAuth token
+     * refreshers, etc.
+     *
+     * ```php
+     * App::addProcess('log-shipper', function (\OpenSwoole\Process $p): void {
+     *     while ($line = fgets(STDIN)) {
+     *         shipToS3($line);
+     *     }
+     * }, workers: 1, coroutine: true);
+     * ```
+     *
+     * The `$callable` receives the `OpenSwoole\Process` instance (call
+     * `$p->exit()` to shut down cleanly; respawn happens automatically when
+     * configured).
+     *
+     * `$workers` spawns N independent copies under the same name (suffixed
+     * with index `0..N-1` internally). `$coroutine` enables OpenSwoole's
+     * coroutine runtime inside the sidecar — `true` by default so the same
+     * `usleep` / curl / PDO yield semantics work that the HTTP workers get.
+     *
+     * Must be called BEFORE `App::run()` so registrations are visible at
+     * server-build time.
+     *
+     * Mirrors `$server->addProcess()` from the OpenSwoole API.
+     */
+    public static function addProcess(string $name, callable $callable, int $workers = 1, bool $coroutine = true): void
+    {
+        if ($workers < 1) {
+            throw new \InvalidArgumentException('addProcess: $workers must be >= 1');
+        }
+        if (isset(self::$processHandlers[$name])) {
+            throw new \InvalidArgumentException("addProcess: process name '$name' already registered");
+        }
+        self::$processHandlers[$name] = [
+            'callable' => $callable,
+            'workers'  => $workers,
+            'coroutine'=> $coroutine,
+        ];
+    }
+
+    /**
+     * BC alias for `addProcess()`. The on*-prefixed name was a misnomer
+     * (this method REGISTERS a process — it isn't an event). New code
+     * should call `App::addProcess()`; pairs symmetrically with
+     * OpenSwoole's `$server->addProcess()` API.
+     */
+    public static function onProcess(string $name, callable $callable, int $workers = 1, bool $coroutine = true): void
+    {
+        self::addProcess($name, $callable, $workers, $coroutine);
+    }
+
+    /**
+     * Internal: wire registered sidecar processes into the OpenSwoole
+     * server via $server->addProcess(). Called from App::run() after
+     * the server is constructed but before start().
+     */
+    private static function wireProcessHandlers(): void
+    {
+        if (self::$processBootWired) { return; }
+        self::$processBootWired = true;
+        $server = self::$server;
+        if ($server === null) { return; }
+        foreach (self::$processHandlers as $name => $cfg) {
+            $cb       = $cfg['callable'];
+            $workers  = $cfg['workers'];
+            $useCo    = $cfg['coroutine'];
+            for ($i = 0; $i < $workers; $i++) {
+                $procName = $workers > 1 ? "{$name}-{$i}" : $name;
+                // Process constructor's enable_coroutine=true initializes
+                // coroutine state in the PARENT process — which triggers the
+                // eventLoop early and breaks $server->start(). We set it
+                // false and run the user callable inside Coroutine::run
+                // INSIDE the child instead, getting the same effect without
+                // contaminating the master's event-loop state.
+                $process = new \OpenSwoole\Process(
+                    function (\OpenSwoole\Process $p) use ($cb, $procName, $useCo): void {
+                        @cli_set_process_title("zealphp:{$procName}");
+                        if ($useCo) {
+                            \OpenSwoole\Coroutine::run(function () use ($cb, $p, $procName): void {
+                                try { $cb($p); }
+                                catch (\Throwable $e) {
+                                    error_log("App::addProcess({$procName}) threw: " . $e->getMessage());
+                                }
+                            });
+                        } else {
+                            try { $cb($p); }
+                            catch (\Throwable $e) {
+                                error_log("App::addProcess({$procName}) threw: " . $e->getMessage());
+                            }
+                        }
+                    },
+                    /* redirect_stdin_stdout */ false,
+                    /* pipe_type */            0,
+                    /* enable_coroutine */     false,
+                );
+                $server->addProcess($process);
+            }
+        }
+    }
+
+    /**
+     * Aggregated framework health snapshot — backends, pool, workers,
+     * memory, uptime, plus per-subsystem counters (X-4). Designed for
+     * `/healthz` middleware exposure + Prometheus exposition (see
+     * `App::onSchedule` v0.3.0 P1.10 plan).
+     *
+     * Subsystems are queried defensively — each one is wrapped in a
+     * try/catch so a single subsystem's failure (e.g. WSRouter not
+     * initialised yet) doesn't take down /healthz.
+     *
+     * @return array<string, mixed>
+     */
+    public static function stats(): array
+    {
+        $bootTs = self::$bootedAt ?? null;
+        return [
+            'workers' => [
+                'http' => self::$worker_num,
+                'task' => self::$task_worker_num,
+            ],
+            'store'      => self::safeStats(fn(): array => \ZealPHP\Store::stats()),
+            'cache'      => self::safeStats(fn(): array => \ZealPHP\Cache::stats()),
+            'ws_router'  => self::safeStats(fn(): array => \ZealPHP\WSRouter::stats()->snapshot()),
+            'memory'     => [
+                'usage_bytes' => memory_get_usage(true),
+                'peak_bytes'  => memory_get_peak_usage(true),
+            ],
+            'uptime_sec' => $bootTs !== null ? max(0, time() - $bootTs) : 0,
+            'php'        => PHP_VERSION,
+            'backends'   => self::safeStats(fn(): array => [
+                'store_kind'   => self::backendKind(\ZealPHP\Store::defaultBackend()),
+                'counter_kind' => self::backendKind(\ZealPHP\Counter::defaultBackend()),
+            ]),
+        ];
+    }
+
+    /**
+     * @param  callable(): array<string, mixed> $fn
+     * @return array<string, mixed>
+     */
+    private static function safeStats(callable $fn): array
+    {
+        try { return $fn(); } catch (\Throwable $e) { return ['_error' => $e->getMessage()]; }
+    }
+
+    private static function backendKind(object $backend): string
+    {
+        $cls = $backend::class;
+        $base = strrchr($cls, '\\');
+        return $base === false ? $cls : substr($base, 1);
+    }
 
     /** Recurring timer: calls `$fn` every `$ms` milliseconds in this worker. */
     public static function tick(int $ms, callable $fn): int
@@ -1837,6 +2292,269 @@ class App
     public static function onWorkerStop(callable $fn): void
     {
         self::$workerStopHooks[] = $fn;
+    }
+
+    /**
+     * Fire-and-forget Redis pub/sub publish.
+     *
+     * **Scope = the entire cluster.** When the Store backend is Redis,
+     * EVERY app instance on EVERY host that has `App::subscribe`'d to
+     * the channel receives the message — that's Redis pub/sub's native
+     * PUBLISH semantics. There's no "this server only" mode; route by
+     * channel name if you need per-server delivery (e.g. the
+     * `ws:server:<id>` pattern `WSRouter::sendToClient` uses).
+     *
+     * Returns the receiver count Redis itself reported (typically
+     * `subscribed workers × cluster instances`). A return of 0 means no
+     * subscriber was listening at publish time. Throws `StoreException`
+     * on the Table backend (no pub/sub semantics; Table is single-server
+     * shared memory).
+     *
+     * Pairs symmetrically with `App::subscribe` — "App publishes, App
+     * subscribes" — so the framework's pub/sub surface reads as one
+     * coherent API. Thin delegate to `Store::publish` (the lower-level
+     * primitive that owns the Redis I/O wire); use whichever shape reads
+     * better in your code.
+     *
+     * ```php
+     * // Cross-cluster broadcast — every subscribed worker on every host
+     * // wakes up with this payload:
+     * $count = App::publish('chat:42', json_encode(['user' => 'alice', 'msg' => 'hi']));
+     * ```
+     */
+    public static function publish(string $channel, string $payload): int
+    {
+        return \ZealPHP\Store::publish($channel, $payload);
+    }
+
+    /**
+     * Reliable publish via Redis Streams (XADD) — at-least-once delivery
+     * via consumer groups. Returns the Redis-generated message id.
+     *
+     * Symmetric pair with `App::subscribeReliable`. Thin delegate to
+     * `Store::publishReliable`. Throws `StoreException` on Table backend.
+     */
+    public static function publishReliable(string $stream, string $payload, ?int $maxLen = null): string
+    {
+        return \ZealPHP\Store::publishReliable($stream, $payload, $maxLen);
+    }
+
+    /**
+     * Register a Redis pub/sub handler — runs once for every message
+     * `App::publish` (or any other Redis client) sends on the channel.
+     *
+     * **Cluster-wide delivery.** Once subscribed, THIS worker receives
+     * every message any app instance on any host publishes to the
+     * channel via the shared Redis. That's how cross-server WebSocket
+     * routing, federated chat rooms, and cluster-wide cache
+     * invalidation all work in ZealPHP — one process publishes, every
+     * subscribed process across the cluster picks it up.
+     *
+     * Channels containing `*` are PSUBSCRIBE patterns (Redis glob);
+     * everything else is SUBSCRIBE exact. Multiple handlers per channel
+     * are allowed and all fire on each message.
+     *
+     * Handler signature: `function(string $payload, string $channel, ?string $pattern): void`.
+     * Each invocation runs in its own `go()` so a slow handler can't
+     * block the next message. Throws inside the handler are caught +
+     * logged via `elog`.
+     *
+     * Pairs symmetrically with `App::publish` ("App publishes, App
+     * subscribes"). The companion `App::publish` is a thin delegate to
+     * `Store::publish` — use whichever side of the layering reads better.
+     *
+     * MUST be called BEFORE App::run() — calling after worker start is
+     * a documented no-op with an elog warning.
+     *
+     * Requires the Redis backend (Store::defaultBackend('redis') OR
+     * ZEALPHP_STORE_BACKEND=redis env). If the backend is still Table
+     * at worker-start time, the subscriber is not spawned and a warning
+     * is logged (Table backend is single-server shared memory — no
+     * pub/sub semantics).
+     */
+    public static function subscribe(string $channelOrPattern, callable $handler): void
+    {
+        self::$pubsubRegistry[$channelOrPattern][] = $handler;
+        self::wirePubSubBoot();
+    }
+
+    /**
+     * Unregister handlers for a channel/pattern. With $handler null,
+     * removes every registered handler for that channel. Returns the
+     * count removed.
+     */
+    public static function unsubscribe(string $channelOrPattern, ?callable $handler = null): int
+    {
+        if (!isset(self::$pubsubRegistry[$channelOrPattern])) { return 0; }
+        if ($handler === null) {
+            $n = count(self::$pubsubRegistry[$channelOrPattern]);
+            unset(self::$pubsubRegistry[$channelOrPattern]);
+            return $n;
+        }
+        $before = self::$pubsubRegistry[$channelOrPattern];
+        self::$pubsubRegistry[$channelOrPattern] = array_values(array_filter(
+            $before,
+            fn(callable $h): bool => $h !== $handler,
+        ));
+        return count($before) - count(self::$pubsubRegistry[$channelOrPattern]);
+    }
+
+    /**
+     * BC alias for `subscribe()`. The original on*-prefixed name was a
+     * misnomer — the act IS subscribing, not an event. New code should
+     * call `App::subscribe()` directly; pairs symmetrically with
+     * `Store::publish()`.
+     */
+    public static function onPubSub(string $channelOrPattern, callable $handler): void
+    {
+        self::subscribe($channelOrPattern, $handler);
+    }
+
+    /** BC alias for `unsubscribe()`. See `onPubSub` docblock. */
+    public static function offPubSub(string $channelOrPattern, ?callable $handler = null): int
+    {
+        return self::unsubscribe($channelOrPattern, $handler);
+    }
+
+    /**
+     * Register a Redis Streams consumer-group handler. At-least-once
+     * delivery via XREADGROUP. Handler signature:
+     *   `function(string $payload, string $messageId, string $stream, array $fields): bool`
+     * Return true to XACK (message removed from pending). Return false
+     * OR throw to leave pending (retried on consumer recovery).
+     *
+     * Default group name derives from canonicalHost() so all servers
+     * in a cluster share one group → round-robin load balancing across
+     * machines and workers.
+     *
+     * Same backend requirement as subscribe().
+     */
+    public static function subscribeReliable(
+        string $stream,
+        callable $handler,
+        ?string $group = null,
+        int $blockMs = 1000,
+        int $batchSize = 16,
+    ): void {
+        $group ??= 'zealphp-' . substr(sha1((string) (self::$canonical_name ?? gethostname())), 0, 8);
+        self::$reliableRegistry[$stream][] = [
+            'group' => $group, 'handler' => $handler,
+            'blockMs' => $blockMs, 'batchSize' => $batchSize,
+        ];
+        self::wirePubSubBoot();
+    }
+
+    /** BC alias for `subscribeReliable()`. See `onPubSub` docblock. */
+    public static function onReliableMessage(
+        string $stream,
+        callable $handler,
+        ?string $group = null,
+        int $blockMs = 1000,
+        int $batchSize = 16,
+    ): void {
+        self::subscribeReliable($stream, $handler, $group, $blockMs, $batchSize);
+    }
+
+    /**
+     * H6 + H7 — boot-time self-checks for the Redis backend.
+     *
+     * Returns an array of warning strings to surface via error_log.
+     * Empty array means everything is fine. Extracted into its own
+     * method so the Redis-misconfiguration surface is unit-testable.
+     *
+     *  H6 — eager ping. If the Redis backend is active, PING the pool
+     *       once at boot; surface a warning when it fails so the user
+     *       sees the misconfiguration BEFORE the first request (instead
+     *       of after a 5s acquire timeout deep inside a worker handler).
+     *
+     *  H7 — phpredis + HOOK_ALL=0 deadlock guard. phpredis SUBSCRIBE
+     *       blocks the worker without HOOK_ALL because the underlying
+     *       socket read is C-side. Detect the unsafe combo at boot and
+     *       tell the user how to fix it.
+     *
+     * @return list<string>
+     * @internal — public for tests; not part of the user-facing API.
+     */
+    public static function redisBootChecks(): array
+    {
+        $warnings = [];
+        $backend = \ZealPHP\Store::defaultBackend();
+        if (!($backend instanceof \ZealPHP\Store\RedisBackend)) {
+            return $warnings;
+        }
+        // H6 — eager ping. Boot-time runs may already have HOOK_ALL active
+        // (the framework's default in coroutine mode), in which case
+        // phpredis's hooked connect() requires a coroutine context. Wrap
+        // in Coroutine::run so the ping always has one.
+        try {
+            $ok = null;
+            $err = null;
+            \OpenSwoole\Coroutine::run(function () use ($backend, &$ok, &$err) {
+                try { $ok = $backend->ping(); }
+                catch (\Throwable $e) { $err = $e; }
+            });
+            if ($err !== null) {
+                $warnings[] = 'Store(H6): Redis backend ping FAILED at boot: ' . $err->getMessage();
+            } elseif ($ok === false) {
+                $warnings[] = 'Store(H6): Redis backend ping returned false at boot — workers may fail on first request';
+            }
+        } catch (\Throwable $e) {
+            $warnings[] = 'Store(H6): Redis backend ping FAILED at boot: ' . $e->getMessage();
+        }
+        // H7 — phpredis + HOOK_ALL=0 deadlock guard
+        $hasSubscribers = self::$pubsubRegistry !== [] || self::$reliableRegistry !== [];
+        if ($hasSubscribers && self::hookAll() === 0) {
+            $preferEnv = strtolower((string) getenv('ZEALPHP_REDIS_PREFER'));
+            $willUsePhpredis = $preferEnv === 'phpredis'
+                || (($preferEnv === '' || $preferEnv === 'auto') && extension_loaded('redis'));
+            if ($willUsePhpredis) {
+                $warnings[] = 'Store(H7): phpredis SUBSCRIBE blocks the worker WITHOUT HOOK_ALL — pub/sub will deadlock. ' .
+                    'Either re-enable HOOK_ALL (default in coroutine mode) OR set ZEALPHP_REDIS_PREFER=predis for subscribers.';
+            }
+        }
+        return $warnings;
+    }
+
+    /**
+     * One-time hook into onWorkerStart that builds + starts the
+     * RedisPubSub and RedisStreams runners based on what's in the
+     * registries. Re-callable; only wires once.
+     */
+    private static function wirePubSubBoot(): void
+    {
+        if (self::$pubsubBootWired) { return; }
+        self::$pubsubBootWired = true;
+
+        self::onWorkerStart(function () {
+            $backend = \ZealPHP\Store::defaultBackend();
+            if (!($backend instanceof \ZealPHP\Store\RedisBackend)) {
+                if (self::$pubsubRegistry !== [] || self::$reliableRegistry !== []) {
+                    error_log('App::onPubSub / onReliableMessage handlers are registered but the Store backend is not redis — runners NOT spawned. Set ZEALPHP_STORE_BACKEND=redis or Store::defaultBackend(\'redis\').');
+                }
+                return;
+            }
+            $url    = $backend->url();
+            $prefix = $backend->prefix();
+
+            if (self::$pubsubRegistry !== []) {
+                $pubsub = new \ZealPHP\Store\RedisPubSub($url, $prefix);
+                foreach (self::$pubsubRegistry as $channel => $handlers) {
+                    foreach ($handlers as $h) { $pubsub->register((string) $channel, $h); }
+                }
+                $pubsub->start();
+                self::onWorkerStop(function () use ($pubsub) { $pubsub->stop(); });
+            }
+            if (self::$reliableRegistry !== []) {
+                $streams = new \ZealPHP\Store\RedisStreams($url);
+                foreach (self::$reliableRegistry as $stream => $entries) {
+                    foreach ($entries as $entry) {
+                        $streams->register((string) $stream, $entry['group'], $entry['handler'], $entry['blockMs'], $entry['batchSize']);
+                    }
+                }
+                $streams->start();
+                self::onWorkerStop(function () use ($streams) { $streams->stop(); });
+            }
+        });
     }
 
     /**
@@ -1897,6 +2615,27 @@ class App
     }
 
     /**
+     * Return the underlying OpenSwoole server. Use this when you need to
+     * push to a WebSocket client from a context that didn't receive
+     * `$server` as a callback argument — e.g. from an `App::subscribe`
+     * pub/sub handler, an `App::tick` timer, or a sidecar process
+     * registered via `App::addProcess`.
+     *
+     * Returns `WebSocket\Server` when any `App::ws()` route was registered
+     * (the framework upgrades from `Http\Server` automatically), `Http\Server`
+     * for pure HTTP apps, or `null` BEFORE `App::run()` constructs it.
+     *
+     * ```php
+     * $server = App::getServer();
+     * if ($server instanceof \OpenSwoole\WebSocket\Server && $server->isEstablished($fd)) {
+     *     $server->push($fd, $payload);
+     * }
+     * ```
+     *
+     * For cluster-wide pushes prefer `WSRouter::sendToClient($clientId, $payload)`
+     * — it owns the cross-node routing fabric so you don't have to thread
+     * `$server` references around your code.
+     *
      * @return \OpenSwoole\WebSocket\Server|\OpenSwoole\Http\Server|null
      */
     public static function getServer()
@@ -4698,17 +5437,34 @@ HELP;
      */
     public function run(?array $settings = null): void
     {
-        // ZEALPHP_STORE_BACKEND=redis flips both Store and Counter to the Redis
-        // backend before workers fork — gets the "deploy-time switch with no
-        // code change" story from the spec without polluting app.php. The
-        // Store/Counter facades are happy with multiple defaultBackend() calls
-        // (the cached backend resets when config changes), so a manual call
-        // later in app.php can still override.
-        $envKind = getenv('ZEALPHP_STORE_BACKEND');
-        if (is_string($envKind) && $envKind !== '') {
-            \ZealPHP\Store::defaultBackend($envKind);
-            \ZealPHP\Counter::defaultBackend($envKind === 'redis' ? 'redis' : 'atomic');
+        // (env-var → backend flip moved to App::init() so app.php's
+        // Store::make() calls land on the resolved backend the first time.
+        // See the commit "fix github_stars boot-order".)
+
+        // H6 + H7 — boot-time self-checks. Surface misconfigurations BEFORE
+        // workers fork so the message is visible in master logs (and not
+        // hidden behind a 5s acquire timeout in some worker minutes later).
+        foreach (self::redisBootChecks() as $warning) {
+            error_log($warning);
         }
+
+        // Capture boot timestamp + resolved worker counts for App::stats().
+        self::$bootedAt = time();
+        $resolvedWorkers = isset($settings['worker_num']) && is_int($settings['worker_num']) ? $settings['worker_num'] : 0;
+        $resolvedTask    = isset($settings['task_worker_num']) && is_int($settings['task_worker_num']) ? $settings['task_worker_num'] : 0;
+        self::$worker_num = $resolvedWorkers;
+        self::$task_worker_num = $resolvedTask;
+
+        // Master-side signal handlers must register AFTER the server's event
+        // loop is up — otherwise `Process::signal()` initializes the loop
+        // early and `$server->start()` then fails with "eventLoop has
+        // already been created". The actual registration happens inside
+        // `$server->on('start', …)` below; here we just mark intent.
+
+        // Reset onProcess wiring flag — wireProcessHandlers actually runs
+        // later in run() once $server is built; track here to make the
+        // ordering explicit.
+        self::$processBootWired = false;
 
         $cliOverrides = self::parseCliArgs();
         if (isset($cliOverrides['_host'])) {
@@ -5432,6 +6188,22 @@ HELP;
                 }
             }
         });
+
+        // Wire registered sidecar processes via $server->addProcess() so they
+        // share fate with the server (managed by master; respawn on reload).
+        // Must run BEFORE $server->start() — after start(), addProcess silently
+        // no-ops because the master is already in its event loop.
+        self::$server = $server;
+        self::wireProcessHandlers();
+
+        // Master-side signal handlers wire from inside the on-start callback —
+        // the event loop is alive at that point so Process::signal() doesn't
+        // pre-initialize it.
+        if (self::$signalHandlers !== []) {
+            $server->on('start', function () {
+                self::applySignalHandlersFor('master');
+            });
+        }
 
         elog("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
         $server->start();

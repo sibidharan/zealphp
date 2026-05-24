@@ -142,4 +142,84 @@ final class RedisClientTest extends RedisTestCase
         $this->assertSame('a', (string) $results[2]);
         $this->assertSame('b', (string) $results[3]);
     }
+
+    public function testPublishReturnsReceiverCountWithNoSubscribers(): void
+    {
+        $c = new RedisClient($this->url);
+        $this->assertSame(0, $c->publish('no-listeners', 'hi'));
+    }
+
+    public function testSubscribeReceivesPublishViaChannel(): void
+    {
+        $this->requireYieldingSubscribe();
+        \OpenSwoole\Coroutine::run(function (): void {
+            $sub  = new RedisClient($this->url);
+            $pub  = new RedisClient($this->url);
+            $rendezvous = new \OpenSwoole\Coroutine\Channel(1);
+
+            go(function () use ($sub, $rendezvous): void {
+                $sub->subscribe(['t:exact'], [], function (string $payload, string $channel, ?string $pattern) use ($rendezvous): void {
+                    $rendezvous->push(compact('payload', 'channel', 'pattern'));
+                    throw new \ZealPHP\Store\PubSubStopException();
+                });
+            });
+
+            // Tiny yield so the subscriber registers before we publish.
+            (new \OpenSwoole\Coroutine\Channel(1))->pop(0.1);
+            $pub->publish('t:exact', 'hello');
+            $received = $rendezvous->pop(2.0);
+
+            $this->assertIsArray($received);
+            $this->assertSame('hello',   $received['payload']);
+            $this->assertSame('t:exact', $received['channel']);
+            $this->assertNull($received['pattern']);
+        });
+    }
+
+    public function testSubscribePatternReceivesMatchingPublish(): void
+    {
+        $this->requireYieldingSubscribe();
+        \OpenSwoole\Coroutine::run(function (): void {
+            $sub  = new RedisClient($this->url);
+            $pub  = new RedisClient($this->url);
+            $rendezvous = new \OpenSwoole\Coroutine\Channel(1);
+
+            go(function () use ($sub, $rendezvous): void {
+                $sub->subscribe([], ['t:p:*'], function (string $payload, string $channel, ?string $pattern) use ($rendezvous): void {
+                    $rendezvous->push(compact('payload', 'channel', 'pattern'));
+                    throw new \ZealPHP\Store\PubSubStopException();
+                });
+            });
+            (new \OpenSwoole\Coroutine\Channel(1))->pop(0.1);
+            $pub->publish('t:p:room1', 'broadcast');
+            $received = $rendezvous->pop(2.0);
+
+            $this->assertIsArray($received);
+            $this->assertSame('broadcast', $received['payload']);
+            $this->assertSame('t:p:room1', $received['channel']);
+            $this->assertSame('t:p:*',     $received['pattern']);
+        });
+    }
+
+    public function testXaddXreadGroupXackRoundTrip(): void
+    {
+        $c = new RedisClient($this->url);
+        $stream = 't:stream:' . bin2hex(random_bytes(4));
+        $group  = 'g1';
+
+        $this->assertTrue($c->xgroupCreate($stream, $group, '$', true));
+        $this->assertFalse($c->xgroupCreate($stream, $group, '$', true), 'second call is BUSYGROUP → false');
+
+        $id = $c->xadd($stream, ['kind' => 'order', 'qty' => '3']);
+        $this->assertMatchesRegularExpression('/^\d+-\d+$/', $id);
+
+        \OpenSwoole\Coroutine::run(function () use ($c, $stream, $group, $id): void {
+            $r = $c->xreadGroup($group, 'c1', [$stream], 10, 1000);
+            $this->assertArrayHasKey($stream, $r);
+            $this->assertCount(1, $r[$stream]);
+            $this->assertSame($id, $r[$stream][0]['id']);
+            $this->assertSame(['kind' => 'order', 'qty' => '3'], $r[$stream][0]['payload']);
+            $this->assertSame(1, $c->xack($stream, $group, $id));
+        });
+    }
 }

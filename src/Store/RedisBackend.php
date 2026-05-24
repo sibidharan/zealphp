@@ -53,6 +53,17 @@ final class RedisBackend implements StoreBackend
         if ($mode === 'ttl' && $ttl < 1) {
             throw new StoreException("RedisBackend::make: 'ttl' mode requires \$opts['ttl'] >= 1 second");
         }
+        // H1: tracked + ttl>0 silently ignored ttl pre-v0.2.41 (membership SET would drift —
+        // an expired key can't fire SREM on the tracked SET, so count()/iterate() would lie).
+        // Throw at make() so the conflict surfaces at boot, not after the first expiry.
+        if ($mode === 'tracked' && $ttl > 0) {
+            throw new StoreException(
+                "RedisBackend::make: 'tracked' mode does not support TTL " .
+                "(expired keys cannot fire SREM on the membership set — " .
+                "the tracked SET would drift and count()/iterate() would lie). " .
+                "Use mode='ttl' for per-key expiry."
+            );
+        }
         $this->schemas[$name]   = $columns;
         $this->tableOpts[$name] = ['mode' => $mode, 'ttl' => $ttl];
     }
@@ -184,24 +195,70 @@ final class RedisBackend implements StoreBackend
         } finally { $this->pool->release($client); }
     }
 
+    public function iteratePaged(string $name, string $cursor = '0', int $count = 100): array
+    {
+        $this->assertMade($name);
+        $schema = $this->schemas[$name];
+        $sk     = $this->setKey($name);
+        $prefix = $this->prefix . ':' . $name . ':';
+        $mode   = $this->tableOpts[$name]['mode'];
+        if ($cursor === '') { $cursor = '0'; }
+
+        // ttl mode: SCAN MATCH $prefix*; tracked mode: SSCAN $sk.
+        // Both return one Redis batch + the server's next cursor; we hydrate
+        // the rows server-side via mhgetall (pipelined HGETALL) so the
+        // round-trip cost stays at 2 (one SCAN + one pipelined HGETALL).
+        return $this->pool->with(function (RedisClient $c) use ($name, $cursor, $count, $sk, $prefix, $mode, $schema): array {
+            if ($mode === 'ttl') {
+                [$nextCursor, $rowKeys] = $c->scanCursor($prefix . '*', $cursor, $count);
+                $rowKeys = array_values(array_filter($rowKeys, fn (string $k): bool => $k !== $sk));
+                $keys    = array_map(fn (string $rk): string => substr($rk, strlen($prefix)), $rowKeys);
+            } else {
+                [$nextCursor, $keys] = $c->sscanCursor($sk, $cursor, $count);
+                $rowKeys = array_map(fn (string $k): string => $this->rowKey($name, $k), $keys);
+            }
+            if ($rowKeys === []) {
+                return ['cursor' => $nextCursor, 'rows' => []];
+            }
+            $raws = $c->mhgetall($rowKeys);
+            $rows = [];
+            foreach ($keys as $i => $k) {
+                $wire = $raws[$i] ?? [];
+                if ($wire === []) { continue; }   // key was deleted between SCAN and HGETALL
+                $decoded = $this->codec->decodeRow($schema, $wire);
+                if (is_array($decoded)) { $rows[$k] = $decoded; }
+            }
+            return ['cursor' => $nextCursor, 'rows' => $rows];
+        });
+    }
+
     public function clear(string $name): void
     {
         $this->assertMade($name);
         $sk     = $this->setKey($name);
         $prefix = $this->prefix . ':' . $name . ':';
         $this->pool->with(function (RedisClient $c) use ($sk, $prefix, $name): void {
+            // H3: UNLINK (non-blocking reclaim, Redis 4.0+) + batches of 100
+            // instead of per-key DEL. Multi-second clears on 10k+-key tables
+            // drop to sub-second.
             if ($this->tableOpts[$name]['mode'] === 'ttl') {
+                $batch = [];
                 foreach ($c->scanKeys($prefix . '*') as $rk) {
-                    $c->del($rk);
+                    $batch[] = $rk;
+                    if (count($batch) >= 100) {
+                        $c->unlink(...$batch);
+                        $batch = [];
+                    }
                 }
+                if ($batch !== []) { $c->unlink(...$batch); }
                 return;
             }
             $members = iterator_to_array($c->sscan($sk), false);
             foreach (array_chunk($members, 100) as $batch) {
                 $rkeys = array_map(fn(string $k): string => $prefix . $k, $batch);
-                $c->del(...$rkeys);
+                $c->unlink(...$rkeys);
             }
-            $c->del($sk);
+            $c->unlink($sk);
         });
     }
 
@@ -216,9 +273,16 @@ final class RedisBackend implements StoreBackend
         if ($keys === []) { return []; }
         $schema = $this->schemas[$name];
         return $this->pool->with(function (RedisClient $c) use ($name, $keys, $schema): array {
+            // H3: pipelined HGETALL — one round-trip for the whole batch.
+            // Pre-v0.2.41 this looped N HGETALL round-trips. On a 100-key
+            // mget over local Redis that's ~1 ms saved; over remote Redis
+            // (~1 ms RTT) the saving is N × RTT.
+            $strKeys = array_map('strval', $keys);
+            $rkeys = array_map(fn(string $k): string => $this->rowKey($name, $k), $strKeys);
+            $raws  = $c->mhgetall($rkeys);
             $out = [];
-            foreach ($keys as $k) {
-                $wire = $c->hgetall($this->rowKey($name, $k));
+            foreach ($strKeys as $i => $k) {
+                $wire = $raws[$i] ?? [];
                 $out[$k] = $this->codec->decodeRow($schema, $wire);
             }
             return $out;
@@ -234,18 +298,29 @@ final class RedisBackend implements StoreBackend
         $sk     = $this->setKey($name);
 
         return (bool) $this->pool->with(function (RedisClient $c) use ($name, $rows, $schema, $opts, $sk): bool {
-            $newKeys = [];
+            // H3: pipeline the HMSET + optional EXPIRE + final SADD into a
+            // single round-trip. SADD is idempotent on existing members,
+            // so we skip the per-key EXISTS+isNew checks that the legacy
+            // path did — tracked SET stays consistent because Redis ignores
+            // duplicate SADD members.
+            $writes = [];
             foreach ($rows as $key => $row) {
-                $skey = (string) $key;
-                $rk   = $this->rowKey($name, $skey);
-                $isNew = !$c->exists($rk);
-                $c->hset($rk, $this->codec->encodeRow($schema, $row));
-                if ($opts['mode'] === 'tracked' && $isNew) { $newKeys[] = $skey; }
-                if ($opts['mode'] === 'ttl' && $opts['ttl'] > 0) {
-                    $c->expire($rk, $opts['ttl']);
+                $skey  = (string) $key;
+                $entry = [
+                    'rk'     => $this->rowKey($name, $skey),
+                    'fields' => $this->codec->encodeRow($schema, $row),
+                ];
+                if ($opts['mode'] === 'tracked') {
+                    $entry['sk'] = $skey;
                 }
+                $writes[] = $entry;
             }
-            if ($newKeys !== []) { $c->sadd($sk, $newKeys); }
+            $ttl = ($opts['mode'] === 'ttl' && $opts['ttl'] > 0) ? $opts['ttl'] : null;
+            $c->mhsetWithMembership(
+                $writes,
+                $opts['mode'] === 'tracked' ? $sk : null,
+                $ttl,
+            );
             return true;
         });
     }
@@ -255,6 +330,64 @@ final class RedisBackend implements StoreBackend
     {
         return (bool) $this->pool->with(fn(RedisClient $c): bool => $c->ping());
     }
+
+    // ── Direct Redis SET primitives (WS-2) ──────────────────────────────
+    //
+    // These expose SADD / SREM / SCARD / SSCAN against caller-provided
+    // absolute keys. Used by Room::join/leave/size/members so the
+    // per-room roster is a real Redis SET (O(1) SCARD, paginated SSCAN
+    // members) instead of a full table scan. The keys are NOT prefixed by
+    // this backend's `$prefix` — caller fully owns the namespace.
+
+    public function sadd(string $key, string ...$members): int
+    {
+        if ($members === []) { return 0; }
+        $list = array_values($members);
+        return $this->pool->with(fn(RedisClient $c): int => $c->sadd($key, $list));
+    }
+
+    public function srem(string $key, string ...$members): int
+    {
+        if ($members === []) { return 0; }
+        $list = array_values($members);
+        return $this->pool->with(fn(RedisClient $c): int => $c->srem($key, $list));
+    }
+
+    public function scard(string $key): int
+    {
+        return $this->pool->with(fn(RedisClient $c): int => $c->scard($key));
+    }
+
+    /** @return array{0:string, 1:list<string>} */
+    public function sscanCursor(string $key, string $cursor, int $count): array
+    {
+        return $this->pool->with(fn(RedisClient $c): array => $c->sscanCursor($key, $cursor, $count));
+    }
+
+    public function sdel(string $key): bool
+    {
+        return (bool) $this->pool->with(fn(RedisClient $c): bool => $c->unlink($key) > 0);
+    }
+
+    /** Pub/sub publish through the pool; returns receivers Redis delivered to. */
+    public function publish(string $channel, string $payload): int
+    {
+        return $this->pool->with(fn(RedisClient $c): int => $c->publish($channel, $payload));
+    }
+
+    /**
+     * Streams append. Auto-MAXLEN-trims when $maxLen is set. Payload is
+     * stored under the 'payload' field; matches the consumer-side
+     * convention in RedisStreams.
+     */
+    public function publishReliable(string $stream, string $payload, ?int $maxLen = null): string
+    {
+        return $this->pool->with(fn(RedisClient $c): string => $c->xadd($stream, ['payload' => $payload], $maxLen));
+    }
+
+    public function url(): string { return $this->pool->url(); }
+    public function pool(): RedisConnectionPool { return $this->pool; }
+    public function prefix(): string { return $this->prefix; }
 
     private function countViaScan(string $name): int
     {

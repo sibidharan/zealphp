@@ -21,6 +21,7 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **SSR streaming** | Generator `yield`, `$response->stream()`, `$response->sse()` — like React's `renderToPipeableStream` |
 | **WebSocket** | `App::ws($path, $onMessage, $onOpen, $onClose)` — rooms, auth, binary, heartbeat |
 | **Pluggable Store/Counter** | `Store::defaultBackend('redis')` (or `ZEALPHP_STORE_BACKEND=redis`) flips storage from local `OpenSwoole\Table`/`Atomic` to Redis/Valkey with zero handler changes — cross-node shared state + persistence with one line. Tracked + TTL modes, per-worker coroutine pool, Lua-backed `Counter::compareAndSet`. |
+| **Cross-node messaging** | `Store::publish($ch, $payload)` + `App::subscribe($ch, $handler)` for fire-and-forget pub/sub (cross-worker AND cross-host). `Store::publishReliable($stream, $payload)` + `App::subscribeReliable($stream, $handler)` for Streams-backed at-least-once delivery via consumer groups. The cross-server WebSocket routing pattern (owner-of-fd pushes; Redis routes to owner) lights up end-to-end. **Driver choice (both validated in v0.2.40):** Both phpredis (preferred when `ext-redis` is loaded) and predis SUBSCRIBE loops yield correctly under `OpenSwoole\Runtime::HOOK_ALL` — the production default in coroutine mode. phpredis is ~2× faster on hot CRUD; pick it when you can. One nuance: phpredis SUBSCRIBE blocks the worker WITHOUT HOOK_ALL — if you disabled HOOK_ALL explicitly, force `ZEALPHP_REDIS_PREFER=predis` for subscribers or re-enable HOOK_ALL. See [`/store#pubsub`](https://php.zeal.ninja/store#pubsub). |
 | **Dynamic routing** | `route()`, `nsRoute()`, `nsPathRoute()`, `patternRoute()` with reflection-based parameter injection |
 | **Middleware** | PSR-15 stack — 18 built-ins (CORS, ETag, Range, Compression, SessionStart, IniIsolation, Charset, CacheControl, Expires, Header, BasicAuth, IpAccess, RateLimit, ConcurrencyLimit, BlockPhpExt, MimeType, BodyRewrite, HostRouter) — full Apache `mod_rewrite` / `mod_headers` / `mod_expires` and nginx `limit_req` / `auth_basic` parity |
 | **HTTP/1.1 compliance** | HEAD, OPTIONS, 301/302/307/308 redirects, Cookie SameSite, ETag, OpenSwoole compression |
@@ -81,7 +82,7 @@ docker compose up app
 
 ```bash
 # New project
-composer create-project sibidharan/zealphp-project:^0.2.38 my-project
+composer create-project sibidharan/zealphp-project:^0.2.40 my-project
 cd my-project
 php app.php
 # → https://php.zeal.ninja
@@ -393,8 +394,8 @@ class TimingMiddleware implements MiddlewareInterface {
 ```php
 // Create BEFORE $app->run() — shared across all forked workers
 $clientTable = Store::make('clients', 4096, [
-    'room' => [\OpenSwoole\Table::TYPE_STRING, 64],
-    'uid'  => [\OpenSwoole\Table::TYPE_STRING, 128],
+    'room' => [Store::TYPE_STRING, 64],
+    'uid'  => [Store::TYPE_STRING, 128],
 ]);
 $hitCounter = new Counter(0);
 
@@ -432,8 +433,8 @@ App::onWorkerStart(function($server, $workerId) use ($hitCounter) {
 2. Run `composer validate` and confirm tests pass.
 3. Tag both `zealphp` and `zealphp-project` with the same version:
    ```bash
-   git tag -a v0.2.38 -m "Release v0.2.38"
-   git push origin master && git push origin v0.2.38
+   git tag -a v0.2.40 -m "Release v0.2.40"
+   git push origin master && git push origin v0.2.40
    ```
 4. Trigger Packagist webhook for both packages.
 

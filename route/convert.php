@@ -4,15 +4,15 @@ use ZealPHP\G;
 use ZealPHP\Store;
 
 Store::make('convert_ratelimit', 256, [
-    'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],
-    'count' => [\OpenSwoole\Table::TYPE_INT, 4],
-    'reset' => [\OpenSwoole\Table::TYPE_INT, 4],
+    'ip'    => [Store::TYPE_STRING, 45],
+    'count' => [Store::TYPE_INT, 4],
+    'reset' => [Store::TYPE_INT, 4],
 ]);
 
 Store::make('convert_cache', 128, [
-    'hash'   => [\OpenSwoole\Table::TYPE_STRING, 32],
-    'result' => [\OpenSwoole\Table::TYPE_STRING, 8192],
-    'time'   => [\OpenSwoole\Table::TYPE_INT, 4],
+    'hash'   => [Store::TYPE_STRING, 32],
+    'result' => [Store::TYPE_STRING, 8192],
+    'time'   => [Store::TYPE_INT, 4],
 ]);
 
 $app = App::instance();

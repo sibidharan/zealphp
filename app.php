@@ -304,9 +304,9 @@ if ($serverLogFile !== '') {
 // Created only when the test fixture is present so demo deployments stay clean.
 if (file_exists(__DIR__ . '/route/_error_test.php')) {
     Store::make('error_test', 16, [
-        'handler_fired'  => [\OpenSwoole\Table::TYPE_INT, 1],
-        'handler_cid'    => [\OpenSwoole\Table::TYPE_INT, 8],
-        'shutdown_count' => [\OpenSwoole\Table::TYPE_INT, 1],
+        'handler_fired'  => [Store::TYPE_INT, 1],
+        'handler_cid'    => [Store::TYPE_INT, 8],
+        'shutdown_count' => [Store::TYPE_INT, 1],
     ]);
 }
 

@@ -27,6 +27,12 @@ $titleHtml   = htmlspecialchars($title);
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="/css/zealphp.css?v=<?= $v ?>">
   <link rel="stylesheet" href="/css/learn.css?v=<?= $v ?>">
+  <!-- pages.css = boot-time concatenation of public/css/pages/*.css. Demo
+       shells render the same widget partials as the lesson pages
+       (_chatroom_widget, _notes_widget, _tictactoe_widget, …), so they need
+       the same per-page CSS the lessons load. Without this link, widgets
+       in /demo/view/* render unstyled. -->
+  <link rel="stylesheet" href="/css/pages.css?v=<?= $v ?>">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" defer></script>

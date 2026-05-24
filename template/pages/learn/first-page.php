@@ -52,7 +52,12 @@ echo "&lt;p&gt;This page was served by ZealPHP.&lt;/p&gt;";</code></pre>
     <h2>Adding dynamic content</h2>
     <p>These are PHP files, so you can use any PHP you want. Let's make the greeting personal:</p>
     <pre><code class="language-php">&lt;?php
-$name = htmlspecialchars($_GET['name'] ?? 'World');
+// $g is ZealPHP's per-coroutine request context. Use $g-&gt;get / $g-&gt;post /
+// $g-&gt;cookie / $g-&gt;session — they work identically in BOTH superglobals
+// modes. Raw $_GET is unsafe in coroutine mode (process-wide array races
+// across concurrent requests). See &lt;a href="/coroutines#state-parity"&gt;/coroutines#state-parity&lt;/a&gt;.
+$g    = \ZealPHP\G::instance();
+$name = htmlspecialchars($g-&gt;get['name'] ?? 'World');
 echo "&lt;h1&gt;Hello, {$name}!&lt;/h1&gt;";
 echo "&lt;p&gt;The time is " . date('H:i:s') . "&lt;/p&gt;";</code></pre>
     <p>Visit <code>/greeting?name=Alice</code> and the page greets Alice by name.</p>

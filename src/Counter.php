@@ -7,7 +7,9 @@ namespace ZealPHP;
 use OpenSwoole\Atomic;
 use ZealPHP\Counter\AtomicBackend;
 use ZealPHP\Counter\CounterBackend;
+use ZealPHP\Counter\CounterBackendKind;
 use ZealPHP\Counter\RedisCounterBackend;
+use ZealPHP\Store\DriverPreference;
 use ZealPHP\Store\RedisConnectionPool;
 use ZealPHP\Store\StoreException;
 
@@ -35,6 +37,13 @@ use ZealPHP\Store\StoreException;
  */
 class Counter
 {
+    // Backend kind constants — prefer over bare strings:
+    //   Counter::defaultBackend(Counter::BACKEND_REDIS) ← IDE-autocompleted
+    //   Counter::defaultBackend('redis')                ← also works (BC).
+    public const BACKEND_ATOMIC    = 'atomic';
+    public const BACKEND_REDIS     = 'redis';
+    public const BACKEND_MEMCACHED = 'memcached';
+
     private static ?CounterBackend $backend = null;
     /** @var array{kind:string, conn?: string|array<string,mixed>} */
     private static array $backendConfig = ['kind' => 'atomic'];
@@ -56,16 +65,21 @@ class Counter
     {
         $this->name = $name ?? '__anon_' . (++self::$anonSerial);
         // Touch the backend only when we actually have state to write —
-        // (a) any explicit name (force-reset to $initial), or
-        // (b) anonymous with non-zero $initial.
+        // (a) any explicit name, or (b) anonymous with non-zero $initial.
         // Anonymous + 0 is a brand-new slot that the backend reads as 0
         // anyway, so we can skip the backend round-trip. This matters at
         // route-load time on the Redis backend: route/*.php often does
         // `new Counter(0)` in the master process (no coroutine context),
         // which would otherwise eagerly open a predis connection through
         // a hooked stream_socket_client and crash boot.
+        //
+        // N-1 — use setIfAbsent (atomic SETNX on Redis, fresh-map check on
+        // Atomic) so subsequent `new Counter(0, 'foo')` constructions
+        // DON'T reset existing counters. Pre-N-1, this was force-set —
+        // hidden footgun for callers building per-room / per-user
+        // monotonic counters.
         if ($name !== null || $initial !== 0) {
-            self::defaultBackend()->set($this->name, $initial);
+            self::defaultBackend()->setIfAbsent($this->name, $initial);
         }
     }
 
@@ -109,6 +123,50 @@ class Counter
     }
 
     /**
+     * Bounded atomic increment (N-2). Increments only if the result would
+     * stay within `$maxBound`. Returns the new value, or NULL when the
+     * cap would be exceeded.
+     *
+     *     $slots = new Counter(0, 'free_slots');
+     *     if ($slots->incrementBounded(1, 100) === null) {
+     *         return 'pool full';
+     *     }
+     */
+    public function incrementBounded(int $by = 1, int $maxBound = PHP_INT_MAX): ?int
+    {
+        return self::defaultBackend()->incrBounded($this->name, $by, $maxBound);
+    }
+
+    /**
+     * Set TTL on the underlying key (N-3).
+     *
+     * Atomic backend: no-op, returns false. Shared memory has no TTL —
+     * the counter survives until the OpenSwoole master dies.
+     * Redis backend: applies EXPIRE on the counter's key. Returns true
+     * if the TTL was set; false if the key doesn't exist.
+     */
+    public function expire(int $seconds): bool
+    {
+        return self::defaultBackend()->expire($this->name, $seconds);
+    }
+
+    /**
+     * Batch atomic increment (N-4). Pipelined on Redis (one round-trip
+     * for the whole batch); sequential on Atomic.
+     *
+     *     $hits = Counter::mincr(['page:home' => 1, 'page:about' => 1]);
+     *     //  ['page:home' => 142, 'page:about' => 87]
+     *
+     * @param  array<string, int> $deltas  name → delta
+     * @return array<string, int> name → new value
+     */
+    public static function mincr(array $deltas): array
+    {
+        if ($deltas === []) { return []; }
+        return self::defaultBackend()->mincr($deltas);
+    }
+
+    /**
      * Return the raw `OpenSwoole\Atomic`. Only available on the atomic
      * backend; throws on the redis backend (no Atomic equivalent there).
      */
@@ -129,13 +187,11 @@ class Counter
      * @param  ?string                          $kind  'atomic' (default) or 'redis'; null to read current
      * @param  string|array<string,mixed>       $conn  redis URL or ['url'=>, 'pool_size'=>, 'prefix'=>]
      */
-    public static function defaultBackend(?string $kind = null, string|array $conn = []): CounterBackend
+    public static function defaultBackend(CounterBackendKind|string|null $kind = null, string|array $conn = []): CounterBackend
     {
         if ($kind !== null) {
-            if (!in_array($kind, ['atomic', 'redis'], true)) {
-                throw new \InvalidArgumentException("Unknown Counter backend kind: $kind (use 'atomic' or 'redis')");
-            }
-            self::$backendConfig = ['kind' => $kind, 'conn' => $conn];
+            $kindStr = CounterBackendKind::coerce($kind)->value;
+            self::$backendConfig = ['kind' => $kindStr, 'conn' => $conn];
             self::$backend = null;
         }
         return self::$backend ??= self::buildBackend(self::$backendConfig);
@@ -144,23 +200,61 @@ class Counter
     /** @param array{kind:string, conn?: string|array<string,mixed>} $cfg */
     private static function buildBackend(array $cfg): CounterBackend
     {
+        if ($cfg['kind'] === 'memcached') {
+            $conn = $cfg['conn'] ?? '';
+            if (is_string($conn)) {
+                $servers = $conn !== '' ? $conn : self::memcachedServersFromEnv();
+                return new \ZealPHP\Counter\MemcachedCounterBackend($servers);
+            }
+            $servers = isset($conn['servers']) && is_string($conn['servers']) ? $conn['servers'] : self::memcachedServersFromEnv();
+            $prefix  = isset($conn['prefix']) && is_string($conn['prefix']) ? $conn['prefix'] : 'zealstore';
+            return new \ZealPHP\Counter\MemcachedCounterBackend($servers, $prefix);
+        }
         if ($cfg['kind'] !== 'redis') {
             return new AtomicBackend();
         }
         $conn = $cfg['conn'] ?? [];
+        $opts = self::poolOptsFromEnv();
         if (is_string($conn)) {
             $url = $conn !== '' ? $conn : self::redisUrlFromEnv();
-            return new RedisCounterBackend(new RedisConnectionPool($url));
+            return new RedisCounterBackend(new RedisConnectionPool($url, 8, $opts));
         }
         $url    = isset($conn['url']) && is_string($conn['url']) ? $conn['url'] : self::redisUrlFromEnv();
         $size   = isset($conn['pool_size']) && is_int($conn['pool_size']) ? $conn['pool_size'] : 8;
         $prefix = isset($conn['prefix']) && is_string($conn['prefix']) ? $conn['prefix'] : 'zealstore';
-        return new RedisCounterBackend(new RedisConnectionPool($url, $size), $prefix);
+        if (isset($conn['prefer'])) {
+            try {
+                $opts['prefer'] = DriverPreference::coerce(
+                    $conn['prefer'] instanceof DriverPreference || is_string($conn['prefer'])
+                        ? $conn['prefer']
+                        : '',
+                )->value;
+            } catch (\InvalidArgumentException) {
+                /* fall back to env-default */
+            }
+        }
+        return new RedisCounterBackend(new RedisConnectionPool($url, $size, $opts), $prefix);
     }
 
     private static function redisUrlFromEnv(): string
     {
         $env = getenv('ZEALPHP_REDIS_URL');
         return is_string($env) && $env !== '' ? $env : 'redis://127.0.0.1:6379';
+    }
+
+    private static function memcachedServersFromEnv(): string
+    {
+        $env = getenv('ZEALPHP_MEMCACHED_SERVERS');
+        return is_string($env) && $env !== '' ? $env : '127.0.0.1:11211';
+    }
+
+    /** @return array{prefer?: 'auto'|'phpredis'|'predis'} */
+    private static function poolOptsFromEnv(): array
+    {
+        $prefer = getenv('ZEALPHP_REDIS_PREFER');
+        if (!is_string($prefer) || $prefer === '') { return []; }
+        $prefer = strtolower($prefer);
+        if (!in_array($prefer, ['auto', 'phpredis', 'predis'], true)) { return []; }
+        return ['prefer' => $prefer];
     }
 }

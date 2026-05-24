@@ -98,6 +98,55 @@ run_pass coroutine suite
 run_pass mixed     exercise ZEALPHP_SUPERGLOBALS=1 ZEALPHP_ENABLE_COROUTINE=0 ZEALPHP_PROCESS_ISOLATION=0
 run_pass cgi       exercise ZEALPHP_SUPERGLOBALS=1 ZEALPHP_PROCESS_ISOLATION=1 ZEALPHP_ENABLE_COROUTINE=0
 
+# Pub/sub pass — flips Store backend to Redis so route/demo.php's
+# App::subscribe / App::subscribeReliable handlers register at boot,
+# then publishes a few messages so the runners (RedisPubSub::runner +
+# RedisStreams::runner) actually receive + dispatch. Covers the
+# SUBSCRIBE / PSUBSCRIBE / XREADGROUP loop bodies that unit tests
+# can't drive (PHPUnit can't keep a HOOK_ALL subscribe coroutine alive
+# without contaminating the next test).
+REDIS_URL_PROBE="${ZEALPHP_REDIS_URL:-redis://127.0.0.1:16379/0}"
+if php -r "
+require 'vendor/autoload.php';
+try { (new Predis\\Client('$REDIS_URL_PROBE'))->ping(); exit(0); }
+catch (Throwable \$e) { exit(1); }
+" >/dev/null 2>&1; then
+    echo "== pass: redis-pubsub (pubsub-exercise) =="
+    rm -f "/tmp/zealphp/zealphp_${PORT}.pid" 2>/dev/null || true
+    env ZEALPHP_COVERAGE_DIR="$COVDIR" ZEALPHP_PORT="$PORT" ZEALPHP_WORKERS=1 \
+        ZEALPHP_TASK_WORKERS=0 ZEALPHP_LOG_ASYNC=0 ZEALPHP_ACCESS_LOG=0 \
+        ZEALPHP_DEBUG_LOG=0 ZEALPHP_RECYCLE_LOG=0 \
+        ZEALPHP_STORE_BACKEND=redis ZEALPHP_REDIS_URL="$REDIS_URL_PROBE" \
+        ZEALPHP_REDIS_PREFER=predis \
+        "${PHP[@]}" app.php \
+        >"$COVDIR/server-redis-pubsub.log" 2>&1 &
+    rps_srv=$!
+    up=no
+    for i in $(seq 1 60); do
+        curl -sf -m1 "http://127.0.0.1:$PORT/json" >/dev/null 2>&1 && { up=yes; break; }
+        sleep 0.5
+    done
+    if [ "$up" = yes ]; then
+        sleep 1
+        for i in 1 2 3 4 5; do
+            curl -sf -m2 "http://127.0.0.1:$PORT/demo/pubsub/publish?channel=demo:pubsub&msg=cov-$i" >/dev/null 2>&1 || true
+            curl -sf -m2 "http://127.0.0.1:$PORT/demo/pubsub/publish?channel=demo:pubsub:warm&msg=warm-$i" >/dev/null 2>&1 || true
+            curl -sf -m2 "http://127.0.0.1:$PORT/demo/pubsub/publish-reliable?stream=demo:reliable&msg=rel-$i" >/dev/null 2>&1 || true
+        done
+        sleep 1
+        curl -sf -m2 "http://127.0.0.1:$PORT/demo/pubsub/log" >/dev/null 2>&1 || true
+    else
+        echo "   [redis-pubsub] server failed to start; skipping"
+        tail -8 "$COVDIR/server-redis-pubsub.log"
+    fi
+    kill -TERM "$rps_srv" 2>/dev/null || true
+    for i in $(seq 1 30); do ls "$COVDIR"/server-w0-*.cov 2>/dev/null | grep -q . && break; sleep 0.5; done
+    wait "$rps_srv" 2>/dev/null || true
+    echo "   [redis-pubsub] done"
+else
+    echo "== skip: redis-pubsub (Redis not reachable at $REDIS_URL_PROBE) =="
+fi
+
 echo "== merge =="
 ls -1 "$COVDIR"/*.cov 2>/dev/null | sed 's#.*/#   #'
 php scripts/merge_coverage.php "$COVDIR"

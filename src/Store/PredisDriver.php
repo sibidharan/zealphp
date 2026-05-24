@@ -19,10 +19,23 @@ final class PredisDriver implements RedisDriver
 {
     private PredisClient $c;
 
-    public function __construct(string $url)
+    /**
+     * Construct from EITHER:
+     *  - a `redis://...` URL string (single-node, default path), OR
+     *  - a pre-built `Predis\Client` (for Cluster / Sentinel / advanced
+     *    pre-wired configurations — see `Store::fromPredisClient()`).
+     *
+     * Cluster:   `new PredisClient(['tcp://n1:7000', 'tcp://n2:7000'], ['cluster' => 'redis'])`
+     * Sentinel:  `new PredisClient(['tcp://sentinel1:26379', ...], ['replication' => 'sentinel', 'service' => 'mymaster'])`
+     */
+    public function __construct(string|PredisClient $urlOrClient)
     {
         try {
-            $this->c = new PredisClient($url);
+            if ($urlOrClient instanceof PredisClient) {
+                $this->c = $urlOrClient;
+            } else {
+                $this->c = new PredisClient($urlOrClient);
+            }
             $this->c->connect();
         } catch (PredisException $e) {
             throw new StoreException('predis connect failed: ' . $e->getMessage(), 0, $e);
@@ -197,6 +210,19 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    public function sscanCursor(string $key, string $cursor, int $count): array
+    {
+        try {
+            $cur = (int) $cursor;
+            /** @var mixed $res */
+            $res = $this->c->sscan($key, $cur, ['count' => $count]);
+            [$nextInt, $members] = $this->scanResult($res, 'sscan');
+            $out = [];
+            foreach ($members as $m) { $out[] = $this->asString($m, 'sscan.member'); }
+            return [(string) $nextInt, $out];
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
     public function incrby(string $key, int $by): int
     {
         try {
@@ -238,6 +264,19 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    public function scanCursor(string $match, string $cursor, int $count): array
+    {
+        try {
+            $cur = (int) $cursor;
+            /** @var mixed $res */
+            $res = $this->c->scan($cur, ['match' => $match, 'count' => $count]);
+            [$nextInt, $keys] = $this->scanResult($res, 'scan');
+            $out = [];
+            foreach ($keys as $k) { $out[] = $this->asString($k, 'scan.key'); }
+            return [(string) $nextInt, $out];
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
     public function ping(): bool
     {
         try {
@@ -252,6 +291,167 @@ final class PredisDriver implements RedisDriver
         try { $this->c->disconnect(); } catch (\Throwable $e) { /* tolerant */ }
     }
 
+    public function publish(string $channel, string $payload): int
+    {
+        try {
+            /** @var mixed $r */
+            $r = $this->c->publish($channel, $payload);
+            return $this->asInt($r, 'publish');
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function subscribe(array $exactChannels, array $patternChannels, callable $consumer): void
+    {
+        if ($exactChannels === [] && $patternChannels === []) {
+            throw new StoreException('subscribe(): need at least one channel or pattern');
+        }
+        try {
+            $loop = $this->c->pubSubLoop();
+            if ($loop === null) { throw new StoreException('predis pubSubLoop returned null'); }
+            if ($exactChannels   !== []) { $loop->subscribe(...$exactChannels); }
+            if ($patternChannels !== []) { $loop->psubscribe(...$patternChannels); }
+            foreach ($loop as $frame) {
+                /** @var mixed $frame */
+                if (!is_object($frame) || !property_exists($frame, 'kind')) { continue; }
+                $kind = is_scalar($frame->kind) ? (string) $frame->kind : '';
+                if ($kind !== 'message' && $kind !== 'pmessage') { continue; }
+                $channel = property_exists($frame, 'channel') && is_scalar($frame->channel) ? (string) $frame->channel : '';
+                $payload = property_exists($frame, 'payload') && is_scalar($frame->payload) ? (string) $frame->payload : '';
+                $pattern = null;
+                if ($kind === 'pmessage' && property_exists($frame, 'pattern') && is_scalar($frame->pattern)) {
+                    $pattern = (string) $frame->pattern;
+                }
+                try { $consumer($payload, $channel, $pattern); }
+                catch (PubSubStopException) { $loop->unsubscribe(); return; }
+            }
+        } catch (PubSubStopException) {
+            return;
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function xadd(string $stream, array $fields, ?int $maxLen = null): string
+    {
+        if ($fields === []) {
+            throw new StoreException('xadd(): fields must be non-empty');
+        }
+        try {
+            $cmd = ['XADD', $stream];
+            if ($maxLen !== null) { array_push($cmd, 'MAXLEN', '~', (string) $maxLen); }
+            $cmd[] = '*';
+            foreach ($fields as $k => $v) { $cmd[] = (string) $k; $cmd[] = (string) $v; }
+            /** @var mixed $id */
+            $id = $this->c->executeRaw($cmd);
+            return $this->asString($id, 'xadd');
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function xgroupCreate(string $stream, string $group, string $id = '$', bool $mkStream = true): bool
+    {
+        try {
+            $cmd = ['XGROUP', 'CREATE', $stream, $group, $id];
+            if ($mkStream) { $cmd[] = 'MKSTREAM'; }
+            /** @var mixed $r */
+            $r = $this->c->executeRaw($cmd);
+            // predis executeRaw returns server error responses as STRINGS (not
+            // throwing) — Redis returns "BUSYGROUP ..." when the group already
+            // exists. Detect and surface that as false (idempotent).
+            if (is_string($r) && str_starts_with($r, 'BUSYGROUP')) { return false; }
+            return true;
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function xreadGroup(string $group, string $consumer, array $streams, int $count, int $blockMs): array
+    {
+        if ($streams === []) { return []; }
+        try {
+            $cmd = ['XREADGROUP', 'GROUP', $group, $consumer, 'COUNT', (string) $count, 'BLOCK', (string) $blockMs, 'STREAMS'];
+            foreach ($streams as $s) { $cmd[] = $s; }
+            foreach ($streams as $_) { $cmd[] = '>'; }
+            /** @var mixed $raw */
+            $raw = $this->c->executeRaw($cmd);
+            // raw: null on timeout, otherwise [ [ <stream>, [ [<id>, [<f>,<v>,<f>,<v>...]], ... ] ], ... ]
+            if (!is_array($raw)) { return []; }
+            $out = [];
+            foreach ($raw as $streamBlock) {
+                if (!is_array($streamBlock) || count($streamBlock) < 2) { continue; }
+                $streamName = is_scalar($streamBlock[0]) ? (string) $streamBlock[0] : '';
+                $entries = $streamBlock[1];
+                if (!is_array($entries) || $streamName === '') { continue; }
+                $list = [];
+                foreach ($entries as $entry) {
+                    if (!is_array($entry) || count($entry) < 2) { continue; }
+                    $id = is_scalar($entry[0]) ? (string) $entry[0] : '';
+                    $flat = $entry[1];
+                    if ($id === '' || !is_array($flat)) { continue; }
+                    $payload = [];
+                    $kv = array_values($flat);
+                    for ($i = 0; $i + 1 < count($kv); $i += 2) {
+                        $k = is_scalar($kv[$i])     ? (string) $kv[$i]     : null;
+                        $v = is_scalar($kv[$i + 1]) ? (string) $kv[$i + 1] : null;
+                        if ($k === null || $v === null) { continue; }
+                        $payload[$k] = $v;
+                    }
+                    $list[] = ['id' => $id, 'payload' => $payload];
+                }
+                $out[$streamName] = $list;
+            }
+            return $out;
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function xack(string $stream, string $group, string ...$ids): int
+    {
+        if ($ids === []) { return 0; }
+        try {
+            $cmd = ['XACK', $stream, $group];
+            foreach ($ids as $id) { $cmd[] = $id; }
+            /** @var mixed $r */
+            $r = $this->c->executeRaw($cmd);
+            return $this->asInt($r, 'xack');
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function xautoclaim(
+        string $stream,
+        string $group,
+        string $consumer,
+        int $minIdleMs,
+        string $start = '0-0',
+        int $count = 16,
+    ): array {
+        try {
+            $cmd = ['XAUTOCLAIM', $stream, $group, $consumer, (string) $minIdleMs, $start, 'COUNT', (string) $count];
+            /** @var mixed $raw */
+            $raw = $this->c->executeRaw($cmd);
+            // Redis 7 returns [<next-cursor>, [<entries>], [<deleted-ids>]];
+            // Redis 6 returns [<next-cursor>, [<entries>]]. We just need the
+            // first two elements.
+            if (!is_array($raw) || count($raw) < 2) {
+                return ['0-0', []];
+            }
+            $nextCursor = is_string($raw[0]) ? $raw[0] : '0-0';
+            $entries = $raw[1];
+            if (!is_array($entries)) { return [$nextCursor, []]; }
+            $list = [];
+            foreach ($entries as $entry) {
+                if (!is_array($entry) || count($entry) < 2) { continue; }
+                $id = is_scalar($entry[0]) ? (string) $entry[0] : '';
+                $flat = $entry[1];
+                if ($id === '' || !is_array($flat)) { continue; }
+                $payload = [];
+                $kv = array_values($flat);
+                for ($i = 0; $i + 1 < count($kv); $i += 2) {
+                    $k = is_scalar($kv[$i])     ? (string) $kv[$i]     : null;
+                    $v = is_scalar($kv[$i + 1]) ? (string) $kv[$i + 1] : null;
+                    if ($k === null || $v === null) { continue; }
+                    $payload[$k] = $v;
+                }
+                $list[] = ['id' => $id, 'payload' => $payload];
+            }
+            return [$nextCursor, $list];
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
     public function pipeline(callable $batch): array
     {
         try {
@@ -261,6 +461,92 @@ final class PredisDriver implements RedisDriver
                 throw new StoreException('predis pipeline: expected array, got ' . get_debug_type($r));
             }
             return array_values($r);
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function mhgetall(array $keys): array
+    {
+        if ($keys === []) { return []; }
+        try {
+            // Use the typed executeCommand(CommandInterface) path on the
+            // Pipeline. Predis's __call shortcut isn't visible to PHPStan
+            // (no @method tags on ClientContextInterface), so we construct
+            // RawCommand explicitly — same wire bytes, type-safe.
+            /** @var mixed $r */
+            $r = $this->c->pipeline(function (\Predis\Pipeline\Pipeline $pipe) use ($keys): void {
+                foreach ($keys as $k) {
+                    $pipe->executeCommand(new \Predis\Command\RawCommand('HGETALL', [$k]));
+                }
+            });
+            if (!is_array($r)) { return []; }
+            $out = [];
+            foreach ($r as $i => $row) {
+                $coerced = [];
+                if (is_array($row)) {
+                    // Predis RawCommand('HGETALL') returns the raw multi-bulk
+                    // as a flat indexed array [k0, v0, k1, v1, ...] — predis
+                    // only auto-pairs into assoc form when going through the
+                    // typed hgetall() method, which we can't use here because
+                    // we need pipeline batching. Pair them up ourselves so
+                    // the downstream TypeCodec sees [field => value].
+                    if (array_is_list($row)) {
+                        $n = count($row);
+                        for ($j = 0; $j < $n - 1; $j += 2) {
+                            $f = is_scalar($row[$j])   ? (string) $row[$j]   : '';
+                            $v = is_scalar($row[$j+1]) ? (string) $row[$j+1] : '';
+                            if ($f !== '') { $coerced[$f] = $v; }
+                        }
+                    } else {
+                        // Already-associative (some predis versions / parsers)
+                        foreach ($row as $hk => $hv) {
+                            $coerced[(string) $hk] = is_scalar($hv) ? (string) $hv : '';
+                        }
+                    }
+                }
+                $out[(int) $i] = $coerced;
+            }
+            return $out;
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function mhsetWithMembership(array $writes, ?string $setKey = null, ?int $ttl = null): void
+    {
+        if ($writes === []) { return; }
+        try {
+            $this->c->pipeline(function (\Predis\Pipeline\Pipeline $pipe) use ($writes, $setKey, $ttl): void {
+                $newMembers = [];
+                foreach ($writes as $w) {
+                    // HMSET key field1 value1 field2 value2 ...
+                    $hmsetArgs = [$w['rk']];
+                    foreach ($w['fields'] as $f => $v) {
+                        $hmsetArgs[] = $f;
+                        $hmsetArgs[] = $v;
+                    }
+                    $pipe->executeCommand(new \Predis\Command\RawCommand('HMSET', $hmsetArgs));
+                    if ($ttl !== null && $ttl > 0) {
+                        $pipe->executeCommand(new \Predis\Command\RawCommand('EXPIRE', [$w['rk'], (string) $ttl]));
+                    }
+                    if ($setKey !== null && isset($w['sk'])) {
+                        $newMembers[] = $w['sk'];
+                    }
+                }
+                if ($setKey !== null && $newMembers !== []) {
+                    // SADD key member [member ...]
+                    $pipe->executeCommand(new \Predis\Command\RawCommand('SADD', array_merge([$setKey], $newMembers)));
+                }
+            });
+        } catch (PredisException $e) { throw $this->wrap($e); }
+    }
+
+    public function unlink(string ...$keys): int
+    {
+        if ($keys === []) { return 0; }
+        try {
+            // executeRaw is on the typed Client surface — bypasses __call's
+            // magic that PHPStan can't see.
+            /** @var mixed $r */
+            $r = $this->c->executeRaw(array_merge(['UNLINK'], $keys));
+            return $this->asInt($r, 'unlink');
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 

@@ -59,3 +59,58 @@
   line-height: 1.8;
   color: var(--text-muted);
 }
+
+/* Live demo panel widget — added v0.2.40 alongside /store#demo + /pubsub */
+.store-demo-panel {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border-color, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, rgba(255, 255, 255, 0.02));
+}
+.store-demo-panel h3 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+}
+.store-demo-panel-lead {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+.store-demo-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.store-demo-controls button {
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.75rem;
+}
+.demo-json-pane {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  background: var(--code-bg, #111);
+  color: var(--code-text, #d4d4d4);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 6rem;
+  max-height: 24rem;
+  overflow: auto;
+}
+.demo-json-pane.is-error {
+  color: #f87171;
+  border: 1px solid #b91c1c;
+}
+.store-demo-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+}

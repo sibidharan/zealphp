@@ -4,9 +4,9 @@ use ZealPHP\G;
 use ZealPHP\Store;
 
 Store::make('chat_ratelimit', 512, [
-    'ip'    => [\OpenSwoole\Table::TYPE_STRING, 45],
-    'count' => [\OpenSwoole\Table::TYPE_INT, 4],
-    'reset' => [\OpenSwoole\Table::TYPE_INT, 4],
+    'ip'    => [Store::TYPE_STRING, 45],
+    'count' => [Store::TYPE_INT, 4],
+    'reset' => [Store::TYPE_INT, 4],
 ]);
 
 $app = App::instance();

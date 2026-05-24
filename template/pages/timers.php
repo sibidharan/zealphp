@@ -79,8 +79,8 @@ PHP],
   ['timer-metrics', 'Per-worker metrics via Store', '/timers/metrics',
    <<<'PHP'
 Store::make('worker_metrics', 64, [
-    'pid'      => [\OpenSwoole\Table::TYPE_INT, 4],
-    'ticks'    => [\OpenSwoole\Table::TYPE_INT, 8],
+    'pid'      => [Store::TYPE_INT, 4],
+    'ticks'    => [Store::TYPE_INT, 8],
 ]);
 App::onWorkerStart(function($server, $workerId) use ($tickCounter) {
     $pid = getmypid();

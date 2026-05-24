@@ -337,9 +337,14 @@ $app->route('/api/chat', ['methods' => ['POST']],
 // Each coroutine yields on I/O automatically
 ZEALPHP_WORKERS=16 php app.php
 
-// Store: cross-worker shared state
+// Store: cross-worker shared state (1 process)
 Store::set('cache', $key, $data);
-$data = Store::get('cache', $key);</code></pre>
+$data = Store::get('cache', $key);
+
+// Or flip to cross-NODE in one line
+Store::defaultBackend(Store::BACKEND_REDIS);
+Store::publish('chat:room', $payload);
+App::subscribe('chat:room', $handler);</code></pre>
         </div>
         <div class="code-compare-panel">
           <div class="compare-label">FastAPI — single process limits</div>
@@ -397,7 +402,7 @@ redis_client.set(key, json.dumps(data))</code></pre>
 
     <div class="qs-panel active" data-panel="starter">
       <div class="qs-block">
-        <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project:^0.2.38 my-app</span><button class="qs-copy" data-copy="composer create-project sibidharan/zealphp-project:^0.2.38 my-app">copy</button></div>
+        <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project:^0.2.40 my-app</span><button class="qs-copy" data-copy="composer create-project sibidharan/zealphp-project:^0.2.40 my-app">copy</button></div>
         <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd my-app && php app.php</span><button class="qs-copy" data-copy="cd my-app && php app.php">copy</button></div>
         <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">Server running at <code class="qs-out-code">http://localhost:8080</code></span></div>
       </div>

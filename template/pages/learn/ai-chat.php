@@ -177,7 +177,6 @@ WS::broadcast($u['user_id'], [
     <h3>2. The broadcaster filters by user_id (not room)</h3>
     <p>
       <code>WS::broadcast()</code> is the same shape as
-      <code>ws_tictactoe_broadcast()</code> and
       <code>ws_session_counter_broadcast()</code> from the previous lesson — iterate the per-fd
       <code>Store</code> table, push to every fd whose stored key matches:
     </p>

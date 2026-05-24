@@ -68,8 +68,8 @@ if ($demoCounter === null) {
 
 // Shared demo store
 Store::make('demo_store', 128, [
-    'name'  => [\OpenSwoole\Table::TYPE_STRING, 64],
-    'score' => [\OpenSwoole\Table::TYPE_INT,    8],
+    'name'  => [Store::TYPE_STRING, 64],
+    'score' => [Store::TYPE_INT,    8],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -254,6 +254,84 @@ $app->route('/demo/store-roundtrip', ['methods' => ['GET']], function() {
         'after_del'  => $afterDel,
         'worker_pid' => getmypid(),
     ];
+});
+
+// ---------------------------------------------------------------------------
+// Pub/sub demo — only meaningful with ZEALPHP_STORE_BACKEND=redis (Store::publish
+// throws StoreException on the Table backend). The handler writes received
+// messages into a tiny in-memory log (a Store table) the smoke test reads.
+// ---------------------------------------------------------------------------
+if (Store::defaultBackend() instanceof \ZealPHP\Store\RedisBackend) {
+    Store::make('demo_pubsub_log', 256, [
+        'channel' => [Store::TYPE_STRING, 64],
+        'payload' => [Store::TYPE_STRING, 256],
+        'pattern' => [Store::TYPE_STRING, 64],
+        'ts'      => [Store::TYPE_INT,    8],
+    ]);
+
+    App::subscribe('demo:pubsub', function (string $payload, string $channel, ?string $pattern): void {
+        $id = 'm_' . bin2hex(random_bytes(4));
+        Store::set('demo_pubsub_log', $id, [
+            'channel' => $channel, 'payload' => $payload,
+            'pattern' => $pattern ?? '', 'ts' => time(),
+        ]);
+    });
+    App::subscribe('demo:pubsub:*', function (string $payload, string $channel, ?string $pattern): void {
+        $id = 'm_' . bin2hex(random_bytes(4));
+        Store::set('demo_pubsub_log', $id, [
+            'channel' => $channel, 'payload' => $payload,
+            'pattern' => $pattern ?? '', 'ts' => time(),
+        ]);
+    });
+
+    // Reliable variant — drives the Streams runner (XREADGROUP loop).
+    // Handler returns true → XACK (message removed from pending).
+    App::subscribeReliable('demo:reliable', function (string $payload, string $id, string $stream, array $fields): bool {
+        $rowKey = 'r_' . bin2hex(random_bytes(4));
+        Store::set('demo_pubsub_log', $rowKey, [
+            'channel' => 'stream:' . $stream,
+            'payload' => $payload,
+            'pattern' => $id,
+            'ts'      => time(),
+        ]);
+        return true;
+    });
+}
+
+$app->route('/demo/pubsub/publish', ['methods' => ['GET']], function (\ZealPHP\HTTP\Request $request) {
+    $q = $request->get ?? [];
+    $channel = is_string($q['channel'] ?? null) ? $q['channel'] : 'demo:pubsub';
+    $msg     = is_string($q['msg']     ?? null) ? $q['msg']     : 'hello';
+    try {
+        $receivers = Store::publish($channel, $msg);
+        return ['ok' => true, 'channel' => $channel, 'msg' => $msg, 'receivers' => $receivers];
+    } catch (\ZealPHP\Store\StoreException $e) {
+        return ['ok' => false, 'error' => $e->getMessage()];
+    }
+});
+
+$app->route('/demo/pubsub/publish-reliable', ['methods' => ['GET']], function (\ZealPHP\HTTP\Request $request) {
+    $q = $request->get ?? [];
+    $stream = is_string($q['stream'] ?? null) ? $q['stream'] : 'demo:reliable';
+    $msg    = is_string($q['msg']    ?? null) ? $q['msg']    : 'durable';
+    try {
+        $id = Store::publishReliable($stream, $msg);
+        return ['ok' => true, 'stream' => $stream, 'msg' => $msg, 'message_id' => $id];
+    } catch (\ZealPHP\Store\StoreException $e) {
+        return ['ok' => false, 'error' => $e->getMessage()];
+    }
+});
+
+$app->route('/demo/pubsub/log', ['methods' => ['GET']], function () {
+    if (!(Store::defaultBackend() instanceof \ZealPHP\Store\RedisBackend)) {
+        return ['ok' => false, 'error' => 'demo:pubsub log is only populated when ZEALPHP_STORE_BACKEND=redis'];
+    }
+    $rows = [];
+    foreach (Store::iterate('demo_pubsub_log') as $key => $row) {
+        $rows[] = ['id' => $key] + $row;
+    }
+    usort($rows, fn(array $a, array $b): int => ((int) $a['ts']) <=> ((int) $b['ts']));
+    return ['ok' => true, 'count' => count($rows), 'log' => $rows];
 });
 
 $app->route('/demo/counter/increment', ['methods' => ['GET']], function() use ($demoCounter) {
@@ -566,10 +644,10 @@ $app->route('/demo/view/store/set-get', ['methods' => ['GET']], function() {
             ['heading' => 'How it works', 'body' =>
                 '<pre class="demo-payload">// route/learn.php — boot
 Store::make(\'ws_store_demo_data\', 32, [
-    \'n\'    =&gt; [Table::TYPE_INT,    8],
-    \'name\' =&gt; [Table::TYPE_STRING, 64],
-    \'who\'  =&gt; [Table::TYPE_STRING, 64],
-    \'ts\'   =&gt; [Table::TYPE_INT,    8],
+    \'n\'    =&gt; [Store::TYPE_INT,    8],
+    \'name\' =&gt; [Store::TYPE_STRING, 64],
+    \'who\'  =&gt; [Store::TYPE_STRING, 64],
+    \'ts\'   =&gt; [Store::TYPE_INT,    8],
 ]);
 
 // POST /api/learn/demo/store-write
@@ -852,5 +930,29 @@ $app->route('/demo/view/tictactoe/play', ['methods' => ['GET']], function () {
              'body'    => App::renderToString('/components/_tictactoe_widget', ['user' => $u])],
         ],
         'learn/tictactoe', 'Tic-Tac-Toe'
+    );
+});
+
+$app->route('/demo/view/chatroom/widget', ['methods' => ['GET']], function () {
+    $u = \ZealPHP\Learn\Auth::currentUser();
+    if (!$u) {
+        return demo_render(
+            'Multi-Room Group Chat',
+            'Log in below to chat. Same auth as Notes / Tic-Tac-Toe — one account, all the demos.',
+            [['heading' => '',
+              'body'    => App::renderToString('/components/_demo_login_card', [
+                  'intro' => 'The chat tags each message with your username so the other tabs know who said it. Sign in or create one — the widget loads in place.',
+              ])]],
+            'learn/chatroom', 'Multi-Room Group Chat'
+        );
+    }
+    return demo_render(
+        'Multi-Room Group Chat',
+        'Same <code class="demo-inline">_chatroom_widget</code> partial that renders inline in the <a href="/learn/chatroom">lesson</a>. SQLite-backed history persists across reloads; open in two tabs to chat with yourself. <a href="/learn/chatroom">Read the build</a>.',
+        [
+            ['heading' => '',
+             'body'    => App::renderToString('/components/_chatroom_widget', ['user' => $u])],
+        ],
+        'learn/chatroom', 'Multi-Room Group Chat'
     );
 });
