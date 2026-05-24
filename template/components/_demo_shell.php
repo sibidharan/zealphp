@@ -33,7 +33,7 @@ $titleHtml   = htmlspecialchars($title);
        the same per-page CSS the lessons load. Without this link, widgets
        in /demo/view/* render unstyled. -->
   <link rel="stylesheet" href="/css/pages.css?v=<?= $v ?>">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/monokai.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/stackoverflow-dark.min.css">
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" defer></script>
   <script src="/js/learn-demo-viewers.js?v=<?= $v ?>" defer></script>
