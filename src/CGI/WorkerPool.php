@@ -4,32 +4,55 @@ declare(strict_types=1);
 
 namespace ZealPHP\CGI;
 
+use OpenSwoole\Coroutine;
+use OpenSwoole\Coroutine\Channel;
+
 /**
- * SPIKE — Master-side pool manager for ZealPHP's native FCGI-style worker pool.
+ * Master-side pool manager for ZealPHP's native FCGI-style worker pool.
  *
- * Spawns N persistent PHP subprocesses (via `proc_open`) at construction,
- * dispatches request frames to idle workers via a free-list, auto-respawns
- * any worker that dies (crash, recycle, OOM).
+ * Spawns N persistent PHP subprocesses (via `proc_open`) at construction.
+ * Each subprocess loops on stdin frames — reads a request payload, runs
+ * the requested PHP file in its own clean global scope (mod_php-style
+ * isolation per request), writes a response frame, then yields. Auto-
+ * respawns any subprocess that dies (crash, `exit()`, OOM) or hits the
+ * recycle limit (FPM `pm.max_requests` parity).
  *
- * Goal of the spike: validate sub-5ms per-request latency, prove the
- * auto-respawn loop works, prove a no-side-effect PHP file can be served
- * 1000+ times without leaking workers. NOT integrated into App.php yet —
- * exposed as a standalone API used by tests + bench script.
+ * Concurrency: idle subprocesses live in a `Coroutine\Channel`. Multiple
+ * coroutines on the parent OpenSwoole worker dispatch in parallel — each
+ * `dispatch()` call pops a worker from the channel (yields the coroutine
+ * if the channel is empty), writes the request frame, reads the response
+ * frame (pipe I/O yields under HOOK_ALL), and pushes the worker back to
+ * the channel. The parent worker handles thousands of concurrent dispatch
+ * coroutines while the subprocess pool executes legacy PHP synchronously.
  *
- * Concurrency model in the spike: synchronous dispatch (each call to
- * dispatch() picks a free worker, writes a frame, blocks on the response).
- * The production version will replace the free-list with a
- * Coroutine\Channel so multiple coroutines can dispatch in parallel.
+ * That's the architectural shape: PHP HTTP server (OpenSwoole worker) +
+ * FPM-style isolation (subprocess pool) + async dispatch (coroutines).
+ *
+ * Outside a coroutine context (tests, CLI tools), `dispatch()` falls back
+ * to a synchronous LIFO array — the same code path the spike used. This
+ * makes the test surface trivial: `new WorkerPool() → $pool->dispatch()`
+ * works without wrapping in `Co::run()`.
  */
 final class WorkerPool
 {
     /** @var list<array{proc: resource, stdin: resource, stdout: resource, stderr: resource, pid: int, served: int}> */
     private array $workers = [];
 
-    /** @var list<int> Indices into $workers that are currently idle. */
-    private array $idle = [];
+    /**
+     * Coroutine idle queue. Created lazily — Channel push REQUIRES coroutine
+     * context, so we can't populate it at constructor time (parent worker
+     * boot is typically non-coroutine). First dispatch in a coroutine
+     * transfers the sync queue into the channel; from then on, all idle/busy
+     * transitions go through the channel for proper parallel-dispatch yield.
+     */
+    private ?Channel $idleChan = null;
 
+    /** @var list<int> Idle worker indices — primary queue at boot + the fallback when no coroutine context. */
+    private array $idleSync = [];
+
+    private bool $channelPopulated = false;
     private bool $closed = false;
+    private readonly int $size;
 
     public function __construct(
         int $size = 4,
@@ -39,27 +62,42 @@ final class WorkerPool
         if ($size < 1) {
             throw new \InvalidArgumentException('WorkerPool size must be >= 1');
         }
+        $this->size = $size;
+
         for ($i = 0; $i < $size; $i++) {
             $this->workers[] = $this->spawn();
-            $this->idle[]   = $i;
+            $this->idleSync[] = $i;
         }
     }
 
     /**
      * Dispatch one request to an idle worker and return the response frame.
+     * Coroutine-aware: yields if all workers are busy until one frees up.
      *
-     * @param array<mixed,mixed> $request The frame payload (file, server, get,
+     * @param array<mixed,mixed> $request Frame payload (file, server, get,
      *                                    post, cookies, files, body).
-     * @return array<string,mixed>        The response frame
-     *                                    (status, headers, cookies, body, return_value).
+     * @param float              $timeout Max seconds to wait for an idle
+     *                                    worker before returning 503.
+     * @return array<string,mixed>        Response (status, headers, cookies,
+     *                                    body, return_value).
      */
-    public function dispatch(array $request): array
+    public function dispatch(array $request, float $timeout = 30.0): array
     {
         if ($this->closed) {
             throw new \RuntimeException('WorkerPool: already closed');
         }
-        $idx = $this->pickIdleWorker();
-        $w   = $this->workers[$idx];
+
+        $idx = $this->popIdleWorker($timeout);
+        if ($idx === null) {
+            return [
+                'status'  => 503,
+                'body'    => 'WorkerPool: all subprocesses busy (timeout after ' . $timeout . 's)',
+                'headers' => [],
+                'cookies' => [],
+            ];
+        }
+
+        $w = $this->workers[$idx];
 
         IPC::writeFrame($w['stdin'], $request);
         $resp = IPC::readFrame($w['stdout']);
@@ -67,24 +105,26 @@ final class WorkerPool
         $this->workers[$idx]['served']++;
         $served = $this->workers[$idx]['served'];
 
-        // If the worker died mid-request OR hit the recycle limit, respawn it.
+        // Respawn if the subprocess died mid-request, hit the recycle
+        // limit, or the OS reports it's no longer running (proc_get_status
+        // ['running' => false]). FPM-equivalent recovery semantics.
         if ($resp === null || $served >= $this->maxRequestsPerWorker || !$this->isAlive($w)) {
             $this->respawn($idx);
         } else {
-            $this->idle[] = $idx; // return to free-list
+            $this->returnToIdle($idx);
         }
 
         if ($resp === null) {
             return [
                 'status'  => 500,
-                'body'    => 'WorkerPool: worker died mid-request — response not received',
+                'body'    => 'WorkerPool: subprocess died mid-request — response not received',
                 'headers' => [],
                 'cookies' => [],
             ];
         }
 
-        // Force-key by string for the strict return type; IPC::readFrame
-        // returns array<mixed,mixed> so PHPStan needs an explicit narrowing.
+        // Force-narrow to array<string,mixed> for the strict return type;
+        // IPC::readFrame returns array<mixed,mixed>.
         $out = [];
         foreach ($resp as $k => $v) {
             if (is_string($k)) {
@@ -101,7 +141,7 @@ final class WorkerPool
     }
 
     /**
-     * Returns the per-worker `served` counter (for tests / observability).
+     * Per-worker `served` counter (for tests / observability / /healthz).
      *
      * @return list<int>
      */
@@ -118,13 +158,17 @@ final class WorkerPool
         }
         $this->closed = true;
         foreach ($this->workers as $w) {
-            @fclose($w['stdin']);  // signal EOF → worker exits its loop
+            @fclose($w['stdin']);   // signal EOF → subprocess exits its loop
             @fclose($w['stdout']);
             @fclose($w['stderr']);
             @proc_close($w['proc']);
         }
-        $this->workers = [];
-        $this->idle    = [];
+        $this->workers  = [];
+        $this->idleSync = [];
+        if ($this->idleChan !== null) {
+            $this->idleChan->close();
+            $this->idleChan = null;
+        }
     }
 
     public function __destruct()
@@ -135,17 +179,63 @@ final class WorkerPool
     // -------------------------------------------------------------------
     // Internals
 
-    /** Pick an idle worker index. Spike: simple LIFO, blocks if all busy. */
-    private function pickIdleWorker(): int
+    /**
+     * Pop an idle worker index. In a coroutine, lazy-promotes the queue to
+     * a Coroutine\Channel (first call) and yields on it until a worker is
+     * freed or the timeout expires. Outside a coroutine, uses the
+     * synchronous LIFO — no yield, returns null if empty.
+     */
+    private function popIdleWorker(float $timeout): ?int
     {
-        // In the synchronous spike, all workers MUST be idle when we get here
-        // (caller dispatches one-at-a-time). If not, dispatch synchronously
-        // by reusing worker 0 — production version uses Coroutine\Channel.
-        if (count($this->idle) === 0) {
-            return 0;
+        if (Coroutine::getCid() > 0 && class_exists(Channel::class, false)) {
+            $this->ensureChannelPopulated();
+            if ($this->idleChan !== null) {
+                /** @var int|false $popped */
+                $popped = $this->idleChan->pop($timeout);
+                return $popped === false ? null : (int) $popped;
+            }
         }
+        return count($this->idleSync) > 0 ? (int) array_pop($this->idleSync) : null;
+    }
 
-        return array_pop($this->idle);
+    /**
+     * Return a worker to the idle pool. Routes to the channel (in coroutine
+     * context, once promoted) so any coroutine waiting on `pop` wakes up;
+     * otherwise pushes to the sync LIFO.
+     */
+    private function returnToIdle(int $idx): void
+    {
+        if ($this->closed) {
+            return;
+        }
+        if ($this->idleChan !== null && Coroutine::getCid() > 0) {
+            // Push with a small timeout — channel is sized to N, can never
+            // be full beyond the pool size, so this never blocks meaningfully.
+            $this->idleChan->push($idx, 0.001);
+            return;
+        }
+        $this->idleSync[] = $idx;
+    }
+
+    /**
+     * One-time promotion of the sync idle queue into a Coroutine\Channel.
+     * Runs on the first dispatch inside a coroutine context, where push is
+     * legal. After this, the sync queue is empty and the channel owns
+     * idle-worker tracking for all subsequent dispatches.
+     */
+    private function ensureChannelPopulated(): void
+    {
+        if ($this->channelPopulated) {
+            return;
+        }
+        if ($this->idleChan === null) {
+            $this->idleChan = new Channel($this->size);
+        }
+        foreach ($this->idleSync as $i) {
+            $this->idleChan->push($i, 0.001);
+        }
+        $this->idleSync         = [];
+        $this->channelPopulated = true;
     }
 
     /**
@@ -180,15 +270,15 @@ final class WorkerPool
             throw new \RuntimeException('WorkerPool: proc_open failed for ' . $entry);
         }
 
-        // Wait for the READY signal on stderr — bounds boot time so callers
-        // don't dispatch into a worker that hasn't loaded its autoloader yet.
+        // Bounded wait for READY signal on stderr — guarantees the
+        // subprocess has loaded its autoloader + uopz overrides before we
+        // dispatch the first frame.
         $ready = fgets($pipes[2]);
         if ($ready === false || !str_contains($ready, 'READY')) {
-            // Worker died during boot — capture diagnostics and bail.
             $more = stream_get_contents($pipes[2]) ?: '';
             proc_terminate($proc);
             @proc_close($proc);
-            throw new \RuntimeException("WorkerPool: worker boot failed: " . trim((string) $ready . $more));
+            throw new \RuntimeException("WorkerPool: subprocess boot failed: " . trim((string) $ready . $more));
         }
 
         $pid = proc_get_status($proc)['pid'];
@@ -212,6 +302,6 @@ final class WorkerPool
         @proc_close($old['proc']);
 
         $this->workers[$idx] = $this->spawn();
-        $this->idle[]       = $idx;
+        $this->returnToIdle($idx);
     }
 }
