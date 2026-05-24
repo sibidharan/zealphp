@@ -170,13 +170,31 @@ PHP]); ?>
 </tr>
 <tr>
   <td><strong>cgiMode('proc')</strong><br><small>fresh <code>proc_open</code> per request</small></td>
-  <td>~30-50 req/s per worker<sup>*</sup></td>
-  <td>~30-50 ms cold spawn</td>
-  <td><sup>*</sup>Not measured here — published cost from prior benches. Cold-start overhead dominates; useful only for occasional dev / one-off scripts.</td>
+  <td>49 req/s</td>
+  <td>20.2 ms avg<br>p50 19.4 ms · p99 30.8 ms</td>
+  <td><code>scripts/bench-fcgi-proc.php</code> — same fixture as pool bench, single caller, 200 iter. Cold PHP startup dominates the 19.4 ms — each request pays the full interpreter spin-up cost.</td>
+</tr>
+<tr>
+  <td><strong>pool / proc speedup</strong></td>
+  <td colspan="3"><strong>~224× faster</strong> (10,983 / 49). This is the v0.2.41 default-flip justification.</td>
 </tr>
 </table>
 
-<p><strong>Reading the numbers</strong>: the pool itself adds ~90 microseconds of dispatch overhead per request (p50 = 28 μs, p99 = 47 μs). That overhead vanishes inside any non-trivial PHP file — by the time WordPress's autoloader has run, the ~90 μs IPC cost is invisible. The headline difference vs <code>cgiMode('proc')</code> is the 300-500× gap from skipping the cold PHP startup.</p>
+<p><strong>Reading the numbers</strong>: the pool itself adds ~90 microseconds of dispatch overhead per request (p50 = 28 μs, p99 = 47 μs). That overhead vanishes inside any non-trivial PHP file — by the time WordPress's autoloader has run, the ~90 μs IPC cost is invisible. The headline difference vs <code>cgiMode('proc')</code> is the <strong>~224× speedup</strong> from skipping the cold PHP startup on every request (proc pays 19.4 ms p50 vs pool's 0.028 ms p50 on the same fixture).</p>
+
+<p>Reproduce locally:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Measure pool vs proc on your own box',
+    'code'  => <<<'BASH'
+# Pool — warm FPM-style subprocesses, IPC-only dispatch
+php scripts/bench-fcgi-pool.php 1000 4 500
+
+# Proc — fresh proc_open per request, full PHP cold-start
+php scripts/bench-fcgi-proc.php 200
+
+# Same fixture (`echo "ok";`) for both → direct comparison.
+BASH]); ?>
 
 <p><strong>vs PHP-FPM</strong>: same semantic model (warm subprocess pool, recycled after N requests), so per-request cost should be in the same ballpark as your FPM pool. We haven't run an apples-to-apples bench against a real FPM install on the same box yet — <a href="/vs-fpm">/vs-fpm</a> covers the measurement story. The honest claim is "FPM-equivalent semantics + ZealPHP-managed (one less daemon to install)."</p>
 
