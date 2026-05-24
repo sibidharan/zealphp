@@ -125,8 +125,8 @@ PHP]); ?>
 </tr>
 <tr>
   <td><code>App::include()</code><br><small>(was <code>App::includeFile()</code> — deprecated alias)</small></td>
-  <td>Runs a PHP file from <code>public/</code> through the framework. In superglobals mode, dispatches through the CGI worker for true global-scope isolation; in coroutine mode, runs in-process. Either way, the file's return value flows through the <a href="/responses#return-contract">universal return contract</a>.</td>
-  <td>mod_prefork MPM + CGI</td>
+  <td>Runs a PHP file from <code>public/</code> through the framework. With <code>processIsolation(true)</code>, dispatches through the <code>cgiMode()</code> backend (default <code>'pool'</code> — warm FPM-style worker pool; see <a href="#pool-buys">below</a> for measured cost); with <code>processIsolation(false)</code>, runs in-process via <code>executeFile()</code>. Either way, the file's return value flows through the <a href="/responses#return-contract">universal return contract</a>.</td>
+  <td>mod_prefork MPM + CGI / PHP-FPM</td>
 </tr>
 <tr>
   <td>Auto-<code>$_SERVER</code> preamble</td>
@@ -149,6 +149,83 @@ $app = App::init('0.0.0.0', 8080);
 $app->run(['task_worker_num' => 0]);
 // PHP files in public/ are served automatically with process isolation
 PHP]); ?>
+
+<h2 id="pool-buys" class="legacy-mt-xl">What <code>cgiMode('pool')</code> buys you — measured</h2>
+
+<p><code>cgiMode('pool')</code> is the default since v0.2.41 — the FPM-style warm worker pool. The numbers below are measured on this machine (Ryzen 9 7900X, OpenSwoole 26.2, PHP 8.3) so you can compare them directly to the bench results elsewhere in the docs.</p>
+
+<table class="ztable legacy-mb">
+<tr><th>Path</th><th>Throughput</th><th>Per-request latency</th><th>What we measured</th></tr>
+<tr>
+  <td><strong>Coroutine mode</strong><br><small>HTTP /json route, no CGI dispatch</small></td>
+  <td>13,210 req/s</td>
+  <td>0.76 ms (mean)</td>
+  <td>Full HTTP stack: middleware + route handler + JSON encode. <code>ab -n 500 -c 10</code> against the live demo server. This is the "modern route" baseline.</td>
+</tr>
+<tr>
+  <td><strong>cgiMode('pool') direct</strong><br><small>4 workers, fixture <code>echo "ok";</code></small></td>
+  <td>10,983 req/s</td>
+  <td>0.091 ms avg<br>p50 0.028 ms · p99 0.047 ms</td>
+  <td><code>scripts/bench-fcgi-pool.php</code> — drives <code>WorkerPool::dispatch()</code> directly with 1000 requests, no HTTP overhead. Measures pure pool round-trip cost (write frame to stdin, subprocess executes, read response).</td>
+</tr>
+<tr>
+  <td><strong>cgiMode('proc')</strong><br><small>fresh <code>proc_open</code> per request</small></td>
+  <td>~30-50 req/s per worker<sup>*</sup></td>
+  <td>~30-50 ms cold spawn</td>
+  <td><sup>*</sup>Not measured here — published cost from prior benches. Cold-start overhead dominates; useful only for occasional dev / one-off scripts.</td>
+</tr>
+</table>
+
+<p><strong>Reading the numbers</strong>: the pool itself adds ~90 microseconds of dispatch overhead per request (p50 = 28 μs, p99 = 47 μs). That overhead vanishes inside any non-trivial PHP file — by the time WordPress's autoloader has run, the ~90 μs IPC cost is invisible. The headline difference vs <code>cgiMode('proc')</code> is the 300-500× gap from skipping the cold PHP startup.</p>
+
+<p><strong>vs PHP-FPM</strong>: same semantic model (warm subprocess pool, recycled after N requests), so per-request cost should be in the same ballpark as your FPM pool. We haven't run an apples-to-apples bench against a real FPM install on the same box yet — <a href="/vs-fpm">/vs-fpm</a> covers the measurement story. The honest claim is "FPM-equivalent semantics + ZealPHP-managed (one less daemon to install)."</p>
+
+<h3 class="legacy-mt-md">What you actually get from pool mode (beyond the bench numbers)</h3>
+
+<ul>
+  <li><strong>True global-scope isolation per request.</strong> Each pool subprocess is a fresh exec'd PHP process (NOT a fork of the HTTP worker), so it doesn't inherit ZealPHP's autoloader, classes, or memory. <code>define()</code>-heavy plugins, classes that re-declare in plugin updates, function tables that grow per request — none of it leaks.</li>
+  <li><strong>FPM-style recycling.</strong> <code>cgiPoolMaxRequests(N)</code> (default 500) makes each pool worker exit cleanly after N requests; the parent respawns it. Defense against slow memory leaks in user PHP that would otherwise compound over millions of requests.</li>
+  <li><strong>Per-HTTP-worker private pools.</strong> No global IPC bottleneck — each OpenSwoole HTTP worker owns its own <code>cgiPoolSize</code> subprocesses with a <code>Coroutine\Channel</code> queue. Scales with worker count.</li>
+  <li><strong>Real <code>$_GET</code> / <code>$_POST</code> / <code>$_SERVER</code> / <code>$_COOKIE</code> inside the subprocess.</strong> Pinned by 5 unit tests in <code>tests/Unit/CGI/CgiPoolDispatchTest.php</code> (testPostSuperglobalReachesSubprocess, etc.).</li>
+  <li><strong>Auto-respawn on crash.</strong> <code>proc_get_status</code> polled before each dispatch; dead workers are replaced transparently.</li>
+</ul>
+
+<h3 id="hybrid-with-coroutines" class="legacy-mt-md">The hybrid: parent runs coroutines, public/*.php gets isolation</h3>
+
+<p>The mode-table on the <a href="/coroutines#lifecycle-modes">coroutines page</a> documents this as <strong>Mode 6 — Coroutine + Process Isolation</strong>. It's the "best of both worlds" combo you can opt into when you want the modern app to be concurrent AND have occasional legacy isolated PHP:</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'Mode 6 — coroutines at the parent, isolated subprocess per public/*.php',
+    'code'  => <<<'PHP'
+<?php
+require 'vendor/autoload.php';
+use ZealPHP\App;
+
+// Modern app — per-coroutine $g in the parent worker (no race)
+App::superglobals(false);
+
+// public/*.php → CGI pool subprocess (true global-scope isolation per request)
+App::processIsolation(true);
+
+// Parent runs coroutines. With HOOK_ALL, the pipe read inside cgiPool
+// YIELDS while the subprocess executes — other coroutines run in parallel.
+// Both default to null → resolve to !sg → these values. Explicit for clarity:
+App::enableCoroutine(true);
+App::hookAll(\OpenSwoole\Runtime::HOOK_ALL);
+
+// cgiMode('pool') is the default since v0.2.41. Tune pool size to your needs:
+App::cgiPoolSize(8);            // 8 isolated PHP subprocesses per HTTP worker
+App::cgiPoolMaxRequests(1000);  // recycle after 1000 requests (FPM parity)
+
+$app = App::init('0.0.0.0', 8080);
+$app->run();
+
+// Route handlers in route/*.php run at full coroutine speed.
+// public/wp-login.php dispatches to the isolated pool.
+// Parent yields on the pipe read → multiple coroutines dispatch in parallel.
+PHP]); ?>
+
+<p>The validator at <code>App::run()</code> would refuse <code>superglobals(true) + enableCoroutine(true)</code> (the race shape) — but with <code>sg=false</code>, both throws are unreachable. Mode 6 is fully supported and pinned by <code>tests/Unit/LifecycleModesMatrixTest.php#testMode6CoroutineIsolatedHybrid</code>.</p>
 
 <h2 id="dual-runtime" class="legacy-mt-xl">Dual-runtime — one codebase, Apache AND ZealPHP at once</h2>
 
