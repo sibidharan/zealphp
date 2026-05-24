@@ -25,8 +25,8 @@ set -euo pipefail
 #                  processIsolation(false) + enableCoroutine(false) — the
 #                  apples-to-apples PHP-FPM-equivalent execution model)
 #   FPM_URL        unset → skipped
-#   FORK_CGI_URL   unset → skipped (App::cgiMode('fork') instance)
-#   LEGACY_CGI_URL unset → skipped (App::cgiMode('proc') instance)
+#   POOL_URL       unset → skipped (App::cgiMode('pool') instance — DEFAULT)
+#   LEGACY_CGI_URL unset → skipped (App::cgiMode('proc') instance — legacy fallback)
 #
 
 CONCURRENCY="${CONCURRENCY:-200}"
@@ -34,7 +34,7 @@ REQUESTS="${REQUESTS:-50000}"
 ZEAL_URL="${ZEAL_URL:-http://127.0.0.1:8080/json}"
 MIXED_URL="${MIXED_URL:-}"
 FPM_URL="${FPM_URL:-}"
-FORK_CGI_URL="${FORK_CGI_URL:-}"
+POOL_URL="${POOL_URL:-}"
 LEGACY_CGI_URL="${LEGACY_CGI_URL:-}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -114,23 +114,24 @@ else
     echo ""
 fi
 
-# --- 4. ZealPHP fork CGI bridge (App::cgiMode('fork')) -------------------
-if [ -n "$FORK_CGI_URL" ]; then
-    if [ "$(probe "$FORK_CGI_URL")" = "200" ]; then
-        run_ab "ZealPHP fork CGI bridge — cgiMode('fork')" "$FORK_CGI_URL"
+# --- 4. ZealPHP pool CGI bridge (App::cgiMode('pool'), the DEFAULT) ------
+if [ -n "$POOL_URL" ]; then
+    if [ "$(probe "$POOL_URL")" = "200" ]; then
+        run_ab "ZealPHP pool CGI bridge — cgiMode('pool')" "$POOL_URL"
     else
-        echo "── ZealPHP fork CGI bridge — cgiMode('fork')"
-        echo "   SKIPPED — $FORK_CGI_URL is not responding 200."
+        echo "── ZealPHP pool CGI bridge — cgiMode('pool')"
+        echo "   SKIPPED — $POOL_URL is not responding 200."
         echo ""
     fi
 else
-    echo "── ZealPHP fork CGI bridge — cgiMode('fork')"
-    echo "   SKIPPED — set FORK_CGI_URL to enable. Start a ZealPHP instance with"
-    echo "   App::superglobals(true) + App::processIsolation(true) + App::cgiMode('fork')."
+    echo "── ZealPHP pool CGI bridge — cgiMode('pool')"
+    echo "   SKIPPED — set POOL_URL to enable. Start a ZealPHP instance with"
+    echo "   App::superglobals(true) + App::processIsolation(true). 'pool' is now"
+    echo "   the default cgiMode, so no explicit App::cgiMode('pool') is required."
     echo ""
 fi
 
-# --- 5. ZealPHP legacy CGI bridge (App::cgiMode('proc'), default) --------
+# --- 5. ZealPHP legacy CGI bridge (App::cgiMode('proc'), legacy fallback) -
 if [ -n "$LEGACY_CGI_URL" ]; then
     if [ "$(probe "$LEGACY_CGI_URL")" = "200" ]; then
         run_ab "ZealPHP legacy CGI bridge — cgiMode('proc')" "$LEGACY_CGI_URL"
@@ -149,9 +150,11 @@ fi
 echo "==========================================================="
 echo "Expected shape (NOT a promise — depends on hardware):"
 echo "  coroutine     ≫ FPM (no FCGI hop, in-process routing)"
-echo "  FPM           > legacy CGI bridge (FPM keeps workers warm)"
+echo "  pool          ≈ FPM (warm subprocesses, FPM-equivalent semantics)"
+echo "  FPM           > legacy CGI (proc) bridge (FPM keeps workers warm)"
 echo "  legacy CGI    ≈ ~30–50 ms per request (proc_open fresh PHP)"
 echo ""
 echo "If your numbers don't match, check: opcache enabled? FPM"
 echo "pm.max_children? workers vs. cores? keep-alive on the load gen?"
+echo "App::cgiPoolSize() set to match your worker count?"
 echo "==========================================================="
