@@ -1,0 +1,72 @@
+ZLOG-6a12c82217079
+[*] #info [2026-05-24 09:42:58] Request ID: 
+    URL: /zlog/test
+    Caller: /var/labsstorage/home/sibidharan/zealphp/tests/Unit/UtilsLoggingTest.php:214
+    Timer: 4.0E-5 sec
+    Message:
+    zlog-info-6a12c822173cf
+
+[*] #debug [2026-05-24 09:42:58] Request ID: 
+    URL: /zlog/array
+    Caller: /var/labsstorage/home/sibidharan/zealphp/tests/Unit/UtilsLoggingTest.php:228
+    Timer: 3.0E-5 sec
+    Message:
+    {"k":"v6a12c82217477","n":5}
+
+[*] #info [2026-05-24 09:42:58] Request ID: 
+    URL: /match/here/now
+    Caller: /var/labsstorage/home/sibidharan/zealphp/tests/Unit/UtilsLoggingTest.php:264
+    Timer: 3.0E-5 sec
+    Message:
+    filter-hit-6a12c82217604
+
+[*] #debug [2026-05-24 09:42:58] Request ID: 
+    URL: /zlog/object
+    Caller: /var/labsstorage/home/sibidharan/zealphp/tests/Unit/UtilsLoggingTest.php:291
+    Timer: 4.0E-5 sec
+    Message:
+    {"field":"objval-6a12c8221771e"}
+
+[*] #info [2026-05-24 09:42:58] Request ID: 
+    URL: cli
+    Caller: /var/labsstorage/home/sibidharan/zealphp/tests/Unit/UtilsLoggingTest.php:307
+    Timer: 3.0E-5 sec
+    Message:
+    cli-uri-6a12c822177bb
+
+ZLOG-6a12c852ce1f9
+[*] #info [2026-05-24 09:43:46] Request ID: 
+    URL: /zlog/test
+    Caller: /var/labsstorage/home/sibidharan/zealphp/tests/Unit/UtilsLoggingTest.php:214
+    Timer: 4.0E-5 sec
+    Message:
+    zlog-info-6a12c852ce506
+
+[*] #debug [2026-05-24 09:43:46] Request ID: 
+    URL: /zlog/array
+    Caller: /var/labsstorage/home/sibidharan/zealphp/tests/Unit/UtilsLoggingTest.php:228
+    Timer: 3.0E-5 sec
+    Message:
+    {"k":"v6a12c852ce5aa","n":5}
+
+[*] #info [2026-05-24 09:43:46] Request ID: 
+    URL: /match/here/now
+    Caller: /var/labsstorage/home/sibidharan/zealphp/tests/Unit/UtilsLoggingTest.php:264
+    Timer: 3.0E-5 sec
+    Message:
+    filter-hit-6a12c852ce73d
+
+[*] #debug [2026-05-24 09:43:46] Request ID: 
+    URL: /zlog/object
+    Caller: /var/labsstorage/home/sibidharan/zealphp/tests/Unit/UtilsLoggingTest.php:291
+    Timer: 4.0E-5 sec
+    Message:
+    {"field":"objval-6a12c852ce854"}
+
+[*] #info [2026-05-24 09:43:46] Request ID: 
+    URL: cli
+    Caller: /var/labsstorage/home/sibidharan/zealphp/tests/Unit/UtilsLoggingTest.php:307
+    Timer: 3.0E-5 sec
+    Message:
+    cli-uri-6a12c852ce8f9
+

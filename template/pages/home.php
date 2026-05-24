@@ -73,7 +73,7 @@ $siteUrl = site_url();
       Apache + mod_php, nginx + PHP-FPM &mdash; the HTTP server is always a C binary that bridges to
       a PHP process via FastCGI. PHP runs the request, then exits the request context. PHP is the
       <em>language</em>, never the <em>server</em>. That model gave us shared-nothing isolation,
-      cheap workers, and 77% of the web. It also gave us "PHP can't do WebSockets" and a separate
+      cheap workers, and ~71% of the web (per <a href="https://w3techs.com/technologies/details/pl-php" target="_blank" rel="noopener">W3Techs</a>). It also gave us "PHP can't do WebSockets" and a separate
       Node service for every streaming feature.
     </p>
     <p class="section-desc section-problem-payoff">
@@ -91,7 +91,7 @@ $siteUrl = site_url();
 <section class="section section-darkbg">
   <div class="container">
     <h2 class="section-title">Try it — live AI chat, streaming on this server</h2>
-    <p class="section-desc">Powered by the <strong>OpenAI Agents SDK</strong> + ZealPHP SSE streaming. Multi-agent with tool use, streamed token-by-token.</p>
+    <p class="section-desc">Wired for the <strong>OpenAI Agents SDK</strong> &mdash; an agent with tool use, streamed token-by-token over ZealPHP SSE. The live demo runs in <em>demo-fallback</em> mode when no API key is configured (check <a href="/api/chat/status">/api/chat/status</a>); the production deploy flips <code>OPENAI_API_KEY</code> and the same code path streams real model tokens.</p>
     <div class="chat-widget">
       <div class="chat-header">
         <span>ZealPHP AI Chat Demo</span>
