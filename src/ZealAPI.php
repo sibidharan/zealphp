@@ -400,12 +400,25 @@ class ZealAPI extends REST
         throw new \BadMethodCallException("ZealAPI: undefined method \$this->{$method}()");
     }
 
-    public function resolveClubParam()
+    /**
+     * Resolve the canonical "club" identifier from the current request,
+     * accepting either `club` (the new name) or `group` (the legacy alias
+     * still used by older client code). Returns whatever the request
+     * payload carries — typically a string id — or null when neither key
+     * is present.
+     */
+    public function resolveClubParam(): mixed
     {
-        return $this->_request['club'] ?? $this->_request['group'] ?? null;
+        $req = is_array($this->_request) ? $this->_request : [];
+        return $req['club'] ?? $req['group'] ?? null;
     }
 
-    public function failAs(\Throwable $e)
+    /**
+     * Shorthand for emitting a 400 JSON error from a caught Throwable.
+     * Mirrors the `{"error": "<message>"}` envelope every other ZealAPI
+     * error path uses, so client code can rely on one error shape.
+     */
+    public function failAs(\Throwable $e): void
     {
         $this->response($this->json(["error" => $e->getMessage()]), 400);
     }
