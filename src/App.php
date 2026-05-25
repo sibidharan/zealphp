@@ -4061,6 +4061,131 @@ class App
     }
 
     /**
+     * Prepare the host->CGI session handoff (issue #108).
+     *
+     * In superglobals(true) + processIsolation(true) mode the host's
+     * SessionManager opens a session at request start. If we then dispatch
+     * to a CGI subprocess that ALSO opens a session, two distinct write
+     * paths race the same file: the subprocess flushes its $_SESSION on
+     * exit, and the host then runs its own session_write_close() in the
+     * SessionManager `finally`, overwriting the subprocess's writes with
+     * stale in-memory state. Additionally, the host and the subprocess
+     * generate INDEPENDENT session ids on a first visit — the host sends
+     * its id back via Set-Cookie, but the subprocess wrote to its own
+     * unrelated file, so the next request reads an empty session.
+     *
+     * This helper closes both gaps:
+     *   - Flushes the host's $_SESSION to disk via session_write_close()
+     *     so the subprocess reads the same authoritative state the host
+     *     has in memory.
+     *   - Returns the host's session id so the caller can inject it into
+     *     the subprocess cookie env, guaranteeing the subprocess
+     *     read/writes the SAME file the host's Set-Cookie pointed the
+     *     client at.
+     *   - Marks `$g->_cgi_session_handoff = true` so SessionManager's
+     *     finally block skips its own session_write_close — the
+     *     subprocess now owns this session's lifecycle.
+     *
+     * Returns null when no handoff is needed (coroutine mode, session not
+     * started, sessionLifecycle disabled). Safe to call repeatedly within
+     * one request — the second call sees session_status() inactive and
+     * returns the captured id without re-closing.
+     */
+    /**
+     * Mint and propagate a session id on behalf of a CGI subprocess request
+     * (issue #108).
+     *
+     * In `cgiOwnsSessions()` mode the host's SessionManager is bypassed, so
+     * NOTHING on the host side emits a Set-Cookie for first-time visitors.
+     * The subprocess can't emit one either: PHP's session module sends the
+     * session cookie through its internal `php_setcookie()` C function, NOT
+     * the userspace `setcookie()` — uopz can't intercept that path, and CLI
+     * SAPI silently discards the buffered SAPI headers. Result: every first
+     * visit gets a freshly generated SID inside the subprocess and zero
+     * Set-Cookie on the wire, so the next request has no PHPSESSID to send
+     * and the cycle repeats forever ("Value: EMPTY" loop).
+     *
+     * This helper closes that gap. When called from a CGI dispatcher:
+     *   - If the request already has a PHPSESSID cookie, return it (no-op).
+     *   - Otherwise mint a fresh id via `session_create_id()`, stash it in
+     *     `$g->cookie[session_name]` so the subprocess sees it in $_COOKIE,
+     *     AND emit `Set-Cookie` on the outbound response so the client uses
+     *     the same id on the next request.
+     *
+     * `session_create_id()` is safe to call without an active session in
+     * PHP 7.1+ — it just returns a fresh random string in the configured
+     * session.sid_bits_per_character format.
+     *
+     * Returns null when the host is NOT in `cgiOwnsSessions()` mode — host
+     * SessionManager already owns cookie emission there.
+     */
+    private static function mintCgiSession(\ZealPHP\RequestContext $g): ?string
+    {
+        if (!self::cgiOwnsSessions()) {
+            return null;
+        }
+        $name = 'PHPSESSID';
+        if (function_exists('session_name')) {
+            $candidate = \session_name();
+            if (is_string($candidate)) {
+                $name = $candidate;
+            }
+        }
+        $existing = $g->cookie[$name] ?? null;
+        if (is_string($existing) && $existing !== '') {
+            return $existing;
+        }
+        if (!function_exists('session_create_id')) {
+            return null;
+        }
+        $sid = \session_create_id();
+        if (!is_string($sid) || $sid === '') {
+            return null;
+        }
+        $g->cookie[$name] = $sid;
+        if ($g->openswoole_response !== null && $g->openswoole_response->isWritable()) {
+            $g->openswoole_response->cookie(
+                $name,
+                $sid,
+                0,        // session cookie (no expiry)
+                '/',
+                '',
+                false,
+                true      // httponly
+            );
+        }
+        return $sid;
+    }
+
+    /**
+     * True when the CGI subprocess is the sole owner of the per-request
+     * session lifecycle — `superglobals(true)` + `processIsolation(true)`.
+     *
+     * Issue #108 — when both the host (SessionManager) AND the subprocess
+     * (native PHP session_start in cgi_worker / pool_worker) drive session
+     * I/O on the same file, the host's `session_write_close()` in the
+     * `finally` block races the subprocess's exit-time flush. The host's
+     * stale in-memory $_SESSION wins and overwrites everything the
+     * subprocess wrote. The fix is to let the subprocess own the session
+     * fully in this lifecycle — the host SessionManager skips session_start,
+     * cookie emission, and session_write_close. The subprocess's native
+     * session machinery handles all three (it captures its own Set-Cookie
+     * via uopz; cgiPool / cgiSubprocess / cgiFcgi thread the captured
+     * cookies back into the outbound response).
+     *
+     * Other lifecycle combos are unaffected:
+     *   - Coroutine mode (`superglobals(false)`): CoSessionManager runs, no
+     *     subprocess involved, no race.
+     *   - Mixed-mode (`superglobals(true)` + `processIsolation(false)`):
+     *     host runs everything in-process — host SessionManager IS the
+     *     session owner. No subprocess race.
+     */
+    public static function cgiOwnsSessions(): bool
+    {
+        return self::$superglobals === true && self::processIsolation() === true;
+    }
+
+    /**
      * Dispatch a legacy include to a FastCGI backend (e.g. php-fpm) via the
      * FCGI binary protocol. Used when App::cgiMode() === 'fcgi'.
      *
@@ -4080,6 +4205,13 @@ class App
     private static function cgiFcgi(string $path, ?string $address = null, array $extraParams = []): mixed
     {
         $g = RequestContext::instance();
+
+        // Issue #108 — mint + emit a session cookie on the host side when
+        // the subprocess owns sessions and the client didn't send a
+        // PHPSESSID. mintCgiSession() is a no-op outside cgiOwnsSessions
+        // mode, so existing flows (per-extension FCGI backends in mixed
+        // mode, etc.) are unaffected.
+        self::mintCgiSession($g);
 
         $ctx = json_encode([
             'server' => $g->server,
@@ -4168,6 +4300,9 @@ class App
     private static function cgiSubprocess(string $path, ?string $interpreter = null): mixed
     {
         $g = RequestContext::instance();
+
+        // Issue #108 — see mintCgiSession() docblock.
+        self::mintCgiSession($g);
 
         $ctx = json_encode([
             'server' => $g->server,
@@ -4644,6 +4779,9 @@ class App
                 return 500;
             }
         }
+
+        // Issue #108 — see mintCgiSession() docblock.
+        self::mintCgiSession($g);
 
         // Build the request frame. Same shape as cgiFork's $ctx and
         // cgi_worker.php's ZEALPHP_REQUEST_CONTEXT env JSON.

@@ -293,6 +293,17 @@ function pool_reset_request_state(): void
 {
     global $__pw_headers, $__pw_cookies, $__pw_rawcookies, $__pw_status, $__pw_globals_snapshot;
 
+    // Issue #108 — flush $_SESSION to disk BEFORE nulling it. The pool worker
+    // outlives any single request, so PHP's native shutdown sequence (which
+    // calls session_write_close for the user) never fires between frames. If
+    // we null $_SESSION here without writing first, every session mutation
+    // made by the included file is silently dropped and the file on disk
+    // stays at its pre-request state. Next request reads the stale file and
+    // sees the old value — exactly the "Value: EMPTY" symptom from #108.
+    if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+
     $_SERVER  = [];
     $_GET     = [];
     $_POST    = [];

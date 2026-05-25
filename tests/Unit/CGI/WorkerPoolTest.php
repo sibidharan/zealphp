@@ -233,4 +233,65 @@ final class WorkerPoolTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         new WorkerPool(size: 0);
     }
+
+    /**
+     * Regression for issue #108 — session data set inside one pool dispatch
+     * MUST persist to disk so a subsequent dispatch with the same PHPSESSID
+     * sees it.
+     *
+     * Pre-fix: pool_reset_request_state() nulled $_SESSION between requests
+     * WITHOUT calling session_write_close(), so PHP's native shutdown
+     * sequence never fired (the worker doesn't shut down between frames)
+     * and the session file on disk stayed empty. Reading on the next
+     * dispatch returned an empty session → "Value: EMPTY".
+     *
+     * Post-fix: pool_reset_request_state() calls session_write_close()
+     * before nulling, so request N's writes are flushed and visible to
+     * request N+1.
+     */
+    public function testSessionDataPersistsAcrossPoolDispatches(): void
+    {
+        $sid       = 'zptest' . bin2hex(random_bytes(6));
+        $sessDir   = sys_get_temp_dir() . '/zptest-sess-' . bin2hex(random_bytes(4));
+        mkdir($sessDir, 0700, true);
+        $setter = $this->fixture(
+            'set.php',
+            'session_save_path(' . var_export($sessDir, true) . ');'
+            . ' session_start();'
+            . ' $_SESSION["test"] = "Success!";'
+            . ' echo "Session Set!";'
+        );
+        $getter = $this->fixture(
+            'get.php',
+            'session_save_path(' . var_export($sessDir, true) . ');'
+            . ' session_start();'
+            . ' echo "Value: " . ($_SESSION["test"] ?? "EMPTY");'
+        );
+
+        $pool = new WorkerPool(size: 1, maxRequestsPerWorker: 100);
+        try {
+            $r1 = $pool->dispatch([
+                'file'    => $setter,
+                'cookies' => ['PHPSESSID' => $sid],
+            ]);
+            $this->assertSame('Session Set!', $r1['body']);
+
+            $r2 = $pool->dispatch([
+                'file'    => $getter,
+                'cookies' => ['PHPSESSID' => $sid],
+            ]);
+            $this->assertSame(
+                'Value: Success!',
+                $r2['body'],
+                'issue #108 — session data set in request 1 must survive into request 2 on the same pool worker'
+            );
+        } finally {
+            $pool->close();
+            // Best-effort cleanup of the per-test session dir.
+            foreach (glob($sessDir . '/*') ?: [] as $f) {
+                @unlink($f);
+            }
+            @rmdir($sessDir);
+        }
+    }
 }
