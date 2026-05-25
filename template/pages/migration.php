@@ -82,8 +82,8 @@ $rungs = [
   [
     'n'    => '2',
     'title' => 'Add REST APIs in <code>api/</code>',
-    'code'  => 'api/users/get.php → GET /api/users     ·     api/users/post.php → POST /api/users',
-    'desc'  => 'Drop a PHP file, get a REST endpoint. ZealAPI auto-routes by filename and HTTP method. Zero config, zero framework boilerplate.',
+    'code'  => 'api/device/list.php → /api/device/list     ·     api/device/add.php → /api/device/add',
+    'desc'  => 'Drop a PHP file, get a REST endpoint. ZealAPI auto-routes by directory (module) and filename (endpoint). Zero config, zero framework boilerplate.',
     'wins'  => 'Replace your "PHP file behind nginx" API layer with structured endpoints in 5 lines each.',
     'gives_up' => 'Still synchronous — handlers run sequentially. Fine for I/O-light endpoints.',
   ],

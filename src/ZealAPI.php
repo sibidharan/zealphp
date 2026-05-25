@@ -18,11 +18,23 @@ use Psr\Http\Server\RequestHandlerInterface;
 /**
  * File-based API dispatcher.
  *
- * URL convention
- * --------------
- *   `GET  /api/users/get`          → `api/users/get.php` must define `$get  = function(...){...}`
- *   `POST /api/users/create`       → `api/users/create.php` must define `$create = function(...){...}`
- *   `GET  /api/php/sapi_name`      → `api/php/sapi_name.php` must define `$sapi_name = function(...){...}`
+ * URL convention — two dispatch modes
+ * -----------------------------------
+ *
+ * **Mode 1 — filename match (all methods):**
+ *   `/api/device/list`             → `api/device/list.php` defines `$list = function(...){...}`
+ *   `/api/device/add`              → `api/device/add.php`  defines `$add  = function(...){...}`
+ *   The closure accepts ALL HTTP methods. The handler reads
+ *   `$this->get_request_method()` if it needs to differentiate.
+ *
+ * **Mode 2 — per-method dispatch (Next.js App Router style):**
+ *   `/api/users`  GET              → `api/users.php` defines `$get    = function(...){...}`
+ *   `/api/users`  POST             → `api/users.php` defines `$post   = function(...){...}`
+ *   Undefined methods return 405 + `Allow` header. HEAD auto-derives from
+ *   `$get`. OPTIONS lists defined methods automatically.
+ *
+ * Resolution: filename match takes priority. If `$list` exists in `list.php`,
+ * it wins and any `$get`/`$post` in the same file are unreachable (warned).
  *
  * The variable name MUST match `basename($file, '.php')`. The closure is
  * `Closure::bind`'d to a `ZealAPI` instance, so inside the handler `$this` is the
@@ -139,15 +151,82 @@ class ZealAPI extends REST
 
                 if (file_exists($realFile)) {
                     include $realFile;
-                    try {
-                        /** @var \Closure $closureToBind */
-                        $closureToBind = ${$func};
-                        $this->api_rpc = \Closure::bind($closureToBind, $this, get_class($this));
-                    } catch (\TypeError $e) {
-                        elog(jTraceEx($e), "error");
-                        $this->response($this->json(['error'=>'method_not_found']), 404);
-                        return;
+                    $_vars = get_defined_vars();
+
+                    // Resolution order:
+                    // 1. Filename match ($list in list.php) → all HTTP methods
+                    // 2. Method variable ($get, $post, …) → per-method dispatch
+                    // 3. No match → 405 or 404
+
+                    $filenameHandler = ($_vars[$func] ?? null) instanceof \Closure ? $_vars[$func] : null;
+
+                    if ($filenameHandler instanceof \Closure) {
+                        $unreachable = [];
+                        foreach (['get', 'post', 'put', 'delete', 'patch'] as $_m) {
+                            if (($_vars[$_m] ?? null) instanceof \Closure) {
+                                $unreachable[] = '$' . $_m;
+                            }
+                        }
+                        if ($unreachable) {
+                            elog(
+                                "api{$module}/{$request}.php: \${$func} (filename match) takes priority"
+                                . " — " . implode(', ', $unreachable) . " are unreachable."
+                                . " Remove \${$func} to enable per-method routing.",
+                                'warning'
+                            );
+                        }
+                        $closureToBind = $filenameHandler;
+                    } else {
+                        /** @var array<string, \Closure> $methodHandlers */
+                        $methodHandlers = [];
+                        foreach (['get', 'post', 'put', 'delete', 'patch'] as $_m) {
+                            $candidate = $_vars[$_m] ?? null;
+                            if ($candidate instanceof \Closure) {
+                                $methodHandlers[$_m] = $candidate;
+                            }
+                        }
+
+                        if (empty($methodHandlers)) {
+                            $this->response($this->json([
+                                'error' => 'handler_not_found',
+                                'hint'  => "api{$module}/{$request}.php exists but defines neither"
+                                    . " \${$func} nor any method handler (\$get, \$post, \$put,"
+                                    . " \$delete, \$patch). Define \${$func} = function() {…};"
+                                    . " for a catch-all, or \$get/\$post/… for per-method dispatch.",
+                            ]), 404);
+                            elog(
+                                "api{$module}/{$request}.php: no handler found — expected"
+                                . " \${$func} or method closures (\$get, \$post, …)",
+                                'warning'
+                            );
+                            return;
+                        }
+
+                        $rawMethod = $this->get_request_method();
+                        $httpMethod = strtolower(is_string($rawMethod) ? $rawMethod : 'GET');
+
+                        $allowMethods = array_map('strtoupper', array_keys($methodHandlers));
+                        if (isset($methodHandlers['get'])) {
+                            $allowMethods[] = 'HEAD';
+                        }
+                        $allowMethods[] = 'OPTIONS';
+                        $allowMethods = array_values(array_unique($allowMethods));
+
+                        if ($httpMethod === 'head' && isset($methodHandlers['get'])) {
+                            $closureToBind = $methodHandlers['get'];
+                        } elseif (isset($methodHandlers[$httpMethod])) {
+                            $closureToBind = $methodHandlers[$httpMethod];
+                        } else {
+                            response_add_header('Allow', implode(', ', $allowMethods));
+                            $this->response($this->json([
+                                'error' => 'method_not_allowed',
+                                'allowed' => $allowMethods,
+                            ]), 405);
+                            return;
+                        }
                     }
+
+                    $this->api_rpc = \Closure::bind($closureToBind, $this, get_class($this));
                     // Apache parity (issue #18): the script path is rooted at
                     // the URL ('/api/<module>/<request>.php'), and
                     // SCRIPT_FILENAME is the absolute path mod_php would have

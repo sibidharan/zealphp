@@ -2,42 +2,73 @@
 <section class="section">
 <div class="container">
 <h1 class="section-title">REST API — File-Based</h1>
-<p class="section-desc">Drop a PHP file in <code>api/</code> and it becomes a REST endpoint automatically. The file defines a closure named after the HTTP method. <code>$this</code> inside the closure is the <code>ZealAPI</code> instance (that's the class powering this — keep reading).</p>
+<p class="section-desc">Drop a PHP file in <code>api/</code> and it becomes a REST endpoint automatically. The file defines a closure whose variable name matches the filename. <code>$this</code> inside the closure is the <code>ZealAPI</code> instance (that's the class powering this — keep reading).</p>
 
 <h2>How it works</h2>
 
 <?php App::render('/components/_code', [
-    'label' => 'api/users/get.php → GET /api/users/get',
+    'label' => 'api/device/list.php → /api/device/list',
     'code'  => <<<'PHP'
 <?php
-// File: api/users/get.php
-// Endpoint: GET /api/users/get
-// The variable name MUST match basename($file, '.php') → 'get'
+// File: api/device/list.php
+// Endpoint: /api/device/list (any HTTP method)
+// The variable name MUST match basename($file, '.php') → 'list'
 
 use ZealPHP\G;
 
-$get = function() {
+$list = function() {
     $g = G::instance();
     return [
-        'users'  => [['id' => 1, 'name' => 'Alice'], ['id' => 2, 'name' => 'Bob']],
-        'method' => $g->server['REQUEST_METHOD'],
-        'query'  => $g->get,
+        'devices' => [['id' => 1, 'name' => 'Sensor A'], ['id' => 2, 'name' => 'Sensor B']],
+        'method'  => $g->server['REQUEST_METHOD'],
+        'query'   => $g->get,
     ];
 };
 PHP]); ?>
 
 <h2>File naming convention</h2>
 <table class="ztable">
-  <tr><th>File</th><th>Variable</th><th>Endpoint</th><th>HTTP method</th></tr>
-  <tr><td><code>api/users/get.php</code></td><td><code>$get</code></td><td><code>GET /api/users/get</code></td><td>GET</td></tr>
-  <tr><td><code>api/users/create.php</code></td><td><code>$create</code></td><td><code>POST /api/users/create</code></td><td>POST</td></tr>
-  <tr><td><code>api/users/update.php</code></td><td><code>$update</code></td><td><code>PUT /api/users/update</code></td><td>PUT</td></tr>
-  <tr><td><code>api/users/delete.php</code></td><td><code>$delete</code></td><td><code>DELETE /api/users/delete</code></td><td>DELETE</td></tr>
-  <tr><td><code>api/data/list.php</code></td><td><code>$list</code></td><td><code>GET /api/data/list</code></td><td>GET</td></tr>
+  <tr><th>File</th><th>Variable</th><th>Endpoint</th><th>Notes</th></tr>
+  <tr><td><code>api/device/list.php</code></td><td><code>$list</code></td><td><code>/api/device/list</code></td><td>Directory = module, filename = endpoint</td></tr>
+  <tr><td><code>api/device/add.php</code></td><td><code>$add</code></td><td><code>/api/device/add</code></td><td>Handler decides what HTTP methods to accept</td></tr>
+  <tr><td><code>api/learn/notes.php</code></td><td><code>$notes</code></td><td><code>/api/learn/notes</code></td><td>Responds to GET, POST, PUT, DELETE</td></tr>
+  <tr><td><code>api/docs/search.php</code></td><td><code>$search</code></td><td><code>/api/docs/search</code></td><td>Filename is the action name</td></tr>
 </table>
 
 <div class="callout info">
-The variable name <strong>must match</strong> the filename (without <code>.php</code>). <code>api/users/get.php</code> defines <code>$get = function() { ... };</code>. ZealAPI binds it as a Closure with <code>$this</code> set to the ZealAPI instance.
+The variable name <strong>must match</strong> the filename (without <code>.php</code>). <code>api/device/list.php</code> defines <code>$list = function() { ... };</code>. ZealAPI binds it as a Closure with <code>$this</code> set to the ZealAPI instance. Every endpoint accepts GET, POST, PUT, DELETE, and PATCH.
+</div>
+
+<h2 id="per-method-dispatch">Per-method dispatch</h2>
+<p>Inspired by <a href="https://nextjs.org/docs/app/getting-started/route-handlers">Next.js App Router route handlers</a>: instead of one catch-all closure, define <code>$get</code>, <code>$post</code>, <code>$put</code>, <code>$delete</code>, or <code>$patch</code> — each handles its HTTP method. Undefined methods return <strong>405 Method Not Allowed</strong> automatically.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'api/users.php — one file, per-method handlers',
+    'code'  => <<<'PHP'
+<?php
+$get = function() {
+    return ['users' => [['id' => 1, 'name' => 'Alice']]];
+};
+
+$post = function() {
+    return ['created' => true, 'id' => 3];
+};
+
+// PUT, DELETE, PATCH → automatic 405 Method Not Allowed
+// HEAD → auto-derived from $get (body stripped by framework)
+// OPTIONS → auto-generated Allow header
+PHP]); ?>
+
+<table class="ztable">
+  <tr><th>Request</th><th>What happens</th></tr>
+  <tr><td><code>GET /api/users</code></td><td>Runs <code>$get</code> → JSON response</td></tr>
+  <tr><td><code>POST /api/users</code></td><td>Runs <code>$post</code> → JSON response</td></tr>
+  <tr><td><code>DELETE /api/users</code></td><td><strong>405</strong> + <code>Allow: GET, POST, HEAD, OPTIONS</code></td></tr>
+  <tr><td><code>HEAD /api/users</code></td><td>Runs <code>$get</code>, body stripped</td></tr>
+</table>
+
+<div class="callout warning">
+<strong>Don't mix both conventions in one file.</strong> If <code>api/list.php</code> defines both <code>$list</code> (filename match) <em>and</em> <code>$get</code>/<code>$post</code>, the filename match wins and method handlers are unreachable. The framework logs a warning to <code>debug.log</code> when this happens.
 </div>
 
 <h2>Return value conventions</h2>
@@ -171,10 +202,10 @@ PHP,
 ]); ?>
 
 <?php App::render('/components/_code', [
-    'label' => 'api/users/delete.php — handler-side use',
+    'label' => 'api/device/delete.php — handler-side use',
     'code'  => <<<'PHP'
 <?php
-// File: api/users/delete.php → POST /api/users/delete
+// File: api/device/delete.php — handler filters by method internally
 $delete = function() {
     // POST + authenticated guard. Sends 403 JSON and returns false if
     // either check fails — short-circuits the handler.

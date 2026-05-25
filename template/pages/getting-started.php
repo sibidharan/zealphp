@@ -273,11 +273,11 @@ PHP
     <p class="gs-p-mt-sm">That's it. No <code>$app->route()</code>, no annotations, no config files. Same for APIs — drop a file in <code>api/</code>:</p>
 
     <?php App::render('/components/_code', [
-      'label' => 'api/users/get.php → GET /api/users',
+      'label' => 'api/device/list.php → /api/device/list',
       'code' => <<<'PHP'
 <?php
-$get = function() {
-    return ['users' => ['alice', 'bob'], 'count' => 2];
+$list = function() {
+    return ['devices' => ['sensor-a', 'sensor-b'], 'count' => 2];
 };
 PHP
     ]); ?>
