@@ -160,10 +160,21 @@ class ZealAPI extends REST
 
                     $filenameHandler = ($_vars[$func] ?? null) instanceof \Closure ? $_vars[$func] : null;
 
+                    $methodKeywords = ['get', 'post', 'put', 'delete', 'patch'];
+
                     if ($filenameHandler instanceof \Closure) {
+                        if (in_array($func, $methodKeywords, true)) {
+                            elog(
+                                "api{$module}/{$request}.php: filename '{$request}' collides with"
+                                . " HTTP method — \${$func} is treated as a filename match (all"
+                                . " methods reach it). To use per-method dispatch, rename the"
+                                . " file (e.g. api{$module}.php) and define \$get/\$post/… there.",
+                                'warning'
+                            );
+                        }
                         $unreachable = [];
-                        foreach (['get', 'post', 'put', 'delete', 'patch'] as $_m) {
-                            if (($_vars[$_m] ?? null) instanceof \Closure) {
+                        foreach ($methodKeywords as $_m) {
+                            if ($_m !== $func && ($_vars[$_m] ?? null) instanceof \Closure) {
                                 $unreachable[] = '$' . $_m;
                             }
                         }
