@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.2.42] - 2026-05-25
+
+Task-worker stability fix + acknowledgment of sibling-package mongodb work.
+
+### Fixed
+
+- **Task callback `ArgumentCountError` worker crash (issue #103).** OpenSwoole 22.x dispatches `$server->on('task', …)` with two different signatures: 2-arg `($server, Task)` when `task_enable_coroutine => true` (our default), or legacy 4-arg `($server, $id, $worker_id, $data)` otherwise. The handler was registered with the 4-arg form only, so production workers running tasks under the default coroutine mode crashed with `Too few arguments to function … 2 passed and exactly 4 expected`. Workers auto-restarted (status=255), so the issue was self-healing but caused intermittent task failures. Fix: extracted `App::dispatchTaskCallback(array $rest): array|false` as a variadic-defensive adapter that tolerates both call shapes — neither user override nor OpenSwoole minor-version shifts can throw mid-worker now. Pinned by 10 unit tests in `tests/Unit/TaskCallbackDispatchTest`.
+
+### Acknowledged
+
+- **`sibidharan/zealphp-mongodb` v0.2.8 → v0.2.11** (issue #104) — sibling-package release stream that makes the MongoDB adapter a drop-in replacement for ext-mongodb. v0.2.8 switched `Collection::wrapDoc()` to return `MongoDB\Model\BSONDocument` so the 106 `instanceof BSONDocument` / 171 `getArrayCopy()` call sites in downstream code work transparently; v0.2.9 added full `MongoDB\Driver\*` polyfills (`Manager`, `BulkWrite`, `WriteResult`, `WriteError`, `WriteConcernError`, `BulkWriteException`) so worker scripts using the raw driver API run without ext-mongodb; v0.2.10/v0.2.11 fixed pass-by-reference bugs where `?? []` temporaries broke calls into the Rust extension layer. The framework `composer.json` doesn't pin the mongodb package (it's a separate `require` per-app), so no framework change is needed — update via `composer update sibidharan/zealphp-mongodb`.
+
+### Note on v0.2.41
+
+v0.2.41 was mis-tagged on Packagist at an orphan commit (`0372c3a`) — the pre-rebase head of PR #100 that did not include the intended release content (FCGI worker pool default, WP-on-proc regression fix, ZealAPI helpers, version-bump docs). v0.2.42 carries the v0.2.41-intended content plus the #103/#104 work above. If `composer require` already pulled v0.2.41, upgrade with `composer require sibidharan/zealphp:^0.2.42`.
+
 ## [0.2.41] - 2026-05-25
 
 ZealPHP-native FCGI-style worker pool — the v0.3.0 "warm + global scope" CGI bridge, shipped. `cgiMode('pool')` is now the framework default. `cgiMode('fork')` removed entirely. The CGI bridge's per-request cost drops from ~30–50 ms (proc) to ~1–3 ms (pool), matching FPM territory, while preserving full mod_php-style global-scope isolation (unmodified WordPress / Drupal works). Parent OpenSwoole worker dispatches to the pool via `Coroutine\Channel` — thousands of concurrent coroutines fan out across N pre-spawned PHP subprocesses without blocking the event loop. PHP HTTP server + FPM-style worker pool + async dispatch.

@@ -2101,6 +2101,68 @@ class App
     // -----------------------------------------------------------------------
 
     /**
+     * Dispatch payload for the `$server->on('task', …)` callback.
+     *
+     * OpenSwoole 22.x calls task handlers with TWO different signatures
+     * depending on `task_enable_coroutine`:
+     *
+     *   true  → ($server, OpenSwoole\Server\Task $task)        // 2-arg
+     *   false → ($server, $id, $worker_id, $data)              // 4-arg
+     *
+     * Our default is `task_enable_coroutine => true`, so the 2-arg form
+     * is the production hot path; apps that opt back out get the 4-arg
+     * form. Accepting both shapes here means neither a user override
+     * nor an OpenSwoole minor-version shift can throw `ArgumentCountError`
+     * mid-worker. See issue #103.
+     *
+     * @param  list<mixed> $rest  Variadic args excluding $server.
+     * @return array{task: array<mixed>, result: mixed}|false
+     */
+    public static function dispatchTaskCallback(array $rest): array|false
+    {
+        if (count($rest) === 1 && is_object($rest[0])) {
+            // Coroutine task path: $rest[0] is OpenSwoole\Server\Task
+            $data = $rest[0]->data ?? [];
+        } elseif (count($rest) === 3) {
+            // Legacy 4-arg path: ($id, $worker_id, $data)
+            $data = $rest[2];
+        } else {
+            elog('Task callback received unexpected arity ' . count($rest), 'error');
+            return false;
+        }
+        if (!is_array($data)) {
+            elog('Task payload not an array; dropping', 'error');
+            return false;
+        }
+        $handler = $data['handler'] ?? '';
+        if (!is_string($handler) || $handler === '') {
+            elog('Task payload missing string "handler"; dropping', 'error');
+            return false;
+        }
+        $args = $data['args'] ?? [];
+        if (!is_array($args)) {
+            elog('Task payload "args" must be an array; dropping', 'error');
+            return false;
+        }
+        $_func = basename($handler);
+        if (file_exists(self::$cwd . $handler . '.php')) {
+            include self::$cwd . $handler . '.php';
+            /** @var callable $fn */
+            $fn = $$_func;
+            $result = $fn(...$args);
+            unset($$_func);
+        } else {
+            elog("Task handler not found: $handler", 'error');
+            $result = false;
+        }
+        elog((string) json_encode([$data, $result]), 'task');
+        return [
+            'task'   => $data,
+            'result' => $result,
+        ];
+    }
+
+    /**
      * Fork-join helper — runs every closure in `$tasks` in its own
      * coroutine in parallel and returns the results in input order.
      *
@@ -5913,28 +5975,19 @@ HELP;
         });
 
         if (($effective_settings['task_worker_num'] ?? 0) > 0) {
-            $server->on('task', function ($server, $id, $rid, $data) {
-                assert(is_array($data));
-                $handler = $data['handler'] ?? '';
-                assert(is_string($handler));
-                $args = $data['args'] ?? [];
-                assert(is_array($args));
-                $_func = basename($handler);
-                if(file_exists(App::$cwd.$handler.'.php')){
-                    include App::$cwd.$handler.'.php';
-                    /** @var callable $fn */
-                    $fn = $$_func;
-                    $result = $fn(...$args);
-                    unset($$_func);
-                } else {
-                    elog("Task handler not found: $handler", "error");
-                    $result = false;
-                }
-                elog((string)json_encode([$data, $result]), "task");
-                return [
-                    'task' => $data,
-                    'result' => $result
-                ];
+            // OpenSwoole 22.x dispatches task callbacks with TWO different
+            // signatures depending on settings:
+            //
+            //   task_enable_coroutine = true  → function($server, Task $task)
+            //   task_enable_coroutine = false → function($server, $id, $rid, $data)
+            //
+            // Our default is `task_enable_coroutine => true`, so the 2-arg
+            // form is the production hot path; the 4-arg form is kept for
+            // apps that opt back out. The variadic adapter below tolerates
+            // both, so neither user override nor an OpenSwoole minor-version
+            // shift can cause `ArgumentCountError` mid-worker. See issue #103.
+            $server->on('task', function ($server, ...$rest) {
+                return App::dispatchTaskCallback(array_values($rest));
             });
 
             $server->on('finish', function ($server, $task_id, $data) {
