@@ -4,7 +4,11 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.2.41] - 2026-05-25
+
 ZealPHP-native FCGI-style worker pool — the v0.3.0 "warm + global scope" CGI bridge, shipped. `cgiMode('pool')` is now the framework default. `cgiMode('fork')` removed entirely. The CGI bridge's per-request cost drops from ~30–50 ms (proc) to ~1–3 ms (pool), matching FPM territory, while preserving full mod_php-style global-scope isolation (unmodified WordPress / Drupal works). Parent OpenSwoole worker dispatches to the pool via `Coroutine\Channel` — thousands of concurrent coroutines fan out across N pre-spawned PHP subprocesses without blocking the event loop. PHP HTTP server + FPM-style worker pool + async dispatch.
+
+Also lands three vendor-patched `ZealAPI` helpers upstreamed from labs-dashboard-web: `resolveClubParam()` (club/group alias accessor used by 13+ club endpoints), `failAs(Throwable)` (canonical `{"error": ...}` 400 envelope), and `json()` is now `public` so handler closures can call `$this->json()` directly without the previous patch-after-update dance.
 
 ### Added
 
