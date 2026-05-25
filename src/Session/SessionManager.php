@@ -95,7 +95,21 @@ class SessionManager
         // session_start, and emitting our own Set-Cookie header. The native
         // session_* functions remain available for user code that wants
         // them.
-        $manageSession = \ZealPHP\App::$session_lifecycle;
+        //
+        // Issue #108 — also skip when the CGI subprocess owns sessions
+        // (superglobals(true) + processIsolation(true)). In that lifecycle
+        // every public file is dispatched to cgiPool / cgiSubprocess /
+        // cgiFcgi, and the subprocess runs native PHP session_start under
+        // its own SAPI. Having BOTH the host and the subprocess drive
+        // session I/O on the same file produces a race where the host's
+        // session_write_close() in this finally block overwrites the
+        // subprocess's writes with the host's stale in-memory state. The
+        // subprocess captures its own Set-Cookie via uopz (cgi_worker.php /
+        // pool_worker.php) and cgiPool / cgiSubprocess / cgiFcgi thread it
+        // back into the outbound response, so the cookie story still
+        // works — the host just gets out of the way.
+        $manageSession = \ZealPHP\App::$session_lifecycle
+            && !\ZealPHP\App::cgiOwnsSessions();
 
         if ($manageSession) {
             if(isset($_SESSION) and isset($_SESSION['__start_time'])) {
