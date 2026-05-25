@@ -81,8 +81,8 @@ $app-&gt;nsPathRoute('admin', '{path}', function ($path) {
 // $path is "anything" or "users/42/orders" or "very/deep/path".</code></pre>
     <p>
       Under the hood, the implicit <code>/api/*</code> handler uses <code>nsPathRoute('api',
-      '{module}/{rquest}', ...)</code> — that&rsquo;s how <code>api/users/list.php</code> gets dispatched
-      from <code>GET /api/users/list</code>.
+      '{module}/{rquest}', ...)</code> — that&rsquo;s how <code>api/device/list.php</code> gets dispatched
+      from <code>/api/device/list</code>.
     </p>
 
     <h2>The fallback — <code>App::setFallback()</code></h2>

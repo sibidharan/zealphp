@@ -27,7 +27,7 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **HTTP/1.1 compliance** | HEAD, OPTIONS, 301/302/307/308 redirects, Cookie SameSite, ETag, OpenSwoole compression |
 | **Shared memory** | `Store` (OpenSwoole\Table) + `Counter` (OpenSwoole\Atomic) — cross-worker state |
 | **Timers** | `App::tick()`, `App::after()`, `App::onWorkerStart()` — per-worker recurring tasks |
-| **ZealAPI** | File-based REST: drop `api/users/get.php` → `/api/users/get` works automatically |
+| **ZealAPI** | File-based REST: drop `api/device/list.php` → `/api/device/list` works automatically |
 | **Templating** | Nested `App::render()` / `App::renderToString()` — single `_master.php`, component-based |
 | **Sessions** | All `session_*()` functions overridden via uopz — coroutine-safe, per-request isolation |
 | **Unit tests** | PHPUnit 11 — 130 unit tests + 46 integration tests, all green |

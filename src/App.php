@@ -5946,7 +5946,7 @@ HELP;
         # catch-all as request="users/list" — which contains a slash and
         # would fail validation with a misleading "invalid_request" error.
         $this->nsPathRoute('api', "{module}/{rquest}", [
-            'methods' => ['GET', 'POST', 'PUT', 'DELETE']
+            'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
         ], function(string $module, string $rquest, $response, $request){
             $api = new ZealAPI($request, $response, self::$cwd);
             try {
@@ -5957,7 +5957,7 @@ HELP;
         });
 
         $this->nsPathRoute('api', "{rquest}", [
-            'methods' => ['GET', 'POST', 'PUT', 'DELETE']
+            'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
         ], function(string $rquest, $response, $request){
             $api = new ZealAPI($request, $response, self::$cwd);
             try {

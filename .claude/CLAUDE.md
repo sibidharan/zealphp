@@ -188,7 +188,12 @@ Routes are registered in this order inside `App::run()` (earlier = higher priori
 4. `.php` extension block (returns 403)
 5. Implicit public file routes: `/` → `public/index.php`, `/{file}` → `public/{file}.php`, `/{dir}/{uri}` → `public/{dir}/{uri}.php`
 
-**API handler naming rule**: `api/users/get.php` must define `$get = function(...)`. The variable name must match `basename($file, '.php')`. ZealAPI binds it as a closure with `$this` set to the `ZealAPI` instance.
+**API handler naming — two dispatch modes:**
+- **Filename match** (all methods): `api/device/list.php` defines `$list = function(...)`. The variable name matches `basename($file, '.php')`. All HTTP methods reach the same handler. This is the primary convention.
+- **Per-method dispatch** (Next.js style): if no filename-matching variable exists, the framework looks for `$get`, `$post`, `$put`, `$delete`, `$patch` closures. Each handles its HTTP method; undefined methods return 405 + `Allow` header. HEAD auto-derives from `$get`.
+- **Priority**: filename match wins. If both `$list` and `$get`/`$post` exist in `list.php`, `$list` is used and method handlers are unreachable (framework logs a warning).
+
+ZealAPI binds every handler closure with `$this` set to the `ZealAPI` instance.
 
 **ZealAPI auth hooks (v0.2.25, issue #13)** — `$this->isAuthenticated()`, `$this->isAdmin()`, `$this->getUsername()`, and the composite `$this->requirePostAuth()` are not hardcoded. They consult three optional callbacks registered on `App`:
 
@@ -572,7 +577,7 @@ The PHPStan badge at `.github/badges/phpstan.json` must match `phpstan.neon`'s l
 
 | Layer | Use for | Example |
 |-------|---------|---------|
-| `api/` (ZealAPI) | REST endpoints — file-based, auto-routed | `api/users/get.php` → `GET /api/users` |
+| `api/` (ZealAPI) | REST endpoints — file-based, auto-routed | `api/device/list.php` → `/api/device/list` |
 | `route/` | Path-param routes, WebSocket, Store table registration, demo routes | `route/ws.php`, `route/streaming.php` |
 | `app.php` | Bootstrap only — middleware, `$app->run()` | Keep thin |
 

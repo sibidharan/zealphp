@@ -375,7 +375,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
           <li>Coroutine-safe sessions (per-request <code>RequestContext</code>, no process-wide superglobal races)</li>
           <li>Templating (<code>App::render</code> / <code>renderStream</code> / <code>fragment</code>) with streaming-Generator output</li>
           <li>Universal return contract (int = status, array = JSON, Generator = SSE/SSR stream)</li>
-          <li>ZealAPI &mdash; file-based REST (drop <code>api/users/get.php</code> &rarr; auto-route)</li>
+          <li>ZealAPI &mdash; file-based REST (drop <code>api/device/list.php</code> &rarr; <code>/api/device/list</code> auto-route)</li>
           <li>CGI worker bridge for unmodified WordPress / Drupal compatibility</li>
           <li>Pluggable <code>Store</code> + <code>Counter</code> backends (Table &rarr; Redis/Valkey &rarr; Tiered with HMAC-signed cross-node L1 invalidation)</li>
           <li>Cross-host pub/sub (<code>App::subscribe</code>) + Streams (<code>App::subscribeReliable</code>) + WSRouter for cross-server WebSocket routing + first-class WS rooms</li>

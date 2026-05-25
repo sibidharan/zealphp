@@ -110,10 +110,10 @@ $app->run();</code></pre>
       <code>App::init()</code>.
     </p>
 
-    <h3><code>api/</code> — REST endpoints, by method</h3>
+    <h3><code>api/</code> — REST endpoints, by action</h3>
     <p>
-      File-based REST: <code>api/users/get.php</code> → <code>GET /api/users</code>. Inside the file
-      you define one closure named after the HTTP method (<code>$get</code>, <code>$post</code>, etc.).
+      File-based REST: <code>api/device/list.php</code> → <code>/api/device/list</code>. Inside the file
+      you define one closure whose variable name matches the filename (<code>$list</code>, <code>$add</code>, etc.).
       The framework auto-binds it with parameter injection. Cleanest pattern for JSON APIs.
     </p>
 
@@ -165,7 +165,7 @@ $app->run();</code></pre>
       <tbody>
         <tr><td>Add a marketing page like <code>/pricing</code></td><td><code>public/pricing.php</code></td></tr>
         <tr><td>Add a static CSS / JS file</td><td><code>public/css/</code> or <code>public/js/</code></td></tr>
-        <tr><td>Add a JSON API endpoint like <code>GET /api/users</code></td><td><code>api/users/get.php</code></td></tr>
+        <tr><td>Add a JSON API endpoint like <code>/api/device/list</code></td><td><code>api/device/list.php</code></td></tr>
         <tr><td>Add a URL-param route like <code>/users/{id}</code></td><td><code>route/users.php</code> with <code>$app-&gt;route(...)</code></td></tr>
         <tr><td>Add a WebSocket endpoint</td><td><code>route/ws.php</code> with <code>$app-&gt;ws(...)</code></td></tr>
         <tr><td>Add a background timer</td><td><code>route/timers.php</code> using <code>App::tick()</code></td></tr>

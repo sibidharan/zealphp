@@ -41,11 +41,23 @@ PHP
 <p class="route-my-1">Same convention works for APIs — drop files in <code>api/</code>:</p>
 
 <table class="ztable">
-  <tr><th>File</th><th>URL</th><th>HTTP method</th></tr>
-  <tr><td><code>api/users/get.php</code></td><td><code>GET /api/users</code></td><td>Filename = method</td></tr>
-  <tr><td><code>api/users/post.php</code></td><td><code>POST /api/users</code></td><td>Filename = method</td></tr>
-  <tr><td><code>api/orders/get.php</code></td><td><code>GET /api/orders</code></td><td>Directory = resource</td></tr>
+  <tr><th>File</th><th>URL</th><th>Notes</th></tr>
+  <tr><td><code>api/device/list.php</code></td><td><code>/api/device/list</code></td><td>Filename match — <code>$list</code> handles all methods</td></tr>
+  <tr><td><code>api/device/add.php</code></td><td><code>/api/device/add</code></td><td>Filename match — <code>$add</code> handles all methods</td></tr>
+  <tr><td><code>api/users.php</code></td><td><code>/api/users</code></td><td>Per-method — <code>$get</code>/<code>$post</code>/… handle their method; others get 405</td></tr>
 </table>
+
+<p class="route-my-sm">Two conventions. <strong>Filename match</strong>: the closure variable matches the filename — all HTTP methods reach it. <strong>Per-method</strong>: define <code>$get</code>, <code>$post</code>, <code>$put</code>, <code>$delete</code>, <code>$patch</code> — each handles its method, undefined ones return 405. See <a href="/api#per-method-dispatch">/api#per-method-dispatch</a>.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'api/device/list.php — filename match (all methods)',
+    'code'  => <<<'PHP'
+<?php
+$list = function () {
+    $this->response($this->json(['devices' => []]), 200);
+};
+PHP
+]); ?>
 
 <p class="route-mt-1">Public files ride the <a href="/responses#return-contract">universal return contract</a> — same shapes as a route handler.</p>
 
