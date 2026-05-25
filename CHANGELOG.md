@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.2.43] - 2026-05-25
+
+CGI-isolation session-persistence fix. `App::superglobals(true)` (legacy CGI) sessions now survive across requests as expected.
+
 ### Fixed
 
 - **Session data loss in CGI isolation mode (issue #108).** With `App::superglobals(true)` (which defaults `processIsolation(true)` and now defaults `cgiMode('pool')` since v0.2.42), session writes inside a CGI subprocess were silently lost — the reporter's "Value: EMPTY" reproducer was deterministic. Two independent bugs intersecting:
