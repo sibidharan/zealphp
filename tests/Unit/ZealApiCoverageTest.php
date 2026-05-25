@@ -166,7 +166,10 @@ class ZealApiCoverageTest extends TestCase
     {
         $r = $this->dispatch($this->makeApi(), 'm', 'notclosure');
         $this->assertNull($r['return']);
-        $this->assertSame(['error' => 'method_not_found'], json_decode($r['echo'], true));
+        $decoded = json_decode($r['echo'], true);
+        $this->assertSame('handler_not_found', $decoded['error']);
+        $this->assertArrayHasKey('hint', $decoded);
+        $this->assertStringContainsString('$notclosure', $decoded['hint']);
     }
 
     public function testNamedParameterInjection(): void
