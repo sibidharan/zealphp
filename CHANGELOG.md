@@ -4,7 +4,37 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.2.43] - 2026-05-25
+
+CGI-isolation session-persistence fix. `App::superglobals(true)` (legacy CGI) sessions now survive across requests as expected.
+
+### Fixed
+
+- **Session data loss in CGI isolation mode (issue #108).** With `App::superglobals(true)` (which defaults `processIsolation(true)` and now defaults `cgiMode('pool')` since v0.2.42), session writes inside a CGI subprocess were silently lost — the reporter's "Value: EMPTY" reproducer was deterministic. Two independent bugs intersecting:
+  - **(a) Pool worker never flushed `$_SESSION`.** `pool_reset_request_state()` in `src/pool_worker.php` nulled `$_SESSION` between dispatches but didn't call `session_write_close()` first. The pool worker is a long-lived subprocess, so PHP's native shutdown sequence (which writes the session file for the user) never fires between frames. Session writes accumulated only in memory and were wiped on next-request reset. Fix: `session_write_close()` at the top of `pool_reset_request_state()` when `session_status() === PHP_SESSION_ACTIVE`.
+  - **(b) Host SessionManager raced the subprocess on cookie + file.** Even after the pool worker started persisting, the host's `SessionManager::__invoke()` generated its OWN session id for the response Set-Cookie, while the subprocess generated its OWN session id for the session file — so the cookie the client received pointed at a file that didn't exist. Plus the host's `session_write_close()` in `finally` would overwrite anything the subprocess wrote, with the host's stale empty `$_SESSION`. Fix: new `App::cgiOwnsSessions()` gate (true when `superglobals(true) + processIsolation(true)`) makes `SessionManager` skip session lifecycle entirely in this combo — the subprocess natively manages `$_SESSION`. New `App::mintCgiSession()` helper, called from `cgiPool()` / `cgiSubprocess()` / `cgiFcgi()`, mints a fresh session id via `session_create_id()` on first visit, threads it into the subprocess `$_COOKIE`, AND emits `Set-Cookie` on the outbound response so the client sticks to the same id (the subprocess can't emit the cookie itself — PHP's session module goes through internal `php_set_cookie()` not userspace `setcookie()`, so uopz can't intercept it). End-to-end roundtrip pinned by `tests/Integration/CgiSessionPersistenceTest` against the reporter's `set.php`/`get.php` reproducer, plus `tests/Unit/CGI/WorkerPoolTest::testSessionDataPersistsAcrossPoolDispatches` for the pool flush, plus `tests/Unit/Session/CgiOwnsSessionsTest` for the gate (5 cases). Other lifecycles (coroutine mode, mixed-mode) are unaffected — `cgiOwnsSessions()` returns false there.
+
+## [0.2.42] - 2026-05-25
+
+Task-worker stability fix + acknowledgment of sibling-package mongodb work.
+
+### Fixed
+
+- **Task callback `ArgumentCountError` worker crash (issue #103).** OpenSwoole 22.x dispatches `$server->on('task', …)` with two different signatures: 2-arg `($server, Task)` when `task_enable_coroutine => true` (our default), or legacy 4-arg `($server, $id, $worker_id, $data)` otherwise. The handler was registered with the 4-arg form only, so production workers running tasks under the default coroutine mode crashed with `Too few arguments to function … 2 passed and exactly 4 expected`. Workers auto-restarted (status=255), so the issue was self-healing but caused intermittent task failures. Fix: extracted `App::dispatchTaskCallback(array $rest): array|false` as a variadic-defensive adapter that tolerates both call shapes — neither user override nor OpenSwoole minor-version shifts can throw mid-worker now. Pinned by 10 unit tests in `tests/Unit/TaskCallbackDispatchTest`.
+
+### Acknowledged
+
+- **`sibidharan/zealphp-mongodb` v0.2.8 → v0.2.11** (issue #104) — sibling-package release stream that makes the MongoDB adapter a drop-in replacement for ext-mongodb. v0.2.8 switched `Collection::wrapDoc()` to return `MongoDB\Model\BSONDocument` so the 106 `instanceof BSONDocument` / 171 `getArrayCopy()` call sites in downstream code work transparently; v0.2.9 added full `MongoDB\Driver\*` polyfills (`Manager`, `BulkWrite`, `WriteResult`, `WriteError`, `WriteConcernError`, `BulkWriteException`) so worker scripts using the raw driver API run without ext-mongodb; v0.2.10/v0.2.11 fixed pass-by-reference bugs where `?? []` temporaries broke calls into the Rust extension layer. The framework `composer.json` doesn't pin the mongodb package (it's a separate `require` per-app), so no framework change is needed — update via `composer update sibidharan/zealphp-mongodb`.
+
+### Note on v0.2.41
+
+v0.2.41 was mis-tagged on Packagist at an orphan commit (`0372c3a`) — the pre-rebase head of PR #100 that did not include the intended release content (FCGI worker pool default, WP-on-proc regression fix, ZealAPI helpers, version-bump docs). v0.2.42 carries the v0.2.41-intended content plus the #103/#104 work above. If `composer require` already pulled v0.2.41, upgrade with `composer require sibidharan/zealphp:^0.2.42`.
+
+## [0.2.41] - 2026-05-25
+
 ZealPHP-native FCGI-style worker pool — the v0.3.0 "warm + global scope" CGI bridge, shipped. `cgiMode('pool')` is now the framework default. `cgiMode('fork')` removed entirely. The CGI bridge's per-request cost drops from ~30–50 ms (proc) to ~1–3 ms (pool), matching FPM territory, while preserving full mod_php-style global-scope isolation (unmodified WordPress / Drupal works). Parent OpenSwoole worker dispatches to the pool via `Coroutine\Channel` — thousands of concurrent coroutines fan out across N pre-spawned PHP subprocesses without blocking the event loop. PHP HTTP server + FPM-style worker pool + async dispatch.
+
+Also lands three vendor-patched `ZealAPI` helpers upstreamed from labs-dashboard-web: `resolveClubParam()` (club/group alias accessor used by 13+ club endpoints), `failAs(Throwable)` (canonical `{"error": ...}` 400 envelope), and `json()` is now `public` so handler closures can call `$this->json()` directly without the previous patch-after-update dance.
 
 ### Added
 
