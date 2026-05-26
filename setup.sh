@@ -337,7 +337,8 @@ install_dependencies() {
         "curl" 
         "libcurl4-openssl-dev" 
         "libpcre3-dev" 
-        "build-essential" 
+        "build-essential"
+        "git"
         "postgresql" 
         "libpq-dev"
     )
