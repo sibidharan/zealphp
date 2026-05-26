@@ -287,7 +287,7 @@ App::hookAll(\OpenSwoole\Runtime::HOOK_ALL); // hooks pipe I/O (resolved from nu
     <td>⚠ Process-wide superglobals, repopulated per-request by the framework. Same address space as PHP-FPM's mental model — one request at a time, no interleaving risk. <code>$g-&gt;get</code> / <code>$g-&gt;post</code> still work too — they bridge to the same arrays.</td>
   </tr>
   <tr>
-    <td><code>header()</code>, <code>setcookie()</code> via uopz</td>
+    <td><code>header()</code>, <code>setcookie()</code> via ext-zealphp</td>
     <td>✅ Writes to per-coroutine <code>$response->headersList</code></td>
     <td>⚠ Writes to the single in-flight request's response — synchronous, no cross-request bleed because requests don't overlap in a worker</td>
   </tr>

@@ -401,7 +401,7 @@ $app->run();
 <ul class="vsfpm-list">
   <li>You're running off-the-shelf code that you can't modify and don't want to touch — a Drupal shop with 40 contrib modules, a WordPress site with 60 plugins. The CGI bridge runs them, but FPM is the path of least surprise.</li>
   <li>Your only PHP extensions are blocking ones with no coroutine equivalent. PDO is the canonical example (see the <a href="/case-studies/sna-labs#phase-4-mongo">SNA Labs case study</a> for how we hit this with MongoDB and built a replacement). If every database call blocks, the coroutine scheduler can't help you — and you might as well run FPM.</li>
-  <li>You're allergic to <code>uopz</code>. ZealPHP requires it; FPM doesn't. If your hosting environment forbids it, FPM wins by default.</li>
+  <li>Your hosting environment forbids custom PHP extensions entirely. ZealPHP requires <code>ext-zealphp</code> (our own lightweight C extension); FPM doesn't. Shared hosting with no shell access = FPM wins by default.</li>
 </ul>
 
 <p class="vsfpm-prose-mt-07">

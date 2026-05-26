@@ -27,7 +27,7 @@
         </div>
       </div>
       <p class="gs-tldr-foot">
-        Installs PHP 8.3 + OpenSwoole + uopz + composer. Auto-detects your distro and bails with manual steps if it can't install for you (Fedora, Arch, Alpine, etc.). The detailed walkthrough below covers manual install, Docker, scaffolding, and deploy. <a href="#install" class="gs-tldr-foot-link">Inspect the script first ↓</a>
+        Installs PHP 8.3 + OpenSwoole + ext-zealphp + composer. Auto-detects your distro and bails with manual steps if it can't install for you (Fedora, Arch, Alpine, etc.). The detailed walkthrough below covers manual install, Docker, scaffolding, and deploy. <a href="#install" class="gs-tldr-foot-link">Inspect the script first ↓</a>
       </p>
     </div>
 
@@ -73,7 +73,7 @@
       <tr><th>Package</th><th>Version</th><th>Why</th></tr>
       <tr><td><code>PHP</code></td><td>8.3+</td><td>Tested on 8.3 and 8.4; OpenSwoole 26.2+ adds PHP 8.5 support</td></tr>
       <tr><td><code>OpenSwoole</code></td><td>22.1+</td><td>Async runtime, HTTP/WebSocket server, coroutines (26.2+ for PHP 8.5)</td></tr>
-      <tr><td><code>uopz</code></td><td>any</td><td>Overrides <code>header()</code>, <code>setcookie()</code>, <code>session_*</code> at runtime</td></tr>
+      <tr><td><code>ext-zealphp</code></td><td>&ge;0.1.0</td><td>Overrides <code>header()</code>, <code>setcookie()</code>, <code>session_*</code> at runtime (or <code>uopz</code> as fallback)</td></tr>
       <tr><td><code>composer</code></td><td>2.x</td><td>Dependency management</td></tr>
       <tr><td><code>uv</code> (optional)</td><td>any</td><td>Only for AI agent examples (Python)</td></tr>
     </table>
@@ -84,7 +84,7 @@
       <ul class="gs-risk-list">
         <li class="gs-risk-item"><strong>Superglobals leak across visitors in coroutine mode</strong> — <code>$_GET</code> / <code>$_POST</code> / <code>$_SESSION</code> are process-wide PHP arrays. Under the default coroutine mode they're not populated per request, and writes are visible to every other request hitting the same worker. Always use <code>$g-&gt;get</code> / <code>$g-&gt;post</code> / <code>$g-&gt;session</code> via <a href="/coroutines#state-parity">RequestContext</a> — those are per-coroutine and safe in both modes. Also audit <code>static</code> variables for similar cross-request leaks.</li>
         <li class="gs-risk-item"><strong>Coroutine safety</strong> — references to <code>RequestContext::instance()</code> (a.k.a. <code>$g</code>) must not be held across <code>yield</code> points; each coroutine has its own context.</li>
-        <li class="gs-risk-item"><strong>uopz compatibility bridge is experimental</strong> — <code>session_start()</code>, <code>header()</code>, etc. are virtualized via <a href="https://pecl.php.net/package/uopz" target="_blank" rel="noopener">uopz</a>. Edge cases exist; report them.</li>
+        <li class="gs-risk-item"><strong>ext-zealphp function overrides are alpha</strong> — <code>session_start()</code>, <code>header()</code>, etc. are intercepted via <a href="https://github.com/sibidharan/zealphp/tree/master/ext/zealphp" target="_blank" rel="noopener">ext-zealphp</a> (our own extension). Edge cases exist; report them.</li>
         <li class="gs-risk-item"><strong>Memory growth</strong> — workers stay alive between requests; profile for leaks under sustained load.</li>
         <li><strong>API stability</strong> — v0.2.x; breaking changes possible until v1.0. Pin a version in <code>composer.json</code>.</li>
       </ul>
@@ -104,7 +104,7 @@
       'lang' => 'bash',
       'code' => <<<'BASH'
 curl -fsSL https://php.zeal.ninja/install.sh | sudo bash
-# Installs: PHP 8.3, OpenSwoole, uopz, composer
+# Installs: PHP 8.3, OpenSwoole, ext-zealphp, composer
 BASH
     ]); ?>
 
@@ -143,18 +143,16 @@ sudo pecl install openswoole
 echo "extension=openswoole.so" | sudo tee /etc/php/8.3/cli/conf.d/zz-openswoole.ini
 echo "short_open_tag=On" | sudo tee -a /etc/php/8.3/cli/conf.d/zz-openswoole.ini
 
-# 3. uopz (via PECL — or from source on PHP 8.4+)
-sudo pecl install uopz || {
-  git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz
-  cd /tmp/uopz && phpize && ./configure && make && sudo make install
-}
-echo "extension=uopz.so" | sudo tee /etc/php/8.3/cli/conf.d/zz-uopz.ini
+# 3. ext-zealphp (ZealPHP's own extension — ships with the framework)
+git clone --depth 1 https://github.com/sibidharan/zealphp.git /tmp/zealphp-src
+cd /tmp/zealphp-src/ext/zealphp && phpize && ./configure && make && sudo make install
+echo "extension=zealphp.so" | sudo tee /etc/php/8.3/cli/conf.d/50-zealphp.ini
 
 # 4. Composer
 curl -sS https://getcomposer.org/installer | sudo php -- --install-dir=/usr/local/bin --filename=composer
 
 # 5. Verify
-php -m | grep -E 'openswoole|uopz'
+php -m | grep -E 'openswoole|zealphp'
 BASH
     ]); ?>
 
@@ -227,7 +225,7 @@ BASH
         <tr><td>Apache / Nginx</td><td>OpenSwoole (built into <code>php app.php</code>)</td></tr>
         <tr><td><code>htdocs/about.php</code> → <code>/about.php</code></td><td><code>public/about.php</code> → <code>/about</code></td></tr>
         <tr><td><code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code></td><td>Use <code>$g->get</code> / <code>$g->post</code> / <code>$g->session</code> via <code>RequestContext::instance()</code> — works in both modes. PHP superglobals are only safe under <code>App::superglobals(true)</code>; coroutine mode does NOT populate them per request. See <a href="/coroutines#state-parity">the parity rule</a>.</td></tr>
-        <tr><td><code>session_start()</code>, <code>header()</code></td><td>Same — overridden via uopz; populates the per-coroutine <code>$g->session</code> in coroutine mode</td></tr>
+        <tr><td><code>session_start()</code>, <code>header()</code></td><td>Same — overridden via ext-zealphp; populates the per-coroutine <code>$g->session</code> in coroutine mode</td></tr>
         <tr><td>One process per request</td><td>One process, thousands of concurrent coroutines</td></tr>
         <tr><td>Restart Apache after config changes</td><td>Restart <code>php app.php</code> after code changes</td></tr>
         <tr><td>Needs Redis for shared state</td><td>Built-in <code>Store</code> — cross-worker shared memory</td></tr>
@@ -383,7 +381,7 @@ BASH
       'lang' => 'bash',
       'code' => <<<'BASH'
 # Extensions loaded?
-php -m | grep -E 'openswoole|uopz'
+php -m | grep -E 'openswoole|zealphp'
 
 # Server responds?
 curl -s http://localhost:8080/ | head -5

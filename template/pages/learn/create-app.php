@@ -11,7 +11,7 @@
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
-      'Install PHP 8.3, OpenSwoole, and uopz with one command',
+      'Install PHP 8.3, OpenSwoole, and ext-zealphp with one command',
       'Scaffold a project with composer create-project',
       'Start the dev server and verify it works',
       'Understand the project folder structure',
@@ -25,16 +25,16 @@
     </p>
 
     <h2>Step 1: Install system dependencies</h2>
-    <p>ZealPHP needs PHP 8.3+, the OpenSwoole extension (event loop + HTTP server), and the uopz
+    <p>ZealPHP needs PHP 8.3+, the OpenSwoole extension (event loop + HTTP server), and the ext-zealphp
       extension (for session/header overrides). One script installs everything:</p>
     <pre><code class="language-bash">curl -fsSL https://php.zeal.ninja/install.sh | sudo bash</code></pre>
-    <p>This installs PHP 8.3 (or higher), the <code>openswoole</code> and <code>uopz</code> PECL
+    <p>This installs PHP 8.3 (or higher), the <code>openswoole</code> and <code>zealphp</code>
       extensions, and Composer. It works on Ubuntu, Debian, and macOS.</p>
 
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'Already have PHP 8.3+?',
-      'body'    => 'You can skip the install script and just install the extensions: <code>pecl install openswoole</code> and <code>pecl install uopz</code>. On PHP 8.4+, the PECL uopz release may fail &mdash; build from source instead: <code>git clone https://github.com/krakjoe/uopz.git &amp;&amp; cd uopz &amp;&amp; phpize &amp;&amp; ./configure &amp;&amp; make &amp;&amp; sudo make install</code>. Verify with <code>php -m | grep -E "openswoole|uopz"</code>.',
+      'body'    => 'You can skip the install script and just install the extensions: <code>pecl install openswoole</code> and build ext-zealphp from source: <code>cd ext/zealphp &amp;&amp; phpize &amp;&amp; ./configure &amp;&amp; make &amp;&amp; sudo make install</code>. Verify with <code>php -m | grep -E "openswoole|zealphp"</code>.',
     ]); ?>
 
     <h2>Step 2: Scaffold a project</h2>
@@ -79,7 +79,7 @@ php app.php logs           # Tail log files</code></pre>
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
-      'One install script sets up PHP, OpenSwoole, and uopz',
+      'One install script sets up PHP, OpenSwoole, and ext-zealphp',
       '<code>composer create-project</code> scaffolds the app with the right structure',
       '<code>php app.php</code> starts the server — no web server config needed',
       'Each folder has one job: public/ for pages, api/ for REST, src/ for logic, template/ for layouts',

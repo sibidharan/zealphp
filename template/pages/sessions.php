@@ -2,15 +2,16 @@
 <section class="section">
 <div class="container">
 <h1 class="section-title">Sessions</h1>
-<p class="section-desc">ZealPHP overrides every <code>session_*()</code> function via uopz at startup — those calls route through the coroutine-local <code>RequestContext::instance()-&gt;session</code>. <strong>Direct writes to the <code>$_SESSION</code> superglobal are NOT intercepted</strong> — PHP has no hook for variable assignment, so <code>$_SESSION['k'] = $v</code> always lands in the process-wide PHP array. In coroutine mode that array leaks across concurrent requests; in <code>App::superglobals(true)</code> mode it's bridged through <code>$GLOBALS</code> per the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a>. <strong>Always read and write through <code>$g-&gt;session</code></strong> — it's the only form that's per-coroutine safe in both modes. (<code>G</code> remains as a <code>class_alias</code> for <code>RequestContext</code> since v0.2.6 — both names resolve to the same class.)</p>
+<p class="section-desc">ZealPHP overrides every <code>session_*()</code> function via ext-zealphp at startup — those calls route through the coroutine-local <code>RequestContext::instance()-&gt;session</code>. <strong>Direct writes to the <code>$_SESSION</code> superglobal are NOT intercepted</strong> — PHP has no hook for variable assignment, so <code>$_SESSION['k'] = $v</code> always lands in the process-wide PHP array. In coroutine mode that array leaks across concurrent requests; in <code>App::superglobals(true)</code> mode it's bridged through <code>$GLOBALS</code> per the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a>. <strong>Always read and write through <code>$g-&gt;session</code></strong> — it's the only form that's per-coroutine safe in both modes. (<code>G</code> remains as a <code>class_alias</code> for <code>RequestContext</code> since v0.2.6 — both names resolve to the same class.)</p>
 
 <?php App::render('/components/_code', [
     'label' => 'How it works under the hood',
     'code'  => <<<'PHP'
 // At App::__construct() time — runs once per server lifecycle:
-\uopz_set_return('session_start',       \Closure::fromCallable('ZealPHP\Session\zeal_session_start'));
-\uopz_set_return('session_id',          \Closure::fromCallable('ZealPHP\Session\zeal_session_id'));
-\uopz_set_return('session_write_close', \Closure::fromCallable('ZealPHP\Session\zeal_session_write_close'));
+// ext-zealphp intercepts session functions, routing to per-request state:
+zealphp_override('session_start',       \Closure::fromCallable('ZealPHP\Session\zeal_session_start'));
+zealphp_override('session_id',          \Closure::fromCallable('ZealPHP\Session\zeal_session_id'));
+zealphp_override('session_write_close', \Closure::fromCallable('ZealPHP\Session\zeal_session_write_close'));
 // ... + 15 more functions
 
 // Use $g->session for per-coroutine safety in both modes:

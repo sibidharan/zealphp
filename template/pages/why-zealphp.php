@@ -53,7 +53,7 @@
           <p class="why-card-body">
             Drop <code>.php</code> files in <code>public/</code> and they route automatically — just like Apache.
             <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>, <code>echo</code>
-            all work unchanged via uopz. Drop files in <code>api/</code> and they become REST endpoints.
+            all work unchanged via ext-zealphp. Drop files in <code>api/</code> and they become REST endpoints.
             Many traditional PHP patterns — including WordPress — run through the CGI worker bridge in compatibility mode, with documented limits. Migrate at your own pace — file by file, feature by feature.
           </p>
         </div>
@@ -183,7 +183,7 @@
           <ul class="why-engine-list">
             <li><strong>Routing</strong> &mdash; <code>route()</code> + <code>nsRoute</code> + <code>nsPathRoute</code> + <code>patternRoute</code> with reflection-based parameter injection (<a href="/routing">/routing</a>)</li>
             <li><strong>PSR-15 middleware stack</strong> &mdash; 18 built-ins (CORS, ETag, Range, Compression, RateLimit, BasicAuth, HostRouter, ScopedMiddleware, &hellip;) covering common Apache mod_*  / nginx behaviors (<a href="/middleware">/middleware</a>)</li>
-            <li><strong><code>uopz</code> overrides</strong> &mdash; <code>session_start()</code>, <code>header()</code>, <code>setcookie()</code>, <code>http_response_code()</code>, <code>headers_list()</code>, the entire <code>session_*()</code> family, <code>flush()</code>, <code>apache_request_headers()</code>, <code>is_uploaded_file()</code> all just work, routing to per-request state instead of mutating process globals</li>
+            <li><strong><code>ext-zealphp</code> overrides</strong> &mdash; <code>session_start()</code>, <code>header()</code>, <code>setcookie()</code>, <code>http_response_code()</code>, <code>headers_list()</code>, the entire <code>session_*()</code> family, <code>flush()</code>, <code>apache_request_headers()</code>, <code>is_uploaded_file()</code> all just work, routing to per-request state instead of mutating process globals</li>
             <li><strong>Coroutine-safe sessions</strong> &mdash; <code>CoSessionManager</code> with per-coroutine isolation, no <code>$_SESSION</code> races across concurrent requests (<a href="/sessions">/sessions</a>)</li>
             <li><strong>Templating</strong> &mdash; <code>App::render</code> / <code>renderToString</code> / <code>renderStream</code> / <code>include</code> / <code>fragment</code> &mdash; htmx-style named regions, streaming-Generator output, sub-template composition (<a href="/templates">/templates</a>)</li>
             <li><strong>Universal return contract</strong> &mdash; <code>int</code> = status, <code>array</code> = JSON, <code>Generator</code> = SSE/SSR stream, <code>string</code> = HTML, <code>Closure</code> = param-injected stream &mdash; one contract across route handler, public file, API closure, fallback, error handler, render(), include() (<a href="/responses#return-contract">/responses#return-contract</a>)</li>
@@ -198,7 +198,7 @@
         </div>
       </div>
       <p class="why-octane-outro">
-        <strong>When raw OpenSwoole is the right choice:</strong> you&rsquo;re building a custom binary-protocol server (your own message broker, database driver, ASR pipeline), you can&rsquo;t use <code>uopz</code> (compliance / locked-down host), or you&rsquo;re explicitly building <em>another</em> framework. For everything else &mdash; HTTP, WebSocket, SSE, REST APIs, web apps with sessions, AI-streaming endpoints &mdash; the harness saves you weeks per project and keeps the migration door open to existing PHP code.
+        <strong>When raw OpenSwoole is the right choice:</strong> you&rsquo;re building a custom binary-protocol server (your own message broker, database driver, ASR pipeline), you can&rsquo;t install custom PHP extensions (locked-down shared host), or you&rsquo;re explicitly building <em>another</em> framework. For everything else &mdash; HTTP, WebSocket, SSE, REST APIs, web apps with sessions, AI-streaming endpoints &mdash; the harness saves you weeks per project and keeps the migration door open to existing PHP code.
       </p>
     </div>
 

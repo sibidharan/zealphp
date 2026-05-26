@@ -17,26 +17,26 @@
       <a href="https://github.com/sibidharan/zealphp/blob/master/CRITIC.md" class="tradeoffs-link">CRITIC.md</a>.
     </div>
 
-    <!-- ─── uopz overrides ─── -->
+    <!-- ─── ext-zealphp function overrides ─── -->
     <div class="tradeoffs-block">
-      <h2 class="tradeoffs-h2">1. uopz overrides on PHP built-ins</h2>
+      <h2 class="tradeoffs-h2">1. ext-zealphp: function overrides on PHP built-ins</h2>
       <p class="tradeoffs-p">
-        At server boot, ZealPHP uses <code>uopz_set_return()</code> to permanently replace
-        PHP built-ins like <code>header()</code>, <code>setcookie()</code>, <code>session_start()</code>,
-        <code>set_error_handler()</code>, <code>http_response_code()</code>. Calls flow into per-request
-        objects (<code>$g->zealphp_response</code>, <code>$g->session</code>) instead of the global PHP state
-        that mod_php and FPM rely on.
+        At server boot, ZealPHP uses <code>ext-zealphp</code> (our own ~250-line C extension) to
+        permanently replace PHP built-ins like <code>header()</code>, <code>setcookie()</code>,
+        <code>session_start()</code>, <code>set_error_handler()</code>, <code>http_response_code()</code>.
+        Calls flow into per-request objects (<code>$g->zealphp_response</code>, <code>$g->session</code>)
+        instead of the global PHP state that mod_php and FPM rely on.
       </p>
       <ul class="tradeoffs-list">
         <li><strong class="tradeoffs-strong-light">What it buys:</strong> unmodified PHP-FPM-era code works. Legacy
           libraries that call <code>session_start()</code> just work; you don't rewrite them.</li>
-        <li><strong class="tradeoffs-strong-light">What it costs:</strong> requires the <code>uopz</code> extension at
-          install time (not bundled with FPM by default; one apt-get / pecl install). PHPStan can't see
-          through uopz redirection — it thinks <code>header()</code> writes to a global table, when at
-          runtime it writes to <code>$response->headersList</code>.</li>
-        <li><strong class="tradeoffs-strong-light">Mitigation:</strong> 16 inline <code>@phpstan-ignore-next-line</code>
-          annotations across <code>src/utils.php</code> and <code>src/Session/utils.php</code>, each with a
-          one-line reason. <code>uopz</code> is checked at <code>App::init()</code> and throws if missing.</li>
+        <li><strong class="tradeoffs-strong-light">What it costs:</strong> requires the <code>ext-zealphp</code>
+          extension at install time (<code>pecl install zealphp</code> or build from <code>ext/zealphp/</code>).
+          PHPStan can't see through the redirection &mdash; it thinks <code>header()</code> writes to a global table,
+          when at runtime it writes to <code>$response->headersList</code>.</li>
+        <li><strong class="tradeoffs-strong-light">Design:</strong> allowlist-only (53 functions), no class manipulation,
+          no constant overrides, no general-purpose API. <code>MSHUTDOWN</code> auto-restores all originals.
+          The legacy <code>uopz</code> extension is supported as a fallback for existing installs.</li>
       </ul>
     </div>
 
@@ -158,7 +158,7 @@ PHP]); ?>
       <p class="tradeoffs-p-sm">
         Beyond the file bridge, <code>App::exec()</code> runs shell commands coroutine-safely through
         <code>OpenSwoole\Coroutine\System::exec()</code> (yields to the scheduler instead of blocking the worker),
-        and a transparent uopz override of the <code>shell_exec</code> / <code>exec</code> / <code>system</code> /
+        and a transparent ext-zealphp override of the <code>shell_exec</code> / <code>exec</code> / <code>system</code> /
         <code>passthru</code> family (and the backtick operator, which compiles to <code>shell_exec</code>) routes
         legacy/user code through it with zero source changes (on by default in coroutine mode,
         <code>App::hookExec()</code> to override).
@@ -300,7 +300,7 @@ PHP]); ?>
       <h2 class="tradeoffs-closing-h2">The math</h2>
       <p class="tradeoffs-closing-p">
         At PHPStan's strictest level (10 on PHPStan 2.x), ZealPHP has <strong>75 documented ignore sites
-        across <code>src/</code></strong>. ~57 are genuine architectural design choices (uopz / <code>__call</code> /
+        across <code>src/</code></strong>. ~57 are genuine architectural design choices (ext-zealphp / <code>__call</code> /
         reflection / dual-mode). ~18 are PHPStan / stub-mismatch limitations where the upstream type
         information is wrong.
       </p>
