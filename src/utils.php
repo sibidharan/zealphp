@@ -736,9 +736,27 @@ function response_headers_list(): array
  * @param bool   $httponly
  * @param string $samesite
  */
-function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false, $samesite = ''): bool {
-    // Cookie name char rules match PHP native setcookie: reject `=,; \t\r\n\013\014\0`.
-    // Reject CR/LF/NUL in value/path/domain to prevent Set-Cookie header injection.
+/**
+ * @param string $name
+ * @param string $value
+ * @param int|array{expires?: int, path?: string, domain?: string, secure?: bool, httponly?: bool, samesite?: string} $expire_or_options
+ * @param string $path
+ * @param string $domain
+ * @param bool $secure
+ * @param bool $httponly
+ * @param string $samesite
+ */
+function setcookie($name, $value = "", int|array $expire_or_options = 0, $path = "", $domain = "", $secure = false, $httponly = false, $samesite = ''): bool {
+    if (is_array($expire_or_options)) {
+        $expire   = (int) ($expire_or_options['expires'] ?? 0);
+        $path     = (string) ($expire_or_options['path'] ?? '');
+        $domain   = (string) ($expire_or_options['domain'] ?? '');
+        $secure   = (bool) ($expire_or_options['secure'] ?? false);
+        $httponly  = (bool) ($expire_or_options['httponly'] ?? false);
+        $samesite = (string) ($expire_or_options['samesite'] ?? '');
+    } else {
+        $expire = $expire_or_options;
+    }
     if (strpbrk((string)$name, "=,; \t\r\n\013\014\0") !== false) {
         trigger_error("Cookie names cannot contain any of the following '=,; \\t\\r\\n\\013\\014'", E_USER_WARNING);
         return false;
@@ -757,32 +775,24 @@ function setcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $s
 }
 
 /**
- * Set a raw cookie.
- *
- * @param string $name The name of the cookie.
- * @param string $value The value of the cookie. Default is an empty string.
- * @param int $expire The time the cookie expires. This is a Unix timestamp so is in number of seconds since the epoch. Default is 0.
- * @param string $path The path on the server in which the cookie will be available on. Default is an empty string.
- * @param string $domain The (sub)domain that the cookie is available to. Default is an empty string.
- * @param bool $secure Indicates that the cookie should only be transmitted over a secure HTTPS connection from the client. Default is false.
- * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
- */
-/**
  * @param string $name
  * @param string $value
- * @param int    $expire
+ * @param int|array{expires?: int, path?: string, domain?: string, secure?: bool, httponly?: bool} $expire_or_options
  * @param string $path
  * @param string $domain
  * @param bool   $secure
  * @param bool   $httponly
  */
-function setrawcookie($name, $value = "", $expire = 0, $path = "", $domain = "", $secure = false, $httponly = false): bool {
-    // setrawcookie() skips URL-encoding on $value, which is the whole point —
-    // it's "raw" so callers can pass already-encoded values verbatim. Match
-    // PHP native behavior: reject the name char-class, but only reject
-    // CRLF/NUL in the value/path/domain (the response-splitting vector).
-    // Do NOT reject space/comma/semicolon in the value — PHP allows them
-    // (test fixture: setrawcookie('rawck', 'a b+c/d')).
+function setrawcookie($name, $value = "", int|array $expire_or_options = 0, $path = "", $domain = "", $secure = false, $httponly = false): bool {
+    if (is_array($expire_or_options)) {
+        $expire   = (int) ($expire_or_options['expires'] ?? 0);
+        $path     = (string) ($expire_or_options['path'] ?? '');
+        $domain   = (string) ($expire_or_options['domain'] ?? '');
+        $secure   = (bool) ($expire_or_options['secure'] ?? false);
+        $httponly  = (bool) ($expire_or_options['httponly'] ?? false);
+    } else {
+        $expire = $expire_or_options;
+    }
     if (strpbrk((string)$name, "=,; \t\r\n\013\014\0") !== false) {
         trigger_error("Cookie names cannot contain any of the following '=,; \\t\\r\\n\\013\\014'", E_USER_WARNING);
         return false;

@@ -6454,7 +6454,9 @@ HELP;
                 }
                 access_log($serverResponse->getStatusCode(), 0);
             } catch (\Throwable|\OpenSwoole\ExitException $e) {
-                if ($e instanceof \OpenSwoole\ExitException) {
+                if ($e instanceof \OpenSwoole\ExitException
+                    || ($e::class === 'ExitException' && method_exists($e, 'getStatus'))
+                ) {
                     $exitStatus = $e->getStatus();
                     $body = is_string($exitStatus) ? $exitStatus : '';
                     $code = (is_int($exitStatus) && $exitStatus >= 100 && $exitStatus <= 599) ? $exitStatus : ($g->status ?? 200);
@@ -6761,7 +6763,9 @@ class ResponseMiddleware implements MiddlewareInterface
             }
             return (new Response($body, $status));
         } catch (\Throwable|\OpenSwoole\ExitException $e) {
-            if($e instanceof \OpenSwoole\ExitException){
+            if ($e instanceof \OpenSwoole\ExitException
+                || ($e::class === 'ExitException' && method_exists($e, 'getStatus'))
+            ) {
                 $exitStatus = $e->getStatus();
                 if ($exitStatus === 0 || $exitStatus === null) {
                     return (new Response(''))->withStatus($g->status ?? 200);
@@ -6935,7 +6939,9 @@ class ResponseMiddleware implements MiddlewareInterface
             }
             return (new Response($buffer, $status));
         } catch (\Throwable|\OpenSwoole\ExitException $e) {
-            if($e instanceof \OpenSwoole\ExitException){
+            if ($e instanceof \OpenSwoole\ExitException
+                || ($e::class === 'ExitException' && method_exists($e, 'getStatus'))
+            ) {
                 $exitStatus = $e->getStatus();
                 $buffered = (string)ob_get_clean();
                 if ($exitStatus === 0 || $exitStatus === null) {
