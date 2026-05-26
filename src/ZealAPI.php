@@ -163,28 +163,30 @@ class ZealAPI extends REST
                     $methodKeywords = ['get', 'post', 'put', 'delete', 'patch'];
 
                     if ($filenameHandler instanceof \Closure) {
-                        if (in_array($func, $methodKeywords, true)) {
-                            elog(
-                                "api{$module}/{$request}.php: filename '{$request}' collides with"
-                                . " HTTP method — \${$func} is treated as a filename match (all"
-                                . " methods reach it). To use per-method dispatch, rename the"
-                                . " file (e.g. api{$module}.php) and define \$get/\$post/… there.",
-                                'warning'
-                            );
-                        }
-                        $unreachable = [];
-                        foreach ($methodKeywords as $_m) {
-                            if ($_m !== $func && ($_vars[$_m] ?? null) instanceof \Closure) {
-                                $unreachable[] = '$' . $_m;
+                        if (\ZealPHP\App::$api_warn_collisions) {
+                            if (in_array($func, $methodKeywords, true)) {
+                                elog(
+                                    "api{$module}/{$request}.php: filename '{$request}' collides with"
+                                    . " HTTP method — \${$func} is treated as a filename match (all"
+                                    . " methods reach it). To use per-method dispatch, rename the"
+                                    . " file (e.g. api{$module}.php) and define \$get/\$post/… there.",
+                                    'warning'
+                                );
                             }
-                        }
-                        if ($unreachable) {
-                            elog(
-                                "api{$module}/{$request}.php: \${$func} (filename match) takes priority"
-                                . " — " . implode(', ', $unreachable) . " are unreachable."
-                                . " Remove \${$func} to enable per-method routing.",
-                                'warning'
-                            );
+                            $unreachable = [];
+                            foreach ($methodKeywords as $_m) {
+                                if ($_m !== $func && ($_vars[$_m] ?? null) instanceof \Closure) {
+                                    $unreachable[] = '$' . $_m;
+                                }
+                            }
+                            if ($unreachable) {
+                                elog(
+                                    "api{$module}/{$request}.php: \${$func} (filename match) takes priority"
+                                    . " — " . implode(', ', $unreachable) . " are unreachable."
+                                    . " Remove \${$func} to enable per-method routing.",
+                                    'warning'
+                                );
+                            }
                         }
                         $closureToBind = $filenameHandler;
                     } else {

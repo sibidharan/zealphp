@@ -41,12 +41,18 @@
     <pre><code class="language-bash">composer create-project sibidharan/zealphp-project my-app
 cd my-app</code></pre>
     <p>This creates a starter project with the right folder structure, a minimal <a href="https://github.com/sibidharan/zealphp/blob/master/app.php" target="_blank"><code>app.php</code></a>,
-      and all dependencies pre-installed (the scaffold ships <code>vendor/</code> so you can run immediately).</p>
+      and all dependencies installed automatically &mdash; you can run immediately.</p>
 
     <h2>Step 3: Start the server</h2>
     <pre><code class="language-bash">php app.php</code></pre>
     <p>Open <code>http://localhost:8080</code> in your browser. You should see the starter page.</p>
-    <p>That's it. Your app is running. No Apache config, no virtual host, no <code>.htaccess</code>.</p>
+    <p>That&rsquo;s it. Your app is running. No Apache config, no virtual host, no <code>.htaccess</code>.</p>
+
+    <?php App::render('/components/_callout', [
+      'variant' => 'info',
+      'title'   => 'What\'s App::superglobals(false)?',
+      'body'    => 'You\'ll see this line near the top of <code>app.php</code>. It tells ZealPHP to run in <strong>coroutine mode</strong> &mdash; the recommended default for new projects. It means each request gets its own isolated state, so many requests can run at the same time without stepping on each other. You don\'t need to understand the details yet &mdash; <a href="/learn/mental-model">Lesson 4 (The Mental Model)</a> explains it. For now, just leave it as-is.',
+    ]); ?>
 
     <h2>The folder structure (in one breath)</h2>
     <p>
