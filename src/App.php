@@ -3218,26 +3218,30 @@ class App
             $result = include $absPath;
         } catch (HaltException $e) {
             // Clean halt — preserves buffered output as the body (PR #10).
-            // Fragment-capture extension: if App::fragment() matched and the
-            // closure returned a non-null contract-shaped value (int / array
-            // / Generator / Closure / string), surface it as $result so the
-            // universal return contract applies.
             $haltState = self::getFragmentState();
             if ($haltState !== null && $haltState['matched'] && $haltState['result'] !== null) {
                 $result = $haltState['result'];
             } else {
-                // Plain halt (no explicit fragment return) — flag the
-                // buffered echo as the response body via the same code path
-                // PHP's "no explicit return from include" uses ($result === 1).
-                // Without this, the bottom-of-method `return $result` would
-                // throw away the buffered HTML the template echoed before
-                // the halt, defeating the whole point of catching HaltException.
                 $result = 1;
             }
         } catch (\Throwable $e) {
-            @ob_end_clean();
-            self::restoreFragmentState($previousFragmentState);
-            throw $e;
+            // PHP 8.4+: exit()/die() throw \ExitException instead of
+            // terminating the process. Treat as clean halt — worker survives.
+            if ($e::class === 'ExitException' && method_exists($e, 'getStatus')) {
+                $status = $e->getStatus();
+                if (is_int($status) && $status >= 100 && $status <= 599) {
+                    $result = $status;
+                } elseif (is_string($status) && $status !== '') {
+                    echo $status;
+                    $result = 1;
+                } else {
+                    $result = 1;
+                }
+            } else {
+                @ob_end_clean();
+                self::restoreFragmentState($previousFragmentState);
+                throw $e;
+            }
         }
         $output = ob_get_clean();
         if ($output === false) {
