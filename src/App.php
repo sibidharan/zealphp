@@ -5911,6 +5911,17 @@ HELP;
         // I/O. We warn rather than refuse — see App::hookAll() docblock.
         self::validateLifecycleCombination(App::$superglobals, $hookFlags, $enableCoroutine);
 
+        // Activate per-coroutine superglobal isolation when ext-zealphp is
+        // loaded AND superglobals mode is on with coroutines. This hooks into
+        // OpenSwoole's yield/resume/close scheduler callbacks so $_GET/$_POST/
+        // $_SESSION are saved/restored on every context switch.
+        if (App::$superglobals && $enableCoroutine
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_coroutine_superglobals')
+        ) {
+            (\zealphp_coroutine_superglobals(...))((bool) true);
+        }
+
         // Transparent coroutine-safe exec family. Overriding `shell_exec` ALSO
         // intercepts the backtick operator (`` `cmd` `` compiles to a
         // shell_exec() call), so legacy/user code becomes coroutine-safe with
