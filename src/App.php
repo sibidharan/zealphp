@@ -863,8 +863,15 @@ class App
         }
     }
 
+    private static bool $overridesRegistered = false;
+
     private static function registerAllOverrides(): void
     {
+        if (self::$overridesRegistered) {
+            return;
+        }
+        self::$overridesRegistered = true;
+
         // Response
         self::overrideBuiltin('header', '\ZealPHP\header');
         self::overrideBuiltin('header_remove', '\ZealPHP\header_remove');
@@ -4386,7 +4393,7 @@ class App
             if ($isPhp) {
                 // PHP target: route through cgi_worker.php for uopz header/cookie captures.
                 $cgiWorker = __DIR__ . '/cgi_worker.php';
-                $cmd = PHP_BINARY . ' ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
+                $cmd = PHP_BINARY . ' -d display_errors=stderr ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
             } else {
                 // Non-PHP file with no explicit interpreter (the `cgiScriptAlias`-only
                 // path): exec the file directly, relying on its `#!` shebang line.
