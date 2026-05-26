@@ -258,7 +258,7 @@ PHP
 
     <div class="callout warn gs-mt-1">
       <strong>Two modes, one rule: <a href="/coroutines#state-parity">always use <code>$g->*</code></a>.</strong>
-      The default <code>app.php</code> runs in <strong>coroutine mode</strong> (<code>App::superglobals(false)</code>) — PHP's <code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code> are NOT populated per request there. Writing to <code>$_SESSION</code> would leak across visitors because the superglobal is process-wide. <code>$g->session</code> / <code>$g->get</code> / <code>$g->post</code> are per-coroutine and always work.
+      The default <code>app.php</code> runs in <strong>coroutine mode</strong> (<code>App::superglobals(false)</code>) — <code>$g-&gt;session</code> / <code>$g-&gt;get</code> / <code>$g-&gt;post</code> are the recommended accessors (per-coroutine, always safe). With ext-zealphp, <code>$_GET</code>/<code>$_SESSION</code> can also be made per-coroutine safe via <code>zealphp_coroutine_superglobals(true)</code>.
       <br><br>
       If you're porting a legacy <code>.htaccess</code> + <code>$_*</code> codebase and want a quick lift, set <code>App::superglobals(true);</code> before <code>App::init()</code> — ZealPHP then bridges <code>$g-&gt;*</code> to the real PHP superglobals via <code>$GLOBALS</code> so legacy code keeps working. See the <a href="/legacy-apps">Legacy apps</a> page for the full migration matrix.
     </div>
