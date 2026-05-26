@@ -485,26 +485,24 @@ $app->route('/notes/{id}', function ($request, $response, $id) {
       11 HX-* response headers htmx reads after a swap — events, browser history,
       target/swap override, refresh, redirect. Fluent, chained:
     </p>
-    <pre><code class="language-php">$app->route('/api/notes', function ($request, $response) {
-    $note = Notes::create($request->getParsedBody());
+    <pre><code class="language-php">$app->route('/api/notes', function ($response) {
+    $g    = \ZealPHP\G::instance();
+    $note = Notes::create($g->post);
 
-    return $response->htmx()
+    $response->htmx()
         ->trigger('note-saved')                   // HX-Trigger: fire JS event
         ->triggerAfterSwap('focus-next-input')    // HX-Trigger-After-Swap
         ->pushUrl("/notes/{$note->id}")           // HX-Push-Url: browser history
-        ->reswap('beforeend')                     // HX-Reswap: override target swap
-        ->response()                              // → underlying Response
-        ->withHeader('Content-Type', 'text/html')
-        ->withBody(\GuzzleHttp\Psr7\Utils::streamFor(
-            App::renderToString('partials/note_card', ['note' => $note])
-        ));
+        ->reswap('beforeend');                    // HX-Reswap: override target swap
+
+    return App::renderToString('partials/note_card', ['note' => $note]);
 });</code></pre>
 
     <p class="lhx-note">
       Full surface: <code>trigger()</code>, <code>triggerAfterSwap()</code>, <code>triggerAfterSettle()</code>,
       <code>reswap()</code>, <code>retarget()</code>, <code>reselect()</code>,
       <code>refresh()</code>, <code>location()</code>, <code>pushUrl()</code>, <code>replaceUrl()</code>,
-      <code>redirect()</code>. Each returns the builder; <code>response()</code> hands you back the underlying <code>Response</code>.
+      <code>redirect()</code>. Each returns the builder &mdash; the HX-* headers are set on the underlying response automatically.
     </p>
 
     <h3 id="hx-oob">Out-of-band swaps — update multiple regions in one response</h3>
@@ -519,9 +517,8 @@ $body = App::renderToString('partials/note_card', ['note' => $note])         // 
       . HtmxResponse::oob('unread-badge', '&lt;span&gt;' . $unread . '&lt;/span&gt;')         // OOB: replace #unread-badge
       . HtmxResponse::oob('toast', '&lt;div&gt;Saved!&lt;/div&gt;', swap: 'beforeend'); // OOB: append to #toast
 
-return $response->htmx()->trigger('note-saved')->response()
-       ->withHeader('Content-Type', 'text/html')
-       ->withBody(\GuzzleHttp\Psr7\Utils::streamFor($body));</code></pre>
+$response->htmx()->trigger('note-saved');
+return $body;</code></pre>
 
     <h3 id="hx-compose">Putting it together: one template, two responses, one HX-Trigger</h3>
     <p>
@@ -544,16 +541,15 @@ return $response->htmx()->trigger('note-saved')->response()
 use ZealPHP\App;
 
 $app->route('/notes', function ($request, $response) {
-    if ($request->getMethod() === 'POST') {
-        Notes::create($request->getParsedBody());
+    $g = \ZealPHP\G::instance();
+    if ($g->server['REQUEST_METHOD'] === 'POST') {
+        Notes::create($g->post);
         // After save, return just the updated list AND fire the toast event.
-        $body = App::renderToString('pages/notes', [
+        $response->htmx()->trigger('note-saved');
+        return App::renderToString('pages/notes', [
             'notes'    => Notes::all(),
             'fragment' => 'note-list',
         ]);
-        return $response->htmx()->trigger('note-saved')->response()
-               ->withHeader('Content-Type', 'text/html')
-               ->withBody(\GuzzleHttp\Psr7\Utils::streamFor($body));
     }
     // GET — full page on plain nav, just #note-list on htmx swap.
     return App::render('_master', [

@@ -87,6 +87,11 @@ is_root() {
         echo -e "${RED}Please run as root.${RESET}"
         return 1 # Not root
     fi
+    # When already root (Docker, `curl | sudo bash`), sudo may not be installed.
+    SUDO=""
+    if [ "$EUID" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+        SUDO="sudo"
+    fi
     # Suppress interactive apt prompts (tzdata, etc.) — required for
     # `curl … | sudo bash` and for fresh Docker images where the timezone
     # dialog would otherwise hang the install.
@@ -156,7 +161,7 @@ get_confirmation() {
 update_package_lists() {
     echo -e "${YELLOW}Updating package lists.${RESET}"
 
-    if ! sudo apt update; then
+    if ! $SUDO apt update; then
         echo -e "${RED}Failed to update package lists.${RESET}"
         return 1 # Return an error code if the update fails
     fi
@@ -170,7 +175,7 @@ update_package_lists() {
 install_add_apt_repository() {
     if ! command -v add-apt-repository &>/dev/null; then
         echo -e "${YELLOW}Installing software-properties-common.${RESET}"
-        sudo apt install -y software-properties-common || {
+        $SUDO apt install -y software-properties-common || {
             echo -e "${RED}Failed to install software-properties-common.${RESET}"
             return 1 # Installation fails
         }
@@ -219,7 +224,7 @@ get_php_version_confirmation() {
         read -rp "Enter your choice (1/2/3): " choice
         case "$choice" in
         1)
-            sudo apt purge -y "php*" || { # Remove all PHP packages if user agrees
+            $SUDO apt purge -y "php*" || { # Remove all PHP packages if user agrees
                 echo -e "${RED}Failed to remove PHP $current_version. Aborting setup.${RESET}"
                 return 1 # Exit if removal fails
             }
@@ -247,14 +252,14 @@ install_php_8.3() {
     echo -e "${YELLOW}Installing PHP 8.3.${RESET}"
 
     echo -e "${GREEN}Adding Ondrej PHP repository.${RESET}"
-    sudo add-apt-repository -y ppa:ondrej/php || {
+    $SUDO add-apt-repository -y ppa:ondrej/php || {
         echo -e "${RED}Failed to add PHP repository.${RESET}"
         return 1 # The repository addition fails
     }
 
     update_package_lists || return 1
 
-    sudo apt install -y php8.3 || {
+    $SUDO apt install -y php8.3 || {
         echo -e "${RED}Failed to install PHP 8.3.${RESET}"
         return 1 # Installation fails
     }
@@ -266,7 +271,7 @@ install_php_8.3() {
 # Returns 0 if the configuration is successful, 1 if the configuration fails
 configure_php_path() {
     echo -e "${YELLOW}Configuring PHP path.${RESET}"
-    sudo update-alternatives --set php /usr/bin/php8.3 || {
+    $SUDO update-alternatives --set php /usr/bin/php8.3 || {
         echo -e "${RED}Failed to configure PHP path.${RESET}"
         return 1 # Configuration fails
     }
@@ -291,7 +296,7 @@ configure_php_extension() {
     echo -e "${YELLOW}Configuring PHP extension $extension.${RESET}"
 
     # Ensure the configuration file exists
-    sudo touch "$config_file"
+    $SUDO touch "$config_file"
 
     # Check if the extension is already in the configuration file
     if grep -q "^$extension$" "$config_file"; then
@@ -300,7 +305,7 @@ configure_php_extension() {
     fi
 
     # Add the extension to the configuration file
-    echo "$extension" | sudo tee -a "$config_file" >/dev/null || {
+    echo "$extension" | $SUDO tee -a "$config_file" >/dev/null || {
         echo -e "${RED}Failed to add $extension to $config_file.${RESET}"
         return 1 # Failed to add extension to PHP config
     }
@@ -323,8 +328,9 @@ install_dependencies() {
         "php${php_version}-common" 
         "php${php_version}-mbstring" 
         "php${php_version}-xml" 
-        "php${php_version}-curl" 
-        "php${php_version}-mysqli" 
+        "php${php_version}-curl"
+        "php${php_version}-intl"
+        "php${php_version}-mysqli"
         "openssl" 
         "libssl-dev" 
         "curl" 
@@ -335,13 +341,13 @@ install_dependencies() {
         "libpq-dev"
     )
 
-    sudo apt install -y "${packages[@]}" || {
+    $SUDO apt install -y "${packages[@]}" || {
         echo -e "${RED}Failed to install dependencies.${RESET}"
         return 1 # Installation fails
     }
 
     # Ensure the MySQL extension is enabled
-    sudo phpenmod mysqli || {
+    $SUDO phpenmod mysqli || {
         echo -e "${RED}Failed to enable the MySQL extension.${RESET}"
         return 1 # Enabling fails
     }
@@ -358,7 +364,7 @@ check_and_remove_openswoole() {
     # Check and remove installation via apt
     if dpkg -l | grep -q 'php-openswoole'; then
         echo -e "${GREEN}OpenSwoole is installed via apt. Removing.${RESET}"
-        sudo apt remove -y php-openswoole || {
+        $SUDO apt remove -y php-openswoole || {
             echo -e "${RED}Failed to remove OpenSwoole installed via apt.${RESET}"
             return 1 # removal fails
         }
@@ -376,7 +382,7 @@ check_and_remove_openswoole() {
     # Check and disable PHP extension if loaded
     if php -m | grep -q '^swoole$'; then
         echo -e "${GREEN}OpenSwoole PHP extension is loaded. Disabling.${RESET}"
-        sudo phpdismod openswoole || {
+        $SUDO phpdismod openswoole || {
             echo -e "${RED}Failed to disable OpenSwoole PHP extension.${RESET}"
             return 1 # disabling fails
         }
@@ -411,7 +417,7 @@ check_and_remove_uopz() {
         echo -e "${YELLOW}uopz is installed via apt. Removing.${RESET}"
 
         # Remove uopz installed via apt
-        sudo apt remove -y php-uopz || {
+        $SUDO apt remove -y php-uopz || {
             echo -e "${RED}Failed to remove uopz installed via apt.${RESET}"
             return 1 # removal fails
         }
@@ -431,7 +437,7 @@ check_and_remove_uopz() {
     # Check if uopz PHP extension is loaded
     if php -m | grep -q '^uopz$'; then
         echo -e "${RED}uopz PHP extension is loaded. Disabling.${RESET}"
-        sudo phpdismod uopz || {
+        $SUDO phpdismod uopz || {
             echo -e "${RED}Failed to disable uopz PHP extension.${RESET}"
             return 1 # disabling fails
         }
@@ -446,7 +452,7 @@ check_and_remove_uopz() {
 install_uopz() {
     echo -e "${YELLOW}Installing uopz${RESET}"
 
-    if sudo pecl install uopz 2>/dev/null; then
+    if $SUDO pecl install uopz 2>/dev/null; then
         echo -e "${GREEN}uopz installed via PECL.${RESET}"
     else
         echo -e "${YELLOW}PECL uopz failed (likely PHP 8.4+). Building from git source.${RESET}"
@@ -457,7 +463,7 @@ install_uopz() {
             rm -rf "$tmpdir"
             return 1
         }
-        (cd "$tmpdir" && phpize && ./configure && make -j"$(nproc)" && sudo make install) || {
+        (cd "$tmpdir" && phpize && ./configure && make -j"$(nproc)" && $SUDO make install) || {
             echo -e "${RED}Failed to build uopz from source.${RESET}"
             rm -rf "$tmpdir"
             return 1
@@ -486,7 +492,7 @@ check_composer_installed() {
 install_composer() {
     echo "Installing Composer using apt."
 
-    sudo apt install -y composer || {
+    $SUDO apt install -y composer || {
         echo "Failed to install Composer."
         return 1 # Installation fails
     }
