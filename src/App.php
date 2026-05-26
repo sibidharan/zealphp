@@ -791,60 +791,7 @@ class App
         \phpinfo(INFO_MODULES);
         \ZealPHP\Diagnostics\PhpInfo::primeModuleText((string) \ob_get_clean());
 
-        // Override PHP built-ins so they route to per-request objects.
-        // Prefer ext-zealphp (allowlist-only, ~250 LOC); fall back to uopz.
-        self::overrideBuiltin('header', '\ZealPHP\header');
-        self::overrideBuiltin('header_remove', '\ZealPHP\header_remove');
-        self::overrideBuiltin('headers_list', '\ZealPHP\headers_list');
-        self::overrideBuiltin('headers_sent', '\ZealPHP\headers_sent');
-        self::overrideBuiltin('setcookie', '\ZealPHP\setcookie');
-        self::overrideBuiltin('setrawcookie', '\ZealPHP\setrawcookie');
-        self::overrideBuiltin('http_response_code', '\ZealPHP\http_response_code');
-        self::overrideBuiltin('flush', '\ZealPHP\flush');
-        self::overrideBuiltin('ob_flush', '\ZealPHP\ob_flush');
-        self::overrideBuiltin('ob_end_flush', '\ZealPHP\ob_end_flush');
-        self::overrideBuiltin('ob_implicit_flush', '\ZealPHP\ob_implicit_flush');
-        self::overrideBuiltin('set_time_limit', '\ZealPHP\set_time_limit');
-        self::overrideBuiltin('ignore_user_abort', '\ZealPHP\ignore_user_abort');
-        self::overrideBuiltin('connection_status', '\ZealPHP\connection_status');
-        self::overrideBuiltin('connection_aborted', '\ZealPHP\connection_aborted');
-        self::overrideBuiltin('output_add_rewrite_var', '\ZealPHP\output_add_rewrite_var');
-        self::overrideBuiltin('output_reset_rewrite_vars', '\ZealPHP\output_reset_rewrite_vars');
-        self::overrideBuiltin('is_uploaded_file', '\ZealPHP\is_uploaded_file');
-        self::overrideBuiltin('move_uploaded_file', '\ZealPHP\move_uploaded_file');
-        self::overrideBuiltin('phpinfo', '\ZealPHP\phpinfo');
-        self::overrideBuiltin('php_sapi_name', '\ZealPHP\php_sapi_name');
-        self::overrideBuiltin('filter_input', '\ZealPHP\filter_input');
-        self::overrideBuiltin('filter_input_array', '\ZealPHP\filter_input_array');
-        self::overrideBuiltin('header_register_callback', '\ZealPHP\header_register_callback');
-        self::overrideBuiltin('error_log', '\ZealPHP\error_log');
-        self::overrideBuiltin('set_error_handler', '\ZealPHP\set_error_handler');
-        self::overrideBuiltin('restore_error_handler', '\ZealPHP\restore_error_handler');
-        self::overrideBuiltin('set_exception_handler', '\ZealPHP\set_exception_handler');
-        self::overrideBuiltin('restore_exception_handler', '\ZealPHP\restore_exception_handler');
-        self::overrideBuiltin('register_shutdown_function', '\ZealPHP\register_shutdown_function');
-        self::overrideBuiltin('error_reporting', '\ZealPHP\error_reporting');
-        // Apache-only built-ins (apache_*, getallheaders, virtual) are NOT defined
-        // in CLI SAPI; neither extension can override what doesn't exist. They are
-        // registered as global shims via src/apache_shims.php (composer files autoload).
-        self::overrideBuiltin('session_start', '\ZealPHP\Session\zeal_session_start');
-        self::overrideBuiltin('session_id', '\ZealPHP\Session\zeal_session_id');
-        self::overrideBuiltin('session_status', '\ZealPHP\Session\zeal_session_status');
-        self::overrideBuiltin('session_name', '\ZealPHP\Session\zeal_session_name');
-        self::overrideBuiltin('session_write_close', '\ZealPHP\Session\zeal_session_write_close');
-        self::overrideBuiltin('session_destroy', '\ZealPHP\Session\zeal_session_destroy');
-        self::overrideBuiltin('session_unset', '\ZealPHP\Session\zeal_session_unset');
-        self::overrideBuiltin('session_regenerate_id', '\ZealPHP\Session\zeal_session_regenerate_id');
-        self::overrideBuiltin('session_get_cookie_params', '\ZealPHP\Session\zeal_session_get_cookie_params');
-        self::overrideBuiltin('session_set_cookie_params', '\ZealPHP\Session\zeal_session_set_cookie_params');
-        self::overrideBuiltin('session_cache_limiter', '\ZealPHP\Session\zeal_session_cache_limiter');
-        self::overrideBuiltin('session_cache_expire', '\ZealPHP\Session\zeal_session_cache_expire');
-        self::overrideBuiltin('session_commit', '\ZealPHP\Session\zeal_session_commit');
-        self::overrideBuiltin('session_abort', '\ZealPHP\Session\zeal_session_abort');
-        self::overrideBuiltin('session_encode', '\ZealPHP\Session\zeal_session_encode');
-        self::overrideBuiltin('session_decode', '\ZealPHP\Session\zeal_session_decode');
-        self::overrideBuiltin('session_save_path', '\ZealPHP\Session\zeal_session_save_path');
-        self::overrideBuiltin('session_module_name', '\ZealPHP\Session\zeal_session_module_name');
+        self::registerAllOverrides();
     }
 
     /**
@@ -914,6 +861,67 @@ class App
         } elseif (\function_exists('uopz_set_return')) {
             \uopz_set_return($name, $cb, true);
         }
+    }
+
+    private static function registerAllOverrides(): void
+    {
+        // Response
+        self::overrideBuiltin('header', '\ZealPHP\header');
+        self::overrideBuiltin('header_remove', '\ZealPHP\header_remove');
+        self::overrideBuiltin('headers_list', '\ZealPHP\headers_list');
+        self::overrideBuiltin('headers_sent', '\ZealPHP\headers_sent');
+        self::overrideBuiltin('setcookie', '\ZealPHP\setcookie');
+        self::overrideBuiltin('setrawcookie', '\ZealPHP\setrawcookie');
+        self::overrideBuiltin('http_response_code', '\ZealPHP\http_response_code');
+        // Output control
+        self::overrideBuiltin('flush', '\ZealPHP\flush');
+        self::overrideBuiltin('ob_flush', '\ZealPHP\ob_flush');
+        self::overrideBuiltin('ob_end_flush', '\ZealPHP\ob_end_flush');
+        self::overrideBuiltin('ob_implicit_flush', '\ZealPHP\ob_implicit_flush');
+        self::overrideBuiltin('output_add_rewrite_var', '\ZealPHP\output_add_rewrite_var');
+        self::overrideBuiltin('output_reset_rewrite_vars', '\ZealPHP\output_reset_rewrite_vars');
+        // Process/connection
+        self::overrideBuiltin('set_time_limit', '\ZealPHP\set_time_limit');
+        self::overrideBuiltin('ignore_user_abort', '\ZealPHP\ignore_user_abort');
+        self::overrideBuiltin('connection_status', '\ZealPHP\connection_status');
+        self::overrideBuiltin('connection_aborted', '\ZealPHP\connection_aborted');
+        self::overrideBuiltin('register_shutdown_function', '\ZealPHP\register_shutdown_function');
+        // File upload
+        self::overrideBuiltin('is_uploaded_file', '\ZealPHP\is_uploaded_file');
+        self::overrideBuiltin('move_uploaded_file', '\ZealPHP\move_uploaded_file');
+        // Info
+        self::overrideBuiltin('phpinfo', '\ZealPHP\phpinfo');
+        self::overrideBuiltin('php_sapi_name', '\ZealPHP\php_sapi_name');
+        // Input filtering
+        self::overrideBuiltin('filter_input', '\ZealPHP\filter_input');
+        self::overrideBuiltin('filter_input_array', '\ZealPHP\filter_input_array');
+        self::overrideBuiltin('header_register_callback', '\ZealPHP\header_register_callback');
+        // Error handling
+        self::overrideBuiltin('error_log', '\ZealPHP\error_log');
+        self::overrideBuiltin('error_reporting', '\ZealPHP\error_reporting');
+        self::overrideBuiltin('set_error_handler', '\ZealPHP\set_error_handler');
+        self::overrideBuiltin('restore_error_handler', '\ZealPHP\restore_error_handler');
+        self::overrideBuiltin('set_exception_handler', '\ZealPHP\set_exception_handler');
+        self::overrideBuiltin('restore_exception_handler', '\ZealPHP\restore_exception_handler');
+        // Session (Apache-only built-ins registered via src/apache_shims.php)
+        self::overrideBuiltin('session_start', '\ZealPHP\Session\zeal_session_start');
+        self::overrideBuiltin('session_id', '\ZealPHP\Session\zeal_session_id');
+        self::overrideBuiltin('session_status', '\ZealPHP\Session\zeal_session_status');
+        self::overrideBuiltin('session_name', '\ZealPHP\Session\zeal_session_name');
+        self::overrideBuiltin('session_write_close', '\ZealPHP\Session\zeal_session_write_close');
+        self::overrideBuiltin('session_destroy', '\ZealPHP\Session\zeal_session_destroy');
+        self::overrideBuiltin('session_unset', '\ZealPHP\Session\zeal_session_unset');
+        self::overrideBuiltin('session_regenerate_id', '\ZealPHP\Session\zeal_session_regenerate_id');
+        self::overrideBuiltin('session_get_cookie_params', '\ZealPHP\Session\zeal_session_get_cookie_params');
+        self::overrideBuiltin('session_set_cookie_params', '\ZealPHP\Session\zeal_session_set_cookie_params');
+        self::overrideBuiltin('session_cache_limiter', '\ZealPHP\Session\zeal_session_cache_limiter');
+        self::overrideBuiltin('session_cache_expire', '\ZealPHP\Session\zeal_session_cache_expire');
+        self::overrideBuiltin('session_commit', '\ZealPHP\Session\zeal_session_commit');
+        self::overrideBuiltin('session_abort', '\ZealPHP\Session\zeal_session_abort');
+        self::overrideBuiltin('session_encode', '\ZealPHP\Session\zeal_session_encode');
+        self::overrideBuiltin('session_decode', '\ZealPHP\Session\zeal_session_decode');
+        self::overrideBuiltin('session_save_path', '\ZealPHP\Session\zeal_session_save_path');
+        self::overrideBuiltin('session_module_name', '\ZealPHP\Session\zeal_session_module_name');
     }
 
     private static function refuseAfterRun(string $setter): void
