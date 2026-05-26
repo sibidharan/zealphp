@@ -34,7 +34,7 @@
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'Already have PHP 8.3+?',
-      'body'    => 'You can skip the install script and just install the extensions: <code>pecl install openswoole</code> and build ext-zealphp from source: <code>cd ext/zealphp &amp;&amp; phpize &amp;&amp; ./configure &amp;&amp; make &amp;&amp; sudo make install</code>. Verify with <code>php -m | grep -E "openswoole|zealphp"</code>.',
+      'body'    => 'You can skip the install script and just install the extensions: <code>pie install openswoole/openswoole</code> and <code>pie install sibidharan/ext-zealphp</code>. Verify with <code>php -m | grep -E "openswoole|zealphp"</code>.',
     ]); ?>
 
     <h2>Step 2: Scaffold a project</h2>
