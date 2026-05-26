@@ -73,8 +73,9 @@ final class CsrfMiddleware implements MiddlewareInterface
             }
         }
 
+        $headerKey = 'HTTP_' . str_replace('-', '_', strtoupper(self::HEADER_NAME));
         $submitted = $g->post[self::FIELD_NAME]
-            ?? $g->server['HTTP_X_CSRF_TOKEN']
+            ?? $g->server[$headerKey]
             ?? null;
 
         if (!is_string($submitted) || !hash_equals($g->session['_csrf_token'], $submitted)) {
