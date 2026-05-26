@@ -50,15 +50,23 @@ docker_setup() {
     fi
     docker-php-ext-enable --ini-name zz-openswoole.ini openswoole
 
-    if [ -n "${UOPZ_VERSION:-}" ]; then
-        pecl install "uopz-${UOPZ_VERSION}"
-    elif ! pecl install uopz 2>/dev/null; then
-        echo -e "${YELLOW}PECL uopz failed (likely PHP 8.4+). Building from git source.${RESET}"
-        git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz-src
-        (cd /tmp/uopz-src && phpize && ./configure && make -j"$(nproc)" && make install)
-        rm -rf /tmp/uopz-src
+    echo -e "${YELLOW}Installing ext-zealphp for Docker image.${RESET}"
+    git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
+    if (cd /tmp/ext-zealphp && phpize && ./configure --enable-zealphp && make -j"$(nproc)" && make install); then
+        docker-php-ext-enable --ini-name zz-zealphp.ini zealphp
+        rm -rf /tmp/ext-zealphp
+    else
+        echo -e "${YELLOW}ext-zealphp failed. Falling back to uopz.${RESET}"
+        rm -rf /tmp/ext-zealphp
+        if [ -n "${UOPZ_VERSION:-}" ]; then
+            pecl install "uopz-${UOPZ_VERSION}"
+        elif ! pecl install uopz 2>/dev/null; then
+            git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz-src
+            (cd /tmp/uopz-src && phpize && ./configure && make -j"$(nproc)" && make install)
+            rm -rf /tmp/uopz-src
+        fi
+        docker-php-ext-enable --ini-name zz-uopz.ini uopz
     fi
-    docker-php-ext-enable --ini-name zz-uopz.ini uopz
 
     {
         echo "short_open_tag=On"
@@ -70,7 +78,7 @@ docker_setup() {
 
     php -m | grep -q '^sockets$'
     php -m | grep -q '^openswoole$'
-    php -m | grep -q '^uopz$'
+    php -m | grep -qE '^(zealphp|uopz)$'
 
     echo -e "${GREEN}Docker image dependencies installed successfully.${RESET}"
 }
@@ -580,29 +588,29 @@ macos_setup() {
     echo "extension=openswoole.so" > "${php_ini_dir}/zz-openswoole.ini"
     echo "short_open_tag=On"       >> "${php_ini_dir}/zz-openswoole.ini"
 
-    echo -e "${GREEN}Installing uopz via PECL.${RESET}"
-    if ! "$pecl_bin" install uopz 2>/dev/null; then
-        echo -e "${YELLOW}PECL uopz failed (likely PHP 8.4+). Building from git source.${RESET}"
-        local tmpdir
-        tmpdir="$(mktemp -d)"
-        git clone --depth 1 https://github.com/krakjoe/uopz.git "$tmpdir" || {
-            echo -e "${RED}Failed to clone uopz from GitHub.${RESET}"
-            rm -rf "$tmpdir"
-            return 1
-        }
-        (cd "$tmpdir" && phpize && ./configure && make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" && make install) || {
-            echo -e "${RED}Failed to build uopz from source.${RESET}"
-            rm -rf "$tmpdir"
-            return 1
-        }
+    echo -e "${GREEN}Installing ext-zealphp.${RESET}"
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    if git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git "$tmpdir" && \
+       (cd "$tmpdir" && phpize && ./configure --enable-zealphp && make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" && make install); then
+        echo "extension=zealphp.so" > "${php_ini_dir}/zz-zealphp.ini"
         rm -rf "$tmpdir"
-        echo -e "${GREEN}uopz built from source.${RESET}"
+        echo -e "${GREEN}ext-zealphp built and installed.${RESET}"
+    else
+        echo -e "${YELLOW}ext-zealphp failed. Falling back to uopz.${RESET}"
+        rm -rf "$tmpdir"
+        tmpdir="$(mktemp -d)"
+        if ! "$pecl_bin" install uopz 2>/dev/null; then
+            git clone --depth 1 https://github.com/krakjoe/uopz.git "$tmpdir" || { rm -rf "$tmpdir"; return 1; }
+            (cd "$tmpdir" && phpize && ./configure && make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" && make install) || { rm -rf "$tmpdir"; return 1; }
+            rm -rf "$tmpdir"
+        fi
+        echo "extension=uopz.so" > "${php_ini_dir}/zz-uopz.ini"
     fi
-    echo "extension=uopz.so" > "${php_ini_dir}/zz-uopz.ini"
 
     echo -e "${YELLOW}Verifying extensions.${RESET}"
-    if "$php_bin" -m | grep -qE 'openswoole|uopz'; then
-        echo -e "${GREEN}OpenSwoole and uopz are loaded.${RESET}"
+    if "$php_bin" -m | grep -qE 'openswoole|zealphp'; then
+        echo -e "${GREEN}OpenSwoole and ext-zealphp are loaded.${RESET}"
     else
         echo -e "${RED}Extensions not loaded — check ${php_ini_dir} for the .ini files.${RESET}"
         return 1
