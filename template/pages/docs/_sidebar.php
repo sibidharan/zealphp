@@ -32,7 +32,7 @@ $groups = [
         ['fuzzing',          'Fuzzing'],
     ],
     'Background' => [
-        ['apache-parity',         'Apache Parity'],
+        ['/http#parity',            'Apache Parity'],
         ['competitive-analysis',  'Competitive Analysis'],
         ['standards-and-roadmap', 'Standards & Roadmap'],
     ],
@@ -73,12 +73,17 @@ $apiChip = 'phpdoc';
           <?php foreach ($items as [$slug, $label]): ?>
             <?php $num++; $isActive = $slug === $current; ?>
             <li class="learn-sidebar-item<?= $isActive ? ' active' : '' ?>" data-num="<?= str_pad((string)$num, 2, '0', STR_PAD_LEFT) ?>">
+              <?php if (str_starts_with($slug, '/')): ?>
+              <a href="<?= htmlspecialchars($slug, ENT_QUOTES) ?>"
+                 class="learn-sidebar-link"><?= htmlspecialchars($label, ENT_QUOTES) ?></a>
+              <?php else: ?>
               <a href="/docs/guide/<?= htmlspecialchars($slug, ENT_QUOTES) ?>"
                  class="learn-sidebar-link"
                  hx-get="/api/docs/page?slug=<?= urlencode($slug) ?>"
                  hx-target=".lesson-content"
                  hx-swap="outerHTML show:.learn-layout:top"
                  hx-push-url="/docs/guide/<?= htmlspecialchars($slug, ENT_QUOTES) ?>"><?= htmlspecialchars($label, ENT_QUOTES) ?></a>
+              <?php endif; ?>
             </li>
           <?php endforeach; ?>
         </ul>

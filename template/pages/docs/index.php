@@ -31,7 +31,7 @@ $groups = [
         ['fuzzing',          'Fuzzing',          'slowhttptest, radamsa, gabbi — HTTP framing & conformance fuzzing.'],
     ],
     'Background' => [
-        ['apache-parity',         'Apache Parity',          'What Apache features port — and what doesn\'t.'],
+        ['/http#parity',            'Apache Parity',          'What Apache features port — and what doesn\'t.'],
         ['competitive-analysis',  'Competitive Analysis',   'vs FrankenPHP, RoadRunner, Octane, AMPHP.'],
         ['standards-and-roadmap', 'Standards & Roadmap',    'PSR conformance + the v0.3.0+ roadmap.'],
     ],
@@ -61,7 +61,8 @@ $groups = [
         <ul class="docs-topics-list">
           <?php foreach ($items as [$slug, $label, $blurb]): $totalNum++; ?>
             <li>
-              <a href="/docs/guide/<?= htmlspecialchars($slug, ENT_QUOTES) ?>"><strong><?= htmlspecialchars($label, ENT_QUOTES) ?></strong></a>
+              <?php $href = str_starts_with($slug, '/') ? $slug : "/docs/guide/{$slug}"; ?>
+              <a href="<?= htmlspecialchars($href, ENT_QUOTES) ?>"><strong><?= htmlspecialchars($label, ENT_QUOTES) ?></strong></a>
               <span class="docs-topics-blurb"><?= htmlspecialchars($blurb, ENT_QUOTES) ?></span>
             </li>
           <?php endforeach; ?>

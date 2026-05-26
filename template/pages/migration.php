@@ -199,7 +199,7 @@ foreach ($rungs as $r):
   <tr><td><code>FileETag</code> / conditional GET</td><td><code>$response-&gt;sendFile()</code> emits weak ETag + <code>Last-Modified</code>; honors <code>If-None-Match</code> and <code>If-Modified-Since</code> → 304.</td></tr>
 </table>
 
-<p class="mig-p-mt">Deeper detail (boot-order tricks, recursion guards, per-coroutine isolation mechanism, source-line references): <a href="https://github.com/sibidharan/zealphp/blob/master/docs/apache-parity.md"><code>docs/apache-parity.md</code></a> and <a href="https://github.com/sibidharan/zealphp/blob/master/docs/error-handling.md"><code>docs/error-handling.md</code></a>.</p>
+<p class="mig-p-mt">Deeper detail (boot-order tricks, recursion guards, per-coroutine isolation mechanism, source-line references): <a href="/http#parity">Apache parity</a> and <a href="https://github.com/sibidharan/zealphp/blob/master/docs/error-handling.md"><code>docs/error-handling.md</code></a>.</p>
 
 <!-- ────────────────────────────────────────────────────────────── -->
 <!-- 4. When migration is a good fit (and when it isn't)            -->

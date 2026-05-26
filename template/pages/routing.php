@@ -225,7 +225,7 @@ foreach ($routeTypes as [$id, $title, $url, $code]) {
 </table>
 
 <div class="callout info route-mt-1">
-<strong>For ETag on static assets too</strong>, disable OpenSwoole's built-in static handler (<code>enable_static_handler =&gt; false</code> in <code>$app-&gt;run()</code> settings) and add a wildcard route that calls <code>$response-&gt;sendFile()</code>. The built-in handler emits <code>Last-Modified</code> only — no ETag, no Range. The trade-off is a small per-request PHP hop. See the <a href="https://github.com/sibidharan/zealphp/blob/master/docs/apache-parity.md">Apache parity deep dive</a> in <code>docs/</code>.
+<strong>For ETag on static assets too</strong>, disable OpenSwoole's built-in static handler (<code>enable_static_handler =&gt; false</code> in <code>$app-&gt;run()</code> settings) and add a wildcard route that calls <code>$response-&gt;sendFile()</code>. The built-in handler emits <code>Last-Modified</code> only — no ETag, no Range. The trade-off is a small per-request PHP hop. See the <a href="/http#parity">Apache parity</a> section.
 </div>
 
 <h2 class="route-h2-top">Pattern routes with named regex groups</h2>
