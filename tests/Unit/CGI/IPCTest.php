@@ -99,4 +99,47 @@ final class IPCTest extends TestCase
         rewind($fp);
         $this->assertNull(IPC::readFrame($fp));
     }
+
+    public function testReadFrameRejectsZeroLength(): void
+    {
+        $fp = $this->makePipe();
+        fwrite($fp, pack('N', 0));
+        rewind($fp);
+        $this->assertNull(IPC::readFrame($fp));
+    }
+
+    public function testReadFrameRejectsNonJsonBody(): void
+    {
+        $fp = $this->makePipe();
+        $garbage = 'not valid json';
+        fwrite($fp, pack('N', strlen($garbage)) . $garbage);
+        rewind($fp);
+        $this->assertNull(IPC::readFrame($fp));
+    }
+
+    public function testReadFrameRejectsJsonScalar(): void
+    {
+        $fp = $this->makePipe();
+        $scalar = '"just a string"';
+        fwrite($fp, pack('N', strlen($scalar)) . $scalar);
+        rewind($fp);
+        $this->assertNull(IPC::readFrame($fp));
+    }
+
+    public function testRoundTripEmptyArray(): void
+    {
+        $fp = $this->makePipe();
+        IPC::writeFrame($fp, []);
+        rewind($fp);
+        $this->assertSame([], IPC::readFrame($fp));
+    }
+
+    public function testRoundTripLargePayload(): void
+    {
+        $fp = $this->makePipe();
+        $payload = ['data' => str_repeat('x', 100_000)];
+        IPC::writeFrame($fp, $payload);
+        rewind($fp);
+        $this->assertSame($payload, IPC::readFrame($fp));
+    }
 }

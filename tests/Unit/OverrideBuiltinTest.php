@@ -222,4 +222,20 @@ final class OverrideBuiltinTest extends TestCase
             'Constructor requires at least one override extension'
         );
     }
+
+    public function testRegisterAllOverridesIsIdempotent(): void
+    {
+        $prop = new \ReflectionProperty(App::class, 'overridesRegistered');
+        $prop->setAccessible(true);
+
+        // First call sets the flag
+        $method = new \ReflectionMethod(App::class, 'registerAllOverrides');
+        $method->setAccessible(true);
+        $method->invoke(null);
+        $this->assertTrue($prop->getValue());
+
+        // Second call is a no-op (no warnings, no errors)
+        $method->invoke(null);
+        $this->assertTrue($prop->getValue());
+    }
 }
