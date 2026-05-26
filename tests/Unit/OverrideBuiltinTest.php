@@ -202,6 +202,62 @@ final class OverrideBuiltinTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    public function testOverrideBuiltinAllConstructorFunctions(): void
+    {
+        $funcs = [
+            'header' => '\ZealPHP\header',
+            'header_remove' => '\ZealPHP\header_remove',
+            'headers_list' => '\ZealPHP\headers_list',
+            'headers_sent' => '\ZealPHP\headers_sent',
+            'setcookie' => '\ZealPHP\setcookie',
+            'setrawcookie' => '\ZealPHP\setrawcookie',
+            'http_response_code' => '\ZealPHP\http_response_code',
+            'flush' => '\ZealPHP\flush',
+            'ob_flush' => '\ZealPHP\ob_flush',
+            'ob_end_flush' => '\ZealPHP\ob_end_flush',
+            'ob_implicit_flush' => '\ZealPHP\ob_implicit_flush',
+            'set_time_limit' => '\ZealPHP\set_time_limit',
+            'ignore_user_abort' => '\ZealPHP\ignore_user_abort',
+            'connection_status' => '\ZealPHP\connection_status',
+            'connection_aborted' => '\ZealPHP\connection_aborted',
+            'output_add_rewrite_var' => '\ZealPHP\output_add_rewrite_var',
+            'output_reset_rewrite_vars' => '\ZealPHP\output_reset_rewrite_vars',
+            'is_uploaded_file' => '\ZealPHP\is_uploaded_file',
+            'move_uploaded_file' => '\ZealPHP\move_uploaded_file',
+            'phpinfo' => '\ZealPHP\phpinfo',
+            'php_sapi_name' => '\ZealPHP\php_sapi_name',
+            'filter_input' => '\ZealPHP\filter_input',
+            'filter_input_array' => '\ZealPHP\filter_input_array',
+            'header_register_callback' => '\ZealPHP\header_register_callback',
+            'error_log' => '\ZealPHP\error_log',
+            'error_reporting' => '\ZealPHP\error_reporting',
+            'register_shutdown_function' => '\ZealPHP\register_shutdown_function',
+            'session_start' => '\ZealPHP\Session\zeal_session_start',
+            'session_id' => '\ZealPHP\Session\zeal_session_id',
+            'session_status' => '\ZealPHP\Session\zeal_session_status',
+            'session_name' => '\ZealPHP\Session\zeal_session_name',
+            'session_write_close' => '\ZealPHP\Session\zeal_session_write_close',
+            'session_destroy' => '\ZealPHP\Session\zeal_session_destroy',
+            'session_unset' => '\ZealPHP\Session\zeal_session_unset',
+            'session_regenerate_id' => '\ZealPHP\Session\zeal_session_regenerate_id',
+            'session_get_cookie_params' => '\ZealPHP\Session\zeal_session_get_cookie_params',
+            'session_set_cookie_params' => '\ZealPHP\Session\zeal_session_set_cookie_params',
+            'session_cache_limiter' => '\ZealPHP\Session\zeal_session_cache_limiter',
+            'session_cache_expire' => '\ZealPHP\Session\zeal_session_cache_expire',
+            'session_commit' => '\ZealPHP\Session\zeal_session_commit',
+            'session_abort' => '\ZealPHP\Session\zeal_session_abort',
+            'session_encode' => '\ZealPHP\Session\zeal_session_encode',
+            'session_decode' => '\ZealPHP\Session\zeal_session_decode',
+            'session_save_path' => '\ZealPHP\Session\zeal_session_save_path',
+            'session_module_name' => '\ZealPHP\Session\zeal_session_module_name',
+        ];
+
+        foreach ($funcs as $name => $callable) {
+            $this->method->invoke(null, $name, $callable);
+            $this->addToAssertionCount(1);
+        }
+    }
+
     public function testConstructorAcceptsEitherExtension(): void
     {
         $this->assertTrue(
