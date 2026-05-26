@@ -285,7 +285,8 @@ BASH
     'label' => 'macOS (Homebrew)',
     'code'  => <<<'BASH'
 brew install wrk php composer node
-pecl install openswoole uopz
+pecl install openswoole
+pecl install uopz || (git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz && cd /tmp/uopz && phpize && ./configure && make && make install)
 git clone https://github.com/sibidharan/zealphp && cd zealphp && composer install
 BASH
 ]); ?>

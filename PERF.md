@@ -288,7 +288,8 @@ your own box and quote what you measure.
 ```bash
 # macOS (Homebrew)
 brew install wrk php openswoole composer node          # composer + node may already be present
-pecl install openswoole uopz
+pecl install openswoole
+pecl install uopz || (git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz && cd /tmp/uopz && phpize && ./configure && make && make install)
 
 # Linux (apt)
 sudo apt install -y wrk apache2-utils php-cli unzip curl
