@@ -75,7 +75,7 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <tr>
     <td><code>App::superglobals(false)</code><br><small>coroutine mode (recommended default)</small></td>
     <td>✅ A per-coroutine typed property on <code>RequestContext</code>, stored on <code>Coroutine::getContext()</code>. Isolated per request even when thousands run concurrently in the same worker.</td>
-    <td>❌ <strong>NOT populated per request.</strong> They're process-wide arrays; the framework does not write to them under coroutine mode. Reads see whatever the last writer left behind; writes leak across coroutines.</td>
+    <td>⚠️ <strong>Not populated by default.</strong> With <code>ext-zealphp</code> + <code>zealphp_coroutine_superglobals(true)</code>, they become per-coroutine safe (saved/restored on yield/resume). Without ext-zealphp, they&rsquo;re process-wide and leak across coroutines.</td>
   </tr>
 </table>
 
@@ -293,8 +293,8 @@ App::hookAll(\OpenSwoole\Runtime::HOOK_ALL); // hooks pipe I/O (resolved from nu
   </tr>
   <tr>
     <td><code>$_GET</code>, <code>$_POST</code> direct access<br><small>(see <a href="#state-parity">the parity rule</a>)</small></td>
-    <td>❌ <strong>Not populated per request</strong> in coroutine mode. Use <code>$g-&gt;get</code> / <code>$g-&gt;post</code> instead — per-coroutine, isolated.</td>
-    <td>⚠ Process-wide superglobals, repopulated per-request by the framework. Same address space as PHP-FPM's mental model — one request at a time, no interleaving risk. <code>$g-&gt;get</code> / <code>$g-&gt;post</code> still work too — they bridge to the same arrays.</td>
+    <td>⚠️ Not populated by default. With ext-zealphp coroutine hooks: per-coroutine safe. <code>$g-&gt;get</code> / <code>$g-&gt;post</code> recommended (always safe, zero overhead).</td>
+    <td>✅ Populated per request. With ext-zealphp: per-coroutine safe even with <code>enableCoroutine(true)</code>. <code>$g-&gt;get</code> / <code>$g-&gt;post</code> also work — they bridge to the same arrays.</td>
   </tr>
   <tr>
     <td><code>header()</code>, <code>setcookie()</code> via ext-zealphp</td>
