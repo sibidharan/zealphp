@@ -54,9 +54,10 @@
 <h2 class="mig-h2-mt-xl">The migration ladder — go at your own pace</h2>
 
 <p class="mig-ladder-intro">
-  Each rung is functional on its own. Stop at the rung that gives you enough
-  upside without forcing changes you're not ready for. Most real migrations
-  stay between rungs 1 and 3 for months before reaching 4.
+  Each rung is functional on its own. With ext-zealphp, coroutines work at
+  every rung — the ladder is about which framework features you adopt, not
+  about unlocking concurrency. Stop at the rung that gives you enough upside
+  without forcing changes you're not ready for.
 </p>
 
 <div class="mig-ladder-grid">
@@ -67,9 +68,9 @@ $rungs = [
     'n'    => '0',
     'title' => 'Drop in your entire app, unchanged',
     'code'  => 'App::superglobals(true); $app->setFallback(fn() => App::include(\'/index.php\'));',
-    'desc'  => 'Many traditional PHP apps — including unmodified WordPress and Drupal — run through the CGI worker bridge in compatibility mode. Most files require no edits to start; complex apps benefit from a compatibility audit first (see <a href="/legacy-apps#limitations">documented limits</a>).',
-    'wins'  => 'Persistent process, no per-request boot. Sub-millisecond TTFB on cached routes.',
-    'gives_up' => 'Defaults to sequential mode (CGI bridge). With ext-zealphp, add <code>enableCoroutine(true)</code> to unlock coroutines, WebSocket, and SSE while keeping <code>$_GET</code>/<code>$_SESSION</code> working.',
+    'desc'  => 'Drop your PHP files into <code>public/</code> (the document root — configurable via <code>App::documentRoot()</code>). <code>setFallback()</code> catches every URL and routes it through your existing <code>index.php</code>, just like Apache\'s <code>RewriteRule . /index.php [L]</code>. With ext-zealphp, <code>$_GET</code>/<code>$_SESSION</code> are per-coroutine safe, so coroutines work out of the box. Apps that use <code>define()</code> heavily (WordPress/Drupal) can opt into <code>processIsolation(true)</code> for the CGI bridge. See <a href="/legacy-apps#limitations">documented limits</a> for complex apps.',
+    'wins'  => 'Persistent process, no per-request boot. Sub-millisecond TTFB on cached routes. Coroutines + superglobals together — no code rewrites needed.',
+    'gives_up' => 'Apps with <code>define()</code> need <code>processIsolation(true)</code> (CGI bridge, ~30–50 ms cost). Without ext-zealphp, falls back to sequential mode.',
   ],
   [
     'n'    => '1',
@@ -81,11 +82,11 @@ $rungs = [
   ],
   [
     'n'    => '2',
-    'title' => 'Add REST APIs in <code>api/</code>',
-    'code'  => 'api/device/list.php → /api/device/list     ·     api/device/add.php → /api/device/add',
-    'desc'  => 'Drop a PHP file, get a REST endpoint. ZealAPI auto-routes by directory (module) and filename (endpoint). Zero config, zero framework boilerplate.',
-    'wins'  => 'Replace your "PHP file behind nginx" API layer with structured endpoints in 5 lines each.',
-    'gives_up' => 'Still synchronous — handlers run sequentially. Fine for I/O-light endpoints.',
+    'title' => 'Add new endpoints alongside your app',
+    'code'  => '$app->route(\'/api/v2/users\', fn($request) => [...]);  // new endpoint, old app untouched',
+    'desc'  => 'Your migrated app keeps its existing routes via <code>setFallback()</code>. New features go through framework routes or the file-based <code>api/</code> layer — no need to rewrite existing endpoints.',
+    'wins'  => 'Extend your app with new API endpoints, WebSocket handlers, or SSE streams without touching legacy code.',
+    'gives_up' => 'Nothing — purely additive. Old routes still flow through the fallback.',
   ],
   [
     'n'    => '3',
@@ -93,14 +94,14 @@ $rungs = [
     'code'  => '$app->route(\'/ws/chat\', ...); $response->sse(...); yield $html;',
     'desc'  => 'WebSocket, SSE streaming, coroutines — available when you\'re ready, not forced upfront. Mix file-based pages with programmatic routes in the same app.',
     'wins'  => 'Real-time features without spinning up a separate Node/Go service. Stream AI responses, push live updates, run background coroutines.',
-    'gives_up' => 'Still allows blocking calls inside individual handlers — coroutine isolation is opt-in at rung 4.',
+    'gives_up' => 'Blocking I/O inside handlers still blocks the worker unless <code>HOOK_ALL</code> is enabled (default in coroutine mode). Use coroutine-aware drivers for DB/HTTP.',
   ],
   [
     'n'    => '4',
     'title' => 'Full coroutine mode',
-    'code'  => 'App::superglobals(false);   // thousands of concurrent requests per worker',
-    'desc'  => 'Use <code>$g-&gt;get</code> / <code>$g-&gt;session</code> (recommended, zero overhead) or enable ext-zealphp coroutine hooks so <code>$_GET</code>/<code>$_SESSION</code> are per-coroutine safe too. Either way, each coroutine gets isolated state; one worker handles thousands of concurrent requests.',
-    'wins'  => 'Peak throughput. <a href="/performance">117k req/s on 4 workers</a> — Express on the same box does 20k. With ext-zealphp, <code>superglobals(true) + enableCoroutine(true)</code> is fully safe &mdash; no code rewrites needed for legacy <code>$_GET</code>/<code>$_SESSION</code> users.',
+    'code'  => 'App::superglobals(true); App::enableCoroutine(true);  // ext-zealphp makes $_GET/$_SESSION per-coroutine safe',
+    'desc'  => 'With ext-zealphp, coroutines work with <em>either</em> superglobals mode. <code>superglobals(true)</code> keeps <code>$_GET</code>/<code>$_SESSION</code> working — ext-zealphp saves/restores them on every context switch. <code>superglobals(false)</code> uses <code>$g-&gt;get</code>/<code>$g-&gt;session</code> (zero overhead, no extension needed). Either way, each coroutine gets isolated state; one worker handles thousands of concurrent requests.',
+    'wins'  => 'Peak throughput. <a href="/performance">117k req/s on 4 workers</a> — Express on the same box does 20k. No code rewrites needed for legacy <code>$_GET</code>/<code>$_SESSION</code> users.',
     'gives_up' => 'Blocking I/O outside coroutine-hooked extensions still blocks the worker. Use <code>HOOK_ALL</code> and coroutine-aware drivers.',
     'highlight' => true,
   ],
@@ -139,11 +140,18 @@ foreach ($rungs as $r):
 
 <ul class="mig-bridge-list">
   <li>
-    <strong>ext-zealphp function overrides.</strong> At server boot, <code>header()</code>,
-    <code>setcookie()</code>, <code>http_response_code()</code>, and the
-    <code>session_*()</code> family are replaced with implementations that read/write
+    <strong>ext-zealphp function overrides (53 functions).</strong> At server boot, <code>header()</code>,
+    <code>setcookie()</code>, <code>http_response_code()</code>, the
+    <code>session_*()</code> family, exec functions, and more are replaced with implementations that read/write
     a per-request <code>G::instance()</code> object. Your <code>header('Location: /foo')</code>
     routes to the right OpenSwoole response without you knowing.
+  </li>
+  <li>
+    <strong>Per-coroutine superglobal isolation.</strong>
+    ext-zealphp hooks into OpenSwoole's yield/resume/close scheduler callbacks so
+    <code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code> are saved and restored
+    on every context switch. <code>superglobals(true) + enableCoroutine(true)</code> just works —
+    legacy code and coroutine concurrency in the same process.
   </li>
   <li>
     <strong>Stream-wrapper redirection.</strong>
@@ -152,16 +160,17 @@ foreach ($rungs as $r):
     in a JSON API handler works unchanged.
   </li>
   <li>
-    <strong>CGI worker bridge.</strong> When <code>App::superglobals(true)</code> +
-    <code>setFallback()</code> are in use, requests that don't match a framework
-    route are forwarded to a CGI-style child process via <code>proc_open</code> —
-    full process isolation, just like mod_php. That's how WordPress runs.
+    <strong>CGI worker bridge (opt-in).</strong> When <code>processIsolation(true)</code>
+    is set, requests are forwarded to a CGI-style child process —
+    full process isolation for <code>define()</code>-heavy apps like WordPress/Drupal.
+    This is opt-in, not the default. Most apps don't need it.
   </li>
 </ul>
 
 <p class="mig-p-mt-sm">
-  Net effect — at rung 0 and 1, your code can't tell it's running on OpenSwoole.
-  At rungs 3 and 4, you opt into the coroutine model where it pays off.
+  Net effect — at every rung, your code can't tell it's running on OpenSwoole.
+  ext-zealphp makes <code>$_GET</code>/<code>$_SESSION</code> coroutine-safe from day one;
+  you opt into higher rungs when you want framework features like WebSocket and SSE.
 </p>
 
 <h2 class="mig-h2-mt-xl">Apache+mod_php parity reference</h2>
@@ -226,7 +235,7 @@ foreach ($rungs as $r):
       <li>✗ App relies on extensions OpenSwoole's runtime hooks don't cover (rare, but exists)</li>
       <li>✗ You'd accept a full rewrite anyway — Go/Rust/Elixir give bigger ceilings if you can pay the cost</li>
       <li>✗ Hard requirement for shared-nothing per-request memory (PHP-FPM's strongest guarantee)</li>
-      <li>✗ Production team can't accept alpha (v0.2.x) stability — wait for v1.0</li>
+      <li>✗ Production team can't accept alpha (v0.3.x) stability — wait for v1.0</li>
       <li>✗ You need byte-for-byte Apache/nginx config replacement — ZealPHP covers the common .htaccess / nginx.conf patterns but isn't a drop-in for every directive</li>
     </ul>
   </div>
@@ -290,7 +299,7 @@ foreach ($rungs as $r):
 </div>
 
 <p class="mig-closing-note">
-  Performance: <a href="/performance">117K req/s text · 106K JSON · 50K templated</a> at rung 4 (full coroutine mode).<br>
+  Performance: <a href="/performance">117K req/s text · 106K JSON · 50K templated</a> (coroutine mode, available at every rung with ext-zealphp).<br>
   WordPress + custom CMS migrations: see the <a href="https://github.com/sibidharan/zealphp-wordpress" target="_blank" rel="noopener">showcase repo</a>.
 </p>
 
