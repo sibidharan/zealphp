@@ -153,13 +153,23 @@ PHP]); ?>
   <tr><td><strong>Coroutine + Process Isolation</strong><br><small>the "best of both worlds" hybrid — opt in via explicit <code>processIsolation(true)</code></small></td><td>false</td><td><strong>true</strong></td><td>true</td><td>HOOK_ALL</td><td>Modern app with coroutine concurrency in route handlers / API / middleware, but occasional legacy isolated PHP (a WordPress plugin endpoint, a heritage <code>define()</code>-heavy script). Parent runs coroutines + dispatches concurrently to different pool workers; each <code>public/*.php</code> still gets full subprocess isolation with real superglobals inside. See <a href="#coroutine-isolation-hybrid">the hybrid explainer</a> below.</td></tr>
 </table>
 
-<div class="callout warn coro-mb">
-  <strong>Unsafe combinations</strong> — <code>App::run()</code> <strong>throws <code>RuntimeException</code> at boot</strong> (v0.2.27+; pre-v0.2.27 these emitted invisible warnings, now fail loud, fail fast):
+<div class="callout info coro-mb">
+  <strong>v0.3.0: superglobals + coroutines now safe with ext-zealphp</strong>
+  <p>
+    With <code>ext-zealphp</code> loaded, <code>superglobals(true) + enableCoroutine(true)</code> is
+    <strong>fully supported</strong>. The extension saves and restores <code>$_GET</code> /
+    <code>$_POST</code> / <code>$_SESSION</code> per coroutine &mdash; no races, no leaks.
+    Legacy code using <code>$_GET</code> just works with concurrent coroutine I/O.
+  </p>
+  <p>
+    Without ext-zealphp (uopz fallback), the old constraint applies &mdash; these combinations
+    throw <code>RuntimeException</code> at boot to prevent process-wide superglobal races:
+  </p>
   <ul class="coro-warn-list">
-    <li><code>superglobals(true) + enableCoroutine(true)</code> — process-wide <code>$_GET</code> / <code>$_POST</code> / <code>$_SESSION</code> arrays would race across concurrent coroutines (the bug per-coroutine <code>$g</code> was designed to avoid).</li>
-    <li><code>superglobals(true) + hookAll(non-zero)</code> — hooked I/O can yield mid-request, exposing process-wide superglobal mutations to other concurrent coroutines.</li>
+    <li><code>superglobals(true) + enableCoroutine(true)</code> without ext-zealphp</li>
+    <li><code>superglobals(true) + hookAll(non-zero)</code> without ext-zealphp</li>
   </ul>
-  <p class="coro-mb">Note: both throws are gated on <code>superglobals(true)</code>. The Coroutine + Process Isolation hybrid (<code>sg=false + pi=true + ec=true + ha=HOOK_ALL</code>) is <strong>fully supported</strong> — see the matrix row above and the explainer below.</p>
+  <p class="coro-mb"><strong>Migration path:</strong> install ext-zealphp (<code>pie install sibidharan/ext-zealphp</code>), set <code>App::superglobals(true)</code>, and enable coroutines. Your existing <code>$_GET</code> / <code>$_SESSION</code> code works unchanged with full concurrency.</p>
 </div>
 
 <h3 id="coroutine-isolation-hybrid" class="coro-h3">Mode 6 — Coroutine + Process Isolation (the hybrid)</h3>
