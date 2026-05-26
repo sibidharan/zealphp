@@ -108,6 +108,12 @@ final class WorkerPool
         // Respawn if the subprocess died mid-request, hit the recycle
         // limit, or the OS reports it's no longer running (proc_get_status
         // ['running' => false]). FPM-equivalent recovery semantics.
+        $err = '';
+        if ($resp === null) {
+            stream_set_blocking($w['stderr'], false);
+            $err = stream_get_contents($w['stderr']);
+        }
+        
         if ($resp === null || $served >= $this->maxRequestsPerWorker || !$this->isAlive($w)) {
             $this->respawn($idx);
         } else {
@@ -117,7 +123,7 @@ final class WorkerPool
         if ($resp === null) {
             return [
                 'status'  => 500,
-                'body'    => 'WorkerPool: subprocess died mid-request — response not received',
+                'body'    => 'WorkerPool: subprocess died mid-request — response not received. Stderr: ' . $err,
                 'headers' => [],
                 'cookies' => [],
             ];
@@ -262,10 +268,10 @@ final class WorkerPool
             2 => ['pipe', 'w'], // stderr  — diagnostics
         ];
         $pipes = [];
-        $env = [
+        $env = array_merge(getenv(), [
             'ZEALPHP_POOL_MAX_REQUESTS' => (string) $this->maxRequestsPerWorker,
-        ];
-        $proc = proc_open(['php', $entry], $desc, $pipes, null, $env);
+        ]);
+        $proc = proc_open([\PHP_BINARY, $entry], $desc, $pipes, null, $env);
         if (!is_resource($proc)) {
             throw new \RuntimeException('WorkerPool: proc_open failed for ' . $entry);
         }

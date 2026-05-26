@@ -2,6 +2,7 @@
 
 COMBOS=(
     "NAME='0.3.0 Coroutine Superglobals' G=true C=true I=false"
+    "NAME='CGI Pool' G=true C=true I=true"
     "NAME='Legacy Sync' G=true C=false I=false"
     "NAME='Standard ZealPHP' G=false C=true I=false"
 )

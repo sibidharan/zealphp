@@ -30,6 +30,8 @@ declare(strict_types=1);
  * through the parent worker's response builder unchanged.
  */
 
+ini_set('display_errors', 'stderr');
+
 foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $__pw_autoload) {
     if (is_file($__pw_autoload)) {
         require_once $__pw_autoload;
