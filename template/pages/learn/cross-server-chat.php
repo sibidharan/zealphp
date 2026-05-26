@@ -264,8 +264,8 @@ WSRouter::broadcast('chat:room:42', json_encode(['hello' =&gt; 'everyone']));</c
 App::ws('/chat',
     onOpen: function ($server, $request) {
         $g = G::instance();   // canonical per-coroutine context; works in BOTH
-                              // superglobals modes. Raw $_SESSION races across
-                              // coroutines in coroutine mode — always use $g.
+                              // superglobals modes. $g is recommended; $_SESSION
+                              // also works with ext-zealphp (per-coroutine safe).
         // 1. Identify the user — pick ONE pattern that suits your app:
         //    a) Cookie session (Apache/PHP-mod parity, default in ZealPHP):
         $sessionId = $request-&gt;cookie['PHPSESSID'] ?? null;
