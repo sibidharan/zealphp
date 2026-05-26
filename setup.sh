@@ -330,6 +330,7 @@ install_dependencies() {
         "php${php_version}-xml" 
         "php${php_version}-curl"
         "php${php_version}-intl"
+        "php${php_version}-sqlite3"
         "php${php_version}-mysqli"
         "openssl" 
         "libssl-dev" 
