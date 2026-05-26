@@ -293,17 +293,19 @@ sudo pecl install openswoole-22.1.2
 Add to `/etc/php/8.3/cli/conf.d/99-zealphp.ini`:
 ```ini
 extension=openswoole.so
-extension=uopz.so
+extension=zealphp.so
 short_open_tag=on
 ```
 
-### 2. Install uopz
+### 2. Install ext-zealphp
 
 ```bash
-sudo pecl install uopz
-# PHP 8.4+: if pecl fails, build from source:
-# git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz
-# cd /tmp/uopz && phpize && ./configure && make && sudo make install
+# Via PIE (recommended):
+pie install sibidharan/ext-zealphp
+
+# Or from source:
+git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
+cd /tmp/ext-zealphp && phpize && ./configure && make && sudo make install
 ```
 
 ### 3. Verify
@@ -463,11 +465,11 @@ PHP Fatal error: Class "OpenSwoole\HTTP\Server" not found
 ```
 → Install OpenSwoole via PECL and add `extension=openswoole.so` to php.ini.
 
-**uopz not installed:**
+**ext-zealphp not installed:**
 ```
-Exception: uopz extension is required for ZealPHP to work
+Exception: ext-zealphp or uopz extension is required for ZealPHP to work
 ```
-→ `sudo pecl install uopz` and add `extension=uopz.so` to php.ini. On PHP 8.4+, build from source — see the install section above.
+→ `pie install sibidharan/ext-zealphp` and add `extension=zealphp.so` to php.ini. Or build from source — see the install section above.
 
 **IDE autocompletion:**  
 Add to VS Code `settings.json`:
