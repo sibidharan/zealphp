@@ -88,13 +88,12 @@ jobs:
             coverage: 'none'
             upload-coverage: false
             experimental: false
-          # 8.5 — all tests pass but ext-zealphp's MSHUTDOWN segfaults
-          # on PHP 8.5 process teardown (exit code 139). Experimental
-          # until the C extension shutdown is fixed for 8.5 internals.
+          # 8.5 is a fully supported, REQUIRED target — openswoole/ext-zealphp
+          # build from source via shivammathur/setup-php.
           - php: '8.5'
             coverage: 'none'
             upload-coverage: false
-            experimental: true
+            experimental: false
 
     services:
       # Redis/Valkey service for the Store/Counter Redis-backend parity tests.
