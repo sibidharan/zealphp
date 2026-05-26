@@ -715,7 +715,7 @@ class App
     {
         # if uopz not enabled, throw error
         if (!extension_loaded('uopz')) {
-            throw new \Exception("uopz extension is required for ZealPHP to work, 'pecl install uopz' to install and load it in your php.ini");
+            throw new \Exception("uopz extension is required for ZealPHP to work. Install: 'pecl install uopz' (PHP 8.3) or build from source: 'git clone https://github.com/krakjoe/uopz.git && cd uopz && phpize && ./configure && make && sudo make install' (PHP 8.4+). Then add extension=uopz.so to php.ini.");
         }
         $this->host = $host;
         $this->port = $port;

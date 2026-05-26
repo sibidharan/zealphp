@@ -34,7 +34,7 @@
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'Already have PHP 8.3+?',
-      'body'    => 'You can skip the install script and just install the extensions: <code>pecl install openswoole</code> and <code>pecl install uopz</code>. Verify with <code>php -m | grep -E "openswoole|uopz"</code>.',
+      'body'    => 'You can skip the install script and just install the extensions: <code>pecl install openswoole</code> and <code>pecl install uopz</code>. On PHP 8.4+, the PECL uopz release may fail &mdash; build from source instead: <code>git clone https://github.com/krakjoe/uopz.git &amp;&amp; cd uopz &amp;&amp; phpize &amp;&amp; ./configure &amp;&amp; make &amp;&amp; sudo make install</code>. Verify with <code>php -m | grep -E "openswoole|uopz"</code>.',
     ]); ?>
 
     <h2>Step 2: Scaffold a project</h2>

@@ -143,8 +143,11 @@ sudo pecl install openswoole
 echo "extension=openswoole.so" | sudo tee /etc/php/8.3/cli/conf.d/zz-openswoole.ini
 echo "short_open_tag=On" | sudo tee -a /etc/php/8.3/cli/conf.d/zz-openswoole.ini
 
-# 3. uopz (via PECL)
-sudo pecl install uopz
+# 3. uopz (via PECL — or from source on PHP 8.4+)
+sudo pecl install uopz || {
+  git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz
+  cd /tmp/uopz && phpize && ./configure && make && sudo make install
+}
 echo "extension=uopz.so" | sudo tee /etc/php/8.3/cli/conf.d/zz-uopz.ini
 
 # 4. Composer

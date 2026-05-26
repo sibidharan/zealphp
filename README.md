@@ -301,6 +301,9 @@ short_open_tag=on
 
 ```bash
 sudo pecl install uopz
+# PHP 8.4+: if pecl fails, build from source:
+# git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz
+# cd /tmp/uopz && phpize && ./configure && make && sudo make install
 ```
 
 ### 3. Verify
@@ -464,7 +467,7 @@ PHP Fatal error: Class "OpenSwoole\HTTP\Server" not found
 ```
 Exception: uopz extension is required for ZealPHP to work
 ```
-→ `sudo pecl install uopz` and add `extension=uopz.so` to php.ini.
+→ `sudo pecl install uopz` and add `extension=uopz.so` to php.ini. On PHP 8.4+, build from source — see the install section above.
 
 **IDE autocompletion:**  
 Add to VS Code `settings.json`:

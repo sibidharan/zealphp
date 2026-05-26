@@ -107,7 +107,8 @@ WantedBy=multi-user.target</code></pre>
 
 RUN apt-get update &amp;&amp; apt-get install -y libssl-dev libcurl4-openssl-dev \
     &amp;&amp; pecl install openswoole &amp;&amp; docker-php-ext-enable openswoole \
-    &amp;&amp; pecl install uopz &amp;&amp; docker-php-ext-enable uopz
+    &amp;&amp; (pecl install uopz || (git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz &amp;&amp; cd /tmp/uopz &amp;&amp; phpize &amp;&amp; ./configure &amp;&amp; make &amp;&amp; make install &amp;&amp; rm -rf /tmp/uopz)) \
+    &amp;&amp; docker-php-ext-enable uopz
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
