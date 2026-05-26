@@ -21,7 +21,7 @@
     <div class="tradeoffs-block">
       <h2 class="tradeoffs-h2">1. ext-zealphp: function overrides on PHP built-ins</h2>
       <p class="tradeoffs-p">
-        At server boot, ZealPHP uses <code>ext-zealphp</code> (our own ~250-line C extension) to
+        At server boot, ZealPHP uses <code>ext-zealphp</code> (our own ~650-line C extension) to
         permanently replace PHP built-ins like <code>header()</code>, <code>setcookie()</code>,
         <code>session_start()</code>, <code>set_error_handler()</code>, <code>http_response_code()</code>.
         Calls flow into per-request objects (<code>$g->zealphp_response</code>, <code>$g->session</code>)
@@ -44,11 +44,12 @@
     <div class="tradeoffs-block">
       <h2 class="tradeoffs-h2">2. Dual-mode runtime: coroutine vs superglobals</h2>
       <p class="tradeoffs-p">
-        <code>App::superglobals(false)</code> (recommended default) enables the coroutine scheduler,
-        per-coroutine state via <code>Coroutine::getContext()</code>, and <code>HOOK_ALL</code> on PHP's
-        I/O functions. <code>App::superglobals(true)</code> runs each request single-threaded with
-        Apache-mod_php-style process-wide <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code> —
-        the path that gives unmodified WordPress/Drupal real superglobals. Since v0.2.23 the one flag is
+        <code>App::superglobals(false)</code> (recommended default) uses per-coroutine state via
+        <code>$g-&gt;get</code> / <code>$g-&gt;session</code> (<code>Coroutine::getContext()</code>).
+        <code>App::superglobals(true)</code> populates <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>
+        per request &mdash; with ext-zealphp, these are <strong>per-coroutine safe</strong> (saved/restored
+        on every yield/resume), so legacy code works with full coroutine concurrency. Without ext-zealphp,
+        superglobals mode runs sequentially (one request at a time per worker). Since v0.2.23 the one flag is
         decomposed into <strong>four independent fluent setters</strong> —
         <code>superglobals()</code>, <code>processIsolation()</code>, <code>enableCoroutine()</code>,
         <code>hookAll()</code> — each defaulting to <code>null</code> ("follow <code>superglobals</code>")
