@@ -440,6 +440,72 @@ class Cache
     }
 
     /**
+     * Batch get — fetch multiple keys in one call.
+     * Returns an associative array of key => value for keys that exist.
+     * Missing keys are omitted from the result.
+     *
+     * @param list<string> $keys
+     * @return array<string, mixed>
+     */
+    public static function mget(array $keys): array
+    {
+        $results = [];
+        $hashes = [];
+        foreach ($keys as $key) {
+            $hashes[$key] = md5($key);
+        }
+
+        $storeRows = Store::mget(self::TABLE, array_values($hashes));
+        $now = time();
+
+        foreach ($keys as $key) {
+            $hash = $hashes[$key];
+            $row = $storeRows[$hash] ?? null;
+            if (is_array($row)) {
+                $ttl = is_numeric($row['ttl'] ?? 0) ? (int)$row['ttl'] : 0;
+                $val = (string)($row['val'] ?? '');
+                $crc = $row['crc'] ?? 0;
+                if ($ttl > 0 && $ttl < $now) {
+                    Store::del(self::TABLE, $hash);
+                    continue;
+                }
+                if (crc32($val) === $crc) {
+                    self::$hitsMem?->increment();
+                    $results[$key] = unserialize($val, ['allowed_classes' => false]);
+                    continue;
+                }
+            }
+
+            $file = self::readFile($hashes[$key]);
+            if ($file !== null) {
+                self::$hitsFile?->increment();
+                $results[$key] = $file;
+            } else {
+                self::$misses?->increment();
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Batch set — store multiple key-value pairs in one call.
+     * Returns the number of keys successfully stored.
+     *
+     * @param array<string, mixed> $items  key => value
+     */
+    public static function mset(array $items, int $ttl = 0): int
+    {
+        $stored = 0;
+        foreach ($items as $key => $value) {
+            if (self::set((string)$key, $value, $ttl)) {
+                $stored++;
+            }
+        }
+        return $stored;
+    }
+
+    /**
      * Cache performance stats. All counters are cross-worker (atomic).
      *
      * Returns: [
