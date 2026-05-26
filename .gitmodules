@@ -1,3 +1,6 @@
 [submodule "ext/zealphp"]
 	path = ext/zealphp
 	url = https://github.com/sibidharan/ext-zealphp.git
+[submodule "ext/mongodb"]
+	path = ext/mongodb
+	url = https://github.com/sibidharan/zealphp-mongodb.git
