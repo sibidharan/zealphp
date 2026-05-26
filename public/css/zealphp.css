@@ -263,7 +263,7 @@ p  { max-width: 70ch; }
 }
 .hero h1 span { color: var(--accent); }
 .hero p { font-size: 1.15rem; color: #a8a29e; margin: 1rem auto 2rem; position: relative; }
-.hero p.home-hero-stamp { font-size: .6rem; color: #57534e; margin: 1rem auto .5rem; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; opacity: .5; }
+.hero p.home-hero-stamp { font-size: .8rem; color: #57534e; margin: 1rem auto .5rem; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; opacity: .5; }
 .hero .cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; position: relative; }
 
 /* ── Hero wordmark (electric) ── */
