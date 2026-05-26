@@ -13,5 +13,9 @@ PHP_MINFO_FUNCTION(zealphp);
 PHP_FUNCTION(zealphp_override);
 PHP_FUNCTION(zealphp_restore);
 PHP_FUNCTION(zealphp_restore_all);
+PHP_FUNCTION(zealphp_superglobals_set);
+PHP_FUNCTION(zealphp_superglobals_clear);
+PHP_FUNCTION(zealphp_superglobals_save);
+PHP_FUNCTION(zealphp_superglobals_restore);
 
 #endif
