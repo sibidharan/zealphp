@@ -69,7 +69,7 @@ $rungs = [
     'code'  => 'App::superglobals(true); $app->setFallback(fn() => App::include(\'/index.php\'));',
     'desc'  => 'Many traditional PHP apps — including unmodified WordPress and Drupal — run through the CGI worker bridge in compatibility mode. Most files require no edits to start; complex apps benefit from a compatibility audit first (see <a href="/legacy-apps#limitations">documented limits</a>).',
     'wins'  => 'Persistent process, no per-request boot. Sub-millisecond TTFB on cached routes.',
-    'gives_up' => 'Coroutines, WebSocket, SSE — you\'re still bound by the global-state model.',
+    'gives_up' => 'Defaults to sequential mode (CGI bridge). With ext-zealphp, add <code>enableCoroutine(true)</code> to unlock coroutines, WebSocket, and SSE while keeping <code>$_GET</code>/<code>$_SESSION</code> working.',
   ],
   [
     'n'    => '1',
