@@ -263,7 +263,7 @@
 <h3 class="perf-h3-spaced">One-line install (Ubuntu/Debian)</h3>
 
 <p class="perf-install-lead">
-  Goes from a fresh box to a benched-ready clone — installs PHP 8.3, OpenSwoole, uopz, composer, wrk, ab, then clones <code>sibidharan/zealphp</code> to <code>~/zealphp</code> and runs <code>composer install</code>:
+  Goes from a fresh box to a benched-ready clone — installs PHP 8.3, OpenSwoole, ext-zealphp, composer, wrk, ab, then clones <code>sibidharan/zealphp</code> to <code>~/zealphp</code> and runs <code>composer install</code>:
 </p>
 
 <?php App::render('/components/_code', [
@@ -286,7 +286,7 @@ BASH
     'code'  => <<<'BASH'
 brew install wrk php composer node
 pecl install openswoole
-pecl install uopz || (git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz && cd /tmp/uopz && phpize && ./configure && make && make install)
+cd ext/zealphp && phpize && ./configure && make && sudo make install
 git clone https://github.com/sibidharan/zealphp && cd zealphp && composer install
 BASH
 ]); ?>
@@ -294,14 +294,14 @@ BASH
 <?php App::render('/components/_code', [
     'label' => 'Linux apt (one-liner equivalent, manually)',
     'code'  => <<<'BASH'
-curl -fsSL https://php.zeal.ninja/install.sh | sudo bash   # PHP + openswoole + uopz + composer
+curl -fsSL https://php.zeal.ninja/install.sh | sudo bash   # PHP + openswoole + ext-zealphp + composer
 sudo apt install -y wrk apache2-utils git
 git clone https://github.com/sibidharan/zealphp && cd zealphp && composer install
 BASH
 ]); ?>
 
 <p class="perf-install-note">
-  Verify extensions loaded: <code>php -m | grep -E 'openswoole|uopz'</code>
+  Verify extensions loaded: <code>php -m | grep -E 'openswoole|zealphp'</code>
 </p>
 
 <h3 class="perf-h3-spaced-2">Recipe 1 — single-stack concurrency sweep (matches the tables above)</h3>

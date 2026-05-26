@@ -95,7 +95,7 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
   the superglobals, fires the <code>session_*</code> and <code>header()</code> machinery,
   and honours <code>.htaccess</code> directives per request. ZealPHP runs under the CLI
   SAPI inside OpenSwoole and rebuilds that contract: it overrides the relevant PHP
-  built-ins via <code>uopz</code>, populates request state per coroutine, and ships
+  built-ins via <code>ext-zealphp</code>, populates request state per coroutine, and ships
   middleware mirroring the common Apache/nginx directives. Every remaining gap is
   listed below with its workaround — nothing is left undocumented.
 </p>
@@ -114,7 +114,7 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
   <tr><td><code>is_uploaded_file()</code> / <code>move_uploaded_file()</code></td><td>✅ Native</td><td>Validate against the request's uploaded set</td></tr>
   <tr><td><code>error_log()</code></td><td>✅ Native</td><td>Routes type 0/4 into the framework log (debug.log → stderr); honors type 3 file append</td></tr>
   <tr><td><code>php_sapi_name()</code></td><td>⚙️ Opt-in</td><td>Default returns real <code>"cli"</code>; set <code>App::sapiName('apache2handler')</code> for legacy parity</td></tr>
-  <tr><td><code>PHP_SAPI</code> constant</td><td>⚠️ Gap</td><td>Constants can't be redefined (<code>uopz</code> refuses). Use <code>php_sapi_name()</code> instead</td></tr>
+  <tr><td><code>PHP_SAPI</code> constant</td><td>⚠️ Gap</td><td>Constants can't be redefined (<code>ext-zealphp cannot redefine constants). Use <code>php_sapi_name()</code> instead</td></tr>
   <tr><td><code>getenv()</code> / <code>putenv()</code> for CGI request vars</td><td>⚠️ Gap</td><td>Not request-scoped. Read request vars from <code>$g-&gt;server</code> / <code>$_SERVER</code></td></tr>
   <tr><td><code>mail()</code></td><td>⚠️ Gap</td><td>Relies on system <code>sendmail</code>; configurable transport planned</td></tr>
   <tr><td><code>get_browser()</code></td><td>⚠️ Gap</td><td>Needs <code>browscap.ini</code> configured; the no-arg form can't read the UA in coroutine mode. Workaround: pass it — <code>get_browser($g-&gt;server['HTTP_USER_AGENT'])</code></td></tr>

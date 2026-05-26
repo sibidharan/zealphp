@@ -81,8 +81,8 @@ $siteUrl = site_url();
       Always-on, coroutine-native, owns the event loop, holds the connections. WebSocket, SSE,
       timers, and shared memory are first-class because the server never shuts down. The on-ramp
       is real too &mdash; <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>,
-      <code>echo</code> all route through <a href="https://github.com/krakjoe/uopz" target="_blank" rel="noopener">uopz</a>
-      overrides into per-request state, so existing PHP code runs unchanged.
+      <code>echo</code> all route through <a href="https://github.com/sibidharan/zealphp/tree/master/ext/zealphp" target="_blank" rel="noopener">ext-zealphp</a>
+      (our own 250-line C extension) into per-request state, so existing PHP code runs unchanged.
     </p>
   </div>
 </section>
@@ -281,7 +281,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
     <div class="home-qs-fresh">
       <div class="home-qs-fresh-head">
         <span class="home-qs-fresh-bolt">⚡</span>
-        <strong>Fresh machine? One line installs PHP 8.3 + OpenSwoole + uopz + composer:</strong>
+        <strong>Fresh machine? One line installs PHP 8.3 + OpenSwoole + ext-zealphp + composer:</strong>
       </div>
       <div class="qs-block home-qs-fresh-block">
         <div class="qs-line home-qs-fresh-line">
@@ -339,7 +339,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
       <span class="qs-prereq-label">Requires</span>
       <code>PHP 8.3+</code>
       <code>OpenSwoole 22.1+</code>
-      <code>uopz</code>
+      <code>ext-zealphp</code>
       <code>composer</code>
       <a href="/getting-started" class="qs-prereq-link">Install help →</a>
     </div>
@@ -371,7 +371,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
         <ul class="home-engine-list">
           <li>Routing (<code>route()</code> + <code>nsRoute</code> + <code>patternRoute</code>) with reflection-based parameter injection</li>
           <li>PSR-15 middleware stack &mdash; 28 built-ins covering common Apache/nginx behaviors</li>
-          <li><code>uopz</code> overrides so <code>session_start()</code>, <code>header()</code>, <code>setcookie()</code>, <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>, <code>echo</code> all just work</li>
+          <li><code>ext-zealphp</code> overrides so <code>session_start()</code>, <code>header()</code>, <code>setcookie()</code>, <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>, <code>echo</code> all just work</li>
           <li>Coroutine-safe sessions (per-request <code>RequestContext</code>, no process-wide superglobal races)</li>
           <li>Templating (<code>App::render</code> / <code>renderStream</code> / <code>fragment</code>) with streaming-Generator output</li>
           <li>Universal return contract (int = status, array = JSON, Generator = SSE/SSR stream)</li>
@@ -385,7 +385,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
       </div>
     </div>
     <p class="home-engine-when-raw">
-      <strong>When raw OpenSwoole is the right choice:</strong> you're building a custom binary-protocol server (your own ASR / database / message broker), you need to avoid <code>uopz</code> entirely (compliance), you're building your own framework. For everything else &mdash; HTTP, WebSocket, SSE, REST, web apps with sessions &mdash; the harness saves you weeks per project.
+      <strong>When raw OpenSwoole is the right choice:</strong> you're building a custom binary-protocol server (your own ASR / database / message broker), you can't install custom extensions (locked-down host), you're building your own framework. For everything else &mdash; HTTP, WebSocket, SSE, REST, web apps with sessions &mdash; the harness saves you weeks per project.
     </p>
   </div>
 </section>
@@ -425,7 +425,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
         ['📡', 'Streaming',    'Stream AI tokens as they generate. yield is your streaming primitive. SSR, SSE, stream() built-in.', '/streaming',  'yield · SSE'],
         ['🔌', 'WebSocket',    'Real-time agent-to-user comms. Multi-user AI sessions, live collaboration, binary frames.',           '/ws',         'App::ws()'],
         ['🛡️', 'Middleware',  'CORS, ETag/304, gzip. PSR-15 compatible — drop in any middleware package.',                            '/middleware', 'PSR-15'],
-        ['🗄️', 'Sessions',   'Coroutine-safe sessions. Your existing session_start() code just works via uopz.',                     '/sessions',   'drop-in'],
+        ['🗄️', 'Sessions',   'Coroutine-safe sessions. Your existing session_start() code just works via ext-zealphp.',                     '/sessions',   'drop-in'],
         ['🗃️', 'Store',      'Cross-worker shared state on one node via OpenSwoole\\Table; flip to Redis/Valkey for cross-node + persistence. One API.',  '/store',      'pluggable backend'],
         ['⏱️', 'Timers',     'Schedule recurring AI tasks. Polling, cleanup, model warmup, health checks.',                           '/timers',     'tick() · after()'],
         ['🌐', 'HTTP',        'Full HTTP/1.1 compliance. HEAD, OPTIONS, Range, redirects, CORS, ETag, gzip — all built-in.',           '/http',       'HTTP/1.1'],
@@ -448,7 +448,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
     <p class="section-desc home-migrate-desc">
       Many traditional PHP patterns run unchanged in compatibility mode. <code>session_start()</code>,
       <code>header()</code>, <code>$_GET</code>, <code>$_POST</code>, <code>echo</code>, <code>setcookie()</code>
-      &mdash; all routed through <code>uopz</code> overrides into per-request state, so existing files
+      &mdash; all routed through <code>ext-zealphp</code> overrides into per-request state, so existing files
       can sit beside coroutine-native routes in the same app. Compatibility is a migration on-ramp,
       not a guarantee that every PHP application is safe to drop in without an audit.
     </p>

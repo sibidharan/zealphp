@@ -146,7 +146,7 @@
     <p>
       Sessions are the one exception that works in <em>both</em> modes via <code>$_SESSION</code> as
       well as <code>$g->session</code>. The framework intercepts every <code>session_*()</code> call
-      via uopz at startup so legacy <code>session_start()</code> code routes to a per-request session
+      via ext-zealphp at startup so legacy <code>session_start()</code> code routes to a per-request session
       bag instead of a shared global. See <a href="/learn/sessions">Lesson 16: Sessions</a> for the
       mechanics.
     </p>

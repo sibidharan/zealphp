@@ -100,7 +100,7 @@ WantedBy=multi-user.target</code></pre>
     <p>
       This is a teaching version showing the pieces inline. The
       <a href="https://github.com/sibidharan/zealphp/blob/master/Dockerfile" target="_blank">canonical <code>Dockerfile</code></a>
-      uses <code>setup.sh --docker</code> for the OpenSwoole / uopz install,
+      uses <code>setup.sh --docker</code> for the OpenSwoole / ext-zealphp install,
       which keeps the same recipe in one script across CLI installs and Docker builds.
     </p>
     <pre><code class="language-dockerfile">FROM php:8.3-cli-bookworm

@@ -9,14 +9,14 @@ use ZealPHP\App;
 
 $groups = [
     'Getting started' => [
-        ['getting-started',      'Getting Started',         'Install PHP/OpenSwoole/uopz, boot your first server.'],
+        ['getting-started',      'Getting Started',         'Install PHP/OpenSwoole/ext-zealphp, boot your first server.'],
         ['directory-structure',  'Directory Structure',     'Repo layout — where routes, APIs, templates, and src/ live.'],
         ['runtime-architecture', 'Runtime Architecture',    'Request lifecycle, lifecycle setters (v0.2.27 safety throw), mode matrix.'],
     ],
     'Routing & responses' => [
         ['routing',                  'Routing',                  'route(), nsRoute, nsPathRoute, patternRoute + parameter injection.'],
         ['api-layer',                'API Layer',                'ZealAPI file-based REST, v0.2.25 auth hooks.'],
-        ['error-handling',           'Error Handling',           'setErrorHandler, uopz overrides, recursion guard, content-negotiated 5xx.'],
+        ['error-handling',           'Error Handling',           'setErrorHandler, ext-zealphp overrides, recursion guard, content-negotiated 5xx.'],
         ['templates-and-rendering',  'Templates & Rendering',    'render / renderToString / renderStream / include / fragment.'],
     ],
     'Surfaces' => [

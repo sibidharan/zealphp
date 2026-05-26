@@ -136,7 +136,7 @@ lesson_counter|i:5;cart|a:2:{...}</code></pre>
       mode. That’s not an accident — the framework intercepts every <code>session_*()</code> call
       (<code>session_start</code>, <code>session_id</code>, <code>session_destroy</code>,
       <code>session_write_close</code>, <code>session_regenerate_id</code>) via the
-      <strong>uopz</strong> extension at startup. Those overrides live in <code>src/Session/utils.php</code>
+      <strong>ext-zealphp</strong> extension at startup. Those overrides live in <code>src/Session/utils.php</code>
       and route every call to the current coroutine&rsquo;s <code>RequestContext</code> instead of a
       process-wide <code>$_SESSION</code> global. The Mental Model lesson covers
       <a href="/learn/mental-model#why-we-even-need-a-coroutine-mode">why that matters for

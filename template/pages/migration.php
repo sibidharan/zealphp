@@ -6,7 +6,7 @@
 <h1 class="section-title">Migrate your PHP codebase to async</h1>
 <p class="section-desc">
   Bring your existing code along. <code>session_start()</code>, <code>header()</code>,
-  <code>$_GET</code>, <code>$_POST</code>, <code>echo</code> — all overridden via uopz to
+  <code>$_GET</code>, <code>$_POST</code>, <code>echo</code> — all overridden via ext-zealphp to
   work inside the coroutine runtime, so the migration ladder starts with "drop your
   app in and run <code>php app.php</code>" rather than "rewrite for an event loop."
 </p>
@@ -139,7 +139,7 @@ foreach ($rungs as $r):
 
 <ul class="mig-bridge-list">
   <li>
-    <strong>uopz function overrides.</strong> At server boot, <code>header()</code>,
+    <strong>ext-zealphp function overrides.</strong> At server boot, <code>header()</code>,
     <code>setcookie()</code>, <code>http_response_code()</code>, and the
     <code>session_*()</code> family are replaced with implementations that read/write
     a per-request <code>G::instance()</code> object. Your <code>header('Location: /foo')</code>
@@ -167,7 +167,7 @@ foreach ($rungs as $r):
 <h2 class="mig-h2-mt-xl">Apache+mod_php parity reference</h2>
 <p>What ZealPHP emulates so legacy apps run unchanged. Most of this is invisible — these rows exist to answer "does X work?" without a code-dive.</p>
 
-<h3 class="mig-h3-sub">Function overrides (via uopz)</h3>
+<h3 class="mig-h3-sub">Function overrides (via ext-zealphp)</h3>
 <table class="ztable">
   <tr><th>Apache+mod_php function</th><th>ZealPHP behavior</th></tr>
   <tr><td><code>header()</code>, <code>header_remove()</code>, <code>headers_list()</code>, <code>headers_sent()</code></td><td>Per-request via <code>$response-&gt;headersList</code> on the Response wrapper (<code>$g-&gt;zealphp_response</code>). Supports <code>header("HTTP/1.1 404 Not Found")</code> status-line form and the optional <code>$http_response_code</code> param. CRLF/NUL in values rejected to prevent response splitting.</td></tr>

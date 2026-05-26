@@ -165,7 +165,7 @@ YAML
 <h2 class="deploy-h2">Production checklist</h2>
 <ul>
   <li>Run as a non-root user; bind to <code>8080</code>, not <code>80</code>.</li>
-  <li>Pin OpenSwoole + uopz extension versions in your Dockerfile.</li>
+  <li>Pin OpenSwoole + ext-zealphp extension versions in your Dockerfile.</li>
   <li>Set <code>ZEALPHP_WORKERS</code> ≈ CPU cores.</li>
   <li>Ensure the session save path (<code>/var/lib/php/sessions</code>) is writable by the service user and mode <code>0700</code>.</li>
   <li>Disable debug logging in production (<code>ZEALPHP_DEBUG_LOG=0</code> or unset).</li>
