@@ -82,7 +82,7 @@ $siteUrl = site_url();
       timers, and shared memory are first-class because the server never shuts down. The on-ramp
       is real too &mdash; <code>session_start()</code>, <code>header()</code>, <code>$_GET</code>,
       <code>echo</code> all route through <a href="https://github.com/sibidharan/zealphp/tree/master/ext/zealphp" target="_blank" rel="noopener">ext-zealphp</a>
-      (our own 250-line C extension) into per-request state, so existing PHP code runs unchanged.
+      (our own ~650-line C extension) into per-request state, so existing PHP code runs unchanged.
     </p>
   </div>
 </section>
