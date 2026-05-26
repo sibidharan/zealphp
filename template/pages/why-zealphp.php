@@ -193,7 +193,7 @@
             <li><strong>Cross-host messaging</strong> &mdash; <code>Store::publish</code> / <code>App::subscribe</code> for fire-and-forget pub/sub, <code>publishReliable</code> / <code>subscribeReliable</code> for Streams-backed at-least-once delivery via consumer groups, <code>WSRouter</code> for cross-server WebSocket routing, first-class WS rooms with federated membership (<a href="/pubsub">/pubsub</a>)</li>
             <li><strong>Stream wrapper for <code>php://input</code></strong> &mdash; legacy <code>file_get_contents('php://input')</code> in JSON APIs just works in long-running workers</li>
             <li><strong>CLI tooling</strong> &mdash; <code>php app.php start/stop/restart/status/logs</code> + daemonization + per-port PID files + log filters (<code>--access</code>, <code>--debug</code>, <code>--server</code>, <code>--zlog</code>)</li>
-            <li><strong>Lifecycle validation</strong> &mdash; unsafe combinations (superglobals(true) + enableCoroutine(true)) throw at boot, not silently race in prod (v0.2.27)</li>
+            <li><strong>Coroutine-safe superglobals</strong> &mdash; with ext-zealphp, <code>$_GET</code> / <code>$_POST</code> / <code>$_SESSION</code> are per-coroutine safe. <code>superglobals(true) + enableCoroutine(true)</code> just works &mdash; legacy code and coroutine concurrency in the same process (v0.3.0)</li>
           </ul>
         </div>
       </div>
