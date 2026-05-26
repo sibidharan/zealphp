@@ -1,6 +1,6 @@
 # ZealPHP — A PHP HTTP Server (built on OpenSwoole)
 
-ZealPHP runs PHP as the HTTP server itself — not a CGI worker behind one. Built on **OpenSwoole**, it ships HTTP, WebSocket, SSE, coroutines, shared memory, timers, and task workers as first-class primitives because the server stays alive between requests. Existing PHP code runs unchanged via uopz overrides in compatibility mode; new features go async without a separate Node or Go service. Alpha — see stability note below.
+ZealPHP runs PHP as the HTTP server itself — not a CGI worker behind one. Built on **OpenSwoole**, it ships HTTP, WebSocket, SSE, coroutines, shared memory, timers, and task workers as first-class primitives because the server stays alive between requests. Existing PHP code runs unchanged via ext-zealphp function overrides; new features go async without a separate Node or Go service. Alpha — see stability note below.
 
 [![Packagist Version](https://img.shields.io/packagist/v/sibidharan/zealphp?style=flat-square&color=orange&logo=packagist&logoColor=white)](https://packagist.org/packages/sibidharan/zealphp) [![Packagist Downloads](https://img.shields.io/packagist/dt/sibidharan/zealphp?style=flat-square&logo=packagist&logoColor=white)](https://packagist.org/packages/sibidharan/zealphp) [![License](https://img.shields.io/packagist/l/sibidharan/zealphp?style=flat-square)](https://packagist.org/packages/sibidharan/zealphp)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sibidharan/zealphp) [![GitHub stars](https://img.shields.io/github/stars/sibidharan/zealphp?style=flat-square&logo=github&logoColor=white)](https://github.com/sibidharan/zealphp/stargazers) [![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square&logo=php&logoColor=white)](https://www.php.net/) [![PHP tested](https://img.shields.io/badge/tested-PHP%208.3%20%7C%208.4%20%7C%208.5--experimental-777bb4?style=flat-square&logo=php&logoColor=white)](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml) [![Stability](https://img.shields.io/badge/stability-active%20alpha-orange?style=flat-square)](CHANGELOG.md)
@@ -43,7 +43,7 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **Timers** | `App::tick()`, `App::after()`, `App::onWorkerStart()` — per-worker recurring tasks |
 | **ZealAPI** | File-based REST: drop `api/device/list.php` → `/api/device/list` works automatically |
 | **Templating** | Nested `App::render()` / `App::renderToString()` — single `_master.php`, component-based |
-| **Sessions** | All `session_*()` functions overridden via uopz — coroutine-safe, per-request isolation |
+| **Sessions** | All `session_*()` functions overridden via ext-zealphp — coroutine-safe, per-request isolation |
 | **Unit tests** | PHPUnit 11 — 130 unit tests + 46 integration tests, all green |
 | **Benchmarks** | OpenSwoole-powered concurrency with a modular `scripts/bench.sh` runner for wrk/ab sweeps through c=1000 |
 
@@ -62,7 +62,7 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 
 PHP powers ~71% of the web ([W3Techs](https://w3techs.com/technologies/details/pl-php)), but the default request-per-process model (PHP-FPM, mod_php) keeps the interpreter warm yet discards request-local state, and gives PHP no native way to hold a persistent connection — so WebSocket/SSE features land in separate Node/Go sidecar processes. ZealPHP runs on **OpenSwoole** — a long-lived PHP server with native coroutines — and adds a framework layer that:
 
-1. **Accepts many traditional PHP patterns unchanged (compatibility mode).** Drop `.php` files in `public/`. `session_start()`, `header()`, `$_GET`, `$_POST`, `setcookie()`, `echo` all route through uopz overrides into per-request state. Many WordPress sites run through the CGI worker bridge — see [zealphp-wordpress](https://github.com/sibidharan/zealphp-wordpress) for the showcase and documented limits. Compatibility is a migration on-ramp, not a guarantee that every PHP application is safe to drop in without an audit.
+1. **Accepts many traditional PHP patterns unchanged (compatibility mode).** Drop `.php` files in `public/`. `session_start()`, `header()`, `$_GET`, `$_POST`, `setcookie()`, `echo` all route through ext-zealphp overrides into per-request state. Many WordPress sites run through the CGI worker bridge — see [zealphp-wordpress](https://github.com/sibidharan/zealphp-wordpress) for the showcase and documented limits. Compatibility is a migration on-ramp, not a guarantee that every PHP application is safe to drop in without an audit.
 2. **Adds async primitives when you want them.** `go()`, `Channel`, WebSocket, SSE, shared memory (`Store` / `Counter`), timers, task workers — all framework-native, no extra services.
 3. **Lets you migrate file by file.** Start with fallback routing on day one; opt into coroutine mode when you're ready. No big-bang rewrite.
 
@@ -90,7 +90,7 @@ docker compose up app
 # → http://localhost:8080
 ```
 
-### Composer (requires PHP 8.3+, OpenSwoole, uopz)
+### Composer (requires PHP 8.3+, OpenSwoole, ext-zealphp)
 
 ```bash
 # New project
@@ -186,10 +186,10 @@ $app->run();
 
   Cross-worker primitives: Store (OpenSwoole\Table) + Counter (Atomic) + Cache
   Per-request state:       G::instance() — coroutine-local context
-  uopz overrides:          header() · session_start() · setcookie() · $_GET
+  ext-zealphp overrides:    header() · session_start() · setcookie() · $_GET
 ```
 
-The uopz function overrides are the framework's load-bearing trick: legacy PHP code calls `session_start()` or `header()` unchanged, but the calls route to per-coroutine state instead of mutating process globals. This lets many traditional PHP patterns — including unmodified WordPress in compatibility mode — run on OpenSwoole's coroutine runtime, with documented limits where the legacy bridge can't fully match Apache's request isolation.
+The ext-zealphp function overrides are the framework's load-bearing trick: legacy PHP code calls `session_start()` or `header()` unchanged, but the calls route to per-coroutine state instead of mutating process globals. This lets many traditional PHP patterns — including unmodified WordPress in compatibility mode — run on OpenSwoole's coroutine runtime, with documented limits where the legacy bridge can't fully match Apache's request isolation.
 
 More detail in [docs/runtime-architecture.md](docs/runtime-architecture.md).
 
@@ -248,7 +248,7 @@ the same defaults. Target a specific instance with `-p PORT` on
 
 ## Docker Benchmark
 
-Run the benchmark in Docker with PHP, OpenSwoole, uopz, Composer deps, and `wrk`
+Run the benchmark in Docker with PHP, OpenSwoole, ext-zealphp, Composer deps, and `wrk`
 inside the image:
 
 ```bash
@@ -311,9 +311,9 @@ cd /tmp/ext-zealphp && phpize && ./configure && make && sudo make install
 ### 3. Verify
 
 ```bash
-php -m | grep -E 'openswoole|uopz'
+php -m | grep -E 'openswoole|zealphp'
 # openswoole
-# uopz
+# ext-zealphp
 ```
 
 Or use the automated setup:
@@ -440,7 +440,7 @@ App::onWorkerStart(function($server, $workerId) use ($hitCounter) {
 
 **`coprocess` / `coproc`:** Available in superglobals mode — spawns a child process for background async work. Not needed in coroutine mode (use `go()` directly).
 
-**uopz overrides:** `header()`, `setcookie()`, all `session_*()` functions are permanently replaced at startup via `uopz_set_return()`. This makes existing PHP code work unchanged inside the long-running OpenSwoole process.
+**ext-zealphp overrides:** `header()`, `setcookie()`, all `session_*()` functions are permanently replaced at startup via `ext-zealphp` overrides. This makes existing PHP code work unchanged inside the long-running OpenSwoole process.
 
 ---
 
