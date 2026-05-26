@@ -53,7 +53,11 @@
     <p>
       Register them in <code>app.php</code> before <code>$app-&gt;run()</code>:
     </p>
-    <pre><code class="language-php">$app-&gt;addMiddleware(new CorsMiddleware());
+    <pre><code class="language-php">use ZealPHP\Middleware\CorsMiddleware;
+use ZealPHP\Middleware\ETagMiddleware;
+use ZealPHP\Middleware\SessionStartMiddleware;
+
+$app-&gt;addMiddleware(new CorsMiddleware());
 $app-&gt;addMiddleware(new ETagMiddleware());
 $app-&gt;addMiddleware(new SessionStartMiddleware());</code></pre>
 

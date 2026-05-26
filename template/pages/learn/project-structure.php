@@ -142,14 +142,14 @@ $app->run();</code></pre>
 {
   "autoload": {
     "psr-4": {
-      "App\\": "src/"
+      "MyProject\\": "src/"
     }
   }
 }</code></pre>
     <p>
-      With that, <code>src/Auth.php</code> defining <code>App\Auth</code> is reachable from anywhere
-      as <code>new \App\Auth()</code>. Run <code>composer dump-autoload</code> after adding new
-      classes for the first time.
+      The scaffold already has this configured. With it, <code>src/Auth.php</code> defining
+      <code>MyProject\Auth</code> is reachable from anywhere as <code>new \MyProject\Auth()</code>.
+      Run <code>composer dump-autoload</code> after adding new classes for the first time.
     </p>
 
     <h3><code>app.php</code> — bootstrap, nothing else</h3>
