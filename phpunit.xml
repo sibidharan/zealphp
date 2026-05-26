@@ -17,6 +17,10 @@
     <include>
       <directory>src</directory>
     </include>
+    <exclude>
+      <file>src/pool_worker.php</file>
+      <file>src/cgi_worker.php</file>
+    </exclude>
   </source>
   <php>
     <env name="ZEALPHP_REDIS_URL" value="redis://127.0.0.1:16379/0"/>

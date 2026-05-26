@@ -362,6 +362,28 @@ class CacheTest extends TestCase
         $this->assertSame(['nested' => true], $result['arr']);
     }
 
+    public function testMgetFileTierFallback(): void
+    {
+        Cache::set('ft-key', 'file-hit');
+        $hash = md5('ft-key');
+        $table = \ZealPHP\Store::table('__cache');
+        $this->assertNotNull($table);
+        $table->del($hash);
+
+        $result = Cache::mget(['ft-key']);
+        $this->assertArrayHasKey('ft-key', $result);
+        $this->assertSame('file-hit', $result['ft-key']);
+    }
+
+    public function testMgetOversizeValueFromFile(): void
+    {
+        $big = str_repeat('z', 9000);
+        Cache::set('mget-big', $big);
+        $result = Cache::mget(['mget-big']);
+        $this->assertArrayHasKey('mget-big', $result);
+        $this->assertSame($big, $result['mget-big']);
+    }
+
     public function testInitConfiguresFreshCacheDir(): void
     {
         // Drive the production init() path (distinct from initForTest used by

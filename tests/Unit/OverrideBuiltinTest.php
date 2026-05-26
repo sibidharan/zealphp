@@ -227,10 +227,11 @@ final class OverrideBuiltinTest extends TestCase
     {
         $prop = new \ReflectionProperty(App::class, 'overridesRegistered');
         $prop->setAccessible(true);
-
-        // First call sets the flag
         $method = new \ReflectionMethod(App::class, 'registerAllOverrides');
         $method->setAccessible(true);
+
+        // Reset to false so the first invoke actually sets it
+        $prop->setValue(null, false);
         $method->invoke(null);
         $this->assertTrue($prop->getValue());
 

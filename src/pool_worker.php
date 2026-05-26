@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 
+// This file runs as a standalone subprocess via proc_open — coverage tools
+// in the parent PHPUnit process cannot instrument it.
+// @codeCoverageIgnoreStart
+
 /**
  * Persistent subprocess entry for ZealPHP's native FCGI-style worker pool.
  *

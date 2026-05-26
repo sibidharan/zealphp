@@ -3234,6 +3234,7 @@ class App
         } catch (\Throwable $e) {
             // PHP 8.4+: exit()/die() throw \ExitException instead of
             // terminating the process. Treat as clean halt — worker survives.
+            // @codeCoverageIgnoreStart — ExitException only exists on PHP 8.4+; CI coverage runs on 8.3
             if ($e::class === 'ExitException' && method_exists($e, 'getStatus')) {
                 $status = $e->getStatus();
                 if (is_int($status) && $status >= 100 && $status <= 599) {
@@ -3244,6 +3245,7 @@ class App
                 } else {
                     $result = 1;
                 }
+            // @codeCoverageIgnoreEnd
             } else {
                 @ob_end_clean();
                 self::restoreFragmentState($previousFragmentState);
@@ -5926,12 +5928,14 @@ HELP;
         // loaded AND superglobals mode is on with coroutines. This hooks into
         // OpenSwoole's yield/resume/close scheduler callbacks so $_GET/$_POST/
         // $_SESSION are saved/restored on every context switch.
+        // @codeCoverageIgnoreStart — requires running OpenSwoole server
         if (App::$superglobals && $enableCoroutine
             && \extension_loaded('zealphp')
             && \function_exists('zealphp_coroutine_superglobals')
         ) {
             (\zealphp_coroutine_superglobals(...))((bool) true);
         }
+        // @codeCoverageIgnoreEnd
 
         // Transparent coroutine-safe exec family. Overriding `shell_exec` ALSO
         // intercepts the backtick operator (`` `cmd` `` compiles to a
