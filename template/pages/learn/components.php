@@ -27,7 +27,7 @@
 
     <h2>Step 1: Create a master layout</h2>
     <p>A layout is just a PHP template that wraps your page content. Create <a href="https://github.com/sibidharan/zealphp/blob/master/template/_master.php" target="_blank"><code>template/_master.php</code></a>:</p>
-    <pre><code class="language-php">&lt;!doctype html&gt;
+    <pre><code class="language-php-template">&lt;!doctype html&gt;
 &lt;html lang="en"&gt;
 &lt;head&gt;
   &lt;meta charset="utf-8"&gt;
@@ -63,7 +63,7 @@ App::render('/_master', ['title' =&gt; 'About', 'page' =&gt; 'about']);</code></
       <strong>stencil with holes</strong> — you lay the stencil down and fill in the holes
       with different data each time.
     </p>
-    <pre><code class="language-php">&lt;!-- template/components/_card.php --&gt;
+    <pre><code class="language-php-template">&lt;!-- template/components/_card.php --&gt;
 &lt;?php $variant ??= 'default'; ?&gt;
 &lt;article class="card card-&lt;?= htmlspecialchars($variant) ?&gt;"&gt;
   &lt;h3&gt;&lt;?= htmlspecialchars($title) ?&gt;&lt;/h3&gt;
@@ -91,7 +91,7 @@ App::render('/_master', ['title' =&gt; 'About', 'page' =&gt; 'about']);</code></
 }
 
 // Requires: React, JSX transpiler, bundler, hydration</code></pre>',
-      'after' => '<pre><code class="language-php">&lt;?php $variant ??= \'default\'; ?&gt;
+      'after' => '<pre><code class="language-php-template">&lt;?php $variant ??= \'default\'; ?&gt;
 &lt;article class="card card-&lt;?= $variant ?&gt;"&gt;
   &lt;h3&gt;&lt;?= htmlspecialchars($title) ?&gt;&lt;/h3&gt;
   &lt;p&gt;&lt;?= $body ?&gt;&lt;/p&gt;

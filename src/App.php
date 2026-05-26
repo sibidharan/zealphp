@@ -782,67 +782,65 @@ class App
 
         // Capture native phpinfo(INFO_MODULES) text ONCE before overriding phpinfo,
         // so PhpInfo can surface extension-specific detail without recursing into
-        // its own override (and without per-request uopz_unset races). \phpinfo here
-        // is still the original built-in — the uopz override is installed below.
+        // its own override. \phpinfo here is still the original built-in.
         \ob_start();
         \phpinfo(INFO_MODULES);
         \ZealPHP\Diagnostics\PhpInfo::primeModuleText((string) \ob_get_clean());
 
-        // Built-ins always present in CLI/OpenSwoole — uopz can override directly.
-        \uopz_set_return('header', \Closure::fromCallable('\ZealPHP\header'), true);
-        \uopz_set_return('header_remove', \Closure::fromCallable('\ZealPHP\header_remove'), true);
-        \uopz_set_return('headers_list', \Closure::fromCallable('\ZealPHP\headers_list'), true);
-        \uopz_set_return('headers_sent', \Closure::fromCallable('\ZealPHP\headers_sent'), true);
-        \uopz_set_return('setcookie', \Closure::fromCallable('\ZealPHP\setcookie') , true);
-        \uopz_set_return('setrawcookie', \Closure::fromCallable('\ZealPHP\setrawcookie') , true);
-        \uopz_set_return('http_response_code', \Closure::fromCallable('\ZealPHP\http_response_code'), true);
-        \uopz_set_return('flush', \Closure::fromCallable('\ZealPHP\flush'), true);
-        \uopz_set_return('ob_flush', \Closure::fromCallable('\ZealPHP\ob_flush'), true);
-        \uopz_set_return('ob_end_flush', \Closure::fromCallable('\ZealPHP\ob_end_flush'), true);
-        \uopz_set_return('ob_implicit_flush', \Closure::fromCallable('\ZealPHP\ob_implicit_flush'), true);
-        \uopz_set_return('set_time_limit', \Closure::fromCallable('\ZealPHP\set_time_limit'), true);
-        \uopz_set_return('ignore_user_abort', \Closure::fromCallable('\ZealPHP\ignore_user_abort'), true);
-        \uopz_set_return('connection_status', \Closure::fromCallable('\ZealPHP\connection_status'), true);
-        \uopz_set_return('connection_aborted', \Closure::fromCallable('\ZealPHP\connection_aborted'), true);
-        \uopz_set_return('output_add_rewrite_var', \Closure::fromCallable('\ZealPHP\output_add_rewrite_var'), true);
-        \uopz_set_return('output_reset_rewrite_vars', \Closure::fromCallable('\ZealPHP\output_reset_rewrite_vars'), true);
-        \uopz_set_return('is_uploaded_file', \Closure::fromCallable('\ZealPHP\is_uploaded_file'), true);
-        \uopz_set_return('move_uploaded_file', \Closure::fromCallable('\ZealPHP\move_uploaded_file'), true);
-        \uopz_set_return('phpinfo', \Closure::fromCallable('\ZealPHP\phpinfo'), true);
-        \uopz_set_return('php_sapi_name', \Closure::fromCallable('\ZealPHP\php_sapi_name'), true);
-        \uopz_set_return('filter_input', \Closure::fromCallable('\ZealPHP\filter_input'), true);
-        \uopz_set_return('filter_input_array', \Closure::fromCallable('\ZealPHP\filter_input_array'), true);
-        \uopz_set_return('header_register_callback', \Closure::fromCallable('\ZealPHP\header_register_callback'), true);
-        \uopz_set_return('error_log', \Closure::fromCallable('\ZealPHP\error_log'), true);
-        // Per-coroutine error/exception/shutdown handler registry.
-        \uopz_set_return('set_error_handler', \Closure::fromCallable('\ZealPHP\set_error_handler'), true);
-        \uopz_set_return('restore_error_handler', \Closure::fromCallable('\ZealPHP\restore_error_handler'), true);
-        \uopz_set_return('set_exception_handler', \Closure::fromCallable('\ZealPHP\set_exception_handler'), true);
-        \uopz_set_return('restore_exception_handler', \Closure::fromCallable('\ZealPHP\restore_exception_handler'), true);
-        \uopz_set_return('register_shutdown_function', \Closure::fromCallable('\ZealPHP\register_shutdown_function'), true);
-        \uopz_set_return('error_reporting', \Closure::fromCallable('\ZealPHP\error_reporting'), true);
+        // Override PHP built-ins so they route to per-request objects.
+        // Prefer ext-zealphp (allowlist-only, ~250 LOC); fall back to uopz.
+        self::overrideBuiltin('header', '\ZealPHP\header');
+        self::overrideBuiltin('header_remove', '\ZealPHP\header_remove');
+        self::overrideBuiltin('headers_list', '\ZealPHP\headers_list');
+        self::overrideBuiltin('headers_sent', '\ZealPHP\headers_sent');
+        self::overrideBuiltin('setcookie', '\ZealPHP\setcookie');
+        self::overrideBuiltin('setrawcookie', '\ZealPHP\setrawcookie');
+        self::overrideBuiltin('http_response_code', '\ZealPHP\http_response_code');
+        self::overrideBuiltin('flush', '\ZealPHP\flush');
+        self::overrideBuiltin('ob_flush', '\ZealPHP\ob_flush');
+        self::overrideBuiltin('ob_end_flush', '\ZealPHP\ob_end_flush');
+        self::overrideBuiltin('ob_implicit_flush', '\ZealPHP\ob_implicit_flush');
+        self::overrideBuiltin('set_time_limit', '\ZealPHP\set_time_limit');
+        self::overrideBuiltin('ignore_user_abort', '\ZealPHP\ignore_user_abort');
+        self::overrideBuiltin('connection_status', '\ZealPHP\connection_status');
+        self::overrideBuiltin('connection_aborted', '\ZealPHP\connection_aborted');
+        self::overrideBuiltin('output_add_rewrite_var', '\ZealPHP\output_add_rewrite_var');
+        self::overrideBuiltin('output_reset_rewrite_vars', '\ZealPHP\output_reset_rewrite_vars');
+        self::overrideBuiltin('is_uploaded_file', '\ZealPHP\is_uploaded_file');
+        self::overrideBuiltin('move_uploaded_file', '\ZealPHP\move_uploaded_file');
+        self::overrideBuiltin('phpinfo', '\ZealPHP\phpinfo');
+        self::overrideBuiltin('php_sapi_name', '\ZealPHP\php_sapi_name');
+        self::overrideBuiltin('filter_input', '\ZealPHP\filter_input');
+        self::overrideBuiltin('filter_input_array', '\ZealPHP\filter_input_array');
+        self::overrideBuiltin('header_register_callback', '\ZealPHP\header_register_callback');
+        self::overrideBuiltin('error_log', '\ZealPHP\error_log');
+        self::overrideBuiltin('set_error_handler', '\ZealPHP\set_error_handler');
+        self::overrideBuiltin('restore_error_handler', '\ZealPHP\restore_error_handler');
+        self::overrideBuiltin('set_exception_handler', '\ZealPHP\set_exception_handler');
+        self::overrideBuiltin('restore_exception_handler', '\ZealPHP\restore_exception_handler');
+        self::overrideBuiltin('register_shutdown_function', '\ZealPHP\register_shutdown_function');
+        self::overrideBuiltin('error_reporting', '\ZealPHP\error_reporting');
         // Apache-only built-ins (apache_*, getallheaders, virtual) are NOT defined
-        // in CLI SAPI; uopz can't override what doesn't exist. They are registered
-        // as global shims via src/apache_shims.php (composer files autoload) that
-        // delegate to the same \ZealPHP\* namespaced implementations.
-        \uopz_set_return('session_start', \Closure::fromCallable('\ZealPHP\Session\zeal_session_start'), true);
-        \uopz_set_return('session_id', \Closure::fromCallable('\ZealPHP\Session\zeal_session_id'), true);
-        \uopz_set_return('session_status', \Closure::fromCallable('\ZealPHP\Session\zeal_session_status'), true);
-        \uopz_set_return('session_name', \Closure::fromCallable('\ZealPHP\Session\zeal_session_name'), true);
-        \uopz_set_return('session_write_close', \Closure::fromCallable('\ZealPHP\Session\zeal_session_write_close'), true);
-        \uopz_set_return('session_destroy', \Closure::fromCallable('\ZealPHP\Session\zeal_session_destroy'), true);
-        \uopz_set_return('session_unset', \Closure::fromCallable('\ZealPHP\Session\zeal_session_unset'), true);
-        \uopz_set_return('session_regenerate_id', \Closure::fromCallable('\ZealPHP\Session\zeal_session_regenerate_id'), true);
-        \uopz_set_return('session_get_cookie_params', \Closure::fromCallable('\ZealPHP\Session\zeal_session_get_cookie_params'), true);
-        \uopz_set_return('session_set_cookie_params', \Closure::fromCallable('\ZealPHP\Session\zeal_session_set_cookie_params'), true);
-        \uopz_set_return('session_cache_limiter', \Closure::fromCallable('\ZealPHP\Session\zeal_session_cache_limiter'), true);
-        \uopz_set_return('session_cache_expire', \Closure::fromCallable('\ZealPHP\Session\zeal_session_cache_expire'), true);
-        \uopz_set_return('session_commit', \Closure::fromCallable('\ZealPHP\Session\zeal_session_commit'), true);
-        \uopz_set_return('session_abort', \Closure::fromCallable('\ZealPHP\Session\zeal_session_abort'), true);
-        \uopz_set_return('session_encode', \Closure::fromCallable('\ZealPHP\Session\zeal_session_encode'), true);
-        \uopz_set_return('session_decode', \Closure::fromCallable('\ZealPHP\Session\zeal_session_decode'), true);
-        \uopz_set_return('session_save_path', \Closure::fromCallable('\ZealPHP\Session\zeal_session_save_path'), true);
-        \uopz_set_return('session_module_name', \Closure::fromCallable('\ZealPHP\Session\zeal_session_module_name'), true);
+        // in CLI SAPI; neither extension can override what doesn't exist. They are
+        // registered as global shims via src/apache_shims.php (composer files autoload).
+        self::overrideBuiltin('session_start', '\ZealPHP\Session\zeal_session_start');
+        self::overrideBuiltin('session_id', '\ZealPHP\Session\zeal_session_id');
+        self::overrideBuiltin('session_status', '\ZealPHP\Session\zeal_session_status');
+        self::overrideBuiltin('session_name', '\ZealPHP\Session\zeal_session_name');
+        self::overrideBuiltin('session_write_close', '\ZealPHP\Session\zeal_session_write_close');
+        self::overrideBuiltin('session_destroy', '\ZealPHP\Session\zeal_session_destroy');
+        self::overrideBuiltin('session_unset', '\ZealPHP\Session\zeal_session_unset');
+        self::overrideBuiltin('session_regenerate_id', '\ZealPHP\Session\zeal_session_regenerate_id');
+        self::overrideBuiltin('session_get_cookie_params', '\ZealPHP\Session\zeal_session_get_cookie_params');
+        self::overrideBuiltin('session_set_cookie_params', '\ZealPHP\Session\zeal_session_set_cookie_params');
+        self::overrideBuiltin('session_cache_limiter', '\ZealPHP\Session\zeal_session_cache_limiter');
+        self::overrideBuiltin('session_cache_expire', '\ZealPHP\Session\zeal_session_cache_expire');
+        self::overrideBuiltin('session_commit', '\ZealPHP\Session\zeal_session_commit');
+        self::overrideBuiltin('session_abort', '\ZealPHP\Session\zeal_session_abort');
+        self::overrideBuiltin('session_encode', '\ZealPHP\Session\zeal_session_encode');
+        self::overrideBuiltin('session_decode', '\ZealPHP\Session\zeal_session_decode');
+        self::overrideBuiltin('session_save_path', '\ZealPHP\Session\zeal_session_save_path');
+        self::overrideBuiltin('session_module_name', '\ZealPHP\Session\zeal_session_module_name');
     }
 
     /**
@@ -901,6 +899,19 @@ class App
      * Called from `superglobals`, `processIsolation`, `enableCoroutine`,
      * `hookAll` setters when they receive a write (not a read).
      */
+    /**
+     * @param callable-string $callable
+     */
+    private static function overrideBuiltin(string $name, string $callable): void
+    {
+        $cb = \Closure::fromCallable($callable);
+        if (\extension_loaded('zealphp') && \function_exists('zealphp_override')) {
+            (\zealphp_override(...))($name, $cb);
+        } elseif (\function_exists('uopz_set_return')) {
+            \uopz_set_return($name, $cb, true);
+        }
+    }
+
     private static function refuseAfterRun(string $setter): void
     {
         if (self::$run_has_started) {
@@ -5886,10 +5897,10 @@ HELP;
         // proc_open, so routing through it keeps the fallback recursion-safe.
         $hookExec = self::$hook_exec ?? (self::$superglobals === false);
         if ($hookExec) {
-            \uopz_set_return('shell_exec', \Closure::fromCallable('\ZealPHP\zeal_shell_exec'), true);
-            \uopz_set_return('system',     \Closure::fromCallable('\ZealPHP\zeal_system'), true);
-            \uopz_set_return('passthru',   \Closure::fromCallable('\ZealPHP\zeal_passthru'), true);
-            \uopz_set_return('exec',       \Closure::fromCallable('\ZealPHP\zeal_exec'), true);
+            self::overrideBuiltin('shell_exec', '\ZealPHP\zeal_shell_exec');
+            self::overrideBuiltin('system',     '\ZealPHP\zeal_system');
+            self::overrideBuiltin('passthru',   '\ZealPHP\zeal_passthru');
+            self::overrideBuiltin('exec',       '\ZealPHP\zeal_exec');
             // proc_open intentionally NOT overridden — App::rawExec()/cgiSubprocess() rely on it.
         }
 

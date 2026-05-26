@@ -52,7 +52,7 @@ $active = $active ?? 'learn/notes';
       reusable partial:
     </p>
     <p><strong>Create <code>template/components/_notes_widget.php</code>:</strong></p>
-    <pre><code class="language-php">&lt;?php
+    <pre><code class="language-php-template">&lt;?php
 $user ??= null;
 if (!$user) return;
 ?&gt;
@@ -253,7 +253,7 @@ ${basename(__FILE__, '.php')} = function () {
       <li><code>hx-on::after-request</code> — clear the form after success</li>
     </ul>
     <p>Delete uses a similar pattern:</p>
-    <pre><code class="language-html">&lt;button hx-delete="/api/learn/notes/&lt;?= $id ?&gt;"
+    <pre><code class="language-php-template">&lt;button hx-delete="/api/learn/notes/&lt;?= $id ?&gt;"
         hx-target="#note-&lt;?= $id ?&gt;"
         hx-swap="outerHTML"
         hx-confirm="Delete this note?"&gt;Delete&lt;/button&gt;</code></pre>
@@ -264,7 +264,7 @@ ${basename(__FILE__, '.php')} = function () {
       Each note renders as a card. This component is used in three places: the notes list (GET), the create response (POST), and the chat history bubbles (<a href="/learn/ai-chat">Lesson 20, AI Chat</a>). Same file, three consumers.
     </p>
     <p><strong>Create <code>template/components/_note_card.php</code>:</strong></p>
-    <pre><code class="language-php">&lt;?php
+    <pre><code class="language-php-template">&lt;?php
 $id    = (int)($id ?? 0);
 $title = (string)($title ?? '');
 $body  = (string)($body ?? '');

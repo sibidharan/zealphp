@@ -525,7 +525,7 @@ return $body;</code></pre>
       This is the punchline. The <em>same</em> route handler serves the full page on plain navigation and the
       named fragment on htmx swap — and on the htmx response, fires a client event so a toast component picks up:
     </p>
-    <pre><code class="language-php">// template/pages/notes.php — fragments and full page from one file
+    <pre><code class="language-php-template">// template/pages/notes.php — fragments and full page from one file
 &lt;?php use ZealPHP\App; ?&gt;
 &lt;section&gt;
   &lt;h1&gt;Notes&lt;/h1&gt;

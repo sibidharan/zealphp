@@ -60,7 +60,7 @@ $active = $active ?? 'learn/ai-chat';
       event log — is extracted into a reusable partial that the lesson page and the standalone popup
       both render:
     </p>
-    <pre><code class="language-php">// template/components/_chat_widget.php
+    <pre><code class="language-php-template">// template/components/_chat_widget.php
 &lt;?php
 $user ??= null;
 if (!$user) return;
