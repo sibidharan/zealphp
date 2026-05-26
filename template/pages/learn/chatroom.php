@@ -68,7 +68,7 @@ CREATE INDEX idx_chatroom_room_time ON chatroom_messages(room, created_at);</cod
     <h2 id="model">A small model class — three pure-PHP functions</h2>
     <p>
       Everything the chat does to SQLite collapses to three methods. This is
-      <code>src/Learn/Chatroom.php</code> shipped with the demo:
+      <code>ZealPHP\Learn\Chatroom</code> (already in <code>vendor/</code> via the framework):
     </p>
 <pre><code class="language-php">final class Chatroom
 {
