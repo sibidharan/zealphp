@@ -103,4 +103,110 @@ final class OverrideBuiltinTest extends TestCase
             'uopz must be loaded when ext-zealphp is not'
         );
     }
+
+    public function testOverrideBuiltinUopzPathExecutes(): void
+    {
+        if (extension_loaded('zealphp')) {
+            $this->markTestSkipped('ext-zealphp loaded — uopz path not taken');
+        }
+        $this->assertTrue(function_exists('uopz_set_return'));
+
+        $this->method->invoke(null, 'http_response_code', '\ZealPHP\http_response_code');
+        // The override routes to ZealPHP's implementation — just verify no crash
+        http_response_code();
+        $this->addToAssertionCount(1);
+    }
+
+    public function testOverrideBuiltinAllResponseFunctions(): void
+    {
+        $funcs = [
+            'header' => '\ZealPHP\header',
+            'header_remove' => '\ZealPHP\header_remove',
+            'headers_list' => '\ZealPHP\headers_list',
+            'headers_sent' => '\ZealPHP\headers_sent',
+            'setcookie' => '\ZealPHP\setcookie',
+            'setrawcookie' => '\ZealPHP\setrawcookie',
+            'http_response_code' => '\ZealPHP\http_response_code',
+        ];
+
+        foreach ($funcs as $name => $callable) {
+            $this->method->invoke(null, $name, $callable);
+            $this->addToAssertionCount(1);
+        }
+    }
+
+    public function testOverrideBuiltinAllOutputFunctions(): void
+    {
+        $funcs = [
+            'flush' => '\ZealPHP\flush',
+            'ob_flush' => '\ZealPHP\ob_flush',
+            'ob_end_flush' => '\ZealPHP\ob_end_flush',
+            'ob_implicit_flush' => '\ZealPHP\ob_implicit_flush',
+        ];
+
+        foreach ($funcs as $name => $callable) {
+            $this->method->invoke(null, $name, $callable);
+            $this->addToAssertionCount(1);
+        }
+    }
+
+    public function testOverrideBuiltinErrorAndMiscFunctions(): void
+    {
+        $funcs = [
+            'error_log' => '\ZealPHP\error_log',
+            'error_reporting' => '\ZealPHP\error_reporting',
+            'register_shutdown_function' => '\ZealPHP\register_shutdown_function',
+            'phpinfo' => '\ZealPHP\phpinfo',
+            'php_sapi_name' => '\ZealPHP\php_sapi_name',
+            'connection_status' => '\ZealPHP\connection_status',
+            'connection_aborted' => '\ZealPHP\connection_aborted',
+        ];
+
+        foreach ($funcs as $name => $callable) {
+            $this->method->invoke(null, $name, $callable);
+            $this->addToAssertionCount(1);
+        }
+    }
+
+    public function testValidateLifecycleCombinationAllowsSgCoroutineWithExtZealphp(): void
+    {
+        $validator = new \ReflectionMethod(App::class, 'validateLifecycleCombination');
+        $validator->setAccessible(true);
+
+        if (extension_loaded('zealphp')) {
+            // Should NOT throw — ext-zealphp makes it safe
+            $validator->invoke(null, true, 0, true);
+            $this->addToAssertionCount(1);
+        } else {
+            // Should throw — no ext-zealphp to make it safe
+            $this->expectException(\RuntimeException::class);
+            $validator->invoke(null, true, 0, true);
+        }
+    }
+
+    public function testValidateLifecycleCombinationSafeModesNeverThrow(): void
+    {
+        $validator = new \ReflectionMethod(App::class, 'validateLifecycleCombination');
+        $validator->setAccessible(true);
+
+        // superglobals(false) + coroutines = always safe
+        $validator->invoke(null, false, \OpenSwoole\Runtime::HOOK_ALL, true);
+        $this->addToAssertionCount(1);
+
+        // superglobals(true) + no coroutines = always safe
+        $validator->invoke(null, true, 0, false);
+        $this->addToAssertionCount(1);
+
+        // superglobals(false) + no hooks + no coroutines = always safe
+        $validator->invoke(null, false, 0, false);
+        $this->addToAssertionCount(1);
+    }
+
+    public function testConstructorAcceptsEitherExtension(): void
+    {
+        $this->assertTrue(
+            extension_loaded('zealphp') || extension_loaded('uopz'),
+            'Constructor requires at least one override extension'
+        );
+    }
 }

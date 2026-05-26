@@ -158,6 +158,18 @@ jobs:
           echo "extension=openswoole.so" | sudo tee "${ini_dir}/30-openswoole.ini"
           php -m | grep openswoole
 
+      - name: Build and install ext-zealphp
+        run: |
+          git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp-src
+          cd /tmp/ext-zealphp-src
+          phpize
+          ./configure --enable-zealphp
+          make -j"$(nproc)"
+          sudo make install
+          ini_dir=$(php -i | awk -F'=> ' '/Scan this dir for additional .ini files/ {print $2}' | head -1 | tr -d ' ')
+          echo "extension=zealphp.so" | sudo tee "${ini_dir}/50-zealphp.ini"
+          php -m | grep zealphp && echo "ext-zealphp installed"
+
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist
 
