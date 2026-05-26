@@ -1579,42 +1579,39 @@ class App
     }
 
     /**
-     * Refuse to start with lifecycle combinations that race process-wide
-     * superglobals across concurrent coroutines.
+     * Validate lifecycle mode combinations at boot.
      *
-     * History: pre-v0.2.27 these were `elog()`'d at warn level so they
-     * landed in `/tmp/zealphp/debug.log` but didn't refuse — the rationale
-     * was "users may have niche reasons (security audits, debugging)". In
-     * practice the warning was invisible to anyone not actively reading
-     * the debug log, and the unsafe configuration is how cross-request
-     * state-leak bugs ship to production. v0.2.27 changes this to a hard
-     * throw at `App::run()` boot — fail loud, fail fast, before any
-     * request can be served against a broken contract.
+     * With ext-zealphp loaded, `superglobals(true) + enableCoroutine(true)`
+     * is now SAFE — the extension saves/restores $_GET/$_POST/$_SESSION
+     * per coroutine via zealphp_superglobals_save/restore(). This unlocks
+     * the "full superglobals + full coroutines" mode: legacy code using
+     * $_GET/$_SESSION just works, AND you get concurrent coroutine I/O.
      *
-     * @throws \RuntimeException When `superglobals(true)` is combined with
-     *   `enableCoroutine(true)` or `hookAll(non-zero)` — both expose
-     *   `$_GET`/`$_POST`/`$_SESSION` (process-wide PHP arrays) to concurrent
-     *   coroutine writes, which races across requests.
+     * Without ext-zealphp (uopz fallback), the old constraint applies:
+     * superglobals + coroutines would race process-wide arrays.
+     *
+     * @throws \RuntimeException When an unsafe combination is used without
+     *   ext-zealphp to make it safe.
      */
     private static function validateLifecycleCombination(bool $sg, int $hookFlags, bool $enableCo): void
     {
-        if ($sg && $enableCo) {
+        $hasZealphpExt = \extension_loaded('zealphp');
+
+        if ($sg && $enableCo && !$hasZealphpExt) {
             throw new \RuntimeException(
-                'ZealPHP lifecycle: App::superglobals(true) + App::enableCoroutine(true) is unsafe. '
-                . 'Concurrent coroutines would race $_GET/$_POST/$_SESSION (process-wide PHP arrays). '
-                . 'Use App::superglobals(false) for coroutine concurrency, or App::enableCoroutine(false) '
-                . 'to keep legacy superglobals semantics with sequential request handling per worker '
-                . '(Apache prefork MPM-style). Refer to /coroutines#lifecycle-modes for the supported '
-                . 'mode matrix.'
+                'ZealPHP lifecycle: App::superglobals(true) + App::enableCoroutine(true) requires '
+                . 'ext-zealphp for per-coroutine superglobal isolation. Install: '
+                . "'pie install sibidharan/ext-zealphp'. Without it, concurrent coroutines would "
+                . 'race $_GET/$_POST/$_SESSION (process-wide PHP arrays). '
+                . 'Alternative: use App::superglobals(false) for coroutine concurrency without ext-zealphp.'
             );
         }
-        if ($sg && $hookFlags !== 0) {
+        if ($sg && $hookFlags !== 0 && !$hasZealphpExt) {
             throw new \RuntimeException(
-                'ZealPHP lifecycle: App::superglobals(true) + App::hookAll(non-zero) is unsafe. '
-                . 'Hooked I/O can yield mid-request, exposing process-wide superglobal mutations to '
-                . 'other concurrent coroutines. Use App::superglobals(false) when enabling I/O hooks, '
-                . 'or App::hookAll(0) to keep legacy superglobals semantics. Refer to '
-                . '/coroutines#lifecycle-modes for the supported mode matrix.'
+                'ZealPHP lifecycle: App::superglobals(true) + App::hookAll(non-zero) requires '
+                . 'ext-zealphp for per-coroutine superglobal isolation. Install: '
+                . "'pie install sibidharan/ext-zealphp'. Without it, hooked I/O can yield mid-request, "
+                . 'exposing process-wide superglobal mutations to other coroutines.'
             );
         }
     }
