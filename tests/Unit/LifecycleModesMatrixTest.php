@@ -401,8 +401,14 @@ final class LifecycleModesMatrixTest extends TestCase
      * in validateLifecycleCombination) — pinning it so a refactor that
      * inverts the order surfaces in the diff.
      */
-    public function testRefusedBothUnsafeFlagsSetSurfacesEnableCoroutineFirst(): void
+    public function testRefusedBothUnsafeFlagsSetSurfacesEnableCoroutineFirstWithoutExtZealphp(): void
     {
+        if (\extension_loaded('zealphp')) {
+            // ext-zealphp makes both combinations safe — no exception
+            $ex = $this->validate(true, Runtime::HOOK_ALL, true);
+            $this->assertNull($ex);
+            return;
+        }
         $ex = $this->validate(true, Runtime::HOOK_ALL, true);
         $this->assertInstanceOf(\RuntimeException::class, $ex);
         $this->assertStringContainsString('enableCoroutine(true)', (string)$ex->getMessage());
