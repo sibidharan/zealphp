@@ -448,31 +448,54 @@ check_and_remove_uopz() {
     return 0 # removal is successful
 }
 
-# Function to install uopz via PECL
-# Returns 0 if the installation is successful, 1 if the installation fails
-install_uopz() {
-    echo -e "${YELLOW}Installing uopz${RESET}"
+# Function to install ext-zealphp (ZealPHP's own extension).
+# Falls back to uopz if ext-zealphp build fails.
+# Returns 0 if installation is successful, 1 if both fail.
+install_zealphp_ext() {
+    echo -e "${YELLOW}Installing ext-zealphp (ZealPHP's function-override extension)${RESET}"
 
-    if $SUDO pecl install uopz 2>/dev/null; then
-        echo -e "${GREEN}uopz installed via PECL.${RESET}"
-    else
-        echo -e "${YELLOW}PECL uopz failed (likely PHP 8.4+). Building from git source.${RESET}"
-        local tmpdir
-        tmpdir="$(mktemp -d)"
-        git clone --depth 1 https://github.com/krakjoe/uopz.git "$tmpdir" || {
-            echo -e "${RED}Failed to clone uopz from GitHub.${RESET}"
-            rm -rf "$tmpdir"
-            return 1
-        }
-        (cd "$tmpdir" && phpize && ./configure && make -j"$(nproc)" && $SUDO make install) || {
-            echo -e "${RED}Failed to build uopz from source.${RESET}"
-            rm -rf "$tmpdir"
-            return 1
-        }
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    git clone --depth 1 https://github.com/sibidharan/zealphp.git "$tmpdir/zealphp-src" || {
+        echo -e "${YELLOW}Failed to clone zealphp repo. Falling back to uopz.${RESET}"
         rm -rf "$tmpdir"
-        echo -e "${GREEN}uopz built and installed from source.${RESET}"
+        install_uopz_fallback
+        return $?
+    }
+
+    if (cd "$tmpdir/zealphp-src/ext/zealphp" && phpize && ./configure --enable-zealphp && make -j"$(nproc)" && $SUDO make install); then
+        rm -rf "$tmpdir"
+        echo -e "${GREEN}ext-zealphp built and installed.${RESET}"
+        return 0
     fi
 
+    echo -e "${YELLOW}ext-zealphp build failed. Falling back to uopz.${RESET}"
+    rm -rf "$tmpdir"
+    install_uopz_fallback
+    return $?
+}
+
+install_uopz_fallback() {
+    echo -e "${YELLOW}Installing uopz as fallback${RESET}"
+    if $SUDO pecl install uopz 2>/dev/null; then
+        echo -e "${GREEN}uopz installed via PECL.${RESET}"
+        return 0
+    fi
+    echo -e "${YELLOW}PECL uopz failed. Building from git source.${RESET}"
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    git clone --depth 1 https://github.com/krakjoe/uopz.git "$tmpdir" || {
+        echo -e "${RED}Failed to clone uopz from GitHub.${RESET}"
+        rm -rf "$tmpdir"
+        return 1
+    }
+    (cd "$tmpdir" && phpize && ./configure && make -j"$(nproc)" && $SUDO make install) || {
+        echo -e "${RED}Failed to build uopz from source.${RESET}"
+        rm -rf "$tmpdir"
+        return 1
+    }
+    rm -rf "$tmpdir"
+    echo -e "${GREEN}uopz built and installed from source (fallback).${RESET}"
     return 0
 }
 
@@ -682,8 +705,12 @@ if check_and_remove_openswoole; then
 fi
 
 if check_and_remove_uopz; then
-    if install_uopz; then
-        configure_php_extension "extension=uopz.so"
+    if install_zealphp_ext; then
+        if php -m 2>/dev/null | grep -q zealphp; then
+            configure_php_extension "extension=zealphp.so"
+        else
+            configure_php_extension "extension=uopz.so"
+        fi
     else
         exit 1
     fi
