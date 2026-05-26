@@ -457,14 +457,14 @@ install_zealphp_ext() {
 
     local tmpdir
     tmpdir="$(mktemp -d)"
-    git clone --depth 1 https://github.com/sibidharan/zealphp.git "$tmpdir/zealphp-src" || {
-        echo -e "${YELLOW}Failed to clone zealphp repo. Falling back to uopz.${RESET}"
+    git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git "$tmpdir/ext-zealphp" || {
+        echo -e "${YELLOW}Failed to clone ext-zealphp repo. Falling back to uopz.${RESET}"
         rm -rf "$tmpdir"
         install_uopz_fallback
         return $?
     }
 
-    if (cd "$tmpdir/zealphp-src/ext/zealphp" && phpize && ./configure --enable-zealphp && make -j"$(nproc)" && $SUDO make install); then
+    if (cd "$tmpdir/ext-zealphp" && phpize && ./configure --enable-zealphp && make -j"$(nproc)" && $SUDO make install); then
         rm -rf "$tmpdir"
         echo -e "${GREEN}ext-zealphp built and installed.${RESET}"
         return 0
