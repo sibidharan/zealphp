@@ -19,7 +19,7 @@ $page = function () {
         'routing', 'api-layer', 'error-handling', 'templates-and-rendering',
         'streaming', 'websocket', 'tasks-and-concurrency', 'middleware-and-authentication',
         'deployment', 'fuzzing', 'fastcgi-backends',
-        'apache-parity', 'competitive-analysis', 'standards-and-roadmap',
+        'competitive-analysis', 'standards-and-roadmap',
     ];
 
     // Landing page ('__index__' or empty slug) — re-render the docs landing

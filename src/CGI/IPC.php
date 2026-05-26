@@ -74,16 +74,26 @@ final class IPC
     private static function readExact($fp, int $n): ?string
     {
         $out = '';
+        $emptyReads = 0;
         while (strlen($out) < $n) {
             $remaining = $n - strlen($out);
             if ($remaining < 1) {
                 break;
             }
             $chunk = fread($fp, $remaining);
-            if ($chunk === false || $chunk === '') {
+            if ($chunk !== false && $chunk !== '') {
+                $out .= $chunk;
+                $emptyReads = 0;
+                continue;
+            }
+            if (feof($fp)) {
                 return null;
             }
-            $out .= $chunk;
+            $emptyReads++;
+            if ($emptyReads > 3000) { // 30s timeout (3000 * 10ms)
+                return null;
+            }
+            usleep(10000); // 10ms yield
         }
 
         return $out;

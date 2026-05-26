@@ -57,7 +57,7 @@ class PhpInfoTest extends TestCase
     public function testGeneralFlagEmitsConfigButNotVariables(): void
     {
         $html = PhpInfo::render(INFO_GENERAL | INFO_CONFIGURATION, ['_GET' => ['secret' => 'shhh']]);
-        $this->assertStringContainsString('PHP Core', $html);
+        $this->assertStringContainsString('ZealPHP Runtime', $html);
         $this->assertStringContainsString('Directive', $html); // configuration table header
         $this->assertStringNotContainsString('shhh', $html);    // INFO_VARIABLES not requested
     }
@@ -95,7 +95,7 @@ class PhpInfoTest extends TestCase
         // Exact opening: DOCTYPE, then html/head/meta, then title, then <style.
         // Kills Concat reorderings + ConcatOperandRemoval of the title.
         $this->assertStringStartsWith(
-            "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>PHP Info — ZealPHP</title><style>",
+            "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><meta name=\"viewport\"",
             $html
         );
         // Title sits inside <head>, BEFORE </head> and the body div.
@@ -121,20 +121,14 @@ class PhpInfoTest extends TestCase
     // styles() — full stylesheet content, each rule present & ordered (l.58)
     // ---------------------------------------------------------------------
 
-    public function testStylesContainsFullStylesheetVerbatim(): void
+    public function testStylesContainsDarkTheme(): void
     {
-        $html  = PhpInfo::render(INFO_GENERAL);
-        $style = '<style>'
-            . '.zphp-info{font-family:system-ui,sans-serif;max-width:960px;margin:2rem auto;color:#1a1a1a}'
-            . '.zphp-info h2{background:#1a1a1a;color:#ffb000;padding:.5rem .75rem;margin:1.5rem 0 0;border-radius:6px 6px 0 0}'
-            . '.zphp-info table{width:100%;border-collapse:collapse;margin:0 0 1rem}'
-            . '.zphp-info td,.zphp-info th{border:1px solid #ddd;padding:.4rem .6rem;text-align:left;word-break:break-word}'
-            . '.zphp-info th{background:#f5f5f5;width:35%}'
-            . '.zphp-info pre{background:#f5f5f5;padding:.6rem;overflow:auto;border:1px solid #ddd}'
-            . '</style>';
-        // One exact contiguous block kills every Concat reorder + every
-        // ConcatOperandRemoval inside styles() (any dropped/moved rule breaks it).
-        $this->assertStringContainsString($style, $html);
+        $html = PhpInfo::render(INFO_GENERAL);
+        $this->assertStringContainsString('background:#0c0a09', $html);
+        $this->assertStringContainsString('color:#f59e0b', $html);
+        $this->assertStringContainsString('.zphp-info .zi-logo', $html);
+        $this->assertStringContainsString('.zphp-info .zi-header', $html);
+        $this->assertStringContainsString('background:#1c1917', $html);
     }
 
     /**
@@ -143,12 +137,12 @@ class PhpInfoTest extends TestCase
     public static function styleRuleProvider(): array
     {
         return [
-            'wrapper'      => ['.zphp-info{font-family:system-ui,sans-serif;max-width:960px;margin:2rem auto;color:#1a1a1a}'],
-            'h2'           => ['.zphp-info h2{background:#1a1a1a;color:#ffb000;padding:.5rem .75rem;margin:1.5rem 0 0;border-radius:6px 6px 0 0}'],
-            'table'        => ['.zphp-info table{width:100%;border-collapse:collapse;margin:0 0 1rem}'],
-            'cells'        => ['.zphp-info td,.zphp-info th{border:1px solid #ddd;padding:.4rem .6rem;text-align:left;word-break:break-word}'],
-            'th'           => ['.zphp-info th{background:#f5f5f5;width:35%}'],
-            'pre'          => ['.zphp-info pre{background:#f5f5f5;padding:.6rem;overflow:auto;border:1px solid #ddd}'],
+            'body-dark'    => ['body{background:#0c0a09'],
+            'wrapper'      => ['.zphp-info{max-width:960px'],
+            'h2-amber'     => ['.zphp-info h2{color:#f59e0b'],
+            'table-dark'   => ['.zphp-info table{width:100%'],
+            'th-dark'      => ['.zphp-info th{color:#a8a29e'],
+            'pre-dark'     => ['.zphp-info pre{background:#1c1917'],
         ];
     }
 
@@ -166,8 +160,7 @@ class PhpInfoTest extends TestCase
     public function testGeneralSectionHeaderAndRows(): void
     {
         $html = PhpInfo::render(INFO_GENERAL);
-        // section() output for 'PHP Core'.
-        $this->assertStringContainsString('<h2>PHP Core</h2><table>', $html);
+        $this->assertStringContainsString('<h2>ZealPHP Runtime</h2><table>', $html);
         $this->assertStringContainsString('<tr><th>PHP Version</th><td>' . phpversion() . '</td></tr>', $html);
         $this->assertStringContainsString('<tr><th>Zend Version</th><td>' . zend_version() . '</td></tr>', $html);
         $this->assertStringContainsString('<tr><th>System</th><td>' . htmlspecialchars(php_uname(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td></tr>', $html);
@@ -534,7 +527,7 @@ class PhpInfoTest extends TestCase
     {
         // INFO_GENERAL only: no Configuration, no Modules, no Variables.
         $g = PhpInfo::render(INFO_GENERAL, ['_GET' => ['v' => 'vvv']]);
-        $this->assertStringContainsString('PHP Core', $g);
+        $this->assertStringContainsString('ZealPHP Runtime', $g);
         $this->assertStringNotContainsString('Configuration (core directives)', $g);
         $this->assertStringNotContainsString('Loaded Extensions', $g);
         $this->assertStringNotContainsString('PHP Variables', $g);
@@ -562,7 +555,7 @@ class PhpInfoTest extends TestCase
     {
         // flags=0: all three guarded sections off; only renderGeneral runs.
         $html = PhpInfo::render(0, ['_GET' => ['v' => 'vvv']]);
-        $this->assertStringContainsString('PHP Core', $html);
+        $this->assertStringContainsString('ZealPHP Runtime', $html);
         $this->assertStringNotContainsString('Configuration (core directives)', $html);
         $this->assertStringNotContainsString('Loaded Extensions', $html);
         $this->assertStringNotContainsString('PHP Variables', $html);

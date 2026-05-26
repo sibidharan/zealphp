@@ -186,6 +186,21 @@ final class WorkerPoolTest extends TestCase
         }
     }
 
+    public function testWorkerCrashReturns500WithStderr(): void
+    {
+        // posix_kill(SIGKILL) kills the subprocess before it can send a
+        // response frame — exercises the stderr-capture + null-response path.
+        $file = $this->fixture('crash.php', 'posix_kill(getmypid(), 9);');
+        $pool = new WorkerPool(size: 1);
+        try {
+            $resp = $pool->dispatch(['file' => $file]);
+            $this->assertSame(500, $resp['status']);
+            $this->assertStringContainsString('response not received', $resp['body']);
+        } finally {
+            $pool->close();
+        }
+    }
+
     public function testMissingFileReturns404(): void
     {
         $pool = new WorkerPool(size: 1);

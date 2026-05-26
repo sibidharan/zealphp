@@ -863,8 +863,15 @@ class App
         }
     }
 
+    private static bool $overridesRegistered = false;
+
     private static function registerAllOverrides(): void
     {
+        if (self::$overridesRegistered) {
+            return;
+        }
+        self::$overridesRegistered = true;
+
         // Response
         self::overrideBuiltin('header', '\ZealPHP\header');
         self::overrideBuiltin('header_remove', '\ZealPHP\header_remove');
@@ -3218,26 +3225,32 @@ class App
             $result = include $absPath;
         } catch (HaltException $e) {
             // Clean halt — preserves buffered output as the body (PR #10).
-            // Fragment-capture extension: if App::fragment() matched and the
-            // closure returned a non-null contract-shaped value (int / array
-            // / Generator / Closure / string), surface it as $result so the
-            // universal return contract applies.
             $haltState = self::getFragmentState();
             if ($haltState !== null && $haltState['matched'] && $haltState['result'] !== null) {
                 $result = $haltState['result'];
             } else {
-                // Plain halt (no explicit fragment return) — flag the
-                // buffered echo as the response body via the same code path
-                // PHP's "no explicit return from include" uses ($result === 1).
-                // Without this, the bottom-of-method `return $result` would
-                // throw away the buffered HTML the template echoed before
-                // the halt, defeating the whole point of catching HaltException.
                 $result = 1;
             }
         } catch (\Throwable $e) {
-            @ob_end_clean();
-            self::restoreFragmentState($previousFragmentState);
-            throw $e;
+            // PHP 8.4+: exit()/die() throw \ExitException instead of
+            // terminating the process. Treat as clean halt — worker survives.
+            // @codeCoverageIgnoreStart — ExitException only exists on PHP 8.4+; CI coverage runs on 8.3
+            if ($e::class === 'ExitException' && method_exists($e, 'getStatus')) {
+                $status = $e->getStatus();
+                if (is_int($status) && $status >= 100 && $status <= 599) {
+                    $result = $status;
+                } elseif (is_string($status) && $status !== '') {
+                    echo $status;
+                    $result = 1;
+                } else {
+                    $result = 1;
+                }
+            // @codeCoverageIgnoreEnd
+            } else {
+                @ob_end_clean();
+                self::restoreFragmentState($previousFragmentState);
+                throw $e;
+            }
         }
         $output = ob_get_clean();
         if ($output === false) {
@@ -4382,7 +4395,7 @@ class App
             if ($isPhp) {
                 // PHP target: route through cgi_worker.php for uopz header/cookie captures.
                 $cgiWorker = __DIR__ . '/cgi_worker.php';
-                $cmd = PHP_BINARY . ' ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
+                $cmd = PHP_BINARY . ' -d display_errors=stderr ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
             } else {
                 // Non-PHP file with no explicit interpreter (the `cgiScriptAlias`-only
                 // path): exec the file directly, relying on its `#!` shebang line.
@@ -5911,6 +5924,19 @@ HELP;
         // I/O. We warn rather than refuse — see App::hookAll() docblock.
         self::validateLifecycleCombination(App::$superglobals, $hookFlags, $enableCoroutine);
 
+        // Activate per-coroutine superglobal isolation when ext-zealphp is
+        // loaded AND superglobals mode is on with coroutines. This hooks into
+        // OpenSwoole's yield/resume/close scheduler callbacks so $_GET/$_POST/
+        // $_SESSION are saved/restored on every context switch.
+        // @codeCoverageIgnoreStart — requires running OpenSwoole server
+        if (App::$superglobals && $enableCoroutine
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_coroutine_superglobals')
+        ) {
+            (\zealphp_coroutine_superglobals(...))((bool) true);
+        }
+        // @codeCoverageIgnoreEnd
+
         // Transparent coroutine-safe exec family. Overriding `shell_exec` ALSO
         // intercepts the backtick operator (`` `cmd` `` compiles to a
         // shell_exec() call), so legacy/user code becomes coroutine-safe with
@@ -6428,6 +6454,17 @@ HELP;
                 }
                 access_log($serverResponse->getStatusCode(), 0);
             } catch (\Throwable|\OpenSwoole\ExitException $e) {
+                if ($e instanceof \OpenSwoole\ExitException) {
+                    $exitStatus = $e->getStatus();
+                    $body = is_string($exitStatus) ? $exitStatus : '';
+                    $code = (is_int($exitStatus) && $exitStatus >= 100 && $exitStatus <= 599) ? $exitStatus : ($g->status ?? 200);
+                    if ($response->parent->isWritable()) {
+                        App::emitStatus($response->parent, $code);
+                        $response->parent->end($body);
+                    }
+                    access_log($code, strlen($body));
+                    return;
+                }
                 elog(jTraceEx($e), "error");
                 if ($response->parent->isWritable()) {
                     // Render via App::renderError so a user-registered 500 handler
@@ -6725,12 +6762,15 @@ class ResponseMiddleware implements MiddlewareInterface
             return (new Response($body, $status));
         } catch (\Throwable|\OpenSwoole\ExitException $e) {
             if($e instanceof \OpenSwoole\ExitException){
-                if($e->getStatus() == 0){
+                $exitStatus = $e->getStatus();
+                if ($exitStatus === 0 || $exitStatus === null) {
                     return (new Response(''))->withStatus($g->status ?? 200);
+                } elseif (is_string($exitStatus)) {
+                    return (new Response($exitStatus))->withStatus($g->status ?? 200);
+                } elseif (is_int($exitStatus) && $exitStatus >= 100 && $exitStatus <= 599) {
+                    return (new Response(''))->withStatus($exitStatus);
                 } else {
-                    $app = App::instance();
-                    assert($app !== null);
-                    return $app->renderError(500);
+                    return (new Response(''))->withStatus($g->status ?? 200);
                 }
             }
             // If this dispatch was itself invoked by renderError (error handler
@@ -6896,14 +6936,16 @@ class ResponseMiddleware implements MiddlewareInterface
             return (new Response($buffer, $status));
         } catch (\Throwable|\OpenSwoole\ExitException $e) {
             if($e instanceof \OpenSwoole\ExitException){
-                if($e->getStatus() == 0){
-                    elog("HTTP Status: ".$g->status);
-                    return (new Response((string)ob_get_clean()))->withStatus($g->status ?? 200);
+                $exitStatus = $e->getStatus();
+                $buffered = (string)ob_get_clean();
+                if ($exitStatus === 0 || $exitStatus === null) {
+                    return (new Response($buffered))->withStatus($g->status ?? 200);
+                } elseif (is_string($exitStatus)) {
+                    return (new Response($buffered . $exitStatus))->withStatus($g->status ?? 200);
+                } elseif (is_int($exitStatus) && $exitStatus >= 100 && $exitStatus <= 599) {
+                    return (new Response($buffered))->withStatus($exitStatus);
                 } else {
-                    @ob_end_clean();
-                    $app = App::instance();
-                    assert($app !== null);
-                    return $app->renderError(500);
+                    return (new Response($buffered))->withStatus($g->status ?? 200);
                 }
             }
             // Inside an error-render recursion — rethrow so the outer renderError

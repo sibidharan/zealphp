@@ -90,38 +90,86 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
 
 <h2 id="parity" class="section-subtitle">Apache + mod_php Parity</h2>
 <p class="section-desc">
-  The goal is simple: <strong>where Apache + mod_php works, ZealPHP works natively.</strong>
-  Classic PHP runs under a web SAPI (mod_php / php-fpm) where the server populates
-  the superglobals, fires the <code>session_*</code> and <code>header()</code> machinery,
-  and honours <code>.htaccess</code> directives per request. ZealPHP runs under the CLI
-  SAPI inside OpenSwoole and rebuilds that contract: it overrides the relevant PHP
-  built-ins via <code>ext-zealphp</code>, populates request state per coroutine, and ships
-  middleware mirroring the common Apache/nginx directives. Every remaining gap is
-  listed below with its workaround — nothing is left undocumented.
+  ZealPHP overrides <strong>53 PHP built-in functions</strong> via <a href="https://github.com/sibidharan/ext-zealphp">ext-zealphp</a> so that
+  code written for Apache + mod_php or nginx + PHP-FPM runs unchanged on a long-lived OpenSwoole server.
+  It populates request state per coroutine and ships middleware mirroring the common Apache/nginx directives.
+  Every remaining gap is listed below with its workaround — nothing is left undocumented.
 </p>
 
-<h3 class="parity-group">PHP built-in functions</h3>
+<h3 class="parity-group">Function overrides (53 functions)</h3>
+<p>At server boot, <code>ext-zealphp</code> intercepts these functions and routes them to per-request objects. Your code calls <code>header()</code> — the framework writes to the correct OpenSwoole response. No code changes needed.</p>
+
+<h4>Response</h4>
 <table class="ztable parity-table">
   <tr><th>Function</th><th>Status</th><th>Notes</th></tr>
   <tr><td><code>header()</code> / <code>header_remove()</code> / <code>headers_list()</code> / <code>headers_sent()</code></td><td>✅ Native</td><td>Write to the per-request response; <code>Location:</code> auto-sets 302</td></tr>
   <tr><td><code>http_response_code()</code></td><td>✅ Native</td><td>Last code wins, like mod_php</td></tr>
   <tr><td><code>setcookie()</code> / <code>setrawcookie()</code></td><td>✅ Native</td><td>Full 7-arg form incl. <code>SameSite</code></td></tr>
-  <tr><td><code>session_*()</code> (whole family)</td><td>✅ Native</td><td>File-backed, coroutine-safe</td></tr>
-  <tr><td><code>apache_request_headers()</code> / <code>getallheaders()</code> / <code>apache_response_headers()</code> / <code>apache_setenv/getenv()</code> / <code>apache_note()</code></td><td>✅ Native</td><td>Apache-only shims registered globally</td></tr>
-  <tr><td><code>phpinfo()</code></td><td>✅ Native</td><td>Renders styled HTML (not the CLI text dump) — since v0.2.31</td></tr>
-  <tr><td><code>filter_input()</code> / <code>filter_input_array()</code></td><td>✅ Native</td><td>Read <code>INPUT_GET/POST/COOKIE/SERVER/ENV</code> from request state (CLI returns null)</td></tr>
-  <tr><td><code>header_register_callback()</code></td><td>✅ Native</td><td>Fires once before buffered headers flush (streaming paths excluded)</td></tr>
-  <tr><td><code>is_uploaded_file()</code> / <code>move_uploaded_file()</code></td><td>✅ Native</td><td>Validate against the request's uploaded set</td></tr>
-  <tr><td><code>error_log()</code></td><td>✅ Native</td><td>Routes type 0/4 into the framework log (debug.log → stderr); honors type 3 file append</td></tr>
-  <tr><td><code>php_sapi_name()</code></td><td>⚙️ Opt-in</td><td>Default returns real <code>"cli"</code>; set <code>App::sapiName('apache2handler')</code> for legacy parity</td></tr>
-  <tr><td><code>PHP_SAPI</code> constant</td><td>⚠️ Gap</td><td>Constants can't be redefined (<code>ext-zealphp cannot redefine constants). Use <code>php_sapi_name()</code> instead</td></tr>
-  <tr><td><code>getenv()</code> / <code>putenv()</code> for CGI request vars</td><td>⚠️ Gap</td><td>Not request-scoped. Read request vars from <code>$g-&gt;server</code> / <code>$_SERVER</code></td></tr>
-  <tr><td><code>mail()</code></td><td>⚠️ Gap</td><td>Relies on system <code>sendmail</code>; configurable transport planned</td></tr>
-  <tr><td><code>get_browser()</code></td><td>⚠️ Gap</td><td>Needs <code>browscap.ini</code> configured; the no-arg form can't read the UA in coroutine mode. Workaround: pass it — <code>get_browser($g-&gt;server['HTTP_USER_AGENT'])</code></td></tr>
-  <tr><td><code>virtual()</code> (Apache subrequest)</td><td>🚫 By design</td><td>Internal subrequest, not an HTTP call — use <code>App::include()</code> or call the route handler inline (same effect, no socket)</td></tr>
+  <tr><td><code>header_register_callback()</code></td><td>✅ Native</td><td>Fires once before buffered headers flush</td></tr>
 </table>
 
-<h3 class="parity-group">$_SERVER superglobal</h3>
+<h4>Sessions (18 functions)</h4>
+<table class="ztable parity-table">
+  <tr><th>Function</th><th>Status</th><th>Notes</th></tr>
+  <tr><td><code>session_start()</code> / <code>session_id()</code> / <code>session_status()</code> / <code>session_name()</code></td><td>✅ Native</td><td>Per-coroutine, file-backed</td></tr>
+  <tr><td><code>session_write_close()</code> / <code>session_commit()</code> / <code>session_abort()</code></td><td>✅ Native</td><td></td></tr>
+  <tr><td><code>session_destroy()</code> / <code>session_unset()</code> / <code>session_regenerate_id()</code></td><td>✅ Native</td><td></td></tr>
+  <tr><td><code>session_get_cookie_params()</code> / <code>session_set_cookie_params()</code></td><td>✅ Native</td><td></td></tr>
+  <tr><td><code>session_cache_limiter()</code> / <code>session_cache_expire()</code></td><td>✅ Native</td><td></td></tr>
+  <tr><td><code>session_encode()</code> / <code>session_decode()</code> / <code>session_save_path()</code> / <code>session_module_name()</code></td><td>✅ Native</td><td></td></tr>
+</table>
+
+<h4>Output control</h4>
+<table class="ztable parity-table">
+  <tr><th>Function</th><th>Status</th><th>Notes</th></tr>
+  <tr><td><code>flush()</code> / <code>ob_flush()</code> / <code>ob_end_flush()</code></td><td>✅ Native</td><td>Flush to OpenSwoole response</td></tr>
+  <tr><td><code>ob_implicit_flush()</code></td><td>✅ Native</td><td></td></tr>
+  <tr><td><code>output_add_rewrite_var()</code> / <code>output_reset_rewrite_vars()</code></td><td>✅ Native</td><td></td></tr>
+</table>
+
+<h4>Error handling</h4>
+<table class="ztable parity-table">
+  <tr><th>Function</th><th>Status</th><th>Notes</th></tr>
+  <tr><td><code>set_error_handler()</code> / <code>restore_error_handler()</code></td><td>✅ Native</td><td>Per-coroutine stack</td></tr>
+  <tr><td><code>set_exception_handler()</code> / <code>restore_exception_handler()</code></td><td>✅ Native</td><td>Per-coroutine stack</td></tr>
+  <tr><td><code>register_shutdown_function()</code></td><td>✅ Native</td><td>Per-request</td></tr>
+  <tr><td><code>error_log()</code> / <code>error_reporting()</code></td><td>✅ Native</td><td>Routes into framework log (debug.log)</td></tr>
+</table>
+
+<h4>Exec family</h4>
+<table class="ztable parity-table">
+  <tr><th>Function</th><th>Status</th><th>Notes</th></tr>
+  <tr><td><code>shell_exec()</code> / backtick operator</td><td>✅ Native</td><td>Coroutine-safe via <code>App::exec()</code></td></tr>
+  <tr><td><code>exec()</code> / <code>system()</code> / <code>passthru()</code></td><td>✅ Native</td><td>Yields in coroutine, blocking fallback outside</td></tr>
+</table>
+
+<h4>Other</h4>
+<table class="ztable parity-table">
+  <tr><th>Function</th><th>Status</th><th>Notes</th></tr>
+  <tr><td><code>phpinfo()</code></td><td>✅ Native</td><td>ZealPHP-branded dark theme with runtime diagnostics</td></tr>
+  <tr><td><code>filter_input()</code> / <code>filter_input_array()</code></td><td>✅ Native</td><td>Read <code>INPUT_GET/POST/COOKIE/SERVER/ENV</code> from request state</td></tr>
+  <tr><td><code>is_uploaded_file()</code> / <code>move_uploaded_file()</code></td><td>✅ Native</td><td>Validate against the request's uploaded set</td></tr>
+  <tr><td><code>apache_request_headers()</code> / <code>getallheaders()</code> / <code>apache_response_headers()</code></td><td>✅ Native</td><td>Apache-only shims registered globally</td></tr>
+  <tr><td><code>apache_setenv()</code> / <code>apache_getenv()</code> / <code>apache_note()</code></td><td>✅ Native</td><td></td></tr>
+  <tr><td><code>php_sapi_name()</code></td><td>⚙️ Opt-in</td><td>Default returns <code>"cli"</code>; set <code>App::sapiName('apache2handler')</code> for legacy parity</td></tr>
+  <tr><td><code>set_time_limit()</code> / <code>ignore_user_abort()</code></td><td>✅ Native</td><td></td></tr>
+  <tr><td><code>connection_status()</code> / <code>connection_aborted()</code></td><td>✅ Native</td><td></td></tr>
+</table>
+
+<h3 class="parity-group">Superglobals</h3>
+<table class="ztable parity-table">
+  <tr><th>Superglobal</th><th>Status</th><th>Notes</th></tr>
+  <tr><td><code>$_GET</code> / <code>$_POST</code> / <code>$_COOKIE</code> / <code>$_FILES</code> / <code>$_REQUEST</code></td><td>✅ Native</td><td>Populated per request. Per-coroutine safe with ext-zealphp.</td></tr>
+  <tr><td><code>$_SERVER</code></td><td>✅ Native</td><td>Includes <code>PHP_SELF</code>, <code>SCRIPT_NAME</code>, <code>SCRIPT_FILENAME</code></td></tr>
+  <tr><td><code>$_SESSION</code></td><td>✅ Native</td><td>Per-coroutine via ext-zealphp + overridden <code>session_start()</code></td></tr>
+</table>
+<p>
+  <strong>Recommended:</strong> use <code>$g-&gt;get</code> / <code>$g-&gt;session</code> (zero overhead, always safe).
+  With ext-zealphp, <code>$_GET</code> / <code>$_SESSION</code> are also per-coroutine safe —
+  saved/restored on every yield/resume via OpenSwoole scheduler hooks.
+</p>
+
+<h3 class="parity-group">$_SERVER keys</h3>
 <table class="ztable parity-table">
   <tr><th>Key(s)</th><th>Status</th><th>Source</th></tr>
   <tr><td><code>REQUEST_METHOD</code> / <code>REQUEST_URI</code> / <code>SERVER_PROTOCOL</code> / <code>QUERY_STRING</code></td><td>✅ Native</td><td>OpenSwoole request</td></tr>
@@ -129,7 +177,7 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
   <tr><td><code>REQUEST_TIME</code> / <code>REQUEST_TIME_FLOAT</code></td><td>✅ Native</td><td>OpenSwoole request</td></tr>
   <tr><td><code>HTTP_*</code> headers</td><td>✅ Native</td><td>Transcribed from request headers</td></tr>
   <tr><td><code>DOCUMENT_ROOT</code> / <code>SCRIPT_NAME</code> / <code>SCRIPT_FILENAME</code> / <code>PHP_SELF</code> / <code>SERVER_SOFTWARE</code> / <code>SERVER_NAME</code></td><td>✅ Native</td><td>Built per request (mod_php convention)</td></tr>
-  <tr><td><code>GATEWAY_INTERFACE</code> / <code>REQUEST_SCHEME</code> / <code>HTTPS</code></td><td>✅ Native</td><td>Added by ZealPHP; scheme derived from <code>HTTPS</code>/<code>X-Forwarded-Proto</code>/port 443</td></tr>
+  <tr><td><code>GATEWAY_INTERFACE</code> / <code>REQUEST_SCHEME</code> / <code>HTTPS</code></td><td>✅ Native</td><td>Added by ZealPHP; scheme from <code>HTTPS</code>/<code>X-Forwarded-Proto</code>/port 443</td></tr>
 </table>
 
 <h3 class="parity-group">Apache directives → middleware &amp; config</h3>
@@ -146,8 +194,11 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
   <tr><td><code>&lt;Location&gt;</code> / <code>&lt;LocationMatch&gt;</code> / <code>&lt;FilesMatch&gt;</code></td><td>✅ Middleware</td><td>ScopedMiddleware — apply any middleware only to matching paths</td></tr>
   <tr><td><code>MergeSlashes</code> (core / nginx)</td><td>✅ Middleware</td><td>MergeSlashesMiddleware — collapse <code>//</code> in the path before routing</td></tr>
   <tr><td><code>client_max_body_size</code> (nginx) / <code>LimitRequestBody</code></td><td>✅ Middleware</td><td>BodySizeLimitMiddleware — 413 when <code>Content-Length</code> exceeds the cap</td></tr>
-  <tr><td><code>valid_referers</code> (nginx)</td><td>✅ Middleware</td><td>RefererMiddleware — 403 hotlink protection (none/blocked/host/wildcard/regex)</td></tr>
+  <tr><td><code>valid_referers</code> (nginx)</td><td>✅ Middleware</td><td>RefererMiddleware — 403 hotlink protection</td></tr>
   <tr><td><code>return</code> (nginx)</td><td>✅ Middleware</td><td>ReturnMiddleware — fixed status / redirect / body; pair with ScopedMiddleware</td></tr>
+  <tr><td><code>mod_deflate</code></td><td>✅ Middleware</td><td>CompressionMiddleware (or OpenSwoole native <code>http_compression</code>)</td></tr>
+  <tr><td><code>ScriptAlias</code> / <code>Options +ExecCGI</code></td><td>✅ Native</td><td><code>App::cgiScriptAlias()</code> / <code>App::registerCgiBackend()</code></td></tr>
+  <tr><td><code>ErrorDocument</code></td><td>✅ Native</td><td><code>App::registerError()</code></td></tr>
   <tr><td><code>ServerTokens</code> / <code>ServerSignature</code></td><td>✅ Config</td><td><code>App::serverTokens()</code> controls/omits the <code>X-Powered-By</code> header</td></tr>
   <tr><td><code>FileETag</code></td><td>✅ Config</td><td><code>App::fileETag(false)</code> disables ETag/304 (<code>FileETag None</code>)</td></tr>
   <tr><td><code>DocumentRoot</code> / <code>TraceEnable</code> / <code>ServerAdmin</code> / <code>ServerName</code> / <code>LimitRequest*</code> / <code>CustomLog</code></td><td>✅ Config</td><td><code>App::*</code> fluent setters (set before <code>App::init()</code>)</td></tr>
@@ -163,6 +214,38 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
   <tr><td><code>default_mimetype</code></td><td>✅ Middleware</td><td>CharsetMiddleware applies <code>App::$default_mimetype</code> (default <code>text/html</code>) to untyped responses</td></tr>
   <tr><td><code>max_input_vars</code></td><td>⚠️ Gap</td><td>Not enforced (default 1000 rarely hit)</td></tr>
 </table>
+
+<h3 id="exit-die" class="parity-group">exit() / die()</h3>
+<table class="ztable parity-table">
+  <tr><th>Call</th><th>PHP 8.4+</th><th>PHP 8.3</th></tr>
+  <tr><td><code>exit()</code> / <code>exit(0)</code></td><td>✅ Worker survives, 200 response</td><td>⚠️ Kills worker (<code>max_request</code> respawns)</td></tr>
+  <tr><td><code>die("message")</code></td><td>✅ Worker survives, message as body</td><td>⚠️ Kills worker</td></tr>
+  <tr><td><code>exit(404)</code></td><td>✅ Worker survives, HTTP 404</td><td>⚠️ Kills worker</td></tr>
+</table>
+<p>
+  On PHP 8.3, use <code>throw new \ZealPHP\HaltException()</code> instead of <code>exit()</code>.
+  On PHP 8.4+, <code>exit()</code>/<code>die()</code> throw <code>\ExitException</code> which ZealPHP catches
+  and treats as a clean halt.
+</p>
+
+<h3 id="parity-gaps" class="parity-group">Known gaps</h3>
+<table class="ztable parity-table">
+  <tr><th>Gap</th><th>Why</th><th>Workaround</th></tr>
+  <tr><td><code>.htaccess</code> file parsing</td><td>No runtime file watcher</td><td>Use middleware — all major directives have equivalents above</td></tr>
+  <tr><td><code>PHP_SAPI</code> constant</td><td>Constants cannot be redefined at runtime</td><td>Use <code>php_sapi_name()</code> function (overridden, configurable)</td></tr>
+  <tr><td><code>exit()</code>/<code>die()</code> on PHP 8.3</td><td>Language constructs, not functions</td><td><code>throw new HaltException()</code> or upgrade to PHP 8.4+</td></tr>
+  <tr><td><code>define()</code> persists across requests</td><td>Long-running process — constants are permanent once defined</td><td><code>processIsolation(true)</code> for define-heavy apps (WordPress/Drupal)</td></tr>
+  <tr><td>Static class properties persist</td><td>Class entries survive between requests</td><td><code>max_request</code> recycles workers; avoid mutable static state</td></tr>
+  <tr><td><code>getenv()</code>/<code>putenv()</code> for CGI vars</td><td>Not request-scoped</td><td>Read from <code>$g-&gt;server</code> / <code>$_SERVER</code></td></tr>
+  <tr><td><code>mail()</code></td><td>Relies on system <code>sendmail</code></td><td>Configurable transport planned</td></tr>
+</table>
+
+<div class="callout info">
+  <strong>Every async PHP framework shares the last four gaps.</strong>
+  They are inherent to the long-running process model, not ZealPHP-specific.
+  ext-zealphp's 53-function override + per-coroutine superglobal isolation is unique to ZealPHP —
+  no other framework intercepts this many built-ins at the C level.
+</div>
 
 </div>
 </section>

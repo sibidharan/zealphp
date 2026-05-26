@@ -88,7 +88,7 @@ jobs:
             coverage: 'none'
             upload-coverage: false
             experimental: false
-          # 8.5 is a fully supported, REQUIRED target — openswoole/uopz
+          # 8.5 is a fully supported, REQUIRED target — openswoole/ext-zealphp
           # build from source via shivammathur/setup-php.
           - php: '8.5'
             coverage: 'none'

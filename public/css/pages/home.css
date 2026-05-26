@@ -20,8 +20,9 @@
 .home-hero-why a { color: #fde68a; text-decoration: none; }
 
 /* Small build-stamp under the hero sub-line — version + runtime credit */
-.home-hero-stamp {
-  font-size: .65rem; color: #78716c; margin-top: .8rem; font-weight: 400;
+.hero .home-hero-stamp {
+  font-size: .6rem; color: #57534e; margin-top: 1rem; font-weight: 500;
+  letter-spacing: .08em; text-transform: uppercase; opacity: .5;
 }
 .home-hero-stamp a { color: #a8a29e; text-decoration: none; }
 .home-hero-stamp a:hover { color: #fde68a; }

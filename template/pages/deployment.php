@@ -140,7 +140,7 @@ App::render('/components/_code', [
     'code'  => <<<'YAML'
 services:
   app:
-    image: zealphp:0.2.43
+    image: zealphp:0.3.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"

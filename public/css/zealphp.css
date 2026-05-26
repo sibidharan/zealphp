@@ -263,6 +263,7 @@ p  { max-width: 70ch; }
 }
 .hero h1 span { color: var(--accent); }
 .hero p { font-size: 1.15rem; color: #a8a29e; margin: 1rem auto 2rem; position: relative; }
+.hero p.home-hero-stamp { font-size: .8rem; color: #a8a29e; margin: 1rem auto .5rem; font-weight: 400; letter-spacing: .06em; text-transform: none; opacity: .8; }
 .hero .cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; position: relative; }
 
 /* ── Hero wordmark (electric) ── */
