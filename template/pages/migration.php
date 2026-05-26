@@ -99,9 +99,9 @@ $rungs = [
     'n'    => '4',
     'title' => 'Full coroutine mode',
     'code'  => 'App::superglobals(false);   // thousands of concurrent requests per worker',
-    'desc'  => 'Replace <code>$_GET</code>/<code>$_SESSION</code> globals with <code>RequestContext::instance()</code> (also reachable as <code>G::instance()</code> — same class via <code>class_alias</code>). Each coroutine gets its own context; one worker handles thousands of concurrent requests without blocking.',
-    'wins'  => 'Peak throughput. <a href="/performance">117k req/s on 4 workers</a> — Express on the same box does 20k.',
-    'gives_up' => 'You must avoid blocking I/O outside coroutine-hooked extensions, and any code that mutates global state needs a per-coroutine equivalent.',
+    'desc'  => 'Use <code>$g-&gt;get</code> / <code>$g-&gt;session</code> (recommended, zero overhead) or enable ext-zealphp coroutine hooks so <code>$_GET</code>/<code>$_SESSION</code> are per-coroutine safe too. Either way, each coroutine gets isolated state; one worker handles thousands of concurrent requests.',
+    'wins'  => 'Peak throughput. <a href="/performance">117k req/s on 4 workers</a> — Express on the same box does 20k. With ext-zealphp, <code>superglobals(true) + enableCoroutine(true)</code> is fully safe &mdash; no code rewrites needed for legacy <code>$_GET</code>/<code>$_SESSION</code> users.',
+    'gives_up' => 'Blocking I/O outside coroutine-hooked extensions still blocks the worker. Use <code>HOOK_ALL</code> and coroutine-aware drivers.',
     'highlight' => true,
   ],
 ];
