@@ -52,8 +52,11 @@ docker_setup() {
 
     if [ -n "${UOPZ_VERSION:-}" ]; then
         pecl install "uopz-${UOPZ_VERSION}"
-    else
-        pecl install uopz
+    elif ! pecl install uopz 2>/dev/null; then
+        echo -e "${YELLOW}PECL uopz failed (likely PHP 8.4+). Building from git source.${RESET}"
+        git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz-src
+        (cd /tmp/uopz-src && phpize && ./configure && make -j"$(nproc)" && make install)
+        rm -rf /tmp/uopz-src
     fi
     docker-php-ext-enable --ini-name zz-uopz.ini uopz
 
@@ -443,13 +446,27 @@ check_and_remove_uopz() {
 install_uopz() {
     echo -e "${YELLOW}Installing uopz${RESET}"
 
-    sudo pecl install uopz || {
-        echo -e "${RED}Failed to install uopz.${RESET}"
-        return 1 # Installation fails
-    }
+    if sudo pecl install uopz 2>/dev/null; then
+        echo -e "${GREEN}uopz installed via PECL.${RESET}"
+    else
+        echo -e "${YELLOW}PECL uopz failed (likely PHP 8.4+). Building from git source.${RESET}"
+        local tmpdir
+        tmpdir="$(mktemp -d)"
+        git clone --depth 1 https://github.com/krakjoe/uopz.git "$tmpdir" || {
+            echo -e "${RED}Failed to clone uopz from GitHub.${RESET}"
+            rm -rf "$tmpdir"
+            return 1
+        }
+        (cd "$tmpdir" && phpize && ./configure && make -j"$(nproc)" && sudo make install) || {
+            echo -e "${RED}Failed to build uopz from source.${RESET}"
+            rm -rf "$tmpdir"
+            return 1
+        }
+        rm -rf "$tmpdir"
+        echo -e "${GREEN}uopz built and installed from source.${RESET}"
+    fi
 
-    echo -e "${GREEN}uopz installed and configured successfully.${RESET}"
-    return 0 # Installation is successful
+    return 0
 }
 
 # Function to check if Composer is installed
@@ -533,10 +550,23 @@ macos_setup() {
     echo "short_open_tag=On"       >> "${php_ini_dir}/zz-openswoole.ini"
 
     echo -e "${GREEN}Installing uopz via PECL.${RESET}"
-    "$pecl_bin" install uopz || {
-        echo -e "${RED}uopz PECL install failed.${RESET}"
-        return 1
-    }
+    if ! "$pecl_bin" install uopz 2>/dev/null; then
+        echo -e "${YELLOW}PECL uopz failed (likely PHP 8.4+). Building from git source.${RESET}"
+        local tmpdir
+        tmpdir="$(mktemp -d)"
+        git clone --depth 1 https://github.com/krakjoe/uopz.git "$tmpdir" || {
+            echo -e "${RED}Failed to clone uopz from GitHub.${RESET}"
+            rm -rf "$tmpdir"
+            return 1
+        }
+        (cd "$tmpdir" && phpize && ./configure && make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" && make install) || {
+            echo -e "${RED}Failed to build uopz from source.${RESET}"
+            rm -rf "$tmpdir"
+            return 1
+        }
+        rm -rf "$tmpdir"
+        echo -e "${GREEN}uopz built from source.${RESET}"
+    fi
     echo "extension=uopz.so" > "${php_ini_dir}/zz-uopz.ini"
 
     echo -e "${YELLOW}Verifying extensions.${RESET}"
