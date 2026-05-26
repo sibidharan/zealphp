@@ -713,9 +713,13 @@ class App
 
     private function __construct(string $host = '0.0.0.0', int $port = 8080, string $cwd = __DIR__)
     {
-        # if uopz not enabled, throw error
-        if (!extension_loaded('uopz')) {
-            throw new \Exception("uopz extension is required for ZealPHP to work. Install: 'pecl install uopz' (PHP 8.3) or build from source: 'git clone https://github.com/krakjoe/uopz.git && cd uopz && phpize && ./configure && make && sudo make install' (PHP 8.4+). Then add extension=uopz.so to php.ini.");
+        if (!extension_loaded('zealphp') && !extension_loaded('uopz')) {
+            throw new \Exception(
+                "ext-zealphp or uopz is required for ZealPHP. "
+                . "Install: 'pie install sibidharan/ext-zealphp' (recommended) "
+                . "or build from source: 'cd ext/zealphp && phpize && ./configure && make && sudo make install'. "
+                . "Then add extension=zealphp.so to php.ini."
+            );
         }
         $this->host = $host;
         $this->port = $port;

@@ -134,8 +134,14 @@ static ZEND_NAMED_FUNCTION(zealphp_dispatch)
     if (call_user_function(NULL, NULL, cb, &retval, argc, args) == SUCCESS) {
         if (Z_TYPE(retval) != IS_UNDEF) {
             ZVAL_COPY_VALUE(return_value, &retval);
+        } else {
+            zval_ptr_dtor(&retval);
         }
     } else {
+        zval_ptr_dtor(&retval);
+        if (EG(exception)) {
+            return;
+        }
         php_error_docref(NULL, E_WARNING,
             "ext-zealphp: callback for %s failed", ZSTR_VAL(fname));
     }
@@ -255,6 +261,99 @@ PHP_FUNCTION(zealphp_restore_all)
     zend_hash_clean(&zealphp_callbacks);
 }
 
+/* ── Superglobals management ─────────────────────────────────────── */
+
+/* Helper: overwrite a superglobal in the executor symbol table. */
+static void zealphp_set_superglobal(const char *name, size_t name_len, zval *value)
+{
+    zval *existing = zend_hash_str_find(&EG(symbol_table), name, name_len);
+    if (existing) {
+        zval_ptr_dtor(existing);
+        ZVAL_COPY(existing, value);
+    } else {
+        zval copy;
+        ZVAL_COPY(&copy, value);
+        zend_hash_str_add_new(&EG(symbol_table), name, name_len, &copy);
+    }
+}
+
+/* zealphp_superglobals_set(array $g, $p, $c, $s, $f, $r): void
+ * Overwrites $_GET, $_POST, $_COOKIE, $_SERVER, $_FILES, $_REQUEST
+ * with the supplied arrays. Called by ZealPHP at request start. */
+PHP_FUNCTION(zealphp_superglobals_set)
+{
+    zval *get, *post, *cookie, *server, *files, *request;
+
+    ZEND_PARSE_PARAMETERS_START(6, 6)
+        Z_PARAM_ARRAY(get)
+        Z_PARAM_ARRAY(post)
+        Z_PARAM_ARRAY(cookie)
+        Z_PARAM_ARRAY(server)
+        Z_PARAM_ARRAY(files)
+        Z_PARAM_ARRAY(request)
+    ZEND_PARSE_PARAMETERS_END();
+
+    zealphp_set_superglobal("_GET",     sizeof("_GET")-1,     get);
+    zealphp_set_superglobal("_POST",    sizeof("_POST")-1,    post);
+    zealphp_set_superglobal("_COOKIE",  sizeof("_COOKIE")-1,  cookie);
+    zealphp_set_superglobal("_SERVER",  sizeof("_SERVER")-1,  server);
+    zealphp_set_superglobal("_FILES",   sizeof("_FILES")-1,   files);
+    zealphp_set_superglobal("_REQUEST", sizeof("_REQUEST")-1, request);
+}
+
+/* zealphp_superglobals_clear(): void
+ * Resets all superglobals to empty arrays. Called at request end
+ * to prevent cross-request leakage in coroutine mode. */
+PHP_FUNCTION(zealphp_superglobals_clear)
+{
+    ZEND_PARSE_PARAMETERS_NONE();
+
+    const char *names[] = {"_GET","_POST","_COOKIE","_SERVER","_FILES","_REQUEST",NULL};
+    for (const char **n = names; *n; n++) {
+        zval empty;
+        array_init(&empty);
+        zealphp_set_superglobal(*n, strlen(*n), &empty);
+        zval_ptr_dtor(&empty);
+    }
+}
+
+/* zealphp_superglobals_save(): array
+ * Snapshots all 6 superglobals into one array for coroutine storage. */
+PHP_FUNCTION(zealphp_superglobals_save)
+{
+    ZEND_PARSE_PARAMETERS_NONE();
+
+    array_init(return_value);
+    const char *names[] = {"_GET","_POST","_COOKIE","_SERVER","_FILES","_REQUEST",NULL};
+    for (const char **n = names; *n; n++) {
+        zval *sg = zend_hash_str_find(&EG(symbol_table), *n, strlen(*n));
+        if (sg) {
+            zval copy;
+            ZVAL_COPY(&copy, sg);
+            add_assoc_zval(return_value, *n, &copy);
+        }
+    }
+}
+
+/* zealphp_superglobals_restore(array $snapshot): void
+ * Restores superglobals from a snapshot saved by zealphp_superglobals_save(). */
+PHP_FUNCTION(zealphp_superglobals_restore)
+{
+    zval *snapshot;
+
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+        Z_PARAM_ARRAY(snapshot)
+    ZEND_PARSE_PARAMETERS_END();
+
+    const char *names[] = {"_GET","_POST","_COOKIE","_SERVER","_FILES","_REQUEST",NULL};
+    for (const char **n = names; *n; n++) {
+        zval *val = zend_hash_str_find(Z_ARRVAL_P(snapshot), *n, strlen(*n));
+        if (val) {
+            zealphp_set_superglobal(*n, strlen(*n), val);
+        }
+    }
+}
+
 /* ── Module lifecycle ────────────────────────────────────────────── */
 
 PHP_MINIT_FUNCTION(zealphp)
@@ -306,10 +405,33 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zealphp_restore_all, 0, 0, IS_VOID, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zealphp_superglobals_set, 0, 6, IS_VOID, 0)
+    ZEND_ARG_TYPE_INFO(0, get, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, post, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, cookie, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, server, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, files, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, request, IS_ARRAY, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zealphp_superglobals_clear, 0, 0, IS_VOID, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zealphp_superglobals_save, 0, 0, IS_ARRAY, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zealphp_superglobals_restore, 0, 1, IS_VOID, 0)
+    ZEND_ARG_TYPE_INFO(0, snapshot, IS_ARRAY, 0)
+ZEND_END_ARG_INFO()
+
 static const zend_function_entry zealphp_functions[] = {
-    PHP_FE(zealphp_override,    arginfo_zealphp_override)
-    PHP_FE(zealphp_restore,     arginfo_zealphp_restore)
-    PHP_FE(zealphp_restore_all, arginfo_zealphp_restore_all)
+    PHP_FE(zealphp_override,               arginfo_zealphp_override)
+    PHP_FE(zealphp_restore,                arginfo_zealphp_restore)
+    PHP_FE(zealphp_restore_all,            arginfo_zealphp_restore_all)
+    PHP_FE(zealphp_superglobals_set,       arginfo_zealphp_superglobals_set)
+    PHP_FE(zealphp_superglobals_clear,     arginfo_zealphp_superglobals_clear)
+    PHP_FE(zealphp_superglobals_save,      arginfo_zealphp_superglobals_save)
+    PHP_FE(zealphp_superglobals_restore,   arginfo_zealphp_superglobals_restore)
     PHP_FE_END
 };
 
