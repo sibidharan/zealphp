@@ -174,7 +174,7 @@ PHP]); ?>
 
 <h3 id="coroutine-isolation-hybrid" class="coro-h3">Mode 6 — Coroutine + Process Isolation (the hybrid)</h3>
 
-<p>The two refused combos above are both gated on <code>superglobals(true)</code>. With <code>superglobals(false)</code> the parent already uses per-coroutine <code>$g</code>, so neither race exists — which means you can legally combine <strong>coroutine concurrency at the parent</strong> with <strong>per-request subprocess isolation</strong>:</p>
+<p>With <code>ext-zealphp</code>, both combos are safe (superglobals are saved/restored per coroutine). Without it, they&rsquo;re gated on <code>superglobals(true)</code>. With <code>superglobals(false)</code> the parent uses per-coroutine <code>$g</code>, so neither race exists either way &mdash; which means you can also combine <strong>coroutine concurrency at the parent</strong> with <strong>per-request subprocess isolation</strong>:</p>
 
 <pre><code class="language-php">App::superglobals(false);     // per-coroutine $g (safe — no race)
 App::processIsolation(true);  // public/*.php → CGI pool subprocess

@@ -325,7 +325,7 @@ $app->run();
 // Parent yields on the pipe read → multiple coroutines dispatch in parallel.
 PHP]); ?>
 
-<p>The validator at <code>App::run()</code> would refuse <code>superglobals(true) + enableCoroutine(true)</code> (the race shape) — but with <code>sg=false</code>, both throws are unreachable. Mode 6 is fully supported and pinned by <code>tests/Unit/LifecycleModesMatrixTest.php#testMode6CoroutineIsolatedHybrid</code>.</p>
+<p>With <code>ext-zealphp</code> (v0.3.0+), <code>superglobals(true) + enableCoroutine(true)</code> is now fully supported &mdash; the extension saves/restores <code>$_GET</code>/<code>$_SESSION</code> per coroutine on every yield/resume. Without ext-zealphp, the validator still refuses this combination. Mode 6 is pinned by <code>tests/Unit/LifecycleModesMatrixTest.php#testMode6CoroutineIsolatedHybrid</code>.</p>
 
 <h2 id="dual-runtime" class="legacy-mt-xl">Dual-runtime — one codebase, Apache AND ZealPHP at once</h2>
 
@@ -386,7 +386,7 @@ PHP]); ?>
 <tr><td>Apache + mod_php</td><td><code>false</code></td><td>shim's <code>&amp;$_GET</code> reference</td><td>populated natively by PHP</td></tr>
 </table>
 
-<p class="legacy-mt-prose"><strong>Coroutine-mode dual-runtime apps must use <code>$g-&gt;X</code> and keep the shim permanently</strong> — it's the only accessor that works on both servers (coroutine mode keeps superglobals empty to avoid cross-coroutine races). This is distinct from the <a href="/vs-fpm">drop-in LAMP / Mixed-mode</a> story, where <code>superglobals(true)</code> lets ZealPHP-only apps read <code>$_GET</code>/<code>$_SESSION</code> directly and skip the shim entirely (v0.2.27+).</p>
+<p class="legacy-mt-prose"><strong>With ext-zealphp (v0.3.0+):</strong> <code>superglobals(true) + enableCoroutine(true)</code> is safe &mdash; <code>$_GET</code>/<code>$_SESSION</code> are per-coroutine. Legacy code using <code>$_GET</code> works unchanged with full coroutine concurrency. <code>$g-&gt;X</code> also works &mdash; both accessors are valid in all modes. Without ext-zealphp, coroutine-mode apps must use <code>$g-&gt;X</code> exclusively (superglobals stay empty to prevent races).</p>
 
 <h2 class="legacy-mt-xl">Apache rewrite recipes — the 12 patterns</h2>
 <p>Real <code>.htaccess</code> files are full of <code>RewriteRule</code> destinations that end in <code>.php</code>. Each recipe below shows the Apache directive and its ZealPHP equivalent. Every example uses the <a href="/coroutines#state-parity"><code>$g</code> form</a> for query-string injection — works in both modes, no per-coroutine leak in coroutine mode. The legacy <code>$_GET</code> equivalent appears as a comment for readers porting older code.</p>
