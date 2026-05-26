@@ -11,6 +11,20 @@ ZealPHP runs PHP as the HTTP server itself — not a CGI worker behind one. Buil
 Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` if you want the rendered example URLs to point somewhere else.
 **Changelog:** [CHANGELOG.md](CHANGELOG.md) · **Design trade-offs:** [/design-tradeoffs](https://php.zeal.ninja/design-tradeoffs) · **Critique retrospective:** [CRITIC.md](CRITIC.md)
 
+### PHP-FPM vs ZealPHP
+
+| | PHP-FPM | ZealPHP |
+|---|:---:|:---:|
+| Process model | Request-per-process | Long-running server |
+| WebSocket server | — | Built-in |
+| Server-Sent Events | Workaround | Native |
+| In-memory state across requests | — | Shared memory (`Store`) |
+| Coroutines | — | OpenSwoole native |
+| Background timers | — | `App::tick()` |
+| Needs Node.js for realtime | Usually | No |
+
+> **Try it:** [`examples/tic-tac-toe/`](examples/tic-tac-toe/) is a multiplayer game with rooms, spectators, and live board sync — [~130 lines of PHP](examples/tic-tac-toe/app.php), no database, no Node.js.
+
 ---
 
 ## Features

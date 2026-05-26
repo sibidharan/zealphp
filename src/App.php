@@ -144,6 +144,15 @@ class App
      */
     public static bool $ignore_php_ext = true;
     /**
+     * Log warnings when a ZealAPI filename collides with an HTTP method
+     * keyword (`get.php` defining `$get`) or when a filename-matched handler
+     * shadows per-method handlers in the same file. Default ON so new apps
+     * surface mistakes; set to `false` (or `'api_warn_collisions' => false`
+     * in the `run()` config) for legacy codebases that knowingly use method
+     * names as filenames.
+     */
+    public static bool $api_warn_collisions = true;
+    /**
      * Toggle the uopz override of the exec family (backtick / `shell_exec`
      * / `exec` / `system` / `passthru`) so they yield via OpenSwoole's
      * coroutine scheduler instead of blocking the worker.
@@ -433,6 +442,27 @@ class App
      * by default — Apache's own default since 1.3.
      */
     public static bool $hostname_lookups = false;
+    /**
+     * ZealPHP config keys recognized in the `run()` $settings array.
+     * Each maps to a static fluent setter; extracted before OpenSwoole
+     * sees the array. Add new framework-level knobs here.
+     *
+     * @var array<string, string>
+     */
+    private static array $configMap = [
+        'superglobals'          => 'superglobals',
+        'process_isolation'     => 'processIsolation',
+        'hook_exec'             => 'hookExec',
+        'document_root'         => 'documentRoot',
+        'trace_enabled'         => 'traceEnabled',
+        'ignore_php_ext'        => 'ignorePhpExt',
+        'default_charset'       => 'defaultCharset',
+        'strip_trailing_slash'  => 'stripTrailingSlash',
+        'server_admin'          => 'serverAdmin',
+        'api_warn_collisions'   => 'apiWarnCollisions',
+        'directory_slash'       => 'directorySlash',
+        'hostname_lookups'      => 'hostnameLookups',
+    ];
     /**
      * Maximum seconds to wait for a CGI subprocess (`proc` mode) to produce
      * its metadata line on stderr. After this deadline the child receives
@@ -919,6 +949,12 @@ class App
     {
         if ($on !== null) self::$ignore_php_ext = $on;
         return self::$ignore_php_ext;
+    }
+
+    public static function apiWarnCollisions(?bool $on = null): bool
+    {
+        if ($on !== null) self::$api_warn_collisions = $on;
+        return self::$api_warn_collisions;
     }
 
     public static function directorySlash(?bool $on = null): bool
@@ -5742,10 +5778,27 @@ HELP;
      * CLI usage:
      *   php app.php [start|stop|status] [-p port] [-H host] [-w workers] [-d] [--task-workers N] [--pid-file path]
      *
-     * @param array<string, mixed>|null $settings
+     * ZealPHP-specific keys (e.g. `'api_warn_collisions' => false`) are
+     * extracted and applied via static setters before the rest passes to
+     * OpenSwoole. See `$configMap` for the full list.
+     *
+     * @param ?array<string, mixed> $settings
      */
     public function run(?array $settings = null): void
     {
+        // Extract ZealPHP-specific config keys and apply them via static
+        // setters before OpenSwoole sees the array. This lets callers pass
+        // everything in one place:
+        //   $app->run(['worker_num' => 16, 'api_warn_collisions' => false]);
+        if (is_array($settings)) {
+            foreach (self::$configMap as $key => $setter) {
+                if (array_key_exists($key, $settings)) {
+                    self::$setter($settings[$key]);
+                    unset($settings[$key]);
+                }
+            }
+        }
+
         // Flip the lifecycle-setter guard ON. Any further attempt to set
         // superglobals / processIsolation / enableCoroutine / hookAll
         // throws RuntimeException — those four knobs are frozen at boot

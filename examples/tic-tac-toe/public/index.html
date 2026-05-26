@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tic-Tac-Toe — ZealPHP WebSocket Demo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>Tic-Tac-Toe</h1>
+    <p>Multiplayer game powered by <a href="https://github.com/sibidharan/zealphp">ZealPHP</a> WebSockets.<br>
+       Open this page in two browser tabs to play.</p>
+  </header>
+
+  <main>
+    <section class="ttt">
+      <form id="ttt-join-form" class="ttt-join">
+        <label class="ttt-label">
+          <span>Your name</span>
+          <input type="text" name="name" maxlength="24" required
+                 placeholder="alice" autocomplete="off">
+        </label>
+        <label class="ttt-label">
+          <span>Room ID</span>
+          <input type="text" name="room" maxlength="32" required
+                 pattern="[a-z0-9\-]{1,32}" placeholder="game-1" autocomplete="off">
+        </label>
+        <label class="ttt-view-toggle">
+          <input type="checkbox" name="view" value="1">
+          <span>Join as spectator</span>
+        </label>
+        <button type="submit" class="btn btn-primary">Play</button>
+        <p class="ttt-hint">Same room ID = same game. First two players get X and O; extras spectate.</p>
+      </form>
+
+      <div id="ttt-stage" class="ttt-stage" hidden>
+        <div class="ttt-meta">
+          <div class="ttt-room">Room <code id="ttt-room-name" class="ttt-room-name"></code></div>
+          <div class="ttt-you">You are <span id="ttt-you" class="ttt-symbol-chip">?</span></div>
+        </div>
+        <div class="ttt-players">
+          <div class="ttt-player" data-side="X">
+            <span class="ttt-symbol-chip ttt-symbol-x">X</span>
+            <span id="ttt-px-name" class="ttt-player-name">waiting...</span>
+            <span id="ttt-px-status" class="ttt-player-status">offline</span>
+          </div>
+          <div class="ttt-player" data-side="O">
+            <span class="ttt-symbol-chip ttt-symbol-o">O</span>
+            <span id="ttt-po-name" class="ttt-player-name">waiting...</span>
+            <span id="ttt-po-status" class="ttt-player-status">offline</span>
+          </div>
+        </div>
+        <div id="ttt-status" class="ttt-status">connecting...</div>
+        <div id="ttt-scoreboard" class="ttt-scoreboard">
+          <span class="ttt-score-cell" data-side="X">
+            <span class="ttt-symbol-chip ttt-symbol-x">X</span>
+            <span class="ttt-score-num" id="ttt-score-x">0</span>
+          </span>
+          <span class="ttt-score-sep">vs</span>
+          <span class="ttt-score-cell" data-side="O">
+            <span class="ttt-score-num" id="ttt-score-o">0</span>
+            <span class="ttt-symbol-chip ttt-symbol-o">O</span>
+          </span>
+          <span class="ttt-score-draws"><span id="ttt-score-draws">0</span> draws</span>
+        </div>
+        <div id="ttt-board" class="ttt-board" data-disabled="1">
+          <button type="button" class="ttt-cell" data-cell="0"></button>
+          <button type="button" class="ttt-cell" data-cell="1"></button>
+          <button type="button" class="ttt-cell" data-cell="2"></button>
+          <button type="button" class="ttt-cell" data-cell="3"></button>
+          <button type="button" class="ttt-cell" data-cell="4"></button>
+          <button type="button" class="ttt-cell" data-cell="5"></button>
+          <button type="button" class="ttt-cell" data-cell="6"></button>
+          <button type="button" class="ttt-cell" data-cell="7"></button>
+          <button type="button" class="ttt-cell" data-cell="8"></button>
+        </div>
+        <div class="ttt-actions">
+          <button type="button" id="ttt-reset" class="btn btn-ghost" hidden>Reset game</button>
+          <button type="button" id="ttt-reset-score" class="btn btn-ghost ttt-reset-score" hidden>Reset score</button>
+          <button type="button" id="ttt-leave" class="btn btn-ghost ttt-leave">Leave room</button>
+          <span id="ttt-viewers" class="ttt-viewers"></span>
+          <span id="ttt-rounds" class="ttt-rounds"></span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <a href="https://github.com/sibidharan/zealphp">GitHub</a> ·
+    <a href="https://php.zeal.ninja">Docs</a> ·
+    130 lines of PHP, zero dependencies beyond ZealPHP
+  </footer>
+
+  <script src="/game.js"></script>
+</body>
+</html>

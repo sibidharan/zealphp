@@ -164,11 +164,13 @@ is the "front an existing php-fpm pool" shortcut for when **every**
 
 ## Coroutine-safe exec
 
-Long-running shell-outs (`git`, `ffmpeg`, `convert`, …) block the OpenSwoole
-worker if you call `exec()` / `shell_exec()` / `system()` / `passthru()` or a
-backtick directly — one slow command stalls every coroutine sharing that worker.
-ZealPHP provides a coroutine-aware wrapper plus a transparent override so legacy
-code gets the safe behaviour for free.
+In vanilla OpenSwoole, shelling out (`git`, `ffmpeg`, `convert`, …) via PHP's
+built-in functions would block the worker — one slow command stalls every
+coroutine sharing it. ZealPHP solves this: in coroutine mode (the default),
+`uopz` overrides intercept `shell_exec`, `exec`, `system`, `passthru`, and the
+backtick operator, routing them through `App::exec()` which yields to the
+scheduler instead of blocking. Legacy code that shells out works safely with no
+changes.
 
 - **`App::exec(string $cmd, ?float $timeout = null): array{output, code, signal}`**
   — coroutine-safe command execution. Inside a coroutine

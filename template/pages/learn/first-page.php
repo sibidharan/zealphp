@@ -52,15 +52,20 @@ echo "&lt;p&gt;This page was served by ZealPHP.&lt;/p&gt;";</code></pre>
     <h2>Adding dynamic content</h2>
     <p>These are PHP files, so you can use any PHP you want. Let's make the greeting personal:</p>
     <pre><code class="language-php">&lt;?php
-// $g is ZealPHP's per-coroutine request context. Use $g-&gt;get / $g-&gt;post /
-// $g-&gt;cookie / $g-&gt;session — they work identically in BOTH superglobals
-// modes. Raw $_GET is unsafe in coroutine mode (process-wide array races
-// across concurrent requests). See &lt;a href="/coroutines#state-parity"&gt;/coroutines#state-parity&lt;/a&gt;.
+// $g gives you the current request's data — query params, form data,
+// cookies, session. Always use $g-&gt;get instead of $_GET in ZealPHP.
 $g    = \ZealPHP\G::instance();
 $name = htmlspecialchars($g-&gt;get['name'] ?? 'World');
 echo "&lt;h1&gt;Hello, {$name}!&lt;/h1&gt;";
 echo "&lt;p&gt;The time is " . date('H:i:s') . "&lt;/p&gt;";</code></pre>
     <p>Visit <code>/greeting?name=Alice</code> and the page greets Alice by name.</p>
+    <p>
+      <strong>Why <code>$g-&gt;get</code> instead of <code>$_GET</code>?</strong> &nbsp;ZealPHP handles
+      many requests at once inside one process. <code>$_GET</code> is a single global array &mdash; if two
+      requests touch it simultaneously, they&rsquo;d overwrite each other. <code>$g</code> is scoped to
+      <em>your</em> request, so it&rsquo;s always safe.
+      <a href="/learn/mental-model">Lesson&nbsp;4</a> has the full picture.
+    </p>
 
     <?php App::render('/components/_tryit', [
       'title' => 'See it live',
