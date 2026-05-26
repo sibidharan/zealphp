@@ -707,7 +707,7 @@ fi
 
 if check_and_remove_uopz; then
     if install_zealphp_ext; then
-        if php -m 2>/dev/null | grep -q zealphp; then
+        if [ -f "$(php -i 2>/dev/null | awk -F'=> ' '/^extension_dir/ {print $2}' | head -1)/zealphp.so" ]; then
             configure_php_extension "extension=zealphp.so"
         else
             configure_php_extension "extension=uopz.so"
