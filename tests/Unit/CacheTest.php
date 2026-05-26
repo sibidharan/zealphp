@@ -295,6 +295,73 @@ class CacheTest extends TestCase
         }
     }
 
+    public function testMgetReturnsMultipleKeys(): void
+    {
+        Cache::set('a', 'alpha');
+        Cache::set('b', 'bravo');
+        Cache::set('c', 'charlie');
+
+        $result = Cache::mget(['a', 'b', 'c']);
+        $this->assertSame('alpha', $result['a']);
+        $this->assertSame('bravo', $result['b']);
+        $this->assertSame('charlie', $result['c']);
+    }
+
+    public function testMgetOmitsMissingKeys(): void
+    {
+        Cache::set('x', 'exists');
+        $result = Cache::mget(['x', 'y', 'z']);
+
+        $this->assertArrayHasKey('x', $result);
+        $this->assertSame('exists', $result['x']);
+        $this->assertArrayNotHasKey('y', $result);
+        $this->assertArrayNotHasKey('z', $result);
+    }
+
+    public function testMgetSkipsExpired(): void
+    {
+        Cache::set('fresh', 'yes', 3600);
+        Cache::set('stale', 'no', 1);
+        sleep(2);
+
+        $result = Cache::mget(['fresh', 'stale']);
+        $this->assertArrayHasKey('fresh', $result);
+        $this->assertArrayNotHasKey('stale', $result);
+    }
+
+    public function testMgetEmptyKeysReturnsEmpty(): void
+    {
+        $this->assertSame([], Cache::mget([]));
+    }
+
+    public function testMsetStoresMultipleKeys(): void
+    {
+        $count = Cache::mset(['m1' => 'one', 'm2' => 'two', 'm3' => 'three']);
+        $this->assertSame(3, $count);
+        $this->assertSame('one', Cache::get('m1'));
+        $this->assertSame('two', Cache::get('m2'));
+        $this->assertSame('three', Cache::get('m3'));
+    }
+
+    public function testMsetWithTtl(): void
+    {
+        Cache::mset(['t1' => 'val1', 't2' => 'val2'], 3600);
+        $this->assertSame('val1', Cache::get('t1'));
+        $this->assertSame('val2', Cache::get('t2'));
+    }
+
+    public function testMsetEmptyReturnsZero(): void
+    {
+        $this->assertSame(0, Cache::mset([]));
+    }
+
+    public function testMgetReadsArrayValues(): void
+    {
+        Cache::set('arr', ['nested' => true]);
+        $result = Cache::mget(['arr']);
+        $this->assertSame(['nested' => true], $result['arr']);
+    }
+
     public function testInitConfiguresFreshCacheDir(): void
     {
         // Drive the production init() path (distinct from initForTest used by
