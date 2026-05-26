@@ -271,7 +271,7 @@ final class WorkerPool
         $env = array_merge(getenv(), [
             'ZEALPHP_POOL_MAX_REQUESTS' => (string) $this->maxRequestsPerWorker,
         ]);
-        $proc = proc_open([\PHP_BINARY, $entry], $desc, $pipes, null, $env);
+        $proc = proc_open([\PHP_BINARY, '-d', 'display_errors=stderr', $entry], $desc, $pipes, null, $env);
         if (!is_resource($proc)) {
             throw new \RuntimeException('WorkerPool: proc_open failed for ' . $entry);
         }

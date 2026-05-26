@@ -49,12 +49,26 @@ $__pw_headers    = [];   /** @var list<array{0:string,1:string}> */
 $__pw_cookies    = [];   /** @var list<array<string,mixed>> */
 $__pw_rawcookies = [];   /** @var list<array<string,mixed>> */
 $__pw_status     = 200;
+$__pw_shutdown_functions = [];
 
 // uopz overrides — set ONCE at boot, survive every iteration. Mirror the
 // shape cgi_worker.php produces so the parent's response builder doesn't
 // need to fork a special pool-mode code path.
-if (function_exists('uopz_set_return')) {
-    uopz_set_return('header', function (string $header, bool $replace = true, int $response_code = 0): void {
+$z_override = function(string $name, \Closure $cb, bool $execute = true): void {
+    if (function_exists('zealphp_override')) {
+        zealphp_override($name, $cb);
+    } elseif (function_exists('uopz_set_return')) {
+        uopz_set_return($name, $cb, true);
+    }
+};
+
+if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
+    $z_override('register_shutdown_function', function (callable $callback, mixed ...$args): void {
+        global $__pw_shutdown_functions;
+        $__pw_shutdown_functions[] = [$callback, $args];
+    }, true);
+
+    $z_override('header', function (string $header, bool $replace = true, int $response_code = 0): void {
         global $__pw_headers, $__pw_status;
         if ($response_code > 0) {
             $__pw_status = $response_code;
@@ -96,7 +110,7 @@ if (function_exists('uopz_set_return')) {
         }
     }, true);
 
-    uopz_set_return('header_remove', function (?string $name = null): void {
+    $z_override('header_remove', function (?string $name = null): void {
         global $__pw_headers;
         if ($name === null) {
             $__pw_headers = [];
@@ -108,18 +122,18 @@ if (function_exists('uopz_set_return')) {
         }
     }, true);
 
-    uopz_set_return('headers_list', function (): array {
+    $z_override('headers_list', function (): array {
         global $__pw_headers;
         return array_map(static fn ($h) => $h[0] . ': ' . $h[1], $__pw_headers);
     }, true);
 
-    uopz_set_return('headers_sent', function (&$file = null, &$line = null): bool {
+    $z_override('headers_sent', function (&$file = null, &$line = null): bool {
         $file = null;
         $line = 0;
         return false;
     }, true);
 
-    uopz_set_return('http_response_code', function (?int $code = null): int|bool {
+    $z_override('http_response_code', function (?int $code = null): int|bool {
         global $__pw_status;
         if ($code === null) {
             return $__pw_status;
@@ -129,7 +143,7 @@ if (function_exists('uopz_set_return')) {
         return $prev;
     }, true);
 
-    uopz_set_return('setcookie', function (
+    $z_override('setcookie', function (
         string $name,
         string $value = '',
         int|array $expires = 0,
@@ -146,7 +160,7 @@ if (function_exists('uopz_set_return')) {
         return true;
     }, true);
 
-    uopz_set_return('setrawcookie', function (
+    $z_override('setrawcookie', function (
         string $name,
         string $value = '',
         int|array $expires = 0,
@@ -265,6 +279,19 @@ function pool_handle_request(array $req): array
             'stderr'     => $e->getTraceAsString(),
         ];
     }
+    
+    // Execute registered shutdown functions before capturing the output buffer
+    global $__pw_shutdown_functions;
+    if (is_array($__pw_shutdown_functions)) {
+        foreach ($__pw_shutdown_functions as $sf) {
+            try {
+                $sf[0](...$sf[1]);
+            } catch (\Throwable $e) {
+                error_log("pool_worker shutdown function error: " . $e->getMessage());
+            }
+        }
+    }
+    
     $body = (string) ob_get_clean();
 
     // Universal return contract — mirror src/cgi_worker.php exactly so the
@@ -293,7 +320,7 @@ function pool_handle_request(array $req): array
 
 function pool_reset_request_state(): void
 {
-    global $__pw_headers, $__pw_cookies, $__pw_rawcookies, $__pw_status, $__pw_globals_snapshot;
+    global $__pw_headers, $__pw_cookies, $__pw_rawcookies, $__pw_status, $__pw_globals_snapshot, $__pw_shutdown_functions;
 
     // Issue #108 — flush $_SESSION to disk BEFORE nulling it. The pool worker
     // outlives any single request, so PHP's native shutdown sequence (which
@@ -318,6 +345,7 @@ function pool_reset_request_state(): void
     $__pw_cookies    = [];
     $__pw_rawcookies = [];
     $__pw_status     = 200;
+    $__pw_shutdown_functions = [];
 
     while (ob_get_level() > 0) {
         ob_end_clean();

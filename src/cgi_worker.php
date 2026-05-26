@@ -14,6 +14,8 @@
 // as a coverage unit.
 // @codeCoverageIgnoreStart
 
+ini_set('display_errors', 'stderr');
+
 // Load the Composer autoloader so the included file has the SAME class /
 // global-function surface it would in fork mode (which inherits the warm
 // worker's autoloader via copy-on-write). Without this, `\ZealPHP\App`,
@@ -97,8 +99,16 @@ function __z_send_meta() {
     fwrite(STDERR, json_encode($payload, JSON_UNESCAPED_SLASHES) . "\n");
 }
 
-if (function_exists('uopz_set_return')) {
-    uopz_set_return('header', function(string $header, bool $replace = true, int $response_code = 0) {
+$z_override = function(string $name, \Closure $cb, bool $execute = true): void {
+    if (function_exists('zealphp_override')) {
+        zealphp_override($name, $cb);
+    } elseif (function_exists('uopz_set_return')) {
+        uopz_set_return($name, $cb, true);
+    }
+};
+
+if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
+    $z_override('header', function(string $header, bool $replace = true, int $response_code = 0) {
         global $__z_headers, $__z_status;
         if ($response_code > 0) $__z_status = $response_code;
         if (stripos($header, 'HTTP/') === 0) {
@@ -137,7 +147,7 @@ if (function_exists('uopz_set_return')) {
         }
     }, true);
 
-    uopz_set_return('header_remove', function(?string $name = null) {
+    $z_override('header_remove', function(?string $name = null) {
         global $__z_headers;
         if ($name === null) {
             $__z_headers = [];
@@ -149,16 +159,16 @@ if (function_exists('uopz_set_return')) {
         }
     }, true);
 
-    uopz_set_return('headers_list', function() {
+    $z_override('headers_list', function() {
         global $__z_headers;
         return array_map(fn($h) => $h[0] . ': ' . $h[1], $__z_headers);
     }, true);
 
-    uopz_set_return('headers_sent', function(&$file = null, &$line = null) {
+    $z_override('headers_sent', function(&$file = null, &$line = null) {
         return false;
     }, true);
 
-    uopz_set_return('setcookie', function(
+    $z_override('setcookie', function(
         string $name, string $value = '', $expires_or_options = 0,
         string $path = '', string $domain = '', bool $secure = false,
         bool $httponly = false, string $samesite = ''
@@ -168,7 +178,7 @@ if (function_exists('uopz_set_return')) {
         return true;
     }, true);
 
-    uopz_set_return('setrawcookie', function(
+    $z_override('setrawcookie', function(
         string $name, string $value = '', $expires_or_options = 0,
         string $path = '', string $domain = '', bool $secure = false,
         bool $httponly = false
@@ -178,14 +188,14 @@ if (function_exists('uopz_set_return')) {
         return true;
     }, true);
 
-    uopz_set_return('http_response_code', function($code = null) {
+    $z_override('http_response_code', function($code = null) {
         global $__z_status;
         if ($code !== null) $__z_status = (int)$code;
         return $__z_status;
     }, true);
 
     // flush() — send metadata on first call, then flush ob buffer to stdout
-    uopz_set_return('flush', function() {
+    $z_override('flush', function() {
         __z_send_meta();
         $data = ob_get_clean();
         if ($data !== false && $data !== '') {
@@ -196,7 +206,7 @@ if (function_exists('uopz_set_return')) {
     }, true);
 
     // ob_end_flush / ob_flush — same streaming behavior
-    uopz_set_return('ob_end_flush', function() {
+    $z_override('ob_end_flush', function() {
         __z_send_meta();
         $data = ob_get_clean();
         if ($data !== false && $data !== '') {
@@ -206,7 +216,7 @@ if (function_exists('uopz_set_return')) {
         ob_start();
     }, true);
 
-    uopz_set_return('ob_flush', function() {
+    $z_override('ob_flush', function() {
         __z_send_meta();
         $data = ob_get_clean();
         if ($data !== false && $data !== '') {
@@ -216,16 +226,16 @@ if (function_exists('uopz_set_return')) {
         ob_start();
     }, true);
 
-    uopz_set_return('ob_implicit_flush', function($enable = true) {
+    $z_override('ob_implicit_flush', function($enable = true) {
         // no-op: streaming is driven by flush()/ob_flush() calls explicitly
     }, true);
 
-    uopz_set_return('is_uploaded_file', function(string $filename) {
+    $z_override('is_uploaded_file', function(string $filename) {
         global $__z_uploaded;
         return isset($__z_uploaded[$filename]);
     }, true);
 
-    uopz_set_return('move_uploaded_file', function(string $from, string $to) {
+    $z_override('move_uploaded_file', function(string $from, string $to) {
         global $__z_uploaded;
         if (!isset($__z_uploaded[$from])) return false;
         if (@rename($from, $to)) {
