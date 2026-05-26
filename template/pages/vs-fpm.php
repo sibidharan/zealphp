@@ -177,7 +177,7 @@ browser</code></pre>
 <h2 class="vsfpm-h2">What the CGI bridge buys you</h2>
 
 <p class="vsfpm-prose">
-  The bridge exists so <strong>unmodified WordPress, Drupal, and other <code>define()</code>-heavy code that assumes a fresh process per request just works.</strong> Set <code>App::superglobals(true)</code>, ZealPHP turns OFF the coroutine scheduler and switches <code>App::include()</code> to dispatch each legacy <code>public/*.php</code> file through a pool subprocess — warm interpreter, global scope, ~1–3 ms per request. Apache prefork MPM semantics at FPM-equivalent speed.
+  The bridge exists so <strong>unmodified WordPress, Drupal, and other <code>define()</code>-heavy code that assumes a fresh process per request just works.</strong> Set <code>App::superglobals(true)</code> &mdash; by default this runs sequential (one request per worker), but with ext-zealphp you can add <code>enableCoroutine(true)</code> for full concurrency while keeping <code>$_GET</code>/<code>$_SESSION</code> safe. For <code>define()</code>-heavy apps, <code>processIsolation(true)</code> dispatches each <code>public/*.php</code> through a pool subprocess &mdash; warm interpreter, global scope, ~1&ndash;3 ms per request.
 </p>
 
 <p class="vsfpm-prose-mt-07">
