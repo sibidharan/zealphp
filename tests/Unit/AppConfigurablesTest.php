@@ -549,25 +549,31 @@ class AppConfigurablesTest extends TestCase
         $ref->invoke(null, $sg, $hookFlags, $enableCo);
     }
 
-    public function testSuperglobalsTruePlusEnableCoroutineTrueThrows(): void
+    public function testSuperglobalsTruePlusEnableCoroutineTrueThrowsWithoutExtZealphp(): void
     {
+        if (\extension_loaded('zealphp')) {
+            $this->markTestSkipped('ext-zealphp makes this combination safe');
+        }
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessageMatches('/superglobals\(true\) \+ App::enableCoroutine\(true\)/');
         $this->invokeValidator(true, 0, true);
     }
 
-    public function testSuperglobalsTruePlusHookAllNonZeroThrows(): void
+    public function testSuperglobalsTruePlusHookAllNonZeroThrowsWithoutExtZealphp(): void
     {
+        if (\extension_loaded('zealphp')) {
+            $this->markTestSkipped('ext-zealphp makes this combination safe');
+        }
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessageMatches('/superglobals\(true\) \+ App::hookAll\(non-zero\)/');
         $this->invokeValidator(true, \OpenSwoole\Runtime::HOOK_ALL, false);
     }
 
-    public function testSuperglobalsTruePlusBothEnableAndHookErrorsOnFirst(): void
+    public function testSuperglobalsTruePlusBothEnableAndHookErrorsOnFirstWithoutExtZealphp(): void
     {
-        // Both unsafe at once — first check (enableCoroutine) triggers,
-        // hookAll never gets reached. Doesn't matter which fires first; we
-        // just need to confirm SOMETHING refuses to start.
+        if (\extension_loaded('zealphp')) {
+            $this->markTestSkipped('ext-zealphp makes this combination safe');
+        }
         $this->expectException(\RuntimeException::class);
         $this->invokeValidator(true, \OpenSwoole\Runtime::HOOK_ALL, true);
     }

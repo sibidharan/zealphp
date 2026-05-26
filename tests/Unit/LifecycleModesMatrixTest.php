@@ -367,27 +367,32 @@ final class LifecycleModesMatrixTest extends TestCase
      * The validator throws with a message naming both flags so the error
      * is self-diagnosing.
      */
-    public function testRefusedSuperglobalsPlusEnableCoroutine(): void
+    public function testRefusedSuperglobalsPlusEnableCoroutineWithoutExtZealphp(): void
     {
+        if (\extension_loaded('zealphp')) {
+            $this->markTestSkipped('ext-zealphp makes this combination safe');
+        }
         $ex = $this->validate(true, 0, true);
         $this->assertInstanceOf(\RuntimeException::class, $ex);
         $this->assertStringContainsString('superglobals(true) + App::enableCoroutine(true)', (string)$ex->getMessage());
-        $this->assertStringContainsString('unsafe', (string)$ex->getMessage());
+        $this->assertStringContainsString('ext-zealphp', (string)$ex->getMessage());
     }
 
     /**
-     * Refused #2 — superglobals(true) + hookAll(non-zero).
+     * Refused #2 without ext-zealphp — superglobals(true) + hookAll(non-zero).
      *
-     * Hooked I/O yields mid-request, exposing process-wide superglobal
-     * mutations to other coroutines. Same race shape as Refused #1 but
-     * via the hookAll knob instead of enable_coroutine.
+     * With ext-zealphp loaded, this combination is safe (per-coroutine
+     * superglobal save/restore). Without it, hooked I/O yields mid-request.
      */
-    public function testRefusedSuperglobalsPlusHookAll(): void
+    public function testRefusedSuperglobalsPlusHookAllWithoutExtZealphp(): void
     {
+        if (\extension_loaded('zealphp')) {
+            $this->markTestSkipped('ext-zealphp makes this combination safe');
+        }
         $ex = $this->validate(true, Runtime::HOOK_ALL, false);
         $this->assertInstanceOf(\RuntimeException::class, $ex);
         $this->assertStringContainsString('superglobals(true) + App::hookAll(non-zero)', (string)$ex->getMessage());
-        $this->assertStringContainsString('unsafe', (string)$ex->getMessage());
+        $this->assertStringContainsString('ext-zealphp', (string)$ex->getMessage());
     }
 
     /**
