@@ -5374,14 +5374,11 @@ class App
     {
         if (!is_dir($dir)) {
             if (!@mkdir($dir, 0777, true) && !is_dir($dir)) {
-                fwrite(STDERR, "Warning: cannot create PID directory {$dir} — check permissions\n");
+                @elog('warn', "Cannot create PID directory {$dir} — check permissions or set ZEALPHP_PID_FILE");
             }
         }
         if (is_dir($dir) && !is_writable($dir)) {
-            if (!@chmod($dir, 0777)) {
-                fwrite(STDERR, "Warning: PID directory {$dir} is not writable — "
-                    . "'sudo chmod 777 {$dir}' or set ZEALPHP_PID_FILE to a writable path\n");
-            }
+            @chmod($dir, 0777);
         }
     }
 
