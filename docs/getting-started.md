@@ -18,12 +18,12 @@ sudo apt install gcc php-dev \
   openssl libssl-dev curl libcurl4-openssl-dev libpcre3-dev build-essential \
   php8.3-mysqlnd postgresql libpq-dev composer
 
-sudo pecl install uopz   # PHP 8.4+: if this fails, build from source (see below)
 sudo pecl install openswoole-22.1.5     # or a newer 22.1.x / 26.2+ release
 
-# uopz from source (PHP 8.4+ — the PECL 7.1.1 release predates 8.4):
-# git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz
-# cd /tmp/uopz && phpize && ./configure && make && sudo make install
+# ext-zealphp (ZealPHP's own extension) — via PIE or from source:
+pie install sibidharan/ext-zealphp
+# Or: git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
+#     cd /tmp/ext-zealphp && phpize && ./configure && make && sudo make install
 ```
 
 When prompted during the OpenSwoole build, answer **yes** to the coroutine and protocol questions so that features such as coroutine sockets and HTTP/2 are enabled.
