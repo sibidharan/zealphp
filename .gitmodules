@@ -1,0 +1,3 @@
+[submodule "ext/zealphp"]
+	path = ext/zealphp
+	url = https://github.com/sibidharan/ext-zealphp.git
