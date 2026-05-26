@@ -21,6 +21,43 @@ $active = $active ?? 'learn/auth';
     ]]); ?>
 
     <h2>The problem</h2>
+    <pre class="mermaid">sequenceDiagram
+    participant B as Browser
+    participant API as API endpoint
+    participant A as Auth.php
+    participant DB as SQLite
+    participant S as Session
+    rect rgb(255, 251, 235)
+    Note over B,S: Register
+    B->>API: POST username + password
+    API->>A: Auth::register(db, user, pass)
+    A->>A: password_hash(pass)
+    A->>DB: INSERT INTO users
+    DB-->>A: id = 7
+    A-->>API: user id 7
+    API->>S: session user_id = 7
+    API-->>B: redirect to notes
+    end
+    rect rgb(236, 253, 245)
+    Note over B,S: Login
+    B->>API: POST username + password
+    API->>A: Auth::login(db, user, pass)
+    A->>DB: SELECT password_hash
+    DB-->>A: stored hash
+    A->>A: password_verify() OK
+    A-->>API: user id 7
+    API->>S: session user_id = 7
+    API-->>B: redirect to notes
+    end
+    rect rgb(254, 242, 242)
+    Note over B,S: Auth guard (every protected page)
+    B->>API: GET /learn/notes
+    API->>S: session user_id?
+    S-->>API: 7
+    API->>DB: SELECT * FROM users WHERE id = 7
+    DB-->>API: user row
+    Note over API: user found, show content
+    end</pre>
     <p>
       Sessions remember <em>this browser</em>, but they don't know <em>who</em> is using it. Anyone
       who opens your app can see anyone else's data. You need real user accounts: a username, a password,

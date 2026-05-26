@@ -18,6 +18,22 @@
     ]]); ?>
 
     <h2>The workers don’t share a heap</h2>
+    <pre class="mermaid">graph TD
+    M[Master process] -->|fork| W1[Worker 1<br/>own PHP heap]
+    M -->|fork| W2[Worker 2<br/>own PHP heap]
+    M -->|fork| W3[Worker N<br/>own PHP heap]
+    M -->|allocate before fork| SHM[Store shared memory<br/>all workers read and write]
+    W1 -->|set / get / incr| SHM
+    W2 -->|set / get / incr| SHM
+    W3 -->|set / get / incr| SHM
+    SHM -.->|read| W1
+    SHM -.->|read| W2
+    SHM -.->|read| W3
+    style SHM fill:#fffbeb,stroke:#f59e0b,stroke-width:2px
+    style M fill:#ecfdf5,stroke:#059669,stroke-width:2px
+    style W1 fill:#fef2f2,stroke:#f87171
+    style W2 fill:#fef2f2,stroke:#f87171
+    style W3 fill:#fef2f2,stroke:#f87171</pre>
     <p>
       ZealPHP runs N worker processes (default: number of CPU cores). Each worker is a separate
       OS process with its own PHP heap. A static class property in one worker is invisible to the

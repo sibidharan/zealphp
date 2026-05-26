@@ -39,6 +39,22 @@
     ]); ?>
 
     <h2>Step 1 — HTTP doesn't remember anything</h2>
+    <pre class="mermaid">sequenceDiagram
+    participant B as Browser
+    participant SW as ZealPHP
+    participant FS as Session file on disk
+    Note over B: First visit, no cookie
+    B->>SW: GET /page
+    SW->>SW: session_start(), mint new id
+    SW->>FS: create sess_abc123
+    SW-->>B: response + Set-Cookie PHPSESSID
+    Note over B: Second visit, cookie present
+    B->>SW: GET /page + Cookie PHPSESSID
+    SW->>FS: read sess_abc123
+    FS-->>SW: lesson_counter = 5
+    SW->>SW: handler increments to 6
+    SW->>FS: write sess_abc123
+    SW-->>B: response (counter shows 6)</pre>
     <p>
       Each HTTP request stands alone. The server doesn&rsquo;t know that <em>you</em> are the same
       visitor who reloaded the page two seconds ago — it just sees a new request. So how does the

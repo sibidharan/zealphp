@@ -21,6 +21,15 @@ $active = $active ?? 'learn/tictactoe';
       'Handle disconnects, reconnects, and an alternating starter across rounds',
     ]]); ?>
 
+    <div class="callout info">
+      <strong>Build it yourself.</strong> The game logic and state management are in
+      <code>route/learn.php</code> (already loaded if you completed Lesson 18). The game state lives
+      in <code>Store</code> tables, and moves broadcast over WebSocket. All the server-side classes
+      (<code>Auth</code>, <code>DB</code>, <code>Store</code>, <code>Counter</code>) are already
+      in your <code>vendor/</code> directory. This lesson shows the route code you&rsquo;ll add
+      to your existing route file.
+    </div>
+
     <h2 id="step-setup">1. Setup — what you&rsquo;re building</h2>
     <p>
       A multiplayer tic-tac-toe game where two players in the same browser, in different browsers, or

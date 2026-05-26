@@ -62,6 +62,21 @@ $app-&gt;addMiddleware(new ETagMiddleware());
 $app-&gt;addMiddleware(new SessionStartMiddleware());</code></pre>
 
     <h2>Order is reversed at execution time</h2>
+    <pre class="mermaid">graph TB
+    REQ[Request arrives] --> C
+    subgraph C_wrap["C  (last registered = outermost)"]
+      C[C.process] --> B_in
+      subgraph B_wrap["B"]
+        B_in[B.process] --> A_in
+        subgraph A_wrap["A  (first registered = innermost)"]
+          A_in[A.process] --> RM["ResponseMiddleware<br/>match route + invoke handler"]
+        end
+      end
+    end
+    RM --> RES[Response emitted]
+    style C_wrap fill:#fffbeb,stroke:#f59e0b,stroke-width:2px
+    style A_wrap fill:#ecfdf5,stroke:#059669,stroke-width:2px
+    style RM fill:#ecfdf5,stroke:#059669</pre>
     <p>
       You register <code>A, B, C</code>. The stack ZealPHP builds is <code>C wraps B wraps A wraps
       ResponseMiddleware</code>. At request time, <strong>C runs first.</strong> The last middleware

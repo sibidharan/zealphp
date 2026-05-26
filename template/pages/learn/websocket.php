@@ -57,6 +57,23 @@
     </p>
 
     <h3>The four callbacks</h3>
+    <pre class="mermaid">sequenceDiagram
+    participant B as Browser
+    participant SW as OpenSwoole<br/>Server
+    participant H as Your callbacks
+    participant ST as Store<br/>ws_clients table
+    B->>SW: HTTP Upgrade request
+    SW->>H: onOpen(server, request)
+    H->>ST: Store fd
+    H-->>B: push(fd, current value)
+    Note over B,SW: Connection is now open,<br/>bidirectional channel
+    B->>SW: ws.send(ping)
+    SW->>H: onMessage(server, frame)
+    H-->>B: push(fd, pong)
+    Note over B: ... time passes ...
+    B->>SW: close / disconnect
+    SW->>H: onClose(server, fd)
+    H->>ST: Delete fd</pre>
     <p>
       One call to <code>$app-&gt;ws()</code>, three callbacks. The callbacks handle the connection
       lifecycle:
