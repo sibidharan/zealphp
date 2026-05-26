@@ -5347,24 +5347,42 @@ class App
      */
     private static function resolvePidFile(array $flags): string
     {
-        if (!empty($flags['pid_file'])) {
-            // @phpstan-ignore-next-line — flags is array<string, mixed>; pid_file value coerced to string at boundary
-            return (string)$flags['pid_file'];
+        if (!empty($flags['pid_file']) && is_scalar($flags['pid_file'])) {
+            $path = (string)$flags['pid_file'];
+            self::ensurePidDir(dirname($path));
+            return $path;
         }
         $envPid = getenv('ZEALPHP_PID_FILE');
         if ($envPid !== false && trim((string)$envPid) !== '') {
-            return trim((string)$envPid);
+            $path = trim((string)$envPid);
+            self::ensurePidDir(dirname($path));
+            return $path;
         }
         // @phpstan-ignore-next-line — flags is array<string, mixed>; port value coerced to int at boundary
         $port = (int)($flags['port'] ?? (self::$instance ? self::$instance->port : 8080));
         $logDir = getenv('ZEALPHP_LOG_DIR');
         if ($logDir !== false && trim((string)$logDir) !== '') {
-            return rtrim(trim((string)$logDir), '/') . "/zealphp_{$port}.pid";
+            $dir = rtrim(trim((string)$logDir), '/');
+            self::ensurePidDir($dir);
+            return "{$dir}/zealphp_{$port}.pid";
         }
-        if (is_dir('/tmp/zealphp')) {
-            return "/tmp/zealphp/zealphp_{$port}.pid";
+        self::ensurePidDir('/tmp/zealphp');
+        return "/tmp/zealphp/zealphp_{$port}.pid";
+    }
+
+    private static function ensurePidDir(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            if (!@mkdir($dir, 0777, true) && !is_dir($dir)) {
+                fwrite(STDERR, "Warning: cannot create PID directory {$dir} — check permissions\n");
+            }
         }
-        return "/tmp/zealphp_{$port}.pid";
+        if (is_dir($dir) && !is_writable($dir)) {
+            if (!@chmod($dir, 0777)) {
+                fwrite(STDERR, "Warning: PID directory {$dir} is not writable — "
+                    . "'sudo chmod 777 {$dir}' or set ZEALPHP_PID_FILE to a writable path\n");
+            }
+        }
     }
 
     /**
