@@ -63,13 +63,13 @@
           coroutine-without-hooks) instead of a single take-it-or-leave-it switch.</li>
         <li><strong class="tradeoffs-strong-light">What it costs:</strong> multiple code paths means multiple surfaces
           for bugs. A mode-specific bug only fires under one config. Documentation has to explicitly mark which
-          mode each guarantee applies to. Some knob combinations are genuinely unsafe (process-wide superglobals
-          racing across concurrent coroutines).</li>
+          mode each guarantee applies to.</li>
         <li><strong class="tradeoffs-strong-light">Mitigation:</strong> coroutine mode is the documented default for
-          new projects (scaffold ships it). Unsafe combinations
-          (<code>superglobals(true) + enableCoroutine(true)</code>, or <code>superglobals(true)</code> with hooked I/O)
-          <strong>throw <code>RuntimeException</code> at <code>App::run()</code> boot</strong> (v0.2.27+) — fail loud,
-          fail fast, before a single request is served against a broken contract. The
+          new projects (scaffold ships it). With <code>ext-zealphp</code> (v0.3.0+), <strong>all mode
+          combinations are safe</strong> &mdash; the extension provides per-coroutine superglobal
+          save/restore, so <code>superglobals(true) + enableCoroutine(true)</code> just works.
+          Without ext-zealphp, the legacy constraint applies: unsafe combinations throw
+          <code>RuntimeException</code> at boot. The
           <a href="/coroutines" class="tradeoffs-link">/coroutines</a> page has a side-by-side safety
           matrix per mode. Most users never touch any flag.</li>
       </ul>
