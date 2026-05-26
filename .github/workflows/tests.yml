@@ -138,6 +138,26 @@ jobs:
           coverage: ${{ matrix.coverage }}
           tools: composer:v2
 
+      - name: Build openswoole from source if setup-php could not install it
+        run: |
+          if php -m | grep -q openswoole; then
+            echo "openswoole already loaded"
+            exit 0
+          fi
+          echo "openswoole missing — building from source"
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev libc-ares-dev
+          tmpdir=$(mktemp -d)
+          git clone --depth 1 https://github.com/openswoole/openswoole.git "$tmpdir"
+          cd "$tmpdir"
+          phpize
+          ./configure --enable-openssl --enable-hook-curl --enable-http2 --enable-mysqlnd --enable-sockets
+          make -j"$(nproc)"
+          sudo make install
+          ini_dir=$(php -i | awk -F'=> ' '/Scan this dir for additional .ini files/ {print $2}' | head -1 | tr -d ' ')
+          echo "extension=openswoole.so" | sudo tee "${ini_dir}/30-openswoole.ini"
+          php -m | grep openswoole
+
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist
 
