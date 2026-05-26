@@ -94,7 +94,7 @@ docker compose up app
 
 ```bash
 # New project
-composer create-project sibidharan/zealphp-project:^0.2.43 my-project
+composer create-project sibidharan/zealphp-project:^0.3.0 my-project
 cd my-project
 php app.php
 # → https://php.zeal.ninja
@@ -448,8 +448,8 @@ App::onWorkerStart(function($server, $workerId) use ($hitCounter) {
 2. Run `composer validate` and confirm tests pass.
 3. Tag both `zealphp` and `zealphp-project` with the same version:
    ```bash
-   git tag -a v0.2.43 -m "Release v0.2.43"
-   git push origin master && git push origin v0.2.43
+   git tag -a v0.3.0 -m "Release v0.3.0"
+   git push origin master && git push origin v0.3.0
    ```
 4. Trigger Packagist webhook for both packages.
 

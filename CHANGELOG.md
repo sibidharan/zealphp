@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-26
+
+ext-zealphp: ZealPHP's own PHP extension replaces the uopz dependency.
+
+### Added
+
+- **ext-zealphp** (`ext/zealphp/`) — purpose-built C extension (~250 lines) that intercepts 53 PHP built-in functions and routes them to per-request callbacks. Drop-in replacement for uopz with an allowlist-only design: no class manipulation, no constant overrides, no general-purpose API. Build: `cd ext/zealphp && phpize && ./configure && make && make install`.
+- **Auto-detection in `App.php`** — new `overrideBuiltin()` helper prefers ext-zealphp when loaded, falls back to uopz. Zero code changes needed in user apps.
+- **Mermaid diagrams** in 5 lessons: middleware (onion model), sessions (cookie lifecycle), auth (register/login/guard), store (shared memory), websocket (connection lifecycle).
+- **"Build it yourself" callouts** in lessons 18–22 — each lists exactly which files to create vs what's already in vendor/.
+
+### Fixed
+
+- **setup.sh**: replaced 17 internal `sudo` calls with `$SUDO` variable (Docker containers don't have sudo when already root); added `php-intl` and `php-sqlite3` to dependencies.
+- **home.php**: middleware count 18 → 28.
+- **coroutines.php**: removed false PDO hooking claim (PDO is not hooked in OpenSwoole 22.1–26.2).
+- **Lesson 15 (htmx)**: replaced broken PSR-7 method chains with correct ZealPHP API.
+- **Lesson 17 (auth)**: fixed namespace `App\Auth` → `ZealPHP\Learn\Auth`, nonexistent methods, undefined `$userId`.
+- **Lesson 5 (project-structure)**: PSR-4 namespace `App\` → `MyProject\` to match scaffold.
+- **Lesson 10 (middleware)**: added missing `use` statements to code snippet.
+- **Syntax highlighting**: 8 mixed PHP/HTML code blocks switched to `language-php-template`.
+
 ## [0.2.43] - 2026-05-25
 
 CGI-isolation session-persistence fix. `App::superglobals(true)` (legacy CGI) sessions now survive across requests as expected.
