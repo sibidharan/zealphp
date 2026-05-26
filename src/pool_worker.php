@@ -56,6 +56,9 @@ $__pw_shutdown_functions = [];
 // need to fork a special pool-mode code path.
 $z_override = function(string $name, \Closure $cb, bool $execute = true): void {
     if (function_exists('zealphp_override')) {
+        if (function_exists('zealphp_restore')) {
+            @zealphp_restore($name);
+        }
         zealphp_override($name, $cb);
     } elseif (function_exists('uopz_set_return')) {
         uopz_set_return($name, $cb, true);
