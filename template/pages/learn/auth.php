@@ -107,8 +107,7 @@ if (!$user) {
 
     <h2>Architecture: proper OOP</h2>
     <p>
-      Notice how the auth logic lives in <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Auth.php" target="_blank"><code>src/Learn/Auth.php</code></a> — a proper class, autoloaded
-      via Composer. The API endpoint (<a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/register.php" target="_blank"><code>api/learn/register.php</code></a>) is a thin wrapper:
+      The auth logic lives in <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Auth.php" target="_blank"><code>ZealPHP\Learn\Auth</code></a> &mdash; already in your <code>vendor/</code> directory via the framework dependency. The API endpoint is a thin wrapper that delegates to it:
     </p>
     <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/register.php" class="lauth-srclink">api/learn/register.php</a> — thin endpoint
 $register = function () {
@@ -282,11 +281,12 @@ $delete = function() {
     if (!$this->requirePostAuth()) return;
 
     $user = \ZealPHP\Learn\Auth::currentUser();
-    // $g is the canonical per-coroutine request context. It works in BOTH
-    // App::superglobals(true) and (false) modes — raw $_POST is unsafe in
-    // coroutine mode (process-wide array races across requests).
     $g = \ZealPHP\G::instance();
-    Note::delete((int)$g->post['note_id'], $userId);
+    \ZealPHP\Learn\Notes::delete(
+        \ZealPHP\Learn\DB::open(),
+        $user['user_id'],
+        (int) $g->post['note_id']
+    );
     return ['ok' => true];
 };
 PHP,
