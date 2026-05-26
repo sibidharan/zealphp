@@ -8,3 +8,4 @@ PHP_ARG_ENABLE([zealphp],
 if test "$PHP_ZEALPHP" != "no"; then
   PHP_NEW_EXTENSION(zealphp, zealphp.c, $ext_shared)
 fi
+# ext-zealphp build
