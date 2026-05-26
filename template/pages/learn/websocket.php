@@ -20,10 +20,20 @@
     <h2 id="step-overview">1. Overview — what you&rsquo;re building</h2>
     <p>
       A counter that <strong>updates in every open tab the moment any tab clicks +1</strong>. No
-      reloads, no polling, no Redis on a single server (cross-server deploys use the Redis-backed federated routing the framework ships — see /websocket#cross-server). The server holds a list of open WebSocket connections; the
+      reloads, no polling, no Redis on a single server (cross-server deploys use the Redis-backed federated routing the framework ships &mdash; see /websocket#cross-server). The server holds a list of open WebSocket connections; the
       <code>+1</code> button hits a normal HTTP endpoint; that endpoint broadcasts the new value
-      back over WebSocket to every connected tab. Try it now — open this URL in another tab first.
+      back over WebSocket to every connected tab. Try it now &mdash; open this URL in another tab first.
     </p>
+
+    <div class="callout info">
+      <strong>Build it yourself.</strong> This lesson adds WebSocket to your scaffold project.
+      You&rsquo;ll create one file:
+      <ol>
+        <li><code>route/ws-counter.php</code> &mdash; WebSocket endpoint + broadcast helper + HTTP bump route</li>
+      </ol>
+      The <code>Store</code> and <code>Counter</code> classes are already available via the framework.
+      Restart the server after creating the route file.
+    </div>
 
     <?php App::render('/components/_ws_counter_widget'); ?>
 

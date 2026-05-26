@@ -30,21 +30,55 @@ $active = $active ?? 'learn/notes';
       Build this once, and you can build any data app — a todo list, a blog, an inventory system.
     </p>
 
+    <div class="callout info">
+      <strong>Build it yourself.</strong> The business logic classes (<code>Notes</code>, <code>Auth</code>,
+      <code>DB</code>, <code>WS</code>) ship with the framework library &mdash; they&rsquo;re already in
+      your <code>vendor/</code> directory after <code>composer create-project</code>. This lesson walks you
+      through creating the <strong>glue files</strong> that wire them into a working app:
+      <ol>
+        <li><code>api/learn/notes.php</code> &mdash; CRUD endpoint</li>
+        <li><code>route/learn.php</code> &mdash; path-param routes + WebSocket registration</li>
+        <li><code>template/components/_notes_widget.php</code> &mdash; the notes UI</li>
+        <li><code>template/components/_note_card.php</code> &mdash; individual note display</li>
+      </ol>
+      Create each file as you reach its section. Restart the server (<code>php app.php restart</code>) after
+      adding route files.
+    </div>
+
     <h2 id="step-components">2. Component extraction — the same widget, two places</h2>
     <p>
-      Before we wire anything up, look at the page structure. The note-creation form, the list of
-      notes below it, and the user bar at the top form a self-contained UI block. That block is
-      extracted into a reusable partial:
+      Before we wire anything up, let&rsquo;s build the UI. The note-creation form, the list of
+      notes below it, and the user bar at the top form a self-contained UI block. Create it as a
+      reusable partial:
     </p>
-    <pre><code class="language-php">// template/components/_notes_widget.php
-&lt;?php
+    <p><strong>Create <code>template/components/_notes_widget.php</code>:</strong></p>
+    <pre><code class="language-php">&lt;?php
 $user ??= null;
 if (!$user) return;
 ?&gt;
-&lt;div class="notes-user-bar"&gt;…&lt;/div&gt;
+&lt;div class="notes-user-bar"&gt;
+  &lt;span class="notes-user-avatar"&gt;&lt;?= strtoupper(substr($user['username'], 0, 1)) ?&gt;&lt;/span&gt;
+  &lt;span class="notes-user-name"&gt;&lt;?= htmlspecialchars($user['username']) ?&gt;&lt;/span&gt;
+  &lt;a href="/api/learn/logout" class="notes-user-logout"&gt;Log out&lt;/a&gt;
+&lt;/div&gt;
+
 &lt;section class="notes-app"&gt;
-  &lt;form class="note-form" hx-post="/api/learn/notes" …&gt;…&lt;/form&gt;
-  &lt;div id="notes-list" class="notes-list" hx-get="/api/learn/notes" hx-trigger="load"&gt;…&lt;/div&gt;
+  &lt;form class="note-form"
+        hx-post="/api/learn/notes"
+        hx-target="#notes-list"
+        hx-swap="afterbegin"
+        hx-on::after-request="this.reset()"&gt;
+    &lt;input type="text" name="title" placeholder="Note title" required maxlength="200"&gt;
+    &lt;textarea name="body" placeholder="What's on your mind?" maxlength="4096"&gt;&lt;/textarea&gt;
+    &lt;button type="submit"&gt;Add note&lt;/button&gt;
+  &lt;/form&gt;
+
+  &lt;div id="notes-list" class="notes-list"
+       hx-get="/api/learn/notes"
+       hx-trigger="load"
+       hx-swap="innerHTML"&gt;
+    &lt;p class="notes-empty"&gt;Loading&amp;hellip;&lt;/p&gt;
+  &lt;/div&gt;
 &lt;/section&gt;</code></pre>
     <p>
       The partial renders identical HTML in two consumers — and that&rsquo;s the lesson:
@@ -117,14 +151,14 @@ if (!$user) return;
     H-->>B: afterbegin swap (green glow)</pre>
     <p>Three layers, each with one job:</p>
     <ol>
-      <li><strong><a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Notes.php" target="_blank"><code>src/Learn/Notes.php</code></a></strong> — Business logic. SQL queries scoped by <code>user_id</code>.</li>
-      <li><strong><a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/notes.php" target="_blank"><code>api/learn/notes.php</code></a></strong> — Endpoint. Reads the request, calls the class, returns HTML.</li>
-      <li><strong>Template + htmx</strong> — UI. The form and list, wired with four htmx attributes.</li>
+      <li><strong><code>ZealPHP\Learn\Notes</code></strong> — Business logic (already in <code>vendor/</code> via the framework). SQL queries scoped by <code>user_id</code>.</li>
+      <li><strong><code>api/learn/notes.php</code></strong> — Endpoint you&rsquo;ll create. Reads the request, calls the class, returns HTML.</li>
+      <li><strong>Template + htmx</strong> — UI you created in step 2, wired with four htmx attributes.</li>
     </ol>
 
-    <h3>The data layer</h3>
-    <p>Every method takes a <code>$userId</code> parameter. The user can never read or modify another user's notes:</p>
-    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/Notes.php" class="lnotes-srclink">src/Learn/Notes.php</a>
+    <h3>The data layer (already in vendor)</h3>
+    <p>The <code>ZealPHP\Learn\Notes</code> class ships with the framework &mdash; you don&rsquo;t need to create it. Every method takes a <code>$userId</code> parameter. The user can never read or modify another user&rsquo;s notes:</p>
+    <pre><code class="language-php">// vendor/sibidharan/zealphp/src/Learn/Notes.php — already installed
 class Notes
 {
     public static function create(\PDO $db, int $userId, string $title, string $body): ?int
@@ -155,11 +189,50 @@ class Notes
       <em>response body</em>. You need the HTML as a string, not echoed to the page. That's
       <code>App::renderToString()</code>:
     </p>
-    <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/notes.php" class="lnotes-srclink">api/learn/notes.php</a> — return the rendered note card
-$note = Notes::read($db, $userId, $id);
-$html = App::renderToString('/components/_note_card', $note);
-$this->response($html, 200);</code></pre>
-    <p>Same component, same template file — but now you get the HTML as a string to return from your API.</p>
+    <p><strong>Create <code>api/learn/notes.php</code></strong> &mdash; this is the endpoint htmx talks to:</p>
+    <pre><code class="language-php">&lt;?php
+use ZealPHP\App;
+use ZealPHP\G;
+use ZealPHP\Learn\DB;
+use ZealPHP\Learn\Auth;
+use ZealPHP\Learn\Notes;
+use ZealPHP\Learn\WS;
+
+${basename(__FILE__, '.php')} = function () {
+    $u = Auth::currentUser();
+    if (!$u) { $this->response($this->json(['error' => 'auth_required']), 401); return; }
+    $g = G::instance();
+    $method = strtoupper($g->server['REQUEST_METHOD'] ?? 'GET');
+    $db = DB::open();
+    $wantsJson = stripos($g->server['HTTP_ACCEPT'] ?? '', 'application/json') !== false;
+
+    if ($method === 'POST') {
+        $body = $g->post;
+        $title    = (string) ($body['title'] ?? '');
+        $bodyText = (string) ($body['body'] ?? '');
+        $id = Notes::create($db, $u['user_id'], $title, $bodyText);
+        if ($id === null) { $this->response($this->json(['error' => 'validation_failed']), 422); return; }
+        WS::broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'create', 'id' => $id]);
+        $note = Notes::read($db, $u['user_id'], $id);
+        header('Content-Type: text/html; charset=utf-8');
+        $this->response(App::renderToString('/components/_note_card', $note), 200);
+        return;
+    }
+
+    // GET — list notes
+    $notesList = Notes::list($db, $u['user_id']);
+    header('Content-Type: text/html; charset=utf-8');
+    if (empty($notesList)) {
+        $this->response('&lt;p class="notes-empty"&gt;No notes yet. Add one above.&lt;/p&gt;', 200);
+        return;
+    }
+    $html = '';
+    foreach ($notesList as $n) {
+        $html .= App::renderToString('/components/_note_card', $n);
+    }
+    $this->response($html, 200);
+};</code></pre>
+    <p>The key line: <code>App::renderToString('/components/_note_card', $note)</code> renders the card you created above and returns it as a string &mdash; exactly what htmx expects as the response body.</p>
 
     <?php App::render('/components/_callout', [
       'variant' => 'info',
@@ -186,10 +259,30 @@ $this->response($html, 200);</code></pre>
         hx-confirm="Delete this note?"&gt;Delete&lt;/button&gt;</code></pre>
     <p><code>hx-swap="outerHTML"</code> replaces the entire note card with the empty response — effectively removing it.</p>
 
-    <h3>Component reuse</h3>
+    <h3>Create the note card component</h3>
     <p>
-      The <a href="https://github.com/sibidharan/zealphp/blob/master/template/components/_note_card.php" target="_blank"><code>_note_card</code></a> component is used in three places: the notes list (GET), the create response (POST), and the chat history bubbles (<a href="/learn/ai-chat">Lesson 20, AI Chat</a>). Same file, three consumers. <code>_notes_widget</code> from step&nbsp;2 takes the same idea one level up — it&rsquo;s the whole notes panel, also used in two places (this lesson + the popup viewer).
+      Each note renders as a card. This component is used in three places: the notes list (GET), the create response (POST), and the chat history bubbles (<a href="/learn/ai-chat">Lesson 20, AI Chat</a>). Same file, three consumers.
     </p>
+    <p><strong>Create <code>template/components/_note_card.php</code>:</strong></p>
+    <pre><code class="language-php">&lt;?php
+$id    = (int)($id ?? 0);
+$title = (string)($title ?? '');
+$body  = (string)($body ?? '');
+$ts    = (int)($updated_at ?? time());
+?&gt;
+&lt;article class="note" id="note-&lt;?= $id ?&gt;" data-id="&lt;?= $id ?&gt;"&gt;
+  &lt;details&gt;
+    &lt;summary class="note-title"&gt;&lt;?= htmlspecialchars($title) ?&gt;&lt;/summary&gt;
+    &lt;p class="note-body"&gt;&lt;?= nl2br(htmlspecialchars($body)) ?&gt;&lt;/p&gt;
+  &lt;/details&gt;
+  &lt;div class="note-meta"&gt;
+    &lt;span&gt;Updated &lt;?= date('Y-m-d H:i', $ts) ?&gt;&lt;/span&gt;
+    &lt;button hx-delete="/api/learn/notes/&lt;?= $id ?&gt;"
+            hx-target="#note-&lt;?= $id ?&gt;"
+            hx-swap="outerHTML"
+            hx-confirm="Delete this note?"&gt;Delete&lt;/button&gt;
+  &lt;/div&gt;
+&lt;/article&gt;</code></pre>
 
     <h2 id="step-sync">5. Live sync — cross-tab via WebSocket</h2>
     <p>

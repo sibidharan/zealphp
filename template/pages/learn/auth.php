@@ -112,7 +112,8 @@ if (!$user) {
     </p>
     <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/api/learn/register.php" class="lauth-srclink">api/learn/register.php</a> — thin endpoint
 $register = function () {
-    $creds = Auth::readCredentials($this);
+    $g = \ZealPHP\G::instance();
+    $creds = Auth::readCredentials($g);
     $userId = Auth::register(DB::open(), $creds['username'], $creds['password']);
     // ... set session, redirect
 };</code></pre>
@@ -259,11 +260,10 @@ document.addEventListener('htmx:beforeSwap', (e) =&gt; {
       'code'  => <<<'PHP'
 <?php
 use ZealPHP\App;
-use App\Auth;          // the src/Auth.php class from Step 2
+use ZealPHP\Learn\Auth; // the src/Learn/Auth.php class from the tutorial
 
-App::authChecker(fn(): bool       => Auth::currentUserId() !== null);
-App::adminChecker(fn(): bool      => Auth::currentRole() === 'admin');
-App::usernameProvider(fn(): ?string => Auth::currentUsername());
+App::authChecker(fn(): bool        => Auth::currentUser() !== null);
+App::usernameProvider(fn(): ?string => Auth::currentUser()['username'] ?? null);
 
 $app = App::init('0.0.0.0', 8080);
 $app->run();
@@ -281,7 +281,7 @@ $delete = function() {
     // POST + authenticated guard. Emits 403 JSON and returns false on failure.
     if (!$this->requirePostAuth()) return;
 
-    $userId = \App\Auth::currentUserId();
+    $user = \ZealPHP\Learn\Auth::currentUser();
     // $g is the canonical per-coroutine request context. It works in BOTH
     // App::superglobals(true) and (false) modes — raw $_POST is unsafe in
     // coroutine mode (process-wide array races across requests).

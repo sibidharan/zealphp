@@ -26,6 +26,19 @@ $active = $active ?? 'learn/ai-chat';
       or deletes them on command. The reply <strong>streams token by token</strong>, like ChatGPT,
       so a slow model never feels frozen.
     </p>
+
+    <div class="callout info">
+      <strong>Build it yourself.</strong> The AI logic classes (<code>Chat</code>, <code>ChatHistory</code>)
+      ship with the framework in <code>vendor/</code>. You&rsquo;ll create:
+      <ol>
+        <li><code>api/learn/chat.php</code> &mdash; SSE streaming endpoint</li>
+        <li><code>api/learn/chat_status.php</code> &mdash; reports whether real AI is enabled</li>
+        <li><code>template/components/_chat_widget.php</code> &mdash; the chat UI</li>
+      </ol>
+      No OpenAI API key needed &mdash; the framework includes a rule-based mock that works identically.
+      Set <code>OPENAI_API_KEY</code> to switch to a real model.
+    </div>
+
     <p>
       Five pieces, in build order:
     </p>

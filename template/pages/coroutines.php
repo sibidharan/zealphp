@@ -2,7 +2,7 @@
 <section class="section">
 <div class="container">
 <h1 class="section-title">Coroutines</h1>
-<p class="section-desc">OpenSwoole coroutines are cooperative — they yield only on I/O, making parallel fetch trivial. ZealPHP enables HOOK_ALL so all PHP I/O (file, curl, PDO) becomes coroutine-aware automatically.</p>
+<p class="section-desc">OpenSwoole coroutines are cooperative — they yield only on I/O, making parallel fetch trivial. ZealPHP enables HOOK_ALL so most PHP I/O (file, curl, sleep) becomes coroutine-aware automatically.</p>
 
 <?php
 $demos = [
@@ -50,7 +50,7 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <tr><td><code>co::sleep(float $s)</code></td><td>Yield for N seconds without blocking the event loop.</td></tr>
   <tr><td><code>new Channel(int $capacity)</code></td><td>Buffered queue for coroutine communication. <code>push()</code> + <code>pop()</code>.</td></tr>
   <tr><td><code>usleep(int $us)</code></td><td>Coroutine-aware micro-sleep under HOOK_ALL (use for sub-second delays).</td></tr>
-  <tr><td><code>OpenSwoole\Runtime::HOOK_ALL</code></td><td>Makes all PHP I/O — curl, file, PDO, sleep — yield the event loop.</td></tr>
+  <tr><td><code>OpenSwoole\Runtime::HOOK_ALL</code></td><td>Makes most PHP I/O — curl, file, sleep — yield the event loop. PDO is <strong>not</strong> hooked in OpenSwoole 22.1&ndash;26.2.</td></tr>
 </table>
 
 <div class="callout info coro-mt">

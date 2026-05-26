@@ -370,7 +370,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
         <h3 class="home-engine-col-title">ZealPHP adds on top</h3>
         <ul class="home-engine-list">
           <li>Routing (<code>route()</code> + <code>nsRoute</code> + <code>patternRoute</code>) with reflection-based parameter injection</li>
-          <li>PSR-15 middleware stack &mdash; 18 built-ins covering common Apache/nginx behaviors</li>
+          <li>PSR-15 middleware stack &mdash; 28 built-ins covering common Apache/nginx behaviors</li>
           <li><code>uopz</code> overrides so <code>session_start()</code>, <code>header()</code>, <code>setcookie()</code>, <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>, <code>echo</code> all just work</li>
           <li>Coroutine-safe sessions (per-request <code>RequestContext</code>, no process-wide superglobal races)</li>
           <li>Templating (<code>App::render</code> / <code>renderStream</code> / <code>fragment</code>) with streaming-Generator output</li>
