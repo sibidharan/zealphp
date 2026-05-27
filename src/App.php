@@ -1316,8 +1316,9 @@ class App
      *
      * @param string $extension  File extension including the dot, e.g. `'.py'`, `'.pl'`.
      * @param array<string, mixed> $config
-     *   `'mode'`        — `'proc'` | `'fork'` | `'fcgi'` (required)
+     *   `'mode'`        — `'pool'` | `'proc'` | `'fcgi'` (required)
      *   `'interpreter'` — full path to interpreter binary (`proc` mode only; `null` = direct exec via shebang)
+     *   `'exec_paths'`  — URL prefixes where this extension may execute, e.g. `['/cgi-bin']`. Files outside these prefixes return 403 (Apache `Options +ExecCGI` parity).
      *   `'address'`     — FastCGI backend address, `"host:port"` or `"unix:/path"` (`fcgi` mode only)
      *   `'fcgi_params'` — extra FCGI params merged into the CGI env after `buildCgiEnv()` (`fcgi` mode only)
      *
@@ -1624,6 +1625,15 @@ class App
     {
         $hasZealphpExt = \extension_loaded('zealphp');
 
+        if (!$sg && !$enableCo) {
+            throw new \RuntimeException(
+                'ZealPHP lifecycle: App::superglobals(false) + App::enableCoroutine(false) is not supported. '
+                . 'Coroutine mode (superglobals=false) uses CoSessionManager which requires the coroutine '
+                . 'scheduler for per-request RequestContext isolation. Either enable coroutines '
+                . '(App::enableCoroutine(true), the default for superglobals=false) or switch to '
+                . 'superglobals mode (App::superglobals(true)) for sequential operation.'
+            );
+        }
         if ($sg && $enableCo && !$hasZealphpExt) {
             throw new \RuntimeException(
                 'ZealPHP lifecycle: App::superglobals(true) + App::enableCoroutine(true) requires '

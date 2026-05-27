@@ -153,10 +153,15 @@ class SessionManager
             $sessionId = is_string($rawSid) ? $rawSid : null;
             session_id($sessionId);
 
-            $handler = new FileSessionHandler();
-            session_set_save_handler($handler, true);
+            static $handlerRegistered = false;
+            if (!$handlerRegistered) {
+                $handler = new FileSessionHandler();
+                session_set_save_handler($handler, true);
+                $handlerRegistered = true;
+            }
 
             session_start();
+            $g->_session_started = true;
 
             // v0.2.27 — make $g->session and $_SESSION the same array.
             //

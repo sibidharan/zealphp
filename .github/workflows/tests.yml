@@ -160,8 +160,9 @@ jobs:
 
       - name: Build and install ext-zealphp
         run: |
-          git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp-src
-          cd /tmp/ext-zealphp-src
+          # Use the pinned submodule to avoid version mismatch (#140)
+          git submodule update --init ext/zealphp 2>/dev/null || git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git ext/zealphp
+          cd ext/zealphp
           phpize
           ./configure --enable-zealphp
           make -j"$(nproc)"

@@ -174,6 +174,20 @@ PHP]); ?>
   <p class="coro-mb"><strong>Migration path:</strong> install ext-zealphp (<code>pie install sibidharan/ext-zealphp</code>), set <code>App::superglobals(true)</code>, and enable coroutines. Your existing <code>$_GET</code> / <code>$_SESSION</code> code works unchanged with full concurrency.</p>
 </div>
 
+<div class="callout warn coro-mb">
+  <strong>Isolation scope.</strong> ext-zealphp isolates the <strong>7 PHP superglobals</strong>
+  (<code>$_GET</code>, <code>$_POST</code>, <code>$_COOKIE</code>, <code>$_SERVER</code>,
+  <code>$_FILES</code>, <code>$_REQUEST</code>, <code>$_SESSION</code>) per coroutine.
+  It does <strong>NOT</strong> isolate <code>$GLOBALS</code>, class statics, function statics,
+  <code>define()</code> constants, or <code>require_once</code> state &mdash; those are process-wide.
+  For apps that need full process isolation (WordPress, Drupal), use
+  <code>App::processIsolation(true)</code> which dispatches each file through a
+  subprocess with clean state. The extension also provides opt-in primitives
+  (<code>zealphp_define_hook</code>, <code>zealphp_globals_snapshot</code>,
+  <code>zealphp_process_state_snapshot</code>) for advanced per-request cleanup
+  &mdash; see the <a href="/http#parity-gaps">known gaps</a> section.
+</div>
+
 <h3 id="coroutine-isolation-hybrid" class="coro-h3">Mode 6 — Coroutine + Process Isolation (the hybrid)</h3>
 
 <p>With <code>ext-zealphp</code>, both combos are safe (superglobals are saved/restored per coroutine). Without it, they&rsquo;re gated on <code>superglobals(true)</code>. With <code>superglobals(false)</code> the parent uses per-coroutine <code>$g</code>, so neither race exists either way &mdash; which means you can also combine <strong>coroutine concurrency at the parent</strong> with <strong>per-request subprocess isolation</strong>:</p>

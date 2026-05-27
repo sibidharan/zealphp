@@ -146,7 +146,7 @@ if (($__ec = getenv('ZEALPHP_ENABLE_COROUTINE')) !== false && $__ec !== '') {
     App::enableCoroutine(env_flag('ZEALPHP_ENABLE_COROUTINE', true));
 }
 if (($__cm = getenv('ZEALPHP_CGI_MODE')) !== false && $__cm !== '') {
-    App::cgiMode($__cm === 'fork' ? 'fork' : 'proc');
+    App::cgiMode($__cm);
 }
 
 // ─── CGI backends (per-extension, ExecCGI-scoped) ───────────────────
@@ -156,7 +156,10 @@ if (($__cm = getenv('ZEALPHP_CGI_MODE')) !== false && $__cm !== '') {
 // are detected at boot so this works wherever the box has them. At this
 // point in boot the exec-override isn't active, so shell_exec is the real
 // builtin — fine for one-time interpreter discovery.
-App::registerCgiBackend('.py', ['mode' => 'proc', 'interpreter' => trim((string) shell_exec('command -v python3')) ?: '/usr/bin/python3', 'exec_paths' => ['/cgi-bin']]);
+$pythonBin = trim((string) shell_exec('command -v python3'));
+if ($pythonBin !== '') {
+    App::registerCgiBackend('.py', ['mode' => 'proc', 'interpreter' => $pythonBin, 'exec_paths' => ['/cgi-bin']]);
+}
 $perlBin = trim((string) shell_exec('command -v perl'));
 if ($perlBin !== '') {
     App::registerCgiBackend('.pl', ['mode' => 'proc', 'interpreter' => $perlBin, 'exec_paths' => ['/cgi-bin']]);

@@ -414,6 +414,18 @@ final class LifecycleModesMatrixTest extends TestCase
         $this->assertStringContainsString('enableCoroutine(true)', (string)$ex->getMessage());
     }
 
+    /**
+     * Refused — superglobals(false) + enableCoroutine(false).
+     * CoSessionManager requires coroutine context; without the scheduler,
+     * RequestContext::instance() returns null on request 2+.
+     */
+    public function testRefusedCoroutineModeWithoutCoroutineScheduler(): void
+    {
+        $ex = $this->validate(false, 0, false);
+        $this->assertInstanceOf(\RuntimeException::class, $ex);
+        $this->assertStringContainsString('superglobals(false) + App::enableCoroutine(false)', (string)$ex->getMessage());
+    }
+
     // ══════════════════════════════════════════════════════════════════
     //   processIsolation — the dispatch-shape switch
     // ══════════════════════════════════════════════════════════════════

@@ -278,13 +278,28 @@ final class WorkerPool
 
         // Bounded wait for READY signal on stderr — guarantees the
         // subprocess has loaded its autoloader + uopz overrides before we
-        // dispatch the first frame.
-        $ready = fgets($pipes[2]);
-        if ($ready === false || !str_contains($ready, 'READY')) {
-            $more = stream_get_contents($pipes[2]) ?: '';
+        // dispatch the first frame. Read lines in a loop to skip any
+        // deprecation warnings that PHP/OpenSwoole emit before READY (#133).
+        $bootLines = '';
+        $foundReady = false;
+        $deadline = microtime(true) + 10.0; // 10s timeout
+        while (microtime(true) < $deadline) {
+            $line = fgets($pipes[2]);
+            if ($line === false) {
+                if (feof($pipes[2])) break;
+                usleep(10000);
+                continue;
+            }
+            if (str_contains($line, 'READY')) {
+                $foundReady = true;
+                break;
+            }
+            $bootLines .= $line;
+        }
+        if (!$foundReady) {
             proc_terminate($proc);
             @proc_close($proc);
-            throw new \RuntimeException("WorkerPool: subprocess boot failed: " . trim((string) $ready . $more));
+            throw new \RuntimeException("WorkerPool: subprocess boot failed (no READY within 10s): " . trim($bootLines));
         }
 
         $pid = proc_get_status($proc)['pid'];
