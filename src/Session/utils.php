@@ -395,39 +395,41 @@ function zeal_session_write_close(): bool
             // Apps with conflicting nested writes should use a database
             // / Redis hash directly, not session storage.
             //
-            // Also note: handler-side locking is not assumed. A
-            // SessionHandlerInterface implementation that itself serialises
-            // (e.g. via Redis WATCH/MULTI) is strictly better than this
-            // best-effort merge — but the merge is correct for the file-
-            // handler default and for handlers that don't lock.
-            $existing = $wHandler->read((string) $session_id);
-            if (is_string($existing) && $existing !== '') {
-                $existingData = php_session_decode_to_array($existing);
-                // $data is $GLOBALS['_SESSION'] (mixed) or $g->session (array)
-                // — narrow before the array_merge so PHPStan can verify the
-                // call shape. Non-array $data means somebody outside the
-                // framework reassigned $_SESSION to a scalar; treat that as
-                // empty and let the merge surface the disk state.
-                $current = is_array($data) ? $data : [];
-                if ($existingData !== []) {
-                    $data = array_merge($existingData, $current);
-                    // #21: honor in-request deletions. A key that was loaded
-                    // this request (in session_loaded_keys) but is now absent
-                    // from $current was unset() — it must NOT be resurrected by
-                    // the merge-with-stored mitigation. Keys we never loaded
-                    // (concurrent adds, not in session_loaded_keys) are left
-                    // intact, preserving the cross-request merge guarantee.
-                    foreach ($g->session_loaded_keys as $loadedKey) {
-                        if (!array_key_exists($loadedKey, $current)) {
-                            unset($data[$loadedKey]);
+            // Optimistic-locking retry loop. RedisSessionHandler uses
+            // WATCH/MULTI: read() WATCHes the key, write() MULTI+EXEC.
+            // If another coroutine modified the key between our read and
+            // write, EXEC returns false → write() returns false → we
+            // re-read, re-merge, and retry. Max 3 attempts; on exhaustion
+            // fall through to a plain write (last-writer-wins, same as
+            // the pre-locking behavior — safe degradation).
+            $current = is_array($data) ? $data : [];
+            $maxRetries = 3;
+            for ($attempt = 0; $attempt < $maxRetries; $attempt++) {
+                $existing = $wHandler->read((string) $session_id);
+                if (is_string($existing) && $existing !== '') {
+                    $existingData = php_session_decode_to_array($existing);
+                    if ($existingData !== []) {
+                        $merged = array_merge($existingData, $current);
+                        foreach ($g->session_loaded_keys as $loadedKey) {
+                            if (!array_key_exists($loadedKey, $current)) {
+                                unset($merged[$loadedKey]);
+                            }
                         }
+                        $data = $merged;
+                    } else {
+                        $data = $current;
                     }
-                } else {
-                    $data = $current;
                 }
+                /** @var array<string, mixed> $data */
+                $written = $wHandler->write(
+                    (string) $session_id,
+                    php_session_encode_from_array($data)
+                );
+                if ($written !== false) {
+                    break;
+                }
+                // WATCH/MULTI conflict — retry with fresh read
             }
-            /** @var array<string, mixed> $data */
-            $wHandler->write((string) $session_id, php_session_encode_from_array($data));
         } else {
             // File-based sessions: flock(LOCK_EX) serializes concurrent
             // writes to the same session file (Apache mod_session parity).
