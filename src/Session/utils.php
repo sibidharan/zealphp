@@ -153,8 +153,13 @@ function zeal_session_start(): bool
     $sessionNameForCookie = $g->session_params['name'];
     $hadIncomingSessionCookie = isset($g->cookie[$sessionNameForCookie]);
 
-    // Get session ID from cookie or generate a new one
+    // Get session ID from cookie or generate a new one.
+    // Store in session_params so write_close can read it without going
+    // through $g->cookie (which has auto-global caching issues in Mode 4).
     $session_id = zeal_session_id();
+    $params = $g->session_params;
+    $params['session_id'] = $session_id;
+    $g->session_params = $params;
 
     // Bug #12: emit Set-Cookie if the session is brand-new (no incoming
     // PHPSESSID cookie). Without this, a handler that calls session_start()
@@ -350,7 +355,13 @@ function zeal_session_write_close(): bool
         : (isset($GLOBALS['_SESSION']) && is_array($GLOBALS['_SESSION']));
 
     if ($hasSession) {
-        $session_id = zeal_session_id();
+        // Read SID from session_params (set by zeal_session_start) — not
+        // zeal_session_id() which reads $g->cookie and suffers from
+        // auto-global caching in coroutine mode.
+        /** @var string $session_id */
+        $session_id = isset($g->session_params['session_id']) && is_string($g->session_params['session_id'])
+            ? $g->session_params['session_id']
+            : zeal_session_id();
         $save_path = $g->session_params['save_path'] ?? '';
         assert(is_string($save_path));
         $session_file = $save_path . '/sess_' . $session_id;
