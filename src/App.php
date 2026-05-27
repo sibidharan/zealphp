@@ -3250,25 +3250,8 @@ class App
             ];
         }
 
-        // Mode 4 (sg=T+ec=T+ext-zealphp): refresh superglobals before include.
-        // ext-zealphp v0.3.3+ zealphp_superglobals_set uses in-place zval swap
-        // (ZVAL_COPY_VALUE + ZVAL_COPY at same address) so cached CVs in the
-        // included file see updated data.
-        if (self::$coroutine_isolated_superglobals
-            && \function_exists('zealphp_superglobals_set')
-            && $g->openswoole_request !== null
-        ) {
-            $req = $g->openswoole_request;
-            /** @var array<string,mixed> $rGet */
-            $rGet  = $req->get  ?: [];
-            /** @var array<string,mixed> $rPost */
-            $rPost = $req->post ?: [];
-            (\zealphp_superglobals_set(...))(
-                $rGet, $rPost,
-                $req->cookie ?: [], $g->server, $req->files ?: [],
-                $rGet + $rPost, $g->session
-            );
-        }
+        // Mode 4 session reference is established in zeal_session_start()
+        // ($_SESSION = &$g->session) so writes go directly to $g->session.
 
         $obBase = ob_get_level();
         ob_start();
@@ -3316,16 +3299,6 @@ class App
         $output = ob_get_clean();
         if ($output === false) {
             $output = '';
-        }
-
-        // Mode 4: sync $_SESSION back to $g->session after the file ran.
-        // The file wrote to $_SESSION (auto-global zval — same address thanks
-        // to zealphp_set_superglobal's in-place swap). Copy back so
-        // CoSessionManager's write_close persists the file's mutations.
-        if (self::$coroutine_isolated_superglobals && \function_exists('zealphp_superglobals_set')) {
-            /** @var array<string, mixed> $syncSess */
-            $syncSess = $_SESSION;
-            $g->session = $syncSess;
         }
 
         // Fragment-mode post-flight: requested but no App::fragment('X', ...)
@@ -6469,18 +6442,14 @@ HELP;
             // is intentionally NOT touched here — the session manager owns its
             // own write path (file load + uopz session_start).
             if (App::$superglobals) {
-                if (self::$coroutine_isolated_superglobals
-                    && \function_exists('zealphp_superglobals_set')
-                ) {
-                    (\zealphp_superglobals_set(...))($get, $post, $cookie, $srvFinal, $files, $g->request, $g->session);
-                } else {
-                    $GLOBALS['_GET']     = $get;
-                    $GLOBALS['_POST']    = $post;
-                    $GLOBALS['_COOKIE']  = $cookie;
-                    $GLOBALS['_FILES']   = $files;
-                    $GLOBALS['_SERVER']  = $srvFinal;
-                    $GLOBALS['_REQUEST'] = $g->request;
-                }
+                $GLOBALS['_GET']     = $get;
+                $GLOBALS['_POST']    = $post;
+                $GLOBALS['_COOKIE']  = $cookie;
+                $GLOBALS['_FILES']   = $files;
+                $GLOBALS['_SERVER']  = $srvFinal;
+                $GLOBALS['_REQUEST'] = $g->request;
+                // $_SESSION is NOT set here — zeal_session_start() binds
+                // $_SESSION = &$g->session via reference in Mode 4.
                 // v0.2.30 (issue #17) — make $g->get/post/cookie/files/server/
                 // request LIVE ALIASES of the superglobals, not per-request
                 // snapshots. A declared `public array $get` is accessed
