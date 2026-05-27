@@ -106,15 +106,19 @@ final class WorkerPool
         $served = $this->workers[$idx]['served'];
 
         // Respawn if the subprocess died mid-request, hit the recycle
-        // limit, or the OS reports it's no longer running (proc_get_status
-        // ['running' => false]). FPM-equivalent recovery semantics.
+        // limit, the OS reports it's no longer running, or the response
+        // carries the _exit flag (the pool worker's shutdown function sent
+        // an IPC frame before exit() terminated the process — the worker
+        // may still be exiting when isAlive checks, so the flag forces
+        // respawn to avoid dispatching to a zombie).
         $err = '';
         if ($resp === null) {
             stream_set_blocking($w['stderr'], false);
-            $err = stream_get_contents($w['stderr']);
+            $err = (string) stream_get_contents($w['stderr']);
         }
-        
-        if ($resp === null || $served >= $this->maxRequestsPerWorker || !$this->isAlive($w)) {
+        $exitFlag = is_array($resp) && !empty($resp['_exit']);
+
+        if ($resp === null || $exitFlag || $served >= $this->maxRequestsPerWorker || !$this->isAlive($w)) {
             $this->respawn($idx);
         } else {
             $this->returnToIdle($idx);

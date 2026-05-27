@@ -54,6 +54,62 @@ $__pw_cookies    = [];   /** @var list<array<string,mixed>> */
 $__pw_rawcookies = [];   /** @var list<array<string,mixed>> */
 $__pw_status     = 200;
 $__pw_shutdown_functions = [];
+$__pw_mid_request = false;
+
+// exit()/die() survival — register a REAL shutdown function BEFORE the uopz
+// override replaces register_shutdown_function. PHP 8.4 has no ExitException;
+// exit() terminates the process immediately. This handler detects that we
+// died mid-request, captures whatever was echoed, and sends the IPC response
+// frame so the parent doesn't see "subprocess died mid-request". The parent
+// will respawn the worker after the process exits.
+register_shutdown_function(function (): void {
+    global $__pw_mid_request, $__pw_headers, $__pw_cookies, $__pw_rawcookies,
+           $__pw_status, $__pw_shutdown_functions;
+
+    if (!$__pw_mid_request) {
+        return;
+    }
+
+    // Flush session to disk before sending the IPC frame — exit()
+    // fires our shutdown handler before PHP's native session_write_close.
+    // Without this, a redirect after exit() races: the next request reads
+    // a stale session file because the old worker hasn't flushed yet.
+    if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+
+    // Run any app-registered shutdown functions (e.g. WordPress cleanup)
+    if (is_array($__pw_shutdown_functions)) {
+        foreach ($__pw_shutdown_functions as $sf) {
+            try {
+                $sf[0](...$sf[1]);
+            } catch (\Throwable $e) {
+                // ignore — we're shutting down
+            }
+        }
+    }
+
+    $body = '';
+    while (ob_get_level() > 0) {
+        $body .= (string) ob_get_clean();
+    }
+
+    $resp = [
+        'status'       => $__pw_status ?: 200,
+        'headers'      => is_array($__pw_headers) ? $__pw_headers : [],
+        'cookies'      => is_array($__pw_cookies) ? $__pw_cookies : [],
+        'rawcookies'   => is_array($__pw_rawcookies) ? $__pw_rawcookies : [],
+        'body'         => $body,
+        'return_value' => null,
+        '_exit'        => true,
+    ];
+
+    try {
+        IPC::writeFrame(STDOUT, $resp);
+    } catch (\Throwable $e) {
+        // stdout may be broken — nothing we can do
+    }
+});
 
 // uopz overrides — set ONCE at boot, survive every iteration. Mirror the
 // shape cgi_worker.php produces so the parent's response builder doesn't
@@ -232,8 +288,10 @@ while ($count < $maxRequests) {
         break; // parent closed pipe → clean exit
     }
 
+    $__pw_mid_request = true;
     $resp = pool_handle_request($req);
     IPC::writeFrame(STDOUT, $resp);
+    $__pw_mid_request = false;
 
     pool_reset_request_state();
     $count++;
