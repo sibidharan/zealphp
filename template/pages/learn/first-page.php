@@ -60,11 +60,11 @@ echo "&lt;h1&gt;Hello, {$name}!&lt;/h1&gt;";
 echo "&lt;p&gt;The time is " . date('H:i:s') . "&lt;/p&gt;";</code></pre>
     <p>Visit <code>/greeting?name=Alice</code> and the page greets Alice by name.</p>
     <p>
-      <strong>Why <code>$g-&gt;get</code> instead of <code>$_GET</code>?</strong> &nbsp;ZealPHP handles
-      many requests at once inside one process. <code>$_GET</code> is a single global array &mdash; if two
-      requests touch it simultaneously, they&rsquo;d overwrite each other. <code>$g</code> is scoped to
-      <em>your</em> request, so it&rsquo;s always safe.
-      <a href="/learn/mental-model">Lesson&nbsp;4</a> has the full picture.
+      <strong>Why <code>$g-&gt;get</code> instead of <code>$_GET</code>?</strong> &nbsp;<code>$g-&gt;get</code>
+      works in every mode ZealPHP supports &mdash; it&rsquo;s always scoped to <em>your</em> request.
+      <code>$_GET</code> also works if you have ext-zealphp installed (it makes superglobals
+      per-request safe), but <code>$g-&gt;get</code> is the recommended convention.
+      <a href="/learn/mental-model">Lesson&nbsp;4</a> explains the difference.
     </p>
 
     <?php App::render('/components/_tryit', [
@@ -112,7 +112,7 @@ App::render('/_master', [
     <?php App::render('/components/_keytakeaways', ['items' => [
       'Files in <code>public/</code> automatically become URLs — no routing config needed',
       'The URL mirrors the file path: <code>public/blog/post.php</code> → <code>/blog/post</code>',
-      'Use <code>$_GET</code> for query parameters, standard PHP for dynamic content',
+      'Use <code>$g-&gt;get</code> for query parameters — works in every mode, always safe',
       '<code>.php</code> extensions are stripped — clean URLs by default',
     ]]); ?>
 

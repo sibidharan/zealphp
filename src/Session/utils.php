@@ -424,6 +424,8 @@ function zeal_session_destroy(): bool
     assert(is_string($session_name));
     unset($g->cookie[$session_name]);
 
+    $g->_session_started = false;
+
     return true;
 }
 
