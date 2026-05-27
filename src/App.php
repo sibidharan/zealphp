@@ -115,6 +115,21 @@ class App
     public static bool $coroutine_isolated_superglobals = false;
 
     /**
+     * Per-request define() isolation. When true, constants defined during
+     * a request are tracked and removed at request end. Boot-time constants
+     * (PHP_VERSION, extension defines, autoloaded class constants) survive.
+     *
+     * WARNING: breaks `require_once` apps — the file won't re-execute to
+     * re-define the constant on the next request. Use only with apps that
+     * guard defines (`defined('X') ?: define('X', ...)`) AND use `require`
+     * (not `require_once`) for the defining file, OR with processIsolation
+     * where each request gets a fresh process.
+     *
+     * Set via `App::defineIsolation(true)` BEFORE `App::run()`.
+     */
+    public static bool $define_isolation = false;
+
+    /**
      * Set true at the top of `App::run()` so the four lifecycle setters
      * (`superglobals`, `processIsolation`, `enableCoroutine`, `hookAll`)
      * can refuse mutations made AFTER the server has booted.
@@ -1615,6 +1630,17 @@ class App
         if ($v === true)  return \OpenSwoole\Runtime::HOOK_ALL;
         if ($v === false) return 0;
         return (int) $v;
+    }
+
+    /**
+     * Per-request define() isolation. Opt-in — see $define_isolation docblock.
+     */
+    public static function defineIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$define_isolation = $on;
+        }
+        return self::$define_isolation;
     }
 
     /**
@@ -6022,14 +6048,18 @@ HELP;
             self::$coroutine_isolated_superglobals = true;
         }
 
-        // Per-request define() / $GLOBALS / process-state isolation are
-        // available via ext-zealphp but NOT auto-activated. Any app using
-        // require_once for files that call define() (virtually all PHP apps)
-        // would break on request 2: require_once is a no-op, so cleaned
-        // constants are never re-defined. These primitives are for:
-        //   - The CGI pool worker (fresh process state per iteration)
-        //   - Apps that explicitly manage their own lifecycle
-        // Use processIsolation(true) for define()-heavy legacy apps.
+        // Per-request define() isolation — opt-in via App::defineIsolation(true).
+        // When enabled, ext-zealphp's define_hook intercepts define() calls,
+        // tracks request-scoped constants, and constants_clear() removes them
+        // at request end. Per-coroutine snapshot/restore on yield/resume
+        // handles concurrent coroutines. Boot-time constants survive.
+        // NOT auto-activated: require_once apps break (see docblock).
+        if (self::$define_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_define_hook')
+        ) {
+            (\zealphp_define_hook(...))((bool) true);
+        }
         // @codeCoverageIgnoreEnd
 
         // Transparent coroutine-safe exec family. Overriding `shell_exec` ALSO
