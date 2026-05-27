@@ -21,13 +21,20 @@
 | 3 | T | F | F | — | SessionManager | Singleton | **Production** |
 | 4 | T | T | F | — | CoSessionManager | Per-coroutine | **Experimental** |
 | 5 | T | F | T | pool | SessionManager | Singleton | **Production** |
-| 6 | T | T | T | pool | CoSessionManager | Per-coroutine | **Broken** |
+| 6 | T | T→F | T | pool | SessionManager | Singleton | **Fallback→5** |
 | 9 | T | F | T | proc | SessionManager | Singleton | **Production** |
-| 10 | T | T | T | proc | CoSessionManager | Per-coroutine | **Broken** |
-| 11 | F | T | T | pool | CoSessionManager | Per-coroutine | **Experimental** |
-| 12 | F | T | T | proc | CoSessionManager | Per-coroutine | **Experimental** |
+| 10 | T | T→F | T | proc | SessionManager | Singleton | **Fallback→9** |
+| 11 | F | T | T→F | pool | CoSessionManager | Per-coroutine | **Fallback→1** |
+| 12 | F | T | T→F | proc | CoSessionManager | Per-coroutine | **Fallback→1** |
 
 Per-coroutine `$g` via `App::$coroutine_isolated_superglobals` when ext-zealphp is loaded (Mode 4).
+
+**Automatic fallbacks** (applied at `App::run()` boot):
+- `pi=T + ec=T + sg=T` → force `ec=false + hookAll=0` (→ Mode 5 or 9)
+- `pi=T + ec=T + sg=F` → force `pi=false` (→ Mode 1, since sg=F requires ec=T)
+
+Reason: CGI subprocess dispatch uses blocking pipe I/O (`proc_open` + `fread`)
+which is incompatible with coroutine scheduling.
 
 ## Test Results
 
@@ -38,18 +45,18 @@ Mode 2  (reject)     — REJECTED AT BOOT (RuntimeException) —
 Mode 3  (sync)       P      P        P        P         P      P
 Mode 4  (mode4)      P      F**      P        P         P      F**
 Mode 5  (pool)       P      P        P        P         P      P
-Mode 6  (ec+pool)    F      F        F        F         F      F
-Mode 9  (proc)       P      P        -***     P         P      P
-Mode 10 (ec+proc)    F      F        F        F         F      F
-Mode 11 (F+pool)     P      F****    P        P         P      F
-Mode 12 (F+proc)     P      F****    -***     P         P      F
+Mode 6  (→5)         P      P        P        P         P      P
+Mode 9  (proc)       P      P        P        P         P      P
+Mode 10 (→9)         P      P        P        P         P      P
+Mode 11 (→1)         P      P        P       N/A*      N/A*   N/A*
+Mode 12 (→1)         P      P        P       N/A*      N/A*   N/A*
 ```
 
-P = Pass, F = Fail, - = Partial
+P = Pass, F = Fail, N/A = not applicable for this mode
 
 ### Notes
 
-*Mode 1 (sg=false): `$_GET`/`$_SERVER` not populated by design. Use `$g->get`, `$g->server`.
+*Mode 1/11/12 (sg=false): `$_GET`/`$_SERVER` not populated by design. Use `$g->get`, `$g->server`.
 Traditional PHP patterns that read `$_GET` directly need sg=true.
 
 **Mode 4: PHP auto-global CV caching. `$_SESSION` zend_array pointer is cached per compiled
@@ -120,19 +127,20 @@ isolation. `exit()`/`die()` captured by shutdown handler — worker respawns aut
 all requests share the process-wide singleton `$g`, but without superglobals
 the framework expects per-request isolation. Throws `RuntimeException` at boot.
 
-### Why Modes 6 and 10 are Broken
+### Modes 6, 10, 11, 12 — Automatic Fallback
 
 `ec=true + pi=true` (coroutines + process isolation): the CGI subprocess dispatch
 (`WorkerPool::dispatch` / `cgiSubprocess`) uses blocking `proc_open` + `fread` on
-pipes. With `hookAll=HOOK_ALL`, OpenSwoole hooks these I/O calls and yields the
-coroutine. But the pool worker subprocess is a separate process — it does not
-participate in the coroutine scheduler. The hooked `fread` on the IPC pipe yields,
-but the data arrives on the OS pipe (not via OpenSwoole's event loop), causing
-deadlocks and timeouts.
+pipes, which is incompatible with coroutine scheduling regardless of `hookAll`.
 
-**Fix (future)**: use `Coroutine\System::exec()` or coroutine-aware pipe reads for
-CGI dispatch when `hookAll` is active. Or document that `ec=true + pi=true`
-requires `hookAll(false)` (explicit opt-out).
+`App::run()` detects this at boot and applies automatic fallbacks:
+- **sg=T** (modes 6/10): force `ec=false + hookAll=0` → falls back to Mode 5/9
+  (sync CGI pool/proc). All tests pass identically.
+- **sg=F** (modes 11/12): force `pi=false` → falls back to Mode 1 (in-process
+  coroutine). Can't force `ec=false` because `sg=F+ec=F` is rejected (coroutines
+  required for per-request `$g` isolation).
+
+A warning is logged via `elog()` so the configuration mismatch is visible.
 
 ### Mode 4 Auto-Global Caching (Deep Dive)
 
