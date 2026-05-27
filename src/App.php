@@ -5961,15 +5961,14 @@ HELP;
             (\zealphp_coroutine_superglobals(...))((bool) true);
         }
 
-        // Per-request define() isolation: intercept define() so constants
-        // created during a request are tracked and removed on request end.
-        // CoSessionManager/SessionManager calls zealphp_constants_clear()
-        // in their finally blocks. Boot-time constants (from autoloaders,
-        // framework init) are defined BEFORE this hook activates, so they
-        // survive untouched.
-        if (\extension_loaded('zealphp') && \function_exists('zealphp_define_hook')) {
-            (\zealphp_define_hook(...))((bool) true);
-        }
+        // Per-request define() / $GLOBALS / process-state isolation are
+        // available via ext-zealphp but NOT auto-activated. Any app using
+        // require_once for files that call define() (virtually all PHP apps)
+        // would break on request 2: require_once is a no-op, so cleaned
+        // constants are never re-defined. These primitives are for:
+        //   - The CGI pool worker (fresh process state per iteration)
+        //   - Apps that explicitly manage their own lifecycle
+        // Use processIsolation(true) for define()-heavy legacy apps.
         // @codeCoverageIgnoreEnd
 
         // Transparent coroutine-safe exec family. Overriding `shell_exec` ALSO
