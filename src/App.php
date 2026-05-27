@@ -6412,12 +6412,12 @@ HELP;
             // is intentionally NOT touched here — the session manager owns its
             // own write path (file load + uopz session_start).
             if (App::$superglobals) {
-                $GLOBALS['_GET']     = $get;
-                $GLOBALS['_POST']    = $post;
-                $GLOBALS['_COOKIE']  = $cookie;
-                $GLOBALS['_FILES']   = $files;
-                $GLOBALS['_SERVER']  = $srvFinal;
-                $GLOBALS['_REQUEST'] = $g->request;
+                $_GET     = $get;
+                $_POST    = $post;
+                $_COOKIE  = $cookie;
+                $_FILES   = $files;
+                $_SERVER  = $srvFinal;
+                $_REQUEST = $g->request;
                 // v0.2.30 (issue #17) — make $g->get/post/cookie/files/server/
                 // request LIVE ALIASES of the superglobals, not per-request
                 // snapshots. A declared `public array $get` is accessed
