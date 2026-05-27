@@ -824,6 +824,8 @@ class App
             $file_name = '/'.basename($php_self);
             $cwd = dirname($php_self);
             self::$default_php_self = $file_name;
+        }
+        if (self::$middleware_stack === null) {
             $stack = (new StackHandler())->add(new ResponseMiddleware());
             assert($stack instanceof StackHandler);
             self::$middleware_stack = $stack;
@@ -3217,6 +3219,7 @@ class App
             ];
         }
 
+        $obBase = ob_get_level();
         ob_start();
         $result = null;
         try {
@@ -3234,9 +3237,16 @@ class App
         } catch (\Throwable $e) {
             // PHP 8.4+: exit()/die() throw \ExitException instead of
             // terminating the process. Treat as clean halt — worker survives.
-            // @codeCoverageIgnoreStart — ExitException only exists on PHP 8.4+; CI coverage runs on 8.3
-            if ($e::class === 'ExitException' && method_exists($e, 'getStatus')) {
+            // @codeCoverageIgnoreStart — ExitException only exists on PHP 8.4+ / OpenSwoole
+            if (($e instanceof \OpenSwoole\ExitException || $e::class === 'ExitException')
+                && method_exists($e, 'getStatus')) {
                 $status = $e->getStatus();
+                // Collapse nested OB levels (apps like Adminer push extra buffers
+                // before exit()). Flush inner buffers into the one ob_start()
+                // at the top of executeFile() created ($obBase + 1).
+                while (ob_get_level() > $obBase + 1) {
+                    ob_end_flush();
+                }
                 if (is_int($status) && $status >= 100 && $status <= 599) {
                     $result = $status;
                 } elseif (is_string($status) && $status !== '') {
@@ -6767,14 +6777,18 @@ class ResponseMiddleware implements MiddlewareInterface
                 || ($e::class === 'ExitException' && method_exists($e, 'getStatus'))
             ) {
                 $exitStatus = $e->getStatus();
+                $buffered = '';
+                while (ob_get_level() > 0) {
+                    $buffered = (string)ob_get_clean() . $buffered;
+                }
                 if ($exitStatus === 0 || $exitStatus === null) {
-                    return (new Response(''))->withStatus($g->status ?? 200);
+                    return (new Response($buffered))->withStatus($g->status ?? 200);
                 } elseif (is_string($exitStatus)) {
-                    return (new Response($exitStatus))->withStatus($g->status ?? 200);
+                    return (new Response($buffered . $exitStatus))->withStatus($g->status ?? 200);
                 } elseif (is_int($exitStatus) && $exitStatus >= 100 && $exitStatus <= 599) {
-                    return (new Response(''))->withStatus($exitStatus);
+                    return (new Response($buffered))->withStatus($exitStatus);
                 } else {
-                    return (new Response(''))->withStatus($g->status ?? 200);
+                    return (new Response($buffered))->withStatus($g->status ?? 200);
                 }
             }
             // If this dispatch was itself invoked by renderError (error handler
