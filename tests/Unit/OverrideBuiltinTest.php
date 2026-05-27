@@ -197,9 +197,15 @@ final class OverrideBuiltinTest extends TestCase
         $validator->invoke(null, true, 0, false);
         $this->addToAssertionCount(1);
 
-        // superglobals(false) + no hooks + no coroutines = always safe
-        $validator->invoke(null, false, 0, false);
-        $this->addToAssertionCount(1);
+        // superglobals(false) + no coroutines = now rejected (#137)
+        try {
+            $validator->invoke(null, false, 0, false);
+            $this->fail('Expected RuntimeException for sg(false)+ec(false)');
+        } catch (\ReflectionException $e) {
+            $this->assertInstanceOf(\RuntimeException::class, $e->getPrevious() ?? $e);
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('superglobals(false)', $e->getMessage());
+        }
     }
 
     #[\PHPUnit\Framework\Attributes\WithoutErrorHandler]
