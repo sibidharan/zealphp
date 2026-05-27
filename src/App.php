@@ -3250,14 +3250,13 @@ class App
             ];
         }
 
-        // Mode 4 session reference is established in zeal_session_start()
+        // Mode 4: $_SESSION reference is established in zeal_session_start()
         // ($_SESSION = &$g->session) so writes go directly to $g->session.
         //
-        // Mode 4: populate ALL request superglobals from the canonical source
-        // ($g->openswoole_request). PHP auto-global caching across coroutines
-        // means $_GET/$_POST/$_COOKIE/$_SERVER/$_FILES return stale values
-        // from a prior coroutine. parse_str fixes $_GET in-place; for the
-        // others, use the same approach via reference binding.
+        // ext-zealphp's PG(http_globals) update handles the auto-global JIT
+        // at the driver level. But included files may have cached the
+        // auto-global from a prior coroutine's EG. Refresh here too so
+        // the included file's scope sees current request data.
         if (self::$coroutine_isolated_superglobals && $g->openswoole_request !== null) {
             $req = $g->openswoole_request;
             $qs = is_string($g->server['QUERY_STRING'] ?? null) ? $g->server['QUERY_STRING'] : '';
