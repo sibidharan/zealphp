@@ -87,7 +87,7 @@ class RequestContext
 
     public static function instance(): self
     {
-        if (!App::$superglobals) {
+        if (!App::$superglobals || App::$coroutine_isolated_superglobals) {
             $cid = \OpenSwoole\Coroutine::getCid();
             if ($cid >= 0) {
                 $context = \OpenSwoole\Coroutine::getContext($cid);
