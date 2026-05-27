@@ -12,6 +12,7 @@ A retrospective record of every substantive technical critique ZealPHP has recei
 |---|---|---|
 | 2026-05-15 → 2026-05-16 | r/PHP thread + #phpc Discord | v0.2.4, v0.2.5, v0.2.6, v0.2.7, v0.2.8 (framework) + v0.2.4, v0.2.5, v0.2.6, v0.2.7, v0.2.8, v0.2.9 (scaffold) |
 | 2026-05-16 (later) | Pastebin line-by-line review of `app.php` | v0.2.13 — `CorsMiddleware` env-var origins + wildcard warning; main `app.php` rewrite (PSR-12, drop unused, fix `/json` session leak, remove `exit()` route + 9 junk routes, demo middleware moved to `examples/`); **static_handler_locations prefix-collision bug fix** (`/js` was intercepting `/json`); scaffold app.php demonstrates explicit CORS origins |
+| 2026-05-18 → 2026-05-27 | Reddit DM (Deep_Ad1959 / s4lai) | PR #150 (SAPI parity, Mode 4 superglobal isolation, pool worker exit survival), PR #151 (define isolation, ini_set isolation, static property snapshot, session file locking, 38 new tests) |
 | 2026-05-16 (continuing) | Pastebin reviewer's PHPStan-level-1 mocking subtext | **v0.2.14 → v0.2.15 → v0.2.16 — PHPStan baseline climbed from level 1 to level 9 (PHPStan 1.x).** v0.2.14 deleted `src/Session.php` dead code + fixed real `StringUtils` casting bugs + landed level 5. v0.2.15 was the annotation cliff (369 mechanical `@param`/`@return`/`array<K, V>` fixes; level 6). v0.2.16 closed the design-tax with 74 inline `@phpstan-ignore-next-line` annotations (each with a one-line reason) + fixed 6 real bugs along the way (`Auth::login`/`currentUser` null-handling, `Cache` miss handling, `ZealAPI::processApi` nullable request crash). |
 | 2026-05-16 (final) | PHPStan 2.x released level 10 | **v0.2.17 — upgraded PHPStan `^1.12` → `^2.1` + climbed to level 10.** PHPStan 2.x's stricter checks added 96 regression errors at level 9 (mostly redundant `?? null` on now-strict typed properties + new `isset.property` / `nullCoalesce.property` identifiers). 156 more new at level 10 (stricter mixed-type rules requiring explicit narrowing). Closed with 26 redundant `?? defaultValue` removals + targeted `assert()` narrowing + 7 net new inline ignores (75 total). Symfony 8+, Laravel 12+, and Mezzio also score level 10. ZealPHP joins the club while still running unmodified PHP-FPM-era code via uopz, `__call`, and reflection. Also in v0.2.17: `vendor/` removed from git (~4300 fewer tracked files), README badge wired to shields.io endpoint via `.github/badges/phpstan.json` with CI sync verifier, PHP 8.5 added to matrix as experimental, PHP 8.4 Xdebug-flake fixed by dropping coverage on 8.4. |
 
@@ -31,6 +32,7 @@ Five framework releases plus scaffold sync in 24 hours, all triggered by communi
 | Tiffany | Discord | "Is it a security nightmare?" — the lurker question that mattered most to address publicly |
 | PHPStan-level-1 mocker | Discord | No technical content; useful for sharpening the level-1 trade-off explanation |
 | **coroutine-isolation commenter** | Reddit (latest) | **Second-sharpest critic.** Articulated the discipline-contract framing: isolation + recycling, not either alone. Raised `ini_set`/handler-stack/pool-poisoning/opcache as the four real production-trust gaps |
+| **Deep_Ad1959 (s4lai)** | Reddit DM | **Long-running architectural collaborator.** Over 3 weeks of sustained technical review: federated WebSocket presence cleanup design, ext-zealphp coroutine isolation validation (forced interleaving test suggestion), define-time vs namespace constant isolation question (drove the define_hook split), concurrent session write race identification (drove flock implementation), connection pool poisoning framing, Rust MongoDB driver tail-latency review, distributed stress-test methodology |
 | **app.php pastebin reviewer** | Pastebin link | Line-by-line annotation of the main repo's `app.php`. Most comments were about a demo file (out of `/src/` scope), but the critique uncovered: misleading `AuthenticationMiddleware` name (didn't authenticate), `/exittest` calling `exit()` (kills OpenSwoole workers — actually dangerous), session-data leak in `/json`, hardcoded timezone, backtick `git describe`, and most importantly the **CORS `*` default**. Also indirectly led to discovering the `/js` static-handler prefix-collision framework bug. |
 
 ---
@@ -370,6 +372,38 @@ The "deliberate trade-off" framing was partly true — the ~57 design-tax sites 
 - **ROADMAP restructured** in this release: explicit policy that v0.2.x is the security + hardening + migration series, with the version-by-version trace inline. Connection-pool work moved out of v0.3 (was misclassified as observability) and into the v0.2.x remaining items — it's a production-trust gap, same class as `max_request` and the session fix here.
 
 ---
+
+### PR #150 — Superglobal isolation + Mode 4 breakthrough (22 commits)
+**Triggered by:** Deep_Ad1959's ext-zealphp coroutine isolation validation + coroutine-isolation commenter's original discipline-contract framing
+
+- **ext-zealphp SAPI parity:** `PG(http_globals)` updated per-request — PHP's auto-global JIT now resolves `$_GET`/`$_POST`/`$_COOKIE`/`$_SERVER`/`$_FILES` correctly across coroutines. The CLI SAPI never initializes these; ext-zealphp implements the SAPI contract that CLI lacks. IS_UNDEF guard prevents segfault.
+- **Per-coroutine RequestContext:** `RequestContext::instance()` returns per-coroutine instances when `coroutine_isolated_superglobals=true` (Mode 4). Framework state (`$g->zealphp_response`, session, error handlers) isolated per request.
+- **`$_SESSION` reference binding:** `$_SESSION = &$g->session` in `zeal_session_start()` — writes go directly to `$g->session`, no COW separation. Session ID stored in `session_params['session_id']` (immune to auto-global caching).
+- **Pool worker exit()/die() survival:** Shutdown handler captures response before process death. `_exit` flag prevents zombie worker race.
+- **Lifecycle mode fallbacks:** `pi=T+ec=T` → force `ec=false` (sg=T) or `pi=false` (sg=F). All 10 non-rejected modes boot and serve.
+- **4 production-ready modes:** Mode 1 (default), Mode 3 (sync), Mode 4 (superglobals+coroutines), Mode 5 (CGI pool).
+- Full architecture docs: `docs/architecture/2026-05-27-lifecycle-matrix.md`, `docs/architecture/2026-05-27-superglobal-isolation.md`.
+
+### PR #151 — Per-coroutine process isolation: constants, ini_set, statics, session locking
+**Triggered by:** Deep_Ad1959's define-time isolation question + concurrent session write race identification
+
+- **`App::defineIsolation(true)`:** Opt-in per-request constant cleanup via `zealphp_define_hook` + `zealphp_constants_clear`. Split by define-time: boot-time constants (PHP_VERSION, E_ALL, extension defines) survive; request-time userland `define()` calls are tracked and cleaned. Per-coroutine snapshot/restore on yield/resume for concurrent coroutines.
+- **`zealphp_ini_restore()`:** Restores all `ini_set()` modifications at request end via `zend_restore_ini_entry()`. Wired in CoSessionManager + SessionManager finally blocks.
+- **Static property snapshot/restore:** `CE_STATIC_MEMBERS` saved/restored per coroutine on yield/resume. Only processes accessed classes (lazy — skips cold classes).
+- **Session file locking:** `flock(LOCK_SH)` on read, `flock(LOCK_EX)` on write with re-read-merge-write under the lock. Apache mod_session parity. Closes the concurrent coroutine session race where two writers silently clobber each other.
+- **38 new unit tests:** DefineIsolationTest, LifecycleModeTest, SessionLifecycleModeTest, WorkerPoolExitFlagTest. Total: 3045 tests, 5838 assertions.
+
+### Deep_Ad1959's review arc — changes driven and pending
+
+| Topic | Status | What it drove |
+|---|---|---|
+| Federated WebSocket presence cleanup | Implemented (v0.2.40) | Deterministic owner sweep, soft sweeper lease, heartbeat+liveness |
+| ext-zealphp coroutine validation | Shipped (PR #150) | Forced-interleaving test methodology, SAPI parity discovery |
+| define-time vs namespace constant split | Shipped (PR #151) | `zealphp_define_hook` with define-time tracking, `App::defineIsolation()` |
+| Concurrent session write race | Shipped (PR #151) | `flock(LOCK_SH/LOCK_EX)` read-merge-write |
+| Connection pool poisoning | **Pending** | `PDOPool` + `RedisPool` with reset-on-checkout semantics |
+| Rust MongoDB driver tail-latency | **Pending** | p99.9 under concurrent burst (1-async-worker queue depth) |
+| Distributed stress test methodology | **Pending** | CTF-driven load test with coordinated student DDoS tool |
 
 ## Outstanding work — remaining v0.2.x items
 
