@@ -17,6 +17,21 @@ function initPageScripts(root) {
     pre.appendChild(btn);
   });
 
+  // Quick-start copy buttons (.qs-copy with data-copy attribute).
+  // Bind once per button so re-runs from htmx:afterSettle don't stack.
+  (root || document).querySelectorAll('.qs-copy[data-copy]').forEach(btn => {
+    if (btn.dataset.qsBound) return;
+    btn.dataset.qsBound = '1';
+    btn.addEventListener('click', () => {
+      navigator.clipboard.writeText(btn.dataset.copy).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = 'copied!';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1200);
+      });
+    });
+  });
+
   // Generic demo panel runner. Bind once per button — initPageScripts may
   // run again on later settles, and re-adding the listener would stack
   // duplicate fetches per click.

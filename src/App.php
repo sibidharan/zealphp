@@ -1316,8 +1316,9 @@ class App
      *
      * @param string $extension  File extension including the dot, e.g. `'.py'`, `'.pl'`.
      * @param array<string, mixed> $config
-     *   `'mode'`        — `'proc'` | `'fork'` | `'fcgi'` (required)
+     *   `'mode'`        — `'pool'` | `'proc'` | `'fcgi'` (required)
      *   `'interpreter'` — full path to interpreter binary (`proc` mode only; `null` = direct exec via shebang)
+     *   `'exec_paths'`  — URL prefixes where this extension may execute, e.g. `['/cgi-bin']`. Files outside these prefixes return 403 (Apache `Options +ExecCGI` parity).
      *   `'address'`     — FastCGI backend address, `"host:port"` or `"unix:/path"` (`fcgi` mode only)
      *   `'fcgi_params'` — extra FCGI params merged into the CGI env after `buildCgiEnv()` (`fcgi` mode only)
      *
