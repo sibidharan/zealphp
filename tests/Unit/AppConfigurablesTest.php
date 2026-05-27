@@ -468,10 +468,7 @@ class AppConfigurablesTest extends TestCase
         // superglobals=false → enable_coroutine=true by default.
         $this->assertTrue(App::enableCoroutine());
         App::superglobals(true);
-        // With ext-zealphp: superglobals(true) auto-enables coroutines (per-coroutine safe).
-        // Without ext-zealphp: superglobals(true) → coroutines off (race prevention).
-        $expected = \extension_loaded('zealphp') ? true : false;
-        $this->assertSame($expected, App::enableCoroutine());
+        $this->assertFalse(App::enableCoroutine());
         App::superglobals(false);
     }
 
@@ -498,10 +495,7 @@ class AppConfigurablesTest extends TestCase
         // superglobals=false → HOOK_ALL.
         $this->assertSame(\OpenSwoole\Runtime::HOOK_ALL, App::hookAll());
         App::superglobals(true);
-        // With ext-zealphp: superglobals(true) auto-enables HOOK_ALL (per-coroutine safe).
-        // Without ext-zealphp: superglobals(true) → hookAll=0 (race prevention).
-        $expected = \extension_loaded('zealphp') ? \OpenSwoole\Runtime::HOOK_ALL : 0;
-        $this->assertSame($expected, App::hookAll());
+        $this->assertSame(0, App::hookAll());
         App::superglobals(false);
     }
 

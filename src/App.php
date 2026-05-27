@@ -1559,11 +1559,11 @@ class App
         if (self::$enable_coroutine_override !== null) {
             return self::$enable_coroutine_override;
         }
-        // With ext-zealphp, superglobals(true) can safely run coroutines
-        // (per-coroutine save/restore). Default to coroutines ON.
-        if (self::$superglobals && \extension_loaded('zealphp')) {
-            return true;
-        }
+        // superglobals(true) defaults to coroutines OFF — SessionManager
+        // uses native session_set_save_handler() which is not coroutine-safe.
+        // ext-zealphp makes $_GET/$_SESSION per-coroutine safe, but the
+        // session lifecycle integration needs work before auto-enabling.
+        // Users can explicitly set App::enableCoroutine(true) to opt in.
         return !self::$superglobals;
     }
 
@@ -1598,11 +1598,6 @@ class App
         }
         $v = self::$hook_all_override;
         if ($v === null) {
-            // With ext-zealphp, superglobals(true) safely supports coroutines
-            // (per-coroutine save/restore), so HOOK_ALL is safe too.
-            if (self::$superglobals && \extension_loaded('zealphp')) {
-                return \OpenSwoole\Runtime::HOOK_ALL;
-            }
             return self::$superglobals ? 0 : \OpenSwoole\Runtime::HOOK_ALL;
         }
         if ($v === true)  return \OpenSwoole\Runtime::HOOK_ALL;
