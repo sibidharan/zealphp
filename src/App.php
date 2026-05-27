@@ -3252,6 +3252,22 @@ class App
 
         // Mode 4 session reference is established in zeal_session_start()
         // ($_SESSION = &$g->session) so writes go directly to $g->session.
+        //
+        // Mode 4: populate ALL request superglobals from the canonical source
+        // ($g->openswoole_request). PHP auto-global caching across coroutines
+        // means $_GET/$_POST/$_COOKIE/$_SERVER/$_FILES return stale values
+        // from a prior coroutine. parse_str fixes $_GET in-place; for the
+        // others, use the same approach via reference binding.
+        if (self::$coroutine_isolated_superglobals && $g->openswoole_request !== null) {
+            $req = $g->openswoole_request;
+            $qs = is_string($g->server['QUERY_STRING'] ?? null) ? $g->server['QUERY_STRING'] : '';
+            parse_str($qs, $_GET);
+            $_POST    = is_array($req->post) ? $req->post : [];
+            $_COOKIE  = is_array($req->cookie) ? $req->cookie : [];
+            $_FILES   = is_array($req->files) ? $req->files : [];
+            $_REQUEST = $_GET + $_POST;
+            $_SERVER  = $g->server;
+        }
 
         $obBase = ob_get_level();
         ob_start();
