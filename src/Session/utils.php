@@ -211,7 +211,17 @@ function zeal_session_start(): bool
     } else {
         $session_file = $save_path . '/sess_' . $session_id;
         if (file_exists($session_file)) {
-            $contents = @file_get_contents($session_file);
+            // Shared lock prevents reading a partially-written file
+            // from a concurrent write_close on another coroutine.
+            $fp = @fopen($session_file, 'r');
+            if ($fp !== false) {
+                flock($fp, LOCK_SH);
+                $contents = stream_get_contents($fp);
+                flock($fp, LOCK_UN);
+                fclose($fp);
+            } else {
+                $contents = false;
+            }
             if (is_string($contents) && $contents !== '') {
                 $session_data = php_session_decode_to_array($contents);
             }
@@ -419,8 +429,39 @@ function zeal_session_write_close(): bool
             /** @var array<string, mixed> $data */
             $wHandler->write((string) $session_id, php_session_encode_from_array($data));
         } else {
+            // File-based sessions: flock(LOCK_EX) serializes concurrent
+            // writes to the same session file (Apache mod_session parity).
+            // Without locking, two coroutines writing the same session race:
+            // the loser's changes are silently lost. The lock is held briefly
+            // (encode + write + flush) — negligible performance impact.
+            //
+            // Read-merge-write under the lock: re-read the file's current
+            // state (another coroutine may have written since our read at
+            // session_start), merge with our changes, write back.
             /** @var array<string, mixed> $data */
-            file_put_contents($session_file, php_session_encode_from_array($data));
+            $fp = fopen($session_file, 'c+');
+            if ($fp !== false) {
+                flock($fp, LOCK_EX);
+                $diskContents = stream_get_contents($fp);
+                if (is_string($diskContents) && $diskContents !== '') {
+                    $diskData = php_session_decode_to_array($diskContents);
+                    $current = $data;
+                    $data = array_merge($diskData, $current);
+                    foreach ($g->session_loaded_keys as $loadedKey) {
+                        if (!array_key_exists($loadedKey, $current)) {
+                            unset($data[$loadedKey]);
+                        }
+                    }
+                }
+                ftruncate($fp, 0);
+                rewind($fp);
+                fwrite($fp, php_session_encode_from_array($data));
+                fflush($fp);
+                flock($fp, LOCK_UN);
+                fclose($fp);
+            } else {
+                file_put_contents($session_file, php_session_encode_from_array($data));
+            }
         }
 
         // Mark inactive — in both modes. Unset the typed slot in coroutine
