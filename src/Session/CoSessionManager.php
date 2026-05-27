@@ -142,6 +142,11 @@ class CoSessionManager
             }
             $g->session = [];
             unset($g->session);
+            if (\ZealPHP\App::$define_isolation
+                && \function_exists('zealphp_constants_clear')
+            ) {
+                (\zealphp_constants_clear(...))();
+            }
         }
     }
 }

@@ -215,6 +215,11 @@ class SessionManager
                 $_SESSION = [];
                 unset($_SESSION);
             }
+            if (\ZealPHP\App::$define_isolation
+                && \function_exists('zealphp_constants_clear')
+            ) {
+                (\zealphp_constants_clear(...))();
+            }
         }
     }
 }
