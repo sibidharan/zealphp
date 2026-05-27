@@ -6286,7 +6286,14 @@ HELP;
             });
         }
 
-        $SessionManager = self::$superglobals ?  'ZealPHP\Session\SessionManager' : 'ZealPHP\Session\CoSessionManager';
+        // When coroutines are enabled, always use CoSessionManager — it uses
+        // per-coroutine RequestContext and overridden zeal_session_start(),
+        // both coroutine-safe. SessionManager uses PHP's native session_start()
+        // + session_set_save_handler() which race under concurrent coroutines.
+        // sg(true)+ec(true) with ext-zealphp needs CoSessionManager (#134).
+        $SessionManager = ($enableCoroutine || !self::$superglobals)
+            ? 'ZealPHP\Session\CoSessionManager'
+            : 'ZealPHP\Session\SessionManager';
 
         assert(self::$middleware_stack !== null);
         foreach (array_reverse(self::$middleware_wait_stack) as $middleware) {
