@@ -5977,12 +5977,25 @@ HELP;
         // process outside the coroutine scheduler → deadlock. Force hooks off
         // for CGI modes; coroutines still work (each request gets a coroutine),
         // just without I/O hooking.
+        // processIsolation + enableCoroutine: CGI subprocess dispatch uses
+        // blocking pipe I/O incompatible with coroutine scheduling. When
+        // sg=true, force both ec=false + hookAll=0 (falls back to sync Mode
+        // 5/9). When sg=false, ec=false would be rejected by validation
+        // (sg=F+ec=F requires coroutines for per-request $g isolation), so
+        // force pi=false instead (falls back to in-process Mode 1).
         if (App::processIsolation() && $enableCoroutine) {
-            elog('[lifecycle] enableCoroutine forced to false: processIsolation=true '
-                . '— CGI subprocess dispatch is incompatible with coroutine mode '
-                . '(blocking pipe I/O in the request handler prevents coroutine scheduling). '
-                . 'Use processIsolation(false) for coroutine mode, or enableCoroutine(false) for CGI.', 'warn');
-            $enableCoroutine = false;
+            if (App::$superglobals) {
+                elog('[lifecycle] processIsolation + enableCoroutine: forcing ec=false + hookAll=0 '
+                    . '— CGI pipe I/O incompatible with coroutines. Workers run synchronously (Mode 5/9).', 'warn');
+                $enableCoroutine = false;
+                $hookFlags = 0;
+            } else {
+                elog('[lifecycle] processIsolation + enableCoroutine(sg=false): forcing pi=false '
+                    . '— CGI pipe I/O incompatible with coroutines and sg=false requires ec=true. '
+                    . 'Files run in-process (Mode 1).', 'warn');
+                App::$process_isolation = false;
+                App::$coproc_implicit_request_handler = false;
+            }
         }
 
         // Surface combinations that are syntactically allowed but race
