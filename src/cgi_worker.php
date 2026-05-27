@@ -172,22 +172,46 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
     }, true);
 
     $z_override('setcookie', function(
-        string $name, string $value = '', $expires_or_options = 0,
+        string $name, string $value = '', int|array $expires_or_options = 0,
         string $path = '', string $domain = '', bool $secure = false,
         bool $httponly = false, string $samesite = ''
     ) {
         global $__z_cookies;
-        $__z_cookies[] = [$name, $value, $expires_or_options, $path, $domain, $secure, $httponly];
+        if (is_array($expires_or_options)) {
+            $o = $expires_or_options;
+            $__z_cookies[] = [
+                $name, $value,
+                (int)($o['expires'] ?? 0),
+                (string)($o['path'] ?? ''),
+                (string)($o['domain'] ?? ''),
+                (bool)($o['secure'] ?? false),
+                (bool)($o['httponly'] ?? false),
+            ];
+        } else {
+            $__z_cookies[] = [$name, $value, $expires_or_options, $path, $domain, $secure, $httponly];
+        }
         return true;
     }, true);
 
     $z_override('setrawcookie', function(
-        string $name, string $value = '', $expires_or_options = 0,
+        string $name, string $value = '', int|array $expires_or_options = 0,
         string $path = '', string $domain = '', bool $secure = false,
         bool $httponly = false
     ) {
         global $__z_rawcookies;
-        $__z_rawcookies[] = [$name, $value, $expires_or_options, $path, $domain, $secure, $httponly];
+        if (is_array($expires_or_options)) {
+            $o = $expires_or_options;
+            $__z_rawcookies[] = [
+                $name, $value,
+                (int)($o['expires'] ?? 0),
+                (string)($o['path'] ?? ''),
+                (string)($o['domain'] ?? ''),
+                (bool)($o['secure'] ?? false),
+                (bool)($o['httponly'] ?? false),
+            ];
+        } else {
+            $__z_rawcookies[] = [$name, $value, $expires_or_options, $path, $domain, $secure, $httponly];
+        }
         return true;
     }, true);
 

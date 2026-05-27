@@ -84,7 +84,12 @@ class CoSessionManager
         // skip reading the PHPSESSID cookie, calling zeal_session_start, and
         // emitting our own Set-Cookie header. The zeal_session_* uopz
         // overrides remain available to user code regardless.
-        $manageSession = \ZealPHP\App::$session_lifecycle;
+        //
+        // Also skip when the CGI subprocess owns sessions (pi=true) — same
+        // guard SessionManager has. Without this, CoSessionManager and the
+        // subprocess both drive session I/O on the same file, racing writes.
+        $manageSession = \ZealPHP\App::$session_lifecycle
+            && !\ZealPHP\App::cgiOwnsSessions();
 
         if ($manageSession) {
             $sessionName = zeal_session_name();

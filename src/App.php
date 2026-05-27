@@ -5972,6 +5972,17 @@ HELP;
         $hookFlags = App::hookAll();
         $enableCoroutine = App::enableCoroutine();
 
+        // processIsolation + hookAll: hooked fread/fwrite on CGI subprocess
+        // pipes yields the coroutine, but the subprocess is a separate OS
+        // process outside the coroutine scheduler → deadlock. Force hooks off
+        // for CGI modes; coroutines still work (each request gets a coroutine),
+        // just without I/O hooking.
+        if (App::processIsolation() && $hookFlags !== 0 && $enableCoroutine) {
+            elog('[lifecycle] hookAll forced to 0: processIsolation=true + enableCoroutine=true '
+                . '— hooked I/O on CGI pipes causes deadlocks. Coroutines remain active without I/O hooks.', 'warn');
+            $hookFlags = 0;
+        }
+
         // Surface combinations that are syntactically allowed but race
         // process-wide superglobals against concurrent coroutines / hooked
         // I/O. We warn rather than refuse — see App::hookAll() docblock.
