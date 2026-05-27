@@ -54,13 +54,15 @@ foreach ($demos as [$id, $title, $url, $code]) {
 </table>
 
 <div class="callout info coro-mt">
-  <strong>App::superglobals(false)</strong> must be called before App::init() to enable coroutine mode.
-  In coroutine mode, every request runs in its own coroutine with isolated <code>RequestContext::instance()</code> state (formerly named <code>G</code>; <code>G</code> remains as a class alias for backward compatibility).
+  <strong>Coroutines work in both modes.</strong> With <code>ext-zealphp</code>, <code>superglobals(true) + enableCoroutine(true)</code>
+  is fully safe — <code>$_GET</code>/<code>$_SESSION</code> are saved/restored per coroutine.
+  With <code>superglobals(false)</code> (scaffold default), each coroutine gets isolated <code>RequestContext::instance()</code> state.
+  Either way, every request runs in its own coroutine.
 </div>
 
 <h2 id="state-parity" class="coro-h2-section"><code>$g</code> vs <code>$_*</code> — request state in both modes</h2>
 <div class="callout info coro-callout">
-  <p class="coro-m-0"><strong>One-line rule.</strong> Use <code>$g-&gt;get</code>, <code>$g-&gt;post</code>, <code>$g-&gt;cookie</code>, <code>$g-&gt;server</code>, <code>$g-&gt;session</code>, <code>$g-&gt;files</code> (where <code>$g = RequestContext::instance()</code>). It works identically in both <code>App::superglobals(true)</code> and <code>App::superglobals(false)</code>. Reserve <code>$_GET</code>, <code>$_POST</code>, <code>$_SERVER</code>, <code>$_SESSION</code>, <code>$_COOKIE</code>, <code>$_FILES</code> for legacy code that you can't change — and only when you're in superglobals mode.</p>
+  <p class="coro-m-0"><strong>One-line rule.</strong> Use <code>$g-&gt;get</code>, <code>$g-&gt;post</code>, <code>$g-&gt;cookie</code>, <code>$g-&gt;server</code>, <code>$g-&gt;session</code>, <code>$g-&gt;files</code> (where <code>$g = RequestContext::instance()</code>). It works identically in both modes — zero overhead, always safe. With <code>ext-zealphp</code>, <code>$_GET</code>/<code>$_SESSION</code> are also per-coroutine safe in both modes, so legacy code using superglobals works unchanged.</p>
 </div>
 
 <p>The two forms diverge on one axis: how the framework populates them per request.</p>
@@ -70,7 +72,7 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <tr>
     <td><code>App::superglobals(true)</code><br><small>legacy / migration mode</small></td>
     <td>✅ Bridged to <code>$GLOBALS['_GET']</code> etc. on each request — both forms read &amp; write the same backing array, so they're observationally equivalent.</td>
-    <td>✅ Repopulated per request by the framework. Safe because each worker runs one request at a time (coroutine scheduler is disabled in this mode).</td>
+    <td>✅ Repopulated per request by the framework. With ext-zealphp + <code>enableCoroutine(true)</code>, superglobals are saved/restored per coroutine — concurrent requests are safe. Without ext-zealphp, sequential mode (one request at a time per worker).</td>
   </tr>
   <tr>
     <td><code>App::superglobals(false)</code><br><small>coroutine mode (recommended default)</small></td>
@@ -79,7 +81,7 @@ foreach ($demos as [$id, $title, $url, $code]) {
   </tr>
 </table>
 
-<p class="coro-mt-half"><strong>Why the <code>$g</code> form is always the right answer:</strong> the rule "use <code>$g-&gt;X</code>" composes correctly regardless of which mode you flip to next. If you write a route today against <code>$g-&gt;get['id']</code>, that handler still works the day you decide to migrate from <code>superglobals(true)</code> to coroutine mode — no rewrite. The <code>$_GET</code> form silently breaks at that boundary.</p>
+<p class="coro-mt-half"><strong>Why <code>$g</code> is the recommended convention:</strong> <code>$g-&gt;get</code> works in every mode with zero overhead — no extension required. With ext-zealphp, <code>$_GET</code> also works in both modes (per-coroutine safe). Either form is valid; <code>$g-&gt;get</code> is recommended because it works universally regardless of whether ext-zealphp is installed.</p>
 
 <?php App::render('/components/_code', [
     'label' => 'The same code, both modes',
@@ -93,7 +95,7 @@ $app->route('/article/{id}', function ($id) {
     $g->get['id'] = $id;
     $g->server['PHP_SELF'] = '/article.php';
 
-    // Legacy equivalent (works in superglobals(true) only):
+    // Also works with ext-zealphp (per-coroutine safe in both modes):
     //     $_GET['id'] = $id;
     //     $_SERVER['PHP_SELF'] = '/article.php';
 
@@ -273,18 +275,18 @@ App::hookAll(\OpenSwoole\Runtime::HOOK_ALL); // hooks pipe I/O (resolved from nu
 </table>
 
 <h3 id="safety-matrix" class="coro-h3">Safety matrix (per mode)</h3>
-<p class="coro-note">The two modes are different runtimes, not different settings on the same runtime. Coroutine mode runs OpenSwoole's coroutine scheduler with <code>HOOK_ALL</code> enabled — every request is its own coroutine, many in flight per worker. Superglobals mode <strong>disables the coroutine scheduler entirely</strong> (<code>enable_coroutine = false</code> on the OpenSwoole server) and runs each request synchronously in the worker process, one at a time per worker — Apache MPM-prefork semantics. Implicit file routes (legacy <code>.php</code> drops) in superglobals mode additionally run through the CGI bridge (<code>App::include()</code> → <code>src/cgi_worker.php</code> via <code>proc_open</code>) for true global-scope process isolation. See the <a href="/templates#file-execution-family">file-execution family</a> for the five entry points and the <a href="/responses#return-contract">universal return contract</a> for the shared return semantics.</p>
+<p class="coro-note">With ext-zealphp, both modes support coroutines — the distinction is about how request state is stored, not whether coroutines are available. <code>superglobals(false)</code> uses per-coroutine <code>RequestContext</code>; <code>superglobals(true)</code> uses PHP superglobals with ext-zealphp saving/restoring them per coroutine. Without ext-zealphp, <code>superglobals(true)</code> falls back to sequential mode (one request at a time per worker). Implicit file routes in <code>processIsolation(true)</code> mode run through the CGI bridge for true global-scope isolation. See the <a href="/templates#file-execution-family">file-execution family</a> and the <a href="/responses#return-contract">universal return contract</a>.</p>
 <table class="ztable">
-  <tr><th>Concern</th><th>Coroutine mode <br><small>(<code>App::superglobals(false)</code>, scaffold default)</small></th><th>Superglobals mode <br><small>(<code>App::superglobals(true)</code>, migration only)</small></th></tr>
+  <tr><th>Concern</th><th>Coroutine mode <br><small>(<code>App::superglobals(false)</code>, scaffold default)</small></th><th>Superglobals mode <br><small>(<code>App::superglobals(true)</code>)</small></th></tr>
   <tr>
     <td>Concurrency model</td>
-    <td>Coroutine scheduler enabled, <code>HOOK_ALL</code> active; thousands of concurrent requests per worker, blocking I/O yields the event loop</td>
-    <td>❌ Coroutine scheduler disabled (<code>enable_coroutine = false</code>); each worker handles <strong>one request at a time</strong>, blocking</td>
+    <td>Coroutine scheduler enabled, <code>HOOK_ALL</code> active; thousands of concurrent requests per worker</td>
+    <td>With ext-zealphp + <code>enableCoroutine(true)</code>: ✅ full coroutine concurrency (superglobals saved/restored per coroutine). Without ext-zealphp: sequential, one request at a time per worker.</td>
   </tr>
   <tr>
     <td>Implicit file routes (legacy <code>public/*.php</code>)</td>
-    <td>Run in the worker process directly</td>
-    <td>Run through the <strong>CGI bridge</strong> (<code>proc_open</code> child) — true global-scope isolation per request</td>
+    <td>Run in the worker process directly (<code>processIsolation(false)</code> default)</td>
+    <td>With <code>processIsolation(true)</code>: CGI bridge (<code>proc_open</code> child) — true global-scope isolation. With <code>processIsolation(false)</code>: in-process, same as coroutine mode.</td>
   </tr>
   <tr>
     <td><code>$g->session</code>, <code>$g->status</code>, etc.</td>
@@ -309,7 +311,7 @@ App::hookAll(\OpenSwoole\Runtime::HOOK_ALL); // hooks pipe I/O (resolved from nu
   <tr>
     <td><code>go()</code> inside a request handler</td>
     <td>✅ Allowed and recommended for parallel I/O</td>
-    <td>❌ Not supported — the coroutine scheduler isn't running. Spawn a child via <code>coprocess()</code> / <code>coproc()</code> if you need async work in this mode.</td>
+    <td>With ext-zealphp + <code>enableCoroutine(true)</code>: ✅ works — coroutine scheduler is active. Without ext-zealphp (sequential mode): ❌ scheduler not running.</td>
   </tr>
   <tr>
     <td><code>static $cache = []</code> in user functions</td>

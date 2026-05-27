@@ -170,11 +170,15 @@ final class LifecycleModesMatrixTest extends TestCase
 
         $this->assertTrue(App::$superglobals);
         $this->assertTrue(App::processIsolation(), 'pi null → follows sg=true → true');
-        $this->assertFalse(App::enableCoroutine(), 'ec null → follows !sg → false');
-        $this->assertSame(0, App::hookAll(), 'ha null → follows !sg → 0 (no hooks)');
+        $hasZealphp = \extension_loaded('zealphp');
+        // With ext-zealphp: coroutines + HOOK_ALL auto-enable (per-coroutine safe).
+        // Without: sequential mode (race prevention).
+        $this->assertSame($hasZealphp, App::enableCoroutine(), 'ec null → ext-zealphp aware');
+        $expectedHook = $hasZealphp ? \OpenSwoole\Runtime::HOOK_ALL : 0;
+        $this->assertSame($expectedHook, App::hookAll(), 'ha null → ext-zealphp aware');
 
         // Boot-time validator passes for this shape.
-        $this->assertNull($this->validate(true, 0, false), 'legacy CGI is supported');
+        $this->assertNull($this->validate(true, $expectedHook, $hasZealphp), 'legacy CGI is supported');
     }
 
     /**
@@ -230,10 +234,12 @@ final class LifecycleModesMatrixTest extends TestCase
 
         $this->assertTrue(App::$superglobals);
         $this->assertFalse(App::processIsolation(), 'pi=false — App::include() runs INLINE');
-        $this->assertFalse(App::enableCoroutine());
-        $this->assertSame(0, App::hookAll());
+        $hasZealphp = \extension_loaded('zealphp');
+        $this->assertSame($hasZealphp, App::enableCoroutine(), 'ec null → ext-zealphp aware');
+        $expectedHook = $hasZealphp ? \OpenSwoole\Runtime::HOOK_ALL : 0;
+        $this->assertSame($expectedHook, App::hookAll(), 'ha null → ext-zealphp aware');
 
-        $this->assertNull($this->validate(true, 0, false), 'mixed-mode is supported');
+        $this->assertNull($this->validate(true, $expectedHook, $hasZealphp), 'mixed-mode is supported');
     }
 
     /**
