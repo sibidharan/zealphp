@@ -5954,14 +5954,17 @@ HELP;
         // I/O. We warn rather than refuse — see App::hookAll() docblock.
         self::validateLifecycleCombination(App::$superglobals, $hookFlags, $enableCoroutine);
 
-        // Per-coroutine superglobal isolation via ext-zealphp's scheduler hooks
-        // is DISABLED. The dlsym-resolved OpenSwoole C++ symbols
-        // (set_on_yield/resume/close) cause SIGSEGV in worker processes —
-        // even a no-op callback crashes. The mangled symbols may be
-        // incompatible with OpenSwoole 26.x's internal calling convention.
-        // Tracked at: https://github.com/openswoole/ext-openswoole/issues/105
-        // When stable C exports land, re-enable this block.
-        // @codeCoverageIgnoreStart
+        // Activate per-coroutine superglobal isolation when ext-zealphp is
+        // loaded AND superglobals mode is on with coroutines. ext-zealphp
+        // v0.3.2+ chains its callbacks with OpenSwoole's PHPCoroutine hooks
+        // (EG/CG context switch) so PHP state remains consistent.
+        // @codeCoverageIgnoreStart — requires running OpenSwoole server
+        if (App::$superglobals && $enableCoroutine
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_coroutine_superglobals')
+        ) {
+            (\zealphp_coroutine_superglobals(...))((bool) true);
+        }
 
         // Per-request define() / $GLOBALS / process-state isolation are
         // available via ext-zealphp but NOT auto-activated. Any app using
