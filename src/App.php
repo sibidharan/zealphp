@@ -1556,7 +1556,15 @@ class App
             self::refuseAfterRun('App::enableCoroutine');
             self::$enable_coroutine_override = $on;
         }
-        return self::$enable_coroutine_override ?? !self::$superglobals;
+        if (self::$enable_coroutine_override !== null) {
+            return self::$enable_coroutine_override;
+        }
+        // With ext-zealphp, superglobals(true) can safely run coroutines
+        // (per-coroutine save/restore). Default to coroutines ON.
+        if (self::$superglobals && \extension_loaded('zealphp')) {
+            return true;
+        }
+        return !self::$superglobals;
     }
 
     /**
@@ -1589,7 +1597,14 @@ class App
             self::$hook_all_override = $on;
         }
         $v = self::$hook_all_override;
-        if ($v === null)  return self::$superglobals ? 0 : \OpenSwoole\Runtime::HOOK_ALL;
+        if ($v === null) {
+            // With ext-zealphp, superglobals(true) safely supports coroutines
+            // (per-coroutine save/restore), so HOOK_ALL is safe too.
+            if (self::$superglobals && \extension_loaded('zealphp')) {
+                return \OpenSwoole\Runtime::HOOK_ALL;
+            }
+            return self::$superglobals ? 0 : \OpenSwoole\Runtime::HOOK_ALL;
+        }
         if ($v === true)  return \OpenSwoole\Runtime::HOOK_ALL;
         if ($v === false) return 0;
         return (int) $v;
@@ -5944,6 +5959,16 @@ HELP;
             && \function_exists('zealphp_coroutine_superglobals')
         ) {
             (\zealphp_coroutine_superglobals(...))((bool) true);
+        }
+
+        // Per-request define() isolation: intercept define() so constants
+        // created during a request are tracked and removed on request end.
+        // CoSessionManager/SessionManager calls zealphp_constants_clear()
+        // in their finally blocks. Boot-time constants (from autoloaders,
+        // framework init) are defined BEFORE this hook activates, so they
+        // survive untouched.
+        if (\extension_loaded('zealphp') && \function_exists('zealphp_define_hook')) {
+            (\zealphp_define_hook(...))((bool) true);
         }
         // @codeCoverageIgnoreEnd
 

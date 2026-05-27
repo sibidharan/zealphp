@@ -209,6 +209,9 @@ class SessionManager
                 $_SESSION = [];
                 unset($_SESSION);
             }
+            if (\function_exists('zealphp_constants_clear')) {
+                (\zealphp_constants_clear(...))();
+            }
         }
     }
 }
