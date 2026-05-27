@@ -35,7 +35,7 @@ PHP
 ]); ?>
 
 <div class="callout info route-mt-1">
-<strong>This is the migration on-ramp.</strong> Drop your existing PHP files into <code>public/</code> and they run on OpenSwoole immediately — <code>session_start()</code>, <code>header()</code>, <code>echo</code> all work unchanged via ext-zealphp overrides. The example above uses <code>$g-&gt;session</code> / <code>$g-&gt;get</code> via <code>RequestContext::instance()</code> — the per-coroutine-safe form that works in both modes. <strong>Direct <code>$_SESSION</code> / <code>$_GET</code> access</strong> only works under <code>App::superglobals(true)</code>; in the default coroutine mode it would silently leak across visitors because PHP superglobals are process-wide. See the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a> and the <a href="/migration">migration ladder</a>.
+<strong>This is the migration on-ramp.</strong> Drop your existing PHP files into <code>public/</code> and they run on OpenSwoole immediately — <code>session_start()</code>, <code>header()</code>, <code>echo</code> all work unchanged via ext-zealphp overrides. The recommended form is <code>$g-&gt;session</code> / <code>$g-&gt;get</code> via <code>RequestContext::instance()</code> — works in both modes, no extension needed. With ext-zealphp, <code>$_GET</code> / <code>$_SESSION</code> are also per-coroutine safe in both modes (saved/restored on every yield/resume). See the <a href="/coroutines#state-parity"><code>$g</code> vs <code>$_*</code> parity rule</a> and the <a href="/migration">migration ladder</a>.
 </div>
 
 <p class="route-my-1">Same convention works for APIs — drop files in <code>api/</code>:</p>
