@@ -219,6 +219,14 @@ function zeal_session_start(): bool
         $GLOBALS['_SESSION'] = $session_data;
     }
 
+    // PHP's native session_start() defines the SID constant. Apps like
+    // Adminer read it directly. define() persists across requests in a
+    // long-running process, so we only define once — value is empty string
+    // (cookie-based sessions, which is always the case in ZealPHP).
+    if (!defined('SID')) {
+        define('SID', '');
+    }
+
     return true;
 }
 
