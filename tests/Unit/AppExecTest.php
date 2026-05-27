@@ -29,6 +29,9 @@ final class AppExecTest extends TestCase
 
     public function testBacktickAndShellExecAreOverridable(): void
     {
+        if (!function_exists('uopz_set_return')) {
+            $this->markTestSkipped('uopz not loaded (ext-zealphp uses zealphp_override instead)');
+        }
         \uopz_set_return('shell_exec', fn($c) => "OVR[$c]", true);
         $this->assertSame('OVR[echo hi]', shell_exec('echo hi'));
         $this->assertSame('OVR[echo hi]', `echo hi`);
@@ -37,6 +40,9 @@ final class AppExecTest extends TestCase
 
     public function testHookedBacktickRoutesThroughAppExecInCoroutine(): void
     {
+        if (!function_exists('uopz_set_return')) {
+            $this->markTestSkipped('uopz not loaded (ext-zealphp uses zealphp_override instead)');
+        }
         \uopz_set_return('shell_exec', \Closure::fromCallable('\ZealPHP\zeal_shell_exec'), true);
         $out = null;
         \OpenSwoole\Coroutine::run(function () use (&$out) { $out = `echo hooked`; });

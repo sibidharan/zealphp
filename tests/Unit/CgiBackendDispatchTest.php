@@ -78,7 +78,9 @@ final class CgiBackendDispatchTest extends TestCase
         App::$coproc_implicit_request_handler = $this->originalCoproc;
 
         foreach ($this->uopzRestores as $method) {
-            uopz_unset_return(App::class, $method);
+            if (function_exists('uopz_unset_return')) {
+                uopz_unset_return(App::class, $method);
+            }
         }
         $this->uopzRestores = [];
     }
