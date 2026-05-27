@@ -1625,6 +1625,15 @@ class App
     {
         $hasZealphpExt = \extension_loaded('zealphp');
 
+        if (!$sg && !$enableCo) {
+            throw new \RuntimeException(
+                'ZealPHP lifecycle: App::superglobals(false) + App::enableCoroutine(false) is not supported. '
+                . 'Coroutine mode (superglobals=false) uses CoSessionManager which requires the coroutine '
+                . 'scheduler for per-request RequestContext isolation. Either enable coroutines '
+                . '(App::enableCoroutine(true), the default for superglobals=false) or switch to '
+                . 'superglobals mode (App::superglobals(true)) for sequential operation.'
+            );
+        }
         if ($sg && $enableCo && !$hasZealphpExt) {
             throw new \RuntimeException(
                 'ZealPHP lifecycle: App::superglobals(true) + App::enableCoroutine(true) requires '
