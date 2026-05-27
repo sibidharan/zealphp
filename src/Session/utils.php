@@ -94,6 +94,14 @@ function zeal_session_start(): bool
 {
     $g = RequestContext::instance();
 
+    // If session is already active (e.g. CoSessionManager already called us),
+    // return immediately. Prevents the double-start bug in Mode 4 (sg=T+ec=T)
+    // where CoSessionManager starts the session, then the included file's
+    // session_start() re-reads from disk and overwrites in-memory mutations.
+    if ($g->_session_started) {
+        return true;
+    }
+
     // Ensure session parameters are initialized
     if (!isset($g->session_params['save_path'])) {
         $g->session_params['save_path'] = '/var/lib/php/sessions';

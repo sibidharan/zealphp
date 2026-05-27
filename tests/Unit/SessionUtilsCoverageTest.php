@@ -61,6 +61,7 @@ class SessionUtilsCoverageTest extends TestCase
         $g->cookie = [];
         $g->server = [];
         $g->openswoole_response = null;
+        $g->_session_started = false;
         $this->savedSuperSession = $GLOBALS['_SESSION'] ?? null;
         $GLOBALS['_SESSION'] = [];
     }

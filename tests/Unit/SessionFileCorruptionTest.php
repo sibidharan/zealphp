@@ -50,6 +50,7 @@ class SessionFileCorruptionTest extends TestCase
         ];
         $g->cookie  = ['PHPSESSID' => $this->sessionId];
         $g->session = [];
+        $g->_session_started = false;
     }
 
     protected function tearDown(): void
