@@ -90,13 +90,21 @@ class RedisSessionHandler implements \SessionHandlerInterface
 
     public function read($sessionId): string
     {
-        $data = $this->redis()->get($this->prefix . $sessionId);
+        $redis = $this->redis();
+        $key = $this->prefix . $sessionId;
+        $redis->watch($key);
+        $data = $redis->get($key);
         return is_string($data) ? $data : '';
     }
 
     public function write($sessionId, $sessionData): bool
     {
-        return $this->redis()->setex($this->prefix . $sessionId, $this->ttl, $sessionData);
+        $redis = $this->redis();
+        $key = $this->prefix . $sessionId;
+        $pipe = $redis->multi();
+        $pipe->setex($key, $this->ttl, $sessionData);
+        $result = $pipe->exec();
+        return $result !== false;
     }
 
     public function destroy($sessionId): bool
