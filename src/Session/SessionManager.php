@@ -220,6 +220,9 @@ class SessionManager
             ) {
                 (\zealphp_constants_clear(...))();
             }
+            if (\function_exists('zealphp_ini_restore')) {
+                (\zealphp_ini_restore(...))();
+            }
         }
     }
 }
