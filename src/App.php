@@ -3250,6 +3250,27 @@ class App
             ];
         }
 
+        // Mode 4 (sg=T+ec=T+ext-zealphp): PHP's auto-global $_GET zval is
+        // cached per coroutine — $GLOBALS['_GET'] = $x replaces the hash
+        // entry but the cached CV pointer still refers to the old zval.
+        // Workaround: populate $_GET in-place from the canonical source
+        // ($g->openswoole_request->get) using array mutation, not assignment.
+        // $_SERVER doesn't have this issue (its JIT resolves correctly).
+        if (self::$coroutine_isolated_superglobals && $g->openswoole_request !== null) {
+            $req = $g->openswoole_request;
+            // $_GET: parse from query string (modifies the zval in-place)
+            $qs = is_string($g->server['QUERY_STRING'] ?? null) ? $g->server['QUERY_STRING'] : '';
+            parse_str($qs, $_GET);
+            // $_POST, $_COOKIE, $_FILES: clear + repopulate in-place
+            foreach (array_keys($_POST) as $k) { unset($_POST[$k]); }
+            foreach ((is_array($req->post) ? $req->post : []) as $k => $v) { $_POST[$k] = $v; }
+            foreach (array_keys($_COOKIE) as $k) { unset($_COOKIE[$k]); }
+            foreach ((is_array($req->cookie) ? $req->cookie : []) as $k => $v) { $_COOKIE[$k] = $v; }
+            foreach (array_keys($_FILES) as $k) { unset($_FILES[$k]); }
+            foreach ((is_array($req->files) ? $req->files : []) as $k => $v) { $_FILES[$k] = $v; }
+            $_REQUEST = $_GET + $_POST;
+        }
+
         $obBase = ob_get_level();
         ob_start();
         $result = null;
@@ -6412,12 +6433,19 @@ HELP;
             // is intentionally NOT touched here — the session manager owns its
             // own write path (file load + uopz session_start).
             if (App::$superglobals) {
-                $_GET     = $get;
-                $_POST    = $post;
-                $_COOKIE  = $cookie;
-                $_FILES   = $files;
-                $_SERVER  = $srvFinal;
-                $_REQUEST = $g->request;
+                // In coroutine-isolated mode (sg=T+ec=T+ext-zealphp), PHP's
+                // auto-global caching makes $GLOBALS['_GET'] = $x and $_GET = $x
+                // unreliable across coroutines (the auto-global zval reference
+                // is cached from the first access and not updated by subsequent
+                // assignments in new coroutines). ext-zealphp's C-level
+                // zealphp_superglobals_set() writes directly to EG(symbol_table)
+                // via zend_hash_str_find, bypassing the auto-global cache.
+                $GLOBALS['_GET']     = $get;
+                $GLOBALS['_POST']    = $post;
+                $GLOBALS['_COOKIE']  = $cookie;
+                $GLOBALS['_FILES']   = $files;
+                $GLOBALS['_SERVER']  = $srvFinal;
+                $GLOBALS['_REQUEST'] = $g->request;
                 // v0.2.30 (issue #17) — make $g->get/post/cookie/files/server/
                 // request LIVE ALIASES of the superglobals, not per-request
                 // snapshots. A declared `public array $get` is accessed
