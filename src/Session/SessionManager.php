@@ -137,6 +137,7 @@ class SessionManager
         $g->status                   = null;
         $g->_streaming               = null;
         $g->ignore_user_abort_state  = 0;
+        $g->_session_started         = false;
 
         $sessionId = null;
         if ($manageSession) {

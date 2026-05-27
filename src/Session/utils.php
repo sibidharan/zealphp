@@ -94,11 +94,12 @@ function zeal_session_start(): bool
 {
     $g = RequestContext::instance();
 
-    // If session is already active (e.g. CoSessionManager already called us),
-    // return immediately. Prevents the double-start bug in Mode 4 (sg=T+ec=T)
-    // where CoSessionManager starts the session, then the included file's
-    // session_start() re-reads from disk and overwrites in-memory mutations.
-    if ($g->_session_started) {
+    // If session is already active AND we're using per-coroutine $g (Mode 4),
+    // return immediately. Prevents the double-start where CoSessionManager
+    // starts the session, then the file's session_start() re-reads from disk.
+    // In sync mode (process-wide $g), SessionManager re-starts cleanly each
+    // request via _session_started reset — the second call is harmless.
+    if ($g->_session_started && \ZealPHP\App::$coroutine_isolated_superglobals) {
         return true;
     }
 
