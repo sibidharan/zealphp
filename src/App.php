@@ -103,6 +103,17 @@ class App
      * Set via `App::superglobals(bool)` BEFORE `App::init()`.
      */
     public static bool $superglobals = true;
+
+    /**
+     * True when ext-zealphp's per-coroutine superglobal isolation is active.
+     * Set by `App::run()` when sg=T + ec=T + ext-zealphp loaded. Tells
+     * `RequestContext::instance()` to use per-coroutine instances even in
+     * superglobals mode — ext-zealphp isolates `$_GET`/`$_SESSION` per
+     * coroutine, so per-coroutine `$g` is safe and necessary for framework
+     * state (`$g->zealphp_response`, etc.) to be isolated too.
+     */
+    public static bool $coroutine_isolated_superglobals = false;
+
     /**
      * Set true at the top of `App::run()` so the four lifecycle setters
      * (`superglobals`, `processIsolation`, `enableCoroutine`, `hookAll`)
@@ -5964,6 +5975,7 @@ HELP;
             && \function_exists('zealphp_coroutine_superglobals')
         ) {
             (\zealphp_coroutine_superglobals(...))((bool) true);
+            self::$coroutine_isolated_superglobals = true;
         }
 
         // Per-request define() / $GLOBALS / process-state isolation are
