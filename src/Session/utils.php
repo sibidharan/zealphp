@@ -225,7 +225,17 @@ function zeal_session_start(): bool
     // (must survive the merge).
     $g->session_loaded_keys = array_keys($session_data);
     if (\ZealPHP\App::$superglobals) {
-        $GLOBALS['_SESSION'] = $session_data;
+        if (\ZealPHP\App::$coroutine_isolated_superglobals) {
+            // Mode 4: bind $_SESSION as a reference to $g->session. PHP's
+            // FETCH_R does ZVAL_COPY (refcount++) into a temp slot, so any
+            // write triggers COW separation — the mutation goes to a copy
+            // that's discarded when the include returns. A reference bypasses
+            // COW: writes follow it directly to $g->session, which is what
+            // zeal_session_write_close() reads.
+            $_SESSION = &$g->session;
+        } else {
+            $GLOBALS['_SESSION'] = $session_data;
+        }
     }
 
     // Mark session as started so CoSessionManager's finally block
@@ -329,18 +339,22 @@ function zeal_session_write_close(): bool
     // declared typed property $g->session shadows the __get/__set proxy,
     // so Symfony/legacy code that writes through $_SESSION never reaches
     // $g->session). Persist whichever holds the live data for the mode.
+    // In Mode 4 (coroutine_isolated_superglobals), $g->session is the
+    // canonical store — $_SESSION is bound via reference, but $GLOBALS['_SESSION']
+    // may not follow the reference correctly across function scopes.
+    $useGSession = \ZealPHP\App::$coroutine_isolated_superglobals || !\ZealPHP\App::$superglobals;
     $superglobals = \ZealPHP\App::$superglobals;
-    $hasSession = $superglobals
-        ? (isset($GLOBALS['_SESSION']) && is_array($GLOBALS['_SESSION']))
+    $hasSession = $useGSession
         /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
-        : isset($g->session);
+        ? isset($g->session)
+        : (isset($GLOBALS['_SESSION']) && is_array($GLOBALS['_SESSION']));
 
     if ($hasSession) {
         $session_id = zeal_session_id();
         $save_path = $g->session_params['save_path'] ?? '';
         assert(is_string($save_path));
         $session_file = $save_path . '/sess_' . $session_id;
-        $data = $superglobals ? $GLOBALS['_SESSION'] : $g->session;
+        $data = $useGSession ? $g->session : $GLOBALS['_SESSION'];
         $wHandler = $g->session_params['handler'] ?? null;
         if ($wHandler instanceof \SessionHandlerInterface) {
             // Merge with stored data to mitigate concurrent-request races.
