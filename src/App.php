@@ -3250,16 +3250,24 @@ class App
             ];
         }
 
-        // Mode 4 (sg=T+ec=T+ext-zealphp): PHP auto-global $_GET zval
-        // pointer is cached per compiled scope in OpenSwoole coroutines.
-        // parse_str modifies the existing $_GET zval IN-PLACE (the internal
-        // zend_array* stays the same), so cached CVs in the included file
-        // see updated data. $_POST/$_COOKIE/$_FILES don't have this issue
-        // (they're rarely accessed via auto-global in included files).
-        // $_SESSION is managed by $g->session (synced back after include).
-        if (self::$coroutine_isolated_superglobals && $g->openswoole_request !== null) {
-            $qs = is_string($g->server['QUERY_STRING'] ?? null) ? $g->server['QUERY_STRING'] : '';
-            parse_str($qs, $_GET);
+        // Mode 4 (sg=T+ec=T+ext-zealphp): refresh superglobals before include.
+        // ext-zealphp v0.3.3+ zealphp_superglobals_set uses in-place zval swap
+        // (ZVAL_COPY_VALUE + ZVAL_COPY at same address) so cached CVs in the
+        // included file see updated data.
+        if (self::$coroutine_isolated_superglobals
+            && \function_exists('zealphp_superglobals_set')
+            && $g->openswoole_request !== null
+        ) {
+            $req = $g->openswoole_request;
+            /** @var array<string,mixed> $rGet */
+            $rGet  = $req->get  ?: [];
+            /** @var array<string,mixed> $rPost */
+            $rPost = $req->post ?: [];
+            (\zealphp_superglobals_set(...))(
+                $rGet, $rPost,
+                $req->cookie ?: [], $g->server, $req->files ?: [],
+                $rGet + $rPost, $g->session
+            );
         }
 
         $obBase = ob_get_level();
@@ -3308,6 +3316,16 @@ class App
         $output = ob_get_clean();
         if ($output === false) {
             $output = '';
+        }
+
+        // Mode 4: sync $_SESSION back to $g->session after the file ran.
+        // The file wrote to $_SESSION (auto-global zval — same address thanks
+        // to zealphp_set_superglobal's in-place swap). Copy back so
+        // CoSessionManager's write_close persists the file's mutations.
+        if (self::$coroutine_isolated_superglobals && \function_exists('zealphp_superglobals_set')) {
+            /** @var array<string, mixed> $syncSess */
+            $syncSess = $_SESSION;
+            $g->session = $syncSess;
         }
 
         // Fragment-mode post-flight: requested but no App::fragment('X', ...)
@@ -6451,17 +6469,18 @@ HELP;
             // is intentionally NOT touched here — the session manager owns its
             // own write path (file load + uopz session_start).
             if (App::$superglobals) {
-                // In coroutine-isolated mode (sg=T+ec=T+ext-zealphp), PHP's
-                // auto-global caching makes $GLOBALS['_GET'] = $x and $_GET = $x
-                // unreliable across coroutines (the auto-global zval reference
-                // is cached from the first access and not updated by subsequent
-                // assignments in new coroutines). ext-zealphp's C-level
-                $GLOBALS['_GET']     = $get;
-                $GLOBALS['_POST']    = $post;
-                $GLOBALS['_COOKIE']  = $cookie;
-                $GLOBALS['_FILES']   = $files;
-                $GLOBALS['_SERVER']  = $srvFinal;
-                $GLOBALS['_REQUEST'] = $g->request;
+                if (self::$coroutine_isolated_superglobals
+                    && \function_exists('zealphp_superglobals_set')
+                ) {
+                    (\zealphp_superglobals_set(...))($get, $post, $cookie, $srvFinal, $files, $g->request, $g->session);
+                } else {
+                    $GLOBALS['_GET']     = $get;
+                    $GLOBALS['_POST']    = $post;
+                    $GLOBALS['_COOKIE']  = $cookie;
+                    $GLOBALS['_FILES']   = $files;
+                    $GLOBALS['_SERVER']  = $srvFinal;
+                    $GLOBALS['_REQUEST'] = $g->request;
+                }
                 // v0.2.30 (issue #17) — make $g->get/post/cookie/files/server/
                 // request LIVE ALIASES of the superglobals, not per-request
                 // snapshots. A declared `public array $get` is accessed
