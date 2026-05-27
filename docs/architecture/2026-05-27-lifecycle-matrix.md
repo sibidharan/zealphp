@@ -19,7 +19,7 @@
 | 1 | F | T | F | — | CoSessionManager | Per-coroutine | **Production** |
 | 2 | F | F | — | — | — | — | **Rejected** |
 | 3 | T | F | F | — | SessionManager | Singleton | **Production** |
-| 4 | T | T | F | — | CoSessionManager | Per-coroutine | **Experimental** |
+| 4 | T | T | F | — | CoSessionManager | Per-coroutine | **Production** |
 | 5 | T | F | T | pool | SessionManager | Singleton | **Production** |
 | 6 | T | T→F | T | pool | SessionManager | Singleton | **Fallback→5** |
 | 9 | T | F | T | proc | SessionManager | Singleton | **Production** |
@@ -43,7 +43,7 @@ which is incompatible with coroutine scheduling.
 Mode 1  (default)    P      P        P       N/A*      N/A*   N/A*
 Mode 2  (reject)     — REJECTED AT BOOT (RuntimeException) —
 Mode 3  (sync)       P      P        P        P         P      P
-Mode 4  (mode4)      P      F**      P        P         P      F**
+Mode 4  (mode4)      P      P        P        P         P      P
 Mode 5  (pool)       P      P        P        P         P      P
 Mode 6  (→5)         P      P        P        P         P      P
 Mode 9  (proc)       P      P        P        P         P      P
