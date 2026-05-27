@@ -5977,10 +5977,12 @@ HELP;
         // process outside the coroutine scheduler → deadlock. Force hooks off
         // for CGI modes; coroutines still work (each request gets a coroutine),
         // just without I/O hooking.
-        if (App::processIsolation() && $hookFlags !== 0 && $enableCoroutine) {
-            elog('[lifecycle] hookAll forced to 0: processIsolation=true + enableCoroutine=true '
-                . '— hooked I/O on CGI pipes causes deadlocks. Coroutines remain active without I/O hooks.', 'warn');
-            $hookFlags = 0;
+        if (App::processIsolation() && $enableCoroutine) {
+            elog('[lifecycle] enableCoroutine forced to false: processIsolation=true '
+                . '— CGI subprocess dispatch is incompatible with coroutine mode '
+                . '(blocking pipe I/O in the request handler prevents coroutine scheduling). '
+                . 'Use processIsolation(false) for coroutine mode, or enableCoroutine(false) for CGI.', 'warn');
+            $enableCoroutine = false;
         }
 
         // Surface combinations that are syntactically allowed but race
@@ -6061,6 +6063,7 @@ HELP;
                 ? self::$static_handler_locations
                 : ['/css/', '/js/', '/img/', '/images/', '/fonts/', '/assets/', '/static/', '/favicon.ico', '/robots.txt'],
             'enable_coroutine' => $enableCoroutine,
+            'hook_flags' => $hookFlags,
             // Runtime compression is owned by OpenSwoole. Do not also register
             // CompressionMiddleware unless this setting is disabled.
             'http_compression' => true,
