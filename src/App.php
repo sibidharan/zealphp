@@ -5954,17 +5954,14 @@ HELP;
         // I/O. We warn rather than refuse — see App::hookAll() docblock.
         self::validateLifecycleCombination(App::$superglobals, $hookFlags, $enableCoroutine);
 
-        // Activate per-coroutine superglobal isolation when ext-zealphp is
-        // loaded AND superglobals mode is on with coroutines. This hooks into
-        // OpenSwoole's yield/resume/close scheduler callbacks so $_GET/$_POST/
-        // $_SESSION are saved/restored on every context switch.
-        // @codeCoverageIgnoreStart — requires running OpenSwoole server
-        if (App::$superglobals && $enableCoroutine
-            && \extension_loaded('zealphp')
-            && \function_exists('zealphp_coroutine_superglobals')
-        ) {
-            (\zealphp_coroutine_superglobals(...))((bool) true);
-        }
+        // Per-coroutine superglobal isolation via ext-zealphp's scheduler hooks
+        // is DISABLED. The dlsym-resolved OpenSwoole C++ symbols
+        // (set_on_yield/resume/close) cause SIGSEGV in worker processes —
+        // even a no-op callback crashes. The mangled symbols may be
+        // incompatible with OpenSwoole 26.x's internal calling convention.
+        // Tracked at: https://github.com/openswoole/ext-openswoole/issues/105
+        // When stable C exports land, re-enable this block.
+        // @codeCoverageIgnoreStart
 
         // Per-request define() / $GLOBALS / process-state isolation are
         // available via ext-zealphp but NOT auto-activated. Any app using
@@ -6286,7 +6283,14 @@ HELP;
             });
         }
 
-        $SessionManager = self::$superglobals ?  'ZealPHP\Session\SessionManager' : 'ZealPHP\Session\CoSessionManager';
+        // When coroutines are enabled, always use CoSessionManager — it uses
+        // per-coroutine RequestContext and overridden zeal_session_start(),
+        // both coroutine-safe. SessionManager uses PHP's native session_start()
+        // + session_set_save_handler() which race under concurrent coroutines.
+        // sg(true)+ec(true) with ext-zealphp needs CoSessionManager (#134).
+        $SessionManager = ($enableCoroutine || !self::$superglobals)
+            ? 'ZealPHP\Session\CoSessionManager'
+            : 'ZealPHP\Session\SessionManager';
 
         assert(self::$middleware_stack !== null);
         foreach (array_reverse(self::$middleware_wait_stack) as $middleware) {

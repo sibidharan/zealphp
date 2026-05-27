@@ -219,6 +219,12 @@ function zeal_session_start(): bool
         $GLOBALS['_SESSION'] = $session_data;
     }
 
+    // Mark session as started so CoSessionManager's finally block
+    // calls zeal_session_write_close() — persists data to disk.
+    // Without this, user code calling session_start() directly
+    // would write to $g->session but never flush to the session file.
+    $g->_session_started = true;
+
     // PHP's native session_start() defines the SID constant. Apps like
     // Adminer read it directly. define() persists across requests in a
     // long-running process, so we only define once — value is empty string
