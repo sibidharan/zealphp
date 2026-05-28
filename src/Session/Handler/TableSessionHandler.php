@@ -55,9 +55,9 @@ final class TableSessionHandler implements \SessionHandlerInterface
     private static ?Table $table = null;
     private static ?Atomic $writeLock = null;
     private static string $savePath = '/var/lib/php/sessions';
-    private static int $ttl = 1440;
-    private static int $maxRows = 4096;
-    private static int $dataSize = 8192;
+    private static int $ttl = 7200;          // 2 hours
+    private static int $maxRows = 65536;     // 64K rows
+    private static int $dataSize = 16384;    // 16 KB per session
 
     /**
      * Per-coroutine read snapshot.
@@ -72,13 +72,18 @@ final class TableSessionHandler implements \SessionHandlerInterface
      * Idempotent setup. Call BEFORE App::run() so the Table is allocated
      * in the master process and inherited by all workers on fork.
      *
-     * @param int $ttl       Session TTL in seconds (default 1440 = 24 min)
-     * @param int $maxRows   Max concurrent sessions in Table; overflow goes
-     *                       to file backing only. Default 4096.
-     * @param int $dataSize  Max serialized session size in bytes (default 8192).
-     *                       Larger sessions get truncated — bump if your
-     *                       app stores big arrays in $_SESSION.
-     * @param string $savePath  File backing directory. Default /var/lib/php/sessions.
+     * All four params fall back to App config (`App::sessionTtl()`, etc.)
+     * when null. Pass explicit values to override per-handler. Defaults
+     * resolved here ONLY apply if App config is also unset (rare).
+     *
+     * @param int|null $ttl       Session TTL in seconds. App default: 7200 (2 hours)
+     * @param int|null $maxRows   Max concurrent sessions in Table; overflow goes
+     *                            to file backing. App default: 65536 (64K).
+     *                            Memory: ~maxRows × (dataSize + 64) bytes shared.
+     * @param int|null $dataSize  Max serialized session size in bytes.
+     *                            App default: 16384 (16 KB) — fits OAuth tokens
+     *                            + cart state + user prefs. Overflow → file only.
+     * @param string|null $savePath  File backing dir. App default: /var/lib/php/sessions.
      */
     public static function register(
         ?int $ttl = null,

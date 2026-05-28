@@ -434,26 +434,30 @@ class App
     public static bool $session_lifecycle = true;
 
     /**
-     * Session TTL in seconds. Default 1440 (24 minutes — PHP's default).
-     * Used by TableSessionHandler and StoreSessionHandler for expiry.
+     * Session TTL in seconds. Default 7200 (2 hours — modern-app reasonable;
+     * PHP's stock 1440 / 24 min is too short for typical workflows).
      * Set via `App::sessionTtl(3600)` BEFORE `App::run()`.
      */
-    public static int $session_ttl = 1440;
+    public static int $session_ttl = 7200;
 
     /**
      * Maximum concurrent sessions in OpenSwoole\Table when using
-     * TableSessionHandler. Default 4096. Sessions beyond this go to file
-     * backing only (still functional, just slower). Bump for high-traffic
-     * deployments — each row costs `$session_data_size + ~64 bytes` RAM.
+     * TableSessionHandler. Default 65536 (64K) — accommodates medium-scale
+     * deployments without re-tuning. Each row costs `$session_data_size +
+     * ~64 bytes` of shared memory (one allocation per OpenSwoole server,
+     * NOT per worker). Default config = 64K × 16KB ≈ 1 GB shared memory.
+     * Bump for high-traffic; sessions beyond the cap fall through to file
+     * backing (still functional, just slower).
      */
-    public static int $session_max_rows = 4096;
+    public static int $session_max_rows = 65536;
 
     /**
      * Maximum serialized session size in bytes when using TableSessionHandler.
-     * Default 8192 (8 KB). Sessions larger than this get truncated at write
-     * time — bump if your app stores big arrays in `$_SESSION`.
+     * Default 16384 (16 KB) — fits most modern sessions including OAuth
+     * tokens, cart state, user preferences. Larger sessions overflow to
+     * file backing only.
      */
-    public static int $session_data_size = 8192;
+    public static int $session_data_size = 16384;
 
     /**
      * File-backing directory for session storage. Default
