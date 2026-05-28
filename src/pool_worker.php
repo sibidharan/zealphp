@@ -328,6 +328,9 @@ function pool_handle_request(array $req): array
     $_FILES   = is_array($req['files']   ?? null) ? $req['files']   : [];
     $_REQUEST = array_merge($_GET, $_POST);
 
+    $prevCwd = getcwd();
+    chdir(dirname($file));
+
     ob_start();
     $result = null;
     try {
@@ -335,6 +338,7 @@ function pool_handle_request(array $req): array
         $result = include $file;
     } catch (\Throwable $e) {
         ob_end_clean();
+        if (is_string($prevCwd)) chdir($prevCwd);
         return [
             'status'     => 500,
             'body'       => 'pool_worker fatal: ' . $e->getMessage(),
@@ -344,6 +348,7 @@ function pool_handle_request(array $req): array
             'stderr'     => $e->getTraceAsString(),
         ];
     }
+    if (is_string($prevCwd)) chdir($prevCwd);
     
     // Execute registered shutdown functions before capturing the output buffer
     global $__pw_shutdown_functions;

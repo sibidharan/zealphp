@@ -100,7 +100,7 @@ final class WorkerPool
         $w = $this->workers[$idx];
 
         IPC::writeFrame($w['stdin'], $request);
-        $resp = IPC::readFrame($w['stdout']);
+        $resp = IPC::readFrame($w['stdout'], $timeout);
 
         $this->workers[$idx]['served']++;
         $served = $this->workers[$idx]['served'];
@@ -125,12 +125,27 @@ final class WorkerPool
         }
 
         if ($resp === null) {
+            try {
+                $alive = $this->isAlive($w);
+            } catch (\Throwable) {
+                $alive = false;
+            }
+            $status = $alive ? 504 : 500;
+            $msg = $status === 504
+                ? 'WorkerPool: subprocess timed out after ' . $timeout . 's'
+                : 'WorkerPool: subprocess died mid-request — response not received. Stderr: ' . $err;
             return [
-                'status'  => 500,
-                'body'    => 'WorkerPool: subprocess died mid-request — response not received. Stderr: ' . $err,
+                'status'  => $status,
+                'body'    => $msg,
                 'headers' => [],
                 'cookies' => [],
             ];
+        }
+
+        // Decode base64-encoded bodies (binary responses that can't be JSON-encoded directly).
+        if (isset($resp['body_encoding']) && $resp['body_encoding'] === 'base64'
+            && isset($resp['body']) && is_string($resp['body'])) {
+            $resp['body'] = base64_decode($resp['body']);
         }
 
         // Force-narrow to array<string,mixed> for the strict return type;
