@@ -36,6 +36,18 @@ declare(strict_types=1);
 
 ini_set('display_errors', 'stderr');
 
+// Suppress E_DEPRECATED and E_USER_DEPRECATED by default. PHP 8.4 emits one
+// deprecation per non-explicit-nullable parameter in older vendor libraries.
+// phpMyAdmin alone produces ~200 such warnings per request. They all go to
+// stderr — which is a 64 KB pipe to the parent. The parent does not drain
+// stderr until the subprocess dies, so once that pipe fills, the next
+// fwrite(STDERR, ...) blocks the subprocess forever. The whole worker
+// deadlocks; readFrame on the parent times out at $cgi_timeout (default 60s).
+// Opt back in via ZEALPHP_POOL_DEBUG_DEPRECATIONS=1 if you actually want them.
+if ((string) getenv('ZEALPHP_POOL_DEBUG_DEPRECATIONS') !== '1') {
+    error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
+}
+
 foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $__pw_autoload) {
     if (is_file($__pw_autoload)) {
         require_once $__pw_autoload;
@@ -278,6 +290,14 @@ while (ob_get_level() > 0) {
 //     gated on $wp_did_header.
 $__pw_globals_snapshot = array_fill_keys(array_keys($GLOBALS), true);
 
+// FPM parity: snapshot constants + classes + functions + included_files at
+// boot so pool_reset_request_state() can roll them back to this baseline
+// after every request. Without this, the FIRST app's defines pollute the
+// second app's namespace (Kanboard's ROOT_DIR leaks into phpMyAdmin etc.).
+if (function_exists('zealphp_process_state_snapshot')) {
+    @zealphp_process_state_snapshot();
+}
+
 // READY signal on stderr — the framing channel (stdout) stays pure. Parent
 // reads this for boot sync (bounds the dispatch-after-spawn window).
 fwrite(STDERR, "ZEALPHP_POOL_WORKER_READY\n");
@@ -440,5 +460,14 @@ function pool_reset_request_state(): void
             }
             unset($GLOBALS[$__pw_key]);
         }
+    }
+
+    // FPM parity for constants, classes, functions, included_files —
+    // ext-zealphp's process_state_clean removes everything added during
+    // the request, restoring the boot snapshot. Without this, app-defined
+    // constants leak across apps in the same pool (Kanboard's ROOT_DIR
+    // collides with phpMyAdmin's CACHE_DIR; both crash on re-define).
+    if (function_exists('zealphp_process_state_clean')) {
+        @zealphp_process_state_clean(); // flags=7 default: files+classes+functions
     }
 }
