@@ -59,14 +59,47 @@ list behaves as it does under PHP-FPM.
 
 PHP 8 resolves a function's runtime statics via
 `ZEND_MAP_PTR_GET(op_array->static_variables_ptr)`, an offset into
-`CG(map_ptr_base)` (in opcache/preload offset-mode). Giving each coroutine its
-own `map_ptr` area and swapping `CG(map_ptr_base)` on yield/resume would make
-function statics (and `run_time_cache`) per-coroutine and lazily re-init from
-the template — i.e. FPM-fresh. This is "Stage 5 reborn": the earlier Stage 5
-swapped `EG(function_table)`/`class_table` and broke internal symbol resolution;
-the `map_ptr` swap touches only the run-time data area, not the symbol tables,
-so it can succeed where Stage 5 failed. It is opcache-dependent and engine-deep
-(high reward, high risk) — tracked as the open isolation item.
+`CG(map_ptr_base)` (in opcache/preload offset-mode). The idea: give each
+coroutine its own `map_ptr` area and swap `CG(map_ptr_base)` on yield/resume,
+so function statics (and `run_time_cache`) become per-coroutine and lazily
+re-init from the op_array template — i.e. FPM-fresh. The `map_ptr` swap touches
+only the run-time data area, not the symbol tables, so it sidesteps the reason
+the original Stage 5 (which swapped `EG(function_table)`/`class_table`) broke
+internal symbol resolution.
+
+**Prototype result (2026-05-28): mechanism sound, but blocked by hook timing.**
+A flag-gated prototype (`zealphp_coroutine_statics(true)`, default-off) captured
+the worker's `CG(map_ptr_*)` and swapped a per-coroutine `pemalloc`'d area in on
+`on_resume` / out on `on_yield`. Two area-init models were tried, both with
+opcache enabled (offset-mode is required for the swap to mean anything):
+
+1. **Copy** the worker baseline into the per-coroutine area (`memcpy`) — crashes
+   with `TypeError: Argument #1 ($request) must be of type
+   OpenSwoole\Http\Request, OpenSwoole\Http\Request given`. The copied
+   `run_time_cache` slots still point at the *worker's* cache buffers, which the
+   coroutines then share and corrupt concurrently. Statics aren't isolated
+   either (slots hold shared pointers).
+2. **Zero** the per-coroutine area (`memset 0`, the FPM-fresh model that should
+   force lazy re-init) — same `TypeError`.
+
+**The definitive wall:** `on_yield` / `on_resume` fire **mid-execution**. When a
+request handler yields at an I/O point (e.g. a channel pop inside
+`CoSessionManager::__invoke`), that frame — and every frame below it — is
+suspended on the PHP call stack, and its opcodes resolve `run_time_cache` via
+`ZEND_MAP_PTR_GET` on *every* access. Swapping or zeroing `CG(map_ptr_base)`
+underneath a suspended frame invalidates that frame's already-resolved
+type-check / method caches → the "X, X given" corruption. A per-coroutine
+`map_ptr` area is only safe if it is established **at coroutine creation, before
+the first opcode runs in it** — exactly how OpenSwoole already allocates the
+per-coroutine `EG` context. The yield/resume/close hooks the ext can reach all
+fire too late.
+
+**Verdict:** isolating function statics needs OpenSwoole to allocate (or let an
+extension allocate) a per-coroutine `map_ptr` base at coroutine-create time —
+an OpenSwoole/engine change, not an ext-side hook. This is the genuine reason
+Stage 5 is hard; it stays the open isolation item. The prototype was reverted
+(the shipped ext build does not carry it); this section preserves the approach
+and the wall for a future dedicated effort.
 
 `putenv`/`getenv` were the other landmine and are now isolated (framework
 override → per-coroutine `$g` store, boot-env fallback).
