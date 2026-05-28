@@ -333,6 +333,59 @@ For 90% of cases, **Mode 3 (Sync + functionIsolation)** is the sweet spot: FPM-l
 
 ---
 
+## 10. Migration Ladder: `$GLOBALS` Coroutine Isolation Evolution
+
+`App::coroutineGlobalsIsolation(true)` ships in ext-zealphp v0.3.6 as the **Option 3 deep-copy snapshot** strategy. The full evolution path:
+
+### Stage 0 — Process-wide `$GLOBALS` (pre-v0.3.6)
+- `$GLOBALS` is the shared `EG(symbol_table)` across all coroutines.
+- Concurrent writes race; last-writer-wins on the leaf level.
+- **Status:** the default before v0.3.6. Users had to use `$g` (per-coroutine `RequestContext`) for request-scoped state.
+
+### Stage 1 — Deep-copy snapshot (Option 3, **CURRENT** in v0.3.6)
+- ext-zealphp hooks `on_yield`/`on_resume` and snapshots the non-superglobal slots of `EG(symbol_table)` per coroutine.
+- O(N keys) memory per active coroutine — for typical apps with <100 globals, this is ~50–200 KB per coroutine. Negligible at usual concurrency.
+- A boot-time advisory in `App::run()` projects peak memory and warns if it exceeds `256 MB` (configurable threshold). Users with `$GLOBALS`-heavy apps see the warning and can plan migration.
+- **Tradeoff:** simple, safe, no opcache interaction. Memory grows linearly with concurrent coroutines × global keys.
+
+### Stage 2 — Copy-on-write delta (Option 2, **PLANNED** for v0.4.x)
+- Shared parent `EG(symbol_table)` snapshotted at framework boot (read-mostly).
+- Each coroutine maintains a small **delta HashTable** of writes.
+- Read path: check delta first, fall through to shared parent.
+- Write path: promote-on-write (copy parent's value into delta on first write to a key).
+- **Memory:** O(deltas) per coroutine — typically 5–20 KB for normal apps regardless of parent size.
+- **Engineering cost:** ~3000 lines of C, custom VM opcode handlers for `ZEND_FETCH_R/W/DIM_R/DIM_W` against `EG(symbol_table)`, reference-tracking for `global $foo;` bindings, fuzz testing.
+- **Triggers for moving from Stage 1 → Stage 2:** field reports of memory pressure at high concurrency, advisory warnings firing in production, or apps requiring `$GLOBALS` to hold large arrays.
+
+### When does the advisory recommend moving to Stage 2?
+
+The boot-time advisory in `App::run()` emits a `warn`-level log when projected peak memory exceeds 256 MB. Users see:
+
+```
+[advisory] coroutineGlobalsIsolation deep-copy projection: ~512 MB at peak
+(200 user globals × 1024 concurrent coroutines × ~2048B each). Per-coroutine
+memory may grow with large arrays in $GLOBALS. A future Option-2 copy-on-write
+mode will reduce this — track ext-zealphp v0.4.x roadmap.
+```
+
+This is the migration signal. Stage 2 is not yet implemented; the advisory exists so users can:
+
+1. **Validate at boot** that their projected memory fits the deployment budget.
+2. **Plan future migration** if they hit the threshold today.
+3. **Provide telemetry signal** to maintainers about real-world Stage 2 demand.
+
+If the threshold is hit:
+- Short-term: reduce `$GLOBALS` payload (move large structures into `$g` or `Store`).
+- Long-term: track [`ext-zealphp#issues`](https://github.com/sibidharan/ext-zealphp/issues) for Stage 2 work.
+
+### Why Stage 1 first, not Stage 2 directly
+
+1. **Stage 1 closes the architectural gap** — Mode 4/5 race on `$GLOBALS` no longer exists.
+2. **Real production data** is needed to justify the engineering cost of Stage 2 (~6 weeks).
+3. **Stage 2 has security risk surface** — refcount audits, reference-tracking, opcode handler safety. Better to defer until we have evidence we need it.
+
+---
+
 ## References
 
 - [`docs/architecture/2026-05-27-lifecycle-matrix.md`](2026-05-27-lifecycle-matrix.md) — full configuration matrix with test results for all 10 mode/fallback combinations

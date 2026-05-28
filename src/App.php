@@ -1781,6 +1781,66 @@ class App
     }
 
     /**
+     * One-time boot-time advisory for `coroutineGlobalsIsolation(true)`.
+     *
+     * The current implementation (ext-zealphp v0.3.6) uses a deep-copy
+     * snapshot per coroutine — O(N keys) extra memory per active coroutine.
+     * For typical apps with <100 global keys this is negligible (~50 KB
+     * per coroutine), but apps that stuff large data structures into
+     * `$GLOBALS` can balloon memory.
+     *
+     * This advisory emits a one-time warning via `elog()` if the projected
+     * memory exceeds `App::$coroutine_globals_memory_warn_mb` (default 256 MB).
+     * A future Option-2 implementation (copy-on-write delta) will reduce
+     * the per-coroutine cost to just the deltas — see the migration ladder
+     * in docs/architecture/application-server-sapi.md.
+     *
+     * The advisory runs only at App::run() boot, never per-request.
+     */
+    public static function coroutineGlobalsMemoryAdvisory(): void
+    {
+        // Snapshot pre-request `$GLOBALS` shape (framework boot state).
+        $entryCount = count($GLOBALS);
+        // Subtract well-known superglobal slots; they don't count toward
+        // per-coroutine cost (handled by zealphp_coroutine_superglobals).
+        $userEntryCount = max(0, $entryCount - 7);
+
+        // Conservative estimate: average ~2 KB per zval (refcount header,
+        // key string, value); apps with arrays grow this fast.
+        $avgKeyBytes = 2048;
+        $workers = self::$worker_num > 0 ? self::$worker_num : 1;
+        // Rough coroutine concurrency estimate: each worker can have many
+        // in-flight coroutines under HOOK_ALL. ~32 is a reasonable upper
+        // bound for typical HTTP workloads.
+        $coroutinesPerWorker = 32;
+        $totalCoroutines = $workers * $coroutinesPerWorker;
+        $projectedBytes = $userEntryCount * $avgKeyBytes * $totalCoroutines;
+        $projectedMB = (int) ($projectedBytes / (1024 * 1024));
+
+        $thresholdMB = 256;
+        if ($projectedMB >= $thresholdMB) {
+            elog(
+                "[advisory] coroutineGlobalsIsolation deep-copy projection: "
+                . "~{$projectedMB} MB at peak ({$userEntryCount} user "
+                . "globals × {$totalCoroutines} concurrent coroutines × "
+                . "~{$avgKeyBytes}B each). Per-coroutine memory may grow "
+                . "with large arrays in \$GLOBALS. A future Option-2 "
+                . "copy-on-write mode will reduce this — track ext-zealphp "
+                . "v0.4.x roadmap. To disable the advisory, raise the "
+                . "threshold or call coroutineGlobalsIsolation(false).",
+                'warn'
+            );
+        } else {
+            elog(
+                "[info] coroutineGlobalsIsolation active. Projected peak "
+                . "memory: ~{$projectedMB} MB ({$userEntryCount} user "
+                . "globals × {$totalCoroutines} coroutines).",
+                'info'
+            );
+        }
+    }
+
+    /**
      * Per-request function/class/include isolation. Opt-in — see $function_isolation docblock.
      */
     public static function functionIsolation(?bool $on = null): bool
@@ -6225,6 +6285,7 @@ HELP;
             && \function_exists('zealphp_coroutine_globals')
         ) {
             (\zealphp_coroutine_globals(...))((bool) true);
+            self::coroutineGlobalsMemoryAdvisory();
         }
 
         if (self::$function_isolation
