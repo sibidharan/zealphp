@@ -185,16 +185,33 @@ Stage 3 hooks `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` / `ZEND_DECLARE_CLA
 - Lychee M4/M5: `403/X/403` → `403` stable
 - Most other Mode 3/4/5 apps unchanged — their crashes are top-level decls (Stage 4) or non-redeclare causes (missing classes, autoload misses, framework-init failures)
 
-### Stage 4 — compile-time silent-redeclare with proper class teardown (PLANNED)
+### Stage 4 — compile-time silent-redeclare (PROTOTYPED, DEADLOCKS, ext commit `226e9e3`)
 
-The next step after Stage 3 — needs:
-1. A `zend_compile_file` wrapper.
-2. Before compile: snapshot existing user `zend_function*` / `zend_class_entry*` from `CG(*_table)`. Increment refcounts so the engine's reset-on-compile doesn't free them.
-3. Detach them from `CG(*_table)`.
-4. Run original `zend_compile_file` — re-declarations now succeed (the slot is empty).
-5. Re-attach saved entries via `zend_hash_update_ptr`, properly releasing the newly-compiled duplicates' method tables / inheritance state to avoid leaks.
+The Stage 4 hook prototype lives in `ext/zealphp/zealphp.c` as `zealphp_compile_file_hook` but is **not wired in MINIT**. The naive design:
 
-Validated locally that step 5 done naively (just `zend_hash_update_ptr` with stashed pointers) breaks `Call to undefined method` on previously-defined classes — the method table inside the entry isn't being maintained correctly across the swap. The fix is a `zend_class_entry_safe_swap()` helper that handles refcount + method table cleanup; out of scope for v0.3.8.
+1. On entry, walk `CG(function_table)` and `CG(class_table)` for user entries.
+2. Bump `op_array->refcount` / `ce->refcount` so the engine's destructor returns without freeing.
+3. `zend_hash_del` to detach.
+4. Run original `zend_compile_file` — slot is empty, no dup-error.
+5. Restore via `zend_hash_update_ptr`, drop the refcount bump.
+
+**Unit-test verdict (test 020): PASS.** Refcount protection correctly preserves method tables across the detach/restore dance for a single-file include.
+
+**Real-world verdict: every worker hangs.** Wiring the hook in MINIT and running the 32-app × 5-mode sweep returned `X` (timeout) for every cell. The root cause: every nested `zend_compile_file` (autoloader chains, Composer requires, vendor boot) walks AND mutates the global function/class tables. Combined with opcache's late-bind path and an O(N×M) cumulative cost across nested compiles, OpenSwoole workers recycle before serving a single request.
+
+**What's wrong with the design (not the implementation):**
+
+- A blanket detach/reattach of every user symbol per compile is fundamentally too coarse. The compile usually adds 1–10 names; we shouldn't be touching 10,000.
+- We don't know what names the compile will define until AFTER it runs, by which point the dup-error has already fired (`E_COMPILE_ERROR` is `noreturn` — there's no in-flight "skip" signal).
+- Opcache's persistent-script cache replays compiled op_arrays — interaction with our table mutation is undefined and produced segfaults in early traces.
+
+**Stage 4-v2 directions worth trying:**
+
+- **Op-array marker pass.** Hook `zend_compile_file`, run original first into a buffer, then scan the resulting op_array for `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` opcodes + the embedded top-level decls, and rewrite duplicates into NOOPs. Avoids the global-table walk entirely.
+- **Opcache cooperation.** Detect "this is a cached replay" via opcache's API and skip the swap entirely on cache hits (the engine has already validated the cached symbols).
+- **Hook deeper — `zend_register_top_func` / `zend_register_top_class`.** Those are `static` in PHP's source but can be reached via the engine's function-pointer indirection in some 8.x minor versions; needs verification per version.
+
+Stage 4 stays in the source as `zealphp_compile_file_hook` (disabled at MINIT) for the next iteration. Stage 3 (opcode-level) ships clean and unaffected.
 
 ### Stage 5+ — per-coroutine `CG(function_table)` (NOT PLANNED)
 
