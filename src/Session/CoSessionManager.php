@@ -148,7 +148,12 @@ class CoSessionManager
                 (\zealphp_constants_clear(...))();
             }
             if (\function_exists('zealphp_ini_restore')) {
-                (\zealphp_ini_restore(...))();
+                @(\zealphp_ini_restore(...))();
+            }
+            if (\ZealPHP\App::$function_isolation
+                && \function_exists('zealphp_process_state_clean')
+            ) {
+                (\zealphp_process_state_clean(...))(6);
             }
         }
     }

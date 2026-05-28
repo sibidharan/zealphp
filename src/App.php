@@ -130,6 +130,23 @@ class App
     public static bool $define_isolation = false;
 
     /**
+     * Per-request function/class/include isolation via ext-zealphp's
+     * zealphp_process_state_snapshot() / zealphp_process_state_clean().
+     *
+     * When enabled, the worker snapshots its function table, class table,
+     * and included-files cache at boot. At request end, any functions,
+     * classes, or require_once entries added during the request are removed
+     * — giving fresh-process semantics without subprocess overhead.
+     *
+     * ONLY safe in Mode 3 (sync, sequential). In coroutine modes the
+     * function table is shared across concurrent coroutines — cleaning it
+     * mid-flight would crash other coroutines.
+     *
+     * Set via `App::functionIsolation(true)` BEFORE `App::run()`.
+     */
+    public static bool $function_isolation = false;
+
+    /**
      * Set true at the top of `App::run()` so the four lifecycle setters
      * (`superglobals`, `processIsolation`, `enableCoroutine`, `hookAll`)
      * can refuse mutations made AFTER the server has booted.
@@ -1630,6 +1647,17 @@ class App
         if ($v === true)  return \OpenSwoole\Runtime::HOOK_ALL;
         if ($v === false) return 0;
         return (int) $v;
+    }
+
+    /**
+     * Per-request function/class/include isolation. Opt-in — see $function_isolation docblock.
+     */
+    public static function functionIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$function_isolation = $on;
+        }
+        return self::$function_isolation;
     }
 
     /**
@@ -6059,6 +6087,18 @@ HELP;
             && \function_exists('zealphp_define_hook')
         ) {
             (\zealphp_define_hook(...))((bool) true);
+        }
+
+        if (self::$function_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_process_state_snapshot')
+        ) {
+            self::onWorkerStart(function () {
+                if (\class_exists(\ZealPHP\Counter::class, false)) {
+                    \ZealPHP\Counter::defaultBackend();
+                }
+                (\zealphp_process_state_snapshot(...))();
+            });
         }
         // @codeCoverageIgnoreEnd
 
