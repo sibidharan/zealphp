@@ -147,6 +147,26 @@ class App
     public static bool $function_isolation = false;
 
     /**
+     * Per-coroutine `$GLOBALS` isolation via ext-zealphp's
+     * `zealphp_coroutine_globals()`. When enabled, each coroutine gets its
+     * own snapshot of `EG(symbol_table)` swapped in on yield/resume — so
+     * `$GLOBALS['app_state']` and `global $foo;` writes never race across
+     * concurrent coroutines.
+     *
+     * Closes the last architectural gap in Mode 4/5 — user-defined globals
+     * (which were previously process-wide) now isolate alongside super-
+     * globals, constants, ini settings, and static properties.
+     *
+     * Tradeoff: each coroutine maintains its own `$GLOBALS` deep-copy at
+     * yield boundary — O(N keys) extra memory per active coroutine. No
+     * function/class table impact — autoloaders keep working as before.
+     *
+     * Requires ext-zealphp 0.3.6+ with `zealphp_coroutine_globals` function.
+     * Set via `App::coroutineGlobalsIsolation(true)` BEFORE `App::run()`.
+     */
+    public static bool $coroutine_globals_isolation = false;
+
+    /**
      * Set true at the top of `App::run()` so the four lifecycle setters
      * (`superglobals`, `processIsolation`, `enableCoroutine`, `hookAll`)
      * can refuse mutations made AFTER the server has booted.
@@ -1748,6 +1768,16 @@ class App
     {
         if (\func_num_args() > 0) self::$session_handler = $handler;
         return self::$session_handler;
+    }
+
+    /**
+     * Per-coroutine `$GLOBALS` isolation. See $coroutine_globals_isolation
+     * docblock. Requires ext-zealphp 0.3.6+.
+     */
+    public static function coroutineGlobalsIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) self::$coroutine_globals_isolation = $on;
+        return self::$coroutine_globals_isolation;
     }
 
     /**
@@ -6188,6 +6218,13 @@ HELP;
             && \function_exists('zealphp_define_hook')
         ) {
             (\zealphp_define_hook(...))((bool) true);
+        }
+
+        if (self::$coroutine_globals_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_coroutine_globals')
+        ) {
+            (\zealphp_coroutine_globals(...))((bool) true);
         }
 
         if (self::$function_isolation
