@@ -19,7 +19,7 @@ class CoSessionManager
     protected $middleware;
 
     /**
-     * @var callable
+     * @var string|callable
      */
     protected $idGenerator;
 
@@ -35,9 +35,42 @@ class CoSessionManager
      * @param bool|null $useCookies
      * @param bool|null $useOnlyCookies
      */
+    /** Skip cleanup when an app autoloader is registered (its lazy-loaded
+     * classes would be cleaned but require_once cache persists). */
+    private static function safeForFunctionIsolation(): bool
+    {
+        $docRoot = \ZealPHP\App::$document_root;
+        if ($docRoot === '' || $docRoot === '.') return true;
+        $docRoot = \rtrim($docRoot, '/');
+        foreach (\spl_autoload_functions() ?: [] as $cb) {
+            if (\is_array($cb) && \is_object($cb[0])) {
+                $obj = $cb[0];
+                if ($obj instanceof \Composer\Autoload\ClassLoader) {
+                    foreach ($obj->getPrefixesPsr4() as $paths) {
+                        foreach ($paths as $p) {
+                            if (\str_starts_with($p, $docRoot . '/')) return false;
+                        }
+                    }
+                    foreach ($obj->getPrefixes() as $paths) {
+                        foreach ($paths as $p) {
+                            if (\str_starts_with($p, $docRoot . '/')) return false;
+                        }
+                    }
+                    foreach ($obj->getClassMap() as $file) {
+                        if (\str_starts_with($file, $docRoot . '/')) return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * @param string|callable $idGenerator
+     */
     public function __construct(
         callable $middleware,
-        $idGenerator = 'session_create_id',
+        string|callable $idGenerator = 'session_create_id',
         ?bool $useCookies = null,
         ?bool $useOnlyCookies = null
     ) {
@@ -152,6 +185,7 @@ class CoSessionManager
             }
             if (\ZealPHP\App::$function_isolation
                 && \function_exists('zealphp_process_state_clean')
+                && self::safeForFunctionIsolation()
             ) {
                 (\zealphp_process_state_clean(...))(6);
             }

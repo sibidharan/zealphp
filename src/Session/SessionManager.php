@@ -27,7 +27,7 @@ class SessionManager
     protected $middleware;
 
     /**
-     * @var callable
+     * @var string|callable
      */
     protected $idGenerator;
 
@@ -45,9 +45,49 @@ class SessionManager
      * @param bool|null $useCookies
      * @param bool|null $useOnlyCookies
      */
+    /**
+     * Check if function isolation cleanup is safe for the current state.
+     *
+     * Returns false if any registered spl_autoload callback resolves to a
+     * class file under App::documentRoot() — that means an app has its own
+     * Composer autoloader registered, and cleanup would orphan its lazy-
+     * loaded classes (the require_once cache stays but the classes get
+     * removed). For autoloader-based apps, use Mode 1 (CGI Pool) instead.
+     */
+    private static function safeForFunctionIsolation(): bool
+    {
+        $docRoot = \ZealPHP\App::$document_root;
+        if ($docRoot === '' || $docRoot === '.') return true;
+        $docRoot = \rtrim($docRoot, '/');
+        foreach (\spl_autoload_functions() ?: [] as $cb) {
+            if (\is_array($cb) && \is_object($cb[0])) {
+                $obj = $cb[0];
+                if ($obj instanceof \Composer\Autoload\ClassLoader) {
+                    foreach ($obj->getPrefixesPsr4() as $paths) {
+                        foreach ($paths as $p) {
+                            if (\str_starts_with($p, $docRoot . '/')) return false;
+                        }
+                    }
+                    foreach ($obj->getPrefixes() as $paths) {
+                        foreach ($paths as $p) {
+                            if (\str_starts_with($p, $docRoot . '/')) return false;
+                        }
+                    }
+                    foreach ($obj->getClassMap() as $file) {
+                        if (\str_starts_with($file, $docRoot . '/')) return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * @param string|callable $idGenerator
+     */
     public function __construct(
         callable $middleware,
-        $idGenerator = 'session_create_id',
+        string|callable $idGenerator = 'session_create_id',
         ?bool $useCookies = null,
         ?bool $useOnlyCookies = null
     ) {
@@ -149,7 +189,8 @@ class SessionManager
             } else if (!$this->useOnlyCookies && isset($reqGet[$sessionName])) {
                 $rawSid = $reqGet[$sessionName];
             } else {
-                $rawSid = call_user_func($this->idGenerator);
+                $gen = $this->idGenerator;
+                $rawSid = is_callable($gen) ? $gen() : null;
             }
             $sessionId = is_string($rawSid) ? $rawSid : null;
             session_id($sessionId);
@@ -157,7 +198,7 @@ class SessionManager
             static $handlerRegistered = false;
             if (!$handlerRegistered) {
                 $handler = new FileSessionHandler();
-                session_set_save_handler($handler, true);
+                @session_set_save_handler($handler, true);
                 $handlerRegistered = true;
             }
 
@@ -225,6 +266,7 @@ class SessionManager
             }
             if (\ZealPHP\App::$function_isolation
                 && \function_exists('zealphp_process_state_clean')
+                && self::safeForFunctionIsolation()
             ) {
                 (\zealphp_process_state_clean(...))(6);
             }
