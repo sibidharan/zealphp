@@ -6275,12 +6275,27 @@ HELP;
             (\zealphp_define_hook(...))((bool) true);
         }
 
+        // Env-var rollback: ZEALPHP_GLOBALS_ISOLATION_DISABLE=1 disables
+        // the Stage 2 COW path even when App::coroutineGlobalsIsolation(true)
+        // was called. Use this as an emergency rollback if a Stage 2 edge
+        // case surfaces in production — the framework falls back to the
+        // pre-v0.3.6 behaviour ($GLOBALS shared process-wide). See the
+        // migration ladder in docs/architecture/application-server-sapi.md.
+        $isolationDisabledViaEnv = (string) \getenv('ZEALPHP_GLOBALS_ISOLATION_DISABLE') === '1';
         if (self::$coroutine_globals_isolation
+            && !$isolationDisabledViaEnv
             && \extension_loaded('zealphp')
             && \function_exists('zealphp_coroutine_globals')
         ) {
             (\zealphp_coroutine_globals(...))((bool) true);
             self::coroutineGlobalsMemoryAdvisory();
+        } elseif (self::$coroutine_globals_isolation && $isolationDisabledViaEnv) {
+            elog(
+                "[warn] coroutineGlobalsIsolation(true) called but disabled "
+                . "via ZEALPHP_GLOBALS_ISOLATION_DISABLE=1 env var. \$GLOBALS "
+                . "is shared process-wide across coroutines.",
+                'warn'
+            );
         }
 
         if (self::$function_isolation
