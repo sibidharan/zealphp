@@ -27,6 +27,45 @@
 <p><strong>Compatibility-mode story.</strong> In the showcase deploy, WordPress runs without source patches: login, sessions, cookies, redirects, file uploads, REST API, and pretty permalinks all work through the CGI worker bridge (<code>App::superglobals(true) + processIsolation(true)</code>). True global-scope isolation is preserved per request via <code>proc_open</code>, at a ~30&ndash;50&nbsp;ms per-request cost &mdash; the price of the isolation that <code>define()</code>-heavy plugins need. The <a href="/vs-fpm">v0.3.0 persistent worker pool</a> is the planned fix for that startup cost. See <a href="#limitations">known limits</a> before betting your production WordPress on it.</p>
 </div>
 
+<h2 id="50-app-sweep" class="legacy-mt-xl">50-app compatibility sweep — May 2026</h2>
+<p>We ran a structured compatibility sweep against 50 popular PHP applications on Docker lab (PHP 8.4.21 + OpenSwoole 26.2 + ext-zealphp 0.3.5), testing each across all four production modes. Full results in <a href="https://github.com/sibidharan/zealphp/blob/master/docs/compatibility-database.md">docs/compatibility-database.md</a>.</p>
+
+<h3>Apps that PASS in ALL 4 modes (no modifications needed)</h3>
+<p>Five apps were tested 5&times; per mode (20 requests total, sequential + concurrent) and passed every request:</p>
+<ul>
+  <li><strong>Kanboard</strong> — project management — <a href="https://github.com/sibidharan/zealphp-kanboard">zealphp-kanboard</a></li>
+  <li><strong>Joomla</strong> — major CMS (Symfony-based) — <a href="https://github.com/sibidharan/zealphp-joomla">zealphp-joomla</a></li>
+  <li><strong>Roundcube</strong> — webmail — <a href="https://github.com/sibidharan/zealphp-roundcube">zealphp-roundcube</a></li>
+  <li><strong>OpenCart</strong> — e-commerce — <a href="https://github.com/sibidharan/zealphp-opencart">zealphp-opencart</a></li>
+  <li><strong>Adminer</strong> (with <code>functionIsolation(true)</code>) — DB admin — <a href="https://github.com/sibidharan/zealphp-adminer">zealphp-adminer</a></li>
+</ul>
+
+<h3>App-by-app summary (Mode 1 = CGI Pool, Mode 3 = Sync + functionIsolation)</h3>
+<table class="parity-table">
+<thead><tr><th>App</th><th>Category</th><th>Mode 1 (CGI)</th><th>Mode 3 (Sync+FI)</th><th>Best mode</th></tr></thead>
+<tbody>
+<tr><td>WordPress</td><td>CMS</td><td>✅ 3/3</td><td>partial</td><td>Mode 1</td></tr>
+<tr><td>Joomla</td><td>CMS</td><td>✅ 3/3</td><td>✅ 5/5</td><td>Any</td></tr>
+<tr><td>Kanboard</td><td>Project mgmt</td><td>✅ 3/3</td><td>✅ 5/5</td><td>Any</td></tr>
+<tr><td>OpenCart</td><td>E-commerce</td><td>✅ 3/3</td><td>✅ 5/5</td><td>Any</td></tr>
+<tr><td>Roundcube</td><td>Webmail</td><td>✅ 3/3</td><td>✅ 5/5</td><td>Any</td></tr>
+<tr><td>Adminer</td><td>DB admin</td><td>✅ 3/3</td><td>✅ 10/10*</td><td>Any (Mode 3 needs functionIsolation)</td></tr>
+<tr><td>TinyFileManager</td><td>File mgr</td><td>✅ 3/3</td><td>✅ 10/10*</td><td>Any (Mode 3 needs functionIsolation)</td></tr>
+<tr><td>FreshRSS</td><td>RSS reader</td><td>✅ 3/3</td><td>✅ 5/5*</td><td>Any (Mode 3 needs functionIsolation)</td></tr>
+<tr><td>Cacti</td><td>Net monitoring</td><td>✅ 3/3</td><td>—</td><td>Mode 1 (relative includes)</td></tr>
+<tr><td>Matomo</td><td>Analytics</td><td>✅ 3/3</td><td>partial</td><td>Mode 1</td></tr>
+<tr><td>DokuWiki</td><td>Wiki</td><td>partial</td><td>✅ 5/5</td><td>Mode 3</td></tr>
+<tr><td>phpMyAdmin</td><td>DB admin</td><td>—</td><td>partial</td><td>Mode 5 (coroutine, async MySQL)</td></tr>
+</tbody>
+</table>
+<p class="legacy-note">* with <code>App::functionIsolation(true)</code> — ext-zealphp 0.3.5+ feature that snapshots <code>CG(function_table)</code> + <code>CG(class_table)</code> at worker boot and cleans request-scoped additions at request end. Auto-skipped when the app registers its own Composer autoloader from documentRoot.</p>
+
+<h3>The two breakthroughs the sweep drove</h3>
+<ul>
+  <li><strong><code>App::functionIsolation(true)</code></strong> — fixes the classic "Cannot redeclare function" crash that breaks single-file legacy PHP apps (Adminer, TinyFileManager, FreshRSS) on long-running servers. Each request gets fresh function/class state via ext-zealphp&apos;s C-level cleanup. ~3ms overhead.</li>
+  <li><strong>CGI Pool <code>chdir()</code> fix</strong> — Apache mod_php sets the working directory to the script&apos;s directory before each include. ZealPHP&apos;s pool worker now does the same. Fixes Cacti, OpenCart, and other apps using relative includes (<code>require &apos;./include/auth.php&apos;</code>).</li>
+</ul>
+
 <h2 id="limitations">Known limitations — things ZealPHP won't do</h2>
 <p>Before going deep, do the 30-second dealbreaker scan. If your app depends on any of the categories marked ❌ below <em>and</em> you can't put a front proxy in front of ZealPHP, this isn't the right runtime. If you pass this gate, the porting story is clean — keep reading.</p>
 

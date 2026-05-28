@@ -431,7 +431,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
         ['🌐', 'HTTP',        'Full HTTP/1.1 compliance. HEAD, OPTIONS, Range, redirects, CORS, ETag, gzip — all built-in.',           '/http',       'HTTP/1.1'],
         ['📝', 'Components',  'SSR streaming components. Compose views with yield from. renderStream() for progressive HTML.',         '/templates',  'renderStream()'],
         ['🔗', 'REST API',    'Drop a PHP file in api/. It becomes a route. File-based REST — the simplest API pattern.',             '/api',        'file-based'],
-        ['🏗️', 'Legacy Apps','WordPress compatibility showcase via the CGI bridge (admin, login, REST API working) — with documented limits and trade-offs.', '/legacy-apps','WordPress'],
+        ['🏗️', 'Legacy Apps','50-app compatibility sweep: WordPress, Joomla, Kanboard, Roundcube, OpenCart, Adminer + 44 more. 5 apps pass ALL 4 modes unmodified.', '/legacy-apps#50-app-sweep','50-app sweep'],
       ];
       foreach ($features as [$icon, $title, $body, $href, $badge]) {
         App::render('/components/_card', compact('icon', 'title', 'body', 'href', 'badge'));
