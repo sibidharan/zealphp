@@ -161,6 +161,36 @@ bookstack, flarum, monica, slim-app, drupal, filegator, phpbb, opencart, wallaba
 
 **Mode 5 today serves 10 apps end-to-end + 4 with app-level errors that are app fixes.** That's 14/32 (44%) of the matrix doing real work in pure coroutine mode. The remaining gap is dominated by per-app config (composer, paths, system extensions) — NOT framework limitations.
 
+### The real coroutine-mode gap — diagnosed (2026-05-28)
+
+The question "why does WordPress fail in coroutine mode if we capture all global state?" has a precise answer. **All five isolation layers are working**:
+
+| Layer | Mechanism | Status |
+|---|---|---|
+| `$GLOBALS` user vars | Stage 2 COW (parent + per-coroutine delta) | ✅ Per-coroutine |
+| Superglobals `$_GET/$_POST/$_SESSION` | OpenSwoole `on_yield` / `on_resume` snapshot | ✅ Per-coroutine |
+| Runtime `function foo()` (in if/method scope) | Stage 3 opcode hook on `ZEND_DECLARE_FUNCTION` | ✅ |
+| Top-level `function foo()` at file scope | Stage 4 `CG(function_table)` pointer swap in `zend_compile_file` | ✅ on cold compile |
+| `define()` constants | silent-define-redeclare intercept on `define()` | ✅ |
+
+**The one remaining gap — opcache hot path.**
+
+`zend_compile_file` is NOT called when opcache has the file cached. Instead, opcache's `zend_accel_load_script` (in `ext/opcache.so`, a separate shared object) replays the cached op_array and calls `do_bind_function` / `do_bind_class` directly to install the top-level declarations into `EG(function_table)`. On the second request, the bind fails with "Cannot redeclare" — and opcache itself calls `zend_accel_error_noreturn` which `zend_bailout`s out of the request.
+
+Stage 4's CG-table swap is on `zend_compile_file`. **Not invoked on opcache hits.** Stage 3's runtime opcode hook only catches conditional declarations, not top-level ones bound by opcache replay.
+
+**Why WordPress homepage `/wordpress/` works:** `wp-blog-header.php` and `wp-load.php` are loaded ONCE on the worker's first request. Their top-level functions land in the process-wide function table. Subsequent requests reuse the same functions — no re-bind happens because opcache sees they're already there.
+
+**Why `wp-login.php` fails:** it declares `login_header()`, `login_footer()`, `wp_login_form()`, `retrieve_password()` at file scope — files only loaded when someone visits the login URL. Worker request 1 → opcache caches the file with these function declarations. Worker request 2 → opcache replays the cached op_array → `do_bind_function('login_header', ...)` fails → bailout. Worker dies.
+
+**Three fix paths (ranked):**
+
+1. **M1 Pool for the specific endpoint** (current state). `App::registerCgiBackend()` lets you route `/wp-login.php`, `/wp-admin/install.php`, `/wp-admin/post.php` to a subprocess while serving `/` from M4 Hybrid. This is the FPM pair-up.
+2. **Stage 5 (planned, v0.4.0)**: hook `do_bind_function` / `do_bind_class` at the engine level so silent-redeclare catches opcache replays. Requires LD_PRELOAD or a small PHP-engine patch — not a clean ext-zealphp addition.
+3. **opcache configuration**: `opcache.blacklist_filename` with a list of WordPress files that have top-level declarations. Brittle (per-app maintenance) but works without engine changes.
+
+The doc summary table above reflects this honestly — Tier B apps (drupal/privatebin/cacti/etc.) often have similar patterns. Stage 4 closes a big slice of the redeclare crashes; opcache hot path is the residual 15–20%.
+
 ### What we verified end-to-end on the 12-core perf VM (2026-05-28)
 
 Setting up real DB + real WordPress + real auth via wp-cli on `labs@172.30.0.3` with ZealPHP Mode 4 Hybrid (`superglobals(true) + enableCoroutine(true)` + ext-zealphp v0.3.8 with Stage 3+4+silent-define-redeclare):
