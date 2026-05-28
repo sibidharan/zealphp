@@ -820,7 +820,7 @@ Maximum compatibility with unknown/untested apps?
 | Mode 4 partial | 6 | tinyfilemanager, dokuwiki, freshrss, vanilla, wordpress, matomo (alternating success — concurrent coroutine race on shared state) |
 | Mode 4 failing | 5 | cacti, nextcloud, phpmyadmin, mybb, phpbb (heavy legacy apps needing fresh state — architectural limit, use Mode 1) |
 | Mode 4 architectural limit | Process-wide state | Concurrent coroutines share function/class/constant tables. ext-zealphp's per-coroutine isolation handles superglobals + constants but NOT user-defined classes (loaded once, shared). For apps requiring fresh PHP state per request → use Mode 1 (CGI Pool) |
-| User-globals cleanup | Yes | Mode 1: FPM-style. Mode 3+FI: ext-zealphp zealphp_globals_clean. Mode 4/5: process-wide (use $g) |
+| User-globals cleanup | Yes (all modes) | Mode 1: FPM-style. Mode 3+FI: ext-zealphp zealphp_globals_clean. Mode 4/5: per-coroutine via `App::coroutineGlobalsIsolation(true)` (ext-zealphp v0.3.6+). |
 | Session merge granularity | Leaf-level | TableSessionHandler + RedisSessionHandler with 3-way merge |
 | Mode 1 recommended | ~24 | Legacy/procedural apps — WordPress, Magento, phpBB, etc. |
 | Mode 3 recommended | ~19 | Framework-based apps — Laravel, Symfony, Flarum, etc. |
