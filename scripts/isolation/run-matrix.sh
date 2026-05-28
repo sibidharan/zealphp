@@ -40,5 +40,6 @@ for MODE in coroutine-legacy coroutine mixed legacy-cgi; do
 done
 echo
 echo "Contract = request-state (superglobals, response, class statics, \$GLOBALS,"
-echo "constants, ini, bootstrap) must be ISOLATED. fn_static + putenv are"
-echo "process-level landmines (developer responsibility) and may LEAK by design."
+echo "constants, ini, bootstrap, putenv) must be ISOLATED. fn_static is ALSO"
+echo "isolated in coroutine-legacy here (Stage 5 — App::coroutineStaticsIsolation(true));"
+echo "with Stage 5 off it leaks by design."

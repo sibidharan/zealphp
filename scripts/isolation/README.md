@@ -43,5 +43,7 @@ Env: `ZEALPHP_SO` (ext path), `PHP_BIN` (php binary), `N` (concurrency, default 
 Each of N concurrent requests sets a primitive to its own unique value, the
 coroutine yields (forcing interleave), then re-reads. **Isolated** = every
 request still sees its own value. Raw OpenSwoole (no ZealPHP) leaks ~39/40;
-ZealPHP must leak 0 for the contract set. `fn_static` and `putenv` are
-process-level and leak by design — they are reported, not asserted.
+ZealPHP must leak 0 for the contract set. `putenv` is isolated via the
+framework override. `fn_static` is isolated too in `coroutine-legacy` here
+(Stage 5 — the probe enables `App::coroutineStaticsIsolation(true)`); with
+Stage 5 off it leaks by design and is reported, not asserted.

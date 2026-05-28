@@ -27,6 +27,7 @@ $port = (int)(getenv('PORT') ?: 9820);
 App::mode($mode);
 if ($mode === 'coroutine-legacy') {
     App::defineIsolation(true);
+    App::coroutineStaticsIsolation(true);   // Stage 5 — isolate function-local static $x
 }
 $app = App::init('127.0.0.1', $port);
 

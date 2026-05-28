@@ -20,6 +20,7 @@ use ZealPHP\App;
 $port = (int)($argv[1] ?? 9820);
 App::mode(App::MODE_COROUTINE_LEGACY);
 App::defineIsolation(true);
+App::coroutineStaticsIsolation(true);   // Stage 5 — isolate function-local static $x
 $app = App::init('127.0.0.1', $port);
 
 $cur = new OpenSwoole\Atomic(0);
@@ -67,8 +68,7 @@ $app->route('/probe', function ($request, $response) use ($cur, $max) {
         'constant'     => (defined('TB_TENANT') ? constant('TB_TENANT') : null) === $x,
         'ini_set'      => ini_get('default_charset') === $x,
         'bootstrap'    => ($tb_boot ?? null) === 'BOOT',
-        // process-level landmines — reported, NOT part of the isolation contract:
-        'fn_static'    => tb_static(null) === $x,
+        'fn_static'    => tb_static(null) === $x,   // Stage 5 — now isolated (opt-in)
         'putenv'       => getenv('TB_ENV') === $x,
     ]];
 });

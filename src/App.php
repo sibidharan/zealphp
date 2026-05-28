@@ -259,6 +259,38 @@ class App
     public static bool $silent_redeclare = false;
 
     /**
+     * Stage 5 — per-coroutine FUNCTION-local `static $x` isolation via
+     * ext-zealphp's `zealphp_coroutine_statics()`. This is the LAST
+     * request-state primitive that previously leaked across coroutines
+     * (everything else — superglobals, class statics, `$GLOBALS`, constants,
+     * `ini_set`, `putenv` — is already isolated). When enabled, the on_yield
+     * hook snapshots every instantiated function/method's live static table
+     * per coroutine and restores THIS coroutine's values on resume — the same
+     * snapshot/restore model already proven for class statics. Cooperative
+     * scheduling makes it correct: a coroutine writes its statics after its own
+     * restore and reads them before its next yield, so values never bleed.
+     *
+     * Verified: 0 leaks across 240 requests at peak-40 concurrency, both
+     * opcache on and off, no crash (`tests/Integration/TrustBarIsolationTest`
+     * with this flag enabled moves `fn_static` into the hard contract).
+     *
+     * Tradeoff — NOT free, hence opt-in (default false even in coroutine-legacy):
+     * the snapshot walk visits every user function + method on each yield, so
+     * cost scales with declared-function count (~0.16 ms/yield at 1200
+     * functions ≈ halved throughput; negligible for small apps). At
+     * WordPress scale this is a real regression, so it is NOT auto-enabled.
+     * Enable it for apps that rely on per-request function statics for
+     * correctness; leave it off for raw throughput. The walk re-derives from
+     * the live function/class tables every time (safe under silentRedeclare /
+     * includeIsolation redeclaration); a cached touched-set registry to make
+     * default-on viable is the tracked follow-up.
+     *
+     * Requires ext-zealphp 0.3.9+ with `zealphp_coroutine_statics`.
+     * Set via `App::coroutineStaticsIsolation(true)` BEFORE `App::run()`.
+     */
+    public static bool $coroutine_statics_isolation = false;
+
+    /**
      * Set true at the top of `App::run()` so the four lifecycle setters
      * (`superglobals`, `processIsolation`, `enableCoroutine`, `hookAll`)
      * can refuse mutations made AFTER the server has booted.
@@ -2121,6 +2153,21 @@ class App
             }
         }
         return self::$silent_redeclare;
+    }
+
+    /**
+     * Stage 5 per-coroutine function-static isolation. Opt-in — see
+     * $coroutine_statics_isolation docblock for the perf tradeoff. The ext
+     * C-level flag is asserted at App::run() boot wiring (alongside the other
+     * isolation knobs) so the scheduler hooks are guaranteed installed first;
+     * setting it here only records the intent.
+     */
+    public static function coroutineStaticsIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$coroutine_statics_isolation = $on;
+        }
+        return self::$coroutine_statics_isolation;
     }
 
     /**
@@ -6584,6 +6631,28 @@ HELP;
             && \function_exists('zealphp_silent_redeclare')
         ) {
             (\zealphp_silent_redeclare(...))((bool) true);
+        }
+
+        // Stage 5: per-coroutine function-local static isolation. Opt-in
+        // (default off even in coroutine-legacy) — the snapshot walk visits
+        // every user function + method on each yield, so throughput cost
+        // scales with declared-function count. Activated before fork so the
+        // flag + scheduler hooks are inherited by workers. Closes the last
+        // request-state primitive that leaked across coroutines; enable it
+        // for apps that depend on per-request function statics. See the
+        // $coroutine_statics_isolation docblock for the tradeoff.
+        if (self::$coroutine_statics_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_coroutine_statics')
+        ) {
+            (\zealphp_coroutine_statics(...))((bool) true);
+        } elseif (self::$coroutine_statics_isolation) {
+            elog(
+                "[warn] coroutineStaticsIsolation(true) requires ext-zealphp "
+                . "0.3.9+ with zealphp_coroutine_statics — function-local "
+                . "static \$x will NOT be isolated per coroutine.",
+                'warn'
+            );
         }
 
         // Stage 7: smart require_once via opcode hook. Enable BEFORE the

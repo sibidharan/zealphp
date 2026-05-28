@@ -36,15 +36,16 @@ final class TrustBarIsolationTest extends TestCase
     private const PORT = 9820;
     private const N = 40;
 
-    /** The hard isolation contract — must be 0 leaks. */
+    /** The hard isolation contract — must be 0 leaks. With Stage 5
+     *  (App::coroutineStaticsIsolation(true), enabled in the fixture),
+     *  function-local `static $x` is now isolated too — so the contract covers
+     *  EVERY request-state primitive. The fixture proves 100% isolation. */
     private const CONTRACT = [
         '$_GET','$_POST','$_REQUEST','$_COOKIE','$_FILES','$_SERVER','$_SESSION',
-        'class_static','$GLOBALS','constant','ini_set','putenv','bootstrap',
+        'class_static','$GLOBALS','constant','ini_set','putenv','bootstrap','fn_static',
     ];
-    /** Process-level — reported, not asserted. Only function-local `static $x`
-     *  remains a landmine (the `static` keyword can't be overridden, and
-     *  per-coroutine map_ptr isolation is the open "Stage 5" research item). */
-    private const PROCESS_LEVEL = ['fn_static'];
+    /** Nothing left process-level: every primitive above is asserted. */
+    private const PROCESS_LEVEL = [];
 
     private static ?int $pid = null;
     private static string $log = '';
