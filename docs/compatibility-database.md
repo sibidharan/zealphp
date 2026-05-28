@@ -811,8 +811,12 @@ Maximum compatibility with unknown/untested apps?
 | Metric | Count | Notes |
 |--------|-------|-------|
 | Total apps surveyed | 50 | Mix of tested and predicted |
-| Tested in Docker lab | 17 | Kanboard, Roundcube, OpenCart, Joomla, traditional, DokuWiki, phpMyAdmin, Adminer, TinyFileManager, FreshRSS, Matomo, Grav, Nextcloud, Slim, phpLiteAdmin, Drupal, PrivateBin |
+| Tested in Docker lab | 32 | All apps in `examples/sweep/apps/` deployed and tested |
 | All 4 modes pass | 5 | Kanboard, Roundcube, OpenCart, Joomla, traditional |
+| Mode 1 (CGI Pool) pass | 19 | adminer, cacti, freshrss, joomla, kanboard, matomo, mybb, nextcloud, opencart, phpbb, phpliteadmin, piwigo, privatebin, roundcube, tinyfilemanager, traditional, vanilla, wallabag, wordpress |
+| Mode 1 known issues | 2 | phpMyAdmin (parent dispatch hangs ~60s), DokuWiki (subprocess exit() corrupts pipe) |
+| User-globals cleanup | Yes | Mode 1: FPM-style. Mode 3+FI: ext-zealphp zealphp_globals_clean. Mode 4/5: process-wide (use $g) |
+| Session merge granularity | Leaf-level | TableSessionHandler + RedisSessionHandler with 3-way merge |
 | Mode 1 recommended | ~24 | Legacy/procedural apps — WordPress, Magento, phpBB, etc. |
 | Mode 3 recommended | ~19 | Framework-based apps — Laravel, Symfony, Flarum, etc. |
 | Mode 4 viable | ~30 | Apps where ext-zealphp resolves redeclaration and isolation |
