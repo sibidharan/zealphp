@@ -81,15 +81,17 @@ final class TableSessionHandler implements \SessionHandlerInterface
      * @param string $savePath  File backing directory. Default /var/lib/php/sessions.
      */
     public static function register(
-        int $ttl = 1440,
-        int $maxRows = 4096,
-        int $dataSize = 8192,
-        string $savePath = '/var/lib/php/sessions'
+        ?int $ttl = null,
+        ?int $maxRows = null,
+        ?int $dataSize = null,
+        ?string $savePath = null
     ): self {
-        self::$ttl = max(1, $ttl);
-        self::$maxRows = max(16, $maxRows);
-        self::$dataSize = max(1024, $dataSize);
-        self::$savePath = $savePath;
+        // Resolve from App config if not explicitly passed — lets users set
+        // these via App::sessionTtl() / sessionMaxRows() / etc. before run().
+        self::$ttl = max(1, $ttl ?? \ZealPHP\App::$session_ttl);
+        self::$maxRows = max(16, $maxRows ?? \ZealPHP\App::$session_max_rows);
+        self::$dataSize = max(1024, $dataSize ?? \ZealPHP\App::$session_data_size);
+        self::$savePath = $savePath ?? \ZealPHP\App::$session_save_path;
 
         if (self::$table === null) {
             $table = new Table(self::$maxRows);
