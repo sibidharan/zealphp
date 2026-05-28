@@ -185,33 +185,47 @@ Stage 3 hooks `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` / `ZEND_DECLARE_CLA
 - Lychee M4/M5: `403/X/403` → `403` stable
 - Most other Mode 3/4/5 apps unchanged — their crashes are top-level decls (Stage 4) or non-redeclare causes (missing classes, autoload misses, framework-init failures)
 
-### Stage 4 — compile-time silent-redeclare (PROTOTYPED, DEADLOCKS, ext commit `226e9e3`)
+### Stage 4 — compile-time silent-redeclare via CG-table swap (SHIPPED, ext commit `892f979`)
 
-The Stage 4 hook prototype lives in `ext/zealphp/zealphp.c` as `zealphp_compile_file_hook` but is **not wired in MINIT**. The naive design:
+The first Stage 4 prototype (commit `226e9e3`) snapshot-then-detached the WHOLE user symbol table per compile with refcount bumps. Single-file unit test passed; production deadlocked every worker because every nested `zend_compile_file` walked AND mutated O(N) entries. With autoloader-driven nested compiles the cumulative cost was O(N×M), workers recycled before serving a request.
 
-1. On entry, walk `CG(function_table)` and `CG(class_table)` for user entries.
-2. Bump `op_array->refcount` / `ce->refcount` so the engine's destructor returns without freeing.
-3. `zend_hash_del` to detach.
-4. Run original `zend_compile_file` — slot is empty, no dup-error.
-5. Restore via `zend_hash_update_ptr`, drop the refcount bump.
+The shipped Stage 4 (commit `892f979`) replaces that with a **pointer swap**:
 
-**Unit-test verdict (test 020): PASS.** Refcount protection correctly preserves method tables across the detach/restore dance for a single-file include.
+```
+save real = CG(function_table)
+swap CG(function_table) = &scratch_fn   (empty hash)
+zend_compile_file(...)   ← writes compile-time decls into scratch
+restore CG(function_table) = real
+merge scratch → real with first-wins
+```
 
-**Real-world verdict: every worker hangs.** Wiring the hook in MINIT and running the 32-app × 5-mode sweep returned `X` (timeout) for every cell. The root cause: every nested `zend_compile_file` (autoloader chains, Composer requires, vendor boot) walks AND mutates the global function/class tables. Combined with opcache's late-bind path and an O(N×M) cumulative cost across nested compiles, OpenSwoole workers recycle before serving a single request.
+Why it works:
+- Compile WRITES via `CG(function_table)` — diverted to scratch, so `zend_register_top_func`'s dup check sees an empty slot and never fires `E_COMPILE_ERROR`.
+- Code lookups during compile use `EG(function_table)` — still the real global table, so internal-function resolution and earlier user definitions stay visible.
+- Cost per compile: **O(K)** where K = symbols this file declares. Independent of total user-symbol count. Re-entrant safe (the swap is stack-local — nested compiles get their own scratch).
 
-**What's wrong with the design (not the implementation):**
+Cleanup: the first-wins merge inserts into real only when the key isn't there. Losers (compile-added duplicates whose name already lives in real) are torn down via `destroy_zend_function` / `destroy_zend_class` so no op_array body leaks.
 
-- A blanket detach/reattach of every user symbol per compile is fundamentally too coarse. The compile usually adds 1–10 names; we shouldn't be touching 10,000.
-- We don't know what names the compile will define until AFTER it runs, by which point the dup-error has already fired (`E_COMPILE_ERROR` is `noreturn` — there's no in-flight "skip" signal).
-- Opcache's persistent-script cache replays compiled op_arrays — interaction with our table mutation is undefined and produced segfaults in early traces.
+**Verification:**
 
-**Stage 4-v2 directions worth trying:**
+- All 3 Stage 3/4 phpt tests pass (018 cond fn, 019 class, 020 top-level).
+- Local stress: 50-file class-redeclare loop runs at 0.19 ms total with `silent_redeclare` ON (vs 0.31 ms cold). No deadlock.
+- Composer `vendor/autoload.php` re-includes loop at 0.10 ms for 10 iterations.
 
-- **Op-array marker pass.** Hook `zend_compile_file`, run original first into a buffer, then scan the resulting op_array for `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` opcodes + the embedded top-level decls, and rewrite duplicates into NOOPs. Avoids the global-table walk entirely.
-- **Opcache cooperation.** Detect "this is a cached replay" via opcache's API and skip the swap entirely on cache hits (the engine has already validated the cached symbols).
-- **Hook deeper — `zend_register_top_func` / `zend_register_top_class`.** Those are `static` in PHP's source but can be reached via the engine's function-pointer indirection in some 8.x minor versions; needs verification per version.
+**32-app × 5-mode lab sweep impact:**
 
-Stage 4 stays in the source as `zealphp_compile_file_hook` (disabled at MINIT) for the next iteration. Stage 3 (opcode-level) ships clean and unaffected.
+| App | Before Stage 4 | With Stage 4 |
+|---|---|---|
+| adminer M5 | `200/X/200` (flicker) | **`200`** stable |
+| lychee M3/M4/M5 | `403/X/403` | **`403`** stable |
+| tinyfilemanager M3/M4/M5 | `200/X/200` | **`200`** stable |
+| phpliteadmin M3 | `500/X/500` | **`500`** stable |
+| WordPress M3 | `302/500/500` (redirect-to-install) | **`200`/500/500** (now serves content on req 1) |
+| dokuwiki M4 | `302/500/500` | `302/X/302` improved |
+| Mode 1 Pool entire column | unchanged | **unchanged** (subprocess scope — Stage 4 doesn't apply) |
+| wordpress M5 | `302` stable | `302/500/302` — minor regression, separate fix |
+
+Stage 3 + Stage 4 together close both lanes — runtime opcode declares and compile-time top-level declares.
 
 ### Stage 5+ — per-coroutine `CG(function_table)` (NOT PLANNED)
 
@@ -482,9 +496,9 @@ Where each isolation feature sits in ZealPHP's release history.
 | Stage 2 `$GLOBALS` COW | **v0.3.7** | — | **CURRENT** — parent + delta + tombstone |
 | `ZEALPHP_GLOBALS_ISOLATION_DISABLE` env-var rollback | v0.3.7 | — | Emergency switch |
 | FD-3 IPC channel (CGI Pool) | **v0.3.8** (commit `9b8111b`) | — | Metadata on dedicated fd 3; STDOUT body-only. Survives `exit()` inside shutdown fn. Restores `wp_ob_end_flush_all()` body. Unblocks phpMyAdmin / WordPress on Mode 1. |
-| Stage 3 silent-redeclare opcode hooks | **v0.3.8** (ext commit `d09693d`) | — | Hooks `ZEND_DECLARE_FUNCTION` / `_CLASS` / `_DELAYED` so re-declaring an EXISTING symbol skips the opcode instead of `E_COMPILE_ERROR`. Covers conditional declares (in if / fn / method scope) cleanly. Top-level decls are compile-time-bound → Stage 4. |
-| Stage 4 compile-time silent-redeclare | PLANNED | — | `zend_compile_file` wrapper + `zend_class_entry_safe_swap` that preserves method-table + inheritance refcounting. Closes the remaining top-level-decl redeclare lane that Stage 3 leaves open. Validated locally that the naive approach segfaults; correct implementation is non-trivial. |
-| Stage 5+ per-coroutine `CG(function_table)` / `CG(class_table)` | NOT PLANNED | — | Would break autoloaders by design (autoloaders register classes once; per-coroutine tables would mean every coroutine triggers the autoloader independently). The silent-redeclare path above is the pragmatic ceiling. |
+| Stage 3 silent-redeclare opcode hooks | **v0.3.8** (ext commit `d09693d`) | — | Hooks `ZEND_DECLARE_FUNCTION` / `_CLASS` / `_DELAYED` so re-declaring an EXISTING symbol skips the opcode instead of `E_COMPILE_ERROR`. Covers conditional declares (in if / fn / method scope) cleanly. |
+| Stage 4 compile-time silent-redeclare via CG-table swap | **v0.3.8** (ext commit `892f979`) | — | `zend_compile_file` wrapper that swaps `CG(function_table)` / `CG(class_table)` pointers to scratch tables for the compile duration. Compile-time decls write to scratch; merged into real first-wins after compile. O(K) per compile, re-entrant safe. Closes the top-level-decl lane that Stage 3's opcode hook can't reach. |
+| Stage 5+ per-coroutine `CG(function_table)` / `CG(class_table)` | NOT PLANNED | — | Would break autoloaders by design (autoloaders register classes once; per-coroutine tables would mean every coroutine triggers the autoloader independently). Stage 3 + Stage 4 together are the pragmatic ceiling. |
 
 ---
 
