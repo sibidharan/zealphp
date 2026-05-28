@@ -1479,6 +1479,110 @@ class App
         return self::$cgi_mode;
     }
 
+    /** Isolation strategy constants — canonical user-facing surface for App::isolation(). */
+    public const ISOLATION_COROUTINE = 'coroutine';
+    public const ISOLATION_CGI_POOL  = 'cgi-pool';
+    public const ISOLATION_CGI_PROC  = 'cgi-proc';
+    public const ISOLATION_CGI_FCGI  = 'cgi-fcgi';
+    public const ISOLATION_NONE      = 'none';
+
+    /** High-level mode presets — canonical user-facing surface for App::mode(). */
+    public const MODE_LEGACY_CGI       = 'legacy-cgi';
+    public const MODE_COROUTINE        = 'coroutine';
+    public const MODE_COROUTINE_LEGACY = 'coroutine-legacy';
+    public const MODE_MIXED            = 'mixed';
+
+    /**
+     * The single knob that says HOW a request is isolated — folds the
+     * (processIsolation × enableCoroutine × hookAll × cgiMode) cross-product
+     * into one intention-revealing value. Pure sugar over the existing fluent
+     * setters (they all keep working unchanged); accepts the `App::ISOLATION_*`
+     * constant, an `Isolation` enum case, or a bare string ("no strong").
+     *
+     *   App::isolation(App::ISOLATION_COROUTINE);  // canonical
+     *   App::isolation(Isolation::CgiProc);         // enum
+     *   App::isolation('cgi-pool');                 // bare string (BC)
+     *
+     * Mapping (each just calls the existing setters, so no forcing rule ever fires):
+     *   coroutine → processIsolation(false) + enableCoroutine(true)  + hookAll(true)
+     *   cgi-pool  → processIsolation(true)  + cgiMode('pool') + enableCoroutine(false) + hookAll(false)
+     *   cgi-proc  → processIsolation(true)  + cgiMode('proc') + enableCoroutine(false) + hookAll(false)
+     *   cgi-fcgi  → processIsolation(true)  + cgiMode('fcgi') + enableCoroutine(false) + hookAll(false)
+     *   none      → processIsolation(false) + enableCoroutine(false) + hookAll(false)
+     *
+     * No-arg call returns the currently-resolved isolation as an `App::ISOLATION_*`
+     * string (derived from the resolved processIsolation/enableCoroutine knobs, so
+     * the default — process for superglobals(true), coroutine for superglobals(false)
+     * — is reported faithfully).
+     */
+    public static function isolation(Isolation|string|null $mode = null): string
+    {
+        if ($mode !== null) {
+            $iso = Isolation::coerce($mode);
+            if ($iso->isProcess()) {
+                self::processIsolation(true);
+                self::cgiMode($iso->cgiMode() ?? CgiMode::Pool);
+                self::enableCoroutine(false);
+                self::hookAll(false);
+            } elseif ($iso === Isolation::Coroutine) {
+                self::processIsolation(false);
+                self::enableCoroutine(true);
+                self::hookAll(true);
+            } else { // None
+                self::processIsolation(false);
+                self::enableCoroutine(false);
+                self::hookAll(false);
+            }
+        }
+        // Derive the effective isolation from the resolved knobs.
+        if (self::processIsolation()) {
+            return 'cgi-' . self::$cgi_mode;
+        }
+        return self::enableCoroutine() ? self::ISOLATION_COROUTINE : self::ISOLATION_NONE;
+    }
+
+    /**
+     * High-level mode preset — sets BOTH axes (`superglobals` + `isolation`) in
+     * one call. Sugar over the fine-grained setters; accepts an `App::MODE_*`
+     * constant or a bare string ("no strong"). All the individual setters remain
+     * available to override afterwards.
+     *
+     *   legacy-cgi       → superglobals(true)  + isolation(cgi-pool)            [unmodified WordPress/Drupal]
+     *   coroutine        → superglobals(false) + isolation(coroutine)          [modern ZealPHP apps — default shape]
+     *   coroutine-legacy → superglobals(true)  + isolation(coroutine)          [legacy code, concurrent — Mode 4]
+     *                      + silentRedeclare(true) + includeIsolation(true)     (so re-included/re-declared legacy code survives)
+     *   mixed            → superglobals(true)  + isolation(none)               [Symfony / Laravel bridge — sequential]
+     */
+    public static function mode(string $mode): void
+    {
+        self::refuseAfterRun('App::mode');
+        switch ($mode) {
+            case self::MODE_LEGACY_CGI:
+                self::superglobals(true);
+                self::isolation(Isolation::CgiPool);
+                break;
+            case self::MODE_COROUTINE:
+                self::superglobals(false);
+                self::isolation(Isolation::Coroutine);
+                break;
+            case self::MODE_COROUTINE_LEGACY:
+                self::superglobals(true);
+                self::isolation(Isolation::Coroutine);
+                self::silentRedeclare(true);
+                self::includeIsolation(true);
+                break;
+            case self::MODE_MIXED:
+                self::superglobals(true);
+                self::isolation(Isolation::None);
+                break;
+            default:
+                throw new \InvalidArgumentException(
+                    "Unknown App::mode('$mode') — use App::MODE_LEGACY_CGI, MODE_COROUTINE, "
+                    . "MODE_COROUTINE_LEGACY, or MODE_MIXED."
+                );
+        }
+    }
+
     /**
      * Worker count for `cgiMode('pool')` — the native FCGI-style subprocess
      * pool. FPM `pm.max_children` parity. Default 4. Set BEFORE `App::run()`.
