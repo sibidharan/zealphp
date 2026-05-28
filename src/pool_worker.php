@@ -251,6 +251,35 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
         $__pw_rawcookies[] = $cookie;
         return true;
     }, true);
+
+    // STDOUT pollution guard. The pool worker writes IPC frames to STDOUT,
+    // so any app writing directly to STDOUT (via flush() / ob_end_flush() /
+    // fastcgi_finish_request()) corrupts the IPC channel — the parent reads
+    // garbage as a frame length, returns "subprocess died mid-request",
+    // and the actual response is lost. Neutralize all three: app output
+    // stays in the outer ob_start buffer, where the shutdown handler /
+    // pool_handle_request can capture it cleanly.
+    $z_override('flush', function (): void { /* no-op */ }, true);
+    $z_override('ob_flush', function (): void { /* no-op */ }, true);
+    $z_override('ob_end_flush', function (): bool {
+        // Pop the buffer but keep its contents in the outer buffer instead
+        // of writing to stdout (which would corrupt IPC).
+        if (ob_get_level() > 0) {
+            $content = (string) ob_get_clean();
+            if ($content !== '' && ob_get_level() > 0) {
+                echo $content;
+            }
+            return true;
+        }
+        return false;
+    }, true);
+    $z_override('fastcgi_finish_request', function (): bool {
+        // Common legacy pattern: render page, fastcgi_finish_request(),
+        // then do background work. In pool we can't actually deliver early
+        // since we use length-prefixed IPC — just no-op and let the
+        // response flow through the normal shutdown path.
+        return true;
+    }, true);
 }
 
 // Drain any output buffering that may have been auto-started so PHP errors
