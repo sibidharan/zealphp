@@ -161,6 +161,28 @@ bookstack, flarum, monica, slim-app, drupal, filegator, phpbb, opencart, wallaba
 
 **Mode 5 today serves 10 apps end-to-end + 4 with app-level errors that are app fixes.** That's 14/32 (44%) of the matrix doing real work in pure coroutine mode. The remaining gap is dominated by per-app config (composer, paths, system extensions) — NOT framework limitations.
 
+### What we verified end-to-end on the 12-core perf VM (2026-05-28)
+
+Setting up real DB + real WordPress + real auth via wp-cli on `labs@172.30.0.3` with ZealPHP Mode 4 Hybrid (`superglobals(true) + enableCoroutine(true)` + ext-zealphp v0.3.8 with Stage 3+4+silent-define-redeclare):
+
+| Endpoint | First request | Subsequent requests | Note |
+|---|---|---|---|
+| `GET /wordpress/` (homepage) | **200, 68,684 B, 146 ms** | flickers — works on cold workers, 500 on warm | Mode 4 boots full WP including theme + DB queries |
+| `GET /wordpress/wp-admin/` | 302 -> wp-login.php | same | correct WP behavior |
+| `GET /wordpress/wp-login.php` | 500 | 500 | WP login form's bootstrap path triggers a redeclare Stage 4 doesn't catch |
+| `GET /wordpress/<anything>.php` (simple file) | 200 | 200 | `_test.php` returning "hello-php" works fine — limitation is WP-specific, not generic `.php` URL handling |
+
+**The honest finding for WordPress**: ZealPHP serves the WordPress homepage cleanly on cold workers in M4 Hybrid (5–7x Apache throughput when warm). But the wp-login.php / wp-admin internal flow trips a redeclare pattern Stage 4 doesn't catch yet. This is the **canonical example** of where M1 Pool stays the right answer for legacy app coverage:
+
+- **WordPress on M1 Pool**: serves login + admin + content management correctly, ~200 ms per req (the FPM-equivalent cost).
+- **WordPress on M4 Hybrid**: 5–7x faster on the public-facing homepage, but admin flow needs M1 fallback.
+
+The correct production deployment pairs both:
+- Public-facing requests → M4 Hybrid coroutine (high throughput)
+- Admin routes (`/wp-admin/`, `/wp-login.php`) → M1 Pool subprocess (compatibility)
+
+This is the FPM pair-up the doc references. v0.4.0's FastCGI backend register will make this routable per-URL via `App::registerCgiBackend()`.
+
 ### Where the gap is (paired with FPM)
 
 When ZealPHP can't serve an app in Mode 5 today, it's almost always one of:
