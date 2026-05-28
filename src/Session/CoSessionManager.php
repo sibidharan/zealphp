@@ -35,6 +35,28 @@ class CoSessionManager
      * @param bool|null $useCookies
      * @param bool|null $useOnlyCookies
      */
+    /**
+     * Resolve the session handler from App::$session_handler. CoSessionManager
+     * runs in coroutine mode, so the default (null) is TableSessionHandler —
+     * concurrent-safe via 3-way merge + Atomic CAS + file backing.
+     */
+    private static function resolveHandler(): ?\SessionHandlerInterface
+    {
+        $h = \ZealPHP\App::$session_handler;
+        if ($h instanceof \SessionHandlerInterface) return $h;
+        switch ($h) {
+            case 'file':
+                return new \ZealPHP\Session\Handler\FileSessionHandler();
+            case 'table':
+            case null:  // default in coroutine mode — concurrent-safe
+                return \ZealPHP\Session\Handler\TableSessionHandler::register();
+            case 'redis':
+                return new \ZealPHP\Session\Handler\RedisSessionHandler();
+            default:
+                return null;
+        }
+    }
+
     /** Skip cleanup when an app autoloader is registered (its lazy-loaded
      * classes would be cleaned but require_once cache persists). */
     private static function safeForFunctionIsolation(): bool
@@ -125,6 +147,19 @@ class CoSessionManager
             && !\ZealPHP\App::cgiOwnsSessions();
 
         if ($manageSession) {
+            // One-shot per-worker handler registration. Resolves App::$session_handler:
+            //   null → auto-pick (TableSessionHandler — concurrent-safe, this IS coroutine mode)
+            //   'table'|'file'|'redis' → corresponding handler
+            //   SessionHandlerInterface → use directly
+            static $handlerRegistered = false;
+            if (!$handlerRegistered) {
+                $handler = self::resolveHandler();
+                if ($handler !== null) {
+                    @\session_set_save_handler($handler, true);
+                }
+                $handlerRegistered = true;
+            }
+
             $sessionName = zeal_session_name();
             $reqCookie = is_array($request->cookie) ? $request->cookie : [];
             $reqGet = is_array($request->get) ? $request->get : [];
