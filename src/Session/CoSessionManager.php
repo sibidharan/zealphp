@@ -223,6 +223,9 @@ class CoSessionManager
                 && self::safeForFunctionIsolation()
             ) {
                 (\zealphp_process_state_clean(...))(6);
+                if (\function_exists('zealphp_globals_clean')) {
+                    (\zealphp_globals_clean(...))();
+                }
             }
         }
     }

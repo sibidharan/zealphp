@@ -269,6 +269,12 @@ class SessionManager
                 && self::safeForFunctionIsolation()
             ) {
                 (\zealphp_process_state_clean(...))(6);
+                // FPM parity: also clean user-defined $GLOBALS added during
+                // this request. Without this, `$GLOBALS['app_state'] = ...`
+                // would leak across requests in Mode 3 in-process workers.
+                if (\function_exists('zealphp_globals_clean')) {
+                    (\zealphp_globals_clean(...))();
+                }
             }
         }
     }

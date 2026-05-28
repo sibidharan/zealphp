@@ -6199,6 +6199,11 @@ HELP;
                     \ZealPHP\Counter::defaultBackend();
                 }
                 (\zealphp_process_state_snapshot(...))();
+                // Also snapshot $GLOBALS so per-request user-defined globals
+                // get cleaned at request end (FPM parity for Mode 3 sync).
+                if (\function_exists('zealphp_globals_snapshot')) {
+                    (\zealphp_globals_snapshot(...))();
+                }
             });
         }
         // @codeCoverageIgnoreEnd
