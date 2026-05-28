@@ -20,7 +20,10 @@ use ZealPHP\App;
 $port = (int)($argv[1] ?? 9820);
 App::mode(App::MODE_COROUTINE_LEGACY);
 App::defineIsolation(true);
-App::coroutineStaticsIsolation(true);   // Stage 5 — isolate function-local static $x
+// NOTE: Stage 5 (function-local static $x isolation) is NOT enabled explicitly
+// here — it is now ON BY DEFAULT in coroutine-legacy (v0.3.10, touched-set
+// registry). The fn_static contract assertion below therefore proves the
+// DEFAULT behavior, not an opt-in.
 $app = App::init('127.0.0.1', $port);
 
 $cur = new OpenSwoole\Atomic(0);

@@ -277,21 +277,26 @@ class App
      *
      * Verified: 0 leaks across 240 requests at peak-40 concurrency, both
      * opcache on and off, no crash (`tests/Integration/TrustBarIsolationTest`
-     * with this flag enabled moves `fn_static` into the hard contract).
+     * keeps `fn_static` in the hard contract).
      *
-     * Tradeoff — NOT free, hence opt-in (default false even in coroutine-legacy):
-     * the snapshot walk visits every user function + method on each yield, so
-     * cost scales with declared-function count (~0.16 ms/yield at 1200
-     * functions ≈ halved throughput; negligible for small apps). At
-     * WordPress scale this is a real regression, so it is NOT auto-enabled.
-     * Enable it for apps that rely on per-request function statics for
-     * correctness; leave it off for raw throughput. The walk re-derives from
-     * the live function/class tables every time (safe under silentRedeclare /
-     * includeIsolation redeclaration); a cached touched-set registry to make
-     * default-on viable is the tracked follow-up.
+     * DEFAULT ON in `coroutine-legacy` (v0.3.10): a touched-set registry —
+     * populated by a ZEND_BIND_STATIC opcode hook as functions first
+     * instantiate their statics — means the per-yield snapshot iterates ONLY
+     * the functions that actually use statics, not every declared function.
+     * Cost is therefore decoupled from total function count: ~1.9µs/yield at
+     * 50 static-using functions, FLAT from 500 to 8000 total functions (the
+     * pre-registry full-table walk was ~0.16ms/yield at 1200 functions and
+     * scaled with the total — that version halved throughput at scale). Cost
+     * now scales only with the (small) number of static-USING functions — the
+     * irreducible per-coroutine snapshot. Closures + eval/top-level code are
+     * excluded from the registry (their op_arrays have per-instance lifetime;
+     * this matches exactly what the snapshot already covered — no regression).
      *
-     * Requires ext-zealphp 0.3.9+ with `zealphp_coroutine_statics`.
-     * Set via `App::coroutineStaticsIsolation(true)` BEFORE `App::run()`.
+     * Opt out with env `ZEALPHP_FN_STATICS_DISABLE=1` (or
+     * `App::coroutineStaticsIsolation(false)` before `App::run()`) for raw
+     * throughput on apps that don't depend on per-request function statics.
+     *
+     * Requires ext-zealphp 0.3.10+ with `zealphp_coroutine_statics`.
      */
     public static bool $coroutine_statics_isolation = false;
 
@@ -1597,7 +1602,8 @@ class App
      *   legacy-cgi       → superglobals(true)  + isolation(cgi-pool)            [unmodified WordPress/Drupal]
      *   coroutine        → superglobals(false) + isolation(coroutine)          [modern ZealPHP apps — default shape]
      *   coroutine-legacy → superglobals(true)  + isolation(coroutine)          [legacy code, concurrent — Mode 4]
-     *                      + silentRedeclare(true) + includeIsolation(true)     (so re-included/re-declared legacy code survives)
+     *                      + silentRedeclare + includeIsolation + coroutineGlobalsIsolation + coroutineStaticsIsolation
+     *                      (re-included/re-declared code survives; $GLOBALS AND function-local static $x isolate per coroutine)
      *   mixed            → superglobals(true)  + isolation(none)               [Symfony / Laravel bridge — sequential]
      */
     public static function mode(string $mode): void
@@ -1618,6 +1624,16 @@ class App
                 self::silentRedeclare(true);
                 self::includeIsolation(true);
                 self::coroutineGlobalsIsolation(true);  // isolate $wp/$wpdb-style globals per coroutine
+                // Stage 5: isolate function-local `static $x` per coroutine.
+                // Default ON now that the touched-set registry decouples cost
+                // from total function count — per-yield overhead scales with
+                // the (small) number of static-USING functions, not all
+                // functions (~1.9µs/yield at 50 static fns, flat from 500 to
+                // 8000 total). This is the "old PHP just works" guarantee: the
+                // LAST request-state primitive is isolated by default. Opt out
+                // with ZEALPHP_FN_STATICS_DISABLE=1 for raw throughput on apps
+                // that don't rely on per-request function statics.
+                self::coroutineStaticsIsolation((string) \getenv('ZEALPHP_FN_STATICS_DISABLE') !== '1');
                 break;
             case self::MODE_MIXED:
                 self::superglobals(true);
