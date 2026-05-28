@@ -815,7 +815,8 @@ Maximum compatibility with unknown/untested apps?
 | All 4 modes pass | 5 | Kanboard, Roundcube, OpenCart, Joomla, traditional |
 | Mode 1 (CGI Pool) pass | 18 of 21 tested | adminer, cacti, dokuwiki (1st req), freshrss, joomla, kanboard, matomo, mybb, nextcloud, opencart, phpbb, phpliteadmin, piwigo, privatebin, roundcube, tinyfilemanager, traditional, vanilla, wordpress |
 | Mode 1 fixed in this session | 4 root causes | 1) stderr deadlock from PHP 8.4 deprecations 2) constant/class/function leak across apps 3) flush/ob_end_flush/fastcgi_finish_request corrupting IPC stream 4) chdir() to script dir for relative includes |
-| Mode 1 known issues | 3 | phpMyAdmin (subprocess dies — PHP 8.4 setcookie strict path), DokuWiki (works 1st req, breaks on respawn), yourls (503 pool exhausted) |
+| Mode 1 known issues | 3 | phpMyAdmin (ResponseRenderer-from-shutdown architectural conflict — see below), DokuWiki (works 1st req, breaks on respawn), yourls (503 pool exhausted) |
+| **phpMyAdmin Mode 1 root cause** | architectural | phpMyAdmin registers `ResponseRenderer->response` as a shutdown function that writes HTML and calls `exit()`. Our pool worker's outer shutdown handler runs user shutdowns mid-cleanup; when `ResponseRenderer->response` exits, we never reach the IPC frame writeFrame line, parent sees null. **Use Mode 5 (Coroutine) for phpMyAdmin** — `HOOK_ALL` makes MySQL async, no subprocess context needed. Verified: M5 ✅ 3/3 PASS. Architectural fix would need separate IPC fd (fd 3) — not on roadmap. |
 | Mode 4 (Hybrid) pass | 5 of 16 tested | adminer, kanboard, joomla, roundcube, opencart |
 | Mode 4 partial | 6 | tinyfilemanager, dokuwiki, freshrss, vanilla, wordpress, matomo (alternating success — concurrent coroutine race on shared state) |
 | Mode 4 failing | 5 | cacti, nextcloud, phpmyadmin, mybb, phpbb (heavy legacy apps needing fresh state — architectural limit, use Mode 1) |
