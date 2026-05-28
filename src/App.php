@@ -147,6 +147,30 @@ class App
     public static bool $function_isolation = false;
 
     /**
+     * Per-request `require_once` cache reset. Clears EG(included_files) so
+     * files loaded via `require_once` on request N re-execute on request N+1.
+     * Functions and classes defined by those files stay loaded (they live in
+     * CG(function_table)/CG(class_table), not in included_files). Pair with
+     * `silentRedeclare(true)` so the re-executed function/class/constant
+     * declarations are silently skipped instead of E_COMPILE_ERROR.
+     *
+     * Solves the "WordPress template-loader runs once then becomes a no-op"
+     * class of bug — any app that puts per-request logic inside a
+     * `require_once`'d file needs this.
+     *
+     * Safe in ALL modes (sync, coroutine, hybrid). Implemented by ext-zealphp
+     * Stage 7: `zealphp_include_isolation(true)` installs a ZEND_INCLUDE_OR_EVAL
+     * opcode hook that, for any `require_once`/`include_once` of a file NOT in
+     * the boot snapshot, drops it from EG(included_files) inline so it
+     * re-executes — bootstrap (snapshotted) files stay cached. This needs ZERO
+     * per-request cleanup (it replaces the older per-request
+     * `zealphp_process_state_clean(1)` files-wipe). Requires a snapshot to have
+     * been taken (`zealphp_process_state_snapshot()` in onWorkerStart); the
+     * framework takes it automatically when this flag is on.
+     */
+    public static bool $include_isolation = false;
+
+    /**
      * Per-coroutine `$GLOBALS` isolation via ext-zealphp's
      * `zealphp_coroutine_globals()`. When enabled, each coroutine gets its
      * own snapshot of `EG(symbol_table)` swapped in on yield/resume — so
@@ -1943,6 +1967,17 @@ class App
             self::$function_isolation = $on;
         }
         return self::$function_isolation;
+    }
+
+    /**
+     * Per-request require_once cache reset. See $include_isolation docblock.
+     */
+    public static function includeIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$include_isolation = $on;
+        }
+        return self::$include_isolation;
     }
 
     /**
@@ -6427,7 +6462,18 @@ HELP;
             (\zealphp_silent_redeclare(...))((bool) true);
         }
 
-        if (self::$function_isolation
+        // Stage 7: smart require_once via opcode hook. Enable BEFORE the
+        // snapshot so the handler is active when workers start processing.
+        // The opcode handler converts require_once → require for files NOT
+        // in the snapshot — zero per-request cleanup needed.
+        if (self::$include_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_include_isolation')
+        ) {
+            (\zealphp_include_isolation(...))((bool) true);
+        }
+
+        if ((self::$function_isolation || self::$include_isolation)
             && \extension_loaded('zealphp')
             && \function_exists('zealphp_process_state_snapshot')
         ) {
@@ -6436,9 +6482,7 @@ HELP;
                     \ZealPHP\Counter::defaultBackend();
                 }
                 (\zealphp_process_state_snapshot(...))();
-                // Also snapshot $GLOBALS so per-request user-defined globals
-                // get cleaned at request end (FPM parity for Mode 3 sync).
-                if (\function_exists('zealphp_globals_snapshot')) {
+                if (self::$function_isolation && \function_exists('zealphp_globals_snapshot')) {
                     (\zealphp_globals_snapshot(...))();
                 }
             });

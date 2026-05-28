@@ -218,18 +218,13 @@ class CoSessionManager
             if (\function_exists('zealphp_ini_restore')) {
                 @(\zealphp_ini_restore(...))();
             }
+            // Stage 7 include_isolation needs no per-request cleanup —
+            // the ZEND_INCLUDE_OR_EVAL opcode handler handles it inline.
             if (\ZealPHP\App::$function_isolation) {
-                // $GLOBALS cleanup is gated on App::$keep_globals — apps that
-                // need process-persistent globals (WordPress's
-                // $wp_object_cache / $wp_did_header, Drupal's $databases,
-                // MediaWiki's services, etc.) call App::keepGlobals(true)
-                // to skip this step. Default behavior is to clean for
-                // FPM-equivalent per-request fresh-state semantic.
                 if (!\ZealPHP\App::$keep_globals
                     && \function_exists('zealphp_globals_clean')) {
                     (\zealphp_globals_clean(...))();
                 }
-                // Function/class cleanup needs autoloader guard.
                 if (\function_exists('zealphp_process_state_clean')
                     && self::safeForFunctionIsolation()
                 ) {

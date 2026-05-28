@@ -264,19 +264,13 @@ class SessionManager
             if (\function_exists('zealphp_ini_restore')) {
                 @(\zealphp_ini_restore(...))();
             }
+            // Stage 7 include_isolation needs no per-request cleanup —
+            // the ZEND_INCLUDE_OR_EVAL opcode handler handles it inline.
             if (\ZealPHP\App::$function_isolation) {
-                // $GLOBALS cleanup is gated on App::$keep_globals — apps
-                // with process-persistent global state (WordPress
-                // $wp_object_cache, Drupal $databases, MediaWiki services,
-                // etc.) call App::keepGlobals(true) to skip this step.
                 if (!\ZealPHP\App::$keep_globals
                     && \function_exists('zealphp_globals_clean')) {
                     (\zealphp_globals_clean(...))();
                 }
-                // Function/class/include cleanup is only safe when no app
-                // autoloader is registered from documentRoot — removing
-                // autoloaded classes would orphan the autoloader's lazy
-                // class map.
                 if (\function_exists('zealphp_process_state_clean')
                     && self::safeForFunctionIsolation()
                 ) {
