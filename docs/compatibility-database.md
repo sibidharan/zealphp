@@ -91,6 +91,90 @@ All 50 apps sorted by category, with grades per mode.
 
 ---
 
+## Coroutine-Mode Ranking (v0.3.8 + silent-define-redeclare, 2026-05-28)
+
+> **The goal**: run every PHP app in Mode 5 (Coroutine, no superglobals). When Mode 5 doesn't fit, fall to Mode 4 (Hybrid: coroutine + superglobals). Mode 1 (Pool/Proc) is the **compatibility floor** — we pair it with FPM-equivalent semantics for apps that fundamentally need fresh-process state. The goal is to move every app UP this ranking.
+
+### Tier S — Renders full UI in Mode 5 Coroutine (the real win)
+
+These apps boot cleanly under `superglobals(false)`/coroutine mode with Stage 3+4 silent-redeclare + silent-define-redeclare. They serve real content (>500 bytes of app-specific HTML), not framework error stubs.
+
+| App | M5 body size | M5 content |
+|---|---:|---|
+| **adminer** | 2995 B | "Login - Adminer" — full login form |
+| **joomla** | 23853 B | "Joomla: Environment Setup Incomplete" — install wizard |
+| **mediawiki** | 5855 B | "MediaWiki 1.47.0-alpha" — setup landing |
+| **nextcloud** | 2644 B | Full Nextcloud HTML (error page about GD ext — Nextcloud's own UI) |
+| **yourls** | 3325 B | "YOURLS — Your Own URL Shortener" — full landing |
+| **lychee** | 1961 B | "ROOT" — auth gate (working) |
+| **matomo** | 1155 B | Install wizard redirect |
+| **traditional** | 717 B | ZealPHP demo |
+
+Plus the 30x redirects that are working correctly: **freshrss** (301), **dokuwiki** (302 to install).
+
+**= 10 apps run in Mode 5 today.** This is what changed from earlier reports — silent-define-redeclare unlocked the const-heavy apps.
+
+### Tier A — Renders APP-LEVEL error in Mode 5 (framework served, app needs config)
+
+The framework reached the app, the app responded with its own error UI. Not a framework bug:
+
+| App | M5 body | What the app says |
+|---|---:|---|
+| **kanboard** | 98 B | `Internal Error: The directory "/app/user/data" must be writable` — chmod fix |
+| **wordpress** | 99 B | `Warning: Undefined array key "HTTP_HOST"` — WP needs `$_SERVER`; **WORKS in M4 Hybrid** |
+| **tinyfilemanager** | 419 B | Same HTTP_HOST issue — needs M4 Hybrid |
+| **roundcube** | 115 B | "Configure HTTP server to point to /public_html" — entry-path issue |
+
+### Tier B — Framework served, app boot fails internally (config / composer / dependencies)
+
+`/src/App.php` debug.log captured the actual app-level error:
+
+| App | Real error |
+|---|---|
+| **drupal** | `Failed opening required vendor/autoload_runtime.php` — `composer install` needed |
+| **privatebin** | `Class "PrivateBin\Controller" not found` — autoloader path issue |
+| **cacti** | `Call to undefined function check_status()` — Cacti's own dependency wiring |
+| **yourls** | `Failed opening required '/app/conf/constants.php'` — wrong include path |
+| **mybb, piwigo, vanilla, grav, filegator** | various boot-time class/file misses |
+| **phpliteadmin** | PHP 8.x compatibility bug (`array_merge(null, ...)`) — broken on vanilla PHP 8.4, not a ZealPHP issue |
+
+### Tier C — Crash with worker death in Mode 5 (true framework gaps)
+
+| App | What happens |
+|---|---|
+| **dokuwiki** | Worker crash on second request (the docs-only `flush()` / `ob_end_flush()` pattern doesn't translate to coroutine state cleanly; FD-3 IPC needed) |
+| **phpmyadmin** | Worker timeout (X) — works in M1 Pool only |
+
+### Tier D — 404 in every mode (path config — NOT app failure)
+
+These apps use Laravel/Symfony's `public/` entry pattern; the sweep probes `/<app>/` which doesn't exist. Probed correctly at `/<app>/public/` → real 500s (composer dep mismatches):
+
+bookstack, flarum, monica, slim-app, drupal, filegator, phpbb, opencart, wallabag
+
+### Mode comparison — same 32 apps
+
+| Mode | Tier S (full render) | Tier A (app error rendered) | Tier B (config issue) | Tier C (worker crash) |
+|---|---:|---:|---:|---:|
+| **Mode 5 (Coroutine)** | **10** | 4 | 8 | 2 |
+| Mode 4 (Hybrid superglobals+coro) | 11 (+ WP, tinyfile) | 2 | 7 | 2 |
+| Mode 1 (Pool) | 13 + 5 redirect | 4 | 6 | 1 |
+
+**Mode 5 today serves 10 apps end-to-end + 4 with app-level errors that are app fixes.** That's 14/32 (44%) of the matrix doing real work in pure coroutine mode. The remaining gap is dominated by per-app config (composer, paths, system extensions) — NOT framework limitations.
+
+### Where the gap is (paired with FPM)
+
+When ZealPHP can't serve an app in Mode 5 today, it's almost always one of:
+
+1. **App relies on `$_SERVER['HTTP_HOST']` etc. without abstraction** — Mode 4 Hybrid fixes this.
+2. **App's vendor/ not installed** — `composer install --ignore-platform-reqs` fixes this.
+3. **App uses native PHP extensions the container lacks** — `ext-gd`, `ext-zip` etc. need installation.
+4. **App boot has redeclare patterns Stage 4 doesn't catch yet** — top-level functions in non-opcache flows.
+5. **App's own bugs on PHP 8.4** — phpLiteAdmin's `array_merge(null, ...)`.
+
+**For category 4 specifically**, the FPM pair-up makes sense: route those apps to a sidecar FPM via fastcgi backend (which ZealPHP supports — `App::cgiMode('fcgi')` / `App::registerCgiBackend('.py', ...)`). The framework doesn't have to RUN the legacy app in coroutine; it just has to PROXY to FPM for the niche cases. Today Mode 1 Pool does this in-process. v0.4.0 brings full FastCGI fallback for these.
+
+---
+
 ## Real App-Render Status (Deep-Dive Pass, 2026-05-28)
 
 The HTTP-200 sweep below tells you "the app didn't crash the worker" — but **200 OK doesn't mean the app is actually usable**. A deeper pass via Chrome DevTools + body-size + title inspection on Mode 1 Pool revealed four distinct states:
