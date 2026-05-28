@@ -893,6 +893,64 @@ function http_response_code($code = null) {
 }
 
 /**
+ * Per-coroutine `putenv()` — stores the assignment in the request-scoped
+ * RequestContext (`$g->memo['_env']`), which is isolated per coroutine in
+ * Mode 4, instead of the process-wide environment. Pairs with {@see getenv()}.
+ * The process environment stays at its boot value, so concurrent requests no
+ * longer race `putenv()` (a process-level landmine in any persistent server).
+ *
+ * Trade-off: subprocesses (proc_open) do NOT inherit a request-scoped putenv —
+ * use it for request-scoped config (tenant id, locale), not for child-process
+ * environment. Registered only in coroutine-isolated mode (Mode 4).
+ *
+ * @param string $assignment "NAME=value" to set, or "NAME" to unset.
+ */
+function zeal_putenv(string $assignment): bool {
+    $g = RequestContext::instance();
+    if (!isset($g->memo['_env']) || !\is_array($g->memo['_env'])) {
+        $g->memo['_env'] = [];
+    }
+    $eq = strpos($assignment, '=');
+    if ($eq === false) {
+        // "NAME" with no '=' removes the variable (getenv returns false).
+        $g->memo['_env'][$assignment] = false;
+    } else {
+        $g->memo['_env'][substr($assignment, 0, $eq)] = substr($assignment, $eq + 1);
+    }
+    return true;
+}
+
+/**
+ * Per-coroutine `getenv()` — reads the request-scoped env first (set via
+ * {@see putenv()}), then the process environment captured at boot
+ * (`App::$boot_env`). No-arg form returns the merged map. `$local_only`
+ * returns only request-scoped variables (matches the native signature).
+ *
+ * @param string|null $name
+ * @return string|array<string,string>|false
+ */
+function zeal_getenv($name = null, bool $local_only = false) {
+    $g = RequestContext::instance();
+    $local = (\is_array($g->memo['_env'] ?? null)) ? $g->memo['_env'] : [];
+    if ($name === null) {
+        $merged = $local_only ? [] : App::$boot_env;
+        foreach ($local as $k => $v) {
+            if ($v === false) { unset($merged[(string) $k]); }
+            elseif (\is_scalar($v)) { $merged[(string) $k] = (string) $v; }
+        }
+        return $merged;
+    }
+    if (\array_key_exists($name, $local)) {
+        $v = $local[$name];
+        return \is_scalar($v) ? (string) $v : false;
+    }
+    if ($local_only) {
+        return false;
+    }
+    return App::$boot_env[$name] ?? false;
+}
+
+/**
  * Coroutine-safe `shell_exec()` shim — routes through {@see App::exec()}.
  *
  * Registered as a uopz override of the `shell_exec` builtin when exec hooking

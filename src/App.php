@@ -115,6 +115,16 @@ class App
     public static bool $coroutine_isolated_superglobals = false;
 
     /**
+     * Process environment captured at boot (real `getenv()`), before the
+     * per-coroutine putenv/getenv overrides are installed in Mode 4. The
+     * overridden `\ZealPHP\zeal_getenv` falls back to this for variables not set
+     * request-scoped via `\ZealPHP\zeal_putenv`.
+     *
+     * @var array<string, string>
+     */
+    public static array $boot_env = [];
+
+    /**
      * Per-request define() isolation. When true, constants defined during
      * a request are tracked and removed at request end. Boot-time constants
      * (PHP_VERSION, extension defines, autoloaded class constants) survive.
@@ -6516,6 +6526,15 @@ HELP;
         ) {
             (\zealphp_coroutine_superglobals(...))((bool) true);
             self::$coroutine_isolated_superglobals = true;
+
+            // Per-coroutine putenv/getenv: capture the boot environment with the
+            // REAL getenv (before overriding to avoid recursion), then route
+            // putenv/getenv through the request-scoped $g store so concurrent
+            // requests no longer race the process environment. See
+            // \ZealPHP\putenv / \ZealPHP\getenv.
+            self::$boot_env = \getenv();
+            self::overrideBuiltin('putenv', '\ZealPHP\zeal_putenv');
+            self::overrideBuiltin('getenv', '\ZealPHP\zeal_getenv');
         }
 
         // Per-request define() isolation — opt-in via App::defineIsolation(true).

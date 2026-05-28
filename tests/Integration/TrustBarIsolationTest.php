@@ -39,10 +39,12 @@ final class TrustBarIsolationTest extends TestCase
     /** The hard isolation contract — must be 0 leaks. */
     private const CONTRACT = [
         '$_GET','$_POST','$_REQUEST','$_COOKIE','$_FILES','$_SERVER','$_SESSION',
-        'class_static','$GLOBALS','constant','ini_set','bootstrap',
+        'class_static','$GLOBALS','constant','ini_set','putenv','bootstrap',
     ];
-    /** Process-level — reported, not asserted. */
-    private const PROCESS_LEVEL = ['fn_static','putenv'];
+    /** Process-level — reported, not asserted. Only function-local `static $x`
+     *  remains a landmine (the `static` keyword can't be overridden, and
+     *  per-coroutine map_ptr isolation is the open "Stage 5" research item). */
+    private const PROCESS_LEVEL = ['fn_static'];
 
     private static ?int $pid = null;
     private static string $log = '';
