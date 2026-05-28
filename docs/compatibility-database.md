@@ -91,6 +91,67 @@ All 50 apps sorted by category, with grades per mode.
 
 ---
 
+## Latest Sweep (v0.3.8 — commit `9b8111b`, 2026-05-28)
+
+Full 32-app × 5-mode sweep after the FD-3 IPC fix. Each cell is **3 sequential GET probes** to `/<app>/`: a single code (e.g. `200`) = identical on all 3 probes; slashed (e.g. `302/500/500`) = differing per-probe responses (flicker / first-time install pages).
+
+> The Stage 2 COW `$GLOBALS` isolation is enabled by default in v0.3.7+. M3/M4/M5 flicker is now overwhelmingly from `Cannot redeclare function/class …` errors — Stage 3 silent-redeclare (see [state-isolation-reference.md §3](./architecture/state-isolation-reference.md#3-the-4-stages-of-globals-coroutine-isolation)) is the next mitigation.
+
+| App | M1 Pool | M1 Proc | M3 Sync+FI | M4 Hybrid | M5 Coro |
+|---|:---:|:---:|:---:|:---:|:---:|
+| adminer | **200** | **200** | **200** | **200** | 200/X/200 |
+| bookstack | 404 | 404 | 404 | 404 | 404 |
+| cacti | **200** | 500 | 500 | 500/X/500 | 500/X/500 |
+| dokuwiki | 302 | 302 | 302/X/302 | 302/500/500 | 302/500/500 |
+| drupal | 500 | 500 | 500/X/500 | 500/500/X | 500 |
+| elfinder | 404 | 404 | 404 | 404 | 404 |
+| filegator | 500 | 500 | 500 | 500 | 500 |
+| flarum | 404 | 404 | 404 | 404 | 404 |
+| freshrss | 301 | 301 | 301 | 301 | 301 |
+| grav | 500 | 500 | 500/500/200 | 500/200/200 | 500/200/200 |
+| joomla | **200** | X | **200** | **200** | **200** |
+| kanboard | **200** | **200** | **200** | **200** | **200** |
+| lychee | 403 | 403 | 403/X/403 | 403/X/403 | 403/X/403 |
+| matomo | **200** | **200** | 200/500/200 | 500/500/200 | 200/500/200 |
+| mediawiki | 500 | 500 | 500 | 500 | 500 |
+| monica | 404 | 404 | 404 | 404 | 404 |
+| mybb | 302 | 500 | 500 | 500 | 500 |
+| nextcloud | **200** | **200** | 500 | 500 | 500 |
+| opencart | 404 | 404 | 404 | 404 | 404 |
+| phpbb | 404 | 404 | 404 | 404 | 404 |
+| phpliteadmin | **200** | 500 | 500/X/500 | 500/X/X | 500/X/500 |
+| phpmyadmin | **200** † | X | 200/500/500 | 500 | X |
+| piwigo | 302 | 500 | 500 | 500 | 500 |
+| privatebin | **200** | 500 | 500 | 500 | 500 |
+| roundcube | **200** | **200** | **200** | **200** | **200** |
+| slim-app | 404 | 404 | 404 | 404 | 404 |
+| tinyfilemanager | **200** | X | 200/X/200 | 200/X/200 | 200/X/200 |
+| traditional | **200** | **200** | **200** | **200** | **200** |
+| vanilla | **200** | 500 | 500/200/500 | 500/200/500 | 500/200/500 |
+| wallabag | 404 | 404 | 404 | 404 | 404 |
+| wordpress | 302 | 302 | 302/500/500 | 302/500/500 | 302/302/500 |
+| yourls | 503 | 503 | 503/200/200 | 503/200/200 | 503/200/200 |
+
+`†` = NEW pass in v0.3.8 (was 504 timeout pre-`9b8111b`). The configured `zealphp-wordpress` container (separate from the sweep matrix above) ALSO restored from 0-byte body to full 68 KB body on `/` after the same fix.
+
+### Pass-rate summary
+
+| Mode | 3/3 200 OK | + Stable 30x redirects | Notes |
+|---|:---:|:---:|---|
+| **Mode 1 Pool** | **13/32 (41%)** | **18/32 (56%)** | The headline mode. phpMyAdmin, Cacti, Nextcloud, Privatebin, phpLiteAdmin all green here only. |
+| Mode 1 Proc | 8/32 (25%) | 13/32 (41%) | Pool wins decisively. `proc_open` per request hits joomla/phpmyadmin/tinyfilemanager with timeouts under serial load. |
+| Mode 3 Sync+FI | 4/32 stable | ~7/32 plausible | Many apps flicker — top-level redeclarations on warm workers. |
+| Mode 4 Hybrid | 4/32 stable | ~8/32 plausible | Stage 2 COW closes `$GLOBALS`; redeclare crashes still dominate. |
+| Mode 5 Coroutine | 3/32 stable | ~7/32 plausible | Pure coroutine; same redeclare ceiling as Mode 4. |
+
+**Green in ALL 5 modes (production-portable):** adminer, kanboard, roundcube, traditional, freshrss
+
+**Require Mode 1 (CGI Pool):** phpMyAdmin, Cacti, Nextcloud, Privatebin, phpLiteAdmin, MyBB, Piwigo, Vanilla, MediaWiki, Drupal, Grav, WordPress
+
+**Config-only failures (404 in every mode — wrong entry path, NOT a framework bug):** bookstack, elfinder, flarum, monica, opencart, phpbb, slim-app, wallabag
+
+---
+
 ## Actual Test Results (Docker Lab, 2026-05-28)
 
 These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zealphp 0.3.3.

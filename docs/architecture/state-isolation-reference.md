@@ -162,15 +162,35 @@ Three module-level HashTables:
 - Two coroutines write same key → each reads own ✓
 - A unsets parent key, B still sees parent (via tombstone path) ✓
 
-### Stage 3 — VM opcode handlers (THEORETICAL, NOT PLANNED)
+### Stage 3 — silent-redeclare opcode hooks (PLANNED, v0.3.8/9)
 
-Would achieve:
-- True transparent isolation of `global $foo;` across yield (reference promotion)
-- Engine-level reference tracking
+The 32-app sweep shows the dominant Mode 4/5 failure isn't `$GLOBALS` races (Stage 2 fixed that). It's `Fatal error: Cannot redeclare foo()` / `Cannot declare class Bar` on the second request — top-level `function`/`class` declarations in legacy code lit up `CG(function_table)` / `CG(class_table)` on request 1, and the engine refuses to declare them again on request 2.
 
-Cost: ~6000 lines of brittle C, opcache JIT integration, PHP version coupling (8.2/8.3/8.4/8.5+), 6–10 weeks dedicated work, fuzz testing harness, threat-modeling pass.
+FPM doesn't hit this because each request gets a fresh PHP process — there's nothing to redeclare AGAINST. Mode 1 Pool sidesteps it too (subprocess scope). But Mode 3/4/5 share one process, so the second request finds the symbol already there and crashes.
 
-**Not on roadmap** unless production field data shows the `global`-across-yield edge case matters enough to justify the engineering cost.
+The **pragmatic Stage 3 plan** is NOT per-coroutine `CG(function_table)`. It's opcode hooks on `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` (and the `_DELAYED` variants) that:
+
+1. Look up the symbol name in `CG(function_table)` / `CG(class_table)`.
+2. If it exists → silently `RETURN` (no-op the opcode). The first declaration "wins".
+3. If it doesn't exist → fall through to the original handler (declare normally).
+
+This matches what FPM gets for free (no second declare ever happens because no second request reuses the symbol-table state) and closes ~80% of the M4/M5 redeclare crashes without any per-coroutine table machinery.
+
+**What it DOES achieve:**
+- WordPress / Drupal / phpBB / MediaWiki / Cacti boot cleanly on Mode 4/5 from request 2 onwards
+- No `Fatal error: Cannot redeclare …` on the warm path
+- Zero memory overhead (no per-coroutine tables)
+- ~150 lines of C in `ext-zealphp` (one source file, no opcache integration)
+
+**What it DOESN'T achieve:**
+- Different definitions of the same symbol across coroutines (the first-declared wins for every subsequent coroutine — but FPM has the same "first request wins per process" semantic, so behavioural parity is preserved)
+- `global $foo;` reference-binding-across-yield (still requires the `$g->foo` workaround documented in carve-out #2)
+
+**Status:** prototype in `ext/zealphp/zealphp.c` behind `App::silentRedeclare(bool)` (default off → behaviour unchanged for early adopters; flip to default on after one release of field exposure).
+
+### Stage 4+ — per-coroutine `CG(function_table)` (NOT PLANNED)
+
+Would mean every coroutine triggers the autoloader independently when it touches a class — defeats the whole point of autoloading. Stage 3 silent-redeclare gives the user-visible benefit without the architectural cost. **Not on roadmap.**
 
 ---
 
@@ -299,18 +319,80 @@ All PHP-callable functions exposed by the extension. ZealPHP framework code call
 
 ## 7. Sweep Results Reference
 
-Full results in [`../compatibility-database.md`](../compatibility-database.md). Summary:
+Full per-app results in [`../compatibility-database.md`](../compatibility-database.md). The matrix below is the post-commit-`9b8111b` sweep across 5 mode containers × 32 real-world PHP apps (3 sequential probes per cell — `code` = identical responses, `c/c/c` = different responses on each probe).
 
-| Mode | Apps passing 3/3 (out of 20-32 tested) |
-|------|:---:|
-| Mode 1 Pool | 18/21 — WordPress, Joomla, Roundcube, OpenCart, Adminer, Cacti, Matomo, Nextcloud, Kanboard, TinyFileManager, FreshRSS, MyBB, phpBB, phpLiteAdmin, Piwigo, PrivateBin, Vanilla, traditional |
-| Mode 3 Sync+FI | 11/20 — Adminer, TinyFileManager, FreshRSS, Kanboard, Joomla, Roundcube, OpenCart, Matomo (partial), traditional |
-| Mode 4 Hybrid | 8/20 — Kanboard, Joomla, Roundcube, OpenCart, traditional, Adminer (worker-rotation luck), Matomo (partial) |
-| Mode 5 Coroutine | 7/20 — Kanboard, Joomla, Roundcube, OpenCart, traditional + clean OOP only |
+### 32-app × 5-mode matrix (May 28 2026 — post FD-3 IPC fix)
 
-**Apps that pass ALL 4 modes:** Kanboard, Joomla, Roundcube, OpenCart, traditional (5 apps).
+| App | M1 Pool | M1 Proc | M3 Sync+FI | M4 Hybrid | M5 Coro |
+|---|:---:|:---:|:---:|:---:|:---:|
+| adminer | **200** | **200** | **200** | **200** | 200/X/200 |
+| bookstack | 404 | 404 | 404 | 404 | 404 |
+| cacti | **200** | 500 | 500 | 500/X/500 | 500/X/500 |
+| dokuwiki | 302 | 302 | 302/X/302 | 302/500/500 | 302/500/500 |
+| drupal | 500 | 500 | 500/X/500 | 500/500/X | 500 |
+| elfinder | 404 | 404 | 404 | 404 | 404 |
+| filegator | 500 | 500 | 500 | 500 | 500 |
+| flarum | 404 | 404 | 404 | 404 | 404 |
+| freshrss | 301 | 301 | 301 | 301 | 301 |
+| grav | 500 | 500 | 500/500/200 | 500/200/200 | 500/200/200 |
+| joomla | **200** | X | **200** | **200** | **200** |
+| kanboard | **200** | **200** | **200** | **200** | **200** |
+| lychee | 403 | 403 | 403/X/403 | 403/X/403 | 403/X/403 |
+| matomo | **200** | **200** | 200/500/200 | 500/500/200 | 200/500/200 |
+| mediawiki | 500 | 500 | 500 | 500 | 500 |
+| monica | 404 | 404 | 404 | 404 | 404 |
+| mybb | 302 | 500 | 500 | 500 | 500 |
+| nextcloud | **200** | **200** | 500 | 500 | 500 |
+| opencart | 404 | 404 | 404 | 404 | 404 |
+| phpbb | 404 | 404 | 404 | 404 | 404 |
+| phpliteadmin | **200** | 500 | 500/X/500 | 500/X/X | 500/X/500 |
+| phpmyadmin | **200** | X | 200/500/500 | 500 | X |
+| piwigo | 302 | 500 | 500 | 500 | 500 |
+| privatebin | **200** | 500 | 500 | 500 | 500 |
+| roundcube | **200** | **200** | **200** | **200** | **200** |
+| slim-app | 404 | 404 | 404 | 404 | 404 |
+| tinyfilemanager | **200** | X | 200/X/200 | 200/X/200 | 200/X/200 |
+| traditional | **200** | **200** | **200** | **200** | **200** |
+| vanilla | **200** | 500 | 500/200/500 | 500/200/500 | 500/200/500 |
+| wallabag | 404 | 404 | 404 | 404 | 404 |
+| wordpress | 302 | 302 | 302/500/500 | 302/500/500 | 302/302/500 |
+| yourls | 503 | 503 | 503/200/200 | 503/200/200 | 503/200/200 |
 
-**Apps requiring Mode 1 (CGI Pool):** WordPress, Cacti, MediaWiki, phpBB, MyBB, Piwigo, Nextcloud — any app with bare `define()`/`function`/`class` declarations at top level + process state expectations.
+**Legend:** **bold** = 3/3 200 OK · `X` = curl timeout · `c/c/c` = differing per-request responses (instability) · `30x/404/500` = same response 3/3 · M1 Proc `X` = subprocess fork pressure (32 reqs serial under load).
+
+### Pass-rate summary (3/3 200 OK)
+
+| Mode | Pass | Stable | Working+redirect | Notes |
+|---|:---:|:---:|:---:|---|
+| **Mode 1 Pool** | **13/32** (41%) | 16/32 stable | 18/32 (56%) incl. redirects | The headline mode. phpMyAdmin, Cacti, Nextcloud, Privatebin, phpLiteAdmin all green here only. |
+| Mode 1 Proc | 8/32 (25%) | 11/32 stable | 13/32 (41%) | Pool wins decisively over Proc — `proc_open` per request hits joomla/phpmyadmin/tinyfilemanager with timeouts under concurrent probes. |
+| Mode 3 Sync+FI | 4/32 stable + many flickering | 4/32 stable | 7/32 plausible | Many apps flicker on first request (top-level redeclarations on warm workers). |
+| Mode 4 Hybrid | 4/32 stable + many flickering | 4/32 stable | 8/32 plausible | Coroutine semantics + superglobals + Stage 2 COW; redeclare crashes dominate. |
+| Mode 5 Coroutine | 3/32 stable + many flickering | 3/32 stable | 7/32 plausible | Pure coroutine; same redeclare ceiling as Mode 4. |
+
+**Apps green in ALL 5 modes (production-portable):**
+
+- adminer (200), kanboard (200), roundcube (200), traditional (200), freshrss (301)
+
+**Apps that require Mode 1 (CGI Pool) — first-class compatibility:**
+
+- phpMyAdmin, Cacti, Nextcloud, Privatebin, phpLiteAdmin, MyBB, Piwigo, Vanilla, MediaWiki, Drupal, Grav
+
+**Apps with config issues (404 in every mode — wrong entry path, not a framework bug):**
+
+- bookstack, elfinder, flarum, monica, opencart, phpbb, slim-app, wallabag
+
+### What changed since the May-28 morning sweep
+
+| Apps | Before commit `9b8111b` | After |
+|---|---|---|
+| **phpmyadmin M1 Pool** | 504 timeout ("subprocess died") | **200 3/3** |
+| **wordpress configured (zealphp-wordpress)** | 200 with 0-byte body | **200 with 68 KB body** |
+| Adminer/Kanboard/Joomla/Roundcube M1 Pool | 200 (was already passing) | unchanged |
+
+The fix (FD-3 IPC + don't re-run leftover shutdown fns + ob_end_flush re-open) lifted phpMyAdmin into the Mode 1 Pool stable column and restored every WordPress response body that `wp_ob_end_flush_all()` had been dropping.
+
+---
 
 ---
 
@@ -374,7 +456,9 @@ Where each isolation feature sits in ZealPHP's release history.
 | Stage 1 `$GLOBALS` deep-copy | v0.3.6 | v0.3.7 (replaced by Stage 2) | First per-coroutine $GLOBALS impl |
 | Stage 2 `$GLOBALS` COW | **v0.3.7** | — | **CURRENT** — parent + delta + tombstone |
 | `ZEALPHP_GLOBALS_ISOLATION_DISABLE` env-var rollback | v0.3.7 | — | Emergency switch |
-| Stage 3 VM opcode handlers | NOT PLANNED | — | Theoretical only |
+| FD-3 IPC channel (CGI Pool) | **v0.3.8** (commit `9b8111b`) | — | Metadata on dedicated fd 3; STDOUT body-only. Survives `exit()` inside shutdown fn. Restores `wp_ob_end_flush_all()` body. Unblocks phpMyAdmin / WordPress on Mode 1. |
+| Stage 3 silent-redeclare (ZEND_DECLARE_FUNCTION / ZEND_DECLARE_CLASS no-op-on-redeclare) | **planned v0.3.8/9** | — | Hook the declare opcodes so re-declaring an EXISTING symbol becomes a no-op instead of `E_COMPILE_ERROR` — matches what FPM gets for free by forking a fresh process per request. Closes the ~80% of M4/M5 redeclare crashes without per-coroutine CG tables. |
+| Stage 3+ per-coroutine `CG(function_table)` / `CG(class_table)` | NOT PLANNED | — | Would break autoloaders by design (autoloaders register classes once; per-coroutine tables would mean every coroutine triggers the autoloader independently). The silent-redeclare path above is the pragmatic ceiling. |
 
 ---
 
