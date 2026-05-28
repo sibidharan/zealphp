@@ -813,8 +813,9 @@ Maximum compatibility with unknown/untested apps?
 | Total apps surveyed | 50 | Mix of tested and predicted |
 | Tested in Docker lab | 32 | All apps in `examples/sweep/apps/` deployed and tested |
 | All 4 modes pass | 5 | Kanboard, Roundcube, OpenCart, Joomla, traditional |
-| Mode 1 (CGI Pool) pass | 19 | adminer, cacti, freshrss, joomla, kanboard, matomo, mybb, nextcloud, opencart, phpbb, phpliteadmin, piwigo, privatebin, roundcube, tinyfilemanager, traditional, vanilla, wallabag, wordpress |
-| Mode 1 known issues | 2 | phpMyAdmin (parent dispatch hangs ~60s), DokuWiki (subprocess exit() corrupts pipe) |
+| Mode 1 (CGI Pool) pass | 18 of 21 tested | adminer, cacti, dokuwiki (1st req), freshrss, joomla, kanboard, matomo, mybb, nextcloud, opencart, phpbb, phpliteadmin, piwigo, privatebin, roundcube, tinyfilemanager, traditional, vanilla, wordpress |
+| Mode 1 fixed in this session | 4 root causes | 1) stderr deadlock from PHP 8.4 deprecations 2) constant/class/function leak across apps 3) flush/ob_end_flush/fastcgi_finish_request corrupting IPC stream 4) chdir() to script dir for relative includes |
+| Mode 1 known issues | 3 | phpMyAdmin (subprocess dies — PHP 8.4 setcookie strict path), DokuWiki (works 1st req, breaks on respawn), yourls (503 pool exhausted) |
 | User-globals cleanup | Yes | Mode 1: FPM-style. Mode 3+FI: ext-zealphp zealphp_globals_clean. Mode 4/5: process-wide (use $g) |
 | Session merge granularity | Leaf-level | TableSessionHandler + RedisSessionHandler with 3-way merge |
 | Mode 1 recommended | ~24 | Legacy/procedural apps — WordPress, Magento, phpBB, etc. |
