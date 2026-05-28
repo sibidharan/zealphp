@@ -51,6 +51,7 @@ final class AppModeIsolationTest extends TestCase
         App::$cgi_mode                  = self::$origCgiMode !== '' ? self::$origCgiMode : 'pool';
         App::$silent_redeclare          = self::$origSr;
         App::$include_isolation         = self::$origIi;
+        App::$coroutine_globals_isolation = false;
     }
 
     // ── isolation() getter: defaults follow superglobals ────────────────
@@ -169,6 +170,7 @@ final class AppModeIsolationTest extends TestCase
         $this->assertTrue(App::enableCoroutine(), 'coroutines on');
         $this->assertTrue(App::silentRedeclare(), 'legacy bundle: silent redeclare');
         $this->assertTrue(App::includeIsolation(), 'legacy bundle: require_once isolation');
+        $this->assertTrue(App::coroutineGlobalsIsolation(), 'legacy bundle: per-coroutine $GLOBALS isolation ($wp/$wpdb)');
     }
 
     public function testModeRejectsUnknown(): void

@@ -1570,6 +1570,7 @@ class App
                 self::isolation(Isolation::Coroutine);
                 self::silentRedeclare(true);
                 self::includeIsolation(true);
+                self::coroutineGlobalsIsolation(true);  // isolate $wp/$wpdb-style globals per coroutine
                 break;
             case self::MODE_MIXED:
                 self::superglobals(true);
@@ -6589,6 +6590,29 @@ HELP;
                 if (self::$function_isolation && \function_exists('zealphp_globals_snapshot')) {
                     (\zealphp_globals_snapshot(...))();
                 }
+            });
+        }
+
+        // Coroutine $GLOBALS isolation — re-capture the per-coroutine parent
+        // baseline AFTER the user's onWorkerStart bootstrap has run, so
+        // bootstrap-time globals (WordPress $wp/$wpdb, Drupal $databases, etc.)
+        // become part of the baseline every request-coroutine inherits — instead
+        // of being reset out of existence (the "wp() / $wp is null" class of bug).
+        //
+        // run() registers this hook AFTER the user's app.php onWorkerStart calls,
+        // and $workerStartHooks fires FIFO, so this runs last — once the app's
+        // globals are in place. The (false)+(true) toggle clears the early
+        // pre-fork baseline (captured at the gate above, before any bootstrap)
+        // and re-snapshots the now-bootstrapped $GLOBALS. Deltas are empty at
+        // worker start (no requests yet), so the clear is a no-op.
+        if (self::$coroutine_globals_isolation
+            && !$isolationDisabledViaEnv
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_coroutine_globals')
+        ) {
+            self::onWorkerStart(function () {
+                (\zealphp_coroutine_globals(...))((bool) false);
+                (\zealphp_coroutine_globals(...))((bool) true);
             });
         }
         // @codeCoverageIgnoreEnd
