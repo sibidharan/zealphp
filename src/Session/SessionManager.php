@@ -264,16 +264,22 @@ class SessionManager
             if (\function_exists('zealphp_ini_restore')) {
                 @(\zealphp_ini_restore(...))();
             }
-            if (\ZealPHP\App::$function_isolation
-                && \function_exists('zealphp_process_state_clean')
-                && self::safeForFunctionIsolation()
-            ) {
-                (\zealphp_process_state_clean(...))(6);
-                // FPM parity: also clean user-defined $GLOBALS added during
-                // this request. Without this, `$GLOBALS['app_state'] = ...`
-                // would leak across requests in Mode 3 in-process workers.
+            if (\ZealPHP\App::$function_isolation) {
+                // $GLOBALS user-var cleanup is ALWAYS safe to run — it only
+                // touches EG(symbol_table) user slots, never the function or
+                // class tables. Decoupled from safeForFunctionIsolation()
+                // so autoloader-based apps don't lose $GLOBALS isolation.
                 if (\function_exists('zealphp_globals_clean')) {
                     (\zealphp_globals_clean(...))();
+                }
+                // Function/class/include cleanup is only safe when no app
+                // autoloader is registered from documentRoot — removing
+                // autoloaded classes would orphan the autoloader's lazy
+                // class map.
+                if (\function_exists('zealphp_process_state_clean')
+                    && self::safeForFunctionIsolation()
+                ) {
+                    (\zealphp_process_state_clean(...))(6);
                 }
             }
         }

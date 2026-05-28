@@ -218,13 +218,16 @@ class CoSessionManager
             if (\function_exists('zealphp_ini_restore')) {
                 @(\zealphp_ini_restore(...))();
             }
-            if (\ZealPHP\App::$function_isolation
-                && \function_exists('zealphp_process_state_clean')
-                && self::safeForFunctionIsolation()
-            ) {
-                (\zealphp_process_state_clean(...))(6);
+            if (\ZealPHP\App::$function_isolation) {
+                // $GLOBALS cleanup is always safe — only touches user slots.
                 if (\function_exists('zealphp_globals_clean')) {
                     (\zealphp_globals_clean(...))();
+                }
+                // Function/class cleanup needs autoloader guard.
+                if (\function_exists('zealphp_process_state_clean')
+                    && self::safeForFunctionIsolation()
+                ) {
+                    (\zealphp_process_state_clean(...))(6);
                 }
             }
         }
