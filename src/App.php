@@ -167,6 +167,26 @@ class App
     public static bool $coroutine_globals_isolation = false;
 
     /**
+     * Stage 3 — silent-redeclare opcode hooks. When enabled, ext-zealphp's
+     * `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` / `_DELAYED` opcode
+     * handlers check if the target symbol already exists in
+     * `EG(function_table)` / `CG(class_table)`. If it does, the opcode is
+     * silently skipped instead of throwing `E_COMPILE_ERROR`
+     * ("Cannot redeclare …"). First declaration wins — matches what FPM
+     * gets "for free" by forking a fresh process per request.
+     *
+     * Closes the dominant Mode 3/4/5 failure mode on the 32-app sweep:
+     * conditional `function foo() {}` / `class Bar {}` in legacy code that
+     * re-runs on every request. Top-level (file-scope) function declarations
+     * are still compile-time-bound by Zend and not covered by this hook;
+     * those need OPcache enabled OR Mode 1 Pool.
+     *
+     * Requires ext-zealphp 0.3.8+. Set via `App::silentRedeclare(true)`
+     * BEFORE `App::run()`. Off by default to keep existing semantics.
+     */
+    public static bool $silent_redeclare = false;
+
+    /**
      * Set true at the top of `App::run()` so the four lifecycle setters
      * (`superglobals`, `processIsolation`, `enableCoroutine`, `hookAll`)
      * can refuse mutations made AFTER the server has booted.
@@ -1855,6 +1875,23 @@ class App
             self::$define_isolation = $on;
         }
         return self::$define_isolation;
+    }
+
+    /**
+     * Stage 3 silent-redeclare. Opt-in — see $silent_redeclare docblock.
+     * When called, also flips the ext-zealphp C-level flag immediately if
+     * the function is available; the App::run() boot wiring re-asserts the
+     * flag for boot-after-set ordering.
+     */
+    public static function silentRedeclare(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$silent_redeclare = $on;
+            if (\function_exists('zealphp_silent_redeclare')) {
+                (\zealphp_silent_redeclare(...))($on);
+            }
+        }
+        return self::$silent_redeclare;
     }
 
     /**
@@ -6296,6 +6333,19 @@ HELP;
                 . "is shared process-wide across coroutines.",
                 'warn'
             );
+        }
+
+        // Stage 3: silent-redeclare opcode hooks. Closes the dominant Mode
+        // 3/4/5 failure: conditional `function foo() {}` / `class Bar {}` in
+        // legacy code re-running on each request and tripping
+        // E_COMPILE_ERROR ("Cannot redeclare …"). With this on, the second
+        // declare is a silent no-op (first wins — matches FPM's fresh-proc
+        // semantic). Requires ext-zealphp 0.3.8+.
+        if (self::$silent_redeclare
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_silent_redeclare')
+        ) {
+            (\zealphp_silent_redeclare(...))((bool) true);
         }
 
         if (self::$function_isolation

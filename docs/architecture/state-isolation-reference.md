@@ -162,35 +162,43 @@ Three module-level HashTables:
 - Two coroutines write same key → each reads own ✓
 - A unsets parent key, B still sees parent (via tombstone path) ✓
 
-### Stage 3 — silent-redeclare opcode hooks (PLANNED, v0.3.8/9)
+### Stage 3 — silent-redeclare opcode hooks (SHIPPED, v0.3.8)
 
-The 32-app sweep shows the dominant Mode 4/5 failure isn't `$GLOBALS` races (Stage 2 fixed that). It's `Fatal error: Cannot redeclare foo()` / `Cannot declare class Bar` on the second request — top-level `function`/`class` declarations in legacy code lit up `CG(function_table)` / `CG(class_table)` on request 1, and the engine refuses to declare them again on request 2.
+The 32-app sweep shows the dominant Mode 3/4/5 failure isn't `$GLOBALS` races (Stage 2 fixed that). It's `Fatal error: Cannot redeclare foo()` / `Cannot declare class Bar` on the second request — declarations in legacy code lit up `EG(function_table)` / `CG(class_table)` on request 1, and the engine refuses to declare them again on request 2.
 
-FPM doesn't hit this because each request gets a fresh PHP process — there's nothing to redeclare AGAINST. Mode 1 Pool sidesteps it too (subprocess scope). But Mode 3/4/5 share one process, so the second request finds the symbol already there and crashes.
+FPM doesn't hit this because each request gets a fresh PHP process — there's nothing to redeclare AGAINST. Mode 1 Pool sidesteps it too (subprocess scope). But Mode 3/4/5 share one process.
 
-The **pragmatic Stage 3 plan** is NOT per-coroutine `CG(function_table)`. It's opcode hooks on `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` (and the `_DELAYED` variants) that:
+Stage 3 hooks `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` / `ZEND_DECLARE_CLASS_DELAYED` opcode handlers via `zend_set_user_opcode_handler`:
 
-1. Look up the symbol name in `CG(function_table)` / `CG(class_table)`.
-2. If it exists → silently `RETURN` (no-op the opcode). The first declaration "wins".
-3. If it doesn't exist → fall through to the original handler (declare normally).
+1. Look up the symbol name in `EG(function_table)` / `CG(class_table)`.
+2. If it exists → advance the opcode pointer and return `ZEND_USER_OPCODE_CONTINUE` (skip the bind). First declaration wins.
+3. If it doesn't exist → return `ZEND_USER_OPCODE_DISPATCH` (default behavior — declare normally).
 
-This matches what FPM gets for free (no second declare ever happens because no second request reuses the symbol-table state) and closes ~80% of the M4/M5 redeclare crashes without any per-coroutine table machinery.
+**Toggle:** `App::silentRedeclare(true)` (default `false`). Behaviour unchanged for apps that don't opt in.
 
-**What it DOES achieve:**
-- WordPress / Drupal / phpBB / MediaWiki / Cacti boot cleanly on Mode 4/5 from request 2 onwards
-- No `Fatal error: Cannot redeclare …` on the warm path
-- Zero memory overhead (no per-coroutine tables)
-- ~150 lines of C in `ext-zealphp` (one source file, no opcache integration)
+**Tests pin both branches:** `tests/018-silent-redeclare-function.phpt` (conditional fn redeclare), `tests/019-silent-redeclare-class.phpt` (conditional class redeclare).
 
-**What it DOESN'T achieve:**
-- Different definitions of the same symbol across coroutines (the first-declared wins for every subsequent coroutine — but FPM has the same "first request wins per process" semantic, so behavioural parity is preserved)
-- `global $foo;` reference-binding-across-yield (still requires the `$g->foo` workaround documented in carve-out #2)
+**Stage 3 LIMITATION — top-level (file-scope) decls** — `function foo() {}` and `class Bar {}` written at file scope are bound to `CG(function_table)` / `CG(class_table)` at COMPILE time by `zend_register_top_func` / `zend_register_top_class`, NOT through the runtime `ZEND_DECLARE_*` opcodes. The opcode hook cannot see them. A naive `zend_compile_file` intercept that snapshots+restores class-entry pointers around the compile breaks class inheritance + method-table invariants (tested locally — class-method calls after restore segfault). Closing this cleanly requires Stage 4: a careful class-entry teardown helper that preserves method tables, inheritance chains, and refcounting. `tests/020-silent-redeclare-toplevel.phpt` is SKIP-pinned with the explanation.
 
-**Status:** prototype in `ext/zealphp/zealphp.c` behind `App::silentRedeclare(bool)` (default off → behaviour unchanged for early adopters; flip to default on after one release of field exposure).
+**32-app × 5-mode sweep with Stage 3 ON (v0.3.8):**
+- WordPress M5: `302/302/500` → `302` stable (3/3)
+- Lychee M4/M5: `403/X/403` → `403` stable
+- Most other Mode 3/4/5 apps unchanged — their crashes are top-level decls (Stage 4) or non-redeclare causes (missing classes, autoload misses, framework-init failures)
 
-### Stage 4+ — per-coroutine `CG(function_table)` (NOT PLANNED)
+### Stage 4 — compile-time silent-redeclare with proper class teardown (PLANNED)
 
-Would mean every coroutine triggers the autoloader independently when it touches a class — defeats the whole point of autoloading. Stage 3 silent-redeclare gives the user-visible benefit without the architectural cost. **Not on roadmap.**
+The next step after Stage 3 — needs:
+1. A `zend_compile_file` wrapper.
+2. Before compile: snapshot existing user `zend_function*` / `zend_class_entry*` from `CG(*_table)`. Increment refcounts so the engine's reset-on-compile doesn't free them.
+3. Detach them from `CG(*_table)`.
+4. Run original `zend_compile_file` — re-declarations now succeed (the slot is empty).
+5. Re-attach saved entries via `zend_hash_update_ptr`, properly releasing the newly-compiled duplicates' method tables / inheritance state to avoid leaks.
+
+Validated locally that step 5 done naively (just `zend_hash_update_ptr` with stashed pointers) breaks `Call to undefined method` on previously-defined classes — the method table inside the entry isn't being maintained correctly across the swap. The fix is a `zend_class_entry_safe_swap()` helper that handles refcount + method table cleanup; out of scope for v0.3.8.
+
+### Stage 5+ — per-coroutine `CG(function_table)` (NOT PLANNED)
+
+Would mean every coroutine triggers the autoloader independently when it touches a class — defeats the whole point of autoloading. Stage 3 + Stage 4 give the user-visible benefit without the architectural cost. **Not on roadmap.**
 
 ---
 
@@ -457,8 +465,9 @@ Where each isolation feature sits in ZealPHP's release history.
 | Stage 2 `$GLOBALS` COW | **v0.3.7** | — | **CURRENT** — parent + delta + tombstone |
 | `ZEALPHP_GLOBALS_ISOLATION_DISABLE` env-var rollback | v0.3.7 | — | Emergency switch |
 | FD-3 IPC channel (CGI Pool) | **v0.3.8** (commit `9b8111b`) | — | Metadata on dedicated fd 3; STDOUT body-only. Survives `exit()` inside shutdown fn. Restores `wp_ob_end_flush_all()` body. Unblocks phpMyAdmin / WordPress on Mode 1. |
-| Stage 3 silent-redeclare (ZEND_DECLARE_FUNCTION / ZEND_DECLARE_CLASS no-op-on-redeclare) | **planned v0.3.8/9** | — | Hook the declare opcodes so re-declaring an EXISTING symbol becomes a no-op instead of `E_COMPILE_ERROR` — matches what FPM gets for free by forking a fresh process per request. Closes the ~80% of M4/M5 redeclare crashes without per-coroutine CG tables. |
-| Stage 3+ per-coroutine `CG(function_table)` / `CG(class_table)` | NOT PLANNED | — | Would break autoloaders by design (autoloaders register classes once; per-coroutine tables would mean every coroutine triggers the autoloader independently). The silent-redeclare path above is the pragmatic ceiling. |
+| Stage 3 silent-redeclare opcode hooks | **v0.3.8** (ext commit `d09693d`) | — | Hooks `ZEND_DECLARE_FUNCTION` / `_CLASS` / `_DELAYED` so re-declaring an EXISTING symbol skips the opcode instead of `E_COMPILE_ERROR`. Covers conditional declares (in if / fn / method scope) cleanly. Top-level decls are compile-time-bound → Stage 4. |
+| Stage 4 compile-time silent-redeclare | PLANNED | — | `zend_compile_file` wrapper + `zend_class_entry_safe_swap` that preserves method-table + inheritance refcounting. Closes the remaining top-level-decl redeclare lane that Stage 3 leaves open. Validated locally that the naive approach segfaults; correct implementation is non-trivial. |
+| Stage 5+ per-coroutine `CG(function_table)` / `CG(class_table)` | NOT PLANNED | — | Would break autoloaders by design (autoloaders register classes once; per-coroutine tables would mean every coroutine triggers the autoloader independently). The silent-redeclare path above is the pragmatic ceiling. |
 
 ---
 
