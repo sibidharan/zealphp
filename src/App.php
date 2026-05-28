@@ -167,6 +167,44 @@ class App
     public static bool $coroutine_globals_isolation = false;
 
     /**
+     * Keep user-defined `$GLOBALS` across requests within the same worker.
+     *
+     * Default `false`: at the end of every request the session manager
+     * calls `zealphp_globals_clean()` to drop user-defined entries back
+     * to the parent baseline. This matches FPM's "fresh process per
+     * request" semantic at the request boundary.
+     *
+     * When `true`: that cleanup is SKIPPED. `$GLOBALS['wp_object_cache']`,
+     * `$GLOBALS['wp_did_header']`, `$GLOBALS['wpdb']`, and similar
+     * process-persistent state stays alive across requests within the
+     * worker's lifetime — matching how WordPress, Drupal 7/8, MediaWiki,
+     * Magento, and other globals-heavy legacy apps were designed to
+     * work under long-running mod_php / single-process SAPI. The same
+     * semantic FrankenPHP's worker mode provides.
+     *
+     * When to use:
+     *   - WordPress, Drupal, MediaWiki, Magento — apps with explicit
+     *     process-persistent globals
+     *   - Any procedural PHP app where `$wp_did_header`-style boot
+     *     sentinels gate the bootstrap chain
+     *
+     * Sharp edge to know about:
+     *   - Apps that mistakenly store REQUEST-SCOPED data in `$GLOBALS`
+     *     (e.g., `$GLOBALS['current_user_id'] = $_SESSION['uid']`) will
+     *     observe cross-request bleed. This is a pre-existing bad
+     *     pattern that's also unsafe under FPM with opcache + persistent
+     *     connections. The fix is to use `$_SERVER`, session, or a
+     *     per-request DI container — not `$GLOBALS`.
+     *
+     * Bounded by worker recycle: OpenSwoole's `max_request` cap (typical
+     * 10,000–50,000) gives the same eventual "fresh process" reset that
+     * FPM does, just at the worker level instead of per-request.
+     *
+     * Set via `App::keepGlobals(true)` BEFORE `App::run()`.
+     */
+    public static bool $keep_globals = false;
+
+    /**
      * Stage 3 — silent-redeclare opcode hooks. When enabled, ext-zealphp's
      * `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` / `_DELAYED` opcode
      * handlers check if the target symbol already exists in
@@ -1798,6 +1836,16 @@ class App
     {
         if ($on !== null) self::$coroutine_globals_isolation = $on;
         return self::$coroutine_globals_isolation;
+    }
+
+    /**
+     * Keep `$GLOBALS` across requests within the worker. See $keep_globals
+     * docblock for the full semantics + when to use it.
+     */
+    public static function keepGlobals(?bool $on = null): bool
+    {
+        if ($on !== null) self::$keep_globals = $on;
+        return self::$keep_globals;
     }
 
     /**

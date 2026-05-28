@@ -265,11 +265,12 @@ class SessionManager
                 @(\zealphp_ini_restore(...))();
             }
             if (\ZealPHP\App::$function_isolation) {
-                // $GLOBALS user-var cleanup is ALWAYS safe to run — it only
-                // touches EG(symbol_table) user slots, never the function or
-                // class tables. Decoupled from safeForFunctionIsolation()
-                // so autoloader-based apps don't lose $GLOBALS isolation.
-                if (\function_exists('zealphp_globals_clean')) {
+                // $GLOBALS cleanup is gated on App::$keep_globals — apps
+                // with process-persistent global state (WordPress
+                // $wp_object_cache, Drupal $databases, MediaWiki services,
+                // etc.) call App::keepGlobals(true) to skip this step.
+                if (!\ZealPHP\App::$keep_globals
+                    && \function_exists('zealphp_globals_clean')) {
                     (\zealphp_globals_clean(...))();
                 }
                 // Function/class/include cleanup is only safe when no app
