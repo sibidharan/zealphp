@@ -88,23 +88,125 @@ class RedisSessionHandler implements \SessionHandlerInterface
         return true;
     }
 
+    /** @var array<string, string> Per-coroutine read snapshot for 3-way merge on conflict. */
+    private array $baseData = [];
+
     public function read($sessionId): string
     {
         $redis = $this->redis();
         $key = $this->prefix . $sessionId;
         $redis->watch($key);
         $data = $redis->get($key);
-        return is_string($data) ? $data : '';
+        $base = is_string($data) ? $data : '';
+        $this->baseData[(string) $sessionId] = $base;
+        return $base;
     }
 
     public function write($sessionId, $sessionData): bool
     {
         $redis = $this->redis();
         $key = $this->prefix . $sessionId;
-        $pipe = $redis->multi();
-        $pipe->setex($key, $this->ttl, $sessionData);
-        $result = $pipe->exec();
-        return $result !== false;
+        $sid = (string) $sessionId;
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            $pipe = $redis->multi();
+            $pipe->setex($key, $this->ttl, $sessionData);
+            $result = $pipe->exec();
+            if ($result !== false) return true;
+
+            // WATCH/MULTI conflict — concurrent writer beat us. Re-WATCH,
+            // read the current state, 3-way merge (base = our original
+            // read, local = our intended write, remote = current). Retry.
+            $redis->watch($key);
+            $remote = $redis->get($key);
+            $remoteStr = is_string($remote) ? $remote : '';
+            $base = $this->baseData[$sid] ?? '';
+            $sessionData = $this->merge3Sessions($base, $sessionData, $remoteStr);
+            $this->baseData[$sid] = $remoteStr;
+        }
+        return false;
+    }
+
+    /**
+     * 3-way merge for serialised PHP session strings.
+     * Gives leaf-level granularity — concurrent writes to disjoint leaf
+     * paths under the same top-level key (e.g. $_SESSION['cart']['item1']
+     * vs $_SESSION['cart']['item2']) both survive.
+     */
+    private function merge3Sessions(string $base, string $local, string $remote): string
+    {
+        $baseArr = self::parseSession($base);
+        $localArr = self::parseSession($local);
+        $remoteArr = self::parseSession($remote);
+        $merged = self::merge3Array($baseArr, $localArr, $remoteArr);
+        return self::serializeSession($merged);
+    }
+
+    /** @return array<mixed,mixed> */
+    public static function parseSession(string $data): array
+    {
+        if ($data === '') return [];
+        $result = [];
+        $offset = 0;
+        $len = strlen($data);
+        while ($offset < $len) {
+            $eq = strpos($data, '|', $offset);
+            if ($eq === false) break;
+            $key = substr($data, $offset, $eq - $offset);
+            $offset = $eq + 1;
+            try {
+                $value = @unserialize(substr($data, $offset), ['allowed_classes' => ['stdClass']]);
+            } catch (\Throwable) {
+                break;
+            }
+            if ($value === false && substr($data, $offset, 4) !== 'b:0;') break;
+            $offset += strlen(serialize($value));
+            $result[$key] = $value;
+        }
+        return $result;
+    }
+
+    /** @param array<mixed,mixed> $data */
+    public static function serializeSession(array $data): string
+    {
+        $out = '';
+        foreach ($data as $key => $val) {
+            $out .= $key . '|' . serialize($val);
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<mixed,mixed> $base
+     * @param array<mixed,mixed> $local
+     * @param array<mixed,mixed> $remote
+     * @return array<mixed,mixed>
+     */
+    public static function merge3Array(array $base, array $local, array $remote): array
+    {
+        $result = $remote;
+        foreach ($local as $key => $val) {
+            $baseHas = array_key_exists($key, $base);
+            if (!$baseHas) {
+                $result[$key] = $val;
+                continue;
+            }
+            $baseVal = $base[$key];
+            $remoteVal = $remote[$key] ?? null;
+            if (is_array($val) && is_array($baseVal) && is_array($remoteVal)) {
+                $result[$key] = self::merge3Array($baseVal, $val, $remoteVal);
+                continue;
+            }
+            if ($val !== $baseVal) {
+                $result[$key] = $val;
+            }
+        }
+        foreach ($base as $key => $_) {
+            if (!array_key_exists($key, $local) && array_key_exists($key, $remote)) {
+                if ($remote[$key] === $base[$key]) unset($result[$key]);
+            }
+        }
+        return $result;
     }
 
     public function destroy($sessionId): bool
