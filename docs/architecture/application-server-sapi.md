@@ -342,47 +342,53 @@ For 90% of cases, **Mode 3 (Sync + functionIsolation)** is the sweet spot: FPM-l
 - Concurrent writes race; last-writer-wins on the leaf level.
 - **Status:** the default before v0.3.6. Users had to use `$g` (per-coroutine `RequestContext`) for request-scoped state.
 
-### Stage 1 — Deep-copy snapshot (Option 3, **CURRENT** in v0.3.6)
+### Stage 1 — Deep-copy snapshot (Option 3, shipped in v0.3.6)
 - ext-zealphp hooks `on_yield`/`on_resume` and snapshots the non-superglobal slots of `EG(symbol_table)` per coroutine.
-- O(N keys) memory per active coroutine — for typical apps with <100 globals, this is ~50–200 KB per coroutine. Negligible at usual concurrency.
-- A boot-time advisory in `App::run()` projects peak memory and warns if it exceeds `256 MB` (configurable threshold). Users with `$GLOBALS`-heavy apps see the warning and can plan migration.
-- **Tradeoff:** simple, safe, no opcache interaction. Memory grows linearly with concurrent coroutines × global keys.
+- O(N keys) memory per active coroutine — for typical apps with <100 globals, this is ~50–200 KB per coroutine.
+- **Replaced by Stage 2 in v0.3.7.** Stage 1 retained for reference.
 
-### Stage 2 — Copy-on-write delta (Option 2, **PLANNED** for v0.4.x)
-- Shared parent `EG(symbol_table)` snapshotted at framework boot (read-mostly).
-- Each coroutine maintains a small **delta HashTable** of writes.
-- Read path: check delta first, fall through to shared parent.
-- Write path: promote-on-write (copy parent's value into delta on first write to a key).
-- **Memory:** O(deltas) per coroutine — typically 5–20 KB for normal apps regardless of parent size.
-- **Engineering cost:** ~3000 lines of C, custom VM opcode handlers for `ZEND_FETCH_R/W/DIM_R/DIM_W` against `EG(symbol_table)`, reference-tracking for `global $foo;` bindings, fuzz testing.
-- **Triggers for moving from Stage 1 → Stage 2:** field reports of memory pressure at high concurrency, advisory warnings firing in production, or apps requiring `$GLOBALS` to hold large arrays.
+### Stage 2 — Copy-on-write parent + delta (Option 2, **CURRENT** in v0.3.7)
+- Shared parent `EG(symbol_table)` snapshotted once at activation (read-mostly baseline).
+- Per-coroutine state has two tables:
+  - **`deltas[cid]`** — slots the coroutine wrote that differ from parent
+  - **`tombstones[cid]`** — parent slots the coroutine `unset()`'d (stored as `IS_LONG 1` dummies to avoid Zend's IS_UNDEF skip)
+- Snapshot save (on_yield):
+  1. Walk EG, compare each non-SG key against parent via `zval_identical` — emit to deltas only if different
+  2. Walk parent, emit tombstone for any key absent from EG
+  3. Reset EG to parent baseline so next coroutine starts clean
+- Snapshot restore (on_resume):
+  1. Reset EG to parent baseline
+  2. Apply `deltas[cid]` over baseline
+  3. `zend_hash_del` each key in `tombstones[cid]`
+- **Memory:** O(deltas + tombstones) per coroutine. Verified on 50-coro × 5-unique-writes test: peak RSS stays flat at ~2 MB allocator-page granularity.
+- **Caveat:** `global $foo;` across yield still rebinds against rebuilt slot (same as Stage 1). Use `$g->foo` for cross-yield references.
 
-### When does the advisory recommend moving to Stage 2?
+### Stage 3 — VM opcode handlers (theoretical, not on roadmap)
+- True transparent COW with custom opcode handlers for `ZEND_FETCH_R/W/DIM_R/DIM_W` against `EG(symbol_table)`.
+- Adds reference-tracking for `global $foo;` bindings across yield.
+- Engineering cost: ~6000 lines of C, deep opcache integration, custom HashTable layout, fuzz testing.
+- **Not planned** unless real production data shows Stage 2's tombstone+delta overhead matters.
 
-The boot-time advisory in `App::run()` emits a `warn`-level log when projected peak memory exceeds 256 MB. Users see:
+### Memory characteristics (v0.3.7 Stage 2)
 
-```
-[advisory] coroutineGlobalsIsolation deep-copy projection: ~512 MB at peak
-(200 user globals × 1024 concurrent coroutines × ~2048B each). Per-coroutine
-memory may grow with large arrays in $GLOBALS. A future Option-2 copy-on-write
-mode will reduce this — track ext-zealphp v0.4.x roadmap.
-```
+With Stage 2 COW, the boot-time advisory in `App::run()` projects peak memory based on:
+- **Parent snapshot**: one-time cost, sizeof framework `$GLOBALS` at activation. Shared across all coroutines.
+- **Per-coroutine delta+tombstones**: O(keys the coroutine wrote/unset that differ from parent). Typically empty for read-only coros, single-digit KB for normal writers.
 
-This is the migration signal. Stage 2 is not yet implemented; the advisory exists so users can:
+For 1000 concurrent coroutines × 10 unique writes each: ~20 MB total (parent + sum of small deltas), vs Stage 1's ~200 MB (full copy × 1000).
 
-1. **Validate at boot** that their projected memory fits the deployment budget.
-2. **Plan future migration** if they hit the threshold today.
-3. **Provide telemetry signal** to maintainers about real-world Stage 2 demand.
+### Why we shipped Stages 1 and 2 in the same release window
 
-If the threshold is hit:
-- Short-term: reduce `$GLOBALS` payload (move large structures into `$g` or `Store`).
-- Long-term: track [`ext-zealphp#issues`](https://github.com/sibidharan/ext-zealphp/issues) for Stage 2 work.
+1. **Stage 1 closed the architectural gap immediately** — Mode 4/5 race on `$GLOBALS` no longer exists.
+2. **Stage 2 layered on top** — same `on_yield`/`on_resume` hooks, swapped the storage strategy.
+3. **Memory savings proven in lab** — 50-coro test went from ~10 MB Stage 1 to flat 2 MB Stage 2.
+4. **No security regression** — same boundary semantics, same nTableMask guard, same ZVAL_COPY paired with hash table destructor.
 
-### Why Stage 1 first, not Stage 2 directly
+### Known caveats (Stage 2)
 
-1. **Stage 1 closes the architectural gap** — Mode 4/5 race on `$GLOBALS` no longer exists.
-2. **Real production data** is needed to justify the engineering cost of Stage 2 (~6 weeks).
-3. **Stage 2 has security risk surface** — refcount audits, reference-tracking, opcode handler safety. Better to defer until we have evidence we need it.
+- **`global $foo;` across yield**: same boundary as Stage 1. PHP's `global` keyword binds the local frame variable by-reference to `EG(symbol_table)['foo']`. When the symbol table slot is rebuilt during yield/resume, the reference is broken. Use `$g->foo` (per-coroutine `RequestContext`) for variables that must persist across yields.
+- **Object identity**: PHP objects are passed by handle. Two coroutines accessing the same object via `$GLOBALS['db']` will share the object instance (this is normal PHP semantics — Stage 2 doesn't change it).
+- **Coroutines launched inline via `Coroutine::create`**: OpenSwoole's `on_resume` doesn't fire for these. Stage 2's post-yield `reset_to_parent` ensures they still start from clean parent state.
 
 ---
 

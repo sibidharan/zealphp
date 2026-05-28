@@ -1783,58 +1783,53 @@ class App
     /**
      * One-time boot-time advisory for `coroutineGlobalsIsolation(true)`.
      *
-     * The current implementation (ext-zealphp v0.3.6) uses a deep-copy
-     * snapshot per coroutine — O(N keys) extra memory per active coroutine.
-     * For typical apps with <100 global keys this is negligible (~50 KB
-     * per coroutine), but apps that stuff large data structures into
-     * `$GLOBALS` can balloon memory.
+     * Stage 2 COW (ext-zealphp v0.3.7+): shared parent snapshot taken once,
+     * per-coroutine state is just (deltas + tombstones) for keys the coro
+     * actually wrote or unset. Memory: O(parent) once + O(deltas) per coro,
+     * not O(N keys) per coro.
      *
-     * This advisory emits a one-time warning via `elog()` if the projected
-     * memory exceeds `App::$coroutine_globals_memory_warn_mb` (default 256 MB).
-     * A future Option-2 implementation (copy-on-write delta) will reduce
-     * the per-coroutine cost to just the deltas — see the migration ladder
-     * in docs/architecture/application-server-sapi.md.
+     * Stage 1 estimate is left in the message for context — most apps stay
+     * well under any threshold with Stage 2 unless they routinely write
+     * thousands of unique global keys per coroutine.
      *
      * The advisory runs only at App::run() boot, never per-request.
      */
     public static function coroutineGlobalsMemoryAdvisory(): void
     {
-        // Snapshot pre-request `$GLOBALS` shape (framework boot state).
         $entryCount = count($GLOBALS);
-        // Subtract well-known superglobal slots; they don't count toward
-        // per-coroutine cost (handled by zealphp_coroutine_superglobals).
+        // Subtract well-known superglobal slots (handled separately).
         $userEntryCount = max(0, $entryCount - 7);
 
-        // Conservative estimate: average ~2 KB per zval (refcount header,
-        // key string, value); apps with arrays grow this fast.
-        $avgKeyBytes = 2048;
         $workers = self::$worker_num > 0 ? self::$worker_num : 1;
-        // Rough coroutine concurrency estimate: each worker can have many
-        // in-flight coroutines under HOOK_ALL. ~32 is a reasonable upper
-        // bound for typical HTTP workloads.
         $coroutinesPerWorker = 32;
         $totalCoroutines = $workers * $coroutinesPerWorker;
-        $projectedBytes = $userEntryCount * $avgKeyBytes * $totalCoroutines;
+
+        // Stage 2 parent snapshot: one-time, shared.
+        $parentBytes = $userEntryCount * 2048;
+        // Per-coroutine deltas: typical write touches <20% of keys.
+        $deltaBytesPerCoro = (int) ($userEntryCount * 0.2 * 2048);
+        $projectedBytes = $parentBytes + ($deltaBytesPerCoro * $totalCoroutines);
         $projectedMB = (int) ($projectedBytes / (1024 * 1024));
 
         $thresholdMB = 256;
+        $stageVer = \function_exists('zealphp_coroutine_globals') ? '0.3.7+ (Stage 2 COW)' : 'unavailable';
+
         if ($projectedMB >= $thresholdMB) {
             elog(
-                "[advisory] coroutineGlobalsIsolation deep-copy projection: "
-                . "~{$projectedMB} MB at peak ({$userEntryCount} user "
-                . "globals × {$totalCoroutines} concurrent coroutines × "
-                . "~{$avgKeyBytes}B each). Per-coroutine memory may grow "
-                . "with large arrays in \$GLOBALS. A future Option-2 "
-                . "copy-on-write mode will reduce this — track ext-zealphp "
-                . "v0.4.x roadmap. To disable the advisory, raise the "
-                . "threshold or call coroutineGlobalsIsolation(false).",
+                "[advisory] coroutineGlobalsIsolation ({$stageVer}) projection: "
+                . "~{$projectedMB} MB at peak (parent ~" . (int) ($parentBytes / 1024)
+                . " KB + deltas ~" . (int) ($deltaBytesPerCoro / 1024)
+                . " KB × {$totalCoroutines} coroutines). If your app holds "
+                . "very large arrays in \$GLOBALS, consider moving them to "
+                . "\$g (per-coroutine RequestContext) or Store (cross-worker "
+                . "shared memory) instead.",
                 'warn'
             );
         } else {
             elog(
-                "[info] coroutineGlobalsIsolation active. Projected peak "
-                . "memory: ~{$projectedMB} MB ({$userEntryCount} user "
-                . "globals × {$totalCoroutines} coroutines).",
+                "[info] coroutineGlobalsIsolation active ({$stageVer}). "
+                . "Projected peak memory: ~{$projectedMB} MB "
+                . "({$userEntryCount} user globals, parent shared + per-coro deltas).",
                 'info'
             );
         }
