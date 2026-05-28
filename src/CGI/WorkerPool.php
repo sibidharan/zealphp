@@ -35,7 +35,28 @@ use OpenSwoole\Coroutine\Channel;
  */
 final class WorkerPool
 {
-    /** @var list<array{proc: resource, stdin: resource, stdout: resource, stderr: resource, pid: int, served: int}> */
+    /**
+     * FD-3 IPC architecture (v0.3.x): the subprocess writes the response BODY
+     * to STDOUT freely (no length-prefixed framing → no risk of corruption
+     * from user code that calls `flush()` / `fastcgi_finish_request()`) and
+     * writes the response METADATA frame (status, headers, cookies) to fd 3.
+     *
+     * The metadata channel uses a destructor on a static class instance —
+     * PHP runs destructors EVEN AFTER `exit()` from inside a shutdown
+     * function (phpMyAdmin's `ResponseRenderer->response()` does exactly
+     * this). Routing metadata through fd 3 keeps the body channel clean and
+     * gives us a guaranteed delivery path for status/headers regardless of
+     * how the app terminates.
+     *
+     * Parent reads the metadata frame from `pipes[3]` first (small,
+     * ~256 bytes), then drains body bytes from STDOUT until EOF.
+     *
+     * Backward compat — older worker entry scripts that still ship the
+     * IPC-frame-on-STDOUT protocol fall through to the legacy single-channel
+     * read path when no fd 3 frame is received within a short window.
+     *
+     * @var list<array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int}>
+     */
     private array $workers = [];
 
     /**
@@ -100,7 +121,41 @@ final class WorkerPool
         $w = $this->workers[$idx];
 
         IPC::writeFrame($w['stdin'], $request);
-        $resp = IPC::readFrame($w['stdout'], $timeout);
+
+        // FD-3 IPC: when fd 3 is open, it's the CANONICAL completion signal.
+        // The subprocess's destructor + shutdown handler writes the metadata
+        // frame on fd 3, regardless of whether user code did exit()/die()
+        // mid-output. STDOUT carries the body bytes and is read AFTER fd 3
+        // tells us `body_length`. Racing fd 3 vs STDOUT readability was a
+        // pre-destructor design that broke apps which echo HTML mid-request
+        // (phpMyAdmin: HTML hits STDOUT first → parent picks legacy STDOUT
+        // path → tries to parse HTML as a JSON frame → "subprocess died").
+        //
+        // We still keep the legacy STDOUT-frame path for test stubs that
+        // don't open fd 3 at all — but only as a fallback when fd 3 EOFs
+        // without ever delivering a frame (i.e., the subprocess closed fd 3
+        // before writing). A live subprocess always writes fd 3 first.
+        $resp = null;
+        $bodyFromStdout = null;
+        if ($w['fd3'] !== null) {
+            $resp = IPC::readFrame($w['fd3'], $timeout);
+            if ($resp !== null) {
+                $bodyLen = (isset($resp['body_length']) && is_numeric($resp['body_length']))
+                    ? (int) $resp['body_length']
+                    : 0;
+                if ($bodyLen > 0) {
+                    $bodyFromStdout = $this->readBody($w['stdout'], $bodyLen, $timeout);
+                } else {
+                    $bodyFromStdout = '';
+                }
+            }
+        }
+        if ($resp === null) {
+            // Legacy: metadata + body in one frame on STDOUT.
+            // Reached when: (1) fd 3 not opened (old subprocess / test stub),
+            // (2) subprocess died before writing fd 3 frame.
+            $resp = IPC::readFrame($w['stdout'], $timeout);
+        }
 
         $this->workers[$idx]['served']++;
         $served = $this->workers[$idx]['served'];
@@ -142,6 +197,12 @@ final class WorkerPool
             ];
         }
 
+        // FD-3 IPC: when the metadata frame came from fd 3, the actual
+        // response body lives on STDOUT (not in the frame). Override.
+        if ($bodyFromStdout !== null) {
+            $resp['body'] = $bodyFromStdout;
+        }
+
         // Decode base64-encoded bodies (binary responses that can't be JSON-encoded directly).
         if (isset($resp['body_encoding']) && $resp['body_encoding'] === 'base64'
             && isset($resp['body']) && is_string($resp['body'])) {
@@ -155,6 +216,48 @@ final class WorkerPool
             if (is_string($k)) {
                 $out[$k] = $v;
             }
+        }
+        return $out;
+    }
+
+    /**
+     * Read exactly $n body bytes from STDOUT. The subprocess wrote
+     * `body_length = $n` into the fd 3 metadata frame and immediately
+     * after streamed $n bytes to STDOUT. Hard-capped at IPC::MAX_FRAME_BYTES
+     * (64 MB) to match the framing channel — anything bigger is a corrupted
+     * length signal.
+     *
+     * @param resource $fp
+     * @param int<0, max> $n
+     */
+    private function readBody($fp, int $n, float $timeout): string
+    {
+        if ($n <= 0) {
+            return '';
+        }
+        if ($n > IPC::MAX_FRAME_BYTES) {
+            // Corrupted or hostile length — refuse silently.
+            return '';
+        }
+        $out = '';
+        $deadline = microtime(true) + $timeout;
+        while (strlen($out) < $n) {
+            $remaining = $n - strlen($out);
+            if ($remaining < 1) {
+                break;
+            }
+            $chunk = fread($fp, min($remaining, 65536));
+            if ($chunk !== false && $chunk !== '') {
+                $out .= $chunk;
+                continue;
+            }
+            if (feof($fp)) {
+                break;
+            }
+            if (microtime(true) >= $deadline) {
+                break;
+            }
+            usleep(5000);
         }
         return $out;
     }
@@ -186,6 +289,9 @@ final class WorkerPool
             @fclose($w['stdin']);   // signal EOF → subprocess exits its loop
             @fclose($w['stdout']);
             @fclose($w['stderr']);
+            if ($w['fd3'] !== null) {
+                @fclose($w['fd3']);
+            }
             @proc_close($w['proc']);
         }
         $this->workers  = [];
@@ -264,7 +370,7 @@ final class WorkerPool
     }
 
     /**
-     * @param array{proc: resource, stdin: resource, stdout: resource, stderr: resource, pid: int, served: int} $w
+     * @param array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int} $w
      */
     private function isAlive(array $w): bool
     {
@@ -272,7 +378,7 @@ final class WorkerPool
     }
 
     /**
-     * @return array{proc: resource, stdin: resource, stdout: resource, stderr: resource, pid: int, served: int}
+     * @return array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int}
      */
     private function spawn(): array
     {
@@ -281,10 +387,17 @@ final class WorkerPool
             throw new \RuntimeException("WorkerPool: worker entry not found: $entry");
         }
 
+        // FD-3 IPC: fd 3 is the metadata channel (status/headers/cookies).
+        // STDOUT is the body channel (raw user output). Splitting the two
+        // streams means user code that writes to STDOUT (via flush() or
+        // fastcgi_finish_request()) can't corrupt the IPC framing, and a
+        // metadata frame written from a destructor still gets delivered
+        // even when phpMyAdmin-style apps call exit() mid-shutdown.
         $desc = [
             0 => ['pipe', 'r'], // stdin   — parent writes requests
-            1 => ['pipe', 'w'], // stdout  — parent reads responses
+            1 => ['pipe', 'w'], // stdout  — parent reads response BODY stream
             2 => ['pipe', 'w'], // stderr  — diagnostics
+            3 => ['pipe', 'w'], // fd 3    — IPC metadata frame channel
         ];
         $pipes = [];
         $env = array_merge(getenv(), [
@@ -323,11 +436,17 @@ final class WorkerPool
 
         $pid = proc_get_status($proc)['pid'];
 
+        // fd 3 is optional — if proc_open didn't open it (very old PHP /
+        // mocked test stubs that override descriptor setup), fall back to
+        // the legacy single-channel protocol on STDOUT.
+        $fd3 = isset($pipes[3]) && is_resource($pipes[3]) ? $pipes[3] : null;
+
         return [
             'proc'   => $proc,
             'stdin'  => $pipes[0],
             'stdout' => $pipes[1],
             'stderr' => $pipes[2],
+            'fd3'    => $fd3,
             'pid'    => $pid,
             'served' => 0,
         ];
@@ -339,6 +458,9 @@ final class WorkerPool
         @fclose($old['stdin']);
         @fclose($old['stdout']);
         @fclose($old['stderr']);
+        if ($old['fd3'] !== null) {
+            @fclose($old['fd3']);
+        }
         @proc_close($old['proc']);
 
         $this->workers[$idx] = $this->spawn();
