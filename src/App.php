@@ -59,8 +59,13 @@ class App
      * via `realpath(__DIR__ . '/..')` and exposed read-only for handlers
      * that need to build paths relative to the project root (e.g.
      * `App::$cwd . '/.cache'` for the file-tier cache directory).
+     *
+     * Defaults to '' so reads before `App::init()` (e.g. `elog()` building a
+     * relative path) don't fatal with "typed static accessed before
+     * initialization" — `str_replace('', ...)` is a harmless no-op. `init()`
+     * sets the real working directory.
      */
-    public static string $cwd;
+    public static string $cwd = '';
     /**
      * The active OpenSwoole server instance after `App::run()` constructs
      * it; `null` before `run()`. Returned as a `WebSocket\Server` when any
