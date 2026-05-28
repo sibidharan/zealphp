@@ -91,6 +91,76 @@ All 50 apps sorted by category, with grades per mode.
 
 ---
 
+## Real App-Render Status (Deep-Dive Pass, 2026-05-28)
+
+The HTTP-200 sweep below tells you "the app didn't crash the worker" — but **200 OK doesn't mean the app is actually usable**. A deeper pass via Chrome DevTools + body-size + title inspection on Mode 1 Pool revealed four distinct states:
+
+### Verified rendering — full UI loads (production-ready)
+
+| App | Body size | Title | Notes |
+|---|---:|---|---|
+| **adminer** | 3 KB | Login - Adminer | Login screen renders; needs DB endpoint to actually log in |
+| **phpmyadmin** | 18 KB | phpMyAdmin | Login screen renders; needs DB |
+| **privatebin** | 23 KB | PrivateBin | Full paste-bin UI |
+| **joomla** | 24 KB | Joomla: Environment Setup Incomplete | Full setup wizard renders; reports missing PHP/system deps |
+| **traditional** | 717 B | Traditional PHP Test | ZealPHP demo page |
+| **lychee** | 2 KB | ROOT | Photo gallery shell |
+| **grav** | 16 KB | Grav Problems | Renders but reports config errors |
+
+### Stub / redirect responses (HTTP 200/30x with tiny body)
+
+| App | Body size | What's happening |
+|---|---:|---|
+| matomo | 627 B | Redirect to install path |
+| freshrss | 307 B | "Redirection" page (working — install wizard at next URL) |
+| roundcube | 115 B | Likely auth/install redirect |
+| cacti | 185 B | Install redirect |
+| tinyfilemanager | 53 B | Login prompt (auth required) |
+| nextcloud | 190 B | Install redirect |
+| vanilla | 92 B | Install redirect |
+| dokuwiki | 0 B | 302 to install (correct) |
+| wordpress | 0 B | 302 to wp-admin/install.php (correct) |
+| mybb | 0 B | Install redirect |
+| piwigo | 0 B | Install redirect |
+
+### In-body errors (200 OK but the body says "broken")
+
+| App | What the body says | Root cause |
+|---|---|---|
+| **kanboard** | `Internal Error: This PHP extension is required: "gd"` | **System dependency**, NOT framework — kanboard needs ext-gd installed in the container |
+| **mediawiki** | Setup/error page | Needs DB config |
+| **yourls** | `Fatal error` | Needs `user/config.php` setup |
+
+### 404 in every mode (app-config issue, NOT framework)
+
+bookstack, flarum, monica, slim-app use Laravel/Symfony's `public/` entry pattern → sweep tested `/<app>/` which doesn't have an `index.php`. Probed correctly at `/<app>/public/` they all return **HTTP 500** because their `vendor/` isn't installed. Composer install required:
+
+| App | Composer status | After install |
+|---|---|---|
+| bookstack | `composer.lock` mismatch (needs `composer update`) | Untested |
+| flarum | ✅ installed cleanly | Untested |
+| monica | `composer.lock` mismatch | Untested |
+| slim-app | ✅ installed cleanly | Untested |
+| drupal | `composer.lock` mismatch | Untested |
+| filegator | `composer.lock` mismatch | Untested |
+| phpbb | No composer.json (uses git submodule pattern) | Untested |
+| opencart | Path: `/opencart/upload/` returns **302 to install** | Working — entry path mistake in sweep |
+| wallabag | Needs symfony console + `php bin/console` setup | Untested |
+| elfinder | Pure JS — needs HTML integration page | N/A |
+
+### To-revisit list (this session focused on framework correctness; per-app config left for follow-up)
+
+These need real setup work — DB credentials wired into config files, `composer install/update`, system extensions installed, install-wizard walkthroughs:
+
+- **Database wiring** for: wordpress, drupal, joomla, mediawiki, bookstack, monica, flarum, vanilla, mybb, piwigo, opencart, matomo, cacti, lychee, roundcube
+- **System extension installs** for: kanboard (gd), possibly others (mbstring, intl, curl checks)
+- **Composer update** for: bookstack, monica, drupal, filegator (lock-file mismatches)
+- **App-side config** for: yourls, mediawiki, grav
+
+**Dummy DB infrastructure already provisioned** in the lab (sweep-mysql at 172.20.0.2, user `testuser`/`testpass`, all per-app databases created). Wiring each app's config file is the remaining task.
+
+---
+
 ## Latest Sweep (v0.3.8 — commit `9b8111b`, 2026-05-28)
 
 Full 32-app × 5-mode sweep after the FD-3 IPC fix. Each cell is **3 sequential GET probes** to `/<app>/`: a single code (e.g. `200`) = identical on all 3 probes; slashed (e.g. `302/500/500`) = differing per-probe responses (flicker / first-time install pages).
