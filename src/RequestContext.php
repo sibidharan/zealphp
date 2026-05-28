@@ -65,6 +65,14 @@ class RequestContext
     public array $error_handlers_stack = [];
     /** @var array<int, callable> stack of callables */
     public array $exception_handlers_stack = [];
+
+    /** Re-entry guards: set true while inside the native dispatcher
+     * closure so a nested error/exception fired while running the
+     * user-supplied callable falls back to PHP's default handler
+     * instead of recursing through our handler until the call stack
+     * is exhausted. */
+    public bool $_error_handler_in_flight = false;
+    public bool $_exception_handler_in_flight = false;
     /** @var array<int, array{0: callable, 1: array<int|string, mixed>}> queue of [callable, args] */
     public array $shutdown_functions = [];
     public ?int $error_reporting_level = null;

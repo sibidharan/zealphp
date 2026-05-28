@@ -922,36 +922,67 @@ class App
         // raised by the engine still go through THIS native dispatcher, which
         // reads the current coroutine's G stack — giving per-coroutine isolation.
         \set_error_handler(static function (int $severity, string $message, string $file, int $line) {
-            $g = \ZealPHP\RequestContext::instance();
-            $level = $g->error_reporting_level ?? \ZealPHP\App::$initial_error_reporting;
-            if (!($severity & $level)) {
-                return true; // suppressed by error_reporting
+            // Re-entry guard. If this handler itself raises an error (e.g.,
+            // RequestContext::instance() throws, the user callable below
+            // re-enters our handler via a nested error), keep returning
+            // false so PHP falls back to its native handler instead of
+            // recursing through us until the stack blows. The flag lives
+            // per-coroutine in RequestContext — set on entry, cleared on
+            // exit via a try/finally that survives user-callable throws. */
+            try {
+                $g = \ZealPHP\RequestContext::instance();
+            } catch (\Throwable $e) {
+                return false;
             }
-            $stack = $g->error_handlers_stack;
-            if (!empty($stack)) {
-                $top = $stack[count($stack) - 1];
-                [$callable, $levels] = $top;
-                if ($severity & $levels) {
-                    try {
-                        return (bool)$callable($severity, $message, $file, $line);
-                    } catch (\Throwable $e) {
-                        // Avoid loops; let PHP default handle if user handler explodes.
-                        return false;
+            if (!empty($g->_error_handler_in_flight)) {
+                return false;
+            }
+            $g->_error_handler_in_flight = true;
+            try {
+                $level = $g->error_reporting_level ?? \ZealPHP\App::$initial_error_reporting;
+                if (!($severity & $level)) {
+                    return true; // suppressed by error_reporting
+                }
+                $stack = $g->error_handlers_stack;
+                if (!empty($stack)) {
+                    $top = $stack[count($stack) - 1];
+                    [$callable, $levels] = $top;
+                    if ($severity & $levels) {
+                        try {
+                            return (bool)$callable($severity, $message, $file, $line);
+                        } catch (\Throwable $e) {
+                            // Avoid loops; let PHP default handle if user handler explodes.
+                            return false;
+                        }
                     }
                 }
+                return false; // PHP default handler
+            } finally {
+                $g->_error_handler_in_flight = false;
             }
-            return false; // PHP default handler
         });
 
         \set_exception_handler(static function (\Throwable $e) {
-            $g = \ZealPHP\RequestContext::instance();
-            $stack = $g->exception_handlers_stack;
-            if (!empty($stack)) {
-                try {
-                    $stack[count($stack) - 1]($e);
-                } catch (\Throwable $e2) {
-                    // swallow
+            try {
+                $g = \ZealPHP\RequestContext::instance();
+            } catch (\Throwable $ce) {
+                return; // RequestContext unavailable — let PHP default handle
+            }
+            if (!empty($g->_exception_handler_in_flight)) {
+                return;
+            }
+            $g->_exception_handler_in_flight = true;
+            try {
+                $stack = $g->exception_handlers_stack;
+                if (!empty($stack)) {
+                    try {
+                        $stack[count($stack) - 1]($e);
+                    } catch (\Throwable $e2) {
+                        // swallow
+                    }
                 }
+            } finally {
+                $g->_exception_handler_in_flight = false;
             }
         });
 
