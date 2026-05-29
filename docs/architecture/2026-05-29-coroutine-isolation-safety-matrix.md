@@ -29,36 +29,44 @@ restoring state across every coroutine switch.
 There are two fundamentally different kinds of isolation, and they have very
 different safety profiles:
 
-| Kind | Stages | Mechanism | Coroutine-safety |
+| Kind | What it covers | Mechanism | Coroutine-safety |
 |---|---|---|---|
-| **Snapshot isolation** | superglobals, `$GLOBALS`, class statics, function statics, constants, ini | save state on yield / restore on resume, keyed by the `Coroutine*` pointer | **Proven safe (10/10)** |
-| **Compile/re-exec isolation** | silent-redeclare (CG-swap), include-isolation (re-execute `require_once`) | rewrite the compiler/opcode behaviour so re-run code doesn't fatal | **Fragile** — see the two hazards below |
+| **State isolation** | superglobals, `$GLOBALS`, class statics, function statics, constants, ini, env | save state on yield / restore on resume, keyed by the `Coroutine*` pointer | **Proven safe (10/10)** |
+| **Code isolation** | silent redeclaration, include re-execution | rewrite the compiler/opcode behaviour so re-run code doesn't fatal | **Fragile** — see the two hazards below |
 
-The snapshot stages are the mental model. They are safe. The compile/re-exec
-stages exist only to tolerate *badly-behaved* legacy code that redeclares
-functions/classes or puts per-request logic in `require_once`'d files — patterns
-a greenfield app should simply not use.
+**State isolation** is the mental model. It is safe. **Code isolation** exists
+only to tolerate *badly-behaved* legacy code that redeclares functions/classes or
+puts per-request logic in `require_once`'d files — patterns a greenfield app
+should simply not use.
+
+> **A note on names.** This document uses **descriptive names** (the ones the
+> public API uses): *superglobal isolation*, *global-variable isolation*,
+> *class-static isolation*, *function-static isolation*, *constant isolation*,
+> *ini isolation*, *silent redeclaration*, *include re-execution*. The source and
+> older docs also carry historical internal labels (*Stage 2*, *Level 2/3*,
+> *Stage 3/3.5/4/5/7*); those are noted in parentheses only where you need them to
+> cross-reference the C code. The descriptive names are canonical.
 
 ---
 
-## Snapshot isolation — proven coroutine-safe
+## State isolation — proven coroutine-safe
 
 Each of these is saved on `on_yield` and restored on `on_resume`, keyed by the
 **`Coroutine*` pointer** passed to the scheduler callback (NOT `os_get_cid()` —
 see the identity note). The empirical proof is `TrustBarIsolationTest` (40
 concurrent interleaved requests, **0/40 leakage** across the full contract) plus
-the isolation matrix below (`min`/`cg` rows: phpMyAdmin all-200 under both
-sequential and concurrent load).
+the isolation matrix below (superglobal- and global-isolation rows: phpMyAdmin
+all-200 under both sequential and concurrent load).
 
-| Stage | Isolates | Setter |
-|---|---|---|
-| base | `$_GET $_POST $_REQUEST $_COOKIE $_FILES $_SERVER $_SESSION` (+ `header()`/`setcookie()`/`http_response_code()`) | implicit in coroutine mode |
-| Stage 2 | `$GLOBALS` / `global $x` (COW delta vs a once-captured parent baseline; objects/resources/refs skipped) | `coroutineGlobalsIsolation()` |
-| Level 2 | class `static` properties | implicit |
-| Level 3 | `ini_set()` changes (**except `session.*`** — see below) | implicit |
-| Stage 5 | function-local `static $x` (ZEND_BIND_STATIC touched-set registry) | `coroutineStaticsIsolation()` |
-| constants | per-request `define()` constants | `defineIsolation()` |
-| env | `putenv()`/`getenv()` | implicit |
+| Isolation | Isolates | Setter | (internal) |
+|---|---|---|---|
+| **Superglobal isolation** | `$_GET $_POST $_REQUEST $_COOKIE $_FILES $_SERVER $_SESSION` (+ `header()`/`setcookie()`/`http_response_code()`) | implicit in coroutine mode | base |
+| **Global-variable isolation** | `$GLOBALS` / `global $x` (COW delta vs a once-captured parent baseline; objects/resources/refs skipped) | `coroutineGlobalsIsolation()` | Stage 2 |
+| **Class-static isolation** | class `static` properties | implicit | Level 2 |
+| **Function-static isolation** | function-local `static $x` (touched-set registry on the `ZEND_BIND_STATIC` opcode) | `coroutineStaticsIsolation()` | Stage 5 |
+| **Constant isolation** | per-request `define()` constants | `defineIsolation()` | Stage 3.5 |
+| **INI isolation** | `ini_set()` changes (**except `session.*`** — see below) | implicit | Level 3 |
+| **Environment isolation** | `putenv()`/`getenv()` | implicit | — |
 
 **Coroutine-identity rule (load-bearing).** Snapshots key on the `Coroutine*`
 pointer, never `os_get_cid()`. Empirically (cid-probe, 3 concurrent coroutines):
@@ -67,7 +75,7 @@ pointer, never `os_get_cid()`. Empirically (cid-probe, 3 concurrent coroutines):
 yet). Keying restores on `os_get_cid()` would look up `hash[-1]` and silently
 restore nothing → cross-coroutine corruption. The pointer is correct in all three
 callbacks; pointer reuse is safe because `on_close` deletes the snapshot before
-the struct can be freed. Stage 7's reincluded-set is the deliberate exception (it
+the struct can be freed. Include re-execution's reincluded-set is the deliberate exception (it
 runs only in PHP-execution context + `on_close`, where `os_get_cid()` is
 reliable; separate hash, never collides).
 
@@ -82,14 +90,14 @@ stage-gated cannot be snapshot-isolated.**
 
 ---
 
-## Compile / re-execution isolation — the two hazards
+## Code isolation — the two hazards
 
-These stages manipulate the compiler and the `require_once` cache so that legacy
-code which re-declares or re-includes per request doesn't fatal. They are where
-coroutine-safety gets hard, because **compilation touches process-global compiler
-state and (under OPcache) shared memory.**
+These mechanisms manipulate the compiler and the `require_once` cache so that
+legacy code which re-declares or re-includes per request doesn't fatal. They are
+where coroutine-safety gets hard, because **compilation touches process-global
+compiler state and (under OPcache) shared memory.**
 
-### Stage 3/4 — silent-redeclare (the CG-swap)
+### Silent redeclaration — the CG-swap (internal: Stage 3/4)
 
 `silentRedeclare(true)` installs a `zend_compile_file` hook that swaps the
 process-global `CG(function_table)` / `CG(class_table)` to stack-local scratch
@@ -118,7 +126,7 @@ The merge also **never frees an immutable (OPcache SHM) op_array/class** on the
 loser branch (`ZEND_ACC_IMMUTABLE` guard) — freeing SHM the process still
 executes is a use-after-free.
 
-### Stage 7 — include-isolation (re-execute `require_once`)
+### Include re-execution (internal: Stage 7)
 
 `includeIsolation(true)` hooks `ZEND_INCLUDE_OR_EVAL`: for a `require_once` of a
 non-bootstrap file, it deletes the file from `EG(included_files)` so the engine
@@ -130,13 +138,14 @@ idempotent within a request.
 > script (delete-from-`included_files` → re-include → cache-hit returns the SHM
 > op_array → re-execute) corrupts engine op_array state under high re-exec volume
 > — a `__stack_chk_fail` "stack smashing detected" abort in the VM, accumulating
-> over a few requests. Confirmed: requires Stage 7 **and** OPcache (OPcache off →
-> hang instead of crash; Stage 7 off → no crash). Independent of HAZARD 1 (it
+> over a few requests. Confirmed: requires include re-execution **and** OPcache
+> (OPcache off → hang instead of crash; include re-execution off → no crash).
+> Independent of HAZARD 1 (it
 > persists after the HOOK_FILE fix). Volume-triggered: the ~19 well-behaved sweep
 > apps are fine; only phpMyAdmin's Symfony-DI bootstrap (hundreds of re-executed
 > service files per request) hits it.
 >
-> **Status:** a proper fix needs Stage 7 to be OPcache-aware (re-execute without
+> **Status:** a proper fix needs include re-execution to be OPcache-aware (re-execute without
 > the delete-from-`included_files` dance, or invalidate the SHM entry too) — a
 > non-trivial redesign. **Until then, compile/re-exec-heavy apps run via
 > `cgiMode('pool')`** (subprocess per request, no shared scheduler), where
@@ -151,11 +160,11 @@ Each stage layered on, worker_num=1, OPcache on. `200` = works, `000` = hang,
 
 | config | result | reading |
 |---|---|---|
-| base superglobal snapshot (`min`) | **all 200** | snapshot isolation is safe |
-| + `$GLOBALS` Stage 2 (`cg`) | **all 200** | safe |
-| + silentRedeclare, HOOK_FILE on (`sr`) | all 000 / CRASH | HAZARD 1 |
-| + silentRedeclare, `HOOK_ALL&~HOOK_FILE` | **0 crash / 0 hang** (200 + Bug-A 500s) | HAZARD 1 fix proven |
-| + includeIsolation, HOOK_FILE on (`ii`) | all 000 / CRASH | HAZARD 1 (re-compile yields) |
+| superglobal isolation only | **all 200** | state isolation is safe |
+| + global-variable isolation | **all 200** | safe |
+| + silent redeclaration, HOOK_FILE on | all 000 / CRASH | HAZARD 1 |
+| + silent redeclaration, `HOOK_ALL&~HOOK_FILE` | **0 crash / 0 hang** (200 + Bug-A 500s) | HAZARD 1 fix proven |
+| + include re-execution, HOOK_FILE on | all 000 / CRASH | HAZARD 1 (re-compile yields) |
 | full coroutine-legacy, **HOOK_FILE fix on** | `200 200 200 000` + residual CRASH | HAZARD 1 fixed; HAZARD 2 residual |
 | full, OPcache off | all 000 (hang), **0 crash** | HAZARD 2 needs OPcache |
 
@@ -167,7 +176,7 @@ HOOK_FILE fix — **zero regressions.**
 
 ## Greenfield rules — what to avoid
 
-To stay in the *proven-safe* (snapshot) lane, a greenfield ZealPHP app should:
+To stay in the *proven-safe* (state-isolation) lane, a greenfield ZealPHP app should:
 
 1. **Declare functions/classes once** (Composer autoload), never conditionally
    re-declare them per request. → you never need `silentRedeclare`; you never
@@ -182,19 +191,19 @@ To stay in the *proven-safe* (snapshot) lane, a greenfield ZealPHP app should:
    wire under concurrency (a separate, documented boundary; not isolation).
 6. **Don't `fork`/`pcntl`/`set_time_limit`** inside a coroutine worker.
 
-A greenfield app following these uses **only snapshot isolation** — the 10/10
-lane. The compile/re-exec stages exist to drag *unmodified legacy* code into the
-coroutine world; they are a compatibility shim with the caveats above, not part
-of the greenfield contract.
+A greenfield app following these uses **only state isolation** — the 10/10 lane.
+Code isolation (silent redeclaration, include re-execution) exists to drag
+*unmodified legacy* code into the coroutine world; it is a compatibility shim
+with the caveats above, not part of the greenfield contract.
 
 ---
 
 ## Honest status
 
-- **Snapshot isolation: 10/10 coroutine-safe.** The greenfield mental model works.
-- **silent-redeclare (HAZARD 1): fixed.** Dropping HOOK_FILE under the compile
+- **State isolation: 10/10 coroutine-safe.** The greenfield mental model works.
+- **Silent redeclaration (HAZARD 1): fixed.** Dropping HOOK_FILE under the compile
   hook makes the CG-swap atomic; no regressions on the working set.
-- **include-isolation × OPcache (HAZARD 2): open.** A volume-triggered op_array
+- **Include re-execution × OPcache (HAZARD 2): open.** A volume-triggered op_array
   corruption on compile/re-exec-heavy legacy apps (phpMyAdmin). `cgiMode('pool')`
   is the supported fallback; a Stage-7 OPcache-aware redesign is the real fix.
 
