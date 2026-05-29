@@ -65,16 +65,23 @@ intermittently 000-ing dokuwiki/filegator/nextcloud.
 
 ## Remaining (not framework bugs / fundamental)
 
-### A. psr/log v1-vs-v3 (kanboard) — fundamental dep-version conflict
-kanboard vendors psr/log **v1** (untyped); the framework vendors **v3** (typed
-`emergency(Stringable|string …): void`). In the shared coroutine class table the
-framework's autoloader (registered first) resolves `Psr\Log\*` to v3 before
-kanboard's autoloader supplies v1 → its `AbstractLogger` fails the compatibility
-check → **compile-time fatal that exits the worker** (uncatchable at runtime; it
-cascades in the shared-worker sweep, but in production — one app per worker —
-only kanboard is affected). Fundamental to in-process hosting of apps whose deps
-conflict with the framework's; **cgi-pool's subprocess avoids it** (only the
-app's vendor loads). Modern apps (psr/log v3) don't clash.
+### A. Dependency-version conflict class — **CONTESTED for kanboard specifically**
+**Correction (2026-05-29 readiness review):** the earlier claim that *kanboard*
+fails with a psr/log v1-vs-v3 compile-time fatal is **contradicted by this repo's
+own `docs/compatibility-database.md`**, which lists Kanboard as grade **A in all
+modes — "All 4 modes pass — cleanest app tested"** (200 across the board). The
+500 this sweep attributed to kanboard was almost certainly **cascade pollution**
+(the same non-determinism warned about in the Method note — a worker-killing
+neighbour, since fixed by the cache-UAF removal), misattributed to a dep clash.
+Treat the kanboard-psr/log story as **retracted** pending a fresh isolated re-run.
+
+The dep-version conflict *class* is still real and worth stating: an app
+vendoring a library version incompatible with the framework's (e.g. an untyped
+`psr/log` v1 `AbstractLogger` vs the framework's typed v3) would hit a
+**compile-time "must be compatible" fatal** in the shared coroutine class table —
+fundamental to in-process hosting, and **cgi-pool's subprocess avoids it** (only
+the app's own vendor loads). But this is now a *hypothetical* class, not a
+confirmed kanboard observation; modern apps on current deps don't clash.
 
 ### B. App-config (not framework) — the goal's "configure the apps" tail
 - **Clean 500, need config** (no crash): phpmyadmin (DB/config), nextcloud
@@ -156,16 +163,24 @@ known boundary in `docs/running-modern-apps.md`.
   matomo*, mediawiki, mybb, phpliteadmin, piwigo, privatebin, roundcube, vanilla,
   wordpress, test.php, traditional, tinyfilemanager. (*matomo: 200 when
   composer-installed; otherwise a clean 500.)
-- **Clean 500 (app-config, no crash):** phpmyadmin, nextcloud, grav.
-- **Worker-crash (fundamental dep-conflict):** kanboard (psr/log).
+- **Clean 500 (app-config, no crash):** nextcloud, grav.
+- **OPEN framework bug:** phpmyadmin — coroutine lost-wakeup in the Symfony-DI
+  bootstrap (caveat D, Bug B); `cgiMode('pool')` returns 200.
+- **Contested (likely cascade artifact, see caveat A):** kanboard — this repo's
+  own `compatibility-database.md` rates it A in all modes; the psr/log story is
+  retracted pending a fresh isolated re-run.
 - **404 / not installed:** 8 apps (caveat B).
 
 ## Verdict
 All **framework-level crashes** in coroutine-legacy are fixed: the relative-
 include break, the circular-`require_once` OOM, and — the big one, found via gdb
 — the Stage 6 compile-cache use-after-free that was segfaulting workers and
-cascading. After the three fixes, the only non-config failure is the
-fundamental framework/app **dependency-version conflict** (kanboard's psr/log),
-for which cgi-pool remains the compatibility fallback. "Old PHP just works"
-holds for the majority of installed, well-behaved apps in coroutine-legacy; the
-remaining tail is per-app install/config, not the framework.
+cascading. The remaining **open framework bug** is phpMyAdmin's compile-hook
+yield race (Bug B, caveat D) — the supported fallback is `cgiMode('pool')`. "Old
+PHP just works" holds for the majority of installed, well-behaved apps in
+coroutine-legacy **run sequentially**; the honest gap to *concurrent* in-process
+hosting is (1) that compile-hook lost-wakeup class and (2) the not-yet-built
+per-coroutine DB connection pool (a shared handle corrupts the wire under
+concurrency). The rest of the tail is per-app install/config, not the framework.
+See `docs/architecture/2026-05-29-ext-readiness-review.md` for the full
+production-readiness verdict.
