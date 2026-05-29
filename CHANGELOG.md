@@ -47,7 +47,7 @@ This release also folds in the 0.3.1–0.3.4 tags, which were cut without change
 
 ### Known limitation
 
-- A few legacy apps that re-include framework-closure-defining files under Stage 7 include-isolation can corrupt a compiled op_array (observed with phpMyAdmin) — under active root-cause investigation. For such apps use `App::cgiMode('pool')` or `App::processIsolation(true)`. **State-isolation correctness is unaffected** — this is a code/compile-cache concern, not a request-state leak.
+- **Coroutine-legacy CODE isolation on PHP 8.4 / 8.5** (silent-redeclare + include-isolation CG-table swap) has a pre-existing, perturbation-sensitive **heap-corruption race** under heavy *concurrent class autoloading* — e.g. a class lazily `autoload`ed mid-request (phpMyAdmin; a session handler under load). It surfaces as `free(): invalid pointer` / intermittent "class not found", **not** a state leak. It does **not** affect PHP 8.3, and both `rr` (thread serialization) and `gdb` (attach slowdown) mask it (tracked as HAZARD-2). **STATE isolation — the per-coroutine cross-request-leak contract — is solid on 8.3, 8.4 and 8.5**: `CoroutineIsolationContractTest` passes on all three (including `global $x` after the ext-zealphp 0.3.17 fix); `TrustBarIsolationTest` (which additionally exercises code-isolation under 40-way concurrency) is skipped on 8.4+ pending the compile-under-concurrency fix. For affected apps on 8.4/8.5 use `App::cgiMode('pool')` / `App::processIsolation(true)`, or run on PHP 8.3.
 
 ## [0.3.0] - 2026-05-26
 
