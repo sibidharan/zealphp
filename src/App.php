@@ -3842,13 +3842,32 @@ class App
             $_SERVER  = $g->server;
         }
 
+        // Apache/mod_php and php-cli run a script with CWD = the script's own
+        // directory, so legacy apps using relative includes (`require './global.php'`,
+        // `require 'conf/constants.php'`) resolve them against that directory. The
+        // in-process executeFile() path otherwise leaves CWD at the framework root
+        // (/app), so those relative requires fail — the dominant 50-app-sweep blocker
+        // in coroutine/sync modes (mybb, cacti, vanilla, …). chdir to the script's
+        // directory for the duration of the include, restore immediately after.
+        // chdir is process-global; per-coroutine CWD stability across yields is
+        // provided by ext-zealphp's per-coroutine cwd snapshot (Stage 8).
+        $prevCwd = \getcwd();
+        $scriptDir = \dirname($absPath);
+        $didChdir = ($scriptDir !== '' && $scriptDir !== '.') ? @\chdir($scriptDir) : false;
+
         $obBase = ob_get_level();
         ob_start();
         $result = null;
         try {
-            $args['g'] = $g;
-            extract($args, EXTR_SKIP);
-            $result = include $absPath;
+            try {
+                $args['g'] = $g;
+                extract($args, EXTR_SKIP);
+                $result = include $absPath;
+            } finally {
+                if ($didChdir && $prevCwd !== false) {
+                    @\chdir($prevCwd);
+                }
+            }
         } catch (HaltException $e) {
             // Clean halt — preserves buffered output as the body (PR #10).
             $haltState = self::getFragmentState();
