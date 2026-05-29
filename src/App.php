@@ -6654,14 +6654,14 @@ HELP;
             (\zealphp_silent_redeclare(...))((bool) true);
         }
 
-        // Stage 5: per-coroutine function-local static isolation. Opt-in
-        // (default off even in coroutine-legacy) — the snapshot walk visits
-        // every user function + method on each yield, so throughput cost
-        // scales with declared-function count. Activated before fork so the
-        // flag + scheduler hooks are inherited by workers. Closes the last
-        // request-state primitive that leaked across coroutines; enable it
-        // for apps that depend on per-request function statics. See the
-        // $coroutine_statics_isolation docblock for the tradeoff.
+        // Stage 5: per-coroutine function-local static isolation. Default-ON
+        // in coroutine-legacy (the mode() preset enables it; env opt-out
+        // ZEALPHP_FN_STATICS_DISABLE=1). A ZEND_BIND_STATIC touched-set registry
+        // keeps the per-yield snapshot proportional to static-USING functions,
+        // not total functions — so cost is decoupled from declared-function
+        // count. Activated before fork so the flag + scheduler hooks are
+        // inherited by workers. Closes the last request-state primitive that
+        // leaked across coroutines. See the $coroutine_statics_isolation docblock.
         if (self::$coroutine_statics_isolation
             && \extension_loaded('zealphp')
             && \function_exists('zealphp_coroutine_statics')

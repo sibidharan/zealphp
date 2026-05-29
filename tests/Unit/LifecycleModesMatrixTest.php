@@ -187,9 +187,11 @@ final class LifecycleModesMatrixTest extends TestCase
      *
      * Knob shape: sg=false, pi=false, ec=true, ha=HOOK_ALL.
      *
-     * Caveat: PDO is NOT hooked in OpenSwoole 22.1 / 26.2 regardless of
-     * HOOK_ALL. Use OpenSwoole\Coroutine\MySQL / PostgreSQL for true
-     * yielding DB access, OR accept PDO blocks the worker.
+     * Caveat: PDO_MYSQL / mysqli on mysqlnd ARE coroutinized under HOOK_ALL
+     * (mysqlnd rides php_stream, which the stream/TCP hooks intercept);
+     * libpq-based PDO_PGSQL / Oracle / ODBC are NOT — use
+     * OpenSwoole\Coroutine\PostgreSQL for yielding Postgres. Hooking makes I/O
+     * non-blocking but a shared connection still needs per-coroutine pooling.
      */
     public function testMode2CoroutineResolvedKnobs(): void
     {
