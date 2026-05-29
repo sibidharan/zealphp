@@ -432,6 +432,56 @@ class App
      * automatically for every request.
      */
     public static bool $session_lifecycle = true;
+
+    /**
+     * Session TTL in seconds. Default 7200 (2 hours — modern-app reasonable;
+     * PHP's stock 1440 / 24 min is too short for typical workflows).
+     * Set via `App::sessionTtl(3600)` BEFORE `App::run()`.
+     */
+    public static int $session_ttl = 7200;
+
+    /**
+     * Maximum concurrent sessions in OpenSwoole\Table when using
+     * TableSessionHandler. Default 65536 (64K) — accommodates medium-scale
+     * deployments without re-tuning. Each row costs `$session_data_size +
+     * ~64 bytes` of shared memory (one allocation per OpenSwoole server,
+     * NOT per worker). Default config = 64K × 16KB ≈ 1 GB shared memory.
+     * Bump for high-traffic; sessions beyond the cap fall through to file
+     * backing (still functional, just slower).
+     */
+    public static int $session_max_rows = 65536;
+
+    /**
+     * Maximum serialized session size in bytes when using TableSessionHandler.
+     * Default 16384 (16 KB) — fits most modern sessions including OAuth
+     * tokens, cart state, user preferences. Larger sessions overflow to
+     * file backing only.
+     */
+    public static int $session_data_size = 16384;
+
+    /**
+     * File-backing directory for session storage. Default
+     * `/var/lib/php/sessions` (matches PHP's default). Used by
+     * FileSessionHandler and TableSessionHandler's file backing layer.
+     */
+    public static string $session_save_path = '/var/lib/php/sessions';
+
+    /**
+     * Session storage backend. One of:
+     *   - `null` (default) — auto-pick based on lifecycle mode:
+     *       coroutine → TableSessionHandler (concurrent-safe, in-memory
+     *       + file backing), sync → FileSessionHandler (flock + file).
+     *   - `'table'` — force TableSessionHandler regardless of mode.
+     *   - `'file'`  — force FileSessionHandler (simple, key-level merge).
+     *   - `'redis'` — force RedisSessionHandler (cross-node, WATCH/MULTI).
+     *   - SessionHandlerInterface instance — bring your own.
+     *
+     * Set via `App::sessionHandler('table')` BEFORE `App::run()`.
+     *
+     * @var string|\SessionHandlerInterface|null
+     */
+    public static string|\SessionHandlerInterface|null $session_handler = null;
+
     /**
      * Auth-hook callbacks consulted by `ZealAPI::isAuthenticated()`,
      * `::isAdmin()`, and `::getUsername()` so the framework's built-in
@@ -1647,6 +1697,57 @@ class App
         if ($v === true)  return \OpenSwoole\Runtime::HOOK_ALL;
         if ($v === false) return 0;
         return (int) $v;
+    }
+
+    /**
+     * Session TTL in seconds. Default 1440 (PHP's default). See $session_ttl.
+     */
+    public static function sessionTtl(?int $seconds = null): int
+    {
+        if ($seconds !== null) self::$session_ttl = max(1, $seconds);
+        return self::$session_ttl;
+    }
+
+    /**
+     * Max concurrent sessions in TableSessionHandler's OpenSwoole\Table.
+     * See $session_max_rows. Must be set BEFORE register() / App::run().
+     */
+    public static function sessionMaxRows(?int $rows = null): int
+    {
+        if ($rows !== null) self::$session_max_rows = max(16, $rows);
+        return self::$session_max_rows;
+    }
+
+    /**
+     * Max serialized session size in bytes for TableSessionHandler.
+     * See $session_data_size. Must be set BEFORE register() / App::run().
+     */
+    public static function sessionDataSize(?int $bytes = null): int
+    {
+        if ($bytes !== null) self::$session_data_size = max(1024, $bytes);
+        return self::$session_data_size;
+    }
+
+    /**
+     * File-backing directory for session storage. Default /var/lib/php/sessions.
+     * Must be set BEFORE register() / App::run().
+     */
+    public static function sessionSavePath(?string $path = null): string
+    {
+        if ($path !== null) self::$session_save_path = $path;
+        return self::$session_save_path;
+    }
+
+    /**
+     * Session storage backend selector. See $session_handler docblock.
+     * Pass 'table', 'file', 'redis', or a SessionHandlerInterface instance.
+     * `null` = auto-pick (TableSessionHandler in coroutine modes,
+     * FileSessionHandler in sync mode).
+     */
+    public static function sessionHandler(string|\SessionHandlerInterface|null $handler = null): string|\SessionHandlerInterface|null
+    {
+        if (\func_num_args() > 0) self::$session_handler = $handler;
+        return self::$session_handler;
     }
 
     /**
