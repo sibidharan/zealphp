@@ -6597,6 +6597,35 @@ HELP;
             }
         }
 
+        // silentRedeclare + enableCoroutine + HOOK_FILE: the compile-yield
+        // hazard (gdb-confirmed on the 50-app sweep, phpMyAdmin's Symfony-DI
+        // bootstrap). silentRedeclare installs the zend_compile_file hook, which
+        // swaps the process-global CG(function_table)/CG(class_table) to scratch
+        // for the duration of each compile. HOOK_FILE coroutinizes the source-
+        // file read INSIDE that compile — so the coroutine can yield mid-compile
+        // while CG is swapped and a zend_try bailout frame is live. That switch
+        // corrupts engine state: a worker SIGSEGV under OPcache, a lost-wakeup
+        // hang without it. Dropping HOOK_FILE (compile-time file read runs
+        // blocking, cannot yield) makes the compile atomic and removes the whole
+        // class. Network / socket / sleep hooks stay on, so coroutine concurrency
+        // for I/O-bound work is unaffected; only file I/O becomes synchronous —
+        // an acceptable trade in legacy mode, and the documented safe shape.
+        // Toggling the file wrapper per-compile from the extension was tried and
+        // is WORSE (the mid-request enable/disable_hook has side effects), so the
+        // fix lives here, at the one place hook flags are frozen. Opt back in
+        // with ZEALPHP_ALLOW_COMPILE_HOOK_FILE=1 if you accept the risk.
+        if (self::$silent_redeclare && $enableCoroutine
+            && ($hookFlags & \OpenSwoole\Runtime::HOOK_FILE)
+            && (string) \getenv('ZEALPHP_ALLOW_COMPILE_HOOK_FILE') !== '1'
+        ) {
+            $hookFlags &= ~\OpenSwoole\Runtime::HOOK_FILE;
+            elog('[lifecycle] silentRedeclare + enableCoroutine: dropping HOOK_FILE '
+                . '— coroutinizing the compile-time file read while the CG-swap '
+                . 'compile hook is active yields mid-compile and corrupts the '
+                . 'engine (SIGSEGV/hang). File I/O is synchronous; other hooks stay '
+                . 'on. Override with ZEALPHP_ALLOW_COMPILE_HOOK_FILE=1.', 'warn');
+        }
+
         // Surface combinations that are syntactically allowed but race
         // process-wide superglobals against concurrent coroutines / hooked
         // I/O. We warn rather than refuse — see App::hookAll() docblock.
