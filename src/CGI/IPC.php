@@ -5,18 +5,14 @@ declare(strict_types=1);
 namespace ZealPHP\CGI;
 
 /**
- * SPIKE — Length-prefixed JSON framing for the native FCGI-style worker pool.
+ * Length-prefixed JSON framing for the native FCGI-style worker pool.
  *
  * Wire format (symmetric, parent <-> child):
  *   [4 bytes: uint32 big-endian length]
  *   [N bytes: JSON-encoded payload]
  *
- * Same shape as `cgiFork()` already uses for IPC over OpenSwoole\Process pipes.
- * Extracted to a class so PoolWorker (child) and WorkerPool (parent) share
- * one definition and the framing can be unit-tested in isolation.
- *
  * Sanity cap: 64 MB per frame — protects against runaway corrupted-length
- * reads draining all memory. Adjust if real payloads ever exceed that.
+ * reads draining all memory.
  */
 final class IPC
 {
@@ -26,13 +22,28 @@ final class IPC
     /**
      * Write a length-prefixed JSON frame to an open stream.
      *
-     * @param resource           $fp      Writable stream (parent stdin pipe to child, or child STDOUT).
+     * @param resource           $fp      Writable stream.
      * @param array<mixed,mixed> $payload Anything json_encode-able.
      */
     public static function writeFrame($fp, array $payload): void
     {
-        $json = (string) json_encode($payload, JSON_UNESCAPED_SLASHES);
-        $hdr  = pack('N', strlen($json));
+        $json = json_encode($payload, JSON_UNESCAPED_SLASHES);
+        if ($json === false) {
+            if (isset($payload['body']) && is_string($payload['body'])) {
+                $payload['body'] = base64_encode($payload['body']);
+                $payload['body_encoding'] = 'base64';
+            }
+            $json = json_encode($payload, JSON_UNESCAPED_SLASHES);
+        }
+        if ($json === false) {
+            $json = (string) json_encode([
+                'status'  => 500,
+                'body'    => 'IPC: json_encode failed: ' . json_last_error_msg(),
+                'headers' => [],
+                'cookies' => [],
+            ], JSON_UNESCAPED_SLASHES);
+        }
+        $hdr = pack('N', strlen($json));
         fwrite($fp, $hdr . $json);
         fflush($fp);
     }
@@ -41,11 +52,12 @@ final class IPC
      * Read one length-prefixed JSON frame.
      *
      * @param resource $fp Readable stream.
-     * @return array<mixed,mixed>|null Null on EOF or framing error.
+     * @param float $timeout Max seconds to wait (default 30).
+     * @return array<mixed,mixed>|null Null on EOF, timeout, or framing error.
      */
-    public static function readFrame($fp): ?array
+    public static function readFrame($fp, float $timeout = 30.0): ?array
     {
-        $hdr = self::readExact($fp, 4);
+        $hdr = self::readExact($fp, 4, $timeout);
         if ($hdr === null) {
             return null;
         }
@@ -55,7 +67,7 @@ final class IPC
         if ($len <= 0 || $len > self::MAX_FRAME_BYTES) {
             return null;
         }
-        $body = self::readExact($fp, $len);
+        $body = self::readExact($fp, $len, $timeout);
         if ($body === null) {
             return null;
         }
@@ -65,16 +77,16 @@ final class IPC
     }
 
     /**
-     * Read exactly $n bytes from a stream. Handles short reads by looping
-     * until the full count arrives. Returns null on EOF or stream error.
+     * Read exactly $n bytes from a stream with timeout.
      *
      * @param resource $fp
      * @param positive-int $n
+     * @param float $timeout Max seconds to wait.
      */
-    private static function readExact($fp, int $n): ?string
+    private static function readExact($fp, int $n, float $timeout = 30.0): ?string
     {
         $out = '';
-        $emptyReads = 0;
+        $deadline = microtime(true) + $timeout;
         while (strlen($out) < $n) {
             $remaining = $n - strlen($out);
             if ($remaining < 1) {
@@ -83,14 +95,12 @@ final class IPC
             $chunk = fread($fp, $remaining);
             if ($chunk !== false && $chunk !== '') {
                 $out .= $chunk;
-                $emptyReads = 0;
                 continue;
             }
             if (feof($fp)) {
                 return null;
             }
-            $emptyReads++;
-            if ($emptyReads > 3000) { // 30s timeout (3000 * 10ms)
+            if (microtime(true) >= $deadline) {
                 return null;
             }
             usleep(10000); // 10ms yield
