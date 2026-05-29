@@ -250,6 +250,33 @@ final class WorkerPoolTest extends TestCase
     }
 
     /**
+     * A response body containing raw binary (invalid UTF-8) can't be
+     * JSON-encoded directly. The child's IPC::writeFrame() base64-encodes it
+     * and tags `body_encoding=base64`; the parent's dispatch() must decode it
+     * back to the exact bytes — so the caller never sees the base64 wrapper.
+     */
+    public function testDispatchDecodesBase64BinaryBody(): void
+    {
+        $binary = "\xff\xfe\x00\x01 binary payload \x80\x81\x9f";
+        $file = $this->fixture(
+            'binary.php',
+            'echo ' . var_export($binary, true) . ';'
+        );
+        $pool = new WorkerPool(size: 1);
+        try {
+            $resp = $pool->dispatch(['file' => $file]);
+            $this->assertSame(200, $resp['status']);
+            $this->assertSame(
+                $binary,
+                $resp['body'],
+                'binary body must survive the base64 IPC round-trip byte-for-byte'
+            );
+        } finally {
+            $pool->close();
+        }
+    }
+
+    /**
      * Regression for issue #108 — session data set inside one pool dispatch
      * MUST persist to disk so a subsequent dispatch with the same PHPSESSID
      * sees it.
