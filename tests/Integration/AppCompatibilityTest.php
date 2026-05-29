@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ZealPHP\Tests\Integration;
 
+use ZealPHP\Tests\TestCase;
+
 /**
  * End-to-end smoke tests for real-world PHP applications mounted under
  * ZealPHP's documentRoot. Each test probes a known hot path and asserts:

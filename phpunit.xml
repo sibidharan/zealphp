@@ -25,5 +25,9 @@
   <php>
     <env name="ZEALPHP_REDIS_URL" value="redis://127.0.0.1:16379/0"/>
     <env name="ZEALPHP_MEMCACHED_SERVERS" value="127.0.0.1:11211"/>
+    <!-- AppCompatibilityTest probes an external Docker app-lab (scripts/app-lab/)
+         that isn't available in CI or most dev boxes. Skip by default; set
+         SKIP_LAB_TESTS=0 + ZEALPHP_LAB_BASE_URL in the shell env to enable. -->
+    <env name="SKIP_LAB_TESTS" value="1"/>
   </php>
 </phpunit>
