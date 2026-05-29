@@ -264,11 +264,18 @@ class SessionManager
             if (\function_exists('zealphp_ini_restore')) {
                 @(\zealphp_ini_restore(...))();
             }
-            if (\ZealPHP\App::$function_isolation
-                && \function_exists('zealphp_process_state_clean')
-                && self::safeForFunctionIsolation()
-            ) {
-                (\zealphp_process_state_clean(...))(6);
+            // Stage 7 include_isolation needs no per-request cleanup —
+            // the ZEND_INCLUDE_OR_EVAL opcode handler handles it inline.
+            if (\ZealPHP\App::$function_isolation) {
+                if (!\ZealPHP\App::$keep_globals
+                    && \function_exists('zealphp_globals_clean')) {
+                    (\zealphp_globals_clean(...))();
+                }
+                if (\function_exists('zealphp_process_state_clean')
+                    && self::safeForFunctionIsolation()
+                ) {
+                    (\zealphp_process_state_clean(...))(6);
+                }
             }
         }
     }

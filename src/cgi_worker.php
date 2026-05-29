@@ -16,6 +16,15 @@
 
 ini_set('display_errors', 'stderr');
 
+// Same stderr-pipe-fill deadlock applies in proc mode. PHP 8.4 + heavy vendor
+// libraries (phpMyAdmin's Safe, etc.) can emit hundreds of deprecation warnings
+// per request to stderr. Parent's stream_get_contents only drains stderr on
+// subprocess death, so a flooded stderr blocks the subprocess fwrite. Opt in
+// with ZEALPHP_CGI_DEBUG_DEPRECATIONS=1.
+if ((string) getenv('ZEALPHP_CGI_DEBUG_DEPRECATIONS') !== '1') {
+    error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
+}
+
 // Load the Composer autoloader so the included file has the SAME class /
 // global-function surface it would in fork mode (which inherits the warm
 // worker's autoloader via copy-on-write). Without this, `\ZealPHP\App`,

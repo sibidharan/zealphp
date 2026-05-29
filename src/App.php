@@ -59,8 +59,13 @@ class App
      * via `realpath(__DIR__ . '/..')` and exposed read-only for handlers
      * that need to build paths relative to the project root (e.g.
      * `App::$cwd . '/.cache'` for the file-tier cache directory).
+     *
+     * Defaults to '' so reads before `App::init()` (e.g. `elog()` building a
+     * relative path) don't fatal with "typed static accessed before
+     * initialization" — `str_replace('', ...)` is a harmless no-op. `init()`
+     * sets the real working directory.
      */
-    public static string $cwd;
+    public static string $cwd = '';
     /**
      * The active OpenSwoole server instance after `App::run()` constructs
      * it; `null` before `run()`. Returned as a `WebSocket\Server` when any
@@ -115,6 +120,16 @@ class App
     public static bool $coroutine_isolated_superglobals = false;
 
     /**
+     * Process environment captured at boot (real `getenv()`), before the
+     * per-coroutine putenv/getenv overrides are installed in Mode 4. The
+     * overridden `\ZealPHP\zeal_getenv` falls back to this for variables not set
+     * request-scoped via `\ZealPHP\zeal_putenv`.
+     *
+     * @var array<string, string>
+     */
+    public static array $boot_env = [];
+
+    /**
      * Per-request define() isolation. When true, constants defined during
      * a request are tracked and removed at request end. Boot-time constants
      * (PHP_VERSION, extension defines, autoloaded class constants) survive.
@@ -145,6 +160,145 @@ class App
      * Set via `App::functionIsolation(true)` BEFORE `App::run()`.
      */
     public static bool $function_isolation = false;
+
+    /**
+     * Per-request `require_once` cache reset. Clears EG(included_files) so
+     * files loaded via `require_once` on request N re-execute on request N+1.
+     * Functions and classes defined by those files stay loaded (they live in
+     * CG(function_table)/CG(class_table), not in included_files). Pair with
+     * `silentRedeclare(true)` so the re-executed function/class/constant
+     * declarations are silently skipped instead of E_COMPILE_ERROR.
+     *
+     * Solves the "WordPress template-loader runs once then becomes a no-op"
+     * class of bug — any app that puts per-request logic inside a
+     * `require_once`'d file needs this.
+     *
+     * Safe in ALL modes (sync, coroutine, hybrid). Implemented by ext-zealphp
+     * Stage 7: `zealphp_include_isolation(true)` installs a ZEND_INCLUDE_OR_EVAL
+     * opcode hook that, for any `require_once`/`include_once` of a file NOT in
+     * the boot snapshot, drops it from EG(included_files) inline so it
+     * re-executes — bootstrap (snapshotted) files stay cached. This needs ZERO
+     * per-request cleanup (it replaces the older per-request
+     * `zealphp_process_state_clean(1)` files-wipe). Requires a snapshot to have
+     * been taken (`zealphp_process_state_snapshot()` in onWorkerStart); the
+     * framework takes it automatically when this flag is on.
+     */
+    public static bool $include_isolation = false;
+
+    /**
+     * Per-coroutine `$GLOBALS` isolation via ext-zealphp's
+     * `zealphp_coroutine_globals()`. When enabled, each coroutine gets its
+     * own snapshot of `EG(symbol_table)` swapped in on yield/resume — so
+     * `$GLOBALS['app_state']` and `global $foo;` writes never race across
+     * concurrent coroutines.
+     *
+     * Closes the last architectural gap in Mode 4/5 — user-defined globals
+     * (which were previously process-wide) now isolate alongside super-
+     * globals, constants, ini settings, and static properties.
+     *
+     * Tradeoff: each coroutine maintains its own `$GLOBALS` deep-copy at
+     * yield boundary — O(N keys) extra memory per active coroutine. No
+     * function/class table impact — autoloaders keep working as before.
+     *
+     * Requires ext-zealphp 0.3.6+ with `zealphp_coroutine_globals` function.
+     * Set via `App::coroutineGlobalsIsolation(true)` BEFORE `App::run()`.
+     */
+    public static bool $coroutine_globals_isolation = false;
+
+    /**
+     * Keep user-defined `$GLOBALS` across requests within the same worker.
+     *
+     * Default `false`: at the end of every request the session manager
+     * calls `zealphp_globals_clean()` to drop user-defined entries back
+     * to the parent baseline. This matches FPM's "fresh process per
+     * request" semantic at the request boundary.
+     *
+     * When `true`: that cleanup is SKIPPED. `$GLOBALS['wp_object_cache']`,
+     * `$GLOBALS['wp_did_header']`, `$GLOBALS['wpdb']`, and similar
+     * process-persistent state stays alive across requests within the
+     * worker's lifetime — matching how WordPress, Drupal 7/8, MediaWiki,
+     * Magento, and other globals-heavy legacy apps were designed to
+     * work under long-running mod_php / single-process SAPI. The same
+     * semantic FrankenPHP's worker mode provides.
+     *
+     * When to use:
+     *   - WordPress, Drupal, MediaWiki, Magento — apps with explicit
+     *     process-persistent globals
+     *   - Any procedural PHP app where `$wp_did_header`-style boot
+     *     sentinels gate the bootstrap chain
+     *
+     * Sharp edge to know about:
+     *   - Apps that mistakenly store REQUEST-SCOPED data in `$GLOBALS`
+     *     (e.g., `$GLOBALS['current_user_id'] = $_SESSION['uid']`) will
+     *     observe cross-request bleed. This is a pre-existing bad
+     *     pattern that's also unsafe under FPM with opcache + persistent
+     *     connections. The fix is to use `$_SERVER`, session, or a
+     *     per-request DI container — not `$GLOBALS`.
+     *
+     * Bounded by worker recycle: OpenSwoole's `max_request` cap (typical
+     * 10,000–50,000) gives the same eventual "fresh process" reset that
+     * FPM does, just at the worker level instead of per-request.
+     *
+     * Set via `App::keepGlobals(true)` BEFORE `App::run()`.
+     */
+    public static bool $keep_globals = false;
+
+    /**
+     * Stage 3 — silent-redeclare opcode hooks. When enabled, ext-zealphp's
+     * `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` / `_DELAYED` opcode
+     * handlers check if the target symbol already exists in
+     * `EG(function_table)` / `CG(class_table)`. If it does, the opcode is
+     * silently skipped instead of throwing `E_COMPILE_ERROR`
+     * ("Cannot redeclare …"). First declaration wins — matches what FPM
+     * gets "for free" by forking a fresh process per request.
+     *
+     * Closes the dominant Mode 3/4/5 failure mode on the 32-app sweep:
+     * conditional `function foo() {}` / `class Bar {}` in legacy code that
+     * re-runs on every request. Top-level (file-scope) function declarations
+     * are still compile-time-bound by Zend and not covered by this hook;
+     * those need OPcache enabled OR Mode 1 Pool.
+     *
+     * Requires ext-zealphp 0.3.8+. Set via `App::silentRedeclare(true)`
+     * BEFORE `App::run()`. Off by default to keep existing semantics.
+     */
+    public static bool $silent_redeclare = false;
+
+    /**
+     * Stage 5 — per-coroutine FUNCTION-local `static $x` isolation via
+     * ext-zealphp's `zealphp_coroutine_statics()`. This is the LAST
+     * request-state primitive that previously leaked across coroutines
+     * (everything else — superglobals, class statics, `$GLOBALS`, constants,
+     * `ini_set`, `putenv` — is already isolated). When enabled, the on_yield
+     * hook snapshots every instantiated function/method's live static table
+     * per coroutine and restores THIS coroutine's values on resume — the same
+     * snapshot/restore model already proven for class statics. Cooperative
+     * scheduling makes it correct: a coroutine writes its statics after its own
+     * restore and reads them before its next yield, so values never bleed.
+     *
+     * Verified: 0 leaks across 240 requests at peak-40 concurrency, both
+     * opcache on and off, no crash (`tests/Integration/TrustBarIsolationTest`
+     * keeps `fn_static` in the hard contract).
+     *
+     * DEFAULT ON in `coroutine-legacy` (v0.3.10): a touched-set registry —
+     * populated by a ZEND_BIND_STATIC opcode hook as functions first
+     * instantiate their statics — means the per-yield snapshot iterates ONLY
+     * the functions that actually use statics, not every declared function.
+     * Cost is therefore decoupled from total function count: ~1.9µs/yield at
+     * 50 static-using functions, FLAT from 500 to 8000 total functions (the
+     * pre-registry full-table walk was ~0.16ms/yield at 1200 functions and
+     * scaled with the total — that version halved throughput at scale). Cost
+     * now scales only with the (small) number of static-USING functions — the
+     * irreducible per-coroutine snapshot. Closures + eval/top-level code are
+     * excluded from the registry (their op_arrays have per-instance lifetime;
+     * this matches exactly what the snapshot already covered — no regression).
+     *
+     * Opt out with env `ZEALPHP_FN_STATICS_DISABLE=1` (or
+     * `App::coroutineStaticsIsolation(false)` before `App::run()`) for raw
+     * throughput on apps that don't depend on per-request function statics.
+     *
+     * Requires ext-zealphp 0.3.10+ with `zealphp_coroutine_statics`.
+     */
+    public static bool $coroutine_statics_isolation = false;
 
     /**
      * Set true at the top of `App::run()` so the four lifecycle setters
@@ -844,36 +998,67 @@ class App
         // raised by the engine still go through THIS native dispatcher, which
         // reads the current coroutine's G stack — giving per-coroutine isolation.
         \set_error_handler(static function (int $severity, string $message, string $file, int $line) {
-            $g = \ZealPHP\RequestContext::instance();
-            $level = $g->error_reporting_level ?? \ZealPHP\App::$initial_error_reporting;
-            if (!($severity & $level)) {
-                return true; // suppressed by error_reporting
+            // Re-entry guard. If this handler itself raises an error (e.g.,
+            // RequestContext::instance() throws, the user callable below
+            // re-enters our handler via a nested error), keep returning
+            // false so PHP falls back to its native handler instead of
+            // recursing through us until the stack blows. The flag lives
+            // per-coroutine in RequestContext — set on entry, cleared on
+            // exit via a try/finally that survives user-callable throws. */
+            try {
+                $g = \ZealPHP\RequestContext::instance();
+            } catch (\Throwable $e) {
+                return false;
             }
-            $stack = $g->error_handlers_stack;
-            if (!empty($stack)) {
-                $top = $stack[count($stack) - 1];
-                [$callable, $levels] = $top;
-                if ($severity & $levels) {
-                    try {
-                        return (bool)$callable($severity, $message, $file, $line);
-                    } catch (\Throwable $e) {
-                        // Avoid loops; let PHP default handle if user handler explodes.
-                        return false;
+            if (!empty($g->_error_handler_in_flight)) {
+                return false;
+            }
+            $g->_error_handler_in_flight = true;
+            try {
+                $level = $g->error_reporting_level ?? \ZealPHP\App::$initial_error_reporting;
+                if (!($severity & $level)) {
+                    return true; // suppressed by error_reporting
+                }
+                $stack = $g->error_handlers_stack;
+                if (!empty($stack)) {
+                    $top = $stack[count($stack) - 1];
+                    [$callable, $levels] = $top;
+                    if ($severity & $levels) {
+                        try {
+                            return (bool)$callable($severity, $message, $file, $line);
+                        } catch (\Throwable $e) {
+                            // Avoid loops; let PHP default handle if user handler explodes.
+                            return false;
+                        }
                     }
                 }
+                return false; // PHP default handler
+            } finally {
+                $g->_error_handler_in_flight = false;
             }
-            return false; // PHP default handler
         });
 
         \set_exception_handler(static function (\Throwable $e) {
-            $g = \ZealPHP\RequestContext::instance();
-            $stack = $g->exception_handlers_stack;
-            if (!empty($stack)) {
-                try {
-                    $stack[count($stack) - 1]($e);
-                } catch (\Throwable $e2) {
-                    // swallow
+            try {
+                $g = \ZealPHP\RequestContext::instance();
+            } catch (\Throwable $ce) {
+                return; // RequestContext unavailable — let PHP default handle
+            }
+            if (!empty($g->_exception_handler_in_flight)) {
+                return;
+            }
+            $g->_exception_handler_in_flight = true;
+            try {
+                $stack = $g->exception_handlers_stack;
+                if (!empty($stack)) {
+                    try {
+                        $stack[count($stack) - 1]($e);
+                    } catch (\Throwable $e2) {
+                        // swallow
+                    }
                 }
+            } finally {
+                $g->_exception_handler_in_flight = false;
             }
         });
 
@@ -1346,6 +1531,122 @@ class App
         return self::$cgi_mode;
     }
 
+    /** Isolation strategy constants — canonical user-facing surface for App::isolation(). */
+    public const ISOLATION_COROUTINE = 'coroutine';
+    public const ISOLATION_CGI_POOL  = 'cgi-pool';
+    public const ISOLATION_CGI_PROC  = 'cgi-proc';
+    public const ISOLATION_CGI_FCGI  = 'cgi-fcgi';
+    public const ISOLATION_NONE      = 'none';
+
+    /** High-level mode presets — canonical user-facing surface for App::mode(). */
+    public const MODE_LEGACY_CGI       = 'legacy-cgi';
+    public const MODE_COROUTINE        = 'coroutine';
+    public const MODE_COROUTINE_LEGACY = 'coroutine-legacy';
+    public const MODE_MIXED            = 'mixed';
+
+    /**
+     * The single knob that says HOW a request is isolated — folds the
+     * (processIsolation × enableCoroutine × hookAll × cgiMode) cross-product
+     * into one intention-revealing value. Pure sugar over the existing fluent
+     * setters (they all keep working unchanged); accepts the `App::ISOLATION_*`
+     * constant, an `Isolation` enum case, or a bare string ("no strong").
+     *
+     *   App::isolation(App::ISOLATION_COROUTINE);  // canonical
+     *   App::isolation(Isolation::CgiProc);         // enum
+     *   App::isolation('cgi-pool');                 // bare string (BC)
+     *
+     * Mapping (each just calls the existing setters, so no forcing rule ever fires):
+     *   coroutine → processIsolation(false) + enableCoroutine(true)  + hookAll(true)
+     *   cgi-pool  → processIsolation(true)  + cgiMode('pool') + enableCoroutine(false) + hookAll(false)
+     *   cgi-proc  → processIsolation(true)  + cgiMode('proc') + enableCoroutine(false) + hookAll(false)
+     *   cgi-fcgi  → processIsolation(true)  + cgiMode('fcgi') + enableCoroutine(false) + hookAll(false)
+     *   none      → processIsolation(false) + enableCoroutine(false) + hookAll(false)
+     *
+     * No-arg call returns the currently-resolved isolation as an `App::ISOLATION_*`
+     * string (derived from the resolved processIsolation/enableCoroutine knobs, so
+     * the default — process for superglobals(true), coroutine for superglobals(false)
+     * — is reported faithfully).
+     */
+    public static function isolation(Isolation|string|null $mode = null): string
+    {
+        if ($mode !== null) {
+            $iso = Isolation::coerce($mode);
+            if ($iso->isProcess()) {
+                self::processIsolation(true);
+                self::cgiMode($iso->cgiMode() ?? CgiMode::Pool);
+                self::enableCoroutine(false);
+                self::hookAll(false);
+            } elseif ($iso === Isolation::Coroutine) {
+                self::processIsolation(false);
+                self::enableCoroutine(true);
+                self::hookAll(true);
+            } else { // None
+                self::processIsolation(false);
+                self::enableCoroutine(false);
+                self::hookAll(false);
+            }
+        }
+        // Derive the effective isolation from the resolved knobs.
+        if (self::processIsolation()) {
+            return 'cgi-' . self::$cgi_mode;
+        }
+        return self::enableCoroutine() ? self::ISOLATION_COROUTINE : self::ISOLATION_NONE;
+    }
+
+    /**
+     * High-level mode preset — sets BOTH axes (`superglobals` + `isolation`) in
+     * one call. Sugar over the fine-grained setters; accepts an `App::MODE_*`
+     * constant or a bare string ("no strong"). All the individual setters remain
+     * available to override afterwards.
+     *
+     *   legacy-cgi       → superglobals(true)  + isolation(cgi-pool)            [unmodified WordPress/Drupal]
+     *   coroutine        → superglobals(false) + isolation(coroutine)          [modern ZealPHP apps — default shape]
+     *   coroutine-legacy → superglobals(true)  + isolation(coroutine)          [legacy code, concurrent — Mode 4]
+     *                      + silentRedeclare + includeIsolation + coroutineGlobalsIsolation + coroutineStaticsIsolation
+     *                      (re-included/re-declared code survives; $GLOBALS AND function-local static $x isolate per coroutine)
+     *   mixed            → superglobals(true)  + isolation(none)               [Symfony / Laravel bridge — sequential]
+     */
+    public static function mode(string $mode): void
+    {
+        self::refuseAfterRun('App::mode');
+        switch ($mode) {
+            case self::MODE_LEGACY_CGI:
+                self::superglobals(true);
+                self::isolation(Isolation::CgiPool);
+                break;
+            case self::MODE_COROUTINE:
+                self::superglobals(false);
+                self::isolation(Isolation::Coroutine);
+                break;
+            case self::MODE_COROUTINE_LEGACY:
+                self::superglobals(true);
+                self::isolation(Isolation::Coroutine);
+                self::silentRedeclare(true);
+                self::includeIsolation(true);
+                self::coroutineGlobalsIsolation(true);  // isolate $wp/$wpdb-style globals per coroutine
+                // Stage 5: isolate function-local `static $x` per coroutine.
+                // Default ON now that the touched-set registry decouples cost
+                // from total function count — per-yield overhead scales with
+                // the (small) number of static-USING functions, not all
+                // functions (~1.9µs/yield at 50 static fns, flat from 500 to
+                // 8000 total). This is the "old PHP just works" guarantee: the
+                // LAST request-state primitive is isolated by default. Opt out
+                // with ZEALPHP_FN_STATICS_DISABLE=1 for raw throughput on apps
+                // that don't rely on per-request function statics.
+                self::coroutineStaticsIsolation((string) \getenv('ZEALPHP_FN_STATICS_DISABLE') !== '1');
+                break;
+            case self::MODE_MIXED:
+                self::superglobals(true);
+                self::isolation(Isolation::None);
+                break;
+            default:
+                throw new \InvalidArgumentException(
+                    "Unknown App::mode('$mode') — use App::MODE_LEGACY_CGI, MODE_COROUTINE, "
+                    . "MODE_COROUTINE_LEGACY, or MODE_MIXED."
+                );
+        }
+    }
+
     /**
      * Worker count for `cgiMode('pool')` — the native FCGI-style subprocess
      * pool. FPM `pm.max_children` parity. Default 4. Set BEFORE `App::run()`.
@@ -1751,6 +2052,81 @@ class App
     }
 
     /**
+     * Per-coroutine `$GLOBALS` isolation. See $coroutine_globals_isolation
+     * docblock. Requires ext-zealphp 0.3.6+.
+     */
+    public static function coroutineGlobalsIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) self::$coroutine_globals_isolation = $on;
+        return self::$coroutine_globals_isolation;
+    }
+
+    /**
+     * Keep `$GLOBALS` across requests within the worker. See $keep_globals
+     * docblock for the full semantics + when to use it.
+     */
+    public static function keepGlobals(?bool $on = null): bool
+    {
+        if ($on !== null) self::$keep_globals = $on;
+        return self::$keep_globals;
+    }
+
+    /**
+     * One-time boot-time advisory for `coroutineGlobalsIsolation(true)`.
+     *
+     * Stage 2 COW (ext-zealphp v0.3.7+): shared parent snapshot taken once,
+     * per-coroutine state is just (deltas + tombstones) for keys the coro
+     * actually wrote or unset. Memory: O(parent) once + O(deltas) per coro,
+     * not O(N keys) per coro.
+     *
+     * Stage 1 estimate is left in the message for context — most apps stay
+     * well under any threshold with Stage 2 unless they routinely write
+     * thousands of unique global keys per coroutine.
+     *
+     * The advisory runs only at App::run() boot, never per-request.
+     */
+    public static function coroutineGlobalsMemoryAdvisory(): void
+    {
+        $entryCount = count($GLOBALS);
+        // Subtract well-known superglobal slots (handled separately).
+        $userEntryCount = max(0, $entryCount - 7);
+
+        $workers = self::$worker_num > 0 ? self::$worker_num : 1;
+        $coroutinesPerWorker = 32;
+        $totalCoroutines = $workers * $coroutinesPerWorker;
+
+        // Stage 2 parent snapshot: one-time, shared.
+        $parentBytes = $userEntryCount * 2048;
+        // Per-coroutine deltas: typical write touches <20% of keys.
+        $deltaBytesPerCoro = (int) ($userEntryCount * 0.2 * 2048);
+        $projectedBytes = $parentBytes + ($deltaBytesPerCoro * $totalCoroutines);
+        $projectedMB = (int) ($projectedBytes / (1024 * 1024));
+
+        $thresholdMB = 256;
+        $stageVer = \function_exists('zealphp_coroutine_globals') ? '0.3.7+ (Stage 2 COW)' : 'unavailable';
+
+        if ($projectedMB >= $thresholdMB) {
+            elog(
+                "[advisory] coroutineGlobalsIsolation ({$stageVer}) projection: "
+                . "~{$projectedMB} MB at peak (parent ~" . (int) ($parentBytes / 1024)
+                . " KB + deltas ~" . (int) ($deltaBytesPerCoro / 1024)
+                . " KB × {$totalCoroutines} coroutines). If your app holds "
+                . "very large arrays in \$GLOBALS, consider moving them to "
+                . "\$g (per-coroutine RequestContext) or Store (cross-worker "
+                . "shared memory) instead.",
+                'warn'
+            );
+        } else {
+            elog(
+                "[info] coroutineGlobalsIsolation active ({$stageVer}). "
+                . "Projected peak memory: ~{$projectedMB} MB "
+                . "({$userEntryCount} user globals, parent shared + per-coro deltas).",
+                'info'
+            );
+        }
+    }
+
+    /**
      * Per-request function/class/include isolation. Opt-in — see $function_isolation docblock.
      */
     public static function functionIsolation(?bool $on = null): bool
@@ -1762,6 +2138,17 @@ class App
     }
 
     /**
+     * Per-request require_once cache reset. See $include_isolation docblock.
+     */
+    public static function includeIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$include_isolation = $on;
+        }
+        return self::$include_isolation;
+    }
+
+    /**
      * Per-request define() isolation. Opt-in — see $define_isolation docblock.
      */
     public static function defineIsolation(?bool $on = null): bool
@@ -1770,6 +2157,38 @@ class App
             self::$define_isolation = $on;
         }
         return self::$define_isolation;
+    }
+
+    /**
+     * Stage 3 silent-redeclare. Opt-in — see $silent_redeclare docblock.
+     * When called, also flips the ext-zealphp C-level flag immediately if
+     * the function is available; the App::run() boot wiring re-asserts the
+     * flag for boot-after-set ordering.
+     */
+    public static function silentRedeclare(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$silent_redeclare = $on;
+            if (\function_exists('zealphp_silent_redeclare')) {
+                (\zealphp_silent_redeclare(...))($on);
+            }
+        }
+        return self::$silent_redeclare;
+    }
+
+    /**
+     * Stage 5 per-coroutine function-static isolation. Opt-in — see
+     * $coroutine_statics_isolation docblock for the perf tradeoff. The ext
+     * C-level flag is asserted at App::run() boot wiring (alongside the other
+     * isolation knobs) so the scheduler hooks are guaranteed installed first;
+     * setting it here only records the intent.
+     */
+    public static function coroutineStaticsIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$coroutine_statics_isolation = $on;
+        }
+        return self::$coroutine_statics_isolation;
     }
 
     /**
@@ -3423,13 +3842,32 @@ class App
             $_SERVER  = $g->server;
         }
 
+        // Apache/mod_php and php-cli run a script with CWD = the script's own
+        // directory, so legacy apps using relative includes (`require './global.php'`,
+        // `require 'conf/constants.php'`) resolve them against that directory. The
+        // in-process executeFile() path otherwise leaves CWD at the framework root
+        // (/app), so those relative requires fail — the dominant 50-app-sweep blocker
+        // in coroutine/sync modes (mybb, cacti, vanilla, …). chdir to the script's
+        // directory for the duration of the include, restore immediately after.
+        // chdir is process-global; per-coroutine CWD stability across yields is
+        // provided by ext-zealphp's per-coroutine cwd snapshot (Stage 8).
+        $prevCwd = \getcwd();
+        $scriptDir = \dirname($absPath);
+        $didChdir = ($scriptDir !== '' && $scriptDir !== '.') ? @\chdir($scriptDir) : false;
+
         $obBase = ob_get_level();
         ob_start();
         $result = null;
         try {
-            $args['g'] = $g;
-            extract($args, EXTR_SKIP);
-            $result = include $absPath;
+            try {
+                $args['g'] = $g;
+                extract($args, EXTR_SKIP);
+                $result = include $absPath;
+            } finally {
+                if ($didChdir && $prevCwd !== false) {
+                    @\chdir($prevCwd);
+                }
+            }
         } catch (HaltException $e) {
             // Clean halt — preserves buffered output as the body (PR #10).
             $haltState = self::getFragmentState();
@@ -6159,6 +6597,35 @@ HELP;
             }
         }
 
+        // silentRedeclare + enableCoroutine + HOOK_FILE: the compile-yield
+        // hazard (gdb-confirmed on the 50-app sweep, phpMyAdmin's Symfony-DI
+        // bootstrap). silentRedeclare installs the zend_compile_file hook, which
+        // swaps the process-global CG(function_table)/CG(class_table) to scratch
+        // for the duration of each compile. HOOK_FILE coroutinizes the source-
+        // file read INSIDE that compile — so the coroutine can yield mid-compile
+        // while CG is swapped and a zend_try bailout frame is live. That switch
+        // corrupts engine state: a worker SIGSEGV under OPcache, a lost-wakeup
+        // hang without it. Dropping HOOK_FILE (compile-time file read runs
+        // blocking, cannot yield) makes the compile atomic and removes the whole
+        // class. Network / socket / sleep hooks stay on, so coroutine concurrency
+        // for I/O-bound work is unaffected; only file I/O becomes synchronous —
+        // an acceptable trade in legacy mode, and the documented safe shape.
+        // Toggling the file wrapper per-compile from the extension was tried and
+        // is WORSE (the mid-request enable/disable_hook has side effects), so the
+        // fix lives here, at the one place hook flags are frozen. Opt back in
+        // with ZEALPHP_ALLOW_COMPILE_HOOK_FILE=1 if you accept the risk.
+        if (self::$silent_redeclare && $enableCoroutine
+            && ($hookFlags & \OpenSwoole\Runtime::HOOK_FILE)
+            && (string) \getenv('ZEALPHP_ALLOW_COMPILE_HOOK_FILE') !== '1'
+        ) {
+            $hookFlags &= ~\OpenSwoole\Runtime::HOOK_FILE;
+            elog('[lifecycle] silentRedeclare + enableCoroutine: dropping HOOK_FILE '
+                . '— coroutinizing the compile-time file read while the CG-swap '
+                . 'compile hook is active yields mid-compile and corrupts the '
+                . 'engine (SIGSEGV/hang). File I/O is synchronous; other hooks stay '
+                . 'on. Override with ZEALPHP_ALLOW_COMPILE_HOOK_FILE=1.', 'warn');
+        }
+
         // Surface combinations that are syntactically allowed but race
         // process-wide superglobals against concurrent coroutines / hooked
         // I/O. We warn rather than refuse — see App::hookAll() docblock.
@@ -6175,6 +6642,15 @@ HELP;
         ) {
             (\zealphp_coroutine_superglobals(...))((bool) true);
             self::$coroutine_isolated_superglobals = true;
+
+            // Per-coroutine putenv/getenv: capture the boot environment with the
+            // REAL getenv (before overriding to avoid recursion), then route
+            // putenv/getenv through the request-scoped $g store so concurrent
+            // requests no longer race the process environment. See
+            // \ZealPHP\putenv / \ZealPHP\getenv.
+            self::$boot_env = \getenv();
+            self::overrideBuiltin('putenv', '\ZealPHP\zeal_putenv');
+            self::overrideBuiltin('getenv', '\ZealPHP\zeal_getenv');
         }
 
         // Per-request define() isolation — opt-in via App::defineIsolation(true).
@@ -6188,6 +6664,137 @@ HELP;
             && \function_exists('zealphp_define_hook')
         ) {
             (\zealphp_define_hook(...))((bool) true);
+
+            // Coupling guard (50-app sweep, phpMyAdmin `AUTOLOAD_FILE` 500):
+            // define-isolation clears request-scoped constants at request end.
+            // A constant defined at the TOP LEVEL of the per-request entry
+            // script re-defines fine next request (the entry runs every
+            // request). But a constant defined INSIDE a require_once'd file
+            // (phpMyAdmin's `libraries/constants.php` → AUTOLOAD_FILE /
+            // ROOT_PATH-derived constants) only re-defines if Stage 7
+            // (includeIsolation) re-executes that file — otherwise the
+            // require_once is a no-op on request 2+ and the constant is gone
+            // → "Undefined constant" 500. Clearing constants is only sound
+            // when the files that define them re-execute. coroutine-legacy
+            // turns both on together; warn loudly for the hand-rolled combo.
+            if (!self::$include_isolation) {
+                elog(
+                    "[warn] defineIsolation(true) without includeIsolation(true): "
+                    . "constants defined inside require_once'd files are CLEARED "
+                    . "each request but their definer files won't re-execute, so "
+                    . "they vanish on request 2+ (Undefined-constant 500). Enable "
+                    . "App::includeIsolation(true) (App::mode('coroutine-legacy') "
+                    . "does this for you).",
+                    'warn'
+                );
+            }
+        }
+
+        // Env-var rollback: ZEALPHP_GLOBALS_ISOLATION_DISABLE=1 disables
+        // the Stage 2 COW path even when App::coroutineGlobalsIsolation(true)
+        // was called. Use this as an emergency rollback if a Stage 2 edge
+        // case surfaces in production — the framework falls back to the
+        // pre-v0.3.6 behaviour ($GLOBALS shared process-wide). See the
+        // migration ladder in docs/architecture/application-server-sapi.md.
+        $isolationDisabledViaEnv = (string) \getenv('ZEALPHP_GLOBALS_ISOLATION_DISABLE') === '1';
+        if (self::$coroutine_globals_isolation
+            && !$isolationDisabledViaEnv
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_coroutine_globals')
+        ) {
+            (\zealphp_coroutine_globals(...))((bool) true);
+            self::coroutineGlobalsMemoryAdvisory();
+        } elseif (self::$coroutine_globals_isolation && $isolationDisabledViaEnv) {
+            elog(
+                "[warn] coroutineGlobalsIsolation(true) called but disabled "
+                . "via ZEALPHP_GLOBALS_ISOLATION_DISABLE=1 env var. \$GLOBALS "
+                . "is shared process-wide across coroutines.",
+                'warn'
+            );
+        }
+
+        // Stage 3: silent-redeclare opcode hooks. Closes the dominant Mode
+        // 3/4/5 failure: conditional `function foo() {}` / `class Bar {}` in
+        // legacy code re-running on each request and tripping
+        // E_COMPILE_ERROR ("Cannot redeclare …"). With this on, the second
+        // declare is a silent no-op (first wins — matches FPM's fresh-proc
+        // semantic). Requires ext-zealphp 0.3.8+.
+        if (self::$silent_redeclare
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_silent_redeclare')
+        ) {
+            (\zealphp_silent_redeclare(...))((bool) true);
+        }
+
+        // Stage 5: per-coroutine function-local static isolation. Default-ON
+        // in coroutine-legacy (the mode() preset enables it; env opt-out
+        // ZEALPHP_FN_STATICS_DISABLE=1). A ZEND_BIND_STATIC touched-set registry
+        // keeps the per-yield snapshot proportional to static-USING functions,
+        // not total functions — so cost is decoupled from declared-function
+        // count. Activated before fork so the flag + scheduler hooks are
+        // inherited by workers. Closes the last request-state primitive that
+        // leaked across coroutines. See the $coroutine_statics_isolation docblock.
+        if (self::$coroutine_statics_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_coroutine_statics')
+        ) {
+            (\zealphp_coroutine_statics(...))((bool) true);
+        } elseif (self::$coroutine_statics_isolation) {
+            elog(
+                "[warn] coroutineStaticsIsolation(true) requires ext-zealphp "
+                . "0.3.9+ with zealphp_coroutine_statics — function-local "
+                . "static \$x will NOT be isolated per coroutine.",
+                'warn'
+            );
+        }
+
+        // Stage 7: smart require_once via opcode hook. Enable BEFORE the
+        // snapshot so the handler is active when workers start processing.
+        // The opcode handler converts require_once → require for files NOT
+        // in the snapshot — zero per-request cleanup needed.
+        if (self::$include_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_include_isolation')
+        ) {
+            (\zealphp_include_isolation(...))((bool) true);
+        }
+
+        if ((self::$function_isolation || self::$include_isolation)
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_process_state_snapshot')
+        ) {
+            self::onWorkerStart(function () {
+                if (\class_exists(\ZealPHP\Counter::class, false)) {
+                    \ZealPHP\Counter::defaultBackend();
+                }
+                (\zealphp_process_state_snapshot(...))();
+                if (self::$function_isolation && \function_exists('zealphp_globals_snapshot')) {
+                    (\zealphp_globals_snapshot(...))();
+                }
+            });
+        }
+
+        // Coroutine $GLOBALS isolation — re-capture the per-coroutine parent
+        // baseline AFTER the user's onWorkerStart bootstrap has run, so
+        // bootstrap-time globals (WordPress $wp/$wpdb, Drupal $databases, etc.)
+        // become part of the baseline every request-coroutine inherits — instead
+        // of being reset out of existence (the "wp() / $wp is null" class of bug).
+        //
+        // run() registers this hook AFTER the user's app.php onWorkerStart calls,
+        // and $workerStartHooks fires FIFO, so this runs last — once the app's
+        // globals are in place. The (false)+(true) toggle clears the early
+        // pre-fork baseline (captured at the gate above, before any bootstrap)
+        // and re-snapshots the now-bootstrapped $GLOBALS. Deltas are empty at
+        // worker start (no requests yet), so the clear is a no-op.
+        if (self::$coroutine_globals_isolation
+            && !$isolationDisabledViaEnv
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_coroutine_globals')
+        ) {
+            self::onWorkerStart(function () {
+                (\zealphp_coroutine_globals(...))((bool) false);
+                (\zealphp_coroutine_globals(...))((bool) true);
+            });
         }
 
         if (self::$function_isolation

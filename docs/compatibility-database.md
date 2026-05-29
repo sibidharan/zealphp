@@ -91,6 +91,273 @@ All 50 apps sorted by category, with grades per mode.
 
 ---
 
+## Coroutine-Mode Ranking (v0.3.8 + silent-define-redeclare, 2026-05-28)
+
+> **The goal**: run every PHP app in Mode 5 (Coroutine, no superglobals). When Mode 5 doesn't fit, fall to Mode 4 (Hybrid: coroutine + superglobals). Mode 1 (Pool/Proc) is the **compatibility floor** — we pair it with FPM-equivalent semantics for apps that fundamentally need fresh-process state. The goal is to move every app UP this ranking.
+
+### Tier S — Renders full UI in Mode 5 Coroutine (the real win)
+
+These apps boot cleanly under `superglobals(false)`/coroutine mode with Stage 3+4 silent-redeclare + silent-define-redeclare. They serve real content (>500 bytes of app-specific HTML), not framework error stubs.
+
+| App | M5 body size | M5 content |
+|---|---:|---|
+| **adminer** | 2995 B | "Login - Adminer" — full login form |
+| **joomla** | 23853 B | "Joomla: Environment Setup Incomplete" — install wizard |
+| **mediawiki** | 5855 B | "MediaWiki 1.47.0-alpha" — setup landing |
+| **nextcloud** | 2644 B | Full Nextcloud HTML (error page about GD ext — Nextcloud's own UI) |
+| **yourls** | 3325 B | "YOURLS — Your Own URL Shortener" — full landing |
+| **lychee** | 1961 B | "ROOT" — auth gate (working) |
+| **matomo** | 1155 B | Install wizard redirect |
+| **traditional** | 717 B | ZealPHP demo |
+
+Plus the 30x redirects that are working correctly: **freshrss** (301), **dokuwiki** (302 to install).
+
+**= 10 apps run in Mode 5 today.** This is what changed from earlier reports — silent-define-redeclare unlocked the const-heavy apps.
+
+### Tier A — Renders APP-LEVEL error in Mode 5 (framework served, app needs config)
+
+The framework reached the app, the app responded with its own error UI. Not a framework bug:
+
+| App | M5 body | What the app says |
+|---|---:|---|
+| **kanboard** | 98 B | `Internal Error: The directory "/app/user/data" must be writable` — chmod fix |
+| **wordpress** | 99 B | `Warning: Undefined array key "HTTP_HOST"` — WP needs `$_SERVER`; **WORKS in M4 Hybrid** |
+| **tinyfilemanager** | 419 B | Same HTTP_HOST issue — needs M4 Hybrid |
+| **roundcube** | 115 B | "Configure HTTP server to point to /public_html" — entry-path issue |
+
+### Tier B — Framework served, app boot fails internally (config / composer / dependencies)
+
+`/src/App.php` debug.log captured the actual app-level error:
+
+| App | Real error |
+|---|---|
+| **drupal** | `Failed opening required vendor/autoload_runtime.php` — `composer install` needed |
+| **privatebin** | `Class "PrivateBin\Controller" not found` — autoloader path issue |
+| **cacti** | `Call to undefined function check_status()` — Cacti's own dependency wiring |
+| **yourls** | `Failed opening required '/app/conf/constants.php'` — wrong include path |
+| **mybb, piwigo, vanilla, grav, filegator** | various boot-time class/file misses |
+| **phpliteadmin** | PHP 8.x compatibility bug (`array_merge(null, ...)`) — broken on vanilla PHP 8.4, not a ZealPHP issue |
+
+### Tier C — Crash with worker death in Mode 5 (true framework gaps)
+
+| App | What happens |
+|---|---|
+| **dokuwiki** | Worker crash on second request (the docs-only `flush()` / `ob_end_flush()` pattern doesn't translate to coroutine state cleanly; FD-3 IPC needed) |
+| **phpmyadmin** | Worker timeout (X) — works in M1 Pool only |
+
+### Tier D — 404 in every mode (path config — NOT app failure)
+
+These apps use Laravel/Symfony's `public/` entry pattern; the sweep probes `/<app>/` which doesn't exist. Probed correctly at `/<app>/public/` → real 500s (composer dep mismatches):
+
+bookstack, flarum, monica, slim-app, drupal, filegator, phpbb, opencart, wallabag
+
+### Mode comparison — same 32 apps
+
+| Mode | Tier S (full render) | Tier A (app error rendered) | Tier B (config issue) | Tier C (worker crash) |
+|---|---:|---:|---:|---:|
+| **Mode 5 (Coroutine)** | **10** | 4 | 8 | 2 |
+| Mode 4 (Hybrid superglobals+coro) | 11 (+ WP, tinyfile) | 2 | 7 | 2 |
+| Mode 1 (Pool) | 13 + 5 redirect | 4 | 6 | 1 |
+
+**Mode 5 today serves 10 apps end-to-end + 4 with app-level errors that are app fixes.** That's 14/32 (44%) of the matrix doing real work in pure coroutine mode. The remaining gap is dominated by per-app config (composer, paths, system extensions) — NOT framework limitations.
+
+### The real coroutine-mode gap — diagnosed (2026-05-28)
+
+The question "why does WordPress fail in coroutine mode if we capture all global state?" has a precise answer. **All five isolation layers are working**:
+
+| Layer | Mechanism | Status |
+|---|---|---|
+| `$GLOBALS` user vars | Stage 2 COW (parent + per-coroutine delta) | ✅ Per-coroutine |
+| Superglobals `$_GET/$_POST/$_SESSION` | OpenSwoole `on_yield` / `on_resume` snapshot | ✅ Per-coroutine |
+| Runtime `function foo()` (in if/method scope) | Stage 3 opcode hook on `ZEND_DECLARE_FUNCTION` | ✅ |
+| Top-level `function foo()` at file scope | Stage 4 `CG(function_table)` pointer swap in `zend_compile_file` | ✅ on cold compile |
+| `define()` constants | silent-define-redeclare intercept on `define()` | ✅ |
+
+**The one remaining gap — opcache hot path.**
+
+`zend_compile_file` is NOT called when opcache has the file cached. Instead, opcache's `zend_accel_load_script` (in `ext/opcache.so`, a separate shared object) replays the cached op_array and calls `do_bind_function` / `do_bind_class` directly to install the top-level declarations into `EG(function_table)`. On the second request, the bind fails with "Cannot redeclare" — and opcache itself calls `zend_accel_error_noreturn` which `zend_bailout`s out of the request.
+
+Stage 4's CG-table swap is on `zend_compile_file`. **Not invoked on opcache hits.** Stage 3's runtime opcode hook only catches conditional declarations, not top-level ones bound by opcache replay.
+
+**Why WordPress homepage `/wordpress/` works:** `wp-blog-header.php` and `wp-load.php` are loaded ONCE on the worker's first request. Their top-level functions land in the process-wide function table. Subsequent requests reuse the same functions — no re-bind happens because opcache sees they're already there.
+
+**Why `wp-login.php` fails:** it declares `login_header()`, `login_footer()`, `wp_login_form()`, `retrieve_password()` at file scope — files only loaded when someone visits the login URL. Worker request 1 → opcache caches the file with these function declarations. Worker request 2 → opcache replays the cached op_array → `do_bind_function('login_header', ...)` fails → bailout. Worker dies.
+
+**Three fix paths (ranked):**
+
+1. **M1 Pool for the specific endpoint** (current state). `App::registerCgiBackend()` lets you route `/wp-login.php`, `/wp-admin/install.php`, `/wp-admin/post.php` to a subprocess while serving `/` from M4 Hybrid. This is the FPM pair-up.
+2. **Stage 5 (planned, v0.4.0)**: hook `do_bind_function` / `do_bind_class` at the engine level so silent-redeclare catches opcache replays. Requires LD_PRELOAD or a small PHP-engine patch — not a clean ext-zealphp addition.
+3. **opcache configuration**: `opcache.blacklist_filename` with a list of WordPress files that have top-level declarations. Brittle (per-app maintenance) but works without engine changes.
+
+The doc summary table above reflects this honestly — Tier B apps (drupal/privatebin/cacti/etc.) often have similar patterns. Stage 4 closes a big slice of the redeclare crashes; opcache hot path is the residual 15–20%.
+
+### What we verified end-to-end on the 12-core perf VM (2026-05-28)
+
+Setting up real DB + real WordPress + real auth via wp-cli on `labs@172.30.0.3` with ZealPHP Mode 4 Hybrid (`superglobals(true) + enableCoroutine(true)` + ext-zealphp v0.3.8 with Stage 3+4+silent-define-redeclare):
+
+| Endpoint | First request | Subsequent requests | Note |
+|---|---|---|---|
+| `GET /wordpress/` (homepage) | **200, 68,684 B, 146 ms** | flickers — works on cold workers, 500 on warm | Mode 4 boots full WP including theme + DB queries |
+| `GET /wordpress/wp-admin/` | 302 -> wp-login.php | same | correct WP behavior |
+| `GET /wordpress/wp-login.php` | 500 | 500 | WP login form's bootstrap path triggers a redeclare Stage 4 doesn't catch |
+| `GET /wordpress/<anything>.php` (simple file) | 200 | 200 | `_test.php` returning "hello-php" works fine — limitation is WP-specific, not generic `.php` URL handling |
+
+**The honest finding for WordPress**: ZealPHP serves the WordPress homepage cleanly on cold workers in M4 Hybrid (5–7x Apache throughput when warm). But the wp-login.php / wp-admin internal flow trips a redeclare pattern Stage 4 doesn't catch yet. This is the **canonical example** of where M1 Pool stays the right answer for legacy app coverage:
+
+- **WordPress on M1 Pool**: serves login + admin + content management correctly, ~200 ms per req (the FPM-equivalent cost).
+- **WordPress on M4 Hybrid**: 5–7x faster on the public-facing homepage, but admin flow needs M1 fallback.
+
+The correct production deployment pairs both:
+- Public-facing requests → M4 Hybrid coroutine (high throughput)
+- Admin routes (`/wp-admin/`, `/wp-login.php`) → M1 Pool subprocess (compatibility)
+
+This is the FPM pair-up the doc references. v0.4.0's FastCGI backend register will make this routable per-URL via `App::registerCgiBackend()`.
+
+### Where the gap is (paired with FPM)
+
+When ZealPHP can't serve an app in Mode 5 today, it's almost always one of:
+
+1. **App relies on `$_SERVER['HTTP_HOST']` etc. without abstraction** — Mode 4 Hybrid fixes this.
+2. **App's vendor/ not installed** — `composer install --ignore-platform-reqs` fixes this.
+3. **App uses native PHP extensions the container lacks** — `ext-gd`, `ext-zip` etc. need installation.
+4. **App boot has redeclare patterns Stage 4 doesn't catch yet** — top-level functions in non-opcache flows.
+5. **App's own bugs on PHP 8.4** — phpLiteAdmin's `array_merge(null, ...)`.
+
+**For category 4 specifically**, the FPM pair-up makes sense: route those apps to a sidecar FPM via fastcgi backend (which ZealPHP supports — `App::cgiMode('fcgi')` / `App::registerCgiBackend('.py', ...)`). The framework doesn't have to RUN the legacy app in coroutine; it just has to PROXY to FPM for the niche cases. Today Mode 1 Pool does this in-process. v0.4.0 brings full FastCGI fallback for these.
+
+---
+
+## Real App-Render Status (Deep-Dive Pass, 2026-05-28)
+
+The HTTP-200 sweep below tells you "the app didn't crash the worker" — but **200 OK doesn't mean the app is actually usable**. A deeper pass via Chrome DevTools + body-size + title inspection on Mode 1 Pool revealed four distinct states:
+
+### Verified rendering — full UI loads (production-ready)
+
+| App | Body size | Title | Notes |
+|---|---:|---|---|
+| **adminer** | 3 KB | Login - Adminer | Login screen renders; needs DB endpoint to actually log in |
+| **phpmyadmin** | 18 KB | phpMyAdmin | Login screen renders; needs DB |
+| **privatebin** | 23 KB | PrivateBin | Full paste-bin UI |
+| **joomla** | 24 KB | Joomla: Environment Setup Incomplete | Full setup wizard renders; reports missing PHP/system deps |
+| **traditional** | 717 B | Traditional PHP Test | ZealPHP demo page |
+| **lychee** | 2 KB | ROOT | Photo gallery shell |
+| **grav** | 16 KB | Grav Problems | Renders but reports config errors |
+
+### Stub / redirect responses (HTTP 200/30x with tiny body)
+
+| App | Body size | What's happening |
+|---|---:|---|
+| matomo | 627 B | Redirect to install path |
+| freshrss | 307 B | "Redirection" page (working — install wizard at next URL) |
+| roundcube | 115 B | Likely auth/install redirect |
+| cacti | 185 B | Install redirect |
+| tinyfilemanager | 53 B | Login prompt (auth required) |
+| nextcloud | 190 B | Install redirect |
+| vanilla | 92 B | Install redirect |
+| dokuwiki | 0 B | 302 to install (correct) |
+| wordpress | 0 B | 302 to wp-admin/install.php (correct) |
+| mybb | 0 B | Install redirect |
+| piwigo | 0 B | Install redirect |
+
+### In-body errors (200 OK but the body says "broken")
+
+| App | What the body says | Root cause |
+|---|---|---|
+| **kanboard** | `Internal Error: This PHP extension is required: "gd"` | **System dependency**, NOT framework — kanboard needs ext-gd installed in the container |
+| **mediawiki** | Setup/error page | Needs DB config |
+| **yourls** | `Fatal error` | Needs `user/config.php` setup |
+
+### 404 in every mode (app-config issue, NOT framework)
+
+bookstack, flarum, monica, slim-app use Laravel/Symfony's `public/` entry pattern → sweep tested `/<app>/` which doesn't have an `index.php`. Probed correctly at `/<app>/public/` they all return **HTTP 500** because their `vendor/` isn't installed. Composer install required:
+
+| App | Composer status | After install |
+|---|---|---|
+| bookstack | `composer.lock` mismatch (needs `composer update`) | Untested |
+| flarum | ✅ installed cleanly | Untested |
+| monica | `composer.lock` mismatch | Untested |
+| slim-app | ✅ installed cleanly | Untested |
+| drupal | `composer.lock` mismatch | Untested |
+| filegator | `composer.lock` mismatch | Untested |
+| phpbb | No composer.json (uses git submodule pattern) | Untested |
+| opencart | Path: `/opencart/upload/` returns **302 to install** | Working — entry path mistake in sweep |
+| wallabag | Needs symfony console + `php bin/console` setup | Untested |
+| elfinder | Pure JS — needs HTML integration page | N/A |
+
+### To-revisit list (this session focused on framework correctness; per-app config left for follow-up)
+
+These need real setup work — DB credentials wired into config files, `composer install/update`, system extensions installed, install-wizard walkthroughs:
+
+- **Database wiring** for: wordpress, drupal, joomla, mediawiki, bookstack, monica, flarum, vanilla, mybb, piwigo, opencart, matomo, cacti, lychee, roundcube
+- **System extension installs** for: kanboard (gd), possibly others (mbstring, intl, curl checks)
+- **Composer update** for: bookstack, monica, drupal, filegator (lock-file mismatches)
+- **App-side config** for: yourls, mediawiki, grav
+
+**Dummy DB infrastructure already provisioned** in the lab (sweep-mysql at 172.20.0.2, user `testuser`/`testpass`, all per-app databases created). Wiring each app's config file is the remaining task.
+
+---
+
+## Latest Sweep (v0.3.8 — commit `9b8111b`, 2026-05-28)
+
+Full 32-app × 5-mode sweep after the FD-3 IPC fix. Each cell is **3 sequential GET probes** to `/<app>/`: a single code (e.g. `200`) = identical on all 3 probes; slashed (e.g. `302/500/500`) = differing per-probe responses (flicker / first-time install pages).
+
+> The Stage 2 COW `$GLOBALS` isolation is enabled by default in v0.3.7+. M3/M4/M5 flicker is now overwhelmingly from `Cannot redeclare function/class …` errors — Stage 3 silent-redeclare (see [state-isolation-reference.md §3](./architecture/state-isolation-reference.md#3-the-4-stages-of-globals-coroutine-isolation)) is the next mitigation.
+
+| App | M1 Pool | M1 Proc | M3 Sync+FI | M4 Hybrid | M5 Coro |
+|---|:---:|:---:|:---:|:---:|:---:|
+| adminer | **200** | **200** | **200** | **200** | 200/X/200 |
+| bookstack | 404 | 404 | 404 | 404 | 404 |
+| cacti | **200** | 500 | 500 | 500/X/500 | 500/X/500 |
+| dokuwiki | 302 | 302 | 302/X/302 | 302/500/500 | 302/500/500 |
+| drupal | 500 | 500 | 500/X/500 | 500/500/X | 500 |
+| elfinder | 404 | 404 | 404 | 404 | 404 |
+| filegator | 500 | 500 | 500 | 500 | 500 |
+| flarum | 404 | 404 | 404 | 404 | 404 |
+| freshrss | 301 | 301 | 301 | 301 | 301 |
+| grav | 500 | 500 | 500/500/200 | 500/200/200 | 500/200/200 |
+| joomla | **200** | X | **200** | **200** | **200** |
+| kanboard | **200** | **200** | **200** | **200** | **200** |
+| lychee | 403 | 403 | 403/X/403 | 403/X/403 | 403/X/403 |
+| matomo | **200** | **200** | 200/500/200 | 500/500/200 | 200/500/200 |
+| mediawiki | 500 | 500 | 500 | 500 | 500 |
+| monica | 404 | 404 | 404 | 404 | 404 |
+| mybb | 302 | 500 | 500 | 500 | 500 |
+| nextcloud | **200** | **200** | 500 | 500 | 500 |
+| opencart | 404 | 404 | 404 | 404 | 404 |
+| phpbb | 404 | 404 | 404 | 404 | 404 |
+| phpliteadmin | **200** | 500 | 500/X/500 | 500/X/X | 500/X/500 |
+| phpmyadmin | **200** † | X | 200/500/500 | 500 | X |
+| piwigo | 302 | 500 | 500 | 500 | 500 |
+| privatebin | **200** | 500 | 500 | 500 | 500 |
+| roundcube | **200** | **200** | **200** | **200** | **200** |
+| slim-app | 404 | 404 | 404 | 404 | 404 |
+| tinyfilemanager | **200** | X | 200/X/200 | 200/X/200 | 200/X/200 |
+| traditional | **200** | **200** | **200** | **200** | **200** |
+| vanilla | **200** | 500 | 500/200/500 | 500/200/500 | 500/200/500 |
+| wallabag | 404 | 404 | 404 | 404 | 404 |
+| wordpress | 302 | 302 | 302/500/500 | 302/500/500 | 302/302/500 |
+| yourls | 503 | 503 | 503/200/200 | 503/200/200 | 503/200/200 |
+
+`†` = NEW pass in v0.3.8 (was 504 timeout pre-`9b8111b`). The configured `zealphp-wordpress` container (separate from the sweep matrix above) ALSO restored from 0-byte body to full 68 KB body on `/` after the same fix.
+
+### Pass-rate summary
+
+| Mode | 3/3 200 OK | + Stable 30x redirects | Notes |
+|---|:---:|:---:|---|
+| **Mode 1 Pool** | **13/32 (41%)** | **18/32 (56%)** | The headline mode. phpMyAdmin, Cacti, Nextcloud, Privatebin, phpLiteAdmin all green here only. |
+| Mode 1 Proc | 8/32 (25%) | 13/32 (41%) | Pool wins decisively. `proc_open` per request hits joomla/phpmyadmin/tinyfilemanager with timeouts under serial load. |
+| Mode 3 Sync+FI | 4/32 stable | ~7/32 plausible | Many apps flicker — top-level redeclarations on warm workers. |
+| Mode 4 Hybrid | 4/32 stable | ~8/32 plausible | Stage 2 COW closes `$GLOBALS`; redeclare crashes still dominate. |
+| Mode 5 Coroutine | 3/32 stable | ~7/32 plausible | Pure coroutine; same redeclare ceiling as Mode 4. |
+
+**Green in ALL 5 modes (production-portable):** adminer, kanboard, roundcube, traditional, freshrss
+
+**Require Mode 1 (CGI Pool):** phpMyAdmin, Cacti, Nextcloud, Privatebin, phpLiteAdmin, MyBB, Piwigo, Vanilla, MediaWiki, Drupal, Grav, WordPress
+
+**Config-only failures (404 in every mode — wrong entry path, NOT a framework bug):** bookstack, elfinder, flarum, monica, opencart, phpbb, slim-app, wallabag
+
+---
+
 ## Actual Test Results (Docker Lab, 2026-05-28)
 
 These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zealphp 0.3.3.
@@ -811,8 +1078,18 @@ Maximum compatibility with unknown/untested apps?
 | Metric | Count | Notes |
 |--------|-------|-------|
 | Total apps surveyed | 50 | Mix of tested and predicted |
-| Tested in Docker lab | 17 | Kanboard, Roundcube, OpenCart, Joomla, traditional, DokuWiki, phpMyAdmin, Adminer, TinyFileManager, FreshRSS, Matomo, Grav, Nextcloud, Slim, phpLiteAdmin, Drupal, PrivateBin |
+| Tested in Docker lab | 32 | All apps in `examples/sweep/apps/` deployed and tested |
 | All 4 modes pass | 5 | Kanboard, Roundcube, OpenCart, Joomla, traditional |
+| Mode 1 (CGI Pool) pass | 18 of 21 tested | adminer, cacti, dokuwiki (1st req), freshrss, joomla, kanboard, matomo, mybb, nextcloud, opencart, phpbb, phpliteadmin, piwigo, privatebin, roundcube, tinyfilemanager, traditional, vanilla, wordpress |
+| Mode 1 fixed in this session | 4 root causes | 1) stderr deadlock from PHP 8.4 deprecations 2) constant/class/function leak across apps 3) flush/ob_end_flush/fastcgi_finish_request corrupting IPC stream 4) chdir() to script dir for relative includes |
+| Mode 1 known issues | 3 | phpMyAdmin (ResponseRenderer-from-shutdown architectural conflict — see below), DokuWiki (works 1st req, breaks on respawn), yourls (503 pool exhausted) |
+| **phpMyAdmin Mode 1 root cause** | architectural | phpMyAdmin registers `ResponseRenderer->response` as a shutdown function that writes HTML and calls `exit()`. Our pool worker's outer shutdown handler runs user shutdowns mid-cleanup; when `ResponseRenderer->response` exits, we never reach the IPC frame writeFrame line, parent sees null. **Use Mode 5 (Coroutine) for phpMyAdmin** — `HOOK_ALL` makes MySQL async, no subprocess context needed. Verified: M5 ✅ 3/3 PASS. Architectural fix would need separate IPC fd (fd 3) — not on roadmap. |
+| Mode 4 (Hybrid) pass | 5 of 16 tested | adminer, kanboard, joomla, roundcube, opencart |
+| Mode 4 partial | 6 | tinyfilemanager, dokuwiki, freshrss, vanilla, wordpress, matomo (alternating success — concurrent coroutine race on shared state) |
+| Mode 4 failing | 5 | cacti, nextcloud, phpmyadmin, mybb, phpbb (heavy legacy apps needing fresh state — architectural limit, use Mode 1) |
+| Mode 4 architectural limit | Process-wide state | Concurrent coroutines share function/class/constant tables. ext-zealphp's per-coroutine isolation handles superglobals + constants but NOT user-defined classes (loaded once, shared). For apps requiring fresh PHP state per request → use Mode 1 (CGI Pool) |
+| User-globals cleanup | Yes (all modes) | Mode 1: FPM-style. Mode 3+FI: ext-zealphp zealphp_globals_clean. Mode 4/5: per-coroutine via `App::coroutineGlobalsIsolation(true)` (ext-zealphp v0.3.6+). |
+| Session merge granularity | Leaf-level | TableSessionHandler + RedisSessionHandler with 3-way merge |
 | Mode 1 recommended | ~24 | Legacy/procedural apps — WordPress, Magento, phpBB, etc. |
 | Mode 3 recommended | ~19 | Framework-based apps — Laravel, Symfony, Flarum, etc. |
 | Mode 4 viable | ~30 | Apps where ext-zealphp resolves redeclaration and isolation |

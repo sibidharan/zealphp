@@ -123,19 +123,37 @@ final class WorkerPoolExitFlagTest extends TestCase
      */
     public function testNormalDispatchIncrementsServedCount(): void
     {
-        // Stub: emits READY on stderr, then loops reading/writing IPC frames.
+        // Stub: emits READY, then loops handling requests via the FD-3 IPC
+        // contract — metadata frame (with body_length) on fd 3, body bytes on
+        // STDOUT — exactly like the real pool_worker.php. (Writing the frame
+        // to STDOUT instead would make dispatch() block the full timeout on
+        // fd 3, which stays open while this long-lived stub keeps looping.)
         $stub = $this->writeStub(<<<'PHP'
+            $fd3 = @fopen('php://fd/3', 'w');
             fwrite(STDERR, "READY\n");
             while (true) {
                 $req = IPC::readFrame(STDIN);
                 if ($req === null) break;
-                IPC::writeFrame(STDOUT, [
-                    'status'       => 200,
-                    'headers'      => [],
-                    'cookies'      => [],
-                    'body'         => 'ok',
-                    'return_value' => null,
-                ]);
+                $body = 'ok';
+                if ($fd3 !== false) {
+                    IPC::writeFrame($fd3, [
+                        'status'       => 200,
+                        'headers'      => [],
+                        'cookies'      => [],
+                        'body_length'  => strlen($body),
+                        'return_value' => null,
+                    ]);
+                    fwrite(STDOUT, $body);
+                    fflush(STDOUT);
+                } else {
+                    IPC::writeFrame(STDOUT, [
+                        'status'       => 200,
+                        'headers'      => [],
+                        'cookies'      => [],
+                        'body'         => $body,
+                        'return_value' => null,
+                    ]);
+                }
             }
             PHP);
 

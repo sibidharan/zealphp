@@ -141,7 +141,7 @@ Historically `App::superglobals()` bundled four decisions into one flag. As of v
 | `App::$superglobals` | `App::superglobals(bool)` | — (no default) | `$g` storage strategy: process-wide PHP superglobals (true) vs per-coroutine `RequestContext` (false). Also picks `SessionManager` (true) vs `CoSessionManager` (false). |
 | `App::$process_isolation` | `App::processIsolation(bool)` | `$superglobals` | `App::include()` dispatch: true → `cgi_worker.php` subprocess per file (Apache mod_php-style isolation, ~30-50 ms `proc_open` cost); false → in-process via `executeFile()` |
 | `App::$enable_coroutine_override` | `App::enableCoroutine(bool)` | `!$superglobals` | OpenSwoole's `enable_coroutine` server setting — auto-coroutine-per-request wrapper. false → workers handle one request at a time synchronously |
-| `App::$hook_all_override` | `App::hookAll(bool\|int)` | `!$superglobals` (HOOK_ALL or 0) | `OpenSwoole\Runtime::enableCoroutine($flags)` — process-wide PHP I/O hooks (curl, fopen, mysqli). PDO is **not** hooked in OpenSwoole 22.1 / 26.2 regardless |
+| `App::$hook_all_override` | `App::hookAll(bool\|int)` | `!$superglobals` (HOOK_ALL or 0) | `OpenSwoole\Runtime::enableCoroutine($flags)` — process-wide PHP I/O hooks (curl, fopen, streams). **`PDO_MYSQL`/`mysqli` on mysqlnd ARE coroutinized** under HOOK_ALL (mysqlnd rides `php_stream`, which the stream/TCP hooks intercept — there is no dedicated `HOOK_PDO` constant); `libpq`-based `PDO_PGSQL`, Oracle/ODBC, and `libmysqlclient` builds are NOT (own C-side socket I/O). Hooking makes I/O non-blocking ≠ a shared connection safe across coroutines — see the DB note below. |
 
 **Supported mode matrix:**
 
@@ -152,15 +152,42 @@ Historically `App::superglobals()` bundled four decisions into one flag. As of v
 | **Mixed-mode / Symfony** | true | **false** | false | 0 | Symfony / Laravel on ZealPHP — real `$_SESSION` needed, but no per-include CGI fork cost. Sequential request handling per worker → no race risk on superglobals |
 | **In-process + sync** | true | false | false | 0 | Same shape as Mixed-mode — the "scheduler off, no CGI" combo |
 | **Coroutine without HOOK_ALL** | false | false | true | 0 | Per-request coroutine isolation but no auto I/O hooks (e.g. testing, custom hooks) |
+| **Coroutine-legacy** (`App::mode('coroutine-legacy')`) | true | false | true | HOOK_ALL | Legacy request-style code, run concurrently — procedural/WordPress-style PHP on the PHP-FPM mental model. **Requires ext-zealphp**; auto-enables silentRedeclare + includeIsolation + coroutineGlobalsIsolation + coroutineStaticsIsolation so every request-state primitive isolates per coroutine (see the isolation section below) |
 
-**Unsafe combinations** — `App::run()` **throws `RuntimeException` at boot** (v0.2.27+). Pre-v0.2.27 these emitted a `[lifecycle]` warning to `debug.log` but didn't refuse; in practice the warning was invisible and the race-prone configuration is how cross-request state-leak bugs ship to production. Fail loud, fail fast:
+**Combination guard** — `App::run()` calls `App::validateLifecycleCombination()` and **throws `RuntimeException` at boot** for genuinely unsafe shapes. The rule changed once ext-zealphp landed: the superglobals-under-coroutines combos are **conditionally safe** — they throw only when the extension is absent:
 
-- `superglobals(true) + enableCoroutine(true)` — process-wide `$_GET`/`$_POST`/`$_SESSION` arrays would race across concurrent coroutines (this is exactly the bug per-coroutine `$g` was designed to avoid).
-- `superglobals(true) + hookAll(non-zero)` — hooked I/O can yield mid-request, exposing process-wide superglobal mutations to other coroutines.
+- `superglobals(true) + enableCoroutine(true)` **and** `superglobals(true) + hookAll(non-zero)` — **SAFE when ext-zealphp is loaded.** The extension's `on_yield`/`on_resume` hooks snapshot/restore `$_GET`/`$_POST`/`$_SESSION` (and the rest of the request-state stack) per coroutine, so concurrent coroutines don't race the process-wide arrays. **This is exactly `coroutine-legacy` mode.** Without ext-zealphp both still throw — the race they'd cause is how cross-request state-leak bugs ship to production (install: `pie install sibidharan/ext-zealphp`).
+- `superglobals(false) + enableCoroutine(false)` — always throws: coroutine mode's `CoSessionManager` needs the scheduler for per-request `RequestContext` isolation.
 
-Apps that need to run one of these for security-audit / debugging purposes can fork and remove the throw at `App::validateLifecycleCombination()`. The supported matrix above covers every safe configuration.
+Apps that need a refused combo for security-audit / debugging can fork and remove the throw at `App::validateLifecycleCombination()`.
 
 The default coupling — `null` everywhere — preserves the historical behaviour for any app that doesn't touch these knobs. The [zealphp-symfony](https://github.com/sibidharan/zealphp-symfony) bridge uses `superglobals(true) + processIsolation(false) + sessionLifecycle(false)` to get the Mixed-mode lifecycle.
+
+### Per-coroutine isolation — the compatibility-runtime stack
+
+`App::mode('coroutine-legacy')` is the headline mode: it turns ZealPHP into a **compatibility runtime** so traditional request-style PHP (the PHP-FPM "fresh state per request" mental model) runs under OpenSwoole coroutine concurrency with **every request-state primitive isolated per coroutine**. It requires **ext-zealphp 0.3.10+**, which dlsym's OpenSwoole's `on_yield`/`on_resume`/`on_close` scheduler callbacks and snapshots/restores per-coroutine state across each yield. (Sibling presets `App::mode('legacy-cgi'|'coroutine'|'mixed')` are in the matrix above; `coroutine-legacy` is the one that needs this stack.)
+
+**Isolated per coroutine** — `tests/Integration/TrustBarIsolationTest.php` fires 40 concurrent interleaved requests and asserts ZERO leakage (raw OpenSwoole leaks 39/40) of its contract set: the 7 superglobals (`$_GET $_POST $_REQUEST $_COOKIE $_FILES $_SERVER $_SESSION`), `header()` + `setcookie()` response state, class statics, `$GLOBALS`/`global $x`, `define()` constants, `ini_set()`, `putenv()`/`getenv()`, and **function-local `static $x`**. The same stack also isolates `http_response_code()` (same uopz→`$g` path as `header()`), `require_once`/`include_once` re-execution (Stage 7), and `exit`/`die` worker-survival — covered in the trust-bar doc rather than asserted in that specific concurrency test.
+
+The knobs `coroutine-legacy` auto-enables (each is also a standalone fluent setter, default **off** so other modes are unaffected):
+
+| Stage / knob | Setter | What it isolates per coroutine |
+|---|---|---|
+| superglobal snapshot | implicit in `coroutine-legacy` | the 7 `$_*` superglobals (IS_REFERENCE-aware, so `$g->get` aliases survive yields) |
+| Stage 2 `$GLOBALS` | `App::coroutineGlobalsIsolation(bool)` | `$GLOBALS` / `global $x` (COW delta vs a once-captured parent baseline). Env rollback: `ZEALPHP_GLOBALS_ISOLATION_DISABLE=1` |
+| Stage 3 silent-redeclare | `App::silentRedeclare(bool)` | conditional `function`/`class` re-declaration → first wins, no `E_COMPILE_ERROR` (opcode hook on `ZEND_DECLARE_*`) |
+| Stage 5 function statics | `App::coroutineStaticsIsolation(bool)` | function-local `static $x`. **Default-ON in coroutine-legacy** via a `ZEND_BIND_STATIC` touched-set registry — per-yield cost scales with static-*using* functions, not total functions (~µs/yield, decoupled from function count). Opt out: `ZEALPHP_FN_STATICS_DISABLE=1`. Closures/eval excluded (per-instance op_array lifetime) |
+| Stage 7 require_once | `App::includeIsolation(bool)` | per-request `require_once`/`include_once` re-execution (opcode hook on the process-wide `EG(included_files)` cache) |
+| `define()` | `App::defineIsolation(bool)` | per-request `define()` constants, removed at request end |
+
+**Honest boundary — what this stack does NOT isolate** (process-level state / OpenSwoole limits; the PHP-FPM mental model holds, not "any binary blob of PHP runs unchanged"):
+
+- **DB connections.** HOOK_ALL makes `PDO_MYSQL`/`mysqli` (mysqlnd → `php_stream`) **non-blocking** under coroutines, but hooking ≠ connection-safe: two coroutines sharing one handle interleave wire frames and corrupt the socket. A shared `$pdo`/`$wpdb` still needs **one connection per coroutine** (a pool, mirroring `RedisConnectionPool`). `libpq`-based `PDO_PGSQL`, Oracle/ODBC stay blocking — use OpenSwoole's native `Coroutine\PostgreSQL`. This per-coroutine DB pool is the main remaining piece for "unmodified WordPress, concurrent."
+- **Closure `static $x`** — excluded from Stage 5 (rarely request-state).
+- **`set_error_handler`/`set_exception_handler`, raw `ob_*`, `register_shutdown_function`** — process-global / not specifically isolation-tested under concurrency.
+- **`pcntl_fork`, `set_time_limit`** — semantics differ under coroutines.
+
+Canonical reference: `docs/architecture/2026-05-28-isolation-trust-bar.md` (the trust-bar matrix + the rejected `map_ptr` Stage 5 dead-end). When adding a new isolation knob, document it here AND in the scaffold's `.claude/CLAUDE.md`.
 
 ### uopz Function Overrides
 

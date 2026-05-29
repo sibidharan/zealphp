@@ -36,6 +36,18 @@ declare(strict_types=1);
 
 ini_set('display_errors', 'stderr');
 
+// Suppress E_DEPRECATED and E_USER_DEPRECATED by default. PHP 8.4 emits one
+// deprecation per non-explicit-nullable parameter in older vendor libraries.
+// phpMyAdmin alone produces ~200 such warnings per request. They all go to
+// stderr — which is a 64 KB pipe to the parent. The parent does not drain
+// stderr until the subprocess dies, so once that pipe fills, the next
+// fwrite(STDERR, ...) blocks the subprocess forever. The whole worker
+// deadlocks; readFrame on the parent times out at $cgi_timeout (default 60s).
+// Opt back in via ZEALPHP_POOL_DEBUG_DEPRECATIONS=1 if you actually want them.
+if ((string) getenv('ZEALPHP_POOL_DEBUG_DEPRECATIONS') !== '1') {
+    error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
+}
+
 foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $__pw_autoload) {
     if (is_file($__pw_autoload)) {
         require_once $__pw_autoload;
@@ -56,58 +68,150 @@ $__pw_status     = 200;
 $__pw_shutdown_functions = [];
 $__pw_mid_request = false;
 
-// exit()/die() survival — register a REAL shutdown function BEFORE the uopz
-// override replaces register_shutdown_function. PHP 8.4 has no ExitException;
-// exit() terminates the process immediately. This handler detects that we
-// died mid-request, captures whatever was echoed, and sends the IPC response
-// frame so the parent doesn't see "subprocess died mid-request". The parent
-// will respawn the worker after the process exits.
+// FD-3 IPC: open fd 3 once at boot — the parent's proc_open spec includes
+// fd 3 as a writable pipe. Reuse the handle across every iteration; the
+// IPC_Sender destructor writes a metadata frame to it.
+// When fd 3 isn't open (very old tests / legacy environments), the file
+// pointer is false; the destructor falls back to writing the frame on
+// STDOUT (legacy protocol).
+$__pw_fd3 = @fopen('php://fd/3', 'w');
+if ($__pw_fd3 === false) {
+    $__pw_fd3 = null;
+}
+
+/**
+ * Destructor-based metadata frame sender. PHP runs destructors even after
+ * `exit()` is called from inside a shutdown function — phpMyAdmin's
+ * `ResponseRenderer->response()` does exactly that. The shutdown chain
+ * gets preempted, but a destructor on a static instance still fires,
+ * so the parent receives status/headers/cookies regardless of how the
+ * request ended.
+ *
+ * Body bytes are written directly to STDOUT during the request (no IPC
+ * framing on STDOUT), so this sender only carries metadata.
+ */
+final class ZealPHP_IPC_Sender
+{
+    private static ?self $instance = null;
+
+    public static function init(): self
+    {
+        if (self::$instance === null) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
+
+    public function __destruct()
+    {
+        global $__pw_mid_request, $__pw_status, $__pw_headers, $__pw_cookies,
+               $__pw_rawcookies, $__pw_shutdown_functions, $__pw_fd3;
+
+        if (!$__pw_mid_request) {
+            return;
+        }
+
+        // Flush session to disk before sending the IPC frame — exit()
+        // fires our destructor before PHP's native session_write_close.
+        // Without this, a redirect after exit() races: the next request reads
+        // a stale session file because the old worker hasn't flushed yet.
+        if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+
+        // Do NOT re-run leftover $__pw_shutdown_functions here. We're in this
+        // destructor specifically because exit()/die() preempted the regular
+        // shutdown chain — re-invoking the queued functions is unsafe:
+        //   (a) phpMyAdmin's ResponseRenderer->response() (the very function
+        //       that called exit()) is typically still in $__pw_shutdown_functions
+        //       and hangs when re-entered with already-finalized state
+        //       (verified by tracing — destructor blocked at "[4.0] running sf").
+        //   (b) any leftover function that itself calls exit() would recurse
+        //       into this destructor.
+        //   (c) exit() inside a shutdown function semantically means "stop
+        //       now and emit the response" — running more handlers contradicts
+        //       that intent.
+        // Buffered output is captured below and emitted as the response body.
+
+        // Capture remaining output buffer as the response body. On the exit
+        // path the body lives in ob_start (pool_handle_request opened it but
+        // didn't get to call ob_get_clean before exit() preempted the chain).
+        // On the happy path ob_get_level() is already 0 (the main loop
+        // emptied the buffer and consumed the body), so $body stays ''.
+        $body = '';
+        while (ob_get_level() > 0) {
+            $chunk = ob_get_clean();
+            if (is_string($chunk)) {
+                $body .= $chunk;
+            }
+        }
+
+        $resp = [
+            'status'     => $__pw_status ?: 200,
+            'headers'    => is_array($__pw_headers) ? $__pw_headers : [],
+            'cookies'    => is_array($__pw_cookies) ? $__pw_cookies : [],
+            'rawcookies' => is_array($__pw_rawcookies) ? $__pw_rawcookies : [],
+            '_exit'      => true,
+        ];
+
+        try {
+            if ($__pw_fd3 !== null && is_resource($__pw_fd3)) {
+                // FD-3 IPC: write metadata + body_length to fd 3 FIRST so
+                // the parent knows how many body bytes to drain from STDOUT.
+                $resp['body_length'] = strlen($body);
+                IPC::writeFrame($__pw_fd3, $resp);
+                if ($body !== '') {
+                    fwrite(STDOUT, $body);
+                }
+                fflush(STDOUT);
+            } else {
+                // Legacy single-channel: stuff body into the frame.
+                $resp['body'] = $body;
+                IPC::writeFrame(STDOUT, $resp);
+            }
+        } catch (\Throwable $e) {
+            // pipes may be broken — nothing we can do
+        }
+    }
+}
+
+ZealPHP_IPC_Sender::init();
+
+// exit()/die() survival — the ZealPHP_IPC_Sender::__destruct() above is the
+// PRIMARY mechanism. It fires LAST in PHP's teardown sequence, even AFTER
+// `exit()` is called from inside a shutdown function (phpMyAdmin's
+// `ResponseRenderer->response()` does exactly that).
+//
+// We register a regular shutdown function too as a belt-and-suspenders. It
+// runs the app's registered shutdown chain in the SAME order as a normal
+// request — the destructor only runs them as a safety net if the chain was
+// preempted before this handler completed. ob_buffer drain happens in the
+// destructor either way.
 register_shutdown_function(function (): void {
-    global $__pw_mid_request, $__pw_headers, $__pw_cookies, $__pw_rawcookies,
-           $__pw_status, $__pw_shutdown_functions;
+    global $__pw_mid_request, $__pw_shutdown_functions;
 
     if (!$__pw_mid_request) {
         return;
     }
 
-    // Flush session to disk before sending the IPC frame — exit()
-    // fires our shutdown handler before PHP's native session_write_close.
-    // Without this, a redirect after exit() races: the next request reads
-    // a stale session file because the old worker hasn't flushed yet.
     if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
         session_write_close();
     }
 
-    // Run any app-registered shutdown functions (e.g. WordPress cleanup)
+    // Run any app-registered shutdown functions in registration order.
+    // If one calls exit(), PHP cuts off iteration and the destructor
+    // still completes the metadata-frame send for whatever ran.
     if (is_array($__pw_shutdown_functions)) {
-        foreach ($__pw_shutdown_functions as $sf) {
+        foreach ($__pw_shutdown_functions as $i => $sf) {
             try {
                 $sf[0](...$sf[1]);
             } catch (\Throwable $e) {
                 // ignore — we're shutting down
             }
+            // Mark consumed so the destructor doesn't double-run it on
+            // the safety-net path.
+            unset($__pw_shutdown_functions[$i]);
         }
-    }
-
-    $body = '';
-    while (ob_get_level() > 0) {
-        $body .= (string) ob_get_clean();
-    }
-
-    $resp = [
-        'status'       => $__pw_status ?: 200,
-        'headers'      => is_array($__pw_headers) ? $__pw_headers : [],
-        'cookies'      => is_array($__pw_cookies) ? $__pw_cookies : [],
-        'rawcookies'   => is_array($__pw_rawcookies) ? $__pw_rawcookies : [],
-        'body'         => $body,
-        'return_value' => null,
-        '_exit'        => true,
-    ];
-
-    try {
-        IPC::writeFrame(STDOUT, $resp);
-    } catch (\Throwable $e) {
-        // stdout may be broken — nothing we can do
     }
 });
 
@@ -239,6 +343,52 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
         $__pw_rawcookies[] = $cookie;
         return true;
     }, true);
+
+    // STDOUT pollution guard. The pool worker writes IPC frames to STDOUT,
+    // so any app writing directly to STDOUT (via flush() / ob_end_flush() /
+    // fastcgi_finish_request()) corrupts the IPC channel — the parent reads
+    // garbage as a frame length, returns "subprocess died mid-request",
+    // and the actual response is lost. Neutralize all three: app output
+    // stays in the outer ob_start buffer, where the shutdown handler /
+    // pool_handle_request can capture it cleanly.
+    $z_override('flush', function (): void { /* no-op */ }, true);
+    $z_override('ob_flush', function (): void { /* no-op */ }, true);
+    $z_override('ob_end_flush', function (): bool {
+        // Pop the buffer but keep its contents accessible to the IPC framer
+        // (writing to STDOUT directly would corrupt the IPC channel). When
+        // there's still an outer buffer, we echo into it (so ob_get_clean()
+        // at the framing point reads the merged content). When we're at the
+        // OUTERMOST buffer (the one pool_handle_request opened at line 501),
+        // re-open it with the same content so the framing point still finds
+        // it — otherwise the content is lost forever. This is what
+        // wp_ob_end_flush_all() triggers via WordPress's shutdown_action_hook:
+        // it flushes EVERY buffer including our outer one, and without the
+        // re-open the response body vanishes.
+        if (ob_get_level() === 0) {
+            return false;
+        }
+        $content = (string) ob_get_clean();
+        if (ob_get_level() > 0) {
+            if ($content !== '') {
+                echo $content;
+            }
+        } else {
+            // We just popped the outermost framework buffer — re-open it so
+            // the response body survives to the IPC framing step.
+            ob_start();
+            if ($content !== '') {
+                echo $content;
+            }
+        }
+        return true;
+    }, true);
+    $z_override('fastcgi_finish_request', function (): bool {
+        // Common legacy pattern: render page, fastcgi_finish_request(),
+        // then do background work. In pool we can't actually deliver early
+        // since we use length-prefixed IPC — just no-op and let the
+        // response flow through the normal shutdown path.
+        return true;
+    }, true);
 }
 
 // Drain any output buffering that may have been auto-started so PHP errors
@@ -278,6 +428,14 @@ while (ob_get_level() > 0) {
 //     gated on $wp_did_header.
 $__pw_globals_snapshot = array_fill_keys(array_keys($GLOBALS), true);
 
+// FPM parity: snapshot constants + classes + functions + included_files at
+// boot so pool_reset_request_state() can roll them back to this baseline
+// after every request. Without this, the FIRST app's defines pollute the
+// second app's namespace (Kanboard's ROOT_DIR leaks into phpMyAdmin etc.).
+if (function_exists('zealphp_process_state_snapshot')) {
+    @zealphp_process_state_snapshot();
+}
+
 // READY signal on stderr — the framing channel (stdout) stays pure. Parent
 // reads this for boot sync (bounds the dispatch-after-spawn window).
 fwrite(STDERR, "ZEALPHP_POOL_WORKER_READY\n");
@@ -290,7 +448,33 @@ while ($count < $maxRequests) {
 
     $__pw_mid_request = true;
     $resp = pool_handle_request($req);
-    IPC::writeFrame(STDOUT, $resp);
+
+    // FD-3 IPC happy path: body goes to STDOUT, metadata frame goes to fd 3.
+    // The metadata frame carries `body_length` so the parent reads exactly
+    // that many bytes from STDOUT — needed because STDOUT is a persistent
+    // pipe (no EOF between iterations on the same worker).
+    $body = '';
+    if (isset($resp['body']) && is_string($resp['body'])) {
+        $body = $resp['body'];
+        unset($resp['body']);
+    }
+
+    if ($__pw_fd3 !== null && is_resource($__pw_fd3)) {
+        // Write metadata FIRST to fd 3 (parent reads metadata first to
+        // learn the body length), then stream the body to STDOUT.
+        $resp['body_length'] = strlen($body);
+        IPC::writeFrame($__pw_fd3, $resp);
+        if ($body !== '') {
+            fwrite(STDOUT, $body);
+        }
+        fflush(STDOUT);
+    } else {
+        // Legacy fallback: parent reads a single frame from STDOUT when
+        // fd 3 isn't open. Put the body back into the frame.
+        $resp['body'] = $body;
+        IPC::writeFrame(STDOUT, $resp);
+    }
+
     $__pw_mid_request = false;
 
     pool_reset_request_state();
@@ -350,18 +534,31 @@ function pool_handle_request(array $req): array
     }
     if (is_string($prevCwd)) chdir($prevCwd);
     
-    // Execute registered shutdown functions before capturing the output buffer
+    // Execute registered shutdown functions before capturing the output buffer.
+    // CRITICAL: clear each entry from $__pw_shutdown_functions as it runs.
+    // If a user shutdown function calls exit() (phpMyAdmin's
+    // ResponseRenderer->response() does this), PHP unwinds to its own
+    // shutdown sequence — which fires our register_shutdown_function and
+    // our IPC_Sender destructor. Both also iterate $__pw_shutdown_functions
+    // as safety nets, so we'd run the user function 2-3 times without
+    // clearing. Unset BEFORE invoke so even if the user fn exit()s, the
+    // entry is already consumed.
     global $__pw_shutdown_functions;
     if (is_array($__pw_shutdown_functions)) {
-        foreach ($__pw_shutdown_functions as $sf) {
+        foreach (array_keys($__pw_shutdown_functions) as $sfKey) {
+            $sf = $__pw_shutdown_functions[$sfKey] ?? null;
+            unset($__pw_shutdown_functions[$sfKey]);
+            if (!is_array($sf) || !isset($sf[0]) || !is_callable($sf[0])) {
+                continue;
+            }
             try {
-                $sf[0](...$sf[1]);
+                $sf[0](...(is_array($sf[1] ?? null) ? $sf[1] : []));
             } catch (\Throwable $e) {
                 error_log("pool_worker shutdown function error: " . $e->getMessage());
             }
         }
     }
-    
+
     $body = (string) ob_get_clean();
 
     // Universal return contract — mirror src/cgi_worker.php exactly so the
@@ -440,5 +637,14 @@ function pool_reset_request_state(): void
             }
             unset($GLOBALS[$__pw_key]);
         }
+    }
+
+    // FPM parity for constants, classes, functions, included_files —
+    // ext-zealphp's process_state_clean removes everything added during
+    // the request, restoring the boot snapshot. Without this, app-defined
+    // constants leak across apps in the same pool (Kanboard's ROOT_DIR
+    // collides with phpMyAdmin's CACHE_DIR; both crash on re-define).
+    if (function_exists('zealphp_process_state_clean')) {
+        @zealphp_process_state_clean(); // flags=7 default: files+classes+functions
     }
 }

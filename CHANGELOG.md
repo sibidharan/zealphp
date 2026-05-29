@@ -4,6 +4,51 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-05-29
+
+The coroutine-legacy compatibility runtime lands. Traditional request-style PHP — the PHP-FPM "fresh state per request" mental model — now runs under OpenSwoole coroutine concurrency with every request-state primitive isolated per coroutine. Powered by ext-zealphp 0.3.17, which dlsym's OpenSwoole's scheduler callbacks and snapshots/restores per-coroutine state across each yield. One-knob lifecycle presets (`App::mode()`) and six standalone isolation setters expose the stack.
+
+This release also folds in the 0.3.1–0.3.4 tags, which were cut without changelog entries.
+
+### Added
+
+- **ext-zealphp 0.3.17 — the coroutine-legacy compatibility runtime.** Per-coroutine isolation of every request-state primitive so unmodified request-style PHP runs concurrently under coroutines:
+  - the **7 superglobals** (`$_GET $_POST $_REQUEST $_COOKIE $_FILES $_SERVER $_SESSION`), snapshot/restored IS_REFERENCE-aware so `$g->get` aliases survive yields;
+  - **`$GLOBALS` / `global $x`** via copy-on-write delta against a once-captured parent baseline (Stage 2);
+  - **function-local `static $x`** via a `ZEND_BIND_STATIC` touched-set registry — per-yield cost scales with static-*using* functions, not total functions (Stage 5; **default-on in coroutine-legacy**);
+  - **`define()` constants**, removed at request end (Stage 3.5);
+  - **`ini_set`** values;
+  - **`putenv` / `getenv`** environment;
+  - **silent function/class redeclaration** — first-wins, no `E_COMPILE_ERROR`, via a CG-table swap on `ZEND_DECLARE_*` (Stage 3/4);
+  - **`require_once` / `include_once`** re-execution per request, by hooking the process-wide `EG(included_files)` cache (Stage 7).
+  Built on dlsym'd OpenSwoole `on_yield` / `on_resume` / `on_close` scheduler hooks. NTS-only.
+- **`App::mode('coroutine-legacy'|'legacy-cgi'|'coroutine'|'mixed')`** — one-knob lifecycle presets. `App::isolation()` exposes the same coupling for direct control. `coroutine-legacy` auto-enables silentRedeclare + includeIsolation + coroutineGlobalsIsolation + coroutineStaticsIsolation.
+- New fluent isolation setters, each a standalone toggle (default off so other modes are unaffected): `App::coroutineGlobalsIsolation()`, `App::coroutineStaticsIsolation()`, `App::silentRedeclare()`, `App::includeIsolation()`, `App::defineIsolation()`, `App::keepGlobals()`.
+- **`TableSessionHandler`** + `App::sessionHandler()` / `App::sessionMaxRows()` / `App::sessionTtl()` — concurrent-safe sessions via a 3-way merge (base/disk/memory) so interleaved coroutine writes don't clobber each other. Defaults bumped to 2026-reasonable scale.
+
+### Changed
+
+- `coroutine-legacy` turns ZealPHP into a **compatibility runtime**: the PHP-FPM per-request-fresh-state contract holds under coroutine concurrency for state isolation. `TrustBarIsolationTest` fires 40 concurrent interleaved requests and asserts ZERO leakage of the contract set (raw OpenSwoole leaks 39/40).
+
+### Fixed
+
+- **Auto-drop `HOOK_FILE` when `silentRedeclare` + `enableCoroutine` are both on.** Compile-time file-read coroutinization under the redeclare hook caused worker SIGSEGV / lost-wakeup; the flag is now stripped automatically in that combination.
+- **Isolate `global`-keyword variables per coroutine (ext-zealphp 0.3.17).** `global $x; $x = ...` makes the `EG(symbol_table)` slot `IS_REFERENCE` (notably on PHP 8.4+, where the engine keeps the global slot a reference); Stage-2 previously skipped references, leaking global-keyword request state across coroutines on PHP 8.4/8.5 (`CoroutineIsolationContractTest`: 39/40 on 8.4, 0 on 8.3). Stage-2 now dereferences ref-of-scalar/array and isolates the underlying value (mirroring the Stage-1 superglobal path); ref-of-object/resource stay shared.
+- **`executeFile()` chdir's to the script's directory** so relative `include`/`require` paths resolve as they do under mod_php / FPM (50-app sweep finding).
+- **Error / exception-handler re-entry guards** — unblocks legacy apps (incl. WordPress-style bootstraps) running in coroutine mode where a handler could recurse.
+- **Session `$GLOBALS` cleanup decoupled** from the autoloader guard; file-locked session read/write for concurrent-coroutine safety; Redis WATCH/MULTI optimistic locking for session writes.
+- **ext-zealphp security hardening passes 1+2:** chain-or-refuse hook install, dedup'd dlsym, per-coroutine registry purge on close, `CE_STATIC_MEMBERS` skip, skip objects/resources in the `$GLOBALS` snapshot, exclude `session.*` from the `ini` snapshot, never-free SHM op_arrays, IS_REFERENCE-aware superglobal snapshot, and an out-of-bounds `PG(http_globals)` write fix.
+- **Pool worker survives `exit()` / `die()`** inside a shutdown function — captures the response before process death; always prefers FD-3 for IPC.
+
+### Documentation
+
+- **Coroutine isolation safety matrix** (`docs/architecture/2026-05-29-coroutine-isolation-safety-matrix.md`) — draws the honest line between **state isolation** (proven per-coroutine) and **code isolation** (fragile: compiled op_arrays are process-shared).
+- **"Running modern PHP apps on ZealPHP"** config guide, the **50-app coroutine-legacy compatibility sweep** findings, the **ext production-readiness review**, and the ext **ARCHITECTURE.md**.
+
+### Known limitation
+
+- **Coroutine-legacy CODE isolation on PHP 8.4 / 8.5** (silent-redeclare + include-isolation CG-table swap) has a pre-existing, perturbation-sensitive **heap-corruption race** under heavy *concurrent class autoloading* — e.g. a class lazily `autoload`ed mid-request (phpMyAdmin; a session handler under load). It surfaces as `free(): invalid pointer` / intermittent "class not found", **not** a state leak. It does **not** affect PHP 8.3, and both `rr` (thread serialization) and `gdb` (attach slowdown) mask it (tracked as HAZARD-2). **STATE isolation — the per-coroutine cross-request-leak contract — is solid on 8.3, 8.4 and 8.5**: `CoroutineIsolationContractTest` passes on all three (including `global $x` after the ext-zealphp 0.3.17 fix); `TrustBarIsolationTest` (which additionally exercises code-isolation under 40-way concurrency) is skipped on 8.4+ pending the compile-under-concurrency fix. For affected apps on 8.4/8.5 use `App::cgiMode('pool')` / `App::processIsolation(true)`, or run on PHP 8.3.
+
 ## [0.3.0] - 2026-05-26
 
 ext-zealphp: ZealPHP's own PHP extension replaces the uopz dependency.
