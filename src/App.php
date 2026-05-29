@@ -6796,6 +6796,18 @@ HELP;
                 (\zealphp_coroutine_globals(...))((bool) true);
             });
         }
+
+        if (self::$function_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_process_state_snapshot')
+        ) {
+            self::onWorkerStart(function () {
+                if (\class_exists(\ZealPHP\Counter::class, false)) {
+                    \ZealPHP\Counter::defaultBackend();
+                }
+                (\zealphp_process_state_snapshot(...))();
+            });
+        }
         // @codeCoverageIgnoreEnd
 
         // Transparent coroutine-safe exec family. Overriding `shell_exec` ALSO
