@@ -134,22 +134,42 @@ re-includes (re-compiles + re-executes) it — letting per-request logic in
 `require_once`'d files run every request. A per-coroutine once-guard keeps it
 idempotent within a request.
 
-> **HAZARD 2 — re-execution × OPcache (OPEN).** Re-executing an OPcache-cached
-> script (delete-from-`included_files` → re-include → cache-hit returns the SHM
-> op_array → re-execute) corrupts engine op_array state under high re-exec volume
-> — a `__stack_chk_fail` "stack smashing detected" abort in the VM, accumulating
-> over a few requests. Confirmed: requires include re-execution **and** OPcache
-> (OPcache off → hang instead of crash; include re-execution off → no crash).
-> Independent of HAZARD 1 (it
-> persists after the HOOK_FILE fix). Volume-triggered: the ~19 well-behaved sweep
-> apps are fine; only phpMyAdmin's Symfony-DI bootstrap (hundreds of re-executed
-> service files per request) hits it.
+> **HAZARD 2 — re-execution corrupts the VM on a deep-bootstrap app (OPEN).**
+> With include re-execution on, phpMyAdmin's Symfony-DI bootstrap crashes the
+> worker with `__stack_chk_fail` "stack smashing detected" (SIGABRT) in the PHP
+> VM (`execute_ex` vicinity), accumulating over a few requests. It is reached
+> only via include re-execution (`includeIsolation` off → the app 500s early on a
+> missing constant and never reaches the deep build), so re-execution *triggers*
+> it; whether re-execution *causes* it or merely lets the app run far enough to
+> hit a pre-existing depth/state problem is unresolved.
 >
-> **Status:** a proper fix needs include re-execution to be OPcache-aware (re-execute without
-> the delete-from-`included_files` dance, or invalidate the SHM entry too) — a
-> non-trivial redesign. **Until then, compile/re-exec-heavy apps run via
-> `cgiMode('pool')`** (subprocess per request, no shared scheduler), where
-> phpMyAdmin returns 200.
+> **What the deep investigation established (and ruled out):**
+> - **Not OPcache-specific.** Crashes with OPcache on *and* off (once HAZARD 1's
+>   HOOK_FILE drop is in place). The earlier "needs OPcache" reading was an
+>   artifact of HAZARD 1 masking it as a hang when OPcache was off.
+> - **Not unbounded re-execution.** The per-coroutine once-guard works: only ~5
+>   files re-execute per request (seen-set ≤13), and each request gets a fresh,
+>   cleanly-incrementing coroutine id — no cid reuse, no runaway recursion.
+> - **Not the CG-swap, not the immutable-SHM-free, not the Stage-5 registry** —
+>   each was isolated out (the immutable-op_array hypothesis failed because
+>   OPcache is the *outermost* `zend_compile_file` wrapper and returns SHM
+>   op_arrays on cache hits without ever calling our hook).
+> - **Stack-related but not stack-size-fixable.** Coroutine stack 2 MB → crash
+>   every 4th request, 16 MB → every 5th, 32 MB → every 2nd (worse). Non-monotonic
+>   — bigger stacks add memory pressure rather than headroom, so it is not a clean
+>   "deepen the stack" fix.
+> - **Volume/app-specific.** The ~19 other sweep apps (adminer, mediawiki,
+>   wordpress, drupal, joomla, …) are clean in the same full config — only
+>   phpMyAdmin's deep DI build hits it.
+>
+> **Status:** root-causing further is blocked on **PHP debug symbols** — the
+> crashing frame is an unsymbolicated address in the custom `-O2` PHP build, so
+> the exact smashed buffer/function is unknown. The next step is a PHP `-g` build
+> (or `php8.x-dbgsym`) on an isolated VM to symbolicate the `__stack_chk_fail`
+> frame, then fix the specific overflow. **Until then, deep-bootstrap apps like
+> phpMyAdmin run via `cgiMode('pool')`** (subprocess per request, no shared
+> coroutine scheduler), where phpMyAdmin returns 200. This is the documented
+> boundary, not the greenfield contract (which never relies on re-execution).
 
 ---
 
@@ -166,7 +186,8 @@ Each stage layered on, worker_num=1, OPcache on. `200` = works, `000` = hang,
 | + silent redeclaration, `HOOK_ALL&~HOOK_FILE` | **0 crash / 0 hang** (200 + Bug-A 500s) | HAZARD 1 fix proven |
 | + include re-execution, HOOK_FILE on | all 000 / CRASH | HAZARD 1 (re-compile yields) |
 | full coroutine-legacy, **HOOK_FILE fix on** | `200 200 200 000` + residual CRASH | HAZARD 1 fixed; HAZARD 2 residual |
-| full, OPcache off | all 000 (hang), **0 crash** | HAZARD 2 needs OPcache |
+| full, HOOK_FILE fix on, OPcache **off** | still `200 200 200 000` CRASH | HAZARD 2 is **not** OPcache-specific |
+| HAZARD 2, coroutine stack 2/16/32 MB | crash every 4th / 5th / 2nd | stack-related but **non-monotonic** (not stack-size-fixable) |
 
 The 19 well-behaved apps (adminer, mediawiki, joomla, roundcube, drupal,
 wordpress, mybb, privatebin, …) are green in full coroutine-legacy with the
@@ -203,9 +224,13 @@ with the caveats above, not part of the greenfield contract.
 - **State isolation: 10/10 coroutine-safe.** The greenfield mental model works.
 - **Silent redeclaration (HAZARD 1): fixed.** Dropping HOOK_FILE under the compile
   hook makes the CG-swap atomic; no regressions on the working set.
-- **Include re-execution × OPcache (HAZARD 2): open.** A volume-triggered op_array
-  corruption on compile/re-exec-heavy legacy apps (phpMyAdmin). `cgiMode('pool')`
-  is the supported fallback; a Stage-7 OPcache-aware redesign is the real fix.
+- **Include re-execution on a deep-bootstrap app (HAZARD 2): open.** An
+  app-specific `__stack_chk_fail` VM crash on phpMyAdmin's Symfony-DI build,
+  reached via re-execution. Ruled out: OPcache-specificity, unbounded recursion,
+  the CG-swap, immutable-SHM-free, the Stage-5 registry, and stack-size (all
+  tested). Root-causing further is blocked on PHP debug symbols to identify the
+  smashed frame. `cgiMode('pool')` is the supported fallback; the ~19 other sweep
+  apps are unaffected.
 
 Canonical companions: `docs/architecture/2026-05-28-isolation-trust-bar.md`
 (the trust-bar matrix), `docs/architecture/2026-05-29-50app-sweep-findings.md`
