@@ -6635,6 +6635,30 @@ HELP;
             && \function_exists('zealphp_define_hook')
         ) {
             (\zealphp_define_hook(...))((bool) true);
+
+            // Coupling guard (50-app sweep, phpMyAdmin `AUTOLOAD_FILE` 500):
+            // define-isolation clears request-scoped constants at request end.
+            // A constant defined at the TOP LEVEL of the per-request entry
+            // script re-defines fine next request (the entry runs every
+            // request). But a constant defined INSIDE a require_once'd file
+            // (phpMyAdmin's `libraries/constants.php` → AUTOLOAD_FILE /
+            // ROOT_PATH-derived constants) only re-defines if Stage 7
+            // (includeIsolation) re-executes that file — otherwise the
+            // require_once is a no-op on request 2+ and the constant is gone
+            // → "Undefined constant" 500. Clearing constants is only sound
+            // when the files that define them re-execute. coroutine-legacy
+            // turns both on together; warn loudly for the hand-rolled combo.
+            if (!self::$include_isolation) {
+                elog(
+                    "[warn] defineIsolation(true) without includeIsolation(true): "
+                    . "constants defined inside require_once'd files are CLEARED "
+                    . "each request but their definer files won't re-execute, so "
+                    . "they vanish on request 2+ (Undefined-constant 500). Enable "
+                    . "App::includeIsolation(true) (App::mode('coroutine-legacy') "
+                    . "does this for you).",
+                    'warn'
+                );
+            }
         }
 
         // Env-var rollback: ZEALPHP_GLOBALS_ISOLATION_DISABLE=1 disables

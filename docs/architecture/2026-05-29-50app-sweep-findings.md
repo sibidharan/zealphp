@@ -91,10 +91,62 @@ already runs `hookAll(0)`. (Earlier "hookAll(0) fixes drupal/matomo" was sweep
 pollution — drupal/matomo were actually fixed by the cache-UAF removal, not by
 hookAll; the hookAll default was **not** changed.)
 
-### D. `silentRedeclare` flips phpmyadmin 200→500 (separate, minor)
-With base + `silentRedeclare` only, phpmyadmin returns 500 where base-only is
-200 — first-wins redeclaration changes a path it depends on. No crash; its own
-characterization.
+### D. phpMyAdmin deep-dive — TWO distinct bugs (gdb + ext-instrumented, 2026-05-29)
+
+phpMyAdmin was the last app failing in *supported* coroutine-legacy. A full
+isolation-matrix sweep (base / +silentRedeclare / +globals / +Stage7 / full,
+each hit twice) plus an ext built with `ROOT_PATH`/`AUTOLOAD_FILE`
+save/restore/define probes, Core.php constant-state probes, and an all-threads
+gdb backtrace of the hung worker separated it into **two independent bugs**:
+
+**Bug A — defineIsolation ↔ includeIsolation coupling (deterministic, root-caused, FIXED).**
+The req-2 error is `Undefined constant "AUTOLOAD_FILE"` at `index.php:27` (and
+the namespaced sibling `Undefined constant "PhpMyAdmin\ROOT_PATH"`).
+Mechanism: `index.php` does `require_once libraries/constants.php`, which
+`define()`s `AUTOLOAD_FILE` + the `ROOT_PATH`-derived constants. **defineIsolation
+(Stage 3.5) clears all request-scoped constants at request end.** With Stage 7
+*off*, the `require_once` on request 2 is a no-op (file still in
+`EG(included_files)`) → constants.php never re-runs → the constants are gone →
+500. So clearing request-constants is **only sound when the files that define
+them re-execute**. The isolation matrix nails it: `sr` (silentRedeclare ⇒
+define-clear, Stage 7 off) = 200/**500**; `noinc` (full minus Stage 7) =
+200/**500**; base/`cg` = 200/200. coroutine-legacy turns both knobs on together,
+so the supported mode is self-consistent — the 500 only appears in hand-rolled
+configs. **Fix:** `App::run()` now warns loudly when `defineIsolation(true)` is set
+without `includeIsolation(true)` (`src/App.php`, the define-hook activation
+block), naming the exact failure. (The `"1libraries"` red herring — ROOT_PATH
+reading as the string `"1"` — was never our constant table: every probe showed
+`ROOT_PATH` = `/apps/phpmyadmin/` type-string; `"1"` was a transient artifact of
+the use-after-clear window, i.e. the same Bug A class.)
+
+**Bug B — coroutine lost-wakeup during the Symfony DI container build (Heisenbug, OPEN; fallback works).**
+With Stage 7 *on* (full coroutine-legacy), phpMyAdmin instead **hangs (000)**.
+Characterization:
+- A trivial 2-file `require_once` + class + define repro works 200/200 under full
+  coroutine-legacy — so it is **not** the generic Stage-7 path. It is
+  phpMyAdmin's deeply-recursive **`new ContainerBuilder()` / `services_loader.php`**
+  autoload+compile bootstrap (`Common::run` → `Core::getContainerBuilder`).
+- It is a **Heisenbug**: inserting *any* extra I/O (a `file_put_contents` step
+  marker, which yields under HOOK_FILE) between bootstrap steps makes the request
+  succeed — the extra yield reshuffles the schedule out of the bad window.
+- `worker_num=1`: every request hangs. Multi-worker: each *successful* request
+  wedges the next (alternating `200 000 200 000…`), and the wedge clears only
+  when the hung request times out and its connection closes.
+- **gdb `thread apply all bt` on the hung worker: master, manager AND worker are
+  all cleanly idle in `epoll_wait` — no thread in PHP, no futex/lock.** So the
+  request coroutine is **suspended awaiting an I/O event that never fires (a lost
+  wakeup)**, not blocked on a resource.
+- Dropping `HOOK_FILE` (HOOK_ALL & ~HOOK_FILE) downgrades all-000 → alternating —
+  so the compile-time file-read-yield is *part* of the trigger but not the whole.
+
+Root cause class: a coroutine yield/resume scheduling race in the compile/
+autoload-heavy path (the Stage-4 `compile_file_hook` swaps the process-global
+`CG(function_table)`/`CG(class_table)` and the file read inside compile can yield
+under HOOK_FILE). A correct fix is deep and high-regression-risk (yield-safety of
+the compile hook / OpenSwoole-level coroutine handling) — **not** shipped
+speculatively. **Supported fallback: `cgiMode('pool')`, where phpMyAdmin returns
+200** (subprocess per request, no shared coroutine scheduler). Documented as the
+known boundary in `docs/running-modern-apps.md`.
 
 ---
 

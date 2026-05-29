@@ -97,12 +97,20 @@ $cfg['blowfish_secret'] = '0123456789abcdef0123456789abcdef';   // 32 chars
 $cfg['Servers'][1]['host'] = 'mysql';        // your DB host
 $cfg['Servers'][1]['auth_type'] = 'cookie';
 ```
-`App::documentRoot('/app/phpmyadmin')`. **Caveat (open):** phpMyAdmin defines
-`PhpMyAdmin\ROOT_PATH` and, under the coroutine-legacy `defineIsolation` +
-silent-define-redeclare path, can hit `Undefined constant PhpMyAdmin\ROOT_PATH`
-on a re-executed request — a define-isolation interaction tracked separately.
-phpMyAdmin works in CGI-Pool mode today; the coroutine-legacy define-isolation
-fix is in progress.
+`App::documentRoot('/app/phpmyadmin')`. **Caveat:** phpMyAdmin is the one app
+that still doesn't run cleanly in full coroutine-legacy — **use
+`App::cgiMode('pool')` for it** (subprocess per request; returns 200). Two
+distinct issues were root-caused (see
+`docs/architecture/2026-05-29-50app-sweep-findings.md` §D):
+- **`Undefined constant AUTOLOAD_FILE` / `ROOT_PATH`** — only appears if you
+  enable `defineIsolation(true)` *without* `includeIsolation(true)`. Clearing
+  request-scoped constants is only sound when the `require_once`'d files that
+  define them re-execute. `App::mode('coroutine-legacy')` enables both together,
+  so don't hand-roll that half-combo (the framework now warns at boot if you do).
+- **Bootstrap hang (000)** — phpMyAdmin's deeply-recursive Symfony DI container
+  build hits a coroutine yield/resume scheduling race under HOOK_ALL (a
+  Heisenbug: extra I/O makes it pass). Open; `cgiMode('pool')` is the supported
+  workaround until the compile-path yield-safety work lands.
 
 ## WordPress
 
