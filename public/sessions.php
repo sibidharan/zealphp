@@ -1,5 +1,2 @@
-<?php
-session_start();
-if (!isset($_SESSION['count'])) $_SESSION['count'] = 0;
-$_SESSION['count']++;
-echo 'Session Count: ' . $_SESSION['count'];
+<?php use ZealPHP\App;
+App::render('_master', ['title' => 'ZealPHP · Sessions', 'page' => 'sessions', 'active' => 'sessions']);
