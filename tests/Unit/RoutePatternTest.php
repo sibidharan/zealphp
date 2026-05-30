@@ -23,6 +23,66 @@ class RoutePatternTest extends TestCase
         return end($routes)['pattern'];
     }
 
+    /** @return array<string, mixed> */
+    private function lastRoute(): array
+    {
+        $routes = self::$app->routes();
+        $last = end($routes);
+        return is_array($last) ? $last : [];
+    }
+
+    // ── named-argument options: methods: / raw: (compose with the array form) ──
+
+    public function testNamedMethodsArg(): void
+    {
+        self::$app->route('/na-methods', methods: ['GET', 'POST'], handler: fn() => '');
+        $this->assertSame(['GET', 'POST'], $this->lastRoute()['methods']);
+    }
+
+    public function testNamedMethodsLowercaseNormalised(): void
+    {
+        self::$app->route('/na-lower', methods: ['get', 'delete'], handler: fn() => '');
+        $this->assertSame(['GET', 'DELETE'], $this->lastRoute()['methods']);
+    }
+
+    public function testNamedRawArg(): void
+    {
+        self::$app->route('/na-raw', raw: true, handler: fn() => '');
+        $r = $this->lastRoute();
+        $this->assertTrue($r['raw']);
+        $this->assertSame(['GET'], $r['methods']);
+    }
+
+    public function testArrayOptionsFormStillWorks(): void
+    {
+        self::$app->route('/bc-array', ['methods' => ['PUT'], 'raw' => true], fn() => '');
+        $r = $this->lastRoute();
+        $this->assertSame(['PUT'], $r['methods']);
+        $this->assertTrue($r['raw']);
+    }
+
+    public function testTwoArgHandlerFormDefaultsToGet(): void
+    {
+        self::$app->route('/bc-2arg', fn() => '');
+        $r = $this->lastRoute();
+        $this->assertSame(['GET'], $r['methods']);
+        $this->assertFalse($r['raw']);
+    }
+
+    public function testNamedArgsOnNsRoute(): void
+    {
+        self::$app->nsRoute('napi', '/u', methods: ['DELETE'], handler: fn() => '');
+        $r = $this->lastRoute();
+        $this->assertSame('/napi/u', $r['path']);
+        $this->assertSame(['DELETE'], $r['methods']);
+    }
+
+    public function testNamedArgsOnPatternRoute(): void
+    {
+        self::$app->patternRoute('#^/np/(?P<x>\d+)$#', methods: ['GET', 'HEAD'], handler: fn() => '');
+        $this->assertSame(['GET', 'HEAD'], $this->lastRoute()['methods']);
+    }
+
     public function testStaticRoute(): void
     {
         self::$app->route('/hello', fn() => '');
