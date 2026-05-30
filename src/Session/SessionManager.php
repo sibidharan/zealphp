@@ -277,6 +277,13 @@ class SessionManager
                     (\zealphp_process_state_clean(...))(6);
                 }
             }
+            // Per-coroutine $GLOBALS isolation: drain object-valued globals (the
+            // `global $wpdb; $wpdb = new wpdb()` pattern) in the request coroutine
+            // so an isolated object's __destruct may yield. No-op unless coroutine
+            // $GLOBALS isolation is active. See CoSessionManager for the rationale.
+            if (\function_exists('zealphp_coroutine_globals_request_end')) {
+                (\zealphp_coroutine_globals_request_end(...))();
+            }
         }
     }
 }
