@@ -189,6 +189,35 @@ The knobs `coroutine-legacy` auto-enables (each is also a standalone fluent sett
 
 Canonical reference: `docs/architecture/2026-05-28-isolation-trust-bar.md` (the trust-bar matrix + the rejected `map_ptr` Stage 5 dead-end). When adding a new isolation knob, document it here AND in the scaffold's `.claude/CLAUDE.md`.
 
+### ⚠️ Cold-concurrent-autoload — hot-path classes MUST be preloaded (coroutine-legacy)
+
+**This is NOT a memory-safety bug (ASAN/Valgrind clean), NOT a class removal, and NOT EG-table swapping (`EG(class_table)` is process-shared — proven: one pointer across all coroutines). It is a PHP delayed-early-binding race.** A class with inheritance (`class Foo extends Bar implements Baz`) that is **first compiled while several coroutines overlap** can land in the shared class table in a **present-but-UNLINKED** state — the entry exists (`zend_hash_find_ptr` sees it) but `ZEND_ACC_LINKED` is not yet set because the parent/interface binding is still racing. `class_exists()`/`new` require a LINKED class, so during the unlinked window they raise `Uncaught Error: Class "X" not found` → transient 500s on the cold burst, then fine once the binding settles. The state oscillates UNLINKED↔linked as coroutines race the bind. Reproduces identically on PHP 8.3 + 8.4. Empirically pinned by instrumenting `ce->ce_flags & ZEND_ACC_LINKED` in the scheduler callbacks (state=1 = present-but-unlinked observed mid-failure). Preload dodges it because worker-start compilation is single-coroutine: the parent links FIRST, so the child is born linked with no unlinked window.
+
+**The vulnerability rule — a class is at risk only when ALL THREE hold:**
+1. `coroutine-legacy` mode (the compile-hook CG-swap under coroutine concurrency)
+2. The class is **cold** — not loaded at boot or worker-start
+3. It is **first instantiated by multiple coroutines simultaneously** (first concurrent cold wave)
+
+**What's SAFE** (loaded single-coroutine before request concurrency, so durable):
+- Anything loaded at **boot** in `App::run()` before `start()`: the middleware stack (built at boot), route registration, `Store`/`Counter` backends configured at boot, session handlers registered at boot.
+- Anything loaded in **`onWorkerStart`** (single coroutine) — including the framework's request-path warmup.
+
+**What's VULNERABLE** (lazily autoloaded under concurrency — MUST be preloaded):
+- The request/response PSR stack — **already fixed**: `App::preloadRequestPathClasses()` warms `OpenSwoole\Core\Psr\{Message,Stream,Response,Request,ServerRequest,Uri,UploadedFile}`, `Middleware\StackHandler`, and the `ZealPHP\HTTP\{Request,Response,LazyServerRequest}` wrappers in `onWorkerStart`.
+- **User controllers / service classes** first hit concurrently.
+- **Lazily-instantiated framework classes** on a hot path: `WSRouter::room()`→`WS\Room`, task-handler classes, cold Redis pub/sub runner classes, etc.
+
+**THE PRELOAD SURFACE (three tiers, by who owns the class):**
+- **Framework hot-path classes** — `App::preloadRequestPathClasses()` warms the request/response stack in `onWorkerStart` (single-coroutine). When you add a framework feature whose class is instantiated lazily on a concurrent hot path, ADD IT HERE.
+- **A few specific app classes** — `App::preloadClasses(Foo::class, Bar::class)` before `App::run()` (also `onWorkerStart`). Use for known hot controllers/services.
+- **A user app's WHOLE class graph** — `App::preloadClassmap()` (+ `App::preloadDir($src)`). **These run in the MASTER, before `$server->start()` forks** — NOT in a worker coroutine. That placement is load-bearing: warming hundreds of arbitrary classes inside the coroutine `onWorkerStart` is UNSAFE — a class with load-time I/O yields, the worker accepts a request mid-warmup, and you get a cold concurrent compile → the duplicate-CE / unlinked race right back (empirically reintroduced HAZARD-2). The master has no scheduler, so every load is blocking+atomic; linked classes COW-fork into workers. `preloadClassmap()` is the structural fix for "the app is just the server, users include wherever they want" — it needs `composer dump-autoload --optimize` (a plain PSR-4 classmap is sparse). Validated: 0 failures on cold bursts with the framework preload disabled (classmap-only).
+
+**Limitations (be honest with users):** the classmap path only covers Composer-known classes (needs `--optimize`). A pure `require_once` legacy app (classic WordPress, no autoloader) can't be preloaded this way — run it in **`legacy-cgi` mode**, which is process-isolated and has NO coroutine race at all. The autoload serializer (`installCoroutineAutoloadSerializer`) remains the safety net but does NOT guarantee durable linking under the first cold wave; preloading is the reliable fix.
+
+**WHICH LEGACY PATTERNS HIT THIS:** only `coroutine-legacy` mode (coroutine concurrency) + a class with `extends`/`implements` + first-instantiated cold under the concurrent wave. `legacy-cgi`/`mixed`/sync modes (no per-request coroutine overlap) never hit it. Verify any preload with a first-concurrent-cold-wave burst (≥40 fresh `curl_multi` connections at a freshly-booted worker) — a gap shows as intermittent `Class not found` (unlinked) or `must be of type X, X given` (duplicate-CE) on the first wave only.
+
+The autoload serializer (`installCoroutineAutoloadSerializer`, HAZARD-2 fix) remains the safety net that prevents the duplicate-CE *crash*, but it does NOT guarantee durable registration under the first cold wave — preloading is the reliable fix. Pin coverage with a first-cold-wave burst test when touching the request/response path or adding hot-path classes.
+
 ### uopz Function Overrides
 
 At startup (`src/App.php:__construct()`), `uopz_set_return()` permanently replaces PHP built-ins:
