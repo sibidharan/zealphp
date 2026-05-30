@@ -4124,8 +4124,10 @@ class App
      *
      * @param array<string, mixed>|callable $options
      * @param callable|null $handler
+     * @param list<string> $methods Named-arg form of $options['methods'] (HTTP verbs); merged into $options.
+     * @param bool $raw Named-arg form of $options['raw'] (skip output buffering).
      */
-    public function route(string $path, $options = [], $handler = null): void
+    public function route(string $path, $options = [], $handler = null, array $methods = [], bool $raw = false): void
     {
         // If only two arguments are provided, assume second is handler and no options.
         // But it's good that we clearly specify all three arguments in usage.
@@ -4134,6 +4136,18 @@ class App
             $options = [];
         }
         assert(is_array($options));
+
+        // Named-argument convenience: `route('/p', handler: $fn, methods: ['GET','POST'])`.
+        // The `methods:` / `raw:` named args augment (and override) the $options
+        // array, so the array form (`['methods' => [...], 'raw' => true]`) and the
+        // named form are interchangeable — and compose. The `$methods` parameter is
+        // merged into $options here, then re-resolved into the local below.
+        if ($methods !== []) {
+            $options['methods'] = $methods;
+        }
+        if ($raw) {
+            $options['raw'] = true;
+        }
 
         // Default methods to GET if not specified
         $methods = $options['methods'] ?? ['GET'];
@@ -4161,8 +4175,10 @@ class App
      *
      * @param array<string, mixed>|callable $options
      * @param callable|null $handler
+     * @param list<string> $methods Named-arg form of $options['methods'] (HTTP verbs); merged into $options.
+     * @param bool $raw Named-arg form of $options['raw'] (skip output buffering).
      */
-    public function nsRoute(string $namespace, string $path, $options = [], $handler = null): void
+    public function nsRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false): void
     {
         // If only two arguments are provided, assume second is handler and no options.
         if (is_callable($options) && $handler === null) {
@@ -4170,6 +4186,14 @@ class App
             $options = [];
         }
         assert(is_array($options));
+
+        // Named-arg convenience: `methods:` / `raw:` augment the $options array.
+        if ($methods !== []) {
+            $options['methods'] = $methods;
+        }
+        if ($raw) {
+            $options['raw'] = true;
+        }
 
         // Prepend the namespace prefix to the path
         $namespace = trim($namespace, '/');
@@ -4211,8 +4235,10 @@ class App
      *
      * @param array<string, mixed>|callable $options
      * @param callable|null $handler
+     * @param list<string> $methods Named-arg form of $options['methods'] (HTTP verbs); merged into $options.
+     * @param bool $raw Named-arg form of $options['raw'] (skip output buffering).
      */
-    public function nsPathRoute(string $namespace, string $path, $options = [], $handler = null): void
+    public function nsPathRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false): void
     {
         // If only two arguments are provided, assume second is handler and no options.
         if (is_callable($options) && $handler === null) {
@@ -4220,6 +4246,14 @@ class App
             $options = [];
         }
         assert(is_array($options));
+
+        // Named-arg convenience: `methods:` / `raw:` augment the $options array.
+        if ($methods !== []) {
+            $options['methods'] = $methods;
+        }
+        if ($raw) {
+            $options['raw'] = true;
+        }
 
         // Prepend the namespace prefix to the path
         $namespace = trim($namespace, '/');
@@ -4270,8 +4304,10 @@ class App
      *
      * @param array<string, mixed>|callable $options
      * @param callable|null $handler
+     * @param list<string> $methods Named-arg form of $options['methods'] (HTTP verbs); merged into $options.
+     * @param bool $raw Named-arg form of $options['raw'] (skip output buffering).
      */
-    public function patternRoute(string $regex, $options = [], $handler = null): void
+    public function patternRoute(string $regex, $options = [], $handler = null, array $methods = [], bool $raw = false): void
     {
         // If only two arguments are provided
         if (is_callable($options) && $handler === null) {
@@ -4279,6 +4315,14 @@ class App
             $options = [];
         }
         assert(is_array($options));
+
+        // Named-arg convenience: `methods:` / `raw:` augment the $options array.
+        if ($methods !== []) {
+            $options['methods'] = $methods;
+        }
+        if ($raw) {
+            $options['raw'] = true;
+        }
 
         $methods = $options['methods'] ?? ['GET'];
         assert(is_array($methods));
