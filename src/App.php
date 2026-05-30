@@ -47,6 +47,8 @@ class App
     protected static array $processHandlers = [];
     /** True once the onWorkerStart hook for process-pool is wired. */
     protected static bool $processBootWired = false;
+    /** True once the per-worker coroutine autoload serializer is installed. */
+    protected static bool $autoloadSerializerInstalled = false;
     /** Unix timestamp the master process booted at (set by run()). */
     protected static ?int $bootedAt = null;
     /** Resolved worker counts after `run()` reads CLI/env/settings. */
@@ -118,6 +120,63 @@ class App
      * state (`$g->zealphp_response`, etc.) to be isolated too.
      */
     public static bool $coroutine_isolated_superglobals = false;
+
+    /**
+     * Extra classes to compile at worker start so they are NEVER cold-autoloaded
+     * under request concurrency. APPENDED to the framework's own request-path
+     * warmup set (see `preloadRequestPathClasses()`).
+     *
+     * WHY THIS EXISTS — in coroutine-legacy mode, a class first compiled by
+     * several overlapping coroutines at once (the first concurrent cold wave)
+     * can intermittently fail to register durably → transient `Class "X" not
+     * found` 500s on the cold burst, then fine once warm. Classes loaded at
+     * boot / worker-start (single-coroutine, no overlap) are immune. The
+     * framework warms its own request/response path; YOUR controllers, services,
+     * and any lazily-instantiated class on a hot path must be warmed too.
+     *
+     * Register BEFORE `App::run()`:
+     *   App::preloadClasses(App\Controller\Home::class, App\Service\Auth::class);
+     *
+     * No-op outside coroutine-legacy (other modes don't have the race).
+     *
+     * @var list<class-string>
+     */
+    public static array $preload_classes = [];
+
+    /**
+     * When true, warm EVERY class in Composer's classmap in the MASTER process
+     * (before `$server->start()` forks the workers), so a user app's own
+     * controllers/services (autoloaded on demand, deep inside handlers — "the
+     * app is just the server") are born LINKED and copy-on-write-forked into
+     * every worker, never compiled on the concurrent cold path. This is the
+     * structural fix for the present-but-unlinked inheritance race: the whole
+     * dependency graph is bound in a single process with NO coroutine scheduler,
+     * so nothing can yield and let a worker interleave a cold compile. Same idea
+     * as PHP's `opcache.preload`. Validated: 0 failures across cold bursts with
+     * the framework's own onWorkerStart preload disabled (classmap-only).
+     *
+     * Requires an OPTIMIZED Composer classmap to be complete — run
+     * `composer dump-autoload --optimize` (or `--classmap-authoritative`).
+     * A plain PSR-4 autoloader has a sparse classmap; for that, list hot classes
+     * with `App::preloadClasses()` or warm a tree with `App::preloadDir()`. A
+     * pure `require_once` legacy app (no Composer/autoloader at all — classic
+     * WordPress) can't be warmed this way; run it in `legacy-cgi` mode, which is
+     * process-isolated and has NO coroutine race in the first place.
+     *
+     * Off by default (it trades a slower BOOT + higher baseline RSS for the
+     * guarantee). Enable BEFORE `App::run()` via `App::preloadClassmap()`.
+     */
+    public static bool $preload_classmap = false;
+
+    /**
+     * Source directory trees to warm at worker start (PSR-4 roots / app source
+     * whose symbols a registered autoloader can resolve). Each `.php` file's
+     * declared symbols are extracted via the tokenizer and autoloaded+linked
+     * single-coroutine. Append via `App::preloadDir()`.
+     *
+     * @var list<string>
+     */
+    public static array $preload_dirs = [];
 
     /**
      * Process environment captured at boot (real `getenv()`), before the
@@ -1412,6 +1471,154 @@ class App
         }
         $port = $srv['SERVER_PORT'] ?? '';
         return is_scalar($port) && (string)$port === '443';
+    }
+
+    /**
+     * Build the per-request `$_SERVER` array from an OpenSwoole request —
+     * mod_php parity. Merges `$request->server` (upper-cased keys), the
+     * `HTTP_*` header vars, and the constant CGI keys mod_php always provides
+     * (GATEWAY_INTERFACE, REQUEST_SCHEME, SCRIPT_FILENAME, SERVER_SOFTWARE, …).
+     *
+     * Single source of truth for `$_SERVER`: shared by the OnRequest populate
+     * path AND `rebindRequestInput()`, so both produce a byte-identical server
+     * array. Pure function of the request — no side effects, safe to call
+     * repeatedly within one request (the coroutine-legacy re-assert does).
+     *
+     * @return array<string, bool|float|int|string|null>
+     */
+    private static function buildServerVars(\ZealPHP\HTTP\Request $request): array
+    {
+        /** @var string|null $serverSoftware */
+        static $serverSoftware = null;
+        if ($serverSoftware === null) {
+            $serverSoftware = 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion();
+        }
+
+        // Build $_SERVER — upper-case OpenSwoole's lower-cased keys. OpenSwoole's
+        // $request->server is typed mixed-valued; CGI server vars are always
+        // scalars, so coerce defensively to keep $_SERVER scalar|null (no nested
+        // arrays/objects) — matching RequestContext::$server's contract.
+        /** @var array<string, bool|float|int|string|null> $srv */
+        $srv = [];
+        if ($request->server) {
+            foreach ($request->server as $sk => $sv) {
+                $srv[strtoupper($sk)] = is_scalar($sv) || $sv === null ? $sv : null;
+            }
+        }
+        if ($request->header) {
+            foreach ($request->header as $key => $value) {
+                $srv['HTTP_' . strtr(strtoupper($key), '-', '_')] = $value;
+            }
+        }
+        $srv += [
+            'REQUEST_METHOD' => 'GET',
+            'REQUEST_URI' => '/',
+            'SCRIPT_NAME' => '/app.php',
+            'SERVER_NAME' => $srv['HTTP_HOST'] ?? site_host(),
+            'DOCUMENT_ROOT' => self::resolveDocumentRoot(),
+            'PHP_SELF' => App::$default_php_self,
+            'SERVER_SOFTWARE' => $serverSoftware,
+        ];
+        if (!isset($srv['SCRIPT_FILENAME'])) {
+            // Values are scalar|null (server vars coerced above); ?? '' removes
+            // null, so a direct (string) cast is safe.
+            $srv['SCRIPT_FILENAME'] = (string)($srv['DOCUMENT_ROOT'] ?? '')
+                . (string)($srv['PHP_SELF'] ?? '');
+        }
+
+        if ($srv['REQUEST_METHOD'] === 'POST' && isset($srv['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
+            $srv['REQUEST_METHOD'] = (string)$srv['HTTP_X_HTTP_METHOD_OVERRIDE'];
+        }
+        // Apache HostnameLookups: populate REMOTE_HOST via reverse DNS when
+        // explicitly enabled. WARNING — blocking call (OpenSwoole's coroutine
+        // hook converts gethostbyaddr() to non-blocking, but it's still a
+        // measurable per-request cost). Off by default since Apache 1.3.
+        if (App::$hostname_lookups && isset($srv['REMOTE_ADDR'])) {
+            $remote = (string)$srv['REMOTE_ADDR'];
+            if ($remote !== '') {
+                $host = @gethostbyaddr($remote);
+                if ($host !== false && $host !== $remote) {
+                    $srv['REMOTE_HOST'] = $host;
+                }
+            }
+        }
+        // mod_php parity: keys OpenSwoole's $request->server doesn't provide.
+        // GATEWAY_INTERFACE is the CGI/1.1 constant mod_php always sets;
+        // REQUEST_SCHEME + HTTPS are derived from the request (honoring
+        // X-Forwarded-Proto behind a trusted proxy). HTTPS is only set under
+        // TLS, matching mod_php (the key is absent on plain HTTP).
+        $srv += ['GATEWAY_INTERFACE' => 'CGI/1.1'];
+        if (self::requestIsHttps($srv)) {
+            $srv['REQUEST_SCHEME'] = 'https';
+            $srv['HTTPS'] = $srv['HTTPS'] ?? 'on';
+        } else {
+            $srv['REQUEST_SCHEME'] = $srv['REQUEST_SCHEME'] ?? 'http';
+        }
+        return $srv;
+    }
+
+    /**
+     * Re-establish the request-input superglobals ($_GET / $_POST / $_COOKIE /
+     * $_SERVER / $_FILES / $_REQUEST) FROM the per-coroutine OpenSwoole request,
+     * in the coroutine that is about to read them. Called right before every
+     * handler / included-file dispatch in coroutine-legacy mode.
+     *
+     * WHY THIS EXISTS — coroutine-legacy populates these as PROCESS-GLOBAL
+     * arrays in the OnRequest closure (so unmodified `$_GET['x']` code works).
+     * ext-zealphp's scheduler snapshots/restores them per coroutine across
+     * yields, but the snapshot is keyed by an OpenSwoole coroutine id that
+     * COLLIDES for requests multiplexed onto one shared connection coroutine
+     * (they all observe cid=2). Under request overlap, request B's populate
+     * overwrites request A's process-global $_GET before A's handler reads it
+     * → cross-request misroute (a response built for B answered to A).
+     *
+     * The per-coroutine `RequestContext` ($g) and its `zealphp_request` ARE
+     * reliably isolated — stored via `OpenSwoole\Coroutine::getContext()`, not
+     * the colliding cid. Re-deriving the superglobals from `$g->zealphp_request`
+     * immediately before dispatch — with NO intervening yield — pins them to
+     * THIS request regardless of what a concurrent coroutine wrote to the
+     * process globals.
+     *
+     * Uses ext-zealphp's `zealphp_request_input_set`, which writes BOTH
+     * EG(symbol_table) AND PG(http_globals) so the auto-global JIT (which reads
+     * PG) observes the corrected values too. No-op when coroutine-legacy
+     * isolation is off or the ext primitive is unavailable (the populate in the
+     * OnRequest closure already covers the non-overlapping single-worker case).
+     *
+     * @param array<string, mixed>|null $serverOverlay Per-file `$_SERVER` keys
+     *        (PHP_SELF / SCRIPT_NAME / SCRIPT_FILENAME) the caller set for an
+     *        included file — these WIN over the request-derived rebuild so the
+     *        included file sees its own canonical values, not the route's. Pass
+     *        null at the route-dispatch boundary (pristine request `$_SERVER`).
+     */
+    public static function rebindRequestInput(RequestContext $g, ?array $serverOverlay = null): void
+    {
+        if (!self::$coroutine_isolated_superglobals) {
+            return;
+        }
+        if (!\function_exists('zealphp_request_input_set')) {
+            return;
+        }
+        $req = $g->zealphp_request;
+        if (!$req instanceof \ZealPHP\HTTP\Request) {
+            return;
+        }
+        /** @var array<string, mixed> $get */
+        $get = $req->get ?? [];
+        /** @var array<string, mixed> $post */
+        $post = $req->post ?? [];
+        /** @var array<string, mixed> $cookie */
+        $cookie = $req->cookie ?? [];
+        /** @var array<string, mixed> $files */
+        $files = $req->files ?? [];
+        $server = self::buildServerVars($req);
+        if ($serverOverlay !== null) {
+            // Overlay wins: preserve per-include PHP_SELF / SCRIPT_NAME /
+            // SCRIPT_FILENAME over the request-derived defaults.
+            $server = $serverOverlay + $server;
+        }
+        $request = $get + $post;
+        (\zealphp_request_input_set(...))($get, $post, $cookie, $server, $files, $request);
     }
 
     /**
@@ -3172,6 +3379,362 @@ class App
     }
 
     /**
+     * Coroutine-aware autoload serializer — the HAZARD-2 correctness fix for
+     * coroutine-legacy mode.
+     *
+     * THE RACE: under `silentRedeclare` the ext isolates `EG(in_autoload)` per
+     * coroutine, so two concurrent coroutines that both reference an as-yet-
+     * unloaded class each enter autoload, each compile it, and the first-wins
+     * merge orphans the loser class-entry. A loser-CE object can then escape to
+     * `new`, while the boot-compiled closure's type-hint cached the winner CE →
+     * `TypeError: …must be of type X, X given` → uncaught fatal → the worker
+     * dies → OpenSwoole respawns it → the fresh worker re-races its first
+     * concurrent batch → crash → an endless respawn cascade. (ASAN/Valgrind both
+     * confirm this is memory-safe — it is a class-identity correctness bug, not
+     * corruption.)
+     *
+     * THE FIX: serialize autoload of any given class name so EXACTLY ONE
+     * coroutine compiles it; the rest wait and resolve to the single winner.
+     * The per-class gate channels live in a `use`-captured object — object
+     * property mutations bypass `coroutineGlobalsIsolation`/static isolation
+     * (which is why a `$GLOBALS`- or `static`-backed gate does NOT work here:
+     * each coroutine would see its own isolated copy and the gate would never
+     * actually be shared).
+     *
+     * Installed per worker via `onWorkerStart`: it captures the autoloaders the
+     * app registered at bootstrap, unregisters them, and re-registers ONE
+     * wrapper that runs them under the gate. Generic — no Composer-specific API.
+     * Idempotent via a class-static flag (class statics are process-global; only
+     * function-local `static $x` is per-coroutine isolated).
+     */
+    private static function installCoroutineAutoloadSerializer(): void
+    {
+        if (self::$autoloadSerializerInstalled) {
+            return;
+        }
+        self::$autoloadSerializerInstalled = true;
+
+        $existing = \spl_autoload_functions() ?: [];
+        foreach ($existing as $fn) {
+            \spl_autoload_unregister($fn);
+        }
+
+        // Shared per-worker gate registry. A typed anonymous-class instance:
+        // all coroutines see the SAME object (captured by handle), and its
+        // property mutations are NOT subject to per-coroutine $GLOBALS/static
+        // isolation (an object's storage is neither a superglobal nor a
+        // function-local static). A $GLOBALS- or static-backed registry does
+        // NOT work here — each coroutine would get its own isolated copy.
+        $gates = new class {
+            /** @var array<string, \OpenSwoole\Coroutine\Channel> class (lc) → gate */
+            public array $ch = [];
+            /** @var array<string, int> class (lc) → cid currently loading it */
+            public array $owner = [];
+        };
+
+        $runChain = static function (string $class) use ($existing): bool {
+            foreach ($existing as $fn) {
+                $fn($class);
+                if (self::symbolDefined($class)) {
+                    return true;
+                }
+            }
+            return self::symbolDefined($class);
+        };
+
+        // spl_autoload_register callbacks are void — the engine re-checks the
+        // class table after the callback runs. We use $runChain purely for its
+        // side effect (defining the symbol); control flow is early returns.
+        \spl_autoload_register(static function (string $class) use ($runChain, $gates): void {
+            if (self::symbolDefined($class)) {
+                return;
+            }
+            // Outside a coroutine (master/boot): no channels — load directly.
+            if (!\class_exists(\OpenSwoole\Coroutine::class) || \OpenSwoole\Coroutine::getCid() < 0) {
+                $runChain($class);
+                return;
+            }
+            $cid = \OpenSwoole\Coroutine::getCid();
+            if (isset($gates->ch[$class])) {
+                // RE-ENTRANCY GUARD: if THIS coroutine already owns the gate for
+                // $class, a nested autoload of it fired mid-load (e.g. a warning
+                // during the include routed through the error handler, which
+                // referenced $class again). We must NOT wait on our own gate —
+                // that self-blocks and recurses until the stack blows. Fall back
+                // to whatever is defined so far; the outer load completes + wakes.
+                if (($gates->owner[$class] ?? -1) === $cid) {
+                    return;
+                }
+                // Another coroutine is loading it — wait, then re-signal the next.
+                $gates->ch[$class]->pop(5.0);
+                $gates->ch[$class]->push(true);
+                if (self::symbolDefined($class)) {
+                    return;
+                }
+                // Wait timed out and the class still isn't defined (the loader is
+                // pathologically slow or died). Don't fail — load it ourselves as
+                // a last resort. A duplicate compile here is memory-safe: the
+                // ext's first-wins merge orphans the loser CE during autoload
+                // (ext-zealphp 0.3.20), so correctness/safety hold either way.
+                $runChain($class);
+                return;
+            }
+            // We are the first — claim the gate (atomic: nothing yields between
+            // the isset() check above and this assignment), load, then wake.
+            $ch = new \OpenSwoole\Coroutine\Channel(1);
+            $gates->ch[$class] = $ch;
+            $gates->owner[$class] = $cid;
+            try {
+                $runChain($class);
+            } finally {
+                unset($gates->owner[$class]);
+                $ch->push(true);
+            }
+        }, true, true);
+    }
+
+    /**
+     * Warm the per-request framework classes at worker start so the first
+     * concurrent request wave never autoloads them under coroutine overlap.
+     * The OnRequest closure and CoSessionManager instantiate the Request /
+     * Response wrappers and LazyServerRequest per request; cold concurrent
+     * autoload of these races to a transient "class not found" Fatal that hangs
+     * the client. Loaded here (worker start = single coroutine), they are
+     * defined before any request coroutine runs. See the onWorkerStart
+     * registration in run() for the full failure mode.
+     */
+    private static function preloadRequestPathClasses(): void
+    {
+        /** @var list<class-string> $classes */
+        $classes = [
+            // OpenSwoole PSR-7 message stack — every class the response /
+            // request emission path (new Response(), LazyServerRequest, the
+            // middleware StackHandler) instantiates per request.
+            \OpenSwoole\Core\Psr\Message::class,
+            \OpenSwoole\Core\Psr\Stream::class,
+            \OpenSwoole\Core\Psr\Response::class,
+            \OpenSwoole\Core\Psr\Request::class,
+            \OpenSwoole\Core\Psr\ServerRequest::class,
+            \OpenSwoole\Core\Psr\Uri::class,
+            \OpenSwoole\Core\Psr\UploadedFile::class,
+            \OpenSwoole\Core\Psr\Middleware\StackHandler::class,
+            // Framework request/response wrappers.
+            \ZealPHP\HTTP\Request::class,
+            \ZealPHP\HTTP\Response::class,
+            \ZealPHP\HTTP\LazyServerRequest::class,
+        ];
+        foreach ($classes as $c) {
+            \class_exists($c);
+        }
+        // User-registered hot-path classes (controllers, services, any class
+        // lazily instantiated under request concurrency). class_exists() with
+        // autoload triggers the loader once here, in the single-coroutine worker
+        // start — never on the concurrent cold path.
+        foreach (self::$preload_classes as $c) {
+            self::warmClass($c);
+        }
+    }
+
+    /**
+     * Bulk warming (whole Composer classmap + registered directory trees) —
+     * runs in the MASTER process before `$server->start()`, NOT in a worker
+     * coroutine. This is load-bearing: warming hundreds/thousands of arbitrary
+     * classes inside the coroutine `onWorkerStart` is unsafe — a class with
+     * load-time I/O (or anything the runtime hooks coroutinize) YIELDS, and the
+     * worker then accepts requests MID-WARMUP → cold concurrent compile → the
+     * duplicate-CE / unlinked race we are trying to avoid (empirically: a
+     * classmap warm in onWorkerStart reintroduced HAZARD-2 TypeErrors). The
+     * master has no coroutine scheduler, so every load is blocking + atomic; the
+     * warmed (linked) classes are then COW-forked into every worker. Same model
+     * as PHP's `opcache.preload`. No-op unless `preloadClassmap()`/`preloadDir()`
+     * registered something.
+     */
+    private static function warmBulkPreloads(): void
+    {
+        foreach (self::$preload_dirs as $dir) {
+            self::warmDir($dir);
+        }
+        if (self::$preload_classmap) {
+            self::warmComposerClassmap();
+        }
+    }
+
+    /**
+     * Trigger one symbol's autoload+link, swallowing load errors (a class with
+     * an unmet dependency must not abort worker start). class_exists() fires the
+     * registered autoloader for classes/interfaces/traits/enums alike.
+     */
+    private static function warmClass(string $name): void
+    {
+        try {
+            \class_exists($name);
+        } catch (\Throwable $e) {
+            // A symbol that can't load standalone (missing parent/ext) — skip it;
+            // it simply won't be warmed. elog at debug so it's diagnosable.
+            elog('[preload] skip ' . $name . ': ' . $e->getMessage(), 'debug');
+        }
+    }
+
+    /**
+     * Register classes to compile at worker start so they are never cold-
+     * autoloaded under request concurrency (coroutine-legacy mode). Call BEFORE
+     * `App::run()`. Idempotent; duplicates are harmless. See `App::$preload_classes`
+     * for the full rationale and the failure mode it prevents.
+     *
+     * @param class-string ...$classes
+     */
+    public static function preloadClasses(string ...$classes): void
+    {
+        foreach ($classes as $c) {
+            self::$preload_classes[] = $c;
+        }
+    }
+
+    /**
+     * Opt into warming the ENTIRE Composer classmap at worker start — the
+     * structural fix so a user app's own classes (autoloaded on demand inside
+     * handlers) are born LINKED, never compiled on the concurrent cold path.
+     * Call BEFORE `App::run()`. Requires `composer dump-autoload --optimize` for
+     * the classmap to be complete. See `App::$preload_classmap`.
+     */
+    public static function preloadClassmap(bool $enable = true): void
+    {
+        self::$preload_classmap = $enable;
+    }
+
+    /**
+     * Register a source directory to warm at worker start: every class /
+     * interface / trait / enum declared under `$dir` (recursively) is
+     * autoloaded+linked single-coroutine before request concurrency. Use this
+     * for PSR-4 apps WITHOUT an optimized classmap, or any app whose own
+     * autoloader (not Composer's classmap) resolves these symbols. Call BEFORE
+     * `App::run()`. The symbol must still be resolvable by a registered
+     * autoloader — a pure `require_once` legacy app (no autoloader) won't warm
+     * this way; run such apps in `legacy-cgi` mode (no coroutine race) instead.
+     */
+    public static function preloadDir(string $dir): void
+    {
+        self::$preload_dirs[] = $dir;
+    }
+
+    /**
+     * Warm every class Composer's registered loaders know about. Iterates the
+     * classmap of each registered `Composer\Autoload\ClassLoader` and triggers
+     * its autoload (single-coroutine at worker start → whole hierarchy linked).
+     */
+    private static function warmComposerClassmap(): void
+    {
+        if (!\class_exists(\Composer\Autoload\ClassLoader::class, false)) {
+            elog('[preload] preloadClassmap: Composer ClassLoader unavailable — skipped', 'debug');
+            return;
+        }
+        $count = 0;
+        foreach (\Composer\Autoload\ClassLoader::getRegisteredLoaders() as $loader) {
+            foreach (array_keys($loader->getClassMap()) as $class) {
+                self::warmClass((string)$class);
+                $count++;
+            }
+        }
+        elog('[preload] preloadClassmap warmed ' . $count . ' classmap symbols', 'debug');
+    }
+
+    /**
+     * Warm every PHP-declared symbol under a directory tree. Reads each `.php`
+     * file and extracts its `namespace` + `class|interface|trait|enum` names via
+     * the tokenizer (no file is executed), then triggers each symbol's autoload.
+     */
+    private static function warmDir(string $dir): void
+    {
+        $real = realpath($dir);
+        if ($real === false || !is_dir($real)) {
+            elog('[preload] preloadDir: not a directory: ' . $dir, 'debug');
+            return;
+        }
+        $count = 0;
+        $it = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($real, \FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($it as $file) {
+            if (!$file instanceof \SplFileInfo || strtolower($file->getExtension()) !== 'php') {
+                continue;
+            }
+            foreach (self::symbolsInFile($file->getPathname()) as $symbol) {
+                self::warmClass($symbol);
+                $count++;
+            }
+        }
+        elog('[preload] preloadDir(' . $real . ') warmed ' . $count . ' symbols', 'debug');
+    }
+
+    /**
+     * Extract fully-qualified class/interface/trait/enum names declared in a PHP
+     * file via the tokenizer — without executing it. Single namespace per file
+     * is the common case; multiple namespaces are handled.
+     *
+     * @return list<string>
+     */
+    private static function symbolsInFile(string $path): array
+    {
+        $src = @file_get_contents($path);
+        if ($src === false || $src === '') {
+            return [];
+        }
+        $tokens = \PhpToken::tokenize($src);
+        $symbols = [];
+        $namespace = '';
+        $n = count($tokens);
+        for ($i = 0; $i < $n; $i++) {
+            $id = $tokens[$i]->id;
+            if ($id === T_NAMESPACE) {
+                $ns = '';
+                for ($j = $i + 1; $j < $n; $j++) {
+                    $t = $tokens[$j];
+                    if ($t->id === T_NAME_QUALIFIED || $t->id === T_STRING || $t->id === T_NS_SEPARATOR) {
+                        $ns .= $t->text;
+                    } elseif ($t->text === '{' || $t->text === ';') {
+                        break;
+                    }
+                }
+                $namespace = trim($ns, '\\');
+            } elseif ($id === T_CLASS || $id === T_INTERFACE || $id === T_TRAIT || $id === T_ENUM) {
+                // Skip `::class`, anonymous classes, and `class` used as a method/const name.
+                $prev = $i > 0 ? $tokens[$i - 1] : null;
+                if ($prev && $prev->id === T_DOUBLE_COLON) {
+                    continue;
+                }
+                for ($j = $i + 1; $j < $n; $j++) {
+                    $t = $tokens[$j];
+                    if ($t->id === T_WHITESPACE) {
+                        continue;
+                    }
+                    if ($t->id === T_STRING) {
+                        $symbols[] = $namespace !== '' ? $namespace . '\\' . $t->text : $t->text;
+                    }
+                    break;
+                }
+            }
+        }
+        return $symbols;
+    }
+
+    /**
+     * True if $name is already defined as a class, interface, or trait
+     * (autoload disabled). Extracted so the autoload serializer can re-test
+     * "is it loaded now?" after a concurrent load.
+     *
+     * @phpstan-impure — reads the process-global class/interface/trait tables,
+     * which a CONCURRENT coroutine's autoload mutates between calls; the result
+     * is NOT constant across repeated calls in the same scope (that is the whole
+     * point of the post-wait re-check in the serializer).
+     */
+    private static function symbolDefined(string $name): bool
+    {
+        return \class_exists($name, false)
+            || \interface_exists($name, false)
+            || \trait_exists($name, false);
+    }
+
+    /**
      * Register a per-worker shutdown hook. Runs inside the worker process when
      * it exits (`max_request` recycle, graceful shutdown, or reload), BEFORE the
      * process terminates — the reliable place to flush per-worker state
@@ -3827,19 +4390,29 @@ class App
         // Mode 4: $_SESSION reference is established in zeal_session_start()
         // ($_SESSION = &$g->session) so writes go directly to $g->session.
         //
-        // ext-zealphp's PG(http_globals) update handles the auto-global JIT
-        // at the driver level. But included files may have cached the
-        // auto-global from a prior coroutine's EG. Refresh here too so
-        // the included file's scope sees current request data.
-        if (self::$coroutine_isolated_superglobals && $g->openswoole_request !== null) {
-            $req = $g->openswoole_request;
-            $qs = is_string($g->server['QUERY_STRING'] ?? null) ? $g->server['QUERY_STRING'] : '';
-            parse_str($qs, $_GET);
-            $_POST    = is_array($req->post) ? $req->post : [];
-            $_COOKIE  = is_array($req->cookie) ? $req->cookie : [];
-            $_FILES   = is_array($req->files) ? $req->files : [];
-            $_REQUEST = $_GET + $_POST;
-            $_SERVER  = $g->server;
+        // Re-establish the request-input superglobals from THIS coroutine's
+        // request before the included file reads them. An included file may have
+        // cached the auto-global from a prior coroutine's EG, and the
+        // process-global populate in the OnRequest closure can be overwritten by
+        // a concurrent overlapping request (the colliding-cid snapshot key).
+        // rebindRequestInput() pins $_GET/$_POST/$_COOKIE/$_SERVER/$_FILES/
+        // $_REQUEST to this request via ext-zealphp's EG+PG dual-write. No-op
+        // outside coroutine-legacy.
+        if (self::$coroutine_isolated_superglobals) {
+            // Preserve the per-include $_SERVER overrides (PHP_SELF / SCRIPT_NAME
+            // / SCRIPT_FILENAME) the caller set into $g->server immediately
+            // before this call (no intervening yield → reliably this request's),
+            // so the request-derived rebuild below doesn't reset them to the
+            // route's values.
+            $serverOverlay = null;
+            $curServer = $g->server;
+            foreach (['PHP_SELF', 'SCRIPT_NAME', 'SCRIPT_FILENAME'] as $sk) {
+                if (array_key_exists($sk, $curServer)) {
+                    $serverOverlay ??= [];
+                    $serverOverlay[$sk] = $curServer[$sk];
+                }
+            }
+            self::rebindRequestInput($g, $serverOverlay);
         }
 
         // Apache/mod_php and php-cli run a script with CWD = the script's own
@@ -6808,6 +7381,39 @@ HELP;
                 (\zealphp_process_state_snapshot(...))();
             });
         }
+
+        // Warm the per-request framework classes the OnRequest closure +
+        // CoSessionManager instantiate (the Request / Response wrappers and
+        // LazyServerRequest). They are otherwise cold until the first request,
+        // so the first CONCURRENT request wave autoloads them under coroutine
+        // overlap — racing the loader to a transient "class not found" Fatal in
+        // the onRequest coroutine that sends NO response and hangs the client
+        // (observed: ~30% of a 40-wide cold burst hang for the full request
+        // timeout). Worker start is single-coroutine, so warming them here is
+        // race-free; every request coroutine then finds them already defined.
+        // The autoload serializer below remains the safety net for app/user
+        // classes; the framework's own hot-path classes are warmed up front so
+        // they never reach it.
+        if ($enableCoroutine) {
+            self::onWorkerStart(function () {
+                self::preloadRequestPathClasses();
+            });
+        }
+
+        // HAZARD-2 correctness fix: serialize concurrent same-class autoload.
+        // Under silentRedeclare the ext isolates EG(in_autoload) per coroutine,
+        // so concurrent coroutines can each compile the same not-yet-loaded
+        // class; the first-wins merge orphans the loser CE, a loser-CE object
+        // escapes to `new`, and the type-hint (cached to the winner CE) throws
+        // "must be of type X, X given" → fatal → worker death → respawn cascade.
+        // The serializer gates autoload per class name so exactly one coroutine
+        // compiles each class. Registered LAST so it wraps the final autoloader
+        // set (after any app/bootstrap onWorkerStart autoloader registration).
+        if (self::$silent_redeclare && $enableCoroutine) {
+            self::onWorkerStart(function () {
+                self::installCoroutineAutoloadSerializer();
+            });
+        }
         // @codeCoverageIgnoreEnd
 
         // Transparent coroutine-safe exec family. Overriding `shell_exec` ALSO
@@ -7140,11 +7746,6 @@ HELP;
 
         $server->on("request",new $SessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) {
             $g = RequestContext::instance();
-            /** @var string|null $serverSoftware */
-            static $serverSoftware = null;
-            if ($serverSoftware === null) {
-                $serverSoftware = 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion();
-            }
 
             $g->status = 200;
             /** @var array<string, mixed> $get */
@@ -7161,67 +7762,10 @@ HELP;
             $g->cookie = $cookie;
             $g->files = $files;
 
-            // Build $_SERVER — use array_change_key_case instead of foreach+strtoupper
-            /** @var array<string, bool|float|int|string|null> $srv */
-            $srv = [];
-            if ($request->server) {
-                foreach ($request->server as $sk => $sv) {
-                    $srv[strtoupper($sk)] = $sv;
-                }
-            }
-            if ($request->header) {
-                foreach ($request->header as $key => $value) {
-                    $srv['HTTP_' . strtr(strtoupper($key), '-', '_')] = $value;
-                }
-            }
-            $srv += [
-                'REQUEST_METHOD' => 'GET',
-                'REQUEST_URI' => '/',
-                'SCRIPT_NAME' => '/app.php',
-                'SERVER_NAME' => $srv['HTTP_HOST'] ?? site_host(),
-                'DOCUMENT_ROOT' => self::resolveDocumentRoot(),
-                'PHP_SELF' => App::$default_php_self,
-                'SERVER_SOFTWARE' => $serverSoftware,
-            ];
-            if (!isset($srv['SCRIPT_FILENAME'])) {
-                $docRoot = $srv['DOCUMENT_ROOT'] ?? '';
-                $phpSelf = $srv['PHP_SELF'] ?? '';
-                $srv['SCRIPT_FILENAME'] = (is_scalar($docRoot) ? (string)$docRoot : '')
-                    . (is_scalar($phpSelf) ? (string)$phpSelf : '');
-            }
-
-            if ($srv['REQUEST_METHOD'] === 'POST' && isset($srv['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
-                $override = $srv['HTTP_X_HTTP_METHOD_OVERRIDE'];
-                $srv['REQUEST_METHOD'] = is_scalar($override) ? (string)$override : null;
-            }
-            // Apache HostnameLookups: populate REMOTE_HOST via reverse DNS when
-            // explicitly enabled. WARNING — blocking call (OpenSwoole's coroutine
-            // hook converts gethostbyaddr() to non-blocking, but it's still a
-            // measurable per-request cost). Off by default since Apache 1.3.
-            if (App::$hostname_lookups && isset($srv['REMOTE_ADDR'])) {
-                $remoteRaw = $srv['REMOTE_ADDR'];
-                $remote = is_scalar($remoteRaw) ? (string)$remoteRaw : '';
-                if ($remote !== '') {
-                    $host = @gethostbyaddr($remote);
-                    if ($host !== false && $host !== $remote) {
-                        $srv['REMOTE_HOST'] = $host;
-                    }
-                }
-            }
-            // mod_php parity: keys OpenSwoole's $request->server doesn't provide.
-            // GATEWAY_INTERFACE is the CGI/1.1 constant mod_php always sets;
-            // REQUEST_SCHEME + HTTPS are derived from the request (honoring
-            // X-Forwarded-Proto behind a trusted proxy). HTTPS is only set under
-            // TLS, matching mod_php (the key is absent on plain HTTP).
-            $srv += ['GATEWAY_INTERFACE' => 'CGI/1.1'];
-            if (self::requestIsHttps($srv)) {
-                $srv['REQUEST_SCHEME'] = 'https';
-                $srv['HTTPS'] = $srv['HTTPS'] ?? 'on';
-            } else {
-                $srv['REQUEST_SCHEME'] = $srv['REQUEST_SCHEME'] ?? 'http';
-            }
-            /** @var array<string, bool|float|int|string|null> $srvFinal */
-            $srvFinal = $srv;
+            // $_SERVER — built by the shared buildServerVars() so the OnRequest
+            // populate and the coroutine-legacy rebindRequestInput() re-assert
+            // produce a byte-identical server array (single source of truth).
+            $srvFinal = self::buildServerVars($request);
             $g->server = $srvFinal;
 
             // v0.2.27 — superglobals(true) mode populates PHP's $_GET, $_POST,
@@ -7538,6 +8082,14 @@ HELP;
             });
         }
 
+        // Master-side bulk class preload (opt-in via preloadClassmap()/
+        // preloadDir()): warm large/arbitrary class sets HERE — in the master,
+        // before fork, where no coroutine scheduler exists — so a class with
+        // load-time I/O can't yield and let a worker accept requests mid-warmup
+        // (which reintroduces the cold-compile race). Workers inherit the linked
+        // classes via copy-on-write fork.
+        self::warmBulkPreloads();
+
         elog("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
         $server->start();
     }
@@ -7581,6 +8133,10 @@ class ResponseMiddleware implements MiddlewareInterface
         }
 
         try {
+            // Pin request-input superglobals to THIS coroutine's request before
+            // the handler reads them (coroutine-legacy overlap defence). No-op
+            // in every other mode.
+            App::rebindRequestInput($g);
             $object = call_user_func_array($handler, $invokeArgs);
             if ($object instanceof ResponseInterface) {
                 return $object;
@@ -7721,6 +8277,10 @@ class ResponseMiddleware implements MiddlewareInterface
         }
 
         try {
+            // Pin request-input superglobals to THIS coroutine's request before
+            // the handler reads them (coroutine-legacy overlap defence). No-op
+            // in every other mode.
+            App::rebindRequestInput($g);
             ob_start();
             $object = call_user_func_array($handler, $invokeArgs);
 

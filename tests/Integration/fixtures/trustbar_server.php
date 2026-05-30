@@ -18,6 +18,7 @@ require dirname(__DIR__, 3) . '/vendor/autoload.php';
 use ZealPHP\App;
 
 $port = (int)($argv[1] ?? 9820);
+$workers = (int)($argv[2] ?? 2);   // overridable so slow (ASAN/Valgrind) builds get enough capacity
 App::mode(App::MODE_COROUTINE_LEGACY);
 App::defineIsolation(true);
 // NOTE: Stage 5 (function-local static $x isolation) is NOT enabled explicitly
@@ -46,7 +47,13 @@ $app->route('/probe', function ($request, $response) use ($cur, $max) {
     $tb_glob = $x;                              // $GLOBALS
     if (!defined('TB_TENANT')) define('TB_TENANT', $x); // constant
     putenv("TB_ENV=$x");                        // process env (process-level)
-    ini_set('default_charset', $x);             // ini
+    // ini probe: `user_agent` (PHP_INI_ALL, arbitrary string, isolated by
+    // zealphp_ini_isolatable like every non-session directive). Deliberately NOT
+    // `default_charset` — a non-encoding token there trips PHP 8.4's strict
+    // output-encoding validation (an fwrite "Unknown encoding" warning storm),
+    // an 8.4/app concern unrelated to coroutine isolation that would mask the
+    // real result. `user_agent` round-trips cleanly and isolates identically.
+    ini_set('user_agent', $x);                  // ini
 
     header("X-TB: $x");
     setcookie('tbc', $x);
@@ -69,7 +76,7 @@ $app->route('/probe', function ($request, $response) use ($cur, $max) {
         'class_static' => TBClass::$user === $x,
         '$GLOBALS'     => ($tb_glob ?? null) === $x,
         'constant'     => (defined('TB_TENANT') ? constant('TB_TENANT') : null) === $x,
-        'ini_set'      => ini_get('default_charset') === $x,
+        'ini_set'      => ini_get('user_agent') === $x,
         'bootstrap'    => ($tb_boot ?? null) === 'BOOT',
         'fn_static'    => tb_static(null) === $x,   // Stage 5 — now isolated (opt-in)
         'putenv'       => getenv('TB_ENV') === $x,
@@ -77,4 +84,4 @@ $app->route('/probe', function ($request, $response) use ($cur, $max) {
 });
 
 $app->route('/ping', fn() => ['ok'=>true]);
-$app->run(['worker_num'=>2, 'task_worker_num'=>0, 'log_level'=>5]);
+$app->run(['worker_num'=>$workers, 'task_worker_num'=>0, 'log_level'=>5]);
