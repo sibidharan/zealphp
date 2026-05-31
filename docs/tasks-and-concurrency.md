@@ -2,7 +2,7 @@
 
 ZealPHP embraces OpenSwoole’s asynchronous primitives to help you build responsive applications that scale across CPU cores. This document outlines the concurrency toolbox provided by the framework and when to use each option.
 
-> **Lifecycle safety (v0.2.27).** `App::run()` validates the configured lifecycle combination at boot. `superglobals(true) + enableCoroutine(true)` and `superglobals(true) + hookAll(non-zero)` throw `RuntimeException` **only when ext-zealphp is absent** — with ext-zealphp loaded, those two combinations are the supported `App::mode('coroutine-legacy')` shape (per-coroutine superglobal isolation via ext-zealphp's scheduler hooks). `superglobals(false) + enableCoroutine(false)` always throws. See [runtime-architecture.md](runtime-architecture.md) for the full mode matrix.
+> **Lifecycle safety (v0.2.27).** `App::run()` validates the configured lifecycle combination at boot. `superglobals(true) + enableCoroutine(true)` and `superglobals(true) + hookAll(non-zero)` throw `RuntimeException` **only when ext-zealphp is absent** — with ext-zealphp loaded, those two combinations are the supported `App::mode(App::MODE_COROUTINE_LEGACY)` shape (per-coroutine superglobal isolation via ext-zealphp's scheduler hooks). `superglobals(false) + enableCoroutine(false)` always throws. See [runtime-architecture.md](runtime-architecture.md) for the full mode matrix.
 
 ## Concurrency lifecycle — `App::mode()` and `App::isolation()`
 
@@ -10,10 +10,10 @@ ZealPHP's concurrency model is selected once, before `App::run()`, via the one-c
 
 | Preset | Typical use |
 |--------|-------------|
-| `App::mode('coroutine')` | Modern ZealPHP apps — per-request coroutine concurrency, `$g` state isolated per coroutine. Recommended default. |
-| `App::mode('legacy-cgi')` | Unmodified WordPress / Drupal — each request runs in an isolated subprocess via the pre-spawned CGI pool. |
-| `App::mode('coroutine-legacy')` | Legacy request-style PHP run **concurrently** — modern Composer apps (Symfony, Laravel, Slim) and procedural code that needs per-coroutine isolation of `$_GET`/`$_SESSION`/`$GLOBALS`/function statics/`require_once`/conditional re-declaration. **Requires ext-zealphp.** (`define()` isolation is a separate opt-in via `App::defineIsolation(true)`, not part of the preset.) |
-| `App::mode('mixed')` | Symfony / Laravel bridge — real `$_SESSION`, sequential per-worker, no CGI fork cost. |
+| `App::mode(App::MODE_COROUTINE)` | Modern ZealPHP apps — per-request coroutine concurrency, `$g` state isolated per coroutine. Recommended default. |
+| `App::mode(App::MODE_LEGACY_CGI)` | Unmodified WordPress / Drupal — each request runs in an isolated subprocess via the pre-spawned CGI pool. |
+| `App::mode(App::MODE_COROUTINE_LEGACY)` | Legacy request-style PHP run **concurrently** — modern Composer apps (Symfony, Laravel, Slim) and procedural code that needs per-coroutine isolation of `$_GET`/`$_SESSION`/`$GLOBALS`/function statics/`require_once`/conditional re-declaration. **Requires ext-zealphp.** (`define()` isolation is a separate opt-in via `App::defineIsolation(true)`, not part of the preset.) |
+| `App::mode(App::MODE_MIXED)` | Symfony / Laravel bridge — real `$_SESSION`, sequential per-worker, no CGI fork cost. |
 
 `App::isolation(string)` is the lower-level single-axis knob that the presets drive; its values are `App::ISOLATION_COROUTINE`, `ISOLATION_CGI_POOL`, `ISOLATION_CGI_PROC`, `ISOLATION_CGI_FCGI`, and `ISOLATION_NONE`. Use `App::mode()` for the common cases and reach for `App::isolation()` only when mixing axes.
 

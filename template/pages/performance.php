@@ -173,19 +173,19 @@
     <td class="perf-right">0.49</td>
   </tr>
   <tr class="perf-row-tint">
-    <td>ZealPHP coroutine — default <small>(<code>App::mode('coroutine')</code>)</small></td>
+    <td>ZealPHP coroutine — default <small>(<code>App::mode(App::MODE_COROUTINE)</code>)</small></td>
     <td>in-process include, coroutine-per-req</td>
     <td class="perf-cell-accent">34,159</td>
     <td class="perf-right">0.59</td>
   </tr>
   <tr>
-    <td>ZealPHP Mixed-mode <small>(<code>App::mode('mixed')</code> / <code>processIsolation(false)</code>)</small></td>
+    <td>ZealPHP Mixed-mode <small>(<code>App::mode(App::MODE_MIXED)</code> / <code>processIsolation(false)</code>)</small></td>
     <td>in-process include, sequential</td>
     <td class="perf-cell-accent">21,964</td>
     <td class="perf-right">0.91</td>
   </tr>
   <tr class="perf-row-tint">
-    <td>ZealPHP CGI pool — default <small>(<code>App::mode('legacy-cgi')</code> / <code>cgiMode('pool')</code>)</small></td>
+    <td>ZealPHP CGI pool — default <small>(<code>App::mode(App::MODE_LEGACY_CGI)</code> / <code>cgiMode('pool')</code>)</small></td>
     <td>pre-spawned subprocess pool, warm dispatch (~1–3 ms)</td>
     <td class="perf-cell-accent">—</td>
     <td class="perf-right">~1–3 ms</td>
@@ -199,7 +199,7 @@
 </table>
 
 <p class="perf-para-note">
-  Intel i9-14900K · PHP 8.3 · 4 workers each · <code>ab -n 3000 -c 20</code> — same run as <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>. Three honest takeaways: (1) the default CGI bridge is now the pre-spawned <code>cgiMode('pool')</code> (~1–3 ms warm) — the 160 req/s row is <code>cgiMode('proc')</code>, the explicit slow-fallback that cold-starts a fresh PHP process per request; turning process isolation off entirely (Mixed-mode) recovers ~137× on the same file; (2) <code>App::mode('legacy-cgi')</code> resolves to the warm pool by default — no extra config needed to avoid the proc_open cost; (3) Apache mod_php edges out ZealPHP on trivial legacy-file serving (a mature in-process C SAPI is hard to beat for no-I/O echo). ZealPHP's win is the native-route numbers above, coroutine I/O concurrency, WebSocket/SSE, and not needing a separate web server. Full analysis + the FPM architecture breakdown: <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>.
+  Intel i9-14900K · PHP 8.3 · 4 workers each · <code>ab -n 3000 -c 20</code> — same run as <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>. Three honest takeaways: (1) the default CGI bridge is now the pre-spawned <code>cgiMode('pool')</code> (~1–3 ms warm) — the 160 req/s row is <code>cgiMode('proc')</code>, the explicit slow-fallback that cold-starts a fresh PHP process per request; turning process isolation off entirely (Mixed-mode) recovers ~137× on the same file; (2) <code>App::mode(App::MODE_LEGACY_CGI)</code> resolves to the warm pool by default — no extra config needed to avoid the proc_open cost; (3) Apache mod_php edges out ZealPHP on trivial legacy-file serving (a mature in-process C SAPI is hard to beat for no-I/O echo). ZealPHP's win is the native-route numbers above, coroutine I/O concurrency, WebSocket/SSE, and not needing a separate web server. Full analysis + the FPM architecture breakdown: <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>.
 </p>
 
 <p class="perf-para-note">

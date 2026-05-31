@@ -91,7 +91,7 @@
       your code; you change what serves it.</em>
     </p>
 
-    <h2>Why we even need a coroutine mode</h2>
+    <h2 id="why-we-even-need-a-coroutine-mode">Why we even need a coroutine mode</h2>
     <p>
       The swap table is almost the whole story. The 20% it doesn’t cover is one specific category of
       bug, and it’s worth understanding before we describe the modes — because once you see it, the
@@ -200,7 +200,7 @@
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'A third option: coroutine-legacy mode',
-      'body'    => '<p>There is a middle ground: <code>App::mode(\'coroutine-legacy\')</code> keeps real <code>$_GET</code>, <code>$_POST</code>, and friends populated per request <em>and</em> runs concurrently — it solves the race shown above by isolating the seven superglobals, <code>$GLOBALS</code>, function statics, and <code>require_once</code> state per coroutine via <strong>ext-zealphp</strong>. This is the mode for Composer-based legacy apps (Symfony, Laravel, Slim) that need real superglobals but also want coroutine concurrency. See <a href="/coroutines#lifecycle-modes">Lifecycle modes</a> for the full preset matrix.</p>',
+      'body'    => '<p>There is a middle ground: <code>App::mode(App::MODE_COROUTINE_LEGACY)</code> keeps real <code>$_GET</code>, <code>$_POST</code>, and friends populated per request <em>and</em> runs concurrently — it solves the race shown above by isolating the seven superglobals, <code>$GLOBALS</code>, function statics, and <code>require_once</code> state per coroutine via <strong>ext-zealphp</strong>. This is the mode for Composer-based legacy apps (Symfony, Laravel, Slim) that need real superglobals but also want coroutine concurrency. See <a href="/coroutines#lifecycle-modes">Lifecycle modes</a> for the full preset matrix.</p>',
     ]); ?>
 
     <?php App::render('/components/_callout', [

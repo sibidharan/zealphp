@@ -36,10 +36,12 @@ Because inclusion is order-insensitive, keep your files focused (one feature per
 
 ## Explicit Routing API
 
-### `route(string $path, array|callable $options, ?callable $handler = null)`
+### `route(string $path, array|callable $options = [], ?callable $handler = null, array $methods = [], bool $raw = false)`
 
 - Path placeholders use `{name}` syntax; captured parameters are injected into the handler by name.
-- Options accept an array with `methods => ['GET', 'POST', ...]`. Defaults to `GET`.
+- **Options** — supply them as the `$options` array (2nd argument) **or** as named arguments. The two forms are interchangeable and compose; a named argument overrides the matching `$options` key.
+  - `methods` (`array`, default `['GET']`) — allowed HTTP verbs. Lowercase verbs are normalised to uppercase.
+  - `raw` (`bool`, default `false`) — skip the per-request output buffer (`ob_start()`). Use it for handlers that stream or write to `$response` directly (SSE, `$response->stream()`, binary payloads) instead of relying on the framework to capture echoed output.
 - Return values:
   - `int`: response status code
   - `ResponseInterface`: emitted as-is
@@ -47,12 +49,24 @@ Because inclusion is order-insensitive, keep your files focused (one feature per
   - anything else: echoed output from the handler buffer
 
 ```php
-$app->route('/hello/{name}', function (string $name) {
-    echo "Hi {$name}";
+// Two-arg shorthand — GET only:
+$app->route('/hello/{name}', fn (string $name) => "Hi {$name}");
+
+// Array options form (backward-compatible):
+$app->route('/users', ['methods' => ['GET', 'POST']], $handler);
+
+// Named-argument form — same result:
+$app->route('/users', methods: ['GET', 'POST'], handler: $handler);
+
+// raw: skip output buffering for a hand-rolled streaming writer:
+$app->route('/export.csv', methods: ['GET'], raw: true, handler: function ($response) {
+    $response->stream(fn ($write) => $write("id,name\n"));
 });
 ```
 
-### `nsRoute(string $namespace, string $path, array|callable $options, ?callable $handler = null)`
+> The `$options` / `methods:` / `raw:` arguments are identical across **all four registrars** below — `route()`, `nsRoute()`, `nsPathRoute()`, and `patternRoute()` share the same signature tail `(…, array|callable $options = [], ?callable $handler = null, array $methods = [], bool $raw = false)`.
+
+### `nsRoute(string $namespace, string $path, array|callable $options = [], ?callable $handler = null, array $methods = [], bool $raw = false)`
 
 Prefixes routes with a static namespace segment. Useful for administrative or versioned areas.
 
@@ -63,7 +77,7 @@ $app->nsRoute('admin', '/dashboard', ['methods' => ['GET']], function () {
 // Resolves to /admin/dashboard
 ```
 
-### `nsPathRoute(string $namespace, string $path)`
+### `nsPathRoute(string $namespace, string $path, array|callable $options = [], ?callable $handler = null, array $methods = [], bool $raw = false)`
 
 Allows deeply nested placeholders while keeping a namespace prefix. ZealPHP uses this internally to wire `/api/{module}/{action}`.
 
@@ -73,7 +87,7 @@ $app->nsPathRoute('reports', '{year}/{month}', function ($year, $month) {
 });
 ```
 
-### `patternRoute(string $regex, array|callable $options, ?callable $handler = null)`
+### `patternRoute(string $regex, array|callable $options = [], ?callable $handler = null, array $methods = [], bool $raw = false)`
 
 Registers a route using a PCRE `pattern`. Named capture groups become handler parameters.
 

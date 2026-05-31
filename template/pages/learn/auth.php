@@ -258,7 +258,7 @@ document.addEventListener('htmx:beforeSwap', (e) =&gt; {
       'hints' => [
         'Allocate the table at boot: <code>Store::make(\'login_fails\', 10000, [\'count\' =&gt; [Store::TYPE_INT, 4], \'reset_at\' =&gt; [Store::TYPE_INT, 4]])</code>',
         'Key by <code>$request-&gt;server[\'REMOTE_ADDR\']</code>. Bump <code>count</code> only when the password check fails — never on success.',
-        'On lockout, return <code>$response-&gt;status(429)-&gt;header(\'Retry-After\', \'300\')-&gt;end()</code>',
+        'On lockout, set the status and header separately (<code>status()</code> returns bool, not <code>$response</code>), then return an error body: <code>$response-&gt;status(429); $response-&gt;header(\'Retry-After\', \'300\'); return [\'error\' =&gt; \'Too many failed attempts\'];</code>',
       ],
     ]); ?>
 
@@ -312,7 +312,8 @@ PHP,
       'label' => 'api/notes/delete.php — guarded endpoint',
       'code'  => <<<'PHP'
 <?php
-// File: api/notes/delete.php → POST /api/notes/delete
+// Illustrative path: api/notes/delete.php → POST /api/notes/delete
+// (The framework ships its demo notes API at api/learn/notes.php — adapt the pattern to your own api/ file.)
 $delete = function() {
     // POST + authenticated guard. Emits 403 JSON and returns false on failure.
     if (!$this->requirePostAuth()) return;

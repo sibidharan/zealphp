@@ -47,7 +47,7 @@
       socket</em> can push to that <code>$fd</code>. Everyone else has to route through it.
     </p>
     <p>
-      That routing is what Lessons 22 build: a shared map saying &ldquo;client X is owned by server Y&rdquo;,
+      That routing is what this lesson builds: a shared map saying &ldquo;client X is owned by server Y&rdquo;,
       plus a messaging fabric so any server can ask Y to push.
     </p>
 
@@ -67,7 +67,7 @@ Store::defaultBackend(Store::BACKEND_REDIS);
     <p>
       Every existing <code>Store::make()</code>, <code>Store::set()</code>, <code>Store::get()</code> call
       keeps working unchanged &mdash; now backed by Redis (or Valkey) and visible to every worker on every
-      node. See <a href="/store#redis">/store#redis</a> for the full backend doc.
+      node. See <a href="/store#backends">/store#backends</a> for the full backend doc.
     </p>
 
     <h3>2. An ownership map</h3>
@@ -148,7 +148,8 @@ App::ws('/chat',
 );</code></pre>
 
     <h3>Step 3: Subscribe to your own inbox</h3>
-<pre><code class="language-php">App::subscribe("ws:server:{$myId}", function (string $payload) use (&amp;$server): void {
+<pre><code class="language-php">App::subscribe("ws:server:{$myId}", function (string $payload): void {
+    $server = App::getServer();
     $msg = json_decode($payload, true);
     $fd  = (int)($msg['fd'] ?? 0);
     if ($fd &gt; 0 &amp;&amp; $server-&gt;isEstablished($fd)) {

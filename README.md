@@ -34,7 +34,7 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **Async coroutines** | `go()` + `Channel` — thousands of concurrent requests per worker |
 | **SSR streaming** | Generator `yield`, `$response->stream()`, `$response->sse()` — like React's `renderToPipeableStream` |
 | **WebSocket** | `App::ws($path, $onMessage, $onOpen, $onClose)` — rooms, auth, binary, heartbeat |
-| **Pluggable Store/Counter** | `Store::defaultBackend('redis')` (or `ZEALPHP_STORE_BACKEND=redis`) flips storage from local `OpenSwoole\Table`/`Atomic` to Redis/Valkey with zero handler changes — cross-node shared state + persistence with one line. Tracked + TTL modes, per-worker coroutine pool, Lua-backed `Counter::compareAndSet`. |
+| **Pluggable Store/Counter** | `Store::defaultBackend(Store::BACKEND_REDIS)` (or `ZEALPHP_STORE_BACKEND=redis`) flips storage from local `OpenSwoole\Table`/`Atomic` to Redis/Valkey with zero handler changes — cross-node shared state + persistence with one line. Tracked + TTL modes, per-worker coroutine pool, Lua-backed `Counter::compareAndSet`. |
 | **Cross-node messaging** | `Store::publish($ch, $payload)` + `App::subscribe($ch, $handler)` for fire-and-forget pub/sub (cross-worker AND cross-host). `Store::publishReliable($stream, $payload)` + `App::subscribeReliable($stream, $handler)` for Streams-backed at-least-once delivery via consumer groups. The cross-server WebSocket routing pattern (owner-of-fd pushes; Redis routes to owner) lights up end-to-end. **Driver choice (both validated in v0.2.40):** Both phpredis (preferred when `ext-redis` is loaded) and predis SUBSCRIBE loops yield correctly under `OpenSwoole\Runtime::HOOK_ALL` — the production default in coroutine mode. phpredis is ~2× faster on hot CRUD; pick it when you can. One nuance: phpredis SUBSCRIBE blocks the worker WITHOUT HOOK_ALL — if you disabled HOOK_ALL explicitly, force `ZEALPHP_REDIS_PREFER=predis` for subscribers or re-enable HOOK_ALL. See [`/store#pubsub`](https://php.zeal.ninja/store#pubsub). |
 | **Dynamic routing** | `route()`, `nsRoute()`, `nsPathRoute()`, `patternRoute()` with reflection-based parameter injection |
 | **Middleware** | PSR-15 stack — 30+ built-ins (CORS, ETag, Range, Compression, SessionStart, IniIsolation, Charset, CacheControl, Expires, Header, BasicAuth, IpAccess, RateLimit, ConcurrencyLimit, BlockPhpExt, MimeType, BodyRewrite, HostRouter, BodySizeLimit, Csrf, Redirect, Scoped, MergeSlashes, Referer, RequestHeader, Return, SetEnvIf, ContentEncoding, ContentLanguage, HealthCheck) — full Apache `mod_rewrite` / `mod_headers` / `mod_expires` and nginx `limit_req` / `auth_basic` parity — see the [middleware reference](https://php.zeal.ninja/middleware) for the full list |
@@ -94,7 +94,7 @@ docker compose up app
 
 ```bash
 # New project
-composer create-project sibidharan/zealphp-project:^0.3.5 my-project
+composer create-project sibidharan/zealphp-project:^0.3.6 my-project
 cd my-project
 php app.php
 # → https://php.zeal.ninja
@@ -444,10 +444,10 @@ App::onWorkerStart(function($server, $workerId) use ($hitCounter) {
 
 | Preset | Use for |
 |--------|---------|
-| `App::mode('coroutine')` | Modern ZealPHP apps — recommended default |
-| `App::mode('legacy-cgi')` | Unmodified WordPress/Drupal — pure `require_once` apps |
-| `App::mode('coroutine-legacy')` | Legacy request-style PHP run **concurrently** — per-coroutine isolation of `$_GET/$_POST/$_SESSION`, `$GLOBALS`, function statics, `require_once`, silent re-declaration. `define()` isolation is opt-in via `App::defineIsolation(true)`, not part of the preset. **Requires ext-zealphp.** |
-| `App::mode('mixed')` | Symfony/Laravel bridge — real `$_SESSION`, sequential, no CGI fork cost |
+| `App::mode(App::MODE_COROUTINE)` | Modern ZealPHP apps — recommended default |
+| `App::mode(App::MODE_LEGACY_CGI)` | Unmodified WordPress/Drupal — pure `require_once` apps |
+| `App::mode(App::MODE_COROUTINE_LEGACY)` | Legacy request-style PHP run **concurrently** — per-coroutine isolation of `$_GET/$_POST/$_SESSION`, `$GLOBALS`, function statics, `require_once`, silent re-declaration. `define()` isolation is opt-in via `App::defineIsolation(true)`, not part of the preset. **Requires ext-zealphp.** |
+| `App::mode(App::MODE_MIXED)` | Symfony/Laravel bridge — real `$_SESSION`, sequential, no CGI fork cost |
 
 The fine-grained setters (`App::superglobals()`, `App::isolation()`, `App::enableCoroutine()`, etc.) remain available for custom combinations. See the [lifecycle modes reference](https://php.zeal.ninja/coroutines#lifecycle-modes) for the full matrix.
 
@@ -461,8 +461,8 @@ The fine-grained setters (`App::superglobals()`, `App::isolation()`, `App::enabl
 2. Run `composer validate` and confirm tests pass.
 3. Tag both `zealphp` and `zealphp-project` with the same version:
    ```bash
-   git tag -a v0.3.5 -m "Release v0.3.5"
-   git push origin master && git push origin v0.3.5
+   git tag -a v0.3.6 -m "Release v0.3.6"
+   git push origin master && git push origin v0.3.6
    ```
 4. Trigger Packagist webhook for both packages.
 

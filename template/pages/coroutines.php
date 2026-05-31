@@ -195,7 +195,7 @@ PHP]); ?>
   <code>$_COOKIE</code>, <code>$_SERVER</code>, <code>$_FILES</code>,
   <code>$_REQUEST</code>, <code>$_SESSION</code>) plus <code>header()</code> /
   <code>setcookie()</code> response state per coroutine.
-  <strong><code>App::mode('coroutine-legacy')</code> goes much further</strong> &mdash;
+  <strong><code>App::mode(App::MODE_COROUTINE_LEGACY)</code> goes much further</strong> &mdash;
   it auto-enables the full per-coroutine isolation stack so traditional request-style
   PHP runs concurrently with <em>every</em> request-state primitive isolated:
   <code>$GLOBALS</code> / <code>global $x</code> (including object-valued globals like
@@ -209,7 +209,7 @@ PHP]); ?>
   <code>App::defineIsolation(true)</code> (not auto-enabled by the preset). What it does <strong>NOT</strong> isolate: live DB
   connections and resource handles (process-shared by nature) &mdash; use one connection per
   coroutine. For pure <code>require_once</code> apps with no autoloader (classic unmodified
-  WordPress), the race-free home is <code>App::mode('legacy-cgi')</code> (process-isolated).
+  WordPress), the race-free home is <code>App::mode(App::MODE_LEGACY_CGI)</code> (process-isolated).
   See <a href="#lifecycle-modes">the mode matrix</a> below.
 </div>
 

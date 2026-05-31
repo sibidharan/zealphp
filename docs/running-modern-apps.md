@@ -105,7 +105,7 @@ distinct issues were root-caused (see
 - **`Undefined constant AUTOLOAD_FILE` / `ROOT_PATH`** — only appears if you
   enable `defineIsolation(true)` *without* `includeIsolation(true)`. Clearing
   request-scoped constants is only sound when the `require_once`'d files that
-  define them re-execute. `App::mode('coroutine-legacy')` enables both together,
+  define them re-execute. `App::mode(App::MODE_COROUTINE_LEGACY)` enables both together,
   so don't hand-roll that half-combo (the framework now warns at boot if you do).
 - **Bootstrap hang (000)** — phpMyAdmin's deeply-recursive Symfony DI container
   build hits a coroutine yield/resume scheduling race under HOOK_ALL (a

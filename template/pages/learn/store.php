@@ -17,7 +17,7 @@
       'How this compares to Redis — and when to still reach for Redis',
     ]]); ?>
 
-    <h2>The workers don’t share a heap</h2>
+    <h2>The workers don't share a heap</h2>
     <pre class="mermaid">graph TD
     M[Master process] -->|fork| W1[Worker 1<br/>own PHP heap]
     M -->|fork| W2[Worker 2<br/>own PHP heap]
@@ -37,11 +37,11 @@
     <p>
       ZealPHP runs N worker processes (default: number of CPU cores). Each worker is a separate
       OS process with its own PHP heap. A static class property in one worker is invisible to the
-      other workers. Same for any object you create — it lives in <em>one</em> worker’s
+      other workers. Same for any object you create — it lives in <em>one</em> worker's
       memory.
     </p>
     <p>
-      That’s usually fine. Most request state belongs to one request, handled by one worker
+      That's usually fine. Most request state belongs to one request, handled by one worker
       — isolation prevents cross-talk. But sometimes you genuinely want shared state: a hit
       counter, a rate-limiter, a cache of expensive lookups, a session of active WebSocket rooms.
       You need a fridge: a place outside the kitchens where every cook can drop something in and
@@ -50,7 +50,7 @@
 
     <h2>Store: typed shared memory</h2>
     <p>
-      <code>ZealPHP\Store</code> wraps OpenSwoole’s shared-memory <code>Table</code>. You
+      <code>ZealPHP\Store</code> wraps OpenSwoole's shared-memory <code>Table</code>. You
       declare a schema, the framework allocates a fixed-size block in shared memory (mmap), and
       every worker can read/write rows by key:
     </p>
@@ -121,9 +121,9 @@ $ok = $visits-&gt;compareAndSet(1000, 0); // atomic CAS — reset only if value 
       </tbody>
     </table>
     <p>
-      The first three are free — you don’t pay an extra-service tax. Redis is for the
-      cases where in-process shared memory isn’t enough: multi-machine deployments, hot data
-      that must outlive a restart, queues consumed by external workers. <em>Don’t reach for
+      The first three are free — you don't pay an extra-service tax. Redis is for the
+      cases where in-process shared memory isn't enough: multi-machine deployments, hot data
+      that must outlive a restart, queues consumed by external workers. <em>Don't reach for
       Redis when Store will do.</em>
     </p>
 
@@ -171,11 +171,11 @@ $app-&gt;route('/api/expensive', function ($request) {
       'id'       => 'store1',
       'question' => 'You write <code>Store::make(\'cache\', 100, [...])</code> inside a route handler. The next request hits a different worker. What happens when that worker calls <code>Store::get(\'cache\', $key)</code>?',
       'correct'  => 'c',
-      'explain'  => 'Shared memory is allocated in the master process before workers fork. A table created inside one request handler only exists in that one worker. The other workers don’t know about it. Always call <code>Store::make()</code> in <code>app.php</code> before <code>$app-&gt;run()</code>.',
+      'explain'  => 'Shared memory is allocated in the master process before workers fork. A table created inside one request handler only exists in that one worker &mdash; the other workers have no record of it. <code>Store::get()</code> on an unknown table returns <code>false</code> (a silent miss), not an exception. The code keeps running but returns stale/empty data on every read. Always call <code>Store::make()</code> in <code>app.php</code> before <code>$app-&gt;run()</code>.',
       'options'  => [
         'a' => 'It reads the value the first handler stored — tables are shared.',
-        'b' => 'It silently returns <code>null</code> — the table exists but is empty.',
-        'c' => 'It errors — the table doesn\'t exist in this worker\'s view.',
+        'b' => 'It throws an exception — the table doesn\'t exist in this worker\'s view.',
+        'c' => 'It silently returns a miss (<code>false</code>) — the table doesn\'t exist in this worker, so every read behaves like an empty/absent table.',
       ],
     ]); ?>
 
@@ -280,7 +280,7 @@ $messageId = Store::publishReliable('orders', json_encode($order));</code></pre>
     </p>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
-      'Workers don’t share PHP heaps — isolation by default, sharing by opt-in.',
+      'Workers don\'t share PHP heaps — isolation by default, sharing by opt-in.',
       '<code>Store::make()</code> allocates a typed, fixed-size table in shared memory — every worker can read/write rows by key.',
       '<code>Counter</code> is a lock-free atomic integer for the simple "one global counter" case.',
       'Allocate both <em>before</em> <code>$app-&gt;run()</code> so the master shares them on fork.',

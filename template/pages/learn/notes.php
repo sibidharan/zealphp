@@ -88,7 +88,7 @@ if (!$user) return;
         <code>App::render('/components/_notes_widget', ['user' =&gt; $user])</code> below, embedded
         right between explanation paragraphs so you can try it without leaving the page.</li>
       <li><strong>Standalone in a popup</strong> — <code>/demo/view/notes/widget</code> renders the
-        same partial inside <code>_demo_shell.php</code> (the focused, no-nav shell). Open it in a
+        same partial inside <code>components/_demo_shell.php</code> (the focused, no-nav shell). Open it in a
         second tab to test cross-tab sync without two lesson pages cluttering the screen.</li>
     </ol>
     <p>
@@ -181,6 +181,8 @@ class Notes
         return $stmt->fetchAll();
     }
 }</code></pre>
+
+    <p class="callout-note"><strong>Note:</strong> The abbreviated <code>Notes::create</code> above always returns an int when it reaches <code>lastInsertId()</code>. The real implementation in <code>vendor/</code> also returns <code>null</code> on validation failure — empty or oversized title, body exceeding 4096 characters, or a per-user quota breach — which is why the endpoint checks <code>if ($id === null)</code> and responds 422.</p>
 
     <h3>Introducing <code>App::renderToString()</code></h3>
     <p>
@@ -298,7 +300,7 @@ $ts    = (int)($updated_at ?? time());
       to refresh its list. One-liner on the client, one broadcast on the server.
     </p>
     <pre><code class="language-php">// api/learn/notes.php — inside the POST handler, after the INSERT
-learn_ws_broadcast($userId, ['type' =&gt; 'note_changed', 'op' =&gt; 'create', 'id' =&gt; $id]);
+WS::broadcast($u['user_id'], ['type' =&gt; 'note_changed', 'op' =&gt; 'create', 'id' =&gt; $id]);
 
 // public/js/learn.js — inside the WebSocket onmessage
 if (msg.type === 'note_changed') {
@@ -306,9 +308,12 @@ if (msg.type === 'note_changed') {
 }</code></pre>
     <p>
       The next lesson — <a href="/learn/websocket">Lesson 19, Real-Time Sync</a> — walks through
-      how <code>learn_ws_broadcast</code> iterates the <code>Store</code> table of connected fds
-      and filters by <code>user_id</code> (the tic-tac-toe lesson later applies the same
-      broadcaster shape with a different filter key: <code>room</code>).
+      how <code>WS::broadcast</code> iterates the <code>Store</code> table of connected fds
+      and filters by <code>user_id</code>. (<code>route/learn.php</code> also defines a
+      <code>learn_ws_broadcast()</code> free function used by its own path-param update/delete
+      routes — that is a different call site; the api/ endpoint uses <code>WS::broadcast</code>
+      directly as shown above.) The tic-tac-toe lesson later applies the same broadcaster shape
+      with a different filter key: <code>room</code>.
     </p>
 
     <h2 id="step-tryit">6. Try it — the live widget</h2>

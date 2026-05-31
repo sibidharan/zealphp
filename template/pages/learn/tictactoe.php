@@ -119,6 +119,14 @@ Store::make('ws_tictactoe_clients', 4096, [
       <code>onOpen</code> does two things: authenticate (read the session via
       <code>G::instance()-&gt;session</code>) and pick a seat:
     </p>
+    <p>
+      Two of the helpers called below — <code>ttt_sanitize_room()</code> and
+      <code>ttt_broadcast_state_with()</code> — are defined in <code>route/learn.php</code>, so you
+      don&rsquo;t author those separately. The rest (<code>seed_new_room()</code>,
+      <code>claim_x_seat()</code>, <code>claim_o_seat()</code>, <code>count_viewers()</code>) are
+      illustrative stand-ins for logic the real handler inlines — name them however you like; the
+      point is the <code>Store</code> read/modify/write shape, not the exact helper names.
+    </p>
     <pre><code class="language-php">onOpen: function ($server, $request) {
     $g        = G::instance();
     $userId   = (int)    ($g->session['user_id']  ?? 0);
@@ -375,9 +383,9 @@ Store::set('ws_tictactoe_rooms', $room, $update);   // one write</code></pre>
       <a class="lesson-chip lesson-chip-prev" href="/learn/ai-chat"
          hx-get="/api/learn/page?slug=learn/ai-chat" hx-target=".lesson-content"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/ai-chat">← AI Chat</a>
-      <a class="lesson-chip lesson-chip-next" href="/learn/routing"
-         hx-get="/api/learn/page?slug=learn/routing" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routing">Routes & APIs →</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/chatroom"
+         hx-get="/api/learn/page?slug=learn/chatroom" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/chatroom">Multi-Room Group Chat →</a>
     </div>
   </article>
 </div>

@@ -63,7 +63,7 @@
     <p>Cleanest possible handler. ZealPHP returns the array as JSON.</p>
 
     <h3>2. URL params + request body</h3>
-    <pre><code class="language-php">$app-&gt;route('/posts/{slug}/comment', ['method' =&gt; 'POST'],
+    <pre><code class="language-php">$app-&gt;route('/posts/{slug}/comment', ['methods' =&gt; ['POST']],
     function ($slug, $request) {
         $body = $request-&gt;post['comment'] ?? '';
         Comment::create($slug, $body);
@@ -74,7 +74,7 @@
     <h3>3. URL params + response (for cookies / streaming / redirects)</h3>
     <pre><code class="language-php">$app-&gt;route('/login/{token}', function ($token, $response) {
     $response-&gt;cookie('session', $token, time() + 86400, '/', '', true, true);
-    return $response-&gt;redirect('/dashboard');
+    $response-&gt;redirect('/dashboard');
 });</code></pre>
 
     <h3>4. Mix everything</h3>
@@ -104,7 +104,7 @@
 
     <h2>Try it live</h2>
     <p>
-      Every parameter-injection case is wired up in the demo app at <code>/demo/inject/{case}</code>.
+      Every parameter-injection case is wired up in the demo app at <code>/demo/view/inject/{case}</code>.
       Visit a few to see what gets injected:
     </p>
     <ul>

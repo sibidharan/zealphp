@@ -28,24 +28,27 @@
     <p>
       When you need to capture URL segments by regex (not by simple
       <code>{name}</code> placeholders), reach for <code>patternRoute()</code>. The whole path
-      after the namespace prefix is matched against a regex; captures land in your handler in order.
+      after the namespace prefix is matched against a regex; captures land in your handler by name (use <code>(?P&lt;name&gt;…)</code> groups).
     </p>
     <pre><code class="language-php">// Match /blog/2026/05 — year + month with strict format
-$app-&gt;patternRoute('/blog/(\d{4})/(\d{2})', ['methods' =&gt; ['GET']],
+// Captures MUST be named (?P&lt;name&gt;...) — the injector matches by name, not position.
+$app-&gt;patternRoute('/blog/(?P&lt;year&gt;\d{4})/(?P&lt;month&gt;\d{2})', ['methods' =&gt; ['GET']],
     function ($year, $month) {
         return Post::byMonth((int)$year, (int)$month);
     }
 );
 
 // Match /file/anything-with-slashes/here.txt
-$app-&gt;patternRoute('/file/(.+\.(?:txt|md|json))', ['methods' =&gt; ['GET']],
+$app-&gt;patternRoute('/file/(?P&lt;path&gt;.+\.(?:txt|md|json))', ['methods' =&gt; ['GET']],
     function ($path, $response) {
         return $response-&gt;sendFile(__DIR__ . '/storage/' . $path);
     }
 );</code></pre>
     <p>
       Use it when <code>{name}</code> can&rsquo;t express the constraint (digits-only, fixed length,
-      file extensions, etc.). Otherwise prefer <code>$app-&gt;route()</code> with named placeholders —
+      file extensions, etc.). Captures <strong>must</strong> use PCRE named-capture syntax
+      <code>(?P&lt;name&gt;...)</code> — the framework injects by name, so positional captures are
+      silently dropped. Otherwise prefer <code>$app-&gt;route()</code> with named placeholders —
       cleaner signatures and the framework injects by name.
     </p>
 
@@ -135,9 +138,12 @@ App::$ignore_php_ext = false;  // accept /about.php as a valid URL
         over the implicit ZealAPI dispatcher because <code>route/*.php</code> files load before the
         implicit catch-all. Useful for overriding one API endpoint without touching <code>api/</code>.</li>
       <li><strong>A <code>{name}</code> param that captures a literal you wanted</strong> — if you
-        register both <code>/users/{id}</code> and <code>/users/new</code>, registration order
-        decides. Register the literal first so it shadows the pattern; otherwise <code>"new"</code>
-        gets captured as <code>$id</code>.</li>
+        register both <code>/users/{id}</code> and <code>/users/new</code>, the literal always wins
+        regardless of registration order. ZealPHP stores exact/literal paths in a separate map and
+        checks it before the pattern loop, so <code>/users/new</code> never gets captured as
+        <code>$id</code>. The &ldquo;first-registered-wins&rdquo; rule applies only when <em>both</em>
+        routes are patterns (e.g. two different <code>{param}</code> or regex routes that both
+        match).</li>
       <li><strong>Trailing slashes</strong> — <code>/about</code> and <code>/about/</code> are
         treated as different URLs unless your route pattern includes <code>/?</code>. The implicit
         public-file route does include this; custom routes typically don&rsquo;t.</li>
@@ -146,7 +152,7 @@ App::$ignore_php_ext = false;  // accept /about.php as a valid URL
     <h2>Try it live</h2>
     <ul>
       <li><a href="/demo/view/inject/all/42" target="_blank">Regex/pattern capture in action</a> — see how URL segments land in handler args</li>
-      <li><a href="/api/learn/demo/timing?mode=parallel" target="_blank">Implicit /api/* dispatch</a> — one route serving many <code>api/*.php</code> files</li>
+      <li><a href="/api/learn/demo/greeting" target="_blank">Implicit /api/* dispatch</a> — one route serving many <code>api/*.php</code> files</li>
     </ul>
 
     <?php App::render('/components/_concept_check', [
@@ -165,14 +171,14 @@ App::$ignore_php_ext = false;  // accept /about.php as a valid URL
       'Use <code>patternRoute()</code> when <code>{name}</code> placeholders can\'t express the constraint.',
       '<code>nsRoute</code> captures single segments; <code>nsPathRoute</code> swallows slashes — pick by what your URL shape needs.',
       '<code>App::setFallback()</code> is the equivalent of Apache\'s catch-all rewrite — great for hosting legacy apps.',
-      'First-registered-wins among route/*.php and explicit routes — register literals before patterns when they overlap.',
+      'Literal/exact paths always win over <code>{param}</code> patterns regardless of registration order — first-registered-wins applies only between two pattern routes that both match.',
       'Foundations: <a href="/learn/routes">How Routes Work</a> covers <code>public/</code>, <code>api/</code>, and the basic priority chain.',
     ]]); ?>
 
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/tictactoe"
-         hx-get="/api/learn/page?slug=learn/tictactoe" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/tictactoe">← Tic-Tac-Toe</a>
+      <a class="lesson-chip lesson-chip-prev" href="/learn/cross-server-chat"
+         hx-get="/api/learn/page?slug=learn/cross-server-chat" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/cross-server-chat">← Cross-Server Chat</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/async"
          hx-get="/api/learn/page?slug=learn/async" hx-target=".lesson-content"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/async">Async & Coroutines →</a>

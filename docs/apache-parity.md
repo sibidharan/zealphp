@@ -191,7 +191,7 @@ The dispatch is two-tiered:
    - `'proc'` (`~30–50 ms cold`) — fresh `proc_open` subprocess per request; the recursion-safe fallback for rare full-isolation cases.
    - `'fcgi'` — forward to an external FastCGI upstream (php-fpm, hhvm, roadrunner).
 
-`App::mode('legacy-cgi')` sets `superglobals(true)` + `isolation(cgi-pool)` in one call, which resolves to the warm pool by default. See [Lifecycle modes](/coroutines#lifecycle-modes) for the full preset table.
+`App::mode(App::MODE_LEGACY_CGI)` sets `superglobals(true)` + `isolation(cgi-pool)` in one call, which resolves to the warm pool by default. See [Lifecycle modes](/coroutines#lifecycle-modes) for the full preset table.
 
 ---
 
@@ -201,8 +201,8 @@ ZealPHP ships four one-call presets via `App::mode(string)`. For Apache + mod_ph
 
 | Preset | What it gives you |
 |---|---|
-| `App::mode('legacy-cgi')` | `superglobals(true)` + warm CGI pool (`~1–3 ms`). True global scope per request. Correct home for unmodified WordPress / Drupal / apps that use pure `require_once` with no Composer autoloader. |
-| `App::mode('coroutine-legacy')` | `superglobals(true)` + coroutine concurrency + **full per-coroutine isolation** of all request-state primitives (`$_*` superglobals, `header()`/`setcookie()`, `$GLOBALS` including object-valued, function-local `static $x`, `ini_set`, `require_once` re-execution). Requires **ext-zealphp**. (`define()` isolation is a separate opt-in via `App::defineIsolation(true)`, not auto-enabled by the preset.) Correct home for modern Composer apps (Symfony, Laravel, Slim) that need real `$_SESSION` and concurrent request handling. |
+| `App::mode(App::MODE_LEGACY_CGI)` | `superglobals(true)` + warm CGI pool (`~1–3 ms`). True global scope per request. Correct home for unmodified WordPress / Drupal / apps that use pure `require_once` with no Composer autoloader. |
+| `App::mode(App::MODE_COROUTINE_LEGACY)` | `superglobals(true)` + coroutine concurrency + **full per-coroutine isolation** of all request-state primitives (`$_*` superglobals, `header()`/`setcookie()`, `$GLOBALS` including object-valued, function-local `static $x`, `ini_set`, `require_once` re-execution). Requires **ext-zealphp**. (`define()` isolation is a separate opt-in via `App::defineIsolation(true)`, not auto-enabled by the preset.) Correct home for modern Composer apps (Symfony, Laravel, Slim) that need real `$_SESSION` and concurrent request handling. |
 
 For the full preset matrix (including `'coroutine'` and `'mixed'`) and the orthogonal `App::isolation()` axis, see [Lifecycle modes](/coroutines#lifecycle-modes).
 

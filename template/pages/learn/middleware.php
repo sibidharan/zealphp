@@ -14,7 +14,7 @@
       'What PSR-15 middleware actually is (in 30 seconds)',
       'The six built-ins ZealPHP ships with — and when each one matters',
       'How to write a custom middleware in about 10 lines',
-      'Why the registration order is reversed when the stack actually runs',
+      'Why the first middleware you register is the outermost wrapper that runs first',
     ]]); ?>
 
     <h2>What middleware is</h2>
@@ -61,43 +61,44 @@ $app-&gt;addMiddleware(new CorsMiddleware());
 $app-&gt;addMiddleware(new ETagMiddleware());
 $app-&gt;addMiddleware(new SessionStartMiddleware());</code></pre>
 
-    <h2>Order is reversed at execution time</h2>
+    <h2>Execution order</h2>
     <pre class="mermaid">graph TB
-    REQ[Request arrives] --> C
-    subgraph C_wrap["C  (last registered = outermost)"]
-      C[C.process] --> B_in
+    REQ[Request arrives] --> A
+    subgraph A_wrap["A  (first registered = outermost)"]
+      A[A.process] --> B_in
       subgraph B_wrap["B"]
-        B_in[B.process] --> A_in
-        subgraph A_wrap["A  (first registered = innermost)"]
-          A_in[A.process] --> RM["ResponseMiddleware<br/>match route + invoke handler"]
+        B_in[B.process] --> C_in
+        subgraph C_wrap["C  (last registered = innermost)"]
+          C_in[C.process] --> RM["ResponseMiddleware<br/>match route + invoke handler"]
         end
       end
     end
     RM --> RES[Response emitted]
-    style C_wrap fill:#fffbeb,stroke:#f59e0b,stroke-width:2px
-    style A_wrap fill:#ecfdf5,stroke:#059669,stroke-width:2px
+    style A_wrap fill:#fffbeb,stroke:#f59e0b,stroke-width:2px
+    style C_wrap fill:#ecfdf5,stroke:#059669,stroke-width:2px
     style RM fill:#ecfdf5,stroke:#059669</pre>
     <p>
-      You register <code>A, B, C</code>. The stack ZealPHP builds is <code>C wraps B wraps A wraps
-      ResponseMiddleware</code>. At request time, <strong>C runs first.</strong> The last middleware
+      You register <code>A, B, C</code>. The stack ZealPHP builds is <code>A wraps B wraps C wraps
+      ResponseMiddleware</code>. At request time, <strong>A runs first.</strong> The first middleware
       you add is the outermost wrapper — same convention as Slim, Express, Laravel.
     </p>
     <p>
-      This means: <em>register the inner-most concerns first, the outer-most last.</em> Session
-      handling is closest to the route handler — register early. CORS handles every response
-      including 404s — register last.
+      This means: <em>register the outer-most concerns first, the inner-most last.</em> CORS handles
+      every response including 404s — register it first. Session handling is closest to the route
+      handler — register it last.
     </p>
 
     <h2>Writing your own</h2>
     <p>Here’s a complete rate-limit-header middleware in 10 lines:</p>
     <pre><code class="language-php">use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
 class RateLimitHeader implements MiddlewareInterface {
     public function __construct(private int $limit = 60) {}
 
-    public function process($request, RequestHandlerInterface $handler) {
+    public function process($request, RequestHandlerInterface $handler): ResponseInterface {
         $response = $handler-&gt;handle($request);
         return $response
             -&gt;withHeader('X-RateLimit-Limit', (string)$this-&gt;limit)
@@ -146,12 +147,12 @@ $app-&gt;addMiddleware(new RateLimitHeader(100));</code></pre>
     <?php App::render('/components/_concept_check', [
       'id'       => 'mw1',
       'question' => 'You register middleware in the order: <code>A, B, C</code>. A request arrives. Which middleware sees the inbound request first?',
-      'correct'  => 'c',
-      'explain'  => 'The last-added middleware is the outermost wrapper at execution time. C wraps everything else, so C sees the request first. Same convention as Slim/Express/Laravel: register inner-most concerns first.',
+      'correct'  => 'a',
+      'explain'  => 'The first-added middleware is the outermost wrapper at execution time. A wraps everything else, so A sees the request first. Register outer-most concerns (CORS, compression) first — they run first on the way in and last on the way out.',
       'options'  => [
-        'a' => 'A — it was registered first.',
+        'a' => 'A — the first-registered middleware is the outermost wrapper.',
         'b' => 'B — it sits in the middle.',
-        'c' => 'C — the last-added middleware is the outermost wrapper.',
+        'c' => 'C — it was registered last.',
       ],
     ]); ?>
 
@@ -159,7 +160,7 @@ $app-&gt;addMiddleware(new RateLimitHeader(100));</code></pre>
       'A middleware is a function that wraps every request: <code>(request, $handler) =&gt; response</code>.',
       'ZealPHP follows PSR-15 — same shape as Slim, Symfony, modern Laravel.',
       'Six built-ins: CORS, ETag, Compression, Range, SessionStart, IniIsolation.',
-      'Register order is <em>reversed</em> at execution: last-added runs first (outermost).',
+      'Register order: first-added is outermost and runs first — register CORS/compression before session/auth.',
       'Middleware is for cross-cutting concerns — per-route logic still belongs in the handler.',
     ]]); ?>
 

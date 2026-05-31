@@ -178,7 +178,7 @@ BASH
           'lang' => 'bash',
           'code' => <<<'BASH'
 composer create-project \
-  sibidharan/zealphp-project:^0.3.5 \
+  sibidharan/zealphp-project:^0.3.6 \
   my-app
 cd my-app && php app.php
 BASH
@@ -260,7 +260,7 @@ PHP
       <strong>Two modes, one rule: <a href="/coroutines#state-parity">always use <code>$g->*</code></a>.</strong>
       The default <code>app.php</code> runs in <strong>coroutine mode</strong> (<code>App::superglobals(false)</code>) — <code>$g-&gt;session</code> / <code>$g-&gt;get</code> / <code>$g-&gt;post</code> are the recommended accessors (per-coroutine, always safe). With ext-zealphp, <code>$_GET</code>/<code>$_SESSION</code> are automatically per-coroutine safe in both modes (saved/restored on every yield/resume).
       <br><br>
-      If you're porting a legacy <code>.htaccess</code> + <code>$_*</code> codebase, use one of the lifecycle presets before <code>App::init()</code>: <code>App::mode('legacy-cgi')</code> for unmodified WordPress/Drupal (pre-warmed subprocess pool, true per-request isolation), or <code>App::mode('coroutine-legacy')</code> to run request-style PHP concurrently with per-coroutine isolation of superglobals, <code>$GLOBALS</code>, statics, and <code>require_once</code> re-execution (requires ext-zealphp; <code>define()</code> isolation is a separate opt-in via <code>App::defineIsolation(true)</code>). The raw <code>App::superglobals(true)</code> flag is the underlying knob these presets configure. See <a href="/coroutines#lifecycle-modes">Lifecycle modes</a> and the <a href="/legacy-apps">Legacy apps</a> page for the full migration matrix.
+      If you're porting a legacy <code>.htaccess</code> + <code>$_*</code> codebase, use one of the lifecycle presets before <code>App::init()</code>: <code>App::mode(App::MODE_LEGACY_CGI)</code> for unmodified WordPress/Drupal (pre-warmed subprocess pool, true per-request isolation), or <code>App::mode(App::MODE_COROUTINE_LEGACY)</code> to run request-style PHP concurrently with per-coroutine isolation of superglobals, <code>$GLOBALS</code>, statics, and <code>require_once</code> re-execution (requires ext-zealphp; <code>define()</code> isolation is a separate opt-in via <code>App::defineIsolation(true)</code>). The raw <code>App::superglobals(true)</code> flag is the underlying knob these presets configure. See <a href="/coroutines#lifecycle-modes">Lifecycle modes</a> and the <a href="/legacy-apps">Legacy apps</a> page for the full migration matrix.
     </div>
 
     <p class="gs-p-mt-sm">Start the server and visit <code>http://localhost:8080/hello?name=PHP</code>:</p>

@@ -21,7 +21,7 @@
     <div class="tradeoffs-block">
       <h2 class="tradeoffs-h2">1. ext-zealphp: function overrides on PHP built-ins</h2>
       <p class="tradeoffs-p">
-        At server boot, ZealPHP uses <code>ext-zealphp</code> (our own ~650-line C extension) to
+        At server boot, ZealPHP uses <code>ext-zealphp</code> (our own C extension) to
         permanently replace PHP built-ins like <code>header()</code>, <code>setcookie()</code>,
         <code>session_start()</code>, <code>set_error_handler()</code>, <code>http_response_code()</code>.
         Calls flow into per-request objects (<code>$g->zealphp_response</code>, <code>$g->session</code>)

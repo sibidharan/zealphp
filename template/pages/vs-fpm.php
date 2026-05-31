@@ -365,7 +365,7 @@ $app->run();
   <tr class="vsfpm-row-tint">
     <td>Cross-node shared cache</td>
     <td>Redis / Memcached</td>
-    <td><code>Store::defaultBackend('redis')</code> — same Store API, cross-node visibility (or <code>'tiered'</code> for L1 local + L2 Redis with HMAC-signed invalidation)</td>
+    <td><code>Store::defaultBackend(Store::BACKEND_REDIS)</code> — same Store API, cross-node visibility (or <code>'tiered'</code> for L1 local + L2 Redis with HMAC-signed invalidation)</td>
   </tr>
   <tr>
     <td>Cross-node pub/sub</td>
