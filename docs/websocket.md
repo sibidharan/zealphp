@@ -108,6 +108,57 @@ $app->ws('/ws/rooms',
 );
 ```
 
+### Federated rooms (cross-host)
+
+The manual Store-iteration example above routes messages across workers on the same server. For cross-host fan-out (multiple nodes behind a load balancer) use the first-class `WSRouter` + `Room` abstraction, which handles cluster-wide membership and pub/sub routing automatically. It requires `Store::defaultBackend(Store::BACKEND_REDIS)` because cross-node pub/sub needs a shared broker.
+
+```php
+use ZealPHP\App;
+use ZealPHP\Store;
+use ZealPHP\WSRouter;
+
+// Boot — before App::run()
+Store::defaultBackend(Store::BACKEND_REDIS, 'redis://127.0.0.1:6379');
+WSRouter::init();           // registers the per-worker PSUBSCRIBE for all rooms
+
+$app->ws('/ws/rooms',
+    onOpen: function($server, $request, $g) {
+        $clientId = $request->cookie['PHPSESSID'] ?? 'anon_' . $request->fd;
+        $roomName = $request->get['room'] ?? 'general';
+
+        WSRouter::own($clientId, $request->fd);      // register fd→clientId cluster-wide
+        WSRouter::room($roomName)->join($clientId);   // add to room, broadcasts presence event
+
+        // persist identity so onMessage/onClose can resolve it from any worker
+        Store::set('ws_rooms', (string)$request->fd, [
+            'room' => $roomName,
+            'uid'  => $clientId,
+        ]);
+    },
+    onMessage: function($server, $frame, $g) {
+        $info = Store::get('ws_rooms', (string)$frame->fd);
+        if (!$info) return;
+        WSRouter::room($info['room'])->push($frame->data); // fan-out to every node
+    },
+    onClose: function($server, $fd, $g) {
+        $info = Store::get('ws_rooms', (string)$fd);
+        if ($info) {
+            WSRouter::room($info['room'])->leave($info['uid']);
+            WSRouter::release($info['uid']);
+        }
+        Store::del('ws_rooms', (string)$fd);
+    }
+);
+```
+
+`WSRouter::room($name)` returns a `Room` instance with `join()`, `leave()`, `push()`, `isMember()`, `size()`, `members()`, `onMessage()`, and `onPresence()`. Messages published from any node reach all workers via a single `ws:room:*` PSUBSCRIBE per worker — there is no per-room subscriber proliferation.
+
+To send directly to one client by id (not a room broadcast) across workers and hosts:
+
+```php
+WSRouter::sendToClient($clientId, json_encode(['type' => 'dm', 'text' => 'hello']));
+```
+
 For a server-wide fan-out where you don't keep your own registry, `$server->getClientList($startFd, $pageSize)` enumerates connected fds. OpenSwoole caps `find_count` at **100**, so paginate:
 
 ```php
@@ -172,7 +223,7 @@ $app->ws('/ws/auth',
 );
 ```
 
-For multi-worker setups, persist the `fd → user` map in `Store` instead of `$g` so any worker that handles a subsequent message can resolve the identity.
+For multi-worker setups, persist the `fd → user` map in `Store` instead of `$g` so any worker that handles a subsequent message can resolve the identity. To route a message to a specific client by id across workers or hosts, use `WSRouter::own($clientId, $fd)` in `onOpen`, `WSRouter::release($clientId)` in `onClose`, and `WSRouter::sendToClient($clientId, $payload)` from anywhere — see the [Federated rooms](#federated-rooms-cross-host) section.
 
 ## Heartbeats
 

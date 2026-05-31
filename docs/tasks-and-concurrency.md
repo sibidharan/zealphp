@@ -2,7 +2,22 @@
 
 ZealPHP embraces OpenSwoole’s asynchronous primitives to help you build responsive applications that scale across CPU cores. This document outlines the concurrency toolbox provided by the framework and when to use each option.
 
-> **Lifecycle safety (v0.2.27).** `App::run()` refuses to start when an unsafe mode combination is configured — specifically `superglobals(true) + enableCoroutine(true)` or `superglobals(true) + hookAll(non-zero)`, because concurrent coroutines would race process-wide `$_GET` / `$_POST` / `$_SESSION` arrays. See the "Lifecycle setters" section of [runtime-architecture.md](runtime-architecture.md) for the full mode matrix and the boot-time refusal contract.
+> **Lifecycle safety (v0.2.27).** `App::run()` validates the configured lifecycle combination at boot. `superglobals(true) + enableCoroutine(true)` and `superglobals(true) + hookAll(non-zero)` throw `RuntimeException` **only when ext-zealphp is absent** — with ext-zealphp loaded, those two combinations are the supported `App::mode('coroutine-legacy')` shape (per-coroutine superglobal isolation via ext-zealphp's scheduler hooks). `superglobals(false) + enableCoroutine(false)` always throws. See [runtime-architecture.md](runtime-architecture.md) for the full mode matrix.
+
+## Concurrency lifecycle — `App::mode()` and `App::isolation()`
+
+ZealPHP's concurrency model is selected once, before `App::run()`, via the one-call preset `App::mode(string)`. The four presets cover the most common shapes:
+
+| Preset | Typical use |
+|--------|-------------|
+| `App::mode('coroutine')` | Modern ZealPHP apps — per-request coroutine concurrency, `$g` state isolated per coroutine. Recommended default. |
+| `App::mode('legacy-cgi')` | Unmodified WordPress / Drupal — each request runs in an isolated subprocess via the pre-spawned CGI pool. |
+| `App::mode('coroutine-legacy')` | Legacy request-style PHP run **concurrently** — modern Composer apps (Symfony, Laravel, Slim) and procedural code that needs per-coroutine isolation of `$_GET`/`$_SESSION`/`$GLOBALS`/function statics/`require_once`/conditional re-declaration. **Requires ext-zealphp.** (`define()` isolation is a separate opt-in via `App::defineIsolation(true)`, not part of the preset.) |
+| `App::mode('mixed')` | Symfony / Laravel bridge — real `$_SESSION`, sequential per-worker, no CGI fork cost. |
+
+`App::isolation(string)` is the lower-level single-axis knob that the presets drive; its values are `App::ISOLATION_COROUTINE`, `ISOLATION_CGI_POOL`, `ISOLATION_CGI_PROC`, `ISOLATION_CGI_FCGI`, and `ISOLATION_NONE`. Use `App::mode()` for the common cases and reach for `App::isolation()` only when mixing axes.
+
+For the full mode matrix, coroutine-legacy isolation stack, and preload requirements (cold-concurrent autoload race), see [/coroutines#lifecycle-modes](/coroutines#lifecycle-modes).
 
 ## Coroutines with `go()` and `co::run()`
 
@@ -42,6 +57,21 @@ $app->route('/fanout', function () {
 
 This pattern mirrors `examples/coroutine.php` and `api/php/coroutine_test.php`, which fetch remote resources in parallel.
 
+For the common fork-join case, the framework ships higher-level helpers that handle Channel setup, error propagation, and sync-mode wrapping automatically:
+
+```php
+// Run all tasks in parallel; returns results in input order.
+$results = App::parallel([
+    fn() => file_get_contents('https://example.com'),
+    fn() => file_get_contents('https://php.net'),
+]);
+
+// Bounded fan-out — process $items with at most $concurrency coroutines in flight.
+$pages = App::parallelLimit($urls, fn($url) => file_get_contents($url), concurrency: 8);
+```
+
+`App::parallel()` and `App::parallelLimit()` auto-wrap callers outside a coroutine context in `Coroutine::run()`, so they work in both coroutine and sync modes. The first thrown exception propagates to the caller.
+
 ## Background Processes with `coproc()` / `coprocess()`
 
 `coproc()` spawns a process with coroutine support and returns its buffered output. It is a lighter-weight alternative to task workers for ad-hoc parallelism:
@@ -59,7 +89,7 @@ $html = coproc(function () {
 Requirements:
 
 - Only available when superglobals are enabled. Attempting to call it in coroutine mode throws an exception. The reason: `coproc()` forks a child process, designed *before* per-coroutine `RequestContext` (`$g`) existed — it relies on copying process-wide superglobals into the child. Under `superglobals(false)` each coroutine already has isolated state, so `coproc()` is both redundant (use `go()` for parallelism) and unsafe (the fork would race the parent's process-wide superglobals at the exact moment the framework is *not* maintaining them).
-- For per-request process isolation of legacy `public/*.php` files in superglobals mode, see `App::cgiMode('proc'|'fork'|'fcgi')` instead — that's the supported path now (Apache mod_php-style isolation, with `'fork'` being ~5× faster via warm `OpenSwoole\Process` fork and `'fcgi'` proxying to an upstream php-fpm pool).
+- For per-request process isolation of legacy `public/*.php` files in superglobals mode, see `App::cgiMode('pool'|'proc'|'fcgi')` instead — that's the supported path now. `'pool'` (the default) uses a pre-spawned warm subprocess pool (~1–3 ms); `'proc'` spawns a fresh `proc_open` process per request (~30–50 ms cold); `'fcgi'` forwards to an external FastCGI upstream such as php-fpm.
 - Data passed to the closure must be serialisable; resources such as database connections should be re-created inside the child process.
 
 ## Task Workers via `$server->task()`
@@ -95,7 +125,7 @@ Reference implementations live in `api/swoole/task.php` and `task/backup.php`, w
 |----------|------------------|-------|
 | Non-blocking IO when superglobals are disabled | `go()` coroutines | Ensure drivers support OpenSwoole hooks. |
 | Long-running, blocking work in superglobals mode | `coproc()` / `coprocess()` | Forks a child process; inherits environment snapshot; no shared memory. |
-| Per-request isolation of legacy `public/*.php` files | `App::cgiMode('proc'\|'fork'\|'fcgi')` | Replaces the old `prefork_request_handler()`. `'proc'` is mod_php-style global isolation; `'fork'` is ~5× faster via warm process fork; `'fcgi'` forwards to an upstream FPM pool. |
+| Per-request isolation of legacy `public/*.php` files | `App::cgiMode('pool'\|'proc'\|'fcgi')` | `'pool'` (default, ~1–3 ms warm pool) gives mod_php-style global isolation; `'proc'` spawns a fresh process per request (~30–50 ms cold); `'fcgi'` forwards to an upstream FPM pool. |
 | Fire-and-forget asynchronous work | `$server->task()` | Task workers run outside the request context. |
 
 ## Coordination and Shared State

@@ -117,7 +117,9 @@ $app->route('/full/{id}', function($id, $request, $response) {
 PHP],
   ['inject-6', 'Default param value',            '/demo/inject/defaults/abc',
    <<<'PHP'
-$app->route('/paged/{id}/{page?}', function($id, $page = 1) {
+// ZealPHP has no optional-segment syntax like {page?}.
+// Express "optional" params by registering a base route with a default:
+$app->route('/paged/{id}', function($id, $page = 1) {
     return ['id' => $id, 'page' => $page];  // page defaults to 1
 });
 PHP],
@@ -209,8 +211,8 @@ foreach ($routeTypes as [$id, $title, $url, $code]) {
 </tr>
 <tr>
   <td>Static-handler URL whitelist</td>
-  <td>OpenSwoole's built-in static handler restricted to <code>/css /js /img /fonts /assets /static /favicon.ico /robots.txt</code> by default. Anything outside falls through to PHP routing.</td>
-  <td><code>App::$static_handler_locations</code></td>
+  <td>At boot, <code>App::$static_handler_locations</code> defaults to <code>[]</code> (empty). When empty, the framework substitutes a safe whitelist: <code>/css/ /js/ /img/ /images/ /fonts/ /assets/ /static/ /favicon.ico /robots.txt</code>. Anything outside falls through to PHP routing.</td>
+  <td><code>App::$static_handler_locations</code> (set before <code>run()</code>; <code>[]</code> = use default whitelist)</td>
 </tr>
 <tr>
   <td><code>ErrorDocument N /path</code></td>

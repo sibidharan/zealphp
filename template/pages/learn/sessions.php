@@ -105,11 +105,37 @@ lesson_counter|i:5;cart|a:2:{...}</code></pre>
       Same convention vanilla PHP uses since the 90s.
     </p>
     <p>
-      For production with multiple servers behind a load balancer, swap the file backend for Redis
-      (set <code>session.save_handler = redis</code> in php.ini). For single-server apps, the file
-      backend is fine — it&rsquo;s fast, it survives restart, and you can debug it with
-      <code>cat</code>.
+      For production with multiple servers behind a load balancer, swap the backend in code
+      (not in php.ini — ZealPHP overrides all <code>session_*()</code> calls and does not consult
+      <code>session.save_handler</code> in php.ini). Register a handler
+      <em>before</em> <code>App::run()</code>:
     </p>
+    <pre><code class="language-php">// Cross-node: Redis WATCH/MULTI optimistic locking + 3-way merge on conflict
+App::sessionHandler('redis');   // or: session_set_save_handler(new RedisSessionHandler(), true);
+
+// Backend-agnostic (Table / Redis / Tiered — follows Store::defaultBackend())
+StoreSessionHandler::register(ttl: 1440);   // TTL in seconds
+
+// Default (coroutine mode): auto-selected as TableSessionHandler
+// — no call needed; CoSessionManager picks it when App::sessionHandler() is null</code></pre>
+    <p>
+      For single-server apps the default (<code>TableSessionHandler</code>) is already coroutine-safe
+      with no Redis dependency — it&rsquo;s fast, it survives restart, and the files are debuggable
+      with <code>cat</code>. Swap to <code>RedisSessionHandler</code> when you add a second server.
+    </p>
+
+    <?php App::render('/components/_callout', [
+      'variant' => 'info',
+      'title'   => 'Concurrent writes are safe — pick a handler',
+      'body'    => '<p>ZealPHP&rsquo;s session handlers protect you from the same-session write race (two coroutines flushing different keys to the same <code>PHPSESSID</code>):</p>' .
+                   '<ul>' .
+                   '<li><strong>TableSessionHandler</strong> (coroutine-mode default) — optimistic CAS versioning + recursive leaf-level 3-way merge. No Redis required. Single-node.</li>' .
+                   '<li><strong>RedisSessionHandler</strong> — Redis <code>WATCH</code>/<code>MULTI</code> optimistic locking, retries with a 3-way merge on conflict. Cross-node.</li>' .
+                   '<li><strong>StoreSessionHandler</strong> — backend-agnostic: Table, Redis, or Tiered — follows whatever <code>Store::defaultBackend()</code> is set to.</li>' .
+                   '<li><strong>File backend</strong> — read-merge-write under an exclusive <code>flock(LOCK_EX)</code>.</li>' .
+                   '</ul>' .
+                   '<p>Per-coroutine <code>RequestContext</code> isolation keeps each request&rsquo;s view private; the handler&rsquo;s merge layer resolves conflicts when two coroutines commit to the <em>same</em> session id simultaneously.</p>',
+    ]); ?>
 
     <h2>Step 4 — Why <code>$_SESSION</code> AND <code>$g-&gt;session</code>?</h2>
     <p>
@@ -172,6 +198,18 @@ lesson_counter|i:5;cart|a:2:{...}</code></pre>
       <a href="/learn/mental-model">The Mental Model</a> (the "What&rsquo;s shared, what isn&rsquo;t"
       section). You don&rsquo;t need to think about it day-to-day — both access paths are wired so
       you can&rsquo;t accidentally cross sessions between requests.
+    </p>
+    <p>
+      Which session manager runs depends on the lifecycle mode set by
+      <a href="/coroutines#lifecycle-modes"><code>App::mode()</code></a>:
+      in coroutine mode (<code>App::superglobals(false)</code>) each request gets a
+      <strong><code>CoSessionManager</code></strong> with its own per-coroutine
+      <code>RequestContext</code>; in <code>legacy-cgi</code> and <code>mixed</code> modes
+      (<code>App::superglobals(true)</code> + coroutines off) the shared-process
+      <strong><code>SessionManager</code></strong> runs instead — <em>except</em>
+      <code>coroutine-legacy</code> mode, which uses <code>superglobals(true)</code> but
+      keeps <code>CoSessionManager</code> because coroutines remain on. Either way
+      <code>$g-&gt;session</code> is the safe access path.
     </p>
 
     <?php App::render('/components/_callout', [

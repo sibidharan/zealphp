@@ -1,7 +1,7 @@
 # ZealPHP 50-App Compatibility Database
 
-> Last updated: 2026-05-28  
-> Test environment: PHP 8.4.21 + OpenSwoole 26.2.0 + ext-zealphp 0.3.3  
+> Last updated: 2026-05-31  
+> Test environment: PHP 8.4.21 + OpenSwoole 26.2.0 + ext-zealphp 0.3.3–0.3.24 (grades vary by section — see per-section notes)  
 > Docker lab sweep — actual boot + first-request tests where marked as tested
 
 This is the reference for which PHP applications work with ZealPHP and in which modes. Use the [Mode Selection Guide](#mode-selection-guide) to quickly find your configuration.
@@ -10,12 +10,16 @@ This is the reference for which PHP applications work with ZealPHP and in which 
 
 ## Modes Reference
 
-| Mode | Config | Description | Overhead | Concurrency |
-|------|--------|-------------|----------|-------------|
-| **Mode 1 (CGI Pool)** | `superglobals(true) + processIsolation(true) + cgiMode('pool')` | Each request runs in a persistent pool worker subprocess. Like Apache mod_php. Fresh globals per request. | ~50 ms/req | Sequential per worker |
-| **Mode 3 (Sync)** | `superglobals(true) + enableCoroutine(false) + processIsolation(false)` | In-process, sequential. Superglobals populated per request. No subprocess overhead. | ~0 ms | Sequential per worker |
-| **Mode 4 (Hybrid)** | `superglobals(true) + enableCoroutine(true) + defineIsolation(true)` | Requires ext-zealphp C extension. Full coroutine concurrency with per-coroutine superglobal isolation. | ~5 ms | Full coroutine |
-| **Mode 5 (Coroutine)** | `superglobals(false) + enableCoroutine(true)` | Native ZealPHP mode. Uses `$g->get`/`$g->post` instead of `$_GET`/`$_POST`. Highest performance. | ~0 ms | Full coroutine |
+> **Canonical API:** use `App::mode(string)` to set both axes in one call. The "Mode N" labels below are shorthand used throughout this document; they map to the presets shown. See [/coroutines#lifecycle-modes](/coroutines#lifecycle-modes) for the full matrix.
+
+| Mode | Canonical preset | Config (fine-grained equivalent) | Description | Overhead | Concurrency |
+|------|-----------------|----------------------------------|-------------|----------|-------------|
+| **Mode 1 (CGI Pool)** | `App::mode('legacy-cgi')` | `superglobals(true) + isolation(CgiPool)` | Each request runs in a pre-spawned pool worker subprocess. Like Apache mod_php. Fresh globals per request. | **~1–3 ms warm** (pool); opt-in `cgiMode('proc')` = ~30–50 ms cold per-process | Sequential per worker |
+| **Mode 3 (Sync)** | `App::mode('mixed')` | `superglobals(true) + isolation(None)` | In-process, sequential. Superglobals populated per request. No subprocess overhead. | ~0 ms | Sequential per worker |
+| **Mode 4 (coroutine-legacy)** | `App::mode('coroutine-legacy')` | `superglobals(true) + isolation(Coroutine)` + silentRedeclare + includeIsolation + coroutineGlobalsIsolation + coroutineStaticsIsolation | Requires ext-zealphp. Full coroutine concurrency with per-coroutine isolation of superglobals, `$GLOBALS`, function statics, and `require_once` re-execution. (`define()` isolation is a separate opt-in: `App::defineIsolation(true)`.) | ~5 ms | Full coroutine |
+| **Mode 5 (Coroutine)** | `App::mode('coroutine')` | `superglobals(false) + isolation(Coroutine)` | Native ZealPHP mode. Uses `$g->get`/`$g->post` instead of `$_GET`/`$_POST`. Highest performance. | ~0 ms | Full coroutine |
+
+> **⚠️ The Mode 4 grades below predate the full `coroutine-legacy` preset (root-caused 2026-05-30).** "Mode 4" as tested here (`superglobals + enableCoroutine + defineIsolation`, ext-zealphp 0.3.3–0.3.8) does NOT include Stage 7 `includeIsolation` + `silentRedeclare`, which `App::mode('coroutine-legacy')` now auto-enables. Under the full preset there is a hard rule: an inherited class (`extends`/`implements`) declared in a `require_once`'d file that Stage 7 re-executes per request corrupts its `default_properties_table` → hard SIGSEGV — fixed in ext-zealphp 0.3.24 (Stage 4 orphans inherited losers instead of destroying them). **Net effect, verified on real apps (PHP 8.4, ASAN, ext-zealphp as the sole override engine):** Composer/PSR-4 **autoload** apps are SAFE in coroutine-legacy (Adminer 5.4.2 ✓, CommonMark 2.x with 224 inherited classes ✓); legacy **`require_once`-bootstrap** apps (WordPress) also trip a separate cold-boot `mysqlnd`/`libtasn1` connection-teardown heap overflow and must use **Mode 1 / `legacy-cgi`** until that second layer lands. A full coroutine-legacy re-grade against ext-zealphp 0.3.24+ is pending.
 
 ---
 
@@ -992,8 +996,8 @@ die(json_encode(['error' => 'unauthorized']));
 
 **Affected apps:** OpenCart, phpBB, Matomo tracker, Cacti, Vanilla Forums, YOURLS  
 **Impact:** In Mode 3 and 5, `exit()` kills the worker process — OpenSwoole cannot trap it at PHP level. The worker is respawned by the manager, but response is lost and the next request gets a fresh worker.  
-**Modes affected:** All in-process modes (3, 4, 5) if unhandled. Mode 1 is immune (subprocess dies, pool spawns replacement). Mode 4 catches `exit()` via `register_shutdown_function` in the CGI wrapper.  
-**Note:** ZealPHP's uopz overrides `exit()` in some configurations — check `App::hookExit()`.
+**Modes affected:** All in-process modes (3, 4, 5) if unhandled. Mode 1 is immune (subprocess dies, pool spawns replacement). Mode 4 (coroutine-legacy) handles `exit()`/`die()` worker-survival via the coroutine-legacy isolation stack (ext-zealphp).  
+**Note:** There is no `App::hookExit()`. The exec-family hook toggle is `App::hookExec()` (backtick/shell_exec/exec/system/passthru). `exit()`/`die()` worker-survival is part of the coroutine-legacy isolation stack, not a separate toggle.
 
 ### 5. Superglobal Access
 
@@ -1054,7 +1058,7 @@ Does it need $_{GET,POST,SESSION,SERVER} superglobals AND concurrency?
 └─ NO  ↓
 
 Maximum compatibility with unknown/untested apps?
-└─ Mode 1 (CGI Pool) — runs anything, ~50ms overhead
+└─ Mode 1 (CGI Pool) — runs anything, ~1–3 ms warm (pool default)
 ```
 
 ### Quick Reference by App Type
@@ -1118,9 +1122,10 @@ Maximum compatibility with unknown/untested apps?
 <?php
 use ZealPHP\App;
 
-App::superglobals(true);
-App::processIsolation(true);
-App::cgiMode('pool');
+// One-call preset — superglobals(true) + isolation(CgiPool).
+// Pre-spawned warm pool, ~1–3 ms dispatch. Use cgiMode('proc') for
+// fresh-process-per-request (~30–50 ms cold) when you need full isolation.
+App::mode('legacy-cgi');
 
 $app = App::init('0.0.0.0', 8080);
 $app->setFallback(function() {
@@ -1135,9 +1140,9 @@ $app->run();
 <?php
 use ZealPHP\App;
 
-App::superglobals(true);
-App::enableCoroutine(false);
-App::processIsolation(false);
+// One-call preset — superglobals(true) + isolation(None).
+// In-process, sequential. No subprocess overhead.
+App::mode('mixed');
 
 $app = App::init('0.0.0.0', 8080);
 // Register your framework's front controller:
@@ -1147,15 +1152,16 @@ $app->setFallback(function() {
 $app->run();
 ```
 
-### Mode 4 — Hybrid (Concurrency + Superglobals, requires ext-zealphp)
+### Mode 4 — coroutine-legacy (Concurrency + Superglobals, requires ext-zealphp)
 
 ```php
 <?php
 use ZealPHP\App;
 
-App::superglobals(true);
-App::enableCoroutine(true);
-// defineIsolation is handled by ext-zealphp automatically
+// One-call preset — sets superglobals(true) + isolation(Coroutine)
+// and auto-enables silentRedeclare, includeIsolation,
+// coroutineGlobalsIsolation, coroutineStaticsIsolation.
+App::mode('coroutine-legacy');
 
 $app = App::init('0.0.0.0', 8080);
 $app->setFallback(function() {
@@ -1170,7 +1176,10 @@ $app->run();
 <?php
 use ZealPHP\App;
 
-// superglobals(false) is the default
+// One-call preset — superglobals(false) + isolation(Coroutine).
+// This is also the default when App::mode() is not called.
+App::mode('coroutine');
+
 $app = App::init('0.0.0.0', 8080);
 $app->route('/api/users', function() {
     $g = \ZealPHP\G::instance();

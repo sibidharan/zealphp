@@ -45,7 +45,7 @@ use ZealPHP\App;
 
 App::superglobals(true);
 App::processIsolation(true);
-App::cgiMode('fcgi');                      // 'proc' (default) | 'fork' | 'fcgi'
+App::cgiMode('fcgi');                      // 'pool' (default) | 'proc' | 'fcgi'
 App::fcgiAddress('127.0.0.1:9000');        // php-fpm's default TCP listener
 
 $app = App::init('0.0.0.0', 8080);
@@ -73,7 +73,7 @@ extension to a backend. Call it once per extension before `$app->run()`. The
 
 | Key | Type | Required | Meaning |
 |-----|------|----------|---------|
-| `mode` | `'proc'` \| `'fork'` \| `'fcgi'` | **yes** | Dispatch strategy. `'fork'` is `.php`-only (it clones the warm PHP worker). |
+| `mode` | `'pool'` \| `'proc'` \| `'fcgi'` | **yes** | Dispatch strategy. `'pool'` is `.php`-only (pre-spawned warm subprocess pool, ~1–3 ms). `'proc'` spawns a fresh process per request (~30–50 ms). `'fcgi'` forwards to an external FastCGI upstream. |
 | `address` | `string` | **for `fcgi`** | Upstream socket — `host:port` or `unix:/path.sock`. Throws if missing in `fcgi` mode. |
 | `interpreter` | `string` | no | For `proc` mode — the binary to exec (e.g. `/usr/bin/perl`). Omit to rely on the file's `#!` shebang. |
 | `fcgi_params` | `array<string,string>` | no | Extra CGI environment variables merged into the FastCGI `PARAMS` record. nginx `fastcgi_param` parity. |
@@ -106,7 +106,7 @@ App::registerCgiBackend('.rb',  ['mode' => 'fcgi', 'address' => '127.0.0.1:9002'
 ```
 
 Unregistered extensions fall back to the framework-wide `App::$cgi_mode`
-(default `'proc'`). Inspect what a path resolves to:
+(default `'pool'` — the warm subprocess pool). Inspect what a path resolves to:
 
 ```php
 $resolved = App::resolveCgiBackend('/var/www/app/report.py', '/cgi-bin/report.py');

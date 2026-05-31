@@ -11,7 +11,8 @@
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
-      'Fan-out / fan-in with go() + Channel — running N requests in parallel',
+      'App::parallel() / App::parallelLimit() — the framework\'s first-class fan-out helpers',
+      'Fan-out / fan-in with go() + Channel — the underlying mechanism',
       'Buffered vs unbuffered channels and when each one is right',
       'Error handling in coroutines — exceptions don\'t propagate; design for it',
       'Task workers vs coroutines — when to reach for each',
@@ -98,6 +99,35 @@ for ($i = 0; $i &lt; 3; $i++) {
     <p>
       The trick is the channel shape carries success-or-failure. The parent never blocks on a
       coroutine that crashed silently.
+    </p>
+
+    <h2>Recommended shortcut: <code>App::parallel()</code> and <code>App::parallelLimit()</code></h2>
+    <p>
+      The hand-rolled <code>go()</code> + <code>Channel</code> fan-out above is the underlying
+      mechanism — but the framework ships first-class helpers so you don&rsquo;t have to wire it
+      yourself every time:
+    </p>
+    <pre><code class="language-php">// App::parallel() — runs every closure concurrently, returns results in input order.
+// Blocks until all finish. Throws the first exception if any coroutine fails.
+$results = App::parallel([
+    fn() =&gt; Users::recent(),
+    fn() =&gt; Orders::pending(),
+    fn() =&gt; Stats::today(),
+]);
+[$users, $orders, $stats] = $results;
+
+// App::parallelLimit() — bounded fan-out, at most $concurrency in-flight at once.
+// Results are keyed by the input array keys.
+$pages = App::parallelLimit(
+    items:       range(1, 20),
+    fn:          fn(int $page) =&gt; Posts::page($page),
+    concurrency: 5,
+);</code></pre>
+    <p>
+      Both helpers auto-wrap in <code>Coroutine::run()</code> when called from outside a coroutine
+      (e.g., a CLI script), so they work in any context. Use the raw <code>Channel</code> form
+      when you need fine-grained control — push-on-error shapes, timeouts via
+      <code>pop($timeout)</code>, or a mixed producer/consumer pipeline.
     </p>
 
     <h2>Pattern 3: <code>co::sleep()</code> vs <code>usleep()</code></h2>
@@ -235,7 +265,9 @@ Store::incr('counters', 'total', 'n');</code></pre>
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
-      'Fan-out with <code>go()</code> + a buffered <code>Channel</code> — total time = slowest task, not sum.',
+      '<code>App::parallel([])</code> is the recommended fan-out primitive — total time = slowest task, not sum; throws on first error.',
+      'For bounded fan-out, <code>App::parallelLimit($items, $fn, $concurrency)</code> caps in-flight coroutines.',
+      'Under the hood: <code>go()</code> + a buffered <code>Channel</code> — reach for the raw form when you need push-error shapes or timeouts.',
       'Exceptions don\'t cross <code>go()</code> boundaries; push a success-or-failure shape through the channel.',
       'Use <code>co::sleep()</code> not <code>usleep()</code>; the framework hooks PDO/curl/file I/O for you.',
       'Task workers are for CPU-bound or non-hookable blocking work — separate process pool, not coroutines.',

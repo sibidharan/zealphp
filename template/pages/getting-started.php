@@ -86,7 +86,7 @@
         <li class="gs-risk-item"><strong>Coroutine safety</strong> — references to <code>RequestContext::instance()</code> (a.k.a. <code>$g</code>) must not be held across <code>yield</code> points; each coroutine has its own context.</li>
         <li class="gs-risk-item"><strong>ext-zealphp function overrides are alpha</strong> — <code>session_start()</code>, <code>header()</code>, etc. are intercepted via <a href="https://github.com/sibidharan/zealphp/tree/master/ext/zealphp" target="_blank" rel="noopener">ext-zealphp</a> (our own extension). Edge cases exist; report them.</li>
         <li class="gs-risk-item"><strong>Memory growth</strong> — workers stay alive between requests; profile for leaks under sustained load.</li>
-        <li><strong>API stability</strong> — v0.2.x; breaking changes possible until v1.0. Pin a version in <code>composer.json</code>.</li>
+        <li><strong>API stability</strong> — v0.3.x; breaking changes possible until v1.0. Pin a version in <code>composer.json</code>.</li>
       </ul>
       <p class="gs-callout-mt-sm">Report issues at <a href="https://github.com/sibidharan/zealphp/issues" target="_blank" rel="noopener">GitHub Issues</a>. Security disclosures: see <a href="https://github.com/sibidharan/zealphp/blob/master/SECURITY.md" target="_blank" rel="noopener">SECURITY.md</a>.</p>
     </div>
@@ -260,7 +260,7 @@ PHP
       <strong>Two modes, one rule: <a href="/coroutines#state-parity">always use <code>$g->*</code></a>.</strong>
       The default <code>app.php</code> runs in <strong>coroutine mode</strong> (<code>App::superglobals(false)</code>) — <code>$g-&gt;session</code> / <code>$g-&gt;get</code> / <code>$g-&gt;post</code> are the recommended accessors (per-coroutine, always safe). With ext-zealphp, <code>$_GET</code>/<code>$_SESSION</code> are automatically per-coroutine safe in both modes (saved/restored on every yield/resume).
       <br><br>
-      If you're porting a legacy <code>.htaccess</code> + <code>$_*</code> codebase and want a quick lift, set <code>App::superglobals(true);</code> before <code>App::init()</code> — ZealPHP then bridges <code>$g-&gt;*</code> to the real PHP superglobals via <code>$GLOBALS</code> so legacy code keeps working. See the <a href="/legacy-apps">Legacy apps</a> page for the full migration matrix.
+      If you're porting a legacy <code>.htaccess</code> + <code>$_*</code> codebase, use one of the lifecycle presets before <code>App::init()</code>: <code>App::mode('legacy-cgi')</code> for unmodified WordPress/Drupal (pre-warmed subprocess pool, true per-request isolation), or <code>App::mode('coroutine-legacy')</code> to run request-style PHP concurrently with per-coroutine isolation of superglobals, <code>$GLOBALS</code>, statics, and <code>require_once</code> re-execution (requires ext-zealphp; <code>define()</code> isolation is a separate opt-in via <code>App::defineIsolation(true)</code>). The raw <code>App::superglobals(true)</code> flag is the underlying knob these presets configure. See <a href="/coroutines#lifecycle-modes">Lifecycle modes</a> and the <a href="/legacy-apps">Legacy apps</a> page for the full migration matrix.
     </div>
 
     <p class="gs-p-mt-sm">Start the server and visit <code>http://localhost:8080/hello?name=PHP</code>:</p>

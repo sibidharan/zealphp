@@ -7,7 +7,7 @@ This guide walks through setting up a workstation capable of running ZealPHP, ve
 - **Operating system**: Linux distribution with access to `apt`, or macOS/Homebrew with equivalent packages.
 - **PHP**: >= 8.3 CLI with development headers. Tested on 8.3 and 8.4; **PHP 8.5 is supported on OpenSwoole 26.2+** (the CI matrix runs `phpunit (PHP 8.5)`).
 - **OpenSwoole**: PECL package, `22.1+` (current channel: `openswoole-22.1.5` or later). `composer.json` pins `ext-openswoole: ">=22.0"`; **OpenSwoole 26.2+ (released Feb 2026) adds PHP 8.5 support**. Compile with coroutine sockets, OpenSSL, HTTP/2, MySQLnd, CURL, and Postgres support.
-- **uopz**: PECL package used to override built-in PHP functions inside the ZealPHP runtime.
+- **ext-zealphp** (recommended) or **uopz** (fallback): used to override built-in PHP functions inside the ZealPHP runtime. ZealPHP requires at least one; it prefers ext-zealphp when loaded. ext-zealphp is also required for `coroutine-legacy` mode.
 - **Composer**: dependency manager for PHP projects.
 
 Install the core toolchain using `apt` (recommended):
@@ -37,6 +37,7 @@ After installing the PECL packages, enable them in the CLI configuration:
 ```bash
 sudo tee /etc/php/8.3/cli/conf.d/99-zealphp-openswoole.ini <<'EOF'
 extension=openswoole.so
+extension=zealphp.so
 extension=uopz.so
 short_open_tag=on
 EOF
@@ -46,12 +47,13 @@ Verify the modules are loaded:
 
 ```bash
 php -m | grep openswoole
-php -m | grep uopz
+php -m | grep zealphp   # recommended override engine
+php -m | grep uopz      # fallback (only needed if ext-zealphp is absent)
 ```
 
-Both commands should print the module name.
+At minimum `openswoole` and one of `zealphp` or `uopz` must print the module name.
 
-> **Session unserialize whitelist (v0.2.26).** When uopz virtualizes `session_start()`, ZealPHP reads `$_SESSION` blobs through `unserialize()` with `['allowed_classes' => ['stdClass']]`. Scalars, arrays, and `stdClass` round-trip normally; any other class read back from session storage becomes `__PHP_Incomplete_Class`. Adding a class to the whitelist requires reviewing its `__wakeup` / `__unserialize` / `__destruct` magic methods first. See `src/Session/utils.php` and the `template/pages/sessions.php#objects-in-session` page for the canonical reference.
+> **Session unserialize whitelist (v0.2.26).** When ZealPHP virtualizes `session_start()` (via ext-zealphp or uopz), it reads `$_SESSION` blobs through `unserialize()` with `['allowed_classes' => ['stdClass']]`. Scalars, arrays, and `stdClass` round-trip normally; any other class read back from session storage becomes `__PHP_Incomplete_Class`. Adding a class to the whitelist requires reviewing its `__wakeup` / `__unserialize` / `__destruct` magic methods first. See `src/Session/utils.php` and the `template/pages/sessions.php#objects-in-session` page for the canonical reference.
 
 ## 2. Clone and Install Dependencies
 
@@ -82,26 +84,26 @@ php app.php
 Expected output:
 
 ```
-ZealPHP server running at http://0.0.0.0:9501 with N routes
+ZealPHP server running at http://0.0.0.0:8080 with N routes
 ```
 
-Visit `http://localhost:9501` in your browser to exercise the implicit public routes that map to files in `public/` — the **document root** (the Apache `DocumentRoot` equivalent). It defaults to `public/`; change it with `App::documentRoot('…')` before `App::init()`.
+Visit `http://localhost:8080` in your browser to exercise the implicit public routes that map to files in `public/` — the **document root** (the Apache `DocumentRoot` equivalent). It defaults to `public/`; change it with `App::documentRoot('…')` before `App::init()`.
 
 ## 5. Verifying Health
 
 1. Open a terminal and request a simple page:
    ```bash
-   curl -i http://localhost:9501/about
+   curl -i http://localhost:8080/about
    ```
    You should see a 200 status and the contents of `public/about.php`.
 2. Hit an API endpoint:
    ```bash
-   curl -i http://localhost:9501/api/device/list
+   curl -i http://localhost:8080/api/device/list
    ```
    Expect a JSON response defined in `api/device/list.php`.
 3. Tail application logs (`logs/` if configured) or review console output for errors thrown during the request lifecycle.
 
-If the server fails to start with `Class "Swoole\HTTP\Server" not found`, double-check that `extension=openswoole.so` is active for the PHP binary you are using.
+If the server fails to start with `Class "OpenSwoole\HTTP\Server" not found`, double-check that `extension=openswoole.so` is active for the PHP binary you are using.
 
 ## 6. Next Steps
 

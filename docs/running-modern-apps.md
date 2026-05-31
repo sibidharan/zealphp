@@ -99,7 +99,7 @@ $cfg['Servers'][1]['auth_type'] = 'cookie';
 ```
 `App::documentRoot('/app/phpmyadmin')`. **Caveat:** phpMyAdmin is the one app
 that still doesn't run cleanly in full coroutine-legacy — **use
-`App::cgiMode('pool')` for it** (subprocess per request; returns 200). Two
+`App::cgiMode('pool')` for it** (pre-spawned, recycled subprocess pool, ~1-3ms warm; returns 200). Two
 distinct issues were root-caused (see
 `docs/architecture/2026-05-29-50app-sweep-findings.md` §D):
 - **`Undefined constant AUTOLOAD_FILE` / `ROOT_PATH`** — only appears if you
@@ -140,7 +140,7 @@ drop-in fallback until the connection-pool lands.
   version of a library the framework also ships (e.g. kanboard's psr/log v1 vs
   the framework's v3) clashes in the shared coroutine class table → a
   compile-time "must be compatible" fatal. This is fundamental to in-process
-  hosting; **CGI-Pool mode (subprocess per request) avoids it** because only the
+  hosting; **CGI-Pool mode (pre-spawned subprocess pool) avoids it** because only the
   app's own vendor/ loads. Modern apps on current deps don't hit it.
 - **`$_SERVER['argv']`** and other CLI-only expectations: some apps (e.g.
   Nextcloud's `base.php`) read `argv` and warn/500 in a web SAPI — an app

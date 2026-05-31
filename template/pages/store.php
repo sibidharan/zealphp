@@ -143,7 +143,7 @@ Cache::flush();                                    // clear everything</code></p
     <td>Use these for counters. Don't do <code>get</code> + <code>set</code>.</td>
   </tr>
   <tr>
-    <td><code>Counter</code> (<code>OpenSwoole\Atomic</code>) — <code>compareAndSet</code>, <code>add</code>, <code>sub</code>, <code>get</code>, <code>set</code></td>
+    <td><code>Counter</code> (<code>OpenSwoole\Atomic</code>) — <code>compareAndSet</code>, <code>increment</code>, <code>decrement</code>, <code>reset</code>, <code>get</code>, <code>set</code></td>
     <td>✅ Lock-free atomic on a 32/64-bit integer</td>
     <td>For single-value cross-worker counters, prefer this over Store.</td>
   </tr>

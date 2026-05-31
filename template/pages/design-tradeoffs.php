@@ -49,13 +49,19 @@
         <code>App::superglobals(true)</code> populates <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>
         per request &mdash; with ext-zealphp, these are <strong>per-coroutine safe</strong> (saved/restored
         on every yield/resume), so legacy code works with full coroutine concurrency. Without ext-zealphp,
-        superglobals mode runs sequentially (one request at a time per worker). Since v0.2.23 the one flag is
-        decomposed into <strong>four independent fluent setters</strong> —
-        <code>superglobals()</code>, <code>processIsolation()</code>, <code>enableCoroutine()</code>,
-        <code>hookAll()</code> — each defaulting to <code>null</code> ("follow <code>superglobals</code>")
-        so existing apps see no change, while advanced users can mix-and-match (e.g. the Symfony bridge runs
-        <code>superglobals(true) + processIsolation(false)</code> for real <code>$_SESSION</code> with no
-        per-include fork cost).
+        superglobals mode runs sequentially (one request at a time per worker). The lifecycle is now
+        described by two orthogonal axes with a one-call preset:
+        <code>App::mode()</code> (constants: <code>App::MODE_COROUTINE</code>,
+        <code>App::MODE_LEGACY_CGI</code>, <code>App::MODE_COROUTINE_LEGACY</code>,
+        <code>App::MODE_MIXED</code>) sets both axes in one call.
+        <code>App::isolation()</code> (constants: <code>ISOLATION_COROUTINE</code>,
+        <code>ISOLATION_CGI_POOL</code>, <code>ISOLATION_CGI_PROC</code>,
+        <code>ISOLATION_CGI_FCGI</code>, <code>ISOLATION_NONE</code>) folds the
+        <code>processIsolation()</code> / <code>enableCoroutine()</code> / <code>hookAll()</code> /
+        <code>cgiMode()</code> cross-product into one value. The fine-grained setters still work
+        unchanged underneath. See
+        <a href="/coroutines#lifecycle-modes" class="tradeoffs-link">/coroutines#lifecycle-modes</a>
+        for the full preset matrix and per-mode safety guarantees.
       </p>
       <ul class="tradeoffs-list">
         <li><strong class="tradeoffs-strong-light">What it buys:</strong> greenfield projects get coroutines (thousands
@@ -139,9 +145,10 @@ PHP]); ?>
       </p>
       <ul class="tradeoffs-list">
         <li><strong class="tradeoffs-strong-light">Three dispatch modes</strong> (<code>App::cgiMode()</code>):
-          <code>'proc'</code> spawns a fresh PHP interpreter per request via <code>proc_open</code> (true mod_cgi
-          parity, full WordPress/Drupal global-scope isolation); <code>'fork'</code> warm-forks the already-booted
-          <code>OpenSwoole\Process</code> (~5&times; faster, <code>.php</code>-only, function-scope code); <code>'fcgi'</code>
+          <code>'pool'</code> (default) uses a pre-spawned PHP subprocess pool — mod_php-style isolation,
+          ~1&#8211;3&nbsp;ms warm, configurable via <code>cgiPoolSize()</code> / <code>cgiPoolMaxRequests()</code>;
+          <code>'proc'</code> spawns a fresh PHP interpreter per request via <code>proc_open</code> (~30&#8211;50&nbsp;ms
+          cold start — the fallback for true fresh-process semantics); <code>'fcgi'</code>
           forwards to an upstream php-fpm / FastCGI pool via the bundled <code>FastCgiClient</code> (no per-request
           spawn at all). Per-extension backends register via <code>App::registerCgiBackend('.py', &hellip;)</code>.</li>
         <li><strong class="tradeoffs-strong-light">ScriptAlias + ExecCGI scope.</strong>
@@ -169,16 +176,19 @@ PHP]); ?>
           <code>App::setFallback(fn() =&gt; App::include('/index.php'))</code> serves WordPress as-is; a polyglot
           <code>/cgi-bin</code> of Python/Perl reports runs without a separate web server; and <code>'fcgi'</code> mode
           lets ZealPHP front an existing php-fpm pool with no fork cost at all.</li>
-        <li><strong class="tradeoffs-strong-light">What it costs:</strong> <code>'proc'</code> mode pays a process spawn
-          per request (~30&ndash;50 ms <code>proc_open</code> + PHP startup) &mdash; no coroutine async, no shared state.
-          It's slow relative to a native main-worker route, and the bridge is real maintenance surface
-          (<code>src/cgi_worker.php</code> + the CGI env/dispatch glue in <code>src/App.php</code>).</li>
+        <li><strong class="tradeoffs-strong-light">What it costs:</strong> the bridge is real maintenance surface
+          (<code>src/cgi_worker.php</code> + the CGI env/dispatch glue in <code>src/App.php</code>).
+          The warm <code>'pool'</code> default adds ~1&#8211;3&nbsp;ms dispatch overhead vs. a native route.
+          <code>'proc'</code> mode (fresh <code>proc_open</code> per request) pays ~30&#8211;50&nbsp;ms cold start
+          with no coroutine async and no shared state &mdash; use it only when you need strict
+          fresh-process isolation and the pool warm path won't do.</li>
         <li><strong class="tradeoffs-strong-light">Mitigation:</strong> CGI-script execution (non-PHP via
           ScriptAlias / registered extensions) works in <em>any</em> lifecycle mode &mdash; it isn't bolted to
           <code>processIsolation</code>. For PHP, <code>.php</code> only goes through the subprocess in isolation mode;
-          in coroutine mode it runs in-process at full speed. Pick <code>'fork'</code> or <code>'fcgi'</code> to drop the
-          per-request spawn when your code tolerates it, and keep native routes for everything you've already
-          modernized &mdash; use the bridge for the legacy slice you can't rewrite yet.</li>
+          in coroutine mode it runs in-process at full speed. Use <code>'pool'</code> (the default warm path)
+          for legacy PHP isolation, <code>'fcgi'</code> to front an existing php-fpm pool with zero spawn cost,
+          and keep native routes for everything you've already modernized &mdash; use the bridge for the
+          legacy slice you can't rewrite yet.</li>
       </ul>
     </div>
 

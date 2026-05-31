@@ -26,7 +26,7 @@ zealphp/
 - **`public/`** – ZealPHP's **document root** (the Apache `DocumentRoot` equivalent): the directory every implicit route and the built-in static handler resolve against. It **defaults to `public/`** — override it with `App::documentRoot('…')` before `App::init()` (see [routing.md](routing.md)). Contains PHP scripts and assets served via implicit routing: a request to `/foo/bar` resolves to `public/foo/bar.php` (without requiring `.php` in the URL). Index files are handled automatically (`public/index.php`, `public/foo/index.php`). Use this directory for traditional PHP pages, SPA bootstraps, or static fallbacks.
 - **`route/`** – Optional route injection point. All files in this directory are included before implicit routes are registered, allowing teams to register additional explicit routes without editing `app.php`. Each file typically calls `$app = App::instance();` followed by `$app->route(...)`, `nsRoute(...)`, or `patternRoute(...)`.
 - **`api/`** – Implicit API router. Files inside `api/` become callable via `/api/<path>`. Subdirectories map to namespaces: `api/device/list.php` is accessible as `/api/device/list`. Each file returns a closure stored in a variable whose name matches the file base name; `ZealAPI` binds that closure into the API context at runtime.
-- **`template/`** – Houses reusable view fragments loaded via `App::render()`. The default template root is `template/home/` with `_master.php`, `_head.php`, and `content.php`. Keep presentation-only PHP here to support dynamic HTML streaming.
+- **`template/`** – Houses reusable view fragments loaded via `App::render()`. The default template root is `template/`; `App::render()` may descend into a subdirectory (e.g. `template/home/`) when the current page name matches one. Keep presentation-only PHP here to support dynamic HTML streaming.
 
 ## Background Execution
 
@@ -48,7 +48,7 @@ zealphp/
 
 - **`docs/`** – The documentation set you are currently reading. Treat these Markdown files as publishable artifacts.
 - **`README.md`, `CHANGELOG.md`, `TODO.md`** – Repository-level guidance, release history, and future work items.
-- **`setup.sh`** – Bootstrap script that installs OpenSwoole, uopz, and Composer dependencies. Useful for setting up CI or fresh workstations.
+- **`setup.sh`** – Bootstrap script that installs OpenSwoole, ext-zealphp (with uopz as a fallback), and Composer dependencies. Useful for setting up CI or fresh workstations.
 
 ## What Gets Loaded at Runtime?
 

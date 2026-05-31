@@ -134,9 +134,9 @@ Inside middleware you have full access to the PSR request:
 
 - Read cookies and headers.
 - Perform asynchronous validation using `go()` (when superglobals are disabled) or `coproc()` to spawn a non-blocking background process when superglobals are enabled.
-- Populate `G::instance()->session` or attach attributes to the PSR request (e.g., `$request = $request->withAttribute('user', $user);` before passing it down).
+- Populate `G::instance()->session` with auth state, or stash a resolved user object on `G::instance()->memo` (e.g. `G::instance()->memo['user'] = $user;`).
 
-Your API handlers can then pull attributes from the PSR request via `$request->getAttribute('user')`.
+Handlers receive a `ZealPHP\HTTP\Request` wrapper — not the PSR `ServerRequestInterface` that flows through the middleware stack — so PSR `withAttribute()`/`getAttribute()` never reaches them. Use `G::instance()->memo['user']`, `G::instance()->session['user_id']`, or any other key on `G::instance()` to pass auth context from middleware to handlers.
 
 ## Testing Middleware
 
@@ -253,12 +253,42 @@ $app->addMiddleware(new SetEnvIfMiddleware([
 ]));
 ```
 
+## ZealAPI Auth Hooks
+
+For file-based API handlers under `api/`, ZealPHP ships first-class authentication integration points rather than requiring manual session checks inside every closure. Wire the three callbacks once at boot and every `api/*` handler gains access to the same auth logic:
+
+```php
+use ZealPHP\App;
+use ZealPHP\G;
+
+// Register before App::run()
+App::authChecker(fn() => !empty(G::instance()->session['user_id']));
+App::adminChecker(fn() => !empty(G::instance()->session['is_admin']));
+App::usernameProvider(fn() => G::instance()->session['username'] ?? null);
+```
+
+Inside any API closure, the `$this` context is the `ZealAPI` instance, so:
+
+```php
+// api/orders/create.php
+$post = function () {
+    if (!$this->requirePostAuth()) {
+        return; // 403 already sent
+    }
+    // $this->isAuthenticated(), $this->isAdmin(), $this->getUsername() all available
+    return ['status' => 'created'];
+};
+```
+
+All three hooks default to `null` (fail-closed): without `App::authChecker()`, `isAuthenticated()` returns `false` and `requirePostAuth()` rejects every request. See `template/pages/api.php` on the live site for the full auth-hooks reference.
+
 ## Future Directions
 
 `standards-and-roadmap.md` tracks planned improvements such as:
 
 - Middleware groups and route-scoped stacks.
-- First-class `Auth` facade for common patterns (sessions, JWT, API keys).
-- Declarative configuration for CORS and rate limiting.
+- A higher-level `Auth` facade built on top of the existing `App::authChecker()` / `App::adminChecker()` / `App::usernameProvider()` hooks (sessions, JWT, API keys in one call).
+
+Note: CSRF protection (`CsrfMiddleware`), CORS (`CorsMiddleware`), and rate limiting (`RateLimitMiddleware`) are already shipped as built-in PSR-15 middleware — see `template/pages/middleware.php` on the live site.
 
 Contributions in these areas are welcome—align proposals with the PSR-15 contract to keep interoperability intact.

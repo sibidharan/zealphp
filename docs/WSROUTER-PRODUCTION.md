@@ -40,14 +40,16 @@ WSRouter::init();
 RAM ≈ maxRows × (4 × Σ column_bytes + ~32 B/row overhead)
 ```
 
-For `ws_owner` (1 STRING(64) + 1 STRING(32) = 96 bytes nominal):
-- 1k rows → ~390 KB
-- 100k rows → ~39 MB
-- 1M rows → ~390 MB
+For `ws_owner` (columns: `server_id STRING(192)` + `conn_id STRING(32)` = 224 bytes nominal;
+`client_id` is the row **key**, not a column):
+- 1k rows → ~930 KB
+- 100k rows → ~93 MB
+- 1M rows → ~930 MB
 
-For `ws_room_members` (2 STRING(64) + 1 STRING(64) + 1 INT(8) = 200 bytes nominal):
-- 100k rows → ~80 MB
-- 1M rows → ~800 MB
+For `ws_room_members` (columns: `room STRING(64)` + `client_id STRING(128)` + `server_id STRING(192)`
++ `joined_at INT(8)` = 392 bytes nominal; keyed by `{room}:{client_id}`):
+- 100k rows → ~160 MB
+- 1M rows → ~1.6 GB
 
 These segments are allocated **at master fork** — the RAM is committed up
 front, not lazy. Size against peak, not average.
@@ -60,8 +62,9 @@ $app->ws('/chat',
         try {
             WSRouter::own($request->get['user'] ?? '', $request->fd);
         } catch (\ZealPHP\WS\CapacityException $e) {
-            // Close code 1013 = "Try Again Later" — RFC 6455 recommended
-            $server->disconnect($request->fd, 1013, 'server at capacity');
+            // WSRouter::CLOSE_CAPACITY (4013) — semantic capacity close code.
+            // 1013 (CLOSE_TRY_AGAIN_LATER) is also valid as the RFC hint.
+            $server->disconnect($request->fd, WSRouter::CLOSE_CAPACITY, 'server at capacity');
             return;
         }
     },
@@ -132,7 +135,7 @@ $app->ws('/chat',
         // 1. Read session cookie
         $sid = $request->cookie['PHPSESSID'] ?? '';
         if ($sid === '') {
-            $server->disconnect($request->fd, 4001, 'unauthenticated');
+            $server->disconnect($request->fd, WSRouter::CLOSE_AUTH_REQUIRED, 'unauthenticated');
             return;
         }
 
@@ -141,7 +144,7 @@ $app->ws('/chat',
         session_start();
         $user = $_SESSION['user'] ?? null;
         if (!$user) {
-            $server->disconnect($request->fd, 4001, 'session expired');
+            $server->disconnect($request->fd, WSRouter::CLOSE_AUTH_INVALID, 'session expired');
             return;
         }
 
@@ -150,7 +153,7 @@ $app->ws('/chat',
         try {
             WSRouter::own($user['username'], $request->fd);
         } catch (\ZealPHP\WS\CapacityException) {
-            $server->disconnect($request->fd, 1013, 'server at capacity');
+            $server->disconnect($request->fd, WSRouter::CLOSE_CAPACITY, 'server at capacity');
             return;
         }
     },
@@ -163,7 +166,7 @@ $app->ws('/chat',
             if ($row['fd'] === $frame->fd) { $username = $cid; break; }
         }
         if ($username === null) {
-            $server->disconnect($frame->fd, 4001, 'fd not bound');
+            $server->disconnect($frame->fd, WSRouter::CLOSE_AUTH_REQUIRED, 'fd not bound');
             return;
         }
         // Now safe to use $username as the trusted sender identity
@@ -179,14 +182,34 @@ intentionally doesn't enforce identity — it leaves auth to you. The
 pattern above pins identity to the WS upgrade's session cookie, which is
 HMAC-signed and tamper-resistant.
 
-### Close codes for auth failures
+### Close codes
 
-- `4001` — unauthenticated (custom; clients can interpret as "log in
-  again")
-- `4003` — authorized but forbidden from this room (custom; clients can
-  show "not allowed")
-- `1008` — generic policy violation (RFC 6455)
-- `1013` — try again later (RFC 6455; for capacity)
+WSRouter ships named constants for all semantic codes. Use them instead
+of hardcoded integers so client code can react specifically:
+
+| Constant | Code | Meaning |
+|---|---|---|
+| `WSRouter::CLOSE_NORMAL` | 1000 | Clean close |
+| `WSRouter::CLOSE_GOING_AWAY` | 1001 | Server going down / page navigating away |
+| `WSRouter::CLOSE_PROTOCOL_ERROR` | 1002 | Malformed frame |
+| `WSRouter::CLOSE_POLICY_VIOLATION` | 1008 | Generic policy violation (RFC 6455) |
+| `WSRouter::CLOSE_MESSAGE_TOO_BIG` | 1009 | Message too large |
+| `WSRouter::CLOSE_INTERNAL_ERROR` | 1011 | Server internal error |
+| `WSRouter::CLOSE_TRY_AGAIN_LATER` | 1013 | Server temporarily overloaded — retry (RFC 6455) |
+| `WSRouter::CLOSE_AUTH_REQUIRED` | 4001 | Not authenticated — client should log in |
+| `WSRouter::CLOSE_AUTH_INVALID` | 4002 | Bad token / expired session |
+| `WSRouter::CLOSE_FORBIDDEN` | 4003 | Authenticated but not permitted for this room |
+| `WSRouter::CLOSE_CAPACITY` | 4013 | Server at capacity (paired with CapacityException) |
+| `WSRouter::CLOSE_RATE_LIMITED` | 4029 | Client exceeded per-client rate limit (WS-4) |
+| `WSRouter::CLOSE_IDLE` | 4040 | Connection idle / heartbeat missed |
+
+Example:
+
+```php
+$server->disconnect($request->fd, WSRouter::CLOSE_AUTH_REQUIRED, 'unauthenticated');
+$server->disconnect($request->fd, WSRouter::CLOSE_FORBIDDEN,     'not in room');
+$server->disconnect($request->fd, WSRouter::CLOSE_CAPACITY,      'server at capacity');
+```
 
 ---
 
@@ -255,7 +278,7 @@ replay. Dropping a few frames preserves the connection.
 
 If you want disconnect-instead-of-drop semantics (e.g. for trading
 systems where lost frames are intolerable), check `send_queue_bytes`
-yourself and call `$server->disconnect($fd, 1013, 'slow consumer')`.
+yourself and call `$server->disconnect($fd, WSRouter::CLOSE_TRY_AGAIN_LATER, 'slow consumer')`.
 
 ### Tuning
 
@@ -292,12 +315,16 @@ Counters (per-worker, accumulate since boot):
 | `capacity_exceeded_owner_total` | `CapacityException` thrown on own() |
 | `capacity_exceeded_room_total` | `CapacityException` thrown on join() |
 | `rate_limit_drops_total` | pushes dropped by the per-room rate limit |
+| `client_rate_limit_drops_total` | pushes dropped by the per-client rate limit (WS-4) |
+| `hmac_verify_failures_total` | pub/sub messages rejected due to bad/missing HMAC (WS-3) |
 
 For cluster-wide metrics, scrape each server's `/healthz/ws` and sum.
 
 ---
 
-## 8. Rate limiting — per room
+## 8. Rate limiting — per room and per client
+
+### Per-room cap
 
 ```php
 // 100 pushes / 60 s / room
@@ -311,8 +338,28 @@ Sliding-window via `Counter::increment` keyed by `room:bucket-id`. Old
 buckets age out naturally (no explicit deletion). Over-rate pushes
 silently drop + count in `rate_limit_drops_total`.
 
-For per-client rate limiting (e.g. spam protection), wire it manually in
-your `onMessage` handler against `Counter::increment("user:$username:$bucket")`.
+### Per-client cap (WS-4)
+
+Per-client rate limiting is a first-class API — no hand-rolling needed:
+
+```php
+// 50 messages / 10 s / client
+// (applies to sendToClient always, and to Room::push only when a
+//  $fromClientId is attributed; server-originated broadcasts are not
+//  per-client-capped)
+WSRouter::setClientRateLimit(50, 10);
+```
+
+When a client exceeds the limit, the push is dropped and counted in
+`client_rate_limit_drops_total`. If you want to disconnect the client
+instead of silently dropping, check the stat in your `onMessage` handler
+and call `$server->disconnect($frame->fd, WSRouter::CLOSE_RATE_LIMITED, 'rate limited')`
+(close code `4029`).
+
+```php
+// Disable
+WSRouter::setClientRateLimit(0);
+```
 
 ---
 
@@ -351,12 +398,19 @@ membership. Same threat model as `TieredBackend` invalidation (C2 in the
 hardening pass).
 
 If your Redis is NOT in a trusted network (e.g. shared Redis-as-a-service
-across tenants), wrap every `Room::push` payload in your own HMAC + verify
-in `onMessage` handlers. The same HMAC pattern from C2 applies.
+across tenants), enable the **built-in channel HMAC** (WS-3):
 
-The C2-style HMAC option for room pub/sub IS on the roadmap (call it
-"WSRouter authenticated messages"); not yet implemented. Until it lands,
-treat the Redis channel as a trusted bus.
+```php
+// Set once at boot, before App::run().
+WSRouter::setChannelHmacSecret(getenv('ZEALPHP_WS_HMAC') ?: null);
+```
+
+When a secret is set, every `sendToClient()` and `Room::push()` publish
+wraps the payload in a signed `{"v":1,"hmac":"...","payload":"..."}` envelope.
+The receiving worker verifies the HMAC before delivering the message; bad or
+missing signatures are silently dropped and counted in
+`hmac_verify_failures_total` (visible via `WSRouter::stats()`). Without a
+secret the channel is unauthenticated (trusted-network default).
 
 ---
 
@@ -369,15 +423,16 @@ Before pointing real traffic at WSRouter:
 - [ ] `onOpen` reads session cookie → resolves identity → `WSRouter::own($trustedId, $fd)`
 - [ ] `onMessage` looks up identity from `WSRouter::localFds()`, never trusts frame
 - [ ] Client-side reconnect logic with exponential backoff + 4001/4003 stop conditions
-- [ ] `WSRouter::setRoomRateLimit($n, $window)` for spam protection
+- [ ] `WSRouter::setRoomRateLimit($n, $window)` for per-room spam protection
+- [ ] `WSRouter::setClientRateLimit($n, $window)` for per-client spam protection (WS-4)
 - [ ] Expose `/healthz/ws` returning `WSRouter::stats()->snapshot()`
 - [ ] `Store::defaultBackend(Store::BACKEND_REDIS)` if you want cross-server federation
 - [ ] If using Redis: capacity for `ws_owner` / `ws_room_members` keys; monitor Redis memory
 - [ ] If using Table backend: capacity sized against `OpenSwoole\Table` RAM budget at master fork
-- [ ] Document close codes your app uses (4001 unauth, 4003 forbidden, 1013 capacity, etc.)
+- [ ] Document close codes your app uses — use `WSRouter::CLOSE_*` constants (4001 unauth, 4002 bad token, 4003 forbidden, 4013 capacity, 4029 rate-limited, 4040 idle)
 - [ ] Load-test at expected peak — connections × broadcasts/sec × room sizes
 - [ ] Decide ordering strategy — `ts` field + client reorder OR `publishReliable` Streams
-- [ ] Trust model — is your Redis network trusted? If not, plan for the per-room HMAC option
+- [ ] Trust model — is your Redis network trusted? If not, set `WSRouter::setChannelHmacSecret(getenv('ZEALPHP_WS_HMAC') ?: null)` (WS-3)
 - [ ] Sweep test: kill -9 a server; verify the GC reaps its rows within 150 s
 
 The first 8 items are configuration / wiring — under 50 LOC total. The

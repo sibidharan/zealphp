@@ -139,7 +139,7 @@ public array $exception_handlers_stack = [];  // [callable, ...]
 public array $shutdown_functions = [];        // [[callable, args], ...]
 ```
 
-### uopz overrides (namespaced)
+### Namespaced overrides (ext-zealphp preferred, uopz fallback)
 
 In [`src/utils.php`](../src/utils.php):
 
@@ -152,7 +152,7 @@ In [`src/utils.php`](../src/utils.php):
 | `\ZealPHP\register_shutdown_function($cb, ...args)` | append `[$cb, $args]` to queue |
 | `\ZealPHP\error_reporting($level)` | read/write `G->error_reporting_level` (defaults to `App::$initial_error_reporting`) |
 
-Each registered via `uopz_set_return` in `App::__construct()`.
+Each registered via `App::overrideBuiltin()` in `App::__construct()` — which prefers `zealphp_override()` when ext-zealphp is loaded and falls back to `uopz_set_return()` otherwise.
 
 ### Process-level native dispatcher — installed BEFORE uopz
 
@@ -246,7 +246,9 @@ Integration tests that need to verify handler-specific shapes (array return, Gen
 
 ### Status codes OpenSwoole drops
 
-OpenSwoole's `Response::status()` honors only the status codes in its internal reason-phrase table. Codes like **308** and **451** are missing and silently downgrade to 200 unless you pass an explicit reason phrase. The framework's `redirect()` works around this for 308. For custom error pages on those statuses, either pick a different code or call `$response->parent->status($code, 'Reason Phrase')` directly in your handler.
+OpenSwoole's single-arg `Response::status($code)` honors only the codes in its internal reason-phrase table; codes like **308** and **451** would silently downgrade to 200 when passed that way. The framework's PSR emit boundary calls `App::emitStatus()`, which looks up the IANA reason phrase from `App::REASON_PHRASES` and uses OpenSwoole's two-arg `$response->status($code, $reason)` form — so every code in `REASON_PHRASES` (including 308, 425, 451, 421, 423, 507, 511, and more) emits correctly with no user workaround required.
+
+The only codes that may still need manual handling are niche non-IANA codes absent from `REASON_PHRASES` (e.g. nginx 444/499). For those, call `$response->parent->status($code, 'Your Reason')` directly in your handler.
 
 ### Generator status preservation
 
