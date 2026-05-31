@@ -151,8 +151,9 @@ PHP]); ?>
 <h2>$this methods (ZealAPI instance)</h2>
 <table class="ztable">
 <tr><th>Property / Method</th><th>Description</th></tr>
-<tr><td><code>$this->_request</code></td><td>The raw OpenSwoole HTTP request</td></tr>
-<tr><td><code>$this->_response</code></td><td>The raw OpenSwoole HTTP response</td></tr>
+<tr><td><code>$this->_request</code></td><td>Sanitized request input — GET (or GET+POST merged, or the parsed body) run through <code>cleanInputs()</code>. An array, not a request object.</td></tr>
+<tr><td><code>$this->_response</code></td><td>The <code>ZealPHP\HTTP\Response</code> wrapper (its <code>-&gt;parent</code> is the raw OpenSwoole response). <code>$this-&gt;response()</code> writes through it.</td></tr>
+<tr><td><code>$this->request</code></td><td>The injected <code>$request</code> — the <code>ZealPHP\HTTP\Request</code> wrapper (<code>$this-&gt;request-&gt;get</code> = per-request query array). Note: no underscore, distinct from <code>$this->_request</code>.</td></tr>
 <tr><td><code>$this->paramsExists(['id', 'name'])</code></td><td>Check required params exist in GET/POST</td></tr>
 <tr><td><code>$this->response($data, $status)</code></td><td>Send response with status code</td></tr>
 <tr><td><code>$this->die($exception)</code></td><td>Handle exception and send error response</td></tr>

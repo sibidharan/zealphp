@@ -137,10 +137,11 @@
         and obviously wrong — not silently-wrong like a race.
       </li>
       <li>
-        <strong>Superglobals mode.</strong> The framework runs each request in a forked CGI
-        subprocess (a true isolated address space). <code>$_GET</code> et al. are populated normally.
-        You pay a fork per request (~1ms), but unmodified WordPress / Drupal — and any code base
-        whose mental model is "I am the only PHP script running" — works without a line changing.
+        <strong>Superglobals mode.</strong> The framework dispatches each request through a pool of
+        pre-warmed PHP subprocesses (true isolated address spaces, reused across requests, recycled
+        after N requests). <code>$_GET</code> et al. are populated normally. The warm pool costs
+        ~1–3 ms per request, and unmodified WordPress / Drupal — and any code base whose mental
+        model is "I am the only PHP script running" — works without a line changing.
       </li>
     </ul>
     <p>
@@ -173,13 +174,13 @@
       <div>
         <h4 class="lmm-mode-title lmm-mode-title-super">Superglobals mode</h4>
         <pre class="mermaid">graph TD
-    R[Request] --> CGI[CGI subprocess]
+    R[Request] --> CGI[Pre-warmed subprocess pool]
     CGI --> G["true $_GET, $_POST, $_SESSION"]
     G --> H[Legacy PHP code]
     H --> RES[Response]
     style CGI fill:#fef2f2,stroke:#f87171
     style G fill:#fef2f2,stroke:#f87171</pre>
-        <p class="lmm-mode-caption">Per-request fork · WordPress / Drupal compatibility</p>
+        <p class="lmm-mode-caption">Pooled CGI worker · WordPress / Drupal compatibility</p>
       </div>
     </div>
     <p>
@@ -189,11 +190,18 @@
       three, return the result.
     </p>
     <p>
-      Superglobals mode forks a CGI worker per request, so it pays a millisecond or two of overhead.
-      In return, <em>any</em> PHP code that mutates <code>$_SESSION</code> directly, sets globals,
-      modifies <code>ini_set()</code>, or assumes “this script runs alone” works unchanged.
-      It’s the bridge for migrating legacy apps without rewriting them.
+      Superglobals mode dispatches through a pool of pre-warmed subprocesses (~1–3 ms warm),
+      so it pays a small overhead per request. In return, <em>any</em> PHP code that mutates
+      <code>$_SESSION</code> directly, sets globals, modifies <code>ini_set()</code>, or assumes
+      “this script runs alone” works unchanged. It’s the bridge for migrating legacy apps without
+      rewriting them.
     </p>
+
+    <?php App::render('/components/_callout', [
+      'variant' => 'info',
+      'title'   => 'A third option: coroutine-legacy mode',
+      'body'    => '<p>There is a middle ground: <code>App::mode(\'coroutine-legacy\')</code> keeps real <code>$_GET</code>, <code>$_POST</code>, and friends populated per request <em>and</em> runs concurrently — it solves the race shown above by isolating the seven superglobals, <code>$GLOBALS</code>, function statics, and <code>require_once</code> state per coroutine via <strong>ext-zealphp</strong>. This is the mode for Composer-based legacy apps (Symfony, Laravel, Slim) that need real superglobals but also want coroutine concurrency. See <a href="/coroutines#lifecycle-modes">Lifecycle modes</a> for the full preset matrix.</p>',
+    ]); ?>
 
     <?php App::render('/components/_callout', [
       'variant' => 'info',

@@ -51,7 +51,8 @@
     </table>
     <p>
       Any other parameter with a default value gets its default. A parameter without a default that
-      ZealPHP can’t resolve raises a clear error at request time — not a silent <code>null</code>.
+      ZealPHP can’t resolve is passed <code>null</code> — if the parameter is typed non-nullable,
+      PHP itself raises a <code>TypeError</code>; otherwise the handler receives <code>null</code> silently.
     </p>
 
     <h2>Examples by parameter name</h2>
@@ -131,7 +132,7 @@
       'Parameter order in your handler signature doesn\'t matter — injection is by name.',
       'Reflection runs once at route registration; the parameter map is cached — per-request injection is just an array walk.',
       'Any parameter with a default value gets its default if not injected.',
-      'Parameters ZealPHP can\'t resolve raise an error — never silently get <code>null</code>.',
+      'Parameters ZealPHP can\'t resolve are passed <code>null</code> — a non-nullable type hint turns that into a PHP <code>TypeError</code>.',
     ]]); ?>
 
     <div class="lesson-chips">

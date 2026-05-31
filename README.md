@@ -37,14 +37,14 @@ Running `php app.php` serves the same docs site locally. Set `ZEALPHP_SITE_URL` 
 | **Pluggable Store/Counter** | `Store::defaultBackend('redis')` (or `ZEALPHP_STORE_BACKEND=redis`) flips storage from local `OpenSwoole\Table`/`Atomic` to Redis/Valkey with zero handler changes — cross-node shared state + persistence with one line. Tracked + TTL modes, per-worker coroutine pool, Lua-backed `Counter::compareAndSet`. |
 | **Cross-node messaging** | `Store::publish($ch, $payload)` + `App::subscribe($ch, $handler)` for fire-and-forget pub/sub (cross-worker AND cross-host). `Store::publishReliable($stream, $payload)` + `App::subscribeReliable($stream, $handler)` for Streams-backed at-least-once delivery via consumer groups. The cross-server WebSocket routing pattern (owner-of-fd pushes; Redis routes to owner) lights up end-to-end. **Driver choice (both validated in v0.2.40):** Both phpredis (preferred when `ext-redis` is loaded) and predis SUBSCRIBE loops yield correctly under `OpenSwoole\Runtime::HOOK_ALL` — the production default in coroutine mode. phpredis is ~2× faster on hot CRUD; pick it when you can. One nuance: phpredis SUBSCRIBE blocks the worker WITHOUT HOOK_ALL — if you disabled HOOK_ALL explicitly, force `ZEALPHP_REDIS_PREFER=predis` for subscribers or re-enable HOOK_ALL. See [`/store#pubsub`](https://php.zeal.ninja/store#pubsub). |
 | **Dynamic routing** | `route()`, `nsRoute()`, `nsPathRoute()`, `patternRoute()` with reflection-based parameter injection |
-| **Middleware** | PSR-15 stack — 18 built-ins (CORS, ETag, Range, Compression, SessionStart, IniIsolation, Charset, CacheControl, Expires, Header, BasicAuth, IpAccess, RateLimit, ConcurrencyLimit, BlockPhpExt, MimeType, BodyRewrite, HostRouter) — full Apache `mod_rewrite` / `mod_headers` / `mod_expires` and nginx `limit_req` / `auth_basic` parity |
+| **Middleware** | PSR-15 stack — 30+ built-ins (CORS, ETag, Range, Compression, SessionStart, IniIsolation, Charset, CacheControl, Expires, Header, BasicAuth, IpAccess, RateLimit, ConcurrencyLimit, BlockPhpExt, MimeType, BodyRewrite, HostRouter, BodySizeLimit, Csrf, Redirect, Scoped, MergeSlashes, Referer, RequestHeader, Return, SetEnvIf, ContentEncoding, ContentLanguage, HealthCheck) — full Apache `mod_rewrite` / `mod_headers` / `mod_expires` and nginx `limit_req` / `auth_basic` parity — see the [middleware reference](https://php.zeal.ninja/middleware) for the full list |
 | **HTTP/1.1 compliance** | HEAD, OPTIONS, 301/302/307/308 redirects, Cookie SameSite, ETag, OpenSwoole compression |
 | **Shared memory** | `Store` (OpenSwoole\Table) + `Counter` (OpenSwoole\Atomic) — cross-worker state |
 | **Timers** | `App::tick()`, `App::after()`, `App::onWorkerStart()` — per-worker recurring tasks |
 | **ZealAPI** | File-based REST: drop `api/device/list.php` → `/api/device/list` works automatically |
 | **Templating** | Nested `App::render()` / `App::renderToString()` — single `_master.php`, component-based |
 | **Sessions** | All `session_*()` functions overridden via ext-zealphp — coroutine-safe, per-request isolation |
-| **Unit tests** | PHPUnit 11 — 130 unit tests + 46 integration tests, all green |
+| **Unit tests** | PHPUnit 11 — extensive unit and integration test suites, all green |
 | **Benchmarks** | OpenSwoole-powered concurrency with a modular `scripts/bench.sh` runner for wrk/ab sweeps through c=1000 |
 
 > **Performance:** 117k req/s text · 106k JSON · 50k templated with 4 HTTP workers under the full PSR-15 middleware stack, 0 failures across 150k requests. ZealPHP retains ~82% of OpenSwoole's raw throughput with the framework on top; numbers vary by workload, payload, and hardware.
@@ -436,9 +436,20 @@ App::onWorkerStart(function($server, $workerId) use ($hitCounter) {
 
 **Coroutine mode (recommended):** `App::superglobals(false)` enables `OpenSwoole\Runtime::HOOK_ALL` so all PHP I/O (file, curl, PDO, sleep) yields the event loop automatically. Each request runs in its own coroutine with isolated `RequestContext::instance()` state (`G` remains as a `class_alias` for `RequestContext` since v0.2.6 — both names resolve to the same class). This is the default for new scaffolds since v0.2.4.
 
-**Superglobals mode (legacy compatibility):** `App::superglobals(true)` disables coroutines in the main thread — `$_GET`, `$_POST`, `$_SESSION` work safely because only one request runs at a time per worker. Use this when migrating existing apps incrementally. Implicit file routes for legacy code run through the CGI bridge (`App::include()` → `src/cgi_worker.php` via `proc_open`) so blocking PHP runs in a child process with its own arena.
+**Superglobals mode (legacy compatibility):** `App::superglobals(true)` disables coroutines in the main thread — `$_GET`, `$_POST`, `$_SESSION` work safely because only one request runs at a time per worker. Use this when migrating existing apps incrementally. Implicit file routes for legacy code run through the CGI bridge (`App::include()`) via a **pre-spawned subprocess pool** (`cgiMode('pool')`, entry script `src/pool_worker.php`, ~1–3 ms warm, the default) so blocking PHP runs in a child process with its own arena. `cgiMode('proc')` opts into a fresh `proc_open` subprocess per request (~30–50 ms cold, entry script `src/cgi_worker.php`) for the rare case that demands fully fresh-process semantics.
 
 **`coprocess` / `coproc`:** Available in superglobals mode — spawns a child process for background async work. Not needed in coroutine mode (use `go()` directly).
+
+**Lifecycle modes — one-call presets:** `App::mode(string)` sets both the superglobals strategy and the isolation strategy in one call. Four presets:
+
+| Preset | Use for |
+|--------|---------|
+| `App::mode('coroutine')` | Modern ZealPHP apps — recommended default |
+| `App::mode('legacy-cgi')` | Unmodified WordPress/Drupal — pure `require_once` apps |
+| `App::mode('coroutine-legacy')` | Legacy request-style PHP run **concurrently** — per-coroutine isolation of `$_GET/$_POST/$_SESSION`, `$GLOBALS`, function statics, `require_once`, silent re-declaration. `define()` isolation is opt-in via `App::defineIsolation(true)`, not part of the preset. **Requires ext-zealphp.** |
+| `App::mode('mixed')` | Symfony/Laravel bridge — real `$_SESSION`, sequential, no CGI fork cost |
+
+The fine-grained setters (`App::superglobals()`, `App::isolation()`, `App::enableCoroutine()`, etc.) remain available for custom combinations. See the [lifecycle modes reference](https://php.zeal.ninja/coroutines#lifecycle-modes) for the full matrix.
 
 **ext-zealphp overrides:** `header()`, `setcookie()`, all `session_*()` functions are permanently replaced at startup via `ext-zealphp` overrides. This makes existing PHP code work unchanged inside the long-running OpenSwoole process.
 

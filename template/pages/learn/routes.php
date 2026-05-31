@@ -78,11 +78,28 @@ $list = function ($app, $request, $response) {
 };</code></pre>
     <p>
       The implicit <code>/api/*</code> dispatcher (registered in <code>src/App.php</code>) listens for
-      <strong>all four HTTP verbs — GET, POST, PUT, DELETE — on the same URL</strong>, then loads
-      the matching file and invokes the closure. If your handler cares about the method, read it
-      yourself:
+      <strong>all five HTTP verbs — GET, POST, PUT, DELETE, PATCH — on the same URL</strong>, then loads
+      the matching file and invokes the closure.
     </p>
-    <pre><code class="language-php">// api/users/list.php — handle GET + POST in one file
+    <p>
+      There are two dispatch styles inside an <code>api/</code> file:
+    </p>
+    <ul>
+      <li>
+        <strong>Filename-match (all methods):</strong> define a closure whose variable name matches
+        <code>basename($file, '.php')</code>. Every HTTP method reaches the same closure — read
+        <code>$request-&gt;server['REQUEST_METHOD']</code> inside it if you need to branch.
+      </li>
+      <li>
+        <strong>Per-method dispatch:</strong> when <em>no</em> filename-match closure exists, the
+        framework looks for <code>$get</code>, <code>$post</code>, <code>$put</code>,
+        <code>$delete</code>, <code>$patch</code> closures and routes by verb automatically.
+        Undefined methods return <code>405 Method Not Allowed</code> with an <code>Allow</code>
+        header. <code>HEAD</code> auto-derives from <code>$get</code>. Filename-match always wins
+        when both styles are present.
+      </li>
+    </ul>
+    <pre><code class="language-php">// api/users/list.php — style 1: filename match, branch manually
 $list = function ($request) {
     $method = $request->server['REQUEST_METHOD'];
     return match ($method) {
@@ -90,11 +107,16 @@ $list = function ($request) {
         'POST' => User::create($request->post),
         default => 405,  // Method Not Allowed
     };
-};</code></pre>
+};
+
+// api/users/item.php — style 2: per-method dispatch (no $item closure present)
+$get    = function ($request) { return User::find($request->get['id'] ?? null) ?: 404; };
+$delete = function ($request) { return User::delete($request->get['id'] ?? null) ? 204 : 404; };
+// GET /api/users/item?id=42 → $get; DELETE → $delete; POST → 405 + Allow</code></pre>
     <p>
       Why a separate convention from <code>public/</code>? Because <code>api/</code> files get
-      parameter injection (<code>$app</code>, <code>$request</code>, <code>$response</code>,
-      <code>$server</code>), a <code>ZealAPI</code> base class with helpers like
+      parameter injection (<code>$app</code>, <code>$request</code>, <code>$response</code>, <code>$server</code>),
+      a <code>ZealAPI</code> base class with helpers like
       <code>$this-&gt;paramsExists()</code>, and automatic JSON encoding for array/object returns.
       <code>public/</code> files are plain PHP scripts that echo their own output. Pick
       <code>api/</code> when you want "structured JSON endpoint with helpers";
@@ -199,12 +221,14 @@ $this->nsPathRoute('api', '{rquest}', [...]);          // /api/healthcheck</code
       <code>basename($file, '.php')</code>), and invokes the closure with parameter injection.
     </p>
     <p>
-      The result: any method on <code>/api/users/list</code> &mdash; <code>GET</code>,
-      <code>POST</code>, <code>PUT</code>, <code>DELETE</code> &mdash; auto-runs
-      <code>api/users/list.php</code>&rsquo;s <code>$list</code> closure. The framework does NOT
-      dispatch by HTTP verb; if your handler cares about the method, read
-      <code>$request-&gt;server['REQUEST_METHOD']</code> inside the closure. You never register an
-      API route by hand &mdash; the framework builds the two catch-all dispatchers once at boot.
+      The result: any of the five methods (<code>GET</code>, <code>POST</code>, <code>PUT</code>,
+      <code>DELETE</code>, <code>PATCH</code>) on <code>/api/users/list</code> auto-runs
+      <code>api/users/list.php</code>&rsquo;s <code>$list</code> closure (filename-match mode).
+      Alternatively, define <code>$get</code>/<code>$post</code>/&hellip; closures in the file (with
+      no <code>$list</code> closure present) and the framework routes by verb automatically, returning
+      405&nbsp;+&nbsp;<code>Allow</code> for undefined methods.
+      You never register an API route by hand &mdash; the framework builds the two catch-all
+      dispatchers once at boot.
     </p>
 
     <h2>When nothing matches — fallback or 404</h2>
@@ -229,7 +253,7 @@ App::setFallback(function () {
       <tbody>
         <tr><td>A static page</td><td><code>public/about.php</code></td><td><code>/about</code></td></tr>
         <tr><td>A CSS or image asset</td><td><code>public/css/site.css</code></td><td><code>/css/site.css</code></td></tr>
-        <tr><td>A JSON API endpoint</td><td><code>api/users/list.php</code> (closure named <code>$list</code>)</td><td><code>/api/users/list</code> (any HTTP method)</td></tr>
+        <tr><td>A JSON API endpoint</td><td><code>api/users/list.php</code> (closure <code>$list</code>, or <code>$get</code>/<code>$post</code>/… for per-method)</td><td><code>/api/users/list</code> (GET/POST/PUT/DELETE/PATCH)</td></tr>
         <tr><td>A URL with a parameter</td><td><code>route/users.php</code> via <code>$app-&gt;route('/users/{id}', ...)</code></td><td><code>/users/42</code></td></tr>
         <tr><td>A WebSocket endpoint</td><td><code>route/ws.php</code> via <code>$app-&gt;ws('/chat', ...)</code></td><td><code>ws://host/chat</code></td></tr>
         <tr><td>A pattern that captures regex</td><td><code>route/legacy.php</code> via <code>$app-&gt;patternRoute('/post/(\d+)', ...)</code></td><td><code>/post/123</code></td></tr>
@@ -253,7 +277,7 @@ App::setFallback(function () {
       'Three filesystem conventions: <code>public/</code> for pages, <code>api/</code> for JSON endpoints, <code>route/</code> for anything dynamic.',
       'Inline <code>$app-&gt;route()</code> calls in <code>app.php</code> are for one-offs — move to <code>route/</code> once you have more than a handful.',
       'Priority order: explicit (app.php) → route/ → /api/* → dotfile/.php guards → public/ → fallback.',
-      'The <code>api/</code> tree is auto-dispatched via <code>ZealAPI::processApi()</code>: <code>api/users/list.php</code> (closure named <code>$list</code>) auto-handles <code>/api/users/list</code> for every HTTP method — the handler reads <code>$request-&gt;server[\'REQUEST_METHOD\']</code> if it cares.',
+      'The <code>api/</code> tree is auto-dispatched via <code>ZealAPI::processApi()</code>: define a filename-match closure (<code>$list</code> in <code>list.php</code>) to handle all five verbs (GET/POST/PUT/DELETE/PATCH), or define <code>$get</code>/<code>$post</code>/… for automatic per-verb routing (405&nbsp;+&nbsp;<code>Allow</code> for undefined methods).',
       'Use <code>App::setFallback()</code> to catch unmatched URLs — perfect for hosting legacy apps under a ZealPHP front door.',
     ]]); ?>
 

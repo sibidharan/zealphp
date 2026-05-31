@@ -24,7 +24,7 @@
 </div>
 
 <div class="callout info legacy-callout-zero">
-<p><strong>Compatibility-mode story.</strong> In the showcase deploy, WordPress runs without source patches: login, sessions, cookies, redirects, file uploads, REST API, and pretty permalinks all work through the CGI worker bridge (<code>App::superglobals(true) + processIsolation(true)</code>). True global-scope isolation is preserved per request via <code>proc_open</code>, at a ~30&ndash;50&nbsp;ms per-request cost &mdash; the price of the isolation that <code>define()</code>-heavy plugins need. The <a href="/vs-fpm">v0.3.0 persistent worker pool</a> is the planned fix for that startup cost. See <a href="#limitations">known limits</a> before betting your production WordPress on it.</p>
+<p><strong>Compatibility-mode story.</strong> In the showcase deploy, WordPress runs without source patches: login, sessions, cookies, redirects, file uploads, REST API, and pretty permalinks all work through the CGI worker bridge (<code>App::mode('legacy-cgi')</code> or the equivalent <code>App::superglobals(true)</code>). The default isolation backend is the <strong>warm CGI pool</strong> (<code>cgiMode('pool')</code>, ~1&ndash;3&nbsp;ms warm &mdash; a pre-spawned FPM-style subprocess pool, not a per-request fork). For apps like WordPress that cache bootstrap files via <code>require_once</code>, pair the pool with <code>App::cgiPoolMaxRequests(1)</code> to get fresh-interpreter semantics with pool pre-spawn; or use <code>cgiMode('proc')</code> (the ~30&ndash;50&nbsp;ms fresh <code>proc_open</code> per request) for a simpler config. See <a href="#limitations">known limits</a> before betting your production WordPress on it.</p>
 </div>
 
 <h2 id="50-app-sweep" class="legacy-mt-xl">50-app compatibility sweep — May 2026</h2>
@@ -175,19 +175,39 @@ PHP]); ?>
 </table>
 
 <?php App::render('/components/_code', [
-    'label' => 'Minimal legacy app configuration',
+    'label' => 'Minimal legacy app configuration — one-liner with App::mode()',
     'code'  => <<<'PHP'
 <?php
 require 'vendor/autoload.php';
 use ZealPHP\App;
 
-App::superglobals(true);
+// One-call preset: superglobals(true) + isolation(CgiPool) + cgiMode('pool')
+// Use this for unmodified WordPress/Drupal and other require_once-bootstrap apps.
+App::mode(App::MODE_LEGACY_CGI);
 App::$ignore_php_ext = false;
 
 $app = App::init('0.0.0.0', 8080);
 $app->run(['task_worker_num' => 0]);
-// PHP files in public/ are served automatically with process isolation
+// PHP files in public/ are served automatically via the warm CGI pool
 PHP]); ?>
+
+<div class="callout info">
+<p><strong>Lifecycle presets — <code>App::mode()</code>.</strong> The framework exposes two orthogonal axes (<code>App::superglobals(bool)</code> and <code>App::isolation()</code>) plus a one-call preset that sets both at once. For legacy-app hosting the two most relevant presets are:</p>
+<table class="ztable">
+<tr><th>Preset</th><th>What it sets</th><th>Use for</th></tr>
+<tr>
+  <td><code>App::mode(App::MODE_LEGACY_CGI)</code></td>
+  <td><code>superglobals(true)</code> + <code>isolation(CgiPool)</code> — warm pre-spawned subprocess pool, ~1&ndash;3&nbsp;ms</td>
+  <td>Unmodified WordPress/Drupal — pure <code>require_once</code> apps needing true global-scope isolation per request</td>
+</tr>
+<tr>
+  <td><code>App::mode(App::MODE_COROUTINE_LEGACY)</code></td>
+  <td><code>superglobals(true)</code> + <code>isolation(Coroutine)</code> + silentRedeclare + includeIsolation + coroutineGlobalsIsolation + coroutineStaticsIsolation</td>
+  <td>Modern Composer apps (Symfony/Laravel/Slim) or <code>require_once</code>-bootstrap apps run <strong>concurrently</strong>; requires <code>ext-zealphp</code></td>
+</tr>
+</table>
+<p>The older knob-by-knob form (<code>App::superglobals(true)</code> + <code>App::processIsolation(true)</code> + <code>App::cgiMode(...)</code>) still works and is what the examples below show for clarity — <code>App::mode()</code> is the one-liner shorthand on top. Full lifecycle matrix: <a href="/coroutines#lifecycle-modes">coroutines &rsaquo; lifecycle modes</a>.</p>
+</div>
 
 <h2 id="wordpress-tested" class="legacy-mt-xl">WordPress — tested end-to-end</h2>
 
@@ -1153,7 +1173,7 @@ TEXT]); ?>
 <table class="ztable">
 <tr><th>Feature</th><th>How</th></tr>
 <tr><td>All HTTP methods</td><td><code>$_SERVER['REQUEST_METHOD']</code> passed via context; request body piped to stdin (<code>php://input</code>)</td></tr>
-<tr><td><code>header()</code> / <code>header_remove()</code></td><td>Captured via <code>uopz_set_return</code> — sent back as JSON metadata</td></tr>
+<tr><td><code>header()</code> / <code>header_remove()</code></td><td>Captured via <code>zealphp_override()</code> (ext-zealphp preferred; <code>uopz_set_return</code> fallback) — sent back as JSON metadata</td></tr>
 <tr><td><code>setcookie()</code> / <code>setrawcookie()</code></td><td>Captured — applied to response by parent worker</td></tr>
 <tr><td><code>http_response_code()</code> / <code>headers_list()</code></td><td>Captured — status and headers returned in metadata</td></tr>
 <tr><td>File return value</td><td>Serialised over stderr metadata; threaded through the <a href="/responses#return-contract">universal return contract</a></td></tr>
@@ -1358,12 +1378,12 @@ PHP]); ?>
 <p>None of these are opt-in — they're always active on the CGI dispatch path, in every lifecycle mode (the path is no longer gated on <code>processIsolation(true)</code>). There is no flag to disable the <code>HTTP_PROXY</code> strip, the timeout has a floor of 1 s rather than an unbounded option, and stderr always lands in <code>elog</code>.</p>
 
 <h2 id="coroutine-safe-exec" class="legacy-mt-xl">Coroutine-safe <code>exec</code></h2>
-<p>In vanilla OpenSwoole, shelling out (<code>git</code>, <code>ffmpeg</code>, <code>convert</code>, …) via PHP's built-in functions would block the worker — one slow command stalls every coroutine sharing it. ZealPHP solves this: in coroutine mode (the default), <code>uopz</code> overrides intercept <code>shell_exec</code>, <code>exec</code>, <code>system</code>, <code>passthru</code>, and the backtick operator, routing them through <code>App::exec()</code> which yields to the scheduler instead of blocking. Legacy code that shells out works safely with no changes.</p>
+<p>In vanilla OpenSwoole, shelling out (<code>git</code>, <code>ffmpeg</code>, <code>convert</code>, …) via PHP's built-in functions would block the worker — one slow command stalls every coroutine sharing it. ZealPHP solves this: in coroutine mode (the default), overrides intercept <code>shell_exec</code>, <code>exec</code>, <code>system</code>, <code>passthru</code>, and the backtick operator via <code>zealphp_override()</code> (ext-zealphp preferred; <code>uopz_set_return()</code> as fallback), routing them through <code>App::exec()</code> which yields to the scheduler instead of blocking. Legacy code that shells out works safely with no changes.</p>
 <table class="ztable">
 <tr><th>API</th><th>What it does</th></tr>
 <tr><td><code>App::exec(string $cmd, ?float $timeout = null): array</code></td><td>Coroutine-safe execution. Inside a coroutine, yields via <code>OpenSwoole\Coroutine\System::exec()</code>; outside one (boot / CLI) falls back to blocking <code>App::rawExec()</code>. Returns <code>['output' =&gt; string, 'code' =&gt; int, 'signal' =&gt; int]</code> either way.</td></tr>
 <tr><td><code>App::rawExec(string $cmd): ?string</code></td><td>Explicit blocking escape hatch — returns captured stdout (or <code>null</code> if the process failed to start). Built on <code>proc_open</code> deliberately (NOT <code>shell_exec</code>/<code>exec</code>/<code>system</code>/<code>passthru</code>/<code>popen</code>), so it stays recursion-safe even with the override on.</td></tr>
-<tr><td><code>App::hookExec(?bool)</code> / <code>App::$hook_exec</code></td><td>Toggles the transparent override. <code>null</code> (default) resolves to <strong>on in coroutine mode</strong> (<code>superglobals === false</code>); a non-null value forces it on/off. When on, <code>shell_exec</code>, <code>exec</code>, <code>system</code>, <code>passthru</code>, and the backtick operator all route through <code>App::exec()</code> via <code>uopz</code> — same override family as <code>header()</code> and <code>session_*()</code>. <code>proc_open</code> / <code>popen</code> are intentionally NOT overridden.</td></tr>
+<tr><td><code>App::hookExec(?bool)</code> / <code>App::$hook_exec</code></td><td>Toggles the transparent override. <code>null</code> (default) resolves to <strong>on in coroutine mode</strong> (<code>superglobals === false</code>); a non-null value forces it on/off. When on, <code>shell_exec</code>, <code>exec</code>, <code>system</code>, <code>passthru</code>, and the backtick operator all route through <code>App::exec()</code> via <code>zealphp_override()</code> (ext-zealphp preferred; <code>uopz_set_return()</code> fallback) — same override family as <code>header()</code> and <code>session_*()</code>. <code>proc_open</code> / <code>popen</code> are intentionally NOT overridden.</td></tr>
 </table>
 <p>New ZealPHP-native code should still prefer explicit <code>App::exec()</code>, but the override means unmodified legacy code that shells out stops blocking the worker automatically.</p>
 

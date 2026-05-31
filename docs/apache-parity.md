@@ -1,6 +1,6 @@
 # Apache + mod_php Parity
 
-ZealPHP targets verbatim Apache+mod_php behavior so that unmodified legacy applications (WordPress, Drupal, classic PHP) run unchanged. This document covers the parity layers: uopz function overrides, public/ file-based routing, static-file handling, and the per-coroutine isolation that keeps mod_php's process-global behaviors from leaking across concurrent requests in an OpenSwoole worker.
+ZealPHP targets verbatim Apache+mod_php behavior so that unmodified legacy applications (WordPress, Drupal, classic PHP) run unchanged. This document covers the parity layers: function overrides (ext-zealphp preferred, uopz fallback), public/ file-based routing, static-file handling, and the per-coroutine isolation that keeps mod_php's process-global behaviors from leaking across concurrent requests in an OpenSwoole worker.
 
 For error handling (custom `ErrorDocument`, `set_error_handler`, `register_shutdown_function`, content negotiation), see [error-handling.md](error-handling.md).
 
@@ -14,13 +14,23 @@ mod_php runs one PHP request per process (or per child); state is naturally isol
 2. **Apache-specific built-ins.** `apache_request_headers()`, `getallheaders()`, `virtual()`, `apache_setenv()` are undefined under the CLI SAPI and crash legacy code with "Call to undefined function."
 3. **Per-request handler lifecycle.** `set_error_handler`, `register_shutdown_function`, `error_reporting()` are process-global in PHP — one coroutine's call leaks into every other.
 
-ZealPHP closes all three via uopz overrides backed by per-coroutine state in `G`.
+ZealPHP closes all three via function overrides backed by per-coroutine state in `G`.
 
-## Function overrides (uopz)
+## Function overrides (ext-zealphp preferred, uopz fallback)
 
-`App::__construct()` installs uopz overrides on every built-in that legacy PHP code uses to interact with the HTTP boundary or the PHP error machinery. Each override delegates to a namespaced implementation in [`src/utils.php`](../src/utils.php) that mutates per-request `G` state instead of touching process globals.
+`App::__construct()` installs overrides on every built-in that legacy PHP code uses to interact with the HTTP boundary or the PHP error machinery. The private `overrideBuiltin()` helper at `src/App.php:1195` uses **ext-zealphp's `zealphp_override()`** when available, and falls back to **`uopz_set_return()`** otherwise:
 
-### Always present in CLI/OpenSwoole — overridden directly via uopz
+```php
+if (extension_loaded('zealphp') && function_exists('zealphp_override')) {
+    (zealphp_override(...))($name, $cb);   // ext-zealphp — preferred
+} elseif (function_exists('uopz_set_return')) {
+    uopz_set_return($name, $cb, true);     // uopz — fallback
+}
+```
+
+Each override delegates to a namespaced implementation in [`src/utils.php`](../src/utils.php) that mutates per-request `G` state instead of touching process globals.
+
+### Always present in CLI/OpenSwoole — overridden via ext-zealphp / uopz
 
 | Built-in | Routes to | Backing state |
 |---|---|---|
@@ -61,12 +71,12 @@ ZealPHP closes all three via uopz overrides backed by per-coroutine state in `G`
 
 The CGI worker ([`src/cgi_worker.php`](../src/cgi_worker.php)) has its own self-contained set of these for legacy files run via `App::include()` (formerly `App::includeFile()` — alias retained) in superglobals mode. The subprocess runs in a fresh PHP CLI process so native `session_*` works natively there — no override needed.
 
-### Boot order — process-level error dispatcher before uopz
+### Boot order — process-level error dispatcher before overrides
 
-`App::__construct()` installs ONE native `set_error_handler` and `set_exception_handler` **before** the first `uopz_set_return()` call. After uopz takes over, user-space `set_error_handler()` calls go to the namespaced override that records in `G`. Real PHP errors raised by the engine still flow through the bootstrap handler, which reads the current coroutine's `G` stack — giving per-coroutine isolation despite PHP's single global handler.
+`App::__construct()` installs ONE native `set_error_handler` and `set_exception_handler` **before** the first override is installed. After the overrides take effect, user-space `set_error_handler()` calls go to the namespaced override that records in `G`. Real PHP errors raised by the engine still flow through the bootstrap handler, which reads the current coroutine's `G` stack — giving per-coroutine isolation despite PHP's single global handler.
 
 ```php
-// Top of App::__construct() — captured BEFORE uopz overrides
+// Top of App::__construct() — captured BEFORE function overrides are installed
 self::$initial_error_reporting = \error_reporting();
 
 \set_error_handler(static function ($severity, $message, $file, $line) {
@@ -156,7 +166,7 @@ The trade-off: zero-copy `sendfile()` on a sub-process boundary is faster than P
 
 ## CGI subprocess for legacy apps
 
-When `App::$superglobals = true`, `App::include($publicPath)` spawns `php cgi_worker.php $path` via `proc_open` — true global scope, native sessions, isolated request lifecycle. The CGI worker has its own uopz overrides ([`src/cgi_worker.php`](../src/cgi_worker.php)) for:
+When `App::$superglobals = true`, `App::include($publicPath)` dispatches to a subprocess that provides true global scope, native sessions, and an isolated request lifecycle. The CGI worker ([`src/cgi_worker.php`](../src/cgi_worker.php)) installs its own overrides (ext-zealphp / uopz, same preference order) for:
 
 - header / header_remove / headers_list / headers_sent
 - setcookie / setrawcookie / http_response_code
@@ -171,7 +181,30 @@ The CGI worker communicates a two-channel protocol back to the parent:
 - **stderr line 1** = JSON metadata (status, headers, cookies) sent FIRST.
 - **stdout** = body bytes streamed (supports SSE, chunked output).
 
-The parent's private `cgiSubprocess()` reads metadata, forwards headers/cookies to its OpenSwoole response, then proxies stdout. Public entry point is `App::include()` (or its deprecated alias `App::includeFile()`); see [`src/App.php`](../src/App.php). The dispatch is gated by `App::processIsolation()` (added in v0.2.23) — `true` (default in superglobals mode) forks the subprocess, `false` runs in-process via `App::executeFile()`.
+The parent reads metadata, forwards headers/cookies to its OpenSwoole response, then proxies stdout. Public entry point is `App::include()` (or its deprecated alias `App::includeFile()`); see [`src/App.php`](../src/App.php).
+
+The dispatch is two-tiered:
+
+1. **`App::processIsolation()`** (default `true` in superglobals mode) gates fork-vs-in-process. `false` → runs in-process via `App::executeFile()`.
+2. When process isolation is on, **`App::cgiMode('pool'|'proc'|'fcgi')`** selects the fork strategy:
+   - `'pool'` (**default**, `~1–3 ms warm`) — a per-worker pre-spawned subprocess pool (`src/CGI/WorkerPool.php`), mod_php-style isolation without a cold-start cost. Configure via `App::cgiPoolSize()` / `App::cgiPoolMaxRequests()`.
+   - `'proc'` (`~30–50 ms cold`) — fresh `proc_open` subprocess per request; the recursion-safe fallback for rare full-isolation cases.
+   - `'fcgi'` — forward to an external FastCGI upstream (php-fpm, hhvm, roadrunner).
+
+`App::mode('legacy-cgi')` sets `superglobals(true)` + `isolation(cgi-pool)` in one call, which resolves to the warm pool by default. See [Lifecycle modes](/coroutines#lifecycle-modes) for the full preset table.
+
+---
+
+## Lifecycle mode — choosing the right parity level
+
+ZealPHP ships four one-call presets via `App::mode(string)`. For Apache + mod_php parity the two relevant ones are:
+
+| Preset | What it gives you |
+|---|---|
+| `App::mode('legacy-cgi')` | `superglobals(true)` + warm CGI pool (`~1–3 ms`). True global scope per request. Correct home for unmodified WordPress / Drupal / apps that use pure `require_once` with no Composer autoloader. |
+| `App::mode('coroutine-legacy')` | `superglobals(true)` + coroutine concurrency + **full per-coroutine isolation** of all request-state primitives (`$_*` superglobals, `header()`/`setcookie()`, `$GLOBALS` including object-valued, function-local `static $x`, `ini_set`, `require_once` re-execution). Requires **ext-zealphp**. (`define()` isolation is a separate opt-in via `App::defineIsolation(true)`, not auto-enabled by the preset.) Correct home for modern Composer apps (Symfony, Laravel, Slim) that need real `$_SESSION` and concurrent request handling. |
+
+For the full preset matrix (including `'coroutine'` and `'mixed'`) and the orthogonal `App::isolation()` axis, see [Lifecycle modes](/coroutines#lifecycle-modes).
 
 ---
 
@@ -180,11 +213,11 @@ The parent's private `cgiSubprocess()` reads metadata, forwards headers/cookies 
 | State | Per-process (mod_php) | Per-coroutine in ZealPHP via | Override site |
 |---|---|---|---|
 | `$_GET` / `$_POST` / `$_SERVER` / `$_SESSION` | yes | `G` proxy (superglobals=false) | `App::superglobals(false)` |
-| Headers / cookies / status | yes | `G->response_headers_list` etc. | uopz overrides |
-| Error handler | yes (single) | `G->error_handlers_stack` | uopz override + native bootstrap dispatcher |
-| Exception handler | yes | `G->exception_handlers_stack` | uopz + dispatchRoute catch |
-| Shutdown functions | per process | `G->shutdown_functions` queue | uopz + on('request') drain |
-| `error_reporting()` level | per process | `G->error_reporting_level` | uopz + native dispatcher reads G |
+| Headers / cookies / status | yes | `G->response_headers_list` etc. | `overrideBuiltin()` (ext-zealphp / uopz) |
+| Error handler | yes (single) | `G->error_handlers_stack` | `overrideBuiltin()` + native bootstrap dispatcher |
+| Exception handler | yes | `G->exception_handlers_stack` | `overrideBuiltin()` + dispatchRoute catch |
+| Shutdown functions | per process | `G->shutdown_functions` queue | `overrideBuiltin()` + on('request') drain |
+| `error_reporting()` level | per process | `G->error_reporting_level` | `overrideBuiltin()` + native dispatcher reads G |
 | Apache notes / env | per process | `G->apache_env`, `G->apache_notes` | namespaced impls |
 
 For details on the error/exception/shutdown flow specifically, see [error-handling.md](error-handling.md).
@@ -207,6 +240,15 @@ curl -I http://localhost:8080/.env                                           # 4
 curl -I 'http://localhost:8080/%2e%2e/foo'                                   # 400
 curl http://localhost:8080/api.php/users/42                                  # PATH_INFO routed to api.php
 ```
+
+## Other-language CGI (mod_cgi / ScriptAlias parity)
+
+Apache `mod_cgi` and `ScriptAlias` parity — running Python, Ruby, shell scripts, or any shebanged executable — is also supported and works in coroutine mode as well as superglobals mode:
+
+- **`App::registerCgiBackend('.py', ['mode' => 'proc', 'interpreter' => '/usr/bin/python3', 'exec_paths' => ['/cgi-bin']])`** — registers a per-extension backend. Only files under `exec_paths` are executed (Apache `Options +ExecCGI` parity); others return 403.
+- **`App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc'])`** — Apache `ScriptAlias` parity: any file under the prefix executes via its `#!` shebang line without a per-extension registration.
+
+For full details, configuration options, and FastCGI upstream support, see [docs/fastcgi-backends.md](fastcgi-backends.md).
 
 ## Out of scope
 

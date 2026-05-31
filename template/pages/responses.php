@@ -73,7 +73,7 @@ PHP]); ?>
 
 <h4 class="resp-mt-1">Edge cases worth knowing</h4>
 <ul class="resp-list">
-  <li><strong>600&ndash;999</strong> are technically in RFC 7230's three-digit range but have no defined meaning. ZealPHP currently lets them pass through (no 500 coercion) — clients may or may not interpret them.</li>
+  <li><strong>600&ndash;999</strong> are coerced to 500 (same as <code>0</code> / <code>-1</code> / <code>42</code> / <code>999</code>) and logged — only 100&ndash;599 emit as-is. <code>App::coerceStatusCode()</code> returns a status only when <code>$status &gt;= 100 &amp;&amp; $status &lt; 600</code>; anything outside that range becomes 500 with a warning in the debug log.</li>
   <li><strong>Reason phrases</strong> for non-standard codes default to empty. The wire format is still <code>HTTP/1.1 451\r\n</code>, just without "Unavailable For Legal Reasons" after the digits. Browsers don't display reason phrases, so this is cosmetic.</li>
   <li><strong>Returning <code>null</code></strong> means "no status override, no body override" — same as a handler that doesn't <code>return</code> at all.</li>
 </ul>

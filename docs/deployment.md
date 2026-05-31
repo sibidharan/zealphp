@@ -340,8 +340,11 @@ manager process drains workers gracefully (current requests finish),
 forks fresh workers that load the new bytecode, and the TCP listener
 stays open the whole time — zero dropped requests.
 
-The CGI bridge (legacy code via `App::include()` / `proc_open`)
-needs the same opcache settings to benefit. With `validate_timestamps=1`
+The CGI bridge (legacy code via `App::include()` — default
+`App::cgiMode('pool')`, a pre-spawned subprocess pool) needs the same
+opcache settings to benefit. Pool subprocesses are long-lived, so they
+hold compiled bytecode just like the main workers — deploy via
+`php app.php restart` to recycle them. With `validate_timestamps=1`
 plus a low `revalidate_freq`, a recently-edited file can serve stale
 bytecode for up to `revalidate_freq` seconds after deploy — looks
 identical to a logic bug. The `validate_timestamps=0` + restart pattern
@@ -426,7 +429,7 @@ use ZealPHP\App;
 use ZealPHP\Cache;
 use ZealPHP\Counter;
 
-$reqs = Counter::make('http_requests_total');
+$reqs = new Counter(0, 'http_requests_total');
 
 App::onWorkerStart(function ($workerId) use ($reqs) {
     if ($workerId !== 0) return;        // worker 0 only

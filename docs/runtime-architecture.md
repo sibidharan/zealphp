@@ -6,12 +6,12 @@ ZealPHP wraps OpenSwoole’s event-driven HTTP server with a framework that feel
 
 `App::init()` performs one-time initialization:
 
-- Validates that the `uopz` extension is loaded (ZealPHP would otherwise be unable to intercept functions such as `header()` or `setcookie()`).
+- Requires either **ext-zealphp** (recommended) or **uopz** to be loaded — both can intercept built-in functions such as `header()` or `setcookie()`. If neither is present, the constructor throws immediately with a message recommending `pie install sibidharan/ext-zealphp`.
 - Records the current working directory and entry script so the framework can build absolute paths later.
 - Prepares the PSR-15 middleware stack (`OpenSwoole\Core\Psr\Middleware\StackHandler`) with `ResponseMiddleware` as the terminal handler.
 - Configures coroutine hooks if superglobals are disabled (see below).
-- Overrides built-in PHP functions via `uopz_set_return()` to route them through ZealPHP shims. This ensures headers, cookies, and response codes cooperate with the PSR response pipeline. The override family covers `header()` / `headers_list()` / `setcookie()` / `http_response_code()`, all `session_*()` functions, and — when the exec hook is on — the **backtick operator**, `shell_exec`, `exec`, `system`, and `passthru` (see below).
-- Optionally installs the **coroutine-safe exec hook**. When `App::hookExec()` resolves to `true` (default-on in coroutine mode), `uopz_set_return()` re-points `shell_exec`, `exec`, `system`, `passthru`, and the backtick operator (the backtick compiles to a `shell_exec()` call, so overriding `shell_exec` intercepts it transparently) at `App::exec()` — so legacy/user code that shells out becomes coroutine-safe with no source changes. `proc_open` / `popen` are intentionally **not** overridden: `App::rawExec()` and the CGI subprocess path rely on `proc_open`, so leaving it untouched keeps the fallback recursion-safe. Toggle with `App::hookExec(bool)`; pass no arg to read the resolved value. See [Coroutine-safe exec](#coroutine-safe-exec) below.
+- Overrides built-in PHP functions to route them through ZealPHP shims — using `zealphp_override()` (ext-zealphp, preferred) when available, or `uopz_set_return()` (uopz, fallback) otherwise. This ensures headers, cookies, and response codes cooperate with the PSR response pipeline. The override family covers `header()` / `headers_list()` / `setcookie()` / `http_response_code()`, all `session_*()` functions, and — when the exec hook is on — the **backtick operator**, `shell_exec`, `exec`, `system`, and `passthru` (see below).
+- Optionally installs the **coroutine-safe exec hook**. When `App::hookExec()` resolves to `true` (default-on in coroutine mode), ZealPHP overrides `shell_exec`, `exec`, `system`, `passthru`, and the backtick operator (the backtick compiles to a `shell_exec()` call, so overriding `shell_exec` intercepts it transparently) at `App::exec()` — so legacy/user code that shells out becomes coroutine-safe with no source changes. Same override mechanism as above (ext-zealphp preferred, uopz fallback). `proc_open` / `popen` are intentionally **not** overridden: `App::rawExec()` and the CGI subprocess path rely on `proc_open`, so leaving it untouched keeps the fallback recursion-safe. Toggle with `App::hookExec(bool)`; pass no arg to read the resolved value. See [Coroutine-safe exec](#coroutine-safe-exec) below.
 
 `App::run()` then constructs the OpenSwoole HTTP server, includes custom route files, registers implicit routes, wires session managers, and starts the event loop. Pass an array of OpenSwoole settings to override defaults:
 
@@ -50,7 +50,7 @@ Traditional PHP scripts rely on `$_GET`, `$_POST`, `$_SERVER`, etc. ZealPHP emul
    - Namespaces (`$app->nsRoute('admin', '/dashboard', ...)`)
    - Path-based namespaces (`$app->nsPathRoute('api', '{module}/{action}', ...)`)
    - Regular expressions (`$app->patternRoute('/raw/(?P<rest>.*)', ...)`)
-4. **Handler Invocation**: Parameters captured from the URI are injected into the handler based on argument names. ZealPHP also recognises special parameters: `app`, `request`, `response`, and `server`.
+4. **Handler Invocation**: Parameters captured from the URI are injected into the handler based on argument names. ZealPHP also recognises three special parameters: `app` (the `ResponseMiddleware` instance), `request` (`ZealPHP\HTTP\Request` wrapper), and `response` (`ZealPHP\HTTP\Response` wrapper). To reach the underlying OpenSwoole server, use `App::getServer()` — it is not an injectable parameter.
 5. **Response Resolution**:
    - If the handler returns an `OpenSwoole\Core\Psr\Response`, ZealPHP emits it immediately.
    - If it returns an `int`, the value becomes the HTTP status code.
@@ -62,7 +62,7 @@ Traditional PHP scripts rely on `$_GET`, `$_POST`, `$_SERVER`, etc. ZealPHP emul
 
 ZealPHP favours a single-request-per-worker model to protect superglobals. When you need to isolate work:
 
-- `App::cgiMode('proc' | 'fork' | 'fcgi')` selects the per-request isolation strategy for legacy `public/*.php` files. `'proc'` forks a fresh PHP interpreter per request via `proc_open` + `cgi_worker.php` (mod_php-style global isolation, ~30–50 ms cold start — what unmodified WordPress/Drupal needs). `'fork'` (v0.2.29) forks the warm worker via `OpenSwoole\Process` for ~5× faster startup at the cost of function-scope semantics. `'fcgi'` (v0.2.39+) forwards to an upstream php-fpm pool via `App::fcgiAddress()` — no child process at all. See [tasks-and-concurrency.md](./tasks-and-concurrency.md) for the trade-off table.
+- `App::cgiMode('pool' | 'proc' | 'fcgi')` selects the per-request isolation strategy for legacy `public/*.php` files. `'pool'` (default) uses a **pre-spawned subprocess pool** (mod_php-style global isolation, ~1–3 ms warm — what unmodified WordPress/Drupal needs). `'proc'` forks a fresh PHP interpreter per request via `proc_open` + `cgi_worker.php` (~30–50 ms cold start; use when true fresh-process isolation is required every request). `'fcgi'` forwards to an upstream php-fpm pool via `App::fcgiAddress()` — no child process at all. See [tasks-and-concurrency.md](./tasks-and-concurrency.md) for the trade-off table.
 - `coprocess()` / `coproc()` create dedicated processes with coroutine support for longer-running workloads that should not block the main worker. These helpers are only available when superglobals are enabled (`coproc` throws otherwise).
 
 ### Custom CGI backends — host any language
@@ -90,13 +90,13 @@ App::registerCgiBackend('.py', [
 App::registerCgiBackend('.cgi', ['mode' => 'proc', 'exec_paths' => ['/cgi-bin']]);
 ```
 
-The three `mode` values:
+The supported `mode` values for `registerCgiBackend()`:
 
 | `mode` | What it does | Languages |
 |--------|--------------|-----------|
 | `'proc'` | `proc_open` spawns the interpreter (or reads the `#!` shebang) per request — Apache CGI semantics | any (`interpreter` optional) |
-| `'fork'` | warm `OpenSwoole\Process` fork (~5× faster than proc) | **`.php` only** — `registerCgiBackend('.py', ['mode' => 'fork'])` throws `InvalidArgumentException` |
 | `'fcgi'` | forwards to a FastCGI daemon at `address` (php-fpm, a Python/Ruby FCGI server, …) — no per-request spawn | any FastCGI/1.0 server |
+| `'pool'` | pre-spawned subprocess pool (~1–3 ms warm) | **`.php` only** — passing `'pool'` for a non-`.php` extension throws `InvalidArgumentException` |
 
 #### Works in every lifecycle mode
 
@@ -167,10 +167,10 @@ is the "front an existing php-fpm pool" shortcut for when **every**
 In vanilla OpenSwoole, shelling out (`git`, `ffmpeg`, `convert`, …) via PHP's
 built-in functions would block the worker — one slow command stalls every
 coroutine sharing it. ZealPHP solves this: in coroutine mode (the default),
-`uopz` overrides intercept `shell_exec`, `exec`, `system`, `passthru`, and the
-backtick operator, routing them through `App::exec()` which yields to the
-scheduler instead of blocking. Legacy code that shells out works safely with no
-changes.
+ZealPHP's function overrides (ext-zealphp preferred, uopz fallback) intercept
+`shell_exec`, `exec`, `system`, `passthru`, and the backtick operator, routing
+them through `App::exec()` which yields to the scheduler instead of blocking.
+Legacy code that shells out works safely with no changes.
 
 - **`App::exec(string $cmd, ?float $timeout = null): array{output, code, signal}`**
   — coroutine-safe command execution. Inside a coroutine
@@ -183,15 +183,16 @@ changes.
 - **`App::rawExec(string $cmd): ?string`** — explicit blocking escape hatch.
   Returns captured stdout (or `null` if the process failed to start). It is
   built on `proc_open` *deliberately* — never on `shell_exec` / `exec` /
-  `system` / `passthru` / `popen` — because those builtins are uopz-overridden
-  when the exec hook is on; routing through `proc_open` (which is **not**
-  overridden) keeps this escape hatch recursion-safe.
+  `system` / `passthru` / `popen` — because those builtins are overridden
+  (ext-zealphp / uopz) when the exec hook is on; routing through `proc_open`
+  (which is **not** overridden) keeps this escape hatch recursion-safe.
 - **`App::hookExec(?bool)` / `App::$hook_exec`** — toggles the transparent
   override described in [Bootstrapping](#bootstrapping). `null` (the default)
   resolves to **on in coroutine mode** (`superglobals === false`); a non-null
   value forces it on/off. When on, `shell_exec`, `exec`, `system`, `passthru`,
-  and the backtick operator all route through `App::exec()`. Belongs to the same
-  uopz-override family as `header()` and the `session_*()` shims.
+  and the backtick operator all route through `App::exec()`. Uses the same
+  override mechanism (ext-zealphp preferred, uopz fallback) as `header()` and
+  the `session_*()` shims.
 
 > CGI backends and the exec hook work in **all** lifecycle modes. New
 > ZealPHP-native code should still prefer explicit `App::exec()` / native
@@ -233,12 +234,29 @@ When superglobals are disabled, `CoSessionManager` applies the same behaviour wh
 
 ## Choosing Between Execution Modes
 
-| Mode | `App::superglobals(...)` | Coroutines (`go()`) | Prefork / `coproc` | Use Case |
-|------|--------------------------|---------------------|--------------------|----------|
-| Legacy | `true` (default) | Disabled in main request; use `coproc()` or task workers | Available | Drop-in support for existing PHP apps that expect mutable superglobals. |
-| Coroutine-first | `false` | Enabled automatically | `coproc()` unavailable (superglobals disabled), still can use task workers | New code bases leveraging async IO and coroutine scheduling without global state. |
+### One-call presets — `App::mode()`
 
-Pick the mode that matches your application’s performance profile. You can toggle superglobals early in `app.php` before calling `App::run()`.
+The canonical way to configure the lifecycle is a single `App::mode()` call before `App::init()`. It sets both the superglobals strategy and the isolation axis in one shot:
+
+```php
+App::mode(App::MODE_COROUTINE);          // recommended default — modern apps
+App::mode(App::MODE_LEGACY_CGI);         // unmodified WordPress / Drupal
+App::mode(App::MODE_COROUTINE_LEGACY);   // legacy request-style PHP run concurrently (requires ext-zealphp)
+App::mode(App::MODE_MIXED);              // Symfony / Laravel — real $_SESSION, no CGI fork cost
+```
+
+| Preset constant | `superglobals` | Isolation | Use for |
+|---|---|---|---|
+| `App::MODE_COROUTINE` (`’coroutine’`) | `false` | `Coroutine` | Modern ZealPHP apps — concurrent coroutine I/O, no superglobals |
+| `App::MODE_LEGACY_CGI` (`’legacy-cgi’`) | `true` | `CgiPool` (~1–3 ms warm) | Unmodified WordPress / Drupal — `require_once`-heavy apps needing full process isolation |
+| `App::MODE_COROUTINE_LEGACY` (`’coroutine-legacy’`) | `true` | `Coroutine` + full isolation stack | Legacy request-style PHP running **concurrently** — the PHP-FPM mental model under OpenSwoole. **Requires ext-zealphp.** |
+| `App::MODE_MIXED` (`’mixed’`) | `true` | `None` | Symfony / Laravel — real `$_SESSION`, sequential per-worker, no CGI fork cost |
+
+`App::mode()` is sugar over `App::superglobals()` and `App::isolation()`. For finer control, see the [Lifecycle setters](#lifecycle-setters-v0223-fine-grained-control-with-safe-by-default) section below.
+
+> **coroutine-legacy** is the framework’s compatibility runtime: it runs traditional request-style PHP under coroutine concurrency with per-coroutine isolation of the 7 superglobals, `$GLOBALS` (including object-valued), function-local `static $x`, `ini_set()`, `require_once` re-execution, and `exit`/`die` worker survival (`define()` isolation is a separate opt-in via `App::defineIsolation(true)`). See [/coroutines#lifecycle-modes](/coroutines#lifecycle-modes) for the full isolation matrix and preload requirements.
+
+Pick the mode that matches your application’s profile. You can call `App::mode()` (or set the individual knobs) early in `app.php` before calling `App::init()`.
 
 ## Lifecycle setters (v0.2.23+) — fine-grained control with safe-by-default
 
@@ -251,10 +269,10 @@ Configure these BEFORE `App::init()`. Each is a no-arg getter / one-arg setter (
 | Setter | Signature | Default (when `null`) | Controls |
 |---|---|---|---|
 | `App::superglobals(bool)` | `superglobals(bool $enable = true): void` | — (explicit default `true`) | `$g` storage strategy: process-wide PHP superglobals (`true`) vs per-coroutine `RequestContext` in `Coroutine::getContext()` (`false`). Also picks `SessionManager` (true) vs `CoSessionManager` (false). |
-| `App::processIsolation(bool)` | `processIsolation(?bool $on = null): bool` | follows `App::$superglobals` | `App::include()` dispatch: `true` forks `cgi_worker.php` via `proc_open` per file (~30–50 ms, true global-scope isolation — Apache mod_php parity); `false` runs in-process through `App::executeFile()`. |
+| `App::processIsolation(bool)` | `processIsolation(?bool $on = null): bool` | follows `App::$superglobals` | `App::include()` dispatch: `true` routes each `.php` file through a subprocess (strategy chosen by `cgiMode()` — default `'pool'`, ~1–3 ms warm; `'proc'` fallback is ~30–50 ms cold — true global-scope isolation, Apache mod_php parity); `false` runs in-process through `App::executeFile()`. |
 | `App::enableCoroutine(bool)` | `enableCoroutine(?bool $on = null): bool` | follows `!App::$superglobals` | OpenSwoole's `enable_coroutine` server setting — whether each inbound request is auto-wrapped in its own coroutine. `false` makes a worker handle one request at a time synchronously. |
 | `App::hookAll(bool\|int\|null)` | `hookAll($on = null): int` | follows `!App::$superglobals` (`HOOK_ALL` or `0`) | `OpenSwoole\Runtime::enableCoroutine($flags)` — process-wide PHP I/O hooks that make blocking calls (fopen, fread, curl, mysqli, ...) yield to the scheduler. Accepts `true` (HOOK_ALL), `false` (0), or an explicit `int` bitmask. **`PDO_MYSQL`/`mysqli` on mysqlnd ARE coroutinized** (mysqlnd rides `php_stream`, which the stream/TCP hooks intercept — no dedicated `HOOK_PDO`); `libpq`-based `PDO_PGSQL`, Oracle/ODBC stay blocking. Hooking makes I/O non-blocking ≠ a shared connection safe across coroutines — use a per-coroutine connection/pool. |
-| `App::cgiMode(string)` | `cgiMode(?string $mode = null): string` | `'proc'` | CGI dispatch strategy when `processIsolation()` is on. `'proc'` (default) — fresh PHP per request via `proc_open` (full WordPress/Drupal compat); `'fork'` (v0.2.29) — warm `OpenSwoole\Process` fork (~5× faster; function-scope only); `'fcgi'` (v0.2.39+) — forward to a FastCGI backend via `App::fcgiAddress()` (no child process). |
+| `App::cgiMode(string)` | `cgiMode(?string $mode = null): string` | `'pool'` | CGI dispatch strategy when `processIsolation()` is on. `'pool'` (default) — pre-spawned subprocess pool, ~1–3 ms warm, mod_php-style isolation; `'proc'` — fresh PHP per request via `proc_open` (~30–50 ms cold, full WordPress/Drupal compat); `'fcgi'` (v0.2.39+) — forward to a FastCGI backend via `App::fcgiAddress()` (no child process). |
 
 Worked examples — one line per setter:
 
@@ -268,21 +286,22 @@ App::cgiMode('fcgi');                           // dispatch legacy includes to p
 
 ### Supported mode matrix
 
-| Mode | `superglobals` | `processIsolation` | `enableCoroutine` | `hookAll` | When to use |
+| `App::mode()` preset | `superglobals` | `processIsolation` | `enableCoroutine` | `hookAll` | When to use |
 |---|---|---|---|---|---|
-| **Legacy CGI** | `true` | `true` | `false` | `0` | Unmodified WordPress / Drupal — `define()`-heavy plugins need a fresh process per request |
-| **Coroutine** | `false` | `false` | `true` | `HOOK_ALL` | Modern apps benefiting from concurrent coroutine I/O; OpenSwoole-native code |
-| **Mixed-mode / Symfony** | `true` | `false` | `false` | `0` | Symfony / Laravel on ZealPHP — real `$_SESSION` needed, but no per-include CGI fork cost. Sequential request handling per worker → no race risk on superglobals |
-| **In-process + sync** | `true` | `false` | `false` | `0` | Same shape as Mixed-mode — the "scheduler off, no CGI" combo |
-| **Coroutine without HOOK_ALL** | `false` | `false` | `true` | `0` | Per-request coroutine isolation but no auto I/O hooks (e.g. testing, custom hooks) |
+| `MODE_LEGACY_CGI` | `true` | `true` (CgiPool) | `false` | `0` | Unmodified WordPress / Drupal — `define()`-heavy plugins need process isolation per request (~1–3 ms warm pool by default) |
+| `MODE_COROUTINE` | `false` | `false` | `true` | `HOOK_ALL` | Modern apps benefiting from concurrent coroutine I/O; OpenSwoole-native code |
+| `MODE_COROUTINE_LEGACY` | `true` | `false` | `true` | `HOOK_ALL` | Legacy request-style PHP running concurrently with per-coroutine isolation of all request-state primitives. **Requires ext-zealphp.** |
+| `MODE_MIXED` | `true` | `false` | `false` | `0` | Symfony / Laravel on ZealPHP — real `$_SESSION` needed, but no per-include CGI fork cost. Sequential per worker → no race risk on superglobals |
+| *(custom)* Coroutine without HOOK_ALL | `false` | `false` | `true` | `0` | Per-request coroutine isolation but no auto I/O hooks (e.g. testing, custom hooks) |
 
 The default coupling — `null` everywhere — preserves the historical behaviour for any app that doesn't touch these knobs. The `zealphp-symfony` bridge uses `superglobals(true) + processIsolation(false) + sessionLifecycle(false)` to get the Mixed-mode lifecycle.
 
 ### Unsafe combinations — boot-time refusal (v0.2.27+)
 
-`App::run()` invokes `App::validateLifecycleCombination()` after resolving the four knobs, and **throws `RuntimeException` at boot** for combinations that race process-wide superglobals across concurrent coroutines:
+`App::run()` invokes `App::validateLifecycleCombination()` after resolving the four knobs, and **throws `RuntimeException` at boot** for genuinely unsafe shapes:
 
-- `superglobals(true) + enableCoroutine(true)` — concurrent coroutines would race the process-wide `$_GET` / `$_POST` / `$_SESSION` arrays (this is exactly the bug per-coroutine `$g` was designed to avoid).
-- `superglobals(true) + hookAll(non-zero)` — hooked I/O can yield mid-request, exposing process-wide superglobal mutations to other concurrent coroutines.
+- `superglobals(false) + enableCoroutine(false)` — **always throws** unconditionally. `CoSessionManager` requires the coroutine scheduler for per-request `RequestContext` isolation; this combination is never safe.
+- `superglobals(true) + enableCoroutine(true)` — throws **only when ext-zealphp is absent**. Without it, concurrent coroutines race the process-wide `$_GET` / `$_POST` / `$_SESSION` arrays. **With ext-zealphp loaded, this combination is fully supported** — it is exactly `App::mode('coroutine-legacy')`, where ext-zealphp's scheduler hooks snapshot/restore superglobals per coroutine.
+- `superglobals(true) + hookAll(non-zero)` — throws **only when ext-zealphp is absent**, for the same reason: hooked I/O can yield mid-request. With ext-zealphp, coroutine-legacy mode uses this combination safely.
 
-Pre-v0.2.27 these were `elog()`'d at warn level into `/tmp/zealphp/debug.log` but didn't refuse — in practice the warning was invisible to anyone not actively reading the debug log, and the unsafe configuration is how cross-request state-leak bugs ship to production. v0.2.27 changes this to a hard throw at `App::run()` boot — fail loud, fail fast, before any request can be served against a broken contract. Apps that need to run an unsafe combination for security-audit or debugging purposes can fork and remove the throw at `App::validateLifecycleCombination()`. The supported matrix above covers every safe configuration.
+Pre-v0.2.27 these were `elog()`'d at warn level into `/tmp/zealphp/debug.log` but didn't refuse — in practice the warning was invisible to anyone not actively reading the debug log, and the unsafe configuration is how cross-request state-leak bugs ship to production. v0.2.27 changes this to a hard throw at `App::run()` boot — fail loud, fail fast, before any request can be served against a broken contract. Apps that need a refused combination for security-audit or debugging purposes can fork and remove the throw at `App::validateLifecycleCombination()`.

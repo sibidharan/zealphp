@@ -86,10 +86,14 @@ $app->run();                                     // ← OpenSwoole takes over he
       </li>
       <li>
         <strong>CoSessionManager runs.</strong> It’s the registered <code>onRequest</code>
-        handler. It builds a fresh <code>RequestContext</code>, attaches the request/response wrappers,
-        copies headers into <code>$_GET</code>/<code>$_POST</code>-shaped arrays, and stores the whole
-        thing in the coroutine context. From this point, <code>RequestContext::instance()</code> always
-        returns the right object for the current coroutine — no globals, no cross-talk.
+        handler. The framework’s request closure builds a fresh <code>RequestContext</code>, attaches
+        the request/response wrappers, and populates <code>$g-&gt;get</code>, <code>$g-&gt;post</code>,
+        <code>$g-&gt;cookie</code>, <code>$g-&gt;server</code> on the per-coroutine context. In
+        coroutine mode the real <code>$_GET</code>/<code>$_POST</code> superglobals are
+        <em>not</em> populated — request input lives on <code>$g</code> only (populating
+        process-wide superglobals would race across concurrent coroutines). From this point,
+        <code>RequestContext::instance()</code> always returns the right object for the current
+        coroutine — no globals, no cross-talk.
       </li>
       <li>
         <strong>The middleware stack engages.</strong> ZealPHP uses a PSR-15 middleware chain. CORS
@@ -140,7 +144,7 @@ $app->run();                                     // ← OpenSwoole takes over he
         </tr>
         <tr>
           <td>Coroutine</td>
-          <td><code>RequestContext</code>, request/response objects, <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code> shims</td>
+          <td><code>RequestContext</code>, request/response objects, <code>$g-&gt;get</code> / <code>$g-&gt;post</code> / <code>$g-&gt;session</code> (superglobals are only populated in <code>superglobals(true)</code> mode)</td>
           <td>One request</td>
         </tr>
         <tr>
@@ -156,6 +160,12 @@ $app->run();                                     // ← OpenSwoole takes over he
       causes data leaks between requests; the second wastes memory and gets discarded on the next
       request.
     </p>
+
+    <?php App::render('/components/_callout', [
+      'variant' => 'info',
+      'title'   => 'The nine steps describe the default Coroutine isolation — other shapes exist',
+      'body'    => '<p>The flow above uses <code>CoSessionManager</code> and per-coroutine <code>RequestContext</code> — that is <code>App::mode(\'coroutine\')</code>, the recommended default for modern ZealPHP apps.</p><p>The isolation strategy is configurable via <code>App::mode()</code> and <code>App::isolation()</code>:</p><ul><li><code>App::mode(\'legacy-cgi\')</code> — <code>SessionManager</code> + a pre-spawned subprocess pool (<code>CgiPool</code>, ~1–3 ms warm) for unmodified WordPress/Drupal-style PHP.</li><li><code>App::mode(\'coroutine-legacy\')</code> — coroutine concurrency <em>with</em> <code>superglobals(true)</code>; ext-zealphp isolates <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>, <code>$GLOBALS</code>, function statics, and <code>require_once</code> per coroutine. (<code>define()</code> isolation is a separate opt-in via <code>App::defineIsolation(true)</code>.) Requires <code>ext-zealphp</code>.</li><li><code>App::mode(\'mixed\')</code> — real <code>$_SESSION</code>, sequential workers, no CGI fork cost. Suits Symfony/Laravel bridges.</li></ul><p>See the <a href="/coroutines#lifecycle-modes">lifecycle modes reference</a> for the full matrix.</p>',
+    ]); ?>
 
     <?php App::render('/components/_callout', [
       'variant' => 'deep',

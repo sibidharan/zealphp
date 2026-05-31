@@ -12,7 +12,7 @@ Implicit routes are registered by `App::run()` after all custom route files have
   - `/blog/post-1` → `public/blog/post-1.php` (falls back to `public/blog/post-1/index.php` when a directory exists)
   - `.php` suffixes are optional; ZealPHP drops them automatically.
 - **API namespace** – Requests under `/api/*` map to files inside `api/`. For example, `/api/device/list` includes `api/device/list.php`, binds the exported closure, and executes it via `ZealAPI`.
-- **.php guard** – By default, requests that explicitly target `.php` files (e.g., `/secret.php`) return 403. Set `App::$ignore_php_ext = false` if you need to serve raw PHP files directly.
+- **.php guard** – By default, requests that explicitly target `.php` files are blocked: an existing-but-blocked file (e.g., `/secret.php` where `public/secret.php` exists) returns 403 Forbidden; a `.php` URL with no backing file returns 404 Not Found. Set `App::$ignore_php_ext = false` if you need to serve raw PHP files directly.
 
 Implicit routes register last with the lowest priority, so any explicit route you register can override them.
 
@@ -92,7 +92,8 @@ Handlers can declare special parameters to access framework objects:
 - `$request` – `ZealPHP\HTTP\Request` wrapper
 - `$response` – `ZealPHP\HTTP\Response` wrapper
 - `$app` – the current `ZealPHP\App` instance
-- `$server` – the underlying `OpenSwoole\HTTP\Server`
+
+To access the underlying `OpenSwoole\HTTP\Server`, call `App::getServer()` — it is not an injectable handler parameter.
 
 ```php
 $app->route('/status', function ($response) {

@@ -176,6 +176,21 @@ PHP]); ?>
 	<p>For <strong>at-least-once</strong> delivery (work queues, command/event sourcing), pair with <code>Store::publishReliable</code> + <code>App::subscribeReliable</code> — Redis Streams with consumer groups. See <a href="/store#pubsub">/store#pubsub</a> + the deeper walkthrough at <a href="/learn/websocket#cross-server-routing">/learn/websocket#cross-server-routing</a>.</p>
 	<?php App::render('/components/_callout', [
 	    'variant' => 'info',
+	    'title'   => 'WSRouter — production-hardened federated rooms',
+	    'body'    => '<p>The raw <code>Store::publish</code> + <code>App::subscribe</code> fabric above is what the framework builds on top of. For production use, <code>WSRouter</code> bundles all of it — cross-server client routing, federated rooms, per-connection conn_id nonce (FD-reuse race fix), optional per-channel HMAC signing, and per-client rate limiting — into a handful of calls:</p>'
+	        . '<pre><code>'
+	        . 'WSRouter::init();                              // one-time, before run()' . "\n"
+	        . 'WSRouter::setChannelHmacSecret(getenv(\'ZEALPHP_WS_HMAC\') ?: null);  // WS-3: sign pub/sub envelopes' . "\n"
+	        . 'WSRouter::setClientRateLimit(50, 10);         // WS-4: 50 ops / 10 s / client' . "\n"
+	        . 'WSRouter::own($clientId, $fd);                // onOpen' . "\n"
+	        . 'WSRouter::release($clientId);                 // onClose' . "\n"
+	        . 'WSRouter::sendToClient($clientId, $payload);  // route to any server' . "\n"
+	        . '$room = WSRouter::room(\'general\');           // Room::push/join/leave/members/onMessage/onPresence' . "\n"
+	        . '</code></pre>'
+	        . '<p>Requires <code>Store::defaultBackend(Store::BACKEND_REDIS)</code>. Close-code constants: <code>WSRouter::CLOSE_AUTH_REQUIRED</code> (4001), <code>CLOSE_CAPACITY</code> (4013), <code>CLOSE_RATE_LIMITED</code> (4029), <code>CLOSE_IDLE</code> (4040). See <a href="/learn/cross-server-chat">/learn/cross-server-chat</a> for the full walkthrough.</p>',
+	]); ?>
+	<?php App::render('/components/_callout', [
+	    'variant' => 'info',
 	    'title'   => 'Driver choice (both validated)',
 	    'body'    => '<p>Both phpredis (preferred when <code>ext-redis</code> is loaded) and predis SUBSCRIBE loops yield under <code>HOOK_ALL</code> — the production default. phpredis is ~2× faster on hot CRUD; predis works without the ext. Spike results: <a href="/store#phpredis-pubsub-caveat">/store#phpredis-pubsub-caveat</a>.</p>',
 	]); ?>

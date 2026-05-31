@@ -46,17 +46,32 @@ Treat Markdown files in `docs/` as canonical documentation. When proposing chang
 
 ## Shipped Highlights
 
-- **Superglobal-less default mode** – `App::superglobals(false)` is the shipped default for new projects: per-coroutine `RequestContext` (`$g`) replaces process-wide `$_GET` / `$_POST` / `$_SESSION` arrays, making the runtime safe to handle concurrent coroutines without cross-request leaks. See [runtime-architecture.md](runtime-architecture.md) for the lifecycle setters that compose around it (`processIsolation`, `enableCoroutine`, `hookAll`, `cgiMode`).
+- **Superglobal-less default mode** – `App::superglobals(false)` is the shipped default for new projects: per-coroutine `RequestContext` (`$g`) replaces process-wide `$_GET` / `$_POST` / `$_SESSION` arrays, making the runtime safe to handle concurrent coroutines without cross-request leaks.
+
+- **One-call lifecycle presets — `App::mode()` and `App::isolation()`** – The current public lifecycle surface folds the underlying four knobs (`processIsolation`, `enableCoroutine`, `hookAll`, `cgiMode`) into two orthogonal axes. `App::isolation(Isolation|string)` picks the request-isolation strategy (one of `App::ISOLATION_COROUTINE`, `ISOLATION_CGI_POOL`, `ISOLATION_CGI_PROC`, `ISOLATION_CGI_FCGI`, `ISOLATION_NONE`). `App::mode(string)` sets both axes in one call via named presets:
+
+  | Preset constant | String | Use for |
+  |---|---|---|
+  | `App::MODE_COROUTINE` | `'coroutine'` | Modern ZealPHP apps — the scaffold default |
+  | `App::MODE_LEGACY_CGI` | `'legacy-cgi'` | Unmodified WordPress/Drupal (`require_once` apps) |
+  | `App::MODE_COROUTINE_LEGACY` | `'coroutine-legacy'` | Legacy request-style PHP run **concurrently** — Composer apps (Symfony/Laravel/Slim) and WordPress-style code with per-coroutine isolation. **Requires ext-zealphp.** |
+  | `App::MODE_MIXED` | `'mixed'` | Real `$_SESSION`, sequential workers, no CGI fork cost (Symfony bridge) |
+
+  The four fine-grained setters remain available as low-level overrides underneath these presets. See [runtime-architecture.md](runtime-architecture.md) for details.
+
+- **Coroutine-legacy compatibility runtime** – `App::mode('coroutine-legacy')` turns ZealPHP into a compatibility runtime: traditional request-style PHP (the PHP-FPM "fresh state per request" mental model) runs under OpenSwoole coroutine concurrency with per-coroutine isolation of the 7 superglobals, `header()`/`setcookie()` response state, `$GLOBALS`/`global $x` (including object-valued), function-local `static $x`, and `require_once`/`include_once` re-execution. `define()` isolation is a separate opt-in via `App::defineIsolation(true)` — it is NOT part of the preset. Requires **ext-zealphp**. See [runtime-architecture.md](runtime-architecture.md) and the `/coroutines#lifecycle-modes` reference.
+
+- **Coroutine-friendly session drivers** – Multiple session handler implementations ship in `src/Session/Handler/`: `FileSessionHandler`, `TableSessionHandler` (CAS + 3-way merge for concurrent-safe writes), `RedisSessionHandler` (WATCH/MULTI optimistic locking), `StoreSessionHandler` (backend-agnostic: Table/Redis/Tiered), and `CoroutineMemorySessionHandler`. Register via `StoreSessionHandler::register($ttl)` or `TableSessionHandler::register()` before `App::run()`. For `RedisSessionHandler`, use `App::sessionHandler('redis')` or `session_set_save_handler(new RedisSessionHandler(), true)` — it has no static `register()` helper.
+
+- **Route-scoped middleware** – `ScopedMiddleware` wraps any other middleware so it runs only when the request path matches a literal prefix, regex, or files predicate — Apache `<Location>` / `<LocationMatch>` / `<Files>` container parity.
 
 ## Roadmap Highlights
 
 The following initiatives are being researched or actively developed:
 
-1. **Configurable middleware groups** – Allow route-scoped middleware stacks for targeted policies (e.g., apply authentication only to `/api/*` automatically).
-2. **Improved session drivers** – Introduce coroutine-friendly session storage (Redis, custom in-memory pools) to complement the current file-based handler.
-3. **Task orchestration helpers** – Higher-level APIs for scheduling recurring jobs and collecting task results.
-4. **Observability toolkit** – First-class metrics, tracing hooks, and structured request logs to integrate with popular observability platforms.
-5. **Developer tooling** – Command-line installer, project generator, and environment scaffolding to simplify onboarding.
+1. **Task orchestration helpers** – Higher-level APIs for scheduling recurring jobs and collecting task results.
+2. **Observability toolkit** – First-class metrics, tracing hooks, and structured request logs to integrate with popular observability platforms.
+3. **Developer tooling** – Command-line installer, project generator, and environment scaffolding to simplify onboarding.
 
 Contributions aligned with the roadmap are encouraged. Open issues in the repository or submit a proposal describing the problem space, design sketch, and PSR implications.
 

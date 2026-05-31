@@ -5,9 +5,9 @@ Welcome to the official documentation set for ZealPHP, a coroutine-aware PHP fra
 ## Index
 
 ### Getting started
-- [getting-started.md](./getting-started.md) — install PHP 8.3+, OpenSwoole, uopz, and Composer; boot the development server.
+- [getting-started.md](./getting-started.md) — install PHP 8.3+, OpenSwoole, ext-zealphp (recommended) or uopz, and Composer; boot the development server.
 - [directory-structure.md](./directory-structure.md) — what lives in `src/`, `route/`, `api/`, `template/`, `public/`, `task/`, and friends.
-- [runtime-architecture.md](./runtime-architecture.md) — request lifecycle, superglobals vs coroutine mode, lifecycle setters (`processIsolation`, `enableCoroutine`, `hookAll`, `cgiMode`), and the unsafe-combination boot refusal.
+- [runtime-architecture.md](./runtime-architecture.md) — request lifecycle, `App::mode()` presets (`legacy-cgi`, `coroutine`, `coroutine-legacy`, `mixed`), `App::superglobals()` × `App::isolation()` axes, the coroutine-legacy compatibility runtime, and the unsafe-combination boot refusal.
 
 ### Routing & responses
 - [routing.md](./routing.md) — `App::route()`, `nsRoute`, `nsPathRoute`, `patternRoute`, parameter injection, and the universal return contract.
@@ -27,7 +27,7 @@ Welcome to the official documentation set for ZealPHP, a coroutine-aware PHP fra
 - [fuzzing.md](./fuzzing.md) — Radamsa parser fuzzing, Gabbi contract fixtures, slowhttptest reactor checks, and the http-garden differential roadmap.
 
 ### Background
-- [apache-parity.md](./apache-parity.md) — uopz function overrides, per-coroutine isolation, and the contract that lets unmodified WordPress / Drupal run on ZealPHP.
+- [apache-parity.md](./apache-parity.md) — function overrides (ext-zealphp preferred, uopz fallback), per-coroutine isolation, and the contract that lets unmodified WordPress / Drupal run on ZealPHP.
 - [competitive-analysis.md](./competitive-analysis.md) — where ZealPHP sits versus PHP-FPM, Laravel Octane, RoadRunner, and Node.js / Express.
 - [standards-and-roadmap.md](./standards-and-roadmap.md) — coding standards, PSR cross-reference to `STANDARDS.md`, and shipped + planned roadmap items.
 
@@ -43,7 +43,7 @@ Each topic is self-contained and written from the perspective of a senior engine
 
 ## Quick reference
 
-- Minimum PHP: 8.3 with `openswoole` 22.1+ (26.2+ for PHP 8.5) and `uopz`
+- Minimum PHP: 8.3 with `openswoole` 22.1+ (26.2+ for PHP 8.5) and `ext-zealphp` (recommended) or `uopz`
 - Entrypoint: `app.php` boots the HTTP server and wires middleware, implicit routes, and session managers
 - Framework namespacing: all core symbols live under `ZealPHP\*` and follow PSR-4 autoloading via Composer
 - Default lifecycle: `App::superglobals(false)` — per-coroutine `$g` state. Use `App::superglobals(true)` to opt into legacy `$_GET` / `$_POST` / `$_SESSION` style (with the unsafe-combination boot refusal documented in `runtime-architecture.md`).

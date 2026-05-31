@@ -173,7 +173,7 @@ YAML
   <li>Tune OPcache for long-running workers: <code>opcache.validate_timestamps=0</code> + restart on deploy. <a href="https://github.com/sibidharan/zealphp/blob/master/docs/deployment.md#opcache-settings-for-long-running-workers" target="_blank">Full settings ↗</a></li>
   <li>Rotate logs in <code>/tmp/zealphp/</code> with <code>logrotate</code>.</li>
   <li>Behind a TLS-terminating proxy, leave <code>ZEALPHP_SESSION_SECURE</code> unset — the framework auto-detects HTTPS from <code>X-Forwarded-Proto</code>.</li>
-  <li>Use <code>php app.php restart</code> for graceful, zero-downtime worker recycling.</li>
+  <li>Use <code>php app.php restart</code> to cleanly drain in-flight requests and restart; expect a brief listener-down window between stop and re-bind. For seamless in-place recycling rely on <code>ZEALPHP_MAX_REQUEST</code> worker rotation (workers recycle one-at-a-time after N requests, with no listener downtime). Front the process with a proxy health-check pool for true zero-downtime deploys.</li>
 </ul>
 
 <h2 class="deploy-h2">More</h2>

@@ -6,7 +6,7 @@ This document compares ZealPHP with existing solutions for async/concurrent PHP.
 
 | Project | Model | Routing | WebSocket | Streaming | Shared Memory | Middleware | Legacy PHP |
 |---------|-------|---------|-----------|-----------|---------------|------------|------------|
-| **ZealPHP** | Coroutine (OpenSwoole) | Built-in | Built-in | yield/SSE/stream() | Store (Table) + Counter (Atomic) | PSR-15 | CGI worker |
+| **ZealPHP** | Coroutine (OpenSwoole) | Built-in | Built-in | yield/SSE/stream() | Store (Table) + Counter (Atomic) | PSR-15 | coroutine-legacy runtime + CGI pool (pool/proc/fcgi) |
 | ReactPHP | Event loop | Manual | Via packages | Manual | No | No standard | No |
 | AMPHP | Coroutine (Fiber) | Manual | Via packages | Manual | No | No standard | No |
 | FrankenPHP | Go worker | Via framework | Via framework | Via framework | No | Via framework | Partial |
@@ -60,7 +60,7 @@ This document compares ZealPHP with existing solutions for async/concurrent PHP.
 - No native PHP coroutines — each request runs in a separate PHP worker
 - Rich plugin ecosystem (queues, KV store, metrics) but all Go-managed
 - WebSocket support via a Go plugin, not native PHP
-- No uopz-based legacy compatibility
+- No override layer for legacy compatibility (no `session_start()`, `header()`, `$_GET` support)
 
 **When to use RoadRunner:** You want Go-level infrastructure with PHP business logic, need the plugin ecosystem (gRPC, temporal, queues), or prefer process-per-request isolation.
 
@@ -83,7 +83,7 @@ This document compares ZealPHP with existing solutions for async/concurrent PHP.
 - Raw API — no routing, no middleware pipeline, no template engine
 - Manual request handling — you wire up `onRequest`, `onOpen`, `onMessage` yourself
 - Full power but significant boilerplate for web applications
-- No uopz overrides — `session_start()`, `header()`, `$_GET` don't work
+- No override layer — `session_start()`, `header()`, `$_GET` don't work in a coroutine worker
 - No legacy PHP compatibility
 
 **When to use raw Swoole/OpenSwoole:** You need maximum control, are building a custom protocol, or ZealPHP's abstractions don't fit your use case.
@@ -93,7 +93,7 @@ This document compares ZealPHP with existing solutions for async/concurrent PHP.
 ZealPHP occupies a specific niche that no other project covers:
 
 1. **Full-stack coroutine framework** — not a library (ReactPHP, AMPHP) or a server (FrankenPHP, RoadRunner), but an integrated framework with routing, middleware, templates, and shared memory
-2. **Legacy PHP bridge** — uopz overrides let existing PHP code (`session_start()`, `header()`, `$_GET`) work unchanged inside a coroutine runtime
+2. **Legacy PHP compatibility runtime** — `App::mode('coroutine-legacy')` runs traditional request-style PHP under coroutine concurrency with per-coroutine isolation of all 7 superglobals, `$GLOBALS` (including object-valued), function-local statics, and `require_once` re-execution state (`App::defineIsolation(true)` adds per-request `define()` constants as a separate opt-in). Built-in functions (`session_start()`, `header()`, `$_GET`) are overridden via ext-zealphp's `zealphp_override()` (uopz is the fallback). No other project in this space offers request-style legacy PHP running concurrently under coroutines; competitors offer either process-per-request isolation (FrankenPHP/RoadRunner) or coroutines without legacy compat. See [Lifecycle modes](/coroutines#lifecycle-modes).
 3. **Streaming-first** — `yield` as a first-class streaming primitive, with SSE, SSR streaming, and `stream()` built into the response object
 4. **Cross-worker shared state** — `Store` and `Counter` provide shared memory without external dependencies (no Redis required)
 5. **Single-process deployment** — HTTP, WebSocket, timers, task workers, and sessions in one `php app.php` process

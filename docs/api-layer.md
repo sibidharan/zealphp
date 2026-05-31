@@ -6,7 +6,12 @@ ZealPHP exposes a lightweight convention for building HTTP APIs while preserving
 
 - `api/<name>.php` &rarr; `/api/<name>`
 - `api/<module>/<action>.php` &rarr; `/api/<module>/<action>`
-- The file must assign a closure to a variable named after the file:
+
+ZealAPI supports two dispatch modes inside each file.
+
+### Mode 1 — Filename match (all HTTP methods)
+
+Assign a closure to a variable whose name matches the file base name. It receives every HTTP method:
 
 ```php
 <?php
@@ -17,7 +22,36 @@ $list = function () {
 };
 ```
 
-`ZealAPI::processApi()` includes the file, binds `$list` to the API object (`$this`), and executes it. If the variable is missing or not callable, ZealPHP responds with `404 method_not_found`.
+`ZealAPI::processApi()` includes the file, binds `$list` to the API object (`$this`), and executes it.
+
+### Mode 2 — Per-method dispatch
+
+When no filename-matching variable exists, ZealAPI looks for `$get`, `$post`, `$put`, `$delete`, and `$patch` closures and dispatches by HTTP method:
+
+```php
+<?php
+// File: api/users.php
+
+$get = function () {
+    return $this->json(['users' => []]);
+};
+
+$post = function () {
+    // create a user
+    return $this->json(['created' => true]);
+};
+```
+
+Behaviour of per-method dispatch:
+- **Undefined methods** return `405 Method Not Allowed` with an `Allow` header listing the supported methods plus `OPTIONS`.
+- **HEAD** is automatically derived from `$get` — no separate handler needed.
+- **OPTIONS** is always appended to the `Allow` list.
+
+**Priority:** filename match always wins. If `$list` exists in `list.php`, any `$get`/`$post` in the same file are unreachable (a warning is logged).
+
+**Error responses when no handler is found:**
+- File missing or path outside `api/` → `404 method_not_found`
+- File exists but defines neither a filename-match closure nor any method handler → `404 handler_not_found` (with a hint)
 
 ## Handler Signature
 

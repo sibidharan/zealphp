@@ -16,7 +16,7 @@ $user = $user ?? \ZealPHP\Learn\Auth::currentUser();
     <?php App::render('/components/_youwilllearn', ['items' => [
       'How to model rooms + messages in SQLite (the bundled-with-PHP database)',
       'The WebSocket handler pattern for join &rarr; broadcast &rarr; persist &rarr; replay',
-      'Per-room fan-out via worker-local fd maps &mdash; no Redis required on one server',
+      'Per-room fan-out via a shared <code>Store</code> table &mdash; works across all workers on one server',
       'How to upgrade the same chat to N servers by swapping one fan-out helper',
     ]]); ?>
 
@@ -117,61 +117,87 @@ CREATE INDEX idx_chatroom_room_time ON chatroom_messages(room, created_at);</cod
     <h2 id="ws-handler">The WebSocket handler &mdash; the entire interactive layer</h2>
     <p>
       The chat&rsquo;s real-time half lives in one <code>App::ws()</code> registration. Three event types:
-      <code>join</code>, <code>message</code>, <code>leave</code>. The handler keeps a worker-local fd map
-      to know who&rsquo;s in which room, so it can fan out to just the relevant connections:
+      <code>join</code>, <code>message</code>, <code>leave</code>. The handler keeps the fd&rarr;room map in a
+      <strong>shared <code>Store</code> table</strong> &mdash; not a worker-local array &mdash; so any
+      worker can fan out to any connection. (OpenSwoole runs multiple workers by default; a worker-local
+      array is invisible to every other worker, silently breaking cross-worker fan-out.)
     </p>
-<pre><code class="language-php">$roomFds = [];     // room → [fd → true]
-$fdMeta  = [];     // fd → {room, username}
+<pre><code class="language-php">// Cluster-wide fd map — must be created BEFORE App::run() forks workers.
+// Route files load at boot time, so this is the right place.
+Store::make('chatroom_fds', 4096, [
+    'room'     =&gt; [Store::TYPE_STRING, 64],
+    'username' =&gt; [Store::TYPE_STRING, 64],
+]);
 
-$app-&gt;ws('/ws/learn/chatroom',
-    function ($server, $frame) use (&amp;$roomFds, &amp;$fdMeta) {
-        $msg = json_decode($frame-&gt;data, true);
+$app-&gt;ws('/ws/learn/chatroom', function ($server, $frame) {
+    $msg  = json_decode((string) $frame-&gt;data, true);
+    if (!is_array($msg)) { return; }
+    $type = is_string($msg['type'] ?? null) ? $msg['type'] : '';
 
-        if ($msg['type'] === 'join') {
-            $room = $msg['room'] ?? 'general';
-            $user = $msg['username'] ?? 'anonymous';
-            $fdMeta[$frame-&gt;fd]       = ['room' =&gt; $room, 'username' =&gt; $user];
-            $roomFds[$room][$frame-&gt;fd] = true;
+    if ($type === 'join') {
+        $room     = is_string($msg['room'] ?? null)     ? $msg['room']     : 'general';
+        $username = is_string($msg['username'] ?? null) ? $msg['username'] : 'anonymous';
 
-            // Send history to the joining client only.
-            $server-&gt;push($frame-&gt;fd, json_encode([
-                'type' =&gt; 'history',
-                'items' =&gt; Chatroom::recent($room, 50),
-            ]));
+        // Record membership in shared memory (visible to all workers).
+        Store::set('chatroom_fds', (string) $frame-&gt;fd, [
+            'room'     =&gt; $room,
+            'username' =&gt; $username,
+        ]);
 
-            // Announce the join to everyone in the room.
-            $sys = Chatroom::saveMessage($room, $user, "joined #{$room}", 'system');
-            broadcast_to_room($server, $roomFds, $room, ['type' =&gt; 'message', 'message' =&gt; $sys]);
+        // Send history to the joining client only.
+        $server-&gt;push($frame-&gt;fd, (string) json_encode([
+            'type'  =&gt; 'history',
+            'room'  =&gt; $room,
+            'items' =&gt; Chatroom::recent($room, 50),
+        ]));
 
-        } elseif ($msg['type'] === 'message') {
-            $meta = $fdMeta[$frame-&gt;fd];
-            $row = Chatroom::saveMessage($meta['room'], $meta['username'], $msg['body']);
-            broadcast_to_room($server, $roomFds, $meta['room'], ['type' =&gt; 'message', 'message' =&gt; $row]);
-        }
-    },
-    onClose: function ($server, $fd) use (&amp;$roomFds, &amp;$fdMeta) {
-        if (isset($fdMeta[$fd])) {
-            $meta = $fdMeta[$fd];
-            unset($roomFds[$meta['room']][$fd], $fdMeta[$fd]);
-            $sys = Chatroom::saveMessage($meta['room'], $meta['username'], "left #{$meta['room']}", 'system');
-            broadcast_to_room($server, $roomFds, $meta['room'], ['type' =&gt; 'message', 'message' =&gt; $sys]);
-        }
-    },
-);
+        // Persist + broadcast a system "X joined" line to everyone in the room.
+        $sys = Chatroom::saveMessage($room, $username, "joined #{$room}", 'system');
+        broadcast_to_room($server, $room, ['type' =&gt; 'message', 'message' =&gt; $sys]);
+        return;
+    }
 
-function broadcast_to_room($server, &amp;$roomFds, string $room, array $payload): void
+    if ($type === 'message') {
+        $meta = Store::get('chatroom_fds', (string) $frame-&gt;fd);
+        if (!is_array($meta)) { return; }
+        $body = is_string($msg['body'] ?? null) ? $msg['body'] : '';
+        if (trim($body) === '') { return; }
+        $row = Chatroom::saveMessage((string) $meta['room'], (string) $meta['username'], $body);
+        broadcast_to_room($server, (string) $meta['room'], ['type' =&gt; 'message', 'message' =&gt; $row]);
+        return;
+    }
+}, onClose: function ($server, $fd) {
+    $meta = Store::get('chatroom_fds', (string) $fd);
+    Store::del('chatroom_fds', (string) $fd);
+    if (!is_array($meta)) { return; }
+    $sys = Chatroom::saveMessage((string) $meta['room'], (string) $meta['username'], "left #{$meta['room']}", 'system');
+    broadcast_to_room($server, (string) $meta['room'], ['type' =&gt; 'message', 'message' =&gt; $sys]);
+});
+
+/**
+ * Fan-out: iterate the cluster-wide fd map and push to every fd in the room.
+ * Works across workers (any worker can $server->push any fd) and across the
+ * cluster when the Store backend is Redis — federated chat for free.
+ *
+ * @param array&lt;string, mixed&gt; $payload
+ */
+function broadcast_to_room($server, string $room, array $payload, int $excludeFd = 0): void
 {
-    if (!isset($roomFds[$room])) return;
-    $data = json_encode($payload);
-    foreach (array_keys($roomFds[$room]) as $fd) {
-        if ($server-&gt;isEstablished($fd)) {
-            $server-&gt;push($fd, $data);
+    $data = (string) json_encode($payload);
+    foreach (Store::iterate('chatroom_fds') as $fd =&gt; $info) {
+        if (($info['room'] ?? null) !== $room) { continue; }
+        $fdInt = (int) $fd;
+        if ($fdInt === $excludeFd) { continue; }
+        if ($server-&gt;isEstablished($fdInt)) {
+            $server-&gt;push($fdInt, $data);
         }
     }
 }</code></pre>
     <p>
-      <strong>What just happened.</strong> Five components — a handler, two state arrays, a fan-out
-      helper, and a model. ~70 lines of PHP total. A working multi-room chat with persistence.
+      <strong>What just happened.</strong> The key insight is <code>Store::make</code> before
+      <code>App::run()</code>: the table lives in <code>OpenSwoole\Table</code> shared memory, so every
+      worker sees every fd&rsquo;s room membership. <code>broadcast_to_room</code> iterates the whole
+      table and pushes to matching fds &mdash; any worker can push to any fd. ~70 lines of PHP total.
     </p>
 
     <h2 id="rest">Tiny REST sidekick &mdash; the lobby + initial paint</h2>
@@ -326,11 +352,12 @@ function renderTyping() {
     <div class="store-grid-tight">
       <div>
         <h3 class="store-col-good">Single-server (this lesson)</h3>
-        <pre><code class="language-php">$roomFds = [];
+        <pre><code class="language-php">// Default: OpenSwoole\Table — in-process shared memory.
+Store::make('chatroom_fds', 4096, [...]);
 // onMessage handler:
-$roomFds[$room][$fd] = true;
-broadcast_to_room($server, $roomFds, $room, $payload);</code></pre>
-        <p>Local fd map; push directly. Zero infrastructure.</p>
+Store::set('chatroom_fds', (string) $frame-&gt;fd, ['room' =&gt; $room, ...]);
+broadcast_to_room($server, $room, $payload);</code></pre>
+        <p>Shared memory table; all workers on one server see every fd. Zero extra infrastructure.</p>
       </div>
       <div>
         <h3 class="store-col-bad">Multi-server (Lesson 23)</h3>
@@ -358,9 +385,10 @@ $room-&gt;push($payload);</code></pre>
       <li><strong>SQLite is real.</strong> One file on disk, ACID, zero setup. Millions of rows per room
         is fine. Move to Postgres when you need multi-writer; until then, save yourself the operational cost.</li>
       <li><strong>The WebSocket handler is the whole interactive layer.</strong> Three event types
-        (join/message/leave), one fan-out helper, two state arrays. That&rsquo;s the entire pattern.</li>
-      <li><strong>Federation is one swap.</strong> Same code, switch the fan-out from a local fd map to
-        <code>WSRouter::room()</code>. <a href="/learn/cross-server-chat">Lesson 23</a> covers this.</li>
+        (join/message/leave), one shared <code>Store</code> table, one fan-out helper. That&rsquo;s the entire pattern.</li>
+      <li><strong>Federation is one swap.</strong> Same code, switch the Store backend from
+        <code>Store::BACKEND_TABLE</code> (shared memory) to <code>Store::BACKEND_REDIS</code> and use
+        <code>WSRouter::room()</code> for pub/sub fan-out. <a href="/learn/cross-server-chat">Lesson 23</a> covers this.</li>
     </ul>
 
     <p>

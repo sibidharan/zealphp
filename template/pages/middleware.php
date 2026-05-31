@@ -37,6 +37,11 @@ $siteUrl = site_url();
   <tr><td><a href="#return"><code>ReturnMiddleware</code></a></td><td>nginx <code>return</code> directive</td><td>Unconditionally returns a fixed response — pair with <code>ScopedMiddleware</code></td></tr>
   <tr><td><a href="#scoped"><code>ScopedMiddleware</code></a></td><td>Apache <code>&lt;Location&gt;</code> / <code>&lt;LocationMatch&gt;</code> containers</td><td>Apply another middleware only to matching request paths</td></tr>
   <tr><td><a href="#set-env-if"><code>SetEnvIfMiddleware</code></a></td><td>Apache <code>mod_setenvif</code> / <code>BrowserMatch</code></td><td>Set request "env" vars in <code>$g->server</code> when a request attribute matches a regex</td></tr>
+  <tr><td><a href="#body-size-limit"><code>BodySizeLimitMiddleware</code></a></td><td>nginx <code>client_max_body_size</code>, Apache <code>LimitRequestBody</code></td><td>Rejects oversized request bodies with <code>413 Content Too Large</code></td></tr>
+  <tr><td><a href="#redirect"><code>RedirectMiddleware</code></a></td><td>Apache <code>mod_alias</code> (<code>Redirect</code> / <code>RedirectMatch</code>)</td><td>Declarative URL redirects — prefix and regex rules, first match short-circuits</td></tr>
+  <tr><td><a href="#referer"><code>RefererMiddleware</code></a></td><td>nginx <code>valid_referers</code> / <code>$invalid_referer</code></td><td>Hotlink protection — refuses requests whose <code>Referer</code> is not in the allowed set</td></tr>
+  <tr><td><a href="#csrf"><code>CsrfMiddleware</code></a></td><td>n/a (framework-level)</td><td>Double-submit CSRF protection for state-mutating requests</td></tr>
+  <tr><td><a href="#health-check"><code>HealthCheckMiddleware</code></a></td><td>n/a (ops concern)</td><td>Short-circuits on health-check paths (default <code>/healthz</code>); returns 200/503 JSON</td></tr>
 </table>
 
 <?php
@@ -210,15 +215,16 @@ PHP]); ?>
     'code' => <<<'PHP'
 use ZealPHP\Middleware\HeaderMiddleware;
 
-$app->addMiddleware(
-    (new HeaderMiddleware())
-        ->set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')
-        ->set('X-Content-Type-Options', 'nosniff')
-        ->set('X-Frame-Options', 'SAMEORIGIN')
-        ->set('Referrer-Policy', 'strict-origin-when-cross-origin')
-        ->add('Link', '</css/zealphp.css>; rel=preload; as=style')
-        ->unset('X-Powered-By')
-);
+$app->addMiddleware(new HeaderMiddleware([
+    'set' => [
+        'Strict-Transport-Security' => 'max-age=63072000; includeSubDomains; preload',
+        'X-Content-Type-Options'    => 'nosniff',
+        'X-Frame-Options'           => 'SAMEORIGIN',
+        'Referrer-Policy'           => 'strict-origin-when-cross-origin',
+    ],
+    'add'   => ['Link' => '</css/zealphp.css>; rel=preload; as=style'],
+    'unset' => ['X-Powered-By'],
+]));
 PHP]); ?>
 
 <h3 id="basic-auth" class="mw-h3"><code>BasicAuthMiddleware</code></h3>
@@ -226,19 +232,24 @@ PHP]); ?>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
 use ZealPHP\Middleware\BasicAuthMiddleware;
+use ZealPHP\Middleware\ScopedMiddleware;
 
-// 1) htpasswd-file backend
-$app->addMiddleware(new BasicAuthMiddleware(
-    realm:      'Admin Area',
-    htpasswd:   __DIR__ . '/.htpasswd',
-    pathPrefix: '/admin',
+// 1) htpasswd-file backend, scoped to /admin
+$app->addMiddleware(ScopedMiddleware::location(
+    new BasicAuthMiddleware(
+        htpasswdFile: __DIR__ . '/.htpasswd',
+        realm:        'Admin Area',
+    ),
+    '/admin'
 ));
 
-// 2) callback verifier — lets you check against the DB
-$app->addMiddleware(new BasicAuthMiddleware(
-    realm:      'API',
-    verify:     fn($user, $pass) => User::checkCredentials($user, $pass),
-    pathPrefix: '/api/private',
+// 2) callback verifier — lets you check against the DB, scoped to /api/private
+$app->addMiddleware(ScopedMiddleware::location(
+    new BasicAuthMiddleware(
+        verify: fn($user, $pass) => User::checkCredentials($user, $pass),
+        realm:  'API',
+    ),
+    '/api/private'
 ));
 PHP]); ?>
 
@@ -247,13 +258,16 @@ PHP]); ?>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
 use ZealPHP\Middleware\IpAccessMiddleware;
+use ZealPHP\Middleware\ScopedMiddleware;
 
-// Allow only internal networks to hit /admin
-$app->addMiddleware(new IpAccessMiddleware(
-    allow:      ['10.0.0.0/8', '192.168.0.0/16', '127.0.0.1/32'],
-    deny:       ['0.0.0.0/0'],     // explicit deny-all fallback
-    order:      'deny,allow',      // Apache legacy semantics
-    pathPrefix: '/admin',
+// Allow only internal networks to hit /admin.
+// The middleware is deny-first: any IP not in 'allow' is refused.
+// No 'deny' entry is needed — the allow list already excludes everything else.
+$app->addMiddleware(ScopedMiddleware::location(
+    new IpAccessMiddleware([
+        'allow' => ['10.0.0.0/8', '192.168.0.0/16', '127.0.0.1/32'],
+    ]),
+    '/admin'
 ));
 PHP]); ?>
 
@@ -269,12 +283,11 @@ Store::make('rate_limit', 100_000, [
     'reset' => ['type' => Store::TYPE_INT, 'size' => 8],
 ]);
 
-// 60 requests per minute per client IP
+// 60 requests per minute per client IP (keyed by client IP internally)
 $app->addMiddleware(new RateLimitMiddleware(
-    limit:    60,
-    window:   60,                              // seconds
-    keyBy:    fn($req) => App::clientIp(),     // respects $trusted_proxies
-    store:    'rate_limit',
+    limit:     60,
+    window:    60,            // seconds
+    tableName: 'rate_limit',
 ));
 PHP]); ?>
 
@@ -288,8 +301,8 @@ use ZealPHP\Middleware\ConcurrencyLimitMiddleware;
 $counter = new Counter('inflight');   // create BEFORE $app->run()
 
 $app->addMiddleware(new ConcurrencyLimitMiddleware(
-    max:     100,           // max concurrent in-flight requests
-    counter: $counter,
+    maxConcurrent: 100,     // max concurrent in-flight requests
+    counter:       $counter,
 ));
 PHP]); ?>
 
@@ -427,7 +440,7 @@ use ZealPHP\Middleware\BlockPhpExtMiddleware;
 
 // Scope BasicAuth to /admin only
 $app->addMiddleware(ScopedMiddleware::location(
-    new BasicAuthMiddleware(realm: 'Admin', htpasswd: __DIR__ . '/.htpasswd'),
+    new BasicAuthMiddleware(htpasswdFile: __DIR__ . '/.htpasswd', realm: 'Admin'),
     '/admin'
 ));
 
@@ -446,6 +459,76 @@ $app->addMiddleware(new SetEnvIfMiddleware([
     ['attr' => 'Request_URI', 'regex' => '#^/admin#', 'set' => ['ADMIN_AREA' => '1']],
     ['attr' => 'Remote_Addr', 'regex' => '#^10\.#',   'set' => ['INTERNAL' => '1']],
 ]));
+PHP]); ?>
+
+<h3 id="body-size-limit" class="mw-h3"><code>BodySizeLimitMiddleware</code></h3>
+<p>Rejects oversized request bodies with <code>413 Content Too Large</code> before the handler runs. Accepts an integer (bytes) or a shorthand string (<code>'10M'</code>, <code>'512K'</code>). Pass <code>0</code> for unlimited. nginx parity: <code>client_max_body_size 10m;</code>. Apache parity: <code>LimitRequestBody</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\BodySizeLimitMiddleware;
+
+// Reject uploads larger than 10 MB
+$app->addMiddleware(new BodySizeLimitMiddleware('10M'));
+PHP]); ?>
+
+<h3 id="redirect" class="mw-h3"><code>RedirectMiddleware</code></h3>
+<p>Declarative URL redirects — first matching rule short-circuits. Each rule is an associative array with either a <code>'from'</code> key (prefix match, like Apache <code>Redirect /old /new</code>) or a <code>'match'</code> key (PCRE regex with capture groups, like <code>RedirectMatch</code>). The per-rule default status is <code>302</code>; pass an explicit <code>'status'</code> per rule to override. A rule without a <code>'to'</code> key is silently skipped. Apache parity: <code>mod_alias</code> (<code>Redirect</code> / <code>RedirectMatch</code>).</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\RedirectMiddleware;
+
+$app->addMiddleware(new RedirectMiddleware([
+    // Permanent prefix redirect
+    ['from' => '/blog',         'to' => '/articles',                'status' => 301],
+    // Regex redirect with back-reference (permanent)
+    ['match' => '#^/old/(.+)#', 'to' => '/new/$1',                 'status' => 301],
+    // Temporary redirect (302 is the per-rule default)
+    ['from' => '/beta',         'to' => 'https://beta.example.com', 'status' => 302],
+]));
+PHP]); ?>
+
+<h3 id="referer" class="mw-h3"><code>RefererMiddleware</code></h3>
+<p>Hotlink protection — refuses requests whose <code>Referer</code> header is not in the allowed set with <code>403 Forbidden</code>. Specs can be plain host names, wildcards (<code>*.example.com</code>), or regexes (prefixed with <code>~</code>). A missing <code>Referer</code> is allowed by default (<code>allowNone: true</code>). nginx parity: <code>valid_referers</code> / <code>if ($invalid_referer) { return 403; }</code>.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\RefererMiddleware;
+
+$app->addMiddleware(new RefererMiddleware(
+    referers:    ['example.com', '*.example.com'],
+    serverNames: ['example.com'],   // own hosts always allowed
+));
+PHP]); ?>
+
+<h3 id="csrf" class="mw-h3"><code>CsrfMiddleware</code></h3>
+<p>Double-submit CSRF protection for state-mutating requests (<code>POST</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code>). Generates a per-session token and validates it on every non-safe request. Pass an array of URL paths to exempt (e.g. API endpoints using their own token scheme).</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\CsrfMiddleware;
+
+$app->addMiddleware(new CsrfMiddleware(
+    exempt: ['/api/', '/webhooks/'],
+));
+PHP]); ?>
+
+<h3 id="health-check" class="mw-h3"><code>HealthCheckMiddleware</code></h3>
+<p>Short-circuits on health-check paths and returns a JSON response — <code>200 {"status":"ok"}</code> when healthy, <code>503 {"status":"unhealthy",...}</code> when the optional check callback returns an error string. Default path is <code>/healthz</code>; pass additional paths (<code>/readyz</code>, <code>/_health</code>) as needed. Route handlers never run for health-check paths.</p>
+<?php App::render('/components/_code', [
+    'code' => <<<'PHP'
+use ZealPHP\Middleware\HealthCheckMiddleware;
+use ZealPHP\Store;
+
+$app->addMiddleware(new HealthCheckMiddleware(
+    paths: ['/healthz', '/readyz'],
+    check: function (): ?string {
+        // Return null → healthy; non-null string → unhealthy reason
+        try {
+            Store::get('rate_limit', '__ping');
+            return null;
+        } catch (\Throwable $e) {
+            return 'store unreachable: ' . $e->getMessage();
+        }
+    },
+));
 PHP]); ?>
 
 <h2 class="mw-h2-ref">Custom middleware</h2>

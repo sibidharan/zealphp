@@ -134,7 +134,7 @@ public static function include(string $publicPath, array $args = []): mixed
 
 Resolves `$publicPath` relative to `public/` (Apache document-root convention — leading `/` optional, so `'/about.php'` and `'about.php'` both work). Auto-populates `$_SERVER['PHP_SELF']`, `SCRIPT_NAME`, and `SCRIPT_FILENAME` for the included file (Apache mod_php parity). Applies `includeCheck()` containment so a traversal attempt outside the document root is refused with HTTP 403 via the universal return contract.
 
-In coroutine mode the file runs in-process via the shared `executeFile()` core. In superglobals mode (legacy apps) it dispatches to a CGI subprocess for true global-scope isolation — the file's return value still flows back through the universal return contract via the metadata channel.
+In coroutine mode the file runs in-process via the shared `executeFile()` core. When `processIsolation()` is on (the default for legacy-app modes), it dispatches to a pre-spawned subprocess pool (`cgiMode('pool')`, ~1–3 ms warm) for global-scope isolation — the file's return value still flows back through the universal return contract via the metadata channel. Use `App::cgiMode('proc')` to switch to a fresh `proc_open` subprocess per request (~30–50 ms cold) when you need fully-isolated process state on every call.
 
 ```php
 // Apache-style rewrite — serve public/new.php from /old-page in-process

@@ -173,25 +173,25 @@
     <td class="perf-right">0.49</td>
   </tr>
   <tr class="perf-row-tint">
-    <td>ZealPHP coroutine (default)</td>
+    <td>ZealPHP coroutine — default <small>(<code>App::mode('coroutine')</code>)</small></td>
     <td>in-process include, coroutine-per-req</td>
     <td class="perf-cell-accent">34,159</td>
     <td class="perf-right">0.59</td>
   </tr>
   <tr>
-    <td>ZealPHP Mixed-mode <small>(<code>processIsolation(false)</code>)</small></td>
+    <td>ZealPHP Mixed-mode <small>(<code>App::mode('mixed')</code> / <code>processIsolation(false)</code>)</small></td>
     <td>in-process include, sequential</td>
     <td class="perf-cell-accent">21,964</td>
     <td class="perf-right">0.91</td>
   </tr>
   <tr class="perf-row-tint">
-    <td>ZealPHP fork CGI <small>(<code>processIsolation(true)</code> + <code>cgiMode('fork')</code>)</small></td>
-    <td><code>OpenSwoole\Process</code> forks the warm worker (COW)</td>
-    <td class="perf-cell-accent">814</td>
-    <td class="perf-right">24.6</td>
+    <td>ZealPHP CGI pool — default <small>(<code>App::mode('legacy-cgi')</code> / <code>cgiMode('pool')</code>)</small></td>
+    <td>pre-spawned subprocess pool, warm dispatch (~1–3 ms)</td>
+    <td class="perf-cell-accent">—</td>
+    <td class="perf-right">~1–3 ms</td>
   </tr>
   <tr>
-    <td>ZealPHP legacy CGI <small>(<code>processIsolation(true)</code> + <code>cgiMode('proc')</code>)</small></td>
+    <td>ZealPHP legacy CGI — proc fallback <small>(<code>cgiMode('proc')</code>)</small></td>
     <td><code>proc_open</code> fresh PHP per req</td>
     <td class="perf-cell-danger">160</td>
     <td class="perf-cell-danger-plain">124.4</td>
@@ -199,11 +199,11 @@
 </table>
 
 <p class="perf-para-note">
-  Intel i9-14900K · PHP 8.3 · 4 workers each · <code>ab -n 3000 -c 20</code> — same run as <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>. Three honest takeaways: (1) the default CGI bridge's <code>proc_open</code> fork is the whole story behind the 160 req/s — turning process isolation off (Mixed-mode) recovers ~137× on the same file; (2) if you need isolation, <code>cgiMode('fork')</code> is ~5× faster than proc (814 vs 160) by forking the warm worker instead of cold-starting PHP; (3) Apache mod_php edges out ZealPHP on trivial legacy-file serving (a mature in-process C SAPI is hard to beat for no-I/O echo). ZealPHP's win is the native-route numbers above, coroutine I/O concurrency, WebSocket/SSE, and not needing a separate web server. Full analysis + the FPM architecture breakdown: <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>.
+  Intel i9-14900K · PHP 8.3 · 4 workers each · <code>ab -n 3000 -c 20</code> — same run as <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>. Three honest takeaways: (1) the default CGI bridge is now the pre-spawned <code>cgiMode('pool')</code> (~1–3 ms warm) — the 160 req/s row is <code>cgiMode('proc')</code>, the explicit slow-fallback that cold-starts a fresh PHP process per request; turning process isolation off entirely (Mixed-mode) recovers ~137× on the same file; (2) <code>App::mode('legacy-cgi')</code> resolves to the warm pool by default — no extra config needed to avoid the proc_open cost; (3) Apache mod_php edges out ZealPHP on trivial legacy-file serving (a mature in-process C SAPI is hard to beat for no-I/O echo). ZealPHP's win is the native-route numbers above, coroutine I/O concurrency, WebSocket/SSE, and not needing a separate web server. Full analysis + the FPM architecture breakdown: <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>.
 </p>
 
 <p class="perf-para-note">
-  <strong>Not shown:</strong> <code>cgiMode('fcgi')</code> — the third dispatch option — forwards each <code>public/*.php</code> file to an upstream php-fpm pool over FastCGI (nginx <code>fastcgi_pass</code> / Apache <code>mod_proxy_fcgi</code> parity). Performance ≈ whatever that pool delivers; we don't run PHP at all in this mode. Walkthrough: <a href="/legacy-apps#cgi-mode-fcgi" class="perf-link-accent">/legacy-apps#cgi-mode-fcgi</a>.
+  <strong>Not shown:</strong> <code>cgiMode('fcgi')</code> — the third of three dispatch modes (<code>pool</code> / <code>proc</code> / <code>fcgi</code>) — forwards each <code>public/*.php</code> file to an upstream php-fpm pool over FastCGI (nginx <code>fastcgi_pass</code> / Apache <code>mod_proxy_fcgi</code> parity). Performance ≈ whatever that pool delivers; we don't run PHP at all in this mode. Walkthrough: <a href="/legacy-apps#cgi-mode-fcgi" class="perf-link-accent">/legacy-apps#cgi-mode-fcgi</a>.
 </p>
 
 <!-- ────────────────────────────────────────────────────────────── -->

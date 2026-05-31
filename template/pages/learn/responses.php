@@ -109,7 +109,7 @@
     <?php App::render('/components/_callout', [
       'variant' => 'deep',
       'title'   => 'Status codes without ceremony',
-      'body'    => '<p>You don’t need a constant for "200 OK." Just <code>return $data</code> and you get a 200. To return any other status code with an empty body, return the int: <code>return 204;</code>, <code>return 304;</code>, <code>return 422;</code>. To return a non-200 with a body, use <code>$response-&gt;status(422)-&gt;json([...])</code>. The framework gets out of your way at the easy cases and helps when you need help.</p>',
+      'body'    => '<p>You don’t need a constant for "200 OK." Just <code>return $data</code> and you get a 200. To return any other status code with an empty body, return the int: <code>return 204;</code>, <code>return 304;</code>, <code>return 422;</code>. To return a non-200 with a body, use <code>$response-&gt;json([...], 422)</code> — the second argument is the status code. The framework gets out of your way at the easy cases and helps when you need help.</p>',
     ]); ?>
 
     <h2>Try it live</h2>
