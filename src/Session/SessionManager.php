@@ -310,6 +310,21 @@ class SessionManager
             ) {
                 (\zealphp_reset_request_statics(...))();
             }
+            // Per-request CLASS-STATIC-PROPERTY reset (coroutine-legacy) — the
+            // class-property analog of the function-static reset above. PHP's
+            // shutdown_executor() resets static properties per request too (via
+            // zend_cleanup_internal_class_data()); OpenSwoole never runs that, and
+            // the per-coroutine isolation leaves OBJECT statics process-shared, so a
+            // static DI container / connection registry persists across requests —
+            // Drupal's static service container then throws "The specified database
+            // connection is not defined" on request 2. Resets non-boot user-class
+            // statics to their template; framework class statics (App::$routes, the
+            // middleware stack, Store/Counter backends) are skipped via the snapshot.
+            if (\ZealPHP\App::$silent_redeclare
+                && \function_exists('zealphp_reset_request_class_statics')
+            ) {
+                (\zealphp_reset_request_class_statics(...))();
+            }
         }
     }
 }
