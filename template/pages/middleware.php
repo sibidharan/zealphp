@@ -279,8 +279,8 @@ use ZealPHP\Middleware\RateLimitMiddleware;
 
 // Create the backing Store once (BEFORE $app->run())
 Store::make('rate_limit', 100_000, [
-    'count' => ['type' => Store::TYPE_INT, 'size' => 4],
-    'reset' => ['type' => Store::TYPE_INT, 'size' => 8],
+    'count' => [Store::TYPE_INT, 4],   // column spec is a positional [type, size] tuple
+    'reset' => [Store::TYPE_INT, 8],
 ]);
 
 // 60 requests per minute per client IP (keyed by client IP internally)
@@ -298,7 +298,7 @@ PHP]); ?>
 use ZealPHP\Counter;
 use ZealPHP\Middleware\ConcurrencyLimitMiddleware;
 
-$counter = new Counter('inflight');   // create BEFORE $app->run()
+$counter = new Counter(0, 'inflight');   // (initial, name) — create BEFORE $app->run()
 
 $app->addMiddleware(new ConcurrencyLimitMiddleware(
     maxConcurrent: 100,     // max concurrent in-flight requests

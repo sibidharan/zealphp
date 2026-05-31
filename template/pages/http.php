@@ -198,7 +198,7 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
   <tr><td><code>return</code> (nginx)</td><td>✅ Middleware</td><td>ReturnMiddleware — fixed status / redirect / body; pair with ScopedMiddleware</td></tr>
   <tr><td><code>mod_deflate</code></td><td>✅ Middleware</td><td>CompressionMiddleware (or OpenSwoole native <code>http_compression</code>)</td></tr>
   <tr><td><code>ScriptAlias</code> / <code>Options +ExecCGI</code></td><td>✅ Native</td><td><code>App::cgiScriptAlias()</code> / <code>App::registerCgiBackend()</code></td></tr>
-  <tr><td><code>ErrorDocument</code></td><td>✅ Native</td><td><code>App::registerError()</code></td></tr>
+  <tr><td><code>ErrorDocument</code></td><td>✅ Native</td><td><code>App::instance()-&gt;setErrorHandler()</code></td></tr>
   <tr><td><code>ServerTokens</code> / <code>ServerSignature</code></td><td>✅ Config</td><td><code>App::serverTokens()</code> controls/omits the <code>X-Powered-By</code> header</td></tr>
   <tr><td><code>FileETag</code></td><td>✅ Config</td><td><code>App::fileETag(false)</code> disables ETag/304 (<code>FileETag None</code>)</td></tr>
   <tr><td><code>DocumentRoot</code> / <code>TraceEnable</code> / <code>ServerAdmin</code> / <code>ServerName</code> / <code>LimitRequest*</code> / <code>CustomLog</code></td><td>✅ Config</td><td><code>App::*</code> fluent setters (set before <code>App::init()</code>)</td></tr>

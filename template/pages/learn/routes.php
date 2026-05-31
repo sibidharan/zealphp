@@ -88,7 +88,7 @@ $list = function ($app, $request, $response) {
       <li>
         <strong>Filename-match (all methods):</strong> define a closure whose variable name matches
         <code>basename($file, '.php')</code>. Every HTTP method reaches the same closure — read
-        <code>$request-&gt;server['REQUEST_METHOD']</code> inside it if you need to branch.
+        <code>$request-&gt;server['request_method']</code> inside it if you need to branch (the OpenSwoole request wrapper uses lowercase CGI keys; <code>$g-&gt;server['REQUEST_METHOD']</code> is the uppercase equivalent).
       </li>
       <li>
         <strong>Per-method dispatch:</strong> when <em>no</em> filename-match closure exists, the
@@ -101,7 +101,7 @@ $list = function ($app, $request, $response) {
     </ul>
     <pre><code class="language-php">// api/users/list.php — style 1: filename match, branch manually
 $list = function ($request) {
-    $method = $request->server['REQUEST_METHOD'];
+    $method = $request->server['request_method'];  // OpenSwoole wrapper uses lowercase keys
     return match ($method) {
         'GET'  => User::all(),
         'POST' => User::create($request->post),

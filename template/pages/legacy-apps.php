@@ -2,7 +2,7 @@
 <section class="section">
 <div class="container">
 <h1 class="section-title">Running Legacy PHP Apps</h1>
-<p class="section-desc">WordPress compatibility showcase: admin dashboard, login, posts, REST API working through the ZealPHP CGI worker bridge in compatibility mode &mdash; with <a href="#limitations">documented limits</a> and an honest startup-cost trade-off. The bridge exists so traditional PHP code that assumes a fresh process per request (WordPress, Drupal, define()-heavy plugins) can run on OpenSwoole&apos;s long-lived workers. The same <code>app.php</code> works for Drupal, Laravel-on-FPM-shape, and other traditional PHP applications.</p>
+<p class="section-desc">WordPress compatibility showcase: front page, login, posts, and REST API working (the WP-admin dashboard has documented limits under coroutine concurrency) through the ZealPHP CGI worker bridge in compatibility mode &mdash; with <a href="#limitations">documented limits</a> and an honest startup-cost trade-off. The bridge exists so traditional PHP code that assumes a fresh process per request (WordPress, Drupal, define()-heavy plugins) can run on OpenSwoole&apos;s long-lived workers. The same <code>app.php</code> works for Drupal, Laravel-on-FPM-shape, and other traditional PHP applications.</p>
 
 <div class="callout info legacy-callout-proof">
   <strong>Production proof point.</strong> Selfmade Ninja Labs (<a href="https://labs.selfmade.ninja">labs.selfmade.ninja</a>) — a large PHP/MongoDB dashboard with OAuth, SSE streaming, and a custom MongoDB ORM — runs the same codebase on both Apache and ZealPHP in production. Two servers, one volume, zero downtime during migration. <a href="/case-studies/sna-labs">Read the case study →</a>
@@ -28,7 +28,7 @@
 </div>
 
 <h2 id="50-app-sweep" class="legacy-mt-xl">50-app compatibility sweep — May 2026</h2>
-<p>We ran a structured compatibility sweep against 50 popular PHP applications on Docker lab (PHP 8.4.21 + OpenSwoole 26.2 + ext-zealphp 0.3.5), testing each across all four production modes. Full results in <a href="https://github.com/sibidharan/zealphp/blob/master/docs/compatibility-database.md">docs/compatibility-database.md</a>.</p>
+<p>We ran a structured compatibility sweep against 50 popular PHP applications on Docker lab (PHP 8.4.21 + OpenSwoole 26.2 + ext-zealphp 0.3.25), testing each across all four production modes. Full results in <a href="https://github.com/sibidharan/zealphp/blob/master/docs/compatibility-database.md">docs/compatibility-database.md</a>.</p>
 
 <h3>Apps that PASS in ALL 4 modes (no modifications needed)</h3>
 <p>Five apps were tested 5&times; per mode (20 requests total, sequential + concurrent) and passed every request:</p>
