@@ -284,6 +284,16 @@ class SessionManager
             if (\function_exists('zealphp_coroutine_globals_request_end')) {
                 (\zealphp_coroutine_globals_request_end(...))();
             }
+            // Per-request run_time_cache reset (coroutine-legacy) — see the detailed
+            // rationale in CoSessionManager. Persisted user functions/methods keep an
+            // arena-backed op_array run_time_cache (cached constant/method pointers);
+            // CG(arena) is rewound every request, so the stale map_ptr yields garbage
+            // resolutions on the next request. Nulling it forces a fresh re-init.
+            if (\ZealPHP\App::$silent_redeclare
+                && \function_exists('zealphp_reset_request_rtcaches')
+            ) {
+                (\zealphp_reset_request_rtcaches(...))();
+            }
         }
     }
 }

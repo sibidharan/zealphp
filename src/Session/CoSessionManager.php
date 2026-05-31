@@ -243,6 +243,26 @@ class CoSessionManager
             if (\function_exists('zealphp_coroutine_globals_request_end')) {
                 (\zealphp_coroutine_globals_request_end(...))();
             }
+            // Per-request run_time_cache reset (coroutine-legacy). User functions
+            // and methods persisted across requests by silent-redeclare keep an
+            // op_array run_time_cache that caches resolved constant / function /
+            // method / property pointers. That cache lives in CG(arena), which is
+            // rewound every request — but the op_array's map_ptr still points at the
+            // reused arena slot, so the next request reads a STALE resolution
+            // (classic symptom: `define('MB', 1024 * KB_IN_BYTES)` throws
+            // "Unsupported operand types: string * int" because the cached
+            // KB_IN_BYTES fetch returns garbage, while constant('KB_IN_BYTES') is
+            // still correct). Nulling the map_ptr forces a fresh, correct re-init on
+            // the next call. Leak-free (the arena is rewound) and concurrency-safe:
+            // running coroutine frames captured EX(run_time_cache) at entry, so only
+            // FUTURE calls re-resolve. Runs last so nothing here re-warms a cache we
+            // just cleared. Gated on silent_redeclare (the marker that user symbols
+            // persist across requests); a no-op otherwise.
+            if (\ZealPHP\App::$silent_redeclare
+                && \function_exists('zealphp_reset_request_rtcaches')
+            ) {
+                (\zealphp_reset_request_rtcaches(...))();
+            }
         }
     }
 }
