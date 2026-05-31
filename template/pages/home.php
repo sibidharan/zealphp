@@ -330,7 +330,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
         <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> git clone https://github.com/sibidharan/zealphp-wordpress.git</span><button class="qs-copy" data-copy="git clone https://github.com/sibidharan/zealphp-wordpress.git">copy</button></div>
         <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd zealphp-wordpress && composer install</span><button class="qs-copy" data-copy="cd zealphp-wordpress && composer install">copy</button></div>
         <div class="qs-line"><span class="qs-num">3</span><span class="qs-cmd"><span class="qs-prompt">$</span> php app.php</span><button class="qs-copy" data-copy="php app.php">copy</button></div>
-        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">WordPress at <code class="qs-out-code">http://localhost:9501</code> — admin, login, REST API all working</span></div>
+        <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">WordPress at <code class="qs-out-code">http://localhost:9501</code> — front page, login, REST API working — admin dashboard has known limits</span></div>
       </div>
       <div class="qs-note">Zero WordPress modifications. CGI worker provides Apache mod_php compatibility. See <a href="/legacy-apps">Legacy Apps</a>.</div>
     </div>
@@ -372,7 +372,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
           <li>Routing (<code>route()</code> + <code>nsRoute</code> + <code>patternRoute</code>) with reflection-based parameter injection</li>
           <li>PSR-15 middleware stack &mdash; 28 built-ins covering common Apache/nginx behaviors</li>
           <li><code>ext-zealphp</code> overrides so <code>session_start()</code>, <code>header()</code>, <code>setcookie()</code>, <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>, <code>echo</code> all just work</li>
-          <li>Coroutine-safe superglobals &mdash; <code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code> are per-coroutine with ext-zealphp. Legacy code + coroutine concurrency in one process.</li>
+          <li>Coroutine-safe superglobals &mdash; <code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code> are per-coroutine with ext-zealphp. Legacy code + coroutine concurrency in one process (per-coroutine request-state isolation; classic pure-<code>require_once</code> apps with no autoloader run on <code>legacy-cgi</code>).</li>
           <li>Templating (<code>App::render</code> / <code>renderStream</code> / <code>fragment</code>) with streaming-Generator output</li>
           <li>Universal return contract (int = status, array = JSON, Generator = SSE/SSR stream)</li>
           <li>ZealAPI &mdash; file-based REST (drop <code>api/device/list.php</code> &rarr; <code>/api/device/list</code> auto-route)</li>

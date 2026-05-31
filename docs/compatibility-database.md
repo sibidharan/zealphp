@@ -19,7 +19,7 @@ This is the reference for which PHP applications work with ZealPHP and in which 
 | **Mode 4 (coroutine-legacy)** | `App::mode(App::MODE_COROUTINE_LEGACY)` | `superglobals(true) + isolation(Coroutine)` + silentRedeclare + includeIsolation + coroutineGlobalsIsolation + coroutineStaticsIsolation | Requires ext-zealphp. Full coroutine concurrency with per-coroutine isolation of superglobals, `$GLOBALS`, function statics, and `require_once` re-execution. (`define()` isolation is a separate opt-in: `App::defineIsolation(true)`.) | ~5 ms | Full coroutine |
 | **Mode 5 (Coroutine)** | `App::mode(App::MODE_COROUTINE)` | `superglobals(false) + isolation(Coroutine)` | Native ZealPHP mode. Uses `$g->get`/`$g->post` instead of `$_GET`/`$_POST`. Highest performance. | ~0 ms | Full coroutine |
 
-> **⚠️ The Mode 4 grades below predate the full `coroutine-legacy` preset (root-caused 2026-05-30).** "Mode 4" as tested here (`superglobals + enableCoroutine + defineIsolation`, ext-zealphp 0.3.3–0.3.8) does NOT include Stage 7 `includeIsolation` + `silentRedeclare`, which `App::mode(App::MODE_COROUTINE_LEGACY)` now auto-enables. Under the full preset there is a hard rule: an inherited class (`extends`/`implements`) declared in a `require_once`'d file that Stage 7 re-executes per request corrupts its `default_properties_table` → hard SIGSEGV — fixed in ext-zealphp 0.3.24 (Stage 4 orphans inherited losers instead of destroying them). **Net effect, verified on real apps (PHP 8.4, ASAN, ext-zealphp as the sole override engine):** Composer/PSR-4 **autoload** apps are SAFE in coroutine-legacy (Adminer 5.4.2 ✓, CommonMark 2.x with 224 inherited classes ✓); legacy **`require_once`-bootstrap** apps (WordPress) also trip a separate cold-boot `mysqlnd`/`libtasn1` connection-teardown heap overflow and must use **Mode 1 / `legacy-cgi`** until that second layer lands. A full coroutine-legacy re-grade against ext-zealphp 0.3.24+ is pending.
+> **⚠️ The Mode 4 grades below predate the full `coroutine-legacy` preset (root-caused 2026-05-30).** "Mode 4" as tested here (`superglobals + enableCoroutine + defineIsolation`, ext-zealphp 0.3.3–0.3.8) does NOT include Stage 7 `includeIsolation` + `silentRedeclare`, which `App::mode(App::MODE_COROUTINE_LEGACY)` now auto-enables. Under the full preset there is a hard rule: an inherited class (`extends`/`implements`) declared in a `require_once`'d file that Stage 7 re-executes per request corrupts its `default_properties_table` → hard SIGSEGV — fixed in ext-zealphp 0.3.24 (Stage 4 orphans inherited losers instead of destroying them). **Net effect, verified on real apps (PHP 8.4, ASAN, ext-zealphp as the sole override engine):** Composer/PSR-4 **autoload** apps are SAFE in coroutine-legacy (Adminer 5.4.2 ✓, CommonMark 2.x with 224 inherited classes ✓); legacy **`require_once`-bootstrap** apps (WordPress) also trip a separate cold-boot `mysqlnd`/`libtasn1` connection-teardown heap overflow and must use **Mode 1 / `legacy-cgi`** until that second layer lands. Re-graded against ext-zealphp 0.3.25 (this release): a 12-app coroutine-legacy sweep (PHP 8.4 + ASAN) upgraded **8 apps from Mode-1-only** — Adminer, TinyFileManager, FreshRSS, YOURLS, Grav, phpBB, MyBB, Piwigo — plus **Drupal** (via the per-request class-static reset) now run in coroutine-legacy **sequentially** (worker-stable, ASAN-clean, zero redeclaration crashes); MediaWiki boots. WordPress serves its public site + login auth + comment writes end-to-end sequentially. **True concurrency of pure-`require_once` apps (classic WordPress) remains the home of `legacy-cgi`.** The per-app Mode-4 grades in the tables below predate this sweep and skew pessimistic for those 8 apps.
 
 ---
 
@@ -83,7 +83,7 @@ All 50 apps sorted by category, with grades per mode.
 | 39 | Leantime | Business | 4.1k | Custom | B | **A** | A | NT | 3 | PSR-based, modern OOP |
 | 40 | Monica CRM | Business | 22k | Laravel | C | **A** | A | NT | 3 | Laravel, clean OOP |
 | 41 | Crater | Business | 8.2k | Laravel | C | **A** | A | NT | 3 | Laravel |
-| 42 | Matomo | Analytics | 19k | Custom | **A** | F | D | F | 1 | **TESTED: Mode 1 PASS, others crash 2nd req** |
+| 42 | Matomo | Analytics | 19k | Custom | **A** | F | D | F | 1 | **Bundled php-di violates PSR `ContainerInterface` under PHP 8.4 LSP — fatals on vanilla PHP 8.4 too (app/vendor issue, not ZealPHP)** |
 | 43 | Cacti | Analytics | 1.5k | Custom | **A** | D | C | F | 1 | Old procedural, `exit()` calls |
 | 44 | LibreNMS | Analytics | 3.9k | Laravel | C | **A** | A | NT | 3 | Laravel-based |
 | 45 | FreshRSS | Content | 10k | Custom | **A** | F | F | F | 1 | Function redeclaration on 2nd req |
@@ -206,10 +206,10 @@ Setting up real DB + real WordPress + real auth via wp-cli on `labs@172.30.0.3` 
 | `GET /wordpress/wp-login.php` | 500 | 500 | WP login form's bootstrap path triggers a redeclare Stage 4 doesn't catch |
 | `GET /wordpress/<anything>.php` (simple file) | 200 | 200 | `_test.php` returning "hello-php" works fine — limitation is WP-specific, not generic `.php` URL handling |
 
-**The honest finding for WordPress**: ZealPHP serves the WordPress homepage cleanly on cold workers in M4 Hybrid (5–7x Apache throughput when warm). But the wp-login.php / wp-admin internal flow trips a redeclare pattern Stage 4 doesn't catch yet. This is the **canonical example** of where M1 Pool stays the right answer for legacy app coverage:
+**The honest finding for WordPress**: ZealPHP serves the WordPress homepage cleanly on cold workers in M4 Hybrid (no documented Apache-throughput benchmark exists; see PERF.md for the measured ZealPHP-vs-Node numbers). But the wp-login.php / wp-admin internal flow trips a redeclare pattern Stage 4 doesn't catch yet. This is the **canonical example** of where M1 Pool stays the right answer for legacy app coverage:
 
 - **WordPress on M1 Pool**: serves login + admin + content management correctly, ~200 ms per req (the FPM-equivalent cost).
-- **WordPress on M4 Hybrid**: 5–7x faster on the public-facing homepage, but admin flow needs M1 fallback.
+- **WordPress on M4 Hybrid**: serves the public-facing homepage; admin flow needs M1 fallback. (No Apache-throughput comparison is benchmarked — don't cite a multiplier.)
 
 The correct production deployment pairs both:
 - Public-facing requests → M4 Hybrid coroutine (high throughput)
@@ -433,7 +433,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 
 - **GitHub:** https://github.com/matomo-org/matomo — 19k stars
 - **Mode 5:** PARTIAL (crash on 2nd) | **Mode 1:** PASS (200, 51 ms) | **Mode 4:** PARTIAL (crash on 2nd) | **Mode 3:** PARTIAL (crash on 2nd)
-- First request renders the install page. Second request crashes in non-CGI modes due to state leakage.
+- First request renders the install page. Matomo's bundled php-di violates PSR `ContainerInterface` under PHP 8.4's stricter LSP enforcement — it fatals on vanilla PHP 8.4 too, so this is an app/vendor incompatibility, NOT a ZealPHP issue (same category as phpLiteAdmin). Mode 1's per-request subprocess masks it; the in-process modes surface it on the 2nd request.
 - **Grade: A (Mode 1 only)**
 - Recommended: Mode 1
 
