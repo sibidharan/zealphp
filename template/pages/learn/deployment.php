@@ -6,7 +6,7 @@
       'number'   => 26,
       'title'    => 'Ship It',
       'subtitle' => 'From localhost to production. Plus: when to use ZealPHP and when not to.',
-      'prev'     => ['slug' => 'learn/async', 'title' => 'Async & Coroutines'],
+      'prev'     => ['slug' => 'learn/async', 'title' => 'Async Patterns'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
@@ -136,7 +136,7 @@ ZEALPHP_PORT              # Listen port (default: 8080)
 ZEALPHP_LOG_DIR           # Log directory (default: /tmp/zealphp)</code></pre>
 
     <h2>What you built</h2>
-    <p>Over 24 lessons you created a real application:</p>
+    <p>Over 25 lessons you created a real application:</p>
     <ul>
       <li><strong>Session-based auth</strong> with SQLite + <code>password_hash</code></li>
       <li><strong>CRUD notes app</strong> with htmx — no page reloads</li>
@@ -152,7 +152,7 @@ ZEALPHP_LOG_DIR           # Log directory (default: /tmp/zealphp)</code></pre>
 
     <h2>When ZealPHP is right</h2>
     <p>
-      ZealPHP on 4 workers benchmarks at <strong>117,000 req/s</strong> with 3ms p90 latency.
+      ZealPHP on 4 workers benchmarks at over <strong>100,000 req/s</strong> with low single-digit ms p90 latency.
       For SaaS dashboards, content sites, internal tools, AI wrappers — it's more than enough.
       The bottleneck is almost always the database or external API, not the framework.
     </p>
@@ -189,7 +189,7 @@ ZEALPHP_LOG_DIR           # Log directory (default: /tmp/zealphp)</code></pre>
     <div class="lesson-chips">
       <a class="lesson-chip lesson-chip-prev" href="/learn/async"
          hx-get="/api/learn/page?slug=learn/async" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/async">← Async &amp; Coroutines</a>
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/async">← Async Patterns</a>
     </div>
   </article>
 </div>

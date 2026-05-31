@@ -14,7 +14,7 @@
       'How starting a server makes every file in public/ become a URL automatically',
       'When to use route/ vs api/ vs public/ — three different routing styles',
       'The execution priority — which route wins when two could match',
-      'Why ZealPHP needs ApIs as a separate convention, and how auto-delivery works',
+      'Why ZealPHP needs APIs as a separate convention, and how auto-delivery works',
       'How to add a fallback for unmatched URLs',
     ]]); ?>
 

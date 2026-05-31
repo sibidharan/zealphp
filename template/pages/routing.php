@@ -75,6 +75,33 @@ PHP
   <tr><td><code>ws()</code></td><td><code>/ws/chat</code></td><td>WebSocket endpoint</td></tr>
 </table>
 
+<!-- Route options -->
+<h2 class="route-h2">Route options — <code>methods</code> &amp; <code>raw</code></h2>
+<p class="route-mb-1">All four registrars (<code>route</code>, <code>nsRoute</code>, <code>nsPathRoute</code>, <code>patternRoute</code>) take the same options — pass them as an <strong>array</strong> (2nd argument) or as <strong>named arguments</strong>. The two forms are interchangeable and compose; a named argument overrides the matching array key.</p>
+<table class="ztable">
+  <tr><th>Option</th><th>Type / default</th><th>What it does</th></tr>
+  <tr><td><code>methods</code></td><td><code>array</code>, default <code>['GET']</code></td><td>Allowed HTTP verbs. Lowercase is normalised to uppercase; a request with an unlisted verb is rejected.</td></tr>
+  <tr><td><code>raw</code></td><td><code>bool</code>, default <code>false</code></td><td>Skip the per-request output buffer (<code>ob_start()</code>). For handlers that stream or write to <code>$response</code> directly (SSE, <code>$response-&gt;stream()</code>, binary payloads) instead of letting the framework capture echoed output.</td></tr>
+</table>
+<?php App::render('/components/_code', [
+    'label' => 'Array form and named-argument form are equivalent',
+    'code'  => <<<'PHP'
+// Two-arg shorthand — GET only:
+$app->route('/hello/{name}', fn($name) => "Hi {$name}");
+
+// Array options (backward-compatible):
+$app->route('/users', ['methods' => ['GET', 'POST']], $handler);
+
+// Named arguments — same result:
+$app->route('/users', methods: ['GET', 'POST'], handler: $handler);
+
+// raw: skip output buffering for a hand-rolled streaming writer:
+$app->route('/export.csv', methods: ['GET'], raw: true, handler: function($response) {
+    $response->stream(fn($write) => $write("id,name\n"));
+});
+PHP
+]); ?>
+
 <!-- Injection cases -->
 <h2 class="route-h2">Parameter injection — every case</h2>
 <p class="route-mb-1-5">All panels below auto-run against the live server. The handler signature determines what gets injected.</p>

@@ -30,7 +30,7 @@
         <tr><td><code>array</code> / <code>object</code></td><td>JSON-encoded, <code>Content-Type: application/json</code></td><td><code>return ['ok' =&gt; true];</code></td></tr>
         <tr><td><code>\Generator</code></td><td>Streaming — each <code>yield</code> sent immediately</td><td><code>yield "&lt;li&gt;{$row-&gt;name}&lt;/li&gt;";</code></td></tr>
         <tr><td><code>void</code> + <code>echo</code></td><td>Captured output buffer becomes the body</td><td><code>echo App::render(...);</code></td></tr>
-        <tr><td><code>ResponseInterface</code></td><td>PSR-7 passthrough — sent verbatim</td><td><code>return $response-&gt;redirect('/');</code></td></tr>
+        <tr><td><code>ResponseInterface</code></td><td>PSR-7 passthrough — sent verbatim</td><td><code>return new \OpenSwoole\Core\Psr\Response($body, 200);</code></td></tr>
       </tbody>
     </table>
     <p>
@@ -60,11 +60,15 @@
     </p>
     <pre><code class="language-php">$app-&gt;route('/logout', function ($response) {
     $response-&gt;cookie('session', '', time() - 3600, '/');
-    return $response-&gt;redirect('/');
+    $response-&gt;redirect('/');
+    // redirect() is void — it sends the response as a side-effect.
+    // You can just return; here, or omit the return entirely.
 });</code></pre>
     <p>
-      Same handler, the <code>redirect()</code> call returns a PSR-7 response which is then returned
-      from the closure. ResponseMiddleware sees the <code>ResponseInterface</code> and ships it.
+      <code>redirect()</code> returns <code>void</code> — it sends the redirect immediately as a
+      side-effect (sets the status, writes the <code>Location</code> header, and calls
+      <code>end()</code> internally). There is no ResponseInterface to return; the handler simply
+      ends after the call.
     </p>
 
     <h2>Streaming via Generator</h2>

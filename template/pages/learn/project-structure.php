@@ -24,7 +24,7 @@
     </p>
     <pre><code>my-app/
 ├── app.php                ← bootstrap: middleware + $app->run()
-├── composer.json          ← autoload "App\\" => "src/"
+├── composer.json          ← autoload "MyProject\\" => "src/"
 ├── public/                ← drop-in pages — filesystem is the router
 │   ├── index.php
 │   ├── about.php          → GET /about
@@ -179,7 +179,7 @@ $app->run();</code></pre>
     <?php App::render('/components/_callout', [
       'variant' => 'deep',
       'title'   => 'Restart vs reload — what picks up changes immediately?',
-      'body'    => '<p>Files in <code>template/</code>, <code>api/</code>, and <code>public/</code> reload on every request — edit, refresh, done. Files in <code>app.php</code>, <code>route/</code>, <code>src/App.php</code>, and <code>src/Middleware/</code> load at startup and need <code>php app.php restart</code> to pick up changes. <code>src/</code> classes used inside handlers reload through the autoloader, but bootstrap-time wiring (middleware, route registration) is frozen until restart.</p>',
+      'body'    => '<p>Files in <code>template/</code>, <code>api/</code>, and <code>public/</code> re-execute on every request — edit, refresh, done. Everything else loads once when the worker starts: <code>app.php</code>, <code>route/</code>, and all <code>src/</code> classes are compiled into memory and cannot be redefined without a process restart. Run <code>php app.php restart</code> after editing any of them.</p>',
     ]); ?>
 
     <h2>The autoloader is shared across requests</h2>

@@ -14,12 +14,12 @@ This is the reference for which PHP applications work with ZealPHP and in which 
 
 | Mode | Canonical preset | Config (fine-grained equivalent) | Description | Overhead | Concurrency |
 |------|-----------------|----------------------------------|-------------|----------|-------------|
-| **Mode 1 (CGI Pool)** | `App::mode('legacy-cgi')` | `superglobals(true) + isolation(CgiPool)` | Each request runs in a pre-spawned pool worker subprocess. Like Apache mod_php. Fresh globals per request. | **~1–3 ms warm** (pool); opt-in `cgiMode('proc')` = ~30–50 ms cold per-process | Sequential per worker |
-| **Mode 3 (Sync)** | `App::mode('mixed')` | `superglobals(true) + isolation(None)` | In-process, sequential. Superglobals populated per request. No subprocess overhead. | ~0 ms | Sequential per worker |
-| **Mode 4 (coroutine-legacy)** | `App::mode('coroutine-legacy')` | `superglobals(true) + isolation(Coroutine)` + silentRedeclare + includeIsolation + coroutineGlobalsIsolation + coroutineStaticsIsolation | Requires ext-zealphp. Full coroutine concurrency with per-coroutine isolation of superglobals, `$GLOBALS`, function statics, and `require_once` re-execution. (`define()` isolation is a separate opt-in: `App::defineIsolation(true)`.) | ~5 ms | Full coroutine |
-| **Mode 5 (Coroutine)** | `App::mode('coroutine')` | `superglobals(false) + isolation(Coroutine)` | Native ZealPHP mode. Uses `$g->get`/`$g->post` instead of `$_GET`/`$_POST`. Highest performance. | ~0 ms | Full coroutine |
+| **Mode 1 (CGI Pool)** | `App::mode(App::MODE_LEGACY_CGI)` | `superglobals(true) + isolation(CgiPool)` | Each request runs in a pre-spawned pool worker subprocess. Like Apache mod_php. Fresh globals per request. | **~1–3 ms warm** (pool); opt-in `cgiMode('proc')` = ~30–50 ms cold per-process | Sequential per worker |
+| **Mode 3 (Sync)** | `App::mode(App::MODE_MIXED)` | `superglobals(true) + isolation(None)` | In-process, sequential. Superglobals populated per request. No subprocess overhead. | ~0 ms | Sequential per worker |
+| **Mode 4 (coroutine-legacy)** | `App::mode(App::MODE_COROUTINE_LEGACY)` | `superglobals(true) + isolation(Coroutine)` + silentRedeclare + includeIsolation + coroutineGlobalsIsolation + coroutineStaticsIsolation | Requires ext-zealphp. Full coroutine concurrency with per-coroutine isolation of superglobals, `$GLOBALS`, function statics, and `require_once` re-execution. (`define()` isolation is a separate opt-in: `App::defineIsolation(true)`.) | ~5 ms | Full coroutine |
+| **Mode 5 (Coroutine)** | `App::mode(App::MODE_COROUTINE)` | `superglobals(false) + isolation(Coroutine)` | Native ZealPHP mode. Uses `$g->get`/`$g->post` instead of `$_GET`/`$_POST`. Highest performance. | ~0 ms | Full coroutine |
 
-> **⚠️ The Mode 4 grades below predate the full `coroutine-legacy` preset (root-caused 2026-05-30).** "Mode 4" as tested here (`superglobals + enableCoroutine + defineIsolation`, ext-zealphp 0.3.3–0.3.8) does NOT include Stage 7 `includeIsolation` + `silentRedeclare`, which `App::mode('coroutine-legacy')` now auto-enables. Under the full preset there is a hard rule: an inherited class (`extends`/`implements`) declared in a `require_once`'d file that Stage 7 re-executes per request corrupts its `default_properties_table` → hard SIGSEGV — fixed in ext-zealphp 0.3.24 (Stage 4 orphans inherited losers instead of destroying them). **Net effect, verified on real apps (PHP 8.4, ASAN, ext-zealphp as the sole override engine):** Composer/PSR-4 **autoload** apps are SAFE in coroutine-legacy (Adminer 5.4.2 ✓, CommonMark 2.x with 224 inherited classes ✓); legacy **`require_once`-bootstrap** apps (WordPress) also trip a separate cold-boot `mysqlnd`/`libtasn1` connection-teardown heap overflow and must use **Mode 1 / `legacy-cgi`** until that second layer lands. A full coroutine-legacy re-grade against ext-zealphp 0.3.24+ is pending.
+> **⚠️ The Mode 4 grades below predate the full `coroutine-legacy` preset (root-caused 2026-05-30).** "Mode 4" as tested here (`superglobals + enableCoroutine + defineIsolation`, ext-zealphp 0.3.3–0.3.8) does NOT include Stage 7 `includeIsolation` + `silentRedeclare`, which `App::mode(App::MODE_COROUTINE_LEGACY)` now auto-enables. Under the full preset there is a hard rule: an inherited class (`extends`/`implements`) declared in a `require_once`'d file that Stage 7 re-executes per request corrupts its `default_properties_table` → hard SIGSEGV — fixed in ext-zealphp 0.3.24 (Stage 4 orphans inherited losers instead of destroying them). **Net effect, verified on real apps (PHP 8.4, ASAN, ext-zealphp as the sole override engine):** Composer/PSR-4 **autoload** apps are SAFE in coroutine-legacy (Adminer 5.4.2 ✓, CommonMark 2.x with 224 inherited classes ✓); legacy **`require_once`-bootstrap** apps (WordPress) also trip a separate cold-boot `mysqlnd`/`libtasn1` connection-teardown heap overflow and must use **Mode 1 / `legacy-cgi`** until that second layer lands. A full coroutine-legacy re-grade against ext-zealphp 0.3.24+ is pending.
 
 ---
 
@@ -1125,7 +1125,7 @@ use ZealPHP\App;
 // One-call preset — superglobals(true) + isolation(CgiPool).
 // Pre-spawned warm pool, ~1–3 ms dispatch. Use cgiMode('proc') for
 // fresh-process-per-request (~30–50 ms cold) when you need full isolation.
-App::mode('legacy-cgi');
+App::mode(App::MODE_LEGACY_CGI);
 
 $app = App::init('0.0.0.0', 8080);
 $app->setFallback(function() {
@@ -1142,7 +1142,7 @@ use ZealPHP\App;
 
 // One-call preset — superglobals(true) + isolation(None).
 // In-process, sequential. No subprocess overhead.
-App::mode('mixed');
+App::mode(App::MODE_MIXED);
 
 $app = App::init('0.0.0.0', 8080);
 // Register your framework's front controller:
@@ -1161,7 +1161,7 @@ use ZealPHP\App;
 // One-call preset — sets superglobals(true) + isolation(Coroutine)
 // and auto-enables silentRedeclare, includeIsolation,
 // coroutineGlobalsIsolation, coroutineStaticsIsolation.
-App::mode('coroutine-legacy');
+App::mode(App::MODE_COROUTINE_LEGACY);
 
 $app = App::init('0.0.0.0', 8080);
 $app->setFallback(function() {
@@ -1178,7 +1178,7 @@ use ZealPHP\App;
 
 // One-call preset — superglobals(false) + isolation(Coroutine).
 // This is also the default when App::mode() is not called.
-App::mode('coroutine');
+App::mode(App::MODE_COROUTINE);
 
 $app = App::init('0.0.0.0', 8080);
 $app->route('/api/users', function() {

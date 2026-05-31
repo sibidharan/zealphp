@@ -44,8 +44,8 @@ $app->run();                                     // ← OpenSwoole takes over he
 
     <h2>The trip, end to end</h2>
     <p>
-      In Apache, a request’s journey is short: php-fpm spawns a worker, the worker runs your
-      script, the worker dies. ZealPHP’s journey looks longer because the worker doesn’t die,
+      In Apache, a request's journey is short: php-fpm spawns a worker, the worker runs your
+      script, the worker dies. ZealPHP's journey looks longer because the worker doesn't die,
       so the framework has to do per-request setup carefully — and just as carefully tear it down.
       Once you see the nine steps, the rest of the framework stops feeling magical.
     </p>
@@ -63,7 +63,7 @@ $app->run();                                     // ← OpenSwoole takes over he
     CO->>CSM: onRequest(req, res)
     CSM->>CSM: build RequestContext on<br/>Coroutine::getContext()
     CSM->>MW: handle(PSR-7 request)
-    MW->>MW: CORS / ETag / Session / ...<br/>(last-added runs first)
+    MW->>MW: CORS / ETag / Session / ...<br/>(first-registered runs first)
     MW->>RM: pass to innermost
     RM->>RM: match route, build param map
     RM->>H: invoke handler(...$injected)
@@ -85,8 +85,8 @@ $app->run();                                     // ← OpenSwoole takes over he
         keeps your data from leaking into the next request.
       </li>
       <li>
-        <strong>CoSessionManager runs.</strong> It’s the registered <code>onRequest</code>
-        handler. The framework’s request closure builds a fresh <code>RequestContext</code>, attaches
+        <strong>CoSessionManager runs.</strong> It's the registered <code>onRequest</code>
+        handler. The framework's request closure builds a fresh <code>RequestContext</code>, attaches
         the request/response wrappers, and populates <code>$g-&gt;get</code>, <code>$g-&gt;post</code>,
         <code>$g-&gt;cookie</code>, <code>$g-&gt;server</code> on the per-coroutine context. In
         coroutine mode the real <code>$_GET</code>/<code>$_POST</code> superglobals are
@@ -97,15 +97,15 @@ $app->run();                                     // ← OpenSwoole takes over he
       </li>
       <li>
         <strong>The middleware stack engages.</strong> ZealPHP uses a PSR-15 middleware chain. CORS
-        runs first, then ETag, then your custom ones, then session-start, then range… the
-        outermost middleware gets the request first, passes it down, and processes the response on the
-        way back up.
+        runs first, then ETag, then Range, then SessionStart… the outermost middleware gets the
+        request first, passes it down, and processes the response on the way back up.
       </li>
       <li>
-        <strong>Order looks backwards.</strong> If you registered CORS first and ETag second, ETag
-        runs first at request time. ZealPHP reverses the registration order before building the stack
-        so that <em>the last thing you add wraps the rest</em> — the same convention as Slim,
-        Express, Laravel. It’s subtle until you debug it once.
+        <strong>Order matches registration.</strong> If you registered CORS first and ETag second,
+        CORS still runs first at request time — the first middleware you add becomes the outermost
+        wrapper. ZealPHP's internal double-reversal (wait-stack reverse + StackHandler prepend)
+        makes the execution order match your registration order top-to-bottom. Register your
+        outermost concerns (CORS, compression) first.
       </li>
       <li>
         <strong>ResponseMiddleware is the bottom of the stack.</strong> Every middleware eventually
@@ -155,8 +155,8 @@ $app->run();                                     // ← OpenSwoole takes over he
       </tbody>
     </table>
     <p>
-      Your handler can touch all three tiers freely. The only rule: don’t put per-request data in
-      a process-level static, and don’t put process-level data in a per-request slot. The first
+      Your handler can touch all three tiers freely. The only rule: don't put per-request data in
+      a process-level static, and don't put process-level data in a per-request slot. The first
       causes data leaks between requests; the second wastes memory and gets discarded on the next
       request.
     </p>
@@ -164,29 +164,29 @@ $app->run();                                     // ← OpenSwoole takes over he
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'The nine steps describe the default Coroutine isolation — other shapes exist',
-      'body'    => '<p>The flow above uses <code>CoSessionManager</code> and per-coroutine <code>RequestContext</code> — that is <code>App::mode(\'coroutine\')</code>, the recommended default for modern ZealPHP apps.</p><p>The isolation strategy is configurable via <code>App::mode()</code> and <code>App::isolation()</code>:</p><ul><li><code>App::mode(\'legacy-cgi\')</code> — <code>SessionManager</code> + a pre-spawned subprocess pool (<code>CgiPool</code>, ~1–3 ms warm) for unmodified WordPress/Drupal-style PHP.</li><li><code>App::mode(\'coroutine-legacy\')</code> — coroutine concurrency <em>with</em> <code>superglobals(true)</code>; ext-zealphp isolates <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>, <code>$GLOBALS</code>, function statics, and <code>require_once</code> per coroutine. (<code>define()</code> isolation is a separate opt-in via <code>App::defineIsolation(true)</code>.) Requires <code>ext-zealphp</code>.</li><li><code>App::mode(\'mixed\')</code> — real <code>$_SESSION</code>, sequential workers, no CGI fork cost. Suits Symfony/Laravel bridges.</li></ul><p>See the <a href="/coroutines#lifecycle-modes">lifecycle modes reference</a> for the full matrix.</p>',
+      'body'    => '<p>The flow above uses <code>CoSessionManager</code> and per-coroutine <code>RequestContext</code> — that is <code>App::mode(App::MODE_COROUTINE)</code>, the recommended default for modern ZealPHP apps.</p><p>The isolation strategy is configurable via <code>App::mode()</code> and <code>App::isolation()</code>:</p><ul><li><code>App::mode(App::MODE_LEGACY_CGI)</code> — <code>SessionManager</code> + a pre-spawned subprocess pool (<code>CgiPool</code>, ~1–3 ms warm) for unmodified WordPress/Drupal-style PHP.</li><li><code>App::mode(App::MODE_COROUTINE_LEGACY)</code> — coroutine concurrency <em>with</em> <code>superglobals(true)</code>; ext-zealphp isolates <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>, <code>$GLOBALS</code>, function statics, and <code>require_once</code> per coroutine. (<code>define()</code> isolation is a separate opt-in via <code>App::defineIsolation(true)</code>.) Requires <code>ext-zealphp</code>.</li><li><code>App::mode(App::MODE_MIXED)</code> — real <code>$_SESSION</code>, sequential workers, no CGI fork cost. Suits Symfony/Laravel bridges.</li></ul><p>See the <a href="/coroutines#lifecycle-modes">lifecycle modes reference</a> for the full matrix.</p>',
     ]); ?>
 
     <?php App::render('/components/_callout', [
       'variant' => 'deep',
       'title'   => 'Why the reversal at registration?',
-      'body'    => '<p>If you write <code>addMiddleware(A); addMiddleware(B); addMiddleware(C);</code> the stack is built as <code>A wraps B wraps C wraps ResponseMiddleware</code>. So C runs <em>first</em> — it’s closest to the handler. ZealPHP follows the PSR-15 convention here so middleware composition reads naturally: register your last-line-of-defense (sessions, range) <em>before</em> your outer wrappers (CORS, compression), and the actual execution order does what your registration code suggests.</p>',
+      'body'    => '<p>If you write <code>addMiddleware(A); addMiddleware(B); addMiddleware(C);</code> the stack is built as <code>A wraps B wraps C wraps ResponseMiddleware</code>, so A runs <em>first</em> — it is the outermost layer. The internal double-reversal in ZealPHP (the wait-stack is reversed before being handed to StackHandler, which prepends each entry) means the two reversals cancel out and execution order matches registration order top-to-bottom. Register your outermost concerns (CORS, compression) <em>first</em>; register your inner defaults (sessions, range) after.</p>',
     ]); ?>
 
     <h2>What never happens (the Apache trauma list)</h2>
     <p>
-      Things you don’t need to worry about in this lifecycle — that you might have spent
+      Things you don't need to worry about in this lifecycle — that you might have spent
       years working around on Apache or php-fpm:
     </p>
     <ul>
-      <li>The autoloader doesn’t rebuild. It’s already loaded in the worker.</li>
-      <li>The opcode cache doesn’t cold-start. Your scripts are already compiled.</li>
-      <li>The DB connection doesn’t reopen per request (if you use a pool). You hold it across requests.</li>
-      <li>The framework doesn’t re-parse routes. The route table is in memory.</li>
-      <li>The worker doesn’t fork. The coroutine spawns and parks — no <code>pcntl_fork</code>.</li>
+      <li>The autoloader doesn't rebuild. It's already loaded in the worker.</li>
+      <li>The opcode cache doesn't cold-start. Your scripts are already compiled.</li>
+      <li>The DB connection doesn't reopen per request (if you use a pool). You hold it across requests.</li>
+      <li>The framework doesn't re-parse routes. The route table is in memory.</li>
+      <li>The worker doesn't fork. The coroutine spawns and parks — no <code>pcntl_fork</code>.</li>
     </ul>
     <p>
-      That’s the cost ZealPHP buys back. The nine-step journey above is what it spends to keep
+      That's the cost ZealPHP buys back. The nine-step journey above is what it spends to keep
       the cost down to memory access and a coroutine spawn — not 50 ms of boot.
     </p>
 
@@ -194,18 +194,18 @@ $app->run();                                     // ← OpenSwoole takes over he
       'id'       => 'lifecycle1',
       'question' => 'You register middleware in this order: CORS, ETag, SessionStart. Which one runs first at request time?',
       'correct'  => 'c',
-      'explain'  => 'ZealPHP reverses the registration order when building the PSR-15 stack — the last middleware added becomes the outermost. So SessionStart is closest to the handler, ETag wraps that, and CORS wraps the whole thing. CORS is the first to see the inbound request and the last to touch the outbound response.',
+      'explain'  => 'ZealPHP\'s internal double-reversal makes the FIRST middleware you add the outermost. CORS was registered first, so it wraps everything and runs first; SessionStart was registered last, so it sits closest to the handler. CORS is the first to see the inbound request and the last to touch the outbound response.',
       'options'  => [
         'a' => 'SessionStart, because it was registered last.',
         'b' => 'ETag, because it sits in the middle.',
-        'c' => 'CORS, because the last-added middleware becomes the outermost wrapper.',
+        'c' => 'CORS, because the first-registered middleware becomes the outermost wrapper.',
       ],
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
       'Nine steps: OpenSwoole → coroutine → CoSessionManager → middleware stack → ResponseMiddleware → handler → response unwind → emit → coroutine ends.',
       'Per-request state lives on <code>Coroutine::getContext()</code> — never on globals you control.',
-      'Middleware is registered "outermost last" — the last-added middleware runs first at request time.',
+      'Middleware is registered "outermost first" — the first-added middleware runs first at request time.',
       '<code>ResponseMiddleware</code> is always the innermost layer; it matches routes and resolves handler parameters by name.',
       'The lifecycle is short by design: every step that <em>could</em> happen per-request was moved to startup.',
     ]]); ?>

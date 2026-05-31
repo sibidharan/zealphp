@@ -12,7 +12,7 @@
 
     <?php App::render('/components/_youwilllearn', ['items' => [
       'Why HTTP can\'t push, and what WebSocket changes',
-      'The 4-callback shape: route, onOpen, onMessage, onClose',
+      'The 3-callback shape: onOpen, onMessage, onClose',
       'Broadcasting to many connected clients at once',
       'When to use WebSocket vs SSE vs htmx vs Redis Pub/Sub',
     ]]); ?>
@@ -20,7 +20,7 @@
     <h2 id="step-overview">1. Overview — what you&rsquo;re building</h2>
     <p>
       A counter that <strong>updates in every open tab the moment any tab clicks +1</strong>. No
-      reloads, no polling, no Redis on a single server (cross-server deploys use the Redis-backed federated routing the framework ships &mdash; see /websocket#cross-server). The server holds a list of open WebSocket connections; the
+      reloads, no polling, no Redis on a single server (cross-server deploys use the Redis-backed federated routing the framework ships &mdash; see <a href="#cross-server-routing">the Pub/Sub bridge</a> below). The server holds a list of open WebSocket connections; the
       <code>+1</code> button hits a normal HTTP endpoint; that endpoint broadcasts the new value
       back over WebSocket to every connected tab. Try it now &mdash; open this URL in another tab first.
     </p>
@@ -29,9 +29,14 @@
       <strong>Build it yourself.</strong> This lesson adds WebSocket to your scaffold project.
       You&rsquo;ll create one file:
       <ol>
-        <li><code>route/ws-counter.php</code> &mdash; WebSocket endpoint + broadcast helper + HTTP bump route</li>
+        <li><code>route/ws-counter.php</code> &mdash; <code>Store::make()</code> call + WebSocket endpoint + broadcast helper + HTTP bump route</li>
       </ol>
-      The <code>Store</code> and <code>Counter</code> classes are already available via the framework.
+      Add <code>use ZealPHP\{App, Store, Counter};</code> at the top of the file.
+      Call <code>Store::make('ws_clients', 4096, ['connected_at' => [Store::TYPE_INT, 8]])</code>
+      <em>before</em> <code>$app-&gt;run()</code> — the table must be allocated in the master process so all
+      workers share it. Without this call, <code>Store::set()</code> silently does nothing and
+      <code>Store::table()</code> returns <code>null</code>, so the broadcast loop&rsquo;s
+      <code>foreach</code> raises a Warning and pushes to nobody.
       Restart the server after creating the route file.
     </div>
 
@@ -78,9 +83,15 @@
       One call to <code>$app-&gt;ws()</code>, three callbacks. The callbacks handle the connection
       lifecycle:
     </p>
-    <pre><code class="language-php">// Create the shared counter ONCE, before $app-&gt;run() — it lives across all
+    <pre><code class="language-php">use ZealPHP\{App, Store, Counter};
+
+// Create the shared table ONCE, before $app-&gt;run() — allocated in the master
+// process and shared across all workers on fork.
+Store::make('ws_clients', 4096, ['connected_at' => [Store::TYPE_INT, 8]]);
+
+// Create the shared counter ONCE, before $app-&gt;run() — it lives across all
 // workers and the closures below capture it via use().
-$counter = new \ZealPHP\Counter(0);
+$counter = new Counter(0);
 
 $app-&gt;ws('/ws/counter-demo',
     onMessage: function ($server, $frame) {

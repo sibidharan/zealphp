@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-05-31
+
+The coroutine-legacy compatibility runtime gains the **per-request state-reset stack** that completes the PHP-FPM "fresh process per request" contract for the entire `require_once`-legacy class (function statics, class statics, run_time_cache), plus the `free_zend_constant` worker-exit fix and an opcache boot advisory. Validated across a 12-app sweep on PHP 8.4 + ASAN. Ships ext-zealphp 0.3.25.
+
 ### Fixed
 
 - **coroutine-legacy: per-request state reset completes the PHP-FPM "fresh process per request" contract for the whole `require_once`-legacy class (ext-zealphp 0.3.25).** This is a general correctness fix, not an app-specific patch — OpenSwoole never runs PHP's per-request `shutdown_executor()`, so symbols persisted across requests by silent-redeclare kept *stale state* on a long-lived worker, breaking **any** legacy app that relies on fresh per-request state. Three fixes mirror exactly what `shutdown_executor()` does each request:

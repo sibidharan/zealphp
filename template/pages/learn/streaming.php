@@ -109,9 +109,10 @@
     });
 });</code></pre>
     <p>
-      The framework formats the SSE wire protocol (<code>data:</code>, <code>event:</code>,
-      <code>id:</code> lines). On the client, <code>new EventSource('/ai/chat')</code> hooks in.
-      See lesson 20 (AI Chat) for the full setup with a real chat UI.
+      <code>OpenAI::stream()</code> is a stand-in for your own streaming data source &mdash; substitute
+      any iterable that yields tokens. The framework formats the SSE wire protocol (<code>data:</code>,
+      <code>event:</code>, <code>id:</code> lines). On the client, <code>new EventSource('/ai/chat')</code>
+      hooks in. See <a href="/learn/ai-chat">lesson 20 (AI Chat)</a> for the full setup with a real chat UI.
     </p>
 
     <h2>Pattern 4: App::renderStream() — compose templates</h2>
@@ -175,7 +176,7 @@ $app-&gt;route('/feed', function () {
 $response-&gt;sse(function ($emit) {
     $emit(json_encode(['status' =&gt; 'connected']), 'open');
     for ($i = 1; $i &lt;= 5; $i++) {
-        co::sleep(1);
+        \OpenSwoole\Coroutine::sleep(1);
         $emit(json_encode(['tick' =&gt; $i]), 'tick', (string)$i);
     }
     $emit(json_encode(['status' =&gt; 'done']), 'done');
@@ -197,7 +198,7 @@ $response-&gt;sse(function ($emit) {
     <p>
       Streaming is one-way (server → client). When you need <em>both</em> directions —
       client typing into chat, server pushing replies — WebSocket is the right tool. Covered in
-      lesson 19 (Real-Time Sync). Rule of thumb: <strong>SSE for push-only, WebSocket for two-way.</strong>
+      <a href="/learn/websocket">lesson 19 (WebSocket)</a>. Rule of thumb: <strong>SSE for push-only, WebSocket for two-way.</strong>
       Don’t reach for WebSocket when SSE will do; the operational cost is real.
     </p>
 

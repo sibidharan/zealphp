@@ -181,18 +181,24 @@ $render_pdf = function (array $args) {
     return Pdf::render($args['template'], $args['data']);
 };
 
-// route handler — dispatches and awaits
+// route handler — fire-and-forget dispatch
+// task() returns a task ID, NOT the result. The result is delivered to the
+// framework&rsquo;s on('finish') callback (logged by default). There is no
+// synchronous task-wait helper — design for async completion.
 $app-&gt;route('/api/invoice/{id}', function ($id) {
-    $bytes = App::getServer()-&gt;task([
+    $taskId = App::getServer()-&gt;task([
         'handler' =&gt; '/task/render-pdf',
         'args'    =&gt; ['template' =&gt; 'invoice', 'data' =&gt; Invoice::find($id)-&gt;toArray()],
     ]);
-    return base64_encode($bytes);
+    // $taskId is an integer task ID — queue it and notify the client when done
+    return ['queued' =&gt; true, 'task_id' =&gt; $taskId];
 });</code></pre>
     <p>
       Set <code>'task_worker_num' =&gt; 8</code> on <code>$app-&gt;run()</code> to provision the pool.
-      Task workers run with <code>task_enable_coroutine =&gt; true</code> by default, so each task
-      itself can use <code>go()</code>.
+      <strong>The default is 0</strong> — without it, <code>task()</code> returns <code>false</code> (and OpenSwoole logs a warning) instead of dispatching, so always
+      set this explicitly when using task workers. Task workers run with
+      <code>task_enable_coroutine =&gt; true</code> by default, so each task itself can use
+      <code>go()</code>.
     </p>
 
     <h2>Pattern 5: per-coroutine context for handler state</h2>
@@ -234,11 +240,12 @@ $x = Cache::get('count');     // ← yields here (I/O)
 $x++;                         // someone else may have incremented in between
 Cache::set('count', $x);      // we overwrite their increment
 
-// GOOD — atomic via the cache backend
-Cache::incr('count');         // single atomic operation, no yield window
+// GOOD — atomic via Store (single operation, no yield window)
+Store::incr('counters', 'total', 'n');
 
-// GOOD — atomic via Store
-Store::incr('counters', 'total', 'n');</code></pre>
+// GOOD — atomic via Counter (cross-worker atomic integer)
+$counter = new \ZealPHP\Counter(0, 'total_count');
+$counter->increment();</code></pre>
     <p>
       The rule of thumb: <em>treat any expression that yields as a possible reentrance point</em>.
       If a value is touched by other requests, read it after a yield and you might be working with

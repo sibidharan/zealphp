@@ -123,7 +123,7 @@ $g = \ZealPHP\G::instance();
 
     <h2>Six recipes you'll actually use</h2>
     <p>
-      The four attributes cover the mechanics. These five patterns cover the everyday use cases —
+      The four attributes cover the mechanics. These six patterns cover the everyday use cases —
       every one of them is wired up in the demo app you're reading right now. Copy, paste, adapt.
     </p>
 
@@ -360,7 +360,8 @@ PHP,
     <?php App::render('/components/_code', [
       'label' => 'route handler — ONE entry, both modes',
       'code'  => <<<'PHP'
-$app->route('/contacts', function($g) {
+$app->route('/contacts', function() {
+    $g = \ZealPHP\G::instance();
     return App::render('contacts/list', [
         'contacts' => Contact::all(),
         // No fragment → full page renders normally.
@@ -577,9 +578,9 @@ $app->route('/notes', function ($request, $response) {
     ]]); ?>
 
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/components"
-         hx-get="/api/learn/page?slug=learn/components" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/components">← Layouts &amp; Components</a>
+      <a class="lesson-chip lesson-chip-prev" href="/learn/react-vs-php"
+         hx-get="/api/learn/page?slug=learn/react-vs-php" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/react-vs-php">← React vs PHP</a>
       <a class="lesson-chip lesson-chip-next" href="/learn/sessions"
          hx-get="/api/learn/page?slug=learn/sessions" hx-target=".lesson-content"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/sessions">Sessions →</a>
