@@ -259,6 +259,19 @@ Boot/snapshot symbols are skipped (`zealphp_process_state_snapshot`), so framewo
 
 **Companion correctness fix (`free_zend_constant`).** The preserve-addresses constant snapshot used to call `free_zend_constant()` — a STATIC (non-exported) engine function — so the orphan-free path aborted the worker (`symbol lookup error … undefined symbol: free_zend_constant`, `exit 127`), seen as periodic worker recycling on the render path and dropped in-flight requests under concurrency. Now inlined with public ZEND_API calls (`zval_ptr_dtor_nogc` + `zend_string_release_ex` + `efree`). Pinned by ext `tests/{036,037,038}` (37/37 phpt green). Add a new per-request reset here AND to the scaffold's `.claude/CLAUDE.md` when extending this stack.
 
+### opcache + coroutine-legacy — the warm-cache class-rebind gap
+
+opcache is **safe with coroutine-legacy for `src/` + `vendor/`**, but NOT for the application's `require_once`-bootstrap files, due to a class-(re)binding conflict root-caused 2026-05-31 (gdb + PHP/opcache source):
+
+- opcache caches op_arrays in SHM and **early-binds *simple* classes** (no `extends`/`implements`) at compile/load — NOT via the runtime `ZEND_DECLARE_CLASS` opcode.
+- Stage 7 re-executes `require_once`'d files each request, and `EG(class_table)` **persists** across requests (long-lived worker, unlike PHP-FPM's fresh process).
+- On a **WARM** opcache cache hit there is **no recompile**, so silent-redeclare's Stage 4 (CG-table swap during compile) never fires; and because the class is early-bound (not the runtime opcode), Stage 3's opcode hook never sees it either. opcache's load re-binds the already-present class → `do_bind_class` → `zend_class_redeclaration_error` (`zend_API.c:464`) → **"Cannot redeclare class"** (e.g. WordPress's `WP_Block_Parser_Block` on request 2). **Delayed (`extends`/`implements`) classes go through the runtime opcode and ARE caught** — only simple early-bound classes are the gap.
+- Symptom is opcache-SHM-warmth-dependent: a cold worker compiles+caches fresh (Stage 4 works); the next request hits the warm cache → redeclare → worker recycles → repeat. Minimal repro reproduces only once the SHM is warm.
+
+**Safe path (validated):** keep opcache ON (it still accelerates the framework + vendor); **opcache-blacklist the application's document-root** so its re-executed files recompile per request, where Stage 4 first-wins works. WordPress runs clean under opcache this way (`200`×N, opcache active, 0 redeclare). Recipe: put `<document-root>/` in a file and point `opcache.blacklist_filename` at it (or set `opcache.enable_cli=0` if the app needs no opcache). `App::run()` emits this advisory at boot when it detects opcache + coroutine-legacy — `App::opcacheLegacyBootCheck()` (the testable seam; goes to `error_log`/debug.log; suppress with `ZEALPHP_OPCACHE_ADVISORY=0`).
+
+**A fully-transparent fix** — opcache ALSO caches the app's op_arrays AND the re-bind is first-wins — needs an engine-level hook on `do_bind_class` / opcache's delayed-early-binding finalize (`zend_accel_finalize_delayed_early_binding_list`): LD_PRELOAD or a small PHP-engine patch, not a clean ext addition. Deferred (matches the v0.3.8 "opcache hot path" note: do_bind_function/do_bind_class engine hook).
+
 ### uopz Function Overrides
 
 At startup (`src/App.php:__construct()`), `uopz_set_return()` permanently replaces PHP built-ins:
