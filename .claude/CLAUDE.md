@@ -190,7 +190,7 @@ The knobs `coroutine-legacy` auto-enables (each is also a standalone fluent sett
 - **`set_error_handler`/`set_exception_handler`, raw `ob_*`, `register_shutdown_function`** — process-global / not specifically isolation-tested under concurrency.
 - **`pcntl_fork`, `set_time_limit`** — semantics differ under coroutines.
 
-Canonical reference: `docs/architecture/2026-05-28-isolation-trust-bar.md` (the trust-bar matrix + the rejected `map_ptr` Stage 5 dead-end). When adding a new isolation knob, document it here AND in the scaffold's `.claude/CLAUDE.md`.
+Canonical reference: `docs/architecture/2026-05-28-isolation-trust-bar.md` (the trust-bar matrix + the rejected `map_ptr` Stage 5 dead-end); the per-request **SAPI-contract coverage assessment** — the weighted derivation of the ~97% figure plus the architectural limits (permanent boundaries vs. fundable frontiers) — is at `docs/architecture/2026-05-31-sapi-contract-coverage.md`. When adding a new isolation knob, document it here AND in the scaffold's `.claude/CLAUDE.md`.
 
 ### ⚠️ Cold-concurrent-autoload — hot-path classes MUST be preloaded (coroutine-legacy)
 
