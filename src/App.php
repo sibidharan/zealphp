@@ -2334,6 +2334,52 @@ class App
     }
 
     /**
+     * Boot-time advisory for opcache + coroutine-legacy (Stage 7).
+     *
+     * Under coroutine-legacy, Stage 7 re-executes `require_once`'d files each
+     * request. With opcache enabled, a WARM cache hit replays a file's early-bound
+     * class declaration WITHOUT recompiling — so silent-redeclare's compile-time
+     * first-wins (the Stage 4 CG-table swap) never fires, and opcache's load
+     * re-binds an already-declared class -> "Cannot redeclare class" on request 2+
+     * (e.g. WordPress's `WP_Block_Parser_Block`). Delayed (`extends`/`implements`)
+     * classes go through the runtime DECLARE opcode and ARE caught; simple
+     * early-bound classes are the gap.
+     *
+     * The safe, no-engine-patch fix is to exclude the app's document-root from
+     * opcache so those files recompile per request (where Stage 4 works) while the
+     * framework + vendor stay cached. A fully-transparent fix (opcache also caches
+     * the app's op_arrays + the re-bind is first-wins) needs an engine-level hook
+     * on `do_bind_class` / opcache's delayed-early-binding finalize — out of scope
+     * for a pure extension. Returns the warning string, or null when N/A. Suppress
+     * with ZEALPHP_OPCACHE_ADVISORY=0.
+     */
+    public static function opcacheLegacyBootCheck(): ?string
+    {
+        if (!self::$silent_redeclare) {
+            return null;  // only coroutine-legacy re-executes require_once'd files
+        }
+        if (\getenv('ZEALPHP_OPCACHE_ADVISORY') === '0') {
+            return null;
+        }
+        if (!\function_exists('opcache_get_status')) {
+            return null;
+        }
+        $status = @\opcache_get_status(false);
+        if (!\is_array($status) || empty($status['opcache_enabled'])) {
+            return null;  // opcache not active for this SAPI — nothing to warn about
+        }
+        $docRoot = \rtrim((string) self::$document_root, '/');
+        return "[advisory] opcache is ENABLED in coroutine-legacy mode. Stage 7 re-executes "
+            . "require_once'd files per request; on a WARM opcache cache a file's early-bound "
+            . "class declaration is replayed without recompiling, so silent-redeclare's first-wins "
+            . "is bypassed and the class re-binds -> \"Cannot redeclare class\" on request 2+. "
+            . "Exclude your application's document-root from opcache so those files recompile per "
+            . "request (framework + vendor stay cached): put \"" . $docRoot . "/\" in a file and set "
+            . "opcache.blacklist_filename to it (or opcache.enable_cli=0 if the app needs no opcache). "
+            . "Suppress with ZEALPHP_OPCACHE_ADVISORY=0.";
+    }
+
+    /**
      * Per-request function/class/include isolation. Opt-in — see $function_isolation docblock.
      */
     public static function functionIsolation(?bool $on = null): bool
@@ -7133,6 +7179,14 @@ HELP;
         // hidden behind a 5s acquire timeout in some worker minutes later).
         foreach (self::redisBootChecks() as $warning) {
             error_log($warning);
+        }
+
+        // opcache + coroutine-legacy advisory — Stage 7 re-execution of
+        // require_once'd files clashes with a warm opcache cache for early-bound
+        // class declarations ("Cannot redeclare class" on request 2+). Surface
+        // the doc-root blacklist recipe at boot. See opcacheLegacyBootCheck().
+        if (($opcacheAdvisory = self::opcacheLegacyBootCheck()) !== null) {
+            error_log($opcacheAdvisory);
         }
 
         // Capture boot timestamp + resolved worker counts for App::stats().
