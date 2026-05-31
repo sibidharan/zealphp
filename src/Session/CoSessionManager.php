@@ -263,6 +263,22 @@ class CoSessionManager
             ) {
                 (\zealphp_reset_request_rtcaches(...))();
             }
+            // Per-request function-static reset (coroutine-legacy) — the PHP-FPM
+            // "fresh process per request" contract. PHP's shutdown_executor()
+            // destroys every user function/method's live static_variables table at
+            // request end so `static $x = INIT;` re-initialises next request;
+            // OpenSwoole never runs that per-request shutdown, so a static keeps its
+            // last value across requests. The canonical break is WordPress's
+            // `static $first_init` in wp_start_object_cache() — a stale `false` on
+            // request 2 skips wp_cache_init(), leaving $wp_object_cache null ->
+            // "Call to a member function switch_to_blog() on null" 500, then a worker
+            // crash on request 3. zealphp_reset_request_statics() mirrors
+            // shutdown_executor() for per-request (non-boot) symbols. Same gate.
+            if (\ZealPHP\App::$silent_redeclare
+                && \function_exists('zealphp_reset_request_statics')
+            ) {
+                (\zealphp_reset_request_statics(...))();
+            }
         }
     }
 }
