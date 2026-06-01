@@ -26,7 +26,7 @@ class FileSessionHandler implements \SessionHandlerInterface
     // Read session data
     public function read($sessionId): string
     {
-        $file = "$this->savePath/sess_$sessionId";
+        $file = $this->savePath . '/sess_' . basename((string) $sessionId);
         if (file_exists($file)) {
             $contents = file_get_contents($file);
             return $contents === false ? '' : $contents;
@@ -37,14 +37,14 @@ class FileSessionHandler implements \SessionHandlerInterface
     // Write session data
     public function write($sessionId, $sessionData): bool
     {
-        $file = "$this->savePath/sess_$sessionId";
+        $file = $this->savePath . '/sess_' . basename((string) $sessionId);
         return file_put_contents($file, $sessionData) !== false;
     }
 
     // Destroy a session
     public function destroy($sessionId): bool
     {
-        $file = "$this->savePath/sess_$sessionId";
+        $file = $this->savePath . '/sess_' . basename((string) $sessionId);
         if (file_exists($file)) {
             unlink($file);
         }

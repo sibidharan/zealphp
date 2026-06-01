@@ -134,9 +134,36 @@ $data = $this->request->parent->rawContent(); // actual OpenSwoole Request
 $serverVars = ZealPHP\G::instance()->server;  // virtualised $_SERVER
 ```
 
+## Scoping middleware to API namespaces & endpoints
+
+ZealAPI files are not individually registered routes — every `/api/*` request funnels through ZealAPI's dynamic file resolver. So there is **no separate "api middleware" system**: an `api/admin/users/delete.php` endpoint is reached by the URL `/api/admin/users/delete`, which flows through the same stack as every other request. You scope middleware by **path** with [`App::when()`](middleware-and-authentication.md), and it covers the api layer for free:
+
+```php
+App::middlewareAlias('auth', fn() => new BasicAuthMiddleware($verifier));
+
+App::when('/api/admin',  ['auth', 'admin-only']);   // every api/admin/*.php endpoint
+App::when('/api/admin/users/delete', ['audit']);    // a single api endpoint
+App::when('/api',        ['request-id']);           // the whole /api/* surface
+```
+
+`when()` matches a literal path **prefix** on segment boundaries (`/api/admin` matches `/api/admin/x` but not `/api/administrators`), or a **PCRE** if the string starts with `#`. Scopes compose in **registration order — first registered is outermost**; the chain wraps route matching + dispatch, runs *after* CORS/OPTIONS handling (so a guard never blocks a preflight), and short-circuits if a middleware returns without calling the handler.
+
+For a guard that belongs to **one file**, declare it inline — read like `$get`/`$post`, it runs **innermost** (after any `App::when` scope, closest to the handler):
+
+```php
+// api/admin/users/delete.php
+$middleware = ['confirm-token'];     // runs after App::when('/api/admin')['auth']
+
+$delete = function () {
+    return ['deleted' => true];
+};
+```
+
+Per-request order for an api endpoint: global `addMiddleware` → `App::when` scopes → the file's in-file `$middleware` → handler. Middleware references the same [`App::middlewareAlias()`](middleware-and-authentication.md) registry as routes. See the [middleware guide](middleware-and-authentication.md) for the full model and the coroutine-safety status.
+
 ## Authentication and Authorisation
 
-APIs commonly apply authentication middleware (see [middleware-and-authentication.md](middleware-and-authentication.md)). Because ZealPHP routes `/api/*` through `nsPathRoute`, you can register targeted middleware or explicit routes above the implicit ones:
+APIs commonly apply authentication middleware (see [middleware-and-authentication.md](middleware-and-authentication.md)) — most often a path-scoped `App::when('/api', ['auth'])` (above) over the whole surface or a subtree. You can also register an explicit route above the implicit ones for a bespoke flow:
 
 ```php
 $app->nsRoute('api', '/secure/{module}/{action}', function ($module, $action) {

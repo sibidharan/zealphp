@@ -55,8 +55,8 @@
         <code>App::MODE_LEGACY_CGI</code>, <code>App::MODE_COROUTINE_LEGACY</code>,
         <code>App::MODE_MIXED</code>) sets both axes in one call.
         <code>App::isolation()</code> (constants: <code>ISOLATION_COROUTINE</code>,
-        <code>ISOLATION_CGI_POOL</code>, <code>ISOLATION_CGI_PROC</code>,
-        <code>ISOLATION_CGI_FCGI</code>, <code>ISOLATION_NONE</code>) folds the
+        <code>ISOLATION_CGI_POOL</code>, <code>ISOLATION_CGI_FCGI</code>,
+        <code>ISOLATION_NONE</code>) folds the
         <code>processIsolation()</code> / <code>enableCoroutine()</code> / <code>hookAll()</code> /
         <code>cgiMode()</code> cross-product into one value. The fine-grained setters still work
         unchanged underneath. See
@@ -144,12 +144,11 @@ PHP]); ?>
         make it real:
       </p>
       <ul class="tradeoffs-list">
-        <li><strong class="tradeoffs-strong-light">Three dispatch modes</strong> (<code>App::cgiMode()</code>):
-          <code>'pool'</code> (default) uses a pre-spawned PHP subprocess pool — mod_php-style isolation,
-          ~1&#8211;3&nbsp;ms warm, configurable via <code>cgiPoolSize()</code> / <code>cgiPoolMaxRequests()</code>;
-          <code>'proc'</code> spawns a fresh PHP interpreter per request via <code>proc_open</code> (~30&#8211;50&nbsp;ms
-          cold start — the fallback for true fresh-process semantics); <code>'fcgi'</code>
-          forwards to an upstream php-fpm / FastCGI pool via the bundled <code>FastCgiClient</code> (no per-request
+        <li><strong class="tradeoffs-strong-light">Two dispatch modes</strong> (<code>App::cgiMode()</code>):
+          <code>'pool'</code> (default) uses a warm, pre-spawned PHP worker pool — the interpreter stays
+          resident in memory, mod_php-style isolation, ~1&#8211;3&nbsp;ms per request, configurable via
+          <code>cgiPoolSize()</code> / <code>cgiPoolMaxRequests()</code>; <code>'fcgi'</code>
+          forwards to an external php-fpm / FastCGI pool via the bundled <code>FastCgiClient</code> (no per-request
           spawn at all). Per-extension backends register via <code>App::registerCgiBackend('.py', &hellip;)</code>.</li>
         <li><strong class="tradeoffs-strong-light">ScriptAlias + ExecCGI scope.</strong>
           <code>App::cgiScriptAlias('/cgi-bin', &hellip;)</code> (Apache <code>ScriptAlias</code> parity) and per-backend
@@ -178,10 +177,9 @@ PHP]); ?>
           lets ZealPHP front an existing php-fpm pool with no fork cost at all.</li>
         <li><strong class="tradeoffs-strong-light">What it costs:</strong> the bridge is real maintenance surface
           (<code>src/cgi_worker.php</code> + the CGI env/dispatch glue in <code>src/App.php</code>).
-          The warm <code>'pool'</code> default adds ~1&#8211;3&nbsp;ms dispatch overhead vs. a native route.
-          <code>'proc'</code> mode (fresh <code>proc_open</code> per request) pays ~30&#8211;50&nbsp;ms cold start
-          with no coroutine async and no shared state &mdash; use it only when you need strict
-          fresh-process isolation and the pool warm path won't do.</li>
+          The warm <code>'pool'</code> default adds ~1&#8211;3&nbsp;ms dispatch overhead vs. a native route &mdash;
+          the interpreter stays resident, so there's no per-request startup tax. If you'd rather front an
+          existing php-fpm pool, <code>'fcgi'</code> mode forwards to it with zero spawn cost.</li>
         <li><strong class="tradeoffs-strong-light">Mitigation:</strong> CGI-script execution (non-PHP via
           ScriptAlias / registered extensions) works in <em>any</em> lifecycle mode &mdash; it isn't bolted to
           <code>processIsolation</code>. For PHP, <code>.php</code> only goes through the subprocess in isolation mode;

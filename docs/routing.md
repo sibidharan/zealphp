@@ -42,6 +42,7 @@ Because inclusion is order-insensitive, keep your files focused (one feature per
 - **Options** — supply them as the `$options` array (2nd argument) **or** as named arguments. The two forms are interchangeable and compose; a named argument overrides the matching `$options` key.
   - `methods` (`array`, default `['GET']`) — allowed HTTP verbs. Lowercase verbs are normalised to uppercase.
   - `raw` (`bool`, default `false`) — skip the per-request output buffer (`ob_start()`). Use it for handlers that stream or write to `$response` directly (SSE, `$response->stream()`, binary payloads) instead of relying on the framework to capture echoed output.
+  - `middleware` (`array`, default `[]`) — a per-route PSR-15 middleware chain (instances and/or named alias strings). Purely additive: routes without it take the unchanged fast path. See [Per-route middleware](#per-route-middleware) below.
 - Return values:
   - `int`: response status code
   - `ResponseInterface`: emitted as-is
@@ -63,6 +64,8 @@ $app->route('/export.csv', methods: ['GET'], raw: true, handler: function ($resp
     $response->stream(fn ($write) => $write("id,name\n"));
 });
 ```
+
+> **Handler last, no `handler:` keyword needed.** The second argument is type-dispatched: a **callable** second arg *is* the handler (`route('/x', $fn)`), an **array** second arg is the options (`route('/x', ['methods' => [...]], $fn)` — handler stays last). So you only need the `handler:` named argument when you want to *skip* options and still pass other named args. The one combination PHP itself forbids is a **positional handler after a named argument** — `route('/x', methods: ['GET'], $fn)` is a fatal "positional argument after named argument"; in that case put `methods` in the options array (`route('/x', ['methods' => ['GET']], $fn)`) or name the handler too.
 
 > The `$options` / `methods:` / `raw:` arguments are identical across **all four registrars** below — `route()`, `nsRoute()`, `nsPathRoute()`, and `patternRoute()` share the same signature tail `(…, array|callable $options = [], ?callable $handler = null, array $methods = [], bool $raw = false)`.
 
@@ -98,6 +101,136 @@ $app->patternRoute('/raw/(?P<rest>.*)', ['methods' => ['GET']], function ($rest)
 ```
 
 Pattern routes are powerful but should be used sparingly—prefer `route()` and `nsRoute()` for readability.
+
+## Per-route middleware
+
+Attach a PSR-15 middleware chain to a **single route** — auth, headers, rate-limit, a redirect — without registering it globally. The `middleware` option is accepted by **all four registrars** (`route()`, `nsRoute()`, `nsPathRoute()`, `patternRoute()`), and like `methods`/`raw` it works as a named argument **and** as an array-option key. It is **purely additive and backward-compatible**: a route that declares no middleware takes the unchanged fast path with zero added work.
+
+Each entry is either a ready `MiddlewareInterface` **instance** or a named **alias string** (registered with `App::middlewareAlias()`, below). The two declaration forms **combine** — the array-option entries run first (outermost), then the named-argument entries.
+
+> **Per-route vs path-scoped:** `middleware:` attaches a chain to *one* route. To apply a chain to a *slice of URLs* — `/admin/*`, the whole `/api/*` surface, a `#regex#` — use [`App::when()`](middleware-and-authentication.md), the centralized path-scoped registry. It is also the one mechanism that covers the [ZealAPI](api-layer.md) layer (api files are just `/api/...` URLs). Both reuse the same `App::middlewareAlias()` registry.
+
+```php
+use ZealPHP\Middleware\{RequestIdMiddleware, IpAccessMiddleware};
+
+// Mix alias strings with a live instance:
+$app->route('/admin/users', methods: ['GET'],
+    middleware: ['auth', 'request-id', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']])],
+    handler: fn () => User::all());
+
+// Same option on any registrar:
+$app->nsRoute('api', '/jobs', middleware: ['request-id'], handler: $list);
+
+// Array-option + named-arg combine — array entries are outermost:
+$app->route('/report', ['middleware' => ['auth']], $handler, middleware: ['request-id']);
+// chain: auth (outer) -> request-id -> handler
+```
+
+### Named middleware aliases — `App::middlewareAlias()`
+
+Register a reusable middleware once and reference it by name everywhere (the named-and-shared vocabulary from Traefik, the route-alias pattern from Laravel). Pass either a ready `MiddlewareInterface` instance (reused as-is) or a **factory callable** that returns one.
+
+```php
+use ZealPHP\Middleware\{BasicAuthMiddleware, IpAccessMiddleware, RateLimitMiddleware, RequestIdMiddleware};
+
+App::middlewareAlias('auth',       fn () => new BasicAuthMiddleware($verifier));
+App::middlewareAlias('admin-only', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']]));
+App::middlewareAlias('request-id', fn () => new RequestIdMiddleware());
+
+// Parameterised reference: 'throttle:120' calls the factory with the
+// comma-split args (fn('120')), mirroring Laravel 'throttle:60,1'.
+App::middlewareAlias('throttle', fn ($n = '60') => new RateLimitMiddleware(limit: (int) $n));
+
+$app->route('/admin/users', middleware: ['auth', 'admin-only', 'throttle:120'], handler: $fn);
+```
+
+A factory runs **once at `App::run()`** (boot, single-coroutine) and the resulting instance is **shared across every request** that uses the alias. Therefore middleware **must be stateless** — one object serves all concurrent coroutines; keep per-request state in `$g` (`RequestContext`), never on the middleware object.
+
+### Route groups — `$app->group()`
+
+Apply a shared URL **prefix** and/or a shared **middleware chain** to many routes at once.
+
+```php
+$app->group(string $prefix, array|callable $middleware = [], ?callable $registrar = null): void
+```
+
+The callback receives a `ZealPHP\RouteGroup` whose `route()`/`nsRoute()`/`nsPathRoute()`/`patternRoute()`/`group()` mirror `App`'s — each prepends the group prefix and prepends the group's shared middleware. The middleware argument may be omitted: `group('/admin', fn ($g) => ...)`.
+
+```php
+$app->group('/admin', ['auth', 'admin-only'], function ($g) {
+    $g->route('/users',    fn () => User::all());       // /admin/users
+    $g->route('/settings', fn () => Settings::get());   // /admin/settings
+
+    $g->group('/audit', ['audit-log'], function ($g) {  // nests prefix + middleware
+        $g->route('/recent', fn () => Audit::recent()); // /admin/audit/recent
+        // chain: auth -> admin-only -> audit-log -> handler
+    });
+});
+
+// Middleware optional — just a prefix and a registrar:
+$app->group('/v1', function ($g) {
+    $g->route('/ping', fn () => 'pong');                // /v1/ping
+});
+```
+
+Group middleware wraps **outside** a route's own middleware, which wraps outside the handler. Groups nest. **One caveat:** `patternRoute()` inside a group does **not** auto-apply the prefix (a raw regex is ambiguous to prefix — bake the prefix into your pattern); the group **middleware still applies**.
+
+### Execution order
+
+A request walks the chain from the outside in; the response unwinds in reverse. A middleware that returns without calling the handler (a 403, a redirect) **short-circuits** — the handler never runs.
+
+```
+global (first-registered = outermost)
+  -> group middleware (outer groups before inner)
+    -> route middleware (first-listed = outermost; array-option before named-arg)
+      -> handler
+```
+
+> The first middleware you register globally is the **outermost** (it runs first). This is consistent with the global stack: OpenSwoole's `StackHandler::add()` prepends, and `App::run()` reverses the wait-stack before building it — so first-added ends up outermost.
+
+### Introspection — `$app->describeRoutes()`
+
+```php
+$app->describeRoutes(): array{
+    global:  list<string>,  // global chain in execution order, ending with 'ResponseMiddleware (router)'
+    aliases: list<string>,
+    routes:  list<array{methods: list<string>, path: string, middleware: list<string>, handler: string}>
+}
+```
+
+Works **before or after** `App::run()`: after boot each route's middleware is resolved to instances (reported as class short-names); before boot, alias strings are shown verbatim. The demo exposes this live at `GET /demo/middleware/visualize`, and the website renders it as a Traefik-style chain view in the **Live middleware visualizer** section of the `/middleware` page.
+
+### Worked example
+
+A correlation id on every request, basic-auth + an IP allow-list on the admin area, and a per-route rate limit — composed from aliases, a group, and an inline instance.
+
+```php
+use ZealPHP\App;
+use ZealPHP\Middleware\{BasicAuthMiddleware, IpAccessMiddleware, RateLimitMiddleware, RequestIdMiddleware};
+
+$app = App::instance();
+
+// 1) Reusable middleware by name.
+App::middlewareAlias('request-id', fn () => new RequestIdMiddleware());
+App::middlewareAlias('auth',       fn () => new BasicAuthMiddleware($verifier));
+App::middlewareAlias('throttle',   fn ($n = '60') => new RateLimitMiddleware(limit: (int) $n));
+
+// 2) request-id on every request, globally (outermost of all).
+$app->addMiddleware(new RequestIdMiddleware());
+
+// 3) The whole /admin area is auth-gated and IP-restricted.
+$app->group('/admin', ['auth', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']])], function ($g) {
+    $g->route('/users', fn () => User::all());                       // auth -> ip -> handler
+
+    // 4) One route adds a tighter rate limit on top of the group chain.
+    $g->route('/export', methods: ['POST'], middleware: ['throttle:30'],
+        handler: fn () => Report::export());                         // auth -> ip -> throttle:30 -> handler
+});
+
+$app->run();
+```
+
+`ZealPHP\Middleware\RequestIdMiddleware` (used above) assigns/propagates an `X-Request-Id` correlation id and echoes it on the response; handlers read it from the per-request memo (`RequestContext::once('request_id', fn () => null)`). It is stateless and coroutine-safe — the canonical shape for per-route middleware.
 
 ## Accessing Request Context
 

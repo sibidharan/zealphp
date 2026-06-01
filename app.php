@@ -280,9 +280,12 @@ foreach ([
     }
 }
 
-// PID file resolution — explicit env wins; otherwise default under ZEALPHP_LOG_DIR.
-$logDir  = trim((string) (getenv('ZEALPHP_LOG_DIR') ?: '/tmp/zealphp'));
-$pidFile = trim((string) (getenv('ZEALPHP_PID_FILE') ?: rtrim($logDir, '/') . '/zealphp_' . $appPort . '.pid'));
+// PID file resolution — explicit env wins; otherwise the shared resolver picks
+// the first writable dir (/tmp/zealphp, else a per-user fallback when it is owned
+// by another user). Same resolver App::resolvePidFile() uses, so the server's PID
+// file and `php app.php stop/status` always agree on the directory.
+$logDir  = rtrim((string) (\ZealPHP\resolve_log_dir() ?: sys_get_temp_dir()), '/');
+$pidFile = trim((string) (getenv('ZEALPHP_PID_FILE') ?: $logDir . '/zealphp_' . $appPort . '.pid'));
 if ($pidFile !== '') {
     $pidDir = dirname($pidFile);
     if ($pidDir !== '.' && !is_dir($pidDir)) {

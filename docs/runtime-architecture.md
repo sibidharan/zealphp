@@ -2,6 +2,8 @@
 
 ZealPHP wraps OpenSwoole’s event-driven HTTP server with a framework that feels familiar to PHP developers while enabling coroutine-friendly patterns. This document highlights the moving parts that collaborate during a request, how state is isolated, and how to opt into advanced execution modes.
 
+> **Configuration via environment:** every runtime knob below can also be driven by a `ZEALPHP_*` environment variable. The complete, code-verified list (defaults, scope, and `env_flag` semantics) lives in [`docs/environment-variables.md`](environment-variables.md); the CLI-relevant subset is in [`docs/cli.md`](cli.md).
+
 ## Bootstrapping
 
 `App::init()` performs one-time initialization:

@@ -209,7 +209,7 @@ function zeal_session_start(): bool
             $session_data = php_session_decode_to_array($contents);
         }
     } else {
-        $session_file = $save_path . '/sess_' . $session_id;
+        $session_file = $save_path . '/sess_' . basename((string)$session_id);
         if (file_exists($session_file)) {
             // Shared lock prevents reading a partially-written file
             // from a concurrent write_close on another coroutine.
@@ -272,6 +272,26 @@ function zeal_session_start(): bool
 
 
 /**
+ * Whether a session id is safe to use in a filesystem path / store key.
+ * Rejects the inputs that would let an attacker-chosen `PHPSESSID` escape the
+ * session save directory: empty/oversized values, NUL bytes, path separators
+ * (`/`, `\`), and parent-directory references (`..`). The character set is
+ * otherwise left permissive so a legitimate custom/legacy session id is not
+ * rejected — the `basename()` applied at every `sess_<id>` file sink is the
+ * belt-and-suspenders traversal guard.
+ */
+function zeal_valid_session_id(string $id): bool
+{
+    if ($id === '' || strlen($id) > 256) {
+        return false;
+    }
+    if (strpbrk($id, "/\\\0") !== false) {
+        return false;
+    }
+    return strpos($id, '..') === false;
+}
+
+/**
  * Get or set the session ID
  *
  * @param string|null $id
@@ -292,14 +312,26 @@ function zeal_session_id($id = null)
         // Get session ID from cookie or generate new one
         if (isset($g->cookie[$session_name])) {
             // @phpstan-ignore-next-line — cookie is array<string, mixed>; session id coerced to string at boundary
-            return (string)$g->cookie[$session_name];
+            $sid = (string)$g->cookie[$session_name];
+            // SECURITY: a forged/malformed PHPSESSID (path traversal, NUL,
+            // oversized) must never reach the `sess_<id>` file path. Reject it
+            // and mint a fresh id instead of trusting the attacker's value
+            // (PHP `session.use_strict_mode` behaviour for malformed ids).
+            if (!zeal_valid_session_id($sid)) {
+                $sid = session_create_id();
+                $g->cookie[$session_name] = $sid;
+            }
+            return $sid;
         } else {
             $new_id = session_create_id();
             $g->cookie[$session_name] = $new_id;
             return $new_id;
         }
     } else {
-        // Set session ID
+        // Set session ID — same validation as the cookie path.
+        if (!zeal_valid_session_id($id)) {
+            $id = session_create_id();
+        }
         $g->cookie[$session_name] = $id;
         return $id;
     }
@@ -374,7 +406,7 @@ function zeal_session_write_close(): bool
             : zeal_session_id();
         $save_path = $g->session_params['save_path'] ?? '';
         assert(is_string($save_path));
-        $session_file = $save_path . '/sess_' . $session_id;
+        $session_file = $save_path . '/sess_' . basename((string)$session_id);
         $data = $useGSession ? $g->session : $GLOBALS['_SESSION'];
         $wHandler = $g->session_params['handler'] ?? null;
         if ($wHandler instanceof \SessionHandlerInterface) {
@@ -498,7 +530,7 @@ function zeal_session_destroy(): bool
     if ($dHandler instanceof \SessionHandlerInterface) {
         $dHandler->destroy((string) $session_id);
     } else {
-        $session_file = $save_path . '/sess_' . $session_id;
+        $session_file = $save_path . '/sess_' . basename((string)$session_id);
         if (file_exists($session_file)) {
             unlink($session_file);
         }
@@ -572,8 +604,8 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
         }
     } else {
         // File handler: keep old data by renaming the backing file.
-        $old_session_file = $save_path . '/sess_' . $old_session_id;
-        $new_session_file = $save_path . '/sess_' . $new_session_id;
+        $old_session_file = $save_path . '/sess_' . basename((string)$old_session_id);
+        $new_session_file = $save_path . '/sess_' . basename((string)$new_session_id);
         if (file_exists($old_session_file)) {
             if ($delete_old_session) {
                 unlink($old_session_file);
@@ -708,7 +740,7 @@ function zeal_session_abort(): bool
         // empty/corrupted files must not crash the worker).
         $save_path = $g->session_params['save_path'] ?? '';
         assert(is_string($save_path));
-        $session_file = $save_path . '/sess_' . $session_id;
+        $session_file = $save_path . '/sess_' . basename((string)$session_id);
         if (file_exists($session_file)) {
             /** @var array<string, mixed> $session_data */
             $session_data = [];

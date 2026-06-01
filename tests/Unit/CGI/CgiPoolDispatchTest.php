@@ -6,17 +6,18 @@ namespace ZealPHP\Tests\Unit\CGI;
 
 use PHPUnit\Framework\TestCase;
 use ZealPHP\App;
+use ZealPHP\CGI\Dispatcher;
 use ZealPHP\RequestContext;
 
 /**
- * Exercise the `App::cgiPool()` dispatch path end-to-end (real subprocess
+ * Exercise the `Dispatcher::cgiPool()` dispatch path end-to-end (real subprocess
  * pool, real IPC, real response application via RequestContext stub).
  *
- * cgiPool() is `private static` so we drive it via Reflection — that's the
- * coverage path codecov/patch needs to count the cgiPool method body as
- * exercised. The 16 WorkerPool unit tests already pin the IPC/pool layer;
- * these focus on the App-side glue (request frame build, response shape
- * coercion, header / cookie / status capture-and-apply).
+ * cgiPool() moved to \ZealPHP\CGI\Dispatcher (Phase 2 refactor); we drive it
+ * via Reflection — that's the coverage path codecov/patch needs to count the
+ * cgiPool method body as exercised. The 16 WorkerPool unit tests already pin
+ * the IPC/pool layer; these focus on the App-side glue (request frame build,
+ * response shape coercion, header / cookie / status capture-and-apply).
  */
 final class CgiPoolDispatchTest extends TestCase
 {
@@ -65,8 +66,8 @@ final class CgiPoolDispatchTest extends TestCase
         $g->status  = 200;
         $g->zealphp_response = $this->makeResponseStub();
 
-        // Bind reflection to private static cgiPool.
-        $rm = new \ReflectionMethod(App::class, 'cgiPool');
+        // Bind reflection to Dispatcher::cgiPool (moved out of App in Phase 2).
+        $rm = new \ReflectionMethod(Dispatcher::class, 'cgiPool');
         $rm->setAccessible(true);
         $this->cgiPool = $rm;
     }

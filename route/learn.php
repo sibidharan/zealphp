@@ -11,6 +11,9 @@ use ZealPHP\Store;
 use ZealPHP\Learn\DB;
 use ZealPHP\Learn\Auth;
 use ZealPHP\Learn\Notes;
+use ZealPHP\Learn\Demo;
+use ZealPHP\Learn\TicTacToe;
+use ZealPHP\Site\DemoHelpers;
 
 $app = App::instance();
 
@@ -51,12 +54,9 @@ $app->ws('/ws/learn',
     },
 );
 
-// Broadcast helper is now in src/Learn/WS.php (autoloaded).
-// Keep a thin wrapper for backward compat with any inline references.
-function learn_ws_broadcast(int $userId, array $payload): void
-{
-    \ZealPHP\Learn\WS::broadcast($userId, $payload);
-}
+// Broadcast helper lives in src/Learn/WS.php (autoloaded). The thin wrapper
+// learn_ws_broadcast() now lives on ZealPHP\Learn\Demo so this route file
+// stays function-free and hot-reloadable.
 
 // ── Public WebSocket counter demo (for /learn/websocket lesson) ─────
 // A single global counter that any open tab can bump; all tabs see the
@@ -80,17 +80,6 @@ $app->ws('/ws/counter-demo',
     },
 );
 
-function ws_counter_demo_broadcast(int $value): void
-{
-    $server = \ZealPHP\App::getServer();
-    if (!$server) return;
-    $payload = json_encode(['value' => $value]);
-    foreach (\ZealPHP\Store::table('ws_counter_demo_clients') ?? [] as $fd => $_) {
-        $fd = (int) $fd;
-        if ($server->isEstablished($fd)) $server->push($fd, $payload);
-    }
-}
-
 // ── Rate-limit for unauthenticated public demo POSTs ────────────────
 // All /api/learn/demo/* mutation endpoints below are reachable without
 // auth — they power live widgets on the public docs site. To prevent
@@ -106,35 +95,20 @@ function ws_counter_demo_broadcast(int $value): void
     'reset' => [Store::TYPE_INT,    4],
 ]);
 
-/**
- * Returns null if the caller is under the limit (proceed). Returns an
- * error payload + sets 429 + Retry-After if rate-limited — caller should
- * `return` this directly from its route handler.
- *
- * @return null|array{error: string, limit: int, window: int}
- */
-function demo_rate_check(): ?array
-{
-    $g  = G::instance();
-    $ip = (string) ($g->server['REMOTE_ADDR'] ?? 'unknown');
-    if (Auth::rateLimit('demo_rate_limits', $ip, 30, 60)) return null;
-    http_response_code(429);
-    header('Retry-After: 60');
-    header('Content-Type: application/json; charset=utf-8');
-    return ['error' => 'rate_limit', 'limit' => 30, 'window' => 60];
-}
+// Demo::demo_rate_check() (in src/Learn/Demo.php) returns null when under the
+// limit, or the 429 error payload to `return` directly when rate-limited.
 
 $app->route('/api/learn/demo/counter-bump', ['methods' => ['POST']], function () use ($wsCounterDemo) {
-    if ($err = demo_rate_check()) return $err;
+    if ($err = Demo::demo_rate_check()) return $err;
     $new = $wsCounterDemo->increment();
-    ws_counter_demo_broadcast((int) $new);
+    Demo::ws_counter_demo_broadcast((int) $new);
     return ['value' => (int) $new];
 });
 
 $app->route('/api/learn/demo/counter-reset', ['methods' => ['POST']], function () use ($wsCounterDemo) {
-    if ($err = demo_rate_check()) return $err;
+    if ($err = Demo::demo_rate_check()) return $err;
     $wsCounterDemo->set(0);
-    ws_counter_demo_broadcast(0);
+    Demo::ws_counter_demo_broadcast(0);
     return ['value' => 0];
 });
 
@@ -166,7 +140,7 @@ $app->route('/api/learn/notes/{id}', ['methods' => ['POST']], function ($request
     $db = DB::open();
     $ok = Notes::update($db, $u['user_id'], (int) $id, $body['title'] ?? null, $body['body'] ?? null);
     if (!$ok) { http_response_code(404); return ['error' => 'not_found']; }
-    learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'update', 'id' => (int) $id]);
+    Demo::learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'update', 'id' => (int) $id]);
     $note = Notes::read($db, $u['user_id'], (int) $id);
     if ($wantsJson) return $note;
     header('Content-Type: text/html; charset=utf-8');
@@ -180,7 +154,7 @@ $app->route('/api/learn/notes/{id}', ['methods' => ['DELETE']], function ($reque
     $db = DB::open();
     $ok = Notes::delete($db, $u['user_id'], (int) $id);
     if (!$ok) { http_response_code(404); return ['error' => 'not_found']; }
-    learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'delete', 'id' => (int) $id]);
+    Demo::learn_ws_broadcast($u['user_id'], ['type' => 'note_changed', 'op' => 'delete', 'id' => (int) $id]);
     $wantsJson = stripos($g->server['HTTP_ACCEPT'] ?? '', 'application/json') !== false;
     return $wantsJson ? ['ok' => true] : '';
 });
@@ -233,19 +207,6 @@ $app->ws('/ws/session-counter',
     },
 );
 
-function ws_session_counter_broadcast(string $sessionId, string $html): void
-{
-    $server = \ZealPHP\App::getServer();
-    if (!$server) return;
-    $table = \ZealPHP\Store::table('ws_session_counter_clients');
-    if (!$table) return;
-    foreach ($table as $fd => $row) {
-        if (($row['session_id'] ?? '') !== $sessionId) continue;
-        $fd = (int) $fd;
-        if ($server->isEstablished($fd)) $server->push($fd, $html);
-    }
-}
-
 $app->route('/api/learn/demo/session-bump', ['methods' => ['POST']], function () {
     $g = G::instance();
     $g->session['lesson_counter'] = (int) ($g->session['lesson_counter'] ?? 0) + 1;
@@ -253,7 +214,7 @@ $app->route('/api/learn/demo/session-bump', ['methods' => ['POST']], function ()
         'n' => (int) $g->session['lesson_counter'],
     ]);
     $sid = $g->cookie['PHPSESSID'] ?? '';
-    if ($sid !== '') ws_session_counter_broadcast($sid, $html);
+    if ($sid !== '') Demo::ws_session_counter_broadcast($sid, $html);
     header('Content-Type: text/html; charset=utf-8');
     return $html;
 });
@@ -262,7 +223,7 @@ $app->route('/api/learn/demo/session-bump', ['methods' => ['POST']], function ()
 $app->route('/demo/view/sessions/counter', ['methods' => ['GET']], function () {
     $g = G::instance();
     $n = (int) ($g->session['lesson_counter'] ?? 0);
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Session-counter cross-tab demo',
         'Click <strong>+1</strong>. Open this URL in a second window — both update live via a WebSocket broadcast scoped to your <code class="demo-inline">PHPSESSID</code>. Foundations &rarr; <a href="/learn/sessions">Sessions</a> explains the mechanism.',
         [
@@ -279,9 +240,11 @@ ws.onmessage = e =&gt; document.getElementById(\'session-counter-btn\')
                        ?.outerHTML = e.data;
 
 // Server (excerpt — route/learn.php)
+use ZealPHP\\Learn\\Demo;   // broadcast helper lives in a src/ class
+
 $app-&gt;route(\'/api/learn/demo/session-bump\', ...
     $html = App::renderToString(\'/components/_session_counter\', [\'n\' =&gt; $n]);
-    ws_session_counter_broadcast($sid, $html);
+    Demo::ws_session_counter_broadcast($sid, $html);
     return $html;   // for the clicking tab&rsquo;s htmx swap
 );</pre>'],
         ],
@@ -319,20 +282,8 @@ $app->ws('/ws/store-demo',
     },
 );
 
-function ws_store_demo_broadcast(): void
-{
-    $server = \ZealPHP\App::getServer();
-    if (!$server) return;
-    $row = \ZealPHP\Store::get('ws_store_demo_data', 'shared_row') ?: ['n' => 0, 'name' => '', 'who' => '', 'ts' => 0];
-    $payload = json_encode($row);
-    foreach (\ZealPHP\Store::table('ws_store_demo_clients') ?? [] as $fd => $_) {
-        $fd = (int) $fd;
-        if ($server->isEstablished($fd)) $server->push($fd, $payload);
-    }
-}
-
 $app->route('/api/learn/demo/store-bump', ['methods' => ['POST']], function () {
-    if ($err = demo_rate_check()) return $err;
+    if ($err = Demo::demo_rate_check()) return $err;
     $row = \ZealPHP\Store::get('ws_store_demo_data', 'shared_row');
     if (!$row) {
         // Initialize the row if a bump arrives before any set-get touched it
@@ -340,19 +291,19 @@ $app->route('/api/learn/demo/store-bump', ['methods' => ['POST']], function () {
     }
     $new = \ZealPHP\Store::incr('ws_store_demo_data', 'shared_row', 'n', 1);
     \ZealPHP\Store::set('ws_store_demo_data', 'shared_row', ['ts' => time()]);
-    ws_store_demo_broadcast();
+    Demo::ws_store_demo_broadcast();
     return ['n' => (int) $new];
 });
 
 $app->route('/api/learn/demo/store-reset', ['methods' => ['POST']], function () {
-    if ($err = demo_rate_check()) return $err;
+    if ($err = Demo::demo_rate_check()) return $err;
     \ZealPHP\Store::set('ws_store_demo_data', 'shared_row', ['n' => 0, 'name' => '', 'who' => '', 'ts' => time()]);
-    ws_store_demo_broadcast();
+    Demo::ws_store_demo_broadcast();
     return ['n' => 0];
 });
 
 $app->route('/api/learn/demo/store-write', ['methods' => ['POST']], function () {
-    if ($err = demo_rate_check()) return $err;
+    if ($err = Demo::demo_rate_check()) return $err;
     $g = G::instance();
     // Strip control chars (anything below 0x20 except space) to prevent broken
     // JSON rendering on the client + ANSI/terminal escape tricks in CLI viewers.
@@ -372,7 +323,7 @@ $app->route('/api/learn/demo/store-write', ['methods' => ['POST']], function () 
         'who'  => $who,
         'ts'   => time(),
     ]);
-    ws_store_demo_broadcast();
+    Demo::ws_store_demo_broadcast();
     $current = \ZealPHP\Store::get('ws_store_demo_data', 'shared_row');
     return ['ok' => true, 'row' => $current];
 });
@@ -411,94 +362,10 @@ $app->route('/api/learn/demo/store-write', ['methods' => ['POST']], function () 
     'draws'   => [Store::TYPE_INT,    4],
 ]);
 
-function ttt_sanitize_room(string $room): string
-{
-    $room = strtolower($room);
-    $room = preg_replace('/[^a-z0-9-]/', '', $room) ?? '';
-    return substr($room, 0, 32);
-}
-
-function ttt_detect_winner(string $board): array
-{
-    $lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
-    foreach ($lines as $line) {
-        [$a, $b, $c] = $line;
-        $s = $board[$a];
-        if ($s !== '_' && $s === $board[$b] && $s === $board[$c]) {
-            return [$s, $line];
-        }
-    }
-    return [null, null];
-}
-
-function ttt_broadcast_state(string $room): void
-{
-    $server = \ZealPHP\App::getServer();
-    if (!$server) return;
-    $row = \ZealPHP\Store::get('ws_tictactoe_rooms', $room);
-    if (!$row) return;
-    // Count viewers in the room (everyone with symbol 'S')
-    $viewers = 0;
-    foreach (\ZealPHP\Store::table('ws_tictactoe_clients') ?? [] as $_ => $c) {
-        if (($c['room'] ?? '') === $room && ($c['symbol'] ?? '') === 'S') $viewers++;
-    }
-    $payload = json_encode([
-        'type'    => 'state',
-        'board'   => $row['board'],
-        'turn'    => $row['turn'],
-        'winner'  => $row['winner'],
-        'rounds'  => (int) $row['rounds'],
-        'players' => [
-            'X' => ['name' => $row['px_name'], 'connected' => ((int) $row['px_fd']) > 0],
-            'O' => ['name' => $row['po_name'], 'connected' => ((int) $row['po_fd']) > 0],
-        ],
-        'score'   => [
-            'X'    => (int) ($row['x_wins'] ?? 0),
-            'O'    => (int) ($row['o_wins'] ?? 0),
-            'draw' => (int) ($row['draws']  ?? 0),
-        ],
-        'viewers' => $viewers,
-    ]);
-    foreach (\ZealPHP\Store::table('ws_tictactoe_clients') ?? [] as $fd => $c) {
-        if (($c['room'] ?? '') !== $room) continue;
-        $fd = (int) $fd;
-        if ($server->isEstablished($fd)) $server->push($fd, $payload);
-    }
-}
-
-function ttt_broadcast_state_with(string $room, array $extras): void
-{
-    $server = \ZealPHP\App::getServer();
-    if (!$server) return;
-    $row = \ZealPHP\Store::get('ws_tictactoe_rooms', $room);
-    if (!$row) return;
-    $viewers = 0;
-    foreach (\ZealPHP\Store::table('ws_tictactoe_clients') ?? [] as $_ => $c) {
-        if (($c['room'] ?? '') === $room && ($c['symbol'] ?? '') === 'S') $viewers++;
-    }
-    $payload = json_encode(array_merge([
-        'type'    => 'state',
-        'board'   => $row['board'],
-        'turn'    => $row['turn'],
-        'winner'  => $row['winner'],
-        'rounds'  => (int) $row['rounds'],
-        'players' => [
-            'X' => ['name' => $row['px_name'], 'connected' => ((int) $row['px_fd']) > 0],
-            'O' => ['name' => $row['po_name'], 'connected' => ((int) $row['po_fd']) > 0],
-        ],
-        'score'   => [
-            'X'    => (int) ($row['x_wins'] ?? 0),
-            'O'    => (int) ($row['o_wins'] ?? 0),
-            'draw' => (int) ($row['draws']  ?? 0),
-        ],
-        'viewers' => $viewers,
-    ], $extras));
-    foreach (\ZealPHP\Store::table('ws_tictactoe_clients') ?? [] as $fd => $c) {
-        if (($c['room'] ?? '') !== $room) continue;
-        $fd = (int) $fd;
-        if ($server->isEstablished($fd)) $server->push($fd, $payload);
-    }
-}
+// Tic-tac-toe helpers (ttt_sanitize_room / ttt_detect_winner /
+// ttt_broadcast_state / ttt_broadcast_state_with) live on
+// ZealPHP\Learn\TicTacToe (src/Learn/TicTacToe.php) so this route file stays
+// function-free and hot-reloadable.
 
 $app->ws('/ws/tictactoe',
     onMessage: function ($server, $frame) {
@@ -525,7 +392,7 @@ $app->ws('/ws/tictactoe',
             $board = (string) ($rowRoom['board'] ?? '_________');
             if (strlen($board) !== 9 || $board[$cell] !== '_') return;
             $board[$cell] = $me['symbol'];
-            [$winSymbol, $winLine] = ttt_detect_winner($board);
+            [$winSymbol, $winLine] = TicTacToe::ttt_detect_winner($board);
             $update = ['board' => $board, 'last_move_ts' => time()];
             $extras = [];
             if ($winSymbol !== null) {
@@ -550,7 +417,7 @@ $app->ws('/ws/tictactoe',
                 $update['turn'] = ($rowRoom['turn'] === 'X') ? 'O' : 'X';
             }
             \ZealPHP\Store::set('ws_tictactoe_rooms', $room, $update);
-            ttt_broadcast_state_with($room, $extras);
+            TicTacToe::ttt_broadcast_state_with($room, $extras);
             return;
         }
 
@@ -564,7 +431,7 @@ $app->ws('/ws/tictactoe',
                 'winner'  => '',
                 'starter' => $starter,
             ]);
-            ttt_broadcast_state($room);
+            TicTacToe::ttt_broadcast_state($room);
             return;
         }
 
@@ -579,7 +446,7 @@ $app->ws('/ws/tictactoe',
                 'draws'  => 0,
                 'rounds' => 0,
             ]);
-            ttt_broadcast_state($room);
+            TicTacToe::ttt_broadcast_state($room);
             return;
         }
     },
@@ -593,7 +460,7 @@ $app->ws('/ws/tictactoe',
         if (!$userId || $username === '') {
             $server->disconnect($request->fd, 1008, 'auth_required'); return;
         }
-        $room = ttt_sanitize_room((string) ($request->get['room'] ?? ''));
+        $room = TicTacToe::ttt_sanitize_room((string) ($request->get['room'] ?? ''));
         if ($room === '') { $server->disconnect($request->fd, 1008, 'no_room'); return; }
         $viewMode = ((string) ($request->get['view'] ?? '')) === '1';
 
@@ -642,7 +509,7 @@ $app->ws('/ws/tictactoe',
             'room'   => $room,
             'name'   => $username,
         ]));
-        ttt_broadcast_state($room);
+        TicTacToe::ttt_broadcast_state($room);
     },
     onClose: function ($server, $fd) {
         $me = \ZealPHP\Store::get('ws_tictactoe_clients', (string) $fd);
@@ -656,7 +523,7 @@ $app->ws('/ws/tictactoe',
         if (((int) $row['px_fd']) === $fd) $update['px_fd'] = 0;
         if (((int) $row['po_fd']) === $fd) $update['po_fd'] = 0;
         if (!empty($update)) \ZealPHP\Store::set('ws_tictactoe_rooms', $room, $update);
-        ttt_broadcast_state($room);
+        TicTacToe::ttt_broadcast_state($room);
     },
 );
 
@@ -664,7 +531,7 @@ $app->route('/api/learn/demo/greeting', ['methods' => ['GET']], function () {
     $g = G::instance();
     $name = htmlspecialchars(trim((string) ($g->get['name'] ?? 'World')));
     header('Content-Type: text/html; charset=utf-8');
-    return learn_demo_shell('Greeting Demo', '<h2>Hello, ' . $name . '!</h2><p>This page was rendered by ZealPHP at ' . date('H:i:s') . '.</p>');
+    return Demo::learn_demo_shell('Greeting Demo', '<h2>Hello, ' . $name . '!</h2><p>This page was rendered by ZealPHP at ' . date('H:i:s') . '.</p>');
 });
 
 // ── Render method demos (Lesson 4) ──────────────────────────────────
@@ -695,32 +562,13 @@ $app->route('/api/learn/demo/timing', ['methods' => ['GET']], function () {
     return ['mode' => $mode, 'elapsed_ms' => $elapsed];
 });
 
-function learn_demo_shell(string $title, string $body): string
-{
-    $titleHtml = htmlspecialchars($title);
-    return <<<HTML
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{$titleHtml} · ZealPHP Learn</title>
-  <link rel="stylesheet" href="/css/learn.css">
-  <style>body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1c1917; } nav { margin-bottom: 1rem; font-size: .85rem; } nav a { color: #f59e0b; text-decoration: none; margin-right: 1rem; }</style>
-</head>
-<body>
-  <nav><a href="/learn/components">← Back to Lesson 4</a> · <strong>{$titleHtml}</strong></nav>
-  {$body}
-</body>
-</html>
-HTML;
-}
+// learn_demo_shell() lives on ZealPHP\Learn\Demo (src/Learn/Demo.php).
 
 $app->route('/api/learn/demo/render', ['methods' => ['GET']], function () {
     header('Content-Type: text/html; charset=utf-8');
     header('X-Render-Method: App::render');
     $card = App::renderToString('/components/_demo_clock', ['label' => 'render() — echoed', 'now' => microtime(true)]);
-    return learn_demo_shell('App::render() demo', '<section class="render-demo"><h4>One-shot echo</h4>' . $card . '</section>');
+    return Demo::learn_demo_shell('App::render() demo', '<section class="render-demo"><h4>One-shot echo</h4>' . $card . '</section>');
 });
 
 $app->route('/api/learn/demo/render-to-string', ['methods' => ['GET']], function () {
@@ -730,7 +578,7 @@ $app->route('/api/learn/demo/render-to-string', ['methods' => ['GET']], function
         'label' => 'renderToString() — composed',
         'now'   => microtime(true),
     ]);
-    return learn_demo_shell('App::renderToString() demo', '<section class="render-demo"><h4>Composed wrapper</h4>' . $card . '</section>');
+    return Demo::learn_demo_shell('App::renderToString() demo', '<section class="render-demo"><h4>Composed wrapper</h4>' . $card . '</section>');
 });
 
 $app->route('/api/learn/demo/render-stream', ['methods' => ['GET']], function () {

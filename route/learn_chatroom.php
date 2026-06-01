@@ -63,7 +63,7 @@ $app->ws('/ws/learn/chatroom', function ($server, $frame) {
 
         // Persist + broadcast a system "X joined" line to every fd in the room.
         $sys = Chatroom::saveMessage($room, $username, "joined #{$room}", 'system');
-        broadcast_to_room($server, $room, ['type' => 'message', 'message' => $sys]);
+        Chatroom::broadcast_to_room($server, $room, ['type' => 'message', 'message' => $sys]);
         return;
     }
 
@@ -73,7 +73,7 @@ $app->ws('/ws/learn/chatroom', function ($server, $frame) {
         $body = is_string($msg['body'] ?? null) ? $msg['body'] : '';
         if (trim($body) === '') { return; }
         $row = Chatroom::saveMessage((string) $meta['room'], (string) $meta['username'], $body);
-        broadcast_to_room($server, (string) $meta['room'], ['type' => 'message', 'message' => $row]);
+        Chatroom::broadcast_to_room($server, (string) $meta['room'], ['type' => 'message', 'message' => $row]);
         return;
     }
 
@@ -83,7 +83,7 @@ $app->ws('/ws/learn/chatroom', function ($server, $frame) {
         $meta = Store::get('chatroom_fds', (string) $frame->fd);
         if (!is_array($meta)) { return; }
         $state = ($msg['state'] ?? '') === 'on' ? 'on' : 'off';
-        broadcast_to_room(
+        Chatroom::broadcast_to_room(
             $server,
             (string) $meta['room'],
             ['type' => 'typing', 'user' => (string) $meta['username'], 'state' => $state],
@@ -97,31 +97,9 @@ $app->ws('/ws/learn/chatroom', function ($server, $frame) {
     if (!is_array($meta)) { return; }
     try {
         $sys = Chatroom::saveMessage((string) $meta['room'], (string) $meta['username'], "left #{$meta['room']}", 'system');
-        broadcast_to_room($server, (string) $meta['room'], ['type' => 'message', 'message' => $sys]);
+        Chatroom::broadcast_to_room($server, (string) $meta['room'], ['type' => 'message', 'message' => $sys]);
     } catch (\Throwable $e) { /* tolerant — close path */ }
 });
-
-/**
- * Fan-out helper: iterate the cluster-wide fd map and push to every fd whose
- * row's `room` matches. Works across workers (any worker can $server->push
- * any fd) AND across the cluster when the Store backend is Redis (the table
- * iteration spans every node — federated chat for free).
- *
- * @param array<string, mixed> $payload
- */
-function broadcast_to_room($server, string $room, array $payload, int $excludeFd = 0): void
-{
-    if (!($server instanceof \OpenSwoole\WebSocket\Server)) { return; }
-    $data = (string) json_encode($payload);
-    foreach (Store::iterate('chatroom_fds') as $fd => $info) {
-        if (($info['room'] ?? null) !== $room) { continue; }
-        $fdInt = (int) $fd;
-        if ($fdInt === $excludeFd) { continue; }   // typing-presence skips sender
-        if ($server->isEstablished($fdInt)) {
-            $server->push($fdInt, $data);
-        }
-    }
-}
 
 // REST sidecar endpoints — used by the popout widget to render initial state.
 $app->route('/api/learn/chatroom/recent', ['methods' => ['GET']], function (Request $request) {

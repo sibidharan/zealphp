@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ZealPHP\Learn;
 
+use ZealPHP\Store;
+
 /**
  * Lesson 22 — multi-room group chat (SQLite persistence, no Redis required).
  *
@@ -141,5 +143,27 @@ final class Chatroom
         if ($room === '')     { $room = 'general'; }
         if ($username === '') { $username = 'anonymous'; }
         return [$room, $username, $body];
+    }
+
+    /**
+     * Fan-out helper: iterate the cluster-wide fd map and push to every fd whose
+     * row's `room` matches. Works across workers (any worker can $server->push
+     * any fd) AND across the cluster when the Store backend is Redis (the table
+     * iteration spans every node — federated chat for free).
+     *
+     * @param array<string, mixed> $payload
+     */
+    public static function broadcast_to_room(mixed $server, string $room, array $payload, int $excludeFd = 0): void
+    {
+        if (!($server instanceof \OpenSwoole\WebSocket\Server)) { return; }
+        $data = (string) json_encode($payload);
+        foreach (Store::iterate('chatroom_fds') as $fd => $info) {
+            if (($info['room'] ?? null) !== $room) { continue; }
+            $fdInt = (int) $fd;
+            if ($fdInt === $excludeFd) { continue; }   // typing-presence skips sender
+            if ($server->isEstablished($fdInt)) {
+                $server->push($fdInt, $data);
+            }
+        }
     }
 }

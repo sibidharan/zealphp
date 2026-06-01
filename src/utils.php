@@ -92,6 +92,60 @@ function async_logging_enabled(): bool
     return $enabled;
 }
 
+/**
+ * Ordered list of directories ZealPHP will try for its logs + PID files, most
+ * preferred first. Pure (no I/O, no memoization) so it is unit-testable; the
+ * actual pick — the first candidate that is writable or creatable — happens in
+ * resolve_log_dir().
+ *
+ * Order:
+ *   1. $ZEALPHP_LOG_DIR — explicit override, when set.
+ *   2. /tmp/zealphp — the shared default, kept first for BC (used whenever the
+ *      current user can create/write it: single-user box, root, or fresh box).
+ *   3. Per-user fallbacks for the collision case where /tmp/zealphp already
+ *      exists owned by ANOTHER user (e.g. root started a server there first), so
+ *      this user cannot write it: $XDG_RUNTIME_DIR/zealphp, then a uid/user-
+ *      suffixed temp dir (sys_get_temp_dir()/zealphp-<uid>). These keep us off a
+ *      non-writable /tmp/zealphp without polluting the project tree, and resolve
+ *      deterministically so `start` and `stop`/`status` agree on the same dir.
+ *   4. Project-tree last resorts (./tmp/zealphp, ./logs/zealphp).
+ *
+ * @return list<string>
+ */
+function zealphp_log_dir_candidates(): array
+{
+    $candidates = [];
+
+    $envDir = getenv('ZEALPHP_LOG_DIR');
+    if ($envDir !== false && trim((string) $envDir) !== '') {
+        $candidates[] = trim((string) $envDir);
+    }
+
+    $candidates[] = '/tmp/zealphp';
+
+    $uid = function_exists('posix_getuid')
+        ? (string) posix_getuid()
+        : trim((string) (getenv('USER') ?: getenv('LOGNAME') ?: ''));
+    if ($uid !== '') {
+        $xdg = getenv('XDG_RUNTIME_DIR');
+        if ($xdg !== false && trim((string) $xdg) !== '') {
+            $candidates[] = rtrim(trim((string) $xdg), '/') . '/zealphp';
+        }
+        $safeUid = preg_replace('/[^A-Za-z0-9_-]/', '', $uid);
+        if (is_string($safeUid) && $safeUid !== '') {
+            $candidates[] = rtrim(sys_get_temp_dir(), '/') . '/zealphp-' . $safeUid;
+        }
+    }
+
+    $cwd = getcwd();
+    if ($cwd !== false) {
+        $candidates[] = $cwd . '/tmp/zealphp';
+        $candidates[] = $cwd . '/logs/zealphp';
+    }
+
+    return array_values(array_unique($candidates));
+}
+
 function resolve_log_dir(): ?string
 {
     /** @var string|null $resolved */
@@ -103,20 +157,7 @@ function resolve_log_dir(): ?string
     }
     $checked = true;
 
-    $candidates = [];
-    $envDir = getenv('ZEALPHP_LOG_DIR');
-    if ($envDir !== false && trim((string) $envDir) !== '') {
-        $candidates[] = trim((string) $envDir);
-    }
-    $candidates[] = '/tmp/zealphp';
-
-    $cwd = getcwd();
-    if ($cwd !== false) {
-        $candidates[] = $cwd . '/tmp/zealphp';
-        $candidates[] = $cwd . '/logs/zealphp';
-    }
-
-    foreach (array_unique($candidates) as $candidate) {
+    foreach (zealphp_log_dir_candidates() as $candidate) {
         if (!is_dir($candidate)) {
             @mkdir($candidate, 0775, true);
         }

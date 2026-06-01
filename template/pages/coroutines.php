@@ -110,13 +110,13 @@ PHP]); ?>
 <p>The runtime is described by <strong>two orthogonal axes</strong>, with a one-call preset on top:</p>
 <ul class="coro-mb">
   <li><strong><code>App::superglobals(bool)</code></strong> — real process-wide <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code> populated per request (<code>true</code>) vs per-coroutine <code>$g</code> only (<code>false</code>).</li>
-  <li><strong><code>App::isolation(Isolation)</code></strong> — <em>how</em> a request is isolated. One value folds the old <code>processIsolation × enableCoroutine × hookAll × cgiMode</code> cross-product: <code>Isolation::Coroutine</code> (in-process, per-coroutine, concurrent), <code>Isolation::CgiPool</code> (warm subprocess pool, ~1-3&nbsp;ms — the default for <code>superglobals(true)</code>), <code>Isolation::CgiProc</code> (fresh <code>proc_open</code> per request, ~30-50&nbsp;ms), <code>Isolation::CgiFcgi</code> (forward to an external FPM/upstream), or <code>Isolation::None</code> (in-process, sequential).</li>
+  <li><strong><code>App::isolation(Isolation)</code></strong> — <em>how</em> a request is isolated. One value folds the old <code>processIsolation × enableCoroutine × hookAll × cgiMode</code> cross-product: <code>Isolation::Coroutine</code> (in-process, per-coroutine, concurrent), <code>Isolation::CgiPool</code> (warm pre-spawned PHP worker pool, interpreter resident, ~1-3&nbsp;ms — the default for <code>superglobals(true)</code>), <code>Isolation::CgiFcgi</code> (forward to an external FPM/upstream), or <code>Isolation::None</code> (in-process, sequential).</li>
 </ul>
 <p><strong><code>App::mode(string)</code></strong> sets both axes in one call. This is the recommended entry point — reach for the individual setters only to fine-tune:</p>
 <table class="ztable coro-mb">
   <tr><th><code>App::mode(...)</code></th><th><code>superglobals</code></th><th><code>isolation</code></th><th>For</th></tr>
   <tr><td><code>App::MODE_COROUTINE</code><br><small>'coroutine'</small></td><td>false</td><td>Coroutine</td><td>Modern ZealPHP apps — the recommended default shape (scaffold default).</td></tr>
-  <tr><td><code>App::MODE_COROUTINE_LEGACY</code><br><small>'coroutine-legacy'</small></td><td>true</td><td>Coroutine</td><td>Legacy request-style code run <strong>concurrently</strong> (the PHP-FPM mental model, modernised); modern Composer apps (Symfony, Laravel, Slim). Auto-enables the full per-coroutine isolation stack (see <a href="#isolation-scope">isolation scope</a>). <strong>Requires ext-zealphp.</strong> Provided the class graph is Composer-autoloaded or preloaded; pure <code>require_once</code> apps with no autoloader (classic WordPress) use <code>MODE_LEGACY_CGI</code>.</td></tr>
+  <tr><td><code>App::MODE_COROUTINE_LEGACY</code><br><small>'coroutine-legacy' &middot; <strong>EXPERIMENTAL</strong></small></td><td>true</td><td>Coroutine</td><td><strong>Experimental.</strong> Legacy request-style code run <strong>concurrently</strong> (the PHP-FPM mental model, modernised); modern Composer apps (Symfony, Laravel, Slim). Auto-enables the full per-coroutine isolation stack (see <a href="#isolation-scope">isolation scope</a>). <strong>Requires ext-zealphp.</strong> Provided the class graph is Composer-autoloaded or preloaded; pure <code>require_once</code> apps with no autoloader (classic WordPress) use <code>MODE_LEGACY_CGI</code>.</td></tr>
   <tr><td><code>App::MODE_LEGACY_CGI</code><br><small>'legacy-cgi'</small></td><td>true</td><td>CgiPool</td><td>Unmodified WordPress / Drupal — pure <code>require_once</code> apps with no autoloader. Each request runs in a warm subprocess pool (full global-scope isolation).</td></tr>
   <tr><td><code>App::MODE_MIXED</code><br><small>'mixed'</small></td><td>true</td><td>None</td><td>Symfony / Laravel bridge — real <code>$_SESSION</code>, in-process, sequential, no CGI fork cost.</td></tr>
 </table>
@@ -134,7 +134,7 @@ PHP]); ?>
     <td><code>$process_isolation</code></td>
     <td><code>App::processIsolation(bool)</code></td>
     <td><code>$superglobals</code></td>
-    <td><code>App::include()</code> dispatch: true → subprocess per file via <code>cgiMode()</code> backend (default <code>'pool'</code> — warm FPM-style worker pool, ~1-3 ms per dispatch; <code>'proc'</code> — fresh <code>proc_open</code> per request, ~30-50 ms; <code>'fcgi'</code> — forward to upstream FPM). false → in-process via <code>executeFile()</code> (sub-ms, no isolation).</td>
+    <td><code>App::include()</code> dispatch: true → subprocess per file via <code>cgiMode()</code> backend (default <code>'pool'</code> — warm FPM-style worker pool with the interpreter resident in memory, ~1-3 ms per dispatch; <code>'fcgi'</code> — forward to an external upstream FPM pool). false → in-process via <code>executeFile()</code> (sub-ms, no isolation).</td>
   </tr>
   <tr>
     <td><code>$enable_coroutine_override</code></td>
@@ -162,7 +162,7 @@ PHP]); ?>
 <table class="ztable coro-mb">
   <tr><th>Mode</th><th><code>App::mode()</code></th><th><code>superglobals</code></th><th><code>isolation</code></th><th>When to use</th></tr>
   <tr><td><strong>Coroutine</strong><br><small>scaffold default</small></td><td><code>MODE_COROUTINE</code></td><td>false</td><td>coroutine</td><td>Modern apps benefiting from concurrent coroutine I/O; OpenSwoole-native code.</td></tr>
-  <tr><td><strong>Coroutine-legacy</strong><br><small>compatibility runtime</small></td><td><code>MODE_COROUTINE_LEGACY</code></td><td>true</td><td>coroutine<br><small>+ isolation stack</small></td><td>Traditional request-style PHP run <strong>concurrently</strong> — every request-state primitive (<code>$GLOBALS</code>, statics, <code>require_once</code>, …) isolated per coroutine. Modern Composer apps too. Requires ext-zealphp. See <a href="#isolation-scope">isolation scope</a> — provided the class graph is Composer-autoloaded or preloaded; pure <code>require_once</code> apps with no autoloader (classic WordPress) use <code>MODE_LEGACY_CGI</code>.</td></tr>
+  <tr><td><strong>Coroutine-legacy</strong><br><small>compatibility runtime &middot; <strong>EXPERIMENTAL</strong></small></td><td><code>MODE_COROUTINE_LEGACY</code></td><td>true</td><td>coroutine<br><small>+ isolation stack</small></td><td><strong>Experimental.</strong> Traditional request-style PHP run <strong>concurrently</strong> — every request-state primitive (<code>$GLOBALS</code>, statics, <code>require_once</code>, …) isolated per coroutine. Modern Composer apps too. Requires ext-zealphp. See <a href="#isolation-scope">isolation scope</a> — provided the class graph is Composer-autoloaded or preloaded; pure <code>require_once</code> apps with no autoloader (classic WordPress) use <code>MODE_LEGACY_CGI</code>.</td></tr>
   <tr><td><strong>Legacy CGI</strong><br><small>default when <code>superglobals(true)</code></small></td><td><code>MODE_LEGACY_CGI</code></td><td>true</td><td>cgi-pool</td><td>Unmodified WordPress / Drupal — pure <code>require_once</code> apps, no autoloader. Warm subprocess pool (FPM-style isolation, ~1-3&nbsp;ms); raise <code>cgiPoolSize()</code> for more CGI concurrency.</td></tr>
   <tr><td><strong>Mixed-mode / Symfony</strong></td><td><code>MODE_MIXED</code></td><td>true</td><td>none</td><td>Symfony / Laravel on ZealPHP — real <code>$_SESSION</code> needed, but no per-include CGI fork cost. Sequential per worker → no race on superglobals.</td></tr>
   <tr><td>Coroutine without HOOK_ALL</td><td><small>tune <code>hookAll(0)</code></small></td><td>false</td><td>coroutine</td><td>Per-request coroutine isolation but no auto I/O hooks (testing, custom hooks, blocking-I/O legacy apps that deadlock under HOOK_ALL).</td></tr>
@@ -325,7 +325,7 @@ App::hookAll(\OpenSwoole\Runtime::HOOK_ALL); // hooks pipe I/O (resolved from nu
   <tr>
     <td>Implicit file routes (legacy <code>public/*.php</code>)</td>
     <td>Run in the worker process directly (<code>processIsolation(false)</code> default)</td>
-    <td>With <code>processIsolation(true)</code>: CGI bridge (<code>proc_open</code> child) — true global-scope isolation. With <code>processIsolation(false)</code>: in-process, same as coroutine mode.</td>
+    <td>With <code>processIsolation(true)</code>: CGI bridge (warm <code>cgiMode('pool')</code> worker, or <code>'fcgi'</code> to an external FPM) — true global-scope isolation. With <code>processIsolation(false)</code>: in-process, same as coroutine mode.</td>
   </tr>
   <tr>
     <td><code>$g->session</code>, <code>$g->status</code>, etc.</td>

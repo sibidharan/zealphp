@@ -51,14 +51,9 @@ use ZealPHP\App;
 use ZealPHP\G;
 use ZealPHP\Store;
 use ZealPHP\Counter;
+use ZealPHP\Site\DemoHelpers;
 
 $app = App::instance();
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-function demo_t(): float { return microtime(true); }
-function demo_ms(float $start): float { return round((microtime(true) - $start) * 1000, 2); }
 
 // Shared demo counter (created in route file scope = before start())
 static $demoCounter = null;
@@ -433,7 +428,7 @@ $app->route('/demo/fragments/contacts', ['methods' => ['GET']], function() {
         'contacts' => $contacts,
         'fragment' => null,
     ]);
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Template fragments — contacts list',
         'One template file, two responses. Click <strong>Show details</strong> on any row — htmx requests <code class="demo-inline">?fragment=contact-{id}</code> and the server returns only that row\'s markup, not the whole page. Open DevTools → Network → XHR to confirm each swap is a single 200 response with just one <code class="demo-inline">&lt;li&gt;</code> in the body. Try <a href="/demo/fragments/contacts?fragment=does-not-exist" target="_blank" rel="noopener">/demo/fragments/contacts?fragment=does-not-exist</a> for the HTTP 404 case — fragment selector with no matching region, no fallback to the full page.',
         [['heading' => 'Live contacts', 'body' => $body]],
@@ -448,59 +443,22 @@ $app->route('/demo/fragments/contacts', ['methods' => ['GET']], function() {
 // (template/components/_demo_shell.php) with a back-link to the lesson.
 // The raw /demo/<...> endpoints above stay JSON for tests and direct API
 // use; the viewers below are the human-friendly versions.
+//
+// The shell renderer (DemoHelpers::demo_render) and the "Response" section
+// builder (DemoHelpers::demo_section_response / _demo_phrase) live in
+// src/Site/DemoHelpers.php so this route file stays function-free and
+// hot-reloadable.
 // ---------------------------------------------------------------------------
-
-/**
- * Render a demo viewer page through a clean standalone shell —
- * site CSS (zealphp.css + learn.css) for typography and colors, but no
- * big top-nav or footer. The whole shell + breadcrumb + body lives in
- * template/components/_demo_shell.php.
- *
- * @param array<int, array{heading: string, body: string}> $sections
- */
-function demo_render(string $title, string $description, array $sections, string $back_slug, string $back_label): string {
-    return App::renderToString('/components/_demo_shell', [
-        'title'       => $title,
-        'description' => $description,
-        'sections'    => $sections,
-        'back_slug'   => $back_slug,
-        'back_label'  => $back_label,
-    ]);
-}
-
-/** Renders one "Response" section showing status + content-type + payload. */
-function demo_section_response(int $status, string $contentType, string $payload, bool $pretty = true): array {
-    if ($pretty && stripos($contentType, 'json') !== false) {
-        $decoded = json_decode($payload, true);
-        if (is_array($decoded)) $payload = json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-    }
-    $cls = 's' . substr((string)$status, 0, 1) . 'xx';
-    $body = '<dl class="demo-kv">'
-          . '<dt>Status</dt><dd><span class="demo-status ' . $cls . '">' . $status . ' ' . htmlspecialchars(_demo_phrase($status)) . '</span></dd>'
-          . '<dt>Content-Type</dt><dd>' . htmlspecialchars($contentType) . '</dd>'
-          . '</dl>'
-          . '<pre class="demo-payload" style="margin-top:.6rem">' . htmlspecialchars($payload) . '</pre>';
-    return ['heading' => 'Response', 'body' => $body];
-}
-
-function _demo_phrase(int $s): string {
-    return match($s) {
-        200 => 'OK', 204 => 'No Content', 301 => 'Moved Permanently', 302 => 'Found',
-        304 => 'Not Modified', 400 => 'Bad Request', 401 => 'Unauthorized',
-        403 => 'Forbidden', 404 => 'Not Found', 500 => 'Internal Server Error',
-        default => '',
-    };
-}
 
 // Inject viewers ------------------------------------------------------------
 
 $app->route('/demo/view/inject/url/{id}', ['methods' => ['GET']], function($id) {
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Inject: URL param only',
         'Route: <code class="demo-inline">$app->route(\'/demo/inject/url/{id}\', function ($id) { ... })</code>. The framework injected <code class="demo-inline">$id</code> by name from the URL pattern. Nothing else was injected.',
         [
             ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/inject/url/' . htmlspecialchars($id) . '</code>'],
-            demo_section_response(200, 'application/json', json_encode(['id' => $id, 'injected' => ['id'], 'note' => 'URL param only'])),
+            DemoHelpers::demo_section_response(200, 'application/json', json_encode(['id' => $id, 'injected' => ['id'], 'note' => 'URL param only'])),
         ],
         'learn/injection', 'Parameter Injection'
     );
@@ -508,12 +466,12 @@ $app->route('/demo/view/inject/url/{id}', ['methods' => ['GET']], function($id) 
 
 $app->route('/demo/view/inject/request-only', ['methods' => ['GET']], function($request) {
     $payload = ['method' => $request->server['REQUEST_METHOD'] ?? 'GET', 'uri' => $request->server['REQUEST_URI'] ?? '/', 'host' => $request->header['host'] ?? '', 'injected' => ['request']];
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Inject: $request only',
         'Route handler declares only <code class="demo-inline">$request</code>. The framework injects the <code class="demo-inline">ZealPHP\HTTP\Request</code> wrapper — headers, query, body, server vars, all accessible.',
         [
             ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/inject/request-only</code>'],
-            demo_section_response(200, 'application/json', json_encode($payload)),
+            DemoHelpers::demo_section_response(200, 'application/json', json_encode($payload)),
         ],
         'learn/injection', 'Parameter Injection'
     );
@@ -521,12 +479,12 @@ $app->route('/demo/view/inject/request-only', ['methods' => ['GET']], function($
 
 $app->route('/demo/view/inject/url-response/{id}', ['methods' => ['GET']], function($id, $response) {
     $response->header('X-Demo-Injected', 'id+response');
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Inject: URL param + $response',
         'Two-name injection: <code class="demo-inline">function ($id, $response)</code>. The framework injects <code class="demo-inline">$id</code> from the URL and <code class="demo-inline">$response</code> from the framework. Note the custom <code class="demo-inline">X-Demo-Injected</code> header on this very response.',
         [
             ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/inject/url-response/' . htmlspecialchars($id) . '</code>'],
-            demo_section_response(200, 'application/json', json_encode(['id' => $id, 'injected' => ['id', 'response'], 'header_set' => 'X-Demo-Injected: id+response'])),
+            DemoHelpers::demo_section_response(200, 'application/json', json_encode(['id' => $id, 'injected' => ['id', 'response'], 'header_set' => 'X-Demo-Injected: id+response'])),
         ],
         'learn/injection', 'Parameter Injection'
     );
@@ -535,24 +493,24 @@ $app->route('/demo/view/inject/url-response/{id}', ['methods' => ['GET']], funct
 $app->route('/demo/view/inject/all/{id}', ['methods' => ['GET']], function($id, $request, $response) {
     $response->header('X-Demo-Injected', 'all');
     $payload = ['id' => $id, 'method' => $request->server['REQUEST_METHOD'] ?? 'GET', 'query' => $request->get ?? [], 'injected' => ['id', 'request', 'response']];
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Inject: $id + $request + $response',
         'Three-name injection: <code class="demo-inline">function ($id, $request, $response)</code>. Order does not matter — injection is by parameter name. Try adding <code class="demo-inline">?foo=bar&debug=1</code> to the URL and reload.',
         [
             ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/inject/all/' . htmlspecialchars($id) . '</code> · try <code class="demo-inline">?foo=bar</code>'],
-            demo_section_response(200, 'application/json', json_encode($payload)),
+            DemoHelpers::demo_section_response(200, 'application/json', json_encode($payload)),
         ],
         'learn/injection', 'Parameter Injection'
     );
 });
 
 $app->route('/demo/view/inject/defaults/{id}', ['methods' => ['GET']], function($id, $page = 1) {
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Inject: default parameter values',
         'Handler signature: <code class="demo-inline">function ($id, $page = 1)</code>. The framework injects <code class="demo-inline">$id</code> from the URL; <code class="demo-inline">$page</code> isn\'t in the URL or the framework injection table, so the default value (<code class="demo-inline">1</code>) is used. To override, use the path with two segments — see the related URL below.',
         [
             ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/inject/defaults/' . htmlspecialchars($id) . '</code> · with page: <code class="demo-inline">/demo/inject/defaults/' . htmlspecialchars($id) . '/7</code>'],
-            demo_section_response(200, 'application/json', json_encode(['id' => $id, 'page' => $page, 'note' => '$page used default value 1 because no override was passed'])),
+            DemoHelpers::demo_section_response(200, 'application/json', json_encode(['id' => $id, 'page' => $page, 'note' => '$page used default value 1 because no override was passed'])),
         ],
         'learn/injection', 'Parameter Injection'
     );
@@ -562,19 +520,19 @@ $app->route('/demo/view/inject/defaults/{id}', ['methods' => ['GET']], function(
 
 $app->route('/demo/view/response/json', ['methods' => ['GET']], function() {
     $payload = ['framework' => 'ZealPHP', 'async' => true, 'engine' => 'OpenSwoole', 'time' => time()];
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Response: return an array → JSON',
         'Handler returns a plain PHP array. The framework auto-encodes it as JSON and sets <code class="demo-inline">Content-Type: application/json</code>. No need to call <code class="demo-inline">$response->json()</code>.',
         [
             ['heading' => 'Live URL', 'body' => '<code class="demo-inline">GET /demo/response/json</code>'],
-            demo_section_response(200, 'application/json', json_encode($payload)),
+            DemoHelpers::demo_section_response(200, 'application/json', json_encode($payload)),
         ],
         'learn/responses', 'Returning a Response'
     );
 });
 
 $app->route('/demo/view/response/redirect-302', ['methods' => ['GET']], function() {
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Response: 302 redirect',
         'Handler called <code class="demo-inline">$response->redirect(\'/\')</code> which returns a PSR-7 response with status 302 and a <code class="demo-inline">Location: /</code> header. The browser would normally follow this — opened directly so you see the response, not the destination.',
         [
@@ -586,7 +544,7 @@ $app->route('/demo/view/response/redirect-302', ['methods' => ['GET']], function
 });
 
 $app->route('/demo/view/response/redirect-301', ['methods' => ['GET']], function() {
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Response: 301 permanent redirect',
         'Handler called <code class="demo-inline">$response->redirect(\'/\', 301)</code>. Status 301 tells the browser and search engines that the move is permanent — bookmarks and indexes get updated.',
         [
@@ -598,7 +556,7 @@ $app->route('/demo/view/response/redirect-301', ['methods' => ['GET']], function
 });
 
 $app->route('/demo/view/response/headers', ['methods' => ['GET']], function() {
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Response: custom headers',
         'Handler called <code class="demo-inline">$response->header(\'X-Demo-Method\', \'response-header()\')</code> and similar for two more custom headers. Open DevTools → Network → this request to see them all in the response.',
         [
@@ -611,7 +569,7 @@ $app->route('/demo/view/response/headers', ['methods' => ['GET']], function() {
 
 $app->route('/demo/view/response/cookie', ['methods' => ['GET']], function($response) {
     $response->cookie('zealphp_demo_cookie', 'set-at-' . time(), time() + 3600, '/', '', false, false, 'Lax');
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Response: $response->cookie()',
         'Handler called <code class="demo-inline">$response->cookie(\'zealphp_demo_cookie\', ...)</code>. Look at <code class="demo-inline">document.cookie</code> in DevTools console to confirm it landed. Cookie path <code class="demo-inline">/</code>, SameSite=Lax, expires in 1 hour.',
         [
@@ -625,7 +583,7 @@ $app->route('/demo/view/response/cookie', ['methods' => ['GET']], function($resp
 // Store + Counter viewers --------------------------------------------------
 
 $app->route('/demo/view/store/set-get', ['methods' => ['GET']], function() {
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Store: write → read across workers',
         'Write a row to a shared-memory <code class="demo-inline">Store</code> table. Every worker can read what any other worker wrote &mdash; no Redis, no network round-trip. Open this page in another window: click <strong>Write row</strong> here and watch the row contents update there live.',
         [
@@ -642,7 +600,9 @@ $app->route('/demo/view/store/set-get', ['methods' => ['GET']], function() {
                 '<div data-store-status class="ws-counter-status" style="margin-top:.65rem">connecting…</div>'
             ],
             ['heading' => 'How it works', 'body' =>
-                '<pre class="demo-payload">// route/learn.php — boot
+                '<pre class="demo-payload">use ZealPHP\\Learn\\Demo;   // broadcast helper lives in a src/ class
+
+// route/learn.php — boot
 Store::make(\'ws_store_demo_data\', 32, [
     \'n\'    =&gt; [Store::TYPE_INT,    8],
     \'name\' =&gt; [Store::TYPE_STRING, 64],
@@ -656,14 +616,14 @@ Store::set(\'ws_store_demo_data\', \'shared_row\', [
     \'who\'  =&gt; $who,
     \'ts\'   =&gt; time(),
 ]);
-ws_store_demo_broadcast();   // push current row to every /ws/store-demo client</pre>'],
+Demo::ws_store_demo_broadcast();   // push current row to every /ws/store-demo client</pre>'],
         ],
         'learn/store', 'Sharing State'
     );
 });
 
 $app->route('/demo/view/store/incr', ['methods' => ['GET']], function() {
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Store: atomic increment',
         '<code class="demo-inline">Store::incr(\'table\', \'row\', \'column\', $by)</code> increments an integer column atomically across all workers. No locks, no read-modify-write race &mdash; one syscall. Click <strong>+1</strong>. Open this URL in another window: every tab tracks the same value.',
         [
@@ -690,7 +650,7 @@ $app->route('/demo/view/counter/increment', ['methods' => ['GET']], function() {
     // Interactive cross-tab demo. Reuses the existing /ws/counter-demo
     // endpoint that powers the /learn/websocket inline counter — so this
     // popup-friendly viewer is a standalone mirror of that widget.
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Counter: lock-free atomic int',
         '<code class="demo-inline">$counter-&gt;increment()</code> wraps <code class="demo-inline">OpenSwoole\\Atomic</code> &mdash; lock-free, cross-worker, no syscall per bump. Click <strong>+1</strong>. Open this URL in another window/tab and click +1 there: every tab updates live via a WebSocket broadcast. Reset zeros the counter for everyone.',
         [
@@ -706,7 +666,9 @@ $app->route('/demo/view/counter/increment', ['methods' => ['GET']], function() {
                 '</div>'
             ],
             ['heading' => 'How it works', 'body' =>
-                '<pre class="demo-payload">// route/learn.php — boot
+                '<pre class="demo-payload">use ZealPHP\\Learn\\Demo;   // broadcast helper lives in a src/ class
+
+// route/learn.php — boot
 $wsCounterDemo = new Counter(0);
 Store::make(\'ws_counter_demo_clients\', 4096, [...]);
 
@@ -722,7 +684,7 @@ $app-&gt;ws(\'/ws/counter-demo\',
 // Bump endpoint — increment + broadcast to every connected fd
 $app-&gt;route(\'/api/learn/demo/counter-bump\', [\'methods\' =&gt; [\'POST\']], function () use ($wsCounterDemo) {
     $new = $wsCounterDemo-&gt;increment();
-    ws_counter_demo_broadcast((int)$new);
+    Demo::ws_counter_demo_broadcast((int)$new);
     return [\'value\' =&gt; (int)$new];
 });</pre>'],
         ],
@@ -734,7 +696,7 @@ $app-&gt;route(\'/api/learn/demo/counter-bump\', [\'methods\' =&gt; [\'POST\']],
 
 $app->route('/demo/view/middleware/cors', ['methods' => ['GET']], function($request) {
     $origin = $request->header['origin'] ?? '(none)';
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Middleware: CorsMiddleware',
         'The <code class="demo-inline">CorsMiddleware</code> registered in <code class="demo-inline">app.php</code> adds <code class="demo-inline">Access-Control-Allow-Origin</code> + related headers to every response. It also intercepts OPTIONS preflight requests automatically — try <code class="demo-inline">curl -X OPTIONS http://host/anything</code>.',
         [
@@ -748,7 +710,7 @@ $app->route('/demo/view/middleware/cors', ['methods' => ['GET']], function($requ
 $app->route('/demo/view/middleware/etag', ['methods' => ['GET']], function() {
     $body = str_repeat('ZealPHP', 50);
     $etag = 'W/"' . md5($body) . '"';
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Middleware: ETagMiddleware',
         'The <code class="demo-inline">ETagMiddleware</code> generates a weak ETag from the response body. Re-request this URL with <code class="demo-inline">If-None-Match: ' . $etag . '</code> and you\'ll get a <code class="demo-inline">304 Not Modified</code> — body skipped, bandwidth saved.',
         [
@@ -762,7 +724,7 @@ $app->route('/demo/view/middleware/etag', ['methods' => ['GET']], function() {
 $app->route('/demo/view/middleware/compress', ['methods' => ['GET']], function($request) {
     $accepts = $request->header['accept-encoding'] ?? '';
     $hasGzip = stripos($accepts, 'gzip') !== false;
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Middleware: gzip compression',
         'OpenSwoole\'s built-in <code class="demo-inline">http_compression</code> is enabled by default in <code class="demo-inline">App::run()</code>. The response below is ~2.7&nbsp;KB raw but is sent as <code class="demo-inline">Content-Encoding: gzip</code> when the client advertises it.',
         [
@@ -779,7 +741,7 @@ $app->route('/demo/view/middleware/compress', ['methods' => ['GET']], function($
 // that drive the stream from the page (no raw chunks in the address bar).
 
 $app->route('/demo/view/streaming/ssr', ['methods' => ['GET']], function() {
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Streaming: Generator yield (SSR)',
         'A route handler that returns a <code class="demo-inline">\\Generator</code> streams every <code class="demo-inline">yield</code> chunk to the browser the moment it produces it &mdash; the page renders progressively instead of waiting for the whole HTML to assemble. Click <strong>Run</strong> below; the chunks arrive in the dark panel.',
         [
@@ -799,7 +761,7 @@ $app->route('/demo/view/streaming/ssr', ['methods' => ['GET']], function() {
 });
 
 $app->route('/demo/view/streaming/stream', ['methods' => ['GET']], function() {
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Streaming: $response->stream()',
         'The <code class="demo-inline">$response->stream($fn)</code> primitive gives you fine-grained control: <code class="demo-inline">$fn</code> receives a <code class="demo-inline">$write(string)</code> closure that flushes chunks the moment you call it. Useful when you want to decide what to send <em>at run time</em> instead of yielding a fixed sequence.',
         [
@@ -818,7 +780,7 @@ $app->route('/demo/view/streaming/stream', ['methods' => ['GET']], function() {
 });
 
 $app->route('/demo/view/streaming/sse', ['methods' => ['GET']], function() {
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Streaming: Server-Sent Events',
         'SSE is one-way push over plain HTTP &mdash; the browser opens an <code class="demo-inline">EventSource</code>, the server keeps the response open and emits named events. <code class="demo-inline">$response->sse($fn)</code> sets the right headers and gives you an <code class="demo-inline">$emit($data, $event, $id)</code> callback. Below: <strong>Connect</strong> opens an <code class="demo-inline">EventSource</code> to <code class="demo-inline">/stream/events</code>; the event log fills with one tick per second.',
         [
@@ -847,7 +809,7 @@ $app->route('/demo/view/streaming/sse', ['methods' => ['GET']], function() {
 $app->route('/demo/view/notes/widget', ['methods' => ['GET']], function () {
     $u = \ZealPHP\Learn\Auth::currentUser();
     if (!$u) {
-        return demo_render(
+        return DemoHelpers::demo_render(
             'Personal Notes',
             'Log in below to use the standalone notes widget. You\'ll stay on this page after sign-in.',
             [['heading' => '',
@@ -857,7 +819,7 @@ $app->route('/demo/view/notes/widget', ['methods' => ['GET']], function () {
             'learn/notes', 'Personal Notes'
         );
     }
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Personal Notes — standalone',
         'Same <code class="demo-inline">_notes_widget</code> partial that renders inline in the <a href="/learn/notes">Personal Notes lesson</a> — here in its own shell so you can open multiple windows for cross-tab WebSocket sync testing.',
         [
@@ -871,7 +833,7 @@ $app->route('/demo/view/notes/widget', ['methods' => ['GET']], function () {
 $app->route('/demo/view/chat/widget', ['methods' => ['GET']], function () {
     $u = \ZealPHP\Learn\Auth::currentUser();
     if (!$u) {
-        return demo_render(
+        return DemoHelpers::demo_render(
             'AI Chat',
             'Log in below to use the standalone chat widget.',
             [['heading' => '',
@@ -881,7 +843,7 @@ $app->route('/demo/view/chat/widget', ['methods' => ['GET']], function () {
             'learn/ai-chat', 'AI Chat'
         );
     }
-    return demo_render(
+    return DemoHelpers::demo_render(
         'AI Chat — standalone',
         'Same <code class="demo-inline">_chat_widget</code> partial that renders inline in the <a href="/learn/ai-chat">AI Chat lesson</a>. Try a prompt like <em>"create a note titled shopping list"</em> and watch the Event Log below the chat for live <span class="proto-badge sse">SSE</span> + <span class="proto-badge ws">WS</span> events.',
         [
@@ -896,7 +858,7 @@ $app->route('/demo/view/websocket/counter', ['methods' => ['GET']], function () 
     // Open this URL in two windows: click +1 in either, the other updates
     // live. No auth — every connected tab on every account sees the same
     // global value (it's a teaching demo for the broadcast pattern).
-    return demo_render(
+    return DemoHelpers::demo_render(
         'WebSocket cross-tab counter',
         'Click <strong>+1</strong>. Open this URL in a second window — both update live via a WebSocket broadcast to every connected client. <a href="/learn/websocket">Read the build</a>.',
         [
@@ -910,7 +872,7 @@ $app->route('/demo/view/websocket/counter', ['methods' => ['GET']], function () 
 $app->route('/demo/view/tictactoe/play', ['methods' => ['GET']], function () {
     $u = \ZealPHP\Learn\Auth::currentUser();
     if (!$u) {
-        return demo_render(
+        return DemoHelpers::demo_render(
             'Multiplayer Tic-Tac-Toe',
             'Sign in to play. Display name = your username so opponents see who they\'re playing.',
             [['heading' => '',
@@ -922,7 +884,7 @@ $app->route('/demo/view/tictactoe/play', ['methods' => ['GET']], function () {
     }
     // Use a focused full-board layout — short description, no section heading.
     // The widget is the page; everything else is breadcrumb + 1-line context.
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Tic-Tac-Toe',
         'Same room ID = same game. First two players take X and O; rest are viewers. <code class="demo-inline">?view=1</code> forces viewer. <a href="/learn/tictactoe">Read the build</a>.',
         [
@@ -936,7 +898,7 @@ $app->route('/demo/view/tictactoe/play', ['methods' => ['GET']], function () {
 $app->route('/demo/view/chatroom/widget', ['methods' => ['GET']], function () {
     $u = \ZealPHP\Learn\Auth::currentUser();
     if (!$u) {
-        return demo_render(
+        return DemoHelpers::demo_render(
             'Multi-Room Group Chat',
             'Log in below to chat. Same auth as Notes / Tic-Tac-Toe — one account, all the demos.',
             [['heading' => '',
@@ -946,7 +908,7 @@ $app->route('/demo/view/chatroom/widget', ['methods' => ['GET']], function () {
             'learn/chatroom', 'Multi-Room Group Chat'
         );
     }
-    return demo_render(
+    return DemoHelpers::demo_render(
         'Multi-Room Group Chat',
         'Same <code class="demo-inline">_chatroom_widget</code> partial that renders inline in the <a href="/learn/chatroom">lesson</a>. SQLite-backed history persists across reloads; open in two tabs to chat with yourself. <a href="/learn/chatroom">Read the build</a>.',
         [
