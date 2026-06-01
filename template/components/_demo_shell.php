@@ -1,7 +1,7 @@
 <?php
 /**
  * Standalone demo viewer shell. Mirrors the clean look of
- * learn_demo_shell() in route/learn.php — site CSS, slim breadcrumb,
+ * Demo::learn_demo_shell() in src/Learn/Demo.php — site CSS, slim breadcrumb,
  * focused content area, no big top-nav. Open in new tab/popup.
  *
  * Expects:

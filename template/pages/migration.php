@@ -70,7 +70,7 @@ $rungs = [
     'code'  => 'App::superglobals(true); $app->setFallback(fn() => App::include(\'/index.php\'));',
     'desc'  => 'Drop your PHP files into <code>public/</code> (the document root — configurable via <code>App::documentRoot()</code>). <code>setFallback()</code> catches every URL and routes it through your existing <code>index.php</code>, just like Apache\'s <code>RewriteRule . /index.php [L]</code>. With ext-zealphp, <code>$_GET</code>/<code>$_SESSION</code> are per-coroutine safe, so coroutines work out of the box. Apps that use <code>define()</code> heavily (WordPress/Drupal) can opt into <code>processIsolation(true)</code> for the CGI bridge. See <a href="/legacy-apps#limitations">documented limits</a> for complex apps.',
     'wins'  => 'Persistent process, no per-request boot. Sub-millisecond TTFB on cached routes. Coroutines + superglobals together — no code rewrites needed.',
-    'gives_up' => 'Apps with <code>define()</code> need <code>processIsolation(true)</code> (CGI bridge). Default dispatch is the pre-spawned pool — <code>cgiMode(\'pool\')</code>, ~1–3 ms warm; <code>cgiMode(\'proc\')</code> is the ~30–50 ms per-request fork fallback. Without ext-zealphp, <code>superglobals(true) + enableCoroutine(true)</code> throws a <code>RuntimeException</code> at boot — install ext-zealphp (<code>pie install sibidharan/ext-zealphp</code>) or use <code>App::superglobals(false)</code> for coroutine concurrency without it.',
+    'gives_up' => 'Apps with <code>define()</code> need <code>processIsolation(true)</code> (the legacy CGI bridge, <code>App::mode(\'legacy-cgi\')</code>). Dispatch goes through the warm worker pool — <code>cgiMode(\'pool\')</code>, the default, ~1–3 ms warm because the PHP interpreter stays resident — or <code>cgiMode(\'fcgi\')</code> to forward to an external FastCGI / php-fpm pool. Without ext-zealphp, <code>superglobals(true) + enableCoroutine(true)</code> throws a <code>RuntimeException</code> at boot — install ext-zealphp (<code>pie install sibidharan/ext-zealphp</code>) or use <code>App::mode(\'coroutine\')</code> for coroutine concurrency without it.',
   ],
   [
     'n'    => '1',
@@ -99,10 +99,10 @@ $rungs = [
   [
     'n'    => '4',
     'title' => 'Full coroutine mode',
-    'code'  => 'App::mode(App::MODE_COROUTINE_LEGACY);  // one call: legacy $_GET/$_SESSION + coroutine concurrency + full per-coroutine isolation stack',
-    'desc'  => '<code>App::mode(App::MODE_COROUTINE_LEGACY)</code> is the one-call preset for running legacy request-style PHP concurrently. It sets <code>superglobals(true)</code> + <code>isolation(Coroutine)</code> and auto-enables the full per-coroutine isolation stack: <code>silentRedeclare</code>, <code>includeIsolation</code>, <code>coroutineGlobalsIsolation</code> (incl. object-valued <code>$GLOBALS</code>), and <code>coroutineStaticsIsolation</code>. Requires ext-zealphp. For modern apps that don\'t need superglobals, <code>App::mode(App::MODE_COROUTINE)</code> gives the same concurrency with no extension required. See <a href="/coroutines#lifecycle-modes">lifecycle modes</a> for the full preset matrix.',
-    'wins'  => 'Peak throughput. <a href="/performance">117k req/s on 4 workers</a> — Express on the same box does 20k. No code rewrites needed for legacy <code>$_GET</code>/<code>$_SESSION</code> users.',
-    'gives_up' => 'Blocking I/O outside coroutine-hooked extensions still blocks the worker. Use <code>HOOK_ALL</code> and coroutine-aware drivers.',
+    'code'  => 'App::mode(\'coroutine\');  // modern default: per-coroutine $g isolation + HOOK_ALL non-blocking I/O',
+    'desc'  => '<code>App::mode(\'coroutine\')</code> is the modern, recommended preset — <code>superglobals(false)</code> + per-coroutine <code>$g</code>/<code>RequestContext</code> isolation + <code>HOOK_ALL</code> non-blocking I/O, no extension required. Read input via <code>$g->get</code> / <code>$g->post</code> / <code>$g->session</code>. If you have legacy request-style code that reads real <code>$_GET</code>/<code>$_SESSION</code> and you want it to run under coroutine concurrency, <code>App::mode(\'coroutine-legacy\')</code> is the <strong>experimental</strong> compatibility runtime (requires ext-zealphp; it isolates the seven superglobals, <code>$GLOBALS</code>, function statics, and <code>require_once</code> state per coroutine). See <a href="/coroutines#lifecycle-modes">lifecycle modes</a> for the full preset matrix.',
+    'wins'  => 'Peak throughput. <a href="/performance">117k req/s on 4 workers</a> — Express on the same box does 20k. Thousands of concurrent connections per worker, sub-millisecond TTFB.',
+    'gives_up' => 'Blocking I/O outside coroutine-hooked extensions still blocks the worker. Use <code>HOOK_ALL</code> and coroutine-aware drivers. <code>coroutine-legacy</code> is experimental and needs ext-zealphp.',
     'highlight' => true,
   ],
 ];
@@ -161,13 +161,13 @@ foreach ($rungs as $r):
   </li>
   <li>
     <strong>CGI worker bridge (opt-in).</strong> When <code>processIsolation(true)</code>
-    is set, requests are forwarded to a subprocess — full process isolation for
-    <code>define()</code>-heavy apps like WordPress/Drupal. The default strategy is
-    <code>cgiMode('pool')</code>: a pre-spawned persistent worker pool (~1–3 ms warm
-    dispatch, <code>App::mode(App::MODE_LEGACY_CGI)</code>). <code>cgiMode('proc')</code>
-    spawns a fresh <code>proc_open</code> subprocess per request (~30–50 ms cold) and is
-    the explicit slow-fallback variant. This is opt-in, not the default. Most apps
-    don't need it.
+    is set (<code>App::mode('legacy-cgi')</code>), each public <code>.php</code> file is
+    dispatched through a warm, pre-spawned PHP worker pool — full process isolation for
+    <code>define()</code>-heavy apps like WordPress/Drupal, with the interpreter staying
+    resident between requests. The default strategy is <code>cgiMode('pool')</code>: a
+    persistent worker pool, ~1–3 ms warm dispatch (no per-request interpreter startup).
+    <code>cgiMode('fcgi')</code> instead forwards to an external FastCGI / php-fpm pool.
+    This is opt-in, not the default — most apps don't need it.
   </li>
 </ul>
 
@@ -175,6 +175,26 @@ foreach ($rungs as $r):
   Net effect — at every rung, your code can't tell it's running on OpenSwoole.
   ext-zealphp makes <code>$_GET</code>/<code>$_SESSION</code> coroutine-safe from day one;
   you opt into higher rungs when you want framework features like WebSocket and SSE.
+</p>
+
+<h2 class="mig-h2-mt-xl">The drop-in PHP-FPM equivalent: <code>App::mode('mixed')</code></h2>
+<p>
+  If you want the closest apples-to-apples swap for a PHP-FPM deployment,
+  <code>App::mode('mixed')</code> is it. It gives you native <code>$_GET</code>,
+  <code>$_POST</code>, <code>$_SESSION</code> populated per request, one request at a
+  time per warm worker — the exact execution model PHP-FPM / mod_php use — but
+  <strong>in-process</strong>, with no FastCGI socket hop and no separate web server
+  to bridge HTTP↔FastCGI. The HTTP server is built in. The worker is already warm, so
+  there's no per-request interpreter startup either.
+</p>
+<p>
+  Under the hood it expands to <code>superglobals(true) + processIsolation(false)</code>
+  with the session lifecycle handled per request — but the preset is the recommended
+  surface. Because each worker handles one request at a time, there's no coroutine race
+  on the superglobals to worry about: it's the same shared-nothing-per-request mental
+  model you already have, minus the FastCGI plumbing. This is the drop-in FPM
+  replacement story. When you're ready for concurrency, move up to
+  <code>App::mode('coroutine')</code>.
 </p>
 
 <h2 class="mig-h2-mt-xl">Apache+mod_php parity reference</h2>

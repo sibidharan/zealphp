@@ -122,19 +122,32 @@ $app-&gt;ws('/ws/counter-demo',
       To push a message to every connected client, walk your fd table and call
       <code>$server-&gt;push()</code> on each one:
     </p>
-    <pre><code class="language-php">function broadcast_counter(int $value): void {
-    $server  = App::getServer();
-    $payload = json_encode(['value' => $value]);
-    foreach (Store::table('ws_clients') as $fd =&gt; $_) {
-        $fd = (int)$fd;
-        if ($server-&gt;isEstablished($fd)) $server-&gt;push($fd, $payload);
+    <pre><code class="language-php">// src/Broadcasts.php — helpers live in a src/ class, route files stay thin
+namespace App;
+
+use ZealPHP\{App, Store};
+
+final class Broadcasts {
+    public static function counter(int $value): void {
+        $server  = App::getServer();
+        $payload = json_encode(['value' => $value]);
+        foreach (Store::table('ws_clients') as $fd =&gt; $_) {
+            $fd = (int)$fd;
+            if ($server-&gt;isEstablished($fd)) $server-&gt;push($fd, $payload);
+        }
     }
-}
+}</code></pre>
+    <p>
+      The broadcaster is a <code>public static function</code> on a small <code>src/</code> class
+      (autoloaded via PSR-4), not a top-level function in the route file &mdash; route files stay
+      thin and hot-reloadable. The call site qualifies it as <code>Broadcasts::counter(...)</code>:
+    </p>
+    <pre><code class="language-php">use App\Broadcasts;   // helpers live in a src/ class — route files stay thin
 
 // In the +1 endpoint:
 $app-&gt;route('/api/counter/bump', ['methods' =&gt; ['POST']], function () use ($counter) {
     $new = $counter-&gt;increment();
-    broadcast_counter($new);
+    Broadcasts::counter($new);
     return ['value' =&gt; $new];
 });</code></pre>
     <p>
@@ -199,7 +212,7 @@ Store::defaultBackend(Store::BACKEND_REDIS);
 // go() per message so a slow handler can't block the next read.
 App::subscribe('counter:bump', function (string $payload) {
     $data = json_decode($payload, true);
-    broadcast_counter((int) $data['value']);
+    Broadcasts::counter((int) $data['value']);   // same src/ class helper
 });
 
 // In the +1 endpoint — publish instead of broadcasting directly.

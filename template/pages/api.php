@@ -165,6 +165,30 @@ PHP]); ?>
 <tr><td><code>$this->requirePostAuth()</code></td><td>POST + authenticated guard. Returns <code>false</code> and emits <code>403</code> JSON on failure.</td></tr>
 </table>
 
+<h2 id="api-middleware">Scoping middleware to API endpoints</h2>
+<p>
+  ZealAPI files aren't individually registered routes, so there is <strong>no separate "api middleware"</strong> — <code>api/admin/x.php</code> is reached by the URL <code>/api/admin/x</code>, which flows through the same stack as everything else. Scope middleware by <strong>path</strong> with <code>App::when()</code> and it covers the api layer for free:
+</p>
+<?php App::render('/components/_code', [
+    'label' => 'app.php — path-scoped middleware covers the api layer',
+    'code'  => <<<'PHP'
+App::middlewareAlias('auth', fn() => new BasicAuthMiddleware($verifier));
+
+App::when('/api/admin', ['auth', 'admin-only']);  // every api/admin/*.php endpoint
+App::when('/api',       ['request-id']);          // the whole /api/* surface
+PHP]); ?>
+<p>For a guard that belongs to <strong>one file</strong>, declare <code>$middleware</code> inline (read like <code>$get</code>/<code>$post</code>) — it runs <strong>innermost</strong>, closest to the handler:</p>
+<?php App::render('/components/_code', [
+    'label' => 'api/admin/users/delete.php — co-located guard',
+    'code'  => <<<'PHP'
+$middleware = ['confirm-token'];   // runs after App::when('/api/admin')['auth']
+
+$delete = function () {
+    return ['deleted' => true];
+};
+PHP]); ?>
+<p class="apidoc-mb-1">Full model + ordering on the <a href="/middleware#path-scoped">middleware page</a>. Middleware <em>gates</em> the request ("should this reach the handler?"); the auth hooks below <em>identify</em> the authenticated user inside the handler — they compose.</p>
+
 <h2 id="auth-hooks">Pluggable auth hooks <span class="badge apidoc-version-badge">v0.2.25</span></h2>
 <p>
   ZealAPI doesn't know what your auth system looks like — your app might use ZealPHP sessions, a Symfony bundle, the SelfMade Ninja stack, a custom OAuth flow, or JWT in a header. So the framework <strong>doesn't bake an auth check in</strong>. Instead it consults three optional callbacks you register on <code>App</code>. They default to fail-closed values (<code>false</code>, <code>false</code>, <code>null</code>) so endpoints guarded by <code>requirePostAuth()</code> reject everything until you wire them up.

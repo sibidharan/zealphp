@@ -114,6 +114,12 @@ class ZealApiProcessApiTest extends TestCase
             $apiDir . '/users/typo.php',
             '<?php $typo = function() { return $this->paramExist(["a"]); };'
         );
+        // Root-level file (issue #157): /api/login → processApi('', 'login').
+        // Lives directly under api/ (no module subdir) and must resolve.
+        file_put_contents(
+            $apiDir . '/login.php',
+            '<?php $login = function() { return ["ok" => true, "where" => "root"]; };'
+        );
     }
 
     protected function tearDown(): void
@@ -303,6 +309,20 @@ class ZealApiProcessApiTest extends TestCase
         $r = $this->dispatch($this->makeApi(), '', 'nope');
         $this->assertNull($r['return']);
         $this->assertSame(['error' => 'method_not_found'], json_decode($r['echo'], true));
+    }
+
+    public function testRootLevelApiFileResolvesWithEmptyModule(): void
+    {
+        // Issue #157: /api/login → processApi('', 'login'). 'login' is NOT a
+        // ZealAPI method, but api/login.php exists at the root of api/, so the
+        // file-resolution block must stat + dispatch it instead of 404ing.
+        $r = $this->dispatch($this->makeApi(), '', 'login');
+        $this->assertInstanceOf(ResponseInterface::class, $r['return']);
+        $this->assertSame(200, $r['return']->getStatusCode());
+        $this->assertSame(
+            ['ok' => true, 'where' => 'root'],
+            json_decode((string) $r['return']->getBody(), true)
+        );
     }
 
     public function testTypoInsideHandlerYields404WithHint(): void

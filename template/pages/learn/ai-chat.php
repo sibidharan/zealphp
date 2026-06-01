@@ -117,10 +117,10 @@ data: {"done":true}</code></pre>
       the subprocess&rsquo;s stdout.
     </p>
     <p>
-      This is the same CGI-bridge pattern <code>cgi_worker.php</code> uses for legacy PHP files: parent
-      process forks a child, child writes a stream of bytes back through a pipe, parent forwards to
-      the client. The protocol is plain text &mdash; you can <code>cat</code> the python script&rsquo;s
-      output and read it.
+      This rides ZealPHP&rsquo;s coroutine-safe shell-out: the spawn yields to the event loop instead
+      of blocking the worker, the child writes a stream of bytes back through a pipe, and PHP forwards
+      each chunk to the client as it arrives. The protocol is plain text &mdash; you can <code>cat</code>
+      the python script&rsquo;s output and read it.
     </p>
 
     <h2 id="step-stream">5. Streaming + tool calls — the architecture</h2>
@@ -131,7 +131,7 @@ data: {"done":true}</code></pre>
     participant AI as OpenAI API
     participant API as Notes API
     B->>PHP: POST /api/learn/chat
-    PHP->>PY: proc_open (spawn)
+    PHP->>PY: spawn (coroutine-safe shell-out)
     PY->>AI: Runner.run_streamed()
     AI-->>PY: token deltas
     PY-->>PHP: SSE: event: token
@@ -190,7 +190,7 @@ WS::broadcast($u['user_id'], [
     <h3>2. The broadcaster filters by user_id (not room)</h3>
     <p>
       <code>WS::broadcast()</code> is the same shape as
-      <code>ws_session_counter_broadcast()</code> from the previous lesson — iterate the per-fd
+      <code>Demo::ws_session_counter_broadcast()</code> from the previous lesson — iterate the per-fd
       <code>Store</code> table, push to every fd whose stored key matches:
     </p>
     <pre><code class="language-php">// <a href="https://github.com/sibidharan/zealphp/blob/master/src/Learn/WS.php" class="lai-srclink">src/Learn/WS.php</a>

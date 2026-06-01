@@ -58,3 +58,4 @@ __pycache__/
 # *.pid). ZealPHP writes here per CLAUDE.md; harmless to gitignore the
 # whole subtree because nothing user-curated lives under tmp/.
 /tmp/
+.claude/settings.local.json

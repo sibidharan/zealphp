@@ -244,4 +244,91 @@ class IpAccessMiddlewareTest extends TestCase
         $this->assertTrue($response->hasHeader('Content-Type'));
         $this->assertSame('text/plain', $response->getHeaderLine('Content-Type'));
     }
+
+    // ---- IPv4-mapped IPv6 (dual-stack deny-list bypass regression) ----
+
+    public function testIpv4MappedPeerStillHitsIpv4DenyRule(): void
+    {
+        // SECURITY: on a dual-stack listener an IPv4 client arrives as
+        // ::ffff:1.2.3.4. A v4 deny rule MUST still block it (was a bypass).
+        $response = $this->process(['allow' => ['*'], 'deny' => ['1.2.3.4']], '::ffff:1.2.3.4');
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
+    public function testIpv4MappedPeerStillHitsIpv4DenyCidr(): void
+    {
+        $response = $this->process(['allow' => ['*'], 'deny' => ['1.2.3.0/24']], '::ffff:1.2.3.4');
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
+    public function testIpv4MappedPeerMatchesIpv4AllowRule(): void
+    {
+        // The allow side must normalize too — a mapped peer matching the v4
+        // allow list passes instead of being wrongly blocked.
+        $response = $this->process(['allow' => ['198.51.100.42'], 'deny' => []], '::ffff:198.51.100.42');
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    public function testGenuineIpv6PeerIsNotOverNormalized(): void
+    {
+        // A real (non-mapped) IPv6 peer must keep matching IPv6 rules.
+        $response = $this->process(['allow' => ['2001:db8::/32'], 'deny' => []], '2001:db8:1234::1');
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    // ---- mixed v4/v6 length-mismatch guard (cidrMatch l.157-158) ----
+
+    public function testMixedV4CidrVsV6IpDoesNotMatch(): void
+    {
+        // SECURITY/CORRECTNESS: a v6 client must NOT match a v4 CIDR even when
+        // their leading bytes coincide. `0.0.0.0/8` (4-byte subnet) vs `::`
+        // (16-byte IP) share a `\x00` first byte; the length-mismatch guard
+        // (`strlen($ipBin) !== strlen($subnetBin)` -> return false) is what
+        // blocks them. Kills the ReturnRemoval mutant (l.158): without the
+        // `return false`, execution falls through to the byte/prefix compare,
+        // matches the shared `\x00` first byte, hits `$rem === 0` and returns
+        // TRUE — so the v6 peer would be WRONGLY allowed (200). With the guard
+        // it is blocked (403, allow-list non-empty + no match).
+        $response = $this->process(['allow' => ['0.0.0.0/8'], 'deny' => []], '::');
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
+    public function testMixedV6CidrVsV4IpDoesNotMatch(): void
+    {
+        // The symmetric direction: a v4 client must not match a v6 CIDR.
+        // `::/8` is a 16-byte subnet, `10.0.0.1` a 4-byte IP — length mismatch
+        // -> no match -> 403 (allow-list non-empty, peer not matched).
+        $response = $this->process(['allow' => ['::/8'], 'deny' => []], '10.0.0.1');
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
+    public function testMixedV4CidrVsV6IpInDenyListDoesNotBlock(): void
+    {
+        // Same guard on the deny side: a v4 deny CIDR must not spuriously match
+        // a v6 peer (which would 403 a request that should pass). `0.0.0.0/8`
+        // deny vs `::` peer -> length mismatch -> deny does NOT match -> the
+        // wildcard allow passes the request (200). This pins that the guard
+        // makes cidrMatch return false here rather than the mutant's TRUE.
+        $response = $this->process(['allow' => ['*'], 'deny' => ['0.0.0.0/8']], '::');
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    // ---- documented EQUIVALENT mutants (no observable behaviour change) ----
+    //
+    // Infection flags four further mutants in this file as "escaped"; all are
+    // genuinely equivalent (verified by hand), so no test can kill them:
+    //
+    //   * l.78  ArrayItemRemoval  `?? ['*']` -> `?? []` — both make the default
+    //     allow-list pass every IP: `['*']` matches via the wildcard, `[]`
+    //     skips the `!empty($this->allow)` allow-check entirely. Identical for
+    //     every IP. (Also noted on testDefaultAllowsEveryone.)
+    //   * l.149 IncrementInteger  `explode('/', $cidr, 2)` -> `..., 3`. The list
+    //     destructuring only reads elements [0] and [1]; `(int)` of element [1]
+    //     stops at the first non-digit, so a third segment never changes $bits.
+    //   * l.164 GreaterThan  `$bytes > 0` -> `$bytes >= 0`. They differ only at
+    //     `$bytes === 0`, where the guarded `substr($x, 0, 0) !== substr($y,0,0)`
+    //     is `'' !== ''` (false), so the `&&` is false either way — no change.
+    //   * l.170 DecrementInteger  `& 0xff` -> `& 254`. The mask values for
+    //     $rem 1..7 are 0x80,0xc0,0xe0,0xf0,0xf8,0xfc,0xfe — every one already
+    //     has bit 0 clear, so masking with 0xff vs 0xfe is identical.
 }

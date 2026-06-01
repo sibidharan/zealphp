@@ -235,7 +235,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
     public function destroy($sessionId): bool
     {
         $this->table()->del((string) $sessionId);
-        $file = self::$savePath . '/sess_' . $sessionId;
+        $file = self::$savePath . '/sess_' . basename((string) $sessionId);
         if (is_file($file)) @unlink($file);
         unset($this->context[(string) $sessionId]);
         return true;
@@ -251,7 +251,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
             $expires = is_numeric($expRaw) ? (int) $expRaw : 0;
             if ($expires > 0 && $expires < $now) {
                 $this->table()->del((string) $id);
-                $file = self::$savePath . '/sess_' . $id;
+                $file = self::$savePath . '/sess_' . basename((string) $id);
                 if (is_file($file)) @unlink($file);
                 $count++;
             }
@@ -379,7 +379,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
 
     private function readFile(string $sessionId): string
     {
-        $file = self::$savePath . '/sess_' . $sessionId;
+        $file = self::$savePath . '/sess_' . basename((string) $sessionId);
         if (!is_file($file)) return '';
         $fp = @fopen($file, 'r');
         if (!$fp) return '';
@@ -397,7 +397,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
 
     private function writeFile(string $sessionId, string $data): bool
     {
-        $file = self::$savePath . '/sess_' . $sessionId;
+        $file = self::$savePath . '/sess_' . basename((string) $sessionId);
         $fp = @fopen($file, 'c');
         if (!$fp) return false;
         try {

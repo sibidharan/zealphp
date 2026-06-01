@@ -57,6 +57,8 @@ class RequestContext
     public mixed $openswoole_request = null;
     /** @var \OpenSwoole\Http\Response|null In tests, this slot may hold a mock — see `tests/Unit/RestTest.php` */
     public mixed $openswoole_response = null;
+    /** @var \Psr\Http\Message\ServerRequestInterface|null The PSR-7 request for the current dispatch; set by `ResponseMiddleware::process()` so ZealAPI (and other inner layers) can reach the same object the middleware stack used. */
+    public mixed $psr_request = null;
     // Legacy Apache mod_php shim state — only populated by the `apache_*()`
     // functions in `src/utils.php`, used by CGI bridge legacy code. Lazy.
     public ?\ZealPHP\Legacy\ApacheContext $apacheContext = null;
@@ -154,6 +156,20 @@ class RequestContext
         $ref =& $null;
         if (property_exists($this, $key) && isset($this->$key)) {
             $ref =& $this->$key;
+        } elseif (in_array($key, ['get', 'post', 'cookie', 'files', 'server', 'request', 'env', 'session'], true)) {
+            // The slot is an unset typed-`array` superglobal property — e.g.
+            // `session` before any session_*() call, or after CoSessionManager
+            // unset() it under sessionLifecycle(false). PHP type-checks a by-ref
+            // __get return against the unset typed property, so handing back the
+            // `null` above would TypeError ("null … must be compatible with …
+            // type array") and 500 the request — notably the access-log path
+            // reading `$g->session['username']` (issue #164). Return an empty
+            // array by ref WITHOUT initializing the property: the value is now
+            // array-compatible AND `isset($g->session)` stays false, which the
+            // session-state detection in Session/utils.php depends on. Mirrors
+            // the superglobals-mode branch above, which likewise hands back [].
+            $empty = [];
+            $ref =& $empty;
         }
         return $ref;
     }
