@@ -182,6 +182,37 @@ class ResponseMiddleware implements MiddlewareInterface
      */
     public function dispatchRoute(array $route, array $params, string $method, ?ServerRequestInterface $request = null): ResponseInterface
     {
+        $backend = $route['backend'] ?? null;
+        if (!is_array($backend)) {
+            // Fast path (the overwhelming majority): no per-route backend, so
+            // App::include() resolves the backend from the global cgiMode /
+            // registry exactly as before — byte-for-byte the pre-feature path.
+            return $this->dispatchRouteInner($route, $params, $method, $request);
+        }
+        // Make the route's backend the override for App::include() calls made
+        // anywhere inside this dispatch (handler + any per-route middleware),
+        // then restore the prior value so nested dispatches (error handler,
+        // fallback) don't inherit it.
+        $g = RequestContext::instance();
+        $prev = $g->cgi_backend_override;
+        /** @var array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>} $backend */
+        $g->cgi_backend_override = $backend;
+        try {
+            return $this->dispatchRouteInner($route, $params, $method, $request);
+        } finally {
+            $g->cgi_backend_override = $prev;
+        }
+    }
+
+    /**
+     * The middleware-vs-direct dispatch decision, factored out so
+     * `dispatchRoute()` can wrap it with the per-route backend override.
+     *
+     * @param array<string, mixed> $route
+     * @param array<string, mixed> $params
+     */
+    private function dispatchRouteInner(array $route, array $params, string $method, ?ServerRequestInterface $request): ResponseInterface
+    {
         $chain = $route['middleware'] ?? null;
         if (is_array($chain) && $chain !== []) {
             return $this->dispatchWithMiddleware($route, $params, $method, $chain, $request);

@@ -50,8 +50,9 @@ final class RouteGroup
      * @param callable|null $handler
      * @param list<string> $methods
      * @param array<int, MiddlewareInterface|string> $middleware
+     * @param array<string,mixed>|string|null $backend Per-route CGI backend (bare mode / `App::cgiBackendAlias()` name / inline config); delegated to `App::route()`.
      */
-    public function route(string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = []): void
+    public function route(string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         [$options, $handler] = $this->normalizeShorthand($options, $handler);
         $this->app->route(
@@ -60,7 +61,8 @@ final class RouteGroup
             $handler,
             $methods,
             $raw,
-            $this->combine($options, $middleware)
+            $this->combine($options, $middleware),
+            $backend
         );
     }
 
@@ -69,8 +71,9 @@ final class RouteGroup
      * @param callable|null $handler
      * @param list<string> $methods
      * @param array<int, MiddlewareInterface|string> $middleware
+     * @param array<string,mixed>|string|null $backend Per-route CGI backend (bare mode / `App::cgiBackendAlias()` name / inline config); delegated to `App::nsRoute()`.
      */
-    public function nsRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = []): void
+    public function nsRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         [$options, $handler] = $this->normalizeShorthand($options, $handler);
         $this->app->nsRoute(
@@ -80,7 +83,8 @@ final class RouteGroup
             $handler,
             $methods,
             $raw,
-            $this->combine($options, $middleware)
+            $this->combine($options, $middleware),
+            $backend
         );
     }
 
@@ -89,8 +93,9 @@ final class RouteGroup
      * @param callable|null $handler
      * @param list<string> $methods
      * @param array<int, MiddlewareInterface|string> $middleware
+     * @param array<string,mixed>|string|null $backend Per-route CGI backend (bare mode / `App::cgiBackendAlias()` name / inline config); delegated to `App::nsPathRoute()`.
      */
-    public function nsPathRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = []): void
+    public function nsPathRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         [$options, $handler] = $this->normalizeShorthand($options, $handler);
         $this->app->nsPathRoute(
@@ -100,7 +105,8 @@ final class RouteGroup
             $handler,
             $methods,
             $raw,
-            $this->combine($options, $middleware)
+            $this->combine($options, $middleware),
+            $backend
         );
     }
 
@@ -113,8 +119,9 @@ final class RouteGroup
      * @param callable|null $handler
      * @param list<string> $methods
      * @param array<int, MiddlewareInterface|string> $middleware
+     * @param array<string,mixed>|string|null $backend Per-route CGI backend (bare mode / `App::cgiBackendAlias()` name / inline config); delegated to `App::patternRoute()`.
      */
-    public function patternRoute(string $regex, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = []): void
+    public function patternRoute(string $regex, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         [$options, $handler] = $this->normalizeShorthand($options, $handler);
         $this->app->patternRoute(
@@ -123,7 +130,8 @@ final class RouteGroup
             $handler,
             $methods,
             $raw,
-            $this->combine($options, $middleware)
+            $this->combine($options, $middleware),
+            $backend
         );
     }
 

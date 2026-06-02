@@ -43,6 +43,7 @@ Because inclusion is order-insensitive, keep your files focused (one feature per
   - `methods` (`array`, default `['GET']`) — allowed HTTP verbs. Lowercase verbs are normalised to uppercase.
   - `raw` (`bool`, default `false`) — skip the per-request output buffer (`ob_start()`). Use it for handlers that stream or write to `$response` directly (SSE, `$response->stream()`, binary payloads) instead of relying on the framework to capture echoed output.
   - `middleware` (`array`, default `[]`) — a per-route PSR-15 middleware chain (instances and/or named alias strings). Purely additive: routes without it take the unchanged fast path. See [Per-route middleware](#per-route-middleware) below.
+  - `backend` (`string|array`, default none) — the CGI dispatch strategy for this route's `App::include()` (`'pool'`/`'proc'`/`'fork'`/`'fcgi'`, a `cgiBackendAlias()` name, or an inline config array). See [Per-route backend](#per-route-backend--backend) below.
 - Return values:
   - `int`: response status code
   - `ResponseInterface`: emitted as-is
@@ -231,6 +232,36 @@ $app->run();
 ```
 
 `ZealPHP\Middleware\RequestIdMiddleware` (used above) assigns/propagates an `X-Request-Id` correlation id and echoes it on the response; handlers read it from the per-request memo (`RequestContext::once('request_id', fn () => null)`). It is stateless and coroutine-safe — the canonical shape for per-route middleware.
+
+## Per-route backend — `backend:`
+
+A route can choose its own **CGI dispatch strategy** for the file its handler `App::include()`s, via the `backend:` option. Like `middleware:`, it is accepted by all four registrars (`route()` / `nsRoute()` / `nsPathRoute()` / `patternRoute()`) and `$app->group()`, as a named argument **and** an array-option key (named arg wins), and is purely additive — a route with no `backend:` resolves the dispatch backend from the global `App::cgiMode()` / registry exactly as before.
+
+It accepts a **bare mode** (`'pool'` / `'proc'` / `'fork'` / `'fcgi'`), an **alias** registered with `App::cgiBackendAlias()`, or an **inline config array**:
+
+```php
+use ZealPHP\App;
+
+// Serve the document root on fork-per-request (Apache MPM prefork);
+App::cgiMode('fork');
+
+// …but this one route forwards to an external php-fpm pool:
+$app->route('/legacy/{path}', methods: ['GET', 'POST'],
+    backend: ['mode' => 'fcgi', 'address' => 'unix:/run/php-fpm.sock'],
+    handler: fn ($path) => App::include("/legacy/$path"));
+
+// …and this one runs a Python CGI script via proc:
+$app->route('/report', backend: ['mode' => 'proc', 'interpreter' => '/usr/bin/python3'],
+    handler: fn () => App::include('/cgi-bin/report.py'));
+
+// Array-option form + a named alias (registered once at boot):
+App::cgiBackendAlias('wp-fork', 'fork');
+$app->route('/wp/{path}', ['backend' => 'wp-fork'], fn ($path) => App::include("/wp/$path"));
+```
+
+`backend:` only affects a handler that actually calls `App::include()` — a pure-closure handler (`fn () => ['ok' => true]`) has no file to dispatch, so the option is a no-op there. A route that names a backend is **itself the ExecCGI authorisation** for its include (no separate `exec_paths` registration needed). Register `cgiBackendAlias()`es **before** the routes that reference them (the natural `app.php`-before-`route/*.php` order).
+
+> **`backend:` is the CGI-isolation family only.** The four dispatch modes (`pool`/`proc`/`fork`/`fcgi`) choose *how a request is isolated as a subprocess* — they can vary per route. The **scheduler** axis (`coroutine` ↔ `coroutine-legacy`, `HOOK_ALL`) **cannot**: `enable_coroutine` and `Runtime::enableCoroutine(HOOK_ALL)` are process-wide, frozen at `$server->start()`. Passing `backend: 'coroutine-legacy'` (or any lifecycle-mode name) **throws at registration** — to mix scheduler modes, run separate processes per port behind a reverse proxy. See [FastCGI Backends](fastcgi-backends.md) for the per-extension / `cgiScriptAlias()` form (scope by extension + URL prefix instead of by route name).
 
 ## Accessing Request Context
 

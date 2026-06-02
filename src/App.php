@@ -38,11 +38,11 @@ use OpenSwoole\Coroutine as co;
  */
 class App
 {
-    /** @var array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>}> */
+    /** @var array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}> */
     protected array $routes = [];
-    /** @var array<string, array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>}>> */
+    /** @var array<string, array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>> */
     protected array $routes_by_method = [];
-    /** @var array<string, array<string, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>}>> */
+    /** @var array<string, array<string, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>> */
     protected array $routes_by_exact_method = [];
     /**
      * Snapshot of the route/middleware registries taken at `App::run()` *before*
@@ -58,10 +58,11 @@ class App
      * their registration.
      *
      * @var array{
-     *   routes: array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>}>,
-     *   implicit: array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>}>,
+     *   routes: array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>,
+     *   implicit: array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>,
      *   when: list<array{type:string, key:string, spec:list<\Psr\Http\Server\MiddlewareInterface|string>}>,
-     *   aliases: array<string, \Psr\Http\Server\MiddlewareInterface|callable>
+     *   aliases: array<string, \Psr\Http\Server\MiddlewareInterface|callable>,
+     *   backend_aliases?: array<string, array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}>
      * }|null
      */
     protected ?array $route_baseline = null;
@@ -680,6 +681,17 @@ class App
      * @var array<string, array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>}>
      */
     public static array $cgi_script_aliases = [];
+    /**
+     * Named CGI backend aliases for the per-route `backend:` option, registered
+     * via `App::cgiBackendAlias()`. Maps an alias name to a normalised backend
+     * config (the same shape `resolveCgiBackend()` returns, minus `exec_paths`).
+     * Resolved at route registration so `backend: 'wp-fork'` becomes a concrete
+     * dispatch strategy with zero per-request lookup. Mirrors the
+     * `$middleware_aliases` precedent.
+     *
+     * @var array<string, array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}>
+     */
+    public static array $cgi_backend_aliases = [];
     /**
      * OpenSwoole `enable_coroutine` server-setting override. `null` means
      * "follow `!$superglobals`" (true → coroutine-per-request, false → one
@@ -2252,6 +2264,195 @@ class App
     {
         self::$cgi_backends = [];
         self::$cgi_script_aliases = [];
+        self::$cgi_backend_aliases = [];
+    }
+
+    /**
+     * The four CGI dispatch strategies a per-route `backend:` may name — the
+     * CGI-ISOLATION family. Excludes the COROUTINE-SCHEDULER family
+     * (`coroutine`/`coroutine-legacy`/`legacy-cgi`/`mixed`), which is a
+     * process-wide lifecycle decision frozen at `$server->start()` and cannot
+     * be chosen per route. See `normalizeBackendConfig()`'s guard.
+     */
+    private const ROUTE_BACKEND_MODES = ['pool', 'proc', 'fork', 'fcgi'];
+
+    /**
+     * Lifecycle modes a user might mistakenly pass as a route backend. Rejected
+     * with a message pointing at the separate-process model.
+     */
+    private const LIFECYCLE_MODE_NAMES = ['coroutine', 'coroutine-legacy', 'legacy-cgi', 'mixed'];
+
+    /**
+     * Register a named CGI backend alias for the per-route `backend:` option —
+     * the `App::middlewareAlias()` of the CGI dispatch world. Lets a route say
+     * `backend: 'wp-fork'` instead of repeating an inline config.
+     *
+     * ```php
+     * App::cgiBackendAlias('wp-fork', 'fork');                         // bare mode
+     * App::cgiBackendAlias('py', ['mode' => 'proc', 'interpreter' => '/usr/bin/python3']);
+     * App::cgiBackendAlias('fpm', ['mode' => 'fcgi', 'address' => 'unix:/run/php-fpm.sock']);
+     * ```
+     *
+     * Register aliases BEFORE the routes that reference them (e.g. in `app.php`
+     * before `route/*.php` load — the natural order). The config is resolved +
+     * validated here, so a bad mode / missing `fcgi` address / a lifecycle-mode
+     * name throws at registration, not at request time.
+     *
+     * @param string $name Alias name. Must be non-empty and not collide with a reserved mode (`pool`/`proc`/`fork`/`fcgi`).
+     * @param array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}|string $config A bare mode string, or an inline backend config array.
+     * @throws \InvalidArgumentException on a reserved/empty name, a non-mode string config, an invalid mode, a lifecycle-mode name, or `fcgi` without an `address`.
+     */
+    public static function cgiBackendAlias(string $name, array|string $config): void
+    {
+        $name = trim($name);
+        if ($name === '' || in_array($name, self::ROUTE_BACKEND_MODES, true)) {
+            throw new \InvalidArgumentException(
+                "App::cgiBackendAlias() name must be non-empty and not a reserved mode name "
+                . "('pool'|'proc'|'fork'|'fcgi'); got '{$name}'."
+            );
+        }
+        if (is_string($config)) {
+            if (!in_array($config, self::ROUTE_BACKEND_MODES, true)) {
+                throw new \InvalidArgumentException(
+                    "App::cgiBackendAlias('{$name}', '{$config}'): a string config must be a bare mode "
+                    . "('pool'|'proc'|'fork'|'fcgi'); use an array for interpreter/address/fcgi_params."
+                );
+            }
+            $config = ['mode' => $config];
+        }
+        self::$cgi_backend_aliases[$name] = self::normalizeBackendConfig($config);
+    }
+
+    /**
+     * Normalise + validate one inline backend config array into the canonical
+     * shape (`mode` + the optional `interpreter`/`address`/`fcgi_params`). The
+     * single validation point for `cgiBackendAlias()` and `resolveBackendSpec()`.
+     *
+     * @param array<array-key, mixed> $config
+     * @return array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}
+     * @throws \InvalidArgumentException on a lifecycle-mode name, an invalid mode, or `fcgi` without an `address`.
+     */
+    private static function normalizeBackendConfig(array $config): array
+    {
+        $mode = is_string($config['mode'] ?? null) ? (string) $config['mode'] : '';
+        if (in_array($mode, self::LIFECYCLE_MODE_NAMES, true)) {
+            throw new \InvalidArgumentException(self::lifecycleBackendMessage($mode));
+        }
+        if (!in_array($mode, self::ROUTE_BACKEND_MODES, true)) {
+            throw new \InvalidArgumentException(
+                "Route backend mode must be 'pool', 'proc', 'fork', or 'fcgi'; got '{$mode}'."
+            );
+        }
+        if ($mode === 'fcgi' && empty($config['address'])) {
+            throw new \InvalidArgumentException(
+                "Route backend 'fcgi' mode requires an 'address' (host:port or unix:/path)."
+            );
+        }
+        $entry = ['mode' => $mode];
+        $interpreter = $config['interpreter'] ?? null;
+        if (is_string($interpreter)) {
+            $entry['interpreter'] = $interpreter;
+        }
+        $address = $config['address'] ?? null;
+        if (is_string($address)) {
+            $entry['address'] = $address;
+        }
+        $fcgiParams = $config['fcgi_params'] ?? null;
+        if (is_array($fcgiParams)) {
+            /** @var array<string, string> $fcgiParams */
+            $entry['fcgi_params'] = $fcgiParams;
+        }
+        return $entry;
+    }
+
+    /**
+     * Resolve a route `backend:` spec — a bare mode string, a registered alias
+     * name, or an inline config array — into a concrete backend config. `null`
+     * passes through (no backend). Called at route registration; the dispatch
+     * hot path never re-resolves.
+     *
+     * @param array<array-key, mixed>|string $spec
+     * @return array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}|null
+     * @throws \InvalidArgumentException on a lifecycle-mode name, an unknown alias, or an invalid inline config.
+     */
+    private static function resolveBackendSpec(array|string $spec): ?array
+    {
+        if (is_string($spec)) {
+            $s = trim($spec);
+            if ($s === '') {
+                return null;
+            }
+            if (in_array($s, self::ROUTE_BACKEND_MODES, true)) {
+                return self::normalizeBackendConfig(['mode' => $s]);
+            }
+            if (in_array($s, self::LIFECYCLE_MODE_NAMES, true)) {
+                throw new \InvalidArgumentException(self::lifecycleBackendMessage($s));
+            }
+            if (!isset(self::$cgi_backend_aliases[$s])) {
+                throw new \InvalidArgumentException(
+                    "Unknown route backend alias '{$s}'. Register it with "
+                    . "App::cgiBackendAlias('{$s}', [...]) BEFORE the route, or use a bare mode "
+                    . "('pool'|'proc'|'fork'|'fcgi') or an inline config array."
+                );
+            }
+            return self::$cgi_backend_aliases[$s];
+        }
+        return self::normalizeBackendConfig($spec);
+    }
+
+    /**
+     * The error shown when a route `backend:` (or a `cgiBackendAlias`) is given
+     * a process-wide lifecycle mode instead of a CGI dispatch strategy.
+     */
+    private static function lifecycleBackendMessage(string $mode): string
+    {
+        return "Route backend '{$mode}' is a process-wide lifecycle mode, not a per-route CGI backend. "
+            . "coroutine / coroutine-legacy / legacy-cgi / mixed are frozen at server start "
+            . "(OpenSwoole's enable_coroutine + Runtime::enableCoroutine(HOOK_ALL) are process-global), "
+            . "so they cannot vary per route — run separate processes per port behind a proxy to mix them. "
+            . "Valid route backends: 'pool', 'proc', 'fork', 'fcgi', an inline config array, "
+            . "or a registered App::cgiBackendAlias() name.";
+    }
+
+    /**
+     * Combine the two ways a route can declare a backend — the `'backend'` key
+     * in `$options` and the `backend:` named argument — and resolve to a
+     * concrete config. The named argument wins when both are present. Returns
+     * `null` (the fast path: no per-route backend) when neither is set.
+     *
+     * @param array<int|string, mixed> $options
+     * @param array<string, mixed>|string|null $backendArg
+     * @return array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}|null
+     */
+    private static function routeBackendSpec(array $options, array|string|null $backendArg): ?array
+    {
+        if ($backendArg !== null) {
+            return self::resolveBackendSpec($backendArg);
+        }
+        $fromOptions = $options['backend'] ?? null;
+        if (is_array($fromOptions) || is_string($fromOptions)) {
+            return self::resolveBackendSpec($fromOptions);
+        }
+        return null;
+    }
+
+    /**
+     * Apply the per-request route backend override (set by the matched route's
+     * `backend:` option in `ResponseMiddleware::dispatchRoute()`) over a
+     * `resolveCgiBackend()` result. A route that names a backend is itself the
+     * ExecCGI authorisation for its `App::include()`, so `mayExecute` is forced
+     * `true`. No override → the resolved backend passes through unchanged.
+     *
+     * @param array{backend: array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>, exec_paths?:array<int,string>}, mayExecute: bool} $cgi
+     * @return array{backend: array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>, exec_paths?:array<int,string>}, mayExecute: bool}
+     */
+    private static function applyRouteBackend(array $cgi): array
+    {
+        $override = RequestContext::instance()->cgi_backend_override;
+        if (is_array($override)) {
+            return ['backend' => $override, 'mayExecute' => true];
+        }
+        return $cgi;
     }
 
     /**
@@ -3270,7 +3471,7 @@ class App
     }
 
     /**
-     * @return array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>}>
+     * @return array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>
      */
     public function routes(): array
     {
@@ -3278,7 +3479,7 @@ class App
     }
 
     /**
-     * @return array<string, array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>}>>
+     * @return array<string, array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>>
      */
     public function routesByMethod(): array
     {
@@ -3286,7 +3487,7 @@ class App
     }
 
     /**
-     * @return array<string, array<string, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>}>>
+     * @return array<string, array<string, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>>
      */
     public function routesByExactMethod(): array
     {
@@ -3358,10 +3559,12 @@ class App
             foreach ($route['middleware'] as $mw) {
                 $chain[] = self::middlewareDisplayName($mw);
             }
+            $backend = $route['backend'] ?? null;
             $routes[] = [
                 'methods'    => array_values($route['methods']),
                 'path'       => $route['path'],
                 'middleware' => $chain,
+                'backend'    => is_array($backend) ? $backend : null,
                 'handler'    => self::handlerDisplayName($route['handler']),
             ];
         }
@@ -4630,8 +4833,9 @@ class App
      * @param list<string> $methods Named-arg form of $options['methods'] (HTTP verbs); merged into $options.
      * @param bool $raw Named-arg form of $options['raw'] (skip output buffering).
      * @param array<int,\Psr\Http\Server\MiddlewareInterface|string> $middleware Named-arg form of $options['middleware'] — per-route PSR-15 middleware (instances or registered aliases); combined with $options['middleware'].
+     * @param array<string,mixed>|string|null $backend Per-route CGI dispatch backend for this route's `App::include()` — a bare mode (`'pool'`/`'proc'`/`'fork'`/`'fcgi'`), a registered `App::cgiBackendAlias()` name, or an inline config array (`['mode'=>'proc','interpreter'=>'/usr/bin/python3']`). Named-arg form of `$options['backend']` (named arg wins). Rejects lifecycle-mode names (coroutine/coroutine-legacy/...) — those are process-wide, not per-route.
      */
-    public function route(string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = []): void
+    public function route(string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         // If only two arguments are provided, assume second is handler and no options.
         // But it's good that we clearly specify all three arguments in usage.
@@ -4670,6 +4874,7 @@ class App
             'param_map'  => $this->buildParamMap($handler),
             'raw'        => (bool)($options['raw'] ?? false),
             'middleware' => self::routeMiddlewareSpec($options, $middleware),
+            'backend'    => self::routeBackendSpec($options, $backend),
         ];
     }
 
@@ -4683,8 +4888,9 @@ class App
      * @param list<string> $methods Named-arg form of $options['methods'] (HTTP verbs); merged into $options.
      * @param bool $raw Named-arg form of $options['raw'] (skip output buffering).
      * @param array<int,\Psr\Http\Server\MiddlewareInterface|string> $middleware Named-arg form of $options['middleware'] — per-route PSR-15 middleware (instances or registered aliases); combined with $options['middleware'].
+     * @param array<string,mixed>|string|null $backend Per-route CGI dispatch backend for this route's `App::include()` — a bare mode (`'pool'`/`'proc'`/`'fork'`/`'fcgi'`), a registered `App::cgiBackendAlias()` name, or an inline config array (`['mode'=>'proc','interpreter'=>'/usr/bin/python3']`). Named-arg form of `$options['backend']` (named arg wins). Rejects lifecycle-mode names (coroutine/coroutine-legacy/...) — those are process-wide, not per-route.
      */
-    public function nsRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = []): void
+    public function nsRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         // If only two arguments are provided, assume second is handler and no options.
         if (is_callable($options) && $handler === null) {
@@ -4722,6 +4928,7 @@ class App
             'param_map'  => $this->buildParamMap($handler),
             'raw'        => (bool)($options['raw'] ?? false),
             'middleware' => self::routeMiddlewareSpec($options, $middleware),
+            'backend'    => self::routeBackendSpec($options, $backend),
         ];
     }
 
@@ -4745,8 +4952,9 @@ class App
      * @param list<string> $methods Named-arg form of $options['methods'] (HTTP verbs); merged into $options.
      * @param bool $raw Named-arg form of $options['raw'] (skip output buffering).
      * @param array<int,\Psr\Http\Server\MiddlewareInterface|string> $middleware Named-arg form of $options['middleware'] — per-route PSR-15 middleware (instances or registered aliases); combined with $options['middleware'].
+     * @param array<string,mixed>|string|null $backend Per-route CGI dispatch backend for this route's `App::include()` — a bare mode (`'pool'`/`'proc'`/`'fork'`/`'fcgi'`), a registered `App::cgiBackendAlias()` name, or an inline config array (`['mode'=>'proc','interpreter'=>'/usr/bin/python3']`). Named-arg form of `$options['backend']` (named arg wins). Rejects lifecycle-mode names (coroutine/coroutine-legacy/...) — those are process-wide, not per-route.
      */
-    public function nsPathRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = []): void
+    public function nsPathRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         // If only two arguments are provided, assume second is handler and no options.
         if (is_callable($options) && $handler === null) {
@@ -4799,6 +5007,7 @@ class App
             'param_map'  => $this->buildParamMap($handler),
             'raw'        => (bool)($options['raw'] ?? false),
             'middleware' => self::routeMiddlewareSpec($options, $middleware),
+            'backend'    => self::routeBackendSpec($options, $backend),
         ];
     }
 
@@ -4816,8 +5025,9 @@ class App
      * @param list<string> $methods Named-arg form of $options['methods'] (HTTP verbs); merged into $options.
      * @param bool $raw Named-arg form of $options['raw'] (skip output buffering).
      * @param array<int,\Psr\Http\Server\MiddlewareInterface|string> $middleware Named-arg form of $options['middleware'] — per-route PSR-15 middleware (instances or registered aliases); combined with $options['middleware'].
+     * @param array<string,mixed>|string|null $backend Per-route CGI dispatch backend for this route's `App::include()` — a bare mode (`'pool'`/`'proc'`/`'fork'`/`'fcgi'`), a registered `App::cgiBackendAlias()` name, or an inline config array (`['mode'=>'proc','interpreter'=>'/usr/bin/python3']`). Named-arg form of `$options['backend']` (named arg wins). Rejects lifecycle-mode names (coroutine/coroutine-legacy/...) — those are process-wide, not per-route.
      */
-    public function patternRoute(string $regex, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = []): void
+    public function patternRoute(string $regex, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         // If only two arguments are provided
         if (is_callable($options) && $handler === null) {
@@ -4851,6 +5061,7 @@ class App
             'param_map'  => $this->buildParamMap($handler),
             'raw'        => (bool)($options['raw'] ?? false),
             'middleware' => self::routeMiddlewareSpec($options, $middleware),
+            'backend'    => self::routeBackendSpec($options, $backend),
         ];
     }
 
@@ -5647,7 +5858,10 @@ class App
         $g->server['SCRIPT_NAME']     = '/' . $rel;
         $g->server['SCRIPT_FILENAME'] = $absPath;
 
-        $cgi   = self::resolveCgiBackend($absPath, '/' . $rel);
+        // A matched route's `backend:` option (request-scoped, set by
+        // ResponseMiddleware::dispatchRoute) overrides the path-resolved backend
+        // for THIS request's include — and authorises execution for it.
+        $cgi   = self::applyRouteBackend(self::resolveCgiBackend($absPath, '/' . $rel));
         $isPhp = str_ends_with(strtolower($absPath), '.php');
 
         if (!$isPhp) {
@@ -5706,8 +5920,9 @@ class App
             return self::include($rel, []);
         }
         // Outside the document root — preserve legacy "trust the caller"
-        // semantics while still applying the universal return contract.
-        $cgi   = self::resolveCgiBackend($path, $path);
+        // semantics while still applying the universal return contract. A
+        // route `backend:` override still applies (same request-scoped slot).
+        $cgi   = self::applyRouteBackend(self::resolveCgiBackend($path, $path));
         $isPhp = str_ends_with(strtolower($path), '.php');
 
         if (!$isPhp) {
@@ -6510,6 +6725,7 @@ class App
             // alias/scope/route in a route file actually disappears on reload.
             self::$when_middleware          = $baseline['when'];
             self::$middleware_aliases       = $baseline['aliases'];
+            self::$cgi_backend_aliases      = $baseline['backend_aliases'] ?? [];
             self::$when_middleware_compiled = [];
             self::$when_middleware_memo     = [];
 
@@ -6853,6 +7069,7 @@ class App
         $baselineExplicitRoutes = $this->routes;
         $baselineWhen           = self::$when_middleware;
         $baselineAliases        = self::$middleware_aliases;
+        $baselineBackendAliases = self::$cgi_backend_aliases;
 
         # Include all files in route directory and its sub directories
         $this->includeRouteFiles();
@@ -6864,10 +7081,11 @@ class App
         // registered: keep them as data (closures survive) so reloadRoutes()
         // re-appends them after the re-included route files, in priority order.
         $this->route_baseline = [
-            'routes'   => $baselineExplicitRoutes,
-            'implicit' => array_slice($this->routes, $baselineFileEndCount),
-            'when'     => $baselineWhen,
-            'aliases'  => $baselineAliases,
+            'routes'          => $baselineExplicitRoutes,
+            'implicit'        => array_slice($this->routes, $baselineFileEndCount),
+            'when'            => $baselineWhen,
+            'aliases'         => $baselineAliases,
+            'backend_aliases' => $baselineBackendAliases,
         ];
 
         $this->registerTaskHandlers($server, $effective_settings);

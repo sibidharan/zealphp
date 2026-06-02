@@ -49,6 +49,15 @@ class RequestContext
     public ?int $status = null;
     public ?bool $_streaming = null;
     public ?bool $_session_started = null;
+    /**
+     * Per-request CGI backend override set by the matched route's `backend:`
+     * option in `ResponseMiddleware::dispatchRoute()`, read by `App::include()`
+     * to pick the dispatch strategy (`pool`/`proc`/`fork`/`fcgi` + interpreter/
+     * address) for THIS request's includes. `null` = no override (fall back to
+     * `App::resolveCgiBackend()` / the global `App::cgiMode()`).
+     * @var array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}|null
+     */
+    public ?array $cgi_backend_override = null;
     /** @var \ZealPHP\HTTP\Request|null In tests, this slot may hold a mock — see `tests/Unit/RestTest.php` */
     public mixed $zealphp_request = null;
     /** @var \ZealPHP\HTTP\Response|null In tests, this slot may hold a mock — see `tests/Unit/RestTest.php` */
