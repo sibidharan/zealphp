@@ -618,6 +618,14 @@ class App
      */
     public static ?\ZealPHP\CGI\ForkPool $cgi_fork_instance = null;
     /**
+     * Live-child concurrency cap for `cgiMode('fork')` — the fork-master refuses
+     * to fork past this many simultaneous children (fork-bomb guard + backpressure).
+     * Defaults to 16; this is a per-request fork ceiling, NOT the pre-spawned
+     * process count `cgi_pool_size` (which would wrongly throttle to 4 under a
+     * coroutine worker handling many concurrent requests).
+     */
+    public static int $cgi_fork_max_concurrent = 16;
+    /**
      * Per-extension CGI backend registry. Apache `AddHandler`/`ProxyPassMatch`
      * + nginx `fastcgi_pass`-per-location parity.
      *

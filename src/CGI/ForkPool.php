@@ -59,6 +59,7 @@ final class ForkPool
         $env = array_merge(getenv(), [
             'ZEALPHP_FORK_SOCK'           => $this->sockPath,
             'ZEALPHP_FORK_MAX_CONCURRENT' => (string) max(1, $this->maxConcurrent),
+            'ZEALPHP_FORK_TIMEOUT'        => (string) (App::$cgi_timeout > 0 ? App::$cgi_timeout : 60),
             'ZEALPHP_CWD'                 => $cwd,
         ]);
 
@@ -74,18 +75,18 @@ final class ForkPool
         }
         $this->proc = $proc;
 
-        // Readiness = the master has bound the socket and accepts connections.
+        // Readiness = the master has bound the socket. stream_socket_server binds
+        // + listens atomically, so once the socket FILE exists the master is
+        // accepting. Poll the file (NOT a real connection — connecting here would
+        // make the master fork a child for a request that never arrives).
         $deadline = microtime(true) + 10.0;
         while (microtime(true) < $deadline) {
             $st = proc_get_status($proc);
             if (!$st['running']) {
                 break; // master died during boot
             }
-            $errno = 0;
-            $errstr = '';
-            $probe = @stream_socket_client('unix://' . $this->sockPath, $errno, $errstr, 0.5);
-            if (is_resource($probe)) {
-                @fclose($probe);
+            clearstatcache(false, $this->sockPath);
+            if (file_exists($this->sockPath)) {
                 $this->ready = true;
                 break;
             }

@@ -275,13 +275,41 @@ if ($listener === false) {
 @chmod($sockPath, 0700);
 
 pcntl_async_signals(true);
+
+// Per-child execution deadline (the legacy `include` has no timeout of its own).
+// A wedged child — slow/deadlocked DB query, flock, blocking read, infinite loop
+// — is SIGKILLed once it exceeds this, so its concurrency slot is reclaimed.
+$forkTimeout = (float) (getenv('ZEALPHP_FORK_TIMEOUT') ?: '60');
+if ($forkTimeout <= 0) {
+    $forkTimeout = 60.0;
+}
+
 $__fm_running = true;
-$__fm_live    = 0;
-$__fm_reap = function () use (&$__fm_live): void {
+/** @var array<int,float> live children: pid => fork start time. count() = $__fm_live. */
+$__fm_children = [];
+
+// Reap exited children and drop them from the live map (so count() is accurate).
+$__fm_reap = function () use (&$__fm_children): void {
     while (($p = @pcntl_waitpid(-1, $st, WNOHANG)) > 0) {
-        $__fm_live = max(0, $__fm_live - 1);
+        unset($__fm_children[$p]);
     }
 };
+// Watchdog: SIGKILL any child that has run past $forkTimeout (the proc/pool
+// modes kill a wedged subprocess on timeout; fork mode needs the same). The
+// reaper then drops it on the resulting SIGCHLD.
+$__fm_watchdog = function () use (&$__fm_children, $forkTimeout): void {
+    $now = microtime(true);
+    foreach ($__fm_children as $pid => $started) {
+        if (($now - $started) > $forkTimeout) {
+            @posix_kill($pid, SIGKILL);
+        }
+    }
+};
+// True once our parent OpenSwoole worker has died (reparented to init).
+$__fm_orphaned = static function (): bool {
+    return function_exists('posix_getppid') && posix_getppid() === 1;
+};
+
 pcntl_signal(SIGCHLD, $__fm_reap);
 pcntl_signal(SIGTERM, function () use (&$__fm_running): void { $__fm_running = false; });
 pcntl_signal(SIGINT, function () use (&$__fm_running): void { $__fm_running = false; });
@@ -293,21 +321,38 @@ while ($__fm_running) {
     // Orphan guard: if the OpenSwoole worker that spawned us died (uncleanly,
     // without close()-ing us), our ppid reparents to init (1). Exit so we never
     // leak as an orphaned fork-master holding a stale socket.
-    if (function_exists('posix_getppid') && posix_getppid() === 1) {
+    if ($__fm_orphaned()) {
         break;
     }
-    // Backpressure: never accept past the live-child cap (fork-bomb guard).
-    while ($__fm_live >= $maxConcurrent) {
+    // Backpressure: never accept past the live-child cap (fork-bomb guard). The
+    // spin keeps reaping, killing wedged children, and re-checking the orphan
+    // guard — so the master can NEVER spin forever or leak when its parent dies
+    // while it sits at the cap.
+    while (count($__fm_children) >= $maxConcurrent) {
+        $__fm_watchdog();
         $__fm_reap();
-        usleep(1000);
+        if ($__fm_orphaned()) {
+            break 2;
+        }
+        usleep(2000);
     }
+    // Sweep wedged children even below the cap (don't wait for saturation).
+    $__fm_watchdog();
+
     $conn = @stream_socket_accept($listener, 1.0);
     if ($conn === false) {
-        continue; // accept timeout (re-check $__fm_running) or EINTR
+        continue; // accept timeout (re-check loop guards) or EINTR
     }
 
+    // Block SIGCHLD across fork + register so the reaper can NEVER run between
+    // pcntl_fork() returning and recording the child — which would otherwise
+    // leak the live count upward (a fast child reaped before it is recorded).
+    // Unblocking after register lets any pending SIGCHLD fire and correctly drop
+    // an already-exited child.
+    @pcntl_sigprocmask(SIG_BLOCK, [SIGCHLD]);
     $pid = pcntl_fork();
     if ($pid === -1) {
+        @pcntl_sigprocmask(SIG_UNBLOCK, [SIGCHLD]);
         IPC::writeFrame($conn, ['status' => 503, 'body' => 'fork_master: fork failed', 'headers' => [], 'cookies' => [], 'rawcookies' => []]);
         @fclose($conn);
         continue;
@@ -315,6 +360,7 @@ while ($__fm_running) {
 
     if ($pid === 0) {
         // ── CHILD (still at this script's TOP-LEVEL scope) ──
+        @pcntl_sigprocmask(SIG_UNBLOCK, [SIGCHLD]); // don't inherit the blocked mask
         @fclose($listener);            // only the parent accepts
         pcntl_signal(SIGCHLD, SIG_DFL);
         pcntl_signal(SIGTERM, SIG_DFL);
@@ -366,10 +412,15 @@ while ($__fm_running) {
     }
 
     // ── PARENT ──
-    $__fm_live++;
+    $__fm_children[$pid] = microtime(true);
+    @pcntl_sigprocmask(SIG_UNBLOCK, [SIGCHLD]); // safe now that the child is recorded
     @fclose($conn); // the child owns the connection
 }
 
+// Shutdown: SIGKILL any still-live children so none linger past the master.
+foreach (array_keys($__fm_children) as $__fm_pid) {
+    @posix_kill($__fm_pid, SIGKILL);
+}
 @fclose($listener);
 @unlink($sockPath);
 exit(0);
