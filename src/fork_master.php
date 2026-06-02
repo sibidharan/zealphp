@@ -290,6 +290,12 @@ pcntl_signal(SIGINT, function () use (&$__fm_running): void { $__fm_running = fa
 fwrite(STDERR, "ZEALPHP_FORK_SERVER_READY\n");
 
 while ($__fm_running) {
+    // Orphan guard: if the OpenSwoole worker that spawned us died (uncleanly,
+    // without close()-ing us), our ppid reparents to init (1). Exit so we never
+    // leak as an orphaned fork-master holding a stale socket.
+    if (function_exists('posix_getppid') && posix_getppid() === 1) {
+        break;
+    }
     // Backpressure: never accept past the live-child cap (fork-bomb guard).
     while ($__fm_live >= $maxConcurrent) {
         $__fm_reap();
