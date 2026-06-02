@@ -24,6 +24,8 @@ final class AppModeIsolationTest extends TestCase
     private static string $origCgiMode = 'pool';
     private static bool $origSr = false;
     private static bool $origIi = false;
+    private static int $origCpmr = 500;
+    private static bool $origCpmrSet = false;
 
     public static function setUpBeforeClass(): void
     {
@@ -34,11 +36,16 @@ final class AppModeIsolationTest extends TestCase
         self::$origCgiMode = App::$cgi_mode;
         self::$origSr      = App::$silent_redeclare;
         self::$origIi      = App::$include_isolation;
+        self::$origCpmr    = App::$cgi_pool_max_requests;
+        self::$origCpmrSet = App::$cgi_pool_max_requests_set;
     }
 
     protected function setUp(): void
     {
         App::$run_has_started = false;
+        // Fresh recycle baseline per test (500 = the untouched default).
+        App::$cgi_pool_max_requests = 500;
+        App::$cgi_pool_max_requests_set = false;
     }
 
     protected function tearDown(): void
@@ -52,6 +59,40 @@ final class AppModeIsolationTest extends TestCase
         App::$silent_redeclare          = self::$origSr;
         App::$include_isolation         = self::$origIi;
         App::$coroutine_globals_isolation = false;
+        App::$cgi_pool_max_requests     = self::$origCpmr;
+        App::$cgi_pool_max_requests_set = self::$origCpmrSet;
+    }
+
+    // ── mode('legacy-cgi') defaults to recycle=1 (issue #167) ────────────
+
+    public function testLegacyCgiDefaultsToFreshProcessPerRequest(): void
+    {
+        // Unmodified WordPress/Drupal re-declare classes on a reused subprocess
+        // → "Cannot redeclare class". legacy-cgi must default to recycle=1.
+        App::mode(App::MODE_LEGACY_CGI);
+        $this->assertSame(1, App::cgiPoolMaxRequests(), 'legacy-cgi defaults to a fresh subprocess per request');
+    }
+
+    public function testExplicitRecycleBeforeModeIsRespected(): void
+    {
+        App::cgiPoolMaxRequests(50);
+        App::mode(App::MODE_LEGACY_CGI);
+        $this->assertSame(50, App::cgiPoolMaxRequests(), 'an explicit recycle set BEFORE mode() is not clobbered');
+    }
+
+    public function testExplicitRecycleAfterModeIsRespected(): void
+    {
+        App::mode(App::MODE_LEGACY_CGI);
+        App::cgiPoolMaxRequests(50);
+        $this->assertSame(50, App::cgiPoolMaxRequests(), 'an explicit recycle set AFTER mode() wins');
+    }
+
+    public function testOtherModesDoNotForceRecycleOne(): void
+    {
+        App::$cgi_pool_max_requests = 500;
+        App::$cgi_pool_max_requests_set = false;
+        App::mode(App::MODE_COROUTINE);
+        $this->assertSame(500, App::cgiPoolMaxRequests(), 'non-legacy-cgi modes leave the recycle default untouched');
     }
 
     // ── isolation() getter: defaults follow superglobals ────────────────

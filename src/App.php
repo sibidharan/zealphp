@@ -579,6 +579,12 @@ class App
      */
     public static int $cgi_pool_max_requests = 500;
     /**
+     * True once `cgiPoolMaxRequests()` set the recycle count explicitly. The
+     * `mode()` presets consult this so a `mode('legacy-cgi')` default (recycle=1)
+     * never clobbers an explicit user choice, regardless of call order.
+     */
+    public static bool $cgi_pool_max_requests_set = false;
+    /**
      * Whether `cgi_worker.php` (proc-mode subprocess entry) loads Composer's
      * `vendor/autoload.php` on startup. Default `false` — restores the pre-
      * v0.2.20 behaviour where the subprocess runs at true global scope with
@@ -1949,6 +1955,15 @@ class App
             case self::MODE_LEGACY_CGI:
                 self::superglobals(true);
                 self::isolation(Isolation::CgiPool);
+                // Fresh subprocess per request by default (mod_php prefork
+                // parity). Unmodified WordPress/Drupal re-run unguarded
+                // top-level define()/class declarations on every request, so a
+                // REUSED pool subprocess hits "Cannot redeclare class" (issue
+                // #167). Apps with re-entrant boot can opt into reuse via
+                // App::cgiPoolMaxRequests(N) (any order — see the flag).
+                if (!self::$cgi_pool_max_requests_set) {
+                    self::$cgi_pool_max_requests = 1;
+                }
                 break;
             case self::MODE_COROUTINE:
                 self::superglobals(false);
@@ -2004,6 +2019,7 @@ class App
     {
         if ($n !== null) {
             self::$cgi_pool_max_requests = max(1, $n);
+            self::$cgi_pool_max_requests_set = true;
         }
         return self::$cgi_pool_max_requests;
     }
