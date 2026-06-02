@@ -376,6 +376,16 @@ if (!$__z_file || !file_exists($__z_file)) {
 $__z_cwd = getenv('ZEALPHP_CWD');
 if ($__z_cwd) chdir($__z_cwd);
 
+// Bridge php://input: the parent (Dispatcher) wrote the request body to our STDIN
+// and closed it, but native CLI php://input does NOT expose that. Read it here and
+// serve it via CgiInputStream so legacy code / the WP REST API (the block editor's
+// JSON save) can read file_get_contents('php://input'). Other php:// pass through.
+// (Also drains STDIN so a >64 KB POST body can't block the parent's pipe write.)
+$GLOBALS['__zeal_cgi_raw_input'] = (string) (@stream_get_contents(STDIN) ?: '');
+require_once __DIR__ . '/CGI/CgiInputStream.php';
+@stream_wrapper_unregister('php');
+@stream_wrapper_register('php', \ZealPHP\CGI\CgiInputStream::class);
+
 register_shutdown_function(function() {
     global $__z_meta_sent;
     __z_send_meta();

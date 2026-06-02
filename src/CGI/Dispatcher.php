@@ -442,15 +442,15 @@ class Dispatcher
             return 500;
         }
 
-        // Drain any remaining stderr after the metadata line and route via elog
-        // so PHP fatal errors / warnings from the subprocess are visible.
-        // Apache parity: cgi_common.h:103-126 log_script_err() reads child stderr line-by-line.
-        stream_set_blocking($pipes[2], true);
-        $stderrRemainder = stream_get_contents($pipes[2]);
-        fclose($pipes[2]);
-        if (is_string($stderrRemainder) && $stderrRemainder !== '') {
-            elog("[cgi_worker] stderr: " . rtrim($stderrRemainder), "cgi_worker");
-        }
+        // NOTE: stderr is deliberately NOT drained to EOF here. The worker writes
+        // the metadata line to stderr and THEN the (often >64 KB) body to stdout at
+        // shutdown; blocking on stderr-to-EOF before reading stdout deadlocks once
+        // the body exceeds the ~64 KB OS pipe buffer — the child blocks writing the
+        // stdout we aren't reading, while we block reading the stderr the child
+        // won't close until it exits (the WordPress-on-proc hang, Issue 3). stdout
+        // and any remaining stderr (for log visibility — Apache cgi_common.h:103-126
+        // log_script_err parity) are drained CONCURRENTLY below instead.
+        $stderrRemainder = '';
 
         $streaming   = false;
         $returnValue = null;
@@ -518,23 +518,41 @@ class Dispatcher
             }
         }
 
+        // ── Streaming (SSE) path: forward stdout to the client progressively,
+        // draining stderr non-blocking in the same select loop so warnings can
+        // never wedge the child (same pipe-ordering hazard as the buffered path).
         // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
         if ($streaming && $g->openswoole_response->isWritable()) {
             // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
             $g->zealphp_response->flush();
+            stream_set_blocking($pipes[1], false);
+            stream_set_blocking($pipes[2], false);
             while (!feof($pipes[1])) {
-                $chunk = fread($pipes[1], 8192);
-                if ($chunk === false || $chunk === '') {
-                    usleep(10000);
-                    continue;
+                $read = [$pipes[1], $pipes[2]];
+                $w = $e = null;
+                $sel = @stream_select($read, $w, $e, 1, 0);
+                if ($sel === false) { usleep(1000); continue; } // EINTR — retry
+                if ($sel === 0) { continue; }
+                foreach ($read as $stream) {
+                    $chunk = fread($stream, 65536);
+                    if ($chunk === false || $chunk === '') { continue; }
+                    if ($stream === $pipes[2]) { $stderrRemainder .= $chunk; continue; }
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                    if (!$g->openswoole_response->isWritable()) { break 2; }
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                    $g->openswoole_response->write($chunk);
                 }
-                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                if (!$g->openswoole_response->isWritable()) break;
-                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                $g->openswoole_response->write($chunk);
+            }
+            // Grab any stderr tail the child flushed as it exited (non-blocking).
+            while (($chunk = fread($pipes[2], 65536)) !== false && $chunk !== '') {
+                $stderrRemainder .= $chunk;
             }
             fclose($pipes[1]);
+            fclose($pipes[2]);
             proc_close($process);
+            if ($stderrRemainder !== '') {
+                elog("[cgi_worker] stderr: " . rtrim($stderrRemainder), "cgi_worker");
+            }
             // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
             if ($g->openswoole_response->isWritable()) {
                 // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
@@ -544,10 +562,44 @@ class Dispatcher
             return null;
         }
 
-        $body = stream_get_contents($pipes[1]);
-        fclose($pipes[1]);
+        // ── Buffered path: read stdout (body) and any remaining stderr (logging)
+        // CONCURRENTLY via stream_select, so an oversized body on stdout can never
+        // deadlock against an undrained stderr (Issue 3 — the WordPress-on-proc
+        // hang). Bounded by a fresh App::$cgi_timeout window so a wedged child can
+        // never pin the worker. stream_select yields the coroutine under HOOK_ALL
+        // and is a plain blocking syscall in legacy-cgi (no scheduler).
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+        $body = '';
+        $open = [1 => $pipes[1], 2 => $pipes[2]];
+        $drainDeadline = microtime(true) + App::$cgi_timeout;
+        while ($open !== []) {
+            if (microtime(true) >= $drainDeadline) {
+                elog("cgiSubprocess: stdout/stderr drain timeout after " . App::$cgi_timeout . "s for $path", "error");
+                break;
+            }
+            $read = array_values($open);
+            $w = $e = null;
+            $sel = @stream_select($read, $w, $e, 1, 0);
+            if ($sel === false) { usleep(1000); continue; } // EINTR (e.g. SIGCHLD) — retry
+            if ($sel === 0) { continue; }
+            foreach ($read as $stream) {
+                $fd = ($stream === $pipes[1]) ? 1 : 2;
+                $chunk = fread($stream, 65536);
+                if ($chunk === false || $chunk === '') {
+                    // select reported the pipe readable + an empty read = EOF.
+                    fclose($stream);
+                    unset($open[$fd]);
+                    continue;
+                }
+                if ($fd === 1) { $body .= $chunk; } else { $stderrRemainder .= $chunk; }
+            }
+        }
+        foreach ($open as $stream) { @fclose($stream); }
         proc_close($process);
-        $body = $body === false ? '' : $body;
+        if ($stderrRemainder !== '') {
+            elog("[cgi_worker] stderr: " . rtrim($stderrRemainder), "cgi_worker");
+        }
 
         // Surface the file's return value when it was explicit (int / array /
         // string). Trust the subprocess: when return_value is non-null AND
@@ -808,6 +860,27 @@ class Dispatcher
         // cgi_worker.php's ZEALPHP_REQUEST_CONTEXT env JSON.
         // RequestContext properties are typed non-nullable arrays — no
         // need for `?? []` guards.
+        // Raw request body for php://input (e.g. a JSON REST payload from the WP
+        // block editor). Skip multipart/form-data — those ride $_FILES (tmp file
+        // already on disk); shipping the full multipart blob through the IPC frame
+        // would bloat it (and a large upload could exceed IPC's 64 MB cap).
+        $rawBody = '';
+        $ct = '';
+        foreach ($g->server as $k => $v) {
+            $kl = strtolower((string) $k);
+            if ($kl === 'content_type' || $kl === 'http_content_type' || $kl === 'content-type') {
+                $ct = is_scalar($v) ? (string) $v : '';
+                break;
+            }
+        }
+        if (stripos($ct, 'multipart/form-data') === false) {
+            try {
+                // @phpstan-ignore-next-line — zealphp_request set by CoSessionManager before dispatch
+                $rawBody = (string) $g->zealphp_request->parent->getContent();
+            } catch (\Throwable $e) {
+                $rawBody = '';
+            }
+        }
         $request = [
             'file'    => $path,
             'server'  => $g->server,
@@ -815,6 +888,7 @@ class Dispatcher
             'post'    => $g->post,
             'cookies' => $g->cookie,
             'files'   => $g->files,
+            'body'    => $rawBody,
         ];
 
         try {
