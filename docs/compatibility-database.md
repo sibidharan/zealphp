@@ -42,7 +42,7 @@ All 50 apps sorted by category, with grades per mode.
 
 | # | App | Category | Stars | Framework | Mode 1 (CGI) | Mode 3 (Sync) | Mode 4 (Hybrid) | Mode 5 (Coroutine) | Best Mode | Key Issue |
 |---|-----|----------|-------|-----------|:---:|:---:|:---:|:---:|-----------|-----------|
-| 1 | WordPress | CMS | 19k | Custom | **A** | C | B | F | 1 | `define()` everywhere, plugin ecosystem |
+| 1 | WordPress | CMS | 19k | Custom | **A** | C | B | F | 1 | Mode 1 verified end-to-end incl. wp-admin + block editor (issue #167). `define()` everywhere, plugin ecosystem |
 | 2 | Drupal | CMS | 4.3k | Custom | **A** | C | B | F | 1 | Static registry, `drupal_bootstrap()` |
 | 3 | Joomla | CMS | 4.7k | Custom | **A** | **A** | **A** | **A** | Any | **TESTED: all 4 modes pass (200, 14ms)** |
 | 4 | TYPO3 | CMS | 1.0k | Symfony | B | **A** | A | NT | 3 | Symfony-based, clean OOP |
@@ -202,14 +202,14 @@ Setting up real DB + real WordPress + real auth via wp-cli on `labs@172.30.0.3` 
 | Endpoint | First request | Subsequent requests | Note |
 |---|---|---|---|
 | `GET /wordpress/` (homepage) | **200, 68,684 B, 146 ms** | flickers — works on cold workers, 500 on warm | Mode 4 boots full WP including theme + DB queries |
-| `GET /wordpress/wp-admin/` | 302 -> wp-login.php | same | correct WP behavior |
-| `GET /wordpress/wp-login.php` | 500 | 500 | WP login form's bootstrap path triggers a redeclare Stage 4 doesn't catch |
+| `GET /wordpress/wp-admin/` | 302 -> wp-login.php (logged out); **200 Dashboard logged in** (M1, this release) | M4: same | M1 now renders the full admin incl. block editor (issue #167) |
+| `GET /wordpress/wp-login.php` | **200** (M1, this release) | M4: 500 | M1 global-scope include + recycle=1 fixed the redeclare; M4 still trips it |
 | `GET /wordpress/<anything>.php` (simple file) | 200 | 200 | `_test.php` returning "hello-php" works fine — limitation is WP-specific, not generic `.php` URL handling |
 
-**The honest finding for WordPress**: ZealPHP serves the WordPress homepage cleanly on cold workers in M4 Hybrid (no documented Apache-throughput benchmark exists; see PERF.md for the measured ZealPHP-vs-Node numbers). But the wp-login.php / wp-admin internal flow trips a redeclare pattern Stage 4 doesn't catch yet. This is the **canonical example** of where M1 Pool stays the right answer for legacy app coverage:
+**The honest finding for WordPress** (updated this release, issue #167): the table row above predates two fixes. **M1 Pool now serves wp-admin and the Gutenberg block editor end-to-end** — two changes landed it: (1) the CGI worker runs the request `include` at **true global scope**, so WordPress's top-level `$menu`/`$submenu` become real `$GLOBALS` and `wp-admin`'s `uksort($menu)` no longer fatals with `null given`; (2) `legacy-cgi` now defaults to `cgiPoolMaxRequests(1)`, so a reused subprocess never re-declares WordPress's unguarded top-level classes (`Cannot redeclare class …`). The **M4 Hybrid** (`coroutine-legacy`) admin flow is a separate story — it still trips the cold-boot `mysqlnd`/`libtasn1` teardown layer for pure-`require_once` WordPress (see the Mode-4 caveat at the top of this doc).
 
-- **WordPress on M1 Pool**: serves login + admin + content management correctly, ~200 ms per req (the FPM-equivalent cost).
-- **WordPress on M4 Hybrid**: serves the public-facing homepage; admin flow needs M1 fallback. (No Apache-throughput comparison is benchmarked — don't cite a multiplier.)
+- **WordPress on M1 Pool**: serves public site + login + **wp-admin + block editor** + content management correctly, ~200 ms per req (the FPM-equivalent cost). **This is the recommended mode for unmodified WordPress.**
+- **WordPress on M4 Hybrid**: serves the public-facing site, login auth, and comment writes sequentially; full **concurrent** wp-admin for pure-`require_once` WordPress remains M1's domain. (No Apache-throughput comparison is benchmarked — don't cite a multiplier.)
 
 The correct production deployment pairs both:
 - Public-facing requests → M4 Hybrid coroutine (high throughput)
@@ -1123,16 +1123,41 @@ Maximum compatibility with unknown/untested apps?
 use ZealPHP\App;
 
 // One-call preset — superglobals(true) + isolation(CgiPool).
-// Pre-spawned warm pool, ~1–3 ms dispatch. Use cgiMode('proc') for
-// fresh-process-per-request (~30–50 ms cold) when you need full isolation.
+// As of this release legacy-cgi DEFAULTS to cgiPoolMaxRequests(1) — a fresh
+// subprocess per request (Apache mod_php prefork parity). Unmodified WordPress/
+// Drupal re-run unguarded top-level define()/class declarations every request,
+// so a REUSED subprocess hits "Cannot redeclare class". Apps with re-entrant
+// (guarded / Composer-autoloaded) boot can opt back into pool reuse with
+// App::cgiPoolMaxRequests(N) for the ~1–3 ms warm dispatch.
 App::mode(App::MODE_LEGACY_CGI);
+App::documentRoot('wordpress');        // serve from the app's docroot
+App::ignorePhpExt(false);              // allow .php URLs (wp-login.php, etc.)
+// WordPress's assets live outside the default whitelist (/css/,/js/,…) — add
+// the wp dirs so CSS/JS/images serve statically (admin asset subdirs too, but
+// NOT /wp-admin/ itself so its .php files still execute).
+App::staticHandlerLocations([
+    '/wp-includes/', '/wp-content/',
+    '/wp-admin/css/', '/wp-admin/js/', '/wp-admin/images/',
+]);
 
 $app = App::init('0.0.0.0', 8080);
+// Front-controller fallback (Apache's .htaccess `RewriteRule . /index.php [L]`).
+// Route unmatched URLs through the app's index.php — NOT raw REQUEST_URI, which
+// would 403 static assets / REST / 404 URLs that must reach the front controller.
 $app->setFallback(function() {
-    return App::include($_SERVER['REQUEST_URI']);
+    $g = \ZealPHP\G::instance();
+    $g->server['PHP_SELF']        = '/index.php';
+    $g->server['SCRIPT_NAME']     = '/index.php';
+    $g->server['SCRIPT_FILENAME'] = App::$cwd . '/wordpress/index.php';
+    return App::include('/index.php');
 });
 $app->run();
 ```
+
+> **Verified (this release):** unmodified WordPress runs end-to-end in
+> `legacy-cgi` — public site, **wp-admin, and the Gutenberg block editor** —
+> with the global-scope include fix (issue #167) and the recycle=1 default. See
+> the WordPress row note below.
 
 ### Mode 3 — Sync (Laravel / Symfony / Framework Apps)
 
