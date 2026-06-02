@@ -2885,13 +2885,16 @@ class App
      * classes go through the runtime DECLARE opcode and ARE caught; simple
      * early-bound classes are the gap.
      *
-     * The safe, no-engine-patch fix is to exclude the app's document-root from
-     * opcache so those files recompile per request (where Stage 4 works) while the
-     * framework + vendor stay cached. A fully-transparent fix (opcache also caches
-     * the app's op_arrays + the re-bind is first-wins) needs an engine-level hook
-     * on `do_bind_class` / opcache's delayed-early-binding finalize — out of scope
-     * for a pure extension. Returns the warning string, or null when N/A. Suppress
-     * with ZEALPHP_OPCACHE_ADVISORY=0.
+     * The primary fix is `opcache.dups_fix=1` — opcache then keeps the first
+     * definition instead of fataling. It MUST be set in php.ini (or `-d`): opcache
+     * reads `ignore_dups` once at its own startup and caches it, so `ini_set()` at
+     * runtime (and therefore any auto-enable from this extension) is too late.
+     * `dups_fix` covers the CLASS case on stock opcache; the FUNCTION case is a
+     * php-src inconsistency (opcache's function-table copy ignores the directive) —
+     * for that, run a patched opcache (the ZealPHP Docker image ships one) or, on
+     * stock PHP, exclude the document-root via `opcache.blacklist_filename` so the
+     * app's files recompile per request (framework + vendor stay cached). Returns
+     * the advisory string, or null when N/A. Suppress with ZEALPHP_OPCACHE_ADVISORY=0.
      */
     public static function opcacheLegacyBootCheck(): ?string
     {
@@ -2908,15 +2911,22 @@ class App
         if (!\is_array($status) || empty($status['opcache_enabled'])) {
             return null;  // opcache not active for this SAPI — nothing to warn about
         }
+        $dupsFix = \filter_var(\ini_get('opcache.dups_fix'), \FILTER_VALIDATE_BOOL);
         $docRoot = \rtrim((string) self::$document_root, '/');
-        return "[advisory] opcache is ENABLED in coroutine-legacy mode. Stage 7 re-executes "
-            . "require_once'd files per request; on a WARM opcache cache a file's early-bound "
-            . "class declaration is replayed without recompiling, so silent-redeclare's first-wins "
-            . "is bypassed and the class re-binds -> \"Cannot redeclare class\" on request 2+. "
-            . "Exclude your application's document-root from opcache so those files recompile per "
-            . "request (framework + vendor stay cached): put \"" . $docRoot . "/\" in a file and set "
-            . "opcache.blacklist_filename to it (or opcache.enable_cli=0 if the app needs no opcache). "
-            . "Suppress with ZEALPHP_OPCACHE_ADVISORY=0.";
+        if (!$dupsFix) {
+            return "[advisory] opcache is ENABLED in coroutine-legacy mode but opcache.dups_fix is "
+                . "OFF. Stage 7 re-executes require_once'd files per request, so opcache re-copies a "
+                . "cached file's classes/functions into a table that already has them -> "
+                . "\"Cannot redeclare\" on request 2+. Set opcache.dups_fix=1 in php.ini (it cannot be "
+                . "set at runtime — opcache reads it at startup) to fix the CLASS case. FUNCTIONS also "
+                . "need a patched opcache (the ZealPHP Docker image ships one) or, on stock PHP, exclude "
+                . "your document-root via opcache.blacklist_filename (put \"" . $docRoot . "/\" in a file "
+                . "and point opcache.blacklist_filename at it). Suppress with ZEALPHP_OPCACHE_ADVISORY=0.";
+        }
+        return "[advisory] opcache + coroutine-legacy with opcache.dups_fix=1 — class redeclares are "
+            . "handled. If you still see \"Cannot redeclare function\", your opcache is unpatched: use "
+            . "the patched opcache from the ZealPHP Docker image, or exclude your document-root via "
+            . "opcache.blacklist_filename (\"" . $docRoot . "/\"). Suppress with ZEALPHP_OPCACHE_ADVISORY=0.";
     }
 
     /**
