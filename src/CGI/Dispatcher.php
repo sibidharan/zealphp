@@ -883,7 +883,7 @@ class Dispatcher
 
         if (App::$cgi_fork_instance === null) {
             try {
-                App::$cgi_fork_instance = new ForkPool(maxConcurrent: max(1, App::$cgi_pool_size));
+                App::$cgi_fork_instance = new ForkPool(maxConcurrent: max(1, App::$cgi_fork_max_concurrent));
             } catch (\Throwable $e) {
                 elog("cgiFork: failed to spawn fork master: " . $e->getMessage(), 'error');
                 return 500;
@@ -963,6 +963,12 @@ class Dispatcher
             foreach ((array) ($resp['headers'] ?? []) as $pair) {
                 if (is_array($pair) && count($pair) >= 2
                     && is_scalar($pair[0]) && is_scalar($pair[1])) {
+                    // CGI/1.1 RFC 3875 §6.3.3 — the "Status:" pseudo-header sets the
+                    // response code (already applied from $resp['status']); it must
+                    // NOT be forwarded to the client as a real header (mod_cgi parity).
+                    if (strcasecmp((string) $pair[0], 'Status') === 0) {
+                        continue;
+                    }
                     $respW->header((string) $pair[0], (string) $pair[1]);
                 }
             }
