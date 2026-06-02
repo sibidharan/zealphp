@@ -7,31 +7,45 @@ namespace ZealPHP\Store;
 use OpenSwoole\Table;
 
 /**
- * Redis/Valkey-backed StoreBackend.
+ * Redis/Valkey-backed `StoreBackend`.
  *
  * Row layout: HASH at `{prefix}:{table}:{key}` (columns → hash fields).
  * Membership (tracked mode): SET at `{prefix}:{table}:__keys__`.
  *
- * Two modes chosen at make():
- *  - 'tracked' (default) — SET-backed; count() is O(1) via SCARD,
- *    iterate() via SSCAN. No TTL (an expired key cannot fire SREM
+ * Two modes chosen at `make()`:
+ *  - `'tracked'` (default) — SET-backed; `count()` is O(1) via `SCARD`,
+ *    `iterate()` via `SSCAN`. No TTL (an expired key cannot fire `SREM`
  *    on the membership set, which would drift).
- *  - 'ttl' — per-key expiry via SETEX-style; count() / iterate() use
- *    SCAN MATCH (O(N)) because tracked membership isn't viable. Pick
- *    one per table; the trade-off is documented in CLAUDE.md.
+ *  - `'ttl'` — per-key expiry via `EXPIRE`; `count()` / `iterate()` use
+ *    `SCAN MATCH` (O(N)) because tracked membership isn't viable. Pick
+ *    one per table; the trade-off is documented in `CLAUDE.md`.
  *
- * Every op goes through RedisConnectionPool::with() so concurrent
+ * Every op goes through `RedisConnectionPool::with()` so concurrent
  * coroutines never share a socket.
  */
 final class RedisBackend implements StoreBackend
 {
-    /** @var array<string, array<string, array{0:int, 1?:int}>> */
+    /**
+     * Per-table column schemas: `table name → column name → [TYPE, size?]`.
+     *
+     * @var array<string, array<string, array{0:int, 1?:int}>>
+     */
     private array $schemas = [];
-    /** @var array<string, array{mode:string, ttl:int}> */
+
+    /**
+     * Per-table options: `table name → ['mode' => 'tracked'|'ttl', 'ttl' => int]`.
+     *
+     * @var array<string, array{mode:string, ttl:int}>
+     */
     private array $tableOpts = [];
 
+    /** Encodes/decodes PHP scalars to/from Redis hash field strings. */
     private TypeCodec $codec;
 
+    /**
+     * @param RedisConnectionPool $pool   Coroutine-safe connection pool.
+     * @param string              $prefix Key namespace prefix (default `'zealstore'`).
+     */
     public function __construct(
         private RedisConnectionPool $pool,
         private string $prefix = 'zealstore',
@@ -39,6 +53,23 @@ final class RedisBackend implements StoreBackend
         $this->codec = new TypeCodec();
     }
 
+    /**
+     * Register a table schema on the Redis backend.
+     *
+     * Must be called before any `set`/`get`/`del`/`incr`/`count`/`iterate`
+     * operations on the named table. Accepts the same `$columns` shape as
+     * `TableBackend::make()` (`column => [TYPE, size?]`). `$maxRows` is
+     * advisory only — Redis has no hard cap; use `maxmemory` +
+     * `maxmemory-policy` server-side instead.
+     *
+     * `$opts` accepts:
+     * - `'mode'` — `'tracked'` (default) or `'ttl'`. See class docblock.
+     * - `'ttl'`  — TTL in seconds; required and >= 1 when `mode = 'ttl'`.
+     *
+     * @param array<string, array{0:int, 1?:int}> $columns Column definitions.
+     * @param array<string, mixed>                 $opts    Table options.
+     * @throws StoreException When mode is unknown, `'tracked'` + `ttl > 0`, or `'ttl'` mode with `ttl < 1`.
+     */
     public function make(string $name, int $maxRows, array $columns, array $opts = []): void
     {
         if ($columns === []) {
@@ -68,6 +99,13 @@ final class RedisBackend implements StoreBackend
         $this->tableOpts[$name] = ['mode' => $mode, 'ttl' => $ttl];
     }
 
+    /**
+     * Write a row to the named table. Creates or overwrites the Redis HASH at
+     * `{prefix}:{name}:{key}` and, in `'tracked'` mode, adds `$key` to the
+     * membership SET. Applies `EXPIRE` in `'ttl'` mode.
+     *
+     * @param array<string, bool|float|int|string> $row Column values to store.
+     */
     public function set(string $name, string $key, array $row): bool
     {
         $this->assertMade($name);
@@ -89,6 +127,14 @@ final class RedisBackend implements StoreBackend
         });
     }
 
+    /**
+     * Fetch a row or a single field from the named table.
+     *
+     * When `$field` is `null`, returns the full decoded row as
+     * `array<string, mixed>` or `null` when the key does not exist.
+     * When `$field` is provided, returns only that field's decoded value
+     * (or `null` on miss).
+     */
     public function get(string $name, string $key, ?string $field = null): mixed
     {
         $this->assertMade($name);
@@ -105,6 +151,12 @@ final class RedisBackend implements StoreBackend
         });
     }
 
+    /**
+     * Delete a row from the named table.
+     *
+     * In `'tracked'` mode also removes `$key` from the membership SET.
+     * Returns `true` when the key existed and was deleted, `false` otherwise.
+     */
     public function del(string $name, string $key): bool
     {
         $this->assertMade($name);
@@ -120,6 +172,7 @@ final class RedisBackend implements StoreBackend
         });
     }
 
+    /** Returns `true` when the row for `$key` exists in the named table. */
     public function exists(string $name, string $key): bool
     {
         $this->assertMade($name);
@@ -127,6 +180,15 @@ final class RedisBackend implements StoreBackend
         return (bool) $this->pool->with(fn(RedisClient $c): bool => $c->exists($rk));
     }
 
+    /**
+     * Atomically increment a numeric column in a row.
+     *
+     * Uses `HINCRBY` for `TYPE_INT` columns and `HINCRBYFLOAT` for `TYPE_FLOAT`.
+     * Creates the row if it does not exist. In `'tracked'` mode, adds the key to
+     * the membership SET on first creation. Applies `EXPIRE` in `'ttl'` mode.
+     *
+     * @return int|float The new value after incrementing.
+     */
     public function incr(string $name, string $key, string $col, int|float $by = 1): int|float
     {
         $this->assertMade($name);
@@ -151,11 +213,22 @@ final class RedisBackend implements StoreBackend
         });
     }
 
+    /**
+     * Atomically decrement a numeric column — delegates to `incr()` with `-$by`.
+     *
+     * @return int|float The new value after decrementing.
+     */
     public function decr(string $name, string $key, string $col, int|float $by = 1): int|float
     {
         return $this->incr($name, $key, $col, -$by);
     }
 
+    /**
+     * Return the number of rows in the named table.
+     *
+     * In `'tracked'` mode: O(1) via `SCARD` on the membership SET.
+     * In `'ttl'` mode: O(N) via `SCAN MATCH` (see `countViaScan()`).
+     */
     public function count(string $name): int
     {
         $this->assertMade($name);
@@ -166,6 +239,17 @@ final class RedisBackend implements StoreBackend
         return $this->pool->with(fn(RedisClient $c): int => $c->scard($sk));
     }
 
+    /**
+     * Yield every row in the named table as `$key => $row`.
+     *
+     * In `'tracked'` mode, iterates the membership SET via `SSCAN` then
+     * fetches each row with `HGETALL`. In `'ttl'` mode, uses `SCAN MATCH`
+     * across the keyspace. Acquires a dedicated connection from the pool for
+     * the duration of iteration — do not hold the generator open longer than
+     * necessary.
+     *
+     * @return \Generator<string, array<string, scalar>>
+     */
     public function iterate(string $name): \Generator
     {
         $this->assertMade($name);
@@ -195,6 +279,25 @@ final class RedisBackend implements StoreBackend
         } finally { $this->pool->release($client); }
     }
 
+    /**
+     * Cursor-based paginated iteration of the named table.
+     *
+     * Returns one Redis `SCAN`/`SSCAN` batch at a time. Each call costs 2
+     * round-trips: one `SCAN`/`SSCAN` + one pipelined `HGETALL` batch via
+     * `mhgetall()`. Pass the returned `'cursor'` value as the next call's
+     * `$cursor`; iteration is complete when the returned cursor is `'0'`.
+     *
+     * ```php
+     * $cursor = '0';
+     * do {
+     *     ['cursor' => $cursor, 'rows' => $rows] =
+     *         Store::iteratePaged('my_table', $cursor, 50);
+     *     foreach ($rows as $key => $row) { // ... }
+     * } while ($cursor !== '0');
+     * ```
+     *
+     * @return array{cursor: string, rows: array<string, array<string, scalar>>}
+     */
     public function iteratePaged(string $name, string $cursor = '0', int $count = 100): array
     {
         $this->assertMade($name);
@@ -232,6 +335,13 @@ final class RedisBackend implements StoreBackend
         });
     }
 
+    /**
+     * Delete every row in the named table.
+     *
+     * Uses `UNLINK` (non-blocking key reclaim, Redis 4.0+) in batches of 100
+     * to avoid blocking the Redis event loop on large tables. In `'tracked'`
+     * mode also deletes the membership SET key.
+     */
     public function clear(string $name): void
     {
         $this->assertMade($name);
@@ -262,11 +372,26 @@ final class RedisBackend implements StoreBackend
         });
     }
 
+    /**
+     * Return the names of all tables registered on this backend via `make()`.
+     *
+     * @return list<string>
+     */
     public function names(): array
     {
         return array_keys($this->schemas);
     }
 
+    /**
+     * Fetch multiple rows in a single pipelined round-trip.
+     *
+     * Returns a map of `key → decoded row` for every key in `$keys`. Missing
+     * keys map to `null`. Uses `mhgetall()` (pipelined `HGETALL`) internally —
+     * O(1) round-trips regardless of batch size.
+     *
+     * @param list<string> $keys
+     * @return array<string, array<string, scalar>|null>
+     */
     public function mget(string $name, array $keys): array
     {
         $this->assertMade($name);
@@ -289,6 +414,16 @@ final class RedisBackend implements StoreBackend
         });
     }
 
+    /**
+     * Write multiple rows in a single pipelined round-trip.
+     *
+     * Uses `mhsetWithMembership()` internally — one pipeline for all `HMSET` +
+     * optional `EXPIRE` + a single `SADD` for tracked-mode membership.
+     * Idempotent on existing keys (tracked SET ignores duplicate members).
+     * Returns `true` on success.
+     *
+     * @param array<string, array<string, bool|float|int|string>> $rows Key → column-value map.
+     */
     public function mset(string $name, array $rows): bool
     {
         $this->assertMade($name);
@@ -325,7 +460,7 @@ final class RedisBackend implements StoreBackend
         });
     }
 
-    /** Health check via PING — `Store::ping()` (Task 11) delegates here. */
+    /** Health check via `PING` — `Store::ping()` delegates here. */
     public function ping(): bool
     {
         return (bool) $this->pool->with(fn(RedisClient $c): bool => $c->ping());
@@ -339,6 +474,12 @@ final class RedisBackend implements StoreBackend
     // members) instead of a full table scan. The keys are NOT prefixed by
     // this backend's `$prefix` — caller fully owns the namespace.
 
+    /**
+     * Add one or more members to a Redis SET at the given absolute `$key`.
+     *
+     * The key is NOT prefixed — callers own the namespace (used by `Room`).
+     * Returns the number of NEW members added (existing members are ignored).
+     */
     public function sadd(string $key, string ...$members): int
     {
         if ($members === []) { return 0; }
@@ -346,6 +487,11 @@ final class RedisBackend implements StoreBackend
         return $this->pool->with(fn(RedisClient $c): int => $c->sadd($key, $list));
     }
 
+    /**
+     * Remove one or more members from a Redis SET at the given absolute `$key`.
+     *
+     * Returns the number of members that were actually removed.
+     */
     public function srem(string $key, string ...$members): int
     {
         if ($members === []) { return 0; }
@@ -353,42 +499,69 @@ final class RedisBackend implements StoreBackend
         return $this->pool->with(fn(RedisClient $c): int => $c->srem($key, $list));
     }
 
+    /**
+     * Return the cardinality (number of members) of a Redis SET at the given
+     * absolute `$key`. O(1). Returns `0` when the key does not exist.
+     */
     public function scard(string $key): int
     {
         return $this->pool->with(fn(RedisClient $c): int => $c->scard($key));
     }
 
-    /** @return array{0:string, 1:list<string>} */
+    /**
+     * Cursor-based `SSCAN` on an absolute SET key — one batch per call.
+     *
+     * @return array{0:string, 1:list<string>} `[nextCursor, members]`
+     */
     public function sscanCursor(string $key, string $cursor, int $count): array
     {
         return $this->pool->with(fn(RedisClient $c): array => $c->sscanCursor($key, $cursor, $count));
     }
 
+    /**
+     * Delete an absolute Redis SET key via `UNLINK` (non-blocking reclaim).
+     *
+     * Returns `true` when the key was present and unlinked.
+     */
     public function sdel(string $key): bool
     {
         return (bool) $this->pool->with(fn(RedisClient $c): bool => $c->unlink($key) > 0);
     }
 
-    /** Pub/sub publish through the pool; returns receivers Redis delivered to. */
+    /**
+     * Pub/sub publish through the pool. Returns the number of subscribers
+     * Redis delivered the message to.
+     */
     public function publish(string $channel, string $payload): int
     {
         return $this->pool->with(fn(RedisClient $c): int => $c->publish($channel, $payload));
     }
 
     /**
-     * Streams append. Auto-MAXLEN-trims when $maxLen is set. Payload is
-     * stored under the 'payload' field; matches the consumer-side
-     * convention in RedisStreams.
+     * Append a message to a Redis Stream via `XADD`. Auto-trims to `$maxLen`
+     * entries when set. The payload is stored under the `'payload'` field,
+     * matching the consumer-side convention in `RedisStreams`.
+     *
+     * @return string The Redis-generated message id (e.g. `'1626300000000-0'`).
      */
     public function publishReliable(string $stream, string $payload, ?int $maxLen = null): string
     {
         return $this->pool->with(fn(RedisClient $c): string => $c->xadd($stream, ['payload' => $payload], $maxLen));
     }
 
+    /** Returns the Redis connection URL this backend was constructed with. */
     public function url(): string { return $this->pool->url(); }
+
+    /** Returns the underlying `RedisConnectionPool` instance. */
     public function pool(): RedisConnectionPool { return $this->pool; }
+
+    /** Returns the key namespace prefix (e.g. `'zealstore'`). */
     public function prefix(): string { return $this->prefix; }
 
+    /**
+     * Count rows in `'ttl'` mode via `SCAN MATCH` — O(N).
+     * Only called from `count()` when the table mode is `'ttl'`.
+     */
     private function countViaScan(string $name): int
     {
         $sk     = $this->setKey($name);
@@ -403,16 +576,23 @@ final class RedisBackend implements StoreBackend
         });
     }
 
+    /** Build the Redis HASH key for a specific row: `{prefix}:{table}:{key}`. */
     private function rowKey(string $table, string $key): string
     {
         return $this->prefix . ':' . $table . ':' . $key;
     }
 
+    /** Build the Redis SET key for the membership index: `{prefix}:{table}:__keys__`. */
     private function setKey(string $table): string
     {
         return $this->prefix . ':' . $table . ':__keys__';
     }
 
+    /**
+     * Assert that `$name` was registered via `make()`, throwing `StoreException` otherwise.
+     *
+     * @throws StoreException When the table has not been registered.
+     */
     private function assertMade(string $name): void
     {
         if (!isset($this->schemas[$name])) {

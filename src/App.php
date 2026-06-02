@@ -16,6 +16,26 @@ use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
 use OpenSwoole\Coroutine as co;
+/**
+ * ZealPHP framework core — the single process-wide singleton that owns the
+ * OpenSwoole server lifecycle, route table, PSR-15 middleware stack, and all
+ * per-request lifecycle configuration.
+ *
+ * Typical boot sequence:
+ *
+ * ```php
+ * App::superglobals(false);          // choose lifecycle mode
+ * $app = App::init('0.0.0.0', 8080); // create singleton + install overrides
+ * $app->route('/hello', fn() => 'Hello!');
+ * $app->addMiddleware(new CorsMiddleware());
+ * $app->run();                        // start the OpenSwoole event loop
+ * ```
+ *
+ * Configuration is expressed as static fluent setters (e.g. `App::superglobals()`,
+ * `App::documentRoot()`) that MUST be called before `App::run()` — OpenSwoole
+ * freezes the server settings at `$server->start()`. See the "Architecture"
+ * section of `CLAUDE.md` for the full lifecycle-mode matrix.
+ */
 class App
 {
     /** @var array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>}> */
@@ -58,6 +78,7 @@ class App
     protected static array $reliableRegistry = [];
     /** True once the onWorkerStart hook for pubsub/streams is wired (one-time guard). */
     protected static bool $pubsubBootWired = false;
+    /** Unix timestamp (float) of the moment this worker's `onWorkerStart` callback finished — used by `App::stats()` to compute per-worker uptime. Zero until the first worker start fires. */
     protected static float $workerStartedAt = 0.0;
 
     // v0.3.0 helpers — registries for App::onSignal / App::addProcess and
@@ -74,7 +95,9 @@ class App
     protected static ?int $bootedAt = null;
     /** Resolved worker counts after `run()` reads CLI/env/settings. */
     protected static int $worker_num = 0;
+    /** Resolved task-worker count after `run()` reads CLI/env/settings. Zero when task workers are disabled. */
     protected static int $task_worker_num = 0;
+    /** Bind address for the OpenSwoole server (e.g. `'0.0.0.0'` or `'127.0.0.1'`). Set in `__construct()` from `App::init()`. */
     protected string $host;
     // Widened protected → public so ZealPHP\CLI (extracted from App.php in the
     // Phase 1 decomposition) can read the running instance's port for PID-file
@@ -828,9 +851,19 @@ class App
      * @var callable|null
      */
     public static $auth_checker = null;
-    /** @var callable|null */
+    /**
+     * Callback consulted by `ZealAPI::isAdmin()`. Signature: `fn(): bool`.
+     * Default `null` → `isAdmin()` returns `false` (fail-closed). Set via `App::adminChecker()`.
+     *
+     * @var callable|null
+     */
     public static $admin_checker = null;
-    /** @var callable|null */
+    /**
+     * Callback consulted by `ZealAPI::getUsername()`. Signature: `fn(): ?string`.
+     * Default `null` → `getUsername()` returns `null`. Set via `App::usernameProvider()`.
+     *
+     * @var callable|null
+     */
     public static $username_provider = null;
     /**
      * Apache `RewriteCond %{REQUEST_FILENAME} !-d` + `RewriteRule ^(.+)/$ /$1 [R=301,L]`.
@@ -1176,6 +1209,22 @@ class App
         return (new Response('', $streamStatus));
     }
 
+    /**
+     * Private constructor — use `App::init()` to obtain the singleton instance.
+     *
+     * Performs one-time per-process setup: validates that ext-zealphp or uopz is
+     * loaded, reads `/etc/environment` into `$_ENV`, captures the initial
+     * `error_reporting()` level, installs the process-level native error and
+     * exception handlers (which delegate to the per-coroutine `RequestContext`
+     * stack), primes `PhpInfo::primeModuleText()`, and calls
+     * `registerAllOverrides()` to replace PHP built-ins with ZealPHP's
+     * coroutine-safe equivalents.
+     *
+     * @param string $host Bind address (e.g. `'0.0.0.0'`).
+     * @param int    $port TCP port.
+     * @param string $cwd  Project root — stored in `App::$cwd`.
+     * @throws \Exception when neither ext-zealphp nor uopz is loaded.
+     */
     private function __construct(string $host = '0.0.0.0', int $port = 8080, string $cwd = __DIR__)
     {
         if (!extension_loaded('zealphp') && !extension_loaded('uopz')) {
@@ -1345,11 +1394,33 @@ class App
      * `$superglobals` etc. leaves the framework in a partial state that
      * races on `$_GET`/`$_POST`/`$_SESSION`. Boot-only is the contract.
      *
-     * Called from `superglobals`, `processIsolation`, `enableCoroutine`,
-     * `hookAll` setters when they receive a write (not a read).
+     * Called from `superglobals()`, `processIsolation()`, `enableCoroutine()`,
+     * and `hookAll()` setters when they receive a write (not a read).
+     *
+     * @throws \RuntimeException when called after `App::run()` has started.
      */
+    private static function refuseAfterRun(string $setter): void
+    {
+        if (self::$run_has_started) {
+            throw new \RuntimeException(
+                "ZealPHP lifecycle: $setter() must be called BEFORE App::run(). "
+                . 'These four knobs (superglobals, processIsolation, enableCoroutine, hookAll) '
+                . 'decide the SessionManager class, the enable_coroutine server setting, and '
+                . 'HOOK_ALL — all frozen at run() boot. Mutating them after the server is '
+                . 'serving requests leaves the framework in a Schrödinger state (coroutines '
+                . 'still active, but per-request handlers now read the new superglobals value) '
+                . 'and races on $_GET / $_POST / $_SESSION. Configure these once in app.php '
+                . 'before App::run() and leave them alone.'
+            );
+        }
+    }
+
     /**
-     * @param callable-string $callable
+     * Install a uopz or ext-zealphp override for a named PHP built-in function,
+     * routing calls to the given ZealPHP replacement. Uses `zealphp_override()`
+     * when ext-zealphp is loaded (preferred), falling back to `uopz_set_return()`.
+     *
+     * @param callable-string $callable Fully-qualified ZealPHP replacement function name.
      */
     private static function overrideBuiltin(string $name, string $callable): void
     {
@@ -1361,8 +1432,18 @@ class App
         }
     }
 
+    /** Guard preventing `registerAllOverrides()` from installing uopz/zealphp built-in overrides more than once per process. */
     private static bool $overridesRegistered = false;
 
+    /**
+     * Install all ZealPHP uopz/ext-zealphp built-in overrides in one shot.
+     * Idempotent — guarded by `$overridesRegistered` so re-entrant calls
+     * (e.g. from tests that re-construct `App`) are no-ops. Covers response
+     * headers (`header()`, `setcookie()`, etc.), session functions
+     * (`session_start()` family), output control (`flush()`, `ob_*`),
+     * error handling (`set_error_handler()`, `error_log()`), and more.
+     * Called once from `__construct()`.
+     */
     private static function registerAllOverrides(): void
     {
         if (self::$overridesRegistered) {
@@ -1429,22 +1510,11 @@ class App
         self::overrideBuiltin('session_module_name', '\ZealPHP\Session\zeal_session_module_name');
     }
 
-    private static function refuseAfterRun(string $setter): void
-    {
-        if (self::$run_has_started) {
-            throw new \RuntimeException(
-                "ZealPHP lifecycle: $setter() must be called BEFORE App::run(). "
-                . 'These four knobs (superglobals, processIsolation, enableCoroutine, hookAll) '
-                . 'decide the SessionManager class, the enable_coroutine server setting, and '
-                . 'HOOK_ALL — all frozen at run() boot. Mutating them after the server is '
-                . 'serving requests leaves the framework in a Schrödinger state (coroutines '
-                . 'still active, but per-request handlers now read the new superglobals value) '
-                . 'and races on $_GET / $_POST / $_SESSION. Configure these once in app.php '
-                . 'before App::run() and leave them alone.'
-            );
-        }
-    }
-
+    /**
+     * Toggle the superglobals-mode lifecycle. See `App::$superglobals` for the full
+     * semantics. Must be called BEFORE `App::run()` — the method calls `refuseAfterRun()`
+     * and throws `\RuntimeException` if the server is already serving requests.
+     */
     public static function superglobals(bool $enable = true): void
     {
         self::refuseAfterRun('App::superglobals');
@@ -1473,18 +1543,32 @@ class App
     // documented API surface and what the converter bot is taught to emit.
     // -----------------------------------------------------------------------
 
+    /**
+     * Whether URLs ending in `.php` are blocked with `403`. Default `true` (Apache
+     * `RewriteRule \.php$ - [F]` parity). Set `false` to allow direct `*.php` routing.
+     * No-arg call returns the current value.
+     */
     public static function ignorePhpExt(?bool $on = null): bool
     {
         if ($on !== null) self::$ignore_php_ext = $on;
         return self::$ignore_php_ext;
     }
 
+    /**
+     * Whether ZealAPI logs a warning when a filename collides with an HTTP method keyword
+     * (e.g. `get.php` defining `$get`) or a filename-matched handler shadows per-method
+     * handlers. Default `true`. No-arg call returns the current value.
+     */
     public static function apiWarnCollisions(?bool $on = null): bool
     {
         if ($on !== null) self::$api_warn_collisions = $on;
         return self::$api_warn_collisions;
     }
 
+    /**
+     * Apache `DirectorySlash` — redirect `/foo` → `/foo/` when `foo` is a directory.
+     * Default `true`. No-arg call returns the current value.
+     */
     public static function directorySlash(?bool $on = null): bool
     {
         if ($on !== null) self::$directory_slash = $on;
@@ -1501,6 +1585,11 @@ class App
         return self::$directory_index;
     }
 
+    /**
+     * Apache `PATH_INFO` — expose the path suffix after a script name as `PATH_INFO`
+     * in `$_SERVER` (e.g. `/script.php/extra/path` → `PATH_INFO=/extra/path`).
+     * Default `true`. No-arg call returns the current value.
+     */
     public static function pathInfo(?bool $on = null): bool
     {
         if ($on !== null) self::$path_info = $on;
@@ -1508,6 +1597,11 @@ class App
     }
 
     /**
+     * URL-prefix whitelist for static-file serving. Empty array (default) allows
+     * any path under `document_root`. When non-empty, only paths whose prefix
+     * matches one of the listed strings are served as static files; others fall
+     * through to route matching. No-arg call returns the current list.
+     *
      * @param array<int, string>|null $prefixes
      * @return array<int, string>
      */
@@ -1517,12 +1611,23 @@ class App
         return self::$static_handler_locations;
     }
 
+    /**
+     * Block any request whose path contains a dotfile component (`.git`, `.env`,
+     * `.htaccess`, etc.) with `403`. Default `true` — matches Apache's convention
+     * of not serving hidden files. No-arg call returns the current value.
+     */
     public static function blockDotfiles(?bool $on = null): bool
     {
         if ($on !== null) self::$block_dotfiles = $on;
         return self::$block_dotfiles;
     }
 
+    /**
+     * Whether framework error pages render the captured exception and stack trace
+     * inline. Default `true` (development-friendly). Set `false` in production so
+     * `5xx` pages show a generic message instead of leaking internal details.
+     * No-arg call returns the current value.
+     */
     public static function displayErrors(?bool $on = null): bool
     {
         if ($on !== null) self::$display_errors = $on;

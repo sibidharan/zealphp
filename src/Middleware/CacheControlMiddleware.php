@@ -18,7 +18,7 @@ use ZealPHP\RequestContext;
  *
  * Apache equivalent:
  *
- * ```
+ * ```apache
  * <FilesMatch "\.(css|js|jpe?g|png|gif|svg|ico|woff2?)$">
  *     Header set Cache-Control "max-age=2628000, public"
  * </FilesMatch>
@@ -26,7 +26,7 @@ use ZealPHP\RequestContext;
  *
  * nginx equivalent:
  *
- * ```
+ * ```nginx
  * location ~* \.(css|js|jpe?g|png|gif|svg|ico|woff2?)$ {
  *     expires 30d;
  *     add_header Cache-Control "public, max-age=2628000";
@@ -59,7 +59,7 @@ use ZealPHP\RequestContext;
  */
 class CacheControlMiddleware implements MiddlewareInterface
 {
-    /** ~30 days in seconds — Apache's classic "ExpiresDefault A2628000" value. */
+    /** ~30 days in seconds — Apache's classic `ExpiresDefault A2628000` value. */
     private const DEFAULT_MAX_AGE = 2_628_000;
 
     /** @var array<string, int> */
@@ -83,17 +83,24 @@ class CacheControlMiddleware implements MiddlewareInterface
         'wasm'  => self::DEFAULT_MAX_AGE,
     ];
 
-    /** @var array<string, int> */
+    /** @var array<string, int> Extension → max-age-seconds map used at runtime. */
     private array $map;
 
     /**
-     * @param array<string, int>|null $map  ext => seconds; null uses defaults
+     * @param array<string, int>|null $map          Extension → seconds map; `null` uses the built-in defaults.
+     * @param bool                    $publicCache  `true` emits `public`, `false` emits `private`.
      */
     public function __construct(?array $map = null, private bool $publicCache = true)
     {
         $this->map = $this->normaliseMap($map ?? self::DEFAULT_MAP);
     }
 
+    /**
+     * Append `Cache-Control: max-age=N, public|private` to static-asset responses.
+     *
+     * Skips responses that already carry a `Cache-Control` header, error responses
+     * (status >= `400`), and paths whose extension is not in the configured map.
+     */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $response = $handler->handle($request);
@@ -124,8 +131,10 @@ class CacheControlMiddleware implements MiddlewareInterface
     }
 
     /**
-     * @param array<string, int> $map
-     * @return array<string, int>
+     * Normalise extension keys to lowercase without a leading dot.
+     *
+     * @param array<string, int> $map Raw extension → seconds map.
+     * @return array<string, int>     Normalised extension → seconds map.
      */
     private function normaliseMap(array $map): array
     {

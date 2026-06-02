@@ -33,10 +33,13 @@ class CgiInputStream
     private bool $isInput = false;
 
     /**
-     * @param string      $path
-     * @param string      $mode
-     * @param int         $options
-     * @param string|null $opened_path
+     * Open `php://input` from `$GLOBALS['__zeal_cgi_raw_input']`, or delegate any other
+     * `php://` URI to the default PHP wrapper by temporarily restoring it.
+     *
+     * @param string      $path        The `php://` URI being opened.
+     * @param string      $mode        The access mode (e.g. `'r'`, `'rb'`).
+     * @param int         $options     Bitmask of `STREAM_*` flags from PHP.
+     * @param string|null $opened_path Set to the actual path opened (unused here).
      */
     public function stream_open($path, $mode, $options, &$opened_path): bool
     {
@@ -60,8 +63,10 @@ class CgiInputStream
     }
 
     /**
-     * @param int $count
-     * @return string|false
+     * Read up to `$count` bytes. Returns `''` when `$count < 1` on the `php://input` path.
+     *
+     * @param int $count Number of bytes to read.
+     * @return string|false The bytes read, or `false` when the passthrough handle is gone.
      */
     public function stream_read($count)
     {
@@ -77,14 +82,17 @@ class CgiInputStream
     }
 
     /**
-     * @param string $data
-     * @return int|false
+     * Write `$data` to the passthrough handle (not applicable to `php://input`).
+     *
+     * @param string $data The bytes to write.
+     * @return int|false Number of bytes written, or `false` when no passthrough handle is open.
      */
     public function stream_write($data)
     {
         return is_resource($this->fh) ? fwrite($this->fh, (string) $data) : false;
     }
 
+    /** Returns `true` when all `php://input` bytes are consumed, or when the passthrough handle is at EOF. */
     public function stream_eof(): bool
     {
         if ($this->isInput) {
@@ -94,8 +102,10 @@ class CgiInputStream
     }
 
     /**
-     * @param int $offset
-     * @param int $whence
+     * Seek to a position; supports `SEEK_SET`, `SEEK_CUR`, `SEEK_END` on the `php://input` buffer.
+     *
+     * @param int $offset Byte offset relative to `$whence`.
+     * @param int $whence One of `SEEK_SET`, `SEEK_CUR`, or `SEEK_END`.
      */
     public function stream_seek($offset, $whence = SEEK_SET): bool
     {
@@ -116,7 +126,11 @@ class CgiInputStream
         return is_resource($this->fh) ? fseek($this->fh, (int) $offset, (int) $whence) === 0 : false;
     }
 
-    /** @return int */
+    /**
+     * Return the current read position in bytes from the start of the stream.
+     *
+     * @return int Byte offset.
+     */
     public function stream_tell()
     {
         if ($this->isInput) {
@@ -125,7 +139,12 @@ class CgiInputStream
         return is_resource($this->fh) ? (int) ftell($this->fh) : 0;
     }
 
-    /** @return array<int|string,mixed>|false */
+    /**
+     * Return stat information. For `php://input` provides a minimal array with `'size'`;
+     * for passthrough handles delegates to `fstat()`.
+     *
+     * @return array<int|string, mixed>|false Stat array, or `false` when unavailable.
+     */
     public function stream_stat()
     {
         if ($this->isInput) {
@@ -135,15 +154,18 @@ class CgiInputStream
     }
 
     /**
-     * @param int $option
-     * @param int $arg1
-     * @param int $arg2
+     * No-op option handler — always returns `true` to suppress PHP "not implemented" warnings.
+     *
+     * @param int $option One of the `STREAM_OPTION_*` constants.
+     * @param int $arg1   Option-specific argument 1.
+     * @param int $arg2   Option-specific argument 2.
      */
     public function stream_set_option($option, $arg1, $arg2): bool
     {
         return true; // no-op success — avoids "not implemented" warnings
     }
 
+    /** Close the stream, releasing the passthrough handle when one was opened for a non-input `php://` URI. */
     public function stream_close(): void
     {
         if (is_resource($this->fh)) {

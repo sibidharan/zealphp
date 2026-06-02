@@ -32,8 +32,8 @@ declare(strict_types=1);
  * experimental cut (zero regression risk to the production pool); it will be
  * de-duplicated into a shared runtime once fork mode is validated.
  *
- * Requires: pcntl + posix. Env: ZEALPHP_FORK_SOCK (unix socket path),
- * ZEALPHP_FORK_MAX_CONCURRENT (live-child cap, default 16), ZEALPHP_CWD.
+ * Requires: `pcntl` + `posix`. Env: `ZEALPHP_FORK_SOCK` (unix socket path),
+ * `ZEALPHP_FORK_MAX_CONCURRENT` (live-child cap, default `16`), `ZEALPHP_CWD`.
  */
 
 ini_set('display_errors', 'stderr');
@@ -66,9 +66,13 @@ if ($sockPath === '') {
 $maxConcurrent = max(1, (int) (getenv('ZEALPHP_FORK_MAX_CONCURRENT') ?: '16'));
 
 // ── Per-request capture state (a child sets these, then exits) ──
+/** @var list<array{0:string,1:string}> $__fm_headers Accumulated response headers: [[name, value], …] */
 $__fm_headers    = [];
+/** @var list<array<string,mixed>> $__fm_cookies Structured cookie descriptors from `setcookie()` overrides. */
 $__fm_cookies    = [];
+/** @var list<array<string,mixed>> $__fm_rawcookies Structured cookie descriptors from `setrawcookie()` overrides. */
 $__fm_rawcookies = [];
+/** @var int $__fm_status HTTP status captured from `header()` / `http_response_code()` calls. */
 $__fm_status     = 200;
 
 // ── Capture overrides (header/cookie/output/upload). Same shape as
@@ -288,15 +292,21 @@ $__fm_running = true;
 /** @var array<int,float> live children: pid => fork start time. count() = $__fm_live. */
 $__fm_children = [];
 
-// Reap exited children and drop them from the live map (so count() is accurate).
+/**
+ * Reap all exited children non-blockingly via `WNOHANG` and remove them from
+ * `$__fm_children` so the backpressure cap reflects the true live count.
+ * Registered as the `SIGCHLD` handler and also called proactively each loop.
+ */
 $__fm_reap = function () use (&$__fm_children): void {
     while (($p = @pcntl_waitpid(-1, $st, WNOHANG)) > 0) {
         unset($__fm_children[$p]);
     }
 };
-// Watchdog: SIGKILL any child that has run past $forkTimeout (the proc/pool
-// modes kill a wedged subprocess on timeout; fork mode needs the same). The
-// reaper then drops it on the resulting SIGCHLD.
+/**
+ * Send `SIGKILL` to any live child that has exceeded `$forkTimeout` seconds.
+ * Mirrors the per-request deadline enforced by the `proc`/pool modes.
+ * `$__fm_reap` reclaims the slot when the resulting `SIGCHLD` fires.
+ */
 $__fm_watchdog = function () use (&$__fm_children, $forkTimeout): void {
     $now = microtime(true);
     foreach ($__fm_children as $pid => $started) {
@@ -305,7 +315,11 @@ $__fm_watchdog = function () use (&$__fm_children, $forkTimeout): void {
         }
     }
 };
-// True once our parent OpenSwoole worker has died (reparented to init).
+/**
+ * Return `true` when this process has been reparented to init (PID `1`).
+ * Indicates that the OpenSwoole worker that spawned us exited without sending
+ * `SIGTERM`. Used as an orphan guard so the master exits rather than leaking.
+ */
 $__fm_orphaned = static function (): bool {
     return function_exists('posix_getppid') && posix_getppid() === 1;
 };

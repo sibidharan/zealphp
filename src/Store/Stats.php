@@ -23,22 +23,29 @@ final class Stats
     /** @var array<string, int> */
     private array $counters = [];
 
+    /** Increment counter `$key` by `$by` (default `1`). Creates the key with value `$by` if absent. */
     public function inc(string $key, int $by = 1): void
     {
         $this->counters[$key] = ($this->counters[$key] ?? 0) + $by;
     }
 
+    /** Read the current value of counter `$key`, returning `0` when the key has never been incremented. */
     public function get(string $key): int
     {
         return $this->counters[$key] ?? 0;
     }
 
-    /** @return array<string, int> */
+    /**
+     * Return a copy of all counters as a `string→int` map.
+     *
+     * @return array<string, int>
+     */
     public function snapshot(): array
     {
         return $this->counters;
     }
 
+    /** Reset all counters to zero by discarding the internal map. */
     public function reset(): void
     {
         $this->counters = [];

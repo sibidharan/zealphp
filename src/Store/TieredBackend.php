@@ -33,11 +33,18 @@ final class TieredBackend implements StoreBackend
 {
     private const CACHED_AT = '__cached_at';
 
-    /** Origin tag stamped on every invalidation publish — the receiver skips messages
-     *  that originated from itself so writers don't re-evict their own freshly-written L1. */
+    /**
+     * Origin tag stamped on every invalidation publish — the receiver skips messages
+     * that originated from itself so writers don't re-evict their own freshly-written L1.
+     */
     private string $originId;
-    /** Per-table set of channels we've registered an invalidation subscriber on. */
-    /** @var array<string, true> */
+
+    /**
+     * Channels (`__l1_invalidate:{table}`) for which a subscriber has been registered
+     * on the `$invalidationRunner`.
+     *
+     * @var array<string, true>
+     */
     private array $invalidationChannels = [];
     private ?RedisPubSub $invalidationRunner = null;
     /**
@@ -73,9 +80,16 @@ final class TieredBackend implements StoreBackend
         return $this->invalidationSecret !== null;
     }
 
+    /** Return the L1 `TableBackend` instance (in-process shared-memory tier). */
     public function l1(): TableBackend { return $this->l1; }
+
+    /** Return the L2 `RedisBackend` instance (cross-node source-of-truth tier). */
     public function l2(): RedisBackend { return $this->l2; }
+
+    /** Return the configured L1 TTL in seconds (maximum staleness window for L1 reads). */
     public function l1Ttl(): int       { return $this->l1Ttl; }
+
+    /** Return the origin ID string stamped on invalidation publishes (hostname + PID + random suffix). */
     public function originId(): string { return $this->originId; }
 
     /**
@@ -100,6 +114,12 @@ final class TieredBackend implements StoreBackend
         $this->invalidationRunner->start();
     }
 
+    /**
+     * Stop the cross-node L1 invalidation subscriber coroutine.
+     * After this call, peer writes will no longer evict local L1 entries;
+     * L1 staleness reverts to the `$l1Ttl` window. Safe to call when no
+     * invalidation runner is active (no-op).
+     */
     public function stopInvalidation(): void
     {
         if ($this->invalidationRunner === null) { return; }
@@ -174,11 +194,20 @@ final class TieredBackend implements StoreBackend
         return substr(hash_hmac('sha256', "$table|$key|$origin", $secret), 0, 16);
     }
 
+    /** Build the Redis pub/sub channel name for L1 invalidation of `$table`. */
     private function channel(string $table): string
     {
         return '__l1_invalidate:' . $table;
     }
 
+    /**
+     * Create a named table in both L1 and L2 backends.
+     *
+     * The L1 schema receives a synthetic `__cached_at` `INT` column appended
+     * to `$columns` for staleness bookkeeping; user-facing `get()` strips it.
+     * Registers the invalidation channel for the new table; if `enableInvalidation()`
+     * has already been called, the subscriber is registered immediately.
+     */
     public function make(string $name, int $maxRows, array $columns, array $opts = []): void
     {
         $l1Columns = $columns + [self::CACHED_AT => [Table::TYPE_INT, 8]];
@@ -192,6 +221,11 @@ final class TieredBackend implements StoreBackend
         }
     }
 
+    /**
+     * Write-through: persist `$row` to L2 first (source of truth), then refresh
+     * the L1 entry and publish an invalidation so peers evict their stale copies.
+     * Returns `false` only when the L2 write itself fails.
+     */
     public function set(string $name, string $key, array $row): bool
     {
         $ok = $this->l2->set($name, $key, $row);
@@ -202,6 +236,14 @@ final class TieredBackend implements StoreBackend
         return $ok;
     }
 
+    /**
+     * Read from L1 if the entry is fresh (within `$l1Ttl` seconds); otherwise
+     * fetch from L2, repopulate L1, and return. The synthetic `__cached_at`
+     * column is stripped before returning the row.
+     *
+     * Returns `null` (field lookup) or `false` (full row) on miss, matching
+     * `TableBackend::get()` semantics.
+     */
     public function get(string $name, string $key, ?string $field = null): mixed
     {
         $now = time();
@@ -241,6 +283,10 @@ final class TieredBackend implements StoreBackend
         return $out;
     }
 
+    /**
+     * Delete `$key` from both L1 and L2, then publish an invalidation to peers.
+     * Returns the L2 delete result (`true` when the key existed and was removed).
+     */
     public function del(string $name, string $key): bool
     {
         $this->l1->del($name, $key);
@@ -249,6 +295,11 @@ final class TieredBackend implements StoreBackend
         return $ok;
     }
 
+    /**
+     * Authoritative existence check — always defers to L2.
+     * L1 may hold a stale entry for a key that has since been deleted on another
+     * node; only L2 is the source of truth.
+     */
     public function exists(string $name, string $key): bool
     {
         // L1 might lie about existence (stale entry); always defer to L2.
@@ -281,6 +332,10 @@ final class TieredBackend implements StoreBackend
         return $this->l2->exists($name, $key);
     }
 
+    /**
+     * Increment `$col` in L2 (authoritative), evict the stale L1 entry so the
+     * next `get()` re-fetches the updated value, and publish an invalidation to peers.
+     */
     public function incr(string $name, string $key, string $col, int|float $by = 1): int|float
     {
         $new = $this->l2->incr($name, $key, $col, $by);
@@ -291,6 +346,10 @@ final class TieredBackend implements StoreBackend
         return $new;
     }
 
+    /**
+     * Decrement `$col` in L2 (authoritative), evict the stale L1 entry, and
+     * publish an invalidation to peers. Mirror of `incr()`.
+     */
     public function decr(string $name, string $key, string $col, int|float $by = 1): int|float
     {
         $new = $this->l2->decr($name, $key, $col, $by);
@@ -299,35 +358,56 @@ final class TieredBackend implements StoreBackend
         return $new;
     }
 
+    /**
+     * Return the authoritative row count from L2. L1 is a partial cache and
+     * must not be counted (it holds only a subset of the L2 key space).
+     */
     public function count(string $name): int
     {
         // L1 is a partial cache, not authoritative. Always count L2.
         return $this->l2->count($name);
     }
 
+    /**
+     * Yield all rows from L2 (authoritative and complete).
+     * L1 is not iterated — it holds only a hot subset of the L2 key space.
+     */
     public function iterate(string $name): \Generator
     {
         // Iterate L2 — it's authoritative and complete.
         yield from $this->l2->iterate($name);
     }
 
+    /**
+     * Return a cursor-paginated page of rows from L2.
+     * Same reasoning as `iterate()`: L2 is the authoritative source.
+     */
     public function iteratePaged(string $name, string $cursor = '0', int $count = 100): array
     {
         // Defer to L2 — same reasoning as iterate(): authoritative + complete.
         return $this->l2->iteratePaged($name, $cursor, $count);
     }
 
+    /** Clear all rows from both L1 and L2 for the given table. */
     public function clear(string $name): void
     {
         $this->l1->clear($name);
         $this->l2->clear($name);
     }
 
+    /** Return the list of table names known to L2 (the authoritative registry). */
     public function names(): array
     {
         return $this->l2->names();
     }
 
+    /**
+     * Batch get: serve L1-fresh entries from the cache tier and fetch the rest
+     * from L2 in one round-trip, populating L1 on the way back.
+     *
+     * Returns an array keyed by the original `$keys`; values are the row arrays
+     * (with `__cached_at` stripped) or `null` for keys not found in either tier.
+     */
     public function mget(string $name, array $keys): array
     {
         $now = time();
@@ -360,6 +440,10 @@ final class TieredBackend implements StoreBackend
         return $out;
     }
 
+    /**
+     * Batch set: write all rows to L2, then repopulate L1 with `__cached_at`
+     * timestamps. Returns `true` only when the L2 bulk write succeeds.
+     */
     public function mset(string $name, array $rows): bool
     {
         $ok = $this->l2->mset($name, $rows);

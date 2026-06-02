@@ -97,9 +97,11 @@ class ZealAPI extends REST
     private ?array $_undefinedMethodError = null;
 
     /**
-     * @param mixed  $request
-     * @param mixed  $response
-     * @param string $cwd
+     * Construct a `ZealAPI` dispatcher bound to the current request/response pair.
+     *
+     * @param mixed  $request  The current `ZealPHP\HTTP\Request` (or equivalent) object.
+     * @param mixed  $response The current `ZealPHP\HTTP\Response` (or equivalent) object.
+     * @param string $cwd      Absolute path to the application root (used to resolve `api/` files).
      */
     public function __construct($request, $response, $cwd)
     {
@@ -109,14 +111,16 @@ class ZealAPI extends REST
         parent::__construct($request, $response);                  // Init parent contructor
     }
 
-    /*
-    * Public method for access api.
-    * This method dynmically call the method based on the query string
-    *
-    */
     /**
-     * @param string      $module
-     * @param string|null $request
+     * Dispatch a file-based API request.
+     *
+     * Resolves `api/{$module}/{$request}.php`, selects a handler closure via the
+     * filename-match → per-method priority rules described in the class docblock,
+     * injects named parameters, applies any in-file `$middleware`, and returns the
+     * result through the universal return contract.
+     *
+     * @param string      $module  URL sub-path (e.g. `'device'` for `/api/device/list`)
+     * @param string|null $request Basename without `.php` (e.g. `'list'`)
      * @return mixed
      */
     public function processApi($module, $request=null)
@@ -422,9 +426,9 @@ class ZealAPI extends REST
     }
 
     /**
-     * Checks if all supplied parameters exists
+     * Return `true` when all named parameters in `$parms` are present in the current request input.
      *
-     * @param array<int, string> $parms Http Parameters
+     * @param array<int, string> $parms HTTP parameter names to check.
      * @return bool
      */
     public function paramsExists($parms = array())
@@ -581,6 +585,8 @@ class ZealAPI extends REST
     }
 
     /**
+     * JSON-encode `$data` with `JSON_PRETTY_PRINT`. Returns `'{}'` for non-array input.
+     *
      * @param mixed $data
      * @return string
      */

@@ -15,6 +15,11 @@ final class PhpredisDriver implements RedisDriver
     /** Original URL kept so subscribe() can spawn fresh per-coroutine clients. */
     private string $url;
 
+    /**
+     * Connect to the Redis server at `$url` using the `phpredis` extension.
+     * Throws `StoreException` when `ext-redis` is not loaded, or when the
+     * connection attempt fails.
+     */
     public function __construct(string $url)
     {
         if (!extension_loaded('redis')) {
@@ -82,8 +87,13 @@ final class PhpredisDriver implements RedisDriver
         ];
     }
 
+    /** Return the driver identifier string `'phpredis'`. */
     public function name(): string { return 'phpredis'; }
 
+    /**
+     * Set a plain string key. Applies `EX $ttlSeconds` when provided.
+     * Returns `true` on success.
+     */
     public function set(string $key, string $value, ?int $ttlSeconds = null): bool
     {
         try {
@@ -94,6 +104,7 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /** Get a plain string key. Returns `null` on miss or when the key doesn't exist. */
     public function get(string $key): ?string
     {
         try {
@@ -106,6 +117,10 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Delete one or more keys. Returns the number of keys that were removed.
+     * No-op (returns `0`) when called with an empty list.
+     */
     public function del(string ...$keys): int
     {
         if ($keys === []) { return 0; }
@@ -113,6 +128,7 @@ final class PhpredisDriver implements RedisDriver
         catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /** Return `true` when the key exists in Redis. */
     public function exists(string $key): bool
     {
         try {
@@ -121,12 +137,19 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /** Set an expiry of `$ttlSeconds` on `$key` via Redis `EXPIRE`. Returns `true` on success. */
     public function expire(string $key, int $ttlSeconds): bool
     {
         try { return $this->c->expire($key, $ttlSeconds); }
         catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Set multiple hash fields via `HMSET`. Returns the number of fields written.
+     * No-op (returns `0`) when `$fields` is empty.
+     *
+     * @param array<string, string> $fields
+     */
     public function hset(string $key, array $fields): int
     {
         if ($fields === []) { return 0; }
@@ -136,6 +159,12 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Return all fields and values of a hash via `HGETALL`.
+     * Returns an empty array when the key does not exist.
+     *
+     * @return array<string, string>
+     */
     public function hgetall(string $key): array
     {
         try {
@@ -145,6 +174,13 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Return the values of specific hash `$fields` via `HMGET`. Missing fields
+     * are returned as `null` at the corresponding index position.
+     *
+     * @param array<int, string> $fields
+     * @return array<int, string|null>
+     */
     public function hmget(string $key, array $fields): array
     {
         if ($fields === []) { return []; }
@@ -162,18 +198,24 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /** Atomically increment a hash field by `$by` (integer) via `HINCRBY`. Returns the new value. */
     public function hincrby(string $key, string $field, int $by): int
     {
         try { return $this->c->hIncrBy($key, $field, $by); }
         catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /** Atomically increment a hash field by `$by` (float) via `HINCRBYFLOAT`. Returns the new value. */
     public function hincrbyfloat(string $key, string $field, float $by): float
     {
         try { return $this->c->hIncrByFloat($key, $field, $by); }
         catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Delete one or more hash fields via `HDEL`. Returns the number of fields removed.
+     * No-op (returns `0`) when called with an empty list.
+     */
     public function hdel(string $key, string ...$fields): int
     {
         if ($fields === []) { return 0; }
@@ -181,6 +223,12 @@ final class PhpredisDriver implements RedisDriver
         catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Add members to a Redis Set via `SADD`. Returns the number of members actually added
+     * (existing members are ignored). No-op (returns `0`) when `$members` is empty.
+     *
+     * @param array<int, string> $members
+     */
     public function sadd(string $key, array $members): int
     {
         if ($members === []) { return 0; }
@@ -188,6 +236,12 @@ final class PhpredisDriver implements RedisDriver
         catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Remove members from a Redis Set via `SREM`. Returns the number of members removed.
+     * No-op (returns `0`) when `$members` is empty.
+     *
+     * @param array<int, string> $members
+     */
     public function srem(string $key, array $members): int
     {
         if ($members === []) { return 0; }
@@ -195,12 +249,19 @@ final class PhpredisDriver implements RedisDriver
         catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /** Return the cardinality of a Redis Set via `SCARD`. O(1). */
     public function scard(string $key): int
     {
         try { return $this->c->sCard($key); }
         catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Full set scan via `SSCAN`. Yields string members one at a time across
+     * all scan batches. Use `sscanCursor()` for paginated access.
+     *
+     * @return \Generator<int, string>
+     */
     public function sscan(string $key, int $batch = 100): \Generator
     {
         try {
@@ -213,6 +274,14 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Single-batch `SSCAN` with cursor. Returns `[next-cursor, members]`.
+     * A returned cursor of `'0'` signals end-of-scan. `phpredis` takes the
+     * cursor by reference (int|null) — this method drives it exactly once
+     * and coerces the result to the string-cursor contract.
+     *
+     * @return array{0:string, 1:list<string>}
+     */
     public function sscanCursor(string $key, string $cursor, int $count): array
     {
         try {
@@ -229,24 +298,40 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /** Atomically increment a plain string counter key by `$by` via `INCRBY`. Returns the new value. */
     public function incrby(string $key, int $by): int
     {
         try { return $this->c->incrBy($key, $by); }
         catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /** Atomically decrement a plain string counter key by `$by` via `DECRBY`. Returns the new value. */
     public function decrby(string $key, int $by): int
     {
         try { return $this->c->decrBy($key, $by); }
         catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Execute a Lua script server-side via `EVAL`. Server-atomic — no other
+     * command interleaves during execution. `$keys` are the `KEYS[n]` values
+     * (cluster-routing hint); `$args` are the `ARGV[n]` values.
+     *
+     * @param array<int, string> $keys
+     * @param array<int, string> $args
+     */
     public function evalScript(string $script, array $keys, array $args): mixed
     {
         try { return $this->c->eval($script, array_merge($keys, $args), count($keys)); }
         catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Full keyspace scan matching `$match` via `SCAN`. Yields string keys one
+     * at a time across all batches. Use `scanCursor()` for paginated access.
+     *
+     * @return \Generator<int, string>
+     */
     public function scanKeys(string $match, int $batch = 200): \Generator
     {
         try {
@@ -259,6 +344,12 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Single-batch keyspace `SCAN` with cursor. Returns `[next-cursor, keys]`.
+     * A returned cursor of `'0'` signals end-of-scan.
+     *
+     * @return array{0:string, 1:list<string>}
+     */
     public function scanCursor(string $match, string $cursor, int $count): array
     {
         try {
@@ -271,6 +362,7 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /** Ping the Redis server. Returns `true` when the server responds with `PONG`. */
     public function ping(): bool
     {
         try {
@@ -279,6 +371,10 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Close the underlying `\Redis` connection. Tolerant on failure —
+     * logs at `debug` level via `elog()` rather than throwing (H9 hardening).
+     */
     public function close(): void
     {
         try {
@@ -295,6 +391,14 @@ final class PhpredisDriver implements RedisDriver
         }
     }
 
+    /**
+     * Execute a batch of commands in a single pipelined round-trip via
+     * `Redis::PIPELINE`. The `$batch` callable receives the pipeline object
+     * and queues commands on it; results are returned as a flat list in
+     * command order.
+     *
+     * @return list<mixed>
+     */
     public function pipeline(callable $batch): array
     {
         try {
@@ -305,6 +409,13 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Pipelined `HGETALL` for multiple keys (H3 hardening). Returns a list of
+     * hash maps in the same order as `$keys`; empty arrays for non-existent keys.
+     *
+     * @param  array<int, string>             $keys
+     * @return array<int, array<string, string>>
+     */
     public function mhgetall(array $keys): array
     {
         if ($keys === []) { return []; }
@@ -327,6 +438,13 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Pipelined bulk write: `HMSET` each row, optionally `EXPIRE` it, and
+     * optionally `SADD` its membership key to `$setKey` — all in a single
+     * pipeline round-trip (H3 hardening). Used by `RedisBackend::mset()`.
+     *
+     * @param array<int, array{rk:string, fields:array<string,string>, sk?:string}> $writes
+     */
     public function mhsetWithMembership(array $writes, ?string $setKey = null, ?int $ttl = null): void
     {
         if ($writes === []) { return; }
@@ -350,6 +468,11 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Asynchronously delete keys via `UNLINK` (non-blocking reclaim, unlike `DEL`).
+     * Returns the number of keys that existed. No-op (returns `0`) when called
+     * with an empty list.
+     */
     public function unlink(string ...$keys): int
     {
         if ($keys === []) { return 0; }
@@ -362,6 +485,10 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Publish `$payload` to a Redis pub/sub `$channel` via `PUBLISH`.
+     * Returns the number of subscribers that received the message.
+     */
     public function publish(string $channel, string $payload): int
     {
         try {
@@ -446,6 +573,13 @@ final class PhpredisDriver implements RedisDriver
         }
     }
 
+    /**
+     * Append an entry to a Redis Stream via `XADD`. Returns the auto-generated
+     * entry ID (e.g. `'1710000000000-0'`). Applies `MAXLEN ~` trimming when
+     * `$maxLen` is provided. Throws `StoreException` when `$fields` is empty.
+     *
+     * @param array<string, string> $fields
+     */
     public function xadd(string $stream, array $fields, ?int $maxLen = null): string
     {
         if ($fields === []) { throw new StoreException('xadd(): fields must be non-empty'); }
@@ -458,6 +592,12 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Create a consumer group on `$stream` starting at `$id` (default `'$'` = only
+     * new entries). When `$mkStream` is `true`, creates the stream if it doesn't
+     * exist. Returns `true` on success, `false` when the group already exists
+     * (`BUSYGROUP` — treated as idempotent).
+     */
     public function xgroupCreate(string $stream, string $group, string $id = '$', bool $mkStream = true): bool
     {
         try {
@@ -471,6 +611,14 @@ final class PhpredisDriver implements RedisDriver
         }
     }
 
+    /**
+     * Read new entries from one or more streams via `XREADGROUP`. Blocks for
+     * up to `$blockMs` milliseconds when no new entries are available.
+     * Returns a map of stream name → list of `{id, payload}` entries.
+     *
+     * @param  array<int, string> $streams
+     * @return array<string, list<array{id: string, payload: array<string, string>}>>
+     */
     public function xreadGroup(string $group, string $consumer, array $streams, int $count, int $blockMs): array
     {
         if ($streams === []) { return []; }
@@ -498,6 +646,11 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Acknowledge one or more stream entries via `XACK`, removing them from
+     * the consumer group's pending-entries list. Returns the number of entries
+     * successfully acknowledged. No-op (returns `0`) when called with no IDs.
+     */
     public function xack(string $stream, string $group, string ...$ids): int
     {
         if ($ids === []) { return 0; }
@@ -507,6 +660,13 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Claim pending stream entries that have been idle for at least `$minIdleMs`
+     * milliseconds via `XAUTOCLAIM`. Used to recover messages from dead consumers.
+     * Returns `[next-cursor, entries]`; iterate until cursor is `'0-0'` to drain.
+     *
+     * @return array{0:string, 1:list<array{id:string, payload:array<string, string>}>}
+     */
     public function xautoclaim(
         string $stream,
         string $group,
@@ -538,6 +698,7 @@ final class PhpredisDriver implements RedisDriver
         } catch (\RedisException $e) { throw $this->wrap($e); }
     }
 
+    /** Wrap a `\RedisException` in a `StoreException` with a `phpredis:` prefix for uniform error handling. */
     private function wrap(\RedisException $e): StoreException
     {
         return new StoreException('phpredis: ' . $e->getMessage(), 0, $e);

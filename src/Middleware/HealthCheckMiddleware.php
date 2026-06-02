@@ -11,31 +11,38 @@ use Psr\Http\Server\RequestHandlerInterface;
 use ZealPHP\App;
 
 /**
- * Health Check Middleware
+ * Health Check Middleware — short-circuits on configured paths and returns
+ * `App::stats()` as JSON. Designed for load-balancer probes, Kubernetes
+ * liveness/readiness, and monitoring agents.
  *
- * Short-circuits on configured paths (default: `/healthz`) and returns
- * JSON from `App::stats()`. Designed for load balancer probes, Kubernetes
- * liveness/readiness, and monitoring.
+ * Basic usage (intercepts `/healthz`):
  *
- * Usage:
- *   $app->addMiddleware(new HealthCheckMiddleware());
+ * ```php
+ * $app->addMiddleware(new HealthCheckMiddleware());
+ * ```
  *
  * Custom paths:
- *   $app->addMiddleware(new HealthCheckMiddleware(
- *       paths: ['/healthz', '/readyz', '/_health']
- *   ));
  *
- * With a custom check (e.g., verify Redis/DB reachable):
- *   $app->addMiddleware(new HealthCheckMiddleware(
- *       check: function(): ?string {
- *           try { \ZealPHP\Store::get('_ping', '_ping'); return null; }
- *           catch (\Throwable $e) { return 'store unreachable'; }
- *       }
- *   ));
+ * ```php
+ * $app->addMiddleware(new HealthCheckMiddleware(
+ *     paths: ['/healthz', '/readyz', '/_health']
+ * ));
+ * ```
  *
- * Response:
- *   200 {"status":"ok", "uptime_sec":123, ...}
- *   503 {"status":"unhealthy", "reason":"store unreachable", ...}
+ * With a custom readiness check (e.g., verify Redis/DB reachable):
+ *
+ * ```php
+ * $app->addMiddleware(new HealthCheckMiddleware(
+ *     check: function(): ?string {
+ *         try { \ZealPHP\Store::get('_ping', '_ping'); return null; }
+ *         catch (\Throwable $e) { return 'store unreachable'; }
+ *     }
+ * ));
+ * ```
+ *
+ * Response shapes:
+ * - `200` `{"status":"ok", "uptime_sec":123, ...}` — healthy
+ * - `503` `{"status":"unhealthy", "reason":"store unreachable", ...}` — unhealthy
  */
 final class HealthCheckMiddleware implements MiddlewareInterface
 {
@@ -46,8 +53,8 @@ final class HealthCheckMiddleware implements MiddlewareInterface
     private $check;
 
     /**
-     * @param list<string>              $paths  URL paths to intercept
-     * @param (callable(): ?string)|null $check  Returns null if healthy, error string if not
+     * @param list<string>               $paths URL paths to intercept (default `['/healthz']`).
+     * @param (callable(): ?string)|null $check Returns `null` if healthy, an error string if not.
      */
     public function __construct(array $paths = ['/healthz'], ?callable $check = null)
     {
@@ -55,6 +62,13 @@ final class HealthCheckMiddleware implements MiddlewareInterface
         $this->check = $check;
     }
 
+    /**
+     * Intercept health-check paths and return a JSON status payload.
+     *
+     * Non-matching paths are forwarded to `$handler` unchanged. When the
+     * optional `$check` callable returns a non-null string, the response
+     * status is `503` and the string is included as `"reason"` in the body.
+     */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $path = $request->getUri()->getPath();

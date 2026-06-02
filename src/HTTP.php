@@ -50,13 +50,15 @@ final class HTTPResponse
  * For the common case — JSON request/response, short timeout, a handful
  * of headers — this is one call:
  *
- *     $r = HTTP::get('https://api.example.com/users', ['Authorization' => 'Bearer ...']);
- *     if ($r->ok()) { return $r->json(); }
+ * ```php
+ * $r = HTTP::get('https://api.example.com/users', ['Authorization' => 'Bearer ...']);
+ * if ($r->ok()) { return $r->json(); }
  *
- *     $r = HTTP::post('https://hooks.slack.com/...', json: ['text' => 'hi']);
+ * $r = HTTP::post('https://hooks.slack.com/...', body: ['text' => 'hi']);
+ * ```
  *
- * For concurrent fan-out (N requests in parallel), use HTTP::all() —
- * built on App::parallel().
+ * For concurrent fan-out (N requests in parallel), use `HTTP::all()` —
+ * built on `App::parallel()`.
  *
  * For complex multipart uploads / streaming bodies, drop down to
  * `OpenSwoole\Coroutine\Http\Client` directly — this wrapper is

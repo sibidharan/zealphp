@@ -8,26 +8,41 @@ use OpenSwoole\Coroutine;
 use OpenSwoole\Coroutine\Channel;
 
 /**
- * Per-worker pool of RedisClient connections.
+ * Per-worker pool of `RedisClient` connections.
  *
  * Two coroutines sharing one phpredis/predis socket interleave RESP frames
  * and corrupt the stream — so each op must acquire a private client from
- * this pool, use it, and release it back. The pool is sized N (default 8)
- * per worker; the OpenSwoole channel blocks until a client is available.
+ * this pool, use it, and release it back. The pool is sized N (default `8`)
+ * per worker; the `OpenSwoole\Coroutine\Channel` blocks until a client is available.
  *
- * Outside a coroutine context (sync mode, e.g. superglobals(true)), the
+ * Outside a coroutine context (sync mode, e.g. `superglobals(true)`), the
  * pool degrades to a single lazily-built client used sequentially — the
- * channel pop would block the worker indefinitely otherwise.
+ * channel `pop()` would block the worker indefinitely otherwise.
  */
 final class RedisConnectionPool
 {
-    /** Channel + its pre-fill are created lazily inside a coroutine — Channel::push throws otherwise. */
+    /**
+     * The coroutine channel holding available `RedisClient` instances.
+     *
+     * Created lazily on the first `acquire()` inside a coroutine context
+     * because `Channel::push()` throws outside the scheduler.
+     */
     private ?Channel $ch = null;
+
+    /** Configured pool capacity (minimum `1`). */
     private int $size;
+
+    /** Single `RedisClient` used in sync (non-coroutine) mode. */
     private ?RedisClient $syncClient = null;
+
+    /** Per-worker counters (`pool_acquires_total`, `pool_acquire_timeouts_total`, `pool_clients_created_total`). */
     private Stats $stats;
 
-    /** @param array{prefer?: 'auto'|'phpredis'|'predis'} $opts */
+    /**
+     * @param string                                       $url  Redis connection URL (e.g. `redis://127.0.0.1:6379`).
+     * @param int                                          $size Maximum pool size per worker (default `8`).
+     * @param array{prefer?: 'auto'|'phpredis'|'predis'}  $opts Driver preference options.
+     */
     public function __construct(
         private string $url,
         int $size = 8,
@@ -93,7 +108,10 @@ final class RedisConnectionPool
         finally { $this->release($c); }
     }
 
+    /** Return the configured pool capacity. */
     public function size(): int { return $this->size; }
+
+    /** Return the Redis connection URL this pool connects to. */
     public function url(): string { return $this->url; }
 
     /**
@@ -125,6 +143,12 @@ final class RedisConnectionPool
         $this->ch = null;
     }
 
+    /**
+     * Lazily initialise the `Channel` and pre-fill it with `$size` clients.
+     *
+     * IMPORTANT: must be called inside a coroutine — `Channel::push()` throws
+     * outside the scheduler.
+     */
     private function ensureChannel(): Channel
     {
         if ($this->ch !== null) { return $this->ch; }

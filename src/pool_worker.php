@@ -686,6 +686,26 @@ function pool_finish_request(mixed $result, ?\Throwable $error, mixed $prevCwd):
     ];
 }
 
+/**
+ * Reset all per-request state between pool iterations.
+ *
+ * Clears superglobals (`$_SERVER`, `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`,
+ * `$_REQUEST`, `$_SESSION`), the raw input buffer, response capture state
+ * (`$__pw_headers`, `$__pw_cookies`, `$__pw_rawcookies`, `$__pw_status`),
+ * any queued shutdown functions, and all output buffers.
+ *
+ * Performs FPM-style `$GLOBALS` cleanup (unsets request-scope keys not in
+ * the boot snapshot) and, when `ext-zealphp` is loaded, calls
+ * `zealphp_process_state_clean()` to roll back constants, classes, functions,
+ * and included files to the boot baseline.
+ *
+ * When `ZEALPHP_POOL_FULL_RESET=1` is set, also resets op_array
+ * `run_time_cache`, function-local statics, and class static properties
+ * (mirrors `CoSessionManager`'s per-request reset stack from ext-zealphp 0.3.25).
+ *
+ * IMPORTANT: Must be called at GLOBAL SCOPE (not inside a function) so that
+ * `$_SESSION = null` and the superglobal resets take effect process-wide.
+ */
 function pool_reset_request_state(): void
 {
     global $__pw_headers, $__pw_cookies, $__pw_rawcookies, $__pw_status, $__pw_globals_snapshot, $__pw_shutdown_functions;

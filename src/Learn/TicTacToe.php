@@ -10,12 +10,21 @@ use ZealPHP\Store;
 /**
  * Tic-tac-toe multiplayer helpers (Build-the-App capstone).
  *
- * Moved verbatim out of route/learn.php so the route file stays function-free
+ * Moved verbatim out of `route/learn.php` so the route file stays function-free
  * and hot-reloadable. Behaviour is unchanged — the same room sanitiser, winner
- * detector, and state-broadcast helpers the /ws/tictactoe handler calls.
+ * detector, and state-broadcast helpers the `/ws/tictactoe` handler calls.
+ *
+ * Game state is stored in the `ws_tictactoe_rooms` and `ws_tictactoe_clients`
+ * `Store` tables, which must be created before `App::run()`.
  */
 class TicTacToe
 {
+    /**
+     * Sanitise a room name to a safe, lowercase slug.
+     *
+     * Lowercases, strips anything that is not `[a-z0-9-]`, and truncates to
+     * 32 characters so the result is safe as a `Store` key.
+     */
     public static function ttt_sanitize_room(string $room): string
     {
         $room = strtolower($room);
@@ -24,6 +33,14 @@ class TicTacToe
     }
 
     /**
+     * Detect a winner on the given 9-character board string.
+     *
+     * The board is indexed `0`–`8` left-to-right, top-to-bottom; each cell holds
+     * `'X'`, `'O'`, or `'_'` (empty). Returns a two-element tuple:
+     * - `[winner_symbol, winning_indices]` when a winning line is found
+     *   (e.g. `['X', [0, 1, 2]]`).
+     * - `[null, null]` when there is no winner yet.
+     *
      * @return array{0: ?string, 1: ?array<int, int>}
      */
     public static function ttt_detect_winner(string $board): array
@@ -39,13 +56,24 @@ class TicTacToe
         return [null, null];
     }
 
+    /**
+     * Broadcast the current room state to all connected clients in `$room`.
+     *
+     * Reads the room row from the `ws_tictactoe_rooms` `Store` table and pushes
+     * a `"state"` JSON message to every `fd` found in `ws_tictactoe_clients`.
+     */
     public static function ttt_broadcast_state(string $room): void
     {
         self::broadcast($room, []);
     }
 
     /**
-     * @param array<string, mixed> $extras
+     * Broadcast the current room state merged with `$extras`.
+     *
+     * Use this variant to piggyback additional fields (e.g. `"event"`,
+     * `"winner_line"`) onto the standard state payload in a single push.
+     *
+     * @param array<string, mixed> $extras  Extra key-value pairs merged into the payload.
      */
     public static function ttt_broadcast_state_with(string $room, array $extras): void
     {
@@ -53,10 +81,11 @@ class TicTacToe
     }
 
     /**
-     * Shared fan-out core for ttt_broadcast_state / _with — builds the state
-     * payload (optionally merged with $extras) and pushes it to every fd in
-     * the room. Single implementation so the two public entry points can't
-     * drift in payload shape.
+     * Shared fan-out core for `ttt_broadcast_state()` / `ttt_broadcast_state_with()`.
+     *
+     * Builds the state payload (optionally merged with `$extras`) and pushes it to
+     * every `fd` in the room. Single implementation so the two public entry points
+     * can't drift in payload shape.
      *
      * @param array<string, mixed> $extras
      */
@@ -104,6 +133,12 @@ class TicTacToe
         }
     }
 
+    /**
+     * Coerce a mixed `Store` value to `int`.
+     *
+     * `Store` columns return `string` on read even for `TYPE_INT` columns.
+     * Returns `0` for non-numeric values.
+     */
     private static function asInt(mixed $v): int
     {
         if (is_int($v))                      { return $v; }

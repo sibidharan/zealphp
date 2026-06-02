@@ -11,29 +11,37 @@ use Psr\Http\Server\RequestHandlerInterface;
 use ZealPHP\RequestContext;
 
 /**
- * CSRF Protection Middleware
+ * CSRF Protection Middleware.
  *
- * Generates a per-session CSRF token on safe requests (GET/HEAD/OPTIONS)
- * and validates it on state-changing requests (POST/PUT/PATCH/DELETE).
+ * Generates a per-session CSRF token on safe requests (`GET`/`HEAD`/`OPTIONS`)
+ * and validates it on state-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`).
  *
  * Token sources checked (first match wins):
  *   1. `$_POST['_csrf_token']` (form hidden field)
  *   2. `X-CSRF-Token` request header (AJAX/htmx)
  *
- * Token is stored in `$g->session['_csrf_token']` and exposed via
+ * The token is stored in `$g->session['_csrf_token']` and exposed via
  * `$g->memo['csrf_token']` for templates to read.
  *
- * Usage:
- *   $app->addMiddleware(new CsrfMiddleware());
+ * Usage in `app.php`:
+ * ```php
+ * $app->addMiddleware(new CsrfMiddleware());
+ * ```
  *
  * In templates:
- *   <input type="hidden" name="_csrf_token" value="<?= $g->memo['csrf_token'] ?>">
+ * ```php
+ * <input type="hidden" name="_csrf_token" value="<?= $g->memo['csrf_token'] ?>">
+ * ```
  *
  * With htmx:
- *   <body hx-headers='{"X-CSRF-Token": "<?= $g->memo['csrf_token'] ?>"}'>
+ * ```php
+ * <body hx-headers='{"X-CSRF-Token": "<?= $g->memo['csrf_token'] ?>"}'>
+ * ```
  *
  * To exempt paths (e.g. webhooks):
- *   $app->addMiddleware(new CsrfMiddleware(exempt: ['/api/webhook', '/api/stripe']));
+ * ```php
+ * $app->addMiddleware(new CsrfMiddleware(exempt: ['/api/webhook', '/api/stripe']));
+ * ```
  */
 final class CsrfMiddleware implements MiddlewareInterface
 {
@@ -42,15 +50,25 @@ final class CsrfMiddleware implements MiddlewareInterface
     private const FIELD_NAME = '_csrf_token';
     private const HEADER_NAME = 'X-CSRF-Token';
 
-    /** @var list<string> */
+    /** @var list<string> URL path prefixes that skip CSRF validation. */
     private array $exempt;
 
-    /** @param list<string> $exempt URL prefixes to skip validation */
+    /**
+     * @param list<string> $exempt URL prefixes to skip validation (e.g. `['/api/webhook']`).
+     */
     public function __construct(array $exempt = [])
     {
         $this->exempt = $exempt;
     }
 
+    /**
+     * Generate or validate the CSRF token for the current request.
+     *
+     * Safe methods (`GET`/`HEAD`/`OPTIONS`) and exempt path prefixes pass through
+     * without validation. All other methods require a matching token submitted
+     * via the `_csrf_token` POST field or the `X-CSRF-Token` header; a mismatch
+     * or missing token returns a `403` response immediately.
+     */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $g = RequestContext::instance();
