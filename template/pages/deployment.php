@@ -35,7 +35,7 @@ BASH
   <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
   <tr><td><code>ZEALPHP_HOST</code></td><td><code>0.0.0.0</code></td><td>Bind address</td></tr>
   <tr><td><code>ZEALPHP_PORT</code></td><td><code>8080</code></td><td>Listen port</td></tr>
-  <tr><td><code>ZEALPHP_WORKERS</code></td><td>CPU count</td><td>HTTP worker processes</td></tr>
+  <tr><td><code>ZEALPHP_WORKERS</code></td><td><code>default_worker_count(4)</code> — min(4, floor(cgroup CPU quota)) when a quota exists; 4 otherwise</td><td>HTTP worker processes. OpenSwoole's own default is the host CPU count, which overshoots in CPU-limited containers — ZealPHP uses a cgroup-aware default instead.</td></tr>
   <tr><td><code>ZEALPHP_TASK_WORKERS</code></td><td><code>8</code></td><td>Async task worker count. Set <code>0</code> to disable (saves ~8 processes if you don't use <code>App::getServer()-&gt;task()</code>).</td></tr>
   <tr><td><code>ZEALPHP_MAX_REQUEST</code></td><td><code>100000</code></td><td>Requests per worker before clean recycle. Bounds memory growth in long-running workers; set <code>0</code> to disable.</td></tr>
   <tr><td><code>ZEALPHP_MAX_CONN</code></td><td>OpenSwoole default</td><td><code>max_conn</code> server setting</td></tr>

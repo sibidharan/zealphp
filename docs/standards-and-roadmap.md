@@ -48,7 +48,7 @@ Treat Markdown files in `docs/` as canonical documentation. When proposing chang
 
 - **Superglobal-less default mode** – `App::superglobals(false)` is the shipped default for new projects: per-coroutine `RequestContext` (`$g`) replaces process-wide `$_GET` / `$_POST` / `$_SESSION` arrays, making the runtime safe to handle concurrent coroutines without cross-request leaks.
 
-- **One-call lifecycle presets — `App::mode()` and `App::isolation()`** – The current public lifecycle surface folds the underlying four knobs (`processIsolation`, `enableCoroutine`, `hookAll`, `cgiMode`) into two orthogonal axes. `App::isolation(Isolation|string)` picks the request-isolation strategy (one of `App::ISOLATION_COROUTINE`, `ISOLATION_CGI_POOL`, `ISOLATION_CGI_PROC`, `ISOLATION_CGI_FCGI`, `ISOLATION_NONE`). `App::mode(string)` sets both axes in one call via named presets:
+- **One-call lifecycle presets — `App::mode()` and `App::isolation()`** – The current public lifecycle surface folds the underlying four knobs (`processIsolation`, `enableCoroutine`, `hookAll`, `cgiMode`) into two orthogonal axes. `App::isolation(Isolation|string)` picks the request-isolation strategy (one of `App::ISOLATION_COROUTINE`, `ISOLATION_CGI_POOL`, `ISOLATION_CGI_PROC`, `ISOLATION_CGI_FCGI`, `ISOLATION_NONE`). The experimental Apache MPM prefork runner (`cgiMode('fork')`) is not a separate `isolation()` constant — it is selected via `App::cgiMode('fork')` directly within the CGI-pool axis. `App::mode(string)` sets both axes in one call via named presets:
 
   | Preset constant | String | Use for |
   |---|---|---|

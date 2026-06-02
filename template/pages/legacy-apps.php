@@ -231,6 +231,11 @@ PHP]); ?>
   <td>WordPress holds <code>$wp</code> (the framework instance) as a global; the pool worker's FPM-style cleanup correctly clears request-scope globals between requests, BUT WordPress's <code>require_once</code> chain caches the bootstrap files (<code>wp-load.php</code>, <code>wp-settings.php</code>) so they don't re-execute on the 2nd request → <code>$wp</code> never gets re-instantiated → null. PHP's <code>require_once</code> is not un-resettable in standard PHP. Drop <code>cgiPoolMaxRequests(1)</code> (the row above) to recycle every request.</td>
 </tr>
 <tr>
+  <td><strong>cgiMode('fork') + <code>App::cgiMode('fork')</code></strong><br><small>(experimental — Apache MPM prefork runner)</small></td>
+  <td>200 on every request</td>
+  <td>A long-lived fork-master (<code>src/fork_master.php</code>) binds a UNIX socket and forks a fresh child <em>per request</em> that runs the target <code>.php</code> at true global scope and hard-exits. Gives fresh-process correctness (no "Cannot redeclare class") without the ~30–50 ms <code>proc_open</code> overhead of <code>cgiMode('proc')</code>; fork cost is ~1 ms. No <code>App::mode()</code> preset — set via <code>App::cgiMode('fork')</code> directly. Requires <code>pcntl</code> + <code>posix</code> in the PHP build. Concurrency capped by <code>App::$cgi_fork_max_concurrent</code> (default 16); returns 503 when full.</td>
+</tr>
+<tr>
   <td>cgiMode('fcgi') → external php-fpm pool</td>
   <td>200 + 50,719 B on every request</td>
   <td>Forward every <code>public/*.php</code> to a php-fpm pool you already run; FPM keeps interpreters warm and recycles them per its own <code>pm.max_requests</code>. ZealPHP becomes the HTTP/WebSocket/coroutine layer in front. See <a href="#cgi-mode-fcgi">Framework-wide <code>cgiMode('fcgi')</code></a> below.</td>
@@ -1230,6 +1235,12 @@ BASH, 'lang' => 'bash']); ?>
   <td>—</td>
   <td><code>App::cgiMode('pool')</code> — default; <strong>.php only</strong></td>
 </tr>
+<tr>
+  <td><code>'fork'</code> <em>(experimental)</em></td>
+  <td>Apache MPM prefork (<code>prefork</code> MPM + <code>mod_php</code>) — fresh process per request, interpreter not shared across requests</td>
+  <td>—</td>
+  <td><code>App::cgiMode('fork')</code> — <strong>.php only</strong>; long-lived fork-master (<code>src/fork_master.php</code>) forks a fresh child per request (~1 ms), true global scope, hard-exits after; requires <code>pcntl</code> + <code>posix</code>; concurrency capped by <code>App::$cgi_fork_max_concurrent</code> (default 16; 503 when full); no <code>App::mode()</code> preset — set directly via <code>App::cgiMode('fork')</code></td>
+</tr>
 </table>
 
 <h3 class="legacy-mt-sm">Worked examples</h3>
@@ -1356,6 +1367,73 @@ PHP]); ?>
 <p><strong>Under the hood:</strong> dispatch lives in <code>App::cgiFcgi(string $path, ?string $address = null, array $extraParams = [])</code>, which builds the CGI/1.1 environment via <code>buildCgiEnv()</code>, forwards via <code>ZealPHP\CGI\FastCgiClient::request($params, $stdinBody)</code>, and applies the upstream's status code + headers to <code>$g-&gt;zealphp_response</code>. A failed connection or <code>FastCgiException</code> from the upstream surfaces as a clean <strong>502 Bad Gateway</strong> — same shape Apache and nginx emit when their FCGI upstream is down.</p>
 
 <p><strong>Performance:</strong> we don't run PHP at all in this mode — throughput equals whatever your FPM pool delivers minus one local socket hop. We deliberately don't quote a number here: it depends on your FPM <code>pm.max_children</code>, the file under load, and whether you're on Unix sockets vs TCP. The bridge-cost table at <a href="/vs-fpm#measured-four-ways">/vs-fpm</a> compares the in-process modes (the warm <code>'pool'</code> and Mixed-mode) and intentionally omits <code>'fcgi'</code> because the answer is "ask your FPM pool."</p>
+
+<h2 id="cgi-mode-fork" class="legacy-mt-xl"><code>cgiMode('fork')</code> — experimental Apache MPM prefork runner</h2>
+
+<div class="callout warn">
+  <p><strong>Experimental.</strong> <code>cgiMode('fork')</code> is the Apache MPM prefork CGI runner. It is functional but not yet recommended as a stable default. Test thoroughly before deploying to production.</p>
+</div>
+
+<p><code>cgiMode('fork')</code> is the fourth <code>.php</code> isolation strategy alongside <code>'pool'</code>, <code>'proc'</code>, and <code>'fcgi'</code>. Where <code>cgiMode('pool')</code> reuses warm workers and <code>cgiMode('proc')</code> spawns via <code>proc_open</code> (~30–50 ms cold start), the fork runner sits between them: a long-lived fork-master process (<code>src/fork_master.php</code>) binds a UNIX socket and forks a <strong>fresh child per request</strong> that runs the target <code>.php</code> at true global scope (~1 ms fork cost), then hard-exits. Result: fresh-process correctness (no "Cannot redeclare class") for unmodified WordPress/legacy apps, at fork cost rather than <code>proc_open</code> cost.</p>
+
+<p><strong>Reachability constraint.</strong> There is <strong>no <code>App::mode()</code> preset</strong> for fork and no <code>App::isolation()</code> Fork case — fork is reached exclusively via <code>App::cgiMode('fork')</code> or <code>App::registerCgiBackend('.php', ['mode' =&gt; 'fork'])</code>. It is <code>.php</code>-only (like <code>'pool'</code>).</p>
+
+<p><strong>Requirements:</strong> the PHP build must include <code>ext-pcntl</code> and <code>ext-posix</code>. Verify with <code>php -m | grep -E 'pcntl|posix'</code>.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'app.php — WordPress with cgiMode(\'fork\') (experimental)',
+    'code'  => <<<'PHP'
+<?php
+require 'vendor/autoload.php';
+use ZealPHP\App;
+
+App::superglobals(true);
+App::cgiMode('fork');             // experimental: fork-per-request MPM prefork runner
+App::$ignore_php_ext = false;     // allow /wp-login.php in URLs
+
+// App::$cgi_fork_max_concurrent = 16; // default; returns 503 when live children hit the cap
+
+$app = App::init('0.0.0.0', 9501);
+$app->setFallback(fn() => App::include('/index.php'));
+$app->run(['task_worker_num' => 0]);
+PHP]); ?>
+
+<h3 class="legacy-mt-sm">fork vs pool — when to use which</h3>
+<table class="ztable">
+<tr><th>Concern</th><th><code>cgiMode('pool')</code> (default)</th><th><code>cgiMode('fork')</code> (experimental)</th></tr>
+<tr>
+  <td>Per-request startup cost</td>
+  <td>~0 ms (interpreter already warm in pool worker)</td>
+  <td>~1 ms (fork syscall)</td>
+</tr>
+<tr class="vsfpm-row-tint">
+  <td>Interpreter state between requests</td>
+  <td>Shared pool worker; recycled after <code>cgiPoolMaxRequests(N)</code> (default 500)</td>
+  <td>Always fresh — child hard-exits after every request; no shared state possible</td>
+</tr>
+<tr>
+  <td>WordPress <code>require_once</code> bootstrap re-run</td>
+  <td>Needs <code>cgiPoolMaxRequests(1)</code> to force recycle each request</td>
+  <td>Automatic — fresh process every request; no <code>maxRequests</code> tuning needed</td>
+</tr>
+<tr class="vsfpm-row-tint">
+  <td>Concurrency cap</td>
+  <td><code>cgiPoolSize(N)</code> per HTTP worker; queue if all busy</td>
+  <td><code>App::$cgi_fork_max_concurrent</code> (default 16) live children; 503 when full</td>
+</tr>
+<tr>
+  <td>PHP extensions required</td>
+  <td>None beyond OpenSwoole</td>
+  <td><code>pcntl</code> + <code>posix</code></td>
+</tr>
+<tr class="vsfpm-row-tint">
+  <td>Stability</td>
+  <td>Stable (default since v0.2.41)</td>
+  <td>Experimental</td>
+</tr>
+</table>
+
+<p class="legacy-mt-prose">Backed by <code>src/CGI/ForkPool.php</code> + <code>src/fork_master.php</code>; dispatched via <code>Dispatcher::cgiFork()</code> in <code>src/App.php</code>. Design doc: <a href="https://github.com/sibidharan/zealphp/blob/master/docs/architecture/2026-06-02-fork-per-request-cgi-pool.md"><code>docs/architecture/2026-06-02-fork-per-request-cgi-pool.md</code></a>.</p>
 
 <h2 id="httpoxy-hardening" class="legacy-mt-xl">What the CGI bridge does for you (security)</h2>
 

@@ -43,7 +43,10 @@ $post = function () {
 ```
 
 Behaviour of per-method dispatch:
-- **Undefined methods** return `405 Method Not Allowed` with an `Allow` header listing the supported methods plus `OPTIONS`.
+- **Undefined methods** return `405 Method Not Allowed` with an `Allow` response header listing the supported methods plus `OPTIONS`, and a machine-readable JSON body:
+  ```json
+  {"error": "method_not_allowed", "allowed": ["GET", "POST", "OPTIONS"]}
+  ```
 - **HEAD** is automatically derived from `$get` — no separate handler needed.
 - **OPTIONS** is always appended to the `Allow` list.
 
@@ -57,12 +60,14 @@ Behaviour of per-method dispatch:
 
 ZealPHP inspects the closure signature and injects arguments by name. Supported parameters:
 
-- **Route placeholders** – e.g., `{id}` maps to `$id`.
 - **Framework objects**:
   - `$app` – current `ZealPHP\ZealAPI` instance
-  - `$request` – PSR-7 request wrapper (`ZealPHP\HTTP\Request`)
-  - `$response` – PSR-7 response wrapper (`ZealPHP\HTTP\Response`)
+  - `$request` – `ZealPHP\HTTP\Request` wrapper
+  - `$response` – `ZealPHP\HTTP\Response` wrapper
   - `$server` – underlying `OpenSwoole\HTTP\Server`
+- **Any other name** – receives `null`, or the parameter's declared default value if one exists.
+
+> **ZealAPI does NOT inject route path parameters.** The URL segments `module` and `action` are consumed by `processApi()` during file resolution and are never passed as closure arguments. To read URL path values use `$request->get` (the query-string array) or `$this->_request` (the cleaned merged inputs). There is no `{id} → $id` injection in ZealAPI — that feature belongs to `$app->route()` handlers, not file-based API closures.
 
 Example (`api/response/override.php`):
 
@@ -86,8 +91,9 @@ When the closure runs, `$this` refers to `ZealPHP\ZealAPI`, which extends `REST`
 | `$this->response(string $body, int $status)` | Sets headers and writes the response with a specific status code. | `$this->response($this->json($payload), 201);` |
 | `$this->paramsExists(array $keys)` | Verifies the presence of query or form parameters; uses cleaned inputs. | `if (!$this->paramsExists(['id'])) { ... }` |
 | `$this->die(\Throwable $e)` | Standardised exception handler that logs and returns an error payload. | `throw new \RuntimeException('Unauthorized');` |
-| `$this->_request` / `$this->_response` | Raw request/response references saved by `REST`. | `log_request($this->_request);` |
-| `$this->request` / `$this->_response` | Request and response injected via the constructor, accessible for advanced use cases. | `$this->request->parent->server` |
+| `$this->_request` | Sanitised, merged inputs populated by `REST::inputs()` — GET/POST params stripped of HTML tags (or PUT payload parsed from `php://input`). This is the safe, cleaned view of request data. | `$title = $this->_request['title'] ?? null;` |
+| `$this->request` | The `ZealPHP\HTTP\Request` wrapper injected at construction — gives access to the raw OpenSwoole request and the full PSR-7 surface. | `$raw = $this->request->parent->rawContent();` |
+| `$this->_response` | The `ZealPHP\HTTP\Response` wrapper injected at construction — use for low-level response control (status, headers, streaming). | `$this->_response->status(201);` |
 
 Additional convenience:
 

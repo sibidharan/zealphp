@@ -87,6 +87,12 @@ Expected output:
 ZealPHP server running at http://0.0.0.0:8080 with N routes
 ```
 
+**Worker count default.** When `ZEALPHP_WORKERS` is unset, ZealPHP calls
+`\ZealPHP\default_worker_count(4)`, which resolves to `min(4, floor(cgroup CPU quota))`.
+In a Docker container or Kubernetes pod with a CPU limit (e.g. `--cpus=2`), this
+keeps the worker count proportional to the allocated CPUs rather than spawning one
+worker per host core. Set `ZEALPHP_WORKERS` explicitly to override.
+
 Visit `http://localhost:8080` in your browser to exercise the implicit public routes that map to files in `public/` — the **document root** (the Apache `DocumentRoot` equivalent). It defaults to `public/`; change it with `App::documentRoot('…')` before `App::init()`.
 
 ## 5. Verifying Health

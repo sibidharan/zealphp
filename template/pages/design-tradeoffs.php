@@ -55,8 +55,8 @@
         <code>App::MODE_LEGACY_CGI</code>, <code>App::MODE_COROUTINE_LEGACY</code>,
         <code>App::MODE_MIXED</code>) sets both axes in one call.
         <code>App::isolation()</code> (constants: <code>ISOLATION_COROUTINE</code>,
-        <code>ISOLATION_CGI_POOL</code>, <code>ISOLATION_CGI_FCGI</code>,
-        <code>ISOLATION_NONE</code>) folds the
+        <code>ISOLATION_CGI_POOL</code>, <code>ISOLATION_CGI_PROC</code>,
+        <code>ISOLATION_CGI_FCGI</code>, <code>ISOLATION_NONE</code>) folds the
         <code>processIsolation()</code> / <code>enableCoroutine()</code> / <code>hookAll()</code> /
         <code>cgiMode()</code> cross-product into one value. The fine-grained setters still work
         unchanged underneath. See
@@ -144,10 +144,16 @@ PHP]); ?>
         make it real:
       </p>
       <ul class="tradeoffs-list">
-        <li><strong class="tradeoffs-strong-light">Two dispatch modes</strong> (<code>App::cgiMode()</code>):
+        <li><strong class="tradeoffs-strong-light">Four dispatch modes</strong> (<code>App::cgiMode()</code>):
           <code>'pool'</code> (default) uses a warm, pre-spawned PHP worker pool — the interpreter stays
           resident in memory, mod_php-style isolation, ~1&#8211;3&nbsp;ms per request, configurable via
-          <code>cgiPoolSize()</code> / <code>cgiPoolMaxRequests()</code>; <code>'fcgi'</code>
+          <code>cgiPoolSize()</code> / <code>cgiPoolMaxRequests()</code>; <code>'proc'</code> spawns a fresh
+          <code>proc_open</code> subprocess per request (~30&#8211;50&nbsp;ms cold start — recursion-safe fallback
+          for cases where fresh-process semantics are needed without a pre-spawned pool);
+          <code>'fork'</code> (<strong>experimental</strong>) is an Apache MPM prefork runner — a long-lived
+          fork-master forks a fresh child per request at true global scope (~1&nbsp;ms fork cost, requires
+          <code>pcntl</code> + <code>posix</code>), giving unmodified-WordPress correctness without the
+          <code>proc_open</code> cold-start tax; <code>'fcgi'</code>
           forwards to an external php-fpm / FastCGI pool via the bundled <code>FastCgiClient</code> (no per-request
           spawn at all). Per-extension backends register via <code>App::registerCgiBackend('.py', &hellip;)</code>.</li>
         <li><strong class="tradeoffs-strong-light">ScriptAlias + ExecCGI scope.</strong>

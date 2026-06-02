@@ -186,9 +186,10 @@ The parent reads metadata, forwards headers/cookies to its OpenSwoole response, 
 The dispatch is two-tiered:
 
 1. **`App::processIsolation()`** (default `true` in superglobals mode) gates fork-vs-in-process. `false` → runs in-process via `App::executeFile()`.
-2. When process isolation is on, **`App::cgiMode('pool'|'proc'|'fcgi')`** selects the fork strategy:
+2. When process isolation is on, **`App::cgiMode('pool'|'proc'|'fork'|'fcgi')`** selects the fork strategy:
    - `'pool'` (**default**, `~1–3 ms warm`) — a per-worker pre-spawned subprocess pool (`src/CGI/WorkerPool.php`), mod_php-style isolation without a cold-start cost. Configure via `App::cgiPoolSize()` / `App::cgiPoolMaxRequests()`.
    - `'proc'` (`~30–50 ms cold`) — fresh `proc_open` subprocess per request; the recursion-safe fallback for rare full-isolation cases.
+   - `'fork'` (**EXPERIMENTAL**, `~1 ms fork cost`) — Apache MPM prefork runner: a long-lived fork-master (`src/fork_master.php`) forks a fresh child per request at true global scope. Unmodified-WordPress correctness without the `proc_open` cold-start cost. Requires `pcntl`+`posix`. `.php`-only.
    - `'fcgi'` — forward to an external FastCGI upstream (php-fpm, hhvm, roadrunner).
 
 `App::mode(App::MODE_LEGACY_CGI)` sets `superglobals(true)` + `isolation(cgi-pool)` in one call, which resolves to the warm pool by default. See [Lifecycle modes](/coroutines#lifecycle-modes) for the full preset table.
