@@ -12,14 +12,17 @@ $page = function () {
     $g = G::instance();
     $slug = trim((string) ($g->get['slug'] ?? ''));
 
-    // Whitelist must match _sidebar.php + route/docs.php — adding a new
-    // .md to docs/ requires touching all three sites.
+    // Whitelist must match template/pages/docs/{index,_sidebar}.php and
+    // MarkdownRenderer::GUIDE_SLUGS — adding a new .md to docs/ requires
+    // touching all of them (route/docs.php renders any docs/{slug}.md, but
+    // this hx-swap endpoint, the sidebar/index lists, and the cross-link
+    // rewriter are each separately gated).
     $allowed = [
         'getting-started', 'directory-structure', 'runtime-architecture',
         'routing', 'api-layer', 'error-handling', 'templates-and-rendering',
-        'streaming', 'websocket', 'tasks-and-concurrency', 'middleware-and-authentication',
-        'deployment', 'fuzzing', 'fastcgi-backends',
-        'competitive-analysis', 'standards-and-roadmap',
+        'streaming', 'websocket', 'WSROUTER-PRODUCTION', 'tasks-and-concurrency', 'middleware-and-authentication',
+        'deployment', 'cli', 'hot-reload', 'fuzzing', 'fastcgi-backends', 'environment-variables',
+        'compatibility-database', 'running-modern-apps', 'competitive-analysis', 'standards-and-roadmap',
     ];
 
     // Landing page ('__index__' or empty slug) — re-render the docs landing

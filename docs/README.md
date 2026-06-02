@@ -18,16 +18,22 @@ Welcome to the official documentation set for ZealPHP, a coroutine-aware PHP fra
 ### Surfaces
 - [streaming.md](./streaming.md) — generator-based SSR, `$response->stream()`, and Server-Sent Events via `$response->sse()`.
 - [websocket.md](./websocket.md) — `App::ws()`, the per-worker fd map, frame handling, and CLOSE 1001 shutdown.
+- [WSROUTER-PRODUCTION.md](./WSROUTER-PRODUCTION.md) — production hardening for federated WebSocket rooms: capacity sizing, auth, backpressure, rate-limiting, stats, and the federated-room trust model.
 - [tasks-and-concurrency.md](./tasks-and-concurrency.md) — coroutines (`go()`), background processes (`coproc()`), OpenSwoole task workers, and the safe-mode contract that governs each.
 - [middleware-and-authentication.md](./middleware-and-authentication.md) — built-in middleware (CORS, ETag, Range, BasicAuth, IpAccess, RateLimit, ...) and how to compose them.
 
 ### Operations
 - [deployment.md](./deployment.md) — systemd unit, Docker image, reverse-proxy guidance, log rotation, and trusted-proxy / `clientIp()` setup.
+- [cli.md](./cli.md) — `php app.php` start/stop/restart/status/logs, port + PID-file handling, and `--dev` route hot-reload.
+- [hot-reload.md](./hot-reload.md) — dev route hot-reload (`App::devReload()` / `ZEALPHP_DEV=1` / `php app.php --dev`) that rebuilds the route table in place with no restart.
 - [fastcgi-backends.md](./fastcgi-backends.md) — front php-fpm or any FastCGI/1.0 server; `cgiMode('fcgi')` + `fcgiAddress()` framework-wide and `registerCgiBackend()` per-extension (custom Python/Ruby/Perl upstreams), socket forms, `fcgi_params`, 502/timeout behavior.
+- [environment-variables.md](./environment-variables.md) — canonical reference for every `ZEALPHP_*` variable: defaults, scope, and `env_flag` boolean semantics.
 - [fuzzing.md](./fuzzing.md) — Radamsa parser fuzzing, Gabbi contract fixtures, slowhttptest reactor checks, and the http-garden differential roadmap.
 
 ### Background
 - [apache-parity.md](./apache-parity.md) — function overrides (ext-zealphp preferred, uopz fallback), per-coroutine isolation, and the contract that lets unmodified WordPress / Drupal run on ZealPHP.
+- [compatibility-database.md](./compatibility-database.md) — per-application coroutine-legacy compatibility grades from the real-world app sweep (WordPress, Drupal, phpBB, FreshRSS, Grav, and more).
+- [running-modern-apps.md](./running-modern-apps.md) — configuration recipes for running Symfony, Laravel, and WordPress on ZealPHP (web-root sub-dirs, `../vendor/` autoload, CGI-mode selection).
 - [competitive-analysis.md](./competitive-analysis.md) — where ZealPHP sits versus PHP-FPM, Laravel Octane, RoadRunner, and Node.js / Express.
 - [standards-and-roadmap.md](./standards-and-roadmap.md) — coding standards, PSR cross-reference to `STANDARDS.md`, and shipped + planned roadmap items.
 
