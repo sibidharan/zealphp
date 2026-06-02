@@ -165,7 +165,7 @@ class CgiFcgiDispatchTest extends TestCase
     public function testCgiModeRejectsInvalidValues(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessageMatches("/'pool', 'proc', or 'fcgi'/");
+        $this->expectExceptionMessageMatches("/'pool', 'proc', 'fork', or 'fcgi'/");
         App::cgiMode('cgi');
     }
 
