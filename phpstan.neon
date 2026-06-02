@@ -5,6 +5,7 @@ parameters:
     excludePaths:
         - src/cgi_worker.php
         - src/pool_worker.php
+        - src/fork_master.php
     bootstrapFiles:
         - phpstan-stubs.php
         - vendor/autoload.php
