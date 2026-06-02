@@ -23,18 +23,23 @@ use League\CommonMark\GithubFlavoredMarkdownConverter;
 final class MarkdownRenderer
 {
     /**
-     * The 16 guide slugs surfaced at `/docs/guide/{topic}`. Must match
-     * the whitelist in `api/docs/page.php` + `route/docs.php` + the
-     * sidebar in `template/pages/docs/_sidebar.php`. Adding a guide
-     * means touching all four sites.
+     * The guide slugs surfaced at `/docs/guide/{topic}`. Used to rewrite
+     * sibling-guide cross-links (`../<slug>.md`) to on-site `/docs/guide/`
+     * URLs; anything not listed resolves to a GitHub blob link instead.
+     * Keep in sync with the whitelist in `api/docs/page.php` and the
+     * `$groups` lists in `template/pages/docs/{index,_sidebar}.php`
+     * (`route/docs.php` renders any `docs/{slug}.md` regardless). Note
+     * `apache-parity` is intentionally absent — its on-site home is the
+     * richer `/http#parity` section, not the standalone guide.
      *
      * @var list<string>
      */
     private const GUIDE_SLUGS = [
         'getting-started', 'directory-structure', 'runtime-architecture',
         'routing', 'api-layer', 'error-handling', 'templates-and-rendering',
-        'streaming', 'websocket', 'tasks-and-concurrency', 'middleware-and-authentication',
-        'deployment', 'fuzzing', 'fastcgi-backends', 'competitive-analysis', 'standards-and-roadmap',
+        'streaming', 'websocket', 'WSROUTER-PRODUCTION', 'tasks-and-concurrency', 'middleware-and-authentication',
+        'deployment', 'cli', 'hot-reload', 'fuzzing', 'fastcgi-backends', 'environment-variables',
+        'compatibility-database', 'running-modern-apps', 'competitive-analysis', 'standards-and-roadmap',
     ];
 
     /** GitHub blob base for `.md` files that aren't surfaced guides. */
