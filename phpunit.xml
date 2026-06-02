@@ -20,6 +20,7 @@
     <exclude>
       <file>src/pool_worker.php</file>
       <file>src/cgi_worker.php</file>
+      <file>src/fork_master.php</file>
     </exclude>
   </source>
   <php>
