@@ -60,6 +60,12 @@ final class MemcachedBackend implements StoreBackend
         }
     }
 
+    /**
+     * Register a named table with its column schema. `$maxRows` is informational
+     * only — Memcached is a global pool with server-side LRU eviction; no hard
+     * cap is enforced here. Pass `$opts['ttl']` (int seconds, default `0` = no
+     * expiry) to set a per-table TTL applied on every `set()` call.
+     */
     public function make(string $name, int $maxRows, array $columns, array $opts = []): void
     {
         if ($columns === []) {
@@ -73,6 +79,11 @@ final class MemcachedBackend implements StoreBackend
         $this->tableOpts[$name] = ['ttl' => $ttl];
     }
 
+    /**
+     * Serialize and store a row in Memcached. The row is stored as a single
+     * serialized value at `{prefix}:{table}:{key}`. The table-level TTL
+     * (set via `make()` `$opts['ttl']`) is applied; `0` means no expiry.
+     */
     public function set(string $name, string $key, array $row): bool
     {
         $this->assertMade($name);
@@ -80,6 +91,11 @@ final class MemcachedBackend implements StoreBackend
         return $this->client->set($this->rowKey($name, $key), $row, $ttl);
     }
 
+    /**
+     * Retrieve a row or a single field from Memcached. Returns `null` on
+     * miss. When `$field` is provided, returns the scalar value of that
+     * column or `null` if the column is absent.
+     */
     public function get(string $name, string $key, ?string $field = null): mixed
     {
         $this->assertMade($name);
@@ -92,12 +108,14 @@ final class MemcachedBackend implements StoreBackend
         return $raw;
     }
 
+    /** Delete a row from Memcached. Returns `true` when the key existed and was removed. */
     public function del(string $name, string $key): bool
     {
         $this->assertMade($name);
         return $this->client->delete($this->rowKey($name, $key));
     }
 
+    /** Return `true` when a row exists in Memcached for the given key. */
     public function exists(string $name, string $key): bool
     {
         $this->assertMade($name);
@@ -109,6 +127,12 @@ final class MemcachedBackend implements StoreBackend
         return $r !== false;
     }
 
+    /**
+     * Read-modify-write increment of column `$col` by `$by`.
+     * NOT atomic across concurrent workers — Memcached has no native hash
+     * `HINCRBY` equivalent. For cross-node atomic counters use `Counter`
+     * with a `RedisCounterBackend` instead.
+     */
     public function incr(string $name, string $key, string $col, int|float $by = 1): int|float
     {
         $this->assertMade($name);
@@ -135,11 +159,17 @@ final class MemcachedBackend implements StoreBackend
         return $new;
     }
 
+    /** Decrement column `$col` by `$by` via `incr()` with a negated delta. Not atomic — see `incr()`. */
     public function decr(string $name, string $key, string $col, int|float $by = 1): int|float
     {
         return $this->incr($name, $key, $col, -$by);
     }
 
+    /**
+     * Not supported — Memcached has no native SCAN.
+     * Throws `StoreException`. Use the Redis backend for iteration workloads,
+     * or maintain your own cardinality counter.
+     */
     public function count(string $name): int
     {
         throw new StoreException(
@@ -148,6 +178,10 @@ final class MemcachedBackend implements StoreBackend
         );
     }
 
+    /**
+     * Not supported — Memcached has no native SCAN.
+     * Throws `StoreException`. Use the Redis backend for iterable Store tables.
+     */
     public function iterate(string $name): \Generator
     {
         throw new StoreException(
@@ -156,6 +190,10 @@ final class MemcachedBackend implements StoreBackend
         );
     }
 
+    /**
+     * Not supported — Memcached has no native SCAN.
+     * Throws `StoreException`. Use the Redis backend for paginated Store iteration.
+     */
     public function iteratePaged(string $name, string $cursor = '0', int $count = 100): array
     {
         throw new StoreException(
@@ -164,6 +202,11 @@ final class MemcachedBackend implements StoreBackend
         );
     }
 
+    /**
+     * Not supported — tracking every written key would be required.
+     * Throws `StoreException`. Use the `flush_all` Memcached admin command,
+     * or set per-table TTLs via `make()` and let entries expire naturally.
+     */
     public function clear(string $name): void
     {
         throw new StoreException(
@@ -172,11 +215,16 @@ final class MemcachedBackend implements StoreBackend
         );
     }
 
+    /** Return the names of all tables registered via `make()`. */
     public function names(): array
     {
         return array_keys($this->schemas);
     }
 
+    /**
+     * Bulk read multiple rows in one `getMulti()` round-trip.
+     * Missing keys are returned as `null` in the result map.
+     */
     public function mget(string $name, array $keys): array
     {
         $this->assertMade($name);
@@ -195,6 +243,11 @@ final class MemcachedBackend implements StoreBackend
         return $out;
     }
 
+    /**
+     * Bulk write multiple rows via one `setMulti()` round-trip.
+     * Atomicity is per-key (not across all keys). Returns `true` when
+     * all writes succeeded.
+     */
     public function mset(string $name, array $rows): bool
     {
         $this->assertMade($name);
@@ -209,6 +262,10 @@ final class MemcachedBackend implements StoreBackend
         return $this->client->setMulti($batch, $ttl);
     }
 
+    /**
+     * Ping the Memcached cluster. Returns `true` when at least one server
+     * responded to `getStats()`. Returns `false` when all servers are unreachable.
+     */
     public function ping(): bool
     {
         // getStats() returns the per-server stats map. PHPStan's stub
@@ -217,10 +274,17 @@ final class MemcachedBackend implements StoreBackend
         return $this->client->getStats() !== [];
     }
 
+    /** Return the underlying `\Memcached` client instance for direct use. */
     public function client(): \Memcached { return $this->client; }
+
+    /** Return the key prefix used for all Memcached keys (e.g. `zealstore`). */
     public function prefix(): string { return $this->prefix; }
 
     /**
+     * Parse a comma-separated host[:port] server list into an array of
+     * `[host, port]` pairs. Defaults to port `11211` when omitted.
+     * Falls back to `['127.0.0.1', 11211]` when `$servers` is empty.
+     *
      * @return list<array{0:string, 1:int}>
      */
     private static function parseServers(string $servers): array
@@ -236,6 +300,10 @@ final class MemcachedBackend implements StoreBackend
         return $out;
     }
 
+    /**
+     * Build the Memcached key for a row. Keeps composite keys within
+     * Memcached's 250-character limit by SHA1-hashing keys longer than 240 chars.
+     */
     private function rowKey(string $table, string $key): string
     {
         // Memcached key max is 250 chars and bans control chars. Hash long
@@ -245,6 +313,10 @@ final class MemcachedBackend implements StoreBackend
     }
 
     /**
+     * Coerce a raw deserialized row to `array<string, scalar>`, dropping
+     * any non-scalar values (which can't arise from `set()` but may appear
+     * from external writes or future schema changes).
+     *
      * @param  array<int|string, mixed> $row
      * @return array<string, scalar>
      */
@@ -257,6 +329,11 @@ final class MemcachedBackend implements StoreBackend
         return $out;
     }
 
+    /**
+     * Assert that a table has been registered via `make()`.
+     * Throws `StoreException` when the table is unknown, surfacing the "call
+     * `Store::make()` before `App::run()`" contract violation clearly.
+     */
     private function assertMade(string $name): void
     {
         if (!isset($this->schemas[$name])) {

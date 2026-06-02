@@ -11,33 +11,58 @@ use OpenSwoole\Coroutine as co;
 use ZealPHP\Session\Handler\FileSessionHandler;
 use ZealPHP\RequestContext;
 
+/**
+ * Per-coroutine session lifecycle manager (coroutine / `superglobals(false)` mode).
+ *
+ * Registered as the OpenSwoole `onRequest` handler in coroutine mode. For each
+ * inbound request it:
+ * 1. Creates a per-coroutine `RequestContext` (`G`) instance and populates
+ *    `$g->openswoole_request` / `$g->openswoole_response` / `$g->zealphp_request` /
+ *    `$g->zealphp_response`.
+ * 2. Optionally starts a session (lazy — only when the client already holds a
+ *    `PHPSESSID` cookie, unless `SessionStartMiddleware` is registered).
+ * 3. Invokes the PSR-15 middleware stack (`$this->middleware`).
+ * 4. Writes and closes the session in the `finally` block, then runs the
+ *    per-request isolation resets for `coroutine-legacy` mode
+ *    (`zealphp_reset_request_rtcaches`, `zealphp_reset_request_statics`,
+ *    `zealphp_reset_request_class_statics`) when `App::$silent_redeclare` is active.
+ *
+ * The session handler is resolved once per worker from `App::$session_handler`:
+ * `null` → `TableSessionHandler` (default, concurrent-safe);
+ * `'file'` → `FileSessionHandler`;
+ * `'redis'` → `RedisSessionHandler`;
+ * or any `\SessionHandlerInterface` instance passed directly.
+ *
+ * IMPORTANT: do not call `session_start()` / `session_write_close()` directly —
+ * use the `zeal_session_*` uopz-overridden wrappers so state routes through
+ * `$g->session` rather than the process-wide `$_SESSION`.
+ */
 class CoSessionManager
 {
     /**
+     * The PSR-15 middleware stack entry point (wrapped as a callable).
+     *
      * @var callable
      */
     protected $middleware;
 
     /**
+     * Session-id generator: either a callable or the string name of a built-in
+     * function such as `'session_create_id'`.
+     *
      * @var string|callable
      */
     protected $idGenerator;
 
+    /** Whether to read/write the session id via a cookie (`session.use_cookies`). */
     protected bool $useCookies;
 
+    /** Whether to refuse session ids passed in query-string (`session.use_only_cookies`). */
     protected bool $useOnlyCookies;
 
     /**
-     * Inject dependencies
-     *
-     * @param callable $middleware function (\Swoole\Http\Request $request, \Swoole\Http\Response $response)
-     * @param callable $idGenerator
-     * @param bool|null $useCookies
-     * @param bool|null $useOnlyCookies
-     */
-    /**
-     * Resolve the session handler from App::$session_handler. CoSessionManager
-     * runs in coroutine mode, so the default (null) is TableSessionHandler —
+     * Resolve the session handler from `App::$session_handler`. `CoSessionManager`
+     * runs in coroutine mode, so the default (`null`) is `TableSessionHandler` —
      * concurrent-safe via 3-way merge + Atomic CAS + file backing.
      */
     private static function resolveHandler(): ?\SessionHandlerInterface
@@ -57,8 +82,15 @@ class CoSessionManager
         }
     }
 
-    /** Skip cleanup when an app autoloader is registered (its lazy-loaded
-     * classes would be cleaned but require_once cache persists). */
+    /**
+     * Returns `true` when it is safe to run `zealphp_process_state_clean()`.
+     *
+     * The cleanup is unsafe when a Composer autoloader maps classes inside
+     * `App::$document_root` — those lazily-loaded classes would have their
+     * statics reset while the `require_once` cache still considers them loaded,
+     * causing a mismatch on the next request. When such an autoloader is
+     * detected, cleanup is skipped for the whole worker.
+     */
     private static function safeForFunctionIsolation(): bool
     {
         $docRoot = \ZealPHP\App::$document_root;
@@ -88,7 +120,13 @@ class CoSessionManager
     }
 
     /**
-     * @param string|callable $idGenerator
+     * Inject the middleware stack callable and session configuration.
+     *
+     * @param callable         $middleware      The PSR-15 stack entry point — called with
+     *                                          `(ZealPHP\HTTP\Request, ZealPHP\HTTP\Response)`.
+     * @param string|callable  $idGenerator     Session-id generator; defaults to `'session_create_id'`.
+     * @param bool|null        $useCookies      Override `session.use_cookies`; `null` reads the ini.
+     * @param bool|null        $useOnlyCookies  Override `session.use_only_cookies`; `null` reads the ini.
      */
     public function __construct(
         callable $middleware,
@@ -103,7 +141,11 @@ class CoSessionManager
     }
 
     /**
-     * Delegate execution to the underlying middleware wrapping it into the session start/stop calls
+     * Handle one HTTP request: set up `RequestContext`, optionally start the
+     * session, invoke the middleware stack, then close the session and run
+     * per-request isolation resets in the `finally` block.
+     *
+     * Called directly by OpenSwoole's `onRequest` event — do not call manually.
      */
     public function __invoke(\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response): void
     {

@@ -286,11 +286,16 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    /** Disconnect from Redis, silently swallowing any errors (tolerant close). */
     public function close(): void
     {
         try { $this->c->disconnect(); } catch (\Throwable $e) { /* tolerant */ }
     }
 
+    /**
+     * Publish a message to a Redis pub/sub channel. Returns the number of subscribers
+     * that received the message.
+     */
     public function publish(string $channel, string $payload): int
     {
         try {
@@ -300,6 +305,11 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Enter a blocking pub/sub loop, dispatching each received message to `$consumer($payload, $channel, $pattern)`.
+     * Exact channels use `SUBSCRIBE`; pattern channels use `PSUBSCRIBE`. Throw `PubSubStopException`
+     * from inside `$consumer` to cleanly exit the loop.
+     */
     public function subscribe(array $exactChannels, array $patternChannels, callable $consumer): void
     {
         if ($exactChannels === [] && $patternChannels === []) {
@@ -329,6 +339,11 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Append an entry to a Redis Stream (`XADD`). Returns the auto-generated entry ID.
+     * When `$maxLen` is set, trims the stream to approximately that length (`MAXLEN ~`).
+     * Throws `StoreException` when `$fields` is empty.
+     */
     public function xadd(string $stream, array $fields, ?int $maxLen = null): string
     {
         if ($fields === []) {
@@ -345,6 +360,11 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Create a consumer group (`XGROUP CREATE`). Returns `true` on success, `false` when the
+     * group already exists (`BUSYGROUP` — idempotent). When `$mkStream` is `true`, the stream
+     * is created if absent (`MKSTREAM`).
+     */
     public function xgroupCreate(string $stream, string $group, string $id = '$', bool $mkStream = true): bool
     {
         try {
@@ -360,6 +380,11 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Read new entries from one or more streams as a consumer group member (`XREADGROUP GROUP … BLOCK`).
+     * Returns `array<streamName, list<array{id:string, payload:array<string,string>}>>`.
+     * Returns `[]` on timeout (blocking expired with no messages) or empty `$streams`.
+     */
     public function xreadGroup(string $group, string $consumer, array $streams, int $count, int $blockMs): array
     {
         if ($streams === []) { return []; }
@@ -399,6 +424,10 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Acknowledge one or more processed stream entries (`XACK`). Returns the number of entries
+     * successfully acknowledged. Unrecognised IDs are silently ignored by Redis.
+     */
     public function xack(string $stream, string $group, string ...$ids): int
     {
         if ($ids === []) { return 0; }
@@ -411,6 +440,12 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Claim pending stream entries idle for at least `$minIdleMs` milliseconds (`XAUTOCLAIM`).
+     * Returns `[nextCursor, list<array{id:string, payload:array<string,string>}>]`.
+     * Iterate until `nextCursor === '0-0'` to drain all orphan entries. Compatible with
+     * Redis 6 (2-element response) and Redis 7 (3-element response with deleted IDs).
+     */
     public function xautoclaim(
         string $stream,
         string $group,
@@ -452,6 +487,11 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Execute a batch of Redis commands in a single pipeline round-trip.
+     * `$batch` receives the predis `Pipeline` object; queue commands on it.
+     * Returns an indexed array of raw responses in command order.
+     */
     public function pipeline(callable $batch): array
     {
         try {
@@ -464,6 +504,13 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Pipelined batch `HGETALL` for multiple hash keys. Returns an indexed array (same
+     * order as `$keys`) where each element is an `array<string,string>` of field→value pairs
+     * (empty array for a missing key). Uses `Predis\Command\RawCommand` to keep PHPStan happy
+     * on the pipeline surface; pairs the flat multi-bulk response into assoc form for both
+     * old and new predis response shapes.
+     */
     public function mhgetall(array $keys): array
     {
         if ($keys === []) { return []; }
@@ -509,6 +556,12 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Pipelined batch `HMSET` with optional per-key TTL and optional set-membership tracking.
+     * Each entry in `$writes` is `array{rk: string, fields: array<string,string>, sk?: string}`:
+     * `rk` is the hash key, `fields` are the field→value pairs, `sk` (when `$setKey` is set)
+     * is the member to add to the tracking `SET`. All commands run in a single pipeline round-trip.
+     */
     public function mhsetWithMembership(array $writes, ?string $setKey = null, ?int $ttl = null): void
     {
         if ($writes === []) { return; }
@@ -538,6 +591,10 @@ final class PredisDriver implements RedisDriver
         } catch (PredisException $e) { throw $this->wrap($e); }
     }
 
+    /**
+     * Non-blocking key deletion via `UNLINK` (async reclaim, unlike `DEL`).
+     * Returns the number of keys scheduled for deletion. Returns `0` for empty input.
+     */
     public function unlink(string ...$keys): int
     {
         if ($keys === []) { return 0; }
@@ -552,6 +609,10 @@ final class PredisDriver implements RedisDriver
 
     // ── narrowing helpers ─────────────────────────────────────────────────
 
+    /**
+     * Return `true` when the raw Redis response equals `$expect` (string comparison,
+     * with `__toString` fallback for predis status objects like `Status::get('OK')`).
+     */
     private function isOkStatus(mixed $r, string $expect = 'OK'): bool
     {
         if (is_string($r)) { return $r === $expect; }
@@ -559,6 +620,10 @@ final class PredisDriver implements RedisDriver
         return false;
     }
 
+    /**
+     * Narrow a mixed Redis response to `int`. Accepts numeric strings.
+     * Throws `StoreException` with the `$op` context when the value is neither.
+     */
     private function asInt(mixed $r, string $op): int
     {
         if (is_int($r)) { return $r; }
@@ -566,6 +631,10 @@ final class PredisDriver implements RedisDriver
         throw new StoreException("predis $op: expected int, got " . get_debug_type($r));
     }
 
+    /**
+     * Narrow a mixed Redis response to `string`. Accepts scalars and objects with `__toString`.
+     * Throws `StoreException` with the `$op` context for non-stringable values.
+     */
     private function asString(mixed $r, string $op): string
     {
         if (is_string($r)) { return $r; }
@@ -595,6 +664,7 @@ final class PredisDriver implements RedisDriver
         return [(int) $cursor, $items];
     }
 
+    /** Wrap a `PredisException` in a `StoreException` for uniform error handling across drivers. */
     private function wrap(PredisException $e): StoreException
     {
         return new StoreException('predis: ' . $e->getMessage(), 0, $e);

@@ -89,6 +89,7 @@ final class Chatroom
         ];
     }
 
+    /** Coerce a mixed PDO column value to `int`, returning `0` on non-numeric input. */
     private static function asInt(mixed $v): int
     {
         if (is_int($v))                          { return $v; }
@@ -97,6 +98,7 @@ final class Chatroom
         return 0;
     }
 
+    /** Coerce a mixed PDO column value to `string`, returning `''` on non-scalar input. */
     private static function asString(mixed $v): string
     {
         if (is_string($v))    { return $v; }
@@ -127,7 +129,13 @@ final class Chatroom
     }
 
     /**
-     * @return array{0:string,1:string,2:string}  trimmed room/username/body
+     * Trim and clamp all three string inputs.
+     *
+     * `$room` defaults to `'general'` when empty; `$username` defaults to
+     * `'anonymous'`. Both `$username` and `$body` are truncated to
+     * `MAX_USERNAME_LEN` and `MAX_MESSAGE_LEN` characters respectively.
+     *
+     * @return array{0:string,1:string,2:string} Trimmed `[room, username, body]`.
      */
     private static function normalize(string $room, string $username, string $body): array
     {
@@ -146,12 +154,13 @@ final class Chatroom
     }
 
     /**
-     * Fan-out helper: iterate the cluster-wide fd map and push to every fd whose
-     * row's `room` matches. Works across workers (any worker can $server->push
-     * any fd) AND across the cluster when the Store backend is Redis (the table
-     * iteration spans every node — federated chat for free).
+     * Fan-out helper: iterate the cluster-wide `chatroom_fds` Store table and
+     * push to every fd whose row's `room` matches. Works across workers (any
+     * worker can call `$server->push($fd, ...)` for any fd) AND across the
+     * cluster when the Store backend is Redis (the table iteration spans every
+     * node — federated chat for free).
      *
-     * @param array<string, mixed> $payload
+     * @param array<string, mixed> $payload JSON-serialisable message payload.
      */
     public static function broadcast_to_room(mixed $server, string $room, array $payload, int $excludeFd = 0): void
     {

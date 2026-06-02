@@ -6,6 +6,7 @@
 // exists so PSR-4 autoloading still finds the old name and triggers the
 // canonical class to load.
 
-// `G` for `$GLOBALS` (coroutine safe) - just a backwards compatibility alias for `RequestContext`.
+// `G` (mnemonic: "globals", coroutine-safe) — a backward-compatibility alias
+// for `RequestContext`. New code should use `RequestContext` directly.
 
 require_once __DIR__ . '/RequestContext.php';

@@ -71,10 +71,24 @@ final class WorkerPool
     /** @var list<int> Idle worker indices — primary queue at boot + the fallback when no coroutine context. */
     private array $idleSync = [];
 
+    /** `true` after the sync idle queue has been migrated into `$idleChan` on the first coroutine dispatch. */
     private bool $channelPopulated = false;
+    /** `true` after `close()` has been called; prevents double-close and guards `dispatch()`. */
     private bool $closed = false;
+    /** Total number of worker slots allocated at construction (immutable after `__construct()`). */
     private readonly int $size;
 
+    /**
+     * Spawn `$size` worker subprocesses immediately. All workers are ready
+     * (READY signal received) before the constructor returns.
+     *
+     * @param int         $size                   Number of persistent worker subprocesses (pool concurrency).
+     * @param int         $maxRequestsPerWorker   Requests served before a worker is recycled (`pm.max_requests` parity).
+     * @param string|null $workerEntry            Absolute path to the pool worker entry script;
+     *                                            defaults to `src/pool_worker.php`.
+     * @throws \InvalidArgumentException When `$size < 1`.
+     * @throws \RuntimeException         When a worker subprocess fails to start or doesn't emit `READY` within 10 s.
+     */
     public function __construct(
         int $size = 4,
         private readonly int $maxRequestsPerWorker = 500,
@@ -452,6 +466,12 @@ final class WorkerPool
         ];
     }
 
+    /**
+     * Close all pipes for the worker at `$idx`, reap the subprocess via
+     * `proc_close()`, spawn a fresh replacement, and immediately return it
+     * to the idle pool. Called when a worker dies mid-request, hits its
+     * `$maxRequestsPerWorker` limit, or sends the `_exit` flag in its IPC frame.
+     */
     private function respawn(int $idx): void
     {
         $old = $this->workers[$idx];

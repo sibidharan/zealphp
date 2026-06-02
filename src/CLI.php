@@ -19,6 +19,14 @@ use function ZealPHP\elog;
 class CLI
 {
     /**
+     * Parse `$argv`, execute any lifecycle sub-command, and return server-config overrides.
+     *
+     * Sub-commands (`stop`, `status`, `logs`, `restart`) are handled in-process and
+     * call `exit()` when done. The `start` / default path returns an array of
+     * OpenSwoole `$server->set()` override keys (`_host`, `_port`, `worker_num`,
+     * `daemonize`, etc.) that `App::run()` merges into its config. Returns an
+     * empty array when no overrides are needed.
+     *
      * @return array<string, mixed>
      */
     public static function parseCliArgs(): array
@@ -203,7 +211,17 @@ class CLI
     }
 
     /**
-     * @param array<string, mixed> $flags
+     * Resolve the PID file path for the given CLI flags.
+     *
+     * Resolution order (first match wins):
+     * 1. `--pid-file` flag (`$flags['pid_file']`).
+     * 2. `ZEALPHP_PID_FILE` environment variable.
+     * 3. `ZEALPHP_LOG_DIR` env var + `zealphp_{port}.pid`.
+     * 4. `resolve_log_dir()` result (per-user fallback) + `zealphp_{port}.pid`.
+     *
+     * Creates the parent directory when it does not exist.
+     *
+     * @param array<string, mixed> $flags Parsed CLI flags from `parseCliArgs()`.
      */
     public static function resolvePidFile(array $flags): string
     {
@@ -236,6 +254,10 @@ class CLI
         return "{$dir}/zealphp_{$port}.pid";
     }
 
+    /**
+     * Ensure `$dir` exists and is writable, creating it recursively if needed.
+     * Logs a warning via `elog()` when creation fails — never throws.
+     */
     private static function ensurePidDir(string $dir): void
     {
         if (!is_dir($dir)) {
@@ -391,6 +413,14 @@ class CLI
         return true;
     }
 
+    /**
+     * Stop the server identified by `$pidFile`.
+     *
+     * Sends `SIGTERM` to the process group (or PID), polls up to 10 s for graceful
+     * shutdown, then falls back to `SIGKILL`. Removes the PID file on success.
+     * When the PID file is missing or stale, calls `claimOrphanIfAny()` to handle
+     * a running-but-unregistered daemon. Output is suppressed when `$quiet` is `true`.
+     */
     private static function cliStop(string $pidFile, bool $quiet = false): void
     {
         $say = function (string $msg) use ($quiet): void {
@@ -447,6 +477,13 @@ class CLI
         @unlink($pidFile);
     }
 
+    /**
+     * Stop all running ZealPHP instances when no specific port is given.
+     *
+     * Globs `{logDir}/zealphp_*.pid`, verifies each PID with `processIsZealphp()`,
+     * and stops the lone instance automatically. When multiple instances are found,
+     * lists them and asks the user to specify a port with `-p PORT`.
+     */
     private static function cliStopAuto(): void
     {
         $logDir = getenv('ZEALPHP_LOG_DIR');
@@ -627,6 +664,10 @@ class CLI
         passthru($cmd);
     }
 
+    /**
+     * Print the `php app.php --help` usage text to stdout and return.
+     * The caller is responsible for calling `exit(0)` after this.
+     */
     private static function cliHelp(): void
     {
         echo <<<'HELP'

@@ -19,40 +19,55 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
+/**
+ * OpenSwoole `onRequest` handler for superglobals mode (`App::superglobals(true)`).
+ *
+ * Invoked as a callable (via `__invoke()`) for every inbound HTTP request on the
+ * worker. Responsible for:
+ * - Resetting per-request `RequestContext` state (error/exception/shutdown stacks).
+ * - Optionally managing the PHP session lifecycle (`session_start()` → inner
+ *   middleware stack → `session_write_close()`), gated on `App::$session_lifecycle`
+ *   and `App::cgiOwnsSessions()`.
+ * - Wrapping the raw OpenSwoole request/response in `ZealPHP\HTTP\Request` /
+ *   `ZealPHP\HTTP\Response` and storing them on `RequestContext`.
+ * - Running the per-request isolation cleanup hooks from `ext-zealphp` when
+ *   `coroutine-legacy` mode is active (`zealphp_reset_request_rtcaches`,
+ *   `zealphp_reset_request_statics`, `zealphp_reset_request_class_statics`).
+ *
+ * The coroutine-mode equivalent is `CoSessionManager`.
+ */
 class SessionManager
 {
     /**
+     * The inner middleware callable — the PSR-15 stack entry point.
+     *
      * @var callable
      */
     protected $middleware;
 
     /**
+     * Session ID generator: a callable or the string `'session_create_id'`.
+     *
      * @var string|callable
      */
     protected $idGenerator;
 
+    /** Whether to read/write the session ID via cookies. */
     protected bool $useCookies;
 
+    /** Whether cookies are the only allowed transport for the session ID. */
     protected bool $useOnlyCookies;
 
+    /** Snapshot of the `RequestContext` singleton at construction time. */
     public \ZealPHP\RequestContext $g;
 
     /**
-     * Inject dependencies
+     * Returns `false` when running `zealphp_process_state_clean()` would be unsafe.
      *
-     * @param callable $middleware function (\Swoole\Http\Request $request, \Swoole\Http\Response $response)
-     * @param callable $idGenerator
-     * @param bool|null $useCookies
-     * @param bool|null $useOnlyCookies
-     */
-    /**
-     * Check if function isolation cleanup is safe for the current state.
-     *
-     * Returns false if any registered spl_autoload callback resolves to a
-     * class file under App::documentRoot() — that means an app has its own
-     * Composer autoloader registered, and cleanup would orphan its lazy-
-     * loaded classes (the require_once cache stays but the classes get
-     * removed). For autoloader-based apps, use Mode 1 (CGI Pool) instead.
+     * Checks registered `spl_autoload` callbacks: if any `Composer\Autoload\ClassLoader`
+     * maps classes under `App::$document_root`, cleaning function/class state would
+     * orphan those lazily-loaded classes. In that case the caller should skip the
+     * cleanup and rely on `legacy-cgi` (process-isolated) mode instead.
      */
     private static function safeForFunctionIsolation(): bool
     {
@@ -83,7 +98,12 @@ class SessionManager
     }
 
     /**
-     * @param string|callable $idGenerator
+     * Inject dependencies for the session manager.
+     *
+     * @param callable        $middleware      The inner PSR-15 middleware stack entry point.
+     * @param string|callable $idGenerator     Session ID generator; defaults to `'session_create_id'`.
+     * @param bool|null       $useCookies      When `null`, inherits `session.use_cookies` ini value.
+     * @param bool|null       $useOnlyCookies  When `null`, inherits `session.use_only_cookies` ini value.
      */
     public function __construct(
         callable $middleware,
@@ -103,10 +123,23 @@ class SessionManager
     // }
 
     /**
-     * Delegate execution to the underlying middleware wrapping it into the session start/stop calls
+     * Handle one inbound OpenSwoole request: set up session + context, run the middleware stack, then clean up.
      *
-     * @param \OpenSwoole\Http\Request  $request
-     * @param \OpenSwoole\Http\Response $response
+     * Sequence (when session management is active):
+     * 1. Reset per-request `RequestContext` state (error/shutdown stacks, streaming flags).
+     * 2. Resolve the session ID from cookie or query string; call `session_start()`.
+     * 3. Wrap raw OpenSwoole objects in `ZealPHP\HTTP\Request` / `ZealPHP\HTTP\Response`.
+     * 4. Invoke the inner middleware stack via `call_user_func($this->middleware, ...)`.
+     * 5. In the `finally` block: `session_write_close()`, isolation cleanup hooks
+     *    (`zealphp_reset_request_rtcaches`, `zealphp_reset_request_statics`,
+     *    `zealphp_reset_request_class_statics`), and constant/globals cleanup.
+     *
+     * When `App::$session_lifecycle` is `false` or `App::cgiOwnsSessions()` returns
+     * `true`, the session lifecycle steps are skipped — context setup and cleanup
+     * hooks still run.
+     *
+     * @param \OpenSwoole\Http\Request  $request  Raw OpenSwoole request object.
+     * @param \OpenSwoole\Http\Response $response Raw OpenSwoole response object.
      */
     public function __invoke($request, $response): void
     {

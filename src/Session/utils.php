@@ -4,36 +4,38 @@ namespace ZealPHP\Session;
 use ZealPHP\RequestContext;
 
 /**
- * Decode PHP 'php' session serialize format (key|serialized_value;key|...).
- * Falls back to unserialize() for php_serialize handler format.
+ * Session utility functions for ZealPHP's coroutine-safe session layer.
  *
- * SECURITY: every `unserialize()` call in this file is narrowly scoped to
- * an explicit class whitelist — currently `['stdClass']`. Sessions are
+ * These functions are registered via `uopz_set_return()` at startup to replace
+ * PHP's built-in `session_*()` family. They read and write to
+ * `RequestContext::instance()->session` (coroutine-isolated storage) rather
+ * than the process-global `$_SESSION`, making session operations safe under
+ * OpenSwoole coroutine concurrency.
+ *
+ * SECURITY: every `unserialize()` call in this file passes an explicit class
+ * whitelist — currently `['allowed_classes' => ['stdClass']]`. Sessions are
  * user-controlled storage (tampered cookie, compromised Redis); allowing
- * arbitrary class instantiation here would let an attacker trigger
- * `__wakeup()` / `__destruct()` gadgets in any class on the autoload
- * graph (the vulnerability commit c43da63 originally fixed by passing
- * `allowed_classes => false`).
+ * arbitrary class instantiation would let an attacker trigger `__wakeup()` /
+ * `__destruct()` gadgets in any class on the autoload graph.
  *
  * Why `stdClass` is on the whitelist (added v0.2.26, issue #15):
- *   - `stdClass` has zero methods — no `__wakeup`, no `__destruct`, no
- *     `__get`/`__set`/`__call`. There is no gadget to chain.
- *   - `json_decode($x)` (the default mode without the second arg) returns
- *     a `stdClass` graph, and apps routinely stash that result in
- *     `$_SESSION['oauth_token']`, `$_SESSION['api_profile']`, etc.
- *     Refusing to round-trip it broke real apps in v0.2.25 (issue #15).
+ * - `stdClass` has zero methods — no `__wakeup`, no `__destruct`, no
+ *   `__get`/`__set`/`__call`. There is no gadget to chain.
+ * - `json_decode($x)` (without the second arg) returns a `stdClass` graph,
+ *   and apps routinely stash that result in `$_SESSION['oauth_token']`,
+ *   `$_SESSION['api_profile']`, etc. Refusing to round-trip it broke real
+ *   apps in v0.2.25 (issue #15).
  *
- * Adding more classes to the whitelist requires a SECURITY review for
- * each one: any magic method that runs on unserialize (`__wakeup`,
- * `__unserialize`) or destruct (`__destruct`) can be turned into a
- * gadget. `DateTime` for example has `__wakeup` and is therefore
- * deliberately excluded.
- *
+ * Adding more classes to the whitelist requires a security review for each
+ * one: any magic method that runs on unserialize (`__wakeup`, `__unserialize`)
+ * or on destruct (`__destruct`) can be turned into a gadget. `DateTime` for
+ * example has `__wakeup` and is therefore deliberately excluded.
  */
+
 /**
- * Encode an array into PHP's native 'php' session serialize format
- * (key|serialized_value for each key). This matches the format produced by
- * session.serialize_handler = php (the default in mod_php / phpredis).
+ * Encode an array into PHP's native `php` session serialize format
+ * (`key|serialized_value` for each key). Matches the format produced by
+ * `session.serialize_handler = php` (the default in mod_php / phpredis).
  *
  * @param array<string, mixed> $data
  */
@@ -47,6 +49,13 @@ function php_session_encode_from_array(array $data): string
 }
 
 /**
+ * Decode a PHP session string back to an associative array.
+ *
+ * Tries `unserialize()` first (handles the `php_serialize` handler format),
+ * then falls back to parsing the native `php` format (`key|serialized_value`
+ * pairs). All `unserialize()` calls use `['allowed_classes' => ['stdClass']]`
+ * — see the file-level security note above.
+ *
  * @return array<string, mixed>
  */
 function php_session_decode_to_array(string $data): array
@@ -88,7 +97,21 @@ function php_session_decode_to_array(string $data): array
 }
 
 /**
- * Start a new session or resume existing one
+ * Start a new session or resume an existing one.
+ *
+ * Coroutine-safe replacement for PHP's `session_start()`. Reads the session
+ * ID from the `PHPSESSID` cookie (or generates one for new visitors),
+ * loads session data from the file backend or a registered
+ * `\SessionHandlerInterface`, and stores it in `$g->session`.
+ *
+ * In superglobals mode (`App::$superglobals = true`) the data is also
+ * mirrored to `$_SESSION` (or bound via reference in coroutine-isolated
+ * superglobals mode). Emits a `Set-Cookie` header for first-time visitors
+ * when `App::$session_lifecycle` is `true` and the response is still
+ * writable.
+ *
+ * The `ZEALPHP_SESSION_SECURE` env var overrides the `secure` cookie flag
+ * (otherwise auto-detected from `X-Forwarded-Proto` / `HTTPS` / port `443`).
  */
 function zeal_session_start(): bool
 {
@@ -292,10 +315,16 @@ function zeal_valid_session_id(string $id): bool
 }
 
 /**
- * Get or set the session ID
+ * Get or set the session ID.
  *
- * @param string|null $id
- * @return string|false
+ * With no argument: reads the `PHPSESSID` (or custom session name) cookie
+ * from `$g->cookie`. When no cookie is present a fresh ID is generated via
+ * `session_create_id()` and stashed in `$g->cookie`. A malformed inbound ID
+ * (path traversal, NUL, oversized) is silently replaced with a fresh one
+ * (`session.use_strict_mode` parity).
+ *
+ * @param string|null $id  Pass a string to set the session ID explicitly.
+ * @return string|false  The current (or newly-set) session ID.
  */
 function zeal_session_id($id = null)
 {
@@ -337,6 +366,14 @@ function zeal_session_id($id = null)
     }
 }
 
+/**
+ * Return the current session status (`PHP_SESSION_ACTIVE` or `PHP_SESSION_NONE`).
+ *
+ * Mode-aware: in superglobals mode inspects `$GLOBALS['_SESSION']`; in
+ * coroutine mode checks whether the typed `$g->session` slot is initialised
+ * (it is `unset()` by `zeal_session_write_close()` / `zeal_session_destroy()`
+ * to mark a session inactive).
+ */
 function zeal_session_status(): int {
     // In superglobals mode the canonical "is session active?" signal is
     // $_SESSION's existence — the declared typed $g->session property is
@@ -357,10 +394,12 @@ function zeal_session_status(): int {
 
 
 /**
- * Get or set the session name
+ * Get or set the session name (the cookie name, e.g. `'PHPSESSID'`).
  *
- * @param string|null $name
- * @return string
+ * Stored per-request in `$g->session_params['name']`.
+ *
+ * @param string|null $name  Pass `null` to read the current value.
+ * @return string  The current (or newly-set) session name.
  */
 function zeal_session_name($name = null)
 {
@@ -376,7 +415,18 @@ function zeal_session_name($name = null)
 }
 
 /**
- * Write session data and close the session
+ * Write session data to the backing store and mark the session inactive.
+ *
+ * Coroutine-safe replacement for PHP's `session_write_close()`. Performs a
+ * read-merge-write under `flock(LOCK_EX)` (file backend) or an optimistic
+ * `WATCH`/`MULTI`/`EXEC` retry loop (custom `\SessionHandlerInterface`) to
+ * guard against concurrent-coroutine last-write-wins data loss on the same
+ * session ID. The merge is shallow — top-level keys added by a concurrent
+ * request survive, but conflicting nested arrays are last-write-wins.
+ *
+ * After writing, `$g->session` (coroutine mode) or `$GLOBALS['_SESSION']`
+ * (superglobals mode) is `unset()` so `zeal_session_status()` returns
+ * `PHP_SESSION_NONE` for the remainder of the request.
  */
 function zeal_session_write_close(): bool
 {
@@ -514,7 +564,11 @@ function zeal_session_write_close(): bool
 }
 
 /**
- * Destroy the session
+ * Destroy the session and delete its backing storage.
+ *
+ * Deletes the session file (or calls `\SessionHandlerInterface::destroy()` for
+ * custom backends), removes `$g->session` and `$_SESSION`, and clears the
+ * session cookie from `$g->cookie`. Sets `$g->_session_started` to `false`.
  */
 function zeal_session_destroy(): bool
 {
@@ -553,7 +607,11 @@ function zeal_session_destroy(): bool
 }
 
 /**
- * Unset all session variables
+ * Unset all session variables without destroying the session.
+ *
+ * Resets `$g->session` to `[]` and, in superglobals mode, also clears
+ * `$GLOBALS['_SESSION']`. The session file / backend entry is NOT deleted —
+ * call `zeal_session_destroy()` to remove it entirely.
  */
 function zeal_session_unset(): void
 {
@@ -565,9 +623,15 @@ function zeal_session_unset(): void
 }
 
 /**
- * Regenerate session ID
+ * Regenerate the session ID, optionally deleting the old session.
  *
- * @param bool $delete_old_session
+ * Coroutine-safe replacement for PHP's `session_regenerate_id()`. Copies the
+ * current in-memory session data to the new ID via the active backend (custom
+ * `\SessionHandlerInterface` or file), then emits a fresh `Set-Cookie` header
+ * so the client switches to the new ID. Gated by `App::$session_lifecycle`
+ * and `session.use_cookies` — same guards as `zeal_session_start()`.
+ *
+ * @param bool $delete_old_session  When `true`, the old session file/entry is deleted.
  */
 function zeal_session_regenerate_id($delete_old_session = false): bool
 {
@@ -644,7 +708,10 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
 }
 
 /**
- * Get session cookie parameters
+ * Get the current session cookie parameters.
+ *
+ * Returns the array stored in `$g->session_params['cookie_params']`, falling
+ * back to safe defaults (`path='/'`, `httponly=true`, `samesite='Lax'`).
  *
  * @return array{lifetime: int, path: string, domain: string, secure: bool, httponly: bool, samesite?: string}
  */
@@ -667,10 +734,14 @@ function zeal_session_get_cookie_params(): array
 }
 
 /**
- * Set session cookie parameters. Accepts either positional args (PHP < 8.0)
- * or an options array (PHP 8.0+).
+ * Set session cookie parameters.
  *
- * @param int|array<string, mixed> $lifetime_or_options
+ * Accepts either the positional-args form (PHP < 8.0 style) or an options
+ * array (PHP 8.0+ `session_set_cookie_params(array $options)` style). Both
+ * are merged over the defaults `['lifetime'=>0, 'path'=>'/', 'domain'=>'',
+ * 'secure'=>false, 'httponly'=>false, 'samesite'=>'Lax']`.
+ *
+ * @param int|array<string, mixed> $lifetime_or_options  Integer lifetime in seconds, or an options array.
  * @param string $path
  * @param string $domain
  * @param bool   $secure
@@ -691,7 +762,11 @@ function zeal_session_set_cookie_params($lifetime_or_options, $path = '/', $doma
 }
 
 /**
- * @param string|null $cache_limiter
+ * Get or set the session cache limiter (e.g. `'nocache'`, `'public'`, `'private'`).
+ *
+ * Stored per-request in `$g->cache_limiter`. Defaults to `'nocache'`.
+ *
+ * @param string|null $cache_limiter  Pass `null` to read the current value.
  */
 function zeal_session_cache_limiter($cache_limiter = null): string
 {
@@ -705,13 +780,23 @@ function zeal_session_cache_limiter($cache_limiter = null): string
     }
 }
 
+/**
+ * Alias for `zeal_session_write_close()` — write session data and close.
+ *
+ * Mirrors PHP's `session_commit()`, which is itself an alias of
+ * `session_write_close()`.
+ */
 function zeal_session_commit(): bool
 {
     return zeal_session_write_close();
 }
 
 /**
- * @param int|null $cache_expire
+ * Get or set the session cache expiry in minutes.
+ *
+ * Stored per-request in `$g->cache_expire`. Defaults to `180` when not set.
+ *
+ * @param int|null $cache_expire  Pass `null` to read the current value.
  */
 function zeal_session_cache_expire($cache_expire = null): int
 {
@@ -725,6 +810,13 @@ function zeal_session_cache_expire($cache_expire = null): int
     }
 }
 
+/**
+ * Discard in-memory session changes and reload session data from the file.
+ *
+ * Mirrors PHP's `session_abort()`: any writes to `$g->session` or
+ * `$_SESSION` since the last `session_start()` are thrown away, and the
+ * session data is re-read from the session file on disk. Returns `true` always.
+ */
 function zeal_session_abort(): bool
 {
     $g = RequestContext::instance();
@@ -770,6 +862,12 @@ function zeal_session_abort(): bool
     return true;
 }
 
+/**
+ * Encode the current session data to PHP's `php` serialize format string.
+ *
+ * Reads from `$GLOBALS['_SESSION']` in superglobals mode, or from
+ * `RequestContext::instance()->session` in coroutine mode.
+ */
 function zeal_session_encode(): string
 {
     $data = \ZealPHP\App::$superglobals
@@ -780,6 +878,14 @@ function zeal_session_encode(): string
     return php_session_encode_from_array($narrowed);
 }
 
+/**
+ * Decode a session data string and populate the active session.
+ *
+ * Mirrors PHP's `session_decode()`: parses `$data` via
+ * `php_session_decode_to_array()` and stores the result in both `$g->session`
+ * and `$GLOBALS['_SESSION']` (in superglobals mode). Returns `false` when
+ * `$data` is empty or decodes to an empty array.
+ */
 function zeal_session_decode(string $data): bool
 {
     if ($data === '') {
@@ -797,8 +903,12 @@ function zeal_session_decode(string $data): bool
 }
 
 /**
- * @param string $prefix
- * @return string|false
+ * Create a new session ID, optionally with a `$prefix`.
+ *
+ * Thin wrapper around PHP's `session_create_id()`.
+ *
+ * @param string $prefix  Optional prefix prepended to the generated ID.
+ * @return string|false  The new session ID, or `false` on failure.
  */
 function zeal_session_create_id($prefix = '')
 {
@@ -806,8 +916,13 @@ function zeal_session_create_id($prefix = '')
 }
 
 /**
- * @param string|null $path
- * @return string
+ * Get or set the session save path.
+ *
+ * Stored per-request in `$g->session_params['save_path']`. Defaults to
+ * `'/var/lib/php/sessions'` when not set.
+ *
+ * @param string|null $path  Pass `null` to read the current value.
+ * @return string  The current (or newly-set) save path.
  */
 function zeal_session_save_path($path = null)
 {
@@ -823,7 +938,13 @@ function zeal_session_save_path($path = null)
 }
 
 /**
- * @param string|null $module
+ * Get or set the session module name (e.g. `'files'`, `'redis'`).
+ *
+ * Stored per-request in `$g->session_module_name`. Defaults to `'files'`
+ * when not set. This is a ZealPHP-internal tracking field; the actual
+ * backend is determined by the registered `\SessionHandlerInterface`.
+ *
+ * @param string|null $module  Pass `null` to read the current value.
  */
 function zeal_session_module_name($module = null): string
 {

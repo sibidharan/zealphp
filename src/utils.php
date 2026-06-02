@@ -9,6 +9,8 @@ use OpenSwoole\Coroutine as co;
 use Throwable;
 
 /**
+ * Read a value from `$_GET` by key.
+ *
  * @param string $key
  * @param mixed  $default
  * @return mixed
@@ -18,6 +20,13 @@ function get($key, $default = null)
     return $_GET[$key] ?? $default;
 }
 
+/**
+ * Read a boolean environment variable using ZealPHP's truthiness convention.
+ *
+ * Returns `$default` when the variable is unset or empty. Otherwise, returns
+ * `false` when the value is one of `'0'`, `'false'`, `'off'`, `'no'`, or
+ * `'none'` (case-insensitive); returns `true` for everything else.
+ */
 function env_flag(string $name, bool $default): bool
 {
     $value = getenv($name);
@@ -29,6 +38,12 @@ function env_flag(string $name, bool $default): bool
     return !in_array($value, ['0', 'false', 'off', 'no', 'none'], true);
 }
 
+/**
+ * Whether benchmark mode is active (`ZEALPHP_BENCH_MODE` env flag).
+ *
+ * Bench mode disables all logging to avoid I/O overhead skewing results.
+ * The result is memoised after the first call.
+ */
 function bench_mode_enabled(): bool
 {
     /** @var bool|null $enabled */
@@ -41,6 +56,17 @@ function bench_mode_enabled(): bool
     return $enabled;
 }
 
+/**
+ * Absolute base URL for the ZealPHP OSS site.
+ *
+ * Resolution order:
+ *   1. `ZEALPHP_SITE_URL` env var.
+ *   2. `ZEALPHP_SITE_HOST` env var (scheme `https://` prepended if absent).
+ *   3. Hard-coded fallback `https://php.zeal.ninja`.
+ *
+ * When `$path` is non-empty it is appended with a single `/` separator.
+ * The result is memoised after the first call.
+ */
 function site_url(string $path = ''): string
 {
     /** @var string|null $base */
@@ -69,6 +95,12 @@ function site_url(string $path = ''): string
     return $base . '/' . ltrim($path, '/');
 }
 
+/**
+ * Return just the host component of `site_url()`.
+ *
+ * Falls back to the full `site_url()` string when `parse_url()` cannot extract
+ * a host (e.g. a bare domain without scheme).
+ */
 function site_host(): string
 {
     $url = site_url();
@@ -80,6 +112,12 @@ function site_host(): string
     return $url;
 }
 
+/**
+ * Whether async (coroutine-channel-backed) logging is enabled.
+ *
+ * Controlled by the `ZEALPHP_LOG_ASYNC` env flag (default `true`).
+ * The result is memoised after the first call.
+ */
 function async_logging_enabled(): bool
 {
     /** @var bool|null $enabled */
@@ -96,19 +134,19 @@ function async_logging_enabled(): bool
  * Ordered list of directories ZealPHP will try for its logs + PID files, most
  * preferred first. Pure (no I/O, no memoization) so it is unit-testable; the
  * actual pick — the first candidate that is writable or creatable — happens in
- * resolve_log_dir().
+ * `resolve_log_dir()`.
  *
  * Order:
- *   1. $ZEALPHP_LOG_DIR — explicit override, when set.
- *   2. /tmp/zealphp — the shared default, kept first for BC (used whenever the
+ *   1. `$ZEALPHP_LOG_DIR` — explicit override, when set.
+ *   2. `/tmp/zealphp` — the shared default, kept first for BC (used whenever the
  *      current user can create/write it: single-user box, root, or fresh box).
- *   3. Per-user fallbacks for the collision case where /tmp/zealphp already
+ *   3. Per-user fallbacks for the collision case where `/tmp/zealphp` already
  *      exists owned by ANOTHER user (e.g. root started a server there first), so
- *      this user cannot write it: $XDG_RUNTIME_DIR/zealphp, then a uid/user-
- *      suffixed temp dir (sys_get_temp_dir()/zealphp-<uid>). These keep us off a
- *      non-writable /tmp/zealphp without polluting the project tree, and resolve
+ *      this user cannot write it: `$XDG_RUNTIME_DIR/zealphp`, then a uid/user-
+ *      suffixed temp dir (`sys_get_temp_dir()/zealphp-<uid>`). These keep us off a
+ *      non-writable `/tmp/zealphp` without polluting the project tree, and resolve
  *      deterministically so `start` and `stop`/`status` agree on the same dir.
- *   4. Project-tree last resorts (./tmp/zealphp, ./logs/zealphp).
+ *   4. Project-tree last resorts (`./tmp/zealphp`, `./logs/zealphp`).
  *
  * @return list<string>
  */
@@ -146,6 +184,13 @@ function zealphp_log_dir_candidates(): array
     return array_values(array_unique($candidates));
 }
 
+/**
+ * Resolve the first writable log directory from `zealphp_log_dir_candidates()`.
+ *
+ * Creates the directory (with `0775` permissions, recursively) if it does not
+ * yet exist. Memoises the result so the filesystem is only probed once per
+ * worker lifetime. Returns `null` when no candidate is writable or creatable.
+ */
 function resolve_log_dir(): ?string
 {
     /** @var string|null $resolved */
@@ -172,12 +217,12 @@ function resolve_log_dir(): ?string
 }
 
 /**
- * The container's CPU allowance from its cgroup CPU quota, or null when there
+ * The container's CPU allowance from its cgroup CPU quota, or `null` when there
  * is no quota (unlimited, or not running under a limited cgroup).
  *
- * Reads cgroup v2 (`/sys/fs/cgroup/cpu.max` = "quota period") first, then v1
+ * Reads cgroup v2 (`/sys/fs/cgroup/cpu.max` = `"quota period"`) first, then v1
  * (`cpu.cfs_quota_us` / `cpu.cfs_period_us`). Returns quota ÷ period as a float
- * (e.g. `6.0` for "600000 100000"); null for "max" / unset / unreadable.
+ * (e.g. `6.0` for `"600000 100000"`); `null` for `"max"` / unset / unreadable.
  */
 function cgroup_cpu_quota(): ?float
 {
@@ -216,7 +261,7 @@ function cgroup_cpu_quota(): ?float
  * Returns `max(1, min($preferred, floor(cgroup_quota)))`; when there is no
  * cgroup quota it returns the conservative `$preferred` (NOT the host count).
  *
- * @param int $preferred desired worker count when unconstrained (default 4)
+ * @param int $preferred desired worker count when unconstrained (default `4`)
  */
 function default_worker_count(int $preferred = 4): int
 {
@@ -228,6 +273,13 @@ function default_worker_count(int $preferred = 4): int
     return $preferred;
 }
 
+/**
+ * Whether debug logging is enabled.
+ *
+ * Always `false` in bench mode. Controlled by `ZEALPHP_DEBUG_LOG` or the legacy
+ * `ZEALPHP_ELOG` env var (default `true` when neither is set). The result is
+ * memoised after the first call.
+ */
 function debug_logging_enabled(): bool
 {
     /** @var bool|null $enabled */
@@ -256,6 +308,12 @@ function debug_logging_enabled(): bool
     return $enabled;
 }
 
+/**
+ * Whether access logging is enabled.
+ *
+ * Always `false` in bench mode. Controlled by the `ZEALPHP_ACCESS_LOG` env flag
+ * (default `true`). The result is memoised after the first call.
+ */
 function access_logging_enabled(): bool
 {
     /** @var bool|null $enabled */
@@ -273,6 +331,19 @@ function access_logging_enabled(): bool
     return $enabled;
 }
 
+/**
+ * Resolve the absolute path for a named log file.
+ *
+ * `$kind` is one of `'access'`, `'zlog'`, or `'debug'`. Checks (in order):
+ *   1. Kind-specific env var (`ZEALPHP_ACCESS_LOG_FILE`, `ZEALPHP_ZLOG_FILE`,
+ *      `ZEALPHP_DEBUG_LOG_FILE`).
+ *   2. `ZEALPHP_LOG_FILE` (generic override, all kinds).
+ *   3. `resolve_log_dir()` + kind-specific filename (`access.log`, `zlog.log`,
+ *      `debug.log`).
+ *
+ * Returns `null` when no writable log directory can be found.
+ * Results are memoised per kind.
+ */
 function log_file_for(string $kind): ?string
 {
     /** @var array<string, string|null> $cache */
@@ -313,6 +384,20 @@ function log_file_for(string $kind): ?string
     return $cache[$kind];
 }
 
+/**
+ * Return (or create) the async `Channel`-backed log sink for `$path`.
+ *
+ * When async logging is enabled and a coroutine scheduler is running, this
+ * function returns an `OpenSwoole\Coroutine\Channel` that a background `go()`
+ * consumer drains to the file at `$path`. Callers push log lines onto the
+ * channel; the consumer does the actual `fwrite()` without blocking the request.
+ *
+ * Returns `null` when async logging is disabled, no scheduler is running, or
+ * `go()` is unavailable — callers fall back to a synchronous `fopen`/`fwrite`.
+ *
+ * The consumer goroutine falls back to `php://stderr` when the file cannot be
+ * opened (avoids silent log loss). Results are memoised per path.
+ */
 function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
 {
     /** @var array<string, \OpenSwoole\Coroutine\Channel> $sinks */
@@ -379,6 +464,18 @@ function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
     // @codeCoverageIgnoreEnd
 }
 
+/**
+ * Write a log line to the appropriate sink for `$kind`.
+ *
+ * Pushes to the async `Channel` sink when one is available (non-blocking,
+ * coroutine-safe). Falls through to a synchronous `fopen`/`fwrite` when called
+ * outside a coroutine or when the channel push fails. Writes to `php://stderr`
+ * as a last resort when no log file can be resolved.
+ *
+ * Note: uses `php://stderr` directly (not `error_log()`) in fallback paths
+ * because `error_log()` is uopz-overridden to route into this very function —
+ * calling it would recurse infinitely.
+ */
 function log_write(string $message, string $kind = 'debug'): void
 {
     $path = log_file_for($kind);
@@ -429,7 +526,7 @@ function log_write(string $message, string $kind = 'debug'): void
  * The child is spawned with OpenSwoole's coroutine runtime enabled, so inside
  * `$taskLogic` you can `go()` + `Channel` + hooked I/O (`curl`, `file_get_contents`,
  * PDO over the network, `Co\System::exec`, ...) and they run concurrently. The
- * call BLOCKS until the child finishes (when `$wait` is true) and returns whatever
+ * call BLOCKS until the child finishes (when `$wait` is `true`) and returns whatever
  * the child echoed — so serialise structured results (`json_encode` in the child,
  * `json_decode` in the caller).
  *
@@ -463,9 +560,9 @@ function log_write(string $message, string $kind = 'debug'): void
  *
  * @param callable $taskLogic The logic to run in the coroutine-enabled child.
  *                            Receives the `OpenSwoole\Process` as its argument.
- * @param bool $wait Whether to block until the child completes. Default true.
+ * @param bool $wait Whether to block until the child completes. Default `true`.
  *
- * @return mixed The child's echoed output (string) when `$wait` is true.
+ * @return mixed The child's echoed output (string) when `$wait` is `true`.
  */
 function coprocess($taskLogic, $wait = true)
 {
@@ -512,7 +609,7 @@ function coprocess($taskLogic, $wait = true)
 }
 
 /**
- * Thin alias for {@see coprocess()} — same fork-a-coroutine-child semantics, so
+ * Thin alias for `coprocess()` — same fork-a-coroutine-child semantics, so
  * it shares `coprocess()`'s untestability (forks a child process; only valid in
  * the `superglobals(true)`+`enableCoroutine(false)` mode the coverage gate excludes).
  *
@@ -526,11 +623,12 @@ function coproc($taskLogic){
 
 
 /**
-* jTraceEx() - provide a Java style exception trace
-* @param \Throwable        $e
-* @param array<int,string>|null $seen array passed to recursive calls to accumulate trace lines already seen
-*                                     leave as NULL when calling this function
-* @return string of array strings, one entry per trace line
+ * Produce a Java-style exception trace string.
+ *
+ * @param \Throwable        $e
+ * @param array<int,string>|null $seen array passed to recursive calls to accumulate trace lines already seen;
+ *                                     leave as `null` when calling this function
+ * @return string of array strings, one entry per trace line
 */
 function jTraceEx($e, $seen=null): string
 {
@@ -575,6 +673,12 @@ function jTraceEx($e, $seen=null): string
     return $result;
 }
 
+/**
+ * Return the `basename` (without `.php` extension) of the calling API file.
+ *
+ * Used inside `api/` handlers to obtain the endpoint name for logging without
+ * hard-coding the filename. Reads one frame from `debug_backtrace()`.
+ */
 function zapi(): string {
     $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
     $caller = array_shift($bt);
@@ -582,11 +686,15 @@ function zapi(): string {
 }
 
 /**
- * Logs a message with an optional tag and limit.
+ * Log a debug message with caller location.
+ *
+ * Writes to the debug log (`debug.log`) when `debug_logging_enabled()` is
+ * `true`. Messages tagged `'wordpress'` are silently suppressed to avoid noise
+ * from WordPress's verbose internal logging.
  *
  * @param string $message The message to log.
- * @param string $tag The tag to associate with the log message. Default is "*".
- * @param int $limit The limit for the log message. Default is 1.
+ * @param string $tag     The tag to associate with the log message. Default `"*"`.
+ * @param int    $limit   Stack depth passed to `debug_backtrace()`. Default `1`.
  */
 function elog($message, $tag = "*", $limit = 1): void {
     if (!debug_logging_enabled()) {
@@ -604,12 +712,18 @@ function elog($message, $tag = "*", $limit = 1): void {
 }
 
 /**
- * Logs a message with an optional tag and filter.
+ * Log a structured message to `zlog.log` with request context.
  *
- * @param mixed  $log           The message or data to log.
- * @param string $tag           The tag to categorize the log entry. Default is "system".
- * @param mixed  $filter        Optional filter to apply to the log entry.
- * @param bool   $invert_filter Whether to invert the filter logic. Default is false.
+ * Writes caller file/line, request URL, request ID, and render timer alongside
+ * the message. Valid `$tag` values: `'system'`, `'fatal'`, `'error'`,
+ * `'warning'`, `'info'`, `'debug'`. Messages with unknown tags are silently
+ * dropped. No-op when `debug_logging_enabled()` is `false`.
+ *
+ * @param mixed  $log           The message or data to log (arrays/objects are JSON-encoded).
+ * @param string $tag           The tag to categorize the log entry. Default `"system"`.
+ * @param mixed  $filter        Optional URI substring filter; skips logging when the
+ *                              current `REQUEST_URI` does not contain this string.
+ * @param bool   $invert_filter Whether to invert the filter logic. Default `false`.
  */
 function zlog($log, $tag = "system", $filter = null, $invert_filter = false): void
 {
@@ -664,6 +778,11 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false): vo
 
 
 /**
+ * Read a site configuration value by key.
+ *
+ * Decodes the global `$__site_config` JSON string and returns the value for
+ * `$key`, or `null` when the key is absent or the config is not valid JSON.
+ *
  * @param string $key
  * @return mixed
  */
@@ -699,7 +818,7 @@ function get_current_render_time()
 
 
 /**
- * Indend the given text with the given number of spaces
+ * Indent the given text with the given number of spaces.
  *
  * @param String $string
  * @param Integer $indend	Number of lines to indent
@@ -722,7 +841,8 @@ function indent($string, $indend = 4)
 }
 
 /**
- * Takes an iterator or object, and converts it into an Array.
+ * Convert an iterator or object into an array via JSON round-trip.
+ *
  * @param  mixed $obj
  * @return array<int|string, mixed>
  */
@@ -737,7 +857,7 @@ function purify_array($obj)
 /**
  * Generates a unique identifier of a specified length.
  *
- * @param int $length The length of the unique identifier to generate. Default is 13.
+ * @param int $length The length of the unique identifier to generate. Default is `13`.
  * @return string The generated unique identifier.
  */
 function uniqidReal($length = 13)
@@ -754,10 +874,16 @@ function uniqidReal($length = 13)
 }
 
 /**
- * Logs access details with the given status and length.
+ * Write an access log line for the current request.
  *
- * @param int $status The HTTP status code to log.
- * @param int $length The length of the response content.
+ * Delegates to `App::formatAccessLogLine()` so the entry honours
+ * `App::$access_log_format` (Apache `LogFormat` / `CustomLog` parity) and the
+ * trusted-proxy `X-Forwarded-For` walk in `App::clientIp()`. No-op when
+ * `access_logging_enabled()` is `false`.
+ *
+ * @param int        $status      The HTTP status code to log.
+ * @param int        $length      The response body length in bytes.
+ * @param float|null $durationSec Request duration in seconds, or `null` to omit.
  */
 function access_log(int $status = 200, int $length = 0, ?float $durationSec = null): void {
     if (!access_logging_enabled()) {
@@ -773,16 +899,14 @@ function access_log(int $status = 200, int $length = 0, ?float $durationSec = nu
 }
 
 /**
- * Adds a header to the response.
+ * Append a header to the current response.
  *
- * @param string $key The name of the header.
- * @param string $value The value of the header.
- * @param bool $ucwords Optional. Whether to capitalize the first letter of each word in the header name. Default is true.
- */
-/**
- * @param string $key
- * @param string $value
- * @param bool   $ucwords
+ * Delegates to `$g->zealphp_response->header()`. The `$ucwords` flag controls
+ * whether the header name is title-cased before queuing (default `true`).
+ *
+ * @param string $key     The header name.
+ * @param string $value   The header value.
+ * @param bool   $ucwords Whether to title-case the header name. Default `true`.
  */
 function response_add_header($key, $value, $ucwords = true): void
 {
@@ -814,27 +938,12 @@ function response_headers_list(): array
 }
 
 /**
- * Set a cookie.
+ * Set a response cookie (uopz override of PHP's built-in `setcookie()`).
  *
- * @param string $name The name of the cookie.
- * @param string $value The value of the cookie. Default is an empty string.
- * @param int $expire The time the cookie expires. This is a Unix timestamp so is in number of seconds since the epoch. Default is 0.
- * @param string $path The path on the server in which the cookie will be available on. Default is an empty string.
- * @param string $domain The (sub)domain that the cookie is available to. Default is an empty string.
- * @param bool $secure Indicates that the cookie should only be transmitted over a secure HTTPS connection from the client. Default is false.
- * @param bool $httponly When true the cookie will be made accessible only through the HTTP protocol. Default is false.
- */
-/**
- * @param string $name
- * @param string $value
- * @param int    $expire
- * @param string $path
- * @param string $domain
- * @param bool   $secure
- * @param bool   $httponly
- * @param string $samesite
- */
-/**
+ * Validates the cookie name and value for control characters (matching PHP
+ * native behaviour since PHP 7). Supports the PHP 7.3+ options-array form for
+ * `$expire_or_options`. Delegates to `$g->zealphp_response->cookie()`.
+ *
  * @param string $name
  * @param string $value
  * @param int|array{expires?: int, path?: string, domain?: string, secure?: bool, httponly?: bool, samesite?: string} $expire_or_options
@@ -873,6 +982,12 @@ function setcookie($name, $value = "", int|array $expire_or_options = 0, $path =
 }
 
 /**
+ * Set a raw (URL-encoded) response cookie (uopz override of PHP's built-in `setrawcookie()`).
+ *
+ * Like `setcookie()` but the value is sent as-is without URL-encoding. Supports
+ * the PHP 7.3+ options-array form for `$expire_or_options`. Validates for
+ * control characters. Delegates to `$g->zealphp_response->rawCookie()`.
+ *
  * @param string $name
  * @param string $value
  * @param int|array{expires?: int, path?: string, domain?: string, secure?: bool, httponly?: bool} $expire_or_options
@@ -924,6 +1039,16 @@ function setrawcookie($name, $value = "", int|array $expire_or_options = 0, $pat
 }
 
 /**
+ * Set a response header (uopz override of PHP's built-in `header()`).
+ *
+ * Guards against CRLF/NUL injection (HTTP response splitting). Recognises
+ * the Apache mod_php status-line forms:
+ *   - `header("HTTP/1.1 404 Not Found")` — sets the response status code.
+ *   - `header("Status: 404 Not Found")` — CGI variant; sets the status code.
+ *
+ * When `$replace` is `true`, any previously queued header with the same name
+ * (case-insensitive) is removed before the new value is added.
+ *
  * @param string   $header
  * @param bool     $replace
  * @param int|null $http_response_code
@@ -973,11 +1098,12 @@ function header($header, $replace = true, $http_response_code = null) {
 }
 
 
-/*
-* @param int|null $code The HTTP status code to set. If null, the current status code is returned.
-* @return int The current HTTP response status code.
-*/
 /**
+ * Get or set the HTTP response status code (uopz override of PHP's built-in `http_response_code()`).
+ *
+ * When `$code` is `null`, returns the current status. Otherwise sets it and
+ * returns `null`.
+ *
  * @param int|null $code
  * @return int|null
  */
@@ -992,16 +1118,16 @@ function http_response_code($code = null) {
 
 /**
  * Per-coroutine `putenv()` — stores the assignment in the request-scoped
- * RequestContext (`$g->memo['_env']`), which is isolated per coroutine in
- * Mode 4, instead of the process-wide environment. Pairs with {@see getenv()}.
+ * `RequestContext` (`$g->memo['_env']`), which is isolated per coroutine in
+ * Mode 4, instead of the process-wide environment. Pairs with `getenv()`.
  * The process environment stays at its boot value, so concurrent requests no
  * longer race `putenv()` (a process-level landmine in any persistent server).
  *
- * Trade-off: subprocesses (proc_open) do NOT inherit a request-scoped putenv —
+ * Trade-off: subprocesses (`proc_open`) do NOT inherit a request-scoped `putenv` —
  * use it for request-scoped config (tenant id, locale), not for child-process
  * environment. Registered only in coroutine-isolated mode (Mode 4).
  *
- * @param string $assignment "NAME=value" to set, or "NAME" to unset.
+ * @param string $assignment `"NAME=value"` to set, or `"NAME"` to unset.
  */
 function zeal_putenv(string $assignment): bool {
     $g = RequestContext::instance();
@@ -1020,7 +1146,7 @@ function zeal_putenv(string $assignment): bool {
 
 /**
  * Per-coroutine `getenv()` — reads the request-scoped env first (set via
- * {@see putenv()}), then the process environment captured at boot
+ * `putenv()`), then the process environment captured at boot
  * (`App::$boot_env`). No-arg form returns the merged map. `$local_only`
  * returns only request-scoped variables (matches the native signature).
  *
@@ -1049,10 +1175,10 @@ function zeal_getenv($name = null, bool $local_only = false) {
 }
 
 /**
- * Coroutine-safe `shell_exec()` shim — routes through {@see App::exec()}.
+ * Coroutine-safe `shell_exec()` shim — routes through `App::exec()`.
  *
  * Registered as a uopz override of the `shell_exec` builtin when exec hooking
- * is enabled (see {@see App::$hook_exec}). Because the PHP backtick operator
+ * is enabled (see `App::$hook_exec`). Because the PHP backtick operator
  * compiles down to a `shell_exec()` call, overriding `shell_exec` also makes
  * `` `cmd` `` coroutine-safe transparently.
  *
@@ -1065,7 +1191,7 @@ function zeal_shell_exec(string $cmd): ?string {
 }
 
 /**
- * Coroutine-safe `system()` shim — routes through {@see App::exec()}.
+ * Coroutine-safe `system()` shim — routes through `App::exec()`.
  *
  * Echoes the full output (like the builtin) and returns the last line of
  * output, writing the exit code into `$code` by reference.
@@ -1083,7 +1209,7 @@ function zeal_system(string $cmd, &$code = null): string {
 }
 
 /**
- * Coroutine-safe `passthru()` shim — routes through {@see App::exec()}.
+ * Coroutine-safe `passthru()` shim — routes through `App::exec()`.
  *
  * Echoes the raw output and writes the exit code into `$code` by reference.
  *
@@ -1097,7 +1223,7 @@ function zeal_passthru(string $cmd, &$code = null): void {
 }
 
 /**
- * Coroutine-safe `exec()` shim — routes through {@see App::exec()}.
+ * Coroutine-safe `exec()` shim — routes through `App::exec()`.
  *
  * Appends each output line to `$output` (like the builtin) and writes the
  * exit code into `$code` by reference. Returns the last line of output.
@@ -1117,13 +1243,12 @@ function zeal_exec(string $cmd, array &$output = [], &$code = null): string {
 }
 
 /**
-* Retrieves all HTTP headers sent by the server.
-*
-* This function returns an array of all the HTTP headers that have been sent
-* by the server. It can be useful for debugging or logging purposes.
-*
-* @return array<int, string> An associative array of all the HTTP headers.
-*/
+ * Return all outbound response headers as formatted strings (uopz override of `headers_list()`).
+ *
+ * Each element is formatted as `"Name: value"`.
+ *
+ * @return array<int, string>
+ */
 function headers_list(): array {
    $headers = response_headers_list();
    $result = [];
@@ -1134,12 +1259,17 @@ function headers_list(): array {
 }
 
 /**
-* Checks if headers have already been sent and optionally returns the file and line number where the output started.
-*
-* @param string|null $file Optional. If provided, this will be set to the filename where output started.
-* @param int|null $line Optional. If provided, this will be set to the line number where output started.
-* @return bool Returns true if headers have already been sent, false otherwise.
-*/
+ * Check whether response headers have already been sent (uopz override of `headers_sent()`).
+ *
+ * Under OpenSwoole, headers are considered "sent" when the underlying
+ * `openswoole_response` is no longer writable. The `$file` and `$line`
+ * out-parameters are not populated (no PHP output-started tracking in this
+ * runtime).
+ *
+ * @param string|null $file Optional. If provided, this will be set to the filename where output started.
+ * @param int|null    $line Optional. If provided, this will be set to the line number where output started.
+ * @return bool Returns `true` if headers have already been sent, `false` otherwise.
+ */
 function headers_sent(&$file = null, &$line = null) {
    $g = RequestContext::instance();
    if (isset($g->openswoole_response)) {
@@ -1149,7 +1279,10 @@ function headers_sent(&$file = null, &$line = null) {
 }
 
 /**
- * Remove a previously set response header. With no argument, clears all.
+ * Remove a previously set response header (uopz override of `header_remove()`).
+ *
+ * With no argument (or `null`), clears all queued response headers. Otherwise
+ * removes all headers matching `$name` (case-insensitive).
  */
 function header_remove(?string $name = null): void
 {
@@ -1168,9 +1301,12 @@ function header_remove(?string $name = null): void
 }
 
 /**
- * Force the current output buffer to the client. In main-worker mode, this
- * switches the response into streaming mode (headers flushed, body chunks
- * written via OpenSwoole). Subsequent `echo`+`flush` calls stream incrementally.
+ * Force the current output buffer to the client (uopz override of `flush()`).
+ *
+ * In main-worker mode, this switches the response into streaming mode: headers
+ * are flushed once, then body chunks are written via `openswoole_response->write()`.
+ * Subsequent `echo` + `flush()` calls stream incrementally. No-op when the
+ * response is no longer writable or no response context is available.
  */
 function flush(): void
 {
@@ -1196,11 +1332,19 @@ function flush(): void
     }
 }
 
+/**
+ * Alias for `ZealPHP\flush()` — flushes the current output buffer to the client.
+ */
 function ob_flush(): void
 {
     \ZealPHP\flush();
 }
 
+/**
+ * Flush the current output buffer and close it (uopz override of `ob_end_flush()`).
+ *
+ * Delegates to `ZealPHP\flush()`, then ends the active output buffer level.
+ */
 function ob_end_flush(): void
 {
     \ZealPHP\flush();
@@ -1210,10 +1354,11 @@ function ob_end_flush(): void
 }
 
 /**
- * Apache mod_php toggles implicit flush on/off. ZealPHP buffers per request
- * by default; we accept the call as a no-op rather than crashing legacy code.
- */
-/**
+ * Apache mod_php `ob_implicit_flush()` compatibility shim.
+ *
+ * Toggles implicit flush on/off under mod_php. ZealPHP buffers per request
+ * by default; this call is accepted as a no-op rather than crashing legacy code.
+ *
  * @param bool|int $enable
  */
 function ob_implicit_flush($enable = true): void
@@ -1224,7 +1369,7 @@ function ob_implicit_flush($enable = true): void
 /**
  * mod_php-parity `phpinfo()`: render a self-contained HTML document instead of the
  * CLI SAPI's plain-text dump. Matches the native signature — echoes output and
- * returns true. Wired via uopz in `App::__construct()`; the renderer lives in
+ * returns `true`. Wired via uopz in `App::__construct()`; the renderer lives in
  * `\ZealPHP\Diagnostics\PhpInfo`.
  *
  * @param int $flags `INFO_*` bitmask.
@@ -1300,14 +1445,14 @@ function header_register_callback(callable $callback): bool
 
 /**
  * mod_php-parity `error_log()`: under the CLI SAPI native `error_log()` writes to
- * stderr / the `php.ini` `error_log` path. ZealPHP routes `message_type` 0 (system
- * logger) and 4 (SAPI logger) into the framework's async log (`debug.log`, or
+ * stderr / the `php.ini` `error_log` path. ZealPHP routes `message_type` `0` (system
+ * logger) and `4` (SAPI logger) into the framework's async log (`debug.log`, or
  * stderr if logging is disabled) so legacy `error_log()` calls land where the
  * rest of the app's diagnostics go — the "we have `elog` for `error_log`" contract.
  *
- *   - type 3 (append to file): honored verbatim — explicit destination intent.
- *   - type 1 (email): unsupported under the coroutine runtime; logged + `false`.
- *   - type 0 / 4: routed to `log_write()` (`debug.log` → stderr fallback).
+ *   - type `3` (append to file): honored verbatim — explicit destination intent.
+ *   - type `1` (email): unsupported under the coroutine runtime; logged + `false`.
+ *   - type `0` / `4`: routed to `log_write()` (`debug.log` → stderr fallback).
  *
  * Always lands somewhere (never silently dropped), unlike `elog()` which gates on
  * debug logging; that's why this routes through `log_write()` directly.
@@ -1357,6 +1502,8 @@ function apache_request_headers(): array
 }
 
 /**
+ * Alias for `apache_request_headers()` — return all inbound request headers.
+ *
  * @return array<string, string>
  */
 function getallheaders(): array
@@ -1365,7 +1512,7 @@ function getallheaders(): array
 }
 
 /**
- * Apache mod_php `apache_response_headers()` — currently set outbound headers.
+ * Apache mod_php `apache_response_headers()` — return currently queued outbound headers.
  *
  * @return array<string, string>
  */
@@ -1383,9 +1530,11 @@ function apache_response_headers(): array
 }
 
 /**
- * Apache mod_php per-request env table. Backed by `Legacy\ApacheContext` on
- * `G`; lifetime = one request. Lazy — only allocated if legacy code calls
- * `apache_setenv`/`getenv`/`note`.
+ * Apache mod_php per-request env table setter (`apache_setenv()`).
+ *
+ * Backed by `Legacy\ApacheContext` on `G`; lifetime = one request. Lazy —
+ * only allocated if legacy code calls `apache_setenv()`/`apache_getenv()`/`apache_note()`.
+ * The `$walk_to_top` flag is accepted for API compatibility but has no effect.
  */
 function apache_setenv(string $variable, string $value, bool $walk_to_top = false): bool
 {
@@ -1398,6 +1547,12 @@ function apache_setenv(string $variable, string $value, bool $walk_to_top = fals
 }
 
 /**
+ * Apache mod_php per-request env table getter (`apache_getenv()`).
+ *
+ * Returns `false` when no Apache context has been initialised or the variable
+ * is not set. The `$walk_to_top` flag is accepted for API compatibility but
+ * has no effect.
+ *
  * @return string|false
  */
 function apache_getenv(string $variable, bool $walk_to_top = false)
@@ -1408,6 +1563,9 @@ function apache_getenv(string $variable, bool $walk_to_top = false)
 
 /**
  * Apache mod_php `apache_note()` — per-request note table. Returns previous value.
+ *
+ * When `$note_value` is `null`, acts as a getter only. Setting a value
+ * lazily initialises the `ApacheContext` if needed.
  */
 function apache_note(string $note_name, ?string $note_value = null): string
 {
@@ -1423,9 +1581,10 @@ function apache_note(string $note_name, ?string $note_value = null): string
 }
 
 /**
- * Apache mod_php `virtual()` — performs an internal subrequest. Not supported
- * in ZealPHP's single-process model; we log once and return `false` rather than
- * crashing legacy code.
+ * Apache mod_php `virtual()` — performs an internal subrequest.
+ *
+ * Not supported in ZealPHP's single-process model; logs once via `elog()` and
+ * returns `false` rather than crashing legacy code.
  */
 function virtual(string $uri): bool
 {
@@ -1434,8 +1593,10 @@ function virtual(string $uri): bool
 }
 
 /**
- * `set_time_limit()` — OpenSwoole has its own coroutine/worker timeouts and
- * native PHP execution-time limit is irrelevant here. Treated as no-op success.
+ * `set_time_limit()` compatibility shim.
+ *
+ * OpenSwoole has its own coroutine/worker timeouts and the native PHP
+ * execution-time limit is irrelevant here. Treated as no-op success.
  */
 function set_time_limit(int $seconds): bool
 {
@@ -1443,11 +1604,13 @@ function set_time_limit(int $seconds): bool
 }
 
 /**
- * `ignore_user_abort()` — Apache mod_php controls whether the script keeps
- * running after the client disconnects. Tracked in `G`; with OpenSwoole the
- * coroutine continues regardless, but we honor the API contract.
- */
-/**
+ * `ignore_user_abort()` compatibility shim (uopz override).
+ *
+ * Apache mod_php controls whether the script keeps running after the client
+ * disconnects. The state is tracked in `G`; with OpenSwoole the coroutine
+ * continues regardless, but we honor the API contract. When called with no
+ * argument, returns the current setting without changing it.
+ *
  * @param bool|null $enable
  */
 function ignore_user_abort($enable = null): int
@@ -1460,6 +1623,12 @@ function ignore_user_abort($enable = null): int
     return $previous;
 }
 
+/**
+ * Return the connection status for the current request.
+ *
+ * Returns `1` (`CONNECTION_ABORTED`) when the underlying `openswoole_response`
+ * is no longer writable, `0` (`CONNECTION_NORMAL`) otherwise.
+ */
 function connection_status(): int
 {
     $g = RequestContext::instance();
@@ -1470,6 +1639,11 @@ function connection_status(): int
     return 0; // CONNECTION_NORMAL
 }
 
+/**
+ * Return `1` when the client connection has been aborted, `0` otherwise.
+ *
+ * Equivalent to `connection_status() === 1`.
+ */
 function connection_aborted(): int
 {
     $g = RequestContext::instance();
@@ -1481,21 +1655,26 @@ function connection_aborted(): int
 }
 
 /**
- * Apache's URL-rewrite output handler — not used in ZealPHP. No-op.
+ * Apache's URL-rewrite output handler — not used in ZealPHP. No-op returning `false`.
  */
 function output_add_rewrite_var(string $name, string $value): bool
 {
     return false;
 }
 
+/**
+ * Apache's URL-rewrite output handler reset — not used in ZealPHP. No-op returning `true`.
+ */
 function output_reset_rewrite_vars(): bool
 {
     return true;
 }
 
 /**
- * `is_uploaded_file()` — verifies that `$filename` is one of the temp paths
- * registered in this request's `$_FILES`. Rejects forged paths from user input.
+ * `is_uploaded_file()` compatibility shim (uopz override).
+ *
+ * Verifies that `$filename` is one of the temp paths registered in this
+ * request's `$_FILES` (via `$g->files`). Rejects forged paths from user input.
  */
 function is_uploaded_file(string $filename): bool
 {
@@ -1513,8 +1692,10 @@ function is_uploaded_file(string $filename): bool
 }
 
 /**
- * `move_uploaded_file()` — equivalent of Apache+mod_php behavior, gated by
- * `is_uploaded_file()` and falling back to `copy`+`unlink` across filesystems.
+ * `move_uploaded_file()` compatibility shim (uopz override).
+ *
+ * Equivalent to Apache+mod_php behaviour, gated by `is_uploaded_file()` and
+ * falling back to `copy()`+`unlink()` across filesystems when `rename()` fails.
  */
 function move_uploaded_file(string $from, string $to): bool
 {
@@ -1532,9 +1713,12 @@ function move_uploaded_file(string $from, string $to): bool
 }
 
 /**
- * Per-coroutine `set_error_handler` override. The native PHP handler is
- * installed at boot and delegates to `G`'s per-coroutine stack — this override
- * just records the user-space registration without touching the engine.
+ * Per-request `set_error_handler()` (uopz override).
+ *
+ * The native PHP error handler is installed at boot and delegates to `G`'s
+ * per-coroutine stack. This override records the user-space registration in
+ * `$g->error_handlers_stack` without touching the engine handler. Passing
+ * `null` pops the most recently registered handler (matches native behaviour).
  */
 function set_error_handler(?callable $callback, int $error_levels = E_ALL): ?callable
 {
@@ -1550,6 +1734,11 @@ function set_error_handler(?callable $callback, int $error_levels = E_ALL): ?cal
     return $prev;
 }
 
+/**
+ * Pop the most recently registered per-request error handler.
+ *
+ * Mirrors the native `restore_error_handler()` contract; always returns `true`.
+ */
 function restore_error_handler(): bool
 {
     $g = RequestContext::instance();
@@ -1559,6 +1748,13 @@ function restore_error_handler(): bool
     return true;
 }
 
+/**
+ * Per-request `set_exception_handler()` (uopz override).
+ *
+ * Stores the handler in `$g->exception_handlers_stack`. Passing `null` pops
+ * the most recently registered handler. Returns the previously active handler
+ * (or `null` when none was set).
+ */
 function set_exception_handler(?callable $callback): ?callable
 {
     $g = RequestContext::instance();
@@ -1573,6 +1769,11 @@ function set_exception_handler(?callable $callback): ?callable
     return $prev;
 }
 
+/**
+ * Pop the most recently registered per-request exception handler.
+ *
+ * Mirrors the native `restore_exception_handler()` contract; always returns `true`.
+ */
 function restore_exception_handler(): bool
 {
     $g = RequestContext::instance();
@@ -1583,9 +1784,12 @@ function restore_exception_handler(): bool
 }
 
 /**
- * Per-request shutdown function — fires after the route handler returns and
- * before the PSR response is emitted, so the function can still call
- * `echo`/`header`/`http_response_code` and have those land in the response.
+ * Per-request shutdown function (uopz override of `register_shutdown_function()`).
+ *
+ * Fires after the route handler returns and before the PSR response is emitted,
+ * so the callback can still call `echo`/`header()`/`http_response_code()` and
+ * have those land in the response. Multiple callbacks are supported and called
+ * in registration order.
  */
 function register_shutdown_function(callable $callback, mixed ...$args): void
 {
@@ -1596,7 +1800,12 @@ function register_shutdown_function(callable $callback, mixed ...$args): void
 }
 
 /**
- * Per-coroutine `error_reporting`. Falls back to the level captured at App boot.
+ * Per-coroutine `error_reporting()` (uopz override).
+ *
+ * When called without an argument, returns the current reporting level for this
+ * coroutine (falling back to the level captured at `App` boot via
+ * `App::$initial_error_reporting`). When called with a level, stores it in
+ * `$g->error_reporting_level` and returns the previous level.
  */
 function error_reporting(?int $error_level = null): int
 {
