@@ -302,4 +302,23 @@ PHP);
         $this->assertSame('sid', $stub->cookies[0][0] ?? null);
     }
 
+    // ── RFC 3875 §6.3.3: the `Status:` pseudo-header must NOT leak as a header ──
+
+    public function testStatusPseudoHeaderIsStrippedNotForwardedToClient(): void
+    {
+        // A legacy CGI app sets its status with `header('Status: NNN ...')`.
+        // applyCgiResponseFrame() applies it as the response CODE but must NOT
+        // forward a literal "Status" header to the client (mod_cgi parity).
+        // This strip is shared by cgiPool AND cgiFork — covered here once.
+        $file = $this->fixture('status-header.php', "header('Status: 503 Service Unavailable'); echo 'x';");
+        $stub = RequestContext::instance()->zealphp_response;
+        $this->cgiPool->invoke(null, $file);
+
+        $headerNames = array_map(
+            static fn (array $h) => strtolower((string) ($h[0] ?? '')),
+            (array) $stub->headers
+        );
+        $this->assertNotContains('status', $headerNames, 'Status pseudo-header must not leak to the client');
+    }
+
 }

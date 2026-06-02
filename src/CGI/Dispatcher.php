@@ -925,11 +925,16 @@ class Dispatcher
             }
         }
         if (stripos($ct, 'multipart/form-data') === false) {
-            try {
-                // @phpstan-ignore-next-line — zealphp_request set by CoSessionManager before dispatch
-                $rawBody = (string) $g->zealphp_request->parent->getContent();
-            } catch (\Throwable $e) {
-                $rawBody = '';
+            // zealphp_request is set by CoSessionManager before a real dispatch,
+            // but is null in unit harnesses — narrow before reading ->parent so
+            // a missing request wrapper degrades to an empty body, not a warning.
+            $req = $g->zealphp_request;
+            if ($req instanceof \ZealPHP\HTTP\Request) {
+                try {
+                    $rawBody = (string) $req->parent->getContent();
+                } catch (\Throwable $e) {
+                    $rawBody = '';
+                }
             }
         }
 

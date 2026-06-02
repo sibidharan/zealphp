@@ -25,12 +25,13 @@ coverage:
         threshold: 7%
 
 # Don't count test scaffolding, vendored code, or the demo site against coverage.
-# Subprocess entry points (cgi_worker.php, pool_worker.php) are excluded for the
-# same reason phpstan.neon excludes them: they run inside forked PHP CLI processes
-# spawned via proc_open(), and xdebug/pcov coverage tracking lives in the parent
-# process — lines executed inside the subprocess can't be counted by coverage
-# tools. Same rationale for the scripts/ benches: standalone diagnostic harnesses
-# that drive WorkerPool/cgi_worker directly (no test harness wraps them).
+# Subprocess entry points (cgi_worker.php, pool_worker.php, fork_master.php) are
+# excluded for the same reason phpstan.neon excludes them: they run inside forked
+# PHP CLI processes spawned via proc_open()/pcntl_fork(), and xdebug/pcov coverage
+# tracking lives in the parent process — lines executed inside the subprocess can't
+# be counted by coverage tools. Same rationale for the scripts/ benches: standalone
+# diagnostic harnesses that drive WorkerPool/cgi_worker directly (no test harness
+# wraps them).
 ignore:
   - "tests/**"
   - "vendor/**"
@@ -44,6 +45,7 @@ ignore:
   - "scripts/**"
   - "src/cgi_worker.php"
   - "src/pool_worker.php"
+  - "src/fork_master.php"
   - "app.php"
 
 comment:
