@@ -171,6 +171,63 @@ function resolve_log_dir(): ?string
     return $resolved;
 }
 
+/**
+ * The container's CPU allowance from its cgroup CPU quota, or null when there
+ * is no quota (unlimited, or not running under a limited cgroup).
+ *
+ * Reads cgroup v2 (`/sys/fs/cgroup/cpu.max` = "quota period") first, then v1
+ * (`cpu.cfs_quota_us` / `cpu.cfs_period_us`). Returns quota ÷ period as a float
+ * (e.g. `6.0` for "600000 100000"); null for "max" / unset / unreadable.
+ */
+function cgroup_cpu_quota(): ?float
+{
+    $v2 = @file_get_contents('/sys/fs/cgroup/cpu.max');
+    if (is_string($v2) && trim($v2) !== '') {
+        $parts = preg_split('/\s+/', trim($v2));
+        if (is_array($parts) && isset($parts[0], $parts[1])) {
+            if ($parts[0] === 'max') {
+                return null; // unlimited
+            }
+            if (ctype_digit($parts[0]) && ctype_digit($parts[1]) && (int) $parts[1] > 0) {
+                return (int) $parts[0] / (int) $parts[1];
+            }
+        }
+        return null;
+    }
+    $q = @file_get_contents('/sys/fs/cgroup/cpu/cpu.cfs_quota_us');
+    $p = @file_get_contents('/sys/fs/cgroup/cpu/cpu.cfs_period_us');
+    if (is_string($q) && is_string($p)) {
+        $qi = (int) trim($q);
+        $pi = (int) trim($p);
+        if ($qi > 0 && $pi > 0) {
+            return $qi / $pi;
+        }
+    }
+    return null;
+}
+
+/**
+ * Default HTTP worker count for a bare `php app.php` (no `ZEALPHP_WORKERS`),
+ * capped to the container's cgroup CPU quota.
+ *
+ * OpenSwoole's own default when `worker_num` is unset is `swoole_cpu_num()` =
+ * the HOST cpu count — so a bare boot in a CPU-limited Docker container
+ * over-spawns (e.g. 24 workers on a 4–6 CPU container) and gets OOM-killed.
+ * Returns `max(1, min($preferred, floor(cgroup_quota)))`; when there is no
+ * cgroup quota it returns the conservative `$preferred` (NOT the host count).
+ *
+ * @param int $preferred desired worker count when unconstrained (default 4)
+ */
+function default_worker_count(int $preferred = 4): int
+{
+    $preferred = max(1, $preferred);
+    $quota = cgroup_cpu_quota();
+    if ($quota !== null && $quota >= 1.0) {
+        return max(1, min($preferred, (int) floor($quota)));
+    }
+    return $preferred;
+}
+
 function debug_logging_enabled(): bool
 {
     /** @var bool|null $enabled */

@@ -280,6 +280,14 @@ foreach ([
     }
 }
 
+// Default worker count when ZEALPHP_WORKERS is unset. OpenSwoole would otherwise
+// fall back to swoole_cpu_num() = the HOST cpu count, which over-spawns in a
+// cgroup-CPU-limited container (e.g. 24 workers on a 4–6 CPU Docker container)
+// and gets OOM-killed. Default to a conservative 4, capped to the cgroup quota.
+if (!isset($settings['worker_num'])) {
+    $settings['worker_num'] = \ZealPHP\default_worker_count(4);
+}
+
 // PID file resolution — explicit env wins; otherwise the shared resolver picks
 // the first writable dir (/tmp/zealphp, else a per-user fallback when it is owned
 // by another user). Same resolver App::resolvePidFile() uses, so the server's PID
