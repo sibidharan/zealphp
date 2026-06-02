@@ -6,7 +6,7 @@ This document compares ZealPHP with existing solutions for async/concurrent PHP.
 
 | Project | Model | Routing | WebSocket | Streaming | Shared Memory | Middleware | Legacy PHP |
 |---------|-------|---------|-----------|-----------|---------------|------------|------------|
-| **ZealPHP** | Coroutine (OpenSwoole) | Built-in | Built-in | yield/SSE/stream() | Store (Table) + Counter (Atomic) | PSR-15 | coroutine-legacy runtime + CGI pool (pool/proc/fcgi) |
+| **ZealPHP** | Coroutine (OpenSwoole) | Built-in | Built-in | yield/SSE/stream() | Store (Table/Redis/Tiered) + Counter (Atomic/Redis) | PSR-15 | coroutine-legacy runtime + CGI pool (pool/proc/fork/fcgi) |
 | ReactPHP | Event loop | Manual | Via packages | Manual | No | No standard | No |
 | AMPHP | Coroutine (Fiber) | Manual | Via packages | Manual | No | No standard | No |
 | FrankenPHP | Go worker | Via framework | Via framework | Via framework | No | Via framework | Partial |

@@ -45,7 +45,7 @@ use ZealPHP\App;
 
 App::superglobals(true);
 App::processIsolation(true);
-App::cgiMode('fcgi');                      // 'pool' (default) | 'proc' | 'fcgi'
+App::cgiMode('fcgi');                      // 'pool' (default) | 'proc' | 'fork' | 'fcgi'
 App::fcgiAddress('127.0.0.1:9000');        // php-fpm's default TCP listener
 
 $app = App::init('0.0.0.0', 8080);
@@ -73,7 +73,7 @@ extension to a backend. Call it once per extension before `$app->run()`. The
 
 | Key | Type | Required | Meaning |
 |-----|------|----------|---------|
-| `mode` | `'pool'` \| `'proc'` \| `'fcgi'` | **yes** | Dispatch strategy. `'pool'` is `.php`-only (pre-spawned warm subprocess pool, ~1–3 ms). `'proc'` spawns a fresh process per request (~30–50 ms). `'fcgi'` forwards to an external FastCGI upstream. |
+| `mode` | `'pool'` \| `'proc'` \| `'fork'` \| `'fcgi'` | **yes** | Dispatch strategy. `'pool'` is `.php`-only (pre-spawned warm subprocess pool, ~1–3 ms). `'proc'` spawns a fresh process per request via `proc_open` (~30–50 ms). `'fork'` is `.php`-only — Apache MPM prefork style: a fork-master forks a fresh child per request at true global scope (~1 ms fork cost, **EXPERIMENTAL**, requires `pcntl`+`posix`). `'fcgi'` forwards to an external FastCGI upstream. |
 | `address` | `string` | **for `fcgi`** | Upstream socket — `host:port` or `unix:/path.sock`. Throws if missing in `fcgi` mode. |
 | `interpreter` | `string` | no | For `proc` mode — the binary to exec (e.g. `/usr/bin/perl`). Omit to rely on the file's `#!` shebang. |
 | `fcgi_params` | `array<string,string>` | no | Extra CGI environment variables merged into the FastCGI `PARAMS` record. nginx `fastcgi_param` parity. |
@@ -174,10 +174,50 @@ HTTP-upstream proxying, put a real proxy (nginx, Caddy, Traefik) in front of
 ZealPHP, or use a coroutine HTTP client from within a native handler.
 
 For per-request *process* isolation of legacy PHP (no external server), use
-`cgiMode('pool')` (warm FPM-style subprocess pool — the default) or
-`cgiMode('proc')` (fresh interpreter per request) instead — see
+`cgiMode('pool')` (warm FPM-style subprocess pool — the default),
+`cgiMode('proc')` (fresh interpreter per request via `proc_open`), or
+`cgiMode('fork')` (Apache MPM prefork style — see below) — see
 [runtime-architecture.md](runtime-architecture.md) and
-[legacy-apps](apache-parity.md). `cgiMode('fork')` was removed in v0.2.41+.
+[Apache parity](apache-parity.md).
+
+### `cgiMode('fork')` — Apache MPM prefork runner (EXPERIMENTAL)
+
+`cgiMode('fork')` is an **experimental** `.php`-only CGI strategy that mirrors
+Apache's MPM prefork model: a long-lived fork-master process
+(`src/fork_master.php`) binds a UNIX socket and forks a **fresh child per
+request**. The child runs the target `.php` file at true global scope
+(no "Cannot redeclare class" — identical correctness to `proc_open`), captures
+the response, then hard-exits. The fork-master recycles and waits for the next
+request.
+
+**Cost:** ~1 ms fork overhead per request — significantly faster than `proc`'s
+~30–50 ms `proc_open` cold start, while still providing full process isolation
+for unmodified WordPress and other `require_once`-heavy legacy apps.
+
+**Requirements:** `pcntl` and `posix` extensions must be present in the PHP build.
+
+**Tunables:**
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `App::$cgi_fork_max_concurrent` | `16` | Maximum live child processes. `ForkPool::dispatch()` returns **503** when the limit is reached. |
+
+**How to enable:**
+
+```php
+App::cgiMode('fork');   // framework-wide for all public/*.php
+// — or per-extension —
+App::registerCgiBackend('.php', ['mode' => 'fork']);
+```
+
+> **Note:** `cgiMode('fork')` is reachable only via `App::cgiMode('fork')` or
+> `registerCgiBackend('.php', ['mode' => 'fork'])`. There is no `App::mode()`
+> preset or `App::isolation()` shortcut for it. It is `.php`-only — passing
+> `'fork'` for a non-`.php` extension is not supported.
+
+Backed by `src/CGI/ForkPool.php` + `src/fork_master.php`; dispatched via
+`Dispatcher::cgiFork()`. Design doc:
+`docs/architecture/2026-06-02-fork-per-request-cgi-pool.md`.
 
 ---
 

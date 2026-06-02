@@ -67,10 +67,13 @@ $results = App::parallel([
 ]);
 
 // Bounded fan-out — process $items with at most $concurrency coroutines in flight.
+// Default concurrency is 10; results are keyed by the input array's original keys.
 $pages = App::parallelLimit($urls, fn($url) => file_get_contents($url), concurrency: 8);
 ```
 
-`App::parallel()` and `App::parallelLimit()` auto-wrap callers outside a coroutine context in `Coroutine::run()`, so they work in both coroutine and sync modes. The first thrown exception propagates to the caller.
+`App::parallel()` and `App::parallelLimit()` auto-wrap callers outside a coroutine context in `Coroutine::run()`, so they work in both coroutine and sync modes.
+
+**Error semantics:** `App::parallel()` surfaces the **first** thrown exception to the caller via `throw reset($errors)` — remaining failures are discarded. `App::parallelLimit()` follows the same pattern. If you need all errors, catch them individually inside each task closure and return a result object.
 
 ## Background Processes with `coproc()` / `coprocess()`
 
@@ -89,7 +92,7 @@ $html = coproc(function () {
 Requirements:
 
 - Only available when superglobals are enabled. Attempting to call it in coroutine mode throws an exception. The reason: `coproc()` forks a child process, designed *before* per-coroutine `RequestContext` (`$g`) existed — it relies on copying process-wide superglobals into the child. Under `superglobals(false)` each coroutine already has isolated state, so `coproc()` is both redundant (use `go()` for parallelism) and unsafe (the fork would race the parent's process-wide superglobals at the exact moment the framework is *not* maintaining them).
-- For per-request process isolation of legacy `public/*.php` files in superglobals mode, see `App::cgiMode('pool'|'proc'|'fcgi')` instead — that's the supported path now. `'pool'` (the default) uses a pre-spawned warm subprocess pool (~1–3 ms); `'proc'` spawns a fresh `proc_open` process per request (~30–50 ms cold); `'fcgi'` forwards to an external FastCGI upstream such as php-fpm.
+- For per-request process isolation of legacy `public/*.php` files in superglobals mode, see `App::cgiMode('pool'|'proc'|'fork'|'fcgi')` instead — that's the supported path now. `'pool'` (the default) uses a pre-spawned warm subprocess pool (~1–3 ms); `'proc'` spawns a fresh `proc_open` process per request (~30–50 ms cold); `'fork'` *(experimental)* uses a fork-master that forks a fresh child per request (~1 ms fork cost, requires `pcntl`+`posix`, `.php` only) for prefork-style correctness; `'fcgi'` forwards to an external FastCGI upstream such as php-fpm.
 - Data passed to the closure must be serialisable; resources such as database connections should be re-created inside the child process.
 
 ## Task Workers via `$server->task()`
@@ -125,8 +128,53 @@ Reference implementations live in `api/swoole/task.php` and `task/backup.php`, w
 |----------|------------------|-------|
 | Non-blocking IO when superglobals are disabled | `go()` coroutines | Ensure drivers support OpenSwoole hooks. |
 | Long-running, blocking work in superglobals mode | `coproc()` / `coprocess()` | Forks a child process; inherits environment snapshot; no shared memory. |
-| Per-request isolation of legacy `public/*.php` files | `App::cgiMode('pool'\|'proc'\|'fcgi')` | `'pool'` (default, ~1–3 ms warm pool) gives mod_php-style global isolation; `'proc'` spawns a fresh process per request (~30–50 ms cold); `'fcgi'` forwards to an upstream FPM pool. |
+| Per-request isolation of legacy `public/*.php` files | `App::cgiMode('pool'\|'proc'\|'fork'\|'fcgi')` | `'pool'` (default, ~1–3 ms warm pool) gives mod_php-style global isolation; `'proc'` spawns a fresh process per request (~30–50 ms cold); `'fork'` *(experimental)* forks a fresh child per request (~1 ms, prefork-style, `.php` only, requires `pcntl`+`posix`); `'fcgi'` forwards to an upstream FPM pool. |
 | Fire-and-forget asynchronous work | `$server->task()` | Task workers run outside the request context. |
+
+## Process Lifecycle Hooks
+
+### `App::onSignal()` — Unix signal handlers
+
+Register a handler for a Unix signal. Useful for config reloads, stats dumps, and graceful drains. Must be called before `App::run()`.
+
+```php
+// SIGHUP → reload routing (master process)
+App::onSignal(SIGHUP, function (): void {
+    App::instance()->reloadRoutes();
+});
+
+// SIGUSR1 → dump stats to debug log (workers only)
+App::onSignal(SIGUSR1, function (): void {
+    \ZealPHP\elog('stats: ' . json_encode(App::stats()));
+}, workerOnly: true);
+```
+
+The third parameter `$workerOnly = false` scopes the handler to master (`false`) or workers (`true`). Backed by `OpenSwoole\Process::signal()`.
+
+### `App::addProcess()` — sidecar long-running processes
+
+Register a named sidecar process that runs alongside the HTTP/WS server, managed by the OpenSwoole master (same fate-sharing: dies when the server stops, respawned on graceful reload). Different from task workers (queue consumers) and worker hooks (run inside HTTP workers). Use for background work such as log shippers, file watchers, scheduled-job runners, and OAuth token refreshers. Must be called before `App::run()`.
+
+```php
+App::addProcess('log-shipper', function (\OpenSwoole\Process $p): void {
+    while ($line = fgets(STDIN)) {
+        shipToS3($line);
+    }
+}, workers: 1, coroutine: true);
+```
+
+`$workers` spawns N independent copies. `$coroutine: true` (default) runs the callable inside `Coroutine::run()` so hooked I/O yields. `App::onProcess()` is a BC alias for `App::addProcess()`.
+
+### `App::onWorkerStop()` — per-worker shutdown hook
+
+Runs inside the worker before it exits (graceful stop, recycle, or reload). The reliable place to flush per-worker state — fires on OpenSwoole's signal-driven stop, unlike `register_shutdown_function`. Call before `App::run()`.
+
+```php
+App::onWorkerStop(function () {
+    // flush metrics buffer, close persistent connections, etc.
+    MetricsBuffer::flush();
+});
+```
 
 ## Coordination and Shared State
 

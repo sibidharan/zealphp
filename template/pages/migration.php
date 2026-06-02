@@ -162,12 +162,17 @@ foreach ($rungs as $r):
   <li>
     <strong>CGI worker bridge (opt-in).</strong> When <code>processIsolation(true)</code>
     is set (<code>App::mode('legacy-cgi')</code>), each public <code>.php</code> file is
-    dispatched through a warm, pre-spawned PHP worker pool — full process isolation for
-    <code>define()</code>-heavy apps like WordPress/Drupal, with the interpreter staying
-    resident between requests. The default strategy is <code>cgiMode('pool')</code>: a
-    persistent worker pool, ~1–3 ms warm dispatch (no per-request interpreter startup).
-    <code>cgiMode('fcgi')</code> instead forwards to an external FastCGI / php-fpm pool.
-    This is opt-in, not the default — most apps don't need it.
+    dispatched through a configurable isolation backend — full process isolation for
+    <code>define()</code>-heavy apps like WordPress/Drupal. Four strategies are available:
+    <code>cgiMode('pool')</code> (default) keeps a pre-spawned warm worker pool resident in
+    memory, ~1–3 ms warm dispatch; <code>cgiMode('proc')</code> spawns a new subprocess per
+    request via <code>proc_open</code>, ~30–50 ms cold start; <code>cgiMode('fork')</code>
+    is the <em>experimental</em> Apache MPM prefork runner — a long-lived fork-master forks
+    a fresh child per request (~1 ms fork cost), giving true fresh-process correctness
+    for unmodified WordPress without the <code>proc_open</code> overhead (requires
+    <code>pcntl</code> + <code>posix</code>; set via <code>App::cgiMode('fork')</code> — no
+    <code>App::mode()</code> preset); <code>cgiMode('fcgi')</code> forwards to an external
+    FastCGI / php-fpm pool. This is opt-in, not the default — most apps don't need it.
   </li>
 </ul>
 

@@ -283,7 +283,9 @@ foreach ($demos as [$id, $title, $url, $code]) {
 <tr><td><code>400</code></td><td><code>invalid_module</code></td><td>Path component fails the strict <code>[a-zA-Z0-9_/-]</code> regex (prevents traversal)</td></tr>
 <tr><td><code>400</code></td><td><code>invalid_request</code></td><td>Method name contains characters other than <code>[a-zA-Z0-9_\-]</code></td></tr>
 <tr><td><code>404</code></td><td><code>method_not_found</code></td><td>Handler file missing, or the expected closure variable name does not exist in the file</td></tr>
+<tr><td><code>404</code></td><td><code>handler_not_found</code></td><td>Per-method dispatch: no matching <code>$get</code>/<code>$post</code>/… variable found in the file (file exists but the method handler is absent)</td></tr>
 <tr><td><code>404</code></td><td><code>undefined_method</code></td><td>Handler called <code>$this-&gt;X()</code> but <code>X</code> is not a method on <code>ZealAPI/REST</code></td></tr>
+<tr><td><code>405</code></td><td><code>method_not_allowed</code></td><td>Per-method dispatch: the file defines some method handlers (e.g. <code>$get</code>) but not the one the client used — <code>Allow</code> header lists the defined methods</td></tr>
 <tr><td><code>500</code></td><td>—</td><td>Uncaught throwable inside the handler — stack trace is logged via <code>elog()</code></td></tr>
 </table>
 

@@ -291,7 +291,48 @@ faster drop of stuck consumers.
 
 ---
 
-## 7. Metrics — `WSRouter::stats()`
+## 7. Metrics and introspection
+
+### Cluster-level counts — `/healthz` dashboard helpers
+
+```php
+// Total connected clients across the cluster (O(1) — SCARD on Redis, Atomic on Table).
+// Cheap enough to call on every /healthz request.
+$total = WSRouter::onlineCount();
+
+// Per-server breakdown — O(N_total_clients), groups ws_owner by server_id.
+// Useful for debugging load-balancer imbalance; avoid calling on every request.
+$byServer = WSRouter::onlineByServer();
+// Returns: ['hostname1:1234' => 512, 'hostname2:5678' => 488, ...]
+
+// This server's cluster-unique id (defaults to hostname:pid, set in WSRouter::init()).
+$me = WSRouter::serverId();
+
+// Fire-and-forget pub/sub publish to any channel (sugar over Store::publish).
+$receivers = WSRouter::broadcast('alerts:global', json_encode($payload));
+```
+
+### Paginated room roster for large rooms
+
+`Room::members()` loads the full roster into memory (SSCAN loop). For rooms
+with more than ~10 000 members, use `Room::membersPaged()`:
+
+```php
+$room   = WSRouter::room('general');
+$cursor = '0';
+do {
+    ['cursor' => $cursor, 'members' => $batch] = $room->membersPaged($cursor, 200);
+    foreach ($batch as $clientId) { /* process */ }
+} while ($cursor !== '0');
+```
+
+`membersPaged(string $cursor = '0', int $count = 100)` returns one SSCAN batch
+(`['cursor' => string, 'members' => list<string>]`). Cursor `'0'` starts a
+fresh scan; a returned cursor of `'0'` signals end-of-scan. On the Table
+backend it falls back to the full roster in one batch (no incremental SSCAN
+available there).
+
+### Per-worker stats — `WSRouter::stats()`
 
 ```php
 $app->route('/healthz/ws', fn() => WSRouter::stats()->snapshot());

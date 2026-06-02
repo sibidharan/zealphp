@@ -8,7 +8,7 @@
 
 <div class="bench-method vsfpm-tldr">
   <strong>TL;DR</strong> &nbsp;|&nbsp;
-  The apples-to-apples comparison is <strong><code>App::mode('mixed')</code></strong>. That's PHP-FPM's <em>exact</em> execution model: one request at a time per warm worker, native <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>, in-process — minus the FastCGI socket hop and minus the separate web server (the HTTP server is built in). Same model, fewer moving parts, faster. <strong><code>App::mode('coroutine')</code></strong> (the default) goes further — sub-millisecond, thousands of concurrent connections per worker — but it's a <em>different</em> execution model, so it's the bonus path, not the FPM comparison. <strong><code>App::mode('legacy-cgi')</code></strong> exists only for unmodified WordPress/Drupal and other <code>define()</code>-heavy code: it dispatches each <code>public/*.php</code> through the default <code>cgiMode('pool')</code> — a warm, pre-spawned PHP worker pool at ~1–3 ms/request — or <code>cgiMode('fcgi')</code> to forward to an external php-fpm pool.
+  The apples-to-apples comparison is <strong><code>App::mode('mixed')</code></strong>. That's PHP-FPM's <em>exact</em> execution model: one request at a time per warm worker, native <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>, in-process — minus the FastCGI socket hop and minus the separate web server (the HTTP server is built in). Same model, fewer moving parts, faster. <strong><code>App::mode('coroutine')</code></strong> (the default) goes further — sub-millisecond, thousands of concurrent connections per worker — but it's a <em>different</em> execution model, so it's the bonus path, not the FPM comparison. <strong><code>App::mode('legacy-cgi')</code></strong> exists only for unmodified WordPress/Drupal and other <code>define()</code>-heavy code: it dispatches each <code>public/*.php</code> through the default <code>cgiMode('pool')</code> — a warm, pre-spawned PHP worker pool at ~1–3 ms/request — <code>cgiMode('proc')</code> for on-demand subprocess spawn (~30–50 ms, cold-start), the experimental <code>cgiMode('fork')</code> (Apache MPM prefork runner, fresh child per request at ~1 ms fork cost — see below), or <code>cgiMode('fcgi')</code> to forward to an external php-fpm pool.
 </div>
 
 <!-- ────────────────────────────────────────────────────────────── -->
@@ -154,6 +154,11 @@ browser</code></pre>
     <td class="vsfpm-cell-amber">~1–3 ms (FPM territory)</td>
   </tr>
   <tr>
+    <td><strong>ZealPHP <code>App::mode('legacy-cgi')</code> — <code>cgiMode('fork')</code></strong> <em>(experimental)</em></td>
+    <td>Apache MPM prefork runner. A long-lived fork-master (<code>src/fork_master.php</code>) binds a UNIX socket and forks a fresh child per request that runs the target <code>.php</code> at true global scope, then hard-exits. Fresh-process correctness (no "Cannot redeclare class") for unmodified WordPress/legacy apps. Requires <code>pcntl</code> + <code>posix</code>. Set via <code>App::cgiMode('fork')</code> — there is no <code>App::mode()</code> preset for fork. Concurrency capped by <code>App::$cgi_fork_max_concurrent</code> (default 16); returns 503 when full.</td>
+    <td class="vsfpm-cell-amber">~1 ms (fork cost)</td>
+  </tr>
+  <tr class="vsfpm-row-tint">
     <td><strong>ZealPHP <code>App::mode('legacy-cgi')</code> — <code>cgiMode('fcgi')</code></strong></td>
     <td>Forwards each <code>public/*.php</code> to an external FastCGI / php-fpm pool over the same wire protocol nginx's <code>fastcgi_pass</code> uses. ZealPHP becomes the HTTP / WebSocket / coroutine layer; your existing FPM pool stays the PHP runtime.</td>
     <td class="vsfpm-cell-amber">your FPM pool + 1 local socket hop</td>
@@ -462,6 +467,12 @@ $app->run();
     <td class="vsfpm-cell-amber">~est. 1,000–3,000</td>
     <td class="vsfpm-right">~1–3</td>
   </tr>
+  <tr>
+    <td><strong>ZealPHP <code>mode('legacy-cgi')</code></strong><br><small><code>cgiMode('fork')</code> — <em>experimental</em></small></td>
+    <td>Fork-per-request (Apache MPM prefork runner); fresh child exits after each request — true fresh-process correctness. Requires <code>pcntl</code> + <code>posix</code>. Not yet in the bench script.</td>
+    <td class="vsfpm-right">—</td>
+    <td class="vsfpm-right">~1 ms (fork)</td>
+  </tr>
 </table>
 
 <p class="vsfpm-note-muted">
@@ -476,7 +487,7 @@ $app->run();
 
 <ul class="vsfpm-list">
   <li><strong>Don't isolate if you don't have to.</strong> Both in-process modes (<code>mode('coroutine')</code> 34k, <code>mode('mixed')</code> 22k) are within striking distance of Apache mod_php (41k) and orders of magnitude past process isolation. If your legacy app doesn't need a fresh process per request, run <code>App::mode('mixed')</code> and pay nothing.</li>
-  <li><strong>If you DO need isolation, <code>App::mode('legacy-cgi')</code> keeps the interpreter warm.</strong> The default <code>cgiMode('pool')</code> targets ~1–3 ms/request — same isolation, same superglobals, same per-request global scope, but the pool's PHP workers stay warm and dispatch is async via the parent worker's coroutines. Nothing forks per request. <code>cgiMode('fcgi')</code> reuses an external php-fpm pool you already run.</li>
+  <li><strong>If you DO need isolation, <code>App::mode('legacy-cgi')</code> keeps the interpreter warm.</strong> The default <code>cgiMode('pool')</code> targets ~1–3 ms/request — same isolation, same superglobals, same per-request global scope, but the pool's PHP workers stay warm and dispatch is async via the parent worker's coroutines. Nothing forks per request. The experimental <code>cgiMode('fork')</code> (Apache MPM prefork runner) forks a fresh child per request at ~1 ms cost — true fresh-process correctness without the ~30–50 ms <code>proc_open</code> overhead of <code>cgiMode('proc')</code>. <code>cgiMode('fcgi')</code> reuses an external php-fpm pool you already run.</li>
   <li><strong>Honest finding: Apache mod_php (41k) edges out ZealPHP on this trivial echo.</strong> For a no-I/O, no-middleware legacy file, a mature in-process C SAPI is hard to beat. ZealPHP's win shows up elsewhere — native routes (<a href="/performance">/performance</a>), coroutine I/O concurrency, WebSocket, SSE, and not needing a separate web server at all. We're not going to pretend otherwise.</li>
 </ul>
 
@@ -490,6 +501,7 @@ $app->run();
   <li><code>MIXED_URL=</code> — the apples-to-apples row: a ZealPHP instance running <code>App::mode('mixed')</code> (the PHP-FPM-equivalent in-process model).</li>
   <li><code>FPM_URL=</code> — Apache/nginx + PHP-FPM serving the same trivial file.</li>
   <li><code>POOL_URL=</code> — a ZealPHP instance running <code>App::mode('legacy-cgi')</code> with the default <code>cgiMode('pool')</code> (warm worker pool).</li>
+  <li><code>FORK_URL=</code> — a ZealPHP instance running <code>App::mode('legacy-cgi')</code> with the experimental <code>cgiMode('fork')</code> (fork-per-request, Apache MPM prefork runner; requires <code>pcntl</code> + <code>posix</code>).</li>
   <li><code>FCGI_URL=</code> — a ZealPHP instance running <code>App::mode('legacy-cgi')</code> with <code>cgiMode('fcgi')</code> fronting an external php-fpm pool.</li>
 </ul>
 
