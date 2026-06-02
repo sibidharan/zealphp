@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+WordPress (and any legacy `require_once`-bootstrap app) now runs end-to-end in the **CGI-subprocess modes** — `cgi-pool` and `cgi-proc` — including **wp-admin and the Gutenberg block editor**, with **unmodified WordPress source**. All four fixes live entirely in ZealPHP's CGI worker layer; the in-process (`coroutine`/`mixed`) paths and `App.php` are unchanged. Huge thanks to **@Guruprasanth-M** for the rigorous, source-cited bug reports (#167, #169) and the reference patches this lands.
+
+### Fixed
+
+- **wp-admin no longer 500s with `uksort(): … null given` (#167).** The CGI worker now performs the request `include` at **true global scope** in the worker's top-level request loop instead of inside a function. A legacy app's top-level variables (WordPress's `$menu`/`$submenu`, built at file scope in `wp-admin/menu.php`) therefore become real `$GLOBALS`, so `global $menu` resolves and the admin menu builds. `src/pool_worker.php`'s `pool_handle_request()` was split into `pool_prepare_request()` (per-request setup) + `pool_finish_request()` (output capture / response), with the `include` hoisted to the caller. **Subprocess modes only** — the trick is structurally impossible on the in-process path (the include runs deep in the OpenSwoole event loop), so `coroutine`/`mixed` are unchanged.
+- **`cgiMode('proc')` no longer hangs on large responses (#167).** `Dispatcher::cgiSubprocess()` drained the child's stderr to EOF *before* reading stdout, which deadlocked once the response body exceeded the ~64 KB OS pipe buffer (the child blocked writing stdout nobody was reading; the parent blocked reading stderr the child wouldn't close). stdout and stderr are now drained **concurrently via `stream_select`** (non-blocking, bounded by `App::$cgi_timeout`), in both the buffered and SSE-streaming paths.
+- **WordPress media uploads work in `cgi-pool` (#169).** `src/pool_worker.php` now registers the `is_uploaded_file()` / `move_uploaded_file()` overrides (the same the proc worker already carried), resolving against the live per-request `$_FILES` so OpenSwoole-delivered uploads pass WordPress's `wp_handle_upload()` security gate (previously every upload failed with "Specified file failed upload test").
+
+### Added
+
+- **`ZealPHP\CGI\CgiInputStream`** — a `php://` stream wrapper for the CGI subprocesses that serves `php://input` from the request's raw body (stashed per request by the worker), so legacy code and the WordPress REST API (the block editor's JSON saves) can `file_get_contents('php://input')` under OpenSwoole, where native CLI `php://input` is empty. Other `php://` streams pass through to the original wrapper. The proc worker reads the body from STDIN; `Dispatcher` ships it in the pool IPC frame (skipping multipart, which rides `$_FILES`). Pinned by `tests/Unit/CGI/CgiInputStreamTest.php`.
+
 ## [0.3.7] - 2026-06-01
 
 A large maintenance + feature release. **`src/App.php` was broken down** (≈9,690 → ≈7,630 lines) into real classes — `ZealPHP\ResponseMiddleware` (the router/dispatch terminal), `ZealPHP\CLI` (server-lifecycle CLI), and `ZealPHP\CGI\Dispatcher` (the CGI execution machinery) — with the 1,085-line `App::run()` decomposed into named private boot steps. Every method moved **verbatim** (adversarially diff-verified against the pre-refactor file); the public `App::` API is unchanged. On top of that: **per-route + `App::when()` path-scoped middleware**, **dev route hot-reload** (`php app.php --dev`), an **Apache mod_php-parity `phpinfo()` redesign**, three security fixes, four bug fixes (#164, #157, #155, and the runtime-dir collision), a complete env-var reference, and the ext-zealphp `v0.3.25` pin.
