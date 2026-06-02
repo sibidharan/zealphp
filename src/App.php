@@ -612,6 +612,12 @@ class App
      */
     public static ?\ZealPHP\CGI\WorkerPool $cgi_pool_instance = null;
     /**
+     * Per-worker ForkPool singleton for `cgiMode('fork')` — the fork-master
+     * subprocess. Lazy-spawned on first dispatch in this OpenSwoole worker
+     * (same per-worker ownership rationale as $cgi_pool_instance).
+     */
+    public static ?\ZealPHP\CGI\ForkPool $cgi_fork_instance = null;
+    /**
      * Per-extension CGI backend registry. Apache `AddHandler`/`ProxyPassMatch`
      * + nginx `fastcgi_pass`-per-location parity.
      *
@@ -1858,8 +1864,11 @@ class App
 
     /**
      * Select how a process-isolated legacy include is dispatched:
-     *   `'proc'` (default) — fresh PHP per request via `proc_open` (full WordPress/Drupal compat).
-     *   `'fork'`           — warm `OpenSwoole\Process` fork (~5× faster; function-scope only).
+     *   `'pool'` (default) — pre-spawned PHP worker pool, mod_php-style isolation, ~1-3 ms warm.
+     *   `'proc'`           — fresh PHP per request via `proc_open` (~30-50 ms cold; full compat).
+     *   `'fork'`           — Apache MPM prefork: a fork-master forks a FRESH child per request at
+     *                        TRUE global scope (~1 ms). Unmodified-WordPress correctness (no class
+     *                        redeclare) at fork cost, not proc cold-start. EXPERIMENTAL (pcntl+posix).
      *   `'fcgi'`           — forward to a FastCGI backend via `App::$fcgi_address` (no child process).
      * See `App::$cgi_mode` for the full trade-off. No-arg call returns the current mode.
      * Only takes effect when `processIsolation()` is on.
@@ -2073,14 +2082,14 @@ class App
     public static function registerCgiBackend(string $extension, array $config): void
     {
         $mode = is_string($config['mode'] ?? null) ? (string)$config['mode'] : '';
-        if ($mode !== 'proc' && $mode !== 'fcgi' && $mode !== 'pool') {
+        if ($mode !== 'proc' && $mode !== 'fcgi' && $mode !== 'pool' && $mode !== 'fork') {
             throw new \InvalidArgumentException(
-                "App::registerCgiBackend() mode must be 'pool', 'proc', or 'fcgi'; got '{$mode}'."
+                "App::registerCgiBackend() mode must be 'pool', 'proc', 'fork', or 'fcgi'; got '{$mode}'."
             );
         }
-        if ($mode === 'pool' && $extension !== '.php') {
+        if (($mode === 'pool' || $mode === 'fork') && $extension !== '.php') {
             throw new \InvalidArgumentException(
-                "pool mode requires a PHP target; use 'fcgi' (warm external pool, language-agnostic) or 'proc' for {$extension}"
+                "{$mode} mode requires a PHP target; use 'fcgi' (warm external pool, language-agnostic) or 'proc' for {$extension}"
             );
         }
         if ($mode === 'fcgi' && empty($config['address'])) {
@@ -5525,6 +5534,7 @@ class App
                     'fcgi'  => \ZealPHP\CGI\Dispatcher::cgiFcgi($absPath, $b['address'] ?? null, $b['fcgi_params'] ?? []),
                     'pool'  => \ZealPHP\CGI\Dispatcher::cgiPool($absPath),
                     'proc'  => \ZealPHP\CGI\Dispatcher::cgiSubprocess($absPath, $b['interpreter'] ?? null),
+                    'fork'  => \ZealPHP\CGI\Dispatcher::cgiFork($absPath),
                     default => \ZealPHP\CGI\Dispatcher::cgiPool($absPath),  // default = 'pool' (was 'proc' pre-fork-removal)
                 };
             }
@@ -5548,6 +5558,7 @@ class App
                 'fcgi'  => \ZealPHP\CGI\Dispatcher::cgiFcgi($absPath, $b['address'] ?? null, $b['fcgi_params'] ?? []),
                 'pool'  => \ZealPHP\CGI\Dispatcher::cgiPool($absPath),
                 'proc'  => \ZealPHP\CGI\Dispatcher::cgiSubprocess($absPath, $b['interpreter'] ?? null),
+                'fork'  => \ZealPHP\CGI\Dispatcher::cgiFork($absPath),
                 default => \ZealPHP\CGI\Dispatcher::cgiPool($absPath),  // default = 'pool'
             };
         }

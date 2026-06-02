@@ -856,14 +856,65 @@ class Dispatcher
         // Issue #108 — see mintCgiSession() docblock.
         self::mintCgiSession($g);
 
-        // Build the request frame. Same shape as cgiFork's $ctx and
-        // cgi_worker.php's ZEALPHP_REQUEST_CONTEXT env JSON.
-        // RequestContext properties are typed non-nullable arrays — no
-        // need for `?? []` guards.
-        // Raw request body for php://input (e.g. a JSON REST payload from the WP
-        // block editor). Skip multipart/form-data — those ride $_FILES (tmp file
-        // already on disk); shipping the full multipart blob through the IPC frame
-        // would bloat it (and a large upload could exceed IPC's 64 MB cap).
+        $request = self::buildCgiRequestFrame($g, $path);
+
+        try {
+            $resp = App::$cgi_pool_instance->dispatch($request, App::$cgi_timeout > 0 ? (float) App::$cgi_timeout : 30.0);
+        } catch (\Throwable $e) {
+            elog("cgiPool: dispatch failed for $path: " . $e->getMessage(), 'error');
+            return 500;
+        }
+
+        return self::applyCgiResponseFrame($resp);
+    }
+
+    /**
+     * Fork-per-request CGI dispatch — `App::cgiMode('fork')` (Apache MPM prefork,
+     * EXPERIMENTAL). Routes `.php` through a {@see ForkPool}: the fork-master
+     * forks a FRESH child per request that runs the file at true global scope
+     * (the #167 wp-admin fix) and dies — fresh-process correctness (no
+     * "Cannot redeclare class") at fork cost (~1 ms), not proc_open cold-start.
+     *
+     * Shares the request-frame shape and response-apply contract with cgiPool.
+     */
+    public static function cgiFork(string $path): mixed
+    {
+        $g = RequestContext::instance();
+
+        if (App::$cgi_fork_instance === null) {
+            try {
+                App::$cgi_fork_instance = new ForkPool(maxConcurrent: max(1, App::$cgi_pool_size));
+            } catch (\Throwable $e) {
+                elog("cgiFork: failed to spawn fork master: " . $e->getMessage(), 'error');
+                return 500;
+            }
+        }
+
+        // Issue #108 — see mintCgiSession() docblock.
+        self::mintCgiSession($g);
+
+        $request = self::buildCgiRequestFrame($g, $path);
+
+        try {
+            $resp = App::$cgi_fork_instance->dispatch($request, App::$cgi_timeout > 0 ? (float) App::$cgi_timeout : 30.0);
+        } catch (\Throwable $e) {
+            elog("cgiFork: dispatch failed for $path: " . $e->getMessage(), 'error');
+            return 500;
+        }
+
+        return self::applyCgiResponseFrame($resp);
+    }
+
+    /**
+     * Build the IPC request frame from the current request context — shared by
+     * cgiPool and cgiFork. The raw body feeds php://input (CgiInputStream);
+     * multipart/form-data is skipped (it rides $_FILES, and the full blob could
+     * exceed IPC's 64 MB cap).
+     *
+     * @return array<string,mixed>
+     */
+    private static function buildCgiRequestFrame(RequestContext $g, string $path): array
+    {
         $rawBody = '';
         $ct = '';
         foreach ($g->server as $k => $v) {
@@ -881,7 +932,8 @@ class Dispatcher
                 $rawBody = '';
             }
         }
-        $request = [
+
+        return [
             'file'    => $path,
             'server'  => $g->server,
             'get'     => $g->get,
@@ -890,13 +942,18 @@ class Dispatcher
             'files'   => $g->files,
             'body'    => $rawBody,
         ];
+    }
 
-        try {
-            $resp = App::$cgi_pool_instance->dispatch($request, App::$cgi_timeout > 0 ? (float) App::$cgi_timeout : 30.0);
-        } catch (\Throwable $e) {
-            elog("cgiPool: dispatch failed for $path: " . $e->getMessage(), 'error');
-            return 500;
-        }
+    /**
+     * Apply a pool/fork response frame (status + headers + cookies) to the
+     * response and return the body per the universal return contract — shared
+     * by cgiPool and cgiFork.
+     *
+     * @param array<mixed,mixed> $resp
+     */
+    private static function applyCgiResponseFrame(array $resp): mixed
+    {
+        $g = RequestContext::instance();
 
         $statusCode = $resp['status'] ?? 200;
         response_set_status(is_numeric($statusCode) ? (int) $statusCode : 200);
@@ -909,8 +966,6 @@ class Dispatcher
                     $respW->header((string) $pair[0], (string) $pair[1]);
                 }
             }
-            // Cookie tuples — same shape cgiFork applies; reuse the same
-            // arg-narrowing pattern.
             $applyCookie = static function (callable $fn, mixed $args): void {
                 if (!is_array($args) || !isset($args[0]) || !is_scalar($args[0])) return;
                 $s = static fn(int $i, string $d): string =>
@@ -927,13 +982,11 @@ class Dispatcher
                     $s(7, ''),
                 );
             };
-            foreach ((array) ($resp['cookies'] ?? []) as $args) {
-                // The cookies from pool_worker may be in two shapes:
-                // associative (from setcookie's $expires=array form) OR
-                // positional (compact()-built); narrow both into the
-                // positional shape applyCookie expects.
+            // Cookies arrive in two shapes: associative (setcookie $expires=array
+            // form) OR positional (compact()-built); narrow both to positional.
+            $narrow = static function (mixed $args): mixed {
                 if (is_array($args) && isset($args['name']) && is_scalar($args['name'])) {
-                    $args = [
+                    return [
                         (string) $args['name'],
                         isset($args['value']) && is_scalar($args['value']) ? (string) $args['value'] : '',
                         isset($args['expires']) && is_numeric($args['expires']) ? (int) $args['expires'] : 0,
@@ -944,22 +997,13 @@ class Dispatcher
                         isset($args['samesite']) && is_scalar($args['samesite']) ? (string) $args['samesite'] : '',
                     ];
                 }
-                $applyCookie([$respW, 'cookie'], $args);
+                return $args;
+            };
+            foreach ((array) ($resp['cookies'] ?? []) as $args) {
+                $applyCookie([$respW, 'cookie'], $narrow($args));
             }
             foreach ((array) ($resp['rawcookies'] ?? []) as $args) {
-                if (is_array($args) && isset($args['name']) && is_scalar($args['name'])) {
-                    $args = [
-                        (string) $args['name'],
-                        isset($args['value']) && is_scalar($args['value']) ? (string) $args['value'] : '',
-                        isset($args['expires']) && is_numeric($args['expires']) ? (int) $args['expires'] : 0,
-                        isset($args['path']) && is_scalar($args['path']) ? (string) $args['path'] : '/',
-                        isset($args['domain']) && is_scalar($args['domain']) ? (string) $args['domain'] : '',
-                        !empty($args['secure']),
-                        !empty($args['httponly']),
-                        isset($args['samesite']) && is_scalar($args['samesite']) ? (string) $args['samesite'] : '',
-                    ];
-                }
-                $applyCookie([$respW, 'rawCookie'], $args);
+                $applyCookie([$respW, 'rawCookie'], $narrow($args));
             }
         }
 
