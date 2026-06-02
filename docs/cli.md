@@ -29,7 +29,7 @@ server in the foreground on the configured port (8080 by default).
 | `-H`, `--host` | `ADDR` | start/restart | Listen address. Default: `0.0.0.0`. |
 | `-w`, `--workers` | `N` | start/restart | Number of HTTP worker processes. |
 | `-d`, `--daemonize` | — | start/restart | Run in the background (detached). |
-| `--task-workers` | `N` | start/restart | Number of task workers. Default: from the server config (0 unless set). |
+| `--task-workers` | `N` | start/restart | Number of task workers. Default: 8 (set `0` to disable). |
 | `--pid-file` | `PATH` | all | Custom PID-file path (overrides the per-port default). |
 | `--dev` | — | start/restart | **Enable dev route hot-reload** — each worker watches `route/*.php` and rebuilds the route table in place when a file changes, no process restart. Equivalent to `ZEALPHP_DEV=1` / `App::devReload(true)`. **Off in production** (the default). See [Hot-reload](hot-reload.md). |
 | `-h`, `--help`, `help` | — | — | Print the built-in help and exit. |
@@ -103,7 +103,7 @@ over the `app.php` defaults. The common ones:
 | `ZEALPHP_SUPERGLOBALS` | start in superglobals mode (`App::superglobals`) | `false` |
 | `ZEALPHP_PROCESS_ISOLATION` | toggle `App::processIsolation()` | follows mode |
 | `ZEALPHP_ENABLE_COROUTINE` | toggle `App::enableCoroutine()` | follows mode |
-| `ZEALPHP_CGI_MODE` | legacy dispatch backend (`pool` / `fcgi`) | `pool` |
+| `ZEALPHP_CGI_MODE` | legacy dispatch backend (`pool` / `proc` / `fork` / `fcgi`) | `pool` |
 | `ZEALPHP_MAX_CONN`, `ZEALPHP_MAX_COROUTINE`, `ZEALPHP_BACKLOG`, `ZEALPHP_REACTOR_NUM` | OpenSwoole server tuning | OpenSwoole defaults |
 
 The full set of `ZEALPHP_*` knobs (logging paths, asset version, CORS origins,

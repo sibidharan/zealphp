@@ -243,7 +243,7 @@ All setters return `self` (fluent) or the current value. Must be called BEFORE `
 | `App::processIsolation(bool)` | bool | follows `$superglobals` | Dispatches to CGI subprocess per request (Mode 1) |
 | `App::enableCoroutine(bool)` | bool | follows `!$superglobals` | OpenSwoole `enable_coroutine` server setting |
 | `App::hookAll(bool\|int)` | bool/int | follows `!$superglobals` | OpenSwoole `Runtime::enableCoroutine` flags |
-| `App::cgiMode(string)` | `'proc'\|'pool'\|'fcgi'` | `'pool'` | CGI dispatch strategy |
+| `App::cgiMode(string)` | `'pool'\|'proc'\|'fork'\|'fcgi'` | `'pool'` | CGI dispatch strategy |
 | `App::cgiPoolSize(int)` | int | 16 | Pool worker count |
 | `App::cgiPoolMaxRequests(int)` | int | 500 | Pool worker recycle threshold |
 | `App::cgiTimeout(int)` | int | 60 | Subprocess dispatch timeout (s) |

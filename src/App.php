@@ -545,13 +545,23 @@ class App
      *                      (e.g. uopz unavailable in the subprocess, or
      *                      audit / compliance requiring zero pre-warm).
      *
+     *   `'fork'` (experimental) — Apache MPM prefork. A long-lived fork-master
+     *                      (`src/fork_master.php`) forks a FRESH child per
+     *                      request that runs the include at TRUE global scope
+     *                      (~1 ms fork cost), captures the response, then
+     *                      hard-exits. Same fresh-process correctness as
+     *                      `'proc'` (no class-redeclare) but at fork cost
+     *                      instead of `proc_open` cold start. Requires
+     *                      pcntl + posix; bounds live children via
+     *                      `App::$cgi_fork_max_concurrent` (503 when full).
+     *
      *   `'fcgi'` (deployment mode) — forward to an external FastCGI backend
      *                      (php-fpm, hhvm, roadrunner) via the FCGI binary
      *                      protocol over TCP or Unix socket. Target address
      *                      via `App::fcgiAddress()`. Use when ZealPHP fronts
      *                      an existing FPM pool you don't want to retire.
      *
-     * Set via `App::cgiMode('pool'|'proc'|'fcgi')`. Default `'pool'`.
+     * Set via `App::cgiMode('pool'|'proc'|'fork'|'fcgi')`. Default `'pool'`.
      */
     public static string $cgi_mode = 'pool';
     /**
@@ -5543,7 +5553,7 @@ class App
                     'pool'  => \ZealPHP\CGI\Dispatcher::cgiPool($absPath),
                     'proc'  => \ZealPHP\CGI\Dispatcher::cgiSubprocess($absPath, $b['interpreter'] ?? null),
                     'fork'  => \ZealPHP\CGI\Dispatcher::cgiFork($absPath),
-                    default => \ZealPHP\CGI\Dispatcher::cgiPool($absPath),  // default = 'pool' (was 'proc' pre-fork-removal)
+                    default => \ZealPHP\CGI\Dispatcher::cgiPool($absPath),  // default = 'pool'
                 };
             }
             // SECURITY: a non-PHP file that is NOT in an exec scope must NOT be

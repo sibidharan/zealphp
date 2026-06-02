@@ -43,6 +43,7 @@ $siteUrl = site_url();
   <tr><td><a href="#referer"><code>RefererMiddleware</code></a></td><td>nginx <code>valid_referers</code> / <code>$invalid_referer</code></td><td>Hotlink protection — refuses requests whose <code>Referer</code> is not in the allowed set</td></tr>
   <tr><td><a href="#csrf"><code>CsrfMiddleware</code></a></td><td>n/a (framework-level)</td><td>Double-submit CSRF protection for state-mutating requests</td></tr>
   <tr><td><a href="#health-check"><code>HealthCheckMiddleware</code></a></td><td>n/a (ops concern)</td><td>Short-circuits on health-check paths (default <code>/healthz</code>); returns 200/503 JSON</td></tr>
+  <tr><td><code>LocationHeaderMiddleware</code></td><td>n/a (proxy port rewrite)</td><td>Rewrites the port in an outbound <code>Location</code> header to a configured value — useful behind a non-standard-port proxy. Note: zero live registrations in the built-in app; wire it manually if you need port-rewriting behind a proxy.</td></tr>
 </table>
 
 <?php
@@ -51,7 +52,7 @@ App::render('/components/_code', [
     'code'  => <<<'PHP'
 $app->addMiddleware(new CorsMiddleware());         // outermost — handles preflight
 $app->addMiddleware(new ETagMiddleware());         // generates ETag
-$app->addMiddleware(new AuthMiddleware());         // your custom middleware
+$app->addMiddleware(new CustomAuthMiddleware());   // your custom middleware
 // ResponseMiddleware is always innermost (built-in)
 PHP]);
 ?>

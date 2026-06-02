@@ -56,6 +56,8 @@ class SessionAuthMiddleware implements MiddlewareInterface
 }
 ```
 
+> **Session availability caveat.** `G::instance()->session` is populated per request only when a session lifecycle is active. In `superglobals(true)` mode `SessionManager` opens the session before middleware runs, so `$g->session` is available here. In `superglobals(false)` (coroutine) mode `CoSessionManager` only opens an existing session (when a `PHPSESSID` cookie is present) — first-time visitors have no session yet. For a robust auth guard, prefer the [`App::authChecker()` hook](#zealapi-auth-hooks) (wired once at boot, called inside the handler), or use `G::instance()->memo['user']` to pass a resolved user object from middleware to handlers when session state is uncertain.
+
 Register the middleware before calling `run()`:
 
 ```php
@@ -88,12 +90,14 @@ Alternatively, mount authenticated routes in a dedicated namespace handled by a 
 Middleware runs before route selection, so you can rely on it inside `api/*` closures:
 
 ```php
-// After SessionAuthMiddleware runs
+// After SessionAuthMiddleware runs (superglobals(true) mode — session is open)
 $profile = function () {
     $session = ZealPHP\G::instance()->session;
     return ['user_id' => $session['user_id']];
 };
 ```
+
+> In `superglobals(false)` (coroutine) mode the session is only open for returning visitors (those with a `PHPSESSID` cookie). For mode-agnostic auth state, use `G::instance()->memo['user']` — written by your auth middleware, readable by any handler regardless of session lifecycle.
 
 For token-based APIs, parse headers using the PSR request:
 
@@ -111,7 +115,13 @@ class BearerAuthMiddleware implements MiddlewareInterface
             return (new Response('Invalid token', 403));
         }
 
-        ZealPHP\G::instance()->session['auth_token'] = $matches['token'];
+        // Stash the validated token where handlers can read it.
+        // G::instance()->memo is always available (per-request, mode-agnostic).
+        // Writing to G::instance()->session works only when a session lifecycle
+        // is active — reliable in superglobals(true) mode; in coroutine mode
+        // prefer memo or use App::authChecker() to keep auth state out of the
+        // session entirely.
+        ZealPHP\G::instance()->memo['auth_token'] = $matches['token'];
         return $handler->handle($request);
     }
 }
@@ -119,7 +129,7 @@ class BearerAuthMiddleware implements MiddlewareInterface
 
 ## Middleware Ordering
 
-The most recently added middleware executes first. A typical order:
+The **first-added middleware executes first** (outermost) — it processes the request first and the response last. ZealPHP reverses the `addMiddleware` wait-stack before feeding it to `StackHandler` (whose `add()` prepends), so the net result is first-registered = outermost. `ResponseMiddleware` always runs innermost. A typical registration order:
 
 1. **Security** – Authentication, authorisation, CSRF.
 2. **Request Shaping** – Input sanitisation, locale negotiation.

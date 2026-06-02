@@ -66,7 +66,7 @@ The error status is seeded into `$g->status` before dispatch, so a handler retur
 
 ### When handlers fire
 
-`renderError($status, ?$exception)` is called from every error site in the framework — 14 of them:
+`renderError($status, ?$exception)` is called from every error site in the framework:
 
 | Site | Status | Trigger |
 |---|---|---|
@@ -123,7 +123,7 @@ $wantsJson = str_contains($accept, 'application/json')
 - **JSON:** `{"error": {"status": 500, "message": "Internal Server Error", "trace": "..."}}` — trace populated only when `App::$display_errors`.
 - **HTML:** `<pre>{status} {reason}</pre>` plus optional trace block.
 
-Reason phrases come from a const map (`App::REASON_PHRASES`) covering 400/401/403/404/405/406/408/409/410/413/414/415/418/422/429/500/501/502/503/504. Custom handlers override negotiation — user intent trumps `Accept`.
+Reason phrases come from `App::REASON_PHRASES`, which covers every IANA-registered code in the 100–599 range — including long-tail codes such as 425 (Too Early), 451 (Unavailable For Legal Reasons), 308 (Permanent Redirect), 511 (Network Authentication Required), and the full 1xx informational set. Custom handlers override negotiation — user intent trumps `Accept`.
 
 ---
 
@@ -184,7 +184,7 @@ self::$initial_error_reporting = \error_reporting();   // capture before uopz ov
     }
 });
 
-// uopz_set_return calls follow ...
+// App::overrideBuiltin() calls follow (prefer zealphp_override() when ext-zealphp is loaded, uopz_set_return() otherwise) ...
 ```
 
 After uopz installs, user-space `set_error_handler(...)` writes to `G` instead of overwriting the native handler. Engine-raised errors still flow through the bootstrap dispatcher, which now reads per-coroutine state.

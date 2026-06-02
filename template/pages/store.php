@@ -171,8 +171,8 @@ Cache::flush();                                    // clear everything</code></p
   <strong>Rule of thumb:</strong> treat Store as a <strong>best-effort, fast, single-server cache</strong>, not as a database. For ACID needs (transactions, durability, multi-row consistency), use Postgres / MySQL / Redis with explicit transaction semantics. Store's job is to make &lt; 5µs reads possible across workers — that's it.
 </div>
 
-<h2 class="store-h2-section" id="backends">Pluggable backends — Table / Redis / Tiered</h2>
-<p class="store-lead-tight">As of v0.2.39, <code>Store</code> and <code>Counter</code> are <strong>backend-agnostic</strong>. Three backends ship in-tree; pick by scope. Every <code>Store::set/get/incr/count</code> call works unchanged across all three.</p>
+<h2 class="store-h2-section" id="backends">Pluggable backends — Table / Redis / Tiered / Memcached</h2>
+<p class="store-lead-tight">As of v0.2.39, <code>Store</code> and <code>Counter</code> are <strong>backend-agnostic</strong>. Four backends ship in-tree; pick by scope. Every <code>Store::set/get/incr/count</code> call works unchanged across all four.</p>
 
 <div class="code-block">
 <pre><code class="language-php">use ZealPHP\Store;
@@ -217,6 +217,14 @@ Store::defaultBackend(Store::BACKEND_TIERED, 'redis://cache:6379');</code></pre>
       <td>Yes (via L2)</td>
       <td>L1 capped by Table; L2 via Redis policy</td>
       <td>Hot keys with ns reads + cross-node visibility for cold keys + tolerate <code>l1_ttl</code>-bounded staleness.</td>
+    </tr>
+    <tr>
+      <td><code>Store::BACKEND_MEMCACHED</code></td>
+      <td>~sub-ms local</td>
+      <td>Yes &mdash; any number of nodes</td>
+      <td>No &mdash; volatile</td>
+      <td>Server-side <code>max_memory</code> LRU eviction</td>
+      <td>Flat KV cache over an existing Memcached cluster; no pub/sub or Streams support.</td>
     </tr>
   </tbody>
 </table>

@@ -43,13 +43,13 @@ All 50 apps sorted by category, with grades per mode.
 | # | App | Category | Stars | Framework | Mode 1 (CGI) | Mode 3 (Sync) | Mode 4 (Hybrid) | Mode 5 (Coroutine) | Best Mode | Key Issue |
 |---|-----|----------|-------|-----------|:---:|:---:|:---:|:---:|-----------|-----------|
 | 1 | WordPress | CMS | 19k | Custom | **A** | C | B | F | 1 | Mode 1 verified end-to-end incl. wp-admin + block editor (issue #167). `define()` everywhere, plugin ecosystem |
-| 2 | Drupal | CMS | 4.3k | Custom | **A** | C | B | F | 1 | Static registry, `drupal_bootstrap()` |
+| 2 | Drupal | CMS | 4.3k | Custom | **A** | C | **B** | F | 1 or 4 | Static registry, `drupal_bootstrap()`; Mode 4 worker-stable (sequential) via class-static reset in 0.3.25 sweep |
 | 3 | Joomla | CMS | 4.7k | Custom | **A** | **A** | **A** | **A** | Any | **TESTED: all 4 modes pass (200, 14ms)** |
 | 4 | TYPO3 | CMS | 1.0k | Symfony | B | **A** | A | NT | 3 | Symfony-based, clean OOP |
 | 5 | Concrete CMS | CMS | 768 | Custom | **A** | C | B | F | 1 | Legacy OOP, superglobal-heavy |
 | 6 | October CMS | CMS | 11k | Laravel | C | **A** | A | NT | 3 | Laravel-based; Octane-aware |
 | 7 | Craft CMS | CMS | 3.1k | Yii-based | C | **A** | A | NT | 3 | Yii2 internals, clean OOP |
-| 8 | Grav | CMS | 14k | Custom | **B** | F | F | F | 1 | **TESTED: Mode 1 works after init, others crash (constant redef)** |
+| 8 | Grav | CMS | 14k | Custom | **B** | F | **B** | F | 1 or 4 | Mode 1 works after init; Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) worker-stable (sequential) — see sweep note |
 | 9 | Kirby | CMS | 7.5k | Custom | B | **A** | A | NT | 3 | Modern OOP, no legacy cruft |
 | 10 | Statamic | CMS | 3.9k | Laravel | C | **A** | A | NT | 3 | Laravel-based |
 | 11 | Bagisto | E-comm | 15k | Laravel | C | **A** | A | NT | 3 | Laravel + Vue; clean |
@@ -59,8 +59,8 @@ All 50 apps sorted by category, with grades per mode.
 | 15 | OpenCart | E-comm | 7.3k | Custom | **A** | **A** | **A** | **A** | Any | **TESTED: all 4 modes pass (302, 20ms)** |
 | 16 | Sylius | E-comm | 7.7k | Symfony | C | **A** | A | NT | 3 | Symfony-based, clean |
 | 17 | Flarum | Forums | 15k | Custom | B | **A** | A | NT | 3 | PSR-7, Laravel-Eloquent, clean OOP |
-| 18 | phpBB | Forums | 1.8k | Custom | **A** | D | C | F | 1 | Legacy procedural, global state |
-| 19 | MyBB | Forums | 2.9k | Custom | **A** | D | C | F | 1 | Procedural, superglobal-heavy |
+| 18 | phpBB | Forums | 1.8k | Custom | **A** | D | **B** | F | 1 or 4 | Legacy procedural, global state; Mode 4 worker-stable (sequential) in 0.3.25 sweep |
+| 19 | MyBB | Forums | 2.9k | Custom | **A** | D | **B** | F | 1 or 4 | Procedural, superglobal-heavy; Mode 4 worker-stable (sequential) in 0.3.25 sweep |
 | 20 | Vanilla Forums | Forums | 2.9k | Custom | **A** | C | B | F | 1 | Hybrid OOP/procedural |
 | 21 | Laravel | Framework | 79k | Self | C | **A** | A | NT | 3 | Static facades, IOC container |
 | 22 | Symfony | Framework | 30k | Self | C | **A** | A | NT | 3 | PSR-15, kernel.terminate lifecycle |
@@ -71,7 +71,7 @@ All 50 apps sorted by category, with grades per mode.
 | 27 | Laminas | Framework | 5.1k | Self | B | **A** | A | NT | 3 | PSR-7/15, Zend successor |
 | 28 | phpMyAdmin | Admin | 7.2k | Custom | C | **A** | A | A | 3 | Vendor deps needed; CGI crashes |
 | 29 | Adminer | Admin | 6.1k | Custom | **A** | F | A | F | 1 or 4 | Function redeclaration on 2nd req |
-| 30 | TinyFileManager | Admin | 6.2k | Custom | **A** | F | F | F | 1 | Function/constant redeclaration |
+| 30 | TinyFileManager | Admin | 6.2k | Custom | **A** | F | **B** | F | 1 or 4 | Function/constant redeclaration; Mode 4 worker-stable (sequential) in 0.3.25 sweep |
 | 31 | Roundcube | Admin | 6.0k | Custom | **A** | **A** | **A** | **A** | Any | **TESTED: all 4 modes pass** |
 | 32 | FileGator | Admin | 1.8k | Vue+PHP | B | **A** | A | NT | 3 | PHP API layer is clean |
 | 33 | elFinder | Admin | 3.0k | Custom | **A** | C | B | F | 1 | Procedural file manager |
@@ -86,12 +86,12 @@ All 50 apps sorted by category, with grades per mode.
 | 42 | Matomo | Analytics | 19k | Custom | **A** | F | D | F | 1 | **Bundled php-di violates PSR `ContainerInterface` under PHP 8.4 LSP — fatals on vanilla PHP 8.4 too (app/vendor issue, not ZealPHP)** |
 | 43 | Cacti | Analytics | 1.5k | Custom | **A** | D | C | F | 1 | Old procedural, `exit()` calls |
 | 44 | LibreNMS | Analytics | 3.9k | Laravel | C | **A** | A | NT | 3 | Laravel-based |
-| 45 | FreshRSS | Content | 10k | Custom | **A** | F | F | F | 1 | Function redeclaration on 2nd req |
-| 46 | Piwigo | Content | 3.1k | Custom | **A** | C | B | F | 1 | Procedural, global variables |
+| 45 | FreshRSS | Content | 10k | Custom | **A** | F | **B** | F | 1 or 4 | Function redeclaration on 2nd req; Mode 4 worker-stable (sequential) in 0.3.25 sweep |
+| 46 | Piwigo | Content | 3.1k | Custom | **A** | C | **B** | F | 1 or 4 | Procedural, global variables; Mode 4 worker-stable (sequential) in 0.3.25 sweep |
 | 47 | Lychee | Content | 13k | Laravel | C | **A** | A | NT | 3 | Laravel, clean |
 | 48 | Wallabag | Content | 10k | Symfony | C | **A** | A | NT | 3 | Symfony-based |
 | 49 | Nextcloud | Utility | 27k | Custom | **A** | D | C | F | 1 | **TESTED: Mode 1 PASS (200, 46ms), others crash** |
-| 50 | YOURLS | Utility | 10k | Custom | **A** | C | B | F | 1 | `define()`-heavy, procedural |
+| 50 | YOURLS | Utility | 10k | Custom | **A** | C | **B** | F | 1 or 4 | `define()`-heavy, procedural; Mode 4 worker-stable (sequential) in 0.3.25 sweep |
 
 ---
 
@@ -393,18 +393,18 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 ### TinyFileManager (File Manager)
 
 - **GitHub:** https://github.com/prasathmani/tinyfilemanager — 6.2k stars
-- **Mode 5:** PARTIAL (crash on 2nd request) | **Mode 1:** PASS (200, 42 ms) | **Mode 4:** PARTIAL (crash on 2nd request) | **Mode 3:** PARTIAL (crash on 2nd request)
-- Same function redeclaration issue as Adminer. Single-file design with all functions/constants inline.
-- **Grade: A (Mode 1 only)**
-- Recommended: Mode 1 only
+- **Mode 5:** PARTIAL (crash on 2nd request) | **Mode 1:** PASS (200, 42 ms) | **Mode 4:** PASS (worker-stable, sequential, ext-zealphp 0.3.25) | **Mode 3:** PARTIAL (crash on 2nd request)
+- Same function redeclaration issue as Adminer; fixed for sequential Mode 4 by the per-request state reset (ext-zealphp 0.3.25). True concurrent Mode 4 remains Mode 1's domain.
+- **Grade: A (Mode 1); B (Mode 4 sequential)**
+- Recommended: Mode 1 (simplest) or Mode 4 sequential
 
 ### FreshRSS (RSS Reader)
 
 - **GitHub:** https://github.com/FreshRSS/FreshRSS — 10k stars
-- **Mode 5:** PARTIAL (crash on 2nd) | **Mode 1:** PASS (302, 42 ms) | **Mode 4:** PARTIAL | **Mode 3:** PARTIAL
-- Same pattern — functions/constants redeclared on 2nd request
-- **Grade: A (Mode 1 only)**
-- Recommended: Mode 1 only
+- **Mode 5:** PARTIAL (crash on 2nd) | **Mode 1:** PASS (302, 42 ms) | **Mode 4:** PASS (worker-stable, sequential, ext-zealphp 0.3.25) | **Mode 3:** PARTIAL
+- Same redeclaration pattern — fixed for sequential Mode 4 by the per-request state reset (ext-zealphp 0.3.25). True concurrent Mode 4 remains Mode 1's domain.
+- **Grade: A (Mode 1); B (Mode 4 sequential)**
+- Recommended: Mode 1 (simplest) or Mode 4 sequential (better throughput at low concurrency)
 
 ### phpLiteAdmin (SQLite Admin)
 
@@ -487,16 +487,17 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **PHP:** 7.4+ | **Framework:** Custom (procedural + hooks)
 - **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
 - **Key issues:** Thousands of `define()` calls without `defined()` guards, plugin ecosystem uses `die()`/`exit()` freely, static globals in core (`$wp`, `$wpdb`), function redeclaration in plugins
-- **Recommended:** Mode 1 (CGI Pool) — this is the only mode that gives plugins their own clean process state
+- **Recommended:** Mode 1 (CGI Pool) — this is the only mode that gives plugins their own clean process state for full concurrent production use
 - The ZealPHP WordPress showcase (`sibidharan/zealphp-wordpress`) demonstrates this working end-to-end
+- **Mode 4 sequential note (ext-zealphp 0.3.25):** WordPress serves its public site + login auth + comment writes end-to-end in coroutine-legacy mode run *sequentially* (worker-stable, ASAN-clean). True concurrent WP (multiple simultaneous coroutines) remains Mode 1's domain due to the cold-boot `mysqlnd`/`libtasn1` connection-teardown layer and the cold-concurrent-autoload race on unwarmed inherited classes. See the Mode-4 caveat at the top of this document.
 
 #### Drupal
 
 - **GitHub:** https://github.com/drupal/drupal — 4.3k stars
 - **PHP:** 8.3+ | **Framework:** Custom (Symfony components)
 - **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** `drupal_bootstrap()` builds a static service container, `\Drupal::state()` singleton, hooks fired via global function registry
-- **Recommended:** Mode 1
+- **Key issues:** `drupal_bootstrap()` builds a static service container, `\Drupal::state()` singleton, hooks fired via global function registry. The static service container / `Database` registry (class static properties) threw `ConnectionNotDefinedException` on request 2 — fixed by the class-static reset in ext-zealphp 0.3.25 (A/B verified: ON = `200`×8, OFF = `200` then `500`×7). Mode 4 is now worker-stable sequentially.
+- **Recommended:** Mode 1 for production concurrency; Mode 4 sequential viable with ext-zealphp 0.3.25+
 
 #### Joomla
 
@@ -542,9 +543,9 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 
 - **GitHub:** https://github.com/getgrav/grav — 14k stars
 - **PHP:** 8.1+ | **Framework:** Custom (PSR-7/PSR-15)
-- **Mode 1:** B | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** PSR-7 request handling, clean dependency injection. Some plugins may use superglobals directly.
-- **Recommended:** Mode 3
+- **Mode 1:** B | **Mode 3:** F | **Mode 4:** B | **Mode 5:** NT
+- **Key issues:** Constants `GRAV_REQUEST_TIME` / `GRAV_PHP_MIN` defined without `defined()` guards crash Mode 3 on 2nd request. Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
+- **Recommended:** Mode 1 or Mode 4 sequential. True concurrent Mode 4 remains Mode 1's domain.
 
 #### Kirby
 
@@ -630,17 +631,17 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 
 - **GitHub:** https://github.com/phpbb/phpbb — 1.8k stars
 - **PHP:** 7.1+ | **Framework:** Custom (procedural + legacy OOP)
-- **Mode 1:** A | **Mode 3:** D | **Mode 4:** C | **Mode 5:** F
-- **Key issues:** Extensive `$phpbb_root_path`, `$phpEx` globals. Top-level includes with `define()`. `exit_handler()` calls `die()`. Login flows use `redirect() + exit`.
-- **Recommended:** Mode 1
+- **Mode 1:** A | **Mode 3:** D | **Mode 4:** B | **Mode 5:** F
+- **Key issues:** Extensive `$phpbb_root_path`, `$phpEx` globals. Top-level includes with `define()`. `exit_handler()` calls `die()`. Login flows use `redirect() + exit`. Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
+- **Recommended:** Mode 1 or Mode 4 sequential
 
 #### MyBB
 
 - **GitHub:** https://github.com/mybb/mybb — 2.9k stars
 - **PHP:** 7.3+ | **Framework:** Custom (procedural)
-- **Mode 1:** A | **Mode 3:** D | **Mode 4:** C | **Mode 5:** F
-- **Key issues:** Global `$mybb`, `$db`, `$lang` objects, `define()`-based constants throughout, procedural plugin system with `run_hooks()` calling arbitrary functions
-- **Recommended:** Mode 1
+- **Mode 1:** A | **Mode 3:** D | **Mode 4:** B | **Mode 5:** F
+- **Key issues:** Global `$mybb`, `$db`, `$lang` objects, `define()`-based constants throughout, procedural plugin system with `run_hooks()` calling arbitrary functions. Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
+- **Recommended:** Mode 1 or Mode 4 sequential
 
 #### Vanilla Forums
 
@@ -874,18 +875,18 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 
 - **GitHub:** https://github.com/FreshRSS/FreshRSS — 10k stars
 - **PHP:** 7.0.7+ | **Framework:** Custom (Minz micro-framework)
-- **Mode 1:** A | **Mode 3:** F | **Mode 4:** F | **Mode 5:** F
-- **Tested:** Mode 1 PASS (302, 42 ms), Mode 3/4/5 CRASH on 2nd request
-- **Root cause:** Minz framework declares `function _t()`, `_s()`, `_n()` and others without `function_exists()` guards. These are PHP-level (not namespaced) function declarations that collide on worker reload.
-- **Recommended:** Mode 1 only
+- **Mode 1:** A | **Mode 3:** F | **Mode 4:** B | **Mode 5:** F
+- **Tested:** Mode 1 PASS (302, 42 ms); Mode 3/5 CRASH on 2nd request; Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) worker-stable sequentially.
+- **Root cause:** Minz framework declares `function _t()`, `_s()`, `_n()` and others without `function_exists()` guards. These are PHP-level (not namespaced) function declarations that collide on worker reload. The per-request state reset (ext-zealphp 0.3.25) resolves this for sequential Mode 4.
+- **Recommended:** Mode 1 (simplest) or Mode 4 sequential
 
 #### Piwigo
 
 - **GitHub:** https://github.com/Piwigo/Piwigo — 3.1k stars
 - **PHP:** 7.1+ | **Framework:** Custom (procedural)
 - **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** Heavy use of global `$conf`, `$page`, `$user` arrays. Plugin system calls `die()`. `include()`-based dispatch.
-- **Recommended:** Mode 1
+- **Key issues:** Heavy use of global `$conf`, `$page`, `$user` arrays. Plugin system calls `die()`. `include()`-based dispatch. Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
+- **Recommended:** Mode 1 or Mode 4 sequential
 
 #### Lychee
 

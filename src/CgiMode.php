@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace ZealPHP;
 
 /**
- * Type-safe enum for `App::cgiMode()`. The three strategies for
+ * Type-safe enum for `App::cgiMode()`. The four strategies for
  * dispatching CGI requests (`.php` files in legacy-CGI mode, and
  * any registered non-`.php` extension).
  *
