@@ -23,18 +23,24 @@ $groups = [
     'Surfaces' => [
         ['streaming',                     'Streaming'],
         ['websocket',                     'WebSocket'],
+        ['WSROUTER-PRODUCTION',           'WSRouter Production'],
         ['tasks-and-concurrency',         'Tasks & Concurrency'],
         ['middleware-and-authentication', 'Middleware & Auth'],
     ],
     'Operations' => [
-        ['deployment',       'Deployment'],
-        ['fastcgi-backends', 'FastCGI Backends'],
-        ['fuzzing',          'Fuzzing'],
+        ['deployment',            'Deployment'],
+        ['cli',                   'CLI Reference'],
+        ['hot-reload',            'Dev Hot-Reload'],
+        ['fastcgi-backends',      'FastCGI Backends'],
+        ['environment-variables', 'Environment Variables'],
+        ['fuzzing',               'Fuzzing'],
     ],
     'Background' => [
-        ['/http#parity',            'Apache Parity'],
-        ['competitive-analysis',  'Competitive Analysis'],
-        ['standards-and-roadmap', 'Standards & Roadmap'],
+        ['/http#parity',           'Apache Parity'],
+        ['compatibility-database', 'Compatibility Database'],
+        ['running-modern-apps',    'Running Modern Apps'],
+        ['competitive-analysis',   'Competitive Analysis'],
+        ['standards-and-roadmap',  'Standards & Roadmap'],
     ],
 ];
 

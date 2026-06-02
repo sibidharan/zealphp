@@ -2,7 +2,7 @@
 /**
  * /docs/ landing — same learn-layout shape (sidebar + main) so the docs
  * section is visually consistent with /learn/. The main column shows a
- * brief intro and the same 16-guide index as the sidebar, but with
+ * brief intro and the same guide index as the sidebar, but with
  * one-line descriptions so the user can scan-pick a starting point.
  */
 use ZealPHP\App;
@@ -22,20 +22,32 @@ $groups = [
     'Surfaces' => [
         ['streaming',                     'Streaming',             'yield-based SSR, stream(), sse(), renderStream.'],
         ['websocket',                     'WebSocket',             'App::ws(), per-worker fd map, frame opcodes, cross-worker broadcast.'],
+        ['WSROUTER-PRODUCTION',           'WSRouter Production',   'Hardening federated WebSocket rooms — capacity, auth, backpressure, stats.'],
         ['tasks-and-concurrency',         'Tasks & Concurrency',   'go(), task workers, App::tick/after, coproc().'],
-        ['middleware-and-authentication', 'Middleware & Auth',     'All 28 PSR-15 middleware classes + common Apache/nginx behavior coverage.'],
+        ['middleware-and-authentication', 'Middleware & Auth',     'The full PSR-15 middleware catalog + common Apache/nginx behavior coverage.'],
     ],
     'Operations' => [
-        ['deployment',       'Deployment',       'systemd unit, CLI flags, PID files, Docker, OPcache tuning.'],
-        ['fastcgi-backends', 'FastCGI Backends', 'Front php-fpm or any FCGI server — cgiMode(\'fcgi\') + registerCgiBackend() for custom upstreams.'],
-        ['fuzzing',          'Fuzzing',          'slowhttptest, radamsa, gabbi — HTTP framing & conformance fuzzing.'],
+        ['deployment',            'Deployment',             'systemd unit, CLI flags, PID files, Docker, OPcache tuning.'],
+        ['cli',                   'CLI Reference',          'php app.php start/stop/restart/status/logs, ports, PID files, --dev.'],
+        ['hot-reload',            'Dev Hot-Reload',         'App::devReload() / ZEALPHP_DEV=1 / php app.php --dev — routes reload, no restart.'],
+        ['fastcgi-backends',      'FastCGI Backends',       'Front php-fpm or any FCGI server — cgiMode(\'fcgi\') + registerCgiBackend() for custom upstreams.'],
+        ['environment-variables', 'Environment Variables',  'Canonical reference for every ZEALPHP_* variable — defaults, scope, semantics.'],
+        ['fuzzing',               'Fuzzing',                'slowhttptest, radamsa, gabbi — HTTP framing & conformance fuzzing.'],
     ],
     'Background' => [
-        ['/http#parity',            'Apache Parity',          'What Apache features port — and what doesn\'t.'],
-        ['competitive-analysis',  'Competitive Analysis',   'vs FrankenPHP, RoadRunner, Octane, AMPHP.'],
-        ['standards-and-roadmap', 'Standards & Roadmap',    'PSR conformance + the v0.3.0+ roadmap.'],
+        ['/http#parity',           'Apache Parity',          'What Apache features port — and what doesn\'t.'],
+        ['compatibility-database', 'Compatibility Database', 'Per-app coroutine-legacy compatibility grades from the real-world app sweep.'],
+        ['running-modern-apps',    'Running Modern Apps',    'Config recipes for Symfony / Laravel / WordPress on ZealPHP.'],
+        ['competitive-analysis',   'Competitive Analysis',   'vs FrankenPHP, RoadRunner, Octane, AMPHP.'],
+        ['standards-and-roadmap',  'Standards & Roadmap',    'PSR conformance + the v0.3.0+ roadmap.'],
     ],
 ];
+
+// Count only real guide slugs — exclude cross-section links like '/http#parity'.
+$guideCount = array_sum(array_map(
+    static fn (array $items) => count(array_filter($items, static fn (array $it) => !str_starts_with($it[0], '/'))),
+    $groups
+));
 ?>
 <div class="learn-layout">
   <?php App::render('/pages/docs/_sidebar', ['topic' => null]); ?>
@@ -47,7 +59,7 @@ $groups = [
       <nav class="lesson-crumb"><a href="/docs/">Docs</a></nav>
       <h1 class="lesson-title">ZealPHP Documentation</h1>
       <p class="lesson-subtitle">
-        Two surfaces, one source of truth. <strong>16 narrative guides</strong>
+        Two surfaces, one source of truth. <strong><?= $guideCount ?> narrative guides</strong>
         walk through each subsystem with worked examples; the
         <a href="/docs/api/">API reference</a> is auto-generated from
         <code>src/</code> docblocks and covers every public method, property,
