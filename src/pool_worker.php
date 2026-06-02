@@ -749,4 +749,28 @@ function pool_reset_request_state(): void
     if (function_exists('zealphp_process_state_clean')) {
         @zealphp_process_state_clean(); // flags=7 default: files+classes+functions
     }
+
+    // OPT-IN full per-request reset (EXPERIMENTAL — off by default; gated on
+    // ZEALPHP_POOL_FULL_RESET=1, inherited via the parent env). Mirrors the
+    // coroutine-legacy reset stack (ext-zealphp 0.3.25) so a REUSED pool
+    // subprocess (cgiPoolMaxRequests > 1) re-initialises run_time_cache +
+    // function/class statics per request, like PHP-FPM's fresh process —
+    // letting *re-entrant* legacy apps use warm reuse. It CANNOT make an app
+    // with inherited-class redeclaration safe (PHP can't un-declare an inherited
+    // class); use the recycle=1 default or cgiMode('fork') for those. See
+    // docs/architecture/2026-06-02-fork-per-request-cgi-pool.md (option A).
+    if (getenv('ZEALPHP_POOL_FULL_RESET') === '1') {
+        // The rtcache reset MUST run paired with the class-static reset (a stray
+        // ZEND_FETCH_STATIC_PROP on a freed slot SEGVs); run all three together.
+        // Order mirrors CoSessionManager's request-end sequence.
+        if (function_exists('zealphp_reset_request_rtcaches')) {
+            @zealphp_reset_request_rtcaches();
+        }
+        if (function_exists('zealphp_reset_request_statics')) {
+            @zealphp_reset_request_statics();
+        }
+        if (function_exists('zealphp_reset_request_class_statics')) {
+            @zealphp_reset_request_class_statics();
+        }
+    }
 }
