@@ -16,7 +16,7 @@ PORT      ?= 8080
 
 .PHONY: help install serve start restart stop status logs \
         test unit integration stan check coverage coverage-full infection \
-        docs docs-rebuild bench perf-smoke valkey-up valkey-down
+        docs docs-rebuild agent-reference bench perf-smoke valkey-up valkey-down
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -68,11 +68,15 @@ infection: ## Mutation testing (MSI) over the Unit suite
 	XDEBUG_MODE=coverage $(INFECTION) --threads=4 --test-framework-options="--testsuite=Unit"
 
 # ---- API docs ----
-docs: ## Build the API reference if it's missing (public/docs/api/)
+docs: agent-reference ## Build the API reference if missing + sync the AI-chat agent reference
 	bash scripts/build-api-docs.sh
 
-docs-rebuild: ## Force-regenerate the API reference from scratch
+docs-rebuild: ## Force-regenerate the API reference + AI-chat agent reference
 	rm -rf public/docs/api && bash scripts/build-api-docs.sh
+	$(PHP) scripts/build-agent-reference.php
+
+agent-reference: ## Regenerate the homepage AI-chat agent reference from docs/*.md
+	$(PHP) scripts/build-agent-reference.php
 
 # ---- Benchmarks ----
 bench: ## Local performance sweep (16 workers, concurrency up to 1000)
