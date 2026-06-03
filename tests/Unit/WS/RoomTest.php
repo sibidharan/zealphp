@@ -226,6 +226,60 @@ final class RoomTest extends TestCase
         });
     }
 
+    public function testReleaseLeavesEveryJoinedRoom(): void
+    {
+        // The membership-leak fix: an abnormal disconnect (ws onClose →
+        // WSRouter::release) must leave every room the client joined, so its
+        // ws_room_members rows + local caches don't linger until the whole
+        // server is GC'd.
+        Coroutine::run(function (): void {
+            $alpha = "alpha-" . bin2hex(random_bytes(3));
+            $beta  = "beta-"  . bin2hex(random_bytes(3));
+            WSRouter::init('test-server');
+            WSRouter::own('alice', 42);
+
+            $ra = WSRouter::room($alpha);
+            $rb = WSRouter::room($beta);
+            $ra->join('alice');
+            $rb->join('alice');
+
+            // Tracked in the per-worker reverse index (both rooms).
+            $tracked = WSRouter::localClientRooms();
+            self::assertArrayHasKey('alice', $tracked);
+            self::assertCount(2, $tracked['alice']);
+            self::assertTrue($ra->isMember('alice'));
+            self::assertTrue($rb->isMember('alice'));
+
+            WSRouter::release('alice');
+
+            // Cluster membership dropped in BOTH rooms.
+            self::assertFalse($ra->isMember('alice'), 'left alpha on release');
+            self::assertFalse($rb->isMember('alice'), 'left beta on release');
+            self::assertSame(0, $ra->size());
+            self::assertSame(0, $rb->size());
+            // Per-worker caches fully torn down — no dangling fd references.
+            self::assertArrayNotHasKey('alice', WSRouter::localClientRooms());
+            self::assertSame([], WSRouter::localRoomMembership());
+            self::assertArrayNotHasKey('alice', WSRouter::localFds());
+        });
+    }
+
+    public function testReleaseWithoutRoomsIsClean(): void
+    {
+        // A client that never joined a room still releases cleanly (no rooms
+        // tracked → the leave loop is a no-op, owner row + fd dropped).
+        Coroutine::run(function (): void {
+            WSRouter::init('test-server');
+            WSRouter::own('bob', 7);
+            self::assertArrayHasKey('bob', WSRouter::localFds());
+
+            WSRouter::release('bob');
+
+            self::assertArrayNotHasKey('bob', WSRouter::localFds());
+            self::assertSame([], WSRouter::localClientRooms());
+        });
+    }
+
     private function skipIfNoRedis(): void
     {
         try {

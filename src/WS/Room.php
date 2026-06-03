@@ -82,6 +82,10 @@ final class Room
             try { Store::sadd(WSRouter::roomMembersSetKey($this->name), $clientId); }
             catch (StoreException) { /* keep join — metadata is authoritative */ }
         }
+        // Track the join in this worker's reverse index so WSRouter::release()
+        // (ws onClose) can leave the room on an abnormal disconnect. No-op for
+        // clients this worker doesn't own.
+        WSRouter::noteLocalRoomJoin($clientId, $this->name);
         WSRouter::stats()->inc('room_joins_total');
         $this->publish([
             'type'      => 'join',
@@ -102,6 +106,7 @@ final class Room
             try { Store::srem(WSRouter::roomMembersSetKey($this->name), $clientId); }
             catch (StoreException) { /* metadata table already removed */ }
         }
+        WSRouter::noteLocalRoomLeave($clientId, $this->name);
         WSRouter::stats()->inc('room_leaves_total');
         $this->publish([
             'type'      => 'leave',
