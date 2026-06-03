@@ -230,7 +230,7 @@ versions with the build args:
 ```bash
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
-    --build-arg ZEALPHP_EXT_VERSION=v0.3.25 \
+    --build-arg ZEALPHP_EXT_VERSION=v0.3.26 \
     -t zealphp:0.3.8 .
 ```
 
