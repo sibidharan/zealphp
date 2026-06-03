@@ -372,6 +372,29 @@ class App
     public static bool $silent_redeclare = false;
 
     /**
+     * Stage 8 — true-global-scope request include (coroutine-legacy). When on
+     * (and ext-zealphp exposes `zealphp_require_global()`), `App::include()` runs
+     * the target file at TRUE global scope so a bare file-scope `$x = ...` — and
+     * every transitive `require_once` — binds to `$GLOBALS` instead of the
+     * `executeFile()` method frame. This is what lets unmodified `require_once`-
+     * bootstrap apps (WordPress's `$menu`/`$submenu`/`$_wp_submenu_nopriv`, built
+     * bare at file scope in `wp-admin/includes/menu.php`) render in
+     * **coroutine-legacy** in-process mode, where the request entry runs inside a
+     * PHP method and those vars would otherwise be method-local.
+     *
+     * Only effective under coroutine-legacy (`$silent_redeclare`): global-scope
+     * includes need the per-coroutine globals isolation stack, else file-scope
+     * globals leak across coroutines. **Off by default** — it changes include
+     * scope (the included file does NOT see `executeFile()`'s injected `$g` /
+     * route params as locals), so enable it only for legacy apps that read
+     * request state through superglobals, not via ZealPHP's `$g`. `null` follows
+     * the `ZEALPHP_GLOBAL_INCLUDE` env var (default off). Set via
+     * `App::globalScopeInclude(true)` BEFORE `App::run()`. Canonical reference:
+     * `docs/architecture/2026-06-02-stage8-global-scope-include.md`.
+     */
+    public static ?bool $global_scope_include = null;
+
+    /**
      * Stage 5 — per-coroutine FUNCTION-local `static $x` isolation via
      * ext-zealphp's `zealphp_coroutine_statics()`. This is the LAST
      * request-state primitive that previously leaked across coroutines
@@ -2993,6 +3016,33 @@ class App
     }
 
     /**
+     * Stage 8 global-scope request include (coroutine-legacy). A no-arg call
+     * returns the current setting; a one-arg call sets it. See the
+     * `$global_scope_include` docblock for the contract. Set BEFORE `App::run()`.
+     */
+    public static function globalScopeInclude(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$global_scope_include = $on;
+        }
+        if (self::$global_scope_include !== null) {
+            return self::$global_scope_include;
+        }
+        return \getenv('ZEALPHP_GLOBAL_INCLUDE') === '1';
+    }
+
+    /**
+     * Whether THIS request's `App::include()` should run at true global scope:
+     * the gate is on AND we're in coroutine-legacy (so the per-coroutine globals
+     * isolation stack is active). The ext-capability check (`function_exists`) is
+     * done inline at the `executeFile()` call site. Policy-only helper.
+     */
+    private static function globalScopeIncludeEffective(): bool
+    {
+        return self::globalScopeInclude() && self::$silent_redeclare;
+    }
+
+    /**
      * Stage 5 per-coroutine function-static isolation. Opt-in — see
      * $coroutine_statics_isolation docblock for the perf tradeoff. The ext
      * C-level flag is asserted at App::run() boot wiring (alongside the other
@@ -5224,7 +5274,16 @@ class App
             try {
                 $args['g'] = $g;
                 extract($args, EXTR_SKIP);
-                $result = include $absPath;
+                if (self::globalScopeIncludeEffective() && \function_exists('zealphp_require_global')) {
+                    // Stage 8: run the file at TRUE global scope so bare file-scope
+                    // vars (WordPress $menu/$submenu/$_wp_submenu_nopriv) become real
+                    // $GLOBALS. The included file does NOT see the extracted $g /
+                    // route params (they stay in this frame) — by contract this mode
+                    // is for legacy apps that read request state via superglobals.
+                    $result = \zealphp_require_global($absPath);
+                } else {
+                    $result = include $absPath;
+                }
             } finally {
                 if ($didChdir && $prevCwd !== false) {
                     @\chdir($prevCwd);
