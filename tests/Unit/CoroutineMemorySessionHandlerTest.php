@@ -89,6 +89,20 @@ class CoroutineMemorySessionHandlerTest extends TestCase
         $this->assertTrue($h->close());
     }
 
+    public function testCloseClearsCoroutineBucketSoMapCannotGrowUnbounded(): void
+    {
+        // The leak fix: close() drops this coroutine's session bucket. Before
+        // the fix close() was a no-op, so $sessions accumulated an entry per
+        // distinct (cid, sessionId) over the worker's whole lifetime (cids are
+        // reused, but the map only grew). After close(), the just-written data
+        // is gone — proving the bucket was pruned.
+        $h = new CoroutineMemorySessionHandler();
+        $h->write('rid', 'x|i:1;');
+        $this->assertSame('x|i:1;', $h->read('rid'));
+        $this->assertTrue($h->close());
+        $this->assertSame('', $h->read('rid'), 'close() must clear the coroutine bucket');
+    }
+
     public function testGcRemovesStaleSessions(): void
     {
         $h = new CoroutineMemorySessionHandler();

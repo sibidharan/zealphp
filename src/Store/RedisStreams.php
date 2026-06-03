@@ -27,6 +27,17 @@ final class RedisStreams
     private string $consumerName;
 
     /**
+     * Small dedicated pool of clients for XACK. Each ACKed message used to
+     * spin up a BRAND-NEW connection (connect + close per message), so a
+     * busy stream opened a TCP connection per delivery — a connection storm
+     * under load. A size-2 pool reuses connections across messages while
+     * still giving each dispatch coroutine a private socket (XACK from two
+     * cors on one socket would interleave RESP frames). Built lazily in the
+     * runner coroutine; closed by stop().
+     */
+    private ?RedisConnectionPool $ackPool = null;
+
+    /**
      * @param array{prefer?: 'auto'|'phpredis'|'predis'} $opts Driver preference
      *        for the runner's connections. Forced to `['prefer' => 'predis']`
      *        by App::wirePubSubBoot() under the H7 phpredis+HOOK_ALL=0 deadlock
@@ -67,6 +78,21 @@ final class RedisStreams
     public function stop(): void
     {
         $this->running->set(0);
+        if ($this->ackPool !== null) {
+            $this->ackPool->close();
+            $this->ackPool = null;
+        }
+    }
+
+    /**
+     * Lazily-built ACK connection pool (size 2). Constructing it is cheap —
+     * the pool only connects on first `acquire()`, which happens inside the
+     * dispatch coroutine. Reused across messages so a busy stream doesn't
+     * connect-per-XACK.
+     */
+    private function ackPool(): RedisConnectionPool
+    {
+        return $this->ackPool ??= new RedisConnectionPool($this->url, 2, $this->opts);
     }
 
     /**
@@ -141,19 +167,18 @@ final class RedisStreams
         // user XADDs raw multi-field shapes, hand the whole map through.
         $payload = $msg['payload']['payload'] ?? '';
         $payloadFields = $msg['payload'];
-        $url = $this->url;
-        $opts = $this->opts;
+        $ackPool = $this->ackPool();
 
-        go(function () use ($url, $opts, $stream, $group, $id, $payload, $payloadFields, $handler): void {
-            // Each dispatch coroutine owns its own client — sharing the
-            // runner's read-client would race on the socket (two cors
-            // reading/writing one TCP stream interleaves RESP frames).
+        go(function () use ($ackPool, $stream, $group, $id, $payload, $payloadFields, $handler): void {
+            // The XACK runs on a pooled client (size-2 pool) rather than a
+            // fresh per-message connection — $pool->with() hands each dispatch
+            // coroutine a private socket from the channel (two cors XACKing on
+            // one socket would interleave RESP frames) and returns it after,
+            // so a busy stream reuses connections instead of connecting per ACK.
             try {
                 $ok = $handler($payload, $id, $stream, $payloadFields);
                 if ($ok === true) {
-                    $ackClient = new RedisClient($url, $opts);
-                    try { $ackClient->xack($stream, $group, $id); }
-                    finally { $ackClient->close(); }
+                    $ackPool->with(fn (RedisClient $c): int => $c->xack($stream, $group, $id));
                 }
             } catch (\Throwable $e) {
                 error_log("RedisStreams handler threw on {$stream}/{$id}: {$e->getMessage()}");
