@@ -345,14 +345,19 @@ class Response
                 // clamp the start to 0 rather than treating it as unsatisfiable.
                 $suffixLen = (int) $sm[2];
                 if ($suffixLen <= 0) {
-                    return ['status' => 'unsatisfiable', 'ranges' => []];
+                    // Degenerate single spec — skip it; if it's the only spec the
+                    // post-loop empty check emits 416 (#185).
+                    continue;
                 }
                 $ranges[] = [max(0, $total - $suffixLen), $total - 1];
             } elseif ($sm[2] === '') {
                 // Open-end range: bytes=N-
                 $start = (int) $sm[1];
                 if ($start >= $total) {
-                    return ['status' => 'unsatisfiable', 'ranges' => []];
+                    // Out-of-bounds spec — skip it (RFC 7233 §4.4: an unsatisfiable
+                    // spec in a multi-range is ignored, not fatal); 416 only if ALL
+                    // specs are unsatisfiable (post-loop check) (#185).
+                    continue;
                 }
                 $ranges[] = [$start, $total - 1];
             } else {
@@ -360,12 +365,15 @@ class Response
                 $start = (int) $sm[1];
                 $end   = (int) $sm[2];
                 if ($start > $end || $start >= $total) {
-                    return ['status' => 'unsatisfiable', 'ranges' => []];
+                    // Unsatisfiable spec — skip (see the §4.4 note above) (#185).
+                    continue;
                 }
                 $ranges[] = [$start, min($end, $total - 1)];
             }
         }
 
+        // Every spec was unsatisfiable/degenerate → 416 (RFC 7233 §4.4). A
+        // multi-range header keeps its satisfiable specs (the bad ones skipped above).
         if ($ranges === []) {
             return ['status' => 'unsatisfiable', 'ranges' => []];
         }

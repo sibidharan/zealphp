@@ -72,7 +72,8 @@ class CorsMiddlewareTest extends TestCase
 
         $this->assertSame(200, $res->getStatusCode());
         $this->assertSame('*', $this->resp->headers['Access-Control-Allow-Origin']);
-        $this->assertSame('false', $this->resp->headers['Access-Control-Allow-Credentials']);
+        // credentials default false -> no Access-Control-Allow-Credentials header.
+        $this->assertArrayNotHasKey('Access-Control-Allow-Credentials', $this->resp->headers);
         $this->assertSame('Origin', $this->resp->headers['Vary']);
     }
 
@@ -92,13 +93,15 @@ class CorsMiddlewareTest extends TestCase
         $this->assertSame('https://a.com', $this->resp->headers['Access-Control-Allow-Origin']);
     }
 
-    public function testWildcardWithCredentialsEchoesRequestOrigin(): void
+    public function testWildcardWithCredentialsDoesNotReflectOrigin(): void
     {
         $mw  = new CorsMiddleware(origins: ['*'], credentials: true);
         $req = (new ServerRequest('/', 'GET'))->withHeader('Origin', 'https://x.com');
         $mw->process($req, $this->okHandler());
-        // credentials=true can't use wildcard — must echo the concrete origin.
-        $this->assertSame('https://x.com', $this->resp->headers['Access-Control-Allow-Origin']);
+        // credentials=true + wildcard must NOT reflect the origin (#180): emit '*'
+        // and omit the credentials header so browsers fail safe.
+        $this->assertSame('*', $this->resp->headers['Access-Control-Allow-Origin']);
+        $this->assertArrayNotHasKey('Access-Control-Allow-Credentials', $this->resp->headers);
     }
 
     public function testEnvOriginsAreParsed(): void

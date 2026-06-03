@@ -12,7 +12,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 /**
  * Block `.php` Extension Middleware
  *
- * Refuses any request whose path matches `\.php(\?|$)` with a `404`. Useful for
+ * Refuses any request whose path matches `\.php(/|$)` with a `404`. Useful for
  * apps that want extensionless URLs as the only public surface and don't want
  * `/index.php`, `/admin.php`, etc. to be reachable even when a public file
  * exists.
@@ -35,7 +35,9 @@ class BlockPhpExtMiddleware implements MiddlewareInterface
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $path = $request->getUri()->getPath();
-        if (preg_match('/\.php($|\?)/i', $path) === 1) {
+        // Match `.php` at the end of ANY path segment, not just the whole path —
+        // otherwise a PATH_INFO suffix (/admin.php/foo) bypasses the block (#184).
+        if (preg_match('#\.php(/|$)#i', $path) === 1) {
             return new Response('Not Found', 404, '', ['Content-Type' => 'text/plain']);
         }
         return $handler->handle($request);

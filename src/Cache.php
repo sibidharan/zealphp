@@ -250,6 +250,10 @@ class Cache
                 self::$spillsFull?->increment();
             }
         } else {
+            // Oversize values live in the file tier only. Evict any stale
+            // memory-tier row for this key first — get() checks memory before
+            // file, so an old small value would otherwise mask this large one (#186).
+            Store::del(self::TABLE, $hash);
             self::$spillsFile?->increment();
         }
 

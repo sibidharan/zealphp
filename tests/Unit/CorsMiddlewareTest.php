@@ -272,18 +272,19 @@ class CorsMiddlewareTest extends TestCase
         $this->assertTrue($this->getWarned());
     }
 
-    public function testWildcardWithCredentialsEchoesRequestOrigin(): void
+    public function testWildcardWithCredentialsDoesNotReflectOrigin(): void
     {
         $rec = $this->recorder();
         RequestContext::instance()->zealphp_response = $rec;
 
-        // origins '*' + credentials true -> must echo the request origin,
-        // never literal '*'. Kills LogicalAnd at resolveOrigin().
+        // origins '*' + credentials true must NOT reflect the request Origin
+        // (credentialed-CORS bypass, #180): emit literal '*' and omit the
+        // Access-Control-Allow-Credentials header so browsers fail safe.
         $mw = new CorsMiddleware(origins: ['*'], credentials: true);
         $this->invoke($mw, 'OPTIONS', ['origin' => 'https://caller.example']);
 
-        $this->assertSame('https://caller.example', $rec->sink['Access-Control-Allow-Origin']);
-        $this->assertSame('true', $rec->sink['Access-Control-Allow-Credentials']);
+        $this->assertSame('*', $rec->sink['Access-Control-Allow-Origin']);
+        $this->assertArrayNotHasKey('Access-Control-Allow-Credentials', $rec->sink);
     }
 
     public function testWildcardWithoutCredentialsReturnsStar(): void
@@ -291,13 +292,27 @@ class CorsMiddlewareTest extends TestCase
         $rec = $this->recorder();
         RequestContext::instance()->zealphp_response = $rec;
 
-        // credentials false -> literal '*' regardless of origin. With LogicalOr
-        // mutant ('||') this would echo the origin instead, so this fails it.
+        // credentials false -> literal '*'. No Access-Control-Allow-Credentials
+        // header is emitted when credentials are disabled.
         $mw = new CorsMiddleware(origins: ['*'], credentials: false);
         $this->invoke($mw, 'OPTIONS', ['origin' => 'https://caller.example']);
 
         $this->assertSame('*', $rec->sink['Access-Control-Allow-Origin']);
-        $this->assertSame('false', $rec->sink['Access-Control-Allow-Credentials']);
+        $this->assertArrayNotHasKey('Access-Control-Allow-Credentials', $rec->sink);
+    }
+
+    public function testExplicitAllowlistWithCredentialsReflectsMatchedOrigin(): void
+    {
+        $rec = $this->recorder();
+        RequestContext::instance()->zealphp_response = $rec;
+
+        // The legitimate credentialed-CORS path still works: an explicit allowlist
+        // reflects a MATCHED origin and emits Access-Control-Allow-Credentials:true.
+        $mw = new CorsMiddleware(origins: ['https://app.example'], credentials: true);
+        $this->invoke($mw, 'OPTIONS', ['origin' => 'https://app.example']);
+
+        $this->assertSame('https://app.example', $rec->sink['Access-Control-Allow-Origin']);
+        $this->assertSame('true', $rec->sink['Access-Control-Allow-Credentials']);
     }
 
     public function testNonPreflightAddsCorsHeadersAfterHandler(): void

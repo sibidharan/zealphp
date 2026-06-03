@@ -912,6 +912,11 @@ function response_add_header($key, $value, $ucwords = true): void
 {
     $g = RequestContext::instance();
     // elog("response_add_header: $key ".var_export($value, true));
+    if ($g->zealphp_response === null) {
+        // No response object in worker-start / tick / CLI / task contexts — a
+        // header has nowhere to go, so no-op instead of a null method call (#195).
+        return;
+    }
     // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any request handler runs
     $g->zealphp_response->header($key, $value, $ucwords);
 }
@@ -976,7 +981,9 @@ function setcookie($name, $value = "", int|array $expire_or_options = 0, $path =
         return false;
     }
     $g = RequestContext::instance();
-    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any request handler runs
+    if ($g->zealphp_response === null) {
+        return false; // no response object (worker-start/tick/CLI/task) — cookie not sent (#195)
+    }
     $g->zealphp_response->cookie($name, $value, $expire, $path, $domain, $secure, $httponly, $samesite);
     return true;
 }
@@ -1033,7 +1040,9 @@ function setrawcookie($name, $value = "", int|array $expire_or_options = 0, $pat
         $cookie .= "; httponly";
     }
     $g = RequestContext::instance();
-    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any request handler runs
+    if ($g->zealphp_response === null) {
+        return false; // no response object (worker-start/tick/CLI/task) — cookie not sent (#195)
+    }
     $g->zealphp_response->rawCookie($name, $value, $expire, $path, $domain, $secure, $httponly);
     return true;
 }

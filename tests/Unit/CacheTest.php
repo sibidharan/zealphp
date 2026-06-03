@@ -95,6 +95,19 @@ class CacheTest extends TestCase
         $this->assertFileExists($filePath);
     }
 
+    public function testOverwriteSmallWithOversizeEvictsMemoryTier(): void
+    {
+        // #186: a small value lives in the memory tier; overwriting it with a
+        // >8KB value (file tier only) must evict the stale memory row, else get()
+        // (which checks memory before file) returns the OLD small value.
+        Cache::set('grow', 'small');
+        $this->assertSame('small', Cache::get('grow'));
+
+        $big = str_repeat('Z', 9000);
+        Cache::set('grow', $big);
+        $this->assertSame($big, Cache::get('grow'));
+    }
+
     public function testFlushClearsBothTiers(): void
     {
         Cache::set('a', 1);

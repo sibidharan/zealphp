@@ -75,6 +75,26 @@ final class TableSessionHandlerTest extends TestCase
         $this->assertTrue(self::$handler->close());
     }
 
+    public function testReadSnapshotIsKeyedByCoroutineAndClearedOnClose(): void
+    {
+        // #182: the read snapshot is keyed by coroutine id THEN session id (so
+        // concurrent same-session requests don't clobber each other), and close()
+        // reclaims this coroutine's bucket so it can't grow unbounded.
+        $sid = $this->sid('snap');
+        self::$handler->write($sid, 'v|i:1;');
+        self::$handler->read($sid); // populates context[cid][sid]
+
+        $ref = new \ReflectionProperty(self::$handler, 'context');
+        $ref->setAccessible(true);
+        $cid = \OpenSwoole\Coroutine::getCid();
+        $ctx = $ref->getValue(self::$handler);
+        $this->assertArrayHasKey($cid, $ctx);
+        $this->assertArrayHasKey($sid, $ctx[$cid]);
+
+        $this->assertTrue(self::$handler->close());
+        $this->assertArrayNotHasKey($cid, $ref->getValue(self::$handler), 'close() clears the coroutine bucket');
+    }
+
     // ── read / write round-trip ───────────────────────────────────────────
 
     public function testWriteThenReadRoundTrip(): void
