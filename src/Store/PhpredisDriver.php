@@ -517,15 +517,29 @@ final class PhpredisDriver implements RedisDriver
         // otherwise constant-fold the !== 0 check inside the inner closures.
         $running = new \OpenSwoole\Atomic(1);
 
+        // Each subscribe/psubscribe coroutine parks in a C-level blocking read
+        // that only wakes on a matching message. The stop sentinel is published
+        // to the runner's exact stop channel, so it reaches the SUBSCRIBE cor
+        // (which breaks the main loop) but NOT the PSUBSCRIBE cor — whose
+        // pattern the sentinel doesn't match. Without an explicit teardown that
+        // cor (plus its dedicated Redis connection) would leak on every stop().
+        // We register each cor's client here and force-close them in `finally`:
+        // closing the fd surfaces a RedisException in the parked read, which the
+        // cor catches and exits on. Deterministic — no reliance on a second
+        // message racing the running flag.
+        /** @var array<string, \Redis> $clients */
+        $clients = [];
+
         // Two parallel coroutines, each owning its OWN \Redis client. Sharing
         // $this->c between them would race on the underlying socket — phpredis
         // is not coroutine-safe on a single connection. Each cor connects via
         // self::buildClient() so subscribe + psubscribe own independent sockets.
 
         if ($exactChannels !== []) {
-            go(function () use ($url, $frames, $exactChannels, $running): void {
+            go(function () use ($url, $frames, $exactChannels, $running, &$clients): void {
                 try {
                     $client = self::buildClient($url);
+                    $clients['sub'] = $client;
                     $client->subscribe($exactChannels, function ($_redis, string $channel, string $payload) use ($frames, $running): void {
                         $frames->push(['channel' => $channel, 'payload' => $payload, 'pattern' => null]);
                         if ($running->get() === 0) { throw new PubSubStopException(); }
@@ -535,15 +549,17 @@ final class PhpredisDriver implements RedisDriver
                 } catch (\RedisException) {
                     /* phpredis re-throws the in-callback PubSubStopException as
                        a 'read error on connection' RedisException once the
-                       subscribe socket closes. Same intent as the sentinel —
-                       runner already saw the stop via $running; silently exit. */
+                       subscribe socket closes (also how the finally force-close
+                       below unblocks us). Runner already saw the stop via
+                       $running; silently exit. */
                 }
             });
         }
         if ($patternChannels !== []) {
-            go(function () use ($url, $frames, $patternChannels, $running): void {
+            go(function () use ($url, $frames, $patternChannels, $running, &$clients): void {
                 try {
                     $client = self::buildClient($url);
+                    $clients['psub'] = $client;
                     $client->psubscribe($patternChannels, function ($_redis, string $pattern, string $channel, string $payload) use ($frames, $running): void {
                         $frames->push(['channel' => $channel, 'payload' => $payload, 'pattern' => $pattern]);
                         if ($running->get() === 0) { throw new PubSubStopException(); }
@@ -570,6 +586,14 @@ final class PhpredisDriver implements RedisDriver
             }
         } finally {
             $running->set(0);
+            // Force the parked subscribe/psubscribe coroutines out of their
+            // blocking reads so they release their connections instead of
+            // lingering until the worker exits. Cooperative scheduling means
+            // those cors are parked (not mid-callback) when this runs, so
+            // closing their fds is safe.
+            foreach ($clients as $client) {
+                try { $client->close(); } catch (\Throwable) { /* already gone */ }
+            }
         }
     }
 

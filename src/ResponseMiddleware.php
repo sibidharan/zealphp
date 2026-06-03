@@ -58,6 +58,11 @@ class ResponseMiddleware implements MiddlewareInterface
             }
         }
 
+        // Output-buffer baseline: this method opens no buffer of its own, so on
+        // an exit()/ExitException we must only reclaim buffers the HANDLER left
+        // open — draining all the way to level 0 would steal a parent dispatch's
+        // buffer (e.g. an exception-handler ob_start, or a nested render).
+        $obBase = ob_get_level();
         try {
             // Pin request-input superglobals to THIS coroutine's request before
             // the handler reads them (coroutine-legacy overlap defence). No-op
@@ -133,7 +138,7 @@ class ResponseMiddleware implements MiddlewareInterface
             ) {
                 $exitStatus = $e->getStatus();
                 $buffered = '';
-                while (ob_get_level() > 0) {
+                while (ob_get_level() > $obBase) {
                     $buffered = (string)ob_get_clean() . $buffered;
                 }
                 if ($exitStatus === 0 || $exitStatus === null) {

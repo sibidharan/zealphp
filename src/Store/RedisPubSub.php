@@ -52,11 +52,18 @@ final class RedisPubSub
      *                          when "keep trying forever" isn't acceptable —
      *                          e.g. a CI worker that should fail loudly if its
      *                          Redis disappears.
+     * @param array{prefer?: 'auto'|'phpredis'|'predis'} $opts Driver preference
+     *                          for the runner's connections. Forced to
+     *                          `['prefer' => 'predis']` by App::wirePubSubBoot()
+     *                          when phpredis would block the worker under
+     *                          HOOK_ALL=0 (H7) — predis SUBSCRIBE yields on its
+     *                          pure-PHP socket regardless of HOOK_ALL.
      */
     public function __construct(
         private string $url,
         private string $prefix = 'zealstore',
         private int $maxAttempts = 0,
+        private array $opts = [],
     ) {
         $this->running = new \OpenSwoole\Atomic(0);
         $this->stopChannel = $this->prefix . ':__pubsub_stop:' . bin2hex(random_bytes(4));
@@ -122,7 +129,7 @@ final class RedisPubSub
         if ($this->running->get() === 0) { return; }
         $this->running->set(0);
         try {
-            $signaller = new RedisClient($this->url);
+            $signaller = new RedisClient($this->url, $this->opts);
             $signaller->publish($this->stopChannel, '__stop__');
             $signaller->close();
         } catch (\Throwable) { /* tolerant; runner will see connection drop and exit */ }
@@ -143,7 +150,7 @@ final class RedisPubSub
         $attempt = 0;
         while ($this->running->get() === 1) {
             try {
-                $client = new RedisClient($this->url);
+                $client = new RedisClient($this->url, $this->opts);
                 $exacts = array_merge(array_keys($this->exactHandlers), [$this->stopChannel]);
                 $patterns = array_keys($this->patternHandlers);
                 $attempt = 0;
