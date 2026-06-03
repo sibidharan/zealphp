@@ -325,4 +325,48 @@ final class TableSessionHandlerTest extends TestCase
         $m->setAccessible(true);
         $this->assertSame('', $m->invoke(self::$handler, 'no-such-session-' . bin2hex(random_bytes(4))));
     }
+
+    // ── sharded write lock (scale fix) ────────────────────────────────────
+
+    public function testWriteLockShardingIsStablePerSessionAndDistributed(): void
+    {
+        // The single global write-lock Atomic (which serialised EVERY session
+        // write) was replaced with a bounded sharded set. Contract: same id →
+        // same lock (same-session writes MUST serialise for the read-merge-CAS);
+        // different ids spread across shards (so they don't all serialise).
+        $m = new \ReflectionMethod(self::$handler, 'lockFor');
+        $m->setAccessible(true);
+
+        $a1 = $m->invoke(self::$handler, 'session-A');
+        $a2 = $m->invoke(self::$handler, 'session-A');
+        $this->assertInstanceOf(\OpenSwoole\Atomic::class, $a1);
+        $this->assertSame($a1, $a2, 'same session id always maps to the same lock shard');
+
+        $shards = [];
+        for ($i = 0; $i < 300; $i++) {
+            $shards[spl_object_id($m->invoke(self::$handler, "sess-{$i}"))] = true;
+        }
+        $this->assertGreaterThan(1, count($shards), 'distinct sessions hash to multiple lock shards');
+    }
+
+    public function testConcurrentWritesToDistinctSessionsAllSucceed(): void
+    {
+        // The scale property: many concurrent writes to DIFFERENT sessions
+        // (which mostly hit different shards) all complete + round-trip
+        // correctly — they no longer serialise behind one global lock.
+        $results = [];
+        \OpenSwoole\Coroutine::run(function () use (&$results): void {
+            $done = new \OpenSwoole\Coroutine\Channel(24);
+            for ($i = 0; $i < 24; $i++) {
+                go(function () use ($done, $i): void {
+                    $sid = "conc-{$i}-" . bin2hex(random_bytes(3));
+                    self::$handler->write($sid, "v|i:{$i};");
+                    $done->push(self::$handler->read($sid) === "v|i:{$i};");
+                });
+            }
+            for ($i = 0; $i < 24; $i++) { $results[] = $done->pop(5.0); }
+        });
+        $this->assertCount(24, $results);
+        $this->assertNotContains(false, $results, 'every concurrent distinct-session write round-tripped');
+    }
 }
