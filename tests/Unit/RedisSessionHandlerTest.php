@@ -121,6 +121,27 @@ class RedisSessionHandlerTest extends TestCase
         $h->close();
     }
 
+    public function testBaseDataMapDoesNotGrowUnbounded(): void
+    {
+        // Regression: the per-instance read→write merge baseline ($baseData) used
+        // to be inserted on every read() and never cleared, so on a long-lived
+        // singleton handler it grew with every distinct session id forever (a
+        // worker-lifetime memory leak). write()/destroy() now drop the entry.
+        $h = $this->skipIfNoRedis();
+        $h->open('', 'PHPSESSID');
+        $prop = new \ReflectionProperty(RedisSessionHandler::class, 'baseData');
+        $prop->setAccessible(true);
+
+        for ($i = 0; $i < 25; $i++) {
+            $sid = 'leak_' . bin2hex(random_bytes(6));
+            $h->read($sid);                       // inserts baseData[$sid]
+            $h->write($sid, "k|i:$i;");           // must clear it
+            $h->destroy($sid);
+        }
+        $this->assertSame([], $prop->getValue($h), 'baseData must be empty after read→write→destroy of each session');
+        $h->close();
+    }
+
     public function testDestroyRemovesKey(): void
     {
         $h = $this->skipIfNoRedis();
