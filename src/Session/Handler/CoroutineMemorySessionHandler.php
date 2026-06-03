@@ -61,6 +61,12 @@ class CoroutineMemorySessionHandler implements \SessionHandlerInterface
     // Close the session
     public function close(): bool
     {
+        // Drop this coroutine's session bucket so $sessions doesn't accumulate
+        // an entry per distinct (cid, sessionId) over the worker's lifetime.
+        // OpenSwoole reuses cids across requests but close() never pruned them,
+        // so the map only ever grew. Mirrors TableSessionHandler::close()'s
+        // per-cid context teardown.
+        unset($this->sessions[co::getCid()]);
         return true;
     }
 
