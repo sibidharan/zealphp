@@ -16,7 +16,10 @@ use OpenSwoole\Table;
  *
  *   1. OpenSwoole\Table  — hot, in-memory, cross-worker, atomic ops
  *   2. File backing      — cold, persistent across restarts, overflow
- *   3. Per-id spinlock   — Atomic cmpset for write critical sections
+ *   3. Sharded spinlock  — Atomic cmpset, one of N shards per session id
+ *                          (`crc32($id) % WRITE_LOCK_SLOTS`), so writes to
+ *                          different sessions don't serialise against each
+ *                          other; only same-session writes (same shard) do.
  *
  * Writes use optimistic versioning (CAS): each session row has a
  * `version` column. On read, the handler snapshots both the data
@@ -51,9 +54,21 @@ final class TableSessionHandler implements \SessionHandlerInterface
     private const COL_VERSION = 'version';
     private const COL_EXPIRES = 'expires';
 
+    /**
+     * Number of sharded write-lock slots. Session ids hash to a slot
+     * (`crc32($id) % WRITE_LOCK_SLOTS`), so writes to DIFFERENT sessions almost
+     * always take DIFFERENT locks (proceed in parallel) while writes to the
+     * SAME session always take the same lock (serialised — required for the
+     * read-merge-CAS to be atomic). Bounded at boot (N small Atomics in shared
+     * memory), so there's no per-session unbounded allocation. Replaces the
+     * single global Atomic that serialised EVERY session write cluster-wide.
+     */
+    private const WRITE_LOCK_SLOTS = 1024;
+
     private static ?self $instance = null;
     private static ?Table $table = null;
-    private static ?Atomic $writeLock = null;
+    /** @var array<int, Atomic> Sharded write locks, indexed `crc32($id) % WRITE_LOCK_SLOTS`. */
+    private static array $writeLocks = [];
     private static string $savePath = '/var/lib/php/sessions';
     private static int $ttl = 7200;          // 2 hours
     private static int $maxRows = 65536;     // 64K rows
@@ -107,7 +122,14 @@ final class TableSessionHandler implements \SessionHandlerInterface
             $table->column(self::COL_EXPIRES, Table::TYPE_INT, 8);
             $table->create();
             self::$table = $table;
-            self::$writeLock = new Atomic(0);
+        }
+
+        // Sharded write locks — allocated once, BEFORE workers fork (Atomic is
+        // shared memory inherited on fork). Idempotent.
+        if (self::$writeLocks === []) {
+            for ($i = 0; $i < self::WRITE_LOCK_SLOTS; $i++) {
+                self::$writeLocks[$i] = new Atomic(0);
+            }
         }
 
         if (!is_dir(self::$savePath)) {
@@ -183,7 +205,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
         $sessionId = (string) $sessionId;
         $data = (string) $data;
         $table = $this->table();
-        $writeLock = $this->writeLock();
+        $writeLock = $this->lockFor($sessionId);
 
         /** @var array{base: array<mixed,mixed>, version: int} $ctx */
         $ctx = $this->context[Coroutine::getCid()][$sessionId] ?? ['base' => [], 'version' => 0];
@@ -192,11 +214,15 @@ final class TableSessionHandler implements \SessionHandlerInterface
         $local = $this->decode($data);
 
         for ($attempt = 0; $attempt < 3; $attempt++) {
-            // Acquire write lock (per-server, not per-session — sessions are
-            // small, critical sections are short; per-id locks would need
-            // unbounded Atomic allocation).
+            // Acquire the per-session-shard write lock. With sharded locks the
+            // critical section only serialises writes to sessions that hash to
+            // the SAME slot (rare), not every session globally. Exponential
+            // backoff (0.1ms → cap 2ms) keeps a contended slot from busy-spinning
+            // at a fixed 0.5ms quantum.
+            $spin = 100; // microseconds
             while (!$writeLock->cmpset(0, 1)) {
-                Coroutine::usleep(500); // 0.5ms yield
+                Coroutine::usleep($spin);
+                $spin = min($spin * 2, 2000);
             }
             try {
                 $current = $table->get($sessionId);
@@ -434,11 +460,16 @@ final class TableSessionHandler implements \SessionHandlerInterface
         return self::$table;
     }
 
-    private function writeLock(): Atomic
+    /**
+     * The write lock for a session id — its hashed shard. Same id → same lock
+     * (serialised, required); different ids → almost always different locks
+     * (parallel).
+     */
+    private function lockFor(string $sessionId): Atomic
     {
-        if (self::$writeLock === null) {
+        if (self::$writeLocks === []) {
             throw new \RuntimeException('TableSessionHandler::register() must be called first');
         }
-        return self::$writeLock;
+        return self::$writeLocks[crc32($sessionId) % self::WRITE_LOCK_SLOTS];
     }
 }
