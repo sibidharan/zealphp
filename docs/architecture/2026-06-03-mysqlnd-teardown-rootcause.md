@@ -8,6 +8,61 @@ coroutine-legacy WordPress crash, with opposite allocator visibility. Both are n
 | **1** | **`ZEND_FETCH_CONSTANT` use-after-free** in the per-coroutine **constant isolation** (`define()` isolation). On resume, `zealphp_constants_snapshot_restore()` freed an orphaned request-constant the instant a peer coroutine re-declared the same name — but a cached op_array's `run_time_cache` FETCH_CONSTANT slot (shared across coroutines under opcache) still pointed at it. | **ASAN** (heap-use-after-free; reproduces both **without** opcache as a compile-arena AST variant and **with** opcache as the orphan-constant variant) | **FIXED** in ext-zealphp **0.3.27** — defer the orphan free to coroutine close. ASAN-clean (0 errors, 30/30), phpt 0 failures. |
 | **2** | **`$wpdb` mysqli teardown allocator mismatch.** Stage-2 **object-globals isolation** holds the `$wpdb` object in the per-coroutine delta; `zealphp_globals_snapshot_delete()` destroys the delta at request-end → `$wpdb.__destruct()` → mysqlnd close → `_php_stream_free(close_options=27)` (the **persistent** free path) → `_efree` on a non-persistently-allocated stream → `zend_mm_heap corrupted`. | **zend_mm only** — **invisible to ASAN/valgrind** (under `USE_ZEND_ALLOC=0` both the persistent and request free paths become plain `free()`, so the mismatch vanishes) | **OPEN** — the production-dominant remaining crash. Independent of bug #1 (still 40 crashes / 80 reqs under VG **with** the 0.3.27 constant fix applied). |
 
+## 2026-06-03 (evening) — debug-build confirmation + resume pointer for bug #2
+
+Re-confirmed bug #2 on **current master + ext-zealphp 0.3.27** with real WordPress (MySQL) on the box:
+coroutine-legacy serves WP **functionally** (homepage 20/20, wp-admin 5/5 logged-in dashboard, 0 uksort)
+but the worker log shows **`zend_mm_heap corrupted` + `signal=11`** — **16 worker crashes over a ~30-request
+wp-admin run** (each respawned by OpenSwoole, so light load is served, but it's heavy churn and drops
+in-flight requests under concurrency).
+
+**Built a dedicated zend_mm-debug toolchain** to chase the corrupting write (it is invisible to ASAN/valgrind):
+- `php84-dbg` = PHP 8.4.21 `--enable-debug` (NTS DEBUG, zend_mm heap-canary validation) at
+  `/home/labs/asan-hazard2/php84-dbg`. **One patch required:** `zend_verify_internal_return_type()`
+  (Zend/zend_execute.c:1497) is forced to `return 1` — under `--enable-debug` an OpenSwoole/internal
+  function trips its strict internal-return-type assertion during WP boot (`zend_vm_execute.h:1917`),
+  aborting before the mysqlnd crash. No-op'ing the verifier lets WP boot; the heap canary is unaffected.
+- openswoole 26.2.0 + ext-zealphp 0.3.27 rebuilt against it (debug extension_dir).
+- Repro: `/tmp/dbg_repro.sh` (boot coroutine-legacy WP on :9843, login, hammer homepage+wp-admin).
+
+**What the debug build told us (and didn't):** the failure prints the *bare* `zend_mm_heap corrupted`
+(zend_mm's own free-list/chunk metadata is already trashed by detection time), **not** a clean
+per-block canary report. That signature = an **out-of-bounds write or double-free**, not a simple
+bad-pointer free. So the precise corrupting write needs a **gdb hardware watchpoint** on the mysqlnd
+VIO `is_persistent` byte (or the freed stream block), driven interactively — the static canary alone
+can't name it.
+
+**Hypothesis A (TESTED — RULED OUT): on_yield/on_resume re-entrancy during the drain.** Theory: the
+`$wpdb` close yields mid-`__destruct` during `request_end`, so the scheduler's `on_yield`/`on_resume`
+globals callbacks re-enter the half-torn-down delta for that coroutine. **Implemented + tested** a
+per-coroutine "draining" guard (`zealphp_globals_draining_ptr`): while `request_end` drains, on_yield
+skips `snapshot_save` and on_resume skips `snapshot_restore` for the draining coroutine. Result on the
+debug build: **still 16 crashes / 30-req run, unchanged.** So the on_yield/on_resume re-entrancy is
+**NOT** the (sole) cause — the guard was reverted (unverified, no benefit; don't add to the hot
+per-switch path without a proven fix).
+
+**Hypothesis B (NEXT — untested): `reset_to_parent` iterating `EG(symbol_table)` across the yield.**
+`zealphp_globals_reset_to_parent()` walks `EG(symbol_table)` freeing non-baseline globals; when a
+`__destruct` (e.g. `$wpdb` close) yields mid-walk, **another coroutine resumes and swaps its own
+globals into `EG(symbol_table)`**, so when the drain coroutine resumes it continues iterating a
+mutated table → corruption. The draining guard does nothing here because the problem is the *other*
+coroutine's legitimate EG swap, not the draining one's callbacks. **Candidate fix:** make the drain
+**detach-then-destroy** — first DETACH every non-baseline object/value out of `EG(symbol_table)` into a
+local list with NO yields (pure pointer moves), THEN destroy the local list (where a `__destruct` may
+yield safely, because `EG(symbol_table)` is already in a clean baseline state other coroutines can swap
+against). This needs a careful restructure of `reset_to_parent` + the full regression (trust bar 16/16
++ ASAN + valgrind + 12-app sweep + WP e2e).
+
+**Hypothesis C (NEXT — untested): stream double-free / persistent-flag flip.** The visible free takes
+`close_options=27` (PERSISTENT) on a non-persistent stream. Either the `php_stream`'s `is_persistent`
+byte is corrupted by B's heap damage (symptom, not cause), or the stream is freed twice (once by
+`$wpdb.__destruct`, once by another ref/the resource list). Distinguishing B vs C **requires a gdb
+hardware watchpoint** on the stream block / its `is_persistent` byte — the static heap canary can't
+name the write (it only reports `zend_mm_heap corrupted` after the metadata is already trashed). The
+debug toolchain (above) is set up for exactly this gdb session.
+
+---
+
 The historical "mysqlnd/libtasn1 connection-teardown heap-overflow" label was a mis-guess (libtasn1/TLS
 ruled out three ways — see below). The visible `zend_mm_heap corrupted` at the mysqlnd free is **bug #2**;
 **bug #1** is a separate UAF that ASAN surfaced because its malloc layout exposes the dangling read.
