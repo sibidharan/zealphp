@@ -154,6 +154,17 @@ final class WSRouter
     private static array $localRoomMembership = [];
 
     /**
+     * Per-worker reverse index: which rooms each LOCALLY-OWNED client has
+     * joined. Lets `release()` (ws onClose) leave every room a client was
+     * in, so an abnormal disconnect doesn't leak `ws_room_members` rows /
+     * per-room SET entries until the whole server is GC'd.
+     * `client_id → [room => true]`
+     *
+     * @var array<string, array<string, true>>
+     */
+    private static array $localClientRooms = [];
+
+    /**
      * User-registered message handlers per room. Each callable receives
      * `(array $msg, string $room)`.
      *
@@ -570,6 +581,31 @@ final class WSRouter
     /** Clean up when a client disconnects (call from ws onClose). */
     public static function release(string $clientId): void
     {
+        // Leave every room this client joined on this worker BEFORE we drop
+        // the local maps. Otherwise an abnormal disconnect (onClose without
+        // an explicit Room::leave) leaks the cluster-wide ws_room_members
+        // rows + per-room SET entries until the whole SERVER is GC'd, and
+        // leaves the per-worker $localRoomMembership cache pointing at a dead
+        // fd. $rooms is a value-copy, so Room::leave() mutating the static
+        // mid-loop is safe.
+        $rooms = self::$localClientRooms[$clientId] ?? [];
+        foreach (array_keys($rooms) as $room) {
+            try {
+                self::room($room)->leave($clientId);
+            } catch (\Throwable $e) {
+                error_log("WSRouter::release leave({$room}, {$clientId}): " . $e->getMessage());
+            }
+            // Evict the local-membership cache directly: the leave presence
+            // event we just published may not round-trip back to this worker
+            // before the localFds unset below, and the leave handler is the
+            // one that would otherwise clear it.
+            unset(self::$localRoomMembership[$room][$clientId]);
+            if (isset(self::$localRoomMembership[$room]) && self::$localRoomMembership[$room] === []) {
+                unset(self::$localRoomMembership[$room]);
+            }
+        }
+        unset(self::$localClientRooms[$clientId]);
+
         unset(self::$localFds[$clientId]);
         Store::del(self::TABLE, $clientId);
         self::stats()->inc('releases_total');
@@ -644,6 +680,7 @@ final class WSRouter
         self::$clientSink          = null;
         self::$initialized         = false;
         self::$localRoomMembership = [];
+        self::$localClientRooms    = [];
         self::$roomMessageHandlers = [];
         self::$roomPresenceHandlers= [];
     }
@@ -665,6 +702,36 @@ final class WSRouter
         }
         return new Room($name, self::$serverId);
     }
+
+    /**
+     * @internal — record that a locally-owned client joined a room, so
+     * `release()` can leave it on disconnect. No-op for clients this worker
+     * doesn't own (the owning worker tracks + cleans those up). Called by
+     * `Room::join()`.
+     */
+    public static function noteLocalRoomJoin(string $clientId, string $room): void
+    {
+        if (!isset(self::$localFds[$clientId])) { return; }
+        self::$localClientRooms[$clientId][$room] = true;
+    }
+
+    /**
+     * @internal — drop a room from a client's local reverse index. Called by
+     * `Room::leave()` (and indirectly by `release()` via the leave path).
+     */
+    public static function noteLocalRoomLeave(string $clientId, string $room): void
+    {
+        unset(self::$localClientRooms[$clientId][$room]);
+        if (isset(self::$localClientRooms[$clientId]) && self::$localClientRooms[$clientId] === []) {
+            unset(self::$localClientRooms[$clientId]);
+        }
+    }
+
+    /**
+     * @internal — current local client→rooms reverse index (for tests + debug).
+     * @return array<string, array<string, true>>
+     */
+    public static function localClientRooms(): array { return self::$localClientRooms; }
 
     /**
      * Total connected clients across the cluster.
@@ -785,10 +852,18 @@ final class WSRouter
 
         if ($type === 'join' || $type === 'leave') {
             $cid = is_string($msg['client_id'] ?? null) ? $msg['client_id'] : '';
-            if ($cid !== '' && isset(self::$localFds[$cid])) {
+            if ($cid !== '') {
                 if ($type === 'join') {
-                    self::$localRoomMembership[$roomName][$cid] = true;
+                    // Only cache clients THIS worker owns (they're the push
+                    // targets); a join for a remote client isn't ours to hold.
+                    if (isset(self::$localFds[$cid])) {
+                        self::$localRoomMembership[$roomName][$cid] = true;
+                    }
                 } else {
+                    // Always evict on leave — unsetting a non-member is a
+                    // harmless no-op, and gating this on $localFds would leak
+                    // the cache entry once release() has already cleared the
+                    // fd (the disconnect path that needs the eviction most).
                     unset(self::$localRoomMembership[$roomName][$cid]);
                     if (isset(self::$localRoomMembership[$roomName]) && self::$localRoomMembership[$roomName] === []) {
                         unset(self::$localRoomMembership[$roomName]);
@@ -926,19 +1001,25 @@ final class WSRouter
         }
         if ($dead === []) { return 0; }
         $reaped = 0;
-        // Drop dependent rows in ws_owner + ws_room_members.
+        // Collect-then-delete: deleting from an OpenSwoole\Table WHILE
+        // iterating it advances the internal cursor into a freed slot and
+        // silently skips ~28% of the remaining rows, so dead-server rows
+        // would survive the sweep. Materialize the hit list first, then
+        // delete after each iterator has fully drained.
+        $ownerDel = [];
         foreach (Store::iterate(self::TABLE) as $clientId => $row) {
             if (in_array((string) ($row['server_id'] ?? ''), $dead, true)) {
-                Store::del(self::TABLE, (string) $clientId);
-                $reaped++;
+                $ownerDel[] = (string) $clientId;
             }
         }
+        $roomDel = [];
         foreach (Store::iterate(self::ROOM_TABLE) as $key => $row) {
             if (in_array((string) ($row['server_id'] ?? ''), $dead, true)) {
-                Store::del(self::ROOM_TABLE, (string) $key);
-                $reaped++;
+                $roomDel[] = (string) $key;
             }
         }
+        foreach ($ownerDel as $clientId) { Store::del(self::TABLE, $clientId); $reaped++; }
+        foreach ($roomDel as $key)       { Store::del(self::ROOM_TABLE, $key);  $reaped++; }
         // Drop the server-registry rows themselves last.
         foreach ($dead as $serverId) {
             Store::del(self::SERVERS_TABLE, $serverId);
@@ -954,18 +1035,22 @@ final class WSRouter
     {
         if (self::$serverId === '') { return 0; }
         $reaped = 0;
+        // Collect-then-delete — see runStaleServerGC: deleting mid-iteration
+        // on the Table backend skips rows, leaving our own footprint behind.
+        $ownerDel = [];
         foreach (Store::iterate(self::TABLE) as $clientId => $row) {
             if (($row['server_id'] ?? '') === self::$serverId) {
-                Store::del(self::TABLE, (string) $clientId);
-                $reaped++;
+                $ownerDel[] = (string) $clientId;
             }
         }
+        $roomDel = [];
         foreach (Store::iterate(self::ROOM_TABLE) as $key => $row) {
             if (($row['server_id'] ?? '') === self::$serverId) {
-                Store::del(self::ROOM_TABLE, (string) $key);
-                $reaped++;
+                $roomDel[] = (string) $key;
             }
         }
+        foreach ($ownerDel as $clientId) { Store::del(self::TABLE, $clientId); $reaped++; }
+        foreach ($roomDel as $key)       { Store::del(self::ROOM_TABLE, $key);  $reaped++; }
         Store::del(self::SERVERS_TABLE, self::$serverId);
         return $reaped;
     }
