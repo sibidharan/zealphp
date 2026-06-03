@@ -261,6 +261,32 @@ App::mode(App::MODE_MIXED);              // Symfony / Laravel — real $_SESSION
 
 Pick the mode that matches your application’s profile. You can call `App::mode()` (or set the individual knobs) early in `app.php` before calling `App::init()`.
 
+## Stage 8 — true-global-scope request include (`App::globalScopeInclude()`)
+
+`App::globalScopeInclude(?bool $on = null): bool` is the capstone of the coroutine-legacy isolation stack. It only matters for legacy `require_once`-bootstrap apps (WordPress wp-admin in particular) running **in-process** under coroutine-legacy.
+
+**The problem it solves.** In coroutine-legacy the request entry runs in-process through `App::executeFile()`, whose `include $absPath;` sits lexically *inside* a static method. PHP's rule is that an included file inherits the variable scope of the line the `include` appears on — so a bare file-scope `$x = [...]` (no `global` keyword) in the entry file, or in anything it transitively `require_once`s, becomes a **method-local variable of `executeFile()`** and never enters `EG(symbol_table)`. WordPress builds `$menu` / `$submenu` / `$_wp_submenu_nopriv` exactly this way; a later `global $_wp_submenu_nopriv;` then reads the global table, finds `NULL`, and 500s with `array_keys(null)` on admin pages. The per-coroutine `$GLOBALS` isolation (Stage 2) can't help — it operates only on `EG(symbol_table)`, which a method-local CV never enters. This is a **scope** problem, orthogonal to isolation.
+
+**What it does.** When enabled, the request entry (and its whole transitive `require_once` tree) runs at **true global scope**, so bare file-scope variables and the `require_once`'d bootstrap bind into `$GLOBALS` / `EG(symbol_table)` — exactly as PHP-FPM / mod_php would. Stage 2 then snapshots/partitions those globals per coroutine across yields and clears the non-baseline keys at request end, so there's no cross-request leak or cross-coroutine clobber.
+
+**The contract (important).** The globally-scoped include does **not** see `executeFile()`'s injected `$g` or route params — those are deliberately not extracted into the global frame (they would otherwise pollute `$GLOBALS`). Stage 8 is strictly for legacy apps that read request state via **superglobals** (`$_GET` / `$_POST` / `$_SERVER` / `$_SESSION`), not via ZealPHP's `$g`. Code that wants `$g` should use a normal route handler or the standard in-process include — not the global-scope path.
+
+| Property | Value |
+|---|---|
+| Setter | `App::globalScopeInclude(?bool $on = null): bool` — no-arg getter / one-arg setter |
+| Default | **Off.** When left `null`, follows the `ZEALPHP_GLOBAL_INCLUDE` env var (`'1'` enables) |
+| Gate | **coroutine-legacy only.** Ignored in other modes |
+| Requires | **ext-zealphp 0.3.26+** (the `zealphp_require_global()` primitive). With the primitive absent, the call is a no-op and the normal in-process `include` path is used |
+| Use case | Unmodified `require_once`-bootstrap **wp-admin** in coroutine-legacy (closes the `array_keys(null)` / `$_wp_submenu_nopriv` NULL gap) |
+
+```php
+App::mode(App::MODE_COROUTINE_LEGACY);
+App::globalScopeInclude(true);   // run the request entry at true global scope
+// ... App::init(); $app->run();
+```
+
+**Honest caveat.** Stage 8 closes the *globals-scope* wall — unmodified wp-admin renders in-process under coroutine concurrency (all menu pages `200`, globals correct). It does **not** resolve the separate **mysqlnd connection-teardown** heap-safety frontier (a `$wpdb`-close-under-HOOK_ALL issue that predates Stage 8 and reproduces without it), which is tracked independently. For fully production-safe unmodified wp-admin today, `App::mode(App::MODE_LEGACY_CGI)` (process-isolated) remains the conservative choice until that frontier lands.
+
 ## Lifecycle setters (v0.2.23+) — fine-grained control with safe-by-default
 
 Historically `App::superglobals()` bundled four orthogonal decisions into one flag: storage strategy, include dispatch, coroutine auto-wrapping, and runtime I/O hooks. As of v0.2.23, each is exposed as its own fluent static setter so applications can mix-and-match for their workload (Symfony wants real `$_SESSION` but no per-include fork cost; testing wants per-request isolation without `HOOK_ALL`; etc.). Every new knob defaults to `null` and resolves to a `App::$superglobals`-derived default at `App::run()` time — apps that don't touch them see no behaviour change.
