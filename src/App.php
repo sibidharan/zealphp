@@ -4733,18 +4733,34 @@ class App
         } catch (\Throwable $e) {
             $warnings[] = 'Store(H6): Redis backend ping FAILED at boot: ' . $e->getMessage();
         }
-        // H7 — phpredis + HOOK_ALL=0 deadlock guard
+        // H7 — phpredis + HOOK_ALL=0 deadlock guard. wirePubSubBoot() auto-forces
+        // the predis driver for the subscriber runner in this exact condition, so
+        // this is now an advisory (the deadlock is prevented), not a live hazard.
         $hasSubscribers = self::$pubsubRegistry !== [] || self::$reliableRegistry !== [];
-        if ($hasSubscribers && self::hookAll() === 0) {
-            $preferEnv = strtolower((string) getenv('ZEALPHP_REDIS_PREFER'));
-            $willUsePhpredis = $preferEnv === 'phpredis'
-                || (($preferEnv === '' || $preferEnv === 'auto') && extension_loaded('redis'));
-            if ($willUsePhpredis) {
-                $warnings[] = 'Store(H7): phpredis SUBSCRIBE blocks the worker WITHOUT HOOK_ALL — pub/sub will deadlock. ' .
-                    'Either re-enable HOOK_ALL (default in coroutine mode) OR set ZEALPHP_REDIS_PREFER=predis for subscribers.';
-            }
+        if ($hasSubscribers && self::phpredisSubscribeWouldBlock()) {
+            $warnings[] = 'Store(H7): phpredis SUBSCRIBE blocks the worker WITHOUT HOOK_ALL — the pub/sub ' .
+                'runner has been auto-switched to the predis driver (pure-PHP socket, yields without HOOK_ALL). ' .
+                'To run subscribers on phpredis, re-enable HOOK_ALL (default in coroutine mode).';
         }
         return $warnings;
+    }
+
+    /**
+     * H7 detection: would a phpredis SUBSCRIBE/PSUBSCRIBE block the whole worker?
+     *
+     * phpredis's subscribe is a C-level blocking read that is only coroutinized
+     * under `OpenSwoole\Runtime::HOOK_ALL`. With HOOK_ALL off, a subscriber
+     * runner on phpredis would park the worker's single event loop forever.
+     * predis (pure-PHP socket) yields via the stream hooks regardless. Returns
+     * true when the resolved driver is phpredis AND HOOK_ALL is disabled — the
+     * signal for wirePubSubBoot() to force `['prefer' => 'predis']` on the runner.
+     */
+    private static function phpredisSubscribeWouldBlock(): bool
+    {
+        if (self::hookAll() !== 0) { return false; }
+        $preferEnv = strtolower((string) getenv('ZEALPHP_REDIS_PREFER'));
+        return $preferEnv === 'phpredis'
+            || (($preferEnv === '' || $preferEnv === 'auto') && extension_loaded('redis'));
     }
 
     /**
@@ -4767,9 +4783,14 @@ class App
             }
             $url    = $backend->url();
             $prefix = $backend->prefix();
+            // H7: if phpredis would block the worker under HOOK_ALL=0, force the
+            // subscriber runner onto the predis driver (pure-PHP socket yields
+            // regardless of HOOK_ALL) instead of letting it deadlock. The
+            // boot-time advisory in redisBootChecks() reports the auto-switch.
+            $subscriberOpts = self::phpredisSubscribeWouldBlock() ? ['prefer' => 'predis'] : [];
 
             if (self::$pubsubRegistry !== []) {
-                $pubsub = new \ZealPHP\Store\RedisPubSub($url, $prefix);
+                $pubsub = new \ZealPHP\Store\RedisPubSub($url, $prefix, 0, $subscriberOpts);
                 foreach (self::$pubsubRegistry as $channel => $handlers) {
                     foreach ($handlers as $h) { $pubsub->register((string) $channel, $h); }
                 }
@@ -4777,7 +4798,7 @@ class App
                 self::onWorkerStop(function () use ($pubsub) { $pubsub->stop(); });
             }
             if (self::$reliableRegistry !== []) {
-                $streams = new \ZealPHP\Store\RedisStreams($url);
+                $streams = new \ZealPHP\Store\RedisStreams($url, null, $subscriberOpts);
                 foreach (self::$reliableRegistry as $stream => $entries) {
                     foreach ($entries as $entry) {
                         $streams->register((string) $stream, $entry['group'], $entry['handler'], $entry['blockMs'], $entry['batchSize']);

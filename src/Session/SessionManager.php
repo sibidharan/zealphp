@@ -211,6 +211,12 @@ class SessionManager
         $g->_streaming               = null;
         $g->ignore_user_abort_state  = 0;
         $g->_session_started         = false;
+        // ResponseMiddleware stashes the canonical PSR-7 request here each
+        // request; on the process-wide singleton (superglobals mode) it would
+        // otherwise pin the previous request's object until the next dispatch
+        // overwrote it. Drop the reference at request end. (Coroutine mode's G
+        // is per-coroutine and freed automatically, so no equivalent is needed.)
+        $g->psr_request              = null;
 
         $sessionId = null;
         if ($manageSession) {

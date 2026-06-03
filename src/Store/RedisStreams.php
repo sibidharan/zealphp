@@ -26,7 +26,13 @@ final class RedisStreams
     private \OpenSwoole\Atomic $running;
     private string $consumerName;
 
-    public function __construct(private string $url, ?string $consumerName = null)
+    /**
+     * @param array{prefer?: 'auto'|'phpredis'|'predis'} $opts Driver preference
+     *        for the runner's connections. Forced to `['prefer' => 'predis']`
+     *        by App::wirePubSubBoot() under the H7 phpredis+HOOK_ALL=0 deadlock
+     *        condition (predis blocking reads yield without HOOK_ALL).
+     */
+    public function __construct(private string $url, ?string $consumerName = null, private array $opts = [])
     {
         $this->running = new \OpenSwoole\Atomic(0);
         $this->consumerName = $consumerName ?? (gethostname() . '-' . getmypid());
@@ -77,7 +83,7 @@ final class RedisStreams
             while (!self::atomicIsZero($this->running)) {
                 try {
                     if ($client === null) {
-                        $client = new RedisClient($this->url);
+                        $client = new RedisClient($this->url, $this->opts);
                         $this->ensureGroups($client);
                         $attempt = 0;
                     }
@@ -136,15 +142,16 @@ final class RedisStreams
         $payload = $msg['payload']['payload'] ?? '';
         $payloadFields = $msg['payload'];
         $url = $this->url;
+        $opts = $this->opts;
 
-        go(function () use ($url, $stream, $group, $id, $payload, $payloadFields, $handler): void {
+        go(function () use ($url, $opts, $stream, $group, $id, $payload, $payloadFields, $handler): void {
             // Each dispatch coroutine owns its own client — sharing the
             // runner's read-client would race on the socket (two cors
             // reading/writing one TCP stream interleaves RESP frames).
             try {
                 $ok = $handler($payload, $id, $stream, $payloadFields);
                 if ($ok === true) {
-                    $ackClient = new RedisClient($url);
+                    $ackClient = new RedisClient($url, $opts);
                     try { $ackClient->xack($stream, $group, $id); }
                     finally { $ackClient->close(); }
                 }

@@ -72,6 +72,27 @@ final class AppRedisBootChecksTest extends TestCase
         App::hookAll(null);
     }
 
+    public function testH7WarningReportsAutoSwitchNotDeadlock(): void
+    {
+        // The H7 warning used to say pub/sub "will deadlock"; wirePubSubBoot()
+        // now auto-forces the predis driver, so the advisory must describe the
+        // auto-switch (the deadlock is prevented, not impending).
+        if (!extension_loaded('redis')) {
+            self::markTestSkipped('phpredis ext-redis not loaded — H7 condition cannot fire');
+        }
+        App::hookAll(false);
+        Store::defaultBackend(Store::BACKEND_REDIS, 'redis://127.0.0.1:16379/0');
+        App::onPubSub('unit-test:h7-msg', function (): void {});
+
+        $w  = App::redisBootChecks();
+        $h7 = array_values(array_filter($w, fn(string $m): bool => str_contains($m, 'H7')));
+        self::assertNotEmpty($h7);
+        self::assertStringContainsString('auto-switched to the predis driver', $h7[0]);
+        self::assertStringNotContainsString('will deadlock', $h7[0]);
+
+        App::hookAll(null);
+    }
+
     public function testForcedPredisSilencesH7Warning(): void
     {
         App::hookAll(false);
