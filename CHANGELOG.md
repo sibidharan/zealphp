@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-06-03
+
 WordPress (and any legacy `require_once`-bootstrap app) now runs end-to-end in the **CGI-subprocess modes** — `cgi-pool` and `cgi-proc` — including **wp-admin and the Gutenberg block editor**, with **unmodified WordPress source**. All four fixes live entirely in ZealPHP's CGI worker layer; the in-process (`coroutine`/`mixed`) paths and `App.php` are unchanged. Huge thanks to **@Guruprasanth-M** for the rigorous, source-cited bug reports (#167, #169) and the reference patches this lands.
 
 ### Fixed
