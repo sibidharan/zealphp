@@ -288,9 +288,19 @@ $app->run();
 </p>
 
 <div class="vsfpm-callout-slate">
-  <strong class="vsfpm-callout-slate-title">When you still need <code>App::mode('legacy-cgi')</code></strong>
+  <strong class="vsfpm-callout-slate-title">Important: <code>mixed</code> matches FPM's execution model, not FPM's per-request reset</strong>
   <p class="vsfpm-callout-slate-body">
-    <code>App::mode('mixed')</code> reuses the worker's PHP heap across requests, so <code>define()</code>, declared classes, and <code>ini_set()</code> changes from request N persist into request N+1 on the same worker. For unmodified WordPress / Drupal that re-<code>define()</code> constants every request, switch to <code>App::mode('legacy-cgi')</code> so each request gets a clean interpreter from the warm pool — OR lean on OpenSwoole <code>max_request</code> recycling + <a href="/middleware">IniIsolationMiddleware</a>. (For modern request-style code there's also the experimental <code>App::mode('coroutine-legacy')</code> compat runtime; see the note in the measured section below.) SNA Labs took a different route — full coroutine mode on dev with an async Rust MongoDB driver; see the <a href="/case-studies/sna-labs">case study</a>.
+    PHP-FPM gives each request a fresh state even on a warm, reused worker: between requests it runs PHP's per-request executor shutdown (<code>shutdown_executor()</code>), which clears <code>require_once</code>'d files, request-declared classes/functions, function statics, and the global symbol table. <strong><code>App::mode('mixed')</code> matches FPM's <em>execution model</em></strong> — one request at a time per warm worker, native superglobals, in-process — <strong>but not that per-request reset.</strong> OpenSwoole keeps the worker's executor alive across requests, so <code>define()</code>, declared classes, the <code>require_once</code>'d bootstrap, and <code>ini_set()</code> from request N persist into request N+1 on the same worker.
+  </p>
+  <p class="vsfpm-callout-slate-body">
+    For apps that <em>don't</em> rely on fresh-state-per-request — Composer-autoloaded, guarded <code>define()</code>s (Symfony, Laravel, most modern code) — that warm reuse is exactly what you want, and <code>mixed</code> is the fast, simple FPM replacement. But <strong>unmodified <code>require_once</code> apps that re-<code>define()</code> constants and rebuild top-level globals every request (WordPress, Drupal) need the reset</strong> — <code>mixed</code> renders them once and then degrades (e.g. <code>Constant WP_USE_THEMES already defined</code> + a blank body on the second request). Two modes provide the reset:
+  </p>
+  <ul class="vsfpm-callout-slate-body">
+    <li><strong><code>App::mode('legacy-cgi')</code></strong> — a fresh subprocess per request from the warm pool (mod_php / FPM parity), or <code>cgiMode('fork')</code>/<code>cgiMode('fcgi')</code>.</li>
+    <li><strong><code>App::mode('coroutine-legacy')</code></strong> — re-implements the per-request reset <em>in-process</em> via ext-zealphp (re-executes <code>require_once</code>'d files, resets statics/classes, runs at true global scope). It now runs unmodified WordPress end-to-end <strong>including wp-admin</strong>, and adds coroutine concurrency on top.</li>
+  </ul>
+  <p class="vsfpm-callout-slate-body">
+    SNA Labs took a different route — full coroutine mode on dev with an async Rust MongoDB driver; see the <a href="/case-studies/sna-labs">case study</a>.
   </p>
 </div>
 
