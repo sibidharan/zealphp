@@ -26,6 +26,15 @@
   <php>
     <env name="ZEALPHP_REDIS_URL" value="redis://127.0.0.1:16379/0"/>
     <env name="ZEALPHP_MEMCACHED_SERVERS" value="127.0.0.1:11211"/>
+    <!-- MySQL/MariaDB for the DbConnectionPool mysqli-driver tests
+         (tests/Unit/Db/MysqliPoolTest). Matches the CI `mariadb` service
+         (root, empty password, db 'zealtest'). Tests skip gracefully when no
+         server is reachable, so local runs without MySQL are non-fatal. -->
+    <env name="ZEALPHP_TEST_MYSQL_HOST" value="127.0.0.1"/>
+    <env name="ZEALPHP_TEST_MYSQL_PORT" value="3306"/>
+    <env name="ZEALPHP_TEST_MYSQL_USER" value="root"/>
+    <env name="ZEALPHP_TEST_MYSQL_PASS" value=""/>
+    <env name="ZEALPHP_TEST_MYSQL_DB" value="zealtest"/>
     <!-- AppCompatibilityTest probes an external Docker app-lab (scripts/app-lab/)
          that isn't available in CI or most dev boxes. Skip by default; set
          SKIP_LAB_TESTS=0 + ZEALPHP_LAB_BASE_URL in the shell env to enable. -->
