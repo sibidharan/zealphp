@@ -44,6 +44,28 @@ final class TableBackendTest extends TestCase
         $this->assertFalse($b->set('absent', 'k', ['v' => 'x']));
     }
 
+    public function testSetReturnsFalseAtTheHardMaxRowsCap(): void
+    {
+        // OpenSwoole\Table maxRows is a HARD cap with no eviction — past it,
+        // set() silently returns false (the value is dropped). The backend now
+        // emits a one-time advisory on the first such failure; here we assert
+        // the observable behaviour (writes eventually rejected, count bounded).
+        // OpenSwoole rounds maxRows up (power-of-2 + conflict headroom), so we
+        // loop until the cap is hit rather than assume an exact boundary.
+        $b = new TableBackend();
+        $b->make('capped', 64, ['v' => [Table::TYPE_STRING, 16]]);
+
+        $hitCap = false;
+        for ($i = 0; $i < 1000; $i++) {
+            if (!$b->set('capped', "k{$i}", ['v' => 'x'])) {
+                $hitCap = true;
+                break;
+            }
+        }
+        $this->assertTrue($hitCap, 'Table rejects writes at its hard cap (silent-full)');
+        $this->assertLessThan(1000, $b->count('capped'), 'the cap held — count did not run unbounded');
+    }
+
     public function testFieldRead(): void
     {
         $b = new TableBackend();
