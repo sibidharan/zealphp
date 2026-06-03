@@ -104,8 +104,42 @@ final class RedisConnectionPool
     public function with(callable $fn): mixed
     {
         $c = $this->acquire();
-        try { return $fn($c); }
-        finally { $this->release($c); }
+        try {
+            $result = $fn($c);
+        } catch (\Throwable $e) {
+            // The op threw — likely a connection/protocol error, so the client may
+            // have a dead socket or a half-consumed RESP frame. Returning it to the
+            // pool would poison every future borrower (the pre-existing bug: a dead
+            // connection was re-pooled and reused forever). Discard it and refill
+            // the pool with a fresh client so capacity is preserved, then re-throw.
+            $this->discard($c);
+            throw $e;
+        }
+        $this->release($c);
+        return $result;
+    }
+
+    /**
+     * Drop a (possibly broken) client instead of returning it to the pool, and
+     * refill the pool with a fresh connection so capacity is preserved. The
+     * sync-mode singleton is just nulled so acquire() lazily rebuilds it.
+     */
+    private function discard(RedisClient $client): void
+    {
+        try { $client->close(); } catch (\Throwable) { /* already dead */ }
+        if ($this->syncClient !== null && $client === $this->syncClient) {
+            $this->syncClient = null;
+            return;
+        }
+        if ($this->ch === null) { return; }
+        try {
+            $this->ch->push(new RedisClient($this->url, $this->opts));
+            $this->stats->inc('pool_clients_created_total');
+        } catch (\Throwable) {
+            // Couldn't reconnect right now; the pool runs one short until a future
+            // acquire times out and a fresh client is built — still better than
+            // pushing a known-dead client back.
+        }
     }
 
     /** Return the configured pool capacity. */

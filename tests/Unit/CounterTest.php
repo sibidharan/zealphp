@@ -79,8 +79,23 @@ class CounterTest extends TestCase
 
     public function testRaw(): void
     {
+        // raw() now returns the 64-bit OpenSwoole\Atomic\Long (was the 32-bit
+        // OpenSwoole\Atomic) so counters can't silently wrap at 2^32.
         $c = new Counter(7);
-        $this->assertInstanceOf(\OpenSwoole\Atomic::class, $c->raw());
+        $this->assertInstanceOf(\OpenSwoole\Atomic\Long::class, $c->raw());
+    }
+
+    public function testCounterDoesNotWrapPast32Bit(): void
+    {
+        // Regression: the Atomic backend used the 32-bit unsigned OpenSwoole\Atomic,
+        // so a value/increment past 2^32 silently wrapped (corrupting e.g. a global
+        // request counter on a busy long-lived server). The 64-bit Atomic\Long
+        // backend holds the full value.
+        $c = new Counter(0, 'overflow_test_' . bin2hex(random_bytes(4)));
+        $big = 5_000_000_000; // > 2^32 (4_294_967_296)
+        $c->set($big);
+        $this->assertSame($big, $c->get(), 'value past 2^32 must not wrap');
+        $this->assertSame($big + 1, $c->increment(), 'increment past 2^32 must not wrap');
     }
 
     public function testChainedIncrements(): void

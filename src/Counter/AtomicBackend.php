@@ -4,14 +4,17 @@ declare(strict_types=1);
 
 namespace ZealPHP\Counter;
 
-use OpenSwoole\Atomic;
+use OpenSwoole\Atomic\Long as Atomic;
 
 /**
- * Default CounterBackend — wraps OpenSwoole\Atomic.
+ * Default CounterBackend — wraps OpenSwoole\Atomic\Long (a 64-bit SIGNED atomic).
  *
- * Each named counter gets a process-shared Atomic; the map must be
- * populated BEFORE workers fork (the shared memory segment is inherited).
- * Lock-free reads, CAS-based compareAndSet.
+ * Each named counter gets a process-shared atomic; the map must be populated
+ * BEFORE workers fork (the shared memory segment is inherited). Lock-free reads,
+ * CAS-based compareAndSet. Uses the 64-bit `Long` variant rather than the 32-bit
+ * unsigned `OpenSwoole\Atomic` so a busy long-lived counter (a global request
+ * counter, etc.) can't silently wrap at 2^32 — its range is the full signed
+ * 64-bit space.
  */
 final class AtomicBackend implements CounterBackend
 {
