@@ -2,6 +2,8 @@
 
 ZealPHP wraps OpenSwoole’s event-driven HTTP server with a framework that feels familiar to PHP developers while enabling coroutine-friendly patterns. This document highlights the moving parts that collaborate during a request, how state is isolated, and how to opt into advanced execution modes.
 
+> **Configuration via environment:** every runtime knob below can also be driven by a `ZEALPHP_*` environment variable. The complete, code-verified list (defaults, scope, and `env_flag` semantics) lives in [`docs/environment-variables.md`](environment-variables.md); the CLI-relevant subset is in [`docs/cli.md`](cli.md).
+
 ## Bootstrapping
 
 `App::init()` performs one-time initialization:
@@ -62,7 +64,7 @@ Traditional PHP scripts rely on `$_GET`, `$_POST`, `$_SERVER`, etc. ZealPHP emul
 
 ZealPHP favours a single-request-per-worker model to protect superglobals. When you need to isolate work:
 
-- `App::cgiMode('pool' | 'proc' | 'fcgi')` selects the per-request isolation strategy for legacy `public/*.php` files. `'pool'` (default) uses a **pre-spawned subprocess pool** (mod_php-style global isolation, ~1–3 ms warm — what unmodified WordPress/Drupal needs). `'proc'` forks a fresh PHP interpreter per request via `proc_open` + `cgi_worker.php` (~30–50 ms cold start; use when true fresh-process isolation is required every request). `'fcgi'` forwards to an upstream php-fpm pool via `App::fcgiAddress()` — no child process at all. See [tasks-and-concurrency.md](./tasks-and-concurrency.md) for the trade-off table.
+- `App::cgiMode('pool' | 'proc' | 'fork' | 'fcgi')` selects the per-request isolation strategy for legacy `public/*.php` files. `'pool'` (default) uses a **pre-spawned subprocess pool** (mod_php-style global isolation, ~1–3 ms warm — what unmodified WordPress/Drupal needs). `'proc'` forks a fresh PHP interpreter per request via `proc_open` + `cgi_worker.php` (~30–50 ms cold start; use when true fresh-process isolation is required every request). `'fork'` is the Apache MPM prefork runner — a fork-master forks a fresh child per request at true global scope (~1 ms fork cost, **EXPERIMENTAL**, requires `pcntl`+`posix`). `'fcgi'` forwards to an upstream php-fpm pool via `App::fcgiAddress()` — no child process at all. See [tasks-and-concurrency.md](./tasks-and-concurrency.md) for the trade-off table.
 - `coprocess()` / `coproc()` create dedicated processes with coroutine support for longer-running workloads that should not block the main worker. These helpers are only available when superglobals are enabled (`coproc` throws otherwise).
 
 ### Custom CGI backends — host any language
@@ -95,6 +97,7 @@ The supported `mode` values for `registerCgiBackend()`:
 | `mode` | What it does | Languages |
 |--------|--------------|-----------|
 | `'proc'` | `proc_open` spawns the interpreter (or reads the `#!` shebang) per request — Apache CGI semantics | any (`interpreter` optional) |
+| `'fork'` | Apache MPM prefork: fork-master forks a fresh child per request at true global scope (~1 ms). **EXPERIMENTAL** — requires `pcntl`+`posix`. | **`.php` only** |
 | `'fcgi'` | forwards to a FastCGI daemon at `address` (php-fpm, a Python/Ruby FCGI server, …) — no per-request spawn | any FastCGI/1.0 server |
 | `'pool'` | pre-spawned subprocess pool (~1–3 ms warm) | **`.php` only** — passing `'pool'` for a non-`.php` extension throws `InvalidArgumentException` |
 
@@ -258,6 +261,32 @@ App::mode(App::MODE_MIXED);              // Symfony / Laravel — real $_SESSION
 
 Pick the mode that matches your application’s profile. You can call `App::mode()` (or set the individual knobs) early in `app.php` before calling `App::init()`.
 
+## Stage 8 — true-global-scope request include (`App::globalScopeInclude()`)
+
+`App::globalScopeInclude(?bool $on = null): bool` is the capstone of the coroutine-legacy isolation stack. It only matters for legacy `require_once`-bootstrap apps (WordPress wp-admin in particular) running **in-process** under coroutine-legacy.
+
+**The problem it solves.** In coroutine-legacy the request entry runs in-process through `App::executeFile()`, whose `include $absPath;` sits lexically *inside* a static method. PHP's rule is that an included file inherits the variable scope of the line the `include` appears on — so a bare file-scope `$x = [...]` (no `global` keyword) in the entry file, or in anything it transitively `require_once`s, becomes a **method-local variable of `executeFile()`** and never enters `EG(symbol_table)`. WordPress builds `$menu` / `$submenu` / `$_wp_submenu_nopriv` exactly this way; a later `global $_wp_submenu_nopriv;` then reads the global table, finds `NULL`, and 500s with `array_keys(null)` on admin pages. The per-coroutine `$GLOBALS` isolation (Stage 2) can't help — it operates only on `EG(symbol_table)`, which a method-local CV never enters. This is a **scope** problem, orthogonal to isolation.
+
+**What it does.** When enabled, the request entry (and its whole transitive `require_once` tree) runs at **true global scope**, so bare file-scope variables and the `require_once`'d bootstrap bind into `$GLOBALS` / `EG(symbol_table)` — exactly as PHP-FPM / mod_php would. Stage 2 then snapshots/partitions those globals per coroutine across yields and clears the non-baseline keys at request end, so there's no cross-request leak or cross-coroutine clobber.
+
+**The contract (important).** The globally-scoped include does **not** see `executeFile()`'s injected `$g` or route params — those are deliberately not extracted into the global frame (they would otherwise pollute `$GLOBALS`). Stage 8 is strictly for legacy apps that read request state via **superglobals** (`$_GET` / `$_POST` / `$_SERVER` / `$_SESSION`), not via ZealPHP's `$g`. Code that wants `$g` should use a normal route handler or the standard in-process include — not the global-scope path.
+
+| Property | Value |
+|---|---|
+| Setter | `App::globalScopeInclude(?bool $on = null): bool` — no-arg getter / one-arg setter |
+| Default | **Off.** When left `null`, follows the `ZEALPHP_GLOBAL_INCLUDE` env var (`'1'` enables) |
+| Gate | **coroutine-legacy only.** Ignored in other modes |
+| Requires | **ext-zealphp 0.3.26+** (the `zealphp_require_global()` primitive). With the primitive absent, the call is a no-op and the normal in-process `include` path is used |
+| Use case | Unmodified `require_once`-bootstrap **wp-admin** in coroutine-legacy (closes the `array_keys(null)` / `$_wp_submenu_nopriv` NULL gap) |
+
+```php
+App::mode(App::MODE_COROUTINE_LEGACY);
+App::globalScopeInclude(true);   // run the request entry at true global scope
+// ... App::init(); $app->run();
+```
+
+**Honest caveat.** Stage 8 closes the *globals-scope* wall — unmodified wp-admin renders in-process under coroutine concurrency (all menu pages `200`, globals correct). It does **not** resolve the separate **mysqlnd connection-teardown** heap-safety frontier (a `$wpdb`-close-under-HOOK_ALL issue that predates Stage 8 and reproduces without it), which is tracked independently. For fully production-safe unmodified wp-admin today, `App::mode(App::MODE_LEGACY_CGI)` (process-isolated) remains the conservative choice until that frontier lands.
+
 ## Lifecycle setters (v0.2.23+) — fine-grained control with safe-by-default
 
 Historically `App::superglobals()` bundled four orthogonal decisions into one flag: storage strategy, include dispatch, coroutine auto-wrapping, and runtime I/O hooks. As of v0.2.23, each is exposed as its own fluent static setter so applications can mix-and-match for their workload (Symfony wants real `$_SESSION` but no per-include fork cost; testing wants per-request isolation without `HOOK_ALL`; etc.). Every new knob defaults to `null` and resolves to a `App::$superglobals`-derived default at `App::run()` time — apps that don't touch them see no behaviour change.
@@ -272,7 +301,7 @@ Configure these BEFORE `App::init()`. Each is a no-arg getter / one-arg setter (
 | `App::processIsolation(bool)` | `processIsolation(?bool $on = null): bool` | follows `App::$superglobals` | `App::include()` dispatch: `true` routes each `.php` file through a subprocess (strategy chosen by `cgiMode()` — default `'pool'`, ~1–3 ms warm; `'proc'` fallback is ~30–50 ms cold — true global-scope isolation, Apache mod_php parity); `false` runs in-process through `App::executeFile()`. |
 | `App::enableCoroutine(bool)` | `enableCoroutine(?bool $on = null): bool` | follows `!App::$superglobals` | OpenSwoole's `enable_coroutine` server setting — whether each inbound request is auto-wrapped in its own coroutine. `false` makes a worker handle one request at a time synchronously. |
 | `App::hookAll(bool\|int\|null)` | `hookAll($on = null): int` | follows `!App::$superglobals` (`HOOK_ALL` or `0`) | `OpenSwoole\Runtime::enableCoroutine($flags)` — process-wide PHP I/O hooks that make blocking calls (fopen, fread, curl, mysqli, ...) yield to the scheduler. Accepts `true` (HOOK_ALL), `false` (0), or an explicit `int` bitmask. **`PDO_MYSQL`/`mysqli` on mysqlnd ARE coroutinized** (mysqlnd rides `php_stream`, which the stream/TCP hooks intercept — no dedicated `HOOK_PDO`); `libpq`-based `PDO_PGSQL`, Oracle/ODBC stay blocking. Hooking makes I/O non-blocking ≠ a shared connection safe across coroutines — use a per-coroutine connection/pool. |
-| `App::cgiMode(string)` | `cgiMode(?string $mode = null): string` | `'pool'` | CGI dispatch strategy when `processIsolation()` is on. `'pool'` (default) — pre-spawned subprocess pool, ~1–3 ms warm, mod_php-style isolation; `'proc'` — fresh PHP per request via `proc_open` (~30–50 ms cold, full WordPress/Drupal compat); `'fcgi'` (v0.2.39+) — forward to a FastCGI backend via `App::fcgiAddress()` (no child process). |
+| `App::cgiMode(string)` | `cgiMode(?string $mode = null): string` | `'pool'` | CGI dispatch strategy when `processIsolation()` is on. `'pool'` (default) — pre-spawned subprocess pool, ~1–3 ms warm, mod_php-style isolation; `'proc'` — fresh PHP per request via `proc_open` (~30–50 ms cold, full WordPress/Drupal compat); `'fork'` — Apache MPM prefork runner, fresh child per request at true global scope (~1 ms fork cost, **EXPERIMENTAL**, `.php`-only, requires `pcntl`+`posix`); `'fcgi'` (v0.2.39+) — forward to a FastCGI backend via `App::fcgiAddress()` (no child process). |
 
 Worked examples — one line per setter:
 

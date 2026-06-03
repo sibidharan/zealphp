@@ -110,42 +110,67 @@ final class WSRouter
     private static int $clientRateLimitWindowSec = 60;
     /** Per-channel HMAC secret (WS-3) — null disables. Set via `setChannelHmacSecret`. */
     private static ?string $channelHmacSecret = null;
-    /** Per-worker counter struct. Surfaced via `WSRouter::stats()`. */
+    /** Per-worker counter struct. Surfaced via `WSRouter::stats()`. Lazily initialised on first access. */
     private static ?\ZealPHP\Store\Stats $stats = null;
 
+    /** Cluster-unique server identifier — defaults to `hostname:pid`. Set by `init()`. */
     private static string $serverId = '';
-    /** @var array<string, array{fd:int, conn_id:string}> client_id → {fd, conn_id} */
+
+    /**
+     * Per-worker map of locally-owned WebSocket connections.
+     * `client_id → ['fd' => int, 'conn_id' => string]`
+     *
+     * @var array<string, array{fd:int, conn_id:string}>
+     */
     private static array $localFds = [];
-    /** @var ?callable(string $clientId, int $fd, string $payload): void */
+
+    /**
+     * Inbound-routed-message handler. Receives `($clientId, $fd, $payload)`
+     * and is responsible for pushing `$payload` to the local fd.
+     * Defaults to a backpressure-aware `$server->push()` installed by `init()`.
+     *
+     * @var ?callable(string $clientId, int $fd, string $payload): void
+     */
     private static $clientSink = null;
-    /** True once init() has wired the subscriber. */
+
+    /** `true` once `init()` has wired the pub/sub subscribers and lifecycle hooks. */
     private static bool $initialized = false;
 
     // Room state — per-worker.
     //
-    // $localRoomMembership[$room][$clientId] = true   (clients in this room
-    //   that ARE locally owned by this worker — push targets when a
-    //   message arrives). Populated via presence events delivered to the
-    //   pattern subscriber.
+    // `$localRoomMembership[$room][$clientId] = true` — clients in this room
+    //   that ARE locally owned by this worker (push targets when a message
+    //   arrives). Populated via presence events from the pattern subscriber.
     //
-    // $roomMessageHandlers[$room][] = callable    (user-registered)
-    // $roomPresenceHandlers[$room][] = callable   (user-registered)
-    /** @var array<string, array<string, true>> */
+    // `$roomMessageHandlers[$room][]` = callable    (user-registered)
+    // `$roomPresenceHandlers[$room][]` = callable   (user-registered)
+
+    /**
+     * Per-worker cache of locally-owned clients by room.
+     * `room → [client_id => true]`
+     *
+     * @var array<string, array<string, true>>
+     */
     private static array $localRoomMembership = [];
-    /** @var array<string, list<callable>> */
+
+    /**
+     * User-registered message handlers per room. Each callable receives
+     * `(array $msg, string $room)`.
+     *
+     * @var array<string, list<callable>>
+     */
     private static array $roomMessageHandlers = [];
-    /** @var array<string, list<callable>> */
+
+    /**
+     * User-registered presence (join/leave) handlers per room. Each callable
+     * receives `(array $event, string $room)`.
+     *
+     * @var array<string, list<callable>>
+     */
     private static array $roomPresenceHandlers = [];
 
     /**
-     * One-time setup. Pass a server id (defaults to hostname:pid) +
-     * an optional callable that handles inbound routed messages.
-     * The default sink looks up the local fd map and pushes via
-     * `App::getServer()->push($fd, $payload)` (skipping with elog
-     * when the client isn't local OR the fd is no longer established).
-     */
-    /**
-     * Bump the per-cluster capacity caps BEFORE init() — these size the
+     * Bump the per-cluster capacity caps BEFORE `init()` — these size the
      * underlying `OpenSwoole\Table` segments allocated at master fork.
      * Defaults (4096 owners / 16384 room members) are demo-grade; production
      * deployments should size these against expected peak.

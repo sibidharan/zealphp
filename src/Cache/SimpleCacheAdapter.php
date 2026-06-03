@@ -15,14 +15,13 @@ class SimpleCacheAdapter implements CacheInterface
     public function set(string $key, mixed $value, null|int|\DateInterval $ttl = null): bool
     {
         $this->validateKey($key);
-        $ttlSeconds = $this->normalizeTtl($ttl);
 
-        if ($ttlSeconds < 0) {
+        if ($this->isExpiredTtl($ttl)) {
             Cache::del($key);
             return true;
         }
 
-        return Cache::set($key, $value, $ttlSeconds);
+        return Cache::set($key, $value, $this->normalizeTtl($ttl));
     }
 
     public function delete(string $key): bool
@@ -56,12 +55,13 @@ class SimpleCacheAdapter implements CacheInterface
     /** @param iterable<string, mixed> $values */
     public function setMultiple(iterable $values, null|int|\DateInterval $ttl = null): bool
     {
+        $expired    = $this->isExpiredTtl($ttl);
         $ttlSeconds = $this->normalizeTtl($ttl);
         $success = true;
 
         foreach ($values as $key => $value) {
             $this->validateKey($key);
-            if ($ttlSeconds < 0) {
+            if ($expired) {
                 Cache::del($key);
             } else {
                 if (!Cache::set($key, $value, $ttlSeconds)) {
@@ -96,6 +96,20 @@ class SimpleCacheAdapter implements CacheInterface
                 "Cache key \"{$key}\" contains reserved characters: {}()/\\@:"
             );
         }
+    }
+
+    /**
+     * PSR-16 distinguishes a null TTL ("use default / persist") from an explicit
+     * non-positive TTL ("expire immediately"). normalizeTtl() collapses null to 0,
+     * so we must consult the ORIGINAL $ttl to tell the two apart: null persists,
+     * an explicit 0 / negative / non-positive DateInterval expires now (#187).
+     */
+    private function isExpiredTtl(null|int|\DateInterval $ttl): bool
+    {
+        if ($ttl === null) {
+            return false;
+        }
+        return $this->normalizeTtl($ttl) <= 0;
     }
 
     private function normalizeTtl(null|int|\DateInterval $ttl): int

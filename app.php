@@ -280,9 +280,20 @@ foreach ([
     }
 }
 
-// PID file resolution — explicit env wins; otherwise default under ZEALPHP_LOG_DIR.
-$logDir  = trim((string) (getenv('ZEALPHP_LOG_DIR') ?: '/tmp/zealphp'));
-$pidFile = trim((string) (getenv('ZEALPHP_PID_FILE') ?: rtrim($logDir, '/') . '/zealphp_' . $appPort . '.pid'));
+// Default worker count when ZEALPHP_WORKERS is unset. OpenSwoole would otherwise
+// fall back to swoole_cpu_num() = the HOST cpu count, which over-spawns in a
+// cgroup-CPU-limited container (e.g. 24 workers on a 4–6 CPU Docker container)
+// and gets OOM-killed. Default to a conservative 4, capped to the cgroup quota.
+if (!isset($settings['worker_num'])) {
+    $settings['worker_num'] = \ZealPHP\default_worker_count(4);
+}
+
+// PID file resolution — explicit env wins; otherwise the shared resolver picks
+// the first writable dir (/tmp/zealphp, else a per-user fallback when it is owned
+// by another user). Same resolver App::resolvePidFile() uses, so the server's PID
+// file and `php app.php stop/status` always agree on the directory.
+$logDir  = rtrim((string) (\ZealPHP\resolve_log_dir() ?: sys_get_temp_dir()), '/');
+$pidFile = trim((string) (getenv('ZEALPHP_PID_FILE') ?: $logDir . '/zealphp_' . $appPort . '.pid'));
 if ($pidFile !== '') {
     $pidDir = dirname($pidFile);
     if ($pidDir !== '.' && !is_dir($pidDir)) {

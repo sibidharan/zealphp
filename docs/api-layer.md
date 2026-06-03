@@ -43,7 +43,10 @@ $post = function () {
 ```
 
 Behaviour of per-method dispatch:
-- **Undefined methods** return `405 Method Not Allowed` with an `Allow` header listing the supported methods plus `OPTIONS`.
+- **Undefined methods** return `405 Method Not Allowed` with an `Allow` response header listing the supported methods plus `OPTIONS`, and a machine-readable JSON body:
+  ```json
+  {"error": "method_not_allowed", "allowed": ["GET", "POST", "OPTIONS"]}
+  ```
 - **HEAD** is automatically derived from `$get` — no separate handler needed.
 - **OPTIONS** is always appended to the `Allow` list.
 
@@ -57,12 +60,14 @@ Behaviour of per-method dispatch:
 
 ZealPHP inspects the closure signature and injects arguments by name. Supported parameters:
 
-- **Route placeholders** – e.g., `{id}` maps to `$id`.
 - **Framework objects**:
   - `$app` – current `ZealPHP\ZealAPI` instance
-  - `$request` – PSR-7 request wrapper (`ZealPHP\HTTP\Request`)
-  - `$response` – PSR-7 response wrapper (`ZealPHP\HTTP\Response`)
+  - `$request` – `ZealPHP\HTTP\Request` wrapper
+  - `$response` – `ZealPHP\HTTP\Response` wrapper
   - `$server` – underlying `OpenSwoole\HTTP\Server`
+- **Any other name** – receives `null`, or the parameter's declared default value if one exists.
+
+> **ZealAPI does NOT inject route path parameters.** The URL segments `module` and `action` are consumed by `processApi()` during file resolution and are never passed as closure arguments. To read URL path values use `$request->get` (the query-string array) or `$this->_request` (the cleaned merged inputs). There is no `{id} → $id` injection in ZealAPI — that feature belongs to `$app->route()` handlers, not file-based API closures.
 
 Example (`api/response/override.php`):
 
@@ -86,8 +91,9 @@ When the closure runs, `$this` refers to `ZealPHP\ZealAPI`, which extends `REST`
 | `$this->response(string $body, int $status)` | Sets headers and writes the response with a specific status code. | `$this->response($this->json($payload), 201);` |
 | `$this->paramsExists(array $keys)` | Verifies the presence of query or form parameters; uses cleaned inputs. | `if (!$this->paramsExists(['id'])) { ... }` |
 | `$this->die(\Throwable $e)` | Standardised exception handler that logs and returns an error payload. | `throw new \RuntimeException('Unauthorized');` |
-| `$this->_request` / `$this->_response` | Raw request/response references saved by `REST`. | `log_request($this->_request);` |
-| `$this->request` / `$this->_response` | Request and response injected via the constructor, accessible for advanced use cases. | `$this->request->parent->server` |
+| `$this->_request` | Sanitised, merged inputs populated by `REST::inputs()` — GET/POST params stripped of HTML tags (or PUT payload parsed from `php://input`). This is the safe, cleaned view of request data. | `$title = $this->_request['title'] ?? null;` |
+| `$this->request` | The `ZealPHP\HTTP\Request` wrapper injected at construction — gives access to the raw OpenSwoole request and the full PSR-7 surface. | `$raw = $this->request->parent->rawContent();` |
+| `$this->_response` | The `ZealPHP\HTTP\Response` wrapper injected at construction — use for low-level response control (status, headers, streaming). | `$this->_response->status(201);` |
 
 Additional convenience:
 
@@ -134,9 +140,36 @@ $data = $this->request->parent->rawContent(); // actual OpenSwoole Request
 $serverVars = ZealPHP\G::instance()->server;  // virtualised $_SERVER
 ```
 
+## Scoping middleware to API namespaces & endpoints
+
+ZealAPI files are not individually registered routes — every `/api/*` request funnels through ZealAPI's dynamic file resolver. So there is **no separate "api middleware" system**: an `api/admin/users/delete.php` endpoint is reached by the URL `/api/admin/users/delete`, which flows through the same stack as every other request. You scope middleware by **path** with [`App::when()`](middleware-and-authentication.md), and it covers the api layer for free:
+
+```php
+App::middlewareAlias('auth', fn() => new BasicAuthMiddleware($verifier));
+
+App::when('/api/admin',  ['auth', 'admin-only']);   // every api/admin/*.php endpoint
+App::when('/api/admin/users/delete', ['audit']);    // a single api endpoint
+App::when('/api',        ['request-id']);           // the whole /api/* surface
+```
+
+`when()` matches a literal path **prefix** on segment boundaries (`/api/admin` matches `/api/admin/x` but not `/api/administrators`), or a **PCRE** if the string starts with `#`. Scopes compose in **registration order — first registered is outermost**; the chain wraps route matching + dispatch, runs *after* CORS/OPTIONS handling (so a guard never blocks a preflight), and short-circuits if a middleware returns without calling the handler.
+
+For a guard that belongs to **one file**, declare it inline — read like `$get`/`$post`, it runs **innermost** (after any `App::when` scope, closest to the handler):
+
+```php
+// api/admin/users/delete.php
+$middleware = ['confirm-token'];     // runs after App::when('/api/admin')['auth']
+
+$delete = function () {
+    return ['deleted' => true];
+};
+```
+
+Per-request order for an api endpoint: global `addMiddleware` → `App::when` scopes → the file's in-file `$middleware` → handler. Middleware references the same [`App::middlewareAlias()`](middleware-and-authentication.md) registry as routes. See the [middleware guide](middleware-and-authentication.md) for the full model and the coroutine-safety status.
+
 ## Authentication and Authorisation
 
-APIs commonly apply authentication middleware (see [middleware-and-authentication.md](middleware-and-authentication.md)). Because ZealPHP routes `/api/*` through `nsPathRoute`, you can register targeted middleware or explicit routes above the implicit ones:
+APIs commonly apply authentication middleware (see [middleware-and-authentication.md](middleware-and-authentication.md)) — most often a path-scoped `App::when('/api', ['auth'])` (above) over the whole surface or a subtree. You can also register an explicit route above the implicit ones for a bespoke flow:
 
 ```php
 $app->nsRoute('api', '/secure/{module}/{action}', function ($module, $action) {

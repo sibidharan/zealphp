@@ -26,6 +26,14 @@ use ZealPHP\RequestContext;
  */
 class MergeSlashesMiddleware implements MiddlewareInterface
 {
+    /**
+     * Collapse consecutive slashes in the request path and pass the request on.
+     *
+     * Mutates `$g->server['REQUEST_URI']` in place (path portion only; query
+     * string is left untouched) so the router sees the normalised path. The
+     * PSR-7 `$request` object is passed to the next handler unchanged — routing
+     * reads `REQUEST_URI` directly.
+     */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $g = RequestContext::instance();

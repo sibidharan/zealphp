@@ -242,6 +242,12 @@ class Store
     public static function make(string $name, int $maxRows = 1024, array $columns = [], array $opts = []): ?Table
     {
         $backend = self::defaultBackend();
+        // Route hot-reload re-includes route/*.php (which often call Store::make).
+        // A Store table is allocated once at boot (shared memory, master-created);
+        // do NOT recreate it on reload — return the existing one.
+        if (\ZealPHP\App::$reloading) {
+            return $backend instanceof TableBackend ? $backend->rawTable($name) : null;
+        }
         $backend->make($name, $maxRows, $columns, $opts);
         return $backend instanceof TableBackend ? $backend->rawTable($name) : null;
     }

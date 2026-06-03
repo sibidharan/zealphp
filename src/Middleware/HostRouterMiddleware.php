@@ -19,21 +19,26 @@ use ZealPHP\RequestContext;
  * array → JSON, int → status code).
  *
  * nginx equivalent:
- *   `server { server_name a.com; location / { ... } }`
- *   `server { server_name b.com; location / { ... } }`
+ *
+ * ```
+ * server { server_name a.com; location / { ... } }
+ * server { server_name b.com; location / { ... } }
+ * ```
  *
  * If no host matches and no `'*'` (catch-all) handler is registered, the
  * middleware **passes through** to the next handler. This lets you mix
  * host-routed and host-agnostic apps inside one ZealPHP instance:
  *
- *   `$app->addMiddleware(new \ZealPHP\Middleware\HostRouterMiddleware([`
- *       `'docs.example.com'  => fn() => 'docs landing page',`
- *       `'api.example.com'   => fn() => ['status' => 'ok'],`
- *       `'*.example.com'     => fn() => 'subdomain fallback',`
- *       `'www.*'             => fn() => 'trailing-wildcard catch',`
- *       `'~^admin\..+'       => fn() => 'regex match',`
- *       `'*'                 => fn() => 'default site',`
- *   `]));`
+ * ```php
+ * $app->addMiddleware(new \ZealPHP\Middleware\HostRouterMiddleware([
+ *     'docs.example.com'  => fn() => 'docs landing page',
+ *     'api.example.com'   => fn() => ['status' => 'ok'],
+ *     '*.example.com'     => fn() => 'subdomain fallback',
+ *     'www.*'             => fn() => 'trailing-wildcard catch',
+ *     '~^admin\..+'       => fn() => 'regex match',
+ *     '*'                 => fn() => 'default site',
+ * ]));
+ * ```
  *
  * Host matching is case-insensitive and ignores port (`example.com:8080`
  * matches the rule `example.com`). IPv6 literals (`[::1]:80`) are parsed

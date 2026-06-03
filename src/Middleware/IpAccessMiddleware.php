@@ -97,13 +97,32 @@ class IpAccessMiddleware implements MiddlewareInterface
         $g = RequestContext::instance();
         $ip = (string)($g->server['REMOTE_ADDR'] ?? '');
         if ($ip !== '') {
-            return $ip;
+            return $this->normalizeIp($ip);
         }
         // Fallback for PSR-7 test contexts where REMOTE_ADDR isn't populated
         // on $g — read off the ServerRequest's server params.
         $params = $request->getServerParams();
         $remote = $params['REMOTE_ADDR'] ?? '';
-        return is_scalar($remote) ? (string)$remote : '';
+        return is_scalar($remote) ? $this->normalizeIp((string)$remote) : '';
+    }
+
+    /**
+     * Collapse an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) to its IPv4 form.
+     * On a dual-stack listener the kernel presents IPv4 peers in this mapped
+     * form, so without this an IPv4 allow/deny rule would silently never match
+     * the peer — a deny-list bypass. Non-mapped addresses are returned as-is.
+     */
+    private function normalizeIp(string $ip): string
+    {
+        $bin = @inet_pton($ip);
+        if ($bin !== false && strlen($bin) === 16
+            && str_starts_with($bin, "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff")) {
+            $v4 = @inet_ntop(substr($bin, 12));
+            if ($v4 !== false) {
+                return $v4;
+            }
+        }
+        return $ip;
     }
 
     /**
@@ -115,7 +134,7 @@ class IpAccessMiddleware implements MiddlewareInterface
             return false;
         }
         foreach ($rules as $rule) {
-            if ($rule === '*' || $rule === $ip) {
+            if ($rule === '*' || $this->normalizeIp($rule) === $ip) {
                 return true;
             }
             if (str_contains($rule, '/') && $this->cidrMatch($ip, $rule)) {
@@ -131,7 +150,7 @@ class IpAccessMiddleware implements MiddlewareInterface
         $bits = (int)$bits;
 
         $ipBin     = @inet_pton($ip);
-        $subnetBin = @inet_pton($subnet);
+        $subnetBin = @inet_pton($this->normalizeIp($subnet));
         if ($ipBin === false || $subnetBin === false) {
             return false;
         }

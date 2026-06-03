@@ -4,10 +4,11 @@ declare(strict_types=1);
 namespace ZealPHP\Tests\Unit;
 
 use ZealPHP\App;
+use ZealPHP\CLI;
 use ZealPHP\Tests\TestCase;
 
 /**
- * In-process coverage for App::parseCliArgs() and the PID-file helpers.
+ * In-process coverage for CLI::parseCliArgs() and the PID-file helpers.
  *
  * parseCliArgs() reads $_SERVER['argv'] and exit()s on stop/status/logs/help.
  * Those exit paths can't run inside PHPUnit (they'd kill the test process), so
@@ -51,7 +52,7 @@ class AppCliArgsTest extends TestCase
         $_SERVER['argv'] = $argv;
         // Make sure the resolved pid file for whatever port doesn't exist so the
         // "already running" branch is skipped and start returns overrides.
-        $m = new \ReflectionMethod(App::class, 'parseCliArgs');
+        $m = new \ReflectionMethod(CLI::class, 'parseCliArgs');
         $m->setAccessible(true);
         /** @var array<string,mixed> $out */
         $out = $m->invoke(null);
@@ -146,14 +147,14 @@ class AppCliArgsTest extends TestCase
 
     public function testResolvePidFileExplicitPidFileWins(): void
     {
-        $m = new \ReflectionMethod(App::class, 'resolvePidFile');
+        $m = new \ReflectionMethod(CLI::class, 'resolvePidFile');
         $m->setAccessible(true);
         $this->assertSame('/custom/path.pid', $m->invoke(null, ['pid_file' => '/custom/path.pid']));
     }
 
     public function testResolvePidFilePerPortConvention(): void
     {
-        $m = new \ReflectionMethod(App::class, 'resolvePidFile');
+        $m = new \ReflectionMethod(CLI::class, 'resolvePidFile');
         $m->setAccessible(true);
         $resolved = $m->invoke(null, ['port' => 9876]);
         $this->assertStringContainsString('zealphp_9876.pid', (string) $resolved);
@@ -161,7 +162,7 @@ class AppCliArgsTest extends TestCase
 
     public function testExtractPortFromPidFileParsesConvention(): void
     {
-        $m = new \ReflectionMethod(App::class, 'extractPortFromPidFile');
+        $m = new \ReflectionMethod(CLI::class, 'extractPortFromPidFile');
         $m->setAccessible(true);
         $this->assertSame(8080, $m->invoke(null, '/tmp/zealphp/zealphp_8080.pid'));
         $this->assertSame(9501, $m->invoke(null, '/var/run/zealphp_9501.pid'));
@@ -169,7 +170,7 @@ class AppCliArgsTest extends TestCase
 
     public function testExtractPortFromPidFileReturnsZeroForNonConvention(): void
     {
-        $m = new \ReflectionMethod(App::class, 'extractPortFromPidFile');
+        $m = new \ReflectionMethod(CLI::class, 'extractPortFromPidFile');
         $m->setAccessible(true);
         $this->assertSame(0, $m->invoke(null, '/custom/server.pid'));
     }

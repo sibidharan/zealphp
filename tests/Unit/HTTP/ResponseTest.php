@@ -773,6 +773,25 @@ class ResponseTest extends TestCase
         $this->assertSame(['status' => 'unsatisfiable', 'ranges' => []], ZResponse::parseRange('bytes=100-', 100));
     }
 
+    public function testParseRangeMultiRangeSkipsUnsatisfiableSpec(): void
+    {
+        // #185: a multi-range header with one out-of-bounds spec keeps the
+        // satisfiable spec(s) instead of 416-ing the whole request (RFC 7233 §4.4).
+        $this->assertSame(
+            ['status' => 'ok', 'ranges' => [[0, 10]]],
+            ZResponse::parseRange('bytes=0-10,9999-10000', 100)
+        );
+    }
+
+    public function testParseRangeMultiRangeAllUnsatisfiable(): void
+    {
+        // Only when EVERY spec is unsatisfiable do we 416 (the post-loop check).
+        $this->assertSame(
+            ['status' => 'unsatisfiable', 'ranges' => []],
+            ZResponse::parseRange('bytes=500-600,9999-10000', 100)
+        );
+    }
+
     public function testParseRangeNonBytesUnitIgnored(): void
     {
         $this->assertSame(['status' => 'ignore', 'ranges' => []], ZResponse::parseRange('items=0-9', 100));

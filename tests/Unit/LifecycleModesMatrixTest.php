@@ -80,8 +80,9 @@ use ZealPHP\App;
  *
  * cgi_mode (the dispatch strategy when processIsolation=true) is independent
  * of the four lifecycle knobs above. Default is 'pool' — the FPM-style warm
- * worker pool. Fork mode was removed in v0.2.41+; 'proc', 'pool', and 'fcgi'
- * are the three valid values. cgi_mode is meaningless when processIsolation
+ * worker pool. The four valid values are 'pool', 'proc', 'fork' (the Apache
+ * MPM prefork runner, re-introduced after its v0.2.41 removal), and 'fcgi'.
+ * cgi_mode is meaningless when processIsolation
  * is false (App::include() never dispatches; runs inline).
  *
  * This test file pins every cell of the matrix + the two refused combos +
@@ -484,19 +485,20 @@ final class LifecycleModesMatrixTest extends TestCase
     }
 
     /**
-     * The three valid cgi_mode values. Fork was removed in v0.2.41+; anything
-     * else throws InvalidArgumentException. Test the setter accepts each
-     * valid value and rejects fork.
+     * The four valid cgi_mode values. 'fork' was removed in v0.2.41 and then
+     * re-introduced as the Apache MPM prefork runner (cgiMode('fork'),
+     * src/fork_master.php + src/CGI/ForkPool.php). The setter accepts each
+     * valid value; anything else throws InvalidArgumentException.
      */
-    public function testCgiModeAcceptsThreeValidValuesRejectsFork(): void
+    public function testCgiModeAcceptsFourValidValuesRejectsUnknown(): void
     {
-        foreach (['pool', 'proc', 'fcgi'] as $mode) {
+        foreach (['pool', 'proc', 'fork', 'fcgi'] as $mode) {
             App::cgiMode($mode);
             $this->assertSame($mode, App::cgiMode(), "cgiMode($mode) is valid");
         }
 
         $this->expectException(\InvalidArgumentException::class);
-        App::cgiMode('fork');  // removed in v0.2.41 — must throw
+        App::cgiMode('cgi');  // not a real mode — must throw
     }
 
     /**

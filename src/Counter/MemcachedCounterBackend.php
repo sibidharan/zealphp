@@ -49,6 +49,7 @@ final class MemcachedCounterBackend implements CounterBackend
         }
     }
 
+    /** Return the current integer value of counter `$name`, or `0` if the key does not exist. */
     public function get(string $name): int
     {
         /** @var mixed $r */
@@ -56,11 +57,16 @@ final class MemcachedCounterBackend implements CounterBackend
         return is_numeric($r) ? (int) $r : 0;
     }
 
+    /** Unconditionally set counter `$name` to `$value`. Returns `true` on success. */
     public function set(string $name, int $value): bool
     {
         return $this->client->set($this->key($name), $value);
     }
 
+    /**
+     * Set counter `$name` to `$value` only when the key does not already exist
+     * (`Memcached::add()` SETNX semantics). Returns `false` when the key already exists.
+     */
     public function setIfAbsent(string $name, int $value): bool
     {
         // Memcached::add only sets when the key doesn't exist — perfect
@@ -68,6 +74,10 @@ final class MemcachedCounterBackend implements CounterBackend
         return $this->client->add($this->key($name), $value);
     }
 
+    /**
+     * Atomically increment counter `$name` by `$by` and return the new value.
+     * Lazily initialises the key to `0` on first call (two round-trips cold, one hot).
+     */
     public function incr(string $name, int $by = 1): int
     {
         $k = $this->key($name);
@@ -84,6 +94,10 @@ final class MemcachedCounterBackend implements CounterBackend
         return is_numeric($r) ? (int) $r : 0;
     }
 
+    /**
+     * Atomically decrement counter `$name` by `$by` and return the new value.
+     * Lazily initialises the key to `0` on first call (same two-round-trip cold path as `incr()`).
+     */
     public function decr(string $name, int $by = 1): int
     {
         $k = $this->key($name);
@@ -94,6 +108,10 @@ final class MemcachedCounterBackend implements CounterBackend
         return is_numeric($r) ? (int) $r : 0;
     }
 
+    /**
+     * Atomically compare-and-swap counter `$name` using `Memcached::gets()` + `cas()`.
+     * Returns `false` when the current value differs from `$expected` or the CAS token race is lost.
+     */
     public function compareAndSet(string $name, int $expected, int $new): bool
     {
         $k = $this->key($name);
@@ -106,6 +124,11 @@ final class MemcachedCounterBackend implements CounterBackend
         return $this->client->cas($cas, $k, $new);
     }
 
+    /**
+     * Increment `$name` by `$by` only when the result would not exceed `$maxBound`.
+     * Implemented as a CAS retry loop (max 100 attempts). Returns the new value, or
+     * `null` when the bound would be exceeded or contention exhausted all attempts.
+     */
     public function incrBounded(string $name, int $by, int $maxBound): ?int
     {
         // CAS retry loop. Bounded at 100 attempts to avoid infinite spin
@@ -131,6 +154,11 @@ final class MemcachedCounterBackend implements CounterBackend
         return null;
     }
 
+    /**
+     * Set a TTL of `$seconds` on counter `$name` via `Memcached::touch()`.
+     * Returns `false` when the key does not exist. Note: `incr()`/`decr()` do not
+     * accept a TTL parameter in the Memcached protocol, so TTL applies only on first creation.
+     */
     public function expire(string $name, int $seconds): bool
     {
         // Memcached::touch sets a new TTL on an existing key. Returns
@@ -139,6 +167,13 @@ final class MemcachedCounterBackend implements CounterBackend
         return $this->client->touch($this->key($name), $seconds);
     }
 
+    /**
+     * Increment multiple counters sequentially. Memcached has no native multi-increment;
+     * for high-throughput bulk increments prefer the Redis backend.
+     *
+     * @param  array<string, int> $deltas  Counter name → increment amount.
+     * @return array<string, int> Counter name → new value after increment.
+     */
     public function mincr(array $deltas): array
     {
         // Sequential — Memcached has no native MINCR. Pipelining wouldn't
@@ -151,11 +186,13 @@ final class MemcachedCounterBackend implements CounterBackend
         return $out;
     }
 
+    /** Reset counter `$name` to `0`. Creates the key if it does not exist. */
     public function reset(string $name): void
     {
         $this->client->set($this->key($name), 0);
     }
 
+    /** Build the namespaced Memcached key for counter `$name` using the configured `$prefix`. */
     private function key(string $name): string
     {
         return $this->prefix . ':counter:' . $name;

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace ZealPHP;
 
 /**
- * Type-safe enum for `App::cgiMode()`. The three strategies for
+ * Type-safe enum for `App::cgiMode()`. The four strategies for
  * dispatching CGI requests (`.php` files in legacy-CGI mode, and
  * any registered non-`.php` extension).
  *
@@ -16,6 +16,7 @@ enum CgiMode: string
 {
     case Pool = 'pool';   // Native FCGI-style worker pool — pre-spawned PHP subprocesses, mod_php-style isolation, ~1-3ms warm. DEFAULT.
     case Proc = 'proc';   // proc_open subprocess per request — recursion-safe; ~30-50ms cold start per request. Fallback for the rare case where you want fresh-process semantics WITHOUT a pre-spawned pool.
+    case Fork = 'fork';   // Apache MPM prefork — a fork-master forks a FRESH child per request at TRUE global scope (~1ms). Unmodified-WordPress correctness (no class redeclare) at fork cost, not proc cold-start. EXPERIMENTAL (pcntl+posix).
     case Fcgi = 'fcgi';   // FastCGI to an upstream pool (php-fpm, hhvm, roadrunner). Deployment-mode: front an existing FPM pool.
 
     public static function coerce(self|string $mode): self
@@ -23,7 +24,7 @@ enum CgiMode: string
         if ($mode instanceof self) { return $mode; }
         $enum = self::tryFrom(strtolower($mode));
         if ($enum === null) {
-            throw new \InvalidArgumentException("Unknown CgiMode: '$mode' (use 'pool', 'proc', or 'fcgi')");
+            throw new \InvalidArgumentException("Unknown CgiMode: '$mode' (use 'pool', 'proc', 'fork', or 'fcgi')");
         }
         return $enum;
     }

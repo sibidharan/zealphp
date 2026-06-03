@@ -138,6 +138,37 @@ class SimpleCacheAdapterTest extends TestCase
         $this->assertFalse($this->adapter->has('alive'));
     }
 
+    public function testZeroTtlExpiresImmediately(): void
+    {
+        // PSR-16: an explicit TTL of 0 expires the item immediately (#187).
+        $this->adapter->set('zero', 'gone', 0);
+        $this->assertFalse($this->adapter->has('zero'));
+        $this->assertNull($this->adapter->get('zero'));
+    }
+
+    public function testNullTtlPersists(): void
+    {
+        // PSR-16: a null TTL means "use default / persist", NOT expire (#187) —
+        // normalizeTtl(null) collapses to 0, so this must NOT be treated as 0-ttl.
+        $this->adapter->set('persist', 'kept', null);
+        $this->assertTrue($this->adapter->has('persist'));
+        $this->assertSame('kept', $this->adapter->get('persist'));
+    }
+
+    public function testSetMultipleZeroTtlExpiresAll(): void
+    {
+        $this->adapter->setMultiple(['mz_a' => 1, 'mz_b' => 2], 0);
+        $this->assertFalse($this->adapter->has('mz_a'));
+        $this->assertFalse($this->adapter->has('mz_b'));
+    }
+
+    public function testSetMultipleNullTtlPersists(): void
+    {
+        $this->adapter->setMultiple(['mn_c' => 3, 'mn_d' => 4], null);
+        $this->assertSame(3, $this->adapter->get('mn_c'));
+        $this->assertSame(4, $this->adapter->get('mn_d'));
+    }
+
     public function testInvalidKeyThrows(): void
     {
         $this->expectException(InvalidCacheKeyException::class);

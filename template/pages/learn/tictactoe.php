@@ -120,34 +120,55 @@ Store::make('ws_tictactoe_clients', 4096, [
       <code>G::instance()-&gt;session</code>) and pick a seat:
     </p>
     <p>
-      Two of the helpers called below — <code>ttt_sanitize_room()</code> and
-      <code>ttt_broadcast_state_with()</code> — are defined in <code>route/learn.php</code>, so you
-      don&rsquo;t author those separately. The rest (<code>seed_new_room()</code>,
-      <code>claim_x_seat()</code>, <code>claim_o_seat()</code>, <code>count_viewers()</code>) are
-      illustrative stand-ins for logic the real handler inlines — name them however you like; the
-      point is the <code>Store</code> read/modify/write shape, not the exact helper names.
+      The helpers called below — <code>TicTacToe::ttt_sanitize_room()</code> and
+      <code>TicTacToe::ttt_broadcast_state()</code> — are <code>public static</code> methods on
+      <code>ZealPHP\Learn\TicTacToe</code> (<code>src/Learn/TicTacToe.php</code>), pulled in with one
+      <code>use</code> at the top of your route file. Keeping them in a <code>src/</code> class is what
+      lets <code>route/learn.php</code> stay function-free and hot-reloadable. Everything else —
+      seeding a fresh room row and claiming a seat — is inlined right in the handler as a plain
+      <code>Store</code> read/modify/write, exactly as the real <code>/ws/tictactoe</code> handler does.
     </p>
-    <pre><code class="language-php">onOpen: function ($server, $request) {
+    <pre><code class="language-php">use ZealPHP\Learn\TicTacToe;   // helpers live in a src/ class — route files stay thin
+
+onOpen: function ($server, $request) {
+    // Auth: G::instance() exposes the current request's session
     $g        = G::instance();
     $userId   = (int)    ($g->session['user_id']  ?? 0);
     $username = (string) ($g->session['username'] ?? '');
     if (!$userId || $username === '') {
         $server->disconnect($request->fd, 1008, 'auth_required'); return;
     }
-    $room = ttt_sanitize_room((string)($request->get['room'] ?? ''));
+    $room = TicTacToe::ttt_sanitize_room((string)($request->get['room'] ?? ''));
     if ($room === '') { $server->disconnect($request->fd, 1008, 'no_room'); return; }
     $viewMode = ((string)($request->get['view'] ?? '')) === '1';
 
-    $row = Store::get('ws_tictactoe_rooms', $room) ?? seed_new_room($room);
-
-    $symbol = 'S';                                       // default: spectator
-    if (!$viewMode) {
-        if ((int)$row['px_fd'] === 0)      { $symbol = 'X'; claim_x_seat($room, $request->fd, $username); }
-        elseif ((int)$row['po_fd'] === 0)  { $symbol = 'O'; claim_o_seat($room, $request->fd, $username); }
+    // Look up or create the room row (seed inline — no helper needed).
+    $row = Store::get('ws_tictactoe_rooms', $room);
+    if (!$row) {
+        Store::set('ws_tictactoe_rooms', $room, [
+            'board'  => '_________', 'turn' => 'X', 'winner' => '',
+            'px_fd'  => 0, 'po_fd' => 0, 'px_name' => '', 'po_name' => '',
+            'starter'=> 'X', 'rounds' => 0, 'x_wins' => 0, 'o_wins' => 0, 'draws' => 0,
+        ]);
+        $row = Store::get('ws_tictactoe_rooms', $room);
     }
-    Store::set('ws_tictactoe_clients', (string)$request->fd, compact('room','username','symbol') + ['joined' => time()]);
+
+    // Assign seat. First fd → X, second → O, rest → spectator.
+    $symbol = 'S';
+    if (!$viewMode) {
+        if ((int)$row['px_fd'] === 0) {
+            $symbol = 'X';
+            Store::set('ws_tictactoe_rooms', $room, ['px_fd' => $request->fd, 'px_name' => $username]);
+        } elseif ((int)$row['po_fd'] === 0) {
+            $symbol = 'O';
+            Store::set('ws_tictactoe_rooms', $room, ['po_fd' => $request->fd, 'po_name' => $username]);
+        }
+    }
+    Store::set('ws_tictactoe_clients', (string)$request->fd, [
+        'room' => $room, 'name' => $username, 'symbol' => $symbol, 'joined' => time(),
+    ]);
     $server->push($request->fd, json_encode(['type'=>'welcome', 'symbol'=>$symbol, 'room'=>$room]));
-    ttt_broadcast_state($room);
+    TicTacToe::ttt_broadcast_state($room);
 }</code></pre>
     <p>
       First fd in a room takes X; second takes O; everyone after gets <code>'S'</code> (spectator).
@@ -178,7 +199,7 @@ Store::make('ws_tictactoe_clients', 4096, [
         if ($board[$cell] !== '_')              return;   // cell occupied
 
         $board[$cell] = $me['symbol'];
-        [$winSymbol, $winLine] = ttt_detect_winner($board);
+        [$winSymbol, $winLine] = TicTacToe::ttt_detect_winner($board);
 
         $update = ['board' => $board];
         if ($winSymbol)                  $update += ['winner'=>$winSymbol, 'turn'=>''];
@@ -186,20 +207,23 @@ Store::make('ws_tictactoe_clients', 4096, [
         else                             $update += ['turn'=> $row['turn']==='X' ? 'O' : 'X'];
 
         Store::set('ws_tictactoe_rooms', $me['room'], $update);
-        ttt_broadcast_state_with($me['room'], $winLine ? ['win_line'=>$winLine] : []);
+        TicTacToe::ttt_broadcast_state_with($me['room'], $winLine ? ['win_line'=>$winLine] : []);
     }
 }</code></pre>
     <p>
       Win detection is eight three-in-a-row checks — three rows, three columns, two diagonals. Cheap
       to compute on every move, no need for clever incremental algorithms at this scale.
     </p>
-    <pre><code class="language-php">function ttt_detect_winner(string $board): array {
-    $lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
-    foreach ($lines as [$a, $b, $c]) {
-        $s = $board[$a];
-        if ($s !== '_' && $s === $board[$b] && $s === $board[$c]) return [$s, [$a, $b, $c]];
+    <pre><code class="language-php">// src/Learn/TicTacToe.php — helpers live in a src/ class, route files stay thin
+class TicTacToe {
+    public static function ttt_detect_winner(string $board): array {
+        $lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+        foreach ($lines as [$a, $b, $c]) {
+            $s = $board[$a];
+            if ($s !== '_' && $s === $board[$b] && $s === $board[$c]) return [$s, [$a, $b, $c]];
+        }
+        return [null, null];
     }
-    return [null, null];
 }</code></pre>
 
     <h2 id="step-broadcast">5. Broadcasting — fan-out to the room</h2>
@@ -208,25 +232,33 @@ Store::make('ws_tictactoe_clients', 4096, [
       iteration is the same loop you saw in the WebSocket lesson — the only addition is filtering by
       <code>room</code>:
     </p>
-    <pre><code class="language-php">function ttt_broadcast_state(string $room): void {
-    $server = App::getServer();
-    $row    = Store::get('ws_tictactoe_rooms', $room);  if (!$row) return;
-    $payload = json_encode([
-        'type'    => 'state',
-        'board'   => $row['board'],
-        'turn'    => $row['turn'],
-        'winner'  => $row['winner'],
-        'rounds'  => (int)$row['rounds'],
-        'players' => [
-            'X' => ['name' => $row['px_name'], 'connected' => (int)$row['px_fd'] > 0],
-            'O' => ['name' => $row['po_name'], 'connected' => (int)$row['po_fd'] > 0],
-        ],
-        'viewers' => count_viewers($room),
-    ]);
-    foreach (Store::table('ws_tictactoe_clients') as $fd =&gt; $c) {
-        if ($c['room'] !== $room) continue;
-        $fd = (int)$fd;
-        if ($server->isEstablished($fd)) $server->push($fd, $payload);
+    <pre><code class="language-php">// src/Learn/TicTacToe.php — helpers live in a src/ class, route files stay thin
+class TicTacToe {
+    public static function ttt_broadcast_state(string $room): void {
+        $server = App::getServer();
+        $row    = Store::get('ws_tictactoe_rooms', $room);  if (!$row) return;
+        // Count viewers (everyone with symbol 'S') inline — no separate helper.
+        $viewers = 0;
+        foreach (Store::table('ws_tictactoe_clients') as $_ =&gt; $c) {
+            if (($c['room'] ?? '') === $room && ($c['symbol'] ?? '') === 'S') $viewers++;
+        }
+        $payload = json_encode([
+            'type'    => 'state',
+            'board'   => $row['board'],
+            'turn'    => $row['turn'],
+            'winner'  => $row['winner'],
+            'rounds'  => (int)$row['rounds'],
+            'players' => [
+                'X' => ['name' => $row['px_name'], 'connected' => (int)$row['px_fd'] > 0],
+                'O' => ['name' => $row['po_name'], 'connected' => (int)$row['po_fd'] > 0],
+            ],
+            'viewers' => $viewers,
+        ]);
+        foreach (Store::table('ws_tictactoe_clients') as $fd =&gt; $c) {
+            if ($c['room'] !== $room) continue;
+            $fd = (int)$fd;
+            if ($server->isEstablished($fd)) $server->push($fd, $payload);
+        }
     }
 }</code></pre>
     <p>
@@ -252,7 +284,7 @@ Store::make('ws_tictactoe_clients', 4096, [
     if ((int)$row['px_fd'] === $fd) $update['px_fd'] = 0;
     if ((int)$row['po_fd'] === $fd) $update['po_fd'] = 0;
     if ($update) Store::set('ws_tictactoe_rooms', $me['room'], $update);
-    ttt_broadcast_state($me['room']);  // tell the room someone left
+    TicTacToe::ttt_broadcast_state($me['room']);  // tell the room someone left
 }</code></pre>
     <p>
       Reset (<code>{"type":"reset"}</code>) is also a socket message: only seated players can send
@@ -308,7 +340,7 @@ Store::set('ws_tictactoe_rooms', $room, $update);   // one write</code></pre>
       in the room receive the new score the moment the game ends — no separate message type, no
       separate <code>onMessage</code> branch on the client:
     </p>
-    <pre><code class="language-php">// inside ttt_broadcast_state(), the payload gets one extra key
+    <pre><code class="language-php">// inside TicTacToe::ttt_broadcast_state(), the payload gets one extra key
 'score' =&gt; [
     'X'    =&gt; (int) $row['x_wins'],
     'O'    =&gt; (int) $row['o_wins'],
@@ -326,7 +358,7 @@ Store::set('ws_tictactoe_rooms', $room, $update);   // one write</code></pre>
     Store::set('ws_tictactoe_rooms', $room, [
         'x_wins' =&gt; 0, 'o_wins' =&gt; 0, 'draws' =&gt; 0, 'rounds' =&gt; 0,
     ]);
-    ttt_broadcast_state($room);
+    TicTacToe::ttt_broadcast_state($room);
 }</code></pre>
 
     <?php App::render('/components/_callout', [
@@ -363,7 +395,7 @@ Store::set('ws_tictactoe_rooms', $room, $update);   // one write</code></pre>
       'id'       => 'ttt1',
       'question' => 'A third tab joins room "alpha-1" while two players are already seated. What happens?',
       'correct'  => 'b',
-      'explain'  => 'The first two fds got the X and O seats. The third fd finds both seats taken (px_fd != 0 and po_fd != 0), so onOpen assigns symbol = "S". The client table records that fd as a spectator; ttt_broadcast_state still pushes to it like any other fd in the room, so the third tab sees the live game. <code>?view=1</code> on the URL forces this even when seats are open — useful for casting.',
+      'explain'  => 'The first two fds got the X and O seats. The third fd finds both seats taken (px_fd != 0 and po_fd != 0), so onOpen assigns symbol = "S". The client table records that fd as a spectator; TicTacToe::ttt_broadcast_state() still pushes to it like any other fd in the room, so the third tab sees the live game. <code>?view=1</code> on the URL forces this even when seats are open — useful for casting.',
       'options'  => [
         'a' => 'The connection is rejected because the room is full',
         'b' => 'They join as a viewer — same fan-out, no ability to move or reset',

@@ -117,8 +117,13 @@ distinct issues were root-caused (see
 Works at the repo root (`App::documentRoot('/app/wordpress'`), `wp-config.php`
 with DB creds). The perf-VM reference runs WordPress in coroutine mode with
 `App::hookAll(0)` (see "blocking I/O" below). Concurrent WordPress also wants a
-per-coroutine DB connection (one `$wpdb` per request) — `cgiMode('pool')` is the
-drop-in fallback until the connection-pool lands.
+per-coroutine DB connection (one `$wpdb` per request) — two subprocess-pool
+fallbacks are available:
+
+- **`App::cgiMode('pool')`** (default) — pre-spawned worker pool, ~1–3 ms warm, recycled per `cgiPoolMaxRequests`. The recommended stable choice.
+- **`App::cgiMode('fork')`** *(experimental)* — Apache MPM prefork style: a fork-master forks a FRESH child per request (~1 ms fork cost, no proc_open cold-start). Gives true global-scope isolation (no "Cannot redeclare class") because each child exits after one request. Requires `pcntl` + `posix` in the PHP build. Reachable via `App::cgiMode('fork')` only — there is no `App::mode()` preset for it. Concurrency is bounded by `App::$cgi_fork_max_concurrent` (default 16); requests beyond that cap return 503.
+
+To run **unmodified wp-admin in-process under coroutine-legacy** (rather than a subprocess pool), enable Stage 8 — `App::globalScopeInclude(true)` — so the `require_once` bootstrap's bare file-scope variables (`$menu`, `$submenu`, `$_wp_submenu_nopriv`, …) bind into `$GLOBALS` instead of becoming `executeFile()`-local. Without it, admin pages 500 with `array_keys(null)`. Stage 8 is coroutine-legacy-only, off by default (follows `ZEALPHP_GLOBAL_INCLUDE`), and requires **ext-zealphp 0.3.26+**; the globally-scoped include reads request state via superglobals, not `$g`. It closes the *globals-scope* wall but not the separate mysqlnd connection-teardown frontier, so `App::mode(App::MODE_LEGACY_CGI)` stays the conservative choice for fully production-safe wp-admin. See [runtime-architecture.md § Stage 8](runtime-architecture.md#stage-8--true-global-scope-request-include-appglobalscopeinclude).
 
 ---
 

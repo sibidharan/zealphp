@@ -85,8 +85,10 @@ final class CgiBackendResolveTest extends TestCase
 
     public function testScriptAliasDefaultsModeToProc(): void
     {
-        App::cgiScriptAlias('/bin', []);
-        $this->assertSame('proc', App::$cgi_script_aliases['/bin']['mode']);
+        // Use a URL prefix that is NOT a real directory on disk — #155 added a
+        // guard rejecting filesystem paths (e.g. the literal '/bin') as aliases.
+        App::cgiScriptAlias('/scripts', []);
+        $this->assertSame('proc', App::$cgi_script_aliases['/scripts']['mode']);
     }
 
     /**

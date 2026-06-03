@@ -11,7 +11,11 @@ zealphp/
 ├── template/
 ├── task/
 ├── src/
+├── ext/
+├── tests/
 ├── examples/
+├── scripts/
+├── deploy/
 ├── vendor/
 ├── docs/
 └── ...
@@ -43,6 +47,16 @@ zealphp/
   - `utils.php` – Helper functions: `coproc()` (background-process spawner), logging utilities (`elog()`, `zlog()`, `access_log()`), and stack-trace helpers (`jTraceEx()`).
 
 - **`vendor/`** – Composer-managed dependencies and autoload metadata. Do not edit manually.
+
+## Extensions and Testing
+
+- **`ext/`** – C source for **ext-zealphp** (`ext/zealphp/`), the optional PHP extension that provides per-coroutine isolation of superglobals, `$GLOBALS`, function statics, `require_once` re-execution, and per-request class/function-static resets. Built with `phpize && ./configure && make`. Required for `App::mode(App::MODE_COROUTINE_LEGACY)`. Install via `pie install sibidharan/ext-zealphp` or `sudo bash setup.sh`.
+- **`tests/`** – PHPUnit 11 test suite. `tests/Unit/` runs without a server; `tests/Integration/` requires `php app.php` on `:8080` (or `ZEALPHP_TEST_PORT`). Run with `./vendor/bin/phpunit --testdox`. See [CLAUDE.md](../CLAUDE.md) for the full testing matrix.
+
+## Scripts and Deployment
+
+- **`scripts/`** – Helper shell scripts: `bench.sh` (local performance sweep), `zealphp.sh` (optional higher-level CLI wrapper), and CI utilities.
+- **`deploy/`** – Deployment artifacts: `zealphp.service` (systemd unit template, `Type=simple`, no `-d` flag) and other server-configuration examples.
 
 ## Documentation and Meta
 

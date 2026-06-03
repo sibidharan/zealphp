@@ -68,6 +68,11 @@ final class TypeCodec
         return $this->coerce($type, $raw);
     }
 
+    /**
+     * Coerce a raw Redis wire string (or `null` for a missing field) to the
+     * PHP type declared by `$type` (`Table::TYPE_INT`, `Table::TYPE_FLOAT`,
+     * or `Table::TYPE_STRING`). Returns the zero-value for the type on `null`.
+     */
     private function coerce(int $type, ?string $raw): int|float|string
     {
         if ($raw === null) {

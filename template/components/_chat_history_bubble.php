@@ -6,7 +6,11 @@ $items = $items ?? [];
   <div class="chat-bubble">
     <?php foreach ($items as $item): ?>
       <?php if (($item['type'] ?? '') === 'text'): ?>
-        <div class="chat-item text"><?= $item['html'] ?? '' ?></div>
+        <?php // Stored chat HTML is server-generated (user turns are escaped at
+              // write time). Defense-in-depth: pass it through a formatting-only
+              // tag allowlist so any untrusted markup that ever reaches this
+              // field cannot inject <script>/<iframe>/<img onerror>/<a href=js>. ?>
+        <div class="chat-item text"><?= strip_tags((string)($item['html'] ?? ''), '<p><br><strong><em><b><i><u><code><pre><ul><ol><li><blockquote><h1><h2><h3><h4><span>') ?></div>
       <?php elseif (($item['type'] ?? '') === 'tool'): ?>
         <div class="chat-item tool" data-id="<?= htmlspecialchars($item['id'] ?? '') ?>" data-status="<?= htmlspecialchars($item['status'] ?? 'ok') ?>">
           <div class="tool-head">

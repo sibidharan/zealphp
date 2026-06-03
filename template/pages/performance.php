@@ -186,24 +186,24 @@
   </tr>
   <tr class="perf-row-tint">
     <td>ZealPHP CGI pool — default <small>(<code>App::mode(App::MODE_LEGACY_CGI)</code> / <code>cgiMode('pool')</code>)</small></td>
-    <td>pre-spawned subprocess pool, warm dispatch (~1–3 ms)</td>
+    <td>warm pre-spawned PHP worker pool, in-memory interpreter</td>
     <td class="perf-cell-accent">—</td>
     <td class="perf-right">~1–3 ms</td>
   </tr>
   <tr>
-    <td>ZealPHP legacy CGI — proc fallback <small>(<code>cgiMode('proc')</code>)</small></td>
-    <td><code>proc_open</code> fresh PHP per req</td>
-    <td class="perf-cell-danger">160</td>
-    <td class="perf-cell-danger-plain">124.4</td>
+    <td>ZealPHP CGI fcgi <small>(<code>cgiMode('fcgi')</code>)</small></td>
+    <td>forward to external php-fpm / FastCGI pool</td>
+    <td class="perf-cell-muted">—</td>
+    <td class="perf-right">≈ upstream pool</td>
   </tr>
 </table>
 
 <p class="perf-para-note">
-  Intel i9-14900K · PHP 8.3 · 4 workers each · <code>ab -n 3000 -c 20</code> — same run as <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>. Three honest takeaways: (1) the default CGI bridge is now the pre-spawned <code>cgiMode('pool')</code> (~1–3 ms warm) — the 160 req/s row is <code>cgiMode('proc')</code>, the explicit slow-fallback that cold-starts a fresh PHP process per request; turning process isolation off entirely (Mixed-mode) recovers ~137× on the same file; (2) <code>App::mode(App::MODE_LEGACY_CGI)</code> resolves to the warm pool by default — no extra config needed to avoid the proc_open cost; (3) Apache mod_php edges out ZealPHP on trivial legacy-file serving (a mature in-process C SAPI is hard to beat for no-I/O echo). ZealPHP's win is the native-route numbers above, coroutine I/O concurrency, WebSocket/SSE, and not needing a separate web server. Full analysis + the FPM architecture breakdown: <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>.
+  Intel i9-14900K · PHP 8.3 · 4 workers each · <code>ab -n 3000 -c 20</code> — same run as <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>. Three honest takeaways: (1) the default legacy bridge is the pre-spawned <code>cgiMode('pool')</code> (~1–3 ms warm) — a pool of PHP workers that stay resident in memory, so there's no per-request interpreter startup; for the absolute fastest legacy path, turning process isolation off entirely (<code>App::mode(App::MODE_MIXED)</code>) runs the file in-process and recovers full throughput on the same file; (2) <code>App::mode(App::MODE_LEGACY_CGI)</code> resolves to the warm pool by default — no extra config needed; (3) Apache mod_php edges out ZealPHP on trivial legacy-file serving (a mature in-process C SAPI is hard to beat for no-I/O echo). ZealPHP's win is the native-route numbers above, coroutine I/O concurrency, WebSocket/SSE, and not needing a separate web server. Full analysis + the FPM architecture breakdown: <a href="/vs-fpm#measured-four-ways" class="perf-link-accent">/vs-fpm</a>.
 </p>
 
 <p class="perf-para-note">
-  <strong>Not shown:</strong> <code>cgiMode('fcgi')</code> — the third of three dispatch modes (<code>pool</code> / <code>proc</code> / <code>fcgi</code>) — forwards each <code>public/*.php</code> file to an upstream php-fpm pool over FastCGI (nginx <code>fastcgi_pass</code> / Apache <code>mod_proxy_fcgi</code> parity). Performance ≈ whatever that pool delivers; we don't run PHP at all in this mode. Walkthrough: <a href="/legacy-apps#cgi-mode-fcgi" class="perf-link-accent">/legacy-apps#cgi-mode-fcgi</a>.
+  <strong>The two legacy dispatch modes:</strong> <code>cgiMode('pool')</code> (default) keeps a warm pool of PHP workers resident in memory, dispatching each <code>public/*.php</code> file to a free worker (~1–3 ms, no per-request startup). <code>cgiMode('fcgi')</code> instead forwards each file to an external php-fpm / FastCGI pool over the wire (nginx <code>fastcgi_pass</code> / Apache <code>mod_proxy_fcgi</code> parity); performance ≈ whatever that pool delivers, since ZealPHP doesn't run the PHP itself in this mode. Walkthrough: <a href="/legacy-apps#cgi-mode-fcgi" class="perf-link-accent">/legacy-apps#cgi-mode-fcgi</a>.
 </p>
 
 <!-- ────────────────────────────────────────────────────────────── -->

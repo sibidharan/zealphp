@@ -2,7 +2,7 @@
 <section class="section">
 <div class="container">
 <h1 class="section-title">Running Legacy PHP Apps</h1>
-<p class="section-desc">WordPress compatibility showcase: front page, login, posts, and REST API working (the WP-admin dashboard has documented limits under coroutine concurrency) through the ZealPHP CGI worker bridge in compatibility mode &mdash; with <a href="#limitations">documented limits</a> and an honest startup-cost trade-off. The bridge exists so traditional PHP code that assumes a fresh process per request (WordPress, Drupal, define()-heavy plugins) can run on OpenSwoole&apos;s long-lived workers. The same <code>app.php</code> works for Drupal, Laravel-on-FPM-shape, and other traditional PHP applications.</p>
+<p class="section-desc">WordPress compatibility showcase: front page, login, posts, and REST API working (the WP-admin dashboard has documented limits under coroutine concurrency) through the ZealPHP CGI worker bridge in compatibility mode &mdash; with <a href="#limitations">documented limits</a>. The bridge exists so traditional PHP code that assumes a fresh process per request (WordPress, Drupal, define()-heavy plugins) can run on OpenSwoole&apos;s long-lived workers via a warm, pre-spawned PHP worker pool (<code>App::cgiMode('pool')</code>) &mdash; the same FPM-style model, with the interpreter resident in memory between requests. The same <code>app.php</code> works for Drupal, Laravel-on-FPM-shape, and other traditional PHP applications.</p>
 
 <div class="callout info legacy-callout-proof">
   <strong>Production proof point.</strong> Selfmade Ninja Labs (<a href="https://labs.selfmade.ninja">labs.selfmade.ninja</a>) — a large PHP/MongoDB dashboard with OAuth, SSE streaming, and a custom MongoDB ORM — runs the same codebase on both Apache and ZealPHP in production. Two servers, one volume, zero downtime during migration. <a href="/case-studies/sna-labs">Read the case study →</a>
@@ -24,7 +24,7 @@
 </div>
 
 <div class="callout info legacy-callout-zero">
-<p><strong>Compatibility-mode story.</strong> In the showcase deploy, WordPress runs without source patches: login, sessions, cookies, redirects, file uploads, REST API, and pretty permalinks all work through the CGI worker bridge (<code>App::mode(App::MODE_LEGACY_CGI)</code> or the equivalent <code>App::superglobals(true)</code>). The default isolation backend is the <strong>warm CGI pool</strong> (<code>cgiMode('pool')</code>, ~1&ndash;3&nbsp;ms warm &mdash; a pre-spawned FPM-style subprocess pool, not a per-request fork). For apps like WordPress that cache bootstrap files via <code>require_once</code>, pair the pool with <code>App::cgiPoolMaxRequests(1)</code> to get fresh-interpreter semantics with pool pre-spawn; or use <code>cgiMode('proc')</code> (the ~30&ndash;50&nbsp;ms fresh <code>proc_open</code> per request) for a simpler config. See <a href="#limitations">known limits</a> before betting your production WordPress on it.</p>
+<p><strong>Compatibility-mode story.</strong> In the showcase deploy, WordPress runs without source patches: login, sessions, cookies, redirects, file uploads, REST API, and pretty permalinks all work through the CGI worker bridge (<code>App::mode(App::MODE_LEGACY_CGI)</code> or the equivalent <code>App::superglobals(true)</code>). The default isolation backend is the <strong>warm CGI pool</strong> (<code>cgiMode('pool')</code>, ~1&ndash;3&nbsp;ms warm &mdash; a pre-spawned, FPM-style PHP worker pool that stays resident in memory, not a per-request fork). For apps like WordPress that cache bootstrap files via <code>require_once</code>, pair the pool with <code>App::cgiPoolMaxRequests(1)</code> so each pool worker recycles after one request &mdash; fresh-interpreter semantics with the pool's pre-spawn warm-up still in front. The alternative backend is <code>cgiMode('fcgi')</code>, which forwards every <code>public/*.php</code> to an external FastCGI / php-fpm pool. See <a href="#limitations">known limits</a> before betting your production WordPress on it.</p>
 </div>
 
 <h2 id="50-app-sweep" class="legacy-mt-xl">50-app compatibility sweep — May 2026</h2>
@@ -216,24 +216,29 @@ PHP]); ?>
 <table class="ztable legacy-mb">
 <tr><th>Configuration</th><th>Result</th><th>Notes</th></tr>
 <tr>
-  <td><strong>cgiMode('proc')</strong> + <code>App::cgiSubprocessAutoload(false)</code><br><small>(the default)</small></td>
-  <td>200 + 50,719 B on every request, ~165 ms warm</td>
-  <td>5 / 5 requests render the full WP homepage (Blog title, posts, Sample Page link). Matches v0.2.0's behaviour exactly.</td>
+  <td><strong>cgiMode('pool') + <code>App::cgiPoolMaxRequests(1)</code></strong><br><small>(recommended for WordPress)</small></td>
+  <td>200 + 50,719 B on every request, ~175 ms warm</td>
+  <td>5 / 5 requests render the full WP homepage (Blog title, posts, Sample Page link). Each pool worker recycles after 1 request → WordPress's <code>require_once</code> bootstrap re-runs clean, while the parent keeps a queue of pre-spawned workers so first-request latency stays bounded.</td>
 </tr>
 <tr>
-  <td>cgiMode('proc') + <code>App::cgiSubprocessAutoload(true)</code></td>
+  <td>cgiMode('pool') + <code>App::cgiSubprocessAutoload(true)</code></td>
   <td>First request OK, 2nd+ deadlock</td>
-  <td>Loading <code>vendor/autoload.php</code> in every subprocess adds ~30 ms, which makes WordPress's <code>wp_cron()</code> 10 ms non-blocking POST queue up at the parent faster than workers can drain. Only opt in if your <code>public/*.php</code> needs <code>\ZealPHP\App</code> inside the subprocess.</td>
+  <td>Loading <code>vendor/autoload.php</code> in every pool worker adds ~30 ms at spawn, which makes WordPress's <code>wp_cron()</code> 10 ms non-blocking POST queue up at the parent faster than workers can drain. Only opt in if your <code>public/*.php</code> needs <code>\ZealPHP\App</code> inside the subprocess.</td>
 </tr>
 <tr>
   <td>cgiMode('pool') (default <code>cgiPoolMaxRequests(500)</code>)</td>
   <td>First request OK (50 KB), 2nd+ return <strong>500 fatal</strong> ("Call to a member function main() on null")</td>
-  <td>WordPress holds <code>$wp</code> (the framework instance) as a global; the pool worker's FPM-style cleanup correctly clears request-scope globals between requests, BUT WordPress's <code>require_once</code> chain caches the bootstrap files (<code>wp-load.php</code>, <code>wp-settings.php</code>) so they don't re-execute on the 2nd request → <code>$wp</code> never gets re-instantiated → null. PHP's <code>require_once</code> is not un-resettable in standard PHP. Use one of the two working configs above OR below.</td>
+  <td>WordPress holds <code>$wp</code> (the framework instance) as a global; the pool worker's FPM-style cleanup correctly clears request-scope globals between requests, BUT WordPress's <code>require_once</code> chain caches the bootstrap files (<code>wp-load.php</code>, <code>wp-settings.php</code>) so they don't re-execute on the 2nd request → <code>$wp</code> never gets re-instantiated → null. PHP's <code>require_once</code> is not un-resettable in standard PHP. Drop <code>cgiPoolMaxRequests(1)</code> (the row above) to recycle every request.</td>
 </tr>
 <tr>
-  <td>cgiMode('pool') + <code>App::cgiPoolMaxRequests(1)</code></td>
-  <td>200 + 50,719 B on every request, ~175 ms warm</td>
-  <td>Best of both: each pool worker exits after 1 request → fresh subprocess each time → WordPress bootstrap re-runs clean. Trade-off: subprocess respawn cost adds ~10 ms vs pool's normal warm-reuse, but you keep the pool's pre-spawn benefit so first-request latency is bounded.</td>
+  <td><strong>cgiMode('fork') + <code>App::cgiMode('fork')</code></strong><br><small>(experimental — Apache MPM prefork runner)</small></td>
+  <td>200 on every request</td>
+  <td>A long-lived fork-master (<code>src/fork_master.php</code>) binds a UNIX socket and forks a fresh child <em>per request</em> that runs the target <code>.php</code> at true global scope and hard-exits. Gives fresh-process correctness (no "Cannot redeclare class") without the ~30–50 ms <code>proc_open</code> overhead of <code>cgiMode('proc')</code>; fork cost is ~1 ms. No <code>App::mode()</code> preset — set via <code>App::cgiMode('fork')</code> directly. Requires <code>pcntl</code> + <code>posix</code> in the PHP build. Concurrency capped by <code>App::$cgi_fork_max_concurrent</code> (default 16); returns 503 when full.</td>
+</tr>
+<tr>
+  <td>cgiMode('fcgi') → external php-fpm pool</td>
+  <td>200 + 50,719 B on every request</td>
+  <td>Forward every <code>public/*.php</code> to a php-fpm pool you already run; FPM keeps interpreters warm and recycles them per its own <code>pm.max_requests</code>. ZealPHP becomes the HTTP/WebSocket/coroutine layer in front. See <a href="#cgi-mode-fcgi">Framework-wide <code>cgiMode('fcgi')</code></a> below.</td>
 </tr>
 </table>
 
@@ -247,7 +252,8 @@ require 'vendor/autoload.php';
 use ZealPHP\App;
 
 App::superglobals(true);                  // mod_php-style superglobals
-App::cgiMode('proc');                     // fresh PHP per request (v0.2.0 parity)
+App::cgiMode('pool');                     // warm FPM-style worker pool (default)
+App::cgiPoolMaxRequests(1);               // recycle each request — WP needs a fresh boot
 // App::cgiSubprocessAutoload(false);     // default — DO NOT enable for WP
 App::$ignore_php_ext = false;             // allow /wp-login.php in URLs
 
@@ -262,7 +268,7 @@ PHP]); ?>
 
 <h3 id="wordpress-pool-with-recycle" class="legacy-mt-md">Pool mode for WordPress — set <code>cgiPoolMaxRequests(1)</code></h3>
 
-<p>If you specifically want the pool's pre-spawn warm-up benefit for WordPress (e.g., your monitoring expects low p99 first-request latency), pair it with <code>App::cgiPoolMaxRequests(1)</code>. Every pool subprocess exits after one request and the parent respawns it — same fresh-process semantics as <code>cgiMode('proc')</code>, but the parent maintains a queue of pre-spawned subprocesses ready to receive the next request:</p>
+<p>WordPress needs a fresh interpreter per request because its <code>require_once</code> bootstrap chain can't be re-run inside an already-warm worker. Pair the default pool with <code>App::cgiPoolMaxRequests(1)</code> to get exactly that: every pool subprocess exits after one request and the parent respawns it from the pre-spawned queue — fresh-process semantics, but the parent always has a warm worker ready to receive the next request (so you keep the pool's bounded first-request latency):</p>
 
 <?php App::render('/components/_code', [
     'label' => 'app.php — WordPress on pool with recycle-each-request',
@@ -285,15 +291,15 @@ PHP]); ?>
 
 <h3 id="wordpress-autoload-pitfall" class="legacy-mt-md">Why <code>cgiSubprocessAutoload(false)</code> is the default</h3>
 
-<p>Issue #18 (the v0.2.41 WP-on-proc regression vs v0.2.0). Between v0.2.0 and v0.2.20, <code>cgi_worker.php</code> gained a <code>require_once vendor/autoload.php</code> at startup so apps that needed <code>\ZealPHP\App</code> inside the subprocess could use it (issue #17). The autoload load measures <strong>~30 ms</strong> per subprocess spawn on a Ryzen 9 7900X.</p>
+<p>Issue #18 (the v0.2.41 WP autoload regression). Between v0.2.0 and v0.2.20, <code>cgi_worker.php</code> gained a <code>require_once vendor/autoload.php</code> at startup so apps that needed <code>\ZealPHP\App</code> inside the subprocess could use it (issue #17). That autoload load measures <strong>~30 ms</strong> per worker spawn on a Ryzen 9 7900X.</p>
 
-<p>For modern apps that don't make 10 ms-timeout self-calls, 30 ms is invisible. But WordPress's <code>wp_cron()</code> fires a non-blocking <code>POST /wp-cron.php</code> with <code>timeout = 0.01</code>. The cgi_worker subprocess takes longer to start than the wp-cron client's timeout window allows — the POST connection arrives at the parent OpenSwoole worker before any worker is free to accept it, accumulating as half-closed sockets. By the 2nd request, the pool is fully blocked.</p>
+<p>For modern apps that don't make 10 ms-timeout self-calls, 30 ms is invisible. But WordPress's <code>wp_cron()</code> fires a non-blocking <code>POST /wp-cron.php</code> with <code>timeout = 0.01</code>. When a recycled pool worker (under <code>cgiPoolMaxRequests(1)</code>) takes longer to warm up than the wp-cron client's timeout window allows, the POST connection arrives at the parent OpenSwoole worker before any pool worker is free to accept it, accumulating as half-closed sockets. By the 2nd request, the pool is fully blocked.</p>
 
-<p><strong>The fix:</strong> gate the autoload on <code>App::cgiSubprocessAutoload(true)</code> — default off — restoring v0.2.0's zero-overhead subprocess start path. Apps that need ZealPHP classes inside CGI dispatch (rare — most legacy apps ship their own bootstrap) opt in. Pinned by <code>tests/Unit/CgiSubprocessAutoloadTest.php</code> (5 tests including a source-level canary against future regressions).</p>
+<p><strong>The fix:</strong> gate the autoload on <code>App::cgiSubprocessAutoload(true)</code> — default off — keeping the pool worker's startup path lean. Apps that need ZealPHP classes inside CGI dispatch (rare — most legacy apps ship their own bootstrap) opt in. Pinned by <code>tests/Unit/CgiSubprocessAutoloadTest.php</code> (5 tests including a source-level canary against future regressions).</p>
 
 <h2 id="pool-buys" class="legacy-mt-xl">What <code>cgiMode('pool')</code> buys you — measured</h2>
 
-<p><code>cgiMode('pool')</code> is the default since v0.2.41 — the FPM-style warm worker pool. The numbers below are measured on this machine (Ryzen 9 7900X, OpenSwoole 26.2, PHP 8.3) so you can compare them directly to the bench results elsewhere in the docs.</p>
+<p><code>cgiMode('pool')</code> is the default since v0.2.41 — the FPM-style warm worker pool: a fixed set of PHP interpreters that stay resident in memory and are reused across requests. The numbers below are measured on this machine (Ryzen 9 7900X, OpenSwoole 26.2, PHP 8.3) so you can compare them directly to the bench results elsewhere in the docs.</p>
 
 <table class="ztable legacy-mb">
 <tr><th>Path</th><th>Throughput</th><th>Per-request latency</th><th>What we measured</th></tr>
@@ -307,37 +313,25 @@ PHP]); ?>
   <td><strong>cgiMode('pool') direct</strong><br><small>4 workers, fixture <code>echo "ok";</code></small></td>
   <td>10,983 req/s</td>
   <td>0.091 ms avg<br>p50 0.028 ms · p99 0.047 ms</td>
-  <td><code>scripts/bench-fcgi-pool.php</code> — drives <code>WorkerPool::dispatch()</code> directly with 1000 requests, no HTTP overhead. Measures pure pool round-trip cost (write frame to stdin, subprocess executes, read response).</td>
-</tr>
-<tr>
-  <td><strong>cgiMode('proc')</strong><br><small>fresh <code>proc_open</code> per request</small></td>
-  <td>49 req/s</td>
-  <td>20.2 ms avg<br>p50 19.4 ms · p99 30.8 ms</td>
-  <td><code>scripts/bench-fcgi-proc.php</code> — same fixture as pool bench, single caller, 200 iter. Cold PHP startup dominates the 19.4 ms — each request pays the full interpreter spin-up cost.</td>
-</tr>
-<tr>
-  <td><strong>pool / proc speedup</strong></td>
-  <td colspan="3"><strong>~224× faster</strong> (10,983 / 49). This is the v0.2.41 default-flip justification.</td>
+  <td><code>scripts/bench-fcgi-pool.php</code> — drives <code>WorkerPool::dispatch()</code> directly with 1000 requests, no HTTP overhead. Measures pure pool round-trip cost (write frame to a warm worker, it executes, read response).</td>
 </tr>
 </table>
 
-<p><strong>Reading the numbers</strong>: the pool itself adds ~90 microseconds of dispatch overhead per request (p50 = 28 μs, p99 = 47 μs). That overhead vanishes inside any non-trivial PHP file — by the time WordPress's autoloader has run, the ~90 μs IPC cost is invisible. The headline difference vs <code>cgiMode('proc')</code> is the <strong>~224× speedup</strong> from skipping the cold PHP startup on every request (proc pays 19.4 ms p50 vs pool's 0.028 ms p50 on the same fixture).</p>
+<p><strong>Reading the numbers</strong>: the pool itself adds ~90 microseconds of dispatch overhead per request (p50 = 28 μs, p99 = 47 μs) — the cost of handing the request to an already-warm interpreter and reading its response back. That overhead vanishes inside any non-trivial PHP file — by the time WordPress's autoloader has run, the ~90 μs IPC cost is invisible. The whole point of the pool is that the PHP interpreter <em>never leaves memory</em>: there is no per-request interpreter spin-up, so legacy <code>public/*.php</code> dispatch lands within a small constant of the modern coroutine route.</p>
 
 <p>Reproduce locally:</p>
 
 <?php App::render('/components/_code', [
-    'label' => 'Measure pool vs proc on your own box',
+    'label' => 'Measure pool dispatch on your own box',
     'code'  => <<<'BASH'
-# Pool — warm FPM-style subprocesses, IPC-only dispatch
+# Pool — warm FPM-style workers, IPC-only dispatch
 php scripts/bench-fcgi-pool.php 1000 4 500
 
-# Proc — fresh proc_open per request, full PHP cold-start
-php scripts/bench-fcgi-proc.php 200
-
-# Same fixture (`echo "ok";`) for both → direct comparison.
+# Args: <requests> <pool-workers> <recycle-after-N-requests>
+# Fixture is `echo "ok";` so you measure pool round-trip, not app code.
 BASH]); ?>
 
-<p><strong>vs PHP-FPM</strong>: same semantic model (warm subprocess pool, recycled after N requests), so per-request cost should be in the same ballpark as your FPM pool. We haven't run an apples-to-apples bench against a real FPM install on the same box yet — <a href="/vs-fpm">/vs-fpm</a> covers the measurement story. The honest claim is "FPM-equivalent semantics + ZealPHP-managed (one less daemon to install)."</p>
+<p><strong>vs PHP-FPM</strong>: same semantic model (warm worker pool, recycled after N requests), so per-request cost is in the same ballpark as your FPM pool — minus the FastCGI socket hop and the separate web-server bridge, since ZealPHP's HTTP server is built in. <a href="/vs-fpm">/vs-fpm</a> covers the apples-to-apples measurement story. The honest claim is "FPM-equivalent semantics + ZealPHP-managed (one less daemon to install, no HTTP↔FastCGI bridge)."</p>
 
 <h3 class="legacy-mt-md">What you actually get from pool mode (beyond the bench numbers)</h3>
 
@@ -1108,6 +1102,8 @@ use ZealPHP\App;
 use ZealPHP\RequestContext;
 
 App::superglobals(true);
+App::cgiMode('pool');         // warm FPM-style worker pool (default)
+App::cgiPoolMaxRequests(1);   // recycle each request — WP needs a fresh boot
 App::$ignore_php_ext = false;
 
 $app = App::init('0.0.0.0', 9501);
@@ -1142,16 +1138,16 @@ PHP]); ?>
 <p><code>App::include()</code> dispatches to two different paths depending on the mode:</p>
 <ul>
   <li><strong>Coroutine mode</strong> (<code>App::superglobals(false)</code>) — runs the file in-process via the shared <code>App::executeFile()</code> core. Captures output, applies the <a href="/responses#return-contract">universal return contract</a>.</li>
-  <li><strong>Superglobals mode</strong> (<code>App::superglobals(true)</code>) — dispatches to <code>src/cgi_worker.php</code> via <code>proc_open</code>. Each request gets a clean PHP interpreter with true global scope — exactly like Apache's prefork MPM. The subprocess captures the file's return value over the stderr metadata channel and threads it back through the same contract.</li>
+  <li><strong>Superglobals mode</strong> (<code>App::superglobals(true)</code>) — dispatches each <code>public/*.php</code> to a warm <code>src/cgi_worker.php</code> drawn from the <code>cgiMode('pool')</code> worker pool (the default), or forwards to an external FastCGI / php-fpm pool under <code>cgiMode('fcgi')</code>. Either way the request runs in a clean, separate PHP process with true global scope — the same model as PHP-FPM / Apache prefork, but the interpreter stays resident between requests instead of cold-starting each time. The worker captures the file's return value over the stderr metadata channel and threads it back through the same contract.</li>
 </ul>
 
 <?php App::render('/components/_code', [
-    'label' => 'How App::include() works (superglobals mode)',
+    'label' => 'How App::include() works (superglobals mode, cgiMode(\'pool\'))',
     'code'  => <<<'TEXT'
-OpenSwoole Worker (long-lived)          CGI Worker (per-request)
+OpenSwoole Worker (long-lived)          Pool Worker (warm, resident)
 ┌─────────────────────────┐             ┌──────────────────────────┐
-│                         │  proc_open  │  php cgi_worker.php      │
-│  Route matched          │ ──────────► │                          │
+│                         │  dispatch   │  php cgi_worker.php      │
+│  Route matched          │ ──────────► │  (drawn from warm pool)  │
 │  App::include('/x.php') │             │  TRUE global scope:      │
 │                         │   stdin     │  ├─ $_SERVER, $_GET, etc.│
 │  Serializes context:    │ ──────────► │  ├─ $_COOKIE, $_FILES    │
@@ -1163,9 +1159,11 @@ OpenSwoole Worker (long-lived)          CGI Worker (per-request)
 │  ├─ Body from stdout    │             │  ├─ include file.php     │
 │  ├─ Metadata from stderr│   stderr    │  │  ← app runs at global │
 │  │  (status, headers,   │ ◄────────── │  │    scope              │
-│  │   cookies, return    │             │  │                       │
-│  │   value as JSON)     │             │  └─ Process exits (clean)│
-│  └─ Applies to response │             │                          │
+│  │   cookies, return    │             │  ├─ resets global scope  │
+│  │   value as JSON)     │             │  │  (FPM-style cleanup)  │
+│  └─ Applies to response │             │  └─ stays warm for next  │
+│                         │             │     request (recycled    │
+│                         │             │     after N requests)    │
 └─────────────────────────┘             └──────────────────────────┘
 TEXT]); ?>
 
@@ -1199,7 +1197,7 @@ BASH, 'lang' => 'bash']); ?>
 
 <h2 class="legacy-mt-xl">Performance &amp; Hybrid Mode</h2>
 <div class="callout warn">
-<p><strong>Performance:</strong> In superglobals mode, each <code>App::include()</code> spawns a CGI subprocess. Static files bypass this (served by OpenSwoole). For high-traffic production, convert hot paths to native ZealPHP routes that run in coroutine mode.</p>
+<p><strong>Performance:</strong> In superglobals mode, each <code>App::include()</code> is dispatched to a warm worker from the <code>cgiMode('pool')</code> pool (or forwarded to an external FastCGI pool under <code>cgiMode('fcgi')</code>) — the interpreter stays resident, so there is no per-request cold start. Static files bypass CGI dispatch entirely (served by OpenSwoole). For the absolute hottest paths, convert them to native ZealPHP routes that run in coroutine mode.</p>
 <p><strong>Streaming:</strong> SSE works in CGI mode via <code>flush()</code>. WebSocket requires native ZealPHP routes (<code>App::ws()</code>).</p>
 <p><strong>Hybrid approach:</strong> Mix native routes (coroutine mode, high performance) with legacy PHP file serving (CGI mode) in the same app. Explicit <code>$app-&gt;route()</code> handlers run directly in the worker.</p>
 </div>
@@ -1207,7 +1205,7 @@ BASH, 'lang' => 'bash']); ?>
 <h2 id="cgi-backends" class="legacy-mt-xl">CGI backends — host any language</h2>
 <p>ZealPHP can serve files written in <strong>any language</strong> that speaks CGI/1.1 — Perl, Python, Ruby, shell scripts, or compiled binaries — side-by-side with your PHP app. Register per-extension backends with <code>App::registerCgiBackend()</code> before <code>$app-&gt;run()</code>.</p>
 <div class="callout legacy-mt-prose-mb">
-  <p><strong>Works in every lifecycle mode.</strong> CGI dispatch is no longer gated on process-isolation. A registered non-<code>.php</code> extension is dispatched through its backend in <strong>coroutine mode too</strong> — the <code>proc</code> path uses a coroutine-aware <code>proc_open</code> / <code>Coroutine\System::exec()</code> that yields to the scheduler instead of blocking the worker, supports a POST body on the interpreter's stdin, and can stream. The interpreter's RFC 3875 CGI response (headers + blank line + body, with a <code>Status:</code> pseudo-header) is read off stdout via <code>cgiInterpreterResponse()</code> — Apache <code>mod_cgi</code> parity. The <code>.php</code> fast path is unchanged.</p>
+  <p><strong>Works in every lifecycle mode.</strong> CGI dispatch is no longer gated on process-isolation. A registered non-<code>.php</code> extension is dispatched through its backend in <strong>coroutine mode too</strong> — the <code>'proc'</code> path spawns the interpreter on demand through a coroutine-aware launcher (<code>Coroutine\System::exec()</code>) that yields to the scheduler instead of blocking the worker, supports a POST body on the interpreter's stdin, and can stream. The interpreter's RFC 3875 CGI response (headers + blank line + body, with a <code>Status:</code> pseudo-header) is read off stdout via <code>cgiInterpreterResponse()</code> — Apache <code>mod_cgi</code> parity. The <code>.php</code> fast path (warm <code>'pool'</code> by default) is unchanged.</p>
 </div>
 
 <h3 class="legacy-mt-sm">Apache / nginx parity table</h3>
@@ -1237,6 +1235,12 @@ BASH, 'lang' => 'bash']); ?>
   <td>—</td>
   <td><code>App::cgiMode('pool')</code> — default; <strong>.php only</strong></td>
 </tr>
+<tr>
+  <td><code>'fork'</code> <em>(experimental)</em></td>
+  <td>Apache MPM prefork (<code>prefork</code> MPM + <code>mod_php</code>) — fresh process per request, interpreter not shared across requests</td>
+  <td>—</td>
+  <td><code>App::cgiMode('fork')</code> — <strong>.php only</strong>; long-lived fork-master (<code>src/fork_master.php</code>) forks a fresh child per request (~1 ms), true global scope, hard-exits after; requires <code>pcntl</code> + <code>posix</code>; concurrency capped by <code>App::$cgi_fork_max_concurrent</code> (default 16; 503 when full); no <code>App::mode()</code> preset — set directly via <code>App::cgiMode('fork')</code></td>
+</tr>
 </table>
 
 <h3 class="legacy-mt-sm">Worked examples</h3>
@@ -1244,7 +1248,7 @@ BASH, 'lang' => 'bash']); ?>
 <?php App::render('/components/_code', [
     'label' => '.php — default (no registration needed)',
     'code'  => <<<'PHP'
-// .php falls through to App::$cgi_mode (default 'proc').
+// .php falls through to App::$cgi_mode (default 'pool' — warm worker pool).
 // No registration needed — this is the existing behaviour.
 App::processIsolation(true); // enables CGI mode
 $app->setFallback(fn() => App::include('/index.php'));
@@ -1280,7 +1284,7 @@ App::registerCgiBackend('.cgi', [
     'mode'       => 'proc',
     'exec_paths' => ['/cgi-bin'],   // ExecCGI scope — only execute under /cgi-bin/*
 ]);
-// ZealPHP calls proc_open(['path/to/script.cgi']) — the OS reads the #! line.
+// ZealPHP execs ['path/to/script.cgi'] directly — the OS reads the #! line.
 // Script must output CGI/1.1 headers: Content-Type + blank line + body.
 // A .cgi requested OUTSIDE /cgi-bin (e.g. an uploaded /uploads/x.cgi) → 403,
 // never executed and never served as source.
@@ -1329,7 +1333,7 @@ $r = App::resolveCgiBackend('/var/www/app/public/uploads/hello.py', '/uploads/he
 // ['backend' => [...], 'mayExecute' => false]  ← outside ExecCGI scope → 403
 
 $r = App::resolveCgiBackend('/var/www/app/public/index.php', '/index.php');
-// ['backend' => ['mode' => 'proc'], 'mayExecute' => false]  ← unregistered, App::$cgi_mode
+// ['backend' => ['mode' => 'pool'], 'mayExecute' => false]  ← unregistered, App::$cgi_mode (default 'pool')
 PHP]); ?>
 
 <p>See <code>examples/multi-lang-cgi/</code> for a runnable demo registering <code>.pl</code> (proc/Perl) alongside the default PHP backend.</p>
@@ -1343,9 +1347,9 @@ PHP]); ?>
     'code'  => <<<'PHP'
 use ZealPHP\App;
 
-App::superglobals(true);          // CGI dispatch path (proc / fork / fcgi)
+App::superglobals(true);          // CGI dispatch path (pool / fcgi)
 App::processIsolation(true);
-App::cgiMode('fcgi');             // 'pool' (default) | 'proc' | 'fcgi'
+App::cgiMode('fcgi');             // 'pool' (default, warm pool) | 'fcgi'
 App::fcgiAddress('127.0.0.1:9000');  // or 'unix:/run/php/php-fpm.sock'
 
 App::init('0.0.0.0', 8080);
@@ -1356,21 +1360,88 @@ PHP]); ?>
 <p>When to reach for this:</p>
 <ul class="legacy-list-loose">
   <li>You already operate a tuned php-fpm pool (sized for your workload, hooked into your observability stack) and don't want to retire it — ZealPHP adds OpenSwoole's HTTP / WebSocket / coroutine layer on top.</li>
-  <li>You want the v0.3.0 "warm pool" semantics today by letting php-fpm be that pool — the FPM master keeps interpreters warm across requests, so per-request cost is closer to FPM's ~1–3 ms than the bridge's ~30–50 ms.</li>
+  <li>You want an externally-managed warm pool — let php-fpm be that pool. The FPM master keeps interpreters warm across requests just as ZealPHP's built-in <code>cgiMode('pool')</code> does (~1–3 ms warm either way); the difference is who owns the pool process.</li>
   <li>You're migrating from an <code>nginx → fastcgi_pass</code> deployment and want a drop-in shape change rather than a code rewrite. The <code>fcgi_params</code> array on <code>App::registerCgiBackend()</code> mirrors nginx's <code>fastcgi_param</code> directive.</li>
 </ul>
 
 <p><strong>Under the hood:</strong> dispatch lives in <code>App::cgiFcgi(string $path, ?string $address = null, array $extraParams = [])</code>, which builds the CGI/1.1 environment via <code>buildCgiEnv()</code>, forwards via <code>ZealPHP\CGI\FastCgiClient::request($params, $stdinBody)</code>, and applies the upstream's status code + headers to <code>$g-&gt;zealphp_response</code>. A failed connection or <code>FastCgiException</code> from the upstream surfaces as a clean <strong>502 Bad Gateway</strong> — same shape Apache and nginx emit when their FCGI upstream is down.</p>
 
-<p><strong>Performance:</strong> we don't run PHP at all in this mode — throughput equals whatever your FPM pool delivers minus one local socket hop. We deliberately don't quote a number here: it depends on your FPM <code>pm.max_children</code>, the file under load, and whether you're on Unix sockets vs TCP. The bridge-cost table at <a href="/vs-fpm#measured-four-ways">/vs-fpm</a> compares the in-process modes (<code>'pool'</code> / <code>'proc'</code> / Mixed-mode) and intentionally omits <code>'fcgi'</code> because the answer is "ask your FPM pool."</p>
+<p><strong>Performance:</strong> we don't run PHP at all in this mode — throughput equals whatever your FPM pool delivers minus one local socket hop. We deliberately don't quote a number here: it depends on your FPM <code>pm.max_children</code>, the file under load, and whether you're on Unix sockets vs TCP. The bridge-cost table at <a href="/vs-fpm#measured-four-ways">/vs-fpm</a> compares the in-process modes (the warm <code>'pool'</code> and Mixed-mode) and intentionally omits <code>'fcgi'</code> because the answer is "ask your FPM pool."</p>
+
+<h2 id="cgi-mode-fork" class="legacy-mt-xl"><code>cgiMode('fork')</code> — experimental Apache MPM prefork runner</h2>
+
+<div class="callout warn">
+  <p><strong>Experimental.</strong> <code>cgiMode('fork')</code> is the Apache MPM prefork CGI runner. It is functional but not yet recommended as a stable default. Test thoroughly before deploying to production.</p>
+</div>
+
+<p><code>cgiMode('fork')</code> is the fourth <code>.php</code> isolation strategy alongside <code>'pool'</code>, <code>'proc'</code>, and <code>'fcgi'</code>. Where <code>cgiMode('pool')</code> reuses warm workers and <code>cgiMode('proc')</code> spawns via <code>proc_open</code> (~30–50 ms cold start), the fork runner sits between them: a long-lived fork-master process (<code>src/fork_master.php</code>) binds a UNIX socket and forks a <strong>fresh child per request</strong> that runs the target <code>.php</code> at true global scope (~1 ms fork cost), then hard-exits. Result: fresh-process correctness (no "Cannot redeclare class") for unmodified WordPress/legacy apps, at fork cost rather than <code>proc_open</code> cost.</p>
+
+<p><strong>Reachability constraint.</strong> There is <strong>no <code>App::mode()</code> preset</strong> for fork and no <code>App::isolation()</code> Fork case — fork is reached exclusively via <code>App::cgiMode('fork')</code> or <code>App::registerCgiBackend('.php', ['mode' =&gt; 'fork'])</code>. It is <code>.php</code>-only (like <code>'pool'</code>).</p>
+
+<p><strong>Requirements:</strong> the PHP build must include <code>ext-pcntl</code> and <code>ext-posix</code>. Verify with <code>php -m | grep -E 'pcntl|posix'</code>.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'app.php — WordPress with cgiMode(\'fork\') (experimental)',
+    'code'  => <<<'PHP'
+<?php
+require 'vendor/autoload.php';
+use ZealPHP\App;
+
+App::superglobals(true);
+App::cgiMode('fork');             // experimental: fork-per-request MPM prefork runner
+App::$ignore_php_ext = false;     // allow /wp-login.php in URLs
+
+// App::$cgi_fork_max_concurrent = 16; // default; returns 503 when live children hit the cap
+
+$app = App::init('0.0.0.0', 9501);
+$app->setFallback(fn() => App::include('/index.php'));
+$app->run(['task_worker_num' => 0]);
+PHP]); ?>
+
+<h3 class="legacy-mt-sm">fork vs pool — when to use which</h3>
+<table class="ztable">
+<tr><th>Concern</th><th><code>cgiMode('pool')</code> (default)</th><th><code>cgiMode('fork')</code> (experimental)</th></tr>
+<tr>
+  <td>Per-request startup cost</td>
+  <td>~0 ms (interpreter already warm in pool worker)</td>
+  <td>~1 ms (fork syscall)</td>
+</tr>
+<tr class="vsfpm-row-tint">
+  <td>Interpreter state between requests</td>
+  <td>Shared pool worker; recycled after <code>cgiPoolMaxRequests(N)</code> (default 500)</td>
+  <td>Always fresh — child hard-exits after every request; no shared state possible</td>
+</tr>
+<tr>
+  <td>WordPress <code>require_once</code> bootstrap re-run</td>
+  <td>Needs <code>cgiPoolMaxRequests(1)</code> to force recycle each request</td>
+  <td>Automatic — fresh process every request; no <code>maxRequests</code> tuning needed</td>
+</tr>
+<tr class="vsfpm-row-tint">
+  <td>Concurrency cap</td>
+  <td><code>cgiPoolSize(N)</code> per HTTP worker; queue if all busy</td>
+  <td><code>App::$cgi_fork_max_concurrent</code> (default 16) live children; 503 when full</td>
+</tr>
+<tr>
+  <td>PHP extensions required</td>
+  <td>None beyond OpenSwoole</td>
+  <td><code>pcntl</code> + <code>posix</code></td>
+</tr>
+<tr class="vsfpm-row-tint">
+  <td>Stability</td>
+  <td>Stable (default since v0.2.41)</td>
+  <td>Experimental</td>
+</tr>
+</table>
+
+<p class="legacy-mt-prose">Backed by <code>src/CGI/ForkPool.php</code> + <code>src/fork_master.php</code>; dispatched via <code>Dispatcher::cgiFork()</code> in <code>src/App.php</code>. Design doc: <a href="https://github.com/sibidharan/zealphp/blob/master/docs/architecture/2026-06-02-fork-per-request-cgi-pool.md"><code>docs/architecture/2026-06-02-fork-per-request-cgi-pool.md</code></a>.</p>
 
 <h2 id="httpoxy-hardening" class="legacy-mt-xl">What the CGI bridge does for you (security)</h2>
 
-<p>All three dispatch modes (<code>'pool'</code> / <code>'proc'</code> / <code>'fcgi'</code>) build the CGI/1.1 environment through the same <code>App::buildCgiEnv()</code> path, so the hardening below applies uniformly. Each item ships a corresponding Apache parity rationale rather than being ZealPHP-specific behaviour.</p>
+<p>Every dispatch mode — the warm <code>'pool'</code>, <code>'fcgi'</code> forwarding, and the per-language backends — builds the CGI/1.1 environment through the same <code>App::buildCgiEnv()</code> path, so the hardening below applies uniformly. Each item ships a corresponding Apache parity rationale rather than being ZealPHP-specific behaviour.</p>
 
 <ul class="legacy-list-loose">
   <li><strong>httpoxy CVE-2016-5385 mitigation</strong> — incoming <code>Proxy:</code> request headers are NOT forwarded as <code>HTTP_PROXY</code> in the CGI env (<code>src/App.php:2830-2836</code>). Apache <code>util_script.c:224-227</code> parity. Prevents the well-known PHP/Go/Python CGI library family that reads <code>HTTP_PROXY</code> to choose an outbound proxy from being hijacked by a hostile client.</li>
-  <li><strong>CGI script timeout — <code>App::$cgi_timeout</code> default 60 s</strong> (<code>src/App.php:273</code>). When a CGI subprocess exceeds the budget the worker escalates <code>proc_terminate(SIGTERM)</code> → <code>SIGKILL</code> and returns control to the request handler. Apache <code>CGIScriptTimeout</code> parity. Override by setting the public static property: <code>App::$cgi_timeout = 120;</code> before <code>App::init()</code>.</li>
+  <li><strong>CGI script timeout — <code>App::$cgi_timeout</code> default 60 s</strong> (<code>src/App.php:273</code>). When a CGI subprocess exceeds the budget the worker escalates <code>SIGTERM</code> → <code>SIGKILL</code> and returns control to the request handler. Apache <code>CGIScriptTimeout</code> parity. Override by setting the public static property: <code>App::$cgi_timeout = 120;</code> before <code>App::init()</code>.</li>
   <li><strong>CGI <code>Status:</code> header parsed from stdout</strong> (<code>src/cgi_worker.php:101-113</code>) — a legacy script that emits <code>Status: 404 Not Found\r\n</code> sets the response status to 404 and the <code>Status:</code> header itself is NOT forwarded to the client. Range-clamped 100–599; non-numeric or out-of-range values fall back to 200. mod_cgi parity.</li>
   <li><strong>stderr drained to <code>elog</code></strong> — anything the subprocess writes to fd 2 (PHP warnings, custom debug, uncaught notices) is routed to <code>/tmp/zealphp/debug.log</code> via the <code>cgi_worker</code> log channel, never leaked into the response body. Prevents the classic "PHP warning rendered into the HTML page" disclosure path.</li>
 </ul>
@@ -1382,8 +1453,8 @@ PHP]); ?>
 <table class="ztable">
 <tr><th>API</th><th>What it does</th></tr>
 <tr><td><code>App::exec(string $cmd, ?float $timeout = null): array</code></td><td>Coroutine-safe execution. Inside a coroutine, yields via <code>OpenSwoole\Coroutine\System::exec()</code>; outside one (boot / CLI) falls back to blocking <code>App::rawExec()</code>. Returns <code>['output' =&gt; string, 'code' =&gt; int, 'signal' =&gt; int]</code> either way.</td></tr>
-<tr><td><code>App::rawExec(string $cmd): ?string</code></td><td>Explicit blocking escape hatch — returns captured stdout (or <code>null</code> if the process failed to start). Built on <code>proc_open</code> deliberately (NOT <code>shell_exec</code>/<code>exec</code>/<code>system</code>/<code>passthru</code>/<code>popen</code>), so it stays recursion-safe even with the override on.</td></tr>
-<tr><td><code>App::hookExec(?bool)</code> / <code>App::$hook_exec</code></td><td>Toggles the transparent override. <code>null</code> (default) resolves to <strong>on in coroutine mode</strong> (<code>superglobals === false</code>); a non-null value forces it on/off. When on, <code>shell_exec</code>, <code>exec</code>, <code>system</code>, <code>passthru</code>, and the backtick operator all route through <code>App::exec()</code> via <code>zealphp_override()</code> (ext-zealphp preferred; <code>uopz_set_return()</code> fallback) — same override family as <code>header()</code> and <code>session_*()</code>. <code>proc_open</code> / <code>popen</code> are intentionally NOT overridden.</td></tr>
+<tr><td><code>App::rawExec(string $cmd): ?string</code></td><td>Explicit blocking escape hatch — returns captured stdout (or <code>null</code> if the process failed to start). Uses a low-level launcher deliberately (NOT the overridden <code>shell_exec</code>/<code>exec</code>/<code>system</code>/<code>passthru</code>/<code>popen</code>), so it stays recursion-safe even with the override on.</td></tr>
+<tr><td><code>App::hookExec(?bool)</code> / <code>App::$hook_exec</code></td><td>Toggles the transparent override. <code>null</code> (default) resolves to <strong>on in coroutine mode</strong> (<code>superglobals === false</code>); a non-null value forces it on/off. When on, <code>shell_exec</code>, <code>exec</code>, <code>system</code>, <code>passthru</code>, and the backtick operator all route through <code>App::exec()</code> via <code>zealphp_override()</code> (ext-zealphp preferred; <code>uopz_set_return()</code> fallback) — same override family as <code>header()</code> and <code>session_*()</code>. The low-level process launchers are intentionally NOT overridden, so the coroutine-safe shell-out path stays recursion-safe.</td></tr>
 </table>
 <p>New ZealPHP-native code should still prefer explicit <code>App::exec()</code>, but the override means unmodified legacy code that shells out stops blocking the worker automatically.</p>
 

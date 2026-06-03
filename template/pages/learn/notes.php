@@ -309,11 +309,12 @@ if (msg.type === 'note_changed') {
     <p>
       The next lesson — <a href="/learn/websocket">Lesson 19, Real-Time Sync</a> — walks through
       how <code>WS::broadcast</code> iterates the <code>Store</code> table of connected fds
-      and filters by <code>user_id</code>. (<code>route/learn.php</code> also defines a
-      <code>learn_ws_broadcast()</code> free function used by its own path-param update/delete
-      routes — that is a different call site; the api/ endpoint uses <code>WS::broadcast</code>
-      directly as shown above.) The tic-tac-toe lesson later applies the same broadcaster shape
-      with a different filter key: <code>room</code>.
+      and filters by <code>user_id</code>. (<code>route/learn.php</code>&rsquo;s path-param
+      update/delete routes call the thin wrapper <code>Demo::learn_ws_broadcast()</code> &mdash;
+      a <code>public static</code> method on <code>ZealPHP\Learn\Demo</code> that just forwards to
+      <code>WS::broadcast()</code> &mdash; so the route file stays function-free and hot-reloadable;
+      the api/ endpoint calls <code>WS::broadcast</code> directly as shown above.) The tic-tac-toe
+      lesson later applies the same broadcaster shape with a different filter key: <code>room</code>.
     </p>
 
     <h2 id="step-tryit">6. Try it — the live widget</h2>

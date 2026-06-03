@@ -87,6 +87,12 @@ foreach ($_FILES as $entry) {
 $__z_return_value = null;
 $__z_has_return   = false;
 
+/**
+ * Write the metadata frame (status, headers, cookies, optional return value) to `STDERR`
+ * as a single JSON line. Idempotent — subsequent calls are no-ops once `$__z_meta_sent`
+ * is `true`. Called by the `flush()` override and the shutdown function so the frame is
+ * always sent before the body, regardless of whether the included file streams or buffers.
+ */
 function __z_send_meta() {
     global $__z_headers, $__z_cookies, $__z_rawcookies, $__z_status, $__z_meta_sent,
            $__z_return_value, $__z_has_return;
@@ -290,6 +296,13 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
 // Apache mod_php functions are not defined in CLI SAPI; define them globally
 // here for the duration of the subprocess so legacy code runs unchanged.
 if (!function_exists('apache_request_headers')) {
+    /**
+     * Polyfill for `apache_request_headers()` in CLI SAPI.
+     * Reconstructs the canonical header map from `$_SERVER` `HTTP_*` keys plus
+     * `CONTENT_TYPE` and `CONTENT_LENGTH`, matching Apache `mod_php` behaviour.
+     *
+     * @return array<string, string> Map of header name → value.
+     */
     function apache_request_headers(): array {
         $out = [];
         foreach ($_SERVER as $name => $value) {
@@ -306,12 +319,23 @@ if (!function_exists('apache_request_headers')) {
 }
 
 if (!function_exists('getallheaders')) {
+    /**
+     * Polyfill for `getallheaders()` in CLI SAPI — delegates to `apache_request_headers()`.
+     *
+     * @return array<string, string> Map of header name → value.
+     */
     function getallheaders(): array {
         return apache_request_headers();
     }
 }
 
 if (!function_exists('apache_response_headers')) {
+    /**
+     * Polyfill for `apache_response_headers()` in CLI SAPI.
+     * Returns the response headers collected so far by the `header()` override.
+     *
+     * @return array<string, string> Map of header name → value.
+     */
     function apache_response_headers(): array {
         global $__z_headers;
         $out = [];
@@ -323,6 +347,10 @@ if (!function_exists('apache_response_headers')) {
 }
 
 if (!function_exists('apache_setenv')) {
+    /**
+     * Polyfill for `apache_setenv()` in CLI SAPI.
+     * Stores `$value` in the subprocess-local `$__z_apache_env` map (Apache `mod_env` parity).
+     */
     function apache_setenv(string $variable, string $value, bool $walk_to_top = false): bool {
         global $__z_apache_env;
         $__z_apache_env[$variable] = $value;
@@ -331,6 +359,10 @@ if (!function_exists('apache_setenv')) {
 }
 
 if (!function_exists('apache_getenv')) {
+    /**
+     * Polyfill for `apache_getenv()` in CLI SAPI.
+     * Reads from `$__z_apache_env`; returns `false` when the variable is not set.
+     */
     function apache_getenv(string $variable, bool $walk_to_top = false) {
         global $__z_apache_env;
         return $__z_apache_env[$variable] ?? false;
@@ -338,6 +370,10 @@ if (!function_exists('apache_getenv')) {
 }
 
 if (!function_exists('apache_note')) {
+    /**
+     * Polyfill for `apache_note()` in CLI SAPI.
+     * Gets/sets a named note in `$__z_apache_notes`. Returns the previous value (empty string if unset).
+     */
     function apache_note(string $note_name, ?string $note_value = null): string {
         global $__z_apache_notes;
         $previous = (string)($__z_apache_notes[$note_name] ?? '');
@@ -349,6 +385,10 @@ if (!function_exists('apache_note')) {
 }
 
 if (!function_exists('virtual')) {
+    /**
+     * Polyfill for `virtual()` in CLI SAPI.
+     * Internal sub-requests are not supported in the subprocess context — always returns `false`.
+     */
     function virtual(string $uri): bool {
         // No internal-subrequest support — silently return false.
         return false;
@@ -375,6 +415,16 @@ if (!$__z_file || !file_exists($__z_file)) {
 
 $__z_cwd = getenv('ZEALPHP_CWD');
 if ($__z_cwd) chdir($__z_cwd);
+
+// Bridge php://input: the parent (Dispatcher) wrote the request body to our STDIN
+// and closed it, but native CLI php://input does NOT expose that. Read it here and
+// serve it via CgiInputStream so legacy code / the WP REST API (the block editor's
+// JSON save) can read file_get_contents('php://input'). Other php:// pass through.
+// (Also drains STDIN so a >64 KB POST body can't block the parent's pipe write.)
+$GLOBALS['__zeal_cgi_raw_input'] = (string) (@stream_get_contents(STDIN) ?: '');
+require_once __DIR__ . '/CGI/CgiInputStream.php';
+@stream_wrapper_unregister('php');
+@stream_wrapper_register('php', \ZealPHP\CGI\CgiInputStream::class);
 
 register_shutdown_function(function() {
     global $__z_meta_sent;

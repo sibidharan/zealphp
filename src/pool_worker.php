@@ -57,6 +57,16 @@ foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php
 
 use ZealPHP\CGI\IPC;
 
+// Bridge php://input to the request's raw body (REST/JSON payloads) for legacy
+// code in this pooled subprocess — mirrors \ZealPHP\IOStreamWrapper (in-process
+// modes) and cgi_worker.php (proc). CgiInputStream serves the CURRENT request's
+// body from $GLOBALS['__zeal_cgi_raw_input'], set per request by
+// pool_prepare_request; every other php:// stream passes through.
+require_once __DIR__ . '/CGI/CgiInputStream.php';
+$GLOBALS['__zeal_cgi_raw_input'] = '';
+@stream_wrapper_unregister('php');
+@stream_wrapper_register('php', \ZealPHP\CGI\CgiInputStream::class);
+
 $maxRequests = (int) (getenv('ZEALPHP_POOL_MAX_REQUESTS') ?: '500');
 $count       = 0;
 
@@ -389,6 +399,58 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
         // response flow through the normal shutdown path.
         return true;
     }, true);
+
+    // is_uploaded_file() / move_uploaded_file() — bridge OpenSwoole-delivered
+    // uploads to legacy code (same overrides cgi_worker.php carries for proc).
+    // The pool repopulates $_FILES per request (pool_prepare_request), so these
+    // resolve against the LIVE $_FILES superglobal at call time, not a boot
+    // snapshot. WITHOUT them, PHP's native is_uploaded_file() runs — and its
+    // SAPI upload list is empty under OpenSwoole — so WordPress's
+    // wp_handle_upload() fails every media upload with "Specified file failed
+    // upload test." (handles both scalar and array `tmp_name` shapes).
+    $z_override('is_uploaded_file', function (string $filename): bool {
+        foreach ($_FILES as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $tmp = $entry['tmp_name'] ?? null;
+            if (is_array($tmp)) {
+                if (in_array($filename, $tmp, true)) {
+                    return true;
+                }
+            } elseif (is_string($tmp) && $tmp === $filename) {
+                return true;
+            }
+        }
+        return false;
+    }, true);
+
+    $z_override('move_uploaded_file', function (string $from, string $to): bool {
+        $isUpload = false;
+        foreach ($_FILES as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $tmp = $entry['tmp_name'] ?? null;
+            if ((is_array($tmp) && in_array($from, $tmp, true))
+                || (is_string($tmp) && $tmp === $from)) {
+                $isUpload = true;
+                break;
+            }
+        }
+        if (!$isUpload) {
+            return false;
+        }
+        // rename within a filesystem; copy+unlink across (e.g. /tmp → uploads).
+        if (@rename($from, $to)) {
+            return true;
+        }
+        if (@copy($from, $to)) {
+            @unlink($from);
+            return true;
+        }
+        return false;
+    }, true);
 }
 
 // Drain any output buffering that may have been auto-started so PHP errors
@@ -447,7 +509,22 @@ while ($count < $maxRequests) {
     }
 
     $__pw_mid_request = true;
-    $resp = pool_handle_request($req);
+    // Run the include AT GLOBAL SCOPE (not inside pool_handle_request) so a
+    // legacy app's top-level variables become real $GLOBALS. [Issue 1]
+    $__pw_prep = pool_prepare_request($req);
+    if (isset($__pw_prep['__error'])) {
+        $resp = $__pw_prep['__error'];
+    } else {
+        $__pw_inc_result = null;
+        $__pw_inc_error  = null;
+        try {
+            /** @psalm-suppress UnresolvableInclude */
+            $__pw_inc_result = include $__pw_prep['file'];
+        } catch (\Throwable $__pw_e) {
+            $__pw_inc_error = $__pw_e;
+        }
+        $resp = pool_finish_request($__pw_inc_result, $__pw_inc_error, $__pw_prep['prevCwd']);
+    }
 
     // FD-3 IPC happy path: body goes to STDOUT, metadata frame goes to fd 3.
     // The metadata frame carries `body_length` so the parent reads exactly
@@ -484,22 +561,27 @@ while ($count < $maxRequests) {
 exit(0);
 
 /**
+ * Prepare per-request state and return the file to include + the prior cwd.
+ * The `include` itself is performed by the CALLER at GLOBAL scope (see the
+ * request loop) — NOT here — so a legacy app's top-level variables
+ * ($menu / $submenu in WP's wp-admin) become real `$GLOBALS`. Including from
+ * inside a function made them function-locals, so WP's `global $menu` resolved
+ * to null and `uksort($menu, …)` fataled. [Issue 1: include scope]
+ *
  * @param array<mixed,mixed> $req
- * @return array<string,mixed>
+ * @return array{file:string,prevCwd:mixed}|array{__error:array<string,mixed>}
  */
-function pool_handle_request(array $req): array
+function pool_prepare_request(array $req): array
 {
-    global $__pw_headers, $__pw_cookies, $__pw_rawcookies, $__pw_status;
-
     $file = isset($req['file']) && is_string($req['file']) ? $req['file'] : '';
     if ($file === '' || !is_file($file)) {
-        return [
+        return ['__error' => [
             'status'     => 404,
             'body'       => "pool_worker: file not found: $file",
             'headers'    => [],
             'cookies'    => [],
             'rawcookies' => [],
-        ];
+        ]];
     }
 
     // Populate request-input superglobals. Merging $_SERVER (rather than
@@ -512,28 +594,47 @@ function pool_handle_request(array $req): array
     $_FILES   = is_array($req['files']   ?? null) ? $req['files']   : [];
     $_REQUEST = array_merge($_GET, $_POST);
 
+    // Raw request body for php://input (CgiInputStream serves it). IPC base64s
+    // the body only when it isn't valid UTF-8 (binary); decode that case.
+    $__pw_body = $req['body'] ?? '';
+    if (is_string($__pw_body) && ($req['body_encoding'] ?? '') === 'base64') {
+        $__pw_body = (string) base64_decode($__pw_body, true);
+    }
+    $GLOBALS['__zeal_cgi_raw_input'] = is_string($__pw_body) ? $__pw_body : '';
+
     $prevCwd = getcwd();
     chdir(dirname($file));
 
     ob_start();
-    $result = null;
-    try {
-        /** @psalm-suppress UnresolvableInclude */
-        $result = include $file;
-    } catch (\Throwable $e) {
-        ob_end_clean();
+    return ['file' => $file, 'prevCwd' => $prevCwd];
+}
+
+/**
+ * Capture output and build the response AFTER the global-scope include.
+ *
+ * @param mixed           $result   the include's return value (null if it threw)
+ * @param \Throwable|null $error    exception thrown by the include, if any
+ * @param mixed           $prevCwd  cwd to restore
+ * @return array<string,mixed>
+ */
+function pool_finish_request(mixed $result, ?\Throwable $error, mixed $prevCwd): array
+{
+    global $__pw_headers, $__pw_cookies, $__pw_rawcookies, $__pw_status;
+
+    if ($error !== null) {
+        while (ob_get_level() > 0) { ob_end_clean(); }
         if (is_string($prevCwd)) chdir($prevCwd);
         return [
             'status'     => 500,
-            'body'       => 'pool_worker fatal: ' . $e->getMessage(),
+            'body'       => 'pool_worker fatal: ' . $error->getMessage(),
             'headers'    => [],
             'cookies'    => [],
             'rawcookies' => [],
-            'stderr'     => $e->getTraceAsString(),
+            'stderr'     => $error->getTraceAsString(),
         ];
     }
     if (is_string($prevCwd)) chdir($prevCwd);
-    
+
     // Execute registered shutdown functions before capturing the output buffer.
     // CRITICAL: clear each entry from $__pw_shutdown_functions as it runs.
     // If a user shutdown function calls exit() (phpMyAdmin's
@@ -585,6 +686,26 @@ function pool_handle_request(array $req): array
     ];
 }
 
+/**
+ * Reset all per-request state between pool iterations.
+ *
+ * Clears superglobals (`$_SERVER`, `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`,
+ * `$_REQUEST`, `$_SESSION`), the raw input buffer, response capture state
+ * (`$__pw_headers`, `$__pw_cookies`, `$__pw_rawcookies`, `$__pw_status`),
+ * any queued shutdown functions, and all output buffers.
+ *
+ * Performs FPM-style `$GLOBALS` cleanup (unsets request-scope keys not in
+ * the boot snapshot) and, when `ext-zealphp` is loaded, calls
+ * `zealphp_process_state_clean()` to roll back constants, classes, functions,
+ * and included files to the boot baseline.
+ *
+ * When `ZEALPHP_POOL_FULL_RESET=1` is set, also resets op_array
+ * `run_time_cache`, function-local statics, and class static properties
+ * (mirrors `CoSessionManager`'s per-request reset stack from ext-zealphp 0.3.25).
+ *
+ * IMPORTANT: Must be called at GLOBAL SCOPE (not inside a function) so that
+ * `$_SESSION = null` and the superglobal resets take effect process-wide.
+ */
 function pool_reset_request_state(): void
 {
     global $__pw_headers, $__pw_cookies, $__pw_rawcookies, $__pw_status, $__pw_globals_snapshot, $__pw_shutdown_functions;
@@ -607,6 +728,7 @@ function pool_reset_request_state(): void
     $_FILES   = [];
     $_REQUEST = [];
     $_SESSION = null;
+    $GLOBALS['__zeal_cgi_raw_input'] = '';
 
     $__pw_headers    = [];
     $__pw_cookies    = [];
@@ -646,5 +768,29 @@ function pool_reset_request_state(): void
     // collides with phpMyAdmin's CACHE_DIR; both crash on re-define).
     if (function_exists('zealphp_process_state_clean')) {
         @zealphp_process_state_clean(); // flags=7 default: files+classes+functions
+    }
+
+    // OPT-IN full per-request reset (EXPERIMENTAL — off by default; gated on
+    // ZEALPHP_POOL_FULL_RESET=1, inherited via the parent env). Mirrors the
+    // coroutine-legacy reset stack (ext-zealphp 0.3.25) so a REUSED pool
+    // subprocess (cgiPoolMaxRequests > 1) re-initialises run_time_cache +
+    // function/class statics per request, like PHP-FPM's fresh process —
+    // letting *re-entrant* legacy apps use warm reuse. It CANNOT make an app
+    // with inherited-class redeclaration safe (PHP can't un-declare an inherited
+    // class); use the recycle=1 default or cgiMode('fork') for those. See
+    // docs/architecture/2026-06-02-fork-per-request-cgi-pool.md (option A).
+    if (getenv('ZEALPHP_POOL_FULL_RESET') === '1') {
+        // The rtcache reset MUST run paired with the class-static reset (a stray
+        // ZEND_FETCH_STATIC_PROP on a freed slot SEGVs); run all three together.
+        // Order mirrors CoSessionManager's request-end sequence.
+        if (function_exists('zealphp_reset_request_rtcaches')) {
+            @zealphp_reset_request_rtcaches();
+        }
+        if (function_exists('zealphp_reset_request_statics')) {
+            @zealphp_reset_request_statics();
+        }
+        if (function_exists('zealphp_reset_request_class_statics')) {
+            @zealphp_reset_request_class_statics();
+        }
     }
 }

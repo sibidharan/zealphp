@@ -28,7 +28,13 @@ interface StoreBackend
      */
     public function make(string $name, int $maxRows, array $columns, array $opts = []): void;
 
-    /** @param array<string, scalar> $row */
+    /**
+     * Write a row into table `$name` under `$key`. Overwrites any existing row.
+     * Returns `true` on success, or `false` when the backend cannot store the entry
+     * (e.g. the `OpenSwoole\Table` is full).
+     *
+     * @param array<string, scalar> $row Column-name → value map. All declared columns must be present.
+     */
     public function set(string $name, string $key, array $row): bool;
 
     /**
@@ -40,10 +46,25 @@ interface StoreBackend
      */
     public function get(string $name, string $key, ?string $field = null): mixed;
 
+    /** Delete the row at `$key` from table `$name`. Returns `true` on success, `false` if the key did not exist. */
     public function del(string $name, string $key): bool;
+
+    /** Return `true` when table `$name` contains a row with key `$key`. */
     public function exists(string $name, string $key): bool;
+
+    /**
+     * Atomically increment column `$col` of row `$key` in table `$name` by `$by`.
+     * Returns the new column value. Creates the row with the column set to `$by` when it does not exist.
+     */
     public function incr(string $name, string $key, string $col, int|float $by = 1): int|float;
+
+    /**
+     * Atomically decrement column `$col` of row `$key` in table `$name` by `$by`.
+     * Returns the new column value. Creates the row with the column set to `-$by` when it does not exist.
+     */
     public function decr(string $name, string $key, string $col, int|float $by = 1): int|float;
+
+    /** Return the number of rows currently stored in table `$name`. */
     public function count(string $name): int;
 
     /** @return \Generator<string, array<string, scalar>> */

@@ -109,7 +109,7 @@ systemd unit (`Environment="..."`), Docker `-e` flags, or shell.
 |---|---|---|---|
 | `ZEALPHP_HOST` | string | `0.0.0.0` | Bind address for the HTTP server |
 | `ZEALPHP_PORT` | int | `8080` | TCP port |
-| `ZEALPHP_WORKERS` | int | auto (CPU cores) | HTTP worker process count |
+| `ZEALPHP_WORKERS` | int | `min(4, floor(cgroup CPU quota))` | HTTP worker process count. When unset, defaults to `\ZealPHP\default_worker_count(4)` — conservative 4, capped to the cgroup CPU quota so containers don't over-spawn workers relative to their allocated CPUs. |
 | `ZEALPHP_TASK_WORKERS` | int | `8` | Async task worker count (set `0` to disable) |
 | `ZEALPHP_MAX_REQUEST` | int | `100000` | Requests per worker before clean recycle. Bounds memory growth from long-running PHP. Set `0` to disable. |
 | `ZEALPHP_MAX_CONN` | int | OpenSwoole default | `max_conn` server setting |
@@ -219,18 +219,19 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.3.6 .
+docker build -t zealphp:0.3.8 .
 ```
 
-The shipped `Dockerfile` is PHP 8.3-cli on `bookworm` with OpenSwoole and
-uopz compiled via `setup.sh --docker`. Pin extension versions with the
-build args:
+The shipped `Dockerfile` is PHP 8.4-cli on `bookworm` with OpenSwoole and
+ext-zealphp compiled via `setup.sh --docker`. uopz is optional — `setup.sh`
+falls back to it only when the ext-zealphp build fails. Pin extension
+versions with the build args:
 
 ```bash
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
-    --build-arg UOPZ_VERSION=7.1.2 \
-    -t zealphp:0.3.6 .
+    --build-arg ZEALPHP_EXT_VERSION=v0.3.26 \
+    -t zealphp:0.3.8 .
 ```
 
 ### Run (single container)
@@ -242,7 +243,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.3.6
+    zealphp:0.3.8
 ```
 
 ### Production compose
@@ -253,7 +254,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.3.6
+    image: registry.example.com/zealphp-app:0.3.8
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"

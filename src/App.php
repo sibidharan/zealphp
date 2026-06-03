@@ -16,14 +16,56 @@ use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
 use OpenSwoole\Coroutine as co;
+/**
+ * ZealPHP framework core — the single process-wide singleton that owns the
+ * OpenSwoole server lifecycle, route table, PSR-15 middleware stack, and all
+ * per-request lifecycle configuration.
+ *
+ * Typical boot sequence:
+ *
+ * ```php
+ * App::superglobals(false);          // choose lifecycle mode
+ * $app = App::init('0.0.0.0', 8080); // create singleton + install overrides
+ * $app->route('/hello', fn() => 'Hello!');
+ * $app->addMiddleware(new CorsMiddleware());
+ * $app->run();                        // start the OpenSwoole event loop
+ * ```
+ *
+ * Configuration is expressed as static fluent setters (e.g. `App::superglobals()`,
+ * `App::documentRoot()`) that MUST be called before `App::run()` — OpenSwoole
+ * freezes the server settings at `$server->start()`. See the "Architecture"
+ * section of `CLAUDE.md` for the full lifecycle-mode matrix.
+ */
 class App
 {
-    /** @var array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool}> */
+    /** @var array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}> */
     protected array $routes = [];
-    /** @var array<string, array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool}>> */
+    /** @var array<string, array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>> */
     protected array $routes_by_method = [];
-    /** @var array<string, array<string, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool}>> */
+    /** @var array<string, array<string, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>> */
     protected array $routes_by_exact_method = [];
+    /**
+     * Snapshot of the route/middleware registries taken at `App::run()` *before*
+     * the `route/*.php` files + implicit routes are loaded — i.e. just the
+     * app.php-defined explicit routes/aliases/scopes. `App::reloadRoutes()`
+     * restores this baseline, then re-runs the file-based registration, so a
+     * route-file edit can be picked up without restarting the worker. Null until
+     * `run()` snapshots it.
+     *
+     * `implicit` holds the framework's own implicit routes (api dispatch, public
+     * file serving, …) captured as data so reload re-appends them after the
+     * re-included route files, preserving priority order without re-running
+     * their registration.
+     *
+     * @var array{
+     *   routes: array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>,
+     *   implicit: array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>,
+     *   when: list<array{type:string, key:string, spec:list<\Psr\Http\Server\MiddlewareInterface|string>}>,
+     *   aliases: array<string, \Psr\Http\Server\MiddlewareInterface|callable>,
+     *   backend_aliases?: array<string, array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}>
+     * }|null
+     */
+    protected ?array $route_baseline = null;
     /** @var array<string, array{message: callable, open: callable|null, close: callable|null}> */
     protected array $ws_routes = [];
     /** @var array<int, callable> */
@@ -37,6 +79,7 @@ class App
     protected static array $reliableRegistry = [];
     /** True once the onWorkerStart hook for pubsub/streams is wired (one-time guard). */
     protected static bool $pubsubBootWired = false;
+    /** Unix timestamp (float) of the moment this worker's `onWorkerStart` callback finished — used by `App::stats()` to compute per-worker uptime. Zero until the first worker start fires. */
     protected static float $workerStartedAt = 0.0;
 
     // v0.3.0 helpers — registries for App::onSignal / App::addProcess and
@@ -53,9 +96,15 @@ class App
     protected static ?int $bootedAt = null;
     /** Resolved worker counts after `run()` reads CLI/env/settings. */
     protected static int $worker_num = 0;
+    /** Resolved task-worker count after `run()` reads CLI/env/settings. Zero when task workers are disabled. */
     protected static int $task_worker_num = 0;
+    /** Bind address for the OpenSwoole server (e.g. `'0.0.0.0'` or `'127.0.0.1'`). Set in `__construct()` from `App::init()`. */
     protected string $host;
-    protected int $port;
+    // Widened protected → public so ZealPHP\CLI (extracted from App.php in the
+    // Phase 1 decomposition) can read the running instance's port for PID-file
+    // / status reporting. Additive BC change — no caller relied on it being
+    // protected, App is not subclassed, and the value is read-only post-boot.
+    public int $port;
     /**
      * Absolute working directory the framework boots in. Resolved at boot
      * via `realpath(__DIR__ . '/..')` and exposed read-only for handlers
@@ -323,6 +372,29 @@ class App
     public static bool $silent_redeclare = false;
 
     /**
+     * Stage 8 — true-global-scope request include (coroutine-legacy). When on
+     * (and ext-zealphp exposes `zealphp_require_global()`), `App::include()` runs
+     * the target file at TRUE global scope so a bare file-scope `$x = ...` — and
+     * every transitive `require_once` — binds to `$GLOBALS` instead of the
+     * `executeFile()` method frame. This is what lets unmodified `require_once`-
+     * bootstrap apps (WordPress's `$menu`/`$submenu`/`$_wp_submenu_nopriv`, built
+     * bare at file scope in `wp-admin/includes/menu.php`) render in
+     * **coroutine-legacy** in-process mode, where the request entry runs inside a
+     * PHP method and those vars would otherwise be method-local.
+     *
+     * Only effective under coroutine-legacy (`$silent_redeclare`): global-scope
+     * includes need the per-coroutine globals isolation stack, else file-scope
+     * globals leak across coroutines. **Off by default** — it changes include
+     * scope (the included file does NOT see `executeFile()`'s injected `$g` /
+     * route params as locals), so enable it only for legacy apps that read
+     * request state through superglobals, not via ZealPHP's `$g`. `null` follows
+     * the `ZEALPHP_GLOBAL_INCLUDE` env var (default off). Set via
+     * `App::globalScopeInclude(true)` BEFORE `App::run()`. Canonical reference:
+     * `docs/architecture/2026-06-02-stage8-global-scope-include.md`.
+     */
+    public static ?bool $global_scope_include = null;
+
+    /**
      * Stage 5 — per-coroutine FUNCTION-local `static $x` isolation via
      * ext-zealphp's `zealphp_coroutine_statics()`. This is the LAST
      * request-state primitive that previously leaked across coroutines
@@ -384,13 +456,75 @@ class App
     public static ?StackHandler $middleware_stack = null;
     /**
      * Middleware queued via `App::addMiddleware()` BEFORE `App::run()`.
-     * Reversed at boot so the last-added middleware wraps outermost;
-     * `ResponseMiddleware` (router) always runs innermost. Public for
-     * apps that want to inspect / mutate the stack at boot time.
+     * Reversed at boot and fed to OpenSwoole's StackHandler (whose `add()`
+     * prepends and whose `handle()` runs index 0 first) so the **first**
+     * middleware you add wraps outermost and runs first; `ResponseMiddleware`
+     * (the router) always runs innermost. Public for apps that want to
+     * inspect / mutate the stack at boot time.
      *
      * @var array<int, MiddlewareInterface>
      */
     public static array $middleware_wait_stack = [];
+    /**
+     * Named middleware registry — Traefik's "named & shared" middleware and
+     * Laravel's route-middleware aliases. Maps a short name to either a
+     * ready `MiddlewareInterface` instance or a factory `callable(...$args)`
+     * that returns one. Populated by `App::middlewareAlias()` at boot;
+     * resolved to instances once at `App::run()` (single-coroutine, so the
+     * hot path never does a registry lookup or instantiation). Reused across
+     * routes — middleware objects MUST be stateless (request state lives in
+     * `$g`/`RequestContext`, never on the middleware) because one instance is
+     * shared by every concurrent coroutine that uses the alias.
+     *
+     * @var array<string, MiddlewareInterface|callable>
+     */
+    public static array $middleware_aliases = [];
+    /**
+     * Path-scoped middleware registry — `App::when($path, $middleware)`. Each
+     * entry scopes a chain to a URL path prefix (or a `#...#` PCRE), and runs
+     * for EVERY request whose normalized path matches — route or api alike,
+     * since api endpoints are just `/api/...` URLs on the same stack. Stored in
+     * registration order (first registered = outermost). Raw specs here;
+     * resolved to instances at `App::run()` into `$when_middleware_compiled`.
+     *
+     * @var list<array{type:string, key:string, spec:list<MiddlewareInterface|string>}>
+     */
+    public static array $when_middleware = [];
+    /**
+     * Boot-compiled `App::when` chains (alias→instance), read-only at request
+     * time so the hot path never does a registry lookup or `new`.
+     *
+     * @var list<array{type:string, key:string, chain:list<MiddlewareInterface>}>
+     */
+    public static array $when_middleware_compiled = [];
+    /**
+     * Per-normalized-path memo of the flattened matching `when` chain (the
+     * registry is immutable after boot, so this is a write-once-per-path cache;
+     * concurrent same-path writes are idempotent). Capped at `WHEN_MEMO_MAX`
+     * entries so an attacker spraying distinct paths can't grow it without
+     * bound — past the cap, paths simply recompute the (cheap) prefix scan.
+     *
+     * @var array<string, list<MiddlewareInterface>>
+     */
+    public static array $when_middleware_memo = [];
+    /** Upper bound on the `App::when` per-path memo (memory-exhaustion guard). */
+    private const WHEN_MEMO_MAX = 4096;
+    /**
+     * True only while `App::reloadRoutes()` is re-including `route/*.php` files.
+     * Infrastructure-registration calls that route files also make at boot
+     * (`Store::make`, `App::ws` excluded as it is idempotent, `App::onWorkerStart`,
+     * `App::addProcess`, `App::subscribe`, `App::onSignal`) check this flag and
+     * skip re-wiring — they were wired once at boot and a reload only swaps the
+     * route table, never the worker's timers/processes/subscribers.
+     */
+    public static bool $reloading = false;
+    /**
+     * Dev route hot-reload toggle. When true, each worker polls `route/*.php`
+     * mtimes and calls `reloadRoutes()` on change (no process restart). `null`
+     * resolves to the `ZEALPHP_DEV` env var at `run()`. OFF in production
+     * (the route table stays master-loaded + COW-shared). Set via `App::devReload()`.
+     */
+    public static ?bool $dev_reload = null;
     /**
      * When `true` (default), URLs ending in `.php` get a 403. The framework
      * encourages extensionless URLs as the canonical public surface (matches
@@ -458,13 +592,23 @@ class App
      *                      (e.g. uopz unavailable in the subprocess, or
      *                      audit / compliance requiring zero pre-warm).
      *
+     *   `'fork'` (experimental) — Apache MPM prefork. A long-lived fork-master
+     *                      (`src/fork_master.php`) forks a FRESH child per
+     *                      request that runs the include at TRUE global scope
+     *                      (~1 ms fork cost), captures the response, then
+     *                      hard-exits. Same fresh-process correctness as
+     *                      `'proc'` (no class-redeclare) but at fork cost
+     *                      instead of `proc_open` cold start. Requires
+     *                      pcntl + posix; bounds live children via
+     *                      `App::$cgi_fork_max_concurrent` (503 when full).
+     *
      *   `'fcgi'` (deployment mode) — forward to an external FastCGI backend
      *                      (php-fpm, hhvm, roadrunner) via the FCGI binary
      *                      protocol over TCP or Unix socket. Target address
      *                      via `App::fcgiAddress()`. Use when ZealPHP fronts
      *                      an existing FPM pool you don't want to retire.
      *
-     * Set via `App::cgiMode('pool'|'proc'|'fcgi')`. Default `'pool'`.
+     * Set via `App::cgiMode('pool'|'proc'|'fork'|'fcgi')`. Default `'pool'`.
      */
     public static string $cgi_mode = 'pool';
     /**
@@ -491,6 +635,12 @@ class App
      * the pool managing spawn-cost amortisation).
      */
     public static int $cgi_pool_max_requests = 500;
+    /**
+     * True once `cgiPoolMaxRequests()` set the recycle count explicitly. The
+     * `mode()` presets consult this so a `mode('legacy-cgi')` default (recycle=1)
+     * never clobbers an explicit user choice, regardless of call order.
+     */
+    public static bool $cgi_pool_max_requests_set = false;
     /**
      * Whether `cgi_worker.php` (proc-mode subprocess entry) loads Composer's
      * `vendor/autoload.php` on startup. Default `false` — restores the pre-
@@ -519,6 +669,20 @@ class App
      */
     public static ?\ZealPHP\CGI\WorkerPool $cgi_pool_instance = null;
     /**
+     * Per-worker ForkPool singleton for `cgiMode('fork')` — the fork-master
+     * subprocess. Lazy-spawned on first dispatch in this OpenSwoole worker
+     * (same per-worker ownership rationale as $cgi_pool_instance).
+     */
+    public static ?\ZealPHP\CGI\ForkPool $cgi_fork_instance = null;
+    /**
+     * Live-child concurrency cap for `cgiMode('fork')` — the fork-master refuses
+     * to fork past this many simultaneous children (fork-bomb guard + backpressure).
+     * Defaults to 16; this is a per-request fork ceiling, NOT the pre-spawned
+     * process count `cgi_pool_size` (which would wrongly throttle to 4 under a
+     * coroutine worker handling many concurrent requests).
+     */
+    public static int $cgi_fork_max_concurrent = 16;
+    /**
      * Per-extension CGI backend registry. Apache `AddHandler`/`ProxyPassMatch`
      * + nginx `fastcgi_pass`-per-location parity.
      *
@@ -540,6 +704,17 @@ class App
      * @var array<string, array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>}>
      */
     public static array $cgi_script_aliases = [];
+    /**
+     * Named CGI backend aliases for the per-route `backend:` option, registered
+     * via `App::cgiBackendAlias()`. Maps an alias name to a normalised backend
+     * config (the same shape `resolveCgiBackend()` returns, minus `exec_paths`).
+     * Resolved at route registration so `backend: 'wp-fork'` becomes a concrete
+     * dispatch strategy with zero per-request lookup. Mirrors the
+     * `$middleware_aliases` precedent.
+     *
+     * @var array<string, array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}>
+     */
+    public static array $cgi_backend_aliases = [];
     /**
      * OpenSwoole `enable_coroutine` server-setting override. `null` means
      * "follow `!$superglobals`" (true → coroutine-per-request, false → one
@@ -711,9 +886,19 @@ class App
      * @var callable|null
      */
     public static $auth_checker = null;
-    /** @var callable|null */
+    /**
+     * Callback consulted by `ZealAPI::isAdmin()`. Signature: `fn(): bool`.
+     * Default `null` → `isAdmin()` returns `false` (fail-closed). Set via `App::adminChecker()`.
+     *
+     * @var callable|null
+     */
     public static $admin_checker = null;
-    /** @var callable|null */
+    /**
+     * Callback consulted by `ZealAPI::getUsername()`. Signature: `fn(): ?string`.
+     * Default `null` → `getUsername()` returns `null`. Set via `App::usernameProvider()`.
+     *
+     * @var callable|null
+     */
     public static $username_provider = null;
     /**
      * Apache `RewriteCond %{REQUEST_FILENAME} !-d` + `RewriteRule ^(.+)/$ /$1 [R=301,L]`.
@@ -1017,6 +1202,64 @@ class App
         }
     }
 
+    /**
+     * Stream a `\Generator` response chunk-by-chunk to the live OpenSwoole
+     * response (SSR streaming), returning an empty placeholder `Response` once
+     * done. Shared by the route dispatcher (`dispatchMatched`) and ZealAPI's
+     * `runHandlerWithContract` so both stream identically. HEAD sends headers
+     * only (no body). Assumes the caller has already discarded its output buffer.
+     *
+     * @param \Generator<mixed> $object
+     */
+    public static function emitGeneratorStream(\Generator $object, string $method): Response
+    {
+        $g = RequestContext::instance();
+        $streamStatus = $g->status ?? 200;
+        // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+        App::emitStatus($g->openswoole_response, $streamStatus);
+        // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+        $g->zealphp_response->header('Accept-Ranges', 'none');
+        // HEAD: send headers only, never the streamed body (Apache strips
+        // content buckets via ctx->final_header_only). Streaming length is
+        // unknown/chunked, so no Content-Length is emitted.
+        if ($method === 'HEAD') {
+            // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+            $g->openswoole_response->end();
+            return (new Response('', $streamStatus));
+        }
+        // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+        $g->zealphp_response->flush();
+        foreach ($object as $chunk) {
+            // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+            if (!$g->openswoole_response->isWritable()) break;
+            // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+            $g->openswoole_response->write((string)$chunk);
+            \OpenSwoole\Coroutine::sleep(0);
+        }
+        // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+        if ($g->openswoole_response->isWritable()) {
+            // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+            $g->openswoole_response->end();
+        }
+        return (new Response('', $streamStatus));
+    }
+
+    /**
+     * Private constructor — use `App::init()` to obtain the singleton instance.
+     *
+     * Performs one-time per-process setup: validates that ext-zealphp or uopz is
+     * loaded, reads `/etc/environment` into `$_ENV`, captures the initial
+     * `error_reporting()` level, installs the process-level native error and
+     * exception handlers (which delegate to the per-coroutine `RequestContext`
+     * stack), primes `PhpInfo::primeModuleText()`, and calls
+     * `registerAllOverrides()` to replace PHP built-ins with ZealPHP's
+     * coroutine-safe equivalents.
+     *
+     * @param string $host Bind address (e.g. `'0.0.0.0'`).
+     * @param int    $port TCP port.
+     * @param string $cwd  Project root — stored in `App::$cwd`.
+     * @throws \Exception when neither ext-zealphp nor uopz is loaded.
+     */
     private function __construct(string $host = '0.0.0.0', int $port = 8080, string $cwd = __DIR__)
     {
         if (!extension_loaded('zealphp') && !extension_loaded('uopz')) {
@@ -1186,11 +1429,33 @@ class App
      * `$superglobals` etc. leaves the framework in a partial state that
      * races on `$_GET`/`$_POST`/`$_SESSION`. Boot-only is the contract.
      *
-     * Called from `superglobals`, `processIsolation`, `enableCoroutine`,
-     * `hookAll` setters when they receive a write (not a read).
+     * Called from `superglobals()`, `processIsolation()`, `enableCoroutine()`,
+     * and `hookAll()` setters when they receive a write (not a read).
+     *
+     * @throws \RuntimeException when called after `App::run()` has started.
      */
+    private static function refuseAfterRun(string $setter): void
+    {
+        if (self::$run_has_started) {
+            throw new \RuntimeException(
+                "ZealPHP lifecycle: $setter() must be called BEFORE App::run(). "
+                . 'These four knobs (superglobals, processIsolation, enableCoroutine, hookAll) '
+                . 'decide the SessionManager class, the enable_coroutine server setting, and '
+                . 'HOOK_ALL — all frozen at run() boot. Mutating them after the server is '
+                . 'serving requests leaves the framework in a Schrödinger state (coroutines '
+                . 'still active, but per-request handlers now read the new superglobals value) '
+                . 'and races on $_GET / $_POST / $_SESSION. Configure these once in app.php '
+                . 'before App::run() and leave them alone.'
+            );
+        }
+    }
+
     /**
-     * @param callable-string $callable
+     * Install a uopz or ext-zealphp override for a named PHP built-in function,
+     * routing calls to the given ZealPHP replacement. Uses `zealphp_override()`
+     * when ext-zealphp is loaded (preferred), falling back to `uopz_set_return()`.
+     *
+     * @param callable-string $callable Fully-qualified ZealPHP replacement function name.
      */
     private static function overrideBuiltin(string $name, string $callable): void
     {
@@ -1202,8 +1467,18 @@ class App
         }
     }
 
+    /** Guard preventing `registerAllOverrides()` from installing uopz/zealphp built-in overrides more than once per process. */
     private static bool $overridesRegistered = false;
 
+    /**
+     * Install all ZealPHP uopz/ext-zealphp built-in overrides in one shot.
+     * Idempotent — guarded by `$overridesRegistered` so re-entrant calls
+     * (e.g. from tests that re-construct `App`) are no-ops. Covers response
+     * headers (`header()`, `setcookie()`, etc.), session functions
+     * (`session_start()` family), output control (`flush()`, `ob_*`),
+     * error handling (`set_error_handler()`, `error_log()`), and more.
+     * Called once from `__construct()`.
+     */
     private static function registerAllOverrides(): void
     {
         if (self::$overridesRegistered) {
@@ -1270,22 +1545,11 @@ class App
         self::overrideBuiltin('session_module_name', '\ZealPHP\Session\zeal_session_module_name');
     }
 
-    private static function refuseAfterRun(string $setter): void
-    {
-        if (self::$run_has_started) {
-            throw new \RuntimeException(
-                "ZealPHP lifecycle: $setter() must be called BEFORE App::run(). "
-                . 'These four knobs (superglobals, processIsolation, enableCoroutine, hookAll) '
-                . 'decide the SessionManager class, the enable_coroutine server setting, and '
-                . 'HOOK_ALL — all frozen at run() boot. Mutating them after the server is '
-                . 'serving requests leaves the framework in a Schrödinger state (coroutines '
-                . 'still active, but per-request handlers now read the new superglobals value) '
-                . 'and races on $_GET / $_POST / $_SESSION. Configure these once in app.php '
-                . 'before App::run() and leave them alone.'
-            );
-        }
-    }
-
+    /**
+     * Toggle the superglobals-mode lifecycle. See `App::$superglobals` for the full
+     * semantics. Must be called BEFORE `App::run()` — the method calls `refuseAfterRun()`
+     * and throws `\RuntimeException` if the server is already serving requests.
+     */
     public static function superglobals(bool $enable = true): void
     {
         self::refuseAfterRun('App::superglobals');
@@ -1314,18 +1578,32 @@ class App
     // documented API surface and what the converter bot is taught to emit.
     // -----------------------------------------------------------------------
 
+    /**
+     * Whether URLs ending in `.php` are blocked with `403`. Default `true` (Apache
+     * `RewriteRule \.php$ - [F]` parity). Set `false` to allow direct `*.php` routing.
+     * No-arg call returns the current value.
+     */
     public static function ignorePhpExt(?bool $on = null): bool
     {
         if ($on !== null) self::$ignore_php_ext = $on;
         return self::$ignore_php_ext;
     }
 
+    /**
+     * Whether ZealAPI logs a warning when a filename collides with an HTTP method keyword
+     * (e.g. `get.php` defining `$get`) or a filename-matched handler shadows per-method
+     * handlers. Default `true`. No-arg call returns the current value.
+     */
     public static function apiWarnCollisions(?bool $on = null): bool
     {
         if ($on !== null) self::$api_warn_collisions = $on;
         return self::$api_warn_collisions;
     }
 
+    /**
+     * Apache `DirectorySlash` — redirect `/foo` → `/foo/` when `foo` is a directory.
+     * Default `true`. No-arg call returns the current value.
+     */
     public static function directorySlash(?bool $on = null): bool
     {
         if ($on !== null) self::$directory_slash = $on;
@@ -1342,6 +1620,11 @@ class App
         return self::$directory_index;
     }
 
+    /**
+     * Apache `PATH_INFO` — expose the path suffix after a script name as `PATH_INFO`
+     * in `$_SERVER` (e.g. `/script.php/extra/path` → `PATH_INFO=/extra/path`).
+     * Default `true`. No-arg call returns the current value.
+     */
     public static function pathInfo(?bool $on = null): bool
     {
         if ($on !== null) self::$path_info = $on;
@@ -1349,6 +1632,11 @@ class App
     }
 
     /**
+     * URL-prefix whitelist for static-file serving. Empty array (default) allows
+     * any path under `document_root`. When non-empty, only paths whose prefix
+     * matches one of the listed strings are served as static files; others fall
+     * through to route matching. No-arg call returns the current list.
+     *
      * @param array<int, string>|null $prefixes
      * @return array<int, string>
      */
@@ -1358,12 +1646,23 @@ class App
         return self::$static_handler_locations;
     }
 
+    /**
+     * Block any request whose path contains a dotfile component (`.git`, `.env`,
+     * `.htaccess`, etc.) with `403`. Default `true` — matches Apache's convention
+     * of not serving hidden files. No-arg call returns the current value.
+     */
     public static function blockDotfiles(?bool $on = null): bool
     {
         if ($on !== null) self::$block_dotfiles = $on;
         return self::$block_dotfiles;
     }
 
+    /**
+     * Whether framework error pages render the captured exception and stack trace
+     * inline. Default `true` (development-friendly). Set `false` in production so
+     * `5xx` pages show a generic message instead of leaking internal details.
+     * No-arg call returns the current value.
+     */
     public static function displayErrors(?bool $on = null): bool
     {
         if ($on !== null) self::$display_errors = $on;
@@ -1723,8 +2022,11 @@ class App
 
     /**
      * Select how a process-isolated legacy include is dispatched:
-     *   `'proc'` (default) — fresh PHP per request via `proc_open` (full WordPress/Drupal compat).
-     *   `'fork'`           — warm `OpenSwoole\Process` fork (~5× faster; function-scope only).
+     *   `'pool'` (default) — pre-spawned PHP worker pool, mod_php-style isolation, ~1-3 ms warm.
+     *   `'proc'`           — fresh PHP per request via `proc_open` (~30-50 ms cold; full compat).
+     *   `'fork'`           — Apache MPM prefork: a fork-master forks a FRESH child per request at
+     *                        TRUE global scope (~1 ms). Unmodified-WordPress correctness (no class
+     *                        redeclare) at fork cost, not proc cold-start. EXPERIMENTAL (pcntl+posix).
      *   `'fcgi'`           — forward to a FastCGI backend via `App::$fcgi_address` (no child process).
      * See `App::$cgi_mode` for the full trade-off. No-arg call returns the current mode.
      * Only takes effect when `processIsolation()` is on.
@@ -1820,6 +2122,15 @@ class App
             case self::MODE_LEGACY_CGI:
                 self::superglobals(true);
                 self::isolation(Isolation::CgiPool);
+                // Fresh subprocess per request by default (mod_php prefork
+                // parity). Unmodified WordPress/Drupal re-run unguarded
+                // top-level define()/class declarations on every request, so a
+                // REUSED pool subprocess hits "Cannot redeclare class" (issue
+                // #167). Apps with re-entrant boot can opt into reuse via
+                // App::cgiPoolMaxRequests(N) (any order — see the flag).
+                if (!self::$cgi_pool_max_requests_set) {
+                    self::$cgi_pool_max_requests = 1;
+                }
                 break;
             case self::MODE_COROUTINE:
                 self::superglobals(false);
@@ -1875,6 +2186,7 @@ class App
     {
         if ($n !== null) {
             self::$cgi_pool_max_requests = max(1, $n);
+            self::$cgi_pool_max_requests_set = true;
         }
         return self::$cgi_pool_max_requests;
     }
@@ -1919,23 +2231,23 @@ class App
      * @param array<string, mixed> $config
      *   `'mode'`        — `'pool'` | `'proc'` | `'fcgi'` (required)
      *   `'interpreter'` — full path to interpreter binary (`proc` mode only; `null` = direct exec via shebang)
-     *   `'exec_paths'`  — URL prefixes where this extension may execute, e.g. `['/cgi-bin']`. Files outside these prefixes return 403 (Apache `Options +ExecCGI` parity).
+     *   `'exec_paths'`  — URL path prefixes (e.g. `'/cgi-bin'`), NOT filesystem paths, where this extension may execute. Files outside these prefixes return 403 (Apache `Options +ExecCGI` parity). Passing a filesystem path (one that exists as a directory) throws `\InvalidArgumentException` — exec_paths are matched against the request URL, never the disk path.
      *   `'address'`     — FastCGI backend address, `"host:port"` or `"unix:/path"` (`fcgi` mode only)
      *   `'fcgi_params'` — extra FCGI params merged into the CGI env after `buildCgiEnv()` (`fcgi` mode only)
      *
-     * @throws \InvalidArgumentException on invalid mode, fork-on-non-PHP, or missing fcgi address.
+     * @throws \InvalidArgumentException on invalid mode, fork-on-non-PHP, missing fcgi address, or an `exec_paths` entry that is a filesystem path rather than a URL prefix.
      */
     public static function registerCgiBackend(string $extension, array $config): void
     {
         $mode = is_string($config['mode'] ?? null) ? (string)$config['mode'] : '';
-        if ($mode !== 'proc' && $mode !== 'fcgi' && $mode !== 'pool') {
+        if ($mode !== 'proc' && $mode !== 'fcgi' && $mode !== 'pool' && $mode !== 'fork') {
             throw new \InvalidArgumentException(
-                "App::registerCgiBackend() mode must be 'pool', 'proc', or 'fcgi'; got '{$mode}'."
+                "App::registerCgiBackend() mode must be 'pool', 'proc', 'fork', or 'fcgi'; got '{$mode}'."
             );
         }
-        if ($mode === 'pool' && $extension !== '.php') {
+        if (($mode === 'pool' || $mode === 'fork') && $extension !== '.php') {
             throw new \InvalidArgumentException(
-                "pool mode requires a PHP target; use 'fcgi' (warm external pool, language-agnostic) or 'proc' for {$extension}"
+                "{$mode} mode requires a PHP target; use 'fcgi' (warm external pool, language-agnostic) or 'proc' for {$extension}"
             );
         }
         if ($mode === 'fcgi' && empty($config['address'])) {
@@ -1958,7 +2270,11 @@ class App
             $entry['fcgi_params'] = $fcgiParams;
         }
         if (isset($config['exec_paths']) && is_array($config['exec_paths'])) {
-            $entry['exec_paths'] = array_values(array_filter($config['exec_paths'], 'is_string'));
+            $execPaths = array_values(array_filter($config['exec_paths'], 'is_string'));
+            foreach ($execPaths as $p) {
+                self::assertUrlPrefix($p, "App::registerCgiBackend() 'exec_paths'");
+            }
+            $entry['exec_paths'] = $execPaths;
         }
         self::$cgi_backends[$extension] = $entry;
     }
@@ -1971,6 +2287,195 @@ class App
     {
         self::$cgi_backends = [];
         self::$cgi_script_aliases = [];
+        self::$cgi_backend_aliases = [];
+    }
+
+    /**
+     * The four CGI dispatch strategies a per-route `backend:` may name — the
+     * CGI-ISOLATION family. Excludes the COROUTINE-SCHEDULER family
+     * (`coroutine`/`coroutine-legacy`/`legacy-cgi`/`mixed`), which is a
+     * process-wide lifecycle decision frozen at `$server->start()` and cannot
+     * be chosen per route. See `normalizeBackendConfig()`'s guard.
+     */
+    private const ROUTE_BACKEND_MODES = ['pool', 'proc', 'fork', 'fcgi'];
+
+    /**
+     * Lifecycle modes a user might mistakenly pass as a route backend. Rejected
+     * with a message pointing at the separate-process model.
+     */
+    private const LIFECYCLE_MODE_NAMES = ['coroutine', 'coroutine-legacy', 'legacy-cgi', 'mixed'];
+
+    /**
+     * Register a named CGI backend alias for the per-route `backend:` option —
+     * the `App::middlewareAlias()` of the CGI dispatch world. Lets a route say
+     * `backend: 'wp-fork'` instead of repeating an inline config.
+     *
+     * ```php
+     * App::cgiBackendAlias('wp-fork', 'fork');                         // bare mode
+     * App::cgiBackendAlias('py', ['mode' => 'proc', 'interpreter' => '/usr/bin/python3']);
+     * App::cgiBackendAlias('fpm', ['mode' => 'fcgi', 'address' => 'unix:/run/php-fpm.sock']);
+     * ```
+     *
+     * Register aliases BEFORE the routes that reference them (e.g. in `app.php`
+     * before `route/*.php` load — the natural order). The config is resolved +
+     * validated here, so a bad mode / missing `fcgi` address / a lifecycle-mode
+     * name throws at registration, not at request time.
+     *
+     * @param string $name Alias name. Must be non-empty and not collide with a reserved mode (`pool`/`proc`/`fork`/`fcgi`).
+     * @param array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}|string $config A bare mode string, or an inline backend config array.
+     * @throws \InvalidArgumentException on a reserved/empty name, a non-mode string config, an invalid mode, a lifecycle-mode name, or `fcgi` without an `address`.
+     */
+    public static function cgiBackendAlias(string $name, array|string $config): void
+    {
+        $name = trim($name);
+        if ($name === '' || in_array($name, self::ROUTE_BACKEND_MODES, true)) {
+            throw new \InvalidArgumentException(
+                "App::cgiBackendAlias() name must be non-empty and not a reserved mode name "
+                . "('pool'|'proc'|'fork'|'fcgi'); got '{$name}'."
+            );
+        }
+        if (is_string($config)) {
+            if (!in_array($config, self::ROUTE_BACKEND_MODES, true)) {
+                throw new \InvalidArgumentException(
+                    "App::cgiBackendAlias('{$name}', '{$config}'): a string config must be a bare mode "
+                    . "('pool'|'proc'|'fork'|'fcgi'); use an array for interpreter/address/fcgi_params."
+                );
+            }
+            $config = ['mode' => $config];
+        }
+        self::$cgi_backend_aliases[$name] = self::normalizeBackendConfig($config);
+    }
+
+    /**
+     * Normalise + validate one inline backend config array into the canonical
+     * shape (`mode` + the optional `interpreter`/`address`/`fcgi_params`). The
+     * single validation point for `cgiBackendAlias()` and `resolveBackendSpec()`.
+     *
+     * @param array<array-key, mixed> $config
+     * @return array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}
+     * @throws \InvalidArgumentException on a lifecycle-mode name, an invalid mode, or `fcgi` without an `address`.
+     */
+    private static function normalizeBackendConfig(array $config): array
+    {
+        $mode = is_string($config['mode'] ?? null) ? (string) $config['mode'] : '';
+        if (in_array($mode, self::LIFECYCLE_MODE_NAMES, true)) {
+            throw new \InvalidArgumentException(self::lifecycleBackendMessage($mode));
+        }
+        if (!in_array($mode, self::ROUTE_BACKEND_MODES, true)) {
+            throw new \InvalidArgumentException(
+                "Route backend mode must be 'pool', 'proc', 'fork', or 'fcgi'; got '{$mode}'."
+            );
+        }
+        if ($mode === 'fcgi' && empty($config['address'])) {
+            throw new \InvalidArgumentException(
+                "Route backend 'fcgi' mode requires an 'address' (host:port or unix:/path)."
+            );
+        }
+        $entry = ['mode' => $mode];
+        $interpreter = $config['interpreter'] ?? null;
+        if (is_string($interpreter)) {
+            $entry['interpreter'] = $interpreter;
+        }
+        $address = $config['address'] ?? null;
+        if (is_string($address)) {
+            $entry['address'] = $address;
+        }
+        $fcgiParams = $config['fcgi_params'] ?? null;
+        if (is_array($fcgiParams)) {
+            /** @var array<string, string> $fcgiParams */
+            $entry['fcgi_params'] = $fcgiParams;
+        }
+        return $entry;
+    }
+
+    /**
+     * Resolve a route `backend:` spec — a bare mode string, a registered alias
+     * name, or an inline config array — into a concrete backend config. `null`
+     * passes through (no backend). Called at route registration; the dispatch
+     * hot path never re-resolves.
+     *
+     * @param array<array-key, mixed>|string $spec
+     * @return array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}|null
+     * @throws \InvalidArgumentException on a lifecycle-mode name, an unknown alias, or an invalid inline config.
+     */
+    private static function resolveBackendSpec(array|string $spec): ?array
+    {
+        if (is_string($spec)) {
+            $s = trim($spec);
+            if ($s === '') {
+                return null;
+            }
+            if (in_array($s, self::ROUTE_BACKEND_MODES, true)) {
+                return self::normalizeBackendConfig(['mode' => $s]);
+            }
+            if (in_array($s, self::LIFECYCLE_MODE_NAMES, true)) {
+                throw new \InvalidArgumentException(self::lifecycleBackendMessage($s));
+            }
+            if (!isset(self::$cgi_backend_aliases[$s])) {
+                throw new \InvalidArgumentException(
+                    "Unknown route backend alias '{$s}'. Register it with "
+                    . "App::cgiBackendAlias('{$s}', [...]) BEFORE the route, or use a bare mode "
+                    . "('pool'|'proc'|'fork'|'fcgi') or an inline config array."
+                );
+            }
+            return self::$cgi_backend_aliases[$s];
+        }
+        return self::normalizeBackendConfig($spec);
+    }
+
+    /**
+     * The error shown when a route `backend:` (or a `cgiBackendAlias`) is given
+     * a process-wide lifecycle mode instead of a CGI dispatch strategy.
+     */
+    private static function lifecycleBackendMessage(string $mode): string
+    {
+        return "Route backend '{$mode}' is a process-wide lifecycle mode, not a per-route CGI backend. "
+            . "coroutine / coroutine-legacy / legacy-cgi / mixed are frozen at server start "
+            . "(OpenSwoole's enable_coroutine + Runtime::enableCoroutine(HOOK_ALL) are process-global), "
+            . "so they cannot vary per route — run separate processes per port behind a proxy to mix them. "
+            . "Valid route backends: 'pool', 'proc', 'fork', 'fcgi', an inline config array, "
+            . "or a registered App::cgiBackendAlias() name.";
+    }
+
+    /**
+     * Combine the two ways a route can declare a backend — the `'backend'` key
+     * in `$options` and the `backend:` named argument — and resolve to a
+     * concrete config. The named argument wins when both are present. Returns
+     * `null` (the fast path: no per-route backend) when neither is set.
+     *
+     * @param array<int|string, mixed> $options
+     * @param array<string, mixed>|string|null $backendArg
+     * @return array{mode:string, interpreter?:string, address?:string, fcgi_params?:array<string,string>}|null
+     */
+    private static function routeBackendSpec(array $options, array|string|null $backendArg): ?array
+    {
+        if ($backendArg !== null) {
+            return self::resolveBackendSpec($backendArg);
+        }
+        $fromOptions = $options['backend'] ?? null;
+        if (is_array($fromOptions) || is_string($fromOptions)) {
+            return self::resolveBackendSpec($fromOptions);
+        }
+        return null;
+    }
+
+    /**
+     * Apply the per-request route backend override (set by the matched route's
+     * `backend:` option in `ResponseMiddleware::dispatchRoute()`) over a
+     * `resolveCgiBackend()` result. A route that names a backend is itself the
+     * ExecCGI authorisation for its `App::include()`, so `mayExecute` is forced
+     * `true`. No override → the resolved backend passes through unchanged.
+     *
+     * @param array{backend: array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>, exec_paths?:array<int,string>}, mayExecute: bool} $cgi
+     * @return array{backend: array{mode:string, interpreter?:string|null, address?:string, fcgi_params?:array<string,string>, exec_paths?:array<int,string>}, mayExecute: bool}
+     */
+    private static function applyRouteBackend(array $cgi): array
+    {
+        $override = RequestContext::instance()->cgi_backend_override;
+        if (is_array($override)) {
+            return ['backend' => $override, 'mayExecute' => true];
+        }
+        return $cgi;
     }
 
     /**
@@ -1978,15 +2483,18 @@ class App
      * parity). Any file served under `$urlPrefix` is treated as executable,
      * regardless of its extension or whether a per-extension backend exists.
      *
-     * @param string $urlPrefix  URL path prefix, e.g. `'/cgi-bin'`.
+     * @param string $urlPrefix  URL path prefix (e.g. `'/cgi-bin'`), NOT a filesystem path. Passing a filesystem path (one that exists as a directory) throws `\InvalidArgumentException`.
      * @param array<string, mixed> $config
      *   `'mode'`        — `'proc'` | `'fork'` | `'fcgi'` (defaults to `'proc'`)
      *   `'interpreter'` — full path to interpreter binary (`proc` mode)
      *   `'address'`     — FastCGI backend address (`fcgi` mode)
      *   `'fcgi_params'` — extra FCGI params (`fcgi` mode)
+     *
+     * @throws \InvalidArgumentException when `$urlPrefix` is a filesystem path rather than a URL prefix.
      */
     public static function cgiScriptAlias(string $urlPrefix, array $config): void
     {
+        self::assertUrlPrefix($urlPrefix, 'App::cgiScriptAlias() $urlPrefix');
         $mode = is_string($config['mode'] ?? null) ? $config['mode'] : 'proc';
         $entry = ['mode' => $mode];
         $interpreter = $config['interpreter'] ?? null;
@@ -2068,6 +2576,61 @@ class App
     private static function pathUnderPrefix(string $url, string $prefix): bool
     {
         return $url === $prefix || str_starts_with($url, rtrim($prefix, '/') . '/');
+    }
+
+    /**
+     * Validate that an ExecCGI scope value is a URL path prefix, not a
+     * filesystem path. `exec_paths` / `cgiScriptAlias` prefixes are matched
+     * against the request URL (`resolveCgiBackend()` → `pathUnderPrefix()`),
+     * so a filesystem path (e.g. `'/var/www/cgi-bin'`) can never match the
+     * incoming URL and silently yields a bare 403 (GitHub #155). Fail fast at
+     * registration instead: reject anything that is not absolute (`/`-rooted)
+     * or that resolves to an existing directory on disk. A real URL prefix
+     * like `'/cgi-bin'` is not a directory on a normal host, so correct
+     * configs pass untouched.
+     *
+     * @throws \InvalidArgumentException when `$value` looks like a filesystem path.
+     */
+    private static function assertUrlPrefix(string $value, string $label): void
+    {
+        if ($value === '' || $value[0] !== '/') {
+            throw new \InvalidArgumentException(
+                "{$label} must be a URL path prefix starting with '/' (e.g. '/cgi-bin'), "
+                . "not a filesystem path; got '{$value}'."
+            );
+        }
+        if (is_dir($value)) {
+            throw new \InvalidArgumentException(
+                "{$label} must be a URL path prefix (e.g. '/cgi-bin'), not a filesystem path; "
+                . "got '{$value}', which is an existing directory on disk. These prefixes are "
+                . "matched against the request URL, never the disk path — a filesystem path can "
+                . "never match and would silently return 403."
+            );
+        }
+    }
+
+    /**
+     * Emit a diagnostic when a request matched a registered CGI extension but
+     * fell outside its `exec_paths` scope (ExecCGI off → bare 403). Without
+     * this, a misconfigured `exec_paths` (e.g. a filesystem path that can never
+     * match the URL — GitHub #155) surfaces only as an opaque 403. Logs only
+     * for files whose extension HAS a registered backend, so unrelated
+     * unregistered-extension 403s stay quiet.
+     */
+    private static function logExecScopeMiss(string $url, string $absPath): void
+    {
+        $ext = '.' . strtolower(pathinfo($absPath, PATHINFO_EXTENSION));
+        if (!isset(self::$cgi_backends[$ext])) {
+            return;
+        }
+        $scopes = self::$cgi_backends[$ext]['exec_paths'] ?? [];
+        $scopeStr = $scopes === [] ? '(none configured)' : implode(', ', $scopes);
+        elog(
+            "{$url} matched a registered CGI extension ({$ext}) but is outside its exec_paths "
+            . "scope [{$scopeStr}] (ExecCGI off) — returning 403. exec_paths are URL path "
+            . "prefixes (e.g. '/cgi-bin'), not filesystem paths.",
+            'warn'
+        );
     }
 
     /**
@@ -2345,13 +2908,16 @@ class App
      * classes go through the runtime DECLARE opcode and ARE caught; simple
      * early-bound classes are the gap.
      *
-     * The safe, no-engine-patch fix is to exclude the app's document-root from
-     * opcache so those files recompile per request (where Stage 4 works) while the
-     * framework + vendor stay cached. A fully-transparent fix (opcache also caches
-     * the app's op_arrays + the re-bind is first-wins) needs an engine-level hook
-     * on `do_bind_class` / opcache's delayed-early-binding finalize — out of scope
-     * for a pure extension. Returns the warning string, or null when N/A. Suppress
-     * with ZEALPHP_OPCACHE_ADVISORY=0.
+     * The primary fix is `opcache.dups_fix=1` — opcache then keeps the first
+     * definition instead of fataling. It MUST be set in php.ini (or `-d`): opcache
+     * reads `ignore_dups` once at its own startup and caches it, so `ini_set()` at
+     * runtime (and therefore any auto-enable from this extension) is too late.
+     * `dups_fix` covers the CLASS case on stock opcache; the FUNCTION case is a
+     * php-src inconsistency (opcache's function-table copy ignores the directive) —
+     * for that, run a patched opcache (the ZealPHP Docker image ships one) or, on
+     * stock PHP, exclude the document-root via `opcache.blacklist_filename` so the
+     * app's files recompile per request (framework + vendor stay cached). Returns
+     * the advisory string, or null when N/A. Suppress with ZEALPHP_OPCACHE_ADVISORY=0.
      */
     public static function opcacheLegacyBootCheck(): ?string
     {
@@ -2368,15 +2934,35 @@ class App
         if (!\is_array($status) || empty($status['opcache_enabled'])) {
             return null;  // opcache not active for this SAPI — nothing to warn about
         }
+        $dupsFix = (bool) \filter_var(\ini_get('opcache.dups_fix'), \FILTER_VALIDATE_BOOL);
         $docRoot = \rtrim((string) self::$document_root, '/');
-        return "[advisory] opcache is ENABLED in coroutine-legacy mode. Stage 7 re-executes "
-            . "require_once'd files per request; on a WARM opcache cache a file's early-bound "
-            . "class declaration is replayed without recompiling, so silent-redeclare's first-wins "
-            . "is bypassed and the class re-binds -> \"Cannot redeclare class\" on request 2+. "
-            . "Exclude your application's document-root from opcache so those files recompile per "
-            . "request (framework + vendor stay cached): put \"" . $docRoot . "/\" in a file and set "
-            . "opcache.blacklist_filename to it (or opcache.enable_cli=0 if the app needs no opcache). "
-            . "Suppress with ZEALPHP_OPCACHE_ADVISORY=0.";
+        return self::opcacheLegacyAdvisory($dupsFix, $docRoot);
+    }
+
+    /**
+     * Build the opcache + coroutine-legacy boot advisory string. Split out of
+     * `opcacheLegacyBootCheck()` as a pure (opcache-independent) seam so both
+     * `dups_fix` branches are unit-testable without opcache enabled in the SAPI.
+     *
+     * @param bool   $dupsFix whether `opcache.dups_fix` is on (the CLASS case is then handled)
+     * @param string $docRoot document-root (already `rtrim`'d), used in the blacklist hint
+     */
+    public static function opcacheLegacyAdvisory(bool $dupsFix, string $docRoot): string
+    {
+        if (!$dupsFix) {
+            return "[advisory] opcache is ENABLED in coroutine-legacy mode but opcache.dups_fix is "
+                . "OFF. Stage 7 re-executes require_once'd files per request, so opcache re-copies a "
+                . "cached file's classes/functions into a table that already has them -> "
+                . "\"Cannot redeclare\" on request 2+. Set opcache.dups_fix=1 in php.ini (it cannot be "
+                . "set at runtime — opcache reads it at startup) to fix the CLASS case. FUNCTIONS also "
+                . "need a patched opcache (the ZealPHP Docker image ships one) or, on stock PHP, exclude "
+                . "your document-root via opcache.blacklist_filename (put \"" . $docRoot . "/\" in a file "
+                . "and point opcache.blacklist_filename at it). Suppress with ZEALPHP_OPCACHE_ADVISORY=0.";
+        }
+        return "[advisory] opcache + coroutine-legacy with opcache.dups_fix=1 — class redeclares are "
+            . "handled. If you still see \"Cannot redeclare function\", your opcache is unpatched: use "
+            . "the patched opcache from the ZealPHP Docker image, or exclude your document-root via "
+            . "opcache.blacklist_filename (\"" . $docRoot . "/\"). Suppress with ZEALPHP_OPCACHE_ADVISORY=0.";
     }
 
     /**
@@ -2427,6 +3013,33 @@ class App
             }
         }
         return self::$silent_redeclare;
+    }
+
+    /**
+     * Stage 8 global-scope request include (coroutine-legacy). A no-arg call
+     * returns the current setting; a one-arg call sets it. See the
+     * `$global_scope_include` docblock for the contract. Set BEFORE `App::run()`.
+     */
+    public static function globalScopeInclude(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$global_scope_include = $on;
+        }
+        if (self::$global_scope_include !== null) {
+            return self::$global_scope_include;
+        }
+        return \getenv('ZEALPHP_GLOBAL_INCLUDE') === '1';
+    }
+
+    /**
+     * Whether THIS request's `App::include()` should run at true global scope:
+     * the gate is on AND we're in coroutine-legacy (so the per-coroutine globals
+     * isolation stack is active). The ext-capability check (`function_exists`) is
+     * done inline at the `executeFile()` call site. Policy-only helper.
+     */
+    private static function globalScopeIncludeEffective(): bool
+    {
+        return self::globalScopeInclude() && self::$silent_redeclare;
     }
 
     /**
@@ -2931,7 +3544,7 @@ class App
     }
 
     /**
-     * @return array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool}>
+     * @return array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>
      */
     public function routes(): array
     {
@@ -2939,7 +3552,7 @@ class App
     }
 
     /**
-     * @return array<string, array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool}>>
+     * @return array<string, array<int, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>>
      */
     public function routesByMethod(): array
     {
@@ -2947,7 +3560,7 @@ class App
     }
 
     /**
-     * @return array<string, array<string, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool}>>
+     * @return array<string, array<string, array{path:string,pattern:string,methods:array<int|string,string>,handler:callable|null,param_map:array<int,array<string, mixed>>,raw:bool,middleware:list<\Psr\Http\Server\MiddlewareInterface|string>,backend?:array{mode:string,interpreter?:string,address?:string,fcgi_params?:array<string,string>}|null}>>
      */
     public function routesByExactMethod(): array
     {
@@ -2957,6 +3570,121 @@ class App
     protected function isExactRoutePath(string $path): bool
     {
         return preg_match('/[\\\\^$.|?*+()[\\]{}]/', $path) === 0;
+    }
+
+    /**
+     * Introspect the routing + middleware topology — the data behind the
+     * "middleware visualizer" (think Traefik's dashboard for your own routes).
+     * For each registered route it reports the HTTP methods, path, the resolved
+     * per-route middleware chain (outer → inner), and a handler label; plus the
+     * global middleware chain (which wraps every route) and the registered
+     * named aliases.
+     *
+     * Works before OR after `App::run()`: after boot each route's middleware is
+     * resolved to instances (class short-names); before boot, alias strings are
+     * shown verbatim. The global chain lists `App::$middleware_wait_stack` in
+     * execution order (first-added = outermost), with the router innermost.
+     *
+     * Also reports the `App::when` path-scoped chains (`when`) — each `{scope,
+     * middleware}` pair, in registration order (first = outermost). These wrap
+     * every matching request (route or `/api/*`), so they are not tied to a
+     * single route row.
+     *
+     * @return array{
+     *   global: list<string>,
+     *   aliases: list<string>,
+     *   when: list<array{scope: string, middleware: list<string>}>,
+     *   routes: list<array{methods: list<string>, path: string, middleware: list<string>, handler: string}>
+     * }
+     */
+    public function describeRoutes(): array
+    {
+        $global = [];
+        foreach (self::$middleware_wait_stack as $mw) {
+            $global[] = self::middlewareDisplayName($mw);
+        }
+        $global[] = 'ResponseMiddleware (router)';
+
+        // App::when path scopes — prefer the boot-compiled instances; fall back
+        // to the raw specs when called before App::run().
+        $when = [];
+        if (self::$when_middleware_compiled !== []) {
+            foreach (self::$when_middleware_compiled as $entry) {
+                $names = [];
+                foreach ($entry['chain'] as $mw) {
+                    $names[] = self::middlewareDisplayName($mw);
+                }
+                $when[] = ['scope' => $entry['key'], 'middleware' => $names];
+            }
+        } else {
+            foreach (self::$when_middleware as $entry) {
+                $names = [];
+                foreach ($entry['spec'] as $mw) {
+                    $names[] = self::middlewareDisplayName($mw);
+                }
+                $when[] = ['scope' => $entry['key'], 'middleware' => $names];
+            }
+        }
+
+        $routes = [];
+        foreach ($this->routes as $route) {
+            $chain = [];
+            foreach ($route['middleware'] as $mw) {
+                $chain[] = self::middlewareDisplayName($mw);
+            }
+            $backend = $route['backend'] ?? null;
+            $routes[] = [
+                'methods'    => array_values($route['methods']),
+                'path'       => $route['path'],
+                'middleware' => $chain,
+                'backend'    => is_array($backend) ? $backend : null,
+                'handler'    => self::handlerDisplayName($route['handler']),
+            ];
+        }
+
+        return [
+            'global'  => $global,
+            'aliases' => array_keys(self::$middleware_aliases),
+            'when'    => $when,
+            'routes'  => $routes,
+        ];
+    }
+
+    /**
+     * Human-readable label for a middleware spec entry — the class short-name
+     * for an instance, the alias string (verbatim) for an unresolved reference.
+     */
+    private static function middlewareDisplayName(mixed $mw): string
+    {
+        if ($mw instanceof \Psr\Http\Server\MiddlewareInterface) {
+            $class = $mw::class;
+            $pos = strrpos($class, '\\');
+            return $pos === false ? $class : substr($class, $pos + 1);
+        }
+        if (is_string($mw)) {
+            return $mw;
+        }
+        return 'middleware';
+    }
+
+    /**
+     * Human-readable label for a route handler — `Class::method` for an array
+     * callable, otherwise `Closure`/`function`.
+     */
+    private static function handlerDisplayName(mixed $handler): string
+    {
+        if (is_array($handler) && count($handler) === 2) {
+            $obj = $handler[0];
+            $cls = is_object($obj) ? $obj::class : (is_string($obj) ? $obj : 'callable');
+            return $cls . '::' . (is_string($handler[1]) ? $handler[1] : 'method');
+        }
+        if (is_string($handler)) {
+            return $handler . '()';
+        }
+        if ($handler instanceof \Closure) {
+            return 'Closure';
+        }
+        return $handler === null ? '—' : 'callable';
     }
 
     /**
@@ -3212,6 +3940,7 @@ class App
      */
     public static function onSignal(int $signal, callable $handler, bool $workerOnly = false): void
     {
+        if (self::$reloading) { return; } // route hot-reload re-include — keep boot registration
         self::$signalHandlers[$signal][] = ['handler' => $handler, 'worker_only' => $workerOnly];
     }
 
@@ -3271,6 +4000,7 @@ class App
      */
     public static function addProcess(string $name, callable $callable, int $workers = 1, bool $coroutine = true): void
     {
+        if (self::$reloading) { return; } // route hot-reload re-include — sidecar already added at boot
         if ($workers < 1) {
             throw new \InvalidArgumentException('addProcess: $workers must be >= 1');
         }
@@ -3421,6 +4151,7 @@ class App
      */
     public static function onWorkerStart(callable $fn): void
     {
+        if (self::$reloading) { return; } // route hot-reload re-include — hook already registered at boot
         self::$workerStartHooks[] = $fn;
     }
 
@@ -3873,6 +4604,7 @@ class App
      */
     public static function subscribe(string $channelOrPattern, callable $handler): void
     {
+        if (self::$reloading) { return; } // route hot-reload re-include — subscriber already wired at boot
         self::$pubsubRegistry[$channelOrPattern][] = $handler;
         self::wirePubSubBoot();
     }
@@ -3935,6 +4667,7 @@ class App
         int $blockMs = 1000,
         int $batchSize = 16,
     ): void {
+        if (self::$reloading) { return; } // route hot-reload re-include — consumer already wired at boot
         $group ??= 'zealphp-' . substr(sha1((string) (self::$canonical_name ?? gethostname())), 0, 8);
         self::$reliableRegistry[$stream][] = [
             'group' => $group, 'handler' => $handler,
@@ -4172,8 +4905,10 @@ class App
      * @param callable|null $handler
      * @param list<string> $methods Named-arg form of $options['methods'] (HTTP verbs); merged into $options.
      * @param bool $raw Named-arg form of $options['raw'] (skip output buffering).
+     * @param array<int,\Psr\Http\Server\MiddlewareInterface|string> $middleware Named-arg form of $options['middleware'] — per-route PSR-15 middleware (instances or registered aliases); combined with $options['middleware'].
+     * @param array<string,mixed>|string|null $backend Per-route CGI dispatch backend for this route's `App::include()` — a bare mode (`'pool'`/`'proc'`/`'fork'`/`'fcgi'`), a registered `App::cgiBackendAlias()` name, or an inline config array (`['mode'=>'proc','interpreter'=>'/usr/bin/python3']`). Named-arg form of `$options['backend']` (named arg wins). Rejects lifecycle-mode names (coroutine/coroutine-legacy/...) — those are process-wide, not per-route.
      */
-    public function route(string $path, $options = [], $handler = null, array $methods = [], bool $raw = false): void
+    public function route(string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         // If only two arguments are provided, assume second is handler and no options.
         // But it's good that we clearly specify all three arguments in usage.
@@ -4205,12 +4940,14 @@ class App
 
         assert(is_callable($handler));
         $this->routes[] = [
-            'path'      => $path,
-            'pattern'   => $pattern,
-            'methods'   => self::normalizeMethods($methods),
-            'handler'   => $handler,
-            'param_map' => $this->buildParamMap($handler),
-            'raw'       => (bool)($options['raw'] ?? false),
+            'path'       => $path,
+            'pattern'    => $pattern,
+            'methods'    => self::normalizeMethods($methods),
+            'handler'    => $handler,
+            'param_map'  => $this->buildParamMap($handler),
+            'raw'        => (bool)($options['raw'] ?? false),
+            'middleware' => self::routeMiddlewareSpec($options, $middleware),
+            'backend'    => self::routeBackendSpec($options, $backend),
         ];
     }
 
@@ -4223,8 +4960,10 @@ class App
      * @param callable|null $handler
      * @param list<string> $methods Named-arg form of $options['methods'] (HTTP verbs); merged into $options.
      * @param bool $raw Named-arg form of $options['raw'] (skip output buffering).
+     * @param array<int,\Psr\Http\Server\MiddlewareInterface|string> $middleware Named-arg form of $options['middleware'] — per-route PSR-15 middleware (instances or registered aliases); combined with $options['middleware'].
+     * @param array<string,mixed>|string|null $backend Per-route CGI dispatch backend for this route's `App::include()` — a bare mode (`'pool'`/`'proc'`/`'fork'`/`'fcgi'`), a registered `App::cgiBackendAlias()` name, or an inline config array (`['mode'=>'proc','interpreter'=>'/usr/bin/python3']`). Named-arg form of `$options['backend']` (named arg wins). Rejects lifecycle-mode names (coroutine/coroutine-legacy/...) — those are process-wide, not per-route.
      */
-    public function nsRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false): void
+    public function nsRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         // If only two arguments are provided, assume second is handler and no options.
         if (is_callable($options) && $handler === null) {
@@ -4255,12 +4994,14 @@ class App
 
         assert(is_callable($handler));
         $this->routes[] = [
-            'path'      => $path,
-            'pattern'   => $pattern,
-            'methods'   => self::normalizeMethods($methods),
-            'handler'   => $handler,
-            'param_map' => $this->buildParamMap($handler),
-            'raw'       => (bool)($options['raw'] ?? false),
+            'path'       => $path,
+            'pattern'    => $pattern,
+            'methods'    => self::normalizeMethods($methods),
+            'handler'    => $handler,
+            'param_map'  => $this->buildParamMap($handler),
+            'raw'        => (bool)($options['raw'] ?? false),
+            'middleware' => self::routeMiddlewareSpec($options, $middleware),
+            'backend'    => self::routeBackendSpec($options, $backend),
         ];
     }
 
@@ -4283,8 +5024,10 @@ class App
      * @param callable|null $handler
      * @param list<string> $methods Named-arg form of $options['methods'] (HTTP verbs); merged into $options.
      * @param bool $raw Named-arg form of $options['raw'] (skip output buffering).
+     * @param array<int,\Psr\Http\Server\MiddlewareInterface|string> $middleware Named-arg form of $options['middleware'] — per-route PSR-15 middleware (instances or registered aliases); combined with $options['middleware'].
+     * @param array<string,mixed>|string|null $backend Per-route CGI dispatch backend for this route's `App::include()` — a bare mode (`'pool'`/`'proc'`/`'fork'`/`'fcgi'`), a registered `App::cgiBackendAlias()` name, or an inline config array (`['mode'=>'proc','interpreter'=>'/usr/bin/python3']`). Named-arg form of `$options['backend']` (named arg wins). Rejects lifecycle-mode names (coroutine/coroutine-legacy/...) — those are process-wide, not per-route.
      */
-    public function nsPathRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false): void
+    public function nsPathRoute(string $namespace, string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         // If only two arguments are provided, assume second is handler and no options.
         if (is_callable($options) && $handler === null) {
@@ -4330,12 +5073,14 @@ class App
 
         assert(is_callable($handler));
         $this->routes[] = [
-            'path'      => $path,
-            'pattern'   => $pattern,
-            'methods'   => self::normalizeMethods($methods),
-            'handler'   => $handler,
-            'param_map' => $this->buildParamMap($handler),
-            'raw'       => (bool)($options['raw'] ?? false),
+            'path'       => $path,
+            'pattern'    => $pattern,
+            'methods'    => self::normalizeMethods($methods),
+            'handler'    => $handler,
+            'param_map'  => $this->buildParamMap($handler),
+            'raw'        => (bool)($options['raw'] ?? false),
+            'middleware' => self::routeMiddlewareSpec($options, $middleware),
+            'backend'    => self::routeBackendSpec($options, $backend),
         ];
     }
 
@@ -4352,8 +5097,10 @@ class App
      * @param callable|null $handler
      * @param list<string> $methods Named-arg form of $options['methods'] (HTTP verbs); merged into $options.
      * @param bool $raw Named-arg form of $options['raw'] (skip output buffering).
+     * @param array<int,\Psr\Http\Server\MiddlewareInterface|string> $middleware Named-arg form of $options['middleware'] — per-route PSR-15 middleware (instances or registered aliases); combined with $options['middleware'].
+     * @param array<string,mixed>|string|null $backend Per-route CGI dispatch backend for this route's `App::include()` — a bare mode (`'pool'`/`'proc'`/`'fork'`/`'fcgi'`), a registered `App::cgiBackendAlias()` name, or an inline config array (`['mode'=>'proc','interpreter'=>'/usr/bin/python3']`). Named-arg form of `$options['backend']` (named arg wins). Rejects lifecycle-mode names (coroutine/coroutine-legacy/...) — those are process-wide, not per-route.
      */
-    public function patternRoute(string $regex, $options = [], $handler = null, array $methods = [], bool $raw = false): void
+    public function patternRoute(string $regex, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         // If only two arguments are provided
         if (is_callable($options) && $handler === null) {
@@ -4380,12 +5127,14 @@ class App
 
         assert(is_callable($handler));
         $this->routes[] = [
-            'path'      => $regex,
-            'pattern'   => $regex,
-            'methods'   => self::normalizeMethods($methods),
-            'handler'   => $handler,
-            'param_map' => $this->buildParamMap($handler),
-            'raw'       => (bool)($options['raw'] ?? false),
+            'path'       => $regex,
+            'pattern'    => $regex,
+            'methods'    => self::normalizeMethods($methods),
+            'handler'    => $handler,
+            'param_map'  => $this->buildParamMap($handler),
+            'raw'        => (bool)($options['raw'] ?? false),
+            'middleware' => self::routeMiddlewareSpec($options, $middleware),
+            'backend'    => self::routeBackendSpec($options, $backend),
         ];
     }
 
@@ -4525,7 +5274,16 @@ class App
             try {
                 $args['g'] = $g;
                 extract($args, EXTR_SKIP);
-                $result = include $absPath;
+                if (self::globalScopeIncludeEffective() && \function_exists('zealphp_require_global')) {
+                    // Stage 8: run the file at TRUE global scope so bare file-scope
+                    // vars (WordPress $menu/$submenu/$_wp_submenu_nopriv) become real
+                    // $GLOBALS. The included file does NOT see the extracted $g /
+                    // route params (they stay in this frame) — by contract this mode
+                    // is for legacy apps that read request state via superglobals.
+                    $result = \zealphp_require_global($absPath);
+                } else {
+                    $result = include $absPath;
+                }
             } finally {
                 if ($didChdir && $prevCwd !== false) {
                     @\chdir($prevCwd);
@@ -5182,22 +5940,27 @@ class App
         $g->server['SCRIPT_NAME']     = '/' . $rel;
         $g->server['SCRIPT_FILENAME'] = $absPath;
 
-        $cgi   = self::resolveCgiBackend($absPath, '/' . $rel);
+        // A matched route's `backend:` option (request-scoped, set by
+        // ResponseMiddleware::dispatchRoute) overrides the path-resolved backend
+        // for THIS request's include — and authorises execution for it.
+        $cgi   = self::applyRouteBackend(self::resolveCgiBackend($absPath, '/' . $rel));
         $isPhp = str_ends_with(strtolower($absPath), '.php');
 
         if (!$isPhp) {
             if ($cgi['mayExecute']) {
                 $b = $cgi['backend'];
                 return match ($b['mode']) {
-                    'fcgi'  => self::cgiFcgi($absPath, $b['address'] ?? null, $b['fcgi_params'] ?? []),
-                    'pool'  => self::cgiPool($absPath),
-                    'proc'  => self::cgiSubprocess($absPath, $b['interpreter'] ?? null),
-                    default => self::cgiPool($absPath),  // default = 'pool' (was 'proc' pre-fork-removal)
+                    'fcgi'  => \ZealPHP\CGI\Dispatcher::cgiFcgi($absPath, $b['address'] ?? null, $b['fcgi_params'] ?? []),
+                    'pool'  => \ZealPHP\CGI\Dispatcher::cgiPool($absPath),
+                    'proc'  => \ZealPHP\CGI\Dispatcher::cgiSubprocess($absPath, $b['interpreter'] ?? null),
+                    'fork'  => \ZealPHP\CGI\Dispatcher::cgiFork($absPath),
+                    default => \ZealPHP\CGI\Dispatcher::cgiPool($absPath),  // default = 'pool'
                 };
             }
             // SECURITY: a non-PHP file that is NOT in an exec scope must NOT be
             // PHP-parsed (executeFile would treat it as PHP) and must NOT have its
             // source served (Apache's ExecCGI-off leaks script source — we refuse).
+            self::logExecScopeMiss('/' . $rel, $absPath);
             return 403;
         }
 
@@ -5211,10 +5974,11 @@ class App
             // cgi_worker.php for uopz header/cookie capture.
             $b = $cgi['backend'];
             return match ($b['mode']) {
-                'fcgi'  => self::cgiFcgi($absPath, $b['address'] ?? null, $b['fcgi_params'] ?? []),
-                'pool'  => self::cgiPool($absPath),
-                'proc'  => self::cgiSubprocess($absPath, $b['interpreter'] ?? null),
-                default => self::cgiPool($absPath),  // default = 'pool'
+                'fcgi'  => \ZealPHP\CGI\Dispatcher::cgiFcgi($absPath, $b['address'] ?? null, $b['fcgi_params'] ?? []),
+                'pool'  => \ZealPHP\CGI\Dispatcher::cgiPool($absPath),
+                'proc'  => \ZealPHP\CGI\Dispatcher::cgiSubprocess($absPath, $b['interpreter'] ?? null),
+                'fork'  => \ZealPHP\CGI\Dispatcher::cgiFork($absPath),
+                default => \ZealPHP\CGI\Dispatcher::cgiPool($absPath),  // default = 'pool'
             };
         }
         return self::executeFile($absPath, $args);       // coroutine-mode fast path (unchanged)
@@ -5238,22 +6002,24 @@ class App
             return self::include($rel, []);
         }
         // Outside the document root — preserve legacy "trust the caller"
-        // semantics while still applying the universal return contract.
-        $cgi   = self::resolveCgiBackend($path, $path);
+        // semantics while still applying the universal return contract. A
+        // route `backend:` override still applies (same request-scoped slot).
+        $cgi   = self::applyRouteBackend(self::resolveCgiBackend($path, $path));
         $isPhp = str_ends_with(strtolower($path), '.php');
 
         if (!$isPhp) {
             if ($cgi['mayExecute']) {
                 $b = $cgi['backend'];
                 return match ($b['mode']) {
-                    'fcgi'  => self::cgiFcgi($path, $b['address'] ?? null, $b['fcgi_params'] ?? []),
-                    'pool'  => self::cgiPool($path),
-                    'proc'  => self::cgiSubprocess($path, $b['interpreter'] ?? null),
-                    default => self::cgiPool($path),
+                    'fcgi'  => \ZealPHP\CGI\Dispatcher::cgiFcgi($path, $b['address'] ?? null, $b['fcgi_params'] ?? []),
+                    'pool'  => \ZealPHP\CGI\Dispatcher::cgiPool($path),
+                    'proc'  => \ZealPHP\CGI\Dispatcher::cgiSubprocess($path, $b['interpreter'] ?? null),
+                    default => \ZealPHP\CGI\Dispatcher::cgiPool($path),
                 };
             }
             // SECURITY: a non-PHP file outside an exec scope must NOT be PHP-parsed
             // by executeFile() nor have its source served. Refuse it.
+            self::logExecScopeMiss($path, $path);
             return 403;
         }
 
@@ -5264,10 +6030,10 @@ class App
             // backend mode (registered .php backend or global $cgi_mode fallback).
             $b = $cgi['backend'];
             return match ($b['mode']) {
-                'fcgi'  => self::cgiFcgi($path, $b['address'] ?? null, $b['fcgi_params'] ?? []),
-                'pool'  => self::cgiPool($path),
-                'proc'  => self::cgiSubprocess($path, $b['interpreter'] ?? null),
-                default => self::cgiPool($path),
+                'fcgi'  => \ZealPHP\CGI\Dispatcher::cgiFcgi($path, $b['address'] ?? null, $b['fcgi_params'] ?? []),
+                'pool'  => \ZealPHP\CGI\Dispatcher::cgiPool($path),
+                'proc'  => \ZealPHP\CGI\Dispatcher::cgiSubprocess($path, $b['interpreter'] ?? null),
+                default => \ZealPHP\CGI\Dispatcher::cgiPool($path),
             };
         }
         return self::executeFile($path, []);
@@ -5364,9 +6130,9 @@ class App
     /**
      * Build the OS-level environment array passed to the CGI subprocess.
      *
-     * Extracted as a public static method so unit tests can assert the exact
-     * env without spawning a process (reflection is not needed). Apache parity
-     * reference: util_script.c ap_add_common_vars() + ap_add_cgi_vars().
+     * Thin public delegating shim — the implementation moved to
+     * {@see \ZealPHP\CGI\Dispatcher::buildCgiEnv()} (Phase 2 refactor).
+     * Kept on App for BC so external callers/tests reach it via App::buildCgiEnv().
      *
      * @param array<string, mixed> $server  $g->server (OpenSwoole-populated)
      * @param string               $ctx     JSON-encoded ZEALPHP_REQUEST_CONTEXT
@@ -5374,171 +6140,7 @@ class App
      */
     public static function buildCgiEnv(array $server, string $ctx): array
     {
-        $env = [];
-        $allowedPrefixes = ['HTTP_', 'REQUEST_', 'SERVER_', 'SCRIPT_', 'DOCUMENT_', 'CONTENT_', 'REMOTE_', 'QUERY_', 'PATH_', 'AUTH_'];
-        foreach ($server as $k => $v) {
-            if (!is_string($v)) continue;
-            if ($k === 'HTTPS') {
-                $env[$k] = $v;
-                continue;
-            }
-            // SECURITY: strip HTTP_PROXY to prevent the httpoxy CVE-class attack.
-            // A client-supplied "Proxy:" request header maps to HTTP_PROXY in the
-            // subprocess env, which many HTTP client libraries read as proxy config.
-            // Apache's fix: util_script.c:224-227 skips the "Proxy" header entirely.
-            if ($k === 'HTTP_PROXY') {
-                continue;
-            }
-            foreach ($allowedPrefixes as $prefix) {
-                if (str_starts_with($k, $prefix)) {
-                    $env[$k] = $v;
-                    break;
-                }
-            }
-        }
-
-        // RFC 3875 mandatory vars absent from OpenSwoole's $request->server.
-        if (!isset($env['GATEWAY_INTERFACE'])) {
-            $env['GATEWAY_INTERFACE'] = 'CGI/1.1';
-        }
-        if (!isset($env['SERVER_SOFTWARE'])) {
-            $env['SERVER_SOFTWARE'] = 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion();
-        }
-        if (!isset($env['DOCUMENT_ROOT'])) {
-            $env['DOCUMENT_ROOT'] = self::resolveDocumentRoot();
-        }
-        if (!isset($env['SERVER_ADMIN']) && self::$server_admin !== null && self::$server_admin !== '') {
-            $env['SERVER_ADMIN'] = self::$server_admin;
-        }
-        // AUTH_TYPE / REMOTE_USER — carry from $server if present (set by BasicAuthMiddleware);
-        // already included via the AUTH_ prefix above, but add explicit fallback keys.
-        if (!isset($env['AUTH_TYPE'])) {
-            $authHeader = $server['HTTP_AUTHORIZATION'] ?? $server['AUTHORIZATION'] ?? '';
-            if (is_string($authHeader) && stripos($authHeader, 'Basic ') === 0) {
-                $env['AUTH_TYPE'] = 'Basic';
-            }
-        }
-        if (!isset($env['REMOTE_USER']) && isset($server['REMOTE_USER']) && is_string($server['REMOTE_USER'])) {
-            $env['REMOTE_USER'] = $server['REMOTE_USER'];
-        }
-        if (!isset($env['REMOTE_PORT']) && isset($server['REMOTE_PORT'])) {
-            $rp = $server['REMOTE_PORT'];
-            if (is_scalar($rp)) {
-                $env['REMOTE_PORT'] = (string)$rp;
-            }
-        }
-        if (!isset($env['PATH_TRANSLATED']) && isset($env['PATH_INFO']) && $env['PATH_INFO'] !== '') {
-            $env['PATH_TRANSLATED'] = self::resolveDocumentRoot() . $env['PATH_INFO'];
-        }
-
-        $env['ZEALPHP_REQUEST_CONTEXT'] = $ctx;
-        $env['ZEALPHP_CWD'] = self::$cwd;
-        // Gate the Composer autoloader load in cgi_worker.php. Default off
-        // (see App::$cgi_subprocess_autoload docblock — fixes the v0.2.41
-        // WordPress wp-cron deadlock by restoring the v0.2.0 zero-overhead
-        // subprocess start path).
-        if (self::$cgi_subprocess_autoload) {
-            $env['ZEALPHP_CGI_AUTOLOAD'] = '1';
-        }
-
-        return $env;
-    }
-
-    /**
-     * Prepare the host->CGI session handoff (issue #108).
-     *
-     * In superglobals(true) + processIsolation(true) mode the host's
-     * SessionManager opens a session at request start. If we then dispatch
-     * to a CGI subprocess that ALSO opens a session, two distinct write
-     * paths race the same file: the subprocess flushes its $_SESSION on
-     * exit, and the host then runs its own session_write_close() in the
-     * SessionManager `finally`, overwriting the subprocess's writes with
-     * stale in-memory state. Additionally, the host and the subprocess
-     * generate INDEPENDENT session ids on a first visit — the host sends
-     * its id back via Set-Cookie, but the subprocess wrote to its own
-     * unrelated file, so the next request reads an empty session.
-     *
-     * This helper closes both gaps:
-     *   - Flushes the host's $_SESSION to disk via session_write_close()
-     *     so the subprocess reads the same authoritative state the host
-     *     has in memory.
-     *   - Returns the host's session id so the caller can inject it into
-     *     the subprocess cookie env, guaranteeing the subprocess
-     *     read/writes the SAME file the host's Set-Cookie pointed the
-     *     client at.
-     *   - Marks `$g->_cgi_session_handoff = true` so SessionManager's
-     *     finally block skips its own session_write_close — the
-     *     subprocess now owns this session's lifecycle.
-     *
-     * Returns null when no handoff is needed (coroutine mode, session not
-     * started, sessionLifecycle disabled). Safe to call repeatedly within
-     * one request — the second call sees session_status() inactive and
-     * returns the captured id without re-closing.
-     */
-    /**
-     * Mint and propagate a session id on behalf of a CGI subprocess request
-     * (issue #108).
-     *
-     * In `cgiOwnsSessions()` mode the host's SessionManager is bypassed, so
-     * NOTHING on the host side emits a Set-Cookie for first-time visitors.
-     * The subprocess can't emit one either: PHP's session module sends the
-     * session cookie through its internal `php_setcookie()` C function, NOT
-     * the userspace `setcookie()` — uopz can't intercept that path, and CLI
-     * SAPI silently discards the buffered SAPI headers. Result: every first
-     * visit gets a freshly generated SID inside the subprocess and zero
-     * Set-Cookie on the wire, so the next request has no PHPSESSID to send
-     * and the cycle repeats forever ("Value: EMPTY" loop).
-     *
-     * This helper closes that gap. When called from a CGI dispatcher:
-     *   - If the request already has a PHPSESSID cookie, return it (no-op).
-     *   - Otherwise mint a fresh id via `session_create_id()`, stash it in
-     *     `$g->cookie[session_name]` so the subprocess sees it in $_COOKIE,
-     *     AND emit `Set-Cookie` on the outbound response so the client uses
-     *     the same id on the next request.
-     *
-     * `session_create_id()` is safe to call without an active session in
-     * PHP 7.1+ — it just returns a fresh random string in the configured
-     * session.sid_bits_per_character format.
-     *
-     * Returns null when the host is NOT in `cgiOwnsSessions()` mode — host
-     * SessionManager already owns cookie emission there.
-     */
-    private static function mintCgiSession(\ZealPHP\RequestContext $g): ?string
-    {
-        if (!self::cgiOwnsSessions()) {
-            return null;
-        }
-        $name = 'PHPSESSID';
-        if (function_exists('session_name')) {
-            $candidate = \session_name();
-            if (is_string($candidate)) {
-                $name = $candidate;
-            }
-        }
-        $existing = $g->cookie[$name] ?? null;
-        if (is_string($existing) && $existing !== '') {
-            return $existing;
-        }
-        if (!function_exists('session_create_id')) {
-            return null;
-        }
-        $sid = \session_create_id();
-        if (!is_string($sid) || $sid === '') {
-            return null;
-        }
-        $g->cookie[$name] = $sid;
-        if ($g->openswoole_response !== null && $g->openswoole_response->isWritable()) {
-            $g->openswoole_response->cookie(
-                $name,
-                $sid,
-                0,        // session cookie (no expiry)
-                '/',
-                '',
-                false,
-                true      // httponly
-            );
-        }
-        return $sid;
+        return \ZealPHP\CGI\Dispatcher::buildCgiEnv($server, $ctx);
     }
 
     /**
@@ -5570,700 +6172,18 @@ class App
     }
 
     /**
-     * Dispatch a legacy include to a FastCGI backend (e.g. php-fpm) via the
-     * FCGI binary protocol. Used when App::cgiMode() === 'fcgi'.
-     *
-     * Builds CGI env via App::buildCgiEnv(), adds SCRIPT_FILENAME / SCRIPT_NAME,
-     * reads the request body, calls \ZealPHP\CGI\FastCgiClient::request(), maps
-     * the response (status, headers, body, stderr) back through the universal
-     * return contract. The FastCgiClient socket layer is OpenSwoole-native
-     * (Coroutine\Client) — the call never blocks the worker.
-     *
-     * On connection failure or protocol error, logs via elog() and returns 502.
-     *
-     * @param string|null $address     Per-backend FastCGI address override (host:port or unix:/path).
-     *   null → falls back to App::$fcgi_address.
-     * @param array<string,string> $extraParams  Extra FCGI params merged after buildCgiEnv()
-     *   (Apache SetEnvIf / nginx fastcgi_param parity).
-     */
-    private static function cgiFcgi(string $path, ?string $address = null, array $extraParams = []): mixed
-    {
-        $g = RequestContext::instance();
-
-        // Issue #108 — mint + emit a session cookie on the host side when
-        // the subprocess owns sessions and the client didn't send a
-        // PHPSESSID. mintCgiSession() is a no-op outside cgiOwnsSessions
-        // mode, so existing flows (per-extension FCGI backends in mixed
-        // mode, etc.) are unaffected.
-        self::mintCgiSession($g);
-
-        $ctx = json_encode([
-            'server' => $g->server,
-            'get'    => $g->get,
-            'post'   => $g->post,
-            'cookie' => $g->cookie,
-            'files'  => $g->files,
-            'env'    => $g->env ?? $_ENV,
-        ], JSON_UNESCAPED_SLASHES);
-
-        $env = self::buildCgiEnv($g->server, is_string($ctx) ? $ctx : '{}');
-
-        // FCGI mandatory vars
-        $env['SCRIPT_FILENAME'] = $path;
-        $docRoot = self::resolveDocumentRoot();
-        $env['SCRIPT_NAME'] = str_starts_with($path, $docRoot)
-            ? '/' . ltrim(substr($path, strlen($docRoot)), '/')
-            : $path;
-
-        // Per-backend extra params (nginx fastcgi_param / Apache SetEnvIf parity)
-        foreach ($extraParams as $k => $v) {
-            $env[$k] = $v;
-        }
-
-        // Request body (POST data etc.)
-        $stdinBody = '';
-        try {
-            // @phpstan-ignore-next-line — zealphp_request set by CoSessionManager before any route dispatches
-            $raw = $g->zealphp_request->parent->rawContent();
-            if (is_string($raw)) {
-                $stdinBody = $raw;
-            }
-        } catch (\Throwable) {
-            // No body available — proceed with empty stdin
-        }
-
-        $fcgiAddress = $address ?? self::$fcgi_address;
-        try {
-            $client   = new \ZealPHP\CGI\FastCgiClient($fcgiAddress, self::$cgi_timeout);
-            $response = $client->request($env, $stdinBody);
-        } catch (\ZealPHP\CGI\FastCgiException $e) {
-            elog("cgiFcgi: FastCGI error for {$path}: " . $e->getMessage(), 'error');
-            return 502;
-        } catch (\Throwable $e) {
-            elog("cgiFcgi: unexpected error for {$path}: " . $e->getMessage(), 'error');
-            return 502;
-        }
-
-        if ($response['stderr'] !== '') {
-            elog("[fcgi] stderr: " . rtrim($response['stderr']), 'fcgi');
-        }
-
-        // Apply status
-        response_set_status($response['status']);
-
-        // Apply headers — $response['headers'] is array<string,string> per FastCgiClient return type
-        foreach ($response['headers'] as $name => $value) {
-            // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-            $g->zealphp_response->header($name, $value);
-        }
-
-        return $response['body'];
-    }
-
-    /**
-     * Run a PHP file in a separate process at true global scope (CGI-style).
-     * Required for legacy apps like WordPress that depend on bare variable
-     * assignments and `global` keyword declarations being seen by every file.
-     *
-     * The subprocess (src/cgi_worker.php) serialises status, headers, cookies
-     * AND the include's return value to stderr as a single JSON line; this
-     * method consumes that channel and returns the same shape executeFile()
-     * would have, so the universal return contract applies in both modes.
-     *
-     * Streaming responses (Generator returns, text/event-stream content type)
-     * are consumed inside the subprocess and streamed back through stdout;
-     * this method threads them through to the OpenSwoole response and
-     * returns null (the caller signals _streaming and ResponseMiddleware
-     * skips its buffering).
-     *
-     * @param string|null $interpreter  Full path to the interpreter binary.
-     *   null (default) → PHP + cgi_worker.php (existing behaviour, uopz captures).
-     *   Non-null → proc_open([$interpreter, $scriptPath]) with buildCgiEnv() env
-     *   (RFC 3875; CGI/1.1 Status: header parsing still works for any interpreter).
-     */
-    private static function cgiSubprocess(string $path, ?string $interpreter = null): mixed
-    {
-        $g = RequestContext::instance();
-
-        // Issue #108 — see mintCgiSession() docblock.
-        self::mintCgiSession($g);
-
-        $ctx = json_encode([
-            'server' => $g->server,
-            'get'    => $g->get,
-            'post'   => $g->post,
-            'cookie' => $g->cookie,
-            'files'  => $g->files,
-            'env'    => $g->env ?? $_ENV,
-        ], JSON_UNESCAPED_SLASHES);
-
-        $env = self::buildCgiEnv($g->server, is_string($ctx) ? $ctx : '{}');
-
-        $descriptors = [
-            0 => ['pipe', 'r'],
-            1 => ['pipe', 'w'],
-            2 => ['pipe', 'w'],
-        ];
-
-        if ($interpreter === null) {
-            $isPhp = str_ends_with(strtolower($path), '.php');
-            if ($isPhp) {
-                // PHP target: route through cgi_worker.php for uopz header/cookie captures.
-                $cgiWorker = __DIR__ . '/cgi_worker.php';
-                $cmd = PHP_BINARY . ' -d display_errors=stderr ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
-            } else {
-                // Non-PHP file with no explicit interpreter (the `cgiScriptAlias`-only
-                // path): exec the file directly, relying on its `#!` shebang line.
-                // Apache `ScriptAlias` parity — Apache requires the file to be
-                // executable (+x) for CGI dispatch; we do the same.
-                if (!is_executable($path)) {
-                    elog("cgiSubprocess: file not executable; ScriptAlias dispatch requires +x and a #! shebang: $path", "error");
-                    return 500;
-                }
-                $cmd = escapeshellarg($path);
-            }
-        } else {
-            // Non-PHP target with an explicit interpreter (e.g. `.py` + `/usr/bin/python3`).
-            // The script must output CGI/1.1 headers (Content-Type + blank line + body).
-            $cmd = escapeshellarg($interpreter) . ' ' . escapeshellarg($path);
-        }
-
-        $process = proc_open(
-            $cmd,
-            $descriptors,
-            $pipes,
-            self::resolveDocumentRoot(),
-            $env
-        );
-
-        if (!is_resource($process)) {
-            elog("cgiSubprocess: failed to start process for $path", "error");
-            return 500;
-        }
-
-        try {
-            // @phpstan-ignore-next-line — zealphp_request set by CoSessionManager before any route dispatches
-            $postBody = $g->zealphp_request->parent->getContent();
-            if ($postBody) fwrite($pipes[0], (string)$postBody);
-        } catch (\Throwable $e) {}
-        fclose($pipes[0]);
-
-        // ── Non-PHP CGI path (RFC 3875) ───────────────────────────────────
-        // A raw Python/Perl/etc. CGI script — whether reached via an explicit
-        // `interpreter` registration OR via shebang exec under a `cgiScriptAlias`
-        // — knows nothing about the cgi_worker stderr-metadata protocol below.
-        // It writes a standard CGI response to STDOUT: header lines, a blank
-        // line, then the body. Parse that directly (Apache mod_cgi parity:
-        // ap_scan_script_header_err_brigade_ex()). stderr is drained for error
-        // visibility (cgi_common.h log_script_err()).
-        if ($interpreter !== null || !str_ends_with(strtolower($path), '.php')) {
-            return self::cgiInterpreterResponse($process, $pipes, $path);
-        }
-
-        // Protocol: CGI worker sends metadata as a single JSON line on stderr
-        // BEFORE streaming body on stdout. This enables SSE and streaming.
-        // Apply a configurable read timeout (App::$cgi_timeout seconds) so a
-        // hung subprocess never blocks the OpenSwoole worker indefinitely.
-        // Apache parity: CGIScriptTimeout / apr_file_pipe_timeout_set() (mod_cgi.c:437,444).
-        stream_set_blocking($pipes[2], false);
-        $deadline = microtime(true) + self::$cgi_timeout;
-        $metaLine = '';
-        while (microtime(true) < $deadline) {
-            $line = fgets($pipes[2]);
-            if ($line !== false) {
-                $metaLine = $line;
-                break;
-            }
-            if (feof($pipes[2])) {
-                break;
-            }
-            usleep(5000);
-        }
-        if ($metaLine === '') {
-            // Subprocess timed out or died without metadata — kill it.
-            proc_terminate($process, 15); // SIGTERM
-            $killDeadline = microtime(true) + 5.0;
-            while (microtime(true) < $killDeadline) {
-                $st = proc_get_status($process);
-                if (!$st['running']) break;
-                usleep(50000);
-            }
-            $st = proc_get_status($process);
-            if ($st['running']) {
-                proc_terminate($process, 9); // SIGKILL
-            }
-            // Drain remaining stderr for visibility.
-            stream_set_blocking($pipes[2], true);
-            $stderrRemainder = stream_get_contents($pipes[2]);
-            fclose($pipes[2]);
-            fclose($pipes[1]);
-            proc_close($process);
-            if (is_string($stderrRemainder) && $stderrRemainder !== '') {
-                elog("[cgi_worker] (timeout) stderr: " . rtrim($stderrRemainder), "cgi_worker");
-            }
-            elog("cgiSubprocess: timeout after " . self::$cgi_timeout . "s for $path", "error");
-            return 500;
-        }
-
-        // Drain any remaining stderr after the metadata line and route via elog
-        // so PHP fatal errors / warnings from the subprocess are visible.
-        // Apache parity: cgi_common.h:103-126 log_script_err() reads child stderr line-by-line.
-        stream_set_blocking($pipes[2], true);
-        $stderrRemainder = stream_get_contents($pipes[2]);
-        fclose($pipes[2]);
-        if (is_string($stderrRemainder) && $stderrRemainder !== '') {
-            elog("[cgi_worker] stderr: " . rtrim($stderrRemainder), "cgi_worker");
-        }
-
-        $streaming   = false;
-        $returnValue = null;
-        $hasReturn   = false;
-        $meta = json_decode(trim($metaLine), true);
-        if (is_array($meta)) {
-            $statusCode = $meta['status_code'] ?? 200;
-            response_set_status(is_numeric($statusCode) ? (int)$statusCode : 200);
-            $metaHeaders = is_array($meta['headers'] ?? null) ? $meta['headers'] : [];
-
-            foreach ($metaHeaders as $pair) {
-                if (!is_array($pair) || count($pair) < 2) continue;
-                $p0 = is_scalar($pair[0]) ? (string)$pair[0] : '';
-                $p1 = is_scalar($pair[1]) ? (string)$pair[1] : '';
-
-                // mod_cgi parity: CGI/1.1 RFC 3875 §6.3.3 — "Status: NNN Reason"
-                // sets the HTTP response code. Apache: ap_scan_script_header_err_brigade_ex().
-                // Strip the Status: pseudo-header so it never reaches the client.
-                if (strcasecmp($p0, 'Status') === 0) {
-                    $codeStr = strtok($p1, ' ');
-                    if ($codeStr !== false && ctype_digit($codeStr)) {
-                        $parsed = (int)$codeStr;
-                        if ($parsed >= 100 && $parsed <= 599) {
-                            response_set_status($parsed);
-                        }
-                    }
-                    continue;
-                }
-
-                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                $g->zealphp_response->header($p0, $p1);
-            }
-            $metaCookies = is_array($meta['cookies'] ?? null) ? $meta['cookies'] : [];
-            foreach ($metaCookies as $args) {
-                if (is_array($args) && !empty($args)) {
-                    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                    $g->zealphp_response->cookie(...$args);
-                }
-            }
-            $metaRawCookies = is_array($meta['rawcookies'] ?? null) ? $meta['rawcookies'] : [];
-            foreach ($metaRawCookies as $args) {
-                if (is_array($args) && !empty($args)) {
-                    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                    $g->zealphp_response->rawCookie(...$args);
-                }
-            }
-            // Detect streaming content types (SSE, chunked, event-stream)
-            foreach ($metaHeaders as $pair) {
-                if (is_array($pair) && count($pair) >= 2) {
-                    $p0 = is_scalar($pair[0]) ? (string)$pair[0] : '';
-                    $p1 = is_scalar($pair[1]) ? (string)$pair[1] : '';
-                    if (strcasecmp($p0, 'Content-Type') === 0
-                        && stripos($p1, 'text/event-stream') !== false) {
-                        $streaming = true;
-                    }
-                }
-            }
-            // Universal return contract: the subprocess captures the file's
-            // return value (int / array / string / null) and ships it here.
-            // Generator/Closure returns are consumed inside the subprocess
-            // and stream out as body — they appear as a `streamed` marker.
-            if (array_key_exists('return_value', $meta)) {
-                $hasReturn   = true;
-                $returnValue = $meta['return_value'];
-            }
-        }
-
-        // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-        if ($streaming && $g->openswoole_response->isWritable()) {
-            // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-            $g->zealphp_response->flush();
-            while (!feof($pipes[1])) {
-                $chunk = fread($pipes[1], 8192);
-                if ($chunk === false || $chunk === '') {
-                    usleep(10000);
-                    continue;
-                }
-                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                if (!$g->openswoole_response->isWritable()) break;
-                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                $g->openswoole_response->write($chunk);
-            }
-            fclose($pipes[1]);
-            proc_close($process);
-            // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-            if ($g->openswoole_response->isWritable()) {
-                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                $g->openswoole_response->end();
-            }
-            $g->_streaming = true;
-            return null;
-        }
-
-        $body = stream_get_contents($pipes[1]);
-        fclose($pipes[1]);
-        proc_close($process);
-        $body = $body === false ? '' : $body;
-
-        // Surface the file's return value when it was explicit (int / array /
-        // string). Trust the subprocess: when return_value is non-null AND
-        // not the default 1-from-no-return, return it. The body (echoed
-        // output) is folded in only if the return was a string (echo-shell-
-        // then-return-body idiom) — exactly matching executeFile().
-        if ($hasReturn && $returnValue !== null && $returnValue !== 1) {
-            if (is_string($returnValue) && $body !== '') {
-                return $body . $returnValue;
-            }
-            return $returnValue;
-        }
-        return $body !== '' ? $body : null;
-    }
-
-    /**
      * Parse a raw CGI/1.1 interpreter response (RFC 3875) into status, headers
      * and body — pure, side-effect-free string handling.
      *
-     * The header block is split from the body on the FIRST blank line. Per RFC
-     * 3875 the separator is CRLF CRLF; a bare LF LF is tolerated as a fallback
-     * (the CRLF CRLF form is searched first regardless of position). Header
-     * lines are parsed `Name: value` (first colon splits; colons in the value
-     * are preserved). The `Status: NNN Reason` pseudo-header (§6.3.3) is
-     * extracted into the returned `status` (only when `NNN` is a valid 100–599
-     * code) and is NOT echoed back as a header. Lines without a colon are
-     * ignored.
-     *
-     * When `$raw` has no blank-line separator at all, the whole input is treated
-     * as the body and `status`/`headers` come back empty — the caller decides
-     * whether that's a malformed-header error (cgiInterpreterResponse() already
-     * does, before calling this) or a bodies-only response.
+     * Thin public delegating shim — the implementation moved to
+     * {@see \ZealPHP\CGI\Dispatcher::parseCgiResponse()} (Phase 2 refactor).
+     * Kept on App for BC so external callers/tests reach it via App::parseCgiResponse().
      *
      * @return array{status: int|null, headers: array<string, string>, body: string}
      */
     public static function parseCgiResponse(string $raw): array
     {
-        // Split the CGI header block from the body on the first blank line.
-        // Per RFC 3875 the separator is CRLF CRLF, but tolerate bare LF LF too.
-        $sep = "\r\n\r\n";
-        $pos = strpos($raw, $sep);
-        if ($pos === false) {
-            $sep = "\n\n";
-            $pos = strpos($raw, $sep);
-        }
-
-        if ($pos === false) {
-            return ['status' => null, 'headers' => [], 'body' => $raw];
-        }
-
-        $headerBlock = substr($raw, 0, $pos);
-        $body        = substr($raw, $pos + strlen($sep));
-
-        $status  = null;
-        $headers = [];
-        foreach (preg_split('/\r\n|\n/', $headerBlock) ?: [] as $line) {
-            if ($line === '' || !str_contains($line, ':')) {
-                continue;
-            }
-            [$name, $value] = explode(':', $line, 2);
-            $name  = trim($name);
-            $value = trim($value);
-
-            // RFC 3875 §6.3.3 — "Status: NNN Reason" sets the HTTP status and
-            // must not be forwarded to the client as a header.
-            if (strcasecmp($name, 'Status') === 0) {
-                $codeStr = strtok($value, ' ');
-                if ($codeStr !== false && ctype_digit($codeStr)) {
-                    $code = (int)$codeStr;
-                    if ($code >= 100 && $code <= 599) {
-                        $status = $code;
-                    }
-                }
-                continue;
-            }
-
-            $headers[$name] = $value;
-        }
-
-        return ['status' => $status, 'headers' => $headers, 'body' => $body];
-    }
-
-    /**
-     * Consume a standard RFC 3875 CGI response from a non-PHP interpreter
-     * subprocess: read stdout (header block + blank line + body), apply the
-     * parsed headers / Status: pseudo-header to the response, and return the
-     * body through the universal contract. stderr is drained for error logging.
-     *
-     * Unlike cgiSubprocess()'s PHP/cgi_worker path, there is NO stderr metadata
-     * channel — a Python/Perl script just writes CGI to stdout. text/event-stream
-     * responses stream chunk-by-chunk; everything else returns one buffered body.
-     *
-     * Apache parity: ap_scan_script_header_err_brigade_ex() (header scan + Status:),
-     * log_script_err() (stderr drain), CGIScriptTimeout (read deadline).
-     *
-     * @param resource              $process
-     * @param array<int,resource>   $pipes
-     */
-    private static function cgiInterpreterResponse($process, array $pipes, string $path): mixed
-    {
-        $g = RequestContext::instance();
-
-        // Read the full stdout (headers + body) under the CGI timeout. A trivial
-        // CGI script completes near-instantly; the deadline only guards a hang.
-        stream_set_blocking($pipes[1], false);
-        $deadline = microtime(true) + self::$cgi_timeout;
-        $raw = '';
-        $timedOut = true;
-        while (microtime(true) < $deadline) {
-            $chunk = fread($pipes[1], 8192);
-            if ($chunk !== false && $chunk !== '') {
-                $raw .= $chunk;
-                continue;
-            }
-            if (feof($pipes[1])) {
-                $timedOut = false;
-                break;
-            }
-            usleep(2000);
-        }
-
-        // Drain stderr (non-blocking) for error visibility — Apache logs child
-        // stderr line-by-line; we route it through elog() under the cgi tag.
-        stream_set_blocking($pipes[2], false);
-        $stderr = stream_get_contents($pipes[2]);
-        fclose($pipes[2]);
-
-        if ($timedOut) {
-            proc_terminate($process, 15);
-            $killDeadline = microtime(true) + 5.0;
-            while (microtime(true) < $killDeadline) {
-                $st = proc_get_status($process);
-                if (!$st['running']) break;
-                usleep(50000);
-            }
-            $st = proc_get_status($process);
-            if ($st['running']) {
-                proc_terminate($process, 9);
-            }
-            fclose($pipes[1]);
-            proc_close($process);
-            if (is_string($stderr) && $stderr !== '') {
-                elog("[cgi] (timeout) stderr: " . rtrim($stderr), "cgi");
-            }
-            elog("cgiInterpreterResponse: timeout after " . self::$cgi_timeout . "s for $path", "error");
-            return 500;
-        }
-
-        fclose($pipes[1]);
-        $exit = proc_get_status($process)['exitcode'];
-        proc_close($process);
-
-        if (is_string($stderr) && $stderr !== '') {
-            elog("[cgi] stderr: " . rtrim($stderr), "cgi");
-        }
-
-        // No header block at all. If the script produced nothing and exited
-        // non-zero, surface a 500 (mod_cgi: "malformed header from script").
-        if (strpos($raw, "\r\n\r\n") === false && strpos($raw, "\n\n") === false) {
-            if ($raw === '') {
-                if ($exit !== 0) {
-                    elog("cgiInterpreterResponse: empty output, exit code $exit for $path", "error");
-                    return 500;
-                }
-                return null;
-            }
-            elog("cgiInterpreterResponse: malformed CGI header (no blank line) for $path", "error");
-            return 500;
-        }
-
-        $parsed  = self::parseCgiResponse($raw);
-        $body    = $parsed['body'];
-        $headers = $parsed['headers'];
-
-        if ($parsed['status'] !== null) {
-            response_set_status($parsed['status']);
-        }
-
-        $streaming = false;
-        foreach ($headers as $name => $value) {
-            if (strcasecmp($name, 'Content-Type') === 0
-                && stripos($value, 'text/event-stream') !== false) {
-                $streaming = true;
-            }
-
-            // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-            $g->zealphp_response->header($name, $value);
-        }
-
-        // SSE / event-stream: flush headers + body immediately so EventSource
-        // clients see events without waiting for the whole response.
-        // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-        if ($streaming && $g->openswoole_response->isWritable()) {
-            // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-            $g->zealphp_response->flush();
-            // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-            if ($body !== '' && $g->openswoole_response->isWritable()) {
-                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                $g->openswoole_response->write($body);
-            }
-            // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-            if ($g->openswoole_response->isWritable()) {
-                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                $g->openswoole_response->end();
-            }
-            $g->_streaming = true;
-            return null;
-        }
-
-        return $body !== '' ? $body : null;
-    }
-
-
-    /**
-     * `cgiMode('pool')` dispatch — native FCGI-style worker pool.
-     *
-     * Lazily creates a per-OpenSwoole-worker singleton `WorkerPool` with
-     * `$cgi_pool_size` pre-spawned PHP subprocesses, then dispatches the
-     * current request frame to an idle subprocess via Coroutine\Channel.
-     * The subprocess executes the file with mod_php-style isolation
-     * (clean global scope per request — same as `cgiMode('proc')`), then
-     * writes the response frame back through the IPC pipe; the parent
-     * coroutine yields the entire time (HOOK_ALL hooks pipe reads),
-     * letting the OpenSwoole worker serve thousands of other coroutines
-     * in parallel while pool subprocesses execute legacy PHP.
-     *
-     * Response-shape handling mirrors cgiFork() exactly — both consume
-     * the same IPC frame format (status, headers, cookies, rawcookies,
-     * body, return_value) and apply captures to $g->zealphp_response via
-     * the same patterns, so the host response builder treats pool
-     * dispatch identically to proc/fork.
-     *
-     * Auto-respawn on subprocess death (FPM-equivalent recovery
-     * semantics — `proc_get_status(['running' => false])` triggers
-     * `respawn(idx)`) and recycle after `$cgi_pool_max_requests`
-     * (FPM `pm.max_requests` parity).
-     */
-    private static function cgiPool(string $path): mixed
-    {
-        $g = RequestContext::instance();
-
-        if (self::$cgi_pool_instance === null) {
-            try {
-                self::$cgi_pool_instance = new \ZealPHP\CGI\WorkerPool(
-                    size: self::$cgi_pool_size,
-                    maxRequestsPerWorker: self::$cgi_pool_max_requests,
-                );
-            } catch (\Throwable $e) {
-                elog("cgiPool: failed to spawn worker pool: " . $e->getMessage(), 'error');
-                return 500;
-            }
-        }
-
-        // Issue #108 — see mintCgiSession() docblock.
-        self::mintCgiSession($g);
-
-        // Build the request frame. Same shape as cgiFork's $ctx and
-        // cgi_worker.php's ZEALPHP_REQUEST_CONTEXT env JSON.
-        // RequestContext properties are typed non-nullable arrays — no
-        // need for `?? []` guards.
-        $request = [
-            'file'    => $path,
-            'server'  => $g->server,
-            'get'     => $g->get,
-            'post'    => $g->post,
-            'cookies' => $g->cookie,
-            'files'   => $g->files,
-        ];
-
-        try {
-            $resp = self::$cgi_pool_instance->dispatch($request, self::$cgi_timeout > 0 ? (float) self::$cgi_timeout : 30.0);
-        } catch (\Throwable $e) {
-            elog("cgiPool: dispatch failed for $path: " . $e->getMessage(), 'error');
-            return 500;
-        }
-
-        $statusCode = $resp['status'] ?? 200;
-        response_set_status(is_numeric($statusCode) ? (int) $statusCode : 200);
-
-        $respW = $g->zealphp_response;
-        if ($respW !== null) {
-            foreach ((array) ($resp['headers'] ?? []) as $pair) {
-                if (is_array($pair) && count($pair) >= 2
-                    && is_scalar($pair[0]) && is_scalar($pair[1])) {
-                    $respW->header((string) $pair[0], (string) $pair[1]);
-                }
-            }
-            // Cookie tuples — same shape cgiFork applies; reuse the same
-            // arg-narrowing pattern.
-            $applyCookie = static function (callable $fn, mixed $args): void {
-                if (!is_array($args) || !isset($args[0]) || !is_scalar($args[0])) return;
-                $s = static fn(int $i, string $d): string =>
-                    isset($args[$i]) && is_scalar($args[$i]) ? (string) $args[$i] : $d;
-                $b = static fn(int $i): bool => isset($args[$i]) && (bool) $args[$i];
-                $fn(
-                    (string) $args[0],
-                    $s(1, ''),
-                    isset($args[2]) && is_numeric($args[2]) ? (int) $args[2] : 0,
-                    $s(3, '/'),
-                    $s(4, ''),
-                    $b(5),
-                    $b(6),
-                    $s(7, ''),
-                );
-            };
-            foreach ((array) ($resp['cookies'] ?? []) as $args) {
-                // The cookies from pool_worker may be in two shapes:
-                // associative (from setcookie's $expires=array form) OR
-                // positional (compact()-built); narrow both into the
-                // positional shape applyCookie expects.
-                if (is_array($args) && isset($args['name']) && is_scalar($args['name'])) {
-                    $args = [
-                        (string) $args['name'],
-                        isset($args['value']) && is_scalar($args['value']) ? (string) $args['value'] : '',
-                        isset($args['expires']) && is_numeric($args['expires']) ? (int) $args['expires'] : 0,
-                        isset($args['path']) && is_scalar($args['path']) ? (string) $args['path'] : '/',
-                        isset($args['domain']) && is_scalar($args['domain']) ? (string) $args['domain'] : '',
-                        !empty($args['secure']),
-                        !empty($args['httponly']),
-                        isset($args['samesite']) && is_scalar($args['samesite']) ? (string) $args['samesite'] : '',
-                    ];
-                }
-                $applyCookie([$respW, 'cookie'], $args);
-            }
-            foreach ((array) ($resp['rawcookies'] ?? []) as $args) {
-                if (is_array($args) && isset($args['name']) && is_scalar($args['name'])) {
-                    $args = [
-                        (string) $args['name'],
-                        isset($args['value']) && is_scalar($args['value']) ? (string) $args['value'] : '',
-                        isset($args['expires']) && is_numeric($args['expires']) ? (int) $args['expires'] : 0,
-                        isset($args['path']) && is_scalar($args['path']) ? (string) $args['path'] : '/',
-                        isset($args['domain']) && is_scalar($args['domain']) ? (string) $args['domain'] : '',
-                        !empty($args['secure']),
-                        !empty($args['httponly']),
-                        isset($args['samesite']) && is_scalar($args['samesite']) ? (string) $args['samesite'] : '',
-                    ];
-                }
-                $applyCookie([$respW, 'rawCookie'], $args);
-            }
-        }
-
-        $body        = is_string($resp['body'] ?? null) ? $resp['body'] : '';
-        $hasReturn   = array_key_exists('return_value', $resp);
-        $returnValue = $resp['return_value'] ?? null;
-
-        // Universal return contract — same as cgiSubprocess/cgiFork/executeFile.
-        if ($hasReturn && $returnValue !== null && $returnValue !== 1) {
-            if (is_string($returnValue) && $body !== '') {
-                return $body . $returnValue;
-            }
-            return $returnValue;
-        }
-        return $body !== '' ? $body : null;
+        return \ZealPHP\CGI\Dispatcher::parseCgiResponse($raw);
     }
 
     /**
@@ -6289,6 +6209,284 @@ class App
     public function addMiddleware(\Psr\Http\Server\MiddlewareInterface $middleware): void
     {
         self::$middleware_wait_stack[] = $middleware;
+    }
+
+    /**
+     * Register a named, reusable middleware — the "named & shared" middleware
+     * vocabulary from Traefik, the route-middleware alias from Laravel.
+     *
+     * The alias can then be referenced by name in the `middleware:` route
+     * option (or a route group) instead of constructing the instance inline:
+     *
+     * ```php
+     * App::middlewareAlias('auth',       fn() => new BasicAuthMiddleware($verifier));
+     * App::middlewareAlias('admin-only', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']]));
+     * App::middlewareAlias('throttle',   fn($n = '60') => new RateLimitMiddleware(limit: (int)$n));
+     *
+     * $app->route('/admin/users', middleware: ['auth', 'admin-only', 'throttle:120'],
+     *     handler: fn() => User::all());
+     * ```
+     *
+     * Pass either a ready `MiddlewareInterface` instance (reused as-is) or a
+     * factory `callable` that returns one. Factories run **once** at
+     * `App::run()` (boot, single-coroutine — safe), and the resulting instance
+     * is shared across every request that uses the alias. A parameterised
+     * reference `'throttle:120'` calls the factory with the comma-split args
+     * (`fn('120')`), mirroring Laravel's `throttle:60,1`.
+     *
+     * Middleware instances MUST be stateless — one object serves all concurrent
+     * coroutines; per-request state belongs in `$g` (`RequestContext`), never on
+     * the middleware object.
+     */
+    public static function middlewareAlias(string $name, \Psr\Http\Server\MiddlewareInterface|callable $factory): void
+    {
+        self::$middleware_aliases[$name] = $factory;
+    }
+
+    /**
+     * Scope a middleware chain to a URL **path** — the centralized,
+     * "think like Traefik" way to apply middleware to a slice of the site,
+     * **including the ZealAPI layer**. Because every request (route or
+     * `api/**` file) flows through the same stack and `api/admin/x` is just the
+     * URL `/api/admin/x`, one mechanism covers everything — there is no separate
+     * "api middleware".
+     *
+     * ```php
+     * App::middlewareAlias('auth', fn() => new BasicAuthMiddleware($verifier));
+     *
+     * App::when('/',           ['request-id']);          // every request
+     * App::when('/admin',      ['auth', 'admin-only']);  // /admin and /admin/*
+     * App::when('/api/admin',  ['auth']);                // api/admin/*.php endpoints
+     * App::when('/api/admin/users/delete', ['audit']);   // a single api endpoint
+     * App::when('#^/api/v\d+/#', new CorsMiddleware());  // a PCRE scope
+     * ```
+     *
+     * **Scope syntax:** a literal **path prefix** by default (matched on segment
+     * boundaries — `/admin` matches `/admin` and `/admin/x` but NOT
+     * `/administrators`); a **PCRE** when the string starts with `#`.
+     * `'/'` (or an empty string) matches everything. Regex scopes are matched
+     * **unanchored** (`preg_match`), so a guard intended for a subtree MUST
+     * anchor it — `'#^/admin(/|$)#'`, not `'#/admin#'` (the latter also matches
+     * `/x/badmin`). Prefer a literal prefix unless you genuinely need a regex.
+     *
+     * **Accepts** a `MiddlewareInterface` instance, a registered alias string
+     * (incl. parameterised `'throttle:120'`), or a list mixing both.
+     *
+     * **Ordering:** runs inside the request lifecycle after path normalization
+     * and after CORS/OPTIONS handling (so a `when` auth guard never blocks a
+     * preflight), wrapping route match + dispatch. Multiple `when()` registrations
+     * compose in **registration order — first registered is outermost**. The full
+     * per-request order is: global `addMiddleware` → `App::when` → the route's own
+     * `middleware:` (or an api file's in-file `$middleware`) → handler; the
+     * response unwinds in reverse. A middleware that returns without calling the
+     * handler short-circuits.
+     *
+     * **Stateless contract:** the resolved instance is shared across every
+     * concurrent request in scope — keep per-request state in `$g`
+     * (`RequestContext`), never on the middleware object.
+     *
+     * Resolution (alias→instance) happens once at `App::run()`; the hot path only
+     * does a cheap, memoized path-prefix scan.
+     *
+     * @param MiddlewareInterface|string|array<int,MiddlewareInterface|string> $middleware
+     */
+    public static function when(string $pathPrefixOrRegex, \Psr\Http\Server\MiddlewareInterface|string|array $middleware): void
+    {
+        if ($pathPrefixOrRegex !== '' && $pathPrefixOrRegex[0] === '#') {
+            $type = 'regex';
+            $key  = $pathPrefixOrRegex;
+        } else {
+            $type = 'prefix';
+            $trimmed = trim($pathPrefixOrRegex, '/');
+            $key = $trimmed === '' ? '/' : '/' . $trimmed;
+        }
+        self::$when_middleware[] = [
+            'type' => $type,
+            'key'  => $key,
+            'spec' => self::normalizeMiddlewareSpec($middleware),
+        ];
+    }
+
+    /**
+     * Select the `App::when` middleware chain for a normalized request path —
+     * every matching scope's instances flattened in registration order
+     * (outermost first). Memoized per path; the registry is immutable after
+     * boot, so this never recomputes for a repeated path. Returns `[]` (the
+     * fast path) when nothing is registered or nothing matches.
+     *
+     * @return list<MiddlewareInterface>
+     */
+    public static function resolveWhenMiddleware(string $normPath): array
+    {
+        if (self::$when_middleware_compiled === []) {
+            return [];
+        }
+        if (array_key_exists($normPath, self::$when_middleware_memo)) {
+            return self::$when_middleware_memo[$normPath];
+        }
+        $flat = [];
+        foreach (self::$when_middleware_compiled as $entry) {
+            if (self::whenScopeMatches($entry['type'], $entry['key'], $normPath)) {
+                foreach ($entry['chain'] as $mw) {
+                    $flat[] = $mw;
+                }
+            }
+        }
+        // Bounded cache: stop inserting past the cap (still correct — a miss
+        // just recomputes the cheap scan). Defends against path-spray memory DoS.
+        if (count(self::$when_middleware_memo) < self::WHEN_MEMO_MAX) {
+            self::$when_middleware_memo[$normPath] = $flat;
+        }
+        return $flat;
+    }
+
+    /**
+     * Whether an `App::when` scope matches a normalized path. Prefixes match on
+     * segment boundaries (the trailing `/` stops `/admin` matching
+     * `/administrators`); `'/'` matches all; regex scopes use `preg_match`.
+     */
+    private static function whenScopeMatches(string $type, string $key, string $normPath): bool
+    {
+        if ($type === 'regex') {
+            return preg_match($key, $normPath) === 1;
+        }
+        return $key === '/' || $normPath === $key || str_starts_with($normPath, $key . '/');
+    }
+
+    /**
+     * Validate + flatten a per-route middleware spec into a list, WITHOUT
+     * resolving aliases (resolution is deferred to `App::run()` so an alias may
+     * be registered after the route that references it). A single instance or
+     * alias string is wrapped into a one-element list.
+     *
+     * @param mixed $spec
+     * @return list<\Psr\Http\Server\MiddlewareInterface|string>
+     */
+    public static function normalizeMiddlewareSpec($spec): array
+    {
+        if ($spec instanceof \Psr\Http\Server\MiddlewareInterface || is_string($spec)) {
+            $spec = [$spec];
+        }
+        if (!is_array($spec)) {
+            throw new \InvalidArgumentException(
+                'Route middleware must be a MiddlewareInterface, an alias string, or a list of them.'
+            );
+        }
+        $out = [];
+        foreach ($spec as $entry) {
+            if (!($entry instanceof \Psr\Http\Server\MiddlewareInterface) && !is_string($entry)) {
+                throw new \InvalidArgumentException(
+                    'Each route middleware must be a MiddlewareInterface instance or an alias string.'
+                );
+            }
+            $out[] = $entry;
+        }
+        return $out;
+    }
+
+    /**
+     * Resolve a normalized middleware spec (instances + alias strings) to a
+     * flat list of `MiddlewareInterface` instances. Called once per route at
+     * `App::run()` boot time, so the dispatch hot path never does a registry
+     * lookup or `new`.
+     *
+     * @param list<\Psr\Http\Server\MiddlewareInterface|string> $spec
+     * @return list<\Psr\Http\Server\MiddlewareInterface>
+     */
+    public static function compileMiddlewareChain(array $spec): array
+    {
+        $out = [];
+        foreach ($spec as $entry) {
+            $out[] = self::resolveMiddleware($entry);
+        }
+        return $out;
+    }
+
+    /**
+     * Resolve one spec entry to an instance. An instance passes through; an
+     * alias string is looked up in the registry (`name` or `name:arg1,arg2`).
+     */
+    private static function resolveMiddleware(\Psr\Http\Server\MiddlewareInterface|string $entry): \Psr\Http\Server\MiddlewareInterface
+    {
+        if ($entry instanceof \Psr\Http\Server\MiddlewareInterface) {
+            return $entry;
+        }
+        $name = $entry;
+        $args = [];
+        if (str_contains($entry, ':')) {
+            [$name, $argString] = explode(':', $entry, 2);
+            $args = $argString === '' ? [] : explode(',', $argString);
+        }
+        if (!isset(self::$middleware_aliases[$name])) {
+            throw new \InvalidArgumentException(
+                "Unknown middleware alias '{$name}'. Register it first with "
+                . "App::middlewareAlias('{$name}', fn() => new SomeMiddleware())."
+            );
+        }
+        $factory = self::$middleware_aliases[$name];
+        if ($factory instanceof \Psr\Http\Server\MiddlewareInterface) {
+            return $factory;
+        }
+        $resolved = $factory(...$args);
+        if (!$resolved instanceof \Psr\Http\Server\MiddlewareInterface) {
+            throw new \InvalidArgumentException(
+                "Middleware alias '{$name}' factory must return a Psr\\Http\\Server\\MiddlewareInterface."
+            );
+        }
+        return $resolved;
+    }
+
+    /**
+     * Route group — apply a shared URL prefix and/or a shared middleware chain
+     * to many routes at once (Traefik chains, Slim/Laravel route groups).
+     *
+     * ```php
+     * $app->group('/admin', ['auth', 'admin-only'], function ($g) {
+     *     $g->route('/users',    fn() => User::all());
+     *     $g->route('/settings', fn() => Settings::get());
+     * });
+     * ```
+     *
+     * The group middleware wraps **outside** any route-level middleware, which
+     * wrap outside the handler. Groups nest — an inner `$g->group()` composes
+     * its prefix and middleware onto the outer group's. The callback receives a
+     * `RouteGroup` whose `route()/nsRoute()/nsPathRoute()/patternRoute()/group()`
+     * mirror `App`'s, transparently prepending the prefix and prepending the
+     * shared middleware.
+     *
+     * `$middleware` may be omitted: `$app->group('/admin', fn ($g) => ...)`.
+     *
+     * @param array<int, \Psr\Http\Server\MiddlewareInterface|string>|callable $middleware
+     */
+    public function group(string $prefix, array|callable $middleware = [], ?callable $registrar = null): void
+    {
+        if (is_callable($middleware) && $registrar === null) {
+            $registrar = $middleware;
+            $middleware = [];
+        }
+        if ($registrar === null) {
+            throw new \InvalidArgumentException('App::group() requires a registrar callback.');
+        }
+        $group = new RouteGroup($this, $prefix, self::normalizeMiddlewareSpec($middleware));
+        $registrar($group);
+    }
+
+    /**
+     * Combine the two ways a route can declare middleware — the `'middleware'`
+     * key of the `$options` array and the `middleware:` named argument — into a
+     * single normalized spec. When both are present the array-option entries
+     * run first (outermost). Stored on the route as the raw spec; resolved to
+     * instances at `App::run()`.
+     *
+     * @param array<int|string,mixed> $options
+     * @param array<int,\Psr\Http\Server\MiddlewareInterface|string> $middlewareArg
+     * @return list<\Psr\Http\Server\MiddlewareInterface|string>
+     */
+    private static function routeMiddlewareSpec(array $options, array $middlewareArg): array
+    {
+        $fromOptions = isset($options['middleware']) ? self::normalizeMiddlewareSpec($options['middleware']) : [];
+        $fromArg = $middlewareArg !== [] ? self::normalizeMiddlewareSpec($middlewareArg) : [];
+        return array_merge($fromOptions, $fromArg);
     }
 
     private function invokeFallbackOrNotFound(): \Psr\Http\Message\ResponseInterface
@@ -6493,641 +6691,6 @@ class App
     }
 
     /**
-     * @return array<string, mixed>
-     */
-    protected static function parseCliArgs(): array
-    {
-        $rawArgv = $_SERVER['argv'] ?? $GLOBALS['argv'] ?? [];
-        if (!is_array($rawArgv)) {
-            return [];
-        }
-        // Filter to ensure all elements are strings (PHPStan can't infer from $_SERVER).
-        $argv = array_values(array_filter($rawArgv, 'is_string'));
-        if (count($argv) <= 1) {
-            return [];
-        }
-
-        array_shift($argv);
-        $command = 'start';
-        $flags = [];
-        $i = 0;
-        while ($i < count($argv)) {
-            $arg = $argv[$i];
-            if (in_array($arg, ['start', 'stop', 'status', 'restart', 'logs'], true)) {
-                $command = $arg;
-                $i++;
-                continue;
-            }
-            if ($arg === '-h' || $arg === '--help' || $arg === 'help') {
-                self::cliHelp();
-                exit(0);
-            }
-            if ($arg === '-p' || $arg === '--port') {
-                if ($i + 1 >= count($argv)) { echo "Error: {$arg} requires a value\n"; exit(1); }
-                $flags['port'] = (int)$argv[++$i];
-                if ($flags['port'] < 1 || $flags['port'] > 65535) { echo "Error: port must be between 1 and 65535\n"; exit(1); }
-            } elseif ($arg === '-H' || $arg === '--host') {
-                if ($i + 1 >= count($argv)) { echo "Error: {$arg} requires a value\n"; exit(1); }
-                $flags['host'] = $argv[++$i];
-            } elseif ($arg === '-w' || $arg === '--workers') {
-                if ($i + 1 >= count($argv)) { echo "Error: {$arg} requires a value\n"; exit(1); }
-                $flags['worker_num'] = max(1, (int)$argv[++$i]);
-            } elseif ($arg === '-d' || $arg === '--daemonize') {
-                $flags['daemonize'] = true;
-            } elseif ($arg === '--task-workers') {
-                if ($i + 1 >= count($argv)) { echo "Error: {$arg} requires a value\n"; exit(1); }
-                $flags['task_worker_num'] = max(0, (int)$argv[++$i]);
-            } elseif ($arg === '--pid-file') {
-                if ($i + 1 >= count($argv)) { echo "Error: {$arg} requires a value\n"; exit(1); }
-                $flags['pid_file'] = $argv[++$i];
-            } elseif ($arg === '--access') {
-                $flags['log_access'] = true;
-            } elseif ($arg === '--debug') {
-                $flags['log_debug'] = true;
-            } elseif ($arg === '--server') {
-                $flags['log_server'] = true;
-            } elseif ($arg === '--zlog') {
-                $flags['log_zlog'] = true;
-            } elseif (str_starts_with($arg, '-')) {
-                echo "Warning: unknown flag '{$arg}' (ignored)\n";
-            }
-            $i++;
-        }
-
-        switch ($command) {
-            case 'stop':
-                if (isset($flags['port']) || !empty($flags['pid_file'])) {
-                    self::cliStop(self::resolvePidFile($flags));
-                } else {
-                    self::cliStopAuto();
-                }
-                exit(0);
-            case 'status':
-                self::cliStatus($flags);
-                exit(0);
-            case 'logs':
-                self::cliLogs($flags);
-                exit(0);
-            case 'restart':
-                $pidFile = self::resolvePidFile($flags);
-                $wasDaemonized = file_exists($pidFile);
-                echo "Restarting ZealPHP...\n";
-                self::cliStop($pidFile, quiet: true);
-                if ($wasDaemonized && !isset($flags['daemonize'])) {
-                    $flags['daemonize'] = true;
-                }
-                // The "Restarted (pid X, port Y)" confirmation is printed by
-                // forkStartupReporter() in the shared 'default' start path
-                // below — it forks so the terminal-attached process prints
-                // the message AFTER the new daemon is confirmed up, instead
-                // of the prompt returning first and the message overlapping
-                // the next command (issue #17). Fall through to start.
-            default:
-                $pidFile = self::resolvePidFile($flags);
-                if ($command === 'start' && file_exists($pidFile)) {
-                    $pid = (int)trim((string)file_get_contents($pidFile));
-                    if ($pid > 0 && @posix_kill($pid, 0)) {
-                        $port = $flags['port'] ?? (self::$instance ? self::$instance->port : 8080);
-                        echo "ZealPHP is already running (pid {$pid}, port {$port})\n";
-                        echo "Use 'php app.php stop' to stop, or 'php app.php restart' to restart\n";
-                        exit(0);
-                    }
-                    @unlink($pidFile);
-                }
-
-                $overrides = [];
-                if (isset($flags['host'])) { $overrides['_host'] = $flags['host']; }
-                if (isset($flags['port'])) { $overrides['_port'] = $flags['port']; }
-                if (isset($flags['worker_num'])) { $overrides['worker_num'] = $flags['worker_num']; }
-                if (isset($flags['daemonize'])) { $overrides['daemonize'] = true; }
-                if (isset($flags['task_worker_num'])) { $overrides['task_worker_num'] = $flags['task_worker_num']; }
-                if (isset($flags['pid_file'])) { $overrides['pid_file'] = $flags['pid_file']; }
-                // Daemonized start/restart: fork so the terminal-attached
-                // parent prints the confirmation AFTER the new daemon is up
-                // (issue #17). The child returns these overrides and goes on
-                // to boot the self-daemonizing server. A foreground start
-                // (no -d) blocks in run() and needs no confirmation line.
-                if (isset($flags['daemonize'])) {
-                    $port = $flags['port'] ?? (self::$instance ? self::$instance->port : 8080);
-                    $verb = $command === 'restart'
-                        ? 'Restarted'
-                        : 'Started ZealPHP in detached mode';
-                    self::forkStartupReporter($pidFile, (int)$port, $verb);
-                }
-                return $overrides;
-        }
-    }
-
-    /**
-     * For daemonized start/restart: fork so the terminal-attached parent
-     * polls for the new daemon's PID file and prints a confirmation line
-     * BEFORE the shell prompt returns, while the child goes on to boot the
-     * (self-daemonizing) server. The parent never touches OpenSwoole — it
-     * only watches the PID file and exits, so the confirmation is always the
-     * last thing written to the terminal (fixes the issue #17 race where the
-     * prompt returned first and the message overlapped the next command).
-     *
-     * No-op when pcntl is unavailable or the fork fails: start proceeds
-     * without a confirmation line (prior behaviour), never silently broken.
-     *
-     * @param string $verb e.g. "Restarted" or "Started ZealPHP in detached mode"
-     *
-     * Forks + polls the daemon PID file and exits in the child — neither
-     * unit-testable in-process (pcntl_fork/exit kills the test runner) nor
-     * dumpable as a subprocess (the OpenSwoole server suppresses the PHP
-     * shutdown coverage flush). Verified manually + by the CLI behaviour.
-     * @codeCoverageIgnore
-     */
-    private static function forkStartupReporter(string $pidFile, int $port, string $verb): void
-    {
-        if (!function_exists('pcntl_fork')) {
-            return; // proceed to boot in-process — no confirmation possible
-        }
-        $childPid = pcntl_fork();
-        if ($childPid <= 0) {
-            // Child (0) boots the server; -1 (fork failed) also proceeds so
-            // start is never blocked by the inability to report.
-            return;
-        }
-        // Parent (terminal-attached): wait for the daemon to write its PID
-        // file, print the confirmation, then exit so the prompt comes last.
-        $newPid = 0;
-        for ($i = 0; $i < 50; $i++) {   // poll up to 5s
-            usleep(100000);
-            if (file_exists($pidFile)) {
-                $candidate = (int)trim(@file_get_contents($pidFile) ?: '');
-                if ($candidate > 0 && @posix_kill($candidate, 0)) {
-                    $newPid = $candidate;
-                    break;
-                }
-            }
-        }
-        if ($newPid > 0) {
-            echo "{$verb} (pid {$newPid}, port {$port}).\n";
-        } else {
-            echo "{$verb}, but could not confirm — check `php app.php status`.\n";
-        }
-        exit(0);
-    }
-
-    /**
-     * @param array<string, mixed> $flags
-     */
-    private static function resolvePidFile(array $flags): string
-    {
-        if (!empty($flags['pid_file']) && is_scalar($flags['pid_file'])) {
-            $path = (string)$flags['pid_file'];
-            self::ensurePidDir(dirname($path));
-            return $path;
-        }
-        $envPid = getenv('ZEALPHP_PID_FILE');
-        if ($envPid !== false && trim((string)$envPid) !== '') {
-            $path = trim((string)$envPid);
-            self::ensurePidDir(dirname($path));
-            return $path;
-        }
-        // @phpstan-ignore-next-line — flags is array<string, mixed>; port value coerced to int at boundary
-        $port = (int)($flags['port'] ?? (self::$instance ? self::$instance->port : 8080));
-        $logDir = getenv('ZEALPHP_LOG_DIR');
-        if ($logDir !== false && trim((string)$logDir) !== '') {
-            $dir = rtrim(trim((string)$logDir), '/');
-            self::ensurePidDir($dir);
-            return "{$dir}/zealphp_{$port}.pid";
-        }
-        self::ensurePidDir('/tmp/zealphp');
-        return "/tmp/zealphp/zealphp_{$port}.pid";
-    }
-
-    private static function ensurePidDir(string $dir): void
-    {
-        if (!is_dir($dir)) {
-            if (!@mkdir($dir, 0777, true) && !is_dir($dir)) {
-                @elog('warn', "Cannot create PID directory {$dir} — check permissions or set ZEALPHP_PID_FILE");
-            }
-        }
-        if (is_dir($dir) && !is_writable($dir)) {
-            @chmod($dir, 0777);
-        }
-    }
-
-    /**
-     * Pull the port number from a default-shaped pid file path like
-     * /tmp/zealphp/zealphp_8080.pid. Returns 0 when the caller passed a
-     * --pid-file override that doesn't match the convention.
-     */
-    private static function extractPortFromPidFile(string $pidFile): int
-    {
-        if (preg_match('/zealphp_(\d+)\.pid$/', $pidFile, $m) === 1) {
-            return (int)$m[1];
-        }
-        return 0;
-    }
-
-    /**
-     * Returns the PID listening on $port, or null when nothing's listening
-     * or it can't be determined (non-Linux, /proc unreadable). Linux-only:
-     * /proc/net/tcp + tcp6 give the LISTEN-state socket inode; /proc/[pid]/fd/*
-     * resolves inode → owner pid. We deliberately avoid stream_socket_server /
-     * socket_bind here — those are intercepted by OpenSwoole's runtime hook
-     * (HOOK_ALL) and become coroutine-only, which would crash this CLI path.
-     */
-    private static function findPortOwnerPid(int $port): ?int
-    {
-        if ($port <= 0 || !is_readable('/proc/net/tcp')) {
-            return null;
-        }
-        $hexPort = strtoupper(str_pad(dechex($port), 4, '0', STR_PAD_LEFT));
-        $inode   = null;
-        foreach (['/proc/net/tcp', '/proc/net/tcp6'] as $tcpFile) {
-            $lines = @file($tcpFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            if ($lines === false) {
-                continue;
-            }
-            foreach ($lines as $line) {
-                $parts = preg_split('/\s+/', trim((string)$line));
-                if (!is_array($parts) || count($parts) < 10) {
-                    continue;
-                }
-                if ($parts[3] !== '0A') {    // 0A = TCP_LISTEN
-                    continue;
-                }
-                if (!str_ends_with($parts[1], ':' . $hexPort)) {
-                    continue;
-                }
-                $candidate = $parts[9];
-                if ($candidate !== '' && $candidate !== '0') {
-                    $inode = $candidate;
-                    break 2;
-                }
-            }
-        }
-        if ($inode === null) {
-            return null;
-        }
-        $target = "socket:[{$inode}]";
-        $fds    = glob('/proc/[0-9]*/fd/*') ?: [];
-        foreach ($fds as $fd) {
-            if (@readlink($fd) !== $target) {
-                continue;
-            }
-            if (preg_match('#^/proc/(\d+)/#', $fd, $m) === 1) {
-                return (int)$m[1];
-            }
-        }
-        return null;
-    }
-
-    /**
-     * True when /proc/$pid/cmdline looks like a ZealPHP daemon: argv[0] is
-     * a real php binary (php, php8.3, etc.) AND the args reference app.php.
-     * Used to gate kill operations so a recycled PID belonging to an
-     * unrelated process is never targeted.
-     *
-     * The stricter argv[0] check matters because bash wrappers that spawn
-     * `php app.php …` as a child carry "app.php" in their own cmdline — a
-     * naive substring match falsely identifies them as ZealPHP daemons and
-     * would happily kill them.
-     *
-     * Non-Linux returns true (be permissive — caller still has posix_kill).
-     */
-    private static function processIsZealphp(int $pid): bool
-    {
-        $cmdlinePath = "/proc/{$pid}/cmdline";
-        if (!is_readable($cmdlinePath)) {
-            return true;
-        }
-        $raw = @file_get_contents($cmdlinePath);
-        if ($raw === false || $raw === '') {
-            return false;
-        }
-        // strtok on non-empty input always returns non-empty-string here
-        // (we checked $raw !== '' above), so no false-return branch needed.
-        $argv0 = strtok($raw, "\0");
-        // Match `php`, `php8`, `php8.3` but not `php-fpm`, `php-cgi`,
-        // `phpunit`, `phpstan`, etc.
-        if (preg_match('/^php(\d|\.|$)/', basename($argv0)) !== 1) {
-            return false;
-        }
-        return strpos(str_replace("\0", ' ', $raw), 'app.php') !== false;
-    }
-
-    /**
-     * Recover from an orphaned-daemon situation: pid file missing or stale
-     * but the port is still held. If the listener is a ZealPHP process,
-     * graceful-then-force kill it. Returns true when an orphan was
-     * cleaned up, false when there's nothing to do (port free, or held by
-     * something that isn't ours).
-     *
-     * Orphan recovery is rare and notable, so messages always print even
-     * when called from a "quiet" code path (cliStop during restart) —
-     * silent recovery hides the fact that the system was in a degraded
-     * state that needed self-healing.
-     */
-    private static function claimOrphanIfAny(int $port): bool
-    {
-        // findPortOwnerPid returns null in three indistinguishable cases:
-        // port free, /proc unreadable, or LISTEN socket owner not in
-        // /proc/*/fd. All three mean "no orphan to clean up."
-        $ownerPid = self::findPortOwnerPid($port);
-        if ($ownerPid === null) {
-            return false;
-        }
-        if (!self::processIsZealphp($ownerPid)) {
-            echo "Port {$port} is held by pid {$ownerPid} (not a ZealPHP process) — refusing to touch it.\n";
-            return false;
-        }
-        echo "Found orphaned ZealPHP daemon on port {$port} (pid {$ownerPid}, no PID file) — cleaning up.\n";
-        $pgid      = @posix_getpgid($ownerPid);
-        $killGroup = $pgid && $pgid !== posix_getpgid(posix_getpid());
-        $killGroup ? posix_kill(-$pgid, SIGTERM) : posix_kill($ownerPid, SIGTERM);
-        for ($i = 0; $i < 100; $i++) {      // up to 10s
-            usleep(100000);
-            if (!@posix_kill($ownerPid, 0)) {
-                echo "Orphan cleaned up.\n";
-                return true;
-            }
-        }
-        echo "Orphan ignored graceful SIGTERM — force killing.\n";
-        $killGroup ? posix_kill(-$pgid, SIGKILL) : posix_kill($ownerPid, SIGKILL);
-        usleep(200000);
-        return true;
-    }
-
-    private static function cliStop(string $pidFile, bool $quiet = false): void
-    {
-        $say = function (string $msg) use ($quiet): void {
-            if (!$quiet) { echo $msg; }
-        };
-
-        if (!file_exists($pidFile)) {
-            // Pid file gone but the port might still be held by an orphaned
-            // daemon. Auto-recover instead of silently passing through; the
-            // alternative is the next start/restart binding the port and
-            // failing without ever telling the user why.
-            $port = self::extractPortFromPidFile($pidFile);
-            if (self::claimOrphanIfAny($port)) {
-                return;
-            }
-            $say("ZealPHP is not running (no PID file: {$pidFile})\n");
-            return;
-        }
-        $pid = (int)trim((string)file_get_contents($pidFile));
-        if ($pid <= 0 || !@posix_kill($pid, 0) || !self::processIsZealphp($pid)) {
-            $say("ZealPHP is not running (stale PID file)\n");
-            @unlink($pidFile);
-            // Stale pid file gone, but an orphan listener may still be there.
-            $port = self::extractPortFromPidFile($pidFile);
-            self::claimOrphanIfAny($port);
-            return;
-        }
-        $pgid = @posix_getpgid($pid);
-        $killGroup = $pgid && $pgid !== posix_getpgid(posix_getpid());
-        $say("Stopping ZealPHP (pid {$pid})...\n");
-        $killGroup ? posix_kill(-$pgid, SIGTERM) : posix_kill($pid, SIGTERM);
-        // OpenSwoole graceful shutdown (workers finish current requests, master
-        // tears down listeners) typically takes 5-7 seconds. Poll for up to 10s
-        // before falling back to SIGKILL.
-        for ($i = 0; $i < 10; $i++) {       // first 500ms: fast poll
-            usleep(50000);
-            if (!@posix_kill($pid, 0)) {
-                @unlink($pidFile);
-                $say("Stopped.\n");
-                return;
-            }
-        }
-        for ($i = 0; $i < 95; $i++) {       // next 9.5s: slower poll
-            usleep(100000);
-            if (!@posix_kill($pid, 0)) {
-                @unlink($pidFile);
-                $say("Stopped.\n");
-                return;
-            }
-        }
-        $say("Graceful shutdown timed out, force killing...\n");
-        $killGroup ? posix_kill(-$pgid, SIGKILL) : posix_kill($pid, SIGKILL);
-        usleep(100000);
-        @unlink($pidFile);
-    }
-
-    private static function cliStopAuto(): void
-    {
-        $logDir = getenv('ZEALPHP_LOG_DIR');
-        if ($logDir === false || trim((string)$logDir) === '') {
-            $logDir = is_dir('/tmp/zealphp') ? '/tmp/zealphp' : '/tmp';
-        }
-        $pidFiles = glob(rtrim(trim((string)$logDir), '/') . '/zealphp_*.pid') ?: [];
-        $running = [];
-        foreach ($pidFiles as $f) {
-            $pid = (int)trim((string)file_get_contents($f));
-            // Pids get recycled — a bare posix_kill check will report a long-
-            // dead ZealPHP daemon as "running" if its PID was reused by an
-            // unrelated process. processIsZealphp() reads /proc/$pid/cmdline
-            // to confirm the listener is actually ours.
-            if ($pid > 0 && @posix_kill($pid, 0) && self::processIsZealphp($pid)) {
-                $port = preg_match('/zealphp_(\d+)\.pid$/', $f, $m) ? $m[1] : '?';
-                $running[] = ['file' => $f, 'pid' => $pid, 'port' => $port];
-            } else {
-                @unlink($f);
-            }
-        }
-        if (empty($running)) {
-            echo "No ZealPHP instances running\n";
-            return;
-        }
-        if (count($running) === 1) {
-            self::cliStop($running[0]['file']);
-            return;
-        }
-        echo "Multiple ZealPHP instances running:\n";
-        foreach ($running as $r) {
-            echo "  pid {$r['pid']}, port {$r['port']}\n";
-        }
-        echo "Use 'php app.php stop -p PORT' to stop a specific instance\n";
-    }
-
-    /**
-     * @param array<string, mixed> $flags
-     */
-    private static function cliStatus(array $flags): void
-    {
-        if (isset($flags['port'])) {
-            $pidFile = self::resolvePidFile($flags);
-            self::cliStatusOne($pidFile);
-            return;
-        }
-
-        $logDir = getenv('ZEALPHP_LOG_DIR');
-        if ($logDir === false || trim((string)$logDir) === '') {
-            $logDir = is_dir('/tmp/zealphp') ? '/tmp/zealphp' : '/tmp';
-        }
-        $pidFiles = glob(rtrim(trim((string)$logDir), '/') . '/zealphp_*.pid') ?: [];
-        if (empty($pidFiles)) {
-            echo "No ZealPHP instances running\n";
-            exit(1);
-        }
-
-        $found = 0;
-        foreach ($pidFiles as $pidFile) {
-            $pid = (int)trim((string)file_get_contents($pidFile));
-            // Pid liveness + cmdline check: posix_kill(0) only tells us the
-            // PID exists, not that it's ours — recycled PIDs would lie.
-            if ($pid <= 0 || !@posix_kill($pid, 0) || !self::processIsZealphp($pid)) {
-                @unlink($pidFile);
-                continue;
-            }
-            $port = '?';
-            if (preg_match('/zealphp_(\d+)\.pid$/', $pidFile, $m)) {
-                $port = $m[1];
-            }
-            echo "ZealPHP is running (pid {$pid}, port {$port})\n";
-            $found++;
-        }
-
-        if ($found === 0) {
-            echo "No ZealPHP instances running\n";
-            exit(1);
-        }
-        exit(0);
-    }
-
-    private static function cliStatusOne(string $pidFile): void
-    {
-        if (!file_exists($pidFile)) {
-            echo "ZealPHP is not running\n";
-            exit(1);
-        }
-        $pid = (int)trim((string)file_get_contents($pidFile));
-        // Cmdline verification guards against PID recycling (see cliStatus).
-        if ($pid <= 0 || !@posix_kill($pid, 0) || !self::processIsZealphp($pid)) {
-            echo "ZealPHP is not running (stale PID file)\n";
-            @unlink($pidFile);
-            exit(1);
-        }
-        $port = '?';
-        if (preg_match('/zealphp_(\d+)\.pid$/', $pidFile, $m)) {
-            $port = $m[1];
-        }
-        echo "ZealPHP is running (pid {$pid}, port {$port})\n";
-        exit(0);
-    }
-
-    /**
-     * @param array<string, mixed> $flags
-     */
-    private static function cliLogs(array $flags): void
-    {
-        if (isset($flags['port'])) {
-            echo "Note: log files are shared across all ports. -p flag ignored.\n";
-        }
-        $hasFilter = isset($flags['log_access']) || isset($flags['log_debug'])
-                  || isset($flags['log_server']) || isset($flags['log_zlog']);
-
-        $files = [];
-
-        if (!$hasFilter || isset($flags['log_access'])) {
-            $path = \ZealPHP\log_file_for('access');
-            if ($path !== null) {
-                $files[] = $path;
-            }
-        }
-        if (!$hasFilter || isset($flags['log_debug'])) {
-            $path = \ZealPHP\log_file_for('debug');
-            if ($path !== null) {
-                $files[] = $path;
-            }
-        }
-        if (!$hasFilter || isset($flags['log_zlog'])) {
-            $path = \ZealPHP\log_file_for('zlog');
-            if ($path !== null) {
-                $files[] = $path;
-            }
-        }
-        if (!$hasFilter || isset($flags['log_server'])) {
-            $serverLog = getenv('ZEALPHP_SERVER_LOG_FILE');
-            if ($serverLog === false || trim((string)$serverLog) === '') {
-                $dir = \ZealPHP\resolve_log_dir();
-                if ($dir !== null) {
-                    $serverLog = $dir . '/server.log';
-                }
-            }
-            if ($serverLog !== false && trim((string)$serverLog) !== '') {
-                $files[] = trim((string)$serverLog);
-            }
-        }
-
-        if (empty($files)) {
-            echo "No log files found. Check ZEALPHP_LOG_DIR or run the server first.\n";
-            exit(1);
-        }
-
-        foreach ($files as $file) {
-            if (!file_exists($file)) {
-                $dir = dirname($file);
-                if (!is_dir($dir)) {
-                    @mkdir($dir, 0775, true);
-                }
-                @touch($file);
-            }
-        }
-
-        echo "Tailing log files (Ctrl+C to stop):\n";
-        foreach ($files as $file) {
-            echo "  {$file}\n";
-        }
-        echo "\n";
-
-        $cmd = 'tail -F';
-        foreach ($files as $file) {
-            $cmd .= ' ' . escapeshellarg($file);
-        }
-        passthru($cmd);
-    }
-
-    private static function cliHelp(): void
-    {
-        echo <<<'HELP'
-Usage: php app.php [command] [options]
-
-Commands:
-  start    Start the server (default)
-  stop     Stop a running server
-  restart  Stop and restart the server
-  status   Check if server is running
-  logs     Tail log files (Ctrl+C to stop)
-
-Options:
-  -p, --port N         Listen port (default: from App::init)
-  -H, --host ADDR      Listen address (default: 0.0.0.0)
-  -w, --workers N      Number of worker processes
-  -d, --daemonize      Run in background
-  --task-workers N     Number of task workers (default: 0)
-  --pid-file PATH      Custom PID file path
-  -h, --help           Show this help message
-
-Log filters (use with 'logs' command):
-  --access             Only tail access.log
-  --debug              Only tail debug.log
-  --server             Only tail server.log
-  --zlog               Only tail zlog.log
-
-Examples:
-  php app.php                        Start with defaults
-  php app.php start -p 9501 -d      Start daemonized on port 9501
-  php app.php stop                   Stop the default (port 8080) server
-  php app.php stop -p 9501          Stop the server on port 9501
-  php app.php restart -p 9501       Restart on port 9501
-  php app.php status                 Check if default server is running
-  php app.php status -p 9501        Check server on port 9501
-  php app.php logs                   Tail all log files
-  php app.php logs --access          Tail only access log
-  php app.php logs --access --debug  Tail access + debug logs
-
-PID files: /tmp/zealphp/zealphp_{port}.pid (one per port, supports multiple apps)
-
-HELP;
-    }
-
-    /**
      * Runs the ZealPHP application.
      *
      * @param array|null $settings Optional settings to override the default OpenSwoole Server Configuration settings.
@@ -7139,12 +6702,180 @@ HELP;
      * - pid_file: string (default: '/tmp/zealphp_{port}.pid')
      *
      * CLI usage:
-     *   php app.php [start|stop|status] [-p port] [-H host] [-w workers] [-d] [--task-workers N] [--pid-file path]
+     *   php app.php [start|stop|status] [-p port] [-H host] [-w workers] [-d] [--task-workers N] [--pid-file path] [--dev]
      *
      * ZealPHP-specific keys (e.g. `'api_warn_collisions' => false`) are
      * extracted and applied via static setters before the rest passes to
      * OpenSwoole. See `$configMap` for the full list.
      *
+     * @param ?array<string, mixed> $settings
+     */
+    /**
+     * Include the `route/*.php` files (the file-based route definitions).
+     * Re-runnable by `reloadRoutes()`; at boot it runs once.
+     */
+    private function includeRouteFiles(): void
+    {
+        $route_files = glob(self::$cwd . "/route/*.php") ?: [];
+        foreach ($route_files as $route_file) {
+            elog("Including route file: " . str_replace(App::$cwd, '', $route_file));
+            include $route_file;
+        }
+    }
+
+    /**
+     * Resolve per-route + `App::when` middleware specs (alias → instance) and
+     * (re)build the method-indexed dispatch table. Idempotent — it resets the
+     * indexes first, so `reloadRoutes()` can call it to rebuild from scratch; at
+     * boot it runs exactly once.
+     */
+    private function compileRouteTable(): void
+    {
+        foreach ($this->routes as $i => $route) {
+            if ($route['middleware'] !== []) {
+                $this->routes[$i]['middleware'] = self::compileMiddlewareChain($route['middleware']);
+            }
+        }
+
+        self::$when_middleware_compiled = [];
+        foreach (self::$when_middleware as $entry) {
+            self::$when_middleware_compiled[] = [
+                'type'  => $entry['type'],
+                'key'   => $entry['key'],
+                'chain' => self::compileMiddlewareChain($entry['spec']),
+            ];
+        }
+        self::$when_middleware_memo = [];
+
+        $this->routes_by_method = [];
+        $this->routes_by_exact_method = [];
+        foreach ($this->routes as $route) {
+            foreach ($route['methods'] as $m) {
+                $this->routes_by_method[$m][] = $route;
+                /** @phpstan-ignore-next-line isset on always-present key kept defensively */
+                if (isset($route['path']) && $this->isExactRoutePath($route['path'])) {
+                    $this->routes_by_exact_method[$m][$route['path']] = $route;
+                }
+            }
+        }
+    }
+
+    /**
+     * **Hot-reload the route table from `route/*.php` WITHOUT restarting the
+     * worker process.** Restores the app.php-defined baseline (explicit routes +
+     * the alias / `App::when` registries), re-includes the route files (picking
+     * up edits — opcache is invalidated for them first), re-appends the
+     * framework's implicit routes in priority order, and rebuilds the dispatch
+     * table. Returns the new route count.
+     *
+     * Scope (be precise): only route DEFINITIONS reload. **`app.php` lifecycle
+     * config — mode/superglobals/worker-counts/the global middleware stack — is
+     * frozen at boot by OpenSwoole and is NOT affected.** Infrastructure a route
+     * file wires at boot (`Store::make`, `App::subscribe`, `App::onWorkerStart`,
+     * `App::addProcess`, `App::onSignal`, timers) is NOT re-run: those calls
+     * detect `App::$reloading` and keep their boot registration; only `route()`,
+     * `App::when()`, `App::middlewareAlias()`, and `App::ws()` take effect.
+     *
+     * Typically driven by the dev mtime-watcher (`App::devReload(true)`); also
+     * callable directly for a programmatic/CLI reload.
+     */
+    public function reloadRoutes(): int
+    {
+        $baseline = $this->route_baseline;
+        if ($baseline === null) {
+            return count($this->routes); // run() hasn't built the table yet
+        }
+        // SAFETY: re-including a route file that declares a top-level `function`
+        // would FATAL with "Cannot redeclare ..." in coroutine mode (no
+        // silent-redeclare), crashing the worker. Detect that and REFUSE the
+        // reload — keep the live table intact — rather than crash. Function-free
+        // route files (the documented "no functions in route/" rule) hot-reload
+        // fine; `App::mode('coroutine-legacy')` tolerates redeclaration.
+        $blocker = self::routeFileWithTopLevelFunction();
+        if ($blocker !== null) {
+            elog(
+                "Route hot-reload skipped: '" . $blocker . "' declares a top-level function, "
+                . "which can't be safely re-included in coroutine mode. Move helpers into a "
+                . "src/ class (PSR-4) or use App::mode('coroutine-legacy'). Route table unchanged.",
+                "warn"
+            );
+            return count($this->routes);
+        }
+        self::$reloading = true;
+        try {
+            // Restore the app.php-defined registries to baseline so a removed
+            // alias/scope/route in a route file actually disappears on reload.
+            self::$when_middleware          = $baseline['when'];
+            self::$middleware_aliases       = $baseline['aliases'];
+            self::$cgi_backend_aliases      = $baseline['backend_aliases'] ?? [];
+            self::$when_middleware_compiled = [];
+            self::$when_middleware_memo     = [];
+
+            // Invalidate opcache for the route files so the re-include sees edits
+            // (no-op if opcache is off or validate_timestamps already handles it).
+            if (function_exists('opcache_invalidate')) {
+                foreach (glob(self::$cwd . "/route/*.php") ?: [] as $rf) {
+                    @opcache_invalidate($rf, true);
+                }
+            }
+
+            // Rebuild in priority order: app.php explicit → re-included route
+            // files → the framework's implicit routes.
+            $this->routes = $baseline['routes'];
+            $this->includeRouteFiles();
+            foreach ($baseline['implicit'] as $implicitRoute) {
+                $this->routes[] = $implicitRoute;
+            }
+            $this->compileRouteTable();
+        } finally {
+            self::$reloading = false;
+        }
+        elog("Routes hot-reloaded: " . count($this->routes) . " routes", "info");
+        return count($this->routes);
+    }
+
+    /**
+     * The first `route/*.php` file that declares a top-level `function` (which
+     * cannot be re-included without a redeclaration fatal), or null if every
+     * route file is function-free and therefore hot-reloadable. The path is
+     * cwd-relative for logging. A `$x = function(){}` closure has no name and is
+     * not matched; a class method carrying a visibility keyword isn't either.
+     */
+    private static function routeFileWithTopLevelFunction(): ?string
+    {
+        foreach (glob(self::$cwd . "/route/*.php") ?: [] as $f) {
+            $src = @file_get_contents($f);
+            if ($src !== false && preg_match('/^\s*function\s+\w+\s*\(/m', $src) === 1) {
+                return str_replace(self::$cwd, '', $f);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Enable/disable dev route hot-reload. When on, each worker polls the
+     * `route/*.php` mtimes and calls `reloadRoutes()` on change — "save file →
+     * routes update" with no process restart. A no-arg call returns the resolved
+     * value; `null` (the default) falls back to the `ZEALPHP_DEV` env var. OFF in
+     * production, where the route table stays master-loaded + COW-shared.
+     *
+     * Heads-up: route-file re-includes pick up edits only if opcache lets them —
+     * set `opcache.validate_timestamps=1` (`revalidate_freq=0`) in dev, or rely
+     * on the per-reload `opcache_invalidate()`.
+     */
+    public static function devReload(?bool $enabled = null): bool
+    {
+        if ($enabled !== null) {
+            self::$dev_reload = $enabled;
+        }
+        if (self::$dev_reload !== null) {
+            return self::$dev_reload;
+        }
+        $env = getenv('ZEALPHP_DEV');
+        return $env !== false && $env !== '' && $env !== '0';
+    }
+
+    /**
      * @param ?array<string, mixed> $settings
      */
     public function run(?array $settings = null): void
@@ -7207,7 +6938,7 @@ HELP;
         // ordering explicit.
         self::$processBootWired = false;
 
-        $cliOverrides = self::parseCliArgs();
+        $cliOverrides = \ZealPHP\CLI::parseCliArgs();
         if (isset($cliOverrides['_host'])) {
             // @phpstan-ignore-next-line — cliOverrides is array<string, mixed>; _host coerced to string at boundary
             $this->host = (string)$cliOverrides['_host'];
@@ -7302,6 +7033,208 @@ HELP;
         // I/O. We warn rather than refuse — see App::hookAll() docblock.
         self::validateLifecycleCombination(App::$superglobals, $hookFlags, $enableCoroutine);
 
+        $this->activateIsolationRuntime($enableCoroutine, $hookFlags);
+
+        // Transparent coroutine-safe exec family. Overriding `shell_exec` ALSO
+        // intercepts the backtick operator (`` `cmd` `` compiles to a
+        // shell_exec() call), so legacy/user code becomes coroutine-safe with
+        // no source changes. Gated by the $hook_exec property / App::hookExec()
+        // setter; null resolves to coroutine mode (superglobals===false) here,
+        // and a non-null value forces it on/off. proc_open/popen are
+        // intentionally NOT overridden — App::rawExec()/cgiSubprocess() rely on
+        // proc_open, so routing through it keeps the fallback recursion-safe.
+        $hookExec = self::$hook_exec ?? (self::$superglobals === false);
+        if ($hookExec) {
+            self::overrideBuiltin('shell_exec', '\ZealPHP\zeal_shell_exec');
+            self::overrideBuiltin('system',     '\ZealPHP\zeal_system');
+            self::overrideBuiltin('passthru',   '\ZealPHP\zeal_passthru');
+            self::overrideBuiltin('exec',       '\ZealPHP\zeal_exec');
+            // proc_open intentionally NOT overridden — App::rawExec()/cgiSubprocess() rely on it.
+        }
+
+        if ($hookFlags !== 0) {
+            co::set(['hook_flags' => $hookFlags]);
+            // Two-arg form (enable, flags). Single-arg with an int as $enable
+            // also works at runtime — PHP truthiness coerces non-zero int to
+            // true and OpenSwoole's C side reads the int as the flag bitmask
+            // — but the IDE stub declares the first arg as strict bool, so
+            // PHPStan flags it. Two-arg form is the canonical OpenSwoole API
+            // and matches every stub version.
+            \OpenSwoole\Runtime::enableCoroutine(true, $hookFlags);
+        }
+        // Use the same path resolution as the stop/status CLI commands so that
+        // `php app.php stop` finds the PID file the server just wrote. Without
+        // this, the server writes /tmp/zealphp_PORT.pid (flat) but stop looks
+        // under /tmp/zealphp/zealphp_PORT.pid (subdir) — they disagree.
+        $defaultPidFile = \ZealPHP\CLI::resolvePidFile(['port' => $this->port]);
+        $default_settings = [
+            'enable_static_handler' => true,
+            'document_root' => self::resolveDocumentRoot(),
+            // Restrict OpenSwoole's built-in static handler to the listed URL prefixes
+            // (Apache equivalent: serving only safe subtrees). Leave empty to serve all
+            // — including dotfiles — like Apache default. Default whitelist below is
+            // safe for typical web apps; override via $app->run(['static_handler_locations' => [...]]).
+            //
+            // IMPORTANT: directory entries MUST end with `/`. OpenSwoole does raw
+            // string-prefix matching, so a bare `/js` entry silently intercepts
+            // user routes like `/json` (a real bug we shipped in 0.2.x — found
+            // when /json on the docs site returned OpenSwoole's default 404
+            // instead of routing into the framework). Trailing slash forces
+            // segment-boundary matching.
+            'static_handler_locations' => self::$static_handler_locations !== []
+                ? self::$static_handler_locations
+                : ['/css/', '/js/', '/img/', '/images/', '/fonts/', '/assets/', '/static/', '/favicon.ico', '/robots.txt'],
+            'enable_coroutine' => $enableCoroutine,
+            'hook_flags' => $hookFlags,
+            // Runtime compression is owned by OpenSwoole. Do not also register
+            // CompressionMiddleware unless this setting is disabled.
+            'http_compression' => true,
+            'pid_file' => $defaultPidFile,
+            // Worker recycling — bounds memory growth from leaks accumulated
+            // in long-running workers (static caches, closure captures, leaky
+            // extensions). After this many requests a worker exits cleanly and
+            // is respawned with a fresh PHP arena. Set 0 to disable. Override
+            // via ZEALPHP_MAX_REQUEST env var or $app->run(['max_request' => N]).
+            'max_request' => (int)(getenv('ZEALPHP_MAX_REQUEST') ?: 100000),
+            'task_worker_num' => 0,
+            'task_enable_coroutine' => true,
+            // Suppress NOTICE-level messages from OpenSwoole internals (e.g. ERRNO 1005
+            // "session does not exist" when SSE/WS clients disconnect mid-stream).
+            // Pass 'log_level' => 0 in $app->run() settings to restore full debug output.
+            'log_level' => 4,  // 0=DEBUG 1=TRACE 2=INFO 3=NOTICE 4=WARNING 5=ERROR 6=NONE
+            // Apache LimitRequestFieldSize / LimitRequestLine parity:
+            // App::$limit_request_field_size / $limit_request_line are kept as
+            // ADVISORY properties — OpenSwoole 22.x does not expose a public
+            // server option matching Apache's per-header byte limit. The
+            // earlier attempt to publish them as 'http_header_buffer_size'
+            // was rejected by OpenSwoole's option validator at boot
+            // (server option not recognised). If you need a hard cap, run
+            // ZealPHP behind a front proxy (Caddy/nginx) that enforces it.
+        ];
+        // @phpstan-ignore-next-line — settings is array<string, mixed>; pid_file coerced to string at boundary
+        $pidFile = (string)($settings['pid_file'] ?? $default_settings['pid_file']);
+        if (file_exists($pidFile)) {
+            $existingPid = (int)trim((string)file_get_contents($pidFile));
+            // processIsZealphp() guards against recycled PIDs falsely
+            // reporting "already running" when the original daemon is gone.
+            if ($existingPid > 0 && @posix_kill($existingPid, 0) && \ZealPHP\CLI::processIsZealphp($existingPid)) {
+                echo "ZealPHP is already running (pid {$existingPid}, port {$this->port})\n";
+                echo "Use 'php app.php stop' to stop, or 'php app.php restart' to restart\n";
+                exit(0);
+            }
+            @unlink($pidFile);
+        }
+        // Catch the orphan case the pid-file check above can't see: pid file
+        // missing or stale, but a previous daemon is still bound to the port.
+        // Without this, OpenSwoole's bind would fail silently and the user
+        // would see "could not confirm" with no actionable explanation.
+        \ZealPHP\CLI::claimOrphanIfAny($this->port);
+
+        self::$server = $server = new \OpenSwoole\WebSocket\Server($this->host, $this->port);
+        if ($settings == null){
+            $effective_settings = $default_settings;
+        } else {
+            $effective_settings = array_merge($default_settings, $settings);
+            // Re-assert the resolved enable_coroutine value AFTER user
+            // settings merge — otherwise a stray `enable_coroutine` key in
+            // the user-passed settings array would silently override the
+            // App::enableCoroutine() decision and the lifecycle warnings
+            // would be a lie.
+            $effective_settings['enable_coroutine'] = $enableCoroutine;
+        }
+        $server->set($effective_settings);
+
+        # Snapshot the app.php-defined baseline (explicit routes + the alias /
+        # App::when registries) BEFORE the file-based + implicit routes load, so
+        # App::reloadRoutes() can restore it and rebuild from route/*.php without
+        # restarting the worker.
+        $baselineExplicitRoutes = $this->routes;
+        $baselineWhen           = self::$when_middleware;
+        $baselineAliases        = self::$middleware_aliases;
+        $baselineBackendAliases = self::$cgi_backend_aliases;
+
+        # Include all files in route directory and its sub directories
+        $this->includeRouteFiles();
+        $baselineFileEndCount = count($this->routes);
+
+        $this->registerImplicitRoutes();
+
+        // Complete the reload baseline now that the implicit routes are
+        // registered: keep them as data (closures survive) so reloadRoutes()
+        // re-appends them after the re-included route files, in priority order.
+        $this->route_baseline = [
+            'routes'          => $baselineExplicitRoutes,
+            'implicit'        => array_slice($this->routes, $baselineFileEndCount),
+            'when'            => $baselineWhen,
+            'aliases'         => $baselineAliases,
+            'backend_aliases' => $baselineBackendAliases,
+        ];
+
+        $this->registerTaskHandlers($server, $effective_settings);
+
+        // When coroutines are enabled, always use CoSessionManager — it uses
+        // per-coroutine RequestContext and overridden zeal_session_start(),
+        // both coroutine-safe. SessionManager uses PHP's native session_start()
+        // + session_set_save_handler() which race under concurrent coroutines.
+        // sg(true)+ec(true) with ext-zealphp needs CoSessionManager (#134).
+        $SessionManager = ($enableCoroutine || !self::$superglobals)
+            ? 'ZealPHP\Session\CoSessionManager'
+            : 'ZealPHP\Session\SessionManager';
+
+        self::buildMiddlewareStack();
+
+        $this->registerOnRequest($server, $SessionManager);
+
+        // Resolve per-route + App::when middleware (alias → instance) and build
+        // the method-indexed dispatch table. Extracted so App::reloadRoutes()
+        // can rebuild it; at boot this runs exactly once.
+        $this->compileRouteTable();
+
+        $this->registerWorkerStart($server);
+
+        $this->registerWorkerStop($server);
+
+        $this->registerWebSocketHandlers($server);
+
+        // Wire registered sidecar processes via $server->addProcess() so they
+        // share fate with the server (managed by master; respawn on reload).
+        // Must run BEFORE $server->start() — after start(), addProcess silently
+        // no-ops because the master is already in its event loop.
+        self::$server = $server;
+        self::wireProcessHandlers();
+
+        // Master-side signal handlers wire from inside the on-start callback —
+        // the event loop is alive at that point so Process::signal() doesn't
+        // pre-initialize it.
+        if (self::$signalHandlers !== []) {
+            $server->on('start', function () {
+                self::applySignalHandlersFor('master');
+            });
+        }
+
+        // Master-side bulk class preload (opt-in via preloadClassmap()/
+        // preloadDir()): warm large/arbitrary class sets HERE — in the master,
+        // before fork, where no coroutine scheduler exists — so a class with
+        // load-time I/O can't yield and let a worker accept requests mid-warmup
+        // (which reintroduces the cold-compile race). Workers inherit the linked
+        // classes via copy-on-write fork.
+        self::warmBulkPreloads();
+
+        elog("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
+        $server->start();
+    }
+
+    /**
+     * Activate the ext-zealphp per-coroutine isolation runtime stack
+     * (superglobals / define / $GLOBALS / silent-redeclare / function-static /
+     * include isolation) and register the matching onWorkerStart hooks.
+     *
+     * Extracted verbatim from App::run() (Phase 3 decomposition) — must run at
+     * the same point and read/write the same static state. Reads the two
+     * resolved lifecycle locals (enableCoroutine, hookFlags) passed in.
+     */
+    private function activateIsolationRuntime(bool $enableCoroutine, int $hookFlags): void
+    {
         // Activate per-coroutine superglobal isolation when ext-zealphp is
         // loaded AND superglobals mode is on with coroutines. ext-zealphp
         // v0.3.2+ chains its callbacks with OpenSwoole's PHPCoroutine hooks
@@ -7513,124 +7446,20 @@ HELP;
             });
         }
         // @codeCoverageIgnoreEnd
+    }
 
-        // Transparent coroutine-safe exec family. Overriding `shell_exec` ALSO
-        // intercepts the backtick operator (`` `cmd` `` compiles to a
-        // shell_exec() call), so legacy/user code becomes coroutine-safe with
-        // no source changes. Gated by the $hook_exec property / App::hookExec()
-        // setter; null resolves to coroutine mode (superglobals===false) here,
-        // and a non-null value forces it on/off. proc_open/popen are
-        // intentionally NOT overridden — App::rawExec()/cgiSubprocess() rely on
-        // proc_open, so routing through it keeps the fallback recursion-safe.
-        $hookExec = self::$hook_exec ?? (self::$superglobals === false);
-        if ($hookExec) {
-            self::overrideBuiltin('shell_exec', '\ZealPHP\zeal_shell_exec');
-            self::overrideBuiltin('system',     '\ZealPHP\zeal_system');
-            self::overrideBuiltin('passthru',   '\ZealPHP\zeal_passthru');
-            self::overrideBuiltin('exec',       '\ZealPHP\zeal_exec');
-            // proc_open intentionally NOT overridden — App::rawExec()/cgiSubprocess() rely on it.
-        }
-
-        if ($hookFlags !== 0) {
-            co::set(['hook_flags' => $hookFlags]);
-            // Two-arg form (enable, flags). Single-arg with an int as $enable
-            // also works at runtime — PHP truthiness coerces non-zero int to
-            // true and OpenSwoole's C side reads the int as the flag bitmask
-            // — but the IDE stub declares the first arg as strict bool, so
-            // PHPStan flags it. Two-arg form is the canonical OpenSwoole API
-            // and matches every stub version.
-            \OpenSwoole\Runtime::enableCoroutine(true, $hookFlags);
-        }
-        // Use the same path resolution as the stop/status CLI commands so that
-        // `php app.php stop` finds the PID file the server just wrote. Without
-        // this, the server writes /tmp/zealphp_PORT.pid (flat) but stop looks
-        // under /tmp/zealphp/zealphp_PORT.pid (subdir) — they disagree.
-        $defaultPidFile = self::resolvePidFile(['port' => $this->port]);
-        $default_settings = [
-            'enable_static_handler' => true,
-            'document_root' => self::resolveDocumentRoot(),
-            // Restrict OpenSwoole's built-in static handler to the listed URL prefixes
-            // (Apache equivalent: serving only safe subtrees). Leave empty to serve all
-            // — including dotfiles — like Apache default. Default whitelist below is
-            // safe for typical web apps; override via $app->run(['static_handler_locations' => [...]]).
-            //
-            // IMPORTANT: directory entries MUST end with `/`. OpenSwoole does raw
-            // string-prefix matching, so a bare `/js` entry silently intercepts
-            // user routes like `/json` (a real bug we shipped in 0.2.x — found
-            // when /json on the docs site returned OpenSwoole's default 404
-            // instead of routing into the framework). Trailing slash forces
-            // segment-boundary matching.
-            'static_handler_locations' => self::$static_handler_locations !== []
-                ? self::$static_handler_locations
-                : ['/css/', '/js/', '/img/', '/images/', '/fonts/', '/assets/', '/static/', '/favicon.ico', '/robots.txt'],
-            'enable_coroutine' => $enableCoroutine,
-            'hook_flags' => $hookFlags,
-            // Runtime compression is owned by OpenSwoole. Do not also register
-            // CompressionMiddleware unless this setting is disabled.
-            'http_compression' => true,
-            'pid_file' => $defaultPidFile,
-            // Worker recycling — bounds memory growth from leaks accumulated
-            // in long-running workers (static caches, closure captures, leaky
-            // extensions). After this many requests a worker exits cleanly and
-            // is respawned with a fresh PHP arena. Set 0 to disable. Override
-            // via ZEALPHP_MAX_REQUEST env var or $app->run(['max_request' => N]).
-            'max_request' => (int)(getenv('ZEALPHP_MAX_REQUEST') ?: 100000),
-            'task_worker_num' => 0,
-            'task_enable_coroutine' => true,
-            // Suppress NOTICE-level messages from OpenSwoole internals (e.g. ERRNO 1005
-            // "session does not exist" when SSE/WS clients disconnect mid-stream).
-            // Pass 'log_level' => 0 in $app->run() settings to restore full debug output.
-            'log_level' => 4,  // 0=DEBUG 1=TRACE 2=INFO 3=NOTICE 4=WARNING 5=ERROR 6=NONE
-            // Apache LimitRequestFieldSize / LimitRequestLine parity:
-            // App::$limit_request_field_size / $limit_request_line are kept as
-            // ADVISORY properties — OpenSwoole 22.x does not expose a public
-            // server option matching Apache's per-header byte limit. The
-            // earlier attempt to publish them as 'http_header_buffer_size'
-            // was rejected by OpenSwoole's option validator at boot
-            // (server option not recognised). If you need a hard cap, run
-            // ZealPHP behind a front proxy (Caddy/nginx) that enforces it.
-        ];
-        // @phpstan-ignore-next-line — settings is array<string, mixed>; pid_file coerced to string at boundary
-        $pidFile = (string)($settings['pid_file'] ?? $default_settings['pid_file']);
-        if (file_exists($pidFile)) {
-            $existingPid = (int)trim((string)file_get_contents($pidFile));
-            // processIsZealphp() guards against recycled PIDs falsely
-            // reporting "already running" when the original daemon is gone.
-            if ($existingPid > 0 && @posix_kill($existingPid, 0) && self::processIsZealphp($existingPid)) {
-                echo "ZealPHP is already running (pid {$existingPid}, port {$this->port})\n";
-                echo "Use 'php app.php stop' to stop, or 'php app.php restart' to restart\n";
-                exit(0);
-            }
-            @unlink($pidFile);
-        }
-        // Catch the orphan case the pid-file check above can't see: pid file
-        // missing or stale, but a previous daemon is still bound to the port.
-        // Without this, OpenSwoole's bind would fail silently and the user
-        // would see "could not confirm" with no actionable explanation.
-        self::claimOrphanIfAny($this->port);
-
-        self::$server = $server = new \OpenSwoole\WebSocket\Server($this->host, $this->port);
-        if ($settings == null){
-            $effective_settings = $default_settings;
-        } else {
-            $effective_settings = array_merge($default_settings, $settings);
-            // Re-assert the resolved enable_coroutine value AFTER user
-            // settings merge — otherwise a stray `enable_coroutine` key in
-            // the user-passed settings array would silently override the
-            // App::enableCoroutine() decision and the lifecycle warnings
-            // would be a lie.
-            $effective_settings['enable_coroutine'] = $enableCoroutine;
-        }
-        $server->set($effective_settings);
-
-        # Include all files in route directory and its sub directories
-
-        $route_files = glob(self::$cwd."/route/*.php") ?: [];
-        foreach ($route_files as $route_file) {
-            elog("Including route file 1: ".str_replace(App::$cwd, '', $route_file));
-            include $route_file;
-        }
-
+    /**
+     * Register the implicit framework routes (api dispatch, .php-ext block,
+     * dotfile block, index, CGI extension/ScriptAlias URL parity, and the
+     * public file/directory catch-alls).
+     *
+     * Extracted verbatim from App::run() (Phase 3). Registers in the SAME order
+     * via $this->route()/nsPathRoute()/patternRoute(), so the route-priority
+     * ordering — and the route_baseline array_slice() that follows in run() —
+     * are unchanged.
+     */
+    private function registerImplicitRoutes(): void
+    {
         # Implicit route for including APIs.
         # The two-segment route is registered FIRST so that /api/users/list
         # matches with module=users, request=list (a single segment passing
@@ -7803,7 +7632,18 @@ HELP;
             }
             return $this->invokeFallbackOrNotFound();
         });
+    }
 
+    /**
+     * Register the task + finish OpenSwoole event handlers when task workers
+     * are configured. Extracted verbatim from App::run() (Phase 3) — runs at the
+     * same point, gated on the same effective_settings['task_worker_num'].
+     *
+     * @param \OpenSwoole\WebSocket\Server $server
+     * @param array<string, mixed> $effective_settings
+     */
+    private function registerTaskHandlers(\OpenSwoole\WebSocket\Server $server, array $effective_settings): void
+    {
         if (($effective_settings['task_worker_num'] ?? 0) > 0) {
             // OpenSwoole 22.x dispatches task callbacks with TWO different
             // signatures depending on settings:
@@ -7824,16 +7664,16 @@ HELP;
                 elog((string)json_encode($data), "task_task");
             });
         }
+    }
 
-        // When coroutines are enabled, always use CoSessionManager — it uses
-        // per-coroutine RequestContext and overridden zeal_session_start(),
-        // both coroutine-safe. SessionManager uses PHP's native session_start()
-        // + session_set_save_handler() which race under concurrent coroutines.
-        // sg(true)+ec(true) with ext-zealphp needs CoSessionManager (#134).
-        $SessionManager = ($enableCoroutine || !self::$superglobals)
-            ? 'ZealPHP\Session\CoSessionManager'
-            : 'ZealPHP\Session\SessionManager';
-
+    /**
+     * Reverse + add the queued middleware-wait-stack onto the live PSR-15
+     * StackHandler. Extracted verbatim from App::run() (Phase 3) — runs at the
+     * same point, mutating self::$middleware_stack in the same first-registered-
+     * outermost order.
+     */
+    private static function buildMiddlewareStack(): void
+    {
         assert(self::$middleware_stack !== null);
         foreach (array_reverse(self::$middleware_wait_stack) as $middleware) {
             elog("Registering middleware: ".get_class($middleware));
@@ -7841,8 +7681,21 @@ HELP;
             assert($newStack instanceof StackHandler);
             self::$middleware_stack = $newStack;
         }
+    }
 
-        $server->on("request",new $SessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) {
+    /**
+     * Register the OnRequest event handler — the per-request entry point that
+     * populates RequestContext, runs the middleware stack, fires shutdown
+     * functions, and emits the response. Extracted verbatim from App::run()
+     * (Phase 3) — runs at the same point; the only captured locals are $server
+     * and the resolved session-manager class name.
+     *
+     * @param \OpenSwoole\WebSocket\Server $server
+     * @param class-string<\ZealPHP\Session\CoSessionManager>|class-string<\ZealPHP\Session\SessionManager> $sessionManager
+     */
+    private function registerOnRequest(\OpenSwoole\WebSocket\Server $server, string $sessionManager): void
+    {
+        $server->on("request",new $sessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) {
             $g = RequestContext::instance();
 
             $g->status = 200;
@@ -8019,18 +7872,18 @@ HELP;
                 }
             }
         }));
+    }
 
-        // Build method-indexed dispatch table once at boot (O(1) method lookup per request)
-        foreach ($this->routes as $route) {
-            foreach ($route['methods'] as $m) {
-                $this->routes_by_method[$m][] = $route;
-                /** @phpstan-ignore-next-line isset on always-present key kept defensively */
-                if (isset($route['path']) && $this->isExactRoutePath($route['path'])) {
-                    $this->routes_by_exact_method[$m][$route['path']] = $route;
-                }
-            }
-        }
-
+    /**
+     * Register the workerStart event handler — re-registers the php:// stream
+     * wrapper, fires user onWorkerStart hooks, and wires dev route hot-reload.
+     * Extracted verbatim from App::run() (Phase 3); closes over $this for the
+     * dev-reload tick.
+     *
+     * @param \OpenSwoole\WebSocket\Server $server
+     */
+    private function registerWorkerStart(\OpenSwoole\WebSocket\Server $server): void
+    {
         // Register the php:// stream wrapper once per worker process instead of per-request
         // and invoke any user-registered onWorkerStart hooks (timers, warmup, etc.)
         $server->on('workerStart', function($server, $workerId) {
@@ -8040,8 +7893,52 @@ HELP;
             foreach (self::$workerStartHooks as $hook) {
                 $hook($server, $workerId);
             }
-        });
 
+            // Dev route hot-reload: each worker polls route/*.php mtimes and
+            // rebuilds its route table in-place on change — "save file → routes
+            // update" with no process restart. OFF in production (App::devReload
+            // resolves false unless explicitly enabled / ZEALPHP_DEV is set).
+            if (App::devReload()) {
+                $app = $this;
+                $mtime = static function (): int {
+                    $max = 0;
+                    foreach (glob(self::$cwd . "/route/*.php") ?: [] as $f) {
+                        $m = @filemtime($f);
+                        if ($m !== false && $m > $max) { $max = $m; }
+                    }
+                    return $max;
+                };
+                $last = $mtime();
+                $wid = is_numeric($workerId) ? (int) $workerId : 0;
+                App::tick(1000, function () use (&$last, $mtime, $app, $wid) {
+                    $cur = $mtime();
+                    if ($cur !== $last) {
+                        $last = $cur;
+                        $n = $app->reloadRoutes();
+                        elog("dev hot-reload (worker " . $wid . "): " . $n . " routes", "info");
+                    }
+                });
+                if ($workerId === 0) {
+                    elog(
+                        "ZealPHP dev route hot-reload ON — polling route/*.php. "
+                        . "Set opcache.validate_timestamps=1 (or disable opcache) in dev "
+                        . "so route-file edits are seen.",
+                        "info"
+                    );
+                }
+            }
+        });
+    }
+
+    /**
+     * Register the workerStop event handler — fires user onWorkerStop hooks then
+     * logs worker-recycle observability. Extracted verbatim from App::run()
+     * (Phase 3).
+     *
+     * @param \OpenSwoole\WebSocket\Server $server
+     */
+    private function registerWorkerStop(\OpenSwoole\WebSocket\Server $server): void
+    {
         // Worker recycle observability — fires when a worker exits (max_request
         // hit, graceful shutdown, or admin reload). Logs the request count,
         // peak RSS, and uptime so the max_request backstop is visible in prod
@@ -8078,7 +7975,17 @@ HELP;
                 $uptime
             ), 'info');
         });
+    }
 
+    /**
+     * Register the WebSocket open/message/close/shutdown event handlers, sharing
+     * the per-worker fd → ws-path map across the closures. Extracted verbatim
+     * from App::run() (Phase 3); the $wsFdMap is local to these four closures.
+     *
+     * @param \OpenSwoole\WebSocket\Server $server
+     */
+    private function registerWebSocketHandlers(\OpenSwoole\WebSocket\Server $server): void
+    {
         // fd → ws path map, shared across WebSocket event closures
         /** @var array<int, string> $wsFdMap */
         $wsFdMap = [];
@@ -8163,688 +8070,10 @@ HELP;
                 }
             }
         });
-
-        // Wire registered sidecar processes via $server->addProcess() so they
-        // share fate with the server (managed by master; respawn on reload).
-        // Must run BEFORE $server->start() — after start(), addProcess silently
-        // no-ops because the master is already in its event loop.
-        self::$server = $server;
-        self::wireProcessHandlers();
-
-        // Master-side signal handlers wire from inside the on-start callback —
-        // the event loop is alive at that point so Process::signal() doesn't
-        // pre-initialize it.
-        if (self::$signalHandlers !== []) {
-            $server->on('start', function () {
-                self::applySignalHandlersFor('master');
-            });
-        }
-
-        // Master-side bulk class preload (opt-in via preloadClassmap()/
-        // preloadDir()): warm large/arbitrary class sets HERE — in the master,
-        // before fork, where no coroutine scheduler exists — so a class with
-        // load-time I/O can't yield and let a worker accept requests mid-warmup
-        // (which reintroduces the cold-compile race). Workers inherit the linked
-        // classes via copy-on-write fork.
-        self::warmBulkPreloads();
-
-        elog("ZealPHP server running at http://{$this->host}:{$this->port} with ".count($this->routes)." routes");
-        $server->start();
     }
 
     public static function middleware(): ?StackHandler
     {
         return self::$middleware_stack;
-    }
-}
-
-class ResponseMiddleware implements MiddlewareInterface
-{
-    /**
-     * @param array<string, mixed> $route
-     * @param array<string, mixed> $params
-     */
-    private function dispatchRawRoute(array $route, array $params, string $method): ResponseInterface
-    {
-        $g = RequestContext::instance();
-        $handler = $route['handler'];
-        assert(is_callable($handler));
-        $paramMap = $route['param_map'];
-        assert(is_array($paramMap));
-
-        $invokeArgs = [];
-        foreach ($paramMap as $param) {
-            assert(is_array($param));
-            $pname = $param['name'] ?? null;
-            assert(is_string($pname));
-            if (isset($params[$pname])) {
-                $invokeArgs[] = $params[$pname];
-            } else if ($pname === 'app') {
-                $invokeArgs[] = $this;
-            } else if ($pname === 'request') {
-                $invokeArgs[] = $g->zealphp_request;
-            } else if ($pname === 'response') {
-                $invokeArgs[] = $g->zealphp_response;
-            } else {
-                $invokeArgs[] = $param['has_default'] ? $param['default'] : null;
-            }
-        }
-
-        try {
-            // Pin request-input superglobals to THIS coroutine's request before
-            // the handler reads them (coroutine-legacy overlap defence). No-op
-            // in every other mode.
-            App::rebindRequestInput($g);
-            $object = call_user_func_array($handler, $invokeArgs);
-            if ($object instanceof ResponseInterface) {
-                return $object;
-            }
-
-            if ($object instanceof \Generator) {
-                // Capture status BEFORE flush — Response::flush() clears g->status.
-                $streamStatus = $g->status ?? 200;
-                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                App::emitStatus($g->openswoole_response, $streamStatus);
-                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                $g->zealphp_response->header('Accept-Ranges', 'none');
-                // HEAD: send headers only, never the streamed body (Apache
-                // strips content buckets via ctx->final_header_only). Streaming
-                // length is unknown/chunked, so no Content-Length is emitted.
-                if ($method === 'HEAD') {
-                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    $g->openswoole_response->end();
-                    return (new Response('', $streamStatus));
-                }
-                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                $g->zealphp_response->flush();
-                foreach ($object as $chunk) {
-                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    if (!$g->openswoole_response->isWritable()) break;
-                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    $g->openswoole_response->write((string)$chunk);
-                    \OpenSwoole\Coroutine::sleep(0);
-                }
-                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                if ($g->openswoole_response->isWritable()) {
-                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    $g->openswoole_response->end();
-                }
-                return (new Response('', $streamStatus));
-            }
-
-            if ($g->_streaming ?? false) {
-                return (new Response('', $g->status ?? 200));
-            }
-
-            if (is_int($object)) {
-                // Universal return contract: int = HTTP status. Coerce out-of-range
-                // to 500 + log warning so bugs surface instead of silently emitting
-                // bogus status codes (Apache-parity behavior).
-                $status = App::coerceStatusCode((int)$object);
-                $body = '';
-            } else {
-                $status = $g->status ?? 200;
-                if (is_array($object) or is_object($object)) {
-                    response_add_header('Content-Type', 'application/json');
-                    $body = (string)json_encode($object);
-                } else if (is_string($object)) {
-                    $body = $object;
-                } else {
-                    $body = '';
-                }
-            }
-
-            if ($method === 'HEAD') {
-                response_add_header('Content-Length', (string)strlen($body));
-                return (new Response('', $status));
-            }
-            return (new Response($body, $status));
-        } catch (\Throwable|\OpenSwoole\ExitException $e) {
-            if ($e instanceof \OpenSwoole\ExitException
-                || ($e::class === 'ExitException' && method_exists($e, 'getStatus'))
-            ) {
-                $exitStatus = $e->getStatus();
-                $buffered = '';
-                while (ob_get_level() > 0) {
-                    $buffered = (string)ob_get_clean() . $buffered;
-                }
-                if ($exitStatus === 0 || $exitStatus === null) {
-                    return (new Response($buffered))->withStatus($g->status ?? 200);
-                } elseif (is_string($exitStatus)) {
-                    return (new Response($buffered . $exitStatus))->withStatus($g->status ?? 200);
-                } elseif (is_int($exitStatus) && $exitStatus >= 100 && $exitStatus <= 599) {
-                    return (new Response($buffered))->withStatus($exitStatus);
-                } else {
-                    return (new Response($buffered))->withStatus($g->status ?? 200);
-                }
-            }
-            // If this dispatch was itself invoked by renderError (error handler
-            // dispatch path), let the throw bubble back so the outer renderError
-            // catches it and renders the ORIGINAL error status's default page —
-            // not a fresh 500 from inside the recursion.
-            if ($g->error_render_depth > 0) {
-                throw $e;
-            }
-            // User-installed exception handler runs before the default error page.
-            $excStack = $g->exception_handlers_stack;
-            if (!empty($excStack)) {
-                ob_start();
-                try { $excStack[count($excStack) - 1]($e); } catch (\Throwable $e2) { /* swallow */ }
-                $body = (string)ob_get_clean();
-                return (new Response($body))->withStatus($g->status ?? 500);
-            }
-            elog(jTraceEx($e), "error");
-            $app = App::instance();
-            assert($app !== null);
-            return $app->renderError(500, $e);
-        }
-    }
-
-    /**
-     * @param array<string, mixed> $route
-     * @param array<string, mixed> $params
-     */
-    public function dispatchRoute(array $route, array $params, string $method): ResponseInterface
-    {
-        if (($route['raw'] ?? false) === true) {
-            return $this->dispatchRawRoute($route, $params, $method);
-        }
-
-        $g = RequestContext::instance();
-        $handler = $route['handler'];
-        assert(is_callable($handler));
-        $paramMap = $route['param_map'];
-        assert(is_array($paramMap));
-
-        $invokeArgs = [];
-        foreach ($paramMap as $param) {
-            assert(is_array($param));
-            $pname = $param['name'] ?? null;
-            assert(is_string($pname));
-            if (isset($params[$pname])) {
-                $invokeArgs[] = $params[$pname];
-            } else if ($pname === 'app') {
-                $invokeArgs[] = $this;
-            } else if ($pname === 'request') {
-                $invokeArgs[] = $g->zealphp_request;
-            } else if ($pname === 'response') {
-                $invokeArgs[] = $g->zealphp_response;
-            } else {
-                $invokeArgs[] = $param['has_default'] ? $param['default'] : null;
-            }
-        }
-
-        try {
-            // Pin request-input superglobals to THIS coroutine's request before
-            // the handler reads them (coroutine-legacy overlap defence). No-op
-            // in every other mode.
-            App::rebindRequestInput($g);
-            ob_start();
-            $object = call_user_func_array($handler, $invokeArgs);
-
-            // Fast paths — discard output buffer without string copy
-            if ($object instanceof \Generator) {
-                ob_end_clean();
-                $streamStatus = $g->status ?? 200;
-                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                App::emitStatus($g->openswoole_response, $streamStatus);
-                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                $g->zealphp_response->header('Accept-Ranges', 'none');
-                // HEAD: send headers only, never the streamed body (Apache
-                // strips content buckets via ctx->final_header_only). Streaming
-                // length is unknown/chunked, so no Content-Length is emitted.
-                if ($method === 'HEAD') {
-                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    $g->openswoole_response->end();
-                    return (new Response('', $streamStatus));
-                }
-                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                $g->zealphp_response->flush();
-                foreach ($object as $chunk) {
-                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    if (!$g->openswoole_response->isWritable()) break;
-                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    $g->openswoole_response->write((string)$chunk);
-                    \OpenSwoole\Coroutine::sleep(0);
-                }
-                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                if ($g->openswoole_response->isWritable()) {
-                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-                    $g->openswoole_response->end();
-                }
-                return (new Response('', $streamStatus));
-            }
-
-            if ($g->_streaming ?? false) {
-                // Apache+mod_php auto-flushes any remaining buffer at handler exit
-                // even in streaming mode. Mirror that to keep the last echo visible.
-                if (ob_get_level() > 0) {
-                    $remaining = ob_get_clean();
-                    if ($remaining !== false && $remaining !== ''
-                        && isset($g->openswoole_response)
-                        && $g->openswoole_response->isWritable()) {
-                        $g->openswoole_response->write($remaining);
-                    }
-                }
-                return (new Response('', $g->status ?? 200));
-            }
-
-            if (is_int($object)) {
-                ob_end_clean();
-                // Universal return contract: int = HTTP status. Coerce out-of-range
-                // (< 100 or >= 600) to 500 + log warning — Apache-parity behavior.
-                $istatus = App::coerceStatusCode((int)$object);
-                // Status-only returns from a handler (e.g. `return 404;`) route
-                // through renderError so any registered custom error page fires —
-                // Apache's `ErrorDocument` behavior for unhandled status codes.
-                if ($istatus >= 400 && $istatus < 600) {
-                    $app = App::instance();
-                    assert($app !== null);
-                    return $app->renderError($istatus);
-                }
-                return (new Response('', $istatus));
-            }
-
-            $status = $g->status ?? 200;
-
-            if ($object instanceof ResponseInterface) {
-                ob_end_clean();
-                return $object;
-            }
-
-            if (is_array($object) || is_object($object)) {
-                ob_end_clean();
-                $body = (string)json_encode($object);
-                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                $g->zealphp_response->header('Content-Type', 'application/json');
-                if ($method === 'HEAD') {
-                    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                    $g->zealphp_response->header('Content-Length', (string)strlen($body));
-                    return (new Response('', $status));
-                }
-                return (new Response($body, $status));
-            }
-
-            if (is_string($object)) {
-                ob_end_clean();
-                if ($method === 'HEAD') {
-                    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                    $g->zealphp_response->header('Content-Length', (string)strlen($object));
-                    return (new Response('', $status));
-                }
-                return (new Response($object, $status));
-            }
-
-            // void + echo — only path that needs the buffered output
-            $buffer = (string)ob_get_clean();
-            if ($method === 'HEAD') {
-                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                $g->zealphp_response->header('Content-Length', (string)strlen($buffer));
-                return (new Response('', $status));
-            }
-            return (new Response($buffer, $status));
-        } catch (\Throwable|\OpenSwoole\ExitException $e) {
-            if ($e instanceof \OpenSwoole\ExitException
-                || ($e::class === 'ExitException' && method_exists($e, 'getStatus'))
-            ) {
-                $exitStatus = $e->getStatus();
-                $buffered = (string)ob_get_clean();
-                if ($exitStatus === 0 || $exitStatus === null) {
-                    return (new Response($buffered))->withStatus($g->status ?? 200);
-                } elseif (is_string($exitStatus)) {
-                    return (new Response($buffered . $exitStatus))->withStatus($g->status ?? 200);
-                } elseif (is_int($exitStatus) && $exitStatus >= 100 && $exitStatus <= 599) {
-                    return (new Response($buffered))->withStatus($exitStatus);
-                } else {
-                    return (new Response($buffered))->withStatus($g->status ?? 200);
-                }
-            }
-            // Inside an error-render recursion — rethrow so the outer renderError
-            // catches and falls through to the default body for the ORIGINAL status.
-            if ($g->error_render_depth > 0) {
-                @ob_end_clean();
-                throw $e;
-            }
-            // User-installed exception handler runs before the default error page.
-            $excStack = $g->exception_handlers_stack;
-            if (!empty($excStack)) {
-                if (ob_get_level() > 0) { @ob_clean(); }
-                ob_start();
-                try { $excStack[count($excStack) - 1]($e); } catch (\Throwable $e2) { /* swallow */ }
-                $body = (string)ob_get_clean();
-                @ob_end_clean();
-                return (new Response($body))->withStatus($g->status ?? 500);
-            }
-            @ob_end_clean();
-            elog(jTraceEx($e), "error");
-            $app = App::instance();
-            assert($app !== null);
-            return $app->renderError(500, $e);
-        }
-    }
-
-    /**
-     * Reconstruct the request line + headers for a TRACE echo body, mirroring
-     * Apache's ap_send_http_trace() (http_filters.c:1130). Format is the request
-     * line, each header as `Name: value`, then a terminating blank line — the
-     * message/http representation the client sent. Header names/values are
-     * passed through verbatim (TRACE is an introspection echo); CR/LF inside a
-     * value is stripped so a crafted header can't inject extra wire lines.
-     *
-     * @param array<string, string> $headers
-     */
-    public static function buildTraceEcho(string $method, string $uri, string $protocol, array $headers): string
-    {
-        $crlf = "\r\n";
-        $out = $method . ' ' . $uri . ' ' . $protocol . $crlf;
-        foreach ($headers as $name => $value) {
-            $cleanName = str_replace(["\r", "\n"], '', $name);
-            $cleanValue = str_replace(["\r", "\n"], '', $value);
-            $out .= $cleanName . ': ' . $cleanValue . $crlf;
-        }
-        return $out . $crlf;
-    }
-
-    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
-    {
-        $g = RequestContext::instance();
-        $uri = (string)$g->server['REQUEST_URI'];
-        $method = (string)$g->server['REQUEST_METHOD'];
-        $app = App::instance();
-        assert($app !== null);
-
-        // URL-decoded traversal/null-byte rejection BEFORE route matching.
-        // Apache rejects these at the URI parse layer; we do the same so encoded
-        // attacks (%2e%2e, %00, backslash) can't survive past pattern matching.
-        $parsedPath = parse_url($uri, PHP_URL_PATH);
-        $rawPath = is_string($parsedPath) ? $parsedPath : $uri;
-
-        // Apache AllowEncodedSlashes Off (default): an encoded slash in the RAW
-        // path is refused with 404 before it can be decoded to a real `/`. Check
-        // the pre-decode bytes — once decoded, %2F is indistinguishable from a
-        // literal slash. Gated by App::$allow_encoded_slashes (default false).
-        if (!App::$allow_encoded_slashes && stripos($rawPath, '%2f') !== false) {
-            return $app->renderError(404);
-        }
-
-        // Decode-until-stable: Apache normalises before each access check, so a
-        // double-encoded payload (%252e%252e -> %2e%2e -> ..) is caught. A single
-        // rawurldecode() peels only one layer. Decode repeatedly (capped) then run
-        // the traversal/null-byte/backslash checks against the fully-decoded form.
-        $decoded = App::decodeUntilStable($rawPath);
-        if (strpos($decoded, "\0") !== false
-            || strpos($decoded, '\\') !== false
-            || preg_match('#(^|/)\.\.(/|$)#', $decoded)) {
-            return $app->renderError(400);
-        }
-
-        // Apache ap_normalize_path: collapse `//` -> `/` and drop `/./` segments
-        // before route matching, so `//admin//` and `/./admin` cannot bypass a
-        // pattern route guarding `/admin`. Rebuild REQUEST_URI from the normalised
-        // path so every downstream consumer (PATH_INFO, route table) sees one form.
-        $path = App::normalizeRequestPath($rawPath);
-        if ($path !== $rawPath) {
-            $qs = parse_url($uri, PHP_URL_QUERY);
-            $uri = $path . (is_string($qs) && $qs !== '' ? '?' . $qs : '');
-            $g->server['REQUEST_URI'] = $uri;
-        }
-
-        // RFC 9112 §3.2: an HTTP/1.1 request MUST carry a Host header; a server
-        // MUST reject one that lacks it with 400. HTTP/1.0 is exempt (Host is
-        // optional there). curl-based clients always send Host, so this only
-        // bites malformed/raw requests — the vhost-confusion / smuggling surface.
-        if (($g->server['SERVER_PROTOCOL'] ?? '') === 'HTTP/1.1' && !isset($g->server['HTTP_HOST'])) {
-            return $app->renderError(400);
-        }
-
-        // RFC 9110 §15.6.2 / Apache server/protocol.c:1253 — a method the server
-        // does not recognise gets 501 Not Implemented, not 404. This distinguishes
-        // "I don't know this verb" from "no such resource". Known methods (incl.
-        // HEAD/OPTIONS/TRACE and the WebDAV verbs) fall through to normal routing,
-        // where an unmatched-but-known method still resolves to 404/405/fallback.
-        if (!in_array($method, App::KNOWN_METHODS, true)) {
-            return $app->renderError(501);
-        }
-
-        // Apache LimitRequestFields — reject requests that carry more header
-        // fields than the configured limit. Apache enforces this at
-        // ap_get_mime_headers_core (protocol.c:930-940) with a 400 response.
-        // We replicate it here at the PHP layer after OpenSwoole has parsed the
-        // header array. A limit of 0 disables the check (unlimited).
-        if (App::$limit_request_fields > 0) {
-            $headerCount = 0;
-            foreach (array_keys($g->server) as $sk) {
-                if (str_starts_with((string)$sk, 'HTTP_')) {
-                    $headerCount++;
-                }
-            }
-            if ($headerCount > App::$limit_request_fields) {
-                return $app->renderError(400);
-            }
-        }
-
-        // Apache PATH_INFO — `/script.php/extra/path` exposes `/extra/path` to
-        // the script and rewrites REQUEST_URI to just the script. Triggers
-        // only when the literal `.php/` appears in the URL (WordPress/Drupal
-        // permalink style); implicit-extension routing is unaffected.
-        if (App::$path_info && strpos($path, '.php/') !== false) {
-            [$scriptPath, $extra] = explode('.php/', $path, 2);
-            $scriptPath .= '.php';
-            $docRoot = App::resolveDocumentRoot();
-            $abs = realpath($docRoot . $scriptPath);
-            if ($abs && is_file($abs) && strpos($abs, $docRoot) === 0) {
-                $g->server['PATH_INFO']       = '/' . $extra;
-                $g->server['PATH_TRANSLATED'] = $docRoot . '/' . $extra;
-                $g->server['SCRIPT_NAME']     = $scriptPath;
-                $qs = parse_url($uri, PHP_URL_QUERY);
-                // When ignore_php_ext is on, the `.php` URI would hit the 403-block
-                // route — strip the extension so the implicit file route resolves it.
-                $rewritten = App::$ignore_php_ext
-                    ? substr($scriptPath, 0, -4)
-                    : $scriptPath;
-                $uri = $rewritten . ($qs ? '?' . $qs : '');
-                $g->server['REQUEST_URI'] = $uri;
-            }
-        }
-
-        // TRACE — disabled by default (XST attack vector). Apache's compiled
-        // default is On, but ZealPHP ships TraceEnable Off as a hardening choice.
-        // Set App::traceEnabled(true) to opt into the Apache ap_send_http_trace()
-        // behaviour: echo the request back as a message/http body.
-        if ($method === 'TRACE') {
-            if (!App::$trace_enabled) {
-                response_set_status(405);
-                response_add_header('Allow', 'GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH');
-                return new Response('', 405);
-            }
-            $req = $g->zealphp_request;
-            // Apache (non-extended TraceEnable On) refuses a request body with
-            // 413 — only AP_TRACE_EXTENDED echoes it, and ZealPHP's boolean knob
-            // maps to the non-extended mode (http_filters.c:1082).
-            $bodyRaw = $req instanceof \ZealPHP\HTTP\Request ? $req->rawContent() : null;
-            if (is_string($bodyRaw) && $bodyRaw !== '') {
-                return $app->renderError(413);
-            }
-            $headers = ($req instanceof \ZealPHP\HTTP\Request && is_array($req->header))
-                ? $req->header
-                : [];
-            $body = self::buildTraceEcho(
-                $method,
-                $uri,
-                (string)($g->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1'),
-                $headers
-            );
-            response_set_status(200);
-            response_add_header('Content-Type', 'message/http');
-            return new Response($body, 200);
-        }
-
-        // Apache: RewriteCond %{REQUEST_FILENAME} !-d
-        //         RewriteRule ^(.+)/$ /$1 [R=301,L]
-        // When stripTrailingSlash() is on and the URI ends in `/` but does not
-        // map to a directory under document_root, 301-redirect to the no-slash
-        // form. Directory URIs are left alone so the existing DirectorySlash
-        // path (serveDirectory()) keeps working. Only safe for GET/HEAD per
-        // RFC 9110 §15.4.2 — POST/PUT/DELETE pass through unchanged.
-        if (App::$strip_trailing_slash
-            && ($method === 'GET' || $method === 'HEAD')
-            && $path !== '/'
-            && substr($path, -1) === '/') {
-            $docRoot = App::resolveDocumentRoot();
-            $candidate = realpath($docRoot . rtrim($path, '/'));
-            if ($candidate === false || !is_dir($candidate)) {
-                $newPath = rtrim($path, '/');
-                $qs = parse_url($uri, PHP_URL_QUERY);
-                $location = $newPath . ($qs ? '?' . $qs : '');
-                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                $g->zealphp_response->redirect($location, 301);
-                $g->_streaming = true;
-                return new Response('', 301);
-            }
-        }
-
-        // OPTIONS — return allowed methods for this URI without running a handler
-        if ($method === 'OPTIONS') {
-            // RFC 9110 §9.3.7 / Apache http_core.c:336 — `OPTIONS *` is a
-            // server-wide capability probe ("HTTP pong"), not resource-specific:
-            // 200 with an empty body and no Allow header. The request target `*`
-            // arrives as the raw REQUEST_URI (query string never applies to `*`).
-            if ($uri === '*') {
-                response_set_status(200);
-                return new Response('', 200);
-            }
-            $allowed = ['OPTIONS'];
-            foreach ($app->routesByMethod() as $m => $routes) {
-                foreach ($routes as $route) {
-                    if (preg_match($route['pattern'], $uri)) {
-                        $allowed[] = $m;
-                        if ($m === 'GET') $allowed[] = 'HEAD';
-                        break;
-                    }
-                }
-            }
-            $allowed = array_unique($allowed);
-            response_set_status(204);
-            response_add_header('Allow', implode(', ', $allowed));
-            return new Response('', 204);
-        }
-
-        // HEAD — match GET routes, run the handler, strip the body
-        $matchMethod = ($method === 'HEAD') ? 'GET' : $method;
-
-        $exactRoutes = $app->routesByExactMethod();
-        if (isset($exactRoutes[$matchMethod][$uri])) {
-            return $this->dispatchRoute($exactRoutes[$matchMethod][$uri], [], $method);
-        }
-
-        foreach ($app->routesByMethod()[$matchMethod] ?? [] as $route) {
-            if (preg_match($route['pattern'], $uri, $matches)) {
-                $params = array_filter($matches, fn($k) => !is_numeric($k), ARRAY_FILTER_USE_KEY);
-                return $this->dispatchRoute($route, $params, $method);
-            }
-        }
-        // RFC 9110 §15.5.6: the URI matches a registered route for some method
-        // but not this one → 405 Method Not Allowed + an `Allow` header listing
-        // the supported methods (distinct from 404 = "no such resource"). The
-        // implicit static routes are GET/HEAD/POST-only, so PUT/DELETE/PATCH on a
-        // file-style path correctly 405s (Apache's static handler does the same);
-        // a path matching no route at all falls through to the fallback / 404.
-        $allowed = [];
-        foreach ($app->routesByMethod() as $m => $routes) {
-            foreach ($routes as $route) {
-                if (preg_match($route['pattern'], $uri)) {
-                    $allowed[] = $m;
-                    if ($m === 'GET') {
-                        $allowed[] = 'HEAD';
-                    }
-                    break;
-                }
-            }
-        }
-        if ($allowed !== []) {
-            $allowed[] = 'OPTIONS';
-            response_add_header('Allow', implode(', ', array_values(array_unique($allowed))));
-            return $app->renderError(405);
-        }
-
-        $fallback = App::getFallback();
-        if ($fallback !== null) {
-            return $this->dispatchRoute($fallback, [], $method);
-        }
-        return $app->renderError(404);
-    }
-}
-
-// class LoggingMiddleware implements MiddlewareInterface
-// {
-//     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
-//     {
-//         $response = $handler->handle($request);
-//         // elog("LoggingMiddleware process() received:".$response->getBody());
-//         access_log($response->getStatusCode(), strlen($response->getBody()));
-//         return $response;
-//     }
-// }
-
-class TemplateUnavailableException extends \Exception {
-
-	/** @var string */
-	protected $message = "The template you are trying to include does not seem to exist. Please check the file name.
-	Invalid error message. ";
-	/** @var int */
-	protected $code = 1002;
-
-	public function __construct(string $message) {
-		$this->message = $message;
-		parent::__construct($this->message, $this->code);
-	}
-
-	public function __toString() {
-		return __CLASS__ . ": [{$this->code}]: {$this->message}\n";
-	}
-
-}
-
-
-class LocationHeaderMiddleware implements MiddlewareInterface
-{
-    private int $correctPort;
-
-    public function __construct(int $correctPort)
-    {
-        $this->correctPort = $correctPort;
-    }
-
-    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
-    {
-        $response = $handler->handle($request);
-
-        if ($response->hasHeader('Location')) {
-            $location = $response->getHeaderLine('Location');
-            $parsedUrl = parse_url($location);
-
-            if (isset($parsedUrl['host']) && isset($parsedUrl['port']) && $parsedUrl['port'] != $this->correctPort) {
-                $parsedUrl['port'] = $this->correctPort;
-                $newLocation = $this->buildUrl($parsedUrl);
-                $response = $response->withHeader('Location', $newLocation);
-            }
-        }
-
-        return $response;
-    }
-
-    /**
-     * @param array<string, string|int> $parsedUrl
-     */
-    private function buildUrl(array $parsedUrl): string
-    {
-        $scheme   = isset($parsedUrl['scheme']) ? $parsedUrl['scheme'] . '://' : '';
-        $host     = isset($parsedUrl['host']) ? $parsedUrl['host'] : '';
-        $port     = isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '';
-        $path     = isset($parsedUrl['path']) ? $parsedUrl['path'] : '';
-        $query    = isset($parsedUrl['query']) ? '?' . $parsedUrl['query'] : '';
-        $fragment = isset($parsedUrl['fragment']) ? '#' . $parsedUrl['fragment'] : '';
-
-        return "$scheme$host$port$path$query$fragment";
     }
 }

@@ -417,12 +417,25 @@ class RangeMiddlewareTest extends TestCase
         $this->assertSame('bytes */54', $response->getHeaderLine('Content-Range'));
     }
 
-    public function testSuffixLargerThanFileIsUnsatisfiable(): void
+    public function testSuffixLargerThanFileServesWholeBody(): void
     {
-        // bytes=-55 → suffixLen(55) > total(54) → 416. Kills GreaterThan and LogicalOr.
+        // bytes=-55 against a 54-byte body: a suffix longer than the file means
+        // "the whole representation" (RFC 7233 §2.1) — clamp to the full body and
+        // serve 206, not 416 (#181).
         $response = $this->dispatchRange('bytes=-55');
-        $this->assertSame(416, $response->getStatusCode());
-        $this->assertSame('bytes */54', $response->getHeaderLine('Content-Range'));
+        $this->assertSame(206, $response->getStatusCode());
+        $this->assertSame('bytes 0-53/54', $response->getHeaderLine('Content-Range'));
+        $this->assertSame(self::BODY, (string) $response->getBody());
+    }
+
+    public function testMultiRangeWithOneUnsatisfiableSpecServesSatisfiable(): void
+    {
+        // A multi-range header with one out-of-bounds spec must serve the
+        // satisfiable spec(s), not 416 the whole request (RFC 7233 §4.4) (#185).
+        $response = $this->dispatchRange('bytes=0-4,9999-10000');
+        $this->assertSame(206, $response->getStatusCode());
+        $this->assertSame('Hello', (string) $response->getBody());
+        $this->assertSame('bytes 0-4/54', $response->getHeaderLine('Content-Range'));
     }
 
     public function testEmptyRangeSpecIsUnsatisfiable(): void

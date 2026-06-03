@@ -25,13 +25,23 @@ namespace ZealPHP\Store;
  */
 final class RedisPubSub
 {
-    /** @var array<string, list<callable>> */
+    /**
+     * Exact-channel handlers keyed by channel name.
+     *
+     * @var array<string, list<callable>>
+     */
     private array $exactHandlers = [];
-    /** @var array<string, list<callable>> */
+    /**
+     * Pattern handlers keyed by PSUBSCRIBE pattern (contains `*`).
+     *
+     * @var array<string, list<callable>>
+     */
     private array $patternHandlers = [];
-    /** Atomic so cross-coroutine mutation by stop() is visible to the runner. */
+    /** Atomic flag (`1` = running, `0` = stopped). Cross-coroutine visibility via `OpenSwoole\Atomic`. */
     private \OpenSwoole\Atomic $running;
+    /** Private sentinel channel used by `stop()` to wake the subscriber loop cleanly. */
     private string $stopChannel;
+    /** Per-worker counters exposed via `stats()`. */
     private Stats $stats;
 
     /**
@@ -70,11 +80,24 @@ final class RedisPubSub
         }
     }
 
-    /** @return list<string> */
+    /**
+     * Return the exact channel names with registered handlers.
+     *
+     * @return list<string>
+     */
     public function exactChannels(): array { return array_keys($this->exactHandlers); }
-    /** @return list<string> */
+
+    /**
+     * Return the PSUBSCRIBE pattern strings with registered handlers.
+     *
+     * @return list<string>
+     */
     public function patternChannels(): array { return array_keys($this->patternHandlers); }
+
+    /** Return the private stop-sentinel channel name (used by `stop()` internally). */
     public function stopChannel(): string { return $this->stopChannel; }
+
+    /** Return `true` when the runner coroutine is active. */
     public function isRunning(): bool { return $this->running->get() === 1; }
 
     /**
@@ -105,6 +128,16 @@ final class RedisPubSub
         } catch (\Throwable) { /* tolerant; runner will see connection drop and exit */ }
     }
 
+    /**
+     * Main subscriber loop running inside its own coroutine.
+     *
+     * Connects a dedicated `RedisClient`, subscribes to all registered exact
+     * channels + PSUBSCRIBE patterns + the private `$stopChannel`, then reads
+     * messages in a blocking loop. On `PubSubStopException` (sentinel received
+     * via `stop()`) the loop exits cleanly. On `StoreException` (connection
+     * drop) it applies bounded exponential backoff and reconnects, up to
+     * `$maxAttempts` times (0 = unlimited).
+     */
     private function runner(): void
     {
         $attempt = 0;
@@ -144,6 +177,13 @@ final class RedisPubSub
         }
     }
 
+    /**
+     * Fan out an inbound message to all matching handlers via `go()`.
+     *
+     * Each handler runs in its own coroutine so a slow handler cannot block
+     * the next message read. Exceptions thrown by handlers are caught,
+     * counted in `pubsub_handler_errors_total`, and logged via `error_log()`.
+     */
     private function dispatch(string $payload, string $channel, ?string $pattern): void
     {
         $handlers = [];
@@ -163,13 +203,25 @@ final class RedisPubSub
         }
     }
 
-    /** Backoff: 0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 5.0 (capped) seconds. */
+    /**
+     * Compute the reconnect wait time for a given attempt number.
+     *
+     * Uses bounded exponential backoff: `0.1 × 2^attempt` seconds, capped
+     * at `5.0` s. Sequence: `0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 5.0, 5.0, …`
+     */
     private static function backoffSeconds(int $attempt): float
     {
         return min(0.1 * (2 ** $attempt), 5.0);
     }
 
-    /** Indirect read defeats PHPStan flow analysis on the loop condition. */
+    /**
+     * Read `$a->get() === 0` via an out-of-line method.
+     *
+     * An indirect read prevents PHPStan from constant-folding the
+     * `while ($this->running->get() === 1)` loop condition when it can
+     * prove `running` was set to `1` just above — which would eliminate
+     * the loop body entirely under strict flow analysis.
+     */
     private static function atomicIsZero(\OpenSwoole\Atomic $a): bool
     {
         return $a->get() === 0;

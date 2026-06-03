@@ -8,6 +8,118 @@ MAGENTA="\e[1;35m"
 WHITE="\e[1;37m"
 RESET="\e[0m"
 
+# Parallelism for every source build here (OpenSwoole / ext-zealphp / uopz).
+# Defaults to 4 rather than $(nproc): nproc over-reports inside CPU/memory-limited
+# containers, so an all-cores build OOMs. Also exported as MAKEFLAGS so nested
+# makes inherit the cap. Override with ZEALPHP_BUILD_JOBS (e.g. =8, or =$(nproc)).
+ZEALPHP_BUILD_JOBS="${ZEALPHP_BUILD_JOBS:-4}"
+export MAKEFLAGS="-j${ZEALPHP_BUILD_JOBS}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OpenSwoole installation — build from a TAGGED source release.
+#
+# `pecl install openswoole` no longer works (OpenSwoole's release pipeline moved
+# off the PECL channel), and PIE/Packagist publishes only the unpinned
+# `dev-master` branch — neither yields a pinned, reproducible build. Downloading
+# the tagged source and running phpize/configure/make is the one method that works
+# regardless of any PECL/PIE/Packagist supply-chain state, so it's the only path
+# we use. Defined before docker_setup() so the Docker path can use it too; works
+# as root (Docker, $SUDO empty) and unprivileged (apt/macOS).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Build + install openswoole.so from a tagged source release. $1 = git ref
+# override; default is the latest stable release (OPENSWOOLE_VERSION /
+# OPENSWOOLE_SOURCE_REF override). Fetches the tagged source two ways for
+# resilience — git clone, then the GitHub release tarball — trying the ref both
+# with and without a leading "v". Bypasses PECL/PIE/Packagist entirely, so it works
+# irrespective of their state. Does NOT enable the extension — the caller does that
+# (openswoole needs ext-sockets loaded first; see the zz-*.ini note at each site).
+install_openswoole_source() {
+    local ref="${1:-}"
+    [ -z "$ref" ] && ref="${OPENSWOOLE_SOURCE_REF:-v26.2.0}"
+    local alt
+    case "$ref" in v*) alt="${ref#v}" ;; *) alt="v${ref}" ;; esac
+
+    local tmpdir src
+    tmpdir="$(mktemp -d)"
+    src="$tmpdir/src"
+    echo -e "${YELLOW}Building OpenSwoole from source (openswoole/ext-openswoole @ ${ref}).${RESET}"
+
+    # macOS/Homebrew: keg-only libs (openssl, c-ares, ...) aren't on the default
+    # search path, so point pkg-config at the brew kegs the build needs. Best-effort
+    # (not exercised in CI); guarded on Darwin so it's a no-op on Linux.
+    if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+        local kl kp
+        for kl in openssl@3 c-ares nghttp2 brotli curl; do
+            kp="$(brew --prefix "$kl" 2>/dev/null)"
+            [ -n "$kp" ] && [ -d "$kp/lib/pkgconfig" ] && PKG_CONFIG_PATH="$kp/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+        done
+        export PKG_CONFIG_PATH
+    fi
+
+    # Fetch the tagged source straight from GitHub — git clone first, then the
+    # release tarball as a second transport. Both bypass PECL/PIE/Packagist.
+    if ! git clone --depth 1 --branch "$ref" https://github.com/openswoole/ext-openswoole.git "$src" 2>/dev/null \
+       && ! git clone --depth 1 --branch "$alt" https://github.com/openswoole/ext-openswoole.git "$src" 2>/dev/null; then
+        echo -e "${YELLOW}git clone failed — trying the release tarball.${RESET}"
+        mkdir -p "$src"
+        local fetched=0 t
+        for t in "$ref" "$alt"; do
+            if curl -fsSL "https://github.com/openswoole/ext-openswoole/archive/refs/tags/${t}.tar.gz" -o "$tmpdir/src.tgz" 2>/dev/null \
+               && tar xzf "$tmpdir/src.tgz" -C "$src" --strip-components=1 2>/dev/null; then
+                fetched=1
+                break
+            fi
+        done
+        if [ "$fetched" -ne 1 ]; then
+            echo -e "${RED}Failed to fetch OpenSwoole source (${ref} / ${alt}) via git or tarball.${RESET}"
+            rm -rf "$tmpdir"
+            return 1
+        fi
+    fi
+
+    # OpenSwoole hard-#errors ("Enable c-ares support, require c-ares library") if
+    # --enable-cares is set but libcares isn't linkable, and --with-postgres needs
+    # libpq. Enable each only when it actually links, so a missing optional dev
+    # library degrades that one feature instead of failing the whole build. (The
+    # apt/brew deps install both; this stays graceful if one is somehow absent.)
+    local flags="--enable-sockets --enable-openssl --enable-http2 --enable-mysqlnd --enable-hook-curl"
+    if echo 'int main(void){return 0;}' | cc -xc - -lcares -o "$tmpdir/conftest" 2>/dev/null; then
+        flags="$flags --enable-cares"
+    else
+        echo -e "${YELLOW}libcares not found — building without --enable-cares (install libc-ares-dev for it).${RESET}"
+    fi
+    if command -v pg_config >/dev/null 2>&1 || echo 'int main(void){return 0;}' | cc -xc - -lpq -o "$tmpdir/conftest" 2>/dev/null; then
+        flags="$flags --with-postgres"
+    else
+        echo -e "${YELLOW}libpq not found — building without PostgreSQL support (install libpq-dev for it).${RESET}"
+    fi
+    rm -f "$tmpdir/conftest"
+
+    # shellcheck disable=SC2086 # $flags is a deliberately word-split flag list
+    if (cd "$src" \
+            && phpize \
+            && ./configure $flags \
+            && make -j"${ZEALPHP_BUILD_JOBS}" \
+            && ${SUDO:-} make install); then
+        rm -rf "$tmpdir"
+        echo -e "${GREEN}OpenSwoole built and installed from source.${RESET}"
+        return 0
+    fi
+    rm -rf "$tmpdir"
+    echo -e "${RED}OpenSwoole source build failed.${RESET}"
+    return 1
+}
+
+# Build + install openswoole.so. Always builds from a tagged source release (see
+# install_openswoole_source) — the pinned, reproducible, supply-chain-proof path.
+# Does NOT enable the extension; the caller enables it with the correct,
+# late-sorting ini name (openswoole needs ext-sockets loaded first). Honors
+# OPENSWOOLE_VERSION as the git ref to build (default: latest stable tag).
+build_install_openswoole() {
+    install_openswoole_source "${OPENSWOOLE_VERSION:-}"
+}
+
 docker_setup() {
     set -e
     export DEBIAN_FRONTEND=noninteractive
@@ -17,6 +129,8 @@ docker_setup() {
     apt-get install -y --no-install-recommends \
         apache2-utils \
         autoconf \
+        automake \
+        libtool \
         ca-certificates \
         curl \
         g++ \
@@ -41,18 +155,21 @@ docker_setup() {
     echo -e "${YELLOW}Installing bundled PHP extensions needed by OpenSwoole.${RESET}"
     docker-php-ext-install sockets pcntl mysqli pdo_mysql
 
-    echo -e "${YELLOW}Installing OpenSwoole and uopz for Docker image.${RESET}"
-    pecl channel-update pecl.php.net
-    if [ -n "${OPENSWOOLE_VERSION:-}" ]; then
-        printf "yes\nyes\nyes\nyes\nyes\nyes\nyes\n" | pecl install "openswoole-${OPENSWOOLE_VERSION}"
-    else
-        printf "yes\nyes\nyes\nyes\nyes\nyes\nyes\n" | pecl install openswoole
-    fi
+    echo -e "${YELLOW}Installing OpenSwoole for the Docker image (tagged source build).${RESET}"
+    build_install_openswoole || { echo -e "${RED}OpenSwoole source build failed.${RESET}"; exit 1; }
+    # Enable with a late-sorting ini name so openswoole loads AFTER ext-sockets
+    # (docker-php-ext-sockets.ini), satisfying its socket_ce symbol dependency.
     docker-php-ext-enable --ini-name zz-openswoole.ini openswoole
+    php -r 'exit(extension_loaded("openswoole") ? 0 : 1);' || { echo -e "${RED}OpenSwoole built but failed to load.${RESET}"; exit 1; }
 
-    echo -e "${YELLOW}Installing ext-zealphp for Docker image.${RESET}"
-    git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
-    if (cd /tmp/ext-zealphp && phpize && ./configure --enable-zealphp && make -j"$(nproc)" && make install); then
+    echo -e "${YELLOW}Installing ext-zealphp ${ZEALPHP_EXT_VERSION:-v0.3.26} for Docker image.${RESET}"
+    # Pinned for reproducibility + to dodge the pre-0.3.16 compile break on modern
+    # toolchains (GCC 14 hardens -Wincompatible-pointer-types to an error; the old
+    # zend_alter_ini_entry_ex call passed the entry struct instead of the name).
+    # NOTE: the ext has its OWN 0.3.x version line — do NOT confuse it with the
+    # framework's 0.3.x. Override with ZEALPHP_EXT_VERSION.
+    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.26}" https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
+    if (cd /tmp/ext-zealphp && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && make install); then
         docker-php-ext-enable --ini-name zz-zealphp.ini zealphp
         rm -rf /tmp/ext-zealphp
     else
@@ -62,7 +179,7 @@ docker_setup() {
             pecl install "uopz-${UOPZ_VERSION}"
         elif ! pecl install uopz 2>/dev/null; then
             git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz-src
-            (cd /tmp/uopz-src && phpize && ./configure && make -j"$(nproc)" && make install)
+            (cd /tmp/uopz-src && phpize && ./configure && make -j"${ZEALPHP_BUILD_JOBS}" && make install)
             rm -rf /tmp/uopz-src
         fi
         docker-php-ext-enable --ini-name zz-uopz.ini uopz
@@ -340,15 +457,25 @@ install_dependencies() {
         "php${php_version}-intl"
         "php${php_version}-sqlite3"
         "php${php_version}-mysqli"
-        "openssl" 
+        "php${php_version}-zip"
+        "openssl"
         "libssl-dev" 
         "curl" 
         "libcurl4-openssl-dev" 
-        "libpcre3-dev" 
+        "libpcre3-dev"
         "build-essential"
+        "autoconf"
+        "automake"
+        "libtool"
         "git"
-        "postgresql" 
+        "postgresql"
         "libpq-dev"
+        "libc-ares-dev"
+        "libnghttp2-dev"
+        "libbrotli-dev"
+        "zlib1g-dev"
+        "pkg-config"
+        "ca-certificates"
     )
 
     $SUDO apt install -y "${packages[@]}" || {
@@ -380,8 +507,9 @@ check_and_remove_openswoole() {
         }
     fi
 
-    # Check and remove installation via pecl
-    if pecl list | grep -q 'openswoole'; then
+    # Check and remove installation via pecl (pecl may be absent — we no longer
+    # install via it; guard so a missing pecl isn't a noisy "command not found").
+    if command -v pecl >/dev/null 2>&1 && pecl list 2>/dev/null | grep -q 'openswoole'; then
         echo -e "${GREEN}OpenSwoole is installed via pecl. Removing.${RESET}"
         pecl uninstall openswoole || {
             echo -e "${RED}Failed to remove OpenSwoole installed via pecl.${RESET}"
@@ -407,11 +535,18 @@ check_and_remove_openswoole() {
 install_openswoole() {
     echo -e "${YELLOW}Installing OpenSwoole with custom configurations.${RESET}"
 
-    # Install OpenSwoole via PECL with custom configurations
-    pecl install --configureoptions 'enable-sockets="yes" enable-openssl="yes" enable-http2="yes" enable-mysqlnd="yes" enable-hook-curl="yes" enable-cares="yes" with-postgres="yes"' openswoole || {
-        echo -e "${RED}Failed to install OpenSwoole.${RESET}"
+    build_install_openswoole || {
+        echo -e "${RED}Failed to install OpenSwoole (source build).${RESET}"
         return 1 # Installation fails
     }
+
+    # The source build installed openswoole.so but did not enable it. Enable it
+    # now and verify it actually loads.
+    configure_php_extension "extension=openswoole.so" || return 1
+    if ! php -r 'exit(extension_loaded("openswoole") ? 0 : 1);'; then
+        echo -e "${RED}OpenSwoole built but failed to load (is ext-sockets available?).${RESET}"
+        return 1
+    fi
 
     echo -e "${GREEN}OpenSwoole installed.${RESET}"
     return 0 # Installation is successful
@@ -465,14 +600,14 @@ install_zealphp_ext() {
 
     local tmpdir
     tmpdir="$(mktemp -d)"
-    git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git "$tmpdir/ext-zealphp" || {
+    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.26}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir/ext-zealphp" || {
         echo -e "${YELLOW}Failed to clone ext-zealphp repo. Falling back to uopz.${RESET}"
         rm -rf "$tmpdir"
         install_uopz_fallback
         return $?
     }
 
-    if (cd "$tmpdir/ext-zealphp" && phpize && ./configure --enable-zealphp && make -j"$(nproc)" && $SUDO make install); then
+    if (cd "$tmpdir/ext-zealphp" && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && $SUDO make install); then
         rm -rf "$tmpdir"
         echo -e "${GREEN}ext-zealphp built and installed.${RESET}"
         return 0
@@ -498,7 +633,7 @@ install_uopz_fallback() {
         rm -rf "$tmpdir"
         return 1
     }
-    (cd "$tmpdir" && phpize && ./configure && make -j"$(nproc)" && $SUDO make install) || {
+    (cd "$tmpdir" && phpize && ./configure && make -j"${ZEALPHP_BUILD_JOBS}" && $SUDO make install) || {
         echo -e "${RED}Failed to build uopz from source.${RESET}"
         rm -rf "$tmpdir"
         return 1
@@ -561,7 +696,7 @@ macos_setup() {
     fi
 
     echo -e "${GREEN}Installing PHP 8.3 (or newer) via Homebrew.${RESET}"
-    brew install php pkg-config autoconf composer || {
+    brew install php pkg-config autoconf automake libtool c-ares nghttp2 brotli composer || {
         echo -e "${RED}brew install failed. See output above.${RESET}"
         return 1
     }
@@ -580,19 +715,27 @@ macos_setup() {
         return 1
     fi
 
-    echo -e "${GREEN}Installing OpenSwoole via PECL.${RESET}"
-    printf "yes\nyes\nyes\nyes\nyes\nyes\nyes\n" | "$pecl_bin" install openswoole || {
-        echo -e "${RED}OpenSwoole PECL install failed.${RESET}"
+    echo -e "${GREEN}Installing OpenSwoole (tagged source build).${RESET}"
+    build_install_openswoole || {
+        echo -e "${RED}OpenSwoole source build failed.${RESET}"
         return 1
     }
-    echo "extension=openswoole.so" > "${php_ini_dir}/zz-openswoole.ini"
-    echo "short_open_tag=On"       >> "${php_ini_dir}/zz-openswoole.ini"
+    # The source build installed openswoole.so but did not enable it; write a
+    # late-sorting ini so it loads after the (built-in) sockets extension.
+    {
+        echo "extension=openswoole.so"
+        echo "short_open_tag=On"
+    } > "${php_ini_dir}/zz-openswoole.ini"
+    "$php_bin" -r 'exit(extension_loaded("openswoole") ? 0 : 1);' || {
+        echo -e "${RED}OpenSwoole built but failed to load.${RESET}"
+        return 1
+    }
 
     echo -e "${GREEN}Installing ext-zealphp.${RESET}"
     local tmpdir
     tmpdir="$(mktemp -d)"
-    if git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git "$tmpdir" && \
-       (cd "$tmpdir" && phpize && ./configure --enable-zealphp && make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" && make install); then
+    if git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.26}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir" && \
+       (cd "$tmpdir" && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && make install); then
         echo "extension=zealphp.so" > "${php_ini_dir}/zz-zealphp.ini"
         rm -rf "$tmpdir"
         echo -e "${GREEN}ext-zealphp built and installed.${RESET}"
@@ -602,7 +745,7 @@ macos_setup() {
         tmpdir="$(mktemp -d)"
         if ! "$pecl_bin" install uopz 2>/dev/null; then
             git clone --depth 1 https://github.com/krakjoe/uopz.git "$tmpdir" || { rm -rf "$tmpdir"; return 1; }
-            (cd "$tmpdir" && phpize && ./configure && make -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" && make install) || { rm -rf "$tmpdir"; return 1; }
+            (cd "$tmpdir" && phpize && ./configure && make -j"${ZEALPHP_BUILD_JOBS}" && make install) || { rm -rf "$tmpdir"; return 1; }
             rm -rf "$tmpdir"
         fi
         echo "extension=uopz.so" > "${php_ini_dir}/zz-uopz.ini"
@@ -665,7 +808,7 @@ case "$DISTRO_ID" in
         echo -e ""
         echo -e "For ${DISTRO_NAME}, please install the following manually:"
         echo -e "  ${WHITE}1.${RESET} PHP 8.3+ (cli + dev headers)"
-        echo -e "  ${WHITE}2.${RESET} ${WHITE}ext-openswoole${RESET} via PECL"
+        echo -e "  ${WHITE}2.${RESET} ${WHITE}ext-openswoole${RESET} from source (git clone the tag + phpize/configure/make)"
         echo -e "  ${WHITE}3.${RESET} ${WHITE}ext-uopz${RESET} via PECL"
         echo -e "  ${WHITE}4.${RESET} composer"
         echo -e ""
@@ -706,7 +849,8 @@ if ! install_dependencies; then exit 1; fi
 
 if check_and_remove_openswoole; then
     if install_openswoole; then
-        configure_php_extension "extension=openswoole.so"
+        # OpenSwoole is enabled inside install_openswoole (source build + enable +
+        # verify); only the short_open_tag ini tweak remains here.
         configure_php_extension "short_open_tag=on"
     else
         exit 1

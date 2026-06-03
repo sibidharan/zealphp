@@ -5,6 +5,7 @@ parameters:
     excludePaths:
         - src/cgi_worker.php
         - src/pool_worker.php
+        - src/fork_master.php
     bootstrapFiles:
         - phpstan-stubs.php
         - vendor/autoload.php
@@ -36,11 +37,12 @@ parameters:
         # ext-posix declares posix_kill() as constant-return — at runtime
         # both return false on the very condition (client disconnect /
         # process exit) that the polling code is checking for. Suppress the
-        # always-false reports across App.php; the actual runtime behavior
-        # is the polling, not the stub fiction.
+        # always-false reports; the actual runtime behavior is the polling,
+        # not the stub fiction. (CLI.php was extracted out of App.php in the
+        # Phase 1 decomposition — the posix_kill polling loops live there now.)
         -
             message: '#^Negated boolean expression is always false\.$#'
-            path: src/App.php
+            path: src/CLI.php
         # ResponseMiddleware re-emits $g->status after handlers run; PHPStan
         # narrows from the constant ($beforeStatus = 200) and reports the
         # 3-way !== check as always-false. Runtime: status is mutated by
@@ -63,9 +65,13 @@ parameters:
         # can't see throws across the openswoole stub boundary, so it
         # reports the catch as dead. Real runtime: exit() inside any
         # route handler raises ExitException up through the dispatch try.
+        # (ResponseMiddleware.php was extracted out of App.php — the same
+        # dispatch try/catch lives there now.)
         -
             message: '#^Dead catch - OpenSwoole\\ExitException is never thrown in the try block\.$#'
-            path: src/App.php
+            paths:
+                - src/App.php
+                - src/ResponseMiddleware.php
 
         # ─── PHP < 8.0 stub vs PHP 8.3+ runtime ─────────────────────────
         # ceil() returns int on PHP 8.0+; older stubs say float. We pin

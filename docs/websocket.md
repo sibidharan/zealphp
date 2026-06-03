@@ -65,6 +65,8 @@ OpenSwoole exposes four opcodes:
 
 ZealPHP silently drops `PING`, `PONG`, and `CONTINUATION` frames before invoking the route handler. PING/PONG belong to the transport-level keepalive that OpenSwoole answers internally — exposing them to user code would mean every handler had to filter them. CONTINUATION frames are reassembled into the original TEXT or BINARY message by OpenSwoole; surfacing the fragments separately would force handlers to track buffers per `fd`. Only the assembled TEXT and BINARY messages reach `onMessage`.
 
+The CLOSE frame (opcode 8) is handled by OpenSwoole's own close event — `App::ws()` does **not** need to drop it in `onMessage`; `onClose` fires automatically when either side sends a close frame.
+
 To distinguish text from binary inside the handler, check `$frame->opcode`:
 
 ```php
@@ -151,7 +153,17 @@ $app->ws('/ws/rooms',
 );
 ```
 
-`WSRouter::room($name)` returns a `Room` instance with `join()`, `leave()`, `push()`, `isMember()`, `size()`, `members()`, `onMessage()`, and `onPresence()`. Messages published from any node reach all workers via a single `ws:room:*` PSUBSCRIBE per worker — there is no per-room subscriber proliferation.
+`WSRouter::room($name)` returns a `Room` instance with `join()`, `leave()`, `push()`, `isMember()`, `size()`, `members()`, `membersPaged()`, `onMessage()`, and `onPresence()`. Messages published from any node reach all workers via a single `ws:room:*` PSUBSCRIBE per worker — there is no per-room subscriber proliferation.
+
+> **Large rooms:** `members()` drains the full roster into memory (SSCAN loop on Redis). For rooms with more than ~10 000 members, use `membersPaged(string $cursor = '0', int $count = 100)` instead — it returns one SSCAN batch plus an opaque next-cursor. Cursor `'0'` starts a fresh walk; a returned cursor of `'0'` signals end-of-scan. On the Table backend, `membersPaged()` falls back to returning the full roster in one batch.
+>
+> ```php
+> $cursor = '0';
+> do {
+>     ['cursor' => $cursor, 'members' => $batch] = WSRouter::room('general')->membersPaged($cursor, 200);
+>     foreach ($batch as $clientId) { /* process */ }
+> } while ($cursor !== '0');
+> ```
 
 To send directly to one client by id (not a room broadcast) across workers and hosts:
 
