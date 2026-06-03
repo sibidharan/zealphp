@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace ZealPHP;
 
-use OpenSwoole\Atomic;
+use OpenSwoole\Atomic\Long as Atomic;
 use ZealPHP\Counter\AtomicBackend;
 use ZealPHP\Counter\CounterBackend;
 use ZealPHP\Counter\CounterBackendKind;
@@ -167,15 +167,19 @@ class Counter
     }
 
     /**
-     * Return the raw `OpenSwoole\Atomic`. Only available on the atomic
-     * backend; throws on the redis backend (no Atomic equivalent there).
+     * Return the raw `OpenSwoole\Atomic\Long` (64-bit signed). Only available on
+     * the atomic backend; throws on the redis backend (no atomic equivalent there).
+     *
+     * NOTE: as of the 64-bit-counter fix this returns `OpenSwoole\Atomic\Long`, not
+     * the 32-bit `OpenSwoole\Atomic` it returned previously — so counters no longer
+     * silently wrap at 2^32.
      */
     public function raw(): Atomic
     {
         $b = self::defaultBackend();
         if (!($b instanceof AtomicBackend)) {
             throw new StoreException(
-                "Counter::raw() returns OpenSwoole\\Atomic — only available on the 'atomic' backend (current: " . self::$backendConfig['kind'] . ")"
+                "Counter::raw() returns OpenSwoole\\Atomic\\Long — only available on the 'atomic' backend (current: " . self::$backendConfig['kind'] . ")"
             );
         }
         return $b->atomicFor($this->name);

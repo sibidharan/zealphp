@@ -230,7 +230,13 @@ final class TieredBackend implements StoreBackend
     {
         $ok = $this->l2->set($name, $key, $row);
         if ($ok) {
-            $this->l1->set($name, $key, $row + [self::CACHED_AT => time()]);
+            // If the L1 (Table) write fails — e.g. the row exceeds the L1 column
+            // size or the table is full — do NOT leave a partial/stale entry that
+            // get() would serve as authoritative within the TTL window. Evict it so
+            // reads fall through to L2 (the source of truth).
+            if (!$this->l1->set($name, $key, $row + [self::CACHED_AT => time()])) {
+                $this->l1->del($name, $key);
+            }
             $this->publishInvalidation($name, $key);
         }
         return $ok;
@@ -258,7 +264,12 @@ final class TieredBackend implements StoreBackend
         // L1 miss or stale — fetch from L2, repopulate L1.
         $l2Row = $this->l2->get($name, $key);
         if (is_array($l2Row)) {
-            $this->l1->set($name, $key, self::scalarRow($l2Row) + [self::CACHED_AT => $now]);
+            // Don't cache a truncated/partial copy in L1 (see set()): evict on a
+            // failed L1 write so the next read re-fetches L2 instead of serving a
+            // corrupt L1 entry.
+            if (!$this->l1->set($name, $key, self::scalarRow($l2Row) + [self::CACHED_AT => $now])) {
+                $this->l1->del($name, $key);
+            }
             return $field !== null ? ($l2Row[$field] ?? null) : $l2Row;
         }
         return $field !== null ? null : $l2Row;
