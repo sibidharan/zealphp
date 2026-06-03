@@ -377,7 +377,14 @@ final class TableSessionHandler implements \SessionHandlerInterface
         } catch (\Throwable) {
             return 0;
         }
-        if ($val === false && $remaining !== 'b:0;') {
+        // `unserialize` returns false BOTH for a corrupt value AND for a
+        // legitimately stored boolean false (`b:0;`). Distinguish by the PREFIX,
+        // not the whole tail: a stored false is rarely the last entry, so
+        // `$remaining` is e.g. `b:0;next|i:1;...`. Comparing the full tail to
+        // `'b:0;'` mis-flagged that as corrupt and made decode() drop every key
+        // after the first stored false (silent session-data loss). Mirror
+        // RedisSessionHandler::parseSession / php_session_decode_to_array.
+        if ($val === false && substr($remaining, 0, 4) !== 'b:0;') {
             return 0;
         }
         return strlen(serialize($val));

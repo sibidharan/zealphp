@@ -306,6 +306,19 @@ final class TableSessionHandlerTest extends TestCase
         $this->assertSame(['k' => false], $this->decode('k|b:0;'));
     }
 
+    public function testDecodeKeepsKeysAfterAStoredFalse(): void
+    {
+        // Regression: a stored boolean false that is NOT the last entry must not
+        // make decode() drop every subsequent key. The old serializedLength()
+        // compared the WHOLE remaining tail to 'b:0;' (only true for a trailing
+        // false), so 'logged_in|b:0;user_id|i:42;...' returned just the first key
+        // (silent session-data loss). Now it compares the 4-byte prefix.
+        $this->assertSame(
+            ['logged_in' => false, 'user_id' => 42, 'role' => 'admin'],
+            $this->decode('logged_in|b:0;user_id|i:42;role|s:5:"admin";')
+        );
+    }
+
     public function testReadFileMissingReturnsEmpty(): void
     {
         $m = new \ReflectionMethod(self::$handler, 'readFile');

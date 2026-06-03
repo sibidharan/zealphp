@@ -548,17 +548,35 @@ function zeal_session_write_close(): bool
             }
         }
 
-        // Mark inactive — in both modes. Unset the typed slot in coroutine
-        // mode; clear the superglobal in superglobals mode so the next
-        // request starts from a known-empty state (CoSessionManager /
-        // SessionManager clear $_SESSION too, but native routes calling
-        // session_write_close() directly need it here as well).
-        if ($superglobals) {
+        // Mark the session closed so a RE-ENTRANT close is a true no-op (#2).
+        // The framework runs a double session lifecycle: a handler may call
+        // session_write_close() directly AND the manager's `finally` calls it
+        // again (gated on `_session_started`). Without resetting the flag here,
+        // that second close re-runs the read-merge-write against a store that the
+        // mark-inactive below just emptied — and its deletion loop (which removes
+        // every `session_loaded_keys` entry absent from the now-empty store) wipes
+        // the whole session file on every other request, so data alternates
+        // present/absent (the #2 1,2,1,2 symptom). Resetting the flag makes the
+        // manager's second close short-circuit; resetting the loaded-keys snapshot
+        // guarantees no stale deletion loop can fire even if a close still re-enters.
+        $g->_session_started = false;
+        $g->session_loaded_keys = [];
+
+        // Clear the session store ONLY where it persists across requests: the
+        // process-wide-singleton mode (superglobals + NOT coroutine-isolated, i.e.
+        // Mixed). In Mode 4 (coroutine-isolated) `$g` is per-coroutine, so the next
+        // request already starts from a fresh `$g`; emptying `$g->session` here
+        // would corrupt the canonical store through the `$_SESSION = &$g->session`
+        // binding (the original bug). Pure coroutine mode ($g per-coroutine, no
+        // `$_SESSION` ref) keeps the historical unset — harmless, and the manager
+        // also clears `$g->session` after this returns.
+        if ($superglobals && !$useGSession) {
             $GLOBALS['_SESSION'] = [];
             unset($GLOBALS['_SESSION']);
-        } else {
+        } elseif (!$superglobals) {
             unset($g->session);
         }
+        // Mode 4: leave $g->session intact — coroutine isolation handles freshness.
     }
     return true;
 }

@@ -160,7 +160,13 @@ class RedisSessionHandler implements \SessionHandlerInterface
             $pipe = $redis->multi();
             $pipe->setex($key, $this->ttl, $sessionData);
             $result = $pipe->exec();
-            if ($result !== false) return true;
+            if ($result !== false) {
+                // The read→write merge baseline is consumed; drop it so the
+                // per-instance map doesn't grow with every distinct session id
+                // for the worker's lifetime (this is a singleton handler).
+                unset($this->baseData[$sid]);
+                return true;
+            }
 
             // WATCH/MULTI conflict — concurrent writer beat us. Re-WATCH,
             // read the current state, 3-way merge (base = our original
@@ -172,6 +178,7 @@ class RedisSessionHandler implements \SessionHandlerInterface
             $sessionData = $this->merge3Sessions($base, $sessionData, $remoteStr);
             $this->baseData[$sid] = $remoteStr;
         }
+        unset($this->baseData[$sid]); // bound the map even when all retries fail
         return false;
     }
 
@@ -286,6 +293,7 @@ class RedisSessionHandler implements \SessionHandlerInterface
     public function destroy($sessionId): bool
     {
         $this->redis()->del($this->prefix . $sessionId);
+        unset($this->baseData[(string) $sessionId]);
         return true;
     }
 

@@ -22,6 +22,7 @@ use function ZealPHP\Session\zeal_session_module_name;
 use function ZealPHP\Session\zeal_session_cache_limiter;
 use function ZealPHP\Session\zeal_session_cache_expire;
 use function ZealPHP\Session\zeal_session_commit;
+use function ZealPHP\Session\zeal_session_write_close;
 use function ZealPHP\Session\zeal_session_create_id;
 use function ZealPHP\Session\php_session_decode_to_array;
 
@@ -398,5 +399,50 @@ class SessionUtilsTest extends TestCase
         $file = $this->savePath . '/sess_commit-id';
         $this->assertFileExists($file);
         $this->assertSame(['committed' => 'yes'], php_session_decode_to_array((string)file_get_contents($file)));
+    }
+
+    // ── #2: write_close idempotency under the double-close lifecycle ──────
+
+    public function testWriteCloseIsIdempotentInMode4(): void
+    {
+        // ext-zealphp #2: under coroutine-isolated superglobals (Mode 4) the
+        // framework runs a DOUBLE close — a handler may call session_write_close()
+        // directly AND the manager's `finally` calls it again. The second close
+        // must not wipe the session (the old code reset the store through the
+        // $_SESSION ref and then re-ran the deletion loop, alternating the data
+        // present/absent across requests). This pins the fix:
+        //   (1) write_close resets _session_started so the manager's gated finally
+        //       skips the second close, and (2) it resets session_loaded_keys so a
+        //       stale deletion loop can never fire, and (3) a re-entrant close does
+        //       not wipe the file.
+        $saved = App::$coroutine_isolated_superglobals;
+        App::$coroutine_isolated_superglobals = true;
+        try {
+            $g = RequestContext::instance();
+            $sid = 'mode4-idem';
+            $g->cookie['PHPSESSID'] = $sid;
+            $g->session_params['session_id'] = $sid;
+            $g->session = ['counter' => 5];
+            $g->session_loaded_keys = ['counter'];
+            $g->_session_started = true;
+
+            $this->assertTrue(zeal_session_write_close());
+            $file = $this->savePath . '/sess_' . $sid;
+            $this->assertSame(['counter' => 5], php_session_decode_to_array((string)file_get_contents($file)));
+            $this->assertFalse($g->_session_started, 'write_close must reset _session_started so the manager skips the 2nd close');
+            $this->assertSame([], $g->session_loaded_keys, 'loaded-keys snapshot reset so a stale deletion loop cannot wipe');
+
+            // The re-entrant second close (the failure path) must NOT wipe the file.
+            zeal_session_write_close();
+            $this->assertSame(
+                ['counter' => 5],
+                php_session_decode_to_array((string)file_get_contents($file)),
+                'second close must not wipe the session (#2)'
+            );
+        } finally {
+            App::$coroutine_isolated_superglobals = $saved;
+            $g = RequestContext::instance();
+            $g->_session_started = false;
+        }
     }
 }
