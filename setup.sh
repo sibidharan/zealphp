@@ -45,6 +45,18 @@ install_openswoole_source() {
     src="$tmpdir/src"
     echo -e "${YELLOW}Building OpenSwoole from source (openswoole/ext-openswoole @ ${ref}).${RESET}"
 
+    # macOS/Homebrew: keg-only libs (openssl, c-ares, ...) aren't on the default
+    # search path, so point pkg-config at the brew kegs the build needs. Best-effort
+    # (not exercised in CI); guarded on Darwin so it's a no-op on Linux.
+    if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+        local kl kp
+        for kl in openssl@3 c-ares nghttp2 brotli curl; do
+            kp="$(brew --prefix "$kl" 2>/dev/null)"
+            [ -n "$kp" ] && [ -d "$kp/lib/pkgconfig" ] && PKG_CONFIG_PATH="$kp/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+        done
+        export PKG_CONFIG_PATH
+    fi
+
     # Fetch the tagged source straight from GitHub — git clone first, then the
     # release tarball as a second transport. Both bypass PECL/PIE/Packagist.
     if ! git clone --depth 1 --branch "$ref" https://github.com/openswoole/ext-openswoole.git "$src" 2>/dev/null \
@@ -461,6 +473,9 @@ install_dependencies() {
         "libc-ares-dev"
         "libnghttp2-dev"
         "libbrotli-dev"
+        "zlib1g-dev"
+        "pkg-config"
+        "ca-certificates"
     )
 
     $SUDO apt install -y "${packages[@]}" || {
@@ -492,8 +507,9 @@ check_and_remove_openswoole() {
         }
     fi
 
-    # Check and remove installation via pecl
-    if pecl list | grep -q 'openswoole'; then
+    # Check and remove installation via pecl (pecl may be absent — we no longer
+    # install via it; guard so a missing pecl isn't a noisy "command not found").
+    if command -v pecl >/dev/null 2>&1 && pecl list 2>/dev/null | grep -q 'openswoole'; then
         echo -e "${GREEN}OpenSwoole is installed via pecl. Removing.${RESET}"
         pecl uninstall openswoole || {
             echo -e "${RED}Failed to remove OpenSwoole installed via pecl.${RESET}"
