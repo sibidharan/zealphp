@@ -55,7 +55,8 @@ final class CacheFileTierAndStampedeTest extends TestCase
         $dir = sys_get_temp_dir() . '/zptest-stampede-' . bin2hex(random_bytes(3));
         Cache::initForTest($dir, 64);
         $key      = 'stampede-key-' . bin2hex(random_bytes(2));
-        $lockName = '__cache_lock_' . md5($key);
+        // Mirror getOrCompute()'s fixed-slot lock name (bounded pool, not per-key).
+        $lockName = '__cache_stampede_slot_' . (crc32($key) % 256);
         // Take the lock from "outside" so getOrCompute's CAS loses and
         // it falls into the stall loop (10 × 20ms usleep). After
         // ~200ms the caller computes itself.

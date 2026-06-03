@@ -144,6 +144,65 @@ class CacheTest extends TestCase
         $this->assertSame(0, Cache::count());
     }
 
+    public function testFlushClearsEveryRowAcrossManyEntries(): void
+    {
+        // Regression: flush() used to delete during OpenSwoole\Table iteration,
+        // which moves the cursor and skips ~28% of rows. With enough rows the
+        // skip is guaranteed — assert ZERO survive.
+        Cache::flush();
+        for ($i = 0; $i < 50; $i++) {
+            Cache::set("bulk-$i", $i);
+        }
+        $this->assertGreaterThanOrEqual(50, Cache::count());
+        Cache::flush();
+        $this->assertSame(0, Cache::count(), 'flush() must clear every row, not skip ~28% (delete-during-iterate)');
+    }
+
+    public function testGcMemoryReapsEveryExpiredRow(): void
+    {
+        Cache::flush();
+        for ($i = 0; $i < 40; $i++) {
+            Cache::set("exp-$i", $i, ttl: 1);
+        }
+        sleep(2);
+        Cache::gcMemory();
+        $this->assertSame(0, Cache::count(), 'gcMemory() must reap every expired row (delete-during-iterate)');
+    }
+
+    public function testCorruptFileBodyIsAMissAndEvicted(): void
+    {
+        // Regression: readFile() returned the bool false from a torn/corrupt body
+        // as if it were a genuinely cached value. A corrupt body must read as a
+        // miss (null) and the file evicted.
+        Cache::flush();
+        $key  = 'corrupt-key';
+        $path = self::$cacheDir . '/' . md5($key) . '.cache';
+        file_put_contents($path, "0\nthis-is-not-valid-serialized-data");
+        $this->assertNull(Cache::get($key), 'corrupt body must read as a miss, not bool false');
+        $this->assertFileDoesNotExist($path, 'corrupt file must be evicted');
+    }
+
+    public function testHasAndGetAgreeOnTornFile(): void
+    {
+        // Regression: has() returned true for a newline-less (torn) file while
+        // get() returned a miss. They must agree.
+        Cache::flush();
+        $key  = 'torn-key';
+        $path = self::$cacheDir . '/' . md5($key) . '.cache';
+        file_put_contents($path, 'no-newline-here-just-garbage');
+        $this->assertFalse(Cache::has($key), 'has() must treat a torn file as a miss');
+        $this->assertNull(Cache::get($key), 'get() must treat a torn file as a miss');
+    }
+
+    public function testStoredFalseRoundTrips(): void
+    {
+        // The readFile corrupt-body guard must NOT mistake a legitimately stored
+        // boolean false ('b:0;') for corruption.
+        Cache::flush();
+        Cache::set('flag', false);
+        $this->assertFalse(Cache::get('flag', 'DEFAULT'), 'a stored false must round-trip, not read as a miss');
+    }
+
     // ---------------------------------------------------------------------
     // Added coverage: branches CacheTest above does not exercise.
     // ---------------------------------------------------------------------
