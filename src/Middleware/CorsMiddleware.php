@@ -110,7 +110,9 @@ class CorsMiddleware implements MiddlewareInterface
             $resp->header('Access-Control-Allow-Methods',     implode(', ', $this->methods));
             $resp->header('Access-Control-Allow-Headers',     implode(', ', $this->headers));
             $resp->header('Access-Control-Max-Age',           (string)$this->maxAge);
-            $resp->header('Access-Control-Allow-Credentials', $this->credentials ? 'true' : 'false');
+            if ($this->credentials && $allowedOrigin !== '*') {
+                $resp->header('Access-Control-Allow-Credentials', 'true');
+            }
             $resp->header('Vary',                             'Origin');
             return new Response('', 204);
         }
@@ -118,7 +120,9 @@ class CorsMiddleware implements MiddlewareInterface
         $response = $handler->handle($request);
 
         $resp->header('Access-Control-Allow-Origin',      $allowedOrigin);
-        $resp->header('Access-Control-Allow-Credentials', $this->credentials ? 'true' : 'false');
+        if ($this->credentials && $allowedOrigin !== '*') {
+            $resp->header('Access-Control-Allow-Credentials', 'true');
+        }
         $resp->header('Vary',                             'Origin');
 
         return $response;
@@ -127,8 +131,12 @@ class CorsMiddleware implements MiddlewareInterface
     private function resolveOrigin(string $requestOrigin): string
     {
         if (in_array('*', $this->origins, true)) {
-            // credentials=true requires explicit origin, not wildcard
-            return ($this->credentials && $requestOrigin !== '') ? $requestOrigin : '*';
+            // A wildcard config has no real allowlist to reflect against; echoing
+            // the request Origin back under credentials=true is the canonical
+            // credentialed-CORS bypass (issue #180). Always emit literal '*' —
+            // process() omits Access-Control-Allow-Credentials when the effective
+            // origin is '*', so browsers fail safe (they reject '*' + credentials).
+            return '*';
         }
         return in_array($requestOrigin, $this->origins, true) ? $requestOrigin : $this->origins[0];
     }

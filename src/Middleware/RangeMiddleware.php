@@ -176,10 +176,14 @@ class RangeMiddleware implements MiddlewareInterface
                     break;
                 }
                 $suffixLen = (int) $tail;
-                if ($suffixLen <= 0 || $suffixLen > $total) {
-                    return $this->unsatisfiable($total, $g);
+                if ($suffixLen <= 0) {
+                    // Degenerate (bytes=-0) — skip; 416 only if it's the sole spec
+                    // (the empty-$ranges check below) (#181/#185).
+                    continue;
                 }
-                $ranges[] = [$total - $suffixLen, $total - 1];
+                // A suffix longer than the file means "the whole representation"
+                // (RFC 7233 §2.1) — clamp the start to 0, don't 416 (#181).
+                $ranges[] = [max(0, $total - $suffixLen), $total - 1];
             } elseif (str_ends_with($spec, '-')) {
                 // Open-end range: bytes=N-
                 $startStr = substr($spec, 0, -1);
@@ -189,7 +193,9 @@ class RangeMiddleware implements MiddlewareInterface
                 }
                 $start = (int) $startStr;
                 if ($start >= $total) {
-                    return $this->unsatisfiable($total, $g);
+                    // Unsatisfiable spec — skip (RFC 7233 §4.4); 416 only if ALL
+                    // specs are unsatisfiable (the empty-$ranges check below) (#185).
+                    continue;
                 }
                 $ranges[] = [$start, $total - 1];
             } elseif (str_contains($spec, '-')) {
@@ -203,7 +209,8 @@ class RangeMiddleware implements MiddlewareInterface
                 $start = (int) $startStr;
                 $end   = (int) $endStr;
                 if ($start > $end || $start >= $total) {
-                    return $this->unsatisfiable($total, $g);
+                    // Unsatisfiable spec — skip (see the §4.4 note above) (#185).
+                    continue;
                 }
                 $end = min($end, $total - 1);
                 $ranges[] = [$start, $end];

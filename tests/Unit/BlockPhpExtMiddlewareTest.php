@@ -39,6 +39,22 @@ class BlockPhpExtMiddlewareTest extends TestCase
         $this->assertSame('OK', (string) $response->getBody());
     }
 
+    public function testBlocksPhpWithPathInfoSuffix(): void
+    {
+        // PATH_INFO bypass (#184): `.php` followed by more path segments must
+        // still be blocked, not just `.php` at the very end of the path.
+        $this->assertSame(404, $this->process('/admin.php/foo')->getStatusCode());
+        $this->assertSame(404, $this->process('/admin.php/')->getStatusCode());
+        $this->assertSame(404, $this->process('/a/b.php/c/d')->getStatusCode());
+    }
+
+    public function testPassesPathsWithNoPhpSegment(): void
+    {
+        // Paths that merely CONTAIN "php" (no `.php` segment) pass through.
+        $this->assertSame(200, $this->process('/phpinfo')->getStatusCode());
+        $this->assertSame(200, $this->process('/api/graphql')->getStatusCode());
+    }
+
     private function process(string $path): ResponseInterface
     {
         $middleware = new BlockPhpExtMiddleware();

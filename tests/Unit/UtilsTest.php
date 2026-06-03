@@ -145,6 +145,22 @@ class UtilsTest extends TestCase
         $this->assertContains(['X-Foo', 'bar'], $list);
     }
 
+    public function testResponseShimsNoOpWhenNoResponseObject(): void
+    {
+        // worker-start / tick / CLI / task contexts have no response object;
+        // the shims must no-op instead of a null method call (#195).
+        $g = RequestContext::instance();
+        $g->zealphp_response = null;
+        try {
+            response_add_header('X-Null', 'v'); // void — must not throw on null response
+            $this->assertFalse(setcookie('c', 'v'), 'setcookie returns false with no response');
+            $this->assertFalse(setrawcookie('rc', 'v'), 'setrawcookie returns false with no response');
+        } finally {
+            // Restore so the rest of the suite (shared singleton) keeps its recorder.
+            $g->zealphp_response = $this->resp;
+        }
+    }
+
     public function testResponseSetStatus(): void
     {
         response_set_status(418);

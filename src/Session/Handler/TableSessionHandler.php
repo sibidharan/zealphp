@@ -60,9 +60,11 @@ final class TableSessionHandler implements \SessionHandlerInterface
     private static int $dataSize = 16384;    // 16 KB per session
 
     /**
-     * Per-coroutine read snapshot.
+     * Read snapshot, keyed by coroutine id THEN session id. This is a per-worker
+     * singleton, so keying by coroutine id keeps concurrent requests for the SAME
+     * session id from clobbering each other's base/version snapshot (#182).
      *
-     * @var array<string, array{base: array<mixed,mixed>, version: int}>
+     * @var array<int, array<string, array{base: array<mixed,mixed>, version: int}>>
      */
     private array $context = [];
 
@@ -131,6 +133,10 @@ final class TableSessionHandler implements \SessionHandlerInterface
 
     public function close(): bool
     {
+        // Reclaim this coroutine's read-snapshot bucket at session_write_close
+        // (called per request by CoSessionManager) so it can't grow unbounded on
+        // a long-lived worker (#182).
+        unset($this->context[Coroutine::getCid()]);
         return true;
     }
 
@@ -149,7 +155,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
                 $data = is_string($dRaw) ? $dRaw : '';
                 $vRaw = $row[self::COL_VERSION] ?? 0;
                 $version = is_numeric($vRaw) ? (int) $vRaw : 0;
-                $this->context[$sessionId] = [
+                $this->context[Coroutine::getCid()][$sessionId] = [
                     'base' => $this->decode($data),
                     'version' => $version,
                 ];
@@ -165,7 +171,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
             self::COL_VERSION => 1,
             self::COL_EXPIRES => time() + self::$ttl,
         ]);
-        $this->context[$sessionId] = [
+        $this->context[Coroutine::getCid()][$sessionId] = [
             'base' => $this->decode($data),
             'version' => 1,
         ];
@@ -180,7 +186,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
         $writeLock = $this->writeLock();
 
         /** @var array{base: array<mixed,mixed>, version: int} $ctx */
-        $ctx = $this->context[$sessionId] ?? ['base' => [], 'version' => 0];
+        $ctx = $this->context[Coroutine::getCid()][$sessionId] ?? ['base' => [], 'version' => 0];
         $base = $ctx['base'];
         $expectedVersion = $ctx['version'];
         $local = $this->decode($data);
@@ -219,7 +225,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
                     self::COL_VERSION => $newVersion,
                     self::COL_EXPIRES => time() + self::$ttl,
                 ]);
-                $this->context[$sessionId] = ['base' => $local, 'version' => $newVersion];
+                $this->context[Coroutine::getCid()][$sessionId] = ['base' => $local, 'version' => $newVersion];
 
                 // Write-through to file backing.
                 $this->writeFile($sessionId, $data);
@@ -237,7 +243,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
         $this->table()->del((string) $sessionId);
         $file = self::$savePath . '/sess_' . basename((string) $sessionId);
         if (is_file($file)) @unlink($file);
-        unset($this->context[(string) $sessionId]);
+        unset($this->context[Coroutine::getCid()][(string) $sessionId]);
         return true;
     }
 
