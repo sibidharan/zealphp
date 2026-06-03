@@ -138,6 +138,51 @@ class SimpleCacheAdapterTest extends TestCase
         $this->assertFalse($this->adapter->has('alive'));
     }
 
+    public function testZeroTtlExpiresImmediately(): void
+    {
+        // PSR-16: a TTL of 0 means the item is already expired and must not be
+        // stored. get() returns the default, has() returns false.
+        $this->assertTrue($this->adapter->set('k0', 'value', 0));
+        $this->assertNull($this->adapter->get('k0'));
+        $this->assertFalse($this->adapter->has('k0'));
+    }
+
+    public function testZeroDateIntervalExpiresImmediately(): void
+    {
+        // A DateInterval resolving to <= 0 seconds is the same case as int 0.
+        $this->adapter->set('di0', 'value', new \DateInterval('PT0S'));
+        $this->assertFalse($this->adapter->has('di0'));
+        $this->assertNull($this->adapter->get('di0'));
+    }
+
+    public function testNullTtlPersists(): void
+    {
+        // A null TTL means "use the default" — here, no expiry. It must NOT be
+        // confused with the int 0 "expire now" case.
+        $this->adapter->set('keep', 'forever');
+        $this->assertTrue($this->adapter->has('keep'));
+        $this->assertSame('forever', $this->adapter->get('keep'));
+    }
+
+    public function testSetMultipleZeroTtlExpiresImmediately(): void
+    {
+        $this->assertTrue($this->adapter->setMultiple(['a' => 1, 'b' => 2], 0));
+        $this->assertFalse($this->adapter->has('a'));
+        $this->assertFalse($this->adapter->has('b'));
+        $this->assertNull($this->adapter->get('a'));
+        $this->assertNull($this->adapter->get('b'));
+    }
+
+    public function testSetMultipleNegativeTtlDeletes(): void
+    {
+        $this->adapter->setMultiple(['m1' => 'x', 'm2' => 'y']);
+        $this->assertTrue($this->adapter->has('m1'));
+
+        $this->adapter->setMultiple(['m1' => 'x', 'm2' => 'y'], -5);
+        $this->assertFalse($this->adapter->has('m1'));
+        $this->assertFalse($this->adapter->has('m2'));
+    }
+
     public function testInvalidKeyThrows(): void
     {
         $this->expectException(InvalidCacheKeyException::class);

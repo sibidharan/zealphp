@@ -15,14 +15,7 @@ class SimpleCacheAdapter implements CacheInterface
     public function set(string $key, mixed $value, null|int|\DateInterval $ttl = null): bool
     {
         $this->validateKey($key);
-        $ttlSeconds = $this->normalizeTtl($ttl);
-
-        if ($ttlSeconds < 0) {
-            Cache::del($key);
-            return true;
-        }
-
-        return Cache::set($key, $value, $ttlSeconds);
+        return $this->writeOne($key, $value, $this->normalizeTtl($ttl));
     }
 
     public function delete(string $key): bool
@@ -61,12 +54,8 @@ class SimpleCacheAdapter implements CacheInterface
 
         foreach ($values as $key => $value) {
             $this->validateKey($key);
-            if ($ttlSeconds < 0) {
-                Cache::del($key);
-            } else {
-                if (!Cache::set($key, $value, $ttlSeconds)) {
-                    $success = false;
-                }
+            if (!$this->writeOne($key, $value, $ttlSeconds)) {
+                $success = false;
             }
         }
 
@@ -98,10 +87,34 @@ class SimpleCacheAdapter implements CacheInterface
         }
     }
 
-    private function normalizeTtl(null|int|\DateInterval $ttl): int
+    /**
+     * Write a single value, applying PSR-16 TTL semantics. Shared by set()
+     * and setMultiple() so they can't drift apart.
+     *
+     * @param ?int $ttlSeconds null = persist (use default); an explicit value
+     *                         of <= 0 means the item is already expired.
+     */
+    private function writeOne(string $key, mixed $value, ?int $ttlSeconds): bool
+    {
+        if ($ttlSeconds !== null && $ttlSeconds <= 0) {
+            Cache::del($key);
+            return true;
+        }
+
+        return Cache::set($key, $value, $ttlSeconds ?? 0);
+    }
+
+    /**
+     * Resolve a PSR-16 TTL to a second count.
+     *
+     * Returns null for a null TTL ("use the default" — Cache persists with no
+     * expiry) so callers can tell it apart from an explicit 0/negative TTL,
+     * which PSR-16 treats as "already expired".
+     */
+    private function normalizeTtl(null|int|\DateInterval $ttl): ?int
     {
         if ($ttl === null) {
-            return 0;
+            return null;
         }
 
         if (is_int($ttl)) {
