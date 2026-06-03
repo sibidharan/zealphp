@@ -362,6 +362,16 @@ class ZealAPI extends REST
                 return new Response($this->json($this->_undefinedMethodError), 404);
             }
             throw $e;
+        } catch (HaltException $e) {
+            // Clean halt mid-handler (#194): send whatever response()/echo already
+            // buffered, with the status the handler set. Without this the halt would
+            // propagate to the generic API error handler ($api->die → 4xx) and the
+            // buffered body would be lost.
+            $buffer = (string) ob_get_clean();
+            if ($g->_streaming ?? false) {
+                return null;
+            }
+            return new Response($buffer, $g->status ?? 200);
         }
         // Already streamed (SSE/chunked) — don't create a second Response.
         if ($g->_streaming ?? false) {

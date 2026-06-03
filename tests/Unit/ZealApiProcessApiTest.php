@@ -8,6 +8,7 @@ use OpenSwoole\Core\Psr\Response;
 use Psr\Http\Message\ResponseInterface;
 use ZealPHP\App;
 use ZealPHP\G;
+use ZealPHP\HaltException;
 use ZealPHP\Tests\TestCase;
 use ZealPHP\ZealAPI;
 
@@ -156,6 +157,21 @@ class ZealApiProcessApiTest extends TestCase
             is_dir($path) ? $this->rrmdir($path) : @unlink($path);
         }
         @rmdir($dir);
+    }
+
+    public function testRunHandlerWithContractTreatsHaltAsCleanResponse(): void
+    {
+        // #194: a handler that echoes then throws HaltException must produce a
+        // normal Response carrying the buffered body — not propagate to
+        // $api->die() (a 4xx error) and lose the buffered body.
+        $resp = $this->makeApi()->runHandlerWithContract(function (): void {
+            echo 'halted-body';
+            throw new HaltException('stop');
+        }, []);
+
+        $this->assertInstanceOf(ResponseInterface::class, $resp);
+        $this->assertSame(200, $resp->getStatusCode());
+        $this->assertSame('halted-body', (string) $resp->getBody());
     }
 
     private function makeApi(): ZealAPI
