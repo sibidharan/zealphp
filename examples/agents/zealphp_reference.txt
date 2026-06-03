@@ -2786,6 +2786,8 @@ fallbacks are available:
 - **`App::cgiMode('pool')`** (default) — pre-spawned worker pool, ~1–3 ms warm, recycled per `cgiPoolMaxRequests`. The recommended stable choice.
 - **`App::cgiMode('fork')`** *(experimental)* — Apache MPM prefork style: a fork-master forks a FRESH child per request (~1 ms fork cost, no proc_open cold-start). Gives true global-scope isolation (no "Cannot redeclare class") because each child exits after one request. Requires `pcntl` + `posix` in the PHP build. Reachable via `App::cgiMode('fork')` only — there is no `App::mode()` preset for it. Concurrency is bounded by `App::$cgi_fork_max_concurrent` (default 16); requests beyond that cap return 503.
 
+To run **unmodified wp-admin in-process under coroutine-legacy** (rather than a subprocess pool), enable Stage 8 — `App::globalScopeInclude(true)` — so the `require_once` bootstrap's bare file-scope variables (`$menu`, `$submenu`, `$_wp_submenu_nopriv`, …) bind into `$GLOBALS` instead of becoming `executeFile()`-local. Without it, admin pages 500 with `array_keys(null)`. Stage 8 is coroutine-legacy-only, off by default (follows `ZEALPHP_GLOBAL_INCLUDE`), and requires **ext-zealphp 0.3.26+**; the globally-scoped include reads request state via superglobals, not `$g`. It closes the *globals-scope* wall but not the separate mysqlnd connection-teardown frontier, so `App::mode(App::MODE_LEGACY_CGI)` stays the conservative choice for fully production-safe wp-admin. See [runtime-architecture.md § Stage 8](runtime-architecture.md#stage-8--true-global-scope-request-include-appglobalscopeinclude).
+
 ---
 
 ## Running modern PHP apps on ZealPHP — Cross-cutting caveats (from the sweep)
@@ -4300,6 +4302,32 @@ App::mode(App::MODE_MIXED);              // Symfony / Laravel — real $_SESSION
 
 Pick the mode that matches your application’s profile. You can call `App::mode()` (or set the individual knobs) early in `app.php` before calling `App::init()`.
 
+## Runtime Architecture — Stage 8 — true-global-scope request include (`App::globalScopeInclude()`)
+
+`App::globalScopeInclude(?bool $on = null): bool` is the capstone of the coroutine-legacy isolation stack. It only matters for legacy `require_once`-bootstrap apps (WordPress wp-admin in particular) running **in-process** under coroutine-legacy.
+
+**The problem it solves.** In coroutine-legacy the request entry runs in-process through `App::executeFile()`, whose `include $absPath;` sits lexically *inside* a static method. PHP's rule is that an included file inherits the variable scope of the line the `include` appears on — so a bare file-scope `$x = [...]` (no `global` keyword) in the entry file, or in anything it transitively `require_once`s, becomes a **method-local variable of `executeFile()`** and never enters `EG(symbol_table)`. WordPress builds `$menu` / `$submenu` / `$_wp_submenu_nopriv` exactly this way; a later `global $_wp_submenu_nopriv;` then reads the global table, finds `NULL`, and 500s with `array_keys(null)` on admin pages. The per-coroutine `$GLOBALS` isolation (Stage 2) can't help — it operates only on `EG(symbol_table)`, which a method-local CV never enters. This is a **scope** problem, orthogonal to isolation.
+
+**What it does.** When enabled, the request entry (and its whole transitive `require_once` tree) runs at **true global scope**, so bare file-scope variables and the `require_once`'d bootstrap bind into `$GLOBALS` / `EG(symbol_table)` — exactly as PHP-FPM / mod_php would. Stage 2 then snapshots/partitions those globals per coroutine across yields and clears the non-baseline keys at request end, so there's no cross-request leak or cross-coroutine clobber.
+
+**The contract (important).** The globally-scoped include does **not** see `executeFile()`'s injected `$g` or route params — those are deliberately not extracted into the global frame (they would otherwise pollute `$GLOBALS`). Stage 8 is strictly for legacy apps that read request state via **superglobals** (`$_GET` / `$_POST` / `$_SERVER` / `$_SESSION`), not via ZealPHP's `$g`. Code that wants `$g` should use a normal route handler or the standard in-process include — not the global-scope path.
+
+| Property | Value |
+|---|---|
+| Setter | `App::globalScopeInclude(?bool $on = null): bool` — no-arg getter / one-arg setter |
+| Default | **Off.** When left `null`, follows the `ZEALPHP_GLOBAL_INCLUDE` env var (`'1'` enables) |
+| Gate | **coroutine-legacy only.** Ignored in other modes |
+| Requires | **ext-zealphp 0.3.26+** (the `zealphp_require_global()` primitive). With the primitive absent, the call is a no-op and the normal in-process `include` path is used |
+| Use case | Unmodified `require_once`-bootstrap **wp-admin** in coroutine-legacy (closes the `array_keys(null)` / `$_wp_submenu_nopriv` NULL gap) |
+
+```php
+App::mode(App::MODE_COROUTINE_LEGACY);
+App::globalScopeInclude(true);   // run the request entry at true global scope
+// ... App::init(); $app->run();
+```
+
+**Honest caveat.** Stage 8 closes the *globals-scope* wall — unmodified wp-admin renders in-process under coroutine concurrency (all menu pages `200`, globals correct). It does **not** resolve the separate **mysqlnd connection-teardown** heap-safety frontier (a `$wpdb`-close-under-HOOK_ALL issue that predates Stage 8 and reproduces without it), which is tracked independently. For fully production-safe unmodified wp-admin today, `App::mode(App::MODE_LEGACY_CGI)` (process-isolated) remains the conservative choice until that frontier lands.
+
 ## Runtime Architecture — Lifecycle setters (v0.2.23+) — fine-grained control with safe-by-default
 
 Historically `App::superglobals()` bundled four orthogonal decisions into one flag: storage strategy, include dispatch, coroutine auto-wrapping, and runtime I/O hooks. As of v0.2.23, each is exposed as its own fluent static setter so applications can mix-and-match for their workload (Symfony wants real `$_SESSION` but no per-include fork cost; testing wants per-request isolation without `HOOK_ALL`; etc.). Every new knob defaults to `null` and resolves to a `App::$superglobals`-derived default at `App::run()` time — apps that don't touch them see no behaviour change.
@@ -4991,6 +5019,7 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 | `ZEALPHP_CLASS_STATICS_RESET_DISABLE` | unset (reset ENABLED; any non-empty value not starting with `'0'` disables) | user | Read in ext-zealphp `zealphp_reset_request_class_statics()`; when set, disables the per-request reset of class static properties to their templates. |
 | `ZEALPHP_POOL_FULL_RESET` | unset (off; only literal `'1'` enables) | user | **EXPERIMENTAL.** Read in `src/pool_worker.php` `pool_reset_request_state()`; when `'1'`, a REUSED `cgiMode('pool')` subprocess (`cgiPoolMaxRequests > 1`) runs the full coroutine-legacy reset stack (`zealphp_reset_request_rtcaches` + `_statics` + `_class_statics`) per request — letting *re-entrant* legacy apps warm-reuse a worker. Cannot make inherited-class-redeclaring apps safe (use the recycle=1 default or `cgiMode('fork')`). Inherited by the subprocess via the parent env. See `docs/architecture/2026-06-02-fork-per-request-cgi-pool.md`. |
 | `ZEALPHP_GLOBALS_ISOLATION_DISABLE` | unset (isolation NOT disabled; only literal `'1'` disables) | user | Read in `App::run()` via `(string)getenv()==='1'`; when `'1'`, disables the Stage 2 per-coroutine `$GLOBALS` COW isolation even if `coroutineGlobalsIsolation(true)` was called. |
+| `ZEALPHP_GLOBAL_INCLUDE` | unset (off; only literal `'1'` enables) | user | Default source for `App::globalScopeInclude()` when its flag is left `null`. When `'1'` **and** running coroutine-legacy with ext-zealphp 0.3.26+ loaded, the request entry (and its transitive `require_once` tree) runs at **true global scope** via `zealphp_require_global()`, so bare file-scope variables bind into `$GLOBALS` / `EG(symbol_table)` instead of becoming `executeFile()`-local — Stage 8, the gap that makes unmodified `require_once`-bootstrap wp-admin render in-process. The globally-scoped include does NOT receive `$g`/route params (legacy apps read request state via superglobals). Ignored outside coroutine-legacy and when the ext primitive is absent. See [runtime-architecture.md § Stage 8](runtime-architecture.md#stage-8--true-global-scope-request-include-appglobalscopeinclude). |
 | `ZEALPHP_INI_ISOLATE` | `false` | user | In `app.php` (`env_flag(...,false)`); when truthy, registers `IniIsolationMiddleware` which snapshots/restores per-request `ini_set()` changes to prevent ini leakage across requests on a worker. |
 | `ZEALPHP_ALLOW_COMPILE_HOOK_FILE` | unset (HOOK_FILE dropped in silentRedeclare+coroutine mode; only literal `'1'` opts back in) | user | Read in `App::run()` via `(string)getenv()!=='1'`; when `'1'`, keeps OpenSwoole's `HOOK_FILE` flag enabled under silentRedeclare+enableCoroutine (else stripped to avoid a mid-compile yield SIGSEGV/hang). |
 
