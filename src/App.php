@@ -2911,8 +2911,21 @@ class App
         if (!\is_array($status) || empty($status['opcache_enabled'])) {
             return null;  // opcache not active for this SAPI — nothing to warn about
         }
-        $dupsFix = \filter_var(\ini_get('opcache.dups_fix'), \FILTER_VALIDATE_BOOL);
+        $dupsFix = (bool) \filter_var(\ini_get('opcache.dups_fix'), \FILTER_VALIDATE_BOOL);
         $docRoot = \rtrim((string) self::$document_root, '/');
+        return self::opcacheLegacyAdvisory($dupsFix, $docRoot);
+    }
+
+    /**
+     * Build the opcache + coroutine-legacy boot advisory string. Split out of
+     * `opcacheLegacyBootCheck()` as a pure (opcache-independent) seam so both
+     * `dups_fix` branches are unit-testable without opcache enabled in the SAPI.
+     *
+     * @param bool   $dupsFix whether `opcache.dups_fix` is on (the CLASS case is then handled)
+     * @param string $docRoot document-root (already `rtrim`'d), used in the blacklist hint
+     */
+    public static function opcacheLegacyAdvisory(bool $dupsFix, string $docRoot): string
+    {
         if (!$dupsFix) {
             return "[advisory] opcache is ENABLED in coroutine-legacy mode but opcache.dups_fix is "
                 . "OFF. Stage 7 re-executes require_once'd files per request, so opcache re-copies a "
