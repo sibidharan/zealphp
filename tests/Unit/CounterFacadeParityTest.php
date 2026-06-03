@@ -33,7 +33,9 @@ final class CounterFacadeParityTest extends TestCase
     {
         Counter::defaultBackend('atomic');
         $c = new Counter(7);
-        $this->assertInstanceOf(\OpenSwoole\Atomic::class, $c->raw());
+        // raw() returns the 64-bit OpenSwoole\Atomic\Long (was OpenSwoole\Atomic
+        // pre-overflow-fix) so counters can't silently wrap at 2^32.
+        $this->assertInstanceOf(\OpenSwoole\Atomic\Long::class, $c->raw());
         $this->assertSame(7, $c->raw()->get());
     }
 
