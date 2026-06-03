@@ -366,15 +366,20 @@
   padding: .75rem 1rem;
   display: flex; flex-direction: column; gap: .6rem;
 }
-.chat-history, .chat-messages { display: flex; flex-direction: column; gap: .6rem; }
+/* Scoped to .chat-box so these don't leak onto the home-page chat widget
+   (.chat-widget), which shares the .chat-msg / .chat-messages class names but
+   has its own layout in zealphp.css. learn.css is loaded globally on every
+   page, so unscoped .chat-msg/.chat-messages rules would override the home
+   chat and break the user bubble + typing loader. */
+.chat-history, .chat-box .chat-messages { display: flex; flex-direction: column; gap: .6rem; }
 .learn-layout .chat-messages { min-height: 0; max-height: none; overflow-y: visible; padding: 0; }
 .chat-history:empty { display: none; }
 .chat-history:not(:empty) { border-bottom: 1px dashed #d6d3d1; padding-bottom: .6rem; }
 
 /* Bubbles */
-.chat-msg { max-width: 85%; }
-.chat-msg.user { align-self: flex-end; }
-.chat-msg.assistant { align-self: flex-start; }
+.chat-box .chat-msg { max-width: 85%; }
+.chat-box .chat-msg.user { align-self: flex-end; }
+.chat-box .chat-msg.assistant { align-self: flex-start; }
 .chat-bubble { padding: .6rem .85rem; border-radius: 14px; font-size: .9rem; line-height: 1.55; }
 .chat-msg.user .chat-bubble { background: var(--accent, #f59e0b); color: #fff; border-bottom-right-radius: 4px; }
 .chat-msg.assistant .chat-bubble { background: #f5f5f4; color: #1c1917; border-bottom-left-radius: 4px; }
