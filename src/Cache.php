@@ -37,6 +37,9 @@ class Cache
 {
     private const TABLE = '__cache';
     private const MAX_MEM_SIZE = 8192;
+    /** Fixed pool size for getOrCompute() stampede locks — bounds the backend's
+     *  counter map instead of growing one lock per distinct key forever. */
+    private const STAMPEDE_LOCK_SLOTS = 256;
 
     private static string $dir = '';
     private static bool $initialized = false;
@@ -183,13 +186,22 @@ class Cache
         }
         // C-1: stampede gate. Without this, N concurrent misses on the same
         // hot key all run $compute() simultaneously — bad when $compute is
-        // expensive (DB query, external API). Elect a single lock-holder
-        // via Counter::compareAndSet (atomic across workers, server-wide on
-        // Atomic backend; cluster-wide on Redis). Losers wait briefly (up
-        // to 200ms in 20ms increments) for the winner's write, then retry
-        // the cache read; on continued miss they compute themselves (worst
-        // case = double compute, not the herd).
-        $lockName = '__cache_lock_' . md5($key);
+        // expensive (DB query, external API). Elect a single lock-holder via
+        // Counter::compareAndSet. Losers wait briefly (up to 200ms in 20ms
+        // increments) for the winner's write, then retry the cache read; on
+        // continued miss they compute themselves (worst case = double compute,
+        // not the herd).
+        //
+        // SCOPE: on the default Atomic backend the gate is PER-WORKER only — a
+        // Counter's OpenSwoole\Atomic is created lazily after fork, so it is not
+        // shared across workers; concurrent misses in DIFFERENT workers each elect
+        // their own holder. For true server-/cluster-wide herd suppression use the
+        // Redis or Tiered backend (Counter::compareAndSet is a server-side Lua CAS
+        // there). The lock name is hashed into a FIXED pool of slots so the backend's
+        // counter map stays bounded (it would otherwise grow one Atomic per distinct
+        // key for the worker's lifetime); a slot collision only adds a rare, brief
+        // wait, never incorrectness.
+        $lockName = '__cache_stampede_slot_' . (crc32($key) % self::STAMPEDE_LOCK_SLOTS);
         $lock     = new Counter(0, $lockName);
         if (!$lock->compareAndSet(0, 1)) {
             for ($i = 0; $i < 10; $i++) {
@@ -397,8 +409,16 @@ class Cache
         if (!$f) {
             return false;
         }
-        $ttlLine = (int) fgets($f);
+        $ttlRaw = fgets($f);
+        // get()/readFile() treats a newline-less or empty-body file (a torn write)
+        // as a miss + evict; has() must agree, else has()==true while get()==miss.
+        $hasBody = is_string($ttlRaw) && str_contains($ttlRaw, "\n") && !feof($f);
         fclose($f);
+        if (!$hasBody) {
+            @unlink($path);
+            return false;
+        }
+        $ttlLine = (int) $ttlRaw;
         if ($ttlLine > 0 && $ttlLine < $now) {
             @unlink($path);
             return false;
@@ -414,10 +434,17 @@ class Cache
         // Backend-agnostic: works on TableBackend and RedisBackend alike.
         // Store::iterate() yields (key, row) pairs from whichever backend is
         // configured; Store::del() targets the same backend.
+        // Collect keys first, THEN delete — deleting during OpenSwoole\Table
+        // iteration moves the internal cursor and skips ~28% of rows (the next
+        // row gets swapped into the freed slot and is never visited).
+        $keys = [];
         foreach (Store::iterate(self::TABLE) as $key => $_row) {
             if ($key !== '') {
-                Store::del(self::TABLE, $key);
+                $keys[] = $key;
             }
+        }
+        foreach ($keys as $key) {
+            Store::del(self::TABLE, $key);
         }
 
         $files = glob(self::$dir . '/*.cache') ?: [];
@@ -559,7 +586,20 @@ class Cache
     private static function writeFile(string $hash, string $serialized, int $expires): bool
     {
         $path = self::filePath($hash);
-        return file_put_contents($path, $expires . "\n" . $serialized) !== false;
+        // Atomic write: build the body in a unique temp file in the same dir, then
+        // rename() over the target (atomic on a POSIX same-filesystem rename). A
+        // plain file_put_contents lets a concurrent reader see a torn body and a
+        // crash / ENOSPC mid-write leaves a corrupt file at $path.
+        $tmp = $path . '.' . getmypid() . '.' . bin2hex(random_bytes(4)) . '.tmp';
+        if (file_put_contents($tmp, $expires . "\n" . $serialized) === false) {
+            @unlink($tmp);
+            return false;
+        }
+        if (!@rename($tmp, $path)) {
+            @unlink($tmp);
+            return false;
+        }
+        return true;
     }
 
     private static function readFile(string $hash): mixed
@@ -587,7 +627,15 @@ class Cache
         }
 
         $serialized = substr($content, $nlPos + 1);
-        return unserialize($serialized, ['allowed_classes' => false]);
+        $val = @unserialize($serialized, ['allowed_classes' => false]);
+        // unserialize() returns false for a torn/corrupt body AND for a
+        // legitimately stored boolean false ('b:0;'). Don't surface a corrupt
+        // body's false as a genuine cached value — treat it as a miss and evict.
+        if ($val === false && $serialized !== 'b:0;') {
+            @unlink($path);
+            return null;
+        }
+        return $val;
     }
 
     private static function registerGc(int $intervalMs): void
@@ -608,12 +656,18 @@ class Cache
     {
         // Backend-agnostic (TableBackend + RedisBackend); same shape as flush().
         $now = time();
+        // Collect expired keys first, THEN delete — deleting during
+        // OpenSwoole\Table iteration skips ~28% of rows (see flush()).
+        $dead = [];
         foreach (Store::iterate(self::TABLE) as $key => $row) {
             $ttl = $row['ttl'] ?? 0;
             $ttlInt = is_numeric($ttl) ? (int)$ttl : 0;
             if ($ttlInt > 0 && $ttlInt < $now && $key !== '') {
-                Store::del(self::TABLE, $key);
+                $dead[] = $key;
             }
+        }
+        foreach ($dead as $key) {
+            Store::del(self::TABLE, $key);
         }
     }
 
@@ -625,32 +679,38 @@ class Cache
         }
         $now = time();
         $files = glob(self::$dir . '/*.cache') ?: [];
-        $alive = [];   // surviving file paths, for the maxFiles trim below
+        /** @var array<string, int> $alive  surviving path => mtime snapshot */
+        $alive = [];
         foreach ($files as $file) {
             $f = @fopen($file, 'r');
             if (!$f) {
                 continue;
             }
             $ttl = (int) fgets($f);
+            // Snapshot mtime WHILE the fd is open so the maxFiles trim below sorts
+            // on a consistent value — a separate filemtime() after the loop races a
+            // concurrent unlink/replace (TOCTOU) and can mis-order or throw.
+            $stat = fstat($f);
             fclose($f);
             if ($ttl > 0 && $ttl < $now) {
                 @unlink($file);
                 continue;
             }
-            $alive[] = $file;
+            $alive[$file] = is_array($stat) ? (int) $stat[9] : 0; // [9] = st_mtime
         }
-        // C-2: enforce maxFiles cap. After expired-file cleanup above, if
-        // the surviving count still exceeds the cap, evict oldest-first
-        // (by mtime) until under the cap. Required when TTLs are 0 (no
+        // C-2: enforce maxFiles cap. After expired-file cleanup above, if the
+        // surviving count still exceeds the cap, evict oldest-first (by the mtime
+        // snapshot taken above) until under the cap. Required when TTLs are 0 (no
         // expiry) but bounded disk usage is desired.
         if (self::$maxFiles > 0 && count($alive) > self::$maxFiles) {
-            // Sort surviving files by mtime ascending (oldest first).
-            usort($alive, function (string $a, string $b): int {
-                return (int) filemtime($a) <=> (int) filemtime($b);
-            });
+            asort($alive); // oldest mtime first
             $overage = count($alive) - self::$maxFiles;
-            for ($i = 0; $i < $overage; $i++) {
-                @unlink($alive[$i]);
+            $i = 0;
+            foreach (array_keys($alive) as $file) {
+                if ($i++ >= $overage) {
+                    break;
+                }
+                @unlink($file);
                 self::$fileRotations?->increment();
             }
         }
