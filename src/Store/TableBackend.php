@@ -20,6 +20,10 @@ final class TableBackend implements StoreBackend
     private array $tables = [];
     /** @var array<string, array<string, array{0:int, 1?:int}>> */
     private array $schemas = [];
+    /** @var array<string, int> Declared `maxRows` per table — for the silent-full advisory. */
+    private array $maxRows = [];
+    /** @var array<string, true> Tables a capacity warning has already been emitted for (rate-limit to once per table per worker). */
+    private array $capacityWarned = [];
 
     /**
      * Create a named `OpenSwoole\Table` with the given schema. Each column in
@@ -43,19 +47,56 @@ final class TableBackend implements StoreBackend
         $t->create();
         $this->tables[$name]  = $t;
         $this->schemas[$name] = $columns;
+        $this->maxRows[$name] = $maxRows;
     }
 
     /**
      * Write a row to the named table. Returns `false` when the table doesn't
-     * exist or when `OpenSwoole\Table::set()` raises an exception (e.g. row
-     * too large for the allocated slot).
+     * exist or when `OpenSwoole\Table::set()` fails — most commonly because the
+     * table is **full** (`maxRows` is a HARD boot-time cap with NO eviction, so
+     * every new distinct key past the cap is silently dropped) or the row
+     * exceeded a declared column size. The FIRST such failure per table emits a
+     * one-time advisory (the failure would otherwise be silent — see the
+     * scaling-limits doc); the return value is unchanged.
      */
     public function set(string $name, string $key, array $row): bool
     {
         $t = $this->tables[$name] ?? null;
         if ($t === null) { return false; }
-        try { return $t->set($key, $row); }
-        catch (\OpenSwoole\Exception) { return false; }
+        try {
+            $ok = $t->set($key, $row);
+        } catch (\OpenSwoole\Exception) {
+            $ok = false;
+        }
+        if (!$ok) {
+            $this->warnCapacity($name, $t, $key);
+        }
+        return $ok;
+    }
+
+    /**
+     * Surface the otherwise-silent `set()` failure ONCE per table per worker.
+     * Distinguishes "table full" (count at the hard `maxRows` cap, no eviction)
+     * from "row didn't fit" (a column value exceeded its declared size).
+     */
+    private function warnCapacity(string $name, Table $t, string $key): void
+    {
+        if (isset($this->capacityWarned[$name])) { return; }
+        $this->capacityWarned[$name] = true;
+        $max   = $this->maxRows[$name] ?? 0;
+        $count = $t->count();
+        $full  = $max > 0 && $count >= $max;
+        $msg   = $full
+            ? "Store/Table '{$name}' is FULL at its hard maxRows cap ({$count}/{$max}) — "
+              . "OpenSwoole\\Table does NOT evict, so further new keys are SILENTLY DROPPED. "
+              . "Size maxRows to the full hot working set up front, or flip to the Redis/Tiered backend."
+            : "Store/Table '{$name}' set('{$key}') failed (count {$count}/{$max}) — likely a row/column "
+              . "value exceeded its declared size. Increase the column size at make() or use the Redis backend.";
+        if (function_exists('ZealPHP\\elog')) {
+            \ZealPHP\elog($msg, 'warn');
+        } else {
+            error_log($msg);
+        }
     }
 
     /**
@@ -131,6 +172,16 @@ final class TableBackend implements StoreBackend
         }
     }
 
+    /**
+     * Paginated iteration. **O(N²/page) on the Table backend** — the cursor is a
+     * skip-offset and each call re-iterates from row 0, discarding `$cursor`
+     * rows before collecting the next `$count`. Paginating all N rows therefore
+     * costs `O(N² / page)`. Fine for a few thousand rows; for large tables use
+     * the Redis/Tiered backend (true `SCAN` cursor) instead, or `iterate()` if
+     * you can hold one pass in memory. See the scaling-limits doc.
+     *
+     * @return array{cursor: string, rows: array<string, array<string, scalar>>}
+     */
     public function iteratePaged(string $name, string $cursor = '0', int $count = 100): array
     {
         $t = $this->tables[$name] ?? null;
