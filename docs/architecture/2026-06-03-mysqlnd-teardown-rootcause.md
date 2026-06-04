@@ -89,6 +89,65 @@ earlier discriminating kill-switch test (`ZEALPHP_GLOBALS_ISOLATION_DISABLE=1` �
 fingered object-globals as the trigger, but ASAN — the tool that would normally pinpoint the corrupting
 write — comes back clean.
 
+### PINPOINTED (2026-06-04, fresh zend_mm DEBUG gdb) — it's an ALLOCATOR MISMATCH, not a double-free
+
+The decisive frame (debug build, `USE_ZEND_ALLOC=1`, real local MySQL, coroutine-legacy):
+
+```
+zend_mm_panic "zend_mm_heap corrupted" (zend_alloc.c:396)
+ _efree (ptr=0x556…)                                   # glibc-malloc region (NOT zend_mm)
+ _php_stream_free (stream=0x7ffb18bc3e00, close_options=27)  streams.c:525
+   525:  pefree(stream->orig_path, stream->is_persistent);   # is_persistent = 0  → efree
+ mysqlnd_vio_close_stream  (mysqlnd_vio.c:680)
+ mysqlnd_conn_data_send_close → mysqlnd_conn_close (MYSQLND_CLOSE_EXPLICIT)
+ php_mysqli_close → mysqli_link_free_storage          # $wpdb->dbh (mysqli) free_storage
+ zend_object_dtor_property                            # destroying $wpdb's dbh property
+ zend_objects_store_del (object = $wpdb)              # $wpdb dtor
+ zend_array_destroy (the per-coroutine delta array)
+ zend_hash_index_del (zealphp_coro_globals_deltas)
+ zealphp_globals_snapshot_delete (zealphp.c:1111)
+ zif_zealphp_coroutine_globals_request_end (zealphp.c:2261)
+```
+
+Inspecting `*stream` at the crash: `is_persistent = 0`, `in_free = 1`, `orig_path = 0x556…
+"tcp://127.0.0.1:3306"`, `ops = socket_ops`, `open_filename = mysqlnd_vio.c`. The struct is at `0x7ffb…`
+(a **zend_mm / mmap** address ⇒ `emalloc`, consistent with `is_persistent=0`), but `orig_path` is at
+`0x556…` (the **glibc-malloc / brk** region ⇒ `pemalloc`/`pestrdup`, i.e. PERSISTENT). So line 525 does
+`pefree(orig_path, is_persistent=0)` = **`efree` on a `pemalloc`'d pointer** → zend_mm rejects a pointer
+it never owned → "heap corrupted". **The crash is an allocator-routing mismatch on `stream->orig_path`,
+not a double-free.** (`in_free=1` at the crash is this free's own in-progress flag, set before line
+525 — not a re-entry.)
+
+**A `_php_stream_free` entry trace settles the double-free question.** Logging `in_free` at every
+`_php_stream_free` *entry* over a wp-admin hammer: 801 calls, **401 with `in_free=0`, 400 with
+`in_free=1`** — a near-perfect alternation. Each real free (`in_free=0`) is immediately re-entered once
+(`in_free=1`) and php-src's recursion guard early-returns it harmlessly: that alternation is the
+**coroutine scheduler re-entering `_php_stream_free` while the close's socket I/O yields under
+HOOK_ALL** — pervasive but guarded, NOT the crash. The crash stream (`0x7ffb18bc3e00`) is freed exactly
+**once** (`in_free=0` at entry) and dies on the `orig_path` `efree`.
+
+**PERSISTENT CONNECTIONS RULED OUT (2026-06-04).** The natural hypothesis — `orig_path` is in the
+glibc-malloc region because mysqlnd built a PERSISTENT stream (`mysqli.allow_persistent => On` on the
+box) and force-closed it — is **wrong**: re-running the repro with `-d mysqli.allow_persistent=0`
+(forces every connection non-persistent) **still crashes 16×** with the identical `zend_mm_heap
+corrupted` / `signal=11`. mysqlnd's persistent path (`mysqlnd_vio.c` 230-256: remove from
+`persistent_list`; `mysqlnd_fixup_regular_list` frees `net_stream->res` and sets `res=NULL` — matching
+the gdb `stream->res = 0x0`) does NOT flip `is_persistent`, and disabling persistence doesn't help. So a
+genuinely-persistent `orig_path` is **not** the cause.
+
+**Revised reading:** the `efree(orig_path)` at streams.c:525 is the **DETECTION POINT** of a zend_mm
+heap that is **already corrupted upstream**, not necessarily the corrupting write itself (with
+`ZEND_MM_DEBUG=1`, the canary check trips on the first `efree` that touches a corrupted arena — which
+happens to be `orig_path` because the `$wpdb` teardown is the heavy free at request-end). The
+corrupting write is earlier in the per-coroutine isolation path. `ZEALPHP_GLOBALS_ISOLATION_DISABLE=1` →
+0 crashes still fingers object-globals isolation as the trigger, but `orig_path` is the victim, not the
+culprit. **Next probe:** bisect with the per-stage kill-switches (`ZEALPHP_FN_STATICS_*`,
+`ZEALPHP_CLASS_STATICS_RESET_DISABLE`, globals-isolation on/off) to isolate which write corrupts the
+arena, and/or a hardware watchpoint on the specific stream's arena chunk to catch the corrupting store.
+This is a hard, iterative zend_mm-debug frontier; the practical production path for unmodified WP-admin
+stays **`legacy-cgi` / `cgi-pool`** (process-isolated, no coroutine teardown), and modern Composer/PSR-4
+apps that build their DB handle per request (not via a persisted `$wpdb` global object) do not hit it.
+
 ### Fix directions (ext-zealphp, not yet landed)
 
 1. **Don't drive a resource-bearing object's `__destruct` from the isolation teardown.** The delta should
