@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added
+
+- **Env vars for the whole CGI subprocess-pool config.** Previously only the back-of-house *strategy* (`ZEALPHP_CGI_MODE`) was env-configurable; the pool sizing/timeouts needed code. Now every scalar CGI knob has an env var, resolved in core by `App::resolveCgiEnv()` (run from `App::init()` in the master before workers fork): `ZEALPHP_CGI_WORKERS` (`cgi_pool_size`, FPM `pm.max_children` parity), `ZEALPHP_CGI_MAX_REQUESTS` (`cgi_pool_max_requests`, `pm.max_requests`), `ZEALPHP_CGI_TIMEOUT` (`cgi_timeout`, Apache `CGIScriptTimeout`), `ZEALPHP_FCGI_ADDRESS` (`fcgi_address`), `ZEALPHP_CGI_FORK_MAX_CONCURRENT` (`cgi_fork_max_concurrent`). Precedence is **explicit fluent setter > env > default**, symmetric with `ZEALPHP_WORKERS` → `worker_num`. Adds the two missing fluent setters `App::cgiTimeout()` and `App::cgiForkMaxConcurrent()`. `ZEALPHP_CGI_MODE` resolution moved from the demo `app.php` into core so it works for any app, not just the bundled one.
+
 ## [0.3.9] - 2026-06-04
 
 A scale + hardening release: the coroutine-aware **`DbConnectionPool`** (the top scalability blocker), a sharded session write-lock, the **`Store::eval()`** atomic-Lua primitive + cross-node fan-out groundwork, Stage 8 global-scope include, and a sweep of edge-case fixes across session / cache / store / WebSocket / pub/sub from a full critical-infra + scalability audit.
