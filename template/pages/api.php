@@ -11,20 +11,34 @@
     'code'  => <<<'PHP'
 <?php
 // File: api/device/list.php
-// Endpoint: /api/device/list (any HTTP method)
+// Endpoint: /api/device/list — Mode 1: EVERY HTTP method hits this ONE handler.
 // The variable name MUST match basename($file, '.php') → 'list'
 
 use ZealPHP\G;
 
 $list = function() {
-    $g = G::instance();
+    // $this is the ZealAPI instance. Because Mode 1 doesn't split GET/POST
+    // into separate closures, use the helper to tell which verb came in:
+    $method = $this->get_request_method();   // 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+
+    if ($method === 'POST') {
+        $g = G::instance();
+        return ['created' => true, 'method' => $method, 'body' => $g->post];
+    }
+
+    // default (GET, HEAD, …)
     return [
         'devices' => [['id' => 1, 'name' => 'Sensor A'], ['id' => 2, 'name' => 'Sensor B']],
-        'method'  => $g->server['REQUEST_METHOD'],
-        'query'   => $g->get,
+        'method'  => $method,
     ];
 };
 PHP]); ?>
+
+<p>In <strong>Mode 1</strong> a single closure answers every HTTP method, so use
+<code>$this->get_request_method()</code> to branch on the verb (it returns
+<code>GET</code>, <code>POST</code>, <code>PUT</code>, <code>DELETE</code>, or
+<code>PATCH</code>). If you'd rather split each method into its own closure, use
+<a href="#per-method-dispatch">per-method dispatch</a> (Mode 2) instead.</p>
 
 <h2>File naming convention</h2>
 <table class="ztable">
