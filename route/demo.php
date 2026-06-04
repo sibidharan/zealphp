@@ -13,6 +13,8 @@
  *   /demo/inject/all/{id}           — $id + $request + $response
  *   /demo/inject/defaults/{id}      — with default $page = 1
  *   /demo/inject/defaults/{id}/{page}
+ *   /demo/inject/aliases/{id}       — $req / $res short aliases for $request / $response
+ *   /demo/inject/req-segment/{req}  — explicit {req} segment wins over the $request alias
  *
  * Route type demos:
  *   /demo/route/ns/items            — nsRoute
@@ -118,6 +120,31 @@ $app->route('/demo/inject/defaults/{id}', ['methods' => ['GET']], function($id, 
 
 $app->route('/demo/inject/defaults/{id}/{page}', ['methods' => ['GET']], function($id, $page = 1) {
     return ['id' => $id, 'page' => $page, 'note' => 'page from URL'];
+});
+
+// $req / $res are accepted as short aliases for $request / $response — they
+// receive the exact same wrapper instances as the long names.
+$app->route('/demo/inject/aliases/{id}', ['methods' => ['GET']], function($id, $req, $res) {
+    $res->header('X-Alias-Inject', 'yes');
+    return [
+        'id'             => $id,
+        'method'         => $req->server['request_method'] ?? 'GET',
+        'request_class'  => get_class($req),
+        'response_class' => get_class($res),
+        'echo'           => $req->get['echo'] ?? null,
+        'injected'       => ['id', 'req', 'res'],
+        'note'           => '$req / $res are short aliases for $request / $response',
+    ];
+});
+
+// Precedence: an explicit {req} URL segment binds the segment, NOT the Request
+// wrapper — the isset($params[$pname]) check wins over the alias.
+$app->route('/demo/inject/req-segment/{req}', ['methods' => ['GET']], function($req) {
+    return [
+        'req'      => $req,
+        'is_string' => is_string($req),
+        'note'     => 'explicit {req} URL segment wins over the $request alias',
+    ];
 });
 
 // ---------------------------------------------------------------------------
