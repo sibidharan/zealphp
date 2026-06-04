@@ -145,9 +145,9 @@ if (($__pi = getenv('ZEALPHP_PROCESS_ISOLATION')) !== false && $__pi !== '') {
 if (($__ec = getenv('ZEALPHP_ENABLE_COROUTINE')) !== false && $__ec !== '') {
     App::enableCoroutine(env_flag('ZEALPHP_ENABLE_COROUTINE', true));
 }
-if (($__cm = getenv('ZEALPHP_CGI_MODE')) !== false && $__cm !== '') {
-    App::cgiMode($__cm);
-}
+// ZEALPHP_CGI_MODE (and the other ZEALPHP_CGI_* / ZEALPHP_FCGI_ADDRESS knobs)
+// are resolved in core by App::init() → App::resolveCgiEnv(), so they work for
+// any app without per-app glue. An explicit App::cgiMode(...) call here still wins.
 
 // ─── CGI backends (per-extension, ExecCGI-scoped) ───────────────────
 // Demonstrates non-PHP CGI parity in coroutine mode: scripts under the

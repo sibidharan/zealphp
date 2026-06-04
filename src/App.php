@@ -642,6 +642,17 @@ class App
      */
     public static bool $cgi_pool_max_requests_set = false;
     /**
+     * "Explicitly set by a fluent setter" flags for the env-overridable CGI
+     * knobs. `App::resolveCgiEnv()` applies a `ZEALPHP_CGI_*` value only when
+     * the matching flag is false — so explicit code config always wins over the
+     * environment, which in turn wins over the hardcoded default.
+     */
+    public static bool $cgi_mode_set = false;
+    public static bool $cgi_pool_size_set = false;
+    public static bool $cgi_timeout_set = false;
+    public static bool $fcgi_address_set = false;
+    public static bool $cgi_fork_max_concurrent_set = false;
+    /**
      * Whether `cgi_worker.php` (proc-mode subprocess entry) loads Composer's
      * `vendor/autoload.php` on startup. Default `false` — restores the pre-
      * v0.2.20 behaviour where the subprocess runs at true global scope with
@@ -1399,6 +1410,11 @@ class App
             \ZealPHP\Counter::defaultBackend($envKind === 'redis' ? 'redis' : 'atomic');
         }
 
+        // CGI subprocess-pool env overrides (ZEALPHP_CGI_* / ZEALPHP_FCGI_ADDRESS).
+        // Applied here in the master before fork; explicit fluent setters still win
+        // (resolveCgiEnv only fills knobs that weren't set in code).
+        self::resolveCgiEnv();
+
         if ($cwd === null) {
             $php_self = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1)[0]['file'] ?? '';
             $file_name = '/'.basename($php_self);
@@ -2036,6 +2052,7 @@ class App
         if ($mode !== null) {
             $mode = CgiMode::coerce($mode)->value;
             self::$cgi_mode = $mode;
+            self::$cgi_mode_set = true;
         }
         return self::$cgi_mode;
     }
@@ -2173,6 +2190,7 @@ class App
     {
         if ($size !== null) {
             self::$cgi_pool_size = max(1, $size);
+            self::$cgi_pool_size_set = true;
         }
         return self::$cgi_pool_size;
     }
@@ -2219,8 +2237,94 @@ class App
     {
         if ($address !== null) {
             self::$fcgi_address = $address;
+            self::$fcgi_address_set = true;
         }
         return self::$fcgi_address;
+    }
+
+    /**
+     * Max seconds to wait for a `proc`-mode CGI subprocess to emit its metadata
+     * line before SIGTERM/SIGKILL. Apache `CGIScriptTimeout` parity. Default 60.
+     * No-arg returns the current value; with-arg sets and returns it. Env:
+     * `ZEALPHP_CGI_TIMEOUT` (applied at boot unless set explicitly here).
+     */
+    public static function cgiTimeout(?int $seconds = null): int
+    {
+        if ($seconds !== null) {
+            self::$cgi_timeout = max(1, $seconds);
+            self::$cgi_timeout_set = true;
+        }
+        return self::$cgi_timeout;
+    }
+
+    /**
+     * Max concurrent `cgiMode('fork')` children — a per-request fork ceiling,
+     * NOT the pre-spawned `cgiPoolSize()`. Default 16. No-arg returns the
+     * current value; with-arg sets and returns it. Env:
+     * `ZEALPHP_CGI_FORK_MAX_CONCURRENT` (applied at boot unless set explicitly).
+     */
+    public static function cgiForkMaxConcurrent(?int $n = null): int
+    {
+        if ($n !== null) {
+            self::$cgi_fork_max_concurrent = max(1, $n);
+            self::$cgi_fork_max_concurrent_set = true;
+        }
+        return self::$cgi_fork_max_concurrent;
+    }
+
+    /**
+     * Resolve the CGI subprocess-pool config from the environment at boot.
+     *
+     * Each variable is applied only when its knob was NOT set explicitly via the
+     * fluent setter, so precedence is: explicit code config > environment >
+     * hardcoded default — symmetric with `ZEALPHP_WORKERS` → `worker_num`.
+     * Called once from `App::run()` in the master before workers fork; the
+     * resolved values COW-inherit into every worker and the CGI pools they
+     * lazily spawn. The testable seam (unit-tested without booting a server).
+     *
+     * | Env var                         | Knob                    | Setter |
+     * |---------------------------------|-------------------------|--------|
+     * | `ZEALPHP_CGI_MODE`              | `cgi_mode`              | `cgiMode()` |
+     * | `ZEALPHP_CGI_WORKERS`          | `cgi_pool_size`         | `cgiPoolSize()` |
+     * | `ZEALPHP_CGI_MAX_REQUESTS`     | `cgi_pool_max_requests` | `cgiPoolMaxRequests()` |
+     * | `ZEALPHP_CGI_TIMEOUT`          | `cgi_timeout`           | `cgiTimeout()` |
+     * | `ZEALPHP_FCGI_ADDRESS`        | `fcgi_address`          | `fcgiAddress()` |
+     * | `ZEALPHP_CGI_FORK_MAX_CONCURRENT` | `cgi_fork_max_concurrent` | `cgiForkMaxConcurrent()` |
+     */
+    public static function resolveCgiEnv(): void
+    {
+        if (!self::$cgi_mode_set) {
+            $v = getenv('ZEALPHP_CGI_MODE');
+            if (is_string($v) && $v !== '') {
+                try {
+                    self::$cgi_mode = CgiMode::coerce($v)->value;
+                } catch (\Throwable) {
+                    // invalid ZEALPHP_CGI_MODE — keep the current/default mode
+                }
+            }
+        }
+        $intEnv = static function (string $name, int $min): ?int {
+            $v = getenv($name);
+            return (is_string($v) && $v !== '' && is_numeric($v) && (int) $v >= $min) ? (int) $v : null;
+        };
+        if (!self::$cgi_pool_size_set && ($n = $intEnv('ZEALPHP_CGI_WORKERS', 1)) !== null) {
+            self::$cgi_pool_size = $n;
+        }
+        if (!self::$cgi_pool_max_requests_set && ($n = $intEnv('ZEALPHP_CGI_MAX_REQUESTS', 1)) !== null) {
+            self::$cgi_pool_max_requests = $n;
+        }
+        if (!self::$cgi_timeout_set && ($n = $intEnv('ZEALPHP_CGI_TIMEOUT', 1)) !== null) {
+            self::$cgi_timeout = $n;
+        }
+        if (!self::$cgi_fork_max_concurrent_set && ($n = $intEnv('ZEALPHP_CGI_FORK_MAX_CONCURRENT', 1)) !== null) {
+            self::$cgi_fork_max_concurrent = $n;
+        }
+        if (!self::$fcgi_address_set) {
+            $v = getenv('ZEALPHP_FCGI_ADDRESS');
+            if (is_string($v) && $v !== '') {
+                self::$fcgi_address = $v;
+            }
+        }
     }
 
     /**
