@@ -82,6 +82,10 @@ final class Room
             try { Store::sadd(WSRouter::roomMembersSetKey($this->name), $clientId); }
             catch (StoreException) { /* keep join — metadata is authoritative */ }
         }
+        // B1: maintain the per-room server-set so a future targeted-publish step
+        // (B2) only wakes servers that actually hold members. Atomic + idempotent;
+        // no-op off the Redis backend.
+        WSRouter::roomServerJoin($this->name, $clientId);
         // Track the join in this worker's reverse index so WSRouter::release()
         // (ws onClose) can leave the room on an abnormal disconnect. No-op for
         // clients this worker doesn't own.
@@ -106,6 +110,9 @@ final class Room
             try { Store::srem(WSRouter::roomMembersSetKey($this->name), $clientId); }
             catch (StoreException) { /* metadata table already removed */ }
         }
+        // B1: keep the per-room server-set in sync (drops this server when its
+        // last member of the room leaves). Atomic + idempotent.
+        WSRouter::roomServerLeave($this->name, $clientId);
         WSRouter::noteLocalRoomLeave($clientId, $this->name);
         WSRouter::stats()->inc('room_leaves_total');
         $this->publish([

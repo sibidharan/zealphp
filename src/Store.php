@@ -377,6 +377,19 @@ class Store
     }
 
     /**
+     * Run a Lua script atomically on the Redis backend. KEYS are raw /
+     * absolute (un-prefixed). Values are passed as `KEYS`/`ARGV` (never
+     * interpolated into the script body). Throws on the Table backend.
+     *
+     * @param  list<string> $keys
+     * @param  list<string> $args
+     */
+    public static function eval(string $script, array $keys = [], array $args = []): mixed
+    {
+        return self::redisOrThrow('eval')->eval($script, $keys, $args);
+    }
+
+    /**
      * Paginated SSCAN. Returns one batch + an opaque next-cursor — same
      * cursor protocol as `iteratePaged`. Cursor '0' starts a fresh scan;
      * a returned cursor of '0' signals end-of-scan.

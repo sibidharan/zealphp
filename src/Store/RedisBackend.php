@@ -509,6 +509,19 @@ final class RedisBackend implements StoreBackend
     }
 
     /**
+     * Run a Lua script server-side (atomic). KEYS are raw / absolute
+     * (un-prefixed, like `sadd`/`publish`). Returns whatever the script
+     * returns. Used by `WSRouter` for the race-free per-room server-set.
+     *
+     * @param list<string> $keys
+     * @param list<string> $args
+     */
+    public function eval(string $script, array $keys = [], array $args = []): mixed
+    {
+        return $this->pool->with(fn(RedisClient $c): mixed => $c->evalScript($script, $keys, $args));
+    }
+
+    /**
      * Cursor-based `SSCAN` on an absolute SET key — one batch per call.
      *
      * @return array{0:string, 1:list<string>} `[nextCursor, members]`

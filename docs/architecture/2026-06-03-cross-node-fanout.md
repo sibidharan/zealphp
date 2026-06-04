@@ -133,7 +133,10 @@ aggregator it's the targeted-server count. Document accordingly.
 
 1. **B1 — server-set maintenance** (Lua refcount + `Room::join`/`leave` hooks),
    no routing change yet. Unit-testable with Valkey by faking multiple
-   `server_id`s. Low risk (additive bookkeeping).
+   `server_id`s. Low risk (additive bookkeeping). **✅ LANDED** — `Store::eval()`
+   + `WSRouter::roomServers()` / `roomServerJoin()` / `roomServerLeave()`, backed
+   by an atomic Lua SADD/SREM on the 0↔1 boundary of a per-`(room, server)`
+   client set (idempotent). Pinned by `tests/Unit/WS/RoomServerSetTest.php`.
 2. **B2 — targeted publish + scoped subscribe** behind `App::wsRoomTargeting(true)`
    (default off). Flip the room channel scheme; keep a migration note. Test the
    delivery matrix (member on A only → B never receives) with two fake servers

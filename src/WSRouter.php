@@ -808,6 +808,107 @@ final class WSRouter
             || $b instanceof \ZealPHP\Store\TieredBackend;
     }
 
+    // ── Per-room server-set (B1: cross-node fan-out targeting groundwork) ──
+    //
+    // `ws:room:{room}:servers` is a Redis SET of the server_ids that hold >=1
+    // member of {room}. The future B2 step will PUBLISH a room message only to
+    // the servers in this set (instead of the cluster-wide ws:room:* broadcast),
+    // so a node with no members of a room never gets woken.
+    //
+    // Maintenance must be refcount-correct under concurrency: a per-(room,server)
+    // SET of client_ids tracks presence, and the server is SADD'd/SREM'd from the
+    // servers-set exactly on the 0<->1 cardinality boundary — done ATOMICALLY in
+    // one Lua call so a leave's SREM can't interleave a join's SADD and drop a
+    // server that still has members. Using a client-SET (not a counter) also
+    // makes join/leave idempotent: re-joining the same client is a no-op SADD.
+    //
+    // B1 is additive bookkeeping ONLY — it does not change message routing yet,
+    // so any transient drift is toward OVER-inclusion (an extra server in the
+    // set → a wasted message in B2), never under-inclusion (a dropped message).
+
+    /** @internal — absolute SET key: the server_ids holding >=1 member of $room. */
+    public static function roomServersKey(string $room): string
+    {
+        return self::ROOM_CHANNEL_PREFIX . $room . ':servers';
+    }
+
+    /** @internal — absolute SET key: the locally-owned client_ids of $room on $server. */
+    public static function roomServerClientsKey(string $room, string $server): string
+    {
+        return self::ROOM_CHANNEL_PREFIX . $room . ':srv:' . $server . ':clients';
+    }
+
+    /**
+     * @internal — record that THIS server now holds $clientId in $room. Adds the
+     * client to the per-(room,server) presence set and, if it was this server's
+     * FIRST member of the room, adds this server to the room's server-set —
+     * atomically. Idempotent. No-op off the Redis backend. Called by Room::join.
+     */
+    public static function roomServerJoin(string $room, string $clientId): void
+    {
+        if (self::$serverId === '' || !self::hasRedisBackend()) { return; }
+        // KEYS[1]=clients-set  KEYS[2]=servers-set   ARGV[1]=client  ARGV[2]=server
+        $lua = "redis.call('SADD', KEYS[1], ARGV[1])\n"
+             . "if redis.call('SCARD', KEYS[1]) == 1 then redis.call('SADD', KEYS[2], ARGV[2]) end\n"
+             . "return 1";
+        try {
+            Store::eval(
+                $lua,
+                [self::roomServerClientsKey($room, self::$serverId), self::roomServersKey($room)],
+                [$clientId, self::$serverId],
+            );
+        } catch (StoreException $e) {
+            error_log("WSRouter::roomServerJoin({$room}, {$clientId}): " . $e->getMessage());
+        }
+    }
+
+    /**
+     * @internal — record that THIS server no longer holds $clientId in $room.
+     * Removes the client from the presence set and, if that was this server's
+     * LAST member of the room, removes this server from the room's server-set —
+     * atomically. Idempotent. No-op off the Redis backend. Called by Room::leave.
+     */
+    public static function roomServerLeave(string $room, string $clientId): void
+    {
+        if (self::$serverId === '' || !self::hasRedisBackend()) { return; }
+        $lua = "redis.call('SREM', KEYS[1], ARGV[1])\n"
+             . "if redis.call('SCARD', KEYS[1]) == 0 then redis.call('SREM', KEYS[2], ARGV[2]) end\n"
+             . "return 1";
+        try {
+            Store::eval(
+                $lua,
+                [self::roomServerClientsKey($room, self::$serverId), self::roomServersKey($room)],
+                [$clientId, self::$serverId],
+            );
+        } catch (StoreException $e) {
+            error_log("WSRouter::roomServerLeave({$room}, {$clientId}): " . $e->getMessage());
+        }
+    }
+
+    /**
+     * @internal — the server_ids currently holding >=1 member of $room. The B2
+     * routing step publishes a room message only to these servers. Returns an
+     * empty list off the Redis backend or on error.
+     *
+     * @return list<string>
+     */
+    public static function roomServers(string $room): array
+    {
+        if (!self::hasRedisBackend()) { return []; }
+        try {
+            $members = Store::eval("return redis.call('SMEMBERS', KEYS[1])", [self::roomServersKey($room)], []);
+        } catch (StoreException $e) {
+            error_log("WSRouter::roomServers({$room}): " . $e->getMessage());
+            return [];
+        }
+        if (!is_array($members)) { return []; }
+        $out = [];
+        foreach ($members as $m) {
+            if (is_string($m) && $m !== '') { $out[] = $m; }
+        }
+        return $out;
+    }
+
     /** @internal — rate-limit threshold accessor (used by WSRouter\Room::push). */
     public static function roomRateLimitN(): int { return self::$roomRateLimitN; }
 
