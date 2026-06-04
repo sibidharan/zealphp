@@ -3120,6 +3120,36 @@ class App
     }
 
     /**
+     * True when the per-request state RESETS — `zealphp_reset_request_rtcaches()`
+     * / `zealphp_reset_request_statics()` / `zealphp_reset_request_class_statics()`,
+     * run in the session-manager `finally` block — are SAFE to execute.
+     *
+     * Those resets restore user symbols to their boot template each request
+     * (the PHP-FPM "fresh process per request" contract). They are safe ONLY
+     * when the boot snapshot (`zealphp_process_state_snapshot()`, taken in
+     * `onWorkerStart`) exists to EXEMPT framework class statics — `App::$routes`,
+     * the middleware stack, `Store`/`Counter` backends, session handlers. That
+     * snapshot is gated on include- or function-isolation (App::run() boot
+     * wiring), so it is taken under `coroutine-legacy` (which enables
+     * `includeIsolation(true)`) but NOT under a bare `silentRedeclare(true)`
+     * that enables neither isolation.
+     *
+     * Issue #227: gating the resets on `$silent_redeclare` ALONE let them fire
+     * under bare `silentRedeclare(true)` with no exempting snapshot, so the
+     * reset zeroed `App::$middleware_stack` (→ "handle() on null" on request
+     * 2+) and could heap-corrupt other framework statics. Requiring an active
+     * isolation (hence a snapshot) keeps the resets scoped to `coroutine-legacy`
+     * — exactly where they are intended and safe. Bare `silentRedeclare(true)`
+     * (the declare-opcode hook alone, for cron-worker redeclares) gets no
+     * resets, matching its documented "just the redeclare hook" contract.
+     */
+    public static function perRequestStateResetsActive(): bool
+    {
+        return self::$silent_redeclare
+            && (self::$function_isolation || self::$include_isolation);
+    }
+
+    /**
      * Stage 8 global-scope request include (coroutine-legacy). A no-arg call
      * returns the current setting; a one-arg call sets it. See the
      * `$global_scope_include` docblock for the contract. Set BEFORE `App::run()`.
@@ -7926,7 +7956,19 @@ class App
      */
     private function registerOnRequest(\OpenSwoole\WebSocket\Server $server, string $sessionManager): void
     {
-        $server->on("request",new $sessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) {
+        // #227 (defense-in-depth): capture the boot-assembled middleware stack
+        // in the request closure's `use` clause. The primary fix is the reset
+        // gate (App::perRequestStateResetsActive()) — but if a per-request
+        // class-static reset ever zeroes App::$middleware_stack anyway (e.g. an
+        // ext-zealphp build whose boot-snapshot exemption misses it under
+        // coroutine-legacy on PHP 8.4), re-reading the class static here would
+        // hand back null and every request would 500 with "handle() on null".
+        // A closure `use` capture lives on the closure object — outside every
+        // per-request reset / isolation category (class statics, function
+        // statics, $GLOBALS, superglobals) — so it survives. registerOnRequest()
+        // runs AFTER buildMiddlewareStack(), so this is the fully assembled chain.
+        $bootMiddleware = self::$middleware_stack;
+        $server->on("request",new $sessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) use ($bootMiddleware) {
             $g = RequestContext::instance();
 
             $g->status = 200;
@@ -7986,8 +8028,22 @@ class App
             $serverRequest  = new \ZealPHP\HTTP\LazyServerRequest($request->parent);
 
             try {
-                $mw = App::middleware();
-                assert($mw !== null);
+                // #227: prefer the registration-time capture (immune to a
+                // per-request class-static reset zeroing the static); fall back
+                // to the self-healing accessor (rebuilds from the wait stack),
+                // then fail loudly with a diagnosable message instead of the
+                // cryptic "Call to a member function handle() on null".
+                $mw = $bootMiddleware ?? App::middleware();
+                if ($mw === null) {
+                    throw new \RuntimeException(
+                        'ZealPHP: middleware stack unavailable at request time. '
+                        . 'App::run() did not assemble it, or a per-request '
+                        . 'state reset zeroed App::$middleware_stack with no '
+                        . 'recoverable wait stack (issue #227). Upgrade '
+                        . 'ext-zealphp to >= 0.3.25 if running coroutine-legacy '
+                        . 'on PHP 8.4.'
+                    );
+                }
                 $serverResponse = $mw->handle($serverRequest);
 
                 // Per-request shutdown functions (Apache mod_php parity). Run AFTER
@@ -8303,8 +8359,38 @@ class App
         });
     }
 
+    /**
+     * The assembled PSR-15 middleware stack (built at boot from
+     * `App::$middleware_wait_stack` by `buildMiddlewareStack()`).
+     *
+     * Self-heals: if `App::$middleware_stack` reads back null but middleware
+     * was queued via `addMiddleware()`, the stack is re-assembled on the fly
+     * from the wait stack — base `ResponseMiddleware` (the router) then each
+     * queued middleware in first-registered-outermost order, identical to
+     * `buildMiddlewareStack()`. This is a defence-in-depth backstop: if a
+     * per-request class-static reset ever zeroes `App::$middleware_stack` after
+     * boot without an exempting snapshot (issue #227 — the root fix is the
+     * reset gate `perRequestStateResetsActive()`), the accessor still returns a
+     * working stack instead of null. The rebuilt stack is
+     * deliberately NOT written back to the static — under isolation the write
+     * would not persist to the next coroutine, and in normal modes a null here
+     * means "called before init()", which the rebuild already satisfies
+     * without masking that ordering mistake. In the normal post-`run()` path
+     * the static is non-null, so this branch never runs (zero overhead, no
+     * behavioural change).
+     */
     public static function middleware(): ?StackHandler
     {
+        if (self::$middleware_stack === null && self::$middleware_wait_stack !== []) {
+            $stack = (new StackHandler())->add(new ResponseMiddleware());
+            assert($stack instanceof StackHandler);
+            foreach (array_reverse(self::$middleware_wait_stack) as $middleware) {
+                $rebuilt = $stack->add($middleware);
+                assert($rebuilt instanceof StackHandler);
+                $stack = $rebuilt;
+            }
+            return $stack;
+        }
         return self::$middleware_stack;
     }
 }
