@@ -58,6 +58,50 @@ class RoutingTest extends TestCase
         $this->assertArrayHasKey('response_class', $j);
     }
 
+    // --- $req / $res short aliases for $request / $response ---
+
+    public function testReqResAliasesInjectSameWrappers(): void
+    {
+        // A handler `function ($id, $req, $res)` must receive the exact same
+        // Request/Response wrappers as `$request`/`$response` — read a query
+        // param via $req, set a header via $res.
+        $r = $this->get('/demo/inject/aliases/55?echo=ping');
+        $this->assertStatus(200, $r);
+        $j = $this->assertJsonResponse($r);
+        $this->assertSame('55', $j['id']);
+        $this->assertSame('GET', $j['method']);
+        $this->assertSame('ping', $j['echo']);            // $req->get['echo']
+        $this->assertHeader('x-alias-inject', 'yes', $r); // $res->header(...)
+        // Same wrapper classes the long names resolve to.
+        $this->assertSame('ZealPHP\\HTTP\\Request', $j['request_class']);
+        $this->assertSame('ZealPHP\\HTTP\\Response', $j['response_class']);
+    }
+
+    public function testExplicitReqSegmentWinsOverAlias(): void
+    {
+        // A {req} URL segment binds the matched string, not the Request wrapper
+        // — the isset($params[$pname]) check runs before the alias.
+        $r = $this->get('/demo/inject/req-segment/hello');
+        $this->assertStatus(200, $r);
+        $j = $this->assertJsonResponse($r);
+        $this->assertSame('hello', $j['req']);
+        $this->assertTrue($j['is_string']);
+    }
+
+    public function testReqResAliasesInjectInApiLayer(): void
+    {
+        // The api/ layer (ZealAPI) accepts the same $req/$res aliases — the
+        // fixture api/test_aliases.php declares `function ($req, $res)`.
+        $r = $this->get('/api/test_aliases?echo=pong');
+        $this->assertStatus(200, $r);
+        $j = $this->assertJsonResponse($r);
+        $this->assertTrue($j['ok']);
+        $this->assertSame('pong', $j['echo']);            // $req->get['echo']
+        $this->assertHeader('x-alias-inject', 'yes', $r); // $res->header(...)
+        $this->assertSame('ZealPHP\\HTTP\\Request', $j['request_class']);
+        $this->assertSame('ZealPHP\\HTTP\\Response', $j['response_class']);
+    }
+
     public function testDefaultParamUsed(): void
     {
         $r = $this->get('/demo/inject/defaults/abc');

@@ -115,7 +115,7 @@ $delete = function ($request) { return User::delete($request->get['id'] ?? null)
 // GET /api/users/item?id=42 → $get; DELETE → $delete; POST → 405 + Allow</code></pre>
     <p>
       Why a separate convention from <code>public/</code>? Because <code>api/</code> files get
-      parameter injection (<code>$app</code>, <code>$request</code>, <code>$response</code>, <code>$server</code>),
+      parameter injection (<code>$app</code>, <code>$request</code> / <code>$req</code>, <code>$response</code> / <code>$res</code>, <code>$server</code>),
       a <code>ZealAPI</code> base class with helpers like
       <code>$this-&gt;paramsExists()</code>, and automatic JSON encoding for array/object returns.
       <code>public/</code> files are plain PHP scripts that echo their own output. Pick

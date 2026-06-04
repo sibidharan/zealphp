@@ -39,16 +39,21 @@
     </p>
 
     <h2>The four magic names</h2>
-    <p>ZealPHP recognizes four parameter-name patterns:</p>
+    <p>ZealPHP recognizes four parameter-name patterns (<code>$request</code> and <code>$response</code> each have a short alias — <code>$req</code> and <code>$res</code>):</p>
     <table class="cmp-table">
       <thead><tr><th>If your parameter is named…</th><th>You get…</th></tr></thead>
       <tbody>
-        <tr><td><code>$request</code></td><td>The <code>ZealPHP\HTTP\Request</code> wrapper — headers, query, body, cookies, files</td></tr>
-        <tr><td><code>$response</code></td><td>The <code>ZealPHP\HTTP\Response</code> wrapper — <code>json()</code>, <code>redirect()</code>, <code>stream()</code>, <code>sse()</code>, <code>cookie()</code></td></tr>
+        <tr><td><code>$request</code> (or <code>$req</code>)</td><td>The <code>ZealPHP\HTTP\Request</code> wrapper — headers, query, body, cookies, files</td></tr>
+        <tr><td><code>$response</code> (or <code>$res</code>)</td><td>The <code>ZealPHP\HTTP\Response</code> wrapper — <code>json()</code>, <code>redirect()</code>, <code>stream()</code>, <code>sse()</code>, <code>cookie()</code></td></tr>
         <tr><td><code>$app</code></td><td>The <code>ResponseMiddleware</code> instance handling this request — almost never useful in modern handlers; reach for the static <code>\ZealPHP\App::*</code> facade (<code>render()</code>, <code>include()</code>, <code>after()</code>, <code>getServer()</code>) instead</td></tr>
         <tr><td>Anything matching a <code>{name}</code> in the route</td><td>The captured URL segment as a string</td></tr>
       </tbody>
     </table>
+    <p>
+      <code>$req</code> / <code>$res</code> are accepted as short aliases for <code>$request</code> / <code>$response</code> —
+      they receive the exact same wrappers. An explicit <code>{req}</code> / <code>{res}</code> URL segment still wins:
+      a matched path parameter binds by name before the alias is considered.
+    </p>
     <p>
       Any other parameter with a default value gets its default. A parameter without a default that
       ZealPHP can’t resolve is passed <code>null</code> — if the parameter is typed non-nullable,

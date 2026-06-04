@@ -279,9 +279,9 @@ class ZealAPI extends REST
                     $pname = $param->getName();
                     if ($pname == 'app'){
                         $invokeArgs[] = $this;
-                    } else if ($pname == 'request'){
+                    } else if ($pname == 'request' || $pname == 'req'){
                         $invokeArgs[] = $this->request;
-                    } else if ($pname == 'response'){
+                    } else if ($pname == 'response' || $pname == 'res'){
                         $invokeArgs[] = $this->_response;
                     } else if ($pname == 'server'){
                         $invokeArgs[] = App::$server;

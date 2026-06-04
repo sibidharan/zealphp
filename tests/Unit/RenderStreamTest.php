@@ -99,6 +99,43 @@ class RenderStreamTest extends TestCase
         $this->assertEmpty($chunks);
     }
 
+    public function testReqResAliasesInClosureTemplate(): void
+    {
+        // resolveClosureParams aliases $req → request, $res → response when the
+        // caller supplied the long-name args but no explicit 'req'/'res'.
+        $this->writeTemplate('aliases', '<?php
+            return function($req, $res) {
+                yield "$req|$res";
+            };
+        ');
+
+        $chunks = iterator_to_array(App::renderStream('aliases', [
+            'request'  => 'REQ',
+            'response' => 'RES',
+        ]));
+        $this->assertCount(1, $chunks);
+        $this->assertEquals('REQ|RES', $chunks[0]);
+    }
+
+    public function testExplicitReqArgWinsOverAlias(): void
+    {
+        // An explicit 'req'/'res' arg binds directly — the alias only fills in
+        // when the caller did NOT pass the short name.
+        $this->writeTemplate('alias-explicit', '<?php
+            return function($req, $res) {
+                yield "$req|$res";
+            };
+        ');
+
+        $chunks = iterator_to_array(App::renderStream('alias-explicit', [
+            'req'      => 'EXPLICIT_REQ',
+            'res'      => 'EXPLICIT_RES',
+            'request'  => 'LONG_REQ',
+            'response' => 'LONG_RES',
+        ]));
+        $this->assertEquals('EXPLICIT_REQ|EXPLICIT_RES', $chunks[0]);
+    }
+
     public function testRenderToStringCaptures(): void
     {
         $this->writeTemplate('string-test', '<h1><?= $title ?></h1>');

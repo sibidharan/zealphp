@@ -336,11 +336,13 @@ Wire them ONCE during boot — either in the user's `app.php` for single-app dep
 
 | Parameter name | Injected value |
 |---------------|---------------|
-| `$request` | `ZealPHP\HTTP\Request` wrapper |
-| `$response` | `ZealPHP\HTTP\Response` wrapper |
+| `$request` (or `$req`) | `ZealPHP\HTTP\Request` wrapper |
+| `$response` (or `$res`) | `ZealPHP\HTTP\Response` wrapper |
 | `$app` | `ResponseMiddleware` instance |
 | `{param}` names | Matched URL segments |
 | Any other name with default | PHP default value |
+
+`$req` / `$res` are accepted as short aliases for `$request` / `$response` — they inject the exact same wrappers (route handlers + fallback/error handlers via `ResponseMiddleware`, api/ closures via `ZealAPI`, and template/streaming closures via `App::resolveClosureParams`). An explicit `{req}` / `{res}` URL segment still wins: a matched path parameter binds by name before the alias is considered. ws/task handlers are positional and unaffected.
 
 Reflection is cached per route at registration time — zero reflection overhead per request.
 
@@ -575,7 +577,9 @@ Duplicate-start detection: if a server is already running on the same port, `sta
 
 Log files default to `/tmp/zealphp/` — `access.log`, `debug.log`, `zlog.log`, `server.log`. All configurable via `ZEALPHP_*` env vars. Logging is fully async via coroutine channels (zero request impact).
 
-**Canonical env-var reference:** every `ZEALPHP_*` variable the code reads (64 of them) is documented in `docs/environment-variables.md` — defaults, scope (user / internal / test / build-CI), and `env_flag` bool semantics, with internal IPC vars (`ZEALPHP_REQUEST_CONTEXT`, `ZEALPHP_CWD`, …) walled off so they aren't mistaken for user knobs. The CLI subset is in `docs/cli.md`; cross-linked from `docs/runtime-architecture.md`. When you add a new `getenv('ZEALPHP_…')`, add a row to that doc (a completeness check greps `src/`/`app.php`/`ext/` for `ZEALPHP_[A-Z0-9_]+`).
+**CGI back-of-house env knobs (v0.4.0):** the whole CGI subprocess-pool config is env-overridable, resolved in core by `App::resolveCgiEnv()` (called from `App::init()`, master, pre-fork): `ZEALPHP_CGI_MODE` (`cgiMode`), `ZEALPHP_CGI_WORKERS` (`cgiPoolSize` — per-OpenSwoole-worker pool size; total subprocs = `worker_num × this`), `ZEALPHP_CGI_MAX_REQUESTS` (`cgiPoolMaxRequests`), `ZEALPHP_CGI_TIMEOUT` (`cgiTimeout`), `ZEALPHP_FCGI_ADDRESS` (`fcgiAddress`), `ZEALPHP_CGI_FORK_MAX_CONCURRENT` (`cgiForkMaxConcurrent`). Precedence: **explicit fluent setter > env > default** (each knob has a `*_set` flag; `resolveCgiEnv()` only fills un-set ones). `cgiTimeout()`/`cgiForkMaxConcurrent()` are the two setters added alongside.
+
+**Canonical env-var reference:** every `ZEALPHP_*` variable the code reads (69 of them) is documented in `docs/environment-variables.md` — defaults, scope (user / internal / test / build-CI), and `env_flag` bool semantics, with internal IPC vars (`ZEALPHP_REQUEST_CONTEXT`, `ZEALPHP_CWD`, …) walled off so they aren't mistaken for user knobs. The CLI subset is in `docs/cli.md`; cross-linked from `docs/runtime-architecture.md`. When you add a new `getenv('ZEALPHP_…')`, add a row to that doc (a completeness check greps `src/`/`app.php`/`ext/` for `ZEALPHP_[A-Z0-9_]+`).
 
 The shell script `scripts/zealphp.sh` is an optional higher-level wrapper. All commands work directly via `php app.php`.
 

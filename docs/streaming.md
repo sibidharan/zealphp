@@ -104,6 +104,8 @@ es.addEventListener('done', () => es.close());
    };
    ```
 
+   As with route handlers, `$req` / `$res` are accepted as short aliases for `$request` / `$response` when those are present in the `$args` array.
+
 2. **IIFE Generator** (explicit, when you want closure-style `use`):
 
    ```php

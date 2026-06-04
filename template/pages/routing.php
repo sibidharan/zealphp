@@ -3,7 +3,7 @@
 <section class="section">
 <div class="container">
 <h1 class="section-title">Routing &amp; Parameter Injection</h1>
-<p class="section-desc">ZealPHP uses reflection to inject route parameters, <code>$request</code>, <code>$response</code>, and <code>$app</code> into handlers by name — no annotations, no containers.</p>
+<p class="section-desc">ZealPHP uses reflection to inject route parameters, <code>$request</code>, <code>$response</code>, and <code>$app</code> into handlers by name — no annotations, no containers. <code>$req</code> / <code>$res</code> are accepted as short aliases for <code>$request</code> / <code>$response</code>.</p>
 
 <!-- File-based routing -->
 <h2 class="route-h2">File-based routing — just like LAMP</h2>
@@ -240,7 +240,7 @@ PHP
 
 <!-- Injection cases -->
 <h2 class="route-h2">Parameter injection — every case</h2>
-<p class="route-mb-1-5">All panels below auto-run against the live server. The handler signature determines what gets injected.</p>
+<p class="route-mb-1-5">All panels below auto-run against the live server. The handler signature determines what gets injected. <code>$req</code> / <code>$res</code> are accepted as short aliases for <code>$request</code> / <code>$response</code> — an explicit <code>{req}</code> / <code>{res}</code> URL segment still wins.</p>
 
 <?php
 $cases = [

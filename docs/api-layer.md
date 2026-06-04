@@ -18,11 +18,19 @@ Assign a closure to a variable whose name matches the file base name. It receive
 // File: api/device/list.php
 
 $list = function () {
-    return $this->json(['devices' => []]);
+    // Mode 1 sends EVERY HTTP method to this one closure. Use the helper to
+    // tell which verb came in (there is no separate $get/$post here):
+    $method = $this->get_request_method();   // 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+
+    if ($method === 'POST') {
+        return $this->json(['created' => true, 'method' => $method]);
+    }
+
+    return $this->json(['devices' => [], 'method' => $method]);
 };
 ```
 
-`ZealAPI::processApi()` includes the file, binds `$list` to the API object (`$this`), and executes it.
+`ZealAPI::processApi()` includes the file, binds `$list` to the API object (`$this`), and executes it. Since a Mode 1 closure answers **every** verb, `$this->get_request_method()` (returns `GET`/`POST`/`PUT`/`DELETE`/`PATCH`, defaulting to `GET`) is how you branch on the HTTP method inside it — the per-method helpers table below lists the related request accessors. If you'd rather split each verb into its own closure, use Mode 2 (per-method dispatch) instead.
 
 ### Mode 2 — Per-method dispatch
 
@@ -62,10 +70,12 @@ ZealPHP inspects the closure signature and injects arguments by name. Supported 
 
 - **Framework objects**:
   - `$app` – current `ZealPHP\ZealAPI` instance
-  - `$request` – `ZealPHP\HTTP\Request` wrapper
-  - `$response` – `ZealPHP\HTTP\Response` wrapper
+  - `$request` – `ZealPHP\HTTP\Request` wrapper (`$req` is accepted as a short alias)
+  - `$response` – `ZealPHP\HTTP\Response` wrapper (`$res` is accepted as a short alias)
   - `$server` – underlying `OpenSwoole\HTTP\Server`
 - **Any other name** – receives `null`, or the parameter's declared default value if one exists.
+
+`$req` / `$res` are accepted as short aliases for `$request` / `$response` — they receive the exact same wrappers the long names would.
 
 > **ZealAPI does NOT inject route path parameters.** The URL segments `module` and `action` are consumed by `processApi()` during file resolution and are never passed as closure arguments. To read URL path values use `$request->get` (the query-string array) or `$this->_request` (the cleaned merged inputs). There is no `{id} → $id` injection in ZealAPI — that feature belongs to `$app->route()` handlers, not file-based API closures.
 
