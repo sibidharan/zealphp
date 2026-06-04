@@ -333,6 +333,24 @@ $messageId = Store::publishReliable('orders', json_encode($order));</code></pre>
 
 <p class="store-lead-tight store-mt-1"><strong>Receiver count semantics:</strong> <code>Store::publish</code> delivers ONE copy to every worker (across every node) running a matching subscriber. So 32 workers per node &times; 2 nodes = <code>receivers: 64</code> for one PUBLISH. That's correct Redis pub/sub &mdash; matches the cross-server WebSocket routing pattern where each worker owns a subset of fds.</p>
 
+<h3 class="store-h3" id="eval">Atomic Lua &mdash; <code>Store::eval()</code></h3>
+<p class="store-lead-tight">For multi-step operations that must be atomic (read-modify-write, conditional set-membership), run a Lua script server-side. Available on the Redis / Tiered backend (throws on Table).</p>
+<div class="code-block">
+<pre><code class="language-php">// Keys are raw/absolute (like publish); values pass as KEYS/ARGV — never
+// interpolated into the script body. Returns whatever the script returns.
+$n = Store::eval(
+    "local v = redis.call('INCR', KEYS[1])\n" .
+    "if v == 1 then redis.call('SADD', KEYS[2], ARGV[1]) end\n" .
+    "return v",
+    keys: ['room:42:count', 'room:42:servers'],
+    args: [$serverId],
+);</code></pre>
+</div>
+
+<div class="callout info store-mt-1" id="cross-node-fanout">
+  <strong>Cross-node fan-out (roadmap).</strong> The W&times;N receiver count above &mdash; every worker on every node gets every message &mdash; is being reduced toward <strong>N</strong> by a per-node pub/sub aggregator (one SUBSCRIBE per node, re-fanning to local workers) plus WebSocket room targeting (publish only to nodes that actually hold members). Step <strong>B1</strong> &mdash; the per-room <em>server-set</em> (<code>WSRouter::roomServers()</code>, maintained race-free via <code>Store::eval()</code>) &mdash; has landed as the additive groundwork; targeted routing (B2) and the aggregator (A1) are opt-in increments. Design + rollout plan: <a href="https://github.com/sibidharan/zealphp/blob/master/docs/architecture/2026-06-03-cross-node-fanout.md" target="_blank">cross-node-fanout.md</a>.
+</div>
+
 <h2 class="store-h2-section" id="demo">Live demo &mdash; this very server</h2>
 <p class="store-lead-tight">Each button below fires a real HTTP request against the running ZealPHP instance. Output panel shows the JSON the server returned. Most useful with <code>ZEALPHP_STORE_BACKEND=redis</code>; on the default Table backend the pub/sub buttons surface a clean <code>StoreException</code> error in JSON.</p>
 <div class="store-demo-panel">
