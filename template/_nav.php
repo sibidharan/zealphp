@@ -18,6 +18,7 @@ $links = [
   'api'             => ['/api',            'REST API'],
   'legacy-apps'     => ['/legacy-apps',    'Legacy Apps'],
   'templates'       => ['/templates',      'Components'],
+  'htmx'            => ['/htmx',            'HTMX'],
   'streaming'       => ['/streaming',      'Streaming'],
   'coroutines'      => ['/coroutines',     'Coroutines'],
   'websocket'       => ['/ws',             'WebSocket'],

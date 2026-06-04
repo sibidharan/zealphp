@@ -19,6 +19,7 @@ $groups = [
         ['api-layer',                'API Layer'],
         ['error-handling',           'Error Handling'],
         ['templates-and-rendering',  'Templates & Rendering'],
+        ['htmx',                     'HTMX'],
     ],
     'Surfaces' => [
         ['streaming',                     'Streaming'],

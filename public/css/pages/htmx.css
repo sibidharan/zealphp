@@ -1,0 +1,31 @@
+/* Page-scoped styles for /htmx. Spacing utilities + the before/after grid.
+   Mirrors the responses.css convention (page-prefixed utility classes). */
+.htmx-page .htmx-m-0 { margin: 0; }
+.htmx-page .htmx-mt-1 { margin-top: 1rem; }
+.htmx-page .htmx-mt-2 { margin-top: 2rem; }
+.htmx-page .htmx-mb-1 { margin-bottom: 1rem; }
+.htmx-page .htmx-mb-2 { margin-bottom: 2rem; }
+
+.htmx-page .htmx-list {
+  margin: 0.5rem 0 1rem 1.25rem;
+  line-height: 1.7;
+}
+
+/* Before/after side-by-side comparison — collapses to one column on narrow
+   viewports so the code blocks never overflow. */
+.htmx-page .htmx-beforeafter {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1rem 0;
+  align-items: start;
+}
+.htmx-page .htmx-ba-col {
+  min-width: 0;
+}
+
+@media (max-width: 860px) {
+  .htmx-page .htmx-beforeafter {
+    grid-template-columns: 1fr;
+  }
+}

@@ -18,6 +18,7 @@ $groups = [
         ['api-layer',                'API Layer',                'ZealAPI file-based REST, v0.2.25 auth hooks.'],
         ['error-handling',           'Error Handling',           'setErrorHandler, ext-zealphp overrides, recursion guard, content-negotiated 5xx.'],
         ['templates-and-rendering',  'Templates & Rendering',    'render / renderToString / renderStream / include / fragment.'],
+        ['htmx',                     'HTMX',                     'isHtmx() + HtmxResponse, App::renderHtmx(), fragments, hx-boost — the full hypermedia surface.'],
     ],
     'Surfaces' => [
         ['streaming',                     'Streaming',             'yield-based SSR, stream(), sse(), renderStream.'],
