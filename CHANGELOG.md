@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-04
+
+First-class **HTMX** support is the headline: `App::renderHtmx()` (an htmx-aware fragment/full-page selector), `HtmxResponse` ergonomics (`triggerJSON()` + chain-back `response()`), and a consolidated **HTMX guide** (`docs/htmx.md` + a `/htmx` page) — completing a surface that already had full HX-* request/response header coverage. Also: `$req`/`$res` handler-parameter aliases, environment config for the entire CGI subprocess pool (`ZEALPHP_CGI_WORKERS` + four more), and a foreground start banner. The scaffold ships a redesigned Terminal-Luxury theme with a live htmx playground.
+
 ### Added
 
 - **`App::renderHtmx()` + HtmxResponse ergonomics + a consolidated HTMX guide.** ZealPHP already had full htmx request/response header coverage (8 `$request->` HX-* accessors on `ZealPHP\HTTP\Request`, 11 `$response->htmx()` builder methods on `ZealPHP\HTTP\HtmxResponse`). This closes the one remaining API gap and the documentation gap:
