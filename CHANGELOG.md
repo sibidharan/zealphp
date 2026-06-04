@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added
+
+- **Foreground start banner.** A plain `php app.php` (no `-d`) used to start **silently** — the "server running" line only went to the debug log, so the terminal sat empty with no confirmation. It now prints a console banner from the master's `on('start')` callback once the server is actually listening: `ZealPHP running at http://localhost:8080  (N routes, W workers)  —  press Ctrl+C to stop`. Bound host `0.0.0.0`/`::` is shown as `localhost` for a clickable URL. The daemonized path (`-d`) is unchanged — its "Started (pid …, port …)" confirmation is still printed by the forked CLI parent, and a detached master prints nothing to the terminal.
+
 ## [0.3.9] - 2026-06-04
 
 A scale + hardening release: the coroutine-aware **`DbConnectionPool`** (the top scalability blocker), a sharded session write-lock, the **`Store::eval()`** atomic-Lua primitive + cross-node fan-out groundwork, Stage 8 global-scope include, and a sweep of edge-case fixes across session / cache / store / WebSocket / pub/sub from a full critical-infra + scalability audit.
