@@ -285,3 +285,56 @@ mode (process-isolated, no coroutine teardown) runs unmodified WP-admin correctl
 "complete the coroutine-legacy unmodified-WP story" investment, not a blocker for the general user base.
 Recommended framing: keep chasing it as a research frontier when box time allows, but **ship
 `coroutine-legacy` for Composer apps and `cgi-pool` for unmodified WP** as the supported matrix.
+
+---
+
+## Fix attempt #2 (2026-06-04) — `snapshot_delete` extract-then-destroy — RULED OUT
+
+Acting on the gdb backtrace (the `$wpdb` dtor fires from `snapshot_delete` →
+`zend_hash_index_del(&zealphp_coro_globals_deltas)` → `zend_array_destroy(delta)`), the leading
+hypothesis was a **dangling-bucket-across-a-yield**: `zend_hash_index_del` runs the value destructor
+*while holding a bucket pointer into the process-shared deltas HT*; `$wpdb`'s mysqli close does COM_QUIT
+I/O that **yields** under HOOK_ALL; another coroutine mutating that shared HT during the yield (possible
+`arData` resize) would dangle the in-flight del's bucket → corruption.
+
+**Fix tried (the idiomatic extract-then-destroy, same `pDestructor`-suppress trick the mysqlnd code +
+the tombstone path already use):** `zend_hash_index_find` the delta, `ZVAL_COPY_VALUE` it out, set
+`deltas.pDestructor = NULL`, `zend_hash_index_del` (unlink only, **no** yielding dtor), restore
+`pDestructor`, then `zval_ptr_dtor(&local)` the detached copy — so the yielding `__destruct` holds no
+pointer into the shared HT.
+
+**Result: the fix took effect but the crash PERSISTED, unchanged (16 crashes / 30 wp-admin reqs).** The
+gdb backtrace **moved** exactly as predicted — from `zealphp.c:1111` (`zend_hash_index_del`) to
+`zealphp.c:1131` (the new `zval_ptr_dtor(&local)`) — proving the rebuilt ext was loaded and the del no
+longer runs the dtor. But the crash is the **identical** `pefree(stream->orig_path, is_persistent=0)` at
+streams.c:525. **So the dangling-bucket was NOT the cause** (ruled out, like the Hypothesis-A draining
+guard). Reverted; box source restored from backup, debug ext rebuilt.
+
+**What this nails down — the cause is BELOW ZealPHP's layer.** Two principled isolation-layer fixes (A:
+draining guard; #2: extract-then-destroy) both demonstrably took effect and neither moved the needle, so
+the corruption is **not** in how the isolation manipulates its hash tables — it is the **`$wpdb` mysqli
+teardown itself**, independent of *when/where* the per-request free is triggered. The stream frame shows
+why: the whole **mysqlnd connection is allocated in the glibc-malloc region** — `orig_path =
+0x5603ba5a8050`, `stats = 0x5603ba5a7f90`, all in the brk/malloc arena (mysqlnd's *persistent* allocator
+`mnd_pemalloc`) — while the `php_stream` struct is at `0x7ff…` (zend_mm/`emalloc`) and reports
+`is_persistent = 0`. So `php_mysqli_close(...resource_status=2)` drives `MYSQLND_CLOSE_EXPLICIT` →
+`_php_stream_free` → `pefree(orig_path, is_persistent=0)` = **`efree` on a `malloc`'d (mysqlnd-persistent)
+`orig_path`** → zend_mm rejects a pointer it never owned → corruption. The connection was allocated
+**persistent** by mysqlnd but the stream/mysqli layer closes it **explicitly as non-persistent** — a
+**persistent-flag inconsistency inside php-src/mysqlnd**, which ZealPHP's per-request `$wpdb` teardown
+merely *exposes* (PHP-FPM never frees a persistent connection per request; the long-lived coroutine
+worker + per-request object-globals drain does).
+
+**Doability — refined verdict.** This is **not cleanly fixable from ZealPHP's layer.** The corrupting
+operation is php-src's `pefree(orig_path, …)` using the wrong allocator because mysqlnd's persistent
+allocation and the stream's `is_persistent=0` disagree; ZealPHP can only change *whether/when* `$wpdb`
+is freed, not how mysqlnd allocated its connection. The honest options are: (1) **`cgi-pool` / `legacy-cgi`
+for unmodified WP** (process-isolated, no per-request coroutine teardown — works today; the supported
+path); (2) a php-src/mysqlnd-level fix or a targeted ZealPHP workaround that **keeps a persistent
+mysqlnd connection out of the per-request teardown entirely** (don't `__destruct` a persistent-allocated
+mysqli link at request-end — return it to the pool / leave it for worker-shutdown), which needs care to
+avoid leaking + the cross-coroutine `$wpdb` race. **Definitive next probe:** a gdb breakpoint at the
+mysqlnd connection/stream creation (`mysqlnd_vio.c:212`) to capture the persistent flag at alloc + a
+watchpoint on `stream->is_persistent`, confirming the alloc-persistent / close-non-persistent split and
+whether forcing a genuinely non-persistent mysqlnd connection (not just `mysqli.allow_persistent=0`,
+which was a no-op here because WP's host carries no `p:` prefix) sidesteps it.
