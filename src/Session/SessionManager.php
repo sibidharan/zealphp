@@ -263,7 +263,10 @@ class SessionManager
             unset($g->session);
 
             if ($this->useCookies) {
-                $cookie = session_get_cookie_params();
+                // zeal_session_get_cookie_params() is exactly what the uopz
+                // override of session_get_cookie_params() resolves to at runtime
+                // (App.php), but carries the samesite-inclusive return type.
+                $cookie = zeal_session_get_cookie_params();
                 $response->cookie(
                     $sessionName,
                     $sessionId,
@@ -271,7 +274,8 @@ class SessionManager
                     $cookie['path'],
                     $cookie['domain'],
                     $cookie['secure'],
-                    $cookie['httponly']
+                    $cookie['httponly'],
+                    $cookie['samesite'] ?? 'Lax'  // 8th arg — emit SameSite (was dropped)
                 );
             }
         }

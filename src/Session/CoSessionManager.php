@@ -226,7 +226,8 @@ class CoSessionManager
                         $cookie['path'],
                         $cookie['domain'],
                         $cookie['secure'],
-                        $cookie['httponly']
+                        $cookie['httponly'],
+                        $cookie['samesite'] ?? 'Lax'  // 8th arg — emit SameSite (was dropped)
                     );
                 }
             }

@@ -134,11 +134,12 @@ function zeal_session_start(): bool
         $g->session_params['name'] = 'PHPSESSID';
     }
     if (!isset($g->session_params['cookie_params'])) {
-        $isHttps = (
-            ($g->server['HTTPS'] ?? '') === 'on' ||
-            ($g->server['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https' ||
-            ($g->server['SERVER_PORT'] ?? '') === '443'
-        );
+        // Secure-cookie auto-detect routes through App::requestIsHttps(), which
+        // only trusts X-Forwarded-Proto from a configured trusted proxy (parity
+        // with App::clientIp()). Trusting the header from any client let an
+        // attacker flip the Secure flag with one header (Secure cookie on a
+        // plaintext listener → browser drops it → session resets every request).
+        $isHttps = \ZealPHP\App::requestIsHttps($g->server);
         $envSecure = getenv('ZEALPHP_SESSION_SECURE');
         $secure = ($envSecure !== false) ? filter_var($envSecure, FILTER_VALIDATE_BOOLEAN) : $isHttps;
 
@@ -216,7 +217,12 @@ function zeal_session_start(): bool
             $cookieParams['path'],
             $cookieParams['domain'],
             $cookieParams['secure'],
-            $cookieParams['httponly']
+            $cookieParams['httponly'],
+            // SameSite (8th arg) — was computed ('Lax') but never emitted, so an
+            // explicit None (iframe/OAuth/SSO) or Strict override was silently
+            // dropped on the wire. The None⇒Secure invariant is enforced in
+            // zeal_session_get_cookie_params().
+            $cookieParams['samesite'] ?? 'Lax'
         );
     }
 
@@ -718,7 +724,12 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
             $cookieParams['path'],
             $cookieParams['domain'],
             $cookieParams['secure'],
-            $cookieParams['httponly']
+            $cookieParams['httponly'],
+            // SameSite (8th arg) — was computed ('Lax') but never emitted, so an
+            // explicit None (iframe/OAuth/SSO) or Strict override was silently
+            // dropped on the wire. The None⇒Secure invariant is enforced in
+            // zeal_session_get_cookie_params().
+            $cookieParams['samesite'] ?? 'Lax'
         );
     }
 
@@ -738,8 +749,19 @@ function zeal_session_get_cookie_params(): array
     $g = RequestContext::instance();
     $params = $g->session_params['cookie_params'] ?? null;
     if (is_array($params)) {
-        // @phpstan-ignore-next-line — session_params is array<string, mixed>; runtime invariant: cookie_params matches shape
-        return $params;
+        $samesite = isset($params['samesite']) && is_string($params['samesite'])
+            ? $params['samesite']
+            : 'Lax';
+        return [
+            'lifetime' => isset($params['lifetime']) && is_int($params['lifetime']) ? $params['lifetime'] : 0,
+            'path'     => isset($params['path']) && is_string($params['path']) ? $params['path'] : '/',
+            'domain'   => isset($params['domain']) && is_string($params['domain']) ? $params['domain'] : '',
+            // SameSite=None is rejected by browsers unless Secure is also set —
+            // enforce the invariant so an explicit None doesn't silently fail.
+            'secure'   => !empty($params['secure']) || strcasecmp($samesite, 'None') === 0,
+            'httponly' => array_key_exists('httponly', $params) ? (bool) $params['httponly'] : true,
+            'samesite' => $samesite,
+        ];
     }
     return [
         'lifetime' => 0,
@@ -974,4 +996,50 @@ function zeal_session_module_name($module = null): string
         $g->session_module_name = $module;
         return $module;
     }
+}
+
+/**
+ * Garbage-collect expired sessions for the active storage.
+ *
+ * ZealPHP replaced PHP's probabilistic per-request GC (`session.gc_probability`)
+ * with deterministic, explicit collection — but nothing called it, so on a
+ * long-lived worker `sess_*` files (default storage) accumulated until inodes
+ * exhausted, and a leaked/abandoned `PHPSESSID` stayed replayable forever.
+ * `App::run()` now schedules this on a worker-0 timer (see
+ * `App::registerSessionGc()`).
+ *
+ * A registered `SessionHandlerInterface` owns its own GC (Redis/Table handlers
+ * already expire rows server-side); the default inline file path sweeps
+ * `sess_*` files whose mtime is older than `$maxlifetime` seconds.
+ *
+ * @param int $maxlifetime Seconds of inactivity after which a session expires.
+ * @return int Number of file entries removed (handler backends return their
+ *             own count, or 0).
+ */
+function zeal_session_gc(int $maxlifetime): int
+{
+    $maxlifetime = max(1, $maxlifetime);
+    $g = RequestContext::instance();
+
+    $handler = $g->session_params['handler'] ?? null;
+    if ($handler instanceof \SessionHandlerInterface) {
+        $res = $handler->gc($maxlifetime);
+        return is_int($res) ? $res : 0;
+    }
+
+    $rawPath = $g->session_params['save_path'] ?? null;
+    $savePath = is_string($rawPath) && $rawPath !== '' ? $rawPath : '/var/lib/php/sessions';
+    if (!is_dir($savePath)) {
+        return 0;
+    }
+
+    $removed = 0;
+    $cutoff = time() - $maxlifetime;
+    foreach (glob($savePath . '/sess_*') ?: [] as $file) {
+        $mtime = @filemtime($file);
+        if ($mtime !== false && $mtime < $cutoff && @unlink($file)) {
+            $removed++;
+        }
+    }
+    return $removed;
 }
