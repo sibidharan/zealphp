@@ -7224,12 +7224,38 @@ class App
         self::$server = $server;
         self::wireProcessHandlers();
 
-        // Master-side signal handlers wire from inside the on-start callback —
-        // the event loop is alive at that point so Process::signal() doesn't
-        // pre-initialize it.
-        if (self::$signalHandlers !== []) {
-            $server->on('start', function () {
-                self::applySignalHandlersFor('master');
+        // Master-side on-start callback. Fires in the master once the server is
+        // bound + listening. Two jobs:
+        //   1. Foreground (no -d): print a console banner so a plain
+        //      `php app.php` confirms it started + where to reach it. The
+        //      daemon path (-d) stays silent here — its "Started (pid …)"
+        //      confirmation is printed by the forked CLI parent (src/CLI.php),
+        //      and a daemonized master's stdout is detached from the terminal.
+        //   2. Wire master signal handlers — the event loop is alive at this
+        //      point, so Process::signal() doesn't pre-initialize it.
+        $foreground   = empty($effective_settings['daemonize']) && PHP_SAPI === 'cli';
+        $haveSignals  = self::$signalHandlers !== [];
+        if ($foreground || $haveSignals) {
+            $displayHost   = in_array($this->host, ['0.0.0.0', '', '::'], true) ? 'localhost' : $this->host;
+            $bannerPort    = $this->port;
+            $bannerRoutes  = count($this->routes);
+            $bannerWorkersRaw = $effective_settings['worker_num'] ?? 0;
+            $bannerWorkers    = is_numeric($bannerWorkersRaw) ? (int) $bannerWorkersRaw : 0;
+            $server->on('start', function () use (
+                $foreground, $haveSignals, $displayHost, $bannerPort, $bannerRoutes, $bannerWorkers
+            ) {
+                if ($foreground) {
+                    fwrite(STDOUT, sprintf(
+                        "ZealPHP running at http://%s:%d  (%d routes%s)  —  press Ctrl+C to stop\n",
+                        $displayHost,
+                        $bannerPort,
+                        $bannerRoutes,
+                        $bannerWorkers > 0 ? ", {$bannerWorkers} workers" : ''
+                    ));
+                }
+                if ($haveSignals) {
+                    self::applySignalHandlersFor('master');
+                }
             });
         }
 
