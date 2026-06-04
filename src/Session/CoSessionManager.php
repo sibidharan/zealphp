@@ -300,7 +300,7 @@ class CoSessionManager
             // FUTURE calls re-resolve. Runs last so nothing here re-warms a cache we
             // just cleared. Gated on silent_redeclare (the marker that user symbols
             // persist across requests); a no-op otherwise.
-            if (\ZealPHP\App::$silent_redeclare
+            if (\ZealPHP\App::perRequestStateResetsActive()
                 && \function_exists('zealphp_reset_request_rtcaches')
             ) {
                 (\zealphp_reset_request_rtcaches(...))();
@@ -316,7 +316,7 @@ class CoSessionManager
             // "Call to a member function switch_to_blog() on null" 500, then a worker
             // crash on request 3. zealphp_reset_request_statics() mirrors
             // shutdown_executor() for per-request (non-boot) symbols. Same gate.
-            if (\ZealPHP\App::$silent_redeclare
+            if (\ZealPHP\App::perRequestStateResetsActive()
                 && \function_exists('zealphp_reset_request_statics')
             ) {
                 (\zealphp_reset_request_statics(...))();
@@ -331,7 +331,7 @@ class CoSessionManager
             // connection is not defined" on request 2. Resets non-boot user-class
             // statics to their template; framework class statics (App::$routes, the
             // middleware stack, Store/Counter backends) are skipped via the snapshot.
-            if (\ZealPHP\App::$silent_redeclare
+            if (\ZealPHP\App::perRequestStateResetsActive()
                 && \function_exists('zealphp_reset_request_class_statics')
             ) {
                 (\zealphp_reset_request_class_statics(...))();
