@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-06-04
+## [0.3.9] - 2026-06-04
 
 A scale + hardening release: the coroutine-aware **`DbConnectionPool`** (the top scalability blocker), a sharded session write-lock, the **`Store::eval()`** atomic-Lua primitive + cross-node fan-out groundwork, Stage 8 global-scope include, and a sweep of edge-case fixes across session / cache / store / WebSocket / pub/sub from a full critical-infra + scalability audit.
 
