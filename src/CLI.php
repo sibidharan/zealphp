@@ -47,8 +47,14 @@ class CLI
         $i = 0;
         while ($i < count($argv)) {
             $arg = $argv[$i];
-            if (in_array($arg, ['start', 'stop', 'status', 'restart', 'logs'], true)) {
-                $command = $arg;
+            // Accept the bare subcommand (`logs`) AND a dashed form (`--logs`):
+            // users reach for `--logs`/`--status` by habit, and silently falling
+            // through to the default `start` (booting the server) is a confusing
+            // footgun. No real flag collides with a command name, so stripping
+            // leading dashes here is safe.
+            $bareCmd = ltrim($arg, '-');
+            if (in_array($bareCmd, ['start', 'stop', 'status', 'restart', 'logs'], true)) {
+                $command = $bareCmd;
                 $i++;
                 continue;
             }

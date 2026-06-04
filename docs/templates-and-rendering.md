@@ -269,6 +269,38 @@ App::render('_master', ['title' => 'About Us', 'page' => 'about']);
 
 This is exactly how the ZealPHP docs site works — every page in `public/` is 3 lines calling `App::render('_master', [...])`. The master renders the nav, the page content, and the footer.
 
+## Editor / IDE: making injected variables visible
+
+`App::render('page', ['title' => …])` injects template variables via `extract()` at runtime. Static analyzers (VSCode's PHP extension / Intelephense, PHPStan) **cannot see through `extract()`**, so they flag `$title` as an *undefined variable* even though it's passed and works. Three ways to fix it — pick per template:
+
+**1. Return a closure with typed params — cleanest, no docblocks.** ZealPHP injects a returned closure's parameters *by name* (`resolveClosureParams`), so the variables become ordinary function parameters the IDE fully understands (types, autocomplete, no warnings):
+
+```php
+<?php
+// template/pages/home.php
+return function (string $title, array $users, \ZealPHP\RequestContext $g): string {
+    $rows = '';
+    foreach ($users as $u) { $rows .= '<li>' . htmlspecialchars($u['name']) . '</li>'; }
+    return '<h1>' . htmlspecialchars($title) . "</h1><ul>{$rows}</ul>";
+};
+```
+Works for both regular and streaming (`yield`) templates. This sidesteps `extract()` entirely.
+
+**2. `@var` docblocks — low-friction retrofit for echo-style templates.** Keep the `<?php … echo $title; ?>` style; just declare the injected vars up top:
+
+```php
+<?php
+/** @var string                  $title */
+/** @var \ZealPHP\RequestContext  $g     */
+?>
+<h1><?= htmlspecialchars($title) ?></h1>
+```
+Precise, and it keeps the undefined-variable check working for genuine typos. (The scaffold's templates use this form as the worked example.)
+
+**3. Typed view-model object** — pass one typed object and access properties (`App::render('home', ['vm' => new HomeView(...)])` → `$vm->title`); best for large pages.
+
+**Blunt fallback:** `{"intelephense.diagnostics.undefinedVariables": false}` in `.vscode/settings.json` silences it project-wide — but it also hides real undefined-variable bugs, so prefer 1–3. There is no `extract()`-stub trick: a static analyzer fundamentally can't know an arbitrary runtime array's keys, so the fix is always to make the variable *not* come from `extract()` (1, 3) or to *declare* it (2).
+
 ## Tips for template authors
 
 - **Always escape user data** with `htmlspecialchars()`. PHP templates have no auto-escaping — full control, full responsibility.

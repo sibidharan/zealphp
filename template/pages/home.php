@@ -18,7 +18,7 @@ $siteUrl = site_url();
        WebSocket, SSE, streaming, coroutines, shared memory, task workers &mdash;
        first&#8209;class because the server never shuts down between requests.</p>
     <p class="home-hero-sub">Bring your existing PHP code. New features go async without a separate Node or Go service.</p>
-    <p class="home-hero-stamp">Alpha &middot; v0.4.0 &middot; built on <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a></p>
+    <p class="home-hero-stamp">Alpha &middot; v0.4.1 &middot; built on <a href="https://openswoole.com/" target="_blank" rel="noopener">OpenSwoole</a></p>
     <div class="cta">
       <a href="/getting-started" class="btn btn-primary">
         <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
@@ -306,7 +306,7 @@ Store::defaultBackend(Store::BACKEND_TIERED);</code></pre>
 
     <div class="qs-panel active" data-panel="starter">
       <div class="qs-block">
-        <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project:^0.4.0 my-app</span><button class="qs-copy" data-copy="composer create-project sibidharan/zealphp-project:^0.4.0 my-app">copy</button></div>
+        <div class="qs-line"><span class="qs-num">1</span><span class="qs-cmd"><span class="qs-prompt">$</span> composer create-project sibidharan/zealphp-project:^0.4.1 my-app</span><button class="qs-copy" data-copy="composer create-project sibidharan/zealphp-project:^0.4.1 my-app">copy</button></div>
         <div class="qs-line"><span class="qs-num">2</span><span class="qs-cmd"><span class="qs-prompt">$</span> cd my-app && php app.php</span><button class="qs-copy" data-copy="cd my-app && php app.php">copy</button></div>
         <div class="qs-line"><span class="qs-arrow">→</span><span class="qs-out">Server running at <code class="qs-out-code">http://localhost:8080</code></span></div>
       </div>

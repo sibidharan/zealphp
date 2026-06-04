@@ -478,6 +478,8 @@ Handlers can declare special parameters to access framework objects:
 - `$response` – `ZealPHP\HTTP\Response` wrapper
 - `$app` – the current `ZealPHP\App` instance
 
+`$req` / `$res` are accepted as short aliases for `$request` / `$response` — they receive the exact same wrapper instances. An explicit `{req}` / `{res}` URL segment still wins: a matched path parameter binds by name before the alias is considered.
+
 To access the underlying `OpenSwoole\HTTP\Server`, call `App::getServer()` — it is not an injectable handler parameter.
 
 ```php
@@ -535,11 +537,19 @@ Assign a closure to a variable whose name matches the file base name. It receive
 // File: api/device/list.php
 
 $list = function () {
-    return $this->json(['devices' => []]);
+    // Mode 1 sends EVERY HTTP method to this one closure. Use the helper to
+    // tell which verb came in (there is no separate $get/$post here):
+    $method = $this->get_request_method();   // 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+
+    if ($method === 'POST') {
+        return $this->json(['created' => true, 'method' => $method]);
+    }
+
+    return $this->json(['devices' => [], 'method' => $method]);
 };
 ```
 
-`ZealAPI::processApi()` includes the file, binds `$list` to the API object (`$this`), and executes it.
+`ZealAPI::processApi()` includes the file, binds `$list` to the API object (`$this`), and executes it. Since a Mode 1 closure answers **every** verb, `$this->get_request_method()` (returns `GET`/`POST`/`PUT`/`DELETE`/`PATCH`, defaulting to `GET`) is how you branch on the HTTP method inside it — the per-method helpers table below lists the related request accessors. If you'd rather split each verb into its own closure, use Mode 2 (per-method dispatch) instead.
 
 ### Mode 2 — Per-method dispatch
 
@@ -579,10 +589,12 @@ ZealPHP inspects the closure signature and injects arguments by name. Supported 
 
 - **Framework objects**:
   - `$app` – current `ZealPHP\ZealAPI` instance
-  - `$request` – `ZealPHP\HTTP\Request` wrapper
-  - `$response` – `ZealPHP\HTTP\Response` wrapper
+  - `$request` – `ZealPHP\HTTP\Request` wrapper (`$req` is accepted as a short alias)
+  - `$response` – `ZealPHP\HTTP\Response` wrapper (`$res` is accepted as a short alias)
   - `$server` – underlying `OpenSwoole\HTTP\Server`
 - **Any other name** – receives `null`, or the parameter's declared default value if one exists.
+
+`$req` / `$res` are accepted as short aliases for `$request` / `$response` — they receive the exact same wrappers the long names would.
 
 > **ZealAPI does NOT inject route path parameters.** The URL segments `module` and `action` are consumed by `processApi()` during file resolution and are never passed as closure arguments. To read URL path values use `$request->get` (the query-string array) or `$this->_request` (the cleaned merged inputs). There is no `{id} → $id` injection in ZealAPI — that feature belongs to `$app->route()` handlers, not file-based API closures.
 
@@ -881,8 +893,8 @@ The handler is dispatched through the same `ResponseMiddleware::dispatchRoute()`
 |---|---|
 | `$status` | The error status code being rendered (`int`). |
 | `$exception` | The caught `\Throwable` (only present for 500 cases originating from a throw; `null` otherwise). |
-| `$request` | `ZealPHP\HTTP\Request` wrapper. |
-| `$response` | `ZealPHP\HTTP\Response` wrapper. |
+| `$request` | `ZealPHP\HTTP\Request` wrapper (`$req` is accepted as a short alias). |
+| `$response` | `ZealPHP\HTTP\Response` wrapper (`$res` is accepted as a short alias). |
 | `$app` | The middleware instance (rarely needed). |
 
 ### Handler return values
@@ -1319,7 +1331,7 @@ return function($users) {
 };
 ```
 
-The framework injects `$users` from the args array by name, exactly like route parameter injection. Each `yield` flushes to the browser immediately.
+The framework injects `$users` from the args array by name, exactly like route parameter injection — and, exactly like route handlers, `$req` / `$res` are accepted as short aliases for `$request` / `$response` when those are present in the args array. Each `yield` flushes to the browser immediately.
 
 ## Templates and Rendering — `App::include()` — run a `public/` file through the framework
 
@@ -1464,6 +1476,38 @@ App::render('_master', ['title' => 'About Us', 'page' => 'about']);
 
 This is exactly how the ZealPHP docs site works — every page in `public/` is 3 lines calling `App::render('_master', [...])`. The master renders the nav, the page content, and the footer.
 
+## Templates and Rendering — Editor / IDE: making injected variables visible
+
+`App::render('page', ['title' => …])` injects template variables via `extract()` at runtime. Static analyzers (VSCode's PHP extension / Intelephense, PHPStan) **cannot see through `extract()`**, so they flag `$title` as an *undefined variable* even though it's passed and works. Three ways to fix it — pick per template:
+
+**1. Return a closure with typed params — cleanest, no docblocks.** ZealPHP injects a returned closure's parameters *by name* (`resolveClosureParams`), so the variables become ordinary function parameters the IDE fully understands (types, autocomplete, no warnings):
+
+```php
+<?php
+// template/pages/home.php
+return function (string $title, array $users, \ZealPHP\RequestContext $g): string {
+    $rows = '';
+    foreach ($users as $u) { $rows .= '<li>' . htmlspecialchars($u['name']) . '</li>'; }
+    return '<h1>' . htmlspecialchars($title) . "</h1><ul>{$rows}</ul>";
+};
+```
+Works for both regular and streaming (`yield`) templates. This sidesteps `extract()` entirely.
+
+**2. `@var` docblocks — low-friction retrofit for echo-style templates.** Keep the `<?php … echo $title; ?>` style; just declare the injected vars up top:
+
+```php
+<?php
+/** @var string                  $title */
+/** @var \ZealPHP\RequestContext  $g     */
+?>
+<h1><?= htmlspecialchars($title) ?></h1>
+```
+Precise, and it keeps the undefined-variable check working for genuine typos. (The scaffold's templates use this form as the worked example.)
+
+**3. Typed view-model object** — pass one typed object and access properties (`App::render('home', ['vm' => new HomeView(...)])` → `$vm->title`); best for large pages.
+
+**Blunt fallback:** `{"intelephense.diagnostics.undefinedVariables": false}` in `.vscode/settings.json` silences it project-wide — but it also hides real undefined-variable bugs, so prefer 1–3. There is no `extract()`-stub trick: a static analyzer fundamentally can't know an arbitrary runtime array's keys, so the fix is always to make the variable *not* come from `extract()` (1, 3) or to *declare* it (2).
+
 ## Templates and Rendering — Tips for template authors
 
 - **Always escape user data** with `htmlspecialchars()`. PHP templates have no auto-escaping — full control, full responsibility.
@@ -1577,6 +1621,8 @@ es.addEventListener('done', () => es.close());
        yield "</section>";
    };
    ```
+
+   As with route handlers, `$req` / `$res` are accepted as short aliases for `$request` / `$response` when those are present in the `$args` array.
 
 2. **IIFE Generator** (explicit, when you want closure-style `use`):
 
@@ -1814,6 +1860,8 @@ $app->ws('/ws/rooms',
 ```
 
 `WSRouter::room($name)` returns a `Room` instance with `join()`, `leave()`, `push()`, `isMember()`, `size()`, `members()`, `membersPaged()`, `onMessage()`, and `onPresence()`. Messages published from any node reach all workers via a single `ws:room:*` PSUBSCRIBE per worker — there is no per-room subscriber proliferation.
+
+> **Cross-node fan-out (roadmap).** Today a room message reaches *every* worker on *every* node (the single `ws:room:*` PSUBSCRIBE), even nodes with zero members of that room — `O(workers × nodes)` deliveries per message. That's being reduced toward `O(nodes)` by **WS room targeting** (publish only to nodes that hold members) plus a **per-node pub/sub aggregator** (one SUBSCRIBE per node, re-fanning to local workers). The first increment has landed: a per-room **server-set** — `WSRouter::roomServers($name)` returns the `server_id`s currently holding ≥1 member — maintained race-free + idempotently on `join`/`leave` via an atomic `Store::eval()` Lua script (additive bookkeeping only; it does **not** change routing yet). Targeted routing (B2) and the aggregator (A1) are opt-in increments. Design + rollout: [`docs/architecture/2026-06-03-cross-node-fanout.md`](architecture/2026-06-03-cross-node-fanout.md). `roomServers()` and the `roomServer*` helpers are `@internal` until B2 makes the routing live.
 
 > **Large rooms:** `members()` drains the full roster into memory (SSCAN loop on Redis). For rooms with more than ~10 000 members, use `membersPaged(string $cursor = '0', int $count = 100)` instead — it returns one SSCAN batch plus an opaque next-cursor. Cursor `'0'` starts a fresh walk; a returned cursor of `'0'` signals end-of-scan. On the Table backend, `membersPaged()` falls back to returning the full roster in one batch.
 >
@@ -5011,7 +5059,12 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 | `ZEALPHP_SUPERGLOBALS` | `false` | user | In `app.php`, sets `App::superglobals()` (`env_flag(...,false)`) — process-wide PHP superglobals (`$g` storage) vs per-coroutine `RequestContext`; unset → coroutine mode. |
 | `ZEALPHP_PROCESS_ISOLATION` | unset (no override; resolves to follow `$superglobals`) | user | Only when set+non-empty, calls `App::processIsolation(env_flag(...,false))` — per-include CGI subprocess dispatch (Apache mod_php-style) vs in-process `executeFile()`. |
 | `ZEALPHP_ENABLE_COROUTINE` | unset (no override; resolves to `!$superglobals`) | user | Only when set+non-empty, calls `App::enableCoroutine(env_flag(...,true))` — toggles OpenSwoole's `enable_coroutine` auto-coroutine-per-request setting. |
-| `ZEALPHP_CGI_MODE` | unset (no override; effective default is `pool`) | user | Only when set+non-empty, its raw string value is passed to `App::cgiMode($value)` — selects the `.php` CGI dispatch strategy (`pool`\|`proc`\|`fork`\|`fcgi`). `pool` is the default pre-spawned subprocess pool; `proc` uses `proc_open` per request (~30–50 ms cold start); `fork` is **experimental** (Apache MPM prefork, pcntl+posix required); `fcgi` proxies to an upstream FastCGI pool. |
+| `ZEALPHP_CGI_MODE` | unset (effective default `pool`) | user | Selects the `.php` CGI dispatch strategy (`pool`\|`proc`\|`fork`\|`fcgi`). Resolved in core by `App::resolveCgiEnv()` (called from `App::init()`) → `App::cgiMode($value)`. `pool` = pre-spawned subprocess pool; `proc` = `proc_open` per request (~30–50 ms cold start); `fork` = **experimental** Apache MPM prefork (pcntl+posix); `fcgi` = proxy to an upstream FastCGI pool. An explicit `App::cgiMode(...)` call in code wins. |
+| `ZEALPHP_CGI_WORKERS` | unset → `4` | user | CGI subprocess **pool size per OpenSwoole worker** (`App::$cgi_pool_size`, FPM `pm.max_children` parity). Total CGI subprocesses = `worker_num × this`. Resolved by `App::resolveCgiEnv()` when ≥ 1; an explicit `App::cgiPoolSize(N)` wins. |
+| `ZEALPHP_CGI_MAX_REQUESTS` | unset → `500` | user | Requests a `cgiMode('pool')` subprocess serves before clean recycle (`App::$cgi_pool_max_requests`, FPM `pm.max_requests` parity). Resolved by `App::resolveCgiEnv()` when ≥ 1; explicit `App::cgiPoolMaxRequests(N)` wins. |
+| `ZEALPHP_CGI_TIMEOUT` | unset → `60` | user | Seconds to wait for a `proc`-mode CGI subprocess to emit its metadata line before SIGTERM/SIGKILL (`App::$cgi_timeout`, Apache `CGIScriptTimeout` parity). Resolved by `App::resolveCgiEnv()` when ≥ 1; explicit `App::cgiTimeout(N)` wins. |
+| `ZEALPHP_FCGI_ADDRESS` | unset → `127.0.0.1:9000` | user | Upstream FastCGI backend address for `cgiMode('fcgi')` (`App::$fcgi_address`) — `host:port` or `unix:/path/to/fpm.sock`. Resolved by `App::resolveCgiEnv()` when non-empty; explicit `App::fcgiAddress(...)` wins. |
+| `ZEALPHP_CGI_FORK_MAX_CONCURRENT` | unset → `16` | user | Max concurrent `cgiMode('fork')` children — a per-request fork ceiling, NOT the pre-spawned pool size (`App::$cgi_fork_max_concurrent`). Resolved by `App::resolveCgiEnv()` when ≥ 1; explicit `App::cgiForkMaxConcurrent(N)` wins. |
 | `ZEALPHP_HTTP_COMPRESSION` | `!$compressionMiddleware` (true when `CompressionMiddleware` is NOT registered, false when it is) | user | In `app.php`, sets the OpenSwoole `http_compression` server setting (`env_flag`) — toggles OpenSwoole's built-in gzip/deflate response compression. |
 | `ZEALPHP_OPCACHE_ADVISORY` | unset (advisory enabled; only literal `'0'` suppresses) | user | Read in `App::opcacheLegacyBootCheck()` via `getenv()==='0'`; when `'0'`, suppresses the boot-time advisory about opcache + coroutine-legacy re-declaring `require_once`'d classes. |
 | `ZEALPHP_FN_STATICS_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineStaticsIsolation()` — when `'1'`, disables per-coroutine isolation of function-local `static $x` (Stage 5) for raw throughput. |
@@ -5426,7 +5479,7 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.3.8 .
+docker build -t zealphp:0.4.0 .
 ```
 
 The shipped `Dockerfile` is PHP 8.4-cli on `bookworm` with OpenSwoole and
@@ -5438,7 +5491,7 @@ versions with the build args:
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
     --build-arg ZEALPHP_EXT_VERSION=v0.3.26 \
-    -t zealphp:0.3.8 .
+    -t zealphp:0.4.0 .
 ```
 
 ### Run (single container)
@@ -5450,7 +5503,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.3.8
+    zealphp:0.4.0
 ```
 
 ### Production compose
@@ -5461,7 +5514,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.3.8
+    image: registry.example.com/zealphp-app:0.4.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -6292,6 +6345,130 @@ ZealPHP occupies a specific niche that no other project covers:
 4. **Cross-worker shared state** — `Store` and `Counter` provide shared memory without external dependencies (no Redis required)
 5. **Single-process deployment** — HTTP, WebSocket, timers, task workers, and sessions in one `php app.php` process
 
+## Database connection pool — `ZealPHP\Db\DbConnectionPool`
+
+A coroutine-aware, connection-library-agnostic pool of SQL connections. It is
+the DB counterpart to `ZealPHP\Store\RedisConnectionPool`.
+
+## Database connection pool — `ZealPHP\Db\DbConnectionPool` — Why
+
+Under coroutine mode with `Runtime::HOOK_ALL`, ZealPHP's documented DB pattern
+is **one connection per coroutine** — two coroutines sharing one `\PDO`/`mysqli`
+handle interleave wire frames and corrupt the socket (see the DB note in the
+architecture docs). That is correct, but it does **not** scale: peak live DB
+connections = peak concurrent requests, so a few hundred concurrent queries blow
+past MySQL/Postgres `max_connections`.
+
+`DbConnectionPool` bounds connections to **`size × workers × nodes`** regardless
+of request concurrency: each query borrows a private connection, uses it, and
+returns it to the pool.
+
+## Database connection pool — `ZealPHP\Db\DbConnectionPool` — Quick start
+
+```php
+use ZealPHP\Db\DbConnectionPool;
+
+// Build the pool once per worker (App::onWorkerStart is the natural place).
+$pool = DbConnectionPool::pdo(
+    'mysql:host=127.0.0.1;dbname=app', 'user', 'pass',
+    size: 16,
+    validationQuery: 'SELECT 1',
+);
+
+// Borrow a connection for one unit of work:
+$users = $pool->with(fn (\PDO $db) =>
+    $db->query('SELECT * FROM users LIMIT 10')->fetchAll());
+
+// Transactional work (BEGIN / COMMIT, or ROLLBACK on throw):
+$pool->transaction(function (\PDO $db): void {
+    $db->exec('UPDATE accounts SET balance = balance - 10 WHERE id = 1');
+    $db->exec('UPDATE accounts SET balance = balance + 10 WHERE id = 2');
+});
+```
+
+### mysqli (e.g. WordPress `$wpdb`-style code)
+
+```php
+$pool = DbConnectionPool::mysqli('127.0.0.1', 'user', 'pass', 'app', size: 16);
+
+$n = $pool->with(function (\mysqli $db): int {
+    $res = $db->query('SELECT COUNT(*) AS c FROM posts');
+    return (int) ($res->fetch_assoc()['c'] ?? 0);
+});
+```
+
+## Database connection pool — `ZealPHP\Db\DbConnectionPool` — API
+
+| Method | Purpose |
+|--------|---------|
+| `DbConnectionPool::pdo($dsn, $user, $pass, $options, $size, $validationQuery)` | Pool of `\PDO` connections from a DSN (any PDO driver). `ERRMODE_EXCEPTION` + `FETCH_ASSOC` applied unless overridden. |
+| `DbConnectionPool::mysqli($host, $user, $pass, $db, $port, $socket, $charset, $size, $validationQuery)` | Pool of `\mysqli` connections. |
+| `new DbConnectionPool(PoolDriver $driver, $size, $validationQuery)` | Advanced — supply a custom `PoolDriver` (e.g. `new PdoDriver($factory)` for custom PDO setup). |
+| `with(callable(TConn): T): T` | Borrow → run `$fn` → return. The recommended entry point. |
+| `transaction(callable(TConn): T): T` | `with()` wrapped in `BEGIN`/`COMMIT` (`ROLLBACK` on throw). |
+| `acquire(float $timeout = 5.0): TConn` | Low-level borrow (yields/blocks until free or timeout → `DbException`). Pair with `release()`. |
+| `release(TConn $conn): void` | Return a borrowed connection (rolls back a leaked transaction first). |
+| `stats(): Stats` | Per-worker counters (see below). |
+| `size(): int` | Configured capacity. |
+| `close(): void` | Drain + close; a closed pool refuses `acquire()`. Call at worker shutdown. |
+
+`stats()` keys: `pool_acquires_total`, `pool_acquire_timeouts_total`,
+`pool_clients_created_total`, `pool_clients_discarded_total` (poison-pill
+discards), `pool_validation_replacements_total` (idle-closed connections
+swapped on the liveness probe).
+
+## Database connection pool — `ZealPHP\Db\DbConnectionPool` — Semantics
+
+- **Coroutine context:** a bounded `OpenSwoole\Coroutine\Channel` of `size`
+  connections; `acquire()` yields until one is free or `$timeout` elapses.
+- **Sync context** (no scheduler, e.g. `superglobals(true)`): degrades to a
+  single sequential connection.
+- **Transaction-safe return:** `release()` rolls back any transaction the
+  borrower left open (PDO). **mysqli has no `inTransaction()`**, so its
+  `rollbackIfNeeded()` is a no-op — use `transaction()` for transactional work
+  on mysqli, and don't leak a raw `begin_transaction()` from a plain `with()`.
+- **Poison-pill discard:** a `with()`/`transaction()` body that throws discards
+  its connection and refills the pool, so a broken handle is never reused. The
+  thrown error still propagates to the caller.
+- **Liveness:** with `validationQuery`, a connection the server closed while
+  idle (`wait_timeout`) is replaced transparently on the next acquire.
+
+## Database connection pool — `ZealPHP\Db\DbConnectionPool` — Sizing
+
+Keep `size × workers × nodes ≤ db_max_connections − headroom`. Example: 4
+workers × 2 nodes against `max_connections = 150` → a pool size of ~16 leaves
+headroom (`16 × 4 × 2 = 128`). Also cap the OpenSwoole server's `max_coroutine`
+so request concurrency can't outrun the pool and pile up on `acquire()` waits.
+
+## Database connection pool — `ZealPHP\Db\DbConnectionPool` — Driver coverage & the coroutine nuance
+
+The pool is **PDO-driver-agnostic** (and adds mysqli). But the **connection
+bounding** benefit and the **coroutine non-blocking** benefit are different:
+
+| Driver | Connection bounding | Non-blocking under `HOOK_ALL` |
+|--------|---------------------|-------------------------------|
+| `PDO_MYSQL` (mysqlnd) | ✅ | ✅ (rides `php_stream`) |
+| `mysqli` (mysqlnd) | ✅ | ✅ |
+| `PDO_PGSQL` (`libpq`), Oracle/ODBC | ✅ | ❌ — C-side socket I/O, blocks the worker per query |
+| SQLite | ✅ | n/a (local file) |
+
+For true async PostgreSQL, use OpenSwoole's native `Coroutine\PostgreSQL` (not
+wrapped by this pool).
+
+## Database connection pool — `ZealPHP\Db\DbConnectionPool` — Not for MongoDB
+
+`zealphp-mongodb` uses the official **MongoDB Rust driver** (the `mongodb` crate
++ Tokio, with a C++ coroutine bridge to OpenSwoole) — **not** PDO, mysqli, or
+libmongoc. The Rust `mongodb::Client` already pools connections internally, so
+`DbConnectionPool` does not apply: keep one `Client` per worker and let the
+driver pool.
+
+## Database connection pool — `ZealPHP\Db\DbConnectionPool` — Extending — custom drivers
+
+Implement `ZealPHP\Db\PoolDriver` (`connect`, `begin`/`commit`/`rollback`,
+`rollbackIfNeeded`, `isAlive`, `disconnect`) to pool any connection type (e.g.
+a coroutine-native client), then `new DbConnectionPool($yourDriver, $size)`.
+
 ## HTTP fuzzing & robustness harness
 
 ZealPHP's ethos is *proven, not claimed*. The framing safety properties (RFC
@@ -6458,6 +6635,416 @@ bounded radamsa fuzz (300 iters) + the gabbi suite and **fails the job** on any
 hang, stack-trace leak, or contract drift. slowhttptest runs informationally
 (non-gating) since the slow-drip gap is expected. http-garden is the gated
 follow-up once a Docker-based job is added.
+
+## HTMX
+
+ZealPHP treats [htmx](https://htmx.org) as a first-class citizen. The model is the opposite of a SPA: **the server returns HTML**, and htmx swaps it into the page over AJAX without a full reload. You write routes that return markup; htmx wires up the interactivity from HTML attributes. There is no client-side framework, no JSON-to-DOM glue, no build step.
+
+This guide covers the full ZealPHP htmx surface: reading the htmx request headers, driving the htmx client from the response, the `App::renderHtmx()` fragment selector, out-of-band swaps, the boosting model, where htmx ends and SSE/WebSocket begin, and the CSRF pattern.
+
+> The demo site (this repository) uses htmx globally — every page is hx-boosted. The `/learn/htmx` lesson is a gentle, narrative introduction; this guide is the reference.
+
+## HTMX — Overview — server returns HTML
+
+A normal AJAX setup returns JSON and rebuilds the DOM in JavaScript. htmx inverts that: an element declares *where* a request goes and *what* to do with the HTML that comes back.
+
+```html
+<form hx-post="/items" hx-target="#list" hx-swap="afterbegin">
+  <input name="item" placeholder="New item">
+  <button type="submit">Add</button>
+</form>
+<ul id="list"><!-- new <li> rows get inserted here --></ul>
+```
+
+The route just returns the new row's HTML:
+
+```php
+$app->route('/items', methods: ['POST'], handler: function ($request) {
+    $item = Item::create($request->post['item']);
+    return "<li>" . htmlspecialchars($item->name) . "</li>";
+});
+```
+
+**Progressive enhancement.** Because the markup is real HTML — a real `<form action>` / `<a href>` underneath the htmx attributes — the same page still works with JavaScript disabled. htmx is an enhancement layer, not a hard dependency.
+
+## HTMX — Setup out of the box
+
+The demo app's `template/_master.php` wires htmx for every page:
+
+```php
+<body hx-boost="true" hx-ext="head-support">
+```
+
+and `template/_head.php` loads the libraries:
+
+| Library | Version | Role |
+|---------|---------|------|
+| `htmx.org` | **2.0.10** | The core library. |
+| `htmx-ext-head-support` | **2.0.4** | Reconciles `<head>` on boosted navigation (hx-boost swaps `<body>` + `<title>` but not `<head>`, so per-page CSS/JS modules wouldn't otherwise load when you navigate *into* a page). |
+
+With `hx-boost="true"` on `<body>`, **every** `<a>` and `<form>` on the page is automatically AJAX-ified: htmx intercepts the navigation, fetches the target URL, swaps the `<body>`, updates the `<title>`, and manages browser history — all without a full reload.
+
+**Boosted vs plain requests.** A boosted navigation sends `HX-Boosted: true` (in addition to `HX-Request: true`); a request from an explicit `hx-get`/`hx-post` attribute sends `HX-Request: true` but not `HX-Boosted`. A normal full-page load (typing a URL, hard refresh) sends neither. That distinction is what lets a handler decide between a full page and a partial — see [Reading the request](#reading-the-request).
+
+## HTMX — Reading the request
+
+`ZealPHP\HTTP\Request` (the `$request` injected into every handler) exposes eight accessors, one per htmx request header. Each reads the lower-cased header from the OpenSwoole request and returns `null` (or `false`, for the booleans) when absent.
+
+| Accessor | Reads header | Returns | Meaning |
+|----------|--------------|---------|---------|
+| `isHtmx()` | `HX-Request` | `bool` | The request came from htmx (`HX-Request: true`). |
+| `isBoosted()` | `HX-Boosted` | `bool` | The request was issued by `hx-boost` (a boosted link/form). |
+| `isHistoryRestoreRequest()` | `HX-History-Restore-Request` | `bool` | htmx is restoring a history-cache miss (re-fetching a page it couldn't restore from cache). |
+| `htmxTarget()` | `HX-Target` | `?string` | The `id` of the target element (the `hx-target`). |
+| `htmxTrigger()` | `HX-Trigger` | `?string` | The `id` of the triggering element. |
+| `htmxTriggerName()` | `HX-Trigger-Name` | `?string` | The `name` attribute of the triggering element. |
+| `htmxCurrentUrl()` | `HX-Current-URL` | `?string` | The browser's current URL at request time. |
+| `htmxPrompt()` | `HX-Prompt` | `?string` | The user's response to an `hx-prompt` dialog. |
+
+Branch on `isHtmx()` to serve a partial to htmx and a full page to a direct hit:
+
+```php
+$app->route('/search', methods: ['GET'], handler: function ($request) {
+    $hits = Search::run($request->get['q'] ?? '');
+
+    if ($request->isHtmx()) {
+        // htmx asked for just the results — return the partial.
+        return App::renderToString('search/results', ['hits' => $hits]);
+    }
+    // Direct navigation — return the whole page (which includes the results).
+    return App::render('search/page', ['hits' => $hits]);
+});
+```
+
+That branch is common enough that ZealPHP ships [`App::renderHtmx()`](#fragments--apprenderhtmx) to collapse it to one line.
+
+## HTMX — Driving the client
+
+`$response->htmx()` returns a fluent `ZealPHP\HTTP\HtmxResponse` builder that queues `HX-*` **response** headers. These tell the htmx client what to do *after* it receives the body — redirect, retarget the swap, trigger a client event, refresh, and so on. Each setter returns the builder so calls chain; every value is CRLF/NUL-injection-guarded by `Response::header()` before it is queued.
+
+```php
+$response->htmx()
+    ->retarget('#alerts')
+    ->reswap('afterbegin')
+    ->trigger('itemSaved');
+```
+
+### History & navigation
+
+| Method | Header | Effect |
+|--------|--------|--------|
+| `pushUrl(string $url)` | `HX-Push-Url` | Push a new URL onto the history stack. Pass `"false"` to suppress. |
+| `replaceUrl(string $url)` | `HX-Replace-Url` | Replace the current URL without a new history entry. |
+| `redirect(string $url)` | `HX-Redirect` | Client-side redirect (no full reload). |
+| `location(string $urlOrJson)` | `HX-Location` | Client-side redirect without a full reload; accepts a URL or a JSON location object (`{"path":"/p","target":"#c"}`). |
+
+### Swap control
+
+| Method | Header | Effect |
+|--------|--------|--------|
+| `reswap(string $strategy)` | `HX-Reswap` | Override the swap strategy (`innerHTML`, `outerHTML`, `beforebegin`, `afterbegin`, `beforeend`, `afterend`, `delete`, `none`, plus modifiers like `innerHTML swap:1s`). |
+| `retarget(string $selector)` | `HX-Retarget` | Redirect the swap to a different element (CSS selector). |
+| `reselect(string $selector)` | `HX-Reselect` | Choose which part of the response body is swapped in. |
+
+### Page control
+
+| Method | Header | Effect |
+|--------|--------|--------|
+| `refresh(bool $refresh = true)` | `HX-Refresh` | `true` → trigger a full client-side page refresh. |
+
+### Events
+
+| Method | Header | Effect |
+|--------|--------|--------|
+| `trigger(string $events)` | `HX-Trigger` | Trigger client events after the swap. Single name, comma-list, or a JSON object for events with detail. |
+| `triggerAfterSwap(string $events)` | `HX-Trigger-After-Swap` | Same, fired after the swap step. |
+| `triggerAfterSettle(string $events)` | `HX-Trigger-After-Settle` | Same, fired after the settle step. |
+| `triggerJSON(string $event, array $detail)` | `HX-Trigger` | Trigger a single named event with a structured detail payload — without hand-encoding the JSON. |
+
+`triggerJSON('showMessage', ['level' => 'info', 'message' => 'Saved!'])` is shorthand for `trigger('{"showMessage":{"level":"info","message":"Saved!"}}')`. The browser receives `event.detail` = the decoded array.
+
+### Flowing back to the Response
+
+Every builder setter returns the `HtmxResponse`, so the chain can't directly call a `Response` method like `status()`. `response()` hands the parent `Response` back so the chain can continue:
+
+```php
+// Validation failed — retarget the error box, swap it, and 422 the response.
+$res->htmx()
+    ->retarget('#form-errors')
+    ->reswap('outerHTML')
+    ->response()          // ← back to the Response
+    ->status(422);
+```
+
+## HTMX — Fragments & `App::renderHtmx()`
+
+The htmx "one URL, two responses" pattern: a direct hit returns the full page; an htmx request returns just the piece that swaps in. ZealPHP supports this two ways.
+
+### `App::fragment()` — two responses, one template file
+
+`App::fragment($name, $fn)` marks a named region *inside* a template. The same template renders the full page normally, and just the named region when called with a `fragment` selector. One file, two responses — no separate partial file.
+
+```php
+// template/contacts/list.php
+<ul>
+<?php foreach ($contacts as $c): ?>
+  <?php App::fragment("contact-{$c->id}", function () use ($c) { ?>
+    <li id="contact-<?= $c->id ?>"><?= htmlspecialchars($c->name) ?></li>
+  <?php }); ?>
+<?php endforeach; ?>
+</ul>
+```
+
+```php
+// Full page:        App::render('contacts/list', ['contacts' => $all])
+// One row (htmx):    App::render('contacts/list', ['contacts' => $all, 'fragment' => "contact-{$id}"])
+```
+
+When the fragment is extracted, its closure's return value rides the [universal return contract](./templates-and-rendering.md#universal-return-contract) — it can `return 404;`, `return ['k' => 'v'];`, or yield a Generator, exactly like a route handler. A `fragment` selector that matches no region is a `404` (no silent fallback). See [Templates & Rendering](./templates-and-rendering.md#appfragment--template-fragments-the-htmx-pattern) for the full fragment semantics.
+
+### `App::renderHtmx()` — the selector
+
+`App::renderHtmx()` is a thin, htmx-aware selector over `App::render()`. It reads the current request, and:
+
+- **htmx request** → renders just a fragment (partial).
+- **normal request** → renders the full page.
+
+```php
+public static function renderHtmx(
+    string  $template,
+    array   $args = [],
+    ?string $fragmentName = null,
+    ?string $fullPageTemplate = null
+): mixed
+```
+
+Fragment selection for an htmx request:
+
+1. If `$fragmentName` is passed, that region is rendered.
+2. Otherwise the framework derives the region from the request — the `HX-Target` element id (a leading `#` is stripped), falling back to `HX-Trigger-Name`. If neither is present, the template is rendered with no `fragment` key (its bare partial output).
+
+Called outside a request (a CLI render, a warmup), it falls back to the full-page path. It does **not** touch `executeFile()`; it only chooses *what* to render, so the universal return contract and streaming are preserved.
+
+**Before** — the manual branch:
+
+```php
+$app->route('/search', methods: ['GET'], handler: function ($request) {
+    $hits = Search::run($request->get['q'] ?? '');
+    if ($request->isHtmx()) {
+        $target = ltrim($request->htmxTarget() ?? '', '#');
+        if ($target !== '') {
+            return App::render('search', ['hits' => $hits, 'fragment' => $target]);
+        }
+        return App::render('search', ['hits' => $hits]);
+    }
+    return App::render('search', ['hits' => $hits]);
+});
+```
+
+**After** — one line:
+
+```php
+$app->route('/search', methods: ['GET'], handler: fn($request) =>
+    App::renderHtmx('search', ['hits' => Search::run($request->get['q'] ?? '')]));
+```
+
+Same shell, the `App::fragment('results', …)` region inside `search.php` is what an htmx `hx-target="#results"` request gets back; a direct hit gets the whole page.
+
+Separate-template form — a bare partial for htmx plus a distinct full-page shell:
+
+```php
+$app->route('/widget', methods: ['GET'], handler: fn() =>
+    App::renderHtmx('widget/partial', ['w' => $w], fullPageTemplate: 'widget/page'));
+```
+
+## HTMX — Out-of-band swaps
+
+Sometimes a response needs to update an element *other* than the swap target — a cart badge, a toast, a notification count. htmx's out-of-band (OOB) swap does that: any element in the response body carrying `hx-swap-oob` is swapped into the matching `id` regardless of the primary target.
+
+`HtmxResponse::oob()` builds an OOB wrapper:
+
+```php
+public static function oob(
+    string $id,
+    string $html,
+    string $swap = 'true',   // hx-swap-oob value; "true" = innerHTML
+    string $tag  = 'div'
+): string
+```
+
+Append it to any response body to perform an OOB swap with no extra round-trip:
+
+```php
+$app->route('/cart/add', methods: ['POST'], handler: function ($request) {
+    $cart = Cart::add($request->post['sku']);
+    // Primary swap: the product row. OOB: the cart badge.
+    return "<div>Added.</div>"
+         . HtmxResponse::oob('cart-count', (string) $cart->count);
+});
+```
+
+The `id` and swap value are HTML-escaped; the tag is sanitised to alphanumerics (falling back to `div`).
+
+## HTMX — The boosting model
+
+`hx-boost="true"` (set on `<body>` in the demo) turns ordinary `<a>` and `<form>` elements into AJAX navigations:
+
+- A click/submit becomes an AJAX request; htmx swaps the `<body>`, updates the `<title>`, and pushes history.
+- The request carries `HX-Boosted: true` **and** `HX-Request: true`. Read it with `$request->isBoosted()`.
+- It degrades gracefully: with JS off, the underlying `href`/`action` performs a normal navigation.
+
+**History restoration.** When the user navigates back/forward, htmx restores the page from its history cache. On a cache miss it re-fetches the URL and sends `HX-History-Restore-Request: true` — detect it with `$request->isHistoryRestoreRequest()` (e.g. to skip an expensive personalisation pass on a restore).
+
+Because hx-boost swaps `<body>` but not `<head>`, the demo loads the `head-support` extension so each page's scoped CSS/JS still loads when you navigate into it. After each boosted swap htmx fires `htmx:afterSettle`, which the demo uses to re-run highlight.js and re-init demo panels.
+
+## HTMX — SSE / WebSocket — where htmx ends
+
+htmx is request/response: a user action triggers a request, the server returns HTML, htmx swaps it. For **server-pushed** updates — the server sending data without a client request — reach past htmx to ZealPHP's streaming primitives:
+
+- **Server-Sent Events** — `$response->sse($fn)` formats the SSE wire protocol for a JS `EventSource` (or htmx's `sse` extension). See [streaming.md](./streaming.md).
+- **WebSocket** — `App::ws($path, $onMessage, $onOpen, $onClose)` for bidirectional realtime. See [websocket.md](./websocket.md).
+
+htmx's `hx-ext="sse"` extension can consume an SSE endpoint declaratively (`sse-connect` / `sse-swap`), so a `$response->sse()` route on the server pairs naturally with htmx on the client when you want push-driven swaps without writing `EventSource` JavaScript. For two-way realtime (chat, presence, collaborative editing) use `App::ws()` — that's outside htmx's request/response model.
+
+## HTMX — CSRF with htmx
+
+htmx submits forms over AJAX, so the usual hidden-input CSRF token works, but the cleaner pattern is `hx-headers` — attach the token as a request header for every htmx request under an element:
+
+```html
+<body hx-boost="true" hx-headers='{"X-CSRF-Token": "<?= htmlspecialchars($csrfToken, ENT_QUOTES) ?>"}'>
+```
+
+Validate it in middleware or the handler by reading the header off the request (`$request->header['x-csrf-token']`). Because `hx-headers` is inherited, one declaration on `<body>` covers every boosted navigation and every nested `hx-get`/`hx-post`.
+
+**Skipping a login double-render.** When an unauthenticated htmx request hits a protected route, returning a full login *page* would swap the login HTML into a small target. Read `HX-Request` to handle it differently — e.g. send an `HX-Redirect` to the login URL (a clean client-side redirect) instead of rendering the login page into the swap target:
+
+```php
+if (!Auth::check()) {
+    if ($request->isHtmx()) {
+        $response->htmx()->redirect('/login');   // HX-Redirect → clean client redirect
+        return '';
+    }
+    return $response->redirect('/login');         // normal 302 for a direct hit
+}
+```
+
+## HTMX — Reference table
+
+| ZealPHP API | HX-* header / behaviour |
+|-------------|-------------------------|
+| **Request — `$request->`** | |
+| `isHtmx()` | reads `HX-Request` |
+| `isBoosted()` | reads `HX-Boosted` |
+| `isHistoryRestoreRequest()` | reads `HX-History-Restore-Request` |
+| `htmxTarget()` | reads `HX-Target` |
+| `htmxTrigger()` | reads `HX-Trigger` |
+| `htmxTriggerName()` | reads `HX-Trigger-Name` |
+| `htmxCurrentUrl()` | reads `HX-Current-URL` |
+| `htmxPrompt()` | reads `HX-Prompt` |
+| **Response — `$response->htmx()->`** | |
+| `pushUrl($url)` | sets `HX-Push-Url` |
+| `replaceUrl($url)` | sets `HX-Replace-Url` |
+| `redirect($url)` | sets `HX-Redirect` |
+| `location($urlOrJson)` | sets `HX-Location` |
+| `reswap($strategy)` | sets `HX-Reswap` |
+| `retarget($selector)` | sets `HX-Retarget` |
+| `reselect($selector)` | sets `HX-Reselect` |
+| `refresh($bool)` | sets `HX-Refresh` |
+| `trigger($events)` | sets `HX-Trigger` |
+| `triggerAfterSwap($events)` | sets `HX-Trigger-After-Swap` |
+| `triggerAfterSettle($events)` | sets `HX-Trigger-After-Settle` |
+| `triggerJSON($event, $detail)` | sets `HX-Trigger` (JSON-encoded detail) |
+| `oob($id, $html, $swap, $tag)` | builds an `hx-swap-oob` element (static) |
+| `response()` | returns the parent `Response` (chain back) |
+| **Rendering — `App::`** | |
+| `renderHtmx($tpl, $args, $fragmentName, $fullPageTemplate)` | htmx → fragment, else full page; derives the fragment from `HX-Target` / `HX-Trigger-Name` |
+| `fragment($name, $fn)` | marks a named region for one-file-two-responses extraction |
+
+## HTMX — See also
+
+- [Templates & Rendering](./templates-and-rendering.md) — the file-execution family, `App::fragment()`, and the universal return contract.
+- [Streaming](./streaming.md) — Generator SSR, `$response->stream()`, and SSE.
+- [WebSocket](./websocket.md) — `App::ws()` and realtime.
+- The `/learn/htmx` lesson — a narrative introduction to htmx on ZealPHP.
+
+## Scaling limits & sizing
+
+The hard limits and sizing formulas you need when running ZealPHP at scale, from
+the 2026-06-03 scalability audit. None of these are bugs — they're properties of
+the underlying primitives (`OpenSwoole\Table`, Redis connections) that you must
+size for.
+
+## Scaling limits & sizing — Redis connection budget
+
+Every worker, on every node, opens its own connections:
+
+- A **data pool** (`RedisConnectionPool`, default `pool_size = 8`) per worker.
+- A **dedicated SUBSCRIBE connection** per worker for each pub/sub runner
+  (`App::subscribe` → `RedisPubSub`, `App::subscribeReliable` → `RedisStreams`).
+
+So steady-state Redis connections ≈
+
+```
+(pool_size + subscriber_runners) × workers × nodes
+```
+
+For `pool_size = 8`, one pub/sub + one streams runner (`+2`), 16 workers, 4
+nodes: `(8 + 2) × 16 × 4 = 640` connections against one Redis. Redis's default
+`maxclients` is 10000, but a proxy/cluster or a small instance can be far lower.
+
+**Sizing:** raise Redis `maxclients` to comfortably exceed the formula, OR front
+Redis with a multiplexing proxy (Twemproxy / Envoy / Redis Cluster), OR lower
+`pool_size` for large fleets. The per-node pub/sub aggregator
+(`docs/architecture/2026-06-03-cross-node-fanout.md`) collapses the *subscriber*
+term from `workers × nodes` to `nodes` once implemented.
+
+`App::stats()` / `Store::stats()` expose `pool_clients_created_total` so you can
+watch actual connection growth per worker.
+
+## Scaling limits & sizing — `OpenSwoole\Table` `maxRows` is a hard cap with NO eviction
+
+`Store` / `Cache` on the **Table backend** allocate a fixed-size
+`OpenSwoole\Table` at `maxRows` **at master boot**. It does not grow and does
+**not evict** — once full, every new distinct key's `set()` **silently fails**
+(returns `false`, the value is dropped).
+
+- **Memory:** `RAM ≈ maxRows × (Σ column sizes + ~32 B/row)`. A 1M-row table with
+  a 32-byte string column ≈ 280 MB allocated up front. Setting `maxRows =
+  PHP_INT_MAX` will OOM-kill the master at boot.
+- **Advisory:** `TableBackend::set()` now emits a **one-time warning per table**
+  the first time a write fails, distinguishing "table FULL at maxRows" (no
+  eviction → keys silently dropped) from "row didn't fit" (a column value
+  exceeded its declared size). Grep your debug log for `is FULL at its hard
+  maxRows cap`.
+
+**Sizing:** size `maxRows` to the **full hot working set** up front (it can't
+grow). For unbounded / TTL'd data, use the **Redis** or **Tiered** backend
+(`Store::defaultBackend(Store::BACKEND_REDIS)`), or pair with `Cache::init(
+ttlSeconds: …)` so entries expire instead of accumulating to the cap.
+
+## Scaling limits & sizing — `iteratePaged()` is O(N²) on the Table backend
+
+`TableBackend::iteratePaged()` treats the cursor as a skip-offset and
+**re-iterates from row 0 on every call**, so paginating all N rows costs
+`O(N² / page)`. Fine for a few thousand rows; above that it's quadratic.
+
+**Use instead:**
+
+- The **Redis / Tiered** backend, whose `iteratePaged()` is a true `SSCAN`
+  cursor (O(N) total).
+- `iterate()` (single O(N) pass) when you can hold one pass in memory and don't
+  need page boundaries.
+
+`count()`, `names()`, and `iterate()` on the Table backend are O(N) single
+passes and are fine.
+
+## Scaling limits & sizing — See also
+
+- `docs/db-connection-pool.md` — bounding DB connections under coroutine
+  concurrency (the same connection-budget concern for SQL).
+- `docs/architecture/2026-06-03-cross-node-fanout.md` — the per-node pub/sub
+  aggregator + WS room targeting design that reduces the cross-node fan-out.
+- `docs/store.md` — backend selection (Table vs Redis vs Tiered).
 
 ## Standards and Roadmap
 

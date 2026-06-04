@@ -30,7 +30,7 @@ class REST {
      * @param mixed $data
      * @param int|null $status
      */
-    public function response($data, $status): void {
+    public function response($data, $status = null): void {
         $this->_code = ($status)?$status:200;
         $this->setHeaders();
         // @phpstan-ignore-next-line — $_response is documented mixed for legacy compatibility

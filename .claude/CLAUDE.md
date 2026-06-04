@@ -1002,12 +1002,18 @@ Verify Packagist picked up the tag: `curl -sS https://repo.packagist.org/p2/sibi
 
 ### Scaffold sync (after main tag is live on Packagist)
 
+**Refresh `llms.txt` FIRST — it ships a SNAPSHOT and MUST be regenerated every release** (it silently shipped stale at v0.4.0 because this step was missing). `scripts/build-agent-reference.php` rebuilds `examples/agents/zealphp_reference.txt` from `docs/*.md`; the scaffold's `llms.txt` is a copy of that file. Run it AFTER all the release's docs are on master, then copy it across:
+
 ```bash
+(cd <main-repo> && make docs-rebuild)                                   # or: php scripts/build-agent-reference.php
+cp <main-repo>/examples/agents/zealphp_reference.txt <scaffold-path>/llms.txt
+# sanity: the new docs must be in it, e.g. `grep -c renderHtmx <scaffold-path>/llms.txt` > 0
+
 cd <scaffold-path>                            # discovered via the env-var/sibling chain above
 # Edit composer.json: "sibidharan/zealphp": "^X.Y.Z" (bump floor, not just caret)
 composer update sibidharan/zealphp --with-dependencies
-git add composer.json composer.lock
-git commit -m "chore: bump sibidharan/zealphp floor to ^X.Y.Z"
+git add composer.json composer.lock llms.txt
+git commit -m "chore: bump sibidharan/zealphp floor to ^X.Y.Z + refresh llms.txt"
 git tag -a vX.Y.Z -m "Release vX.Y.Z — tracks sibidharan/zealphp vX.Y.Z"
 for remote in $(git remote); do
   git push $remote main && git push $remote vX.Y.Z

@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-04
+
+A first-run polish patch: `REST::response()` no longer needs the status argument, the CLI accepts `--logs`-style dashed subcommands, editor/IDE guidance for templates, and the scaffold ships IDE-clean templates + a header-safe toast. (The response-`charset=utf-8` work is deferred to a tested follow-up — applying it naively would clobber JSON `Content-Type`.)
+
+### Fixed
+
+- **`REST::response($data, $status)` no longer requires the status argument.** The method body already defaulted a falsy status to `200` and its docblock declared `@param int|null $status`, but the signature lacked a default — so the natural `$this->response($this->json($data))` call inside an `api/` handler threw `ArgumentCountError: Too few arguments`. `$status` now defaults to `null` (→ 200).
+- **CLI accepts dashed subcommand forms.** `php app.php --logs` (and `--status` / `--stop` / `--restart` / `--start`) previously fell through to the default `start` action — silently **booting the server** instead of running the intended command. The arg parser now strips leading dashes when matching the subcommand, so both `logs` and `--logs` work.
+
+### Added
+
+- **Editor / IDE guidance for templates** (`docs/templates-and-rendering.md`) — how to stop VSCode/Intelephense flagging `extract()`-injected template variables as "undefined": the closure-with-typed-params form (no docblocks, full type-checking), `@var` docblocks, or a typed view-model. The scaffold templates ship with `@var` docblocks as the worked example.
+
 ## [0.4.0] - 2026-06-04
 
 First-class **HTMX** support is the headline: `App::renderHtmx()` (an htmx-aware fragment/full-page selector), `HtmxResponse` ergonomics (`triggerJSON()` + chain-back `response()`), and a consolidated **HTMX guide** (`docs/htmx.md` + a `/htmx` page) — completing a surface that already had full HX-* request/response header coverage. Also: `$req`/`$res` handler-parameter aliases, environment config for the entire CGI subprocess pool (`ZEALPHP_CGI_WORKERS` + four more), and a foreground start banner. The scaffold ships a redesigned Terminal-Luxury theme with a live htmx playground.
