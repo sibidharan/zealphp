@@ -18,11 +18,19 @@ Assign a closure to a variable whose name matches the file base name. It receive
 // File: api/device/list.php
 
 $list = function () {
-    return $this->json(['devices' => []]);
+    // Mode 1 sends EVERY HTTP method to this one closure. Use the helper to
+    // tell which verb came in (there is no separate $get/$post here):
+    $method = $this->get_request_method();   // 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+
+    if ($method === 'POST') {
+        return $this->json(['created' => true, 'method' => $method]);
+    }
+
+    return $this->json(['devices' => [], 'method' => $method]);
 };
 ```
 
-`ZealAPI::processApi()` includes the file, binds `$list` to the API object (`$this`), and executes it.
+`ZealAPI::processApi()` includes the file, binds `$list` to the API object (`$this`), and executes it. Since a Mode 1 closure answers **every** verb, `$this->get_request_method()` (returns `GET`/`POST`/`PUT`/`DELETE`/`PATCH`, defaulting to `GET`) is how you branch on the HTTP method inside it — the per-method helpers table below lists the related request accessors. If you'd rather split each verb into its own closure, use Mode 2 (per-method dispatch) instead.
 
 ### Mode 2 — Per-method dispatch
 
