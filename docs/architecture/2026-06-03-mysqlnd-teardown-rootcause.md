@@ -235,3 +235,53 @@ This supersedes the single-cause "mysqlnd/libtasn1 connection-teardown heap-over
 fixed (0.3.27); bug #2 (object-globals `$wpdb`) is the remaining coroutine-legacy WordPress frontier.
 Modern Composer/PSR-4 apps that build their DB handle per request (not via a persisted global object) do
 not hit bug #2.
+
+---
+
+## Doability assessment (2026-06-04) — is bug #2 fixable, and at what cost?
+
+**Verdict: probably fixable, but it's a hard, multi-cycle effort with a fundamental design tension and
+a narrow payoff — and a clean production workaround already exists.**
+
+**Why it's hard to even pinpoint.**
+- The corrupting write is **invisible to ASAN and valgrind** — forced to `malloc`, both collapse the
+  `pefree`/`efree` distinction, so the allocator-routing mismatch never corrupts and there is no classic
+  OOB/UAF to flag. Only a **zend_mm `--enable-debug`** build catches it.
+- Even the debug build prints the **bare** `zend_mm_heap corrupted` (free-list metadata already trashed
+  by detection time), **not** a per-block canary report. So the actual corrupting store can't be named
+  by the static canary — it needs an **interactive gdb hardware watchpoint** on the arena chunk (or the
+  mysqlnd VIO bytes), driven by hand.
+- Each iteration is a **slow debug-build cycle** (-O0 WP boot, ~minutes) on a **memory-limited box**.
+  This is the rate limiter on progress.
+
+**Why the fix itself is non-trivial (3-way interaction + a tension).** The bug lives in the intersection
+of ext-zealphp's **per-coroutine object-globals isolation** × **mysqlnd's stream/resource lifecycle** ×
+the **OpenSwoole coroutine scheduler** — the isolation fires `$wpdb`'s mysqli teardown at request-end,
+from a context that the normal mysqli resource-dtor path would route differently. The clean structural
+fixes pull against each other:
+- **Exclude resource-bearing objects from isolation** (leave `$wpdb` process-shared) removes the
+  bad teardown — but **reintroduces the cross-coroutine `$wpdb` slot race** the isolation was built to
+  fix (`global $wpdb; $wpdb = new wpdb()` under concurrency, the v0.3.23 motivation).
+- That exclusion is only safe **paired with a per-coroutine connection** the isolation never snapshots —
+  which is exactly `ZealPHP\Db\DbConnectionPool` (shipped in v0.4.0) — but **unmodified WordPress doesn't
+  use the pool** (it builds `$wpdb` itself), so that pairing can't be imposed on the WP case.
+- So a WP-safe fix must instead **narrowly patch the exact upstream corrupting write** once a watchpoint
+  names it — a surgical ext-zealphp C change, not a structural redesign.
+
+**Already ruled out (don't re-walk):** the double-free theory (the `_php_stream_free` in_free entry
+trace — guarded coroutine re-entries, single real free), persistent connections (`mysqli.allow_persistent=0`
+still crashes), and on_yield/on_resume re-entrancy during the drain (the tested-and-reverted draining
+guard — no change, 16/30).
+
+**Next concrete probe:** a gdb hardware watchpoint on the corrupted arena chunk + a per-stage
+kill-switch bisect (`ZEALPHP_FN_STATICS_*`, `ZEALPHP_CLASS_STATICS_RESET_DISABLE`, globals-isolation
+on/off) to isolate which isolation write corrupts the arena. Until that names the store, the fix isn't
+targetable.
+
+**Is it worth it?** The blast radius is narrow: **only unmodified `require_once`-bootstrap apps
+(WordPress) running IN-PROCESS under `coroutine-legacy`** hit it. Modern Composer/PSR-4 apps don't (no
+persisted `$wpdb` global). And there is a **clean production workaround today** — `legacy-cgi` / `cgi-pool`
+mode (process-isolated, no coroutine teardown) runs unmodified WP-admin correctly. So the deep fix is a
+"complete the coroutine-legacy unmodified-WP story" investment, not a blocker for the general user base.
+Recommended framing: keep chasing it as a research frontier when box time allows, but **ship
+`coroutine-legacy` for Composer apps and `cgi-pool` for unmodified WP** as the supported matrix.
