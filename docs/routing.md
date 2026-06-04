@@ -271,6 +271,8 @@ Handlers can declare special parameters to access framework objects:
 - `$response` – `ZealPHP\HTTP\Response` wrapper
 - `$app` – the current `ZealPHP\App` instance
 
+`$req` / `$res` are accepted as short aliases for `$request` / `$response` — they receive the exact same wrapper instances. An explicit `{req}` / `{res}` URL segment still wins: a matched path parameter binds by name before the alias is considered.
+
 To access the underlying `OpenSwoole\HTTP\Server`, call `App::getServer()` — it is not an injectable handler parameter.
 
 ```php

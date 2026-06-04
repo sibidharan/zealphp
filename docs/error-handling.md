@@ -45,8 +45,8 @@ The handler is dispatched through the same `ResponseMiddleware::dispatchRoute()`
 |---|---|
 | `$status` | The error status code being rendered (`int`). |
 | `$exception` | The caught `\Throwable` (only present for 500 cases originating from a throw; `null` otherwise). |
-| `$request` | `ZealPHP\HTTP\Request` wrapper. |
-| `$response` | `ZealPHP\HTTP\Response` wrapper. |
+| `$request` | `ZealPHP\HTTP\Request` wrapper (`$req` is accepted as a short alias). |
+| `$response` | `ZealPHP\HTTP\Response` wrapper (`$res` is accepted as a short alias). |
 | `$app` | The middleware instance (rarely needed). |
 
 ### Handler return values

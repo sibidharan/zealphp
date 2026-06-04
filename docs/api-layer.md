@@ -62,10 +62,12 @@ ZealPHP inspects the closure signature and injects arguments by name. Supported 
 
 - **Framework objects**:
   - `$app` – current `ZealPHP\ZealAPI` instance
-  - `$request` – `ZealPHP\HTTP\Request` wrapper
-  - `$response` – `ZealPHP\HTTP\Response` wrapper
+  - `$request` – `ZealPHP\HTTP\Request` wrapper (`$req` is accepted as a short alias)
+  - `$response` – `ZealPHP\HTTP\Response` wrapper (`$res` is accepted as a short alias)
   - `$server` – underlying `OpenSwoole\HTTP\Server`
 - **Any other name** – receives `null`, or the parameter's declared default value if one exists.
+
+`$req` / `$res` are accepted as short aliases for `$request` / `$response` — they receive the exact same wrappers the long names would.
 
 > **ZealAPI does NOT inject route path parameters.** The URL segments `module` and `action` are consumed by `processApi()` during file resolution and are never passed as closure arguments. To read URL path values use `$request->get` (the query-string array) or `$this->_request` (the cleaned merged inputs). There is no `{id} → $id` injection in ZealAPI — that feature belongs to `$app->route()` handlers, not file-based API closures.
 

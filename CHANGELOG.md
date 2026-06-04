@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Added
+- **`$req` / `$res` handler-parameter aliases** — `$req` and `$res` are now accepted as short aliases for `$request` and `$response` in handler parameter injection, across route handlers, fallback + error handlers, `api/**.php` closures, and template/streaming closures. They inject the exact same wrapper instances as the long names. An explicit `{req}` / `{res}` URL segment still wins (a matched path parameter binds by name first); ws/task handlers are positional and unaffected.
+
 ## [0.3.9] - 2026-06-04
 
 A scale + hardening release: the coroutine-aware **`DbConnectionPool`** (the top scalability blocker), a sharded session write-lock, the **`Store::eval()`** atomic-Lua primitive + cross-node fan-out groundwork, Stage 8 global-scope include, and a sweep of edge-case fixes across session / cache / store / WebSocket / pub/sub from a full critical-infra + scalability audit.

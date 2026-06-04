@@ -91,7 +91,7 @@ $list = function() {
 PHP]); ?>
 
 <h2>Parameter injection</h2>
-<p>API handlers get the same parameter injection as route handlers:</p>
+<p>API handlers get the same parameter injection as route handlers. <code>$req</code> / <code>$res</code> are accepted as short aliases for <code>$request</code> / <code>$response</code> — they receive the exact same wrappers:</p>
 
 <?php App::render('/components/_code', [
     'label' => 'Magic parameters: $request, $response, $app, $server (auto-injected by name)',
@@ -101,8 +101,8 @@ use ZealPHP\RequestContext;
 
 $get = function($request, $response) {
     // ZealAPI's dispatcher injects these by parameter name (reflection-cached):
-    //   $request  → ZealPHP\HTTP\Request  (wrapped OpenSwoole request)
-    //   $response → ZealPHP\HTTP\Response (wrapped OpenSwoole response)
+    //   $request  → ZealPHP\HTTP\Request  (wrapped OpenSwoole request; alias: $req)
+    //   $response → ZealPHP\HTTP\Response (wrapped OpenSwoole response; alias: $res)
     //   $app      → ZealAPI instance      (same as $this)
     //   $server   → \OpenSwoole\Http\Server (raw OpenSwoole server handle)
     //   $this     → ZealAPI instance      (handler runs inside Closure::bind)
