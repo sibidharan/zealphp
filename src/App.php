@@ -5461,7 +5461,18 @@ class App
         }
         $out = [];
         foreach ($cache[$cacheKey] as $p) {
-            $out[] = $args[$p['name']] ?? $p['default'];
+            $name = $p['name'];
+            // Short aliases: $req → request, $res → response — only when the
+            // caller didn't pass an explicit 'req'/'res' arg but DID provide the
+            // long name. Keeps $req/$res working in any param-injected closure,
+            // mirroring the route/api handler injection.
+            if ($name === 'req' && !array_key_exists('req', $args) && array_key_exists('request', $args)) {
+                $out[] = $args['request'];
+            } elseif ($name === 'res' && !array_key_exists('res', $args) && array_key_exists('response', $args)) {
+                $out[] = $args['response'];
+            } else {
+                $out[] = $args[$name] ?? $p['default'];
+            }
         }
         return $out;
     }

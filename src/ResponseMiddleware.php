@@ -49,9 +49,9 @@ class ResponseMiddleware implements MiddlewareInterface
                 $invokeArgs[] = $params[$pname];
             } else if ($pname === 'app') {
                 $invokeArgs[] = $this;
-            } else if ($pname === 'request') {
+            } else if ($pname === 'request' || $pname === 'req') {
                 $invokeArgs[] = $g->zealphp_request;
-            } else if ($pname === 'response') {
+            } else if ($pname === 'response' || $pname === 'res') {
                 $invokeArgs[] = $g->zealphp_response;
             } else {
                 $invokeArgs[] = $param['has_default'] ? $param['default'] : null;
@@ -286,9 +286,9 @@ class ResponseMiddleware implements MiddlewareInterface
                 $invokeArgs[] = $params[$pname];
             } else if ($pname === 'app') {
                 $invokeArgs[] = $this;
-            } else if ($pname === 'request') {
+            } else if ($pname === 'request' || $pname === 'req') {
                 $invokeArgs[] = $g->zealphp_request;
-            } else if ($pname === 'response') {
+            } else if ($pname === 'response' || $pname === 'res') {
                 $invokeArgs[] = $g->zealphp_response;
             } else {
                 $invokeArgs[] = $param['has_default'] ? $param['default'] : null;

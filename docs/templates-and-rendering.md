@@ -124,7 +124,7 @@ return function($users) {
 };
 ```
 
-The framework injects `$users` from the args array by name, exactly like route parameter injection. Each `yield` flushes to the browser immediately.
+The framework injects `$users` from the args array by name, exactly like route parameter injection — and, exactly like route handlers, `$req` / `$res` are accepted as short aliases for `$request` / `$response` when those are present in the args array. Each `yield` flushes to the browser immediately.
 
 ## `App::include()` — run a `public/` file through the framework
 

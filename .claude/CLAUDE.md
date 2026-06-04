@@ -336,11 +336,13 @@ Wire them ONCE during boot — either in the user's `app.php` for single-app dep
 
 | Parameter name | Injected value |
 |---------------|---------------|
-| `$request` | `ZealPHP\HTTP\Request` wrapper |
-| `$response` | `ZealPHP\HTTP\Response` wrapper |
+| `$request` (or `$req`) | `ZealPHP\HTTP\Request` wrapper |
+| `$response` (or `$res`) | `ZealPHP\HTTP\Response` wrapper |
 | `$app` | `ResponseMiddleware` instance |
 | `{param}` names | Matched URL segments |
 | Any other name with default | PHP default value |
+
+`$req` / `$res` are accepted as short aliases for `$request` / `$response` — they inject the exact same wrappers (route handlers + fallback/error handlers via `ResponseMiddleware`, api/ closures via `ZealAPI`, and template/streaming closures via `App::resolveClosureParams`). An explicit `{req}` / `{res}` URL segment still wins: a matched path parameter binds by name before the alias is considered. ws/task handlers are positional and unaffected.
 
 Reflection is cached per route at registration time — zero reflection overhead per request.
 
