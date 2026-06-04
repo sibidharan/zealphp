@@ -358,4 +358,66 @@ class HtmxResponseTest extends TestCase
         $this->assertSame('#output', $headers['HX-Retarget']);
         $this->assertSame('streamDone', $headers['HX-Trigger']);
     }
+
+    // ---- triggerJSON() -----------------------------------------------------
+
+    public function testTriggerJsonEncodesEventDetailObject(): void
+    {
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+        $resp->htmx()->triggerJSON('showMessage', ['level' => 'info', 'message' => 'Saved!']);
+        $resp->flush();
+        $this->assertSame(
+            '{"showMessage":{"level":"info","message":"Saved!"}}',
+            $this->headers($fake)['HX-Trigger']
+        );
+    }
+
+    public function testTriggerJsonWithEmptyDetailEncodesEmptyObject(): void
+    {
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+        // json_encode([]) is "[]"; the event-keyed wrapper makes it
+        // {"refresh":[]} — htmx fires `refresh` with detail = [].
+        $resp->htmx()->triggerJSON('refresh', []);
+        $resp->flush();
+        $this->assertSame('{"refresh":[]}', $this->headers($fake)['HX-Trigger']);
+    }
+
+    public function testTriggerJsonReturnsSelfForChaining(): void
+    {
+        $resp = $this->wrap($this->fake());
+        $htmx = $resp->htmx();
+        $this->assertSame($htmx, $htmx->triggerJSON('e', ['a' => 1]));
+    }
+
+    // ---- response() --------------------------------------------------------
+
+    public function testResponseReturnsParentResponse(): void
+    {
+        $resp = $this->wrap($this->fake());
+        $this->assertSame($resp, $resp->htmx()->response());
+    }
+
+    public function testResponseClosesTheBuilderChainBackToResponse(): void
+    {
+        // The motivating chain: builder → back to Response → status().
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+        $back = $resp->htmx()->retarget('#errors')->reswap('outerHTML')->response();
+        $this->assertSame($resp, $back);
+        $back->status(422);
+        $resp->flush();
+
+        $headers = $this->headers($fake);
+        $this->assertSame('#errors', $headers['HX-Retarget']);
+        $this->assertSame('outerHTML', $headers['HX-Reswap']);
+
+        $statuses = array_values(array_filter(
+            $fake->log,
+            static fn(array $entry): bool => ($entry[0] ?? null) === 'status'
+        ));
+        $this->assertNotEmpty($statuses);
+        $this->assertSame(422, $statuses[0][1]);
+    }
 }

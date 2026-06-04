@@ -5563,6 +5563,75 @@ class App
     }
 
     /**
+     * htmx-aware render: return a fragment (partial) for an htmx request, the
+     * full page otherwise — a thin selector over {@see App::render()} that
+     * keeps the universal return contract and streaming intact (it does NOT
+     * touch `executeFile()`; it only chooses what to render).
+     *
+     * The htmx "one URL, two responses" pattern, in one call:
+     *  - **htmx request** (`HX-Request: true`) → render only the named region
+     *    (via the `App::fragment()` mechanism), so the response is just the
+     *    HTML that swaps in.
+     *  - **normal request** → render the whole page shell.
+     *
+     * Fragment selection for an htmx request:
+     *  1. If `$fragmentName` is passed, that region is rendered.
+     *  2. Otherwise the framework derives the region from the request: the
+     *     `HX-Target` element id (a leading `#` is stripped), falling back to
+     *     `HX-Trigger-Name`. If neither is present, the template is rendered
+     *     with no `fragment` key — i.e. its bare partial output.
+     *
+     * Called outside a request (no current `zealphp_request`), it falls back
+     * to the full-page path so server-side renders never break.
+     *
+     * Two common shapes:
+     *
+     * Same template, a `App::fragment('results', …)` region inside it:
+     * ```php
+     * // /search → full page; htmx (hx-target="#results") → just #results
+     * $app->route('/search', fn() =>
+     *     App::renderHtmx('search', ['q' => $q, 'hits' => $hits]));
+     * ```
+     *
+     * A bare partial template for htmx + a separate full-page shell:
+     * ```php
+     * $app->route('/widget', fn() =>
+     *     App::renderHtmx('widget/partial', ['w' => $w],
+     *         fullPageTemplate: 'widget/page'));
+     * ```
+     *
+     * @param array<string, mixed> $args              Template args (param-injected as usual).
+     * @param string|null          $fragmentName      Region to extract for htmx; null → derive from HX-Target / HX-Trigger-Name.
+     * @param string|null          $fullPageTemplate  Template for non-htmx requests; null → `$template`.
+     * @return mixed The {@see App::render()} return value, riding the universal contract.
+     */
+    public static function renderHtmx(string $template, array $args = [], ?string $fragmentName = null, ?string $fullPageTemplate = null): mixed
+    {
+        $req = RequestContext::instance()->zealphp_request;
+
+        // No request in scope (CLI render, warmup, etc.) → full page.
+        if (!$req instanceof \ZealPHP\HTTP\Request || !$req->isHtmx()) {
+            return self::render($fullPageTemplate ?? $template, $args);
+        }
+
+        // Explicit fragment wins.
+        if ($fragmentName !== null) {
+            return self::render($template, $args + ['fragment' => $fragmentName]);
+        }
+
+        // Derive the fragment from the request: HX-Target (strip a leading
+        // '#'), else HX-Trigger-Name. If neither is present, render the bare
+        // partial with no fragment key.
+        $target = $req->htmxTarget();
+        $derived = $target !== null ? ltrim($target, '#') : $req->htmxTriggerName();
+        if ($derived !== null && $derived !== '') {
+            return self::render($template, $args + ['fragment' => $derived]);
+        }
+
+        return self::render($template, $args);
+    }
+
+    /**
      * Render a template and return the result as a string. Generators are
      * consumed; Closures are invoked with param injection; arrays/objects
      * are JSON-encoded.

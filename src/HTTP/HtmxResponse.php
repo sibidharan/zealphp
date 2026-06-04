@@ -141,6 +141,22 @@ class HtmxResponse
         return $this;
     }
 
+    /**
+     * HX-Trigger — trigger a single named client-side event carrying a detail
+     * payload, without hand-encoding the JSON object form yourself.
+     *
+     * `triggerJSON('showMessage', ['level' => 'info', 'message' => 'Saved!'])`
+     * is shorthand for `trigger('{"showMessage":{"level":"info","message":"Saved!"}}')`.
+     * The browser receives `event.detail` = the decoded `$detail` array, the
+     * htmx convention for passing structured data to an event listener.
+     *
+     * @param array<string, mixed> $detail Detail payload — becomes `event.detail`.
+     */
+    public function triggerJSON(string $event, array $detail): static
+    {
+        return $this->trigger((string) json_encode([$event => $detail]));
+    }
+
     // ---- Out-of-band helper ------------------------------------------------
 
     /**
@@ -161,6 +177,22 @@ class HtmxResponse
         $swap = htmlspecialchars($swap, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $tag  = preg_replace('/[^a-zA-Z0-9]/', '', $tag) ?: 'div';
         return "<{$tag} id=\"{$id}\" hx-swap-oob=\"{$swap}\">{$html}</{$tag}>";
+    }
+
+    // ---- Builder exit ------------------------------------------------------
+
+    /**
+     * Return the parent Response so the builder chain can flow back into the
+     * Response API. Without this the htmx() builder dead-ends — every HX-*
+     * setter returns `static`, so there is no way to continue with a Response
+     * call (e.g. `status()`) in the same expression.
+     *
+     *   $res->htmx()->retarget('#errors')->reswap('outerHTML')
+     *       ->response()->status(422);
+     */
+    public function response(): Response
+    {
+        return $this->response;
     }
 
     // ---- Internal ----------------------------------------------------------
