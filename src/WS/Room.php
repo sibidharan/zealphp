@@ -243,20 +243,19 @@ final class Room
     /**
      * Per-room rate limit check. True = allowed, false = drop.
      *
-     * Sliding window via floor(time() / window) bucket — each window has
-     * its own counter; old counters age out naturally without explicit
-     * deletion. Disabled when WSRouter::$roomRateLimitN === 0.
+     * Sliding window via floor(time() / window) bucket. WS-7: the counter
+     * NAME is STABLE per room (no per-window suffix) — the window roll is
+     * handled by WSRouter::rateLimitAllow() resetting the SAME counter on
+     * boundary crossing, instead of allocating a brand-new named Atomic every
+     * window (which leaked one dead Atomic per elapsed window on the default
+     * Atomic Counter backend). Disabled when WSRouter::$roomRateLimitN === 0.
      */
     private function checkRoomRateLimit(): bool
     {
-        $n      = WSRouter::roomRateLimitN();
+        $n = WSRouter::roomRateLimitN();
         if ($n === 0) { return true; }
-        $window = WSRouter::roomRateLimitWindowSec();
-        $bucket = (int) (time() / $window);
-        $name   = '_wsrouter_rl_' . substr(sha1($this->name . ':' . $bucket), 0, 16);
-        $c      = new \ZealPHP\Counter(0, $name);
-        $now    = $c->increment();
-        return $now <= $n;
+        $name = '_wsrouter_rl_' . substr(sha1($this->name), 0, 16);
+        return WSRouter::rateLimitAllow($name, $n, WSRouter::roomRateLimitWindowSec());
     }
 
     /**

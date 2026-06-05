@@ -80,6 +80,18 @@ final class TieredBackend implements StoreBackend
         return $this->invalidationSecret !== null;
     }
 
+    /**
+     * True once `enableInvalidation()` has spun up the cross-node L1
+     * invalidation subscriber. While false, peer writes do NOT evict local L1
+     * entries — L1 staleness is bounded only by `$l1Ttl` (a key updated on
+     * node A serves stale from node B's L1 for up to that window). Used by the
+     * `Store::tieredBootChecks()` advisory to surface the silent gap.
+     */
+    public function isInvalidationEnabled(): bool
+    {
+        return $this->invalidationRunner !== null;
+    }
+
     /** Return the L1 `TableBackend` instance (in-process shared-memory tier). */
     public function l1(): TableBackend { return $this->l1; }
 
@@ -100,8 +112,19 @@ final class TieredBackend implements StoreBackend
      * matching L1 entry. Self-publishes are skipped via the origin tag.
      *
      * MUST be called inside a coroutine context (spawns the subscriber cor).
-     * Idempotent — repeated calls are no-ops; new tables registered after
-     * enable() automatically subscribe themselves.
+     * Idempotent — repeated calls are no-ops.
+     *
+     * BOOT-ORDER REQUIREMENT — call `enableInvalidation()` AFTER every
+     * `make()`, or call it once up front and `make()` tables afterwards:
+     * a table `make()`d BEFORE this runner is up auto-subscribes itself when
+     * enable() runs (its channel is replayed from `$invalidationChannels`),
+     * and a table `make()`d AFTER enable() auto-subscribes at make() time.
+     * The ONLY broken ordering is enabling, then making — which IS handled
+     * here — but a runner that is restarted (`stopInvalidation()` then
+     * `enableInvalidation()`) only re-subscribes channels still tracked in
+     * `$invalidationChannels`. In short: register all tables AND call
+     * enableInvalidation() during boot, before request concurrency; do not
+     * interleave make()/stop()/enable() at runtime.
      */
     public function enableInvalidation(): void
     {

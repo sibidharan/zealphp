@@ -98,6 +98,28 @@ class App
     protected static int $worker_num = 0;
     /** Resolved task-worker count after `run()` reads CLI/env/settings. Zero when task workers are disabled. */
     protected static int $task_worker_num = 0;
+    /**
+     * Default per-worker coroutine ceiling applied in `run()` when the operator
+     * sets none (via `ZEALPHP_MAX_COROUTINE` or `$app->run(['max_coroutine' => N])`).
+     *
+     * OpenSwoole's own default is ~100,000/worker, which is effectively
+     * unbounded relative to every downstream resource (the Redis pool of 8, the
+     * DB connection budget, per-coroutine memory). With no ceiling a load burst
+     * has no front-door shed path — it propagates inward until the first bounded
+     * resource fails as a cliff (OOM / pool-acquire-timeout 500s) instead of
+     * OpenSwoole rejecting the over-limit coroutine. This default restores
+     * backpressure while staying generous: ~40k concurrent in-flight coroutines
+     * across 4 workers (10k/worker), ~10x below OpenSwoole's 100k and far above
+     * the c=1000 benchmark's ~250/worker — a real bound that won't shed normal
+     * load or a typical streaming/WebSocket fan-in.
+     *
+     * SCALE IT for very high long-lived-connection counts (each SSE/WS client
+     * holds a coroutine): `ZEALPHP_MAX_COROUTINE=50000` or
+     * `$app->run(['max_coroutine' => 50000])`, and/or add workers/nodes. Pair
+     * with `ConcurrencyLimitMiddleware` (nginx limit_conn parity) for graceful
+     * 503s before the ceiling is hit.
+     */
+    public const DEFAULT_MAX_COROUTINE = 10000;
     /** Bind address for the OpenSwoole server (e.g. `'0.0.0.0'` or `'127.0.0.1'`). Set in `__construct()` from `App::init()`. */
     protected string $host;
     // Widened protected → public so ZealPHP\CLI (extracted from App.php in the
@@ -1816,15 +1838,35 @@ class App
      *
      * @param array<string, mixed> $srv
      */
-    private static function requestIsHttps(array $srv): bool
+    /**
+     * Whether the request arrived over HTTPS. `X-Forwarded-Proto` is honoured
+     * ONLY when the immediate peer (`REMOTE_ADDR`) is a configured trusted
+     * proxy — parity with `App::clientIp()`. Public so the session layer
+     * (`zeal_session_start`'s Secure-cookie auto-detect) shares this one gated
+     * source of truth instead of trusting the header from any client.
+     *
+     * @param array<string, mixed> $srv
+     */
+    public static function requestIsHttps(array $srv): bool
     {
         $https = $srv['HTTPS'] ?? '';
         if (is_scalar($https) && strtolower((string)$https) === 'on') {
             return true;
         }
+        // X-Forwarded-Proto is only honoured when the immediate peer
+        // (REMOTE_ADDR) is a configured trusted proxy — parity with
+        // App::clientIp()'s X-Forwarded-For gating. Trusting it from ANY client
+        // lets an attacker flip the framework's HTTPS determination with one
+        // header (Secure-cookie on a plaintext listener → browser drops it;
+        // legacy code branching on $_SERVER['HTTPS'] fooled). With no
+        // $trusted_proxies configured the header is ignored entirely.
         $proto = $srv['HTTP_X_FORWARDED_PROTO'] ?? '';
         if (is_scalar($proto) && strtolower((string)$proto) === 'https') {
-            return true;
+            $remoteRaw = $srv['REMOTE_ADDR'] ?? '';
+            $remote = is_scalar($remoteRaw) ? (string)$remoteRaw : '';
+            if ($remote !== '' && self::$trusted_proxies !== [] && self::peerInTrustedProxies($remote)) {
+                return true;
+            }
         }
         $port = $srv['SERVER_PORT'] ?? '';
         return is_scalar($port) && (string)$port === '443';
@@ -4383,6 +4425,39 @@ class App
     }
 
     /**
+     * Schedule the deterministic session garbage collector on a worker-0 timer.
+     *
+     * ZealPHP replaced PHP's probabilistic per-request session GC, so without
+     * this nothing ever reclaims expired sessions: default-storage `sess_*`
+     * files accumulate until inodes exhaust, and a leaked `PHPSESSID` stays
+     * replayable forever. Mirrors `Cache::registerGc()` — one worker (id 0)
+     * runs the sweep so N workers don't N-times-duplicate it. No-op when the
+     * session lifecycle is disabled (e.g. a Symfony/Laravel bridge owns
+     * sessions). Interval is env-tunable via `ZEALPHP_SESSION_GC_INTERVAL`
+     * (milliseconds, default 10 min); the max-lifetime is `App::$session_ttl`.
+     * Called from `App::run()` before `$server->start()`.
+     */
+    private static function registerSessionGc(): void
+    {
+        if (!self::$session_lifecycle) {
+            return;
+        }
+        $intervalMs = (int) (getenv('ZEALPHP_SESSION_GC_INTERVAL') ?: 600000);
+        if ($intervalMs < 1000) {
+            $intervalMs = 600000;
+        }
+        $maxLifetime = max(1, self::$session_ttl);
+        self::onWorkerStart(function ($server, $workerId) use ($intervalMs, $maxLifetime): void {
+            if ($workerId !== 0) {
+                return;
+            }
+            self::tick($intervalMs, static function () use ($maxLifetime): void {
+                \ZealPHP\Session\zeal_session_gc($maxLifetime);
+            });
+        });
+    }
+
+    /**
      * Coroutine-aware autoload serializer — the HAZARD-2 correctness fix for
      * coroutine-legacy mode.
      *
@@ -4912,6 +4987,41 @@ class App
         int $batchSize = 16,
     ): void {
         self::subscribeReliable($stream, $handler, $group, $blockMs, $batchSize);
+    }
+
+    /**
+     * Boot-time backpressure advisory (pure testable seam over the resolved
+     * server settings). Returns a warning when the per-worker coroutine ceiling
+     * has been raised into OpenSwoole's effectively-unbounded range (>= 100000)
+     * — which removes the front-door shed path, so a load burst propagates to
+     * the first bounded downstream resource (Redis pool, DB, memory) as a cliff
+     * instead of OpenSwoole rejecting the over-limit coroutine. Returns null
+     * when a bounded ceiling is in effect (the default, or any operator value
+     * below the unbounded threshold).
+     *
+     * @param array<string, mixed> $effectiveSettings
+     * @internal — public for tests; not part of the user-facing API.
+     */
+    public static function backpressureBootAdvisory(array $effectiveSettings): ?string
+    {
+        $maxCo = $effectiveSettings['max_coroutine'] ?? null;
+        if (!is_int($maxCo) || $maxCo < 100000) {
+            return null;
+        }
+        $workers = is_int($effectiveSettings['worker_num'] ?? null)
+            ? (int) $effectiveSettings['worker_num']
+            : 0;
+        return sprintf(
+            '[backpressure] max_coroutine=%d per worker%s is in OpenSwoole\'s '
+            . 'effectively-unbounded range: a load burst has no front-door shed '
+            . 'path and will propagate to the first bounded downstream resource '
+            . '(Redis pool, DB connections, memory) as a cliff rather than being '
+            . 'rejected at the door. Lower it (framework default is %d) and/or add '
+            . 'ConcurrencyLimitMiddleware for graceful 503s under overload.',
+            $maxCo,
+            $workers > 0 ? sprintf(' (x%d workers)', $workers) : '',
+            self::DEFAULT_MAX_COROUTINE
+        );
     }
 
     /**
@@ -7414,6 +7524,19 @@ class App
                 : ['/css/', '/js/', '/img/', '/images/', '/fonts/', '/assets/', '/static/', '/favicon.ico', '/robots.txt'],
             'enable_coroutine' => $enableCoroutine,
             'hook_flags' => $hookFlags,
+            // Worker count default — cgroup-quota-aware so a CPU-limited
+            // container does NOT inherit OpenSwoole's host-core-count default
+            // (which spawns one full PHP arena per host core → OOM on a 4-vCPU
+            // pod running on a 48-core node). Overridable via ZEALPHP_WORKERS
+            // env / -w CLI / $app->run(['worker_num' => N]); the passed value
+            // wins because $settings is array_merge'd OVER $default_settings.
+            'worker_num' => \ZealPHP\default_worker_count(4),
+            // Per-worker coroutine ceiling — front-door backpressure. Without
+            // it a burst spawns up to OpenSwoole's ~100k coroutines/worker and
+            // there is no shed path, so the first bounded downstream resource
+            // (Redis pool, DB, memory) fails as a cliff. See DEFAULT_MAX_COROUTINE
+            // for the rationale + how to raise it for streaming/WS workloads.
+            'max_coroutine' => (int)(getenv('ZEALPHP_MAX_COROUTINE') ?: self::DEFAULT_MAX_COROUTINE),
             // Runtime compression is owned by OpenSwoole. Do not also register
             // CompressionMiddleware unless this setting is disabled.
             'http_compression' => true,
@@ -7471,6 +7594,18 @@ class App
             $effective_settings['enable_coroutine'] = $enableCoroutine;
         }
         $server->set($effective_settings);
+
+        // Backpressure advisory — warn if the operator raised max_coroutine back
+        // into OpenSwoole's effectively-unbounded range (removing the front-door
+        // shed path). Logged once at boot, visible in master logs before fork.
+        if (($bpAdvisory = self::backpressureBootAdvisory($effective_settings)) !== null) {
+            error_log($bpAdvisory);
+        }
+
+        // Deterministic session GC on a worker-0 timer — ZealPHP replaced PHP's
+        // probabilistic per-request GC, so without this sess_* files / handler
+        // entries accumulate forever and leaked PHPSESSIDs never expire.
+        self::registerSessionGc();
 
         # Snapshot the app.php-defined baseline (explicit routes + the alias /
         # App::when registries) BEFORE the file-based + implicit routes load, so

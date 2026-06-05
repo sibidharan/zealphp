@@ -199,7 +199,79 @@ class Store
         $l1Ttl  = is_array($conn) && isset($conn['l1_ttl']) && is_int($conn['l1_ttl']) ? $conn['l1_ttl'] : 5;
         $secret = is_array($conn) && isset($conn['invalidation_secret']) && is_string($conn['invalidation_secret']) ? $conn['invalidation_secret'] : null;
 
-        return new TieredBackend(new TableBackend(), $l2, l1Ttl: $l1Ttl, invalidationSecret: $secret);
+        $backend = new TieredBackend(new TableBackend(), $l2, l1Ttl: $l1Ttl, invalidationSecret: $secret);
+
+        // Surface the silent cross-node coherence gap at build time. The
+        // default Tiered backend ships with invalidation OFF (it needs a
+        // coroutine + a secret decision the framework can't make for the
+        // operator), so a key updated on node A serves stale from node B's L1
+        // for up to $l1Ttl. We do NOT auto-enable it (that changes Redis
+        // subscription behaviour) — we make the gap LOUD instead. The
+        // testable decision lives in tieredAdvisory(); emit it via elog so it
+        // reaches the same boot-log channel as the other Store advisories.
+        $advisory = self::tieredAdvisory($backend);
+        if ($advisory !== null) {
+            if (function_exists('ZealPHP\\elog')) {
+                \ZealPHP\elog($advisory, 'warn');
+            } else {
+                error_log($advisory);
+            }
+        }
+
+        return $backend;
+    }
+
+    /**
+     * Advisory for a Tiered backend whose cross-node L1 invalidation is OFF.
+     *
+     * Returns the warning string when `$backend` is Tiered (always Redis-L2)
+     * AND `enableInvalidation()` has not been called, telling the operator
+     * cross-node L1 coherence is OFF, how to turn it on, and the
+     * enable-relative-to-make boot-order requirement. When invalidation IS
+     * enabled but no HMAC secret is set, the message instead warns that any
+     * Redis writer can forge an evict (the C2 trust-mode gap). Returns null
+     * when invalidation is enabled with a secret — nothing to warn about.
+     *
+     * Pure (no side effects) so a unit test can assert the decision; the
+     * build path emits it via `elog`. Mirrors the shape of
+     * `App::redisBootChecks()` / `App::opcacheLegacyBootCheck()`.
+     */
+    public static function tieredAdvisory(StoreBackend $backend): ?string
+    {
+        if (!($backend instanceof TieredBackend)) {
+            return null;
+        }
+        if (!$backend->isInvalidationEnabled()) {
+            return 'Store(Tiered): cross-node L1 invalidation is OFF — a key updated on one node serves '
+                . 'STALE from another node\'s L1 cache for up to l1_ttl (' . $backend->l1Ttl() . 's). '
+                . 'Call $backend->enableInvalidation() inside a coroutine at boot to evict peer L1 entries '
+                . 'sub-millisecond, and set an invalidation_secret (or ZEALPHP_TIERED_INVALIDATION_SECRET) '
+                . 'so peers can authenticate evicts. BOOT-ORDER: call enableInvalidation() during boot for '
+                . 'every table you make() (tables made() before OR after enable() auto-subscribe; do not '
+                . 'interleave make()/stop()/enable() at runtime).';
+        }
+        if (!$backend->isInvalidationAuthenticated()) {
+            return 'Store(Tiered): cross-node L1 invalidation is ON but UNAUTHENTICATED (no HMAC secret) — '
+                . 'any client with Redis write access can forge an L1-evict and DoS the cluster\'s caches. '
+                . 'Set invalidation_secret (or ZEALPHP_TIERED_INVALIDATION_SECRET) on every node to require '
+                . 'authenticated evicts.';
+        }
+        return null;
+    }
+
+    /**
+     * Boot-check advisories for the active Tiered backend. Returns the list of
+     * advisory strings (currently 0 or 1) for the process-wide default backend
+     * — empty when the backend is not Tiered, or when Tiered invalidation is
+     * enabled with a secret. Mirrors `App::redisBootChecks()`'s return shape so
+     * a boot harness can fold these into the same warning stream.
+     *
+     * @return list<string>
+     */
+    public static function tieredBootChecks(): array
+    {
+        $advisory = self::tieredAdvisory(self::defaultBackend());
+        return $advisory !== null ? [$advisory] : [];
     }
 
     private static function redisUrlFromEnv(): string

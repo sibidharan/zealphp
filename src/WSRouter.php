@@ -108,6 +108,16 @@ final class WSRouter
     /** Per-client rate limit (WS-4) — 0 disables. Set via `setClientRateLimit`. */
     private static int $clientRateLimitN = 0;
     private static int $clientRateLimitWindowSec = 60;
+    /**
+     * WS-6 — max simultaneous push coroutines per room broadcast. Bounds the
+     * fan-out so a large room + message burst can't spawn an unbounded number
+     * of concurrent push coroutines (each push call is non-blocking, but the
+     * `getClientInfo` + dispatch path is not free, and unbounded `go()` per
+     * member is the keystone backpressure gap). Pushes still run concurrently
+     * (per-coroutine isolation preserved) — only the SIMULTANEITY is capped via
+     * a `Coroutine\Channel` token semaphore. Configure via `setFanoutConcurrency`.
+     */
+    private static int $fanoutConcurrency = 128;
     /** Per-channel HMAC secret (WS-3) — null disables. Set via `setChannelHmacSecret`. */
     private static ?string $channelHmacSecret = null;
     /** Per-worker counter struct. Surfaced via `WSRouter::stats()`. Lazily initialised on first access. */
@@ -135,6 +145,23 @@ final class WSRouter
 
     /** `true` once `init()` has wired the pub/sub subscribers and lifecycle hooks. */
     private static bool $initialized = false;
+
+    /**
+     * WS-7 — per-worker record of the window id each rate-limit counter is
+     * currently serving. A sliding-window limiter rotates buckets every
+     * `$windowSec`; the PRE-WS-7 code baked the bucket id into the counter
+     * NAME (`..._{hash}_{bucket}`), so on the default Atomic backend every
+     * elapsed window left a dead named Atomic forever → unbounded per-worker
+     * memory growth. WS-7 keeps the counter name STABLE (one per distinct
+     * room / client) and reuses it across windows: when this map shows the
+     * counter has rolled into a new window, the limiter `reset()`s it to 0
+     * before the increment. Bounds the live Atomic count to the number of
+     * distinct rate-limited rooms + clients, not rooms × elapsed-windows.
+     * `counter-name → window-id`
+     *
+     * @var array<string, int>
+     */
+    private static array $rateLimitWindows = [];
 
     // Room state — per-worker.
     //
@@ -263,28 +290,84 @@ final class WSRouter
         self::$clientRateLimitWindowSec = $windowSec;
     }
 
+    /**
+     * WS-6 — bound the per-broadcast push fan-out concurrency. Default 128.
+     * A room broadcast spawns at most `$n` push coroutines at a time; the
+     * rest queue on a `Coroutine\Channel` token semaphore and start as
+     * in-flight pushes complete. Pass 0 to UNBOUND (restores the legacy
+     * spawn-per-member behaviour — not recommended for large rooms).
+     *
+     *     WSRouter::setFanoutConcurrency(256);   // up to 256 simultaneous pushes
+     *     WSRouter::setFanoutConcurrency(0);      // unbounded (legacy)
+     */
+    public static function setFanoutConcurrency(int $n): void
+    {
+        if ($n < 0) {
+            throw new \InvalidArgumentException('setFanoutConcurrency: $n must be >= 0');
+        }
+        self::$fanoutConcurrency = $n;
+    }
+
+    /** @internal — current per-broadcast fan-out concurrency cap (0 = unbounded). */
+    public static function fanoutConcurrency(): int { return self::$fanoutConcurrency; }
+
     /** @internal — used by Room::push to gate per-client rate */
     public static function clientRateLimitN(): int { return self::$clientRateLimitN; }
 
     /**
      * Returns true when the client is under the rate limit (or limits
-     * disabled). Increments the bucket counter atomically.
+     * disabled). Increments the (window-stable) counter atomically.
      */
     public static function checkClientRate(string $clientId): bool
     {
         $n = self::$clientRateLimitN;
         if ($n === 0 || $clientId === '') { return true; }
-        $window = self::$clientRateLimitWindowSec;
-        $bucket = (int) (time() / $window);
-        $name   = '_wsrouter_cl_' . substr(sha1($clientId . ':' . $bucket), 0, 16);
-        $c      = new \ZealPHP\Counter(0, $name);
-        $now    = $c->increment();
-        if ($now > $n) {
+        // WS-7: STABLE counter name (no per-window suffix) — see rateLimitAllow.
+        $name  = '_wsrouter_cl_' . substr(sha1($clientId), 0, 16);
+        $allow = self::rateLimitAllow($name, $n, self::$clientRateLimitWindowSec);
+        if (!$allow) {
             self::stats()->inc('client_rate_limit_drops_total');
-            return false;
         }
-        return true;
+        return $allow;
     }
+
+    /**
+     * @internal — WS-7 shared sliding-window rate-limit primitive. Bounds the
+     * named-Atomic allocation on the default Counter backend: the counter name
+     * is STABLE (`$name`, derived from the room/client, NOT the window), so a
+     * given subject reuses ONE Atomic across every window instead of leaking a
+     * fresh dead Atomic per elapsed window. When this worker observes that the
+     * counter has rolled into a new `floor(time()/$windowSec)` bucket, it
+     * `reset()`s the counter to 0 before incrementing — the window boundary
+     * without a new allocation.
+     *
+     * On a SHARED Counter backend (Redis/Memcached) the per-worker window map
+     * means each worker independently resets the shared counter on its first
+     * touch of a new window; that's a benign over-reset (the first request of a
+     * window in each worker re-zeroes, which can let slightly more than `$n`
+     * through cluster-wide right at a boundary) and keeps the previous
+     * cross-node behaviour otherwise. For exact cross-node windows, a
+     * key-with-EXPIRE scheme on Redis is the upgrade path; this fix's mandate
+     * is to STOP the unbounded Atomic growth without regressing correctness.
+     *
+     * Returns true when the post-increment count is within `$n`.
+     */
+    public static function rateLimitAllow(string $name, int $n, int $windowSec): bool
+    {
+        if ($n <= 0 || $windowSec <= 0) { return true; }
+        $window = (int) (time() / $windowSec);
+        $c      = new \ZealPHP\Counter(0, $name);
+        // First touch in a fresh window (per worker) → reset the shared/atomic
+        // counter so the stable name behaves like a rotating bucket.
+        if ((self::$rateLimitWindows[$name] ?? null) !== $window) {
+            self::$rateLimitWindows[$name] = $window;
+            $c->reset();
+        }
+        return $c->increment() <= $n;
+    }
+
+    /** @internal — testing hook: current per-worker rate-limit window map size. */
+    public static function rateLimitWindowCount(): int { return count(self::$rateLimitWindows); }
 
     /**
      * WS-3 — set a shared HMAC secret for pub/sub channel authentication.
@@ -342,6 +425,66 @@ final class WSRouter
             return null;
         }
         return $inner;
+    }
+
+    /** @internal — true when a channel HMAC secret is configured (WS-3). */
+    public static function hmacConfigured(): bool
+    {
+        return self::$channelHmacSecret !== null;
+    }
+
+    /**
+     * @internal — true when the active Counter backend is SHARED across the
+     * cluster (Redis / Memcached), false on the default per-worker Atomic
+     * backend. The WS rate limiters (`setRoomRateLimit`, `setClientRateLimit`)
+     * build named `Counter`s; on Atomic those are PER-WORKER (so the effective
+     * limit is multiplied by worker count and is NOT cross-node) — `bootChecks`
+     * surfaces that.
+     */
+    public static function counterBackendIsShared(): bool
+    {
+        return !(\ZealPHP\Counter::defaultBackend() instanceof \ZealPHP\Counter\AtomicBackend);
+    }
+
+    /**
+     * Boot-time WS advisories — mirror of `App::redisBootChecks()`. Returns a
+     * list of human-readable warning strings for misconfigurations that are
+     * legal but surprising in production. `App::run()` (or app.php) can emit
+     * these via `elog`/`error_log` at boot. Pure + side-effect-free so it's
+     * unit-testable without booting a server.
+     *
+     * Covers:
+     *  - WS-2: a WS rate limit (room or client) is configured but the Counter
+     *    backend is the per-worker Atomic — limits are per-worker (× worker
+     *    count), NOT cross-node. Flip to `Counter::defaultBackend('redis')`
+     *    for a true cluster-wide cap.
+     *  - WS-3: the router is Redis-backed (cross-node pub/sub) but NO channel
+     *    HMAC secret is set — routed `ws:server:*` / `ws:room:*` messages are
+     *    UNAUTHENTICATED, so any peer with Redis write access can forge a
+     *    message onto a real client. Set `WSRouter::setChannelHmacSecret()`.
+     *
+     * @return list<string>
+     */
+    public static function bootChecks(): array
+    {
+        $warnings = [];
+
+        $rateLimitOn = self::$roomRateLimitN > 0 || self::$clientRateLimitN > 0;
+        if ($rateLimitOn && !self::counterBackendIsShared()) {
+            $warnings[] = 'WSRouter(WS-2): WebSocket rate limiting is configured but the Counter backend is the ' .
+                'per-worker Atomic — limits are PER-WORKER (effective cap ≈ configured × worker_count) and are ' .
+                'NOT enforced cross-node. For a true cluster-wide cap, set Counter::defaultBackend(\'redis\') ' .
+                '(or ZEALPHP_STORE_BACKEND=redis) before App::run().';
+        }
+
+        if (self::hasRedisBackend() && !self::hmacConfigured()) {
+            $warnings[] = 'WSRouter(WS-3): the router is Redis-backed (cross-node pub/sub) but no channel HMAC ' .
+                'secret is set — routed ws:server:* / ws:room:* messages are UNAUTHENTICATED, so any peer with ' .
+                'Redis write access can forge a message onto a real client. Set ' .
+                'WSRouter::setChannelHmacSecret(getenv(\'ZEALPHP_WS_HMAC\') ?: null) with a shared secret.';
+        }
+
+        return $warnings;
     }
 
     /**
@@ -519,6 +662,19 @@ final class WSRouter
                 self::sweepThisServer();
             }
         });
+
+        // Boot-time advisories (WS-2 per-worker rate limits / WS-3 missing
+        // channel HMAC). Mirror App::redisBootChecks() — emit once at init so
+        // production misconfigurations surface before workers fork. Rate
+        // limits + the HMAC secret are conventionally set BEFORE init(), so
+        // they're already resolved here.
+        foreach (self::bootChecks() as $warning) {
+            if (function_exists('elog')) {
+                elog($warning, 'info');
+            } else {
+                error_log($warning);
+            }
+        }
     }
 
     /** Returns the configured server id (hostname:pid by default). */
@@ -690,6 +846,7 @@ final class WSRouter
         self::$localClientRooms    = [];
         self::$roomMessageHandlers = [];
         self::$roomPresenceHandlers= [];
+        self::$rateLimitWindows    = [];
     }
 
     /**
@@ -1018,26 +1175,101 @@ final class WSRouter
         $server = App::getServer();
         if (!($server instanceof \OpenSwoole\WebSocket\Server)) { return; }
         $data = (string) json_encode($msg);
+
+        // WS-6: resolve member ids to live fds first (re-validating connection
+        // identity, #246), then fan out under a concurrency cap. Each push still
+        // runs in its OWN coroutine (a slow consumer's back-pressure can't block
+        // the others — per-coroutine isolation preserved), but at most
+        // `$fanoutConcurrency` run simultaneously so a large room + burst can't
+        // spawn unbounded push coroutines (the keystone backpressure gap).
+        $fds = [];
         foreach ($localMembers as $cid => $cachedConnId) {
             $local = self::$localFds[$cid] ?? null;
             if ($local === null) { continue; }
-            // #246 — re-validate connection identity before pushing. If the fd
-            // was reused (the cached client id now maps to a DIFFERENT live
-            // connection, i.e. a fresh conn_id), skip — the room message was
-            // destined for the disconnected owner, not the new client on the
-            // reused fd. Same guarantee as the identity-path C1 guard.
-            if ($cachedConnId !== '' && $local['conn_id'] !== $cachedConnId) {
-                continue;
+            // #246 — re-validate connection identity before pushing. If the fd was
+            // reused (the cached client id now maps to a DIFFERENT live connection,
+            // a fresh conn_id), skip — the room message was destined for the
+            // disconnected owner, not the new client on the reused fd. Same
+            // guarantee as the identity-path C1 guard.
+            if ($cachedConnId !== '' && $local['conn_id'] !== $cachedConnId) { continue; }
+            $fds[] = $local['fd'];
+        }
+        if ($fds === []) { return; }
+        self::boundedFanOut(
+            $fds,
+            self::$fanoutConcurrency,
+            // Real spawner — one push coroutine per fd. `$release` MUST run in
+            // the coroutine's finally so a token is returned even if the push
+            // throws, otherwise the semaphore would deadlock the remaining fan-out.
+            function (int $fd, callable $release) use ($server, $data): void {
+                \OpenSwoole\Coroutine::create(function () use ($server, $fd, $data, $release): void {
+                    try {
+                        self::pushWithBackpressure($server, $fd, $data);
+                    } finally {
+                        $release();
+                    }
+                });
+            },
+        );
+    }
+
+    /**
+     * @internal — WS-6 bounded fan-out driver. Spawns one task per item via
+     * the injected `$spawn` callable while never letting more than
+     * `$maxConcurrent` tasks be in flight at once. Every item is dispatched
+     * EXACTLY ONCE.
+     *
+     * `$maxConcurrent === 0` means UNBOUNDED — every item is spawned
+     * immediately (legacy spawn-per-member behaviour), and `$release` is a
+     * no-op the spawner can ignore. Otherwise a `Coroutine\Channel` of
+     * `$maxConcurrent` tokens acts as a counting semaphore: the driver blocks
+     * (`pop`) for a free token before spawning the next item, and the spawned
+     * task returns its token by calling the `$release` closure it was handed
+     * (which `push`es back onto the channel) in its `finally`.
+     *
+     * The driver does NOT wait for in-flight tasks to finish after the last
+     * item is dispatched — the channel reclaim is purely for admission
+     * control, and the spawned push coroutines complete independently.
+     *
+     * Testable in isolation: pass a synchronous fake `$spawn` that records the
+     * concurrency it observes (call `$release` to model completion) — the
+     * driver's admission logic needs neither a live server nor real pushes.
+     *
+     * @param list<int>                            $items
+     * @param callable(int $item, callable(): void $release): void $spawn
+     */
+    public static function boundedFanOut(array $items, int $maxConcurrent, callable $spawn): void
+    {
+        if ($items === []) { return; }
+        if ($maxConcurrent <= 0) {
+            // Unbounded: dispatch every item immediately; release is a no-op.
+            $noop = static function (): void {};
+            foreach ($items as $item) {
+                $spawn($item, $noop);
             }
-            $fd = $local['fd'];
-            // Each push runs in its own coroutine so a slow consumer's
-            // back-pressure (TCP buffer full → push waits) can't block the
-            // others. The push call itself is non-blocking in OpenSwoole,
-            // but getClientInfo + the dispatch path are not free; the go()
-            // wrap keeps fan-out parallel.
-            \OpenSwoole\Coroutine::create(function () use ($server, $fd, $data): void {
-                self::pushWithBackpressure($server, $fd, $data);
-            });
+            return;
+        }
+        // Counting semaphore: a channel pre-filled with `$maxConcurrent` tokens.
+        $tokens = new \OpenSwoole\Coroutine\Channel($maxConcurrent);
+        for ($i = 0; $i < $maxConcurrent; $i++) {
+            $tokens->push(true);
+        }
+        // Each release returns a token exactly once — `$returned` guards against
+        // a double-release inflating the in-flight budget above the cap.
+        $makeRelease = static function () use ($tokens): callable {
+            $returned = false;
+            return static function () use ($tokens, &$returned): void {
+                if ($returned) { return; }
+                $returned = true;
+                $tokens->push(true);
+            };
+        };
+        foreach ($items as $item) {
+            // Block until a token is free — admission control. pop() yields the
+            // current coroutine when the channel is empty, so the driver doesn't
+            // busy-wait; an in-flight task's release() wakes it.
+            $tokens->pop();
+            $spawn($item, $makeRelease());
         }
     }
 
