@@ -224,7 +224,7 @@ class FastCgiClientTest extends TestCase
         $stdout = "Content-Type: text/html\r\n\r\n<html/>";
         $result = $this->invokeParseStdout($stdout, '', 0);
         $this->assertSame(200, $result['status']);
-        $this->assertSame('text/html', $result['headers']['Content-Type']);
+        $this->assertContains(['Content-Type', 'text/html'], $result['headers']);
         $this->assertSame('<html/>', $result['body']);
         $this->assertSame('', $result['stderr']);
     }
@@ -235,8 +235,8 @@ class FastCgiClientTest extends TestCase
         $stdout = "Status: 302 Found\r\nLocation: /new\r\n\r\n";
         $result = $this->invokeParseStdout($stdout, '', 0);
         $this->assertSame(302, $result['status']);
-        $this->assertArrayNotHasKey('Status', $result['headers']);
-        $this->assertSame('/new', $result['headers']['Location']);
+        $this->assertNotContains('Status', array_column($result['headers'], 0));
+        $this->assertContains(['Location', '/new'], $result['headers']);
     }
 
     public function testParseStdoutStatus404(): void
@@ -253,7 +253,7 @@ class FastCgiClientTest extends TestCase
         $stdout = "Content-Type: text/plain\nX-Foo: bar\n\nbody text";
         $result = $this->invokeParseStdout($stdout, '', 0);
         $this->assertSame(200, $result['status']);
-        $this->assertSame('bar', $result['headers']['X-Foo']);
+        $this->assertContains(['X-Foo', 'bar'], $result['headers']);
         $this->assertSame('body text', $result['body']);
     }
 
@@ -279,8 +279,8 @@ class FastCgiClientTest extends TestCase
         $stdout = "Content-Type: application/json\r\nX-Custom: value\r\nSet-Cookie: id=1\r\n\r\n{\"ok\":true}";
         $result = $this->invokeParseStdout($stdout, '', 0);
         $this->assertSame(200, $result['status']);
-        $this->assertSame('application/json', $result['headers']['Content-Type']);
-        $this->assertSame('value', $result['headers']['X-Custom']);
+        $this->assertContains(['Content-Type', 'application/json'], $result['headers']);
+        $this->assertContains(['X-Custom', 'value'], $result['headers']);
         $this->assertSame('{"ok":true}', $result['body']);
     }
 
@@ -312,7 +312,7 @@ class FastCgiClientTest extends TestCase
         fclose($b);
 
         $this->assertSame(200, $result['status']);
-        $this->assertSame('text/plain', $result['headers']['Content-Type']);
+        $this->assertContains(['Content-Type', 'text/plain'], $result['headers']);
         $this->assertSame($responseBody, $result['body']);
     }
 
@@ -553,8 +553,8 @@ class FastCgiClientTest extends TestCase
         // A header line without a colon must be silently ignored.
         $stdout = "Content-Type: text/plain\r\nBadLineWithoutColon\r\nX-Ok: yes\r\n\r\nbody";
         $result = $this->invokeParseStdout($stdout, '', 0);
-        $this->assertSame('yes', $result['headers']['X-Ok']);
-        $this->assertArrayNotHasKey('BadLineWithoutColon', $result['headers']);
+        $this->assertContains(['X-Ok', 'yes'], $result['headers']);
+        $this->assertNotContains('BadLineWithoutColon', array_column($result['headers'], 0));
         $this->assertSame('body', $result['body']);
     }
 }
