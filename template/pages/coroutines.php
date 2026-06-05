@@ -65,6 +65,10 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <p class="coro-m-0"><strong>One-line rule.</strong> Use <code>$g-&gt;get</code>, <code>$g-&gt;post</code>, <code>$g-&gt;cookie</code>, <code>$g-&gt;server</code>, <code>$g-&gt;session</code>, <code>$g-&gt;files</code> (where <code>$g = RequestContext::instance()</code>). It works identically in both modes — zero overhead, always safe. With <code>ext-zealphp</code>, <code>$_GET</code>/<code>$_SESSION</code> are also per-coroutine safe in both modes, so legacy code using superglobals works unchanged.</p>
 </div>
 
+<div class="callout warn coro-callout">
+  <p class="coro-m-0"><strong>&#9888; Direct <code>$_SESSION</code> (and <code>$_GET</code> / <code>$_POST</code>) under plain <code>superglobals(false)</code> is a concurrency bug.</strong> Without <code>ext-zealphp</code> these superglobals are <strong>process-wide</strong> &mdash; a read in one coroutine can see data written by another, so <code>$uid = $_SESSION['user_id']</code> may return <em>a different user&rsquo;s</em> id under load (issues #272 / #273). Always go through <code>$g-&gt;session</code> (or your framework&rsquo;s <code>Session::*</code> API, which should delegate to it); those are per-coroutine in every mode. The safe pattern for snapshotting session state into a dispatched task/worker is <code>RequestContext::instance()-&gt;session</code>, <em>never</em> <code>$_SESSION</code>. In <strong>coroutine-legacy</strong> (<code>ext-zealphp</code>) the extension isolates all seven superglobals &mdash; including <code>$_SESSION</code> &mdash; per coroutine, so direct <code>$_SESSION</code> access becomes safe there.</p>
+</div>
+
 <p>The two forms diverge on one axis: how the framework populates them per request.</p>
 
 <table class="ztable coro-mb">
