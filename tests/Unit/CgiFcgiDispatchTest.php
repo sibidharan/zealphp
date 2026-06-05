@@ -573,4 +573,27 @@ class CgiFcgiDispatchTest extends TestCase
         $this->expectExceptionMessageMatches('/too large/');
         $client->encodeRecord(FastCgiClient::FCGI_STDIN, 1, str_repeat('x', 65536));
     }
+
+    public function testRequestWrappedInCoroutineRunDoesNotFatalOutsideCoroutine(): void
+    {
+        // #261 — FastCgiClient->request() uses OpenSwoole\Coroutine\Client, which
+        // fatals "API must be called in the coroutine" when called OUTSIDE a
+        // coroutine (the legacy cgiMode('fcgi') lifecycle, where the request
+        // handler isn't coroutine-wrapped). cgiFcgi() now wraps request() in
+        // Coroutine::run when getCid() < 0; this pins that the wrapped call
+        // degrades gracefully (a dead-port connect → FastCgiException) instead of
+        // the uncatchable fatal. The test process itself runs outside a coroutine.
+        $this->assertLessThan(0, \OpenSwoole\Coroutine::getCid(), 'precondition: outside a coroutine');
+        $client = new FastCgiClient('127.0.0.1:59997', 2); // dead port
+        $caught = null;
+        \OpenSwoole\Coroutine::run(function () use ($client, &$caught): void {
+            try {
+                $client->request(['SCRIPT_FILENAME' => '/tmp/x.php', 'REQUEST_METHOD' => 'GET'], '');
+            } catch (\Throwable $e) {
+                $caught = $e;
+            }
+        });
+        $this->assertInstanceOf(FastCgiException::class, $caught);
+        $this->assertStringContainsString('cannot connect', (string) $caught->getMessage());
+    }
 }

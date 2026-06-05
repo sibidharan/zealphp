@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`cgiMode('fcgi')` no longer fatals every request (#261).** The FastCGI dispatch (`Dispatcher::cgiFcgi()` → `FastCgiClient::request()`) uses `OpenSwoole\Coroutine\Client`, a coroutine API. Under the legacy / `superglobals(true)` lifecycles — exactly where `cgiMode('fcgi')` forwards `.php` to php-fpm — the request handler runs OUTSIDE a coroutine, so the connect fataled with `OpenSwoole\Error: API must be called in the coroutine` before php-fpm was ever contacted (100% of requests 500'd). The request now runs inside `Coroutine::run()` when outside a coroutine (the `App::parallel` sync-mode idiom), with the throw captured + rethrown so the `FastCgiException` → 502 path is preserved. Validated bidirectionally (old code fatals, new degrades to a graceful connect error); pinned by `CgiFcgiDispatchTest::testRequestWrappedInCoroutineRunDoesNotFatalOutsideCoroutine`.
+
 ### Security & hardening (architecture-review pass)
 
 A focused hardening pass closing the highest-blast-radius gaps from a full architectural review — scalability backpressure, session edge cases, and the cross-node Redis/WebSocket fabric. Most reuse patterns the framework already had elsewhere; defaults that were unsafe for production are now safe-by-default or surfaced with a boot advisory.

@@ -271,8 +271,35 @@ class Dispatcher
 
         $fcgiAddress = $address ?? App::$fcgi_address;
         try {
-            $client   = new \ZealPHP\CGI\FastCgiClient($fcgiAddress, App::$cgi_timeout);
-            $response = $client->request($env, $stdinBody);
+            $client = new \ZealPHP\CGI\FastCgiClient($fcgiAddress, App::$cgi_timeout);
+            // #261 — FastCgiClient uses OpenSwoole\Coroutine\Client, a coroutine
+            // API. cgiMode('fcgi') runs under the legacy / superglobals(true)
+            // lifecycles where the request handler is NOT wrapped in a coroutine,
+            // so a direct request() fatals "API must be called in the coroutine"
+            // before php-fpm is ever contacted. Run it inside Coroutine::run()
+            // when outside a coroutine (the App::parallel sync-mode idiom);
+            // Coroutine::run swallows uncaught throws, so capture + rethrow to keep
+            // the FastCgiException -> 502 path intact.
+            if (\OpenSwoole\Coroutine::getCid() >= 0) {
+                $response = $client->request($env, $stdinBody);
+            } else {
+                /** @var array{status:int,headers:array<string,string>,body:string,stderr:string}|null $response */
+                $response = null;
+                $fcgiErr  = null;
+                \OpenSwoole\Coroutine::run(function () use ($client, $env, $stdinBody, &$response, &$fcgiErr): void {
+                    try {
+                        $response = $client->request($env, $stdinBody);
+                    } catch (\Throwable $e) {
+                        $fcgiErr = $e;
+                    }
+                });
+                if ($fcgiErr !== null) {
+                    throw $fcgiErr;
+                }
+                if ($response === null) {
+                    throw new \ZealPHP\CGI\FastCgiException('FastCGI request did not complete (coroutine produced no response)');
+                }
+            }
         } catch (\ZealPHP\CGI\FastCgiException $e) {
             elog("cgiFcgi: FastCGI error for {$path}: " . $e->getMessage(), 'error');
             return 502;
