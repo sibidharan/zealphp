@@ -65,6 +65,22 @@ class AppStaticHelpersTest extends TestCase
         $g->status = 200;
     }
 
+    public function testBaseServerVarsProvidesCgiSapiKeys(): void
+    {
+        // #270 — the static CGI/SAPI keys seeded into $g->server at worker start
+        // so app bootstrap that reads them BEFORE the first request doesn't warn
+        // "Undefined array key" (the per-request handler overlays real values).
+        $m = new \ReflectionMethod(App::class, 'baseServerVars');
+        $m->setAccessible(true);
+        /** @var array<string, string> $base */
+        $base = $m->invoke(null);
+        foreach (['PHP_SELF', 'SCRIPT_NAME', 'SCRIPT_FILENAME', 'REQUEST_URI', 'DOCUMENT_ROOT', 'REQUEST_METHOD'] as $key) {
+            $this->assertArrayHasKey($key, $base, "baseServerVars must provide {$key}");
+            $this->assertNotSame('', $base[$key], "{$key} must not be empty");
+        }
+        $this->assertStringEndsWith($base['PHP_SELF'], $base['SCRIPT_FILENAME']);
+    }
+
     // ─────────────────────────────────────────────────────────────
     // coerceStatusCode()
     // ─────────────────────────────────────────────────────────────
