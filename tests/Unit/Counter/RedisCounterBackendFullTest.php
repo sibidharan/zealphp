@@ -66,6 +66,42 @@ final class RedisCounterBackendFullTest extends RedisTestCase
         });
     }
 
+    /**
+     * #242 — a legitimately NEGATIVE result must be returned (and persisted),
+     * NOT collapsed to null. The old code used `return -1` as the cap sentinel
+     * AND for the value, so `($v < 0) ? null` lied about any negative outcome.
+     * The structured `{ok, val}` Lua reply separates "capped" from "value is
+     * negative": base 0 + incrBounded(-7, 100) → -7, written, returned.
+     */
+    public function testIncrBoundedReturnsNegativeResultInsteadOfNull(): void
+    {
+        \OpenSwoole\Coroutine::run(function (): void {
+            $b = $this->backend();
+            $name = 'neg-' . bin2hex(random_bytes(3));
+            $b->set($name, 0);
+            $this->assertSame(-7, $b->incrBounded($name, -7, 100), 'negative result is returned, not null');
+            $this->assertSame(-7, $b->get($name), 'negative result was persisted');
+            // A further negative step that stays under the cap also returns + persists.
+            $this->assertSame(-10, $b->incrBounded($name, -3, 100));
+            $this->assertSame(-10, $b->get($name));
+        });
+    }
+
+    /**
+     * #242 — the cap path returns null AND leaves the stored value untouched,
+     * with the structured reply ({0}) — distinct from the negative-value path.
+     */
+    public function testIncrBoundedCapLeavesValueUnchanged(): void
+    {
+        \OpenSwoole\Coroutine::run(function (): void {
+            $b = $this->backend();
+            $name = 'cap-' . bin2hex(random_bytes(3));
+            $b->set($name, 5);
+            $this->assertNull($b->incrBounded($name, 10, 12), '5 + 10 > 12 → capped → null');
+            $this->assertSame(5, $b->get($name), 'value unchanged when capped');
+        });
+    }
+
     public function testExpireOnExistingKey(): void
     {
         \OpenSwoole\Coroutine::run(function (): void {

@@ -636,6 +636,19 @@ class App
      */
     public static int $cgi_pool_max_requests = 500;
     /**
+     * Optional strict env allowlist for `cgiMode('pool')` subprocesses
+     * (`WorkerPool::filterSubprocessEnv`). Empty (default) = pass the parent
+     * environment through to the subprocess (legacy-app compatibility) MINUS
+     * the request-controlled `HTTP_PROXY` (httpoxy). Set via
+     * `App::cgiPoolEnvAllowlist([...])` to a list of exact names / `PREFIX*`
+     * globs to restrict what secrets the long-lived subprocess inherits;
+     * `ZEALPHP_POOL_MAX_REQUESTS` is always passed. Per-request CGI vars travel
+     * over the IPC frame, not this env, so a strict allowlist doesn't lose them.
+     *
+     * @var list<string>
+     */
+    public static array $cgi_pool_env_allowlist = [];
+    /**
      * True once `cgiPoolMaxRequests()` set the recycle count explicitly. The
      * `mode()` presets consult this so a `mode('legacy-cgi')` default (recycle=1)
      * never clobbers an explicit user choice, regardless of call order.
@@ -2225,6 +2238,25 @@ class App
     }
 
     /**
+     * Strict environment allowlist for `cgiMode('pool')` subprocesses — exact
+     * names and/or `PREFIX*` globs. A no-arg call returns the current list; a
+     * one-arg call sets it. Empty (default) passes the parent env through
+     * (legacy-app compatibility) minus the httpoxy `HTTP_PROXY` var; a non-empty
+     * list restricts the subprocess to matching vars only (the pool IPC var is
+     * always passed). Set BEFORE `App::run()`.
+     *
+     * @param list<string>|null $names
+     * @return list<string>
+     */
+    public static function cgiPoolEnvAllowlist(?array $names = null): array
+    {
+        if ($names !== null) {
+            self::$cgi_pool_env_allowlist = $names;
+        }
+        return self::$cgi_pool_env_allowlist;
+    }
+
+    /**
      * Per-subprocess request count before recycle for `cgiMode('pool')`.
      * FPM `pm.max_requests` parity. Default 500. Set to 1 for fresh-process
      * semantics every request (slower; same isolation as `cgiMode('proc')`).
@@ -3411,11 +3443,13 @@ class App
                     return $ip;
                 }
             }
-            // Every hop is trusted — fall back to the first (originator) entry.
-            // $chain is guaranteed non-empty here: $forwarded !== '' and explode
-            // always yields at least one element, so [0] is always defined.
-            $first = $chain[0];
-            return $first !== '' ? $first : $remote;
+            // Every hop in the chain is trusted — we cannot identify an external
+            // client from a fully-trusted header. The leftmost entry is the
+            // forgeable one (a client prepends it; real proxies append on the
+            // right), so promoting it would trust attacker-controlled input.
+            // Fall back to the address observed on the socket, matching Apache
+            // mod_remoteip / nginx realip semantics.
+            return $remote;
         }
 
         $realIp = (string)($g->server['HTTP_X_REAL_IP'] ?? '');
@@ -3452,7 +3486,18 @@ class App
 
         $slash = strpos($cidr, '/');
         $net   = $slash === false ? $cidr : substr($cidr, 0, $slash);
-        $bits  = $slash === false ? null  : (int)substr($cidr, $slash + 1);
+        if ($slash === false) {
+            $bits = null;
+        } else {
+            $prefix = substr($cidr, $slash + 1);
+            // Fail CLOSED on a malformed prefix. `(int)"abc"` and `(int)""` both
+            // yield 0, and a `/0` mask matches every address — so `10.0.0.0/abc`
+            // or a bare `10.0.0.0/` would silently trust/allow the whole internet.
+            if ($prefix === '' || !ctype_digit($prefix)) {
+                return false;
+            }
+            $bits = (int)$prefix;
+        }
 
         $netPacked = @inet_pton($net);
         $ipPacked  = @inet_pton($ip);
@@ -3519,7 +3564,12 @@ class App
         foreach ($tokens as $tok) {
             $out .= self::renderAccessLogToken($tok, $g, $status, $length, $durationSec);
         }
-        return $out;
+        // Log-injection defence (Apache mod_log_config parity): escape CR/LF/NUL
+        // so an attacker-controlled token (REQUEST_URI, Referer, User-Agent, …)
+        // cannot inject a forged physical log line. Compiled format literals are
+        // single-line (spaces/quotes/brackets), so this only neutralises smuggled
+        // control characters; tab/space field separators are preserved.
+        return strtr($out, ["\r" => '\\r', "\n" => '\\n', "\0" => '\\0']);
     }
 
     /**

@@ -117,7 +117,13 @@ final class RedisBackend implements StoreBackend
         return (bool) $this->pool->with(function (RedisClient $c) use ($rk, $sk, $wire, $key, $opts): bool {
             $isNew = !$c->exists($rk);
             $c->hset($rk, $wire);
-            if ($opts['mode'] === 'tracked' && $isNew) {
+            // #254: only add to the tracked membership SET when the wire is
+            // non-empty. An empty row makes `HSET key` (no fields) a no-op —
+            // the hash is never created — so a phantom SADD would leave the
+            // SET (and thus SCARD count()) over-reporting vs get()/iterate(),
+            // which both skip the absent hash. The incr() path (HINCRBY
+            // creates the hash) is unaffected and stays as-is.
+            if ($opts['mode'] === 'tracked' && $isNew && $wire !== []) {
                 $c->sadd($sk, [$key]);
             }
             if ($opts['mode'] === 'ttl' && $opts['ttl'] > 0) {

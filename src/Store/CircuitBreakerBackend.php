@@ -20,8 +20,11 @@ namespace ZealPHP\Store;
  *                writes → throw immediately (no fallback semantics for writes)
  *                After the cooldown elapses, the next call transitions
  *                to HALF_OPEN and acts as a probe.
- *   half-open  — exactly one probe is sent to the primary. Success →
- *                back to CLOSED; failure → back to OPEN (timer resets).
+ *   half-open  — exactly one probe is sent to the primary, enforced by an
+ *                atomic `cmpset(HALF_OPEN_READY → HALF_OPEN_PROBING)`: the lone
+ *                CAS winner probes, every concurrent caller is turned away
+ *                (fallback for reads, fail-fast for writes — no thundering
+ *                herd). Probe success → CLOSED; failure → OPEN (timer resets).
  *
  * Reads vs writes:
  *   READS (get, exists, count, iterate, mget, names) — can fall back to
@@ -37,7 +40,10 @@ namespace ZealPHP\Store;
  *   - make: schemas land in both so reads can serve from fallback when
  *     primary is open. Failure on primary increments the breaker's
  *     failure counter but doesn't throw to the caller — the schema still
- *     exists on the fallback.
+ *     exists on the fallback. The failed primary make() is REMEMBERED and
+ *     retried on the next write to that table (#241), so writes recover once
+ *     the primary is reachable instead of throwing "table not registered"
+ *     forever.
  *   - clear: a "destroy table" write; throws on open (drop semantics).
  *
  * Concurrency: all state lives in `OpenSwoole\Atomic` slots so transitions
@@ -57,13 +63,33 @@ final class CircuitBreakerBackend implements StoreBackend
 {
     private const CLOSED = 0;
     private const OPEN = 1;
-    private const HALF_OPEN = 2;
+    /**
+     * Half-open, awaiting a probe. The FIRST caller to win the atomic
+     * `cmpset(HALF_OPEN_READY, HALF_OPEN_PROBING)` is admitted as the lone
+     * probe (#255); concurrent callers lose the CAS and fall back / fail-fast
+     * exactly like OPEN, so the primary sees a single probe — not a herd.
+     */
+    private const HALF_OPEN_READY = 2;
+    /** Half-open, a probe is in flight. Concurrent callers are turned away. */
+    private const HALF_OPEN_PROBING = 3;
 
     private \OpenSwoole\Atomic $state;
     private \OpenSwoole\Atomic $failureCount;
     private \OpenSwoole\Atomic $firstFailureAt;
     private \OpenSwoole\Atomic $openedAt;
     private Stats $stats;
+
+    /**
+     * Per-table args of a primary `make()` that FAILED — keyed by table name,
+     * value `[maxRows, columns, opts]`. #241: the breaker stays CLOSED after a
+     * single make() failure (threshold default 5), but the primary never had
+     * the table registered, so every later write would throw "table not
+     * registered" forever. The write entrypoints retry the pending make() (when
+     * not OPEN) and clear the entry on success.
+     *
+     * @var array<string, array{0:int, 1:array<string, array{0:int, 1?:int}>, 2:array<string, mixed>}>
+     */
+    private array $primaryMakePending = [];
 
     public function __construct(
         private StoreBackend $primary,
@@ -86,11 +112,32 @@ final class CircuitBreakerBackend implements StoreBackend
     public function state(): string
     {
         return match ($this->state->get()) {
-            self::CLOSED    => 'closed',
-            self::OPEN      => 'open',
-            self::HALF_OPEN => 'half-open',
-            default         => '?',
+            self::CLOSED           => 'closed',
+            self::OPEN             => 'open',
+            self::HALF_OPEN_READY,
+            self::HALF_OPEN_PROBING => 'half-open',
+            default                => '?',
         };
+    }
+
+    /** True while the breaker is in either half-open sub-state (ready or probing). */
+    private function isHalfOpen(): bool
+    {
+        $s = $this->state->get();
+        return $s === self::HALF_OPEN_READY || $s === self::HALF_OPEN_PROBING;
+    }
+
+    /**
+     * #255 — admit exactly one half-open probe. Atomically claims the probe
+     * slot via `cmpset(HALF_OPEN_READY → HALF_OPEN_PROBING)`: the single winner
+     * gets `true` and proceeds to the primary; every concurrent loser gets
+     * `false` and is turned away (fallback for reads, fail-fast for writes).
+     * Returns `false` when the breaker isn't half-open-ready (e.g. another
+     * coroutine already took the probe slot).
+     */
+    private function admitHalfOpenProbe(): bool
+    {
+        return $this->state->cmpset(self::HALF_OPEN_READY, self::HALF_OPEN_PROBING);
     }
 
     /** Per-worker breaker stats — breaker_opened_total, breaker_closed_total, breaker_short_circuited_total. */
@@ -106,18 +153,20 @@ final class CircuitBreakerBackend implements StoreBackend
         $this->openedAt->set(0);
     }
 
-    /** Maybe transition OPEN → HALF_OPEN if the cooldown has elapsed. */
+    /** Maybe transition OPEN → HALF_OPEN_READY if the cooldown has elapsed. */
     private function probeStateMaybe(): void
     {
         if ($this->state->get() !== self::OPEN) { return; }
         if (time() - $this->openedAt->get() >= $this->openDurationSec) {
-            $this->state->set(self::HALF_OPEN);
+            // CAS so only one of N concurrent callers flips OPEN → READY; the
+            // admission CAS in callRead/callWrite then picks the single prober.
+            $this->state->cmpset(self::OPEN, self::HALF_OPEN_READY);
         }
     }
 
     private function recordSuccess(): void
     {
-        if ($this->state->get() === self::HALF_OPEN) {
+        if ($this->isHalfOpen()) {
             $this->state->set(self::CLOSED);
             $this->stats->inc('breaker_closed_total');
         }
@@ -141,7 +190,7 @@ final class CircuitBreakerBackend implements StoreBackend
         $count = $this->failureCount->add(1);
 
         // Half-open probe failed → straight back to open with fresh cooldown.
-        if ($this->state->get() === self::HALF_OPEN) {
+        if ($this->isHalfOpen()) {
             $this->state->set(self::OPEN);
             $this->openedAt->set($now);
             $this->stats->inc('breaker_opened_total');
@@ -163,7 +212,11 @@ final class CircuitBreakerBackend implements StoreBackend
     private function callRead(callable $primary, callable $fallback): mixed
     {
         $this->probeStateMaybe();
-        if ($this->state->get() === self::OPEN) {
+        // OPEN, or HALF_OPEN but this caller lost the single-probe CAS (#255):
+        // short-circuit to the fallback. Only the admitted prober reaches the
+        // primary; a herd of concurrent half-open readers serves from fallback.
+        if ($this->state->get() === self::OPEN
+            || ($this->isHalfOpen() && !$this->admitHalfOpenProbe())) {
             $this->stats->inc('breaker_short_circuited_total');
             if ($this->fallback === null) {
                 throw new StoreException('CircuitBreakerBackend: primary OPEN and no fallback configured');
@@ -186,14 +239,26 @@ final class CircuitBreakerBackend implements StoreBackend
     /**
      * @template T
      * @param  callable(): T $primary
+     * @param  string|null   $table  When set, a pending primary make() for this
+     *                               table is retried before the write (#241).
      * @return T
      */
-    private function callWrite(callable $primary): mixed
+    private function callWrite(callable $primary, ?string $table = null): mixed
     {
         $this->probeStateMaybe();
-        if ($this->state->get() === self::OPEN) {
+        // OPEN, or HALF_OPEN but this caller lost the single-probe CAS (#255):
+        // writes never fall back — fail fast, just like OPEN.
+        if ($this->state->get() === self::OPEN
+            || ($this->isHalfOpen() && !$this->admitHalfOpenProbe())) {
             $this->stats->inc('breaker_short_circuited_total');
             throw new StoreException('CircuitBreakerBackend: primary OPEN — refusing write (no fallback semantics for writes)');
+        }
+        // #241: if the primary's make() failed earlier, the table isn't
+        // registered on it — retry now (we're CLOSED or the admitted probe) so
+        // the write doesn't hit "table not registered" forever. A retry failure
+        // is recorded like any other primary failure and the write still throws.
+        if ($table !== null) {
+            $this->retryPrimaryMake($table);
         }
         try {
             $r = $primary();
@@ -205,6 +270,21 @@ final class CircuitBreakerBackend implements StoreBackend
         }
     }
 
+    /**
+     * #241 — retry a primary `make()` that failed during `make()`. Re-runs the
+     * original args; on success the pending entry is cleared so subsequent
+     * writes take the fast path. On failure the entry is kept (so the next
+     * write retries again) and the exception propagates — the caller's write
+     * then surfaces it through the normal failure path.
+     */
+    private function retryPrimaryMake(string $name): void
+    {
+        if (!isset($this->primaryMakePending[$name])) { return; }
+        [$maxRows, $columns, $opts] = $this->primaryMakePending[$name];
+        $this->primary->make($name, $maxRows, $columns, $opts);
+        unset($this->primaryMakePending[$name]);
+    }
+
     public function make(string $name, int $maxRows, array $columns, array $opts = []): void
     {
         // make() lands the schema on BOTH backends so reads can serve from
@@ -214,15 +294,20 @@ final class CircuitBreakerBackend implements StoreBackend
         try {
             $this->primary->make($name, $maxRows, $columns, $opts);
             $this->recordSuccess();
+            unset($this->primaryMakePending[$name]);
         } catch (StoreException) {
             $this->recordFailure();
+            // #241: remember the args so the next write can retry the make()
+            // (it didn't land on the primary — without this the table stays
+            // unregistered and every later write throws "table not registered").
+            $this->primaryMakePending[$name] = [$maxRows, $columns, $opts];
         }
         $this->fallback?->make($name, $maxRows, $columns, $opts);
     }
 
     public function set(string $name, string $key, array $row): bool
     {
-        return (bool) $this->callWrite(fn(): bool => $this->primary->set($name, $key, $row));
+        return (bool) $this->callWrite(fn(): bool => $this->primary->set($name, $key, $row), $name);
     }
 
     public function get(string $name, string $key, ?string $field = null): mixed
@@ -235,7 +320,7 @@ final class CircuitBreakerBackend implements StoreBackend
 
     public function del(string $name, string $key): bool
     {
-        return (bool) $this->callWrite(fn(): bool => $this->primary->del($name, $key));
+        return (bool) $this->callWrite(fn(): bool => $this->primary->del($name, $key), $name);
     }
 
     public function exists(string $name, string $key): bool
@@ -249,14 +334,14 @@ final class CircuitBreakerBackend implements StoreBackend
     public function incr(string $name, string $key, string $col, int|float $by = 1): int|float
     {
         /** @var int|float $r */
-        $r = $this->callWrite(fn(): int|float => $this->primary->incr($name, $key, $col, $by));
+        $r = $this->callWrite(fn(): int|float => $this->primary->incr($name, $key, $col, $by), $name);
         return $r;
     }
 
     public function decr(string $name, string $key, string $col, int|float $by = 1): int|float
     {
         /** @var int|float $r */
-        $r = $this->callWrite(fn(): int|float => $this->primary->decr($name, $key, $col, $by));
+        $r = $this->callWrite(fn(): int|float => $this->primary->decr($name, $key, $col, $by), $name);
         return $r;
     }
 
@@ -281,7 +366,9 @@ final class CircuitBreakerBackend implements StoreBackend
     public function iterate(string $name): \Generator
     {
         $this->probeStateMaybe();
-        if ($this->state->get() === self::OPEN) {
+        // OPEN, or HALF_OPEN but this caller lost the single-probe CAS (#255).
+        if ($this->state->get() === self::OPEN
+            || ($this->isHalfOpen() && !$this->admitHalfOpenProbe())) {
             $this->stats->inc('breaker_short_circuited_total');
             if ($this->fallback !== null) {
                 yield from $this->fallback->iterate($name);
@@ -314,7 +401,7 @@ final class CircuitBreakerBackend implements StoreBackend
         $this->callWrite(function () use ($name): bool {
             $this->primary->clear($name);
             return true;
-        });
+        }, $name);
     }
 
     public function mget(string $name, array $keys): array
@@ -329,6 +416,6 @@ final class CircuitBreakerBackend implements StoreBackend
 
     public function mset(string $name, array $rows): bool
     {
-        return (bool) $this->callWrite(fn(): bool => $this->primary->mset($name, $rows));
+        return (bool) $this->callWrite(fn(): bool => $this->primary->mset($name, $rows), $name);
     }
 }

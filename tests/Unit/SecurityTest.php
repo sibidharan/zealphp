@@ -147,12 +147,22 @@ class SecurityTest extends TestCase
         $this->assertSame(302, \ZealPHP\G::instance()->status);
     }
 
-    public function testRedirectAcceptsCrossOriginButLogsWarning(): void
+    public function testRedirectBlocksCrossOriginByDefault(): void
     {
-        // Cross-origin is warned, not blocked (preserves OAuth flows).
+        // #243: cross-origin is BLOCKED by default (open-redirect / CWE-601 guard)
+        // — a change from the prior warn-and-emit behaviour.
         $response = $this->makeResponse();
         \ZealPHP\G::instance()->server = ['HTTP_HOST' => 'example.test'];
+        $this->expectException(\InvalidArgumentException::class);
         $response->redirect('https://oauth.provider.test/authorize');
+    }
+
+    public function testRedirectAllowsCrossOriginWithOptIn(): void
+    {
+        // #243: a legitimate external redirect (OAuth flow) opts in explicitly.
+        $response = $this->makeResponse();
+        \ZealPHP\G::instance()->server = ['HTTP_HOST' => 'example.test'];
+        $response->redirect('https://oauth.provider.test/authorize', 302, true);
         $this->assertSame(302, \ZealPHP\G::instance()->status);
         $this->assertContains(['Location', 'https://oauth.provider.test/authorize'], $response->headersList);
     }
