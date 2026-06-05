@@ -3077,6 +3077,32 @@ class App
     }
 
     /**
+     * Re-capture the per-coroutine `$GLOBALS` baseline from the current symbol table.
+     *
+     * Under coroutine-legacy, ext-zealphp snapshots the parent `$GLOBALS` baseline
+     * once — when `coroutineGlobalsIsolation` activates. Boot-time `$GLOBALS` writes
+     * that happen AFTER that (e.g. an app bootstrap include such as `load.php` at
+     * worker start) aren't in the baseline, so they'd be visible only to the FIRST
+     * request coroutine and vanish for every subsequent one once a yield resets
+     * `$GLOBALS` to the stale baseline (#26). The framework calls this once after the
+     * `onWorkerStart` hooks complete (where such bootstraps run) to fold those writes
+     * into the baseline; apps that populate `$GLOBALS` later in boot can call it
+     * explicitly afterwards.
+     *
+     * No-op returning `false` when ext-zealphp lacks the function (< 0.3.33) or
+     * per-coroutine `$GLOBALS` isolation isn't active — always safe to call.
+     *
+     * @return bool True if the baseline was refreshed.
+     */
+    public static function refreshGlobalsBaseline(): bool
+    {
+        if (!\function_exists('zealphp_globals_baseline_refresh')) {
+            return false;
+        }
+        return (bool) \zealphp_globals_baseline_refresh();
+    }
+
+    /**
      * Keep `$GLOBALS` across requests within the worker. See $keep_globals
      * docblock for the full semantics + when to use it.
      */
@@ -8459,6 +8485,12 @@ class App
             foreach (self::$workerStartHooks as $hook) {
                 $hook($server, $workerId);
             }
+
+            // #26 — fold any boot-time $GLOBALS writes made during the onWorkerStart
+            // hooks (app bootstrap includes like load.php) into the per-coroutine
+            // baseline, so every request coroutine sees them — not just the first.
+            // No-op unless coroutine-legacy $GLOBALS isolation is active (ext 0.3.33+).
+            self::refreshGlobalsBaseline();
 
             // Dev route hot-reload: each worker polls route/*.php mtimes and
             // rebuilds its route table in-place on change — "save file → routes
