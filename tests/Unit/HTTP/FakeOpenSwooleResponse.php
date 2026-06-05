@@ -32,7 +32,15 @@ class FakeOpenSwooleResponse extends \OpenSwoole\Http\Response
         return true;
     }
 
-    public function header(string $key, string $value, bool $format = true): bool
+    /**
+     * The real ext-openswoole header() parses its value as a zval (Z_PARAM_ZVAL)
+     * and emits one wire line per element when given an array — the multi
+     * same-name-header mechanism (#260). Mirror that here: accept array|string
+     * and log accordingly so tests can assert the array form was used.
+     *
+     * @param array<int, string>|string $value
+     */
+    public function header(string $key, array|string $value, bool $format = true): bool
     {
         $this->log[] = ['header', $key, $value];
         return true;

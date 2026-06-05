@@ -29,6 +29,26 @@ use function ZealPHP\access_log;
 class ResponseMiddleware implements MiddlewareInterface
 {
     /**
+     * Map a status-only int return (the universal return contract's
+     * `return <int>;` shape) to a PSR-7 response. Coerces out-of-range codes
+     * to 500 (Apache parity) and — crucially — routes any 4xx/5xx through
+     * `renderError()` so a registered custom error page fires. Shared by the
+     * raw and non-raw dispatch paths so both honour the contract identically
+     * (#259: raw routes previously emitted a bare empty-body status, skipping
+     * the error page).
+     */
+    private function statusOnlyResponse(int $rawStatus): ResponseInterface
+    {
+        $status = App::coerceStatusCode($rawStatus);
+        if ($status >= 400 && $status < 600) {
+            $app = App::instance();
+            assert($app !== null);
+            return $app->renderError($status);
+        }
+        return new Response('', $status);
+    }
+
+    /**
      * @param array<string, mixed> $route
      * @param array<string, mixed> $params
      */
@@ -110,21 +130,21 @@ class ResponseMiddleware implements MiddlewareInterface
             }
 
             if (is_int($object)) {
-                // Universal return contract: int = HTTP status. Coerce out-of-range
-                // to 500 + log warning so bugs surface instead of silently emitting
-                // bogus status codes (Apache-parity behavior).
-                $status = App::coerceStatusCode((int)$object);
-                $body = '';
+                // Universal return contract: int = HTTP status. Status-only
+                // returns route through the shared helper so a 4xx/5xx fires any
+                // registered custom error page — identical to the non-raw path
+                // (#259). Out-of-range codes coerce to 500 (Apache parity).
+                return $this->statusOnlyResponse((int)$object);
+            }
+
+            $status = $g->status ?? 200;
+            if (is_array($object) or is_object($object)) {
+                response_add_header('Content-Type', 'application/json');
+                $body = (string)json_encode($object);
+            } else if (is_string($object)) {
+                $body = $object;
             } else {
-                $status = $g->status ?? 200;
-                if (is_array($object) or is_object($object)) {
-                    response_add_header('Content-Type', 'application/json');
-                    $body = (string)json_encode($object);
-                } else if (is_string($object)) {
-                    $body = $object;
-                } else {
-                    $body = '';
-                }
+                $body = '';
             }
 
             if ($method === 'HEAD') {
@@ -325,18 +345,12 @@ class ResponseMiddleware implements MiddlewareInterface
 
             if (is_int($object)) {
                 ob_end_clean();
-                // Universal return contract: int = HTTP status. Coerce out-of-range
-                // (< 100 or >= 600) to 500 + log warning — Apache-parity behavior.
-                $istatus = App::coerceStatusCode((int)$object);
-                // Status-only returns from a handler (e.g. `return 404;`) route
-                // through renderError so any registered custom error page fires —
-                // Apache's `ErrorDocument` behavior for unhandled status codes.
-                if ($istatus >= 400 && $istatus < 600) {
-                    $app = App::instance();
-                    assert($app !== null);
-                    return $app->renderError($istatus);
-                }
-                return (new Response('', $istatus));
+                // Universal return contract: int = HTTP status. Status-only
+                // returns (e.g. `return 404;`) route through the shared helper so
+                // a 4xx/5xx fires any registered custom error page (Apache's
+                // `ErrorDocument`); out-of-range coerces to 500. Shared with the
+                // raw path so both honour the contract identically (#259).
+                return $this->statusOnlyResponse((int)$object);
             }
 
             $status = $g->status ?? 200;

@@ -323,6 +323,30 @@ final class TableSessionHandler implements \SessionHandlerInterface
                 continue;
             }
             if (is_array($val) && is_array($baseVal) && is_array($remoteVal)) {
+                // #253 — list-shaped (sequential-int-keyed) sub-arrays are the
+                // idiomatic `$_SESSION['flash'][] = ...` append. Two concurrent
+                // appends both land at the SAME next integer index, so the
+                // key-aligned leaf recursion below would pick one and silently
+                // drop the other. Treat three lists as an APPEND-merge instead:
+                // keep all of remote's elements plus the elements local added on
+                // top of base (union of remote + local-new), so BOTH appends
+                // survive. Caveat: "local-new" is diffed by VALUE
+                // (`!in_array($v, $base, true)`), so a local append whose value
+                // already EXISTS in base is indistinguishable from base's copy
+                // and is NOT re-added on top of remote (no data loss across
+                // distinct values; only a value-equal-to-an-existing-element is
+                // affected). String-keyed maps fall through to the leaf-level
+                // recursion and keep their existing local-wins behaviour.
+                if (array_is_list($baseVal) && array_is_list($val) && array_is_list($remoteVal)) {
+                    $added = array_values(array_filter(
+                        $val,
+                        static fn($v): bool => !in_array($v, $baseVal, true)
+                    ));
+                    // array_merge of two lists is already 0-indexed — no outer
+                    // array_values() needed (it would be a no-op).
+                    $result[$key] = array_merge($remoteVal, $added);
+                    continue;
+                }
                 // All three are arrays — recurse for leaf-level merge.
                 $result[$key] = $this->merge3($baseVal, $val, $remoteVal);
                 continue;
