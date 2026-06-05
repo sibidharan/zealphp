@@ -68,7 +68,7 @@ final class FastCgiClient
      *
      * @param array<string,string> $params    FCGI `PARAMS` (CGI environment variables).
      * @param string               $stdinBody Request body (`POST` data).
-     * @return array{status:int,headers:array<string,string>,body:string,stderr:string}
+     * @return array{status:int,headers:list<array{0:string,1:string}>,body:string,stderr:string}
      * @throws FastCgiException on protocol error, timeout, or connection failure.
      */
     public function request(array $params, string $stdinBody = ''): array
@@ -272,7 +272,7 @@ final class FastCgiClient
      * Header state machine mirrors `mod_proxy_fcgi.c:543-594` and
      * `ngx_http_fastcgi_module.c:1690-1857`.
      *
-     * @return array{status:int,headers:array<string,string>,body:string,stderr:string}
+     * @return array{status:int,headers:list<array{0:string,1:string}>,body:string,stderr:string}
      */
     public function readResponse(CoClient $conn, int $reqId): array
     {
@@ -351,7 +351,7 @@ final class FastCgiClient
      * `Status:` header is extracted and removed (nginx: `ngx_http_fastcgi_module.c:648-656`;
      * Apache: `ap_scan_script_header_err_brigade_ex`).
      *
-     * @return array{status:int,headers:array<string,string>,body:string,stderr:string}
+     * @return array{status:int,headers:list<array{0:string,1:string}>,body:string,stderr:string}
      */
     public function parseStdout(string $stdout, string $stderr, int $appStatus): array
     {
@@ -391,7 +391,10 @@ final class FastCgiClient
                 continue;
             }
 
-            $headers[$name] = $value;
+            // #260 — append as an ordered [name, value] pair, not $headers[$name],
+            // so an upstream that sends multiple same-name headers (multi
+            // Set-Cookie, Link, Vary, …) doesn't collapse them to the last.
+            $headers[] = [$name, $value];
         }
 
         return [

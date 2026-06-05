@@ -9,6 +9,10 @@ use ZealPHP\App;
  * Unit coverage for App::parseCgiResponse() — the pure RFC 3875 CGI response
  * parser extracted out of cgiInterpreterResponse() (which is itself
  * integration-only: subprocess spawn + $g->response emission).
+ *
+ * #260 — `headers` is an ordered list of `[name, value]` pairs (NOT a
+ * name-keyed map), so multiple same-name headers (multi `Set-Cookie`, …) are
+ * preserved instead of collapsing to the last.
  */
 final class CgiResponseParserTest extends TestCase
 {
@@ -17,7 +21,7 @@ final class CgiResponseParserTest extends TestCase
         $raw = "Content-Type: text/plain\r\n\r\nhello world";
         $r = App::parseCgiResponse($raw);
         $this->assertNull($r['status']);
-        $this->assertSame(['Content-Type' => 'text/plain'], $r['headers']);
+        $this->assertSame([['Content-Type', 'text/plain']], $r['headers']);
         $this->assertSame('hello world', $r['body']);
     }
 
@@ -26,7 +30,7 @@ final class CgiResponseParserTest extends TestCase
         $raw = "Content-Type: text/plain\n\nhello";
         $r = App::parseCgiResponse($raw);
         $this->assertNull($r['status']);
-        $this->assertSame(['Content-Type' => 'text/plain'], $r['headers']);
+        $this->assertSame([['Content-Type', 'text/plain']], $r['headers']);
         $this->assertSame('hello', $r['body']);
     }
 
@@ -35,8 +39,8 @@ final class CgiResponseParserTest extends TestCase
         $raw = "Status: 418 I'm a teapot\r\nContent-Type: text/plain\r\n\r\nbrew";
         $r = App::parseCgiResponse($raw);
         $this->assertSame(418, $r['status']);
-        $this->assertArrayNotHasKey('Status', $r['headers']);
-        $this->assertSame(['Content-Type' => 'text/plain'], $r['headers']);
+        $this->assertNotContains('Status', array_column($r['headers'], 0));
+        $this->assertSame([['Content-Type', 'text/plain']], $r['headers']);
         $this->assertSame('brew', $r['body']);
     }
 
@@ -45,8 +49,8 @@ final class CgiResponseParserTest extends TestCase
         $raw = "status: 503\r\n\r\ndown";
         $r = App::parseCgiResponse($raw);
         $this->assertSame(503, $r['status']);
-        $this->assertArrayNotHasKey('status', $r['headers']);
-        $this->assertArrayNotHasKey('Status', $r['headers']);
+        // Only a Status pseudo-header was sent — it is consumed, not forwarded.
+        $this->assertSame([], $r['headers']);
     }
 
     public function testStatusOutOfRangeIgnored(): void
@@ -69,10 +73,22 @@ final class CgiResponseParserTest extends TestCase
         $raw = "Content-Type: application/json\r\nX-Custom: yes\r\n\r\n{}";
         $r = App::parseCgiResponse($raw);
         $this->assertSame(
-            ['Content-Type' => 'application/json', 'X-Custom' => 'yes'],
+            [['Content-Type', 'application/json'], ['X-Custom', 'yes']],
             $r['headers']
         );
         $this->assertSame('{}', $r['body']);
+    }
+
+    public function testMultipleSameNameHeadersPreserved(): void
+    {
+        // #260 — two Set-Cookie headers must BOTH survive as ordered pairs, not
+        // collapse to the last (a name-keyed map would lose the first).
+        $raw = "Set-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/html\r\n\r\nx";
+        $r = App::parseCgiResponse($raw);
+        $this->assertSame(
+            [['Set-Cookie', 'a=1'], ['Set-Cookie', 'b=2'], ['Content-Type', 'text/html']],
+            $r['headers']
+        );
     }
 
     public function testNoHeadersBlankLineFirstIsAllBody(): void
@@ -90,7 +106,7 @@ final class CgiResponseParserTest extends TestCase
         // The body itself has a blank line; only the FIRST blank line splits.
         $raw = "Content-Type: text/plain\r\n\r\npara1\r\n\r\npara2";
         $r = App::parseCgiResponse($raw);
-        $this->assertSame(['Content-Type' => 'text/plain'], $r['headers']);
+        $this->assertSame([['Content-Type', 'text/plain']], $r['headers']);
         $this->assertSame("para1\r\n\r\npara2", $r['body']);
     }
 
@@ -99,7 +115,7 @@ final class CgiResponseParserTest extends TestCase
         // First colon splits; colons inside the value (URL with port) survive.
         $raw = "Location: http://x/y:8080\r\n\r\n";
         $r = App::parseCgiResponse($raw);
-        $this->assertSame('http://x/y:8080', $r['headers']['Location']);
+        $this->assertSame([['Location', 'http://x/y:8080']], $r['headers']);
         $this->assertSame('', $r['body']);
     }
 
@@ -124,7 +140,7 @@ final class CgiResponseParserTest extends TestCase
     {
         $raw = "Content-Type: text/html\r\ngarbage-line-no-colon\r\n\r\nbody";
         $r = App::parseCgiResponse($raw);
-        $this->assertSame(['Content-Type' => 'text/html'], $r['headers']);
+        $this->assertSame([['Content-Type', 'text/html']], $r['headers']);
         $this->assertSame('body', $r['body']);
     }
 
@@ -136,7 +152,7 @@ final class CgiResponseParserTest extends TestCase
         // because it is searched first regardless of position.
         $raw = "Content-Type: text/plain\r\n\r\nbody-with-\n\n-inside";
         $r = App::parseCgiResponse($raw);
-        $this->assertSame(['Content-Type' => 'text/plain'], $r['headers']);
+        $this->assertSame([['Content-Type', 'text/plain']], $r['headers']);
         $this->assertSame("body-with-\n\n-inside", $r['body']);
     }
 }

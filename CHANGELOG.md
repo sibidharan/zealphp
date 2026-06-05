@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Fixed
+
+- **CGI workers no longer collapse multiple same-name response headers to the last (#260).** In `proc` / `pool` / `fork` dispatch (and the FastCGI + CGI-interpreter paths), a script emitting multiple same-name headers (multi `Set-Cookie`, `Link`, `Vary`, …) lost all but the last on the wire: the worker captured them correctly, but the parent applied each with the wrapper's default `$replace = true`, and the FastCGI / interpreter parsers stored a name-keyed map. Fixed via one replace-aware `Dispatcher::applyCgiHeaders()` (first occurrence of a name replaces any framework default; subsequent same-name pairs append) routed through all four dispatch sites, plus `FastCgiClient::parseStdout()` and `parseCgiResponse()` now return an ordered `[name, value]` pair list. (The earlier #264 fix covered only the in-process path.) Pinned by `CgiPoolDispatchTest::testMultipleSameNameHeadersAllReachResponse` (two `Set-Cookie` survive end-to-end through the pool) + the CGI parser tests.
+
 ### Security & hardening (architecture-review pass)
 
 A focused hardening pass closing the highest-blast-radius gaps from a full architectural review — scalability backpressure, session edge cases, and the cross-node Redis/WebSocket fabric. Most reuse patterns the framework already had elsewhere; defaults that were unsafe for production are now safe-by-default or surfaced with a boot advisory.
