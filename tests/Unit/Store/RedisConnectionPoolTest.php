@@ -126,4 +126,43 @@ final class RedisConnectionPoolTest extends RedisTestCase
         $this->assertTrue($hit);
         $pool->close();
     }
+
+    /**
+     * #252 — a post-close() acquire() must THROW, not silently rebuild a fresh
+     * N-client pool (which leaks the sockets the rebuilt pool opens). Sync-mode
+     * path: close() nulls the lone $syncClient AND sets the new $closed flag, so
+     * acquire() can tell "torn down" from "never built".
+     */
+    public function testAcquireAfterCloseThrowsInSyncMode(): void
+    {
+        $pool = new RedisConnectionPool($this->url, 4);
+        $pool->acquire();  // builds the sync singleton
+        $pool->close();
+
+        $this->expectException(StoreException::class);
+        $this->expectExceptionMessageMatches('/after close|torn down/');
+        $pool->acquire();
+    }
+
+    /**
+     * #252 — same guard inside a coroutine: once close() has drained the
+     * channel, a later acquire() throws instead of lazily rebuilding the pool.
+     */
+    public function testAcquireAfterCloseThrowsInCoroutineMode(): void
+    {
+        $pool = new RedisConnectionPool($this->url, 2);
+        $hit = false;
+        \OpenSwoole\Coroutine::run(function () use ($pool, &$hit): void {
+            $pool->release($pool->acquire());  // build + return the channel
+            $pool->close();
+            try {
+                $pool->acquire();
+                $this->fail('expected StoreException after close()');
+            } catch (StoreException $e) {
+                $hit = true;
+                $this->assertStringContainsString('torn down', $e->getMessage());
+            }
+        });
+        $this->assertTrue($hit);
+    }
 }

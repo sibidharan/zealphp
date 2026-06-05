@@ -51,17 +51,28 @@ final class RedisCounterBackend implements CounterBackend
     public function incrBounded(string $name, int $by, int $maxBound): ?int
     {
         // Server-side atomic CHECK-AND-INCREMENT in one round-trip via Lua.
+        // #242: the script returns a STRUCTURED 2-element table —
+        //   {0}          → cap exceeded, nothing written
+        //   {1, nxt}     → written; nxt is the new value (which may legitimately
+        //                  be NEGATIVE, e.g. base 0 + incrBounded(-7, 100))
+        // The old `return -1` sentinel collapsed any legitimately-negative
+        // result to null ("not incremented"), a lie — a -1 status and a -1
+        // value were indistinguishable. The {ok, val} shape separates them.
+        // Redis maps a Lua table to a multi-bulk reply (array) on both drivers.
         $r = $this->pool->with(fn(RedisClient $c): mixed => $c->evalScript(
             "local cur = tonumber(redis.call('GET', KEYS[1]) or '0'); " .
             "local nxt = cur + tonumber(ARGV[1]); " .
-            "if nxt > tonumber(ARGV[2]) then return -1; end; " .
+            "if nxt > tonumber(ARGV[2]) then return {0}; end; " .
             "redis.call('SET', KEYS[1], nxt); " .
-            "return nxt;",
+            "return {1, nxt};",
             [$this->key($name)],
             [(string) $by, (string) $maxBound],
         ));
-        $v = is_int($r) ? $r : (is_string($r) && is_numeric($r) ? (int) $r : null);
-        return ($v === null || $v < 0) ? null : $v;
+        if (!is_array($r) || (($r[0] ?? 0) !== 1)) {
+            return null; // capped (or an unexpected reply shape) — nothing written
+        }
+        $val = $r[1] ?? 0;
+        return is_numeric($val) ? (int) $val : 0;
     }
 
     public function expire(string $name, int $seconds): bool
