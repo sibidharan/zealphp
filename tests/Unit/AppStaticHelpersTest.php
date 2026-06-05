@@ -462,4 +462,16 @@ class AppStaticHelpersTest extends TestCase
         $this->assertSame(500, $res->getStatusCode());
         $this->assertStringContainsString('500 Internal Server Error', (string) $res->getBody());
     }
+
+    public function testRefreshGlobalsBaselineIsSafeNoOpWithoutExt(): void
+    {
+        // #26 — without ext-zealphp 0.3.33+ the helper is a safe no-op returning
+        // false, so the worker-start auto-call never errors on a stock PHP build.
+        // The real refresh behaviour (post-activation boot $GLOBALS visible to every
+        // request coroutine, not just the first) is validated against the ASAN ext.
+        if (\function_exists('zealphp_globals_baseline_refresh')) {
+            $this->markTestSkipped('ext-zealphp 0.3.33+ present — no-op contract not exercised here.');
+        }
+        $this->assertFalse(\ZealPHP\App::refreshGlobalsBaseline());
+    }
 }

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Boot-time `$GLOBALS` writes are now visible to every request coroutine in coroutine-legacy (#26, needs ext-zealphp 0.3.33+).** Under coroutine-legacy the per-coroutine `$GLOBALS` baseline is snapshotted once, when isolation activates; a boot write that lands after activation (e.g. an app bootstrap include like `load.php` at worker start) wasn't in the baseline, so it survived only for the *first* request coroutine and vanished for every subsequent one once a yield reset `$GLOBALS` to the stale baseline (reproduced: 1/8 concurrent requests saw the boot global). The framework now calls the new `App::refreshGlobalsBaseline()` once after the `onWorkerStart` hooks complete, folding those boot writes into the baseline so all requests see them; apps that populate `$GLOBALS` later in boot can call it explicitly. No-op on older ext / when isolation is inactive. Backed by ext-zealphp `zealphp_globals_baseline_refresh()` (validated 8/8 concurrent, ASAN-clean).
+
 ### Security & hardening (architecture-review pass)
 
 A focused hardening pass closing the highest-blast-radius gaps from a full architectural review — scalability backpressure, session edge cases, and the cross-node Redis/WebSocket fabric. Most reuse patterns the framework already had elsewhere; defaults that were unsafe for production are now safe-by-default or surfaced with a boot advisory.
