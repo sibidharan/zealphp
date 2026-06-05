@@ -223,10 +223,17 @@ class SessionManager
             $sessionName = session_name() ?: 'PHPSESSID';
             $reqCookie = is_array($request->cookie) ? $request->cookie : [];
             $reqGet = is_array($request->get) ? $request->get : [];
+            // #244: track whether the id is CLIENT-SUPPLIED (cookie/query param)
+            // vs server-minted by the idGenerator. Only a client id can be a
+            // planted/fixated value, so only it is subject to the strict-mode
+            // rotation below.
+            $clientSupplied = false;
             if ($this->useCookies && isset($reqCookie[$sessionName])) {
                 $rawSid = $reqCookie[$sessionName];
+                $clientSupplied = true;
             } else if (!$this->useOnlyCookies && isset($reqGet[$sessionName])) {
                 $rawSid = $reqGet[$sessionName];
+                $clientSupplied = true;
             } else {
                 $gen = $this->idGenerator;
                 $rawSid = is_callable($gen) ? $gen() : null;
@@ -261,6 +268,25 @@ class SessionManager
             // belt-and-suspenders for direct $g->session reads before the
             // first session_*() call.
             unset($g->session);
+
+            // #244 session.use_strict_mode: a CLIENT-SUPPLIED id that opened an
+            // EMPTY session (stale / foreign / never-issued) must not be honoured
+            // — regenerate to a fresh server-generated id and delete the old one
+            // so a fixated id can't become an authed session. $_SESSION is the
+            // canonical store here (the typed $g->session slot was just unset);
+            // read it defensively in case an upstream cleared it. session_*() are
+            // the framework's uopz overrides; session_regenerate_id(true) routes
+            // through zeal_session_regenerate_id (deletes old + emits Set-Cookie)
+            // and session_id() returns the new id for the cookie emit below.
+            if (zeal_session_strict_should_regenerate(
+                \ZealPHP\App::$session_strict_mode,
+                $clientSupplied,
+                isset($_SESSION) ? $_SESSION : []
+            )) {
+                session_regenerate_id(true);
+                $newId = session_id();
+                $sessionId = is_string($newId) ? $newId : $sessionId;
+            }
 
             if ($this->useCookies) {
                 $cookie = session_get_cookie_params();

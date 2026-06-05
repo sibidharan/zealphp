@@ -894,6 +894,12 @@ class App
      * fail-closed values (`false`, `false`, `null`). See the issue #13
      * discussion and `/learn/api` for usage.
      *
+     * SECURITY (#244): on any privilege change (login / logout / role change)
+     * call `session_regenerate_id(true)` to defeat session fixation. Strict mode
+     * (`App::$session_strict_mode`, default on) blocks an attacker from
+     * *planting* an id; regenerate-on-auth blocks *reusing* a pre-auth id. The
+     * framework can't force this — it doesn't know when your app authenticates.
+     *
      * @var callable|null
      */
     public static $auth_checker = null;
@@ -917,6 +923,29 @@ class App
      * form. Inverse of `$directory_slash`. Default false (keeps current behaviour).
      */
     public static bool $strip_trailing_slash = false;
+    /**
+     * PHP `session.use_strict_mode` parity (#244). When true (the default —
+     * security-first) a CLIENT-SUPPLIED session id (from a `PHPSESSID` cookie or
+     * query param) whose backing store loads an EMPTY session is treated as
+     * untrusted: the session managers mint a fresh server-generated id and switch
+     * the client to it. This defeats session FIXATION — an attacker who plants a
+     * known id into the victim's browser can no longer have it promoted to an
+     * authenticated session, because the framework rotates any unrecognised id
+     * before the victim ever authenticates under it. A well-formed id that DOES
+     * resolve to a non-empty stored session is preserved unchanged.
+     *
+     * CAVEAT — storage topology: the empty-session signal is only meaningful when
+     * the id's store is visible to the node handling the request. That holds for
+     * single-node (`TableSessionHandler`, the coroutine-mode default) and for
+     * shared storage (`Redis`/`Tiered`-backed sessions). A MULTI-NODE deployment
+     * using the per-server `TableSessionHandler` WITHOUT sticky load-balancing or
+     * shared session storage is already broken (sessions don't persist across
+     * nodes); with strict mode on it will ALSO rotate the id on every cross-node
+     * hop. Such setups should switch to Redis-backed sessions (so every node sees
+     * the same store) or opt out via `App::sessionStrictMode(false)`. Set via the
+     * fluent setter `App::sessionStrictMode()`.
+     */
+    public static bool $session_strict_mode = true;
     /**
      * Apache `ServerAdmin webmaster@example.com`. When set, the framework's default
      * `500`/error page mentions this contact. `null` disables the contact line.
@@ -3247,6 +3276,20 @@ class App
     {
         if ($on !== null) self::$strip_trailing_slash = $on;
         return self::$strip_trailing_slash;
+    }
+
+    /**
+     * PHP `session.use_strict_mode` parity (#244). When on (the default), a
+     * client-supplied session id that loads an empty session is rotated to a
+     * fresh server-generated id, defeating session fixation. Pass `false` to
+     * accept client-supplied ids verbatim (only safe for multi-node setups
+     * without shared/sticky session storage — see `App::$session_strict_mode`).
+     * No-arg call returns the current value.
+     */
+    public static function sessionStrictMode(?bool $on = null): bool
+    {
+        if ($on !== null) self::$session_strict_mode = $on;
+        return self::$session_strict_mode;
     }
 
     /**
