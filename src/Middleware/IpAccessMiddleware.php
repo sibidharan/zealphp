@@ -146,8 +146,16 @@ class IpAccessMiddleware implements MiddlewareInterface
 
     private function cidrMatch(string $ip, string $cidr): bool
     {
-        [$subnet, $bits] = explode('/', $cidr, 2);
-        $bits = (int)$bits;
+        $parts  = explode('/', $cidr, 2);
+        $subnet = $parts[0];
+        $prefix = $parts[1] ?? '';
+        // Fail CLOSED on a missing/malformed prefix. `(int)"abc"`/`(int)""` → 0,
+        // and a /0 mask matches every address — so `10.0.0.0/abc`, a bare
+        // `10.0.0.0/`, or `10.0.0.0` with no slash would allow/deny every client.
+        if ($prefix === '' || !ctype_digit($prefix)) {
+            return false;
+        }
+        $bits = (int)$prefix;
 
         $ipBin     = @inet_pton($ip);
         $subnetBin = @inet_pton($this->normalizeIp($subnet));
@@ -156,6 +164,9 @@ class IpAccessMiddleware implements MiddlewareInterface
         }
         if (strlen($ipBin) !== strlen($subnetBin)) {
             return false; // mixed v4/v6
+        }
+        if ($bits > strlen($ipBin) * 8) {
+            return false; // prefix wider than the address family
         }
 
         $bytes = intdiv($bits, 8);

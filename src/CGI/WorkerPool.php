@@ -392,6 +392,52 @@ final class WorkerPool
     }
 
     /**
+     * Build the environment handed to a pool subprocess.
+     *
+     * Previously this was `array_merge(getenv(), …)` — every parent env var
+     * (DB passwords, `ZEALPHP_TIERED_INVALIDATION_SECRET`, `AWS_*`, k8s/systemd
+     * secrets) was inherited by the long-lived subprocess running arbitrary
+     * legacy app code, and — unlike the proc/fork CGI path (`Dispatcher::buildCgiEnv`)
+     * — the request-controlled `HTTP_PROXY` was forwarded (httpoxy, CVE-2016-5385).
+     *
+     * Default (empty `$allowlist`): pass the parent env through for legacy-app
+     * compatibility but ALWAYS drop `HTTP_PROXY`. Set `App::cgiPoolEnvAllowlist()`
+     * to a list of exact names / `PREFIX*` globs to harden to a strict allowlist
+     * (the pool IPC var is always included). Per-request CGI vars travel over the
+     * fd-3 IPC frame, not this spawn env, so a strict allowlist does not lose them.
+     *
+     * @param array<string,string> $parentEnv  Usually `getenv()`.
+     * @param list<string>         $allowlist  Exact names or `PREFIX*` globs; empty = pass-through.
+     * @return array<string,string>
+     */
+    public static function filterSubprocessEnv(array $parentEnv, array $allowlist, int $maxRequests): array
+    {
+        $out = [];
+        foreach ($parentEnv as $name => $value) {
+            // httpoxy: a request `Proxy:` header lands as HTTP_PROXY and would
+            // hijack the subprocess's outbound HTTP. Never forward it.
+            if (\strcasecmp($name, 'HTTP_PROXY') === 0) {
+                continue;
+            }
+            if ($allowlist === []) {
+                $out[$name] = (string) $value;
+                continue;
+            }
+            foreach ($allowlist as $rule) {
+                $match = \str_ends_with($rule, '*')
+                    ? \str_starts_with($name, \substr($rule, 0, -1))
+                    : $name === $rule;
+                if ($match) {
+                    $out[$name] = (string) $value;
+                    break;
+                }
+            }
+        }
+        $out['ZEALPHP_POOL_MAX_REQUESTS'] = (string) $maxRequests;
+        return $out;
+    }
+
+    /**
      * @return array{proc: resource, stdin: resource, stdout: resource, stderr: resource, fd3: resource|null, pid: int, served: int}
      */
     private function spawn(): array
@@ -414,9 +460,13 @@ final class WorkerPool
             3 => ['pipe', 'w'], // fd 3    — IPC metadata frame channel
         ];
         $pipes = [];
-        $env = array_merge(getenv(), [
-            'ZEALPHP_POOL_MAX_REQUESTS' => (string) $this->maxRequestsPerWorker,
-        ]);
+        /** @var array<string,string> $parentEnv */
+        $parentEnv = getenv();
+        $env = self::filterSubprocessEnv(
+            $parentEnv,
+            \ZealPHP\App::$cgi_pool_env_allowlist,
+            $this->maxRequestsPerWorker
+        );
         $proc = proc_open([\PHP_BINARY, '-d', 'display_errors=stderr', $entry], $desc, $pipes, null, $env);
         if (!is_resource($proc)) {
             throw new \RuntimeException('WorkerPool: proc_open failed for ' . $entry);
