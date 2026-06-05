@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`$g->server` CGI/SAPI keys seeded at worker start + a per-request `UNIQUE_ID` (#270, #274).** App bootstrap that read `$g->server['PHP_SELF']` (or `SCRIPT_NAME` / `SCRIPT_FILENAME` / `REQUEST_URI`) at class-load — *before* the first request populates them per-request — hit "Undefined array key" floods under `MODE_COROUTINE_LEGACY` (the per-coroutine `$_SERVER` isolation hands the worker-start coroutine a fresh empty array). `App::run()` now seeds the static CGI/SAPI vars (`App::baseServerVars()`) into `$g->server` at worker start — existing keys win, and the per-request handler overlays the real values (mod_php parity). Separately, `buildServerVars()` now mints a fresh per-request `UNIQUE_ID` when one isn't already set (Apache `mod_unique_id` parity), so a class-load `$_SERVER['UNIQUE_ID'] = …` is no longer needed — that pattern produces one worker-wide id shared by every coroutine, breaking log correlation.
+
 ### Security & hardening (architecture-review pass)
 
 A focused hardening pass closing the highest-blast-radius gaps from a full architectural review — scalability backpressure, session edge cases, and the cross-node Redis/WebSocket fabric. Most reuse patterns the framework already had elsewhere; defaults that were unsafe for production are now safe-by-default or surfaced with a boot advisory.
