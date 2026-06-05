@@ -102,12 +102,25 @@ class RedisSessionHandlerTest extends TestCase
         if (!extension_loaded('redis')) {
             $this->markTestSkipped('ext-redis not loaded — connected tests skipped.');
         }
+        // #271 — the handler no longer connects in its constructor (the eager
+        // connect would fatal under HOOK_ALL outside a coroutine), so the old
+        // "construct → catch" probe can't detect an unreachable Redis: the
+        // constructor now always succeeds. Probe explicitly with a raw client.
+        $ok = false;
         try {
-            $h = new RedisSessionHandler('127.0.0.1', 6379, 'PHPREDIS_SESSION_TEST:', 60);
+            $probe = new \Redis();
+            if (@$probe->connect('127.0.0.1', 6379, 0.5)) {
+                $probe->ping();
+                $probe->close();
+                $ok = true;
+            }
         } catch (\Throwable $e) {
-            $this->markTestSkipped('Redis not reachable at 127.0.0.1:6379 — connected tests skipped: ' . $e->getMessage());
+            $ok = false;
         }
-        return $h;
+        if ($ok !== true) {
+            $this->markTestSkipped('Redis not reachable at 127.0.0.1:6379 — connected tests skipped.');
+        }
+        return new RedisSessionHandler('127.0.0.1', 6379, 'PHPREDIS_SESSION_TEST:', 60);
     }
 
     public function testOpenReturnsTrueOnConnected(): void
