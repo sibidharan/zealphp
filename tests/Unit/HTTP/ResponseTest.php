@@ -265,16 +265,25 @@ class ResponseTest extends TestCase
         $resp->redirect('data:text/html,<script>x</script>');
     }
 
-    public function testRedirectAllowsProtocolRelativeWithWarning(): void
+    public function testRedirectAllowsProtocolRelativeWithOptIn(): void
     {
-        // Protocol-relative URLs are allowed (logged as a warning) — they still redirect.
+        // #243: protocol-relative URLs are BLOCKED by default; with
+        // $allowExternal=true they are allowed (logged as a warning) + still redirect.
         $g = RequestContext::instance();
         $fake = $this->fake();
         $resp = $this->wrap($fake);
 
-        $resp->redirect('//cdn.example.com/asset');
+        $resp->redirect('//cdn.example.com/asset', 302, true);
         $this->assertSame(302, $g->status);
         $this->assertContains(['header', 'Location', '//cdn.example.com/asset'], $fake->log);
+    }
+
+    public function testRedirectBlocksProtocolRelativeByDefault(): void
+    {
+        // #243: the secure default — a bare protocol-relative target throws.
+        $resp = $this->wrap($this->fake());
+        $this->expectException(\InvalidArgumentException::class);
+        $resp->redirect('//cdn.example.com/asset');
     }
 
     public function testRedirectCrossOriginAbsoluteAllowed(): void
@@ -284,7 +293,9 @@ class ResponseTest extends TestCase
         $fake = $this->fake();
         $resp = $this->wrap($fake);
 
-        $resp->redirect('https://other.com/page');
+        // #243: a cross-origin target is blocked by default; opt in with
+        // $allowExternal=true to allow + emit it (this test's intent).
+        $resp->redirect('https://other.com/page', 302, true);
         $this->assertSame(302, $g->status);
         $this->assertContains(['header', 'Location', 'https://other.com/page'], $fake->log);
     }
