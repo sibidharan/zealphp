@@ -14,7 +14,7 @@
  *   /demo/inject/defaults/{id}      — with default $page = 1
  *   /demo/inject/defaults/{id}/{page}
  *   /demo/inject/aliases/{id}       — $req / $res short aliases for $request / $response
- *   /demo/inject/req-segment/{req}  — explicit {req} segment wins over the $request alias
+ *   /demo/inject/req-segment/{req}  — #240: reserved {req} binds the Request wrapper, NOT the URL segment
  *
  * Route type demos:
  *   /demo/route/ns/items            — nsRoute
@@ -137,13 +137,16 @@ $app->route('/demo/inject/aliases/{id}', ['methods' => ['GET']], function($id, $
     ];
 });
 
-// Precedence: an explicit {req} URL segment binds the segment, NOT the Request
-// wrapper — the isset($params[$pname]) check wins over the alias.
+// Security (#240): a {req} URL segment CANNOT shadow the injected Request
+// wrapper. The reserved framework-object names (request/req/response/res/app)
+// bind the object FIRST, so a handler typed function($req) always gets the
+// wrapper — never an attacker-controlled path segment. To read the segment,
+// name the parameter something else.
 $app->route('/demo/inject/req-segment/{req}', ['methods' => ['GET']], function($req) {
     return [
-        'req'      => $req,
-        'is_string' => is_string($req),
-        'note'     => 'explicit {req} URL segment wins over the $request alias',
+        'is_request_wrapper' => $req instanceof \ZealPHP\HTTP\Request,
+        'is_string'          => is_string($req),
+        'note'               => '#240: reserved {req} binds the Request wrapper, not the URL segment',
     ];
 });
 
