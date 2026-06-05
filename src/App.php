@@ -6617,7 +6617,7 @@ class App
      * {@see \ZealPHP\CGI\Dispatcher::parseCgiResponse()} (Phase 2 refactor).
      * Kept on App for BC so external callers/tests reach it via App::parseCgiResponse().
      *
-     * @return array{status: int|null, headers: array<string, string>, body: string}
+     * @return array{status: int|null, headers: list<array{0:string,1:string}>, body: string}
      */
     public static function parseCgiResponse(string $raw): array
     {

@@ -248,8 +248,12 @@ class CgiFcgiDispatchTest extends TestCase
             0
         );
         $this->assertSame('{"ok":true}', $result['body']);
-        $this->assertSame('application/json', $result['headers']['Content-Type']);
-        $this->assertSame('zealphp', $result['headers']['X-App']);
+        // #260 — headers is an ordered [name, value] pair list, not a name-keyed
+        // map, so an upstream's multiple same-name headers are preserved.
+        $this->assertSame(
+            [['Content-Type', 'application/json'], ['X-App', 'zealphp']],
+            $result['headers']
+        );
     }
 
     public function testParseStdoutStatusHeaderExtracted(): void
@@ -262,7 +266,7 @@ class CgiFcgiDispatchTest extends TestCase
         );
         $this->assertSame(404, $result['status']);
         $this->assertSame('not found', $result['body']);
-        $this->assertArrayNotHasKey('Status', $result['headers']);
+        $this->assertNotContains('Status', array_column($result['headers'], 0));
     }
 
     public function testParseStdoutNoBlankLineReturnedAsBody(): void
@@ -286,7 +290,7 @@ class CgiFcgiDispatchTest extends TestCase
 
         $this->mockFastCgiClient([
             'status'  => 200,
-            'headers' => ['Content-Type' => 'text/html'],
+            'headers' => [['Content-Type', 'text/html']],
             'body'    => 'hello from fpm',
             'stderr'  => '',
         ]);
@@ -311,7 +315,7 @@ class CgiFcgiDispatchTest extends TestCase
 
         $this->mockFastCgiClient([
             'status'  => 301,
-            'headers' => ['Location' => 'https://example.com/'],
+            'headers' => [['Location', 'https://example.com/']],
             'body'    => '',
             'stderr'  => '',
         ]);
