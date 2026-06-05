@@ -77,15 +77,17 @@ class RoutingTest extends TestCase
         $this->assertSame('ZealPHP\\HTTP\\Response', $j['response_class']);
     }
 
-    public function testExplicitReqSegmentWinsOverAlias(): void
+    public function testReservedReqNameCannotBeShadowedByUrlSegment(): void
     {
-        // A {req} URL segment binds the matched string, not the Request wrapper
-        // — the isset($params[$pname]) check runs before the alias.
+        // #240 — a {req} URL segment must NOT shadow the injected Request
+        // wrapper. The reserved framework-object names bind the object FIRST
+        // (security), so a handler typed function($req) gets the wrapper, never
+        // an attacker-controlled path string. Reversed from the pre-#240 design.
         $r = $this->get('/demo/inject/req-segment/hello');
         $this->assertStatus(200, $r);
         $j = $this->assertJsonResponse($r);
-        $this->assertSame('hello', $j['req']);
-        $this->assertTrue($j['is_string']);
+        $this->assertTrue($j['is_request_wrapper']);
+        $this->assertFalse($j['is_string']);
     }
 
     public function testReqResAliasesInjectInApiLayer(): void

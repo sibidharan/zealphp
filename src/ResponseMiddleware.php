@@ -65,14 +65,22 @@ class ResponseMiddleware implements MiddlewareInterface
             assert(is_array($param));
             $pname = $param['name'] ?? null;
             assert(is_string($pname));
-            if (isset($params[$pname])) {
-                $invokeArgs[] = $params[$pname];
-            } else if ($pname === 'app') {
+            // #240 — reserved framework-object names bind to the injected object
+            // BEFORE any same-named URL segment, so a route declared with a
+            // {request}/{response}/{app} (or {req}/{res}) parameter can't shadow
+            // the PSR-7 Request/Response/App with an attacker-controlled URL
+            // string (a handler typed `function($request)` always gets the
+            // wrapper, never a path segment). A URL segment that happens to use a
+            // reserved name is simply unbindable to that handler parameter — name
+            // it something else to read the segment.
+            if ($pname === 'app') {
                 $invokeArgs[] = $this;
             } else if ($pname === 'request' || $pname === 'req') {
                 $invokeArgs[] = $g->zealphp_request;
             } else if ($pname === 'response' || $pname === 'res') {
                 $invokeArgs[] = $g->zealphp_response;
+            } else if (isset($params[$pname])) {
+                $invokeArgs[] = $params[$pname];
             } else {
                 $invokeArgs[] = $param['has_default'] ? $param['default'] : null;
             }
@@ -302,14 +310,22 @@ class ResponseMiddleware implements MiddlewareInterface
             assert(is_array($param));
             $pname = $param['name'] ?? null;
             assert(is_string($pname));
-            if (isset($params[$pname])) {
-                $invokeArgs[] = $params[$pname];
-            } else if ($pname === 'app') {
+            // #240 — reserved framework-object names bind to the injected object
+            // BEFORE any same-named URL segment, so a route declared with a
+            // {request}/{response}/{app} (or {req}/{res}) parameter can't shadow
+            // the PSR-7 Request/Response/App with an attacker-controlled URL
+            // string (a handler typed `function($request)` always gets the
+            // wrapper, never a path segment). A URL segment that happens to use a
+            // reserved name is simply unbindable to that handler parameter — name
+            // it something else to read the segment.
+            if ($pname === 'app') {
                 $invokeArgs[] = $this;
             } else if ($pname === 'request' || $pname === 'req') {
                 $invokeArgs[] = $g->zealphp_request;
             } else if ($pname === 'response' || $pname === 'res') {
                 $invokeArgs[] = $g->zealphp_response;
+            } else if (isset($params[$pname])) {
+                $invokeArgs[] = $params[$pname];
             } else {
                 $invokeArgs[] = $param['has_default'] ? $param['default'] : null;
             }

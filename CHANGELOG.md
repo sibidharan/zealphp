@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Security
+
+- **`{request}` / `{response}` / `{app}` URL params can no longer shadow the injected framework object (#240).** `ResponseMiddleware` now binds the reserved framework-object names (`request` / `req` / `response` / `res` / `app`) **before** any same-named URL segment, so a handler typed `function($request)` always receives the PSR-7 wrapper — never an attacker-controllable path string. **Behaviour change:** this reverses the prior "explicit `{req}` URL segment wins" precedence; a URL segment that uses a reserved name is now unbindable to that handler parameter (name it something else to read the segment). `ZealAPI` was already reserved-first and binds no URL placeholders; template/streaming closures bind only developer-provided args.
+
 ### Security & hardening (architecture-review pass)
 
 A focused hardening pass closing the highest-blast-radius gaps from a full architectural review — scalability backpressure, session edge cases, and the cross-node Redis/WebSocket fabric. Most reuse patterns the framework already had elsewhere; defaults that were unsafe for production are now safe-by-default or surfaced with a boot advisory.

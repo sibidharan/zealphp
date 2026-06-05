@@ -46,6 +46,16 @@ class ResponseMiddlewarePipelineTest extends TestCase
             $app->route('/inject/default', fn($missing = 'fallback') => "v=$missing");
             $app->route('/gen', fn() => (function () { yield 'g1'; yield 'g2'; })());
             $app->route('/postonly', ['methods' => ['POST']], fn() => 'posted');
+            // #240 — reserved framework-object params (app / request / req /
+            // response / res) bind the injected object BEFORE any same-named URL
+            // segment. These routes unit-cover the reordered binding in BOTH the
+            // matched (regular) and raw dispatch blocks.
+            $app->route('/inject/app', fn($app) => 'app:' . (is_object($app) ? (new \ReflectionClass($app))->getShortName() : gettype($app)));
+            $app->route('/inject/res', fn($res) => 'res:' . (is_object($res) ? (new \ReflectionClass($res))->getShortName() : gettype($res)));
+            $app->route('/shadow/{request}', fn($request) => is_string($request) ? "url:$request" : 'wrapper');
+            $app->route('/raw/inject', ['raw' => true], fn($app, $req, $res) => 'raw:' . (is_object($app) ? 'a' : '-') . (is_object($res) ? 'r' : '-'));
+            $app->route('/raw/url/{id}', ['raw' => true], fn($id) => "rawurl:$id");
+            $app->route('/raw/default', ['raw' => true], fn($missing = 'def') => "rawdef:$missing");
 
             // run() builds the method-indexed dispatch table from $this->routes
             // (App.php ~3996). We don't boot the server, so replicate that build
@@ -160,6 +170,48 @@ class ResponseMiddlewarePipelineTest extends TestCase
     public function testDefaultParamUsedWhenAbsent(): void
     {
         $this->assertSame('v=fallback', (string) $this->dispatch('/inject/default')->getBody());
+    }
+
+    // ── #240: reserved framework-object params bind before URL segments ──
+
+    public function testReservedAppParamInjectsResponseMiddleware(): void
+    {
+        $this->assertSame('app:ResponseMiddleware', (string) $this->dispatch('/inject/app')->getBody());
+    }
+
+    public function testReservedResParamInjectsResponseWrapper(): void
+    {
+        $this->assertSame('res:Response', (string) $this->dispatch('/inject/res')->getBody());
+    }
+
+    public function testReservedRequestNameWinsOverUrlSegment(): void
+    {
+        // The {request} URL segment must NOT shadow the injected request — the
+        // reserved name binds first, so function($request) never receives the path
+        // string ('pwned'). $g->zealphp_request is null in this harness, so the
+        // handler sees a non-string and returns 'wrapper', never 'url:pwned'.
+        $body = (string) $this->dispatch('/shadow/pwned')->getBody();
+        $this->assertSame('wrapper', $body);
+        $this->assertStringNotContainsString('pwned', $body);
+    }
+
+    public function testRawRouteReservedParamsInjected(): void
+    {
+        // The raw dispatch block carries the identical reserved-name precedence.
+        $this->assertSame('raw:ar', (string) $this->dispatch('/raw/inject')->getBody());
+    }
+
+    public function testRawRouteUrlParamBinds(): void
+    {
+        // dispatchRawRoute: a non-reserved URL segment binds normally (the
+        // isset($params) branch, after the reserved-name checks).
+        $this->assertSame('rawurl:7', (string) $this->dispatch('/raw/url/7')->getBody());
+    }
+
+    public function testRawRouteDefaultParamUsed(): void
+    {
+        // dispatchRawRoute: an absent, non-reserved param falls back to its default.
+        $this->assertSame('rawdef:def', (string) $this->dispatch('/raw/default')->getBody());
     }
 
     // ── HTTP method handling ──────────────────────────────────────
