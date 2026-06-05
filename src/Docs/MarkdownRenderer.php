@@ -142,16 +142,29 @@ final class MarkdownRenderer
                     }
                 }
 
-                // Any other relative path is a repo file reference
-                // (../src/App.php, ../tests/Foo.php, ../STANDARDS.md, …).
-                // Resolve it against the repo root on GitHub. The docs
-                // live in docs/, so a leading ../ climbs to the repo
-                // root; strip the ./ and ../ segments and prefix the
-                // blob base.
-                $clean = (string) preg_replace('#^(?:\.\./|\./)+#', '', $path);
-                $clean = ltrim($clean, '/');
+                // Any other relative path is a repo file reference. Guides are
+                // served from docs/, so resolve the link against that base
+                // instead of blindly stripping every ./ + ../ prefix (which
+                // dropped the docs/ segment for any link that stayed WITHIN docs/
+                // — e.g. ./architecture/state-isolation-reference.md 404'd as
+                // master/architecture/… rather than master/docs/architecture/…):
+                //   ./architecture/x.md → docs/architecture/x.md
+                //   architecture/x.md   → docs/architecture/x.md
+                //   ../STANDARDS.md      → STANDARDS.md   (climbs out of docs/)
+                //   ../src/App.php       → src/App.php
+                $resolved = [];
+                foreach (explode('/', 'docs/' . $path) as $seg) {
+                    if ($seg === '' || $seg === '.') {
+                        continue;
+                    }
+                    if ($seg === '..') {
+                        array_pop($resolved);
+                        continue;
+                    }
+                    $resolved[] = $seg;
+                }
 
-                return 'href="' . self::GITHUB_BLOB . $clean . $anchor . '"';
+                return 'href="' . self::GITHUB_BLOB . implode('/', $resolved) . $anchor . '"';
             },
             $html
         );
