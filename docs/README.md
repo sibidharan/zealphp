@@ -30,6 +30,7 @@ Welcome to the official documentation set for ZealPHP, a coroutine-aware PHP fra
 - [fastcgi-backends.md](./fastcgi-backends.md) — front php-fpm or any FastCGI/1.0 server; `cgiMode('fcgi')` + `fcgiAddress()` framework-wide and `registerCgiBackend()` per-extension (custom Python/Ruby/Perl upstreams), socket forms, `fcgi_params`, 502/timeout behavior.
 - [environment-variables.md](./environment-variables.md) — canonical reference for every `ZEALPHP_*` variable: defaults, scope, and `env_flag` boolean semantics.
 - [fuzzing.md](./fuzzing.md) — Radamsa parser fuzzing, Gabbi contract fixtures, slowhttptest reactor checks, and the http-garden differential roadmap.
+- [coroutine-isolation-security-research.md](./coroutine-isolation-security-research.md) — starting map for security researchers auditing the per-coroutine isolation runtime: the use-after-free / cross-tenant-leak / unbounded-leak vulnerability classes, where to focus, the known-open frontier, and the ASAN + Valgrind methodology for testing ext-zealphp **through** ZealPHP.
 
 ### Background
 - [apache-parity.md](./apache-parity.md) — function overrides (ext-zealphp preferred, uopz fallback), per-coroutine isolation, and the contract that lets unmodified WordPress / Drupal run on ZealPHP.
