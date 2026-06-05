@@ -35,6 +35,14 @@ final class RedisConnectionPool
     /** Single `RedisClient` used in sync (non-coroutine) mode. */
     private ?RedisClient $syncClient = null;
 
+    /**
+     * Set once `close()` has run. Distinguishes "torn down" from "never
+     * built" (both leave `$ch === null`), so a post-`close()` `acquire()`
+     * throws instead of silently rebuilding a fresh N-client pool — which
+     * would leak the sockets the rebuilt pool opens (#252).
+     */
+    private bool $closed = false;
+
     /** Per-worker counters (`pool_acquires_total`, `pool_acquire_timeouts_total`, `pool_clients_created_total`). */
     private Stats $stats;
 
@@ -62,6 +70,9 @@ final class RedisConnectionPool
      */
     public function acquire(float $timeout = 5.0): RedisClient
     {
+        if ($this->closed) {
+            throw new StoreException('RedisConnectionPool: acquire() after close() — the pool is torn down');
+        }
         if (Coroutine::getCid() < 0) {
             if ($this->syncClient === null) {
                 $this->syncClient = new RedisClient($this->url, $this->opts);
@@ -155,6 +166,7 @@ final class RedisConnectionPool
      */
     public function close(): void
     {
+        $this->closed = true;
         if ($this->syncClient !== null) {
             $this->syncClient->close();
             $this->syncClient = null;
@@ -185,6 +197,9 @@ final class RedisConnectionPool
      */
     private function ensureChannel(): Channel
     {
+        if ($this->closed) {
+            throw new StoreException('RedisConnectionPool: cannot build channel after close() — the pool is torn down');
+        }
         if ($this->ch !== null) { return $this->ch; }
         // Must be called inside a coroutine — Channel::push throws otherwise.
         $ch = new Channel($this->size);

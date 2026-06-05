@@ -145,6 +145,47 @@ final class RedisBackendTest extends RedisTestCase
         });
     }
 
+    /**
+     * #254 — a tracked-mode set() with an EMPTY row makes `HSET key` (no
+     * fields) a Redis no-op, so the hash is never created. The phantom SADD
+     * (gated out by the fix) used to add a membership member anyway, making
+     * count() (SCARD) over-report vs get()/iterate(), which both skip the
+     * absent hash. After the fix count()===0 agrees with get()===null.
+     */
+    public function testTrackedEmptyRowDoesNotPhantomCount(): void
+    {
+        \OpenSwoole\Coroutine::run(function (): void {
+            $b = $this->backend();
+            $b->make('t', 100, ['v' => [Table::TYPE_STRING, 8]]);
+            // Empty row → empty wire → HSET no-op → hash never created.
+            $b->set('t', 'ghost', []);
+            $this->assertNull($b->get('t', 'ghost'), 'no hash was created for the empty row');
+            $this->assertFalse($b->exists('t', 'ghost'));
+            $this->assertSame(0, $b->count('t'), 'count() must agree with get()/exists() — no phantom member');
+            // iterate() also sees nothing.
+            $seen = [];
+            foreach ($b->iterate('t') as $k => $row) { $seen[] = $k; }
+            $this->assertSame([], $seen);
+        });
+    }
+
+    /**
+     * #254 — a NON-empty row in the same table still tracks correctly (the
+     * fix only skips the SADD when the wire is empty, not in general).
+     */
+    public function testTrackedNonEmptyRowStillCountsAfterEmptyRowFix(): void
+    {
+        \OpenSwoole\Coroutine::run(function (): void {
+            $b = $this->backend();
+            $b->make('t', 100, ['v' => [Table::TYPE_STRING, 8]]);
+            $b->set('t', 'empty', []);              // skipped — no member
+            $b->set('t', 'real', ['v' => 'x']);     // tracked — one member
+            $this->assertSame(1, $b->count('t'));
+            $this->assertSame(['v' => 'x'], $b->get('t', 'real'));
+            $this->assertNull($b->get('t', 'empty'));
+        });
+    }
+
     public function testTrackedClearWipesEveryRowAndTheMembershipSet(): void
     {
         \OpenSwoole\Coroutine::run(function (): void {
