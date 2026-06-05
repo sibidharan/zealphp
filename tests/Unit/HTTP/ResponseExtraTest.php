@@ -1156,8 +1156,10 @@ class ResponseExtraTest extends TestCase
         // exact prefix AND the URL, in that order.
         $resp = $this->wrap();
 
+        // #243: external targets are blocked by default; opt in with
+        // $allowExternal=true to exercise the (still-present) warn-log path.
         $log = $this->captureDebugLog(function () use ($resp): void {
-            $resp->redirect('//cdn.example.com/asset');
+            $resp->redirect('//cdn.example.com/asset', 302, true);
         });
 
         $this->assertStringContainsString(
@@ -1176,7 +1178,7 @@ class ResponseExtraTest extends TestCase
         $resp = $this->wrap();
 
         $log = $this->captureDebugLog(function () use ($resp): void {
-            $resp->redirect('https://other.com/page');
+            $resp->redirect('https://other.com/page', 302, true); // #243: opt-in external → warn path
         });
 
         $this->assertStringContainsString(
@@ -1197,7 +1199,7 @@ class ResponseExtraTest extends TestCase
         $resp = $this->wrap();
 
         $log = $this->captureDebugLog(function () use ($resp): void {
-            $resp->redirect('https://other.com/page');
+            $resp->redirect('https://other.com/page', 302, true); // #243: opt-in external → warn path
         });
 
         $this->assertStringContainsString('[security] Cross-origin redirect:', $log);
@@ -1230,7 +1232,7 @@ class ResponseExtraTest extends TestCase
         $resp = $this->wrap();
 
         $log = $this->captureDebugLog(function () use ($resp): void {
-            $resp->redirect('https://other.com/page');
+            $resp->redirect('https://other.com/page', 302, true); // #243: opt-in external → warn path
         });
 
         $this->assertStringNotContainsString('Cross-origin redirect', $log);
@@ -1246,7 +1248,7 @@ class ResponseExtraTest extends TestCase
         $resp = $this->wrap();
 
         $log = $this->captureDebugLog(function () use ($resp): void {
-            $resp->redirect('https://elsewhere.example/x');
+            $resp->redirect('https://elsewhere.example/x', 302, true); // #243: opt-in external → warn path
         });
 
         $this->assertStringContainsString('[security] Cross-origin redirect: https://elsewhere.example/x', $log);

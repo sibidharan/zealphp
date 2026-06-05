@@ -187,6 +187,14 @@ final class TieredBackend implements StoreBackend
     /** Publish an invalidation marker after a successful L2 write. */
     private function publishInvalidation(string $table, string $key): void
     {
+        // #256(A): only publish when invalidation is actually ENABLED. The
+        // channel map is populated unconditionally by make() (it feeds runner
+        // registration), so gating on it alone meant every write published an
+        // invalidation even when enableInvalidation() was never called — a
+        // wasted Redis round-trip + a surprising write-time side effect on a
+        // dormant feature, with no subscriber to receive it. The runner being
+        // non-null is the truthful "invalidation is active" signal.
+        if ($this->invalidationRunner === null) { return; }
         if (!isset($this->invalidationChannels[$this->channel($table)])) { return; }
         try {
             $msg = [

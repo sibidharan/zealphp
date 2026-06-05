@@ -217,6 +217,24 @@ class CoSessionManager
                 zeal_session_start();
                 $g->_session_started = true;
 
+                // #244 session.use_strict_mode: this branch is reached ONLY for a
+                // client-supplied id, so if it loaded an EMPTY session (stale /
+                // foreign / never-issued) it must not be honoured — mint a fresh
+                // server-generated id so a fixated id can't become an authed
+                // session. The store was just read by zeal_session_start() into
+                // $g->session, so [] here means "id not recognised".
+                if (zeal_session_strict_should_regenerate(
+                    \ZealPHP\App::$session_strict_mode,
+                    true,
+                    $g->session
+                )) {
+                    $freshId = session_create_id();
+                    if (is_string($freshId)) {
+                        $sessionId = $freshId;
+                        zeal_session_id($sessionId);
+                    }
+                }
+
                 if ($this->useCookies) {
                     $cookie = zeal_session_get_cookie_params();
                     $response->cookie(

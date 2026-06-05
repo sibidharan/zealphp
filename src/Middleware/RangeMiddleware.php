@@ -104,9 +104,12 @@ class RangeMiddleware implements MiddlewareInterface
                 }
                 // No ETag on response or tags match: fall through and honour range.
             } else {
-                // HTTP-date comparison against Last-Modified.
-                // Apache clock-skew rule: if request time < mtime + 60 s, treat as
-                // a weak (untrustworthy) match and ignore the range.
+                // HTTP-date comparison against Last-Modified — delegated to the
+                // single shared strong-validation helper so this buffered path
+                // and Response::sendFile()'s zero-copy path can never disagree
+                // on the same request (#258). The helper encodes Apache's 60 s
+                // clock-skew rule (a Last-Modified younger than 60 s is weak and
+                // must not short-circuit a Range).
                 $lastModifiedHeader = $response->getHeaderLine('Last-Modified');
                 if ($lastModifiedHeader === '') {
                     // No Last-Modified available — cannot validate; serve full body.
@@ -114,28 +117,21 @@ class RangeMiddleware implements MiddlewareInterface
                 }
 
                 $mtime = strtotime($lastModifiedHeader);
-                $rtime = strtotime($ifRange);
-
-                if ($mtime === false || $rtime === false || $mtime === -1 || $rtime === -1) {
-                    // Unparseable date — cannot validate; serve full body safely.
+                if ($mtime === false || $mtime === -1) {
+                    // Unparseable Last-Modified — cannot validate; serve full body.
                     return $response->withHeader('Accept-Ranges', 'bytes');
                 }
 
-                if ($rtime !== $mtime) {
-                    // Dates differ: resource has changed, ignore range.
-                    return $response->withHeader('Accept-Ranges', 'bytes');
-                }
-
-                // Dates match; apply Apache's one-minute clock-skew rule.
-                // Use the response Date header when present, otherwise wall clock.
+                // Resolve the served-time from the response Date header when
+                // present, otherwise wall clock — same source the inline code
+                // used; the helper applies the skew comparison.
                 $dateHeader = $response->getHeaderLine('Date');
-                $reqtime = ($dateHeader !== '') ? strtotime($dateHeader) : time();
-                if ($reqtime === false || $reqtime === -1) {
-                    $reqtime = time();
-                }
+                $reqtime = ($dateHeader !== '') ? strtotime($dateHeader) : false;
+                $servedTime = ($reqtime !== false && $reqtime !== -1) ? $reqtime : null;
 
-                if ($reqtime < $mtime + 60) {
-                    // Clock skew too small — weak match not allowed with Range.
+                if (!\ZealPHP\HTTP\Response::ifRangeDateMatches($ifRange, $mtime, $servedTime)) {
+                    // Date differs, unparseable, or skew window not elapsed —
+                    // ignore the range and serve the full body.
                     return $response->withHeader('Accept-Ranges', 'bytes');
                 }
                 // Strong match: honour range.

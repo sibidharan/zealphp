@@ -125,7 +125,20 @@ class Response
     }
 
     // You can override methods if necessary or add more custom methods
-    public function header(string $key, string $value): bool
+
+    /**
+     * Queue a response header.
+     *
+     * Mirrors PHP's native `header($value, $replace = true)` semantics (#260):
+     * `$replace = true` (the default) drops any previously-queued header of the
+     * same name before adding this one — last write wins, as every framework
+     * caller that sets a single header (Content-Type, Cache-Control, …) relies
+     * on. `$replace = false` is the APPEND form (`header($h, false)`) — it keeps
+     * prior same-name entries, so multiple `Link` / `WWW-Authenticate` / CSP
+     * headers all survive (flush() groups same-name appends into one
+     * array-valued OpenSwoole call so they all reach the wire).
+     */
+    public function header(string $key, string $value, bool $replace = true): bool
     {
         // CRLF / NUL injection guard. Also block `:` and whitespace in the
         // header name itself (RFC 7230 field-name = token, which excludes
@@ -134,6 +147,13 @@ class Response
         if (strpbrk($key, "\r\n\0: \t") !== false || strpbrk($value, "\r\n\0") !== false) {
             trigger_error('Header injection blocked: control characters in name or value', E_USER_WARNING);
             return false;
+        }
+        if ($replace) {
+            // Drop prior same-name entries (case-insensitive) so this value wins.
+            $this->headersList = array_values(array_filter(
+                $this->headersList,
+                static fn(array $pair): bool => strcasecmp($pair[0], $key) !== 0
+            ));
         }
         $this->headersList[] = [$key, $value];
         if (strtolower($key) === 'location' && $value && ($this->g->status === 200 || $this->g->status === null)) {
@@ -145,11 +165,18 @@ class Response
     /**
      * Send an HTTP redirect.
      *
-     * @param string $url    Destination URL (absolute or relative)
-     * @param int    $status 301 Moved Permanently, 302 Found (default),
-     *                       307 Temporary Redirect, 308 Permanent Redirect
+     * @param string $url           Destination URL (absolute or relative)
+     * @param int    $status        301 Moved Permanently, 302 Found (default),
+     *                              307 Temporary Redirect, 308 Permanent Redirect
+     * @param bool   $allowExternal Permit cross-origin / protocol-relative
+     *                              targets. Default `false` — safe-by-default:
+     *                              a `//evil.com` or different-host absolute URL
+     *                              is REFUSED (open-redirect / CWE-601 guard).
+     *                              Set `true` only when an external redirect is
+     *                              genuinely intended (and validate user input
+     *                              against an allowlist first).
      */
-    public function redirect(string $url, int $status = 302): void
+    public function redirect(string $url, int $status = 302, bool $allowExternal = false): void
     {
         if (strpbrk($url, "\r\n\0") !== false) {
             throw new \InvalidArgumentException('Redirect URL contains control characters');
@@ -173,11 +200,20 @@ class Response
             throw new \InvalidArgumentException('Unsafe redirect URL scheme');
         }
 
+        // Open-redirect guard (CWE-601). Refuse cross-origin / protocol-relative
+        // targets by default — warning-and-emitting let `$res->redirect($_GET['next'])`
+        // ship an open redirect. Opt in with $allowExternal when truly intended.
         if (preg_match('#^//#', $url)) {
+            if (!$allowExternal) {
+                throw new \InvalidArgumentException('Protocol-relative redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
+            }
             \ZealPHP\elog('[security] Protocol-relative redirect detected: ' . $url, 'warn');
         } elseif (isset(parse_url($url)['host'])) {
             $requestHost = $this->g->server['HTTP_HOST'] ?? $this->g->server['SERVER_NAME'] ?? '';
             if ($requestHost !== '' && parse_url($url, PHP_URL_HOST) !== $requestHost) {
+                if (!$allowExternal) {
+                    throw new \InvalidArgumentException('Cross-origin redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
+                }
                 \ZealPHP\elog('[security] Cross-origin redirect: ' . $url, 'warn');
             }
         }
@@ -195,9 +231,10 @@ class Response
             $reason = self::REDIRECT_REASONS[$status] ?? '';
             $this->g->_streaming = true;
             $this->parent->status($status, $reason);
-            foreach ($this->headersList as [$k, $v]) {
-                $this->parent->header($k, $v);
-            }
+            // Group same-name headers so multiple appends (e.g. several Link
+            // preload hints emitted alongside a redirect) survive on the wire
+            // (#260) — same path flush() uses.
+            $this->emitQueuedHeaders();
             foreach ($this->cookiesList as $cookie) {
                 $this->parent->cookie(...$cookie);
             }
@@ -480,9 +517,11 @@ class Response
 
         // If-Range (RFC 9110 §13.1.5): only honour the Range if the validator
         // still matches. A leading `"` (or `W/"`) marks an entity-tag form,
-        // otherwise it is an HTTP-date compared against the file mtime (strong:
-        // exact second match required). On mismatch we ignore the Range and
-        // serve the full body — never a 412 here.
+        // otherwise it is an HTTP-date evaluated by the shared
+        // self::ifRangeDateMatches() strong-validation helper (Apache's 60 s
+        // clock-skew rule — identical to the buffered RangeMiddleware path, see
+        // #258). On mismatch we ignore the Range and serve the full body —
+        // never a 412 here.
         if ($rangeHeader !== '') {
             $ifRange = $reqHeaders['if-range'] ?? '';
             if (!is_string($ifRange)) {
@@ -552,10 +591,50 @@ class Response
             return $ifRange === $etag;
         }
 
-        // HTTP-date form: honour the Range only if the file has not been
-        // modified since the supplied date (exact-second strong match).
-        $when = strtotime($ifRange);
-        return $when !== false && $when === $mtime;
+        // HTTP-date form: defer to the single shared date-strong helper so the
+        // buffered (RangeMiddleware) and zero-copy (this) paths can never drift
+        // on what "strong date match" means (#258). reqTime = null → the helper
+        // uses wall-clock now (sendFile has no upstream Date header to consult).
+        return self::ifRangeDateMatches($ifRange, $mtime, null);
+    }
+
+    /**
+     * Shared If-Range HTTP-date evaluator — the SINGLE source of truth for
+     * date-form `If-Range` strong validation across both range-serving paths
+     * (this Response::sendFile() zero-copy path AND the buffered
+     * RangeMiddleware path), so they can never diverge on the same request
+     * (#258).
+     *
+     * Implements RFC 9110 §13.1.5's strong-validation requirement via Apache's
+     * one-minute clock-skew rule (ap_condition_if_range): a Last-Modified date
+     * is only a STRONG validator if it is at least 60 s older than the time the
+     * representation was served — a value younger than that window is treated
+     * as weak and a weak validator MUST NOT be used to short-circuit a Range
+     * request. The Range is honoured only when the supplied date matches the
+     * resource mtime exactly AND that 60 s skew window has elapsed.
+     *
+     * @param string   $ifRange Raw If-Range header value (already known to be
+     *                          the HTTP-date form, not an entity-tag).
+     * @param int      $mtime   Resource last-modified time (unix seconds).
+     * @param int|null $reqTime Time the response is/was served (unix seconds) —
+     *                          from the response Date header when available;
+     *                          null → use wall-clock now.
+     * @return bool true → the date is a strong match, honour the Range.
+     */
+    public static function ifRangeDateMatches(string $ifRange, int $mtime, ?int $reqTime): bool
+    {
+        $when = strtotime(trim($ifRange));
+        if ($when === false || $when !== $mtime) {
+            // Unparseable, or the validator no longer matches the resource —
+            // ignore the Range and serve the full representation.
+            return false;
+        }
+        $served = $reqTime ?? time();
+        if ($served < $mtime + 60) {
+            // Skew window not yet elapsed — weak match, not allowed with Range.
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -635,9 +714,7 @@ class Response
     public function flush(): bool
     {
         if ($this->parent->isWritable()) {
-            foreach ($this->headersList as $header) {
-                $this->parent->header(...$header);
-            }
+            $this->emitQueuedHeaders();
             foreach ($this->cookiesList as $cookie) {
                 $this->parent->cookie(...$cookie);
             }
@@ -651,5 +728,57 @@ class Response
             return true;
         }
         return false;
+    }
+
+    /**
+     * Emit every queued header to the underlying OpenSwoole response, grouping
+     * same-name entries so multiple appends survive on the wire (#260).
+     *
+     * `header($name, $value, false)` (PHP's append form) queues each value as a
+     * separate `$headersList` entry — correct. But OpenSwoole's scalar
+     * `$response->header($name, $scalar)` OVERWRITES any prior entry of the same
+     * name (it stores under the header name as the array key), so emitting one
+     * scalar call per entry collapses `Link` / `WWW-Authenticate` /
+     * `Content-Security-Policy` multi-value headers to the LAST value only.
+     *
+     * OpenSwoole DOES support multiple same-name headers — pass an ARRAY value
+     * and the ext emits one wire line per element (the same mechanism that makes
+     * multiple `Set-Cookie` work). So we group by name (first-seen order
+     * preserved), then emit a scalar for single-value names and an array for
+     * names with >1 value.
+     */
+    private function emitQueuedHeaders(): void
+    {
+        /** @var array<string, list<string>> $grouped */
+        $grouped = [];
+        foreach ($this->headersList as [$name, $value]) {
+            // Preserve first-seen order of distinct names; append repeats.
+            $grouped[$name][] = $value;
+        }
+        foreach ($grouped as $name => $values) {
+            if (count($values) === 1) {
+                $this->parent->header($name, $values[0]);
+            } else {
+                // Array value → OpenSwoole emits one `Name: value` line per
+                // element (proven against ext-openswoole 26.x: header() parses
+                // the value as a zval and the emit loop expands array values).
+                $this->emitMultiHeader($name, $values);
+            }
+        }
+    }
+
+    /**
+     * Emit a single header name with multiple values as one OpenSwoole
+     * `header()` call carrying an ARRAY value, so the ext writes one wire line
+     * per value (#260). Isolated in its own method because the
+     * openswoole/ide-helper stub types the value param as `string` while the
+     * real ext accepts any zval (incl. an array) — the array-value behaviour is
+     * a documented ext-vs-stub mismatch (see phpstan.neon ignoreErrors).
+     *
+     * @param list<string> $values
+     */
+    private function emitMultiHeader(string $name, array $values): void
+    {
+        $this->parent->header($name, $values);
     }
 }

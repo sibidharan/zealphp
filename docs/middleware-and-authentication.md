@@ -525,6 +525,24 @@ $post = function () {
 
 All three hooks default to `null` (fail-closed): without `App::authChecker()`, `isAuthenticated()` returns `false` and `requirePostAuth()` rejects every request. See `template/pages/api.php` on the live site for the full auth-hooks reference.
 
+## Session Fixation Defence (#244)
+
+Session fixation has two halves, and ZealPHP closes both:
+
+1. **Planting an id — handled by the framework.** `App::$session_strict_mode` (default **on**, security-first) gives `session.use_strict_mode=1` parity: a client-supplied `PHPSESSID` (cookie or query param) whose backing store loads an **empty** session is treated as unrecognised — both session managers mint a fresh server-generated id and switch the client to it. So an attacker can't pre-plant a known id and have it promoted to the victim's authenticated session. A well-formed id that resolves to a **non-empty** stored session is preserved unchanged. Opt out (e.g. multi-node without shared/sticky session storage — see the caveat below) with `App::sessionStrictMode(false)`.
+
+2. **Reusing a pre-auth id — your responsibility, one call.** The framework can't know when *your* app changes a privilege level, so on **login / logout / role change** call `session_regenerate_id(true)` (the framework's coroutine-safe override — deletes the old session and emits a fresh `Set-Cookie`):
+
+   ```php
+   // After verifying credentials, BEFORE writing the authenticated identity:
+   session_regenerate_id(true);
+   $_SESSION['user_id'] = $user->id;   // or G::instance()->session['user_id'] in coroutine mode
+   ```
+
+   Strict mode blocks *planting* an id; regenerate-on-auth blocks *reusing* a pre-auth id. Use both.
+
+> **Multi-node caveat.** The empty-session signal is only meaningful when the id's store is visible to the node serving the request — single-node (`TableSessionHandler`, the coroutine-mode default) or shared `Redis`/`Tiered`-backed sessions. A multi-node deployment using the per-server `TableSessionHandler` **without** sticky load-balancing or shared storage is already broken (sessions don't persist cross-node); with strict mode on it will also rotate the id on every cross-node hop. Such setups should use Redis-backed sessions or `App::sessionStrictMode(false)`.
+
 ## Future Directions
 
 `standards-and-roadmap.md` tracks planned improvements such as:

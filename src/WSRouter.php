@@ -174,9 +174,16 @@ final class WSRouter
 
     /**
      * Per-worker cache of locally-owned clients by room.
-     * `room → [client_id => true]`
+     * `room → [client_id => conn_id]`
      *
-     * @var array<string, array<string, true>>
+     * #246 — the value is the per-connection nonce (conn_id) captured from
+     * `$localFds[$clientId]` at join time, NOT a bare `true`. The room push
+     * loop re-checks it against the live `$localFds[$clientId]['conn_id']`
+     * before pushing, so a reused fd (client reconnected under a fresh nonce
+     * while a stale membership entry lingers) can't receive a prior owner's
+     * room message — mirroring the C1 guard on the identity-delivery path.
+     *
+     * @var array<string, array<string, string>>
      */
     private static array $localRoomMembership = [];
 
@@ -857,6 +864,20 @@ final class WSRouter
         if (self::$serverId === '') {
             throw new StoreException('WSRouter::init() must be called before WSRouter::room()');
         }
+        // #247 — the room name is woven into Store keys (ws_room_members rows,
+        // the per-room SET key) and the `ws:room:{name}` pub/sub channel. A `:`
+        // (or other separator) in the name would alias one room's keys/channel
+        // onto another's (compositeKey('chat:42','alice') === compositeKey(
+        // 'chat','42:alice')). Restrict to a strict charset at the single
+        // construction chokepoint so neither the keys NOR the PSUBSCRIBE pattern
+        // can collide. (compositeKey() is additionally length-prefixed for
+        // defence in depth on the client-id half.)
+        if (!preg_match('/^[A-Za-z0-9_.-]+$/', $name)) {
+            throw new StoreException(
+                "WSRouter::room(): invalid room name '{$name}' — must match /^[A-Za-z0-9_.-]+$/ " .
+                "(no ':' or other separators, which would collide ws_room_members keys / the ws:room:* channel)"
+            );
+        }
         return new Room($name, self::$serverId);
     }
 
@@ -1114,8 +1135,10 @@ final class WSRouter
                 if ($type === 'join') {
                     // Only cache clients THIS worker owns (they're the push
                     // targets); a join for a remote client isn't ours to hold.
+                    // #246 — capture the connection's conn_id alongside the
+                    // client id so the push loop can detect an fd-reuse drift.
                     if (isset(self::$localFds[$cid])) {
-                        self::$localRoomMembership[$roomName][$cid] = true;
+                        self::$localRoomMembership[$roomName][$cid] = self::$localFds[$cid]['conn_id'];
                     }
                 } else {
                     // Always evict on leave — unsetting a non-member is a
@@ -1153,16 +1176,22 @@ final class WSRouter
         if (!($server instanceof \OpenSwoole\WebSocket\Server)) { return; }
         $data = (string) json_encode($msg);
 
-        // WS-6: resolve member ids to live fds first, then fan out under a
-        // concurrency cap. Each push still runs in its OWN coroutine (a slow
-        // consumer's back-pressure can't block the others — per-coroutine
-        // isolation preserved), but at most `$fanoutConcurrency` run
-        // simultaneously so a large room + burst can't spawn unbounded push
-        // coroutines (the keystone backpressure gap).
+        // WS-6: resolve member ids to live fds first (re-validating connection
+        // identity, #246), then fan out under a concurrency cap. Each push still
+        // runs in its OWN coroutine (a slow consumer's back-pressure can't block
+        // the others — per-coroutine isolation preserved), but at most
+        // `$fanoutConcurrency` run simultaneously so a large room + burst can't
+        // spawn unbounded push coroutines (the keystone backpressure gap).
         $fds = [];
-        foreach (array_keys($localMembers) as $cid) {
+        foreach ($localMembers as $cid => $cachedConnId) {
             $local = self::$localFds[$cid] ?? null;
             if ($local === null) { continue; }
+            // #246 — re-validate connection identity before pushing. If the fd was
+            // reused (the cached client id now maps to a DIFFERENT live connection,
+            // a fresh conn_id), skip — the room message was destined for the
+            // disconnected owner, not the new client on the reused fd. Same
+            // guarantee as the identity-path C1 guard.
+            if ($cachedConnId !== '' && $local['conn_id'] !== $cachedConnId) { continue; }
             $fds[] = $local['fd'];
         }
         if ($fds === []) { return; }
@@ -1293,7 +1322,7 @@ final class WSRouter
 
     /**
      * @internal — current per-worker local-room cache snapshot (for tests).
-     * @return array<string, array<string, true>>
+     * @return array<string, array<string, string>>
      */
     public static function localRoomMembership(): array { return self::$localRoomMembership; }
 

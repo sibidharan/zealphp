@@ -265,16 +265,25 @@ class ResponseTest extends TestCase
         $resp->redirect('data:text/html,<script>x</script>');
     }
 
-    public function testRedirectAllowsProtocolRelativeWithWarning(): void
+    public function testRedirectAllowsProtocolRelativeWithOptIn(): void
     {
-        // Protocol-relative URLs are allowed (logged as a warning) — they still redirect.
+        // #243: protocol-relative URLs are BLOCKED by default; with
+        // $allowExternal=true they are allowed (logged as a warning) + still redirect.
         $g = RequestContext::instance();
         $fake = $this->fake();
         $resp = $this->wrap($fake);
 
-        $resp->redirect('//cdn.example.com/asset');
+        $resp->redirect('//cdn.example.com/asset', 302, true);
         $this->assertSame(302, $g->status);
         $this->assertContains(['header', 'Location', '//cdn.example.com/asset'], $fake->log);
+    }
+
+    public function testRedirectBlocksProtocolRelativeByDefault(): void
+    {
+        // #243: the secure default — a bare protocol-relative target throws.
+        $resp = $this->wrap($this->fake());
+        $this->expectException(\InvalidArgumentException::class);
+        $resp->redirect('//cdn.example.com/asset');
     }
 
     public function testRedirectCrossOriginAbsoluteAllowed(): void
@@ -284,7 +293,9 @@ class ResponseTest extends TestCase
         $fake = $this->fake();
         $resp = $this->wrap($fake);
 
-        $resp->redirect('https://other.com/page');
+        // #243: a cross-origin target is blocked by default; opt in with
+        // $allowExternal=true to allow + emit it (this test's intent).
+        $resp->redirect('https://other.com/page', 302, true);
         $this->assertSame(302, $g->status);
         $this->assertContains(['header', 'Location', 'https://other.com/page'], $fake->log);
     }
@@ -636,7 +647,15 @@ class ResponseTest extends TestCase
     public function testSendFileIfRangeDateMatchHonoursRange(): void
     {
         $path = $this->makeTempFile(str_repeat('m', 100), 'bin');
-        $mtime = (int) filemtime($path);
+        // #258 — the shared strong-validation rule (Apache 60 s clock-skew) only
+        // HONOURS a date If-Range once the file is ≥ 60 s old (a younger
+        // Last-Modified is a weak validator). Backdate the file so the matching
+        // date is a STRONG match → range honoured (206). (Pre-#258 sendFile used
+        // exact-second and would 206 even on a brand-new file; that divergence
+        // from RangeMiddleware is exactly what this fix closes.)
+        $mtime = time() - 120;
+        touch($path, $mtime);
+        clearstatcache(true, $path);
         $this->setRequestHeaders([
             'range'    => 'bytes=0-9',
             'if-range' => gmdate('D, d M Y H:i:s', $mtime) . ' GMT',
@@ -646,7 +665,7 @@ class ResponseTest extends TestCase
 
         $resp->sendFile($path);
 
-        // Validator matches → range honoured (206 slice).
+        // Validator matches AND skew window elapsed → range honoured (206 slice).
         $this->assertContains(['status', 206, ''], $fake->log);
         $this->assertContains(['sendfile', $path, 0, 10], $fake->log);
     }

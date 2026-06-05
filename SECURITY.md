@@ -34,6 +34,20 @@ The following areas are in scope for security reports:
 - Example files (`examples/`)
 - Benchmark scripts (`scripts/`)
 
+## Researching coroutine isolation
+
+The per-coroutine request-state isolation runtime — the [ext-zealphp](https://github.com/sibidharan/ext-zealphp)
+extension, exercised through `App::mode('coroutine-legacy')` — is the
+highest-value security-research surface: a break is a **cross-tenant data leak**
+(one request reading another's session/globals) or a **use-after-free** (worker
+crash / DoS). It is researched **through ZealPHP**, not the extension alone.
+
+If you're auditing it, start with
+**[docs/coroutine-isolation-security-research.md](docs/coroutine-isolation-security-research.md)**
+— the vulnerability-class taxonomy (UAF / cross-tenant leak / unbounded leak), the
+high-risk code surface, the known-open frontier, and the ASAN + Valgrind
+reproduction methodology.
+
 ## Response
 
 - We will **acknowledge** your report within **48 hours**.

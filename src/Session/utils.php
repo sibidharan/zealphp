@@ -321,13 +321,48 @@ function zeal_valid_session_id(string $id): bool
 }
 
 /**
+ * `session.use_strict_mode` provenance decision (#244).
+ *
+ * `zeal_valid_session_id()` checks only the FORMAT of a client-supplied id; a
+ * well-formed but server-never-issued id (a planted/fixated `PHPSESSID`) still
+ * passes it. PHP's `session.use_strict_mode=1` rejects any id the server has no
+ * record of by minting a fresh one. The session managers reproduce that here:
+ * after `zeal_session_start()` has loaded the store for a CLIENT-SUPPLIED id,
+ * an EMPTY result means the id is unrecognised (stale / foreign / never issued)
+ * — so it must not be honoured, and a fresh server-generated id is issued in
+ * its place. This is the single trust check both `CoSessionManager` and
+ * `SessionManager` consult, kept here so it is unit-testable without driving a
+ * full request through OpenSwoole.
+ *
+ * @param bool   $strictMode      `App::$session_strict_mode`.
+ * @param bool   $clientSupplied  Whether the active id came from the client
+ *                                (cookie/query param) rather than being
+ *                                server-minted.
+ * @param array<array-key, mixed> $loadedSession  The session data the store
+ *                                resolved for that id; only its emptiness is
+ *                                inspected.
+ * @return bool  `true` when the id must be rotated to a fresh server id.
+ */
+function zeal_session_strict_should_regenerate(
+    bool $strictMode,
+    bool $clientSupplied,
+    array $loadedSession
+): bool {
+    return $strictMode && $clientSupplied && $loadedSession === [];
+}
+
+/**
  * Get or set the session ID.
  *
  * With no argument: reads the `PHPSESSID` (or custom session name) cookie
  * from `$g->cookie`. When no cookie is present a fresh ID is generated via
  * `session_create_id()` and stashed in `$g->cookie`. A malformed inbound ID
- * (path traversal, NUL, oversized) is silently replaced with a fresh one
- * (`session.use_strict_mode` parity).
+ * (path traversal, NUL, oversized) is silently replaced with a fresh one.
+ *
+ * NOTE: this function only validates id FORMAT. The `session.use_strict_mode`
+ * PROVENANCE check (rotating a well-formed but never-issued id that loads an
+ * empty session — #244) lives in the session managers, which call
+ * `zeal_session_strict_should_regenerate()` after the store has been read.
  *
  * @param string|null $id  Pass a string to set the session ID explicitly.
  * @return string|false  The current (or newly-set) session ID.

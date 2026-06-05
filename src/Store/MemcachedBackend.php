@@ -18,6 +18,15 @@ use OpenSwoole\Table;
  * keyed by `{prefix}:{table}:{key}`. Multi-column rows round-trip through
  * PHP serialize/unserialize.
  *
+ * Security — object-injection defence: rows are stored as a `serialize()`d
+ * STRING (bypassing ext-memcached's built-in PHP serializer, which would run
+ * an unrestricted `unserialize()` on every `get()` and fire `__wakeup`/
+ * `__destruct` of ANY class present in the payload). On read the string is
+ * deserialized with `['allowed_classes' => false]`, so a hostile blob can only
+ * round-trip to scalars/arrays — any object becomes `__PHP_Incomplete_Class`
+ * and no magic methods run. This mirrors every other `unserialize()` site in
+ * the codebase (`Cache`, `Session/utils.php`).
+ *
  * Constraints surfaced as `StoreException`:
  *   - `iterate()`, `count()`, `clear()` — Memcached has no SCAN. Throws
  *     with a clear "use Redis for iteration workloads" message.
@@ -88,7 +97,7 @@ final class MemcachedBackend implements StoreBackend
     {
         $this->assertMade($name);
         $ttl = $this->tableOpts[$name]['ttl'];
-        return $this->client->set($this->rowKey($name, $key), $row, $ttl);
+        return $this->client->set($this->rowKey($name, $key), self::encodeRow($row), $ttl);
     }
 
     /**
@@ -101,11 +110,12 @@ final class MemcachedBackend implements StoreBackend
         $this->assertMade($name);
         /** @var mixed $raw */
         $raw = $this->client->get($this->rowKey($name, $key));
-        if (!is_array($raw)) { return null; }
+        $row = self::decodeRow($raw);
+        if ($row === null) { return null; }
         if ($field !== null) {
-            return $raw[$field] ?? null;
+            return $row[$field] ?? null;
         }
-        return $raw;
+        return $row;
     }
 
     /** Delete a row from Memcached. Returns `true` when the key existed and was removed. */
@@ -121,9 +131,9 @@ final class MemcachedBackend implements StoreBackend
         $this->assertMade($name);
         /** @var mixed $r */
         $r = $this->client->get($this->rowKey($name, $key));
-        // Memcached returns false on miss. Distinguish from a stored
-        // `false` value (which Cache never stores at the row level — rows
-        // are always arrays here).
+        // Memcached returns false on miss. A present row is stored as a
+        // non-false `serialize()`d string, so a strict !== false check is
+        // an accurate existence signal.
         return $r !== false;
     }
 
@@ -238,7 +248,8 @@ final class MemcachedBackend implements StoreBackend
         foreach ($strKeys as $i => $k) {
             $mck = $mcKeys[$i];
             $v = $rawArr[$mck] ?? null;
-            $out[$k] = is_array($v) ? $this->normalizeRow($v) : null;
+            $decoded = self::decodeRow($v);
+            $out[$k] = $decoded === null ? null : $this->normalizeRow($decoded);
         }
         return $out;
     }
@@ -253,10 +264,10 @@ final class MemcachedBackend implements StoreBackend
         $this->assertMade($name);
         if ($rows === []) { return true; }
         $ttl   = $this->tableOpts[$name]['ttl'];
-        /** @var array<string, array<string, scalar>> $batch */
+        /** @var array<string, string> $batch */
         $batch = [];
         foreach ($rows as $key => $row) {
-            $batch[$this->rowKey($name, (string) $key)] = $row;
+            $batch[$this->rowKey($name, (string) $key)] = self::encodeRow($row);
         }
         // setMulti is one round-trip + atomic per-key (not across keys).
         return $this->client->setMulti($batch, $ttl);
@@ -310,6 +321,37 @@ final class MemcachedBackend implements StoreBackend
         // composite keys to keep within bounds.
         $raw = $this->prefix . ':' . $table . ':' . $key;
         return strlen($raw) > 240 ? $this->prefix . ':' . $table . ':' . sha1($raw) : $raw;
+    }
+
+    /**
+     * Serialize a row to the string we store in Memcached. Stored as a
+     * plain `serialize()` string (NOT handed to ext-memcached's serializer)
+     * so reads can deserialize with an `allowed_classes` whitelist —
+     * see `decodeRow()` and the class docblock's object-injection note.
+     *
+     * @param  array<string, scalar> $row
+     */
+    private static function encodeRow(array $row): string
+    {
+        return serialize($row);
+    }
+
+    /**
+     * Safely deserialize a value read back from Memcached. Object injection
+     * is blocked via `['allowed_classes' => false]`: any object in the blob
+     * decodes to `__PHP_Incomplete_Class` and no `__wakeup`/`__destruct`
+     * runs. Returns the decoded array, or `null` on a miss (`false` from
+     * Memcached), a non-string value, or a payload that doesn't deserialize
+     * to an array.
+     *
+     * @return array<int|string, mixed>|null
+     */
+    private static function decodeRow(mixed $raw): ?array
+    {
+        if (!is_string($raw)) { return null; }
+        /** @var mixed $decoded */
+        $decoded = unserialize($raw, ['allowed_classes' => false]);
+        return is_array($decoded) ? $decoded : null;
     }
 
     /**

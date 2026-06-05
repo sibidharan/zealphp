@@ -34,6 +34,7 @@ $groups = [
         ['fastcgi-backends',      'FastCGI Backends',       'Front php-fpm or any FCGI server — cgiMode(\'fcgi\') + registerCgiBackend() for custom upstreams.'],
         ['environment-variables', 'Environment Variables',  'Canonical reference for every ZEALPHP_* variable — defaults, scope, semantics.'],
         ['fuzzing',               'Fuzzing',                'slowhttptest, radamsa, gabbi — HTTP framing & conformance fuzzing.'],
+        ['coroutine-isolation-security-research', 'Security Research', 'Vulnerability classes (UAF / cross-tenant leak / unbounded leak) + the ASAN & Valgrind methodology for auditing the per-coroutine isolation runtime.'],
     ],
     'Background' => [
         ['/http#parity',           'Apache Parity',          'What Apache features port — and what doesn\'t.'],

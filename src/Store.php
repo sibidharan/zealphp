@@ -654,7 +654,11 @@ class Store
      */
     public static function publish(string $channel, string $payload): int
     {
+        // #256(B): unwrap a Tiered backend to its working L2 (Redis), mirroring
+        // redisOrThrow()/hasSetOps(). Rejecting Tiered here forced callers to
+        // reach into ->l2() manually despite a fully functional cross-node L2.
         $b = self::defaultBackend();
+        if ($b instanceof TieredBackend) { $b = $b->l2(); }
         if (!($b instanceof RedisBackend)) {
             throw new StoreException("Store::publish requires the redis backend (current: " . self::$backendConfig['kind'] . ")");
         }
@@ -669,7 +673,9 @@ class Store
      */
     public static function stats(): array
     {
+        // #256(B): unwrap Tiered → L2 so its pool stats surface instead of [].
         $b = self::defaultBackend();
+        if ($b instanceof TieredBackend) { $b = $b->l2(); }
         if ($b instanceof RedisBackend) {
             return $b->pool()->stats()->snapshot();
         }
@@ -686,7 +692,9 @@ class Store
      */
     public static function publishReliable(string $stream, string $payload, ?int $maxLen = null): string
     {
+        // #256(B): unwrap Tiered → L2, mirroring publish()/redisOrThrow().
         $b = self::defaultBackend();
+        if ($b instanceof TieredBackend) { $b = $b->l2(); }
         if (!($b instanceof RedisBackend)) {
             throw new StoreException("Store::publishReliable requires the redis backend (current: " . self::$backendConfig['kind'] . ")");
         }
