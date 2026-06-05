@@ -53,7 +53,20 @@ class UtilsTest extends TestCase
             public array $headersList = [];
             /** @var array<int, array<int, mixed>> */
             public array $cookies = [];
-            public function header(string $k, string $v, bool $ucwords = true): void { $this->headersList[] = [$k, $v]; }
+            // Mirrors the real ZealPHP\HTTP\Response::header() $replace contract
+            // (#260): replace=true drops prior same-name entries; replace=false
+            // appends. The uopz header() override now threads $replace here
+            // rather than filtering the list itself.
+            public function header(string $k, string $v, bool $replace = true): void
+            {
+                if ($replace) {
+                    $this->headersList = array_values(array_filter(
+                        $this->headersList,
+                        static fn(array $p): bool => strcasecmp($p[0], $k) !== 0
+                    ));
+                }
+                $this->headersList[] = [$k, $v];
+            }
             public function cookie(mixed ...$args): void { $this->cookies[] = $args; }
             public function rawCookie(mixed ...$args): void { $this->cookies[] = $args; }
         };
@@ -209,6 +222,18 @@ class UtilsTest extends TestCase
         $matches = array_filter(response_headers_list(), fn($p) => $p[0] === 'X-Dup');
         $this->assertCount(1, $matches);
         $this->assertSame('second', array_values($matches)[0][1]);
+    }
+
+    public function testHeaderAppendKeepsBoth(): void
+    {
+        // #260 — the append form (`header($h, false)`) must keep BOTH same-name
+        // entries in the queue, so flush() can emit them as multiple wire lines.
+        header('Link: </a.css>; rel=preload', false);
+        header('Link: </b.js>; rel=preload', false);
+        $matches = array_values(array_filter(response_headers_list(), fn($p) => $p[0] === 'Link'));
+        $this->assertCount(2, $matches);
+        $this->assertSame('</a.css>; rel=preload', $matches[0][1]);
+        $this->assertSame('</b.js>; rel=preload', $matches[1][1]);
     }
 
     public function testHttpResponseCodeGetAndSet(): void

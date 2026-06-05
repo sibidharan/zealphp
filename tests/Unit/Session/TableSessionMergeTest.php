@@ -6,6 +6,7 @@ namespace ZealPHP\Tests\Unit\Session;
 
 use PHPUnit\Framework\TestCase;
 use ZealPHP\Session\Handler\RedisSessionHandler;
+use ZealPHP\Session\Handler\TableSessionHandler;
 
 /**
  * 3-way merge correctness — the property that closes the Deep_Ad1959
@@ -109,5 +110,102 @@ final class TableSessionMergeTest extends TestCase
     {
         $this->assertSame([], RedisSessionHandler::parseSession(''));
         $this->assertSame('', RedisSessionHandler::serializeSession([]));
+    }
+
+    // ── #253: TableSessionHandler::merge3() list-append union ──────────────
+    //
+    // merge3() diffs on array KEYS. The idiomatic `$_SESSION['flash'][] = 'x'`
+    // append writes the next integer index, so two concurrent appends both land
+    // at index 0 — the old key-aligned local-wins dropped one. The fix detects
+    // three list-shaped sub-arrays and merges them by VALUE union (remote +
+    // local-new) so both appends survive. These run against the real instance
+    // method (newInstanceWithoutConstructor — merge3 touches no state).
+
+    private function tableHandler(): TableSessionHandler
+    {
+        /** @var TableSessionHandler $h */
+        $h = (new \ReflectionClass(TableSessionHandler::class))->newInstanceWithoutConstructor();
+        return $h;
+    }
+
+    public function testConcurrentFlashAppendsBothSurvive(): void
+    {
+        $h = $this->tableHandler();
+        // base flash empty; A appended msgA, B appended msgB concurrently.
+        $merged = $h->merge3(
+            ['flash' => []],
+            ['flash' => ['msgA']],
+            ['flash' => ['msgB']]
+        );
+        // Both appends present — remote first (already committed), then local-new.
+        $this->assertSame(['flash' => ['msgB', 'msgA']], $merged);
+    }
+
+    public function testListAppendOntoExistingElementsUnions(): void
+    {
+        $h = $this->tableHandler();
+        // base already has one element; A and B each append a different one.
+        $merged = $h->merge3(
+            ['queue' => ['a']],
+            ['queue' => ['a', 'b']],   // local added b
+            ['queue' => ['a', 'c']]    // remote added c
+        );
+        $this->assertSame(['queue' => ['a', 'c', 'b']], $merged);
+    }
+
+    public function testListMergeReindexesSequentially(): void
+    {
+        $h = $this->tableHandler();
+        $merged = $h->merge3(
+            ['flash' => []],
+            ['flash' => ['only-local']],
+            ['flash' => ['remote-1', 'remote-2']]
+        );
+        $this->assertSame(['flash' => ['remote-1', 'remote-2', 'only-local']], $merged);
+        // Result is a clean 0-indexed list.
+        $this->assertSame([0, 1, 2], array_keys($merged['flash']));
+    }
+
+    public function testStringKeyedMapKeepsLeafLocalWins(): void
+    {
+        // The map case (string keys) must NOT use the list-union path — it keeps
+        // the documented leaf-level local-wins behaviour.
+        $h = $this->tableHandler();
+        $merged = $h->merge3(
+            ['cart' => ['item1' => 5]],
+            ['cart' => ['item1' => 5, 'item2' => 3]],   // local adds item2
+            ['cart' => ['item1' => 5, 'item3' => 7]]    // remote adds item3
+        );
+        $this->assertSame(['cart' => ['item1' => 5, 'item3' => 7, 'item2' => 3]], $merged);
+    }
+
+    public function testMapDeleteDetectionUnchanged(): void
+    {
+        // Deletion of a string key with remote unchanged still drops it.
+        $h = $this->tableHandler();
+        $merged = $h->merge3(
+            ['flag' => true, 'keep' => 1],
+            ['keep' => 1],                 // local deleted flag
+            ['flag' => true, 'keep' => 1]  // remote still has base value
+        );
+        $this->assertSame(['keep' => 1], $merged);
+    }
+
+    public function testValueDiffCaveatAppendEqualToBaseIsTreatedAsUnchanged(): void
+    {
+        // Documented caveat: the union diffs by VALUE (`!in_array($v, $base)`),
+        // so if local's appended value already EXISTS in base, the diff cannot
+        // tell it apart from base's copy and treats it as "not new" — the local
+        // append is not added on top of remote. (Two distinct values never
+        // collide; only a value-equal-to-an-existing-element does.)
+        $h = $this->tableHandler();
+        $merged = $h->merge3(
+            ['tags' => ['x']],
+            ['tags' => ['x', 'x']],   // local appended a SECOND 'x'
+            ['tags' => ['x', 'y']]    // remote appended 'y'
+        );
+        // The second 'x' is indistinguishable from base's 'x' → not re-added;
+        // remote's 'y' survives. No data is lost across distinct values.
+        $this->assertSame(['tags' => ['x', 'y']], $merged);
     }
 }

@@ -34,8 +34,10 @@ final class RoomAccessorsTest extends RedisTestCase
 
     public function testNameReturnsConstructedRoomName(): void
     {
-        $r = WSRouter::room('chat:42');
-        $this->assertSame('chat:42', $r->name());
+        // #247 — room names are charset-validated (no ':' which would collide
+        // ws_room_members keys / the ws:room:* channel). Use the dotted form.
+        $r = WSRouter::room('chat.42');
+        $this->assertSame('chat.42', $r->name());
     }
 
     public function testIsMemberFalseForUnjoinedClient(): void

@@ -647,7 +647,15 @@ class ResponseTest extends TestCase
     public function testSendFileIfRangeDateMatchHonoursRange(): void
     {
         $path = $this->makeTempFile(str_repeat('m', 100), 'bin');
-        $mtime = (int) filemtime($path);
+        // #258 — the shared strong-validation rule (Apache 60 s clock-skew) only
+        // HONOURS a date If-Range once the file is ≥ 60 s old (a younger
+        // Last-Modified is a weak validator). Backdate the file so the matching
+        // date is a STRONG match → range honoured (206). (Pre-#258 sendFile used
+        // exact-second and would 206 even on a brand-new file; that divergence
+        // from RangeMiddleware is exactly what this fix closes.)
+        $mtime = time() - 120;
+        touch($path, $mtime);
+        clearstatcache(true, $path);
         $this->setRequestHeaders([
             'range'    => 'bytes=0-9',
             'if-range' => gmdate('D, d M Y H:i:s', $mtime) . ' GMT',
@@ -657,7 +665,7 @@ class ResponseTest extends TestCase
 
         $resp->sendFile($path);
 
-        // Validator matches → range honoured (206 slice).
+        // Validator matches AND skew window elapsed → range honoured (206 slice).
         $this->assertContains(['status', 206, ''], $fake->log);
         $this->assertContains(['sendfile', $path, 0, 10], $fake->log);
     }

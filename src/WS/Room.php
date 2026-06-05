@@ -21,12 +21,14 @@ use ZealPHP\WS\CapacityException;
  *   - One PSUBSCRIBE per worker covers EVERY room (no per-room subscriber
  *     proliferation).
  *
- * Construct via `WSRouter::room('chat:42')` — don't `new` directly
- * (instances need WSRouter::init() to have wired the PSUBSCRIBE).
+ * Construct via `WSRouter::room('chat.42')` — don't `new` directly
+ * (instances need WSRouter::init() to have wired the PSUBSCRIBE). Room names
+ * must match `/^[A-Za-z0-9_.-]+$/` (no `:` — it would collide ws_room_members
+ * keys and the `ws:room:*` channel; #247).
  *
  * Usage:
  *
- *     $room = WSRouter::room('chat:42');
+ *     $room = WSRouter::room('chat.42');
  *     $room->join('alice');                            // SADD-equivalent + presence broadcast
  *     $room->push(['from' => 'alice', 'msg' => 'hi']); // fans out across cluster
  *     $room->size();                                   // cluster-wide member count
@@ -288,9 +290,17 @@ final class Room
         return Store::publish(WSRouter::roomChannelPrefix() . $this->name, $signed);
     }
 
-    /** Composite key shape used in the ws_room_members Store table. */
+    /**
+     * Composite key shape used in the ws_room_members Store table.
+     *
+     * #247 — length-prefix the room half so the key is an unambiguous function
+     * of the (room, client) pair even if a client id contains a `:`. The room
+     * name is already charset-validated (no `:`) at the WSRouter::room()
+     * chokepoint; prefixing its byte length here removes any residual ambiguity
+     * at the room↔client boundary (`5:chat:42:alice` can only decompose one way).
+     */
     private static function compositeKey(string $room, string $clientId): string
     {
-        return $room . ':' . $clientId;
+        return strlen($room) . ':' . $room . ':' . $clientId;
     }
 }

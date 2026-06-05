@@ -899,16 +899,25 @@ function access_log(int $status = 200, int $length = 0, ?float $durationSec = nu
 }
 
 /**
- * Append a header to the current response.
+ * Add a header to the current response.
  *
- * Delegates to `$g->zealphp_response->header()`. The `$ucwords` flag controls
- * whether the header name is title-cased before queuing (default `true`).
+ * Delegates to `$g->zealphp_response->header()`. The 3rd argument is the
+ * `$replace` flag (PHP `header()` semantics): `true` (default) drops prior
+ * same-name entries so this value wins; `false` is the APPEND form, keeping
+ * earlier same-name headers so multiple Link / WWW-Authenticate / CSP headers
+ * all reach the wire (#260).
+ *
+ * Note: the parameter was historically named `$ucwords` and passed as a DEAD
+ * 3rd argument to a 2-param method (silently ignored). It is repurposed here as
+ * `$replace` — every existing 2-arg call keeps the replace-by-default behaviour
+ * it already had on the wire, so this is BC.
  *
  * @param string $key     The header name.
  * @param string $value   The header value.
- * @param bool   $ucwords Whether to title-case the header name. Default `true`.
+ * @param bool   $replace Whether to replace a prior same-name header (default
+ *                        true). Pass false to append.
  */
-function response_add_header($key, $value, $ucwords = true): void
+function response_add_header($key, $value, $replace = true): void
 {
     $g = RequestContext::instance();
     // elog("response_add_header: $key ".var_export($value, true));
@@ -917,8 +926,7 @@ function response_add_header($key, $value, $ucwords = true): void
         // header has nowhere to go, so no-op instead of a null method call (#195).
         return;
     }
-    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any request handler runs
-    $g->zealphp_response->header($key, $value, $ucwords);
+    $g->zealphp_response->header($key, $value, $replace);
 }
 
 /**
@@ -1091,16 +1099,11 @@ function header($header, $replace = true, $http_response_code = null) {
     }
     $name = trim($parts[0]);
     $value = trim($parts[1]);
-    if ($replace) {
-        $response = RequestContext::instance()->zealphp_response;
-        if ($response !== null) {
-            $response->headersList = array_values(array_filter(
-                $response->headersList,
-                static fn($pair) => strcasecmp($pair[0], $name) !== 0
-            ));
-        }
-    }
-    response_add_header($name, $value);
+    // Thread $replace through to the response wrapper, which owns the same-name
+    // dedup (replace=true → last wins) vs append (replace=false → both kept, and
+    // flush() groups appends into one array-valued OpenSwoole call so multiple
+    // same-name headers all reach the wire — #260).
+    response_add_header($name, $value, (bool)$replace);
     if ($http_response_code !== null && (int)$http_response_code > 0) {
         response_set_status((int)$http_response_code);
     }
