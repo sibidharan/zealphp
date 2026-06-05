@@ -271,8 +271,35 @@ class Dispatcher
 
         $fcgiAddress = $address ?? App::$fcgi_address;
         try {
-            $client   = new \ZealPHP\CGI\FastCgiClient($fcgiAddress, App::$cgi_timeout);
-            $response = $client->request($env, $stdinBody);
+            $client = new \ZealPHP\CGI\FastCgiClient($fcgiAddress, App::$cgi_timeout);
+            // #261 — FastCgiClient uses OpenSwoole\Coroutine\Client, a coroutine
+            // API. cgiMode('fcgi') runs under the legacy / superglobals(true)
+            // lifecycles where the request handler is NOT wrapped in a coroutine,
+            // so a direct request() fatals "API must be called in the coroutine"
+            // before php-fpm is ever contacted. Run it inside Coroutine::run()
+            // when outside a coroutine (the App::parallel sync-mode idiom);
+            // Coroutine::run swallows uncaught throws, so capture + rethrow to keep
+            // the FastCgiException -> 502 path intact.
+            if (\OpenSwoole\Coroutine::getCid() >= 0) {
+                $response = $client->request($env, $stdinBody);
+            } else {
+                /** @var array{status:int,headers:array<string,string>,body:string,stderr:string}|null $response */
+                $response = null;
+                $fcgiErr  = null;
+                \OpenSwoole\Coroutine::run(function () use ($client, $env, $stdinBody, &$response, &$fcgiErr): void {
+                    try {
+                        $response = $client->request($env, $stdinBody);
+                    } catch (\Throwable $e) {
+                        $fcgiErr = $e;
+                    }
+                });
+                if ($fcgiErr !== null) {
+                    throw $fcgiErr;
+                }
+                if ($response === null) {
+                    throw new \ZealPHP\CGI\FastCgiException('FastCGI request did not complete (coroutine produced no response)');
+                }
+            }
         } catch (\ZealPHP\CGI\FastCgiException $e) {
             elog("cgiFcgi: FastCGI error for {$path}: " . $e->getMessage(), 'error');
             return 502;
@@ -288,11 +315,10 @@ class Dispatcher
         // Apply status
         response_set_status($response['status']);
 
-        // Apply headers — $response['headers'] is array<string,string> per FastCgiClient return type
-        foreach ($response['headers'] as $name => $value) {
-            // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-            $g->zealphp_response->header($name, $value);
-        }
+        // #260 — apply replace-aware so an upstream's multiple same-name headers
+        // (multi Set-Cookie, Link, …) all reach the wire. FastCgiClient returns an
+        // ordered list of [name, value] pairs; Status is consumed above.
+        self::applyCgiHeaders($g->zealphp_response, $response['headers']);
 
         return $response['body'];
     }
@@ -461,28 +487,10 @@ class Dispatcher
             response_set_status(is_numeric($statusCode) ? (int)$statusCode : 200);
             $metaHeaders = is_array($meta['headers'] ?? null) ? $meta['headers'] : [];
 
-            foreach ($metaHeaders as $pair) {
-                if (!is_array($pair) || count($pair) < 2) continue;
-                $p0 = is_scalar($pair[0]) ? (string)$pair[0] : '';
-                $p1 = is_scalar($pair[1]) ? (string)$pair[1] : '';
-
-                // mod_cgi parity: CGI/1.1 RFC 3875 §6.3.3 — "Status: NNN Reason"
-                // sets the HTTP response code. Apache: ap_scan_script_header_err_brigade_ex().
-                // Strip the Status: pseudo-header so it never reaches the client.
-                if (strcasecmp($p0, 'Status') === 0) {
-                    $codeStr = strtok($p1, ' ');
-                    if ($codeStr !== false && ctype_digit($codeStr)) {
-                        $parsed = (int)$codeStr;
-                        if ($parsed >= 100 && $parsed <= 599) {
-                            response_set_status($parsed);
-                        }
-                    }
-                    continue;
-                }
-
-                // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-                $g->zealphp_response->header($p0, $p1);
-            }
+            // #260 — apply replace-aware so MULTIPLE same-name headers (multi
+            // Set-Cookie, Link, Vary, …) all reach the wire instead of collapsing
+            // to the last. Status: is consumed as the response code, not forwarded.
+            self::applyCgiHeaders($g->zealphp_response, $metaHeaders);
             $metaCookies = is_array($meta['cookies'] ?? null) ? $meta['cookies'] : [];
             foreach ($metaCookies as $args) {
                 if (is_array($args) && !empty($args)) {
@@ -616,6 +624,60 @@ class Dispatcher
     }
 
     /**
+     * Apply CGI-captured response headers to the live response, preserving
+     * MULTIPLE same-name headers (multi `Set-Cookie`, `Link`, `Vary`, …).
+     *
+     * #260 — the proc/pool/fork workers capture headers as an ordered list of
+     * `[name, value]` pairs (the uopz `header()` override already honours each
+     * `header(..., $replace)` call), but applying every captured pair with the
+     * wrapper's default `$replace = true` collapsed each same-name header to the
+     * LAST on the wire. Here the FIRST occurrence of a name replaces any
+     * framework default; every subsequent same-name pair is appended, so the
+     * worker's exact multi-header set reaches the client.
+     *
+     * The CGI/1.1 "Status:" pseudo-header (RFC 3875 §6.3.3) is consumed as the
+     * response code and never forwarded (mod_cgi parity).
+     *
+     * @param mixed           $resp  a Response-like object exposing
+     *                               `header(string, string, bool)` — the live
+     *                               `$g->zealphp_response` (typed `mixed`) or a
+     *                               test double; null/non-object emits nothing
+     * @param iterable<mixed> $pairs each element a `[string $name, string $value]` pair
+     */
+    private static function applyCgiHeaders(mixed $resp, iterable $pairs): void
+    {
+        // Duck-typed: $g->zealphp_response is `mixed`, so accept any object that
+        // exposes header() (the real wrapper or a test stub); null otherwise.
+        $emitter = (is_object($resp) && method_exists($resp, 'header')) ? $resp : null;
+        $seen = [];
+        foreach ($pairs as $pair) {
+            if (!is_array($pair) || count($pair) < 2
+                || !is_scalar($pair[0]) || !is_scalar($pair[1])) {
+                continue;
+            }
+            $name  = (string) $pair[0];
+            $value = (string) $pair[1];
+            if (strcasecmp($name, 'Status') === 0) {
+                $codeStr = strtok($value, ' ');
+                if ($codeStr !== false && ctype_digit($codeStr)) {
+                    $code = (int) $codeStr;
+                    if ($code >= 100 && $code <= 599) {
+                        response_set_status($code);
+                    }
+                }
+                continue;
+            }
+            if ($emitter === null) {
+                continue;
+            }
+            $lc = strtolower($name);
+            // First occurrence overrides any framework default; the rest append.
+            $emitter->header($name, $value, !isset($seen[$lc]));
+            $seen[$lc] = true;
+        }
+    }
+
+    /**
      * Parse a raw CGI/1.1 interpreter response (RFC 3875) into status, headers
      * and body — pure, side-effect-free string handling.
      *
@@ -633,7 +695,7 @@ class Dispatcher
      * whether that's a malformed-header error (cgiInterpreterResponse() already
      * does, before calling this) or a bodies-only response.
      *
-     * @return array{status: int|null, headers: array<string, string>, body: string}
+     * @return array{status: int|null, headers: list<array{0:string,1:string}>, body: string}
      */
     public static function parseCgiResponse(string $raw): array
     {
@@ -676,7 +738,10 @@ class Dispatcher
                 continue;
             }
 
-            $headers[$name] = $value;
+            // #260 — ordered [name, value] pair, not $headers[$name], so an
+            // interpreter that emits multiple same-name headers (multi
+            // Set-Cookie, …) doesn't collapse them to the last on the wire.
+            $headers[] = [$name, $value];
         }
 
         return ['status' => $status, 'headers' => $headers, 'body' => $body];
@@ -778,16 +843,18 @@ class Dispatcher
             response_set_status($parsed['status']);
         }
 
+        // #260 — $headers is now an ordered [name, value] pair list. Detect SSE
+        // by scanning the pairs, then apply replace-aware so multiple same-name
+        // headers (multi Set-Cookie, …) survive instead of collapsing to the last.
         $streaming = false;
-        foreach ($headers as $name => $value) {
-            if (strcasecmp($name, 'Content-Type') === 0
-                && stripos($value, 'text/event-stream') !== false) {
+        foreach ($headers as $pair) {
+            if (strcasecmp($pair[0], 'Content-Type') === 0
+                && stripos($pair[1], 'text/event-stream') !== false) {
                 $streaming = true;
+                break;
             }
-
-            // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
-            $g->zealphp_response->header($name, $value);
         }
+        self::applyCgiHeaders($g->zealphp_response, $headers);
 
         // SSE / event-stream: flush headers + body immediately so EventSource
         // clients see events without waiting for the whole response.
@@ -965,18 +1032,10 @@ class Dispatcher
 
         $respW = $g->zealphp_response;
         if ($respW !== null) {
-            foreach ((array) ($resp['headers'] ?? []) as $pair) {
-                if (is_array($pair) && count($pair) >= 2
-                    && is_scalar($pair[0]) && is_scalar($pair[1])) {
-                    // CGI/1.1 RFC 3875 §6.3.3 — the "Status:" pseudo-header sets the
-                    // response code (already applied from $resp['status']); it must
-                    // NOT be forwarded to the client as a real header (mod_cgi parity).
-                    if (strcasecmp((string) $pair[0], 'Status') === 0) {
-                        continue;
-                    }
-                    $respW->header((string) $pair[0], (string) $pair[1]);
-                }
-            }
+            // #260 — apply replace-aware so multiple same-name headers (multi
+            // Set-Cookie, Link, …) all reach the wire instead of collapsing to the
+            // last. Status: is consumed as the response code (already applied above).
+            self::applyCgiHeaders($respW, (array) ($resp['headers'] ?? []));
             $applyCookie = static function (callable $fn, mixed $args): void {
                 if (!is_array($args) || !isset($args[0]) || !is_scalar($args[0])) return;
                 $s = static fn(int $i, string $d): string =>

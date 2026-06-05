@@ -65,6 +65,22 @@ class AppStaticHelpersTest extends TestCase
         $g->status = 200;
     }
 
+    public function testBaseServerVarsProvidesCgiSapiKeys(): void
+    {
+        // #270 — the static CGI/SAPI keys seeded into $g->server at worker start
+        // so app bootstrap that reads them BEFORE the first request doesn't warn
+        // "Undefined array key" (the per-request handler overlays real values).
+        $m = new \ReflectionMethod(App::class, 'baseServerVars');
+        $m->setAccessible(true);
+        /** @var array<string, string> $base */
+        $base = $m->invoke(null);
+        foreach (['PHP_SELF', 'SCRIPT_NAME', 'SCRIPT_FILENAME', 'REQUEST_URI', 'DOCUMENT_ROOT', 'REQUEST_METHOD'] as $key) {
+            $this->assertArrayHasKey($key, $base, "baseServerVars must provide {$key}");
+            $this->assertNotSame('', $base[$key], "{$key} must not be empty");
+        }
+        $this->assertStringEndsWith($base['PHP_SELF'], $base['SCRIPT_FILENAME']);
+    }
+
     // ─────────────────────────────────────────────────────────────
     // coerceStatusCode()
     // ─────────────────────────────────────────────────────────────
@@ -461,5 +477,17 @@ class AppStaticHelpersTest extends TestCase
         $res = self::$app->renderError(500);
         $this->assertSame(500, $res->getStatusCode());
         $this->assertStringContainsString('500 Internal Server Error', (string) $res->getBody());
+    }
+
+    public function testRefreshGlobalsBaselineIsSafeNoOpWithoutExt(): void
+    {
+        // #26 — without ext-zealphp 0.3.33+ the helper is a safe no-op returning
+        // false, so the worker-start auto-call never errors on a stock PHP build.
+        // The real refresh behaviour (post-activation boot $GLOBALS visible to every
+        // request coroutine, not just the first) is validated against the ASAN ext.
+        if (\function_exists('zealphp_globals_baseline_refresh')) {
+            $this->markTestSkipped('ext-zealphp 0.3.33+ present — no-op contract not exercised here.');
+        }
+        $this->assertFalse(\ZealPHP\App::refreshGlobalsBaseline());
     }
 }

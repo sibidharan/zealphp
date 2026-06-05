@@ -178,7 +178,7 @@ BASH
           'lang' => 'bash',
           'code' => <<<'BASH'
 composer create-project \
-  sibidharan/zealphp-project:^0.4.2 \
+  sibidharan/zealphp-project:^0.4.3 \
   my-app
 cd my-app && php app.php
 BASH

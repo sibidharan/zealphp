@@ -1873,6 +1873,35 @@ class App
     }
 
     /**
+     * The static CGI/SAPI server vars mod_php exposes even OUTSIDE a request
+     * (PHP_SELF, SCRIPT_NAME, SCRIPT_FILENAME, REQUEST_URI, DOCUMENT_ROOT).
+     * Seeded into `$g->server` at worker start so app bootstrap that reads them
+     * at class-load — before the first request populates the real per-request
+     * values via {@see buildServerVars()} — doesn't hit "Undefined array key"
+     * (#270). buildServerVars() overlays the real per-request values on top.
+     *
+     * @return array<string, string>
+     */
+    private static function baseServerVars(): array
+    {
+        $docRoot = self::resolveDocumentRoot();
+        $phpSelf = (string)(self::$default_php_self ?? '');
+        if ($phpSelf === '') {
+            $phpSelf = '/app.php';
+        }
+        return [
+            'REQUEST_METHOD'  => 'GET',
+            'REQUEST_URI'     => '/',
+            'SCRIPT_NAME'     => $phpSelf,
+            'PHP_SELF'        => $phpSelf,
+            'DOCUMENT_ROOT'   => $docRoot,
+            'SCRIPT_FILENAME' => $docRoot . $phpSelf,
+            'SERVER_SOFTWARE' => 'ZealPHP/dev (' . php_uname('s') . ') PHP/' . phpversion(),
+            'SERVER_NAME'     => site_host(),
+        ];
+    }
+
+    /**
      * Build the per-request `$_SERVER` array from an OpenSwoole request —
      * mod_php parity. Merges `$request->server` (upper-cased keys), the
      * `HTTP_*` header vars, and the constant CGI keys mod_php always provides
@@ -1923,6 +1952,15 @@ class App
             // null, so a direct (string) cast is safe.
             $srv['SCRIPT_FILENAME'] = (string)($srv['DOCUMENT_ROOT'] ?? '')
                 . (string)($srv['PHP_SELF'] ?? '');
+        }
+
+        // Apache mod_unique_id parity (#274): a FRESH per-request correlation id.
+        // Under coroutine concurrency a class-load `$_SERVER['UNIQUE_ID'] = …`
+        // assignment is worker-wide — every request on that worker shares one id,
+        // breaking log correlation. Minting it here gives each request its own.
+        // Kept as-is if an upstream (Apache mod_unique_id / a proxy) already set one.
+        if (!isset($srv['UNIQUE_ID'])) {
+            $srv['UNIQUE_ID'] = bin2hex(random_bytes(12));
         }
 
         if ($srv['REQUEST_METHOD'] === 'POST' && isset($srv['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
@@ -3036,6 +3074,32 @@ class App
     {
         if ($on !== null) self::$coroutine_globals_isolation = $on;
         return self::$coroutine_globals_isolation;
+    }
+
+    /**
+     * Re-capture the per-coroutine `$GLOBALS` baseline from the current symbol table.
+     *
+     * Under coroutine-legacy, ext-zealphp snapshots the parent `$GLOBALS` baseline
+     * once — when `coroutineGlobalsIsolation` activates. Boot-time `$GLOBALS` writes
+     * that happen AFTER that (e.g. an app bootstrap include such as `load.php` at
+     * worker start) aren't in the baseline, so they'd be visible only to the FIRST
+     * request coroutine and vanish for every subsequent one once a yield resets
+     * `$GLOBALS` to the stale baseline (#26). The framework calls this once after the
+     * `onWorkerStart` hooks complete (where such bootstraps run) to fold those writes
+     * into the baseline; apps that populate `$GLOBALS` later in boot can call it
+     * explicitly afterwards.
+     *
+     * No-op returning `false` when ext-zealphp lacks the function (< 0.3.33) or
+     * per-coroutine `$GLOBALS` isolation isn't active — always safe to call.
+     *
+     * @return bool True if the baseline was refreshed.
+     */
+    public static function refreshGlobalsBaseline(): bool
+    {
+        if (!\function_exists('zealphp_globals_baseline_refresh')) {
+            return false;
+        }
+        return (bool) \zealphp_globals_baseline_refresh();
     }
 
     /**
@@ -6617,7 +6681,7 @@ class App
      * {@see \ZealPHP\CGI\Dispatcher::parseCgiResponse()} (Phase 2 refactor).
      * Kept on App for BC so external callers/tests reach it via App::parseCgiResponse().
      *
-     * @return array{status: int|null, headers: array<string, string>, body: string}
+     * @return array{status: int|null, headers: list<array{0:string,1:string}>, body: string}
      */
     public static function parseCgiResponse(string $raw): array
     {
@@ -8405,9 +8469,28 @@ class App
             @stream_wrapper_unregister("php");
             stream_wrapper_register("php", \ZealPHP\IOStreamWrapper::class);
             self::$workerStartedAt = microtime(true);
+            // #270 — seed the static CGI/SAPI server vars (PHP_SELF, SCRIPT_NAME,
+            // SCRIPT_FILENAME, REQUEST_URI, DOCUMENT_ROOT) so app bootstrap that
+            // reads $g->server / $_SERVER at worker start — BEFORE the first
+            // request populates them per-request via buildServerVars() — doesn't
+            // hit "Undefined array key". Existing keys win, and the per-request
+            // handler overlays the real values; this is mod_php parity (the SAPI
+            // exposes these even outside a request). Especially relevant in
+            // coroutine-legacy, where the per-coroutine $_SERVER isolation gives
+            // the worker-start coroutine a fresh empty $_SERVER.
+            $g    = RequestContext::instance();
+            // Existing keys win (left operand of +), so a stale value is never
+            // clobbered; the per-request handler overlays real values later.
+            $g->server = $g->server + self::baseServerVars();
             foreach (self::$workerStartHooks as $hook) {
                 $hook($server, $workerId);
             }
+
+            // #26 — fold any boot-time $GLOBALS writes made during the onWorkerStart
+            // hooks (app bootstrap includes like load.php) into the per-coroutine
+            // baseline, so every request coroutine sees them — not just the first.
+            // No-op unless coroutine-legacy $GLOBALS isolation is active (ext 0.3.33+).
+            self::refreshGlobalsBaseline();
 
             // Dev route hot-reload: each worker polls route/*.php mtimes and
             // rebuilds its route table in-place on change — "save file → routes

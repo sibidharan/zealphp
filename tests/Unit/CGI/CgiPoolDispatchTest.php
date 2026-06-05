@@ -126,6 +126,26 @@ final class CgiPoolDispatchTest extends TestCase
         $this->assertContains('X-Pool-Test', $headerNames);
     }
 
+    public function testMultipleSameNameHeadersAllReachResponse(): void
+    {
+        // #260 — two Set-Cookie headers (appended via header(..., false)) must
+        // BOTH reach the response end-to-end through the pool dispatch, not
+        // collapse to the last on the wire (the capture is a pair list; the apply
+        // is replace-aware: first occurrence replaces, the rest append).
+        $file = $this->fixture(
+            'multicookie.php',
+            'header("Set-Cookie: a=1", false); header("Set-Cookie: b=2", false); echo "ok";'
+        );
+        $stub = RequestContext::instance()->zealphp_response;
+        $this->cgiPool->invoke(null, $file);
+        $setCookies = array_values(array_filter(
+            (array) $stub->headers,
+            static fn ($p): bool => is_array($p) && ($p[0] ?? null) === 'Set-Cookie'
+        ));
+        $this->assertCount(2, $setCookies, 'both Set-Cookie headers must survive');
+        $this->assertSame(['a=1', 'b=2'], array_column($setCookies, 1));
+    }
+
     public function testCookieCaptureFlowsToResponseStub(): void
     {
         $file = $this->fixture('cookie.php', 'setcookie("sid", "abc123", time() + 3600, "/"); echo "ok";');

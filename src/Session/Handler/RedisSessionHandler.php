@@ -59,10 +59,14 @@ class RedisSessionHandler implements \SessionHandlerInterface
         $this->port = $port;
         $this->prefix = $prefix;
         $this->ttl = $ttl;
-        // Connect eagerly to validate configuration at construction (preserves
-        // the prior constructor behaviour); this becomes the non-coroutine
-        // fallback connection.
-        $this->fallback = $this->connect();
+        // #271 — do NOT connect eagerly here. Under HOOK_ALL, `\Redis->connect()`
+        // is a coroutine API, so constructing the handler at a non-coroutine point
+        // (boot / middleware registration — e.g. with `sessionLifecycle(false)`,
+        // where the app installs its own save handler before the request loop)
+        // fataled with "API must be called in the coroutine". The connection is
+        // now established lazily in `redis()` on first use — a per-coroutine socket
+        // inside a request, or the `$fallback` (`??=`) outside one — both of which
+        // are always safe contexts. `$fallback` is already nullable + lazy.
     }
 
     /**
