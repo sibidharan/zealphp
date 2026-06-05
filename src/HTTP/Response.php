@@ -187,14 +187,14 @@ class Response
             if (!$allowExternal) {
                 throw new \InvalidArgumentException('Protocol-relative redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
             }
-            \ZealPHP\elog('[security] Protocol-relative redirect (allowed): ' . $url, 'warn');
+            \ZealPHP\elog('[security] Protocol-relative redirect detected: ' . $url, 'warn');
         } elseif (isset(parse_url($url)['host'])) {
             $requestHost = $this->g->server['HTTP_HOST'] ?? $this->g->server['SERVER_NAME'] ?? '';
             if ($requestHost !== '' && parse_url($url, PHP_URL_HOST) !== $requestHost) {
                 if (!$allowExternal) {
                     throw new \InvalidArgumentException('Cross-origin redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
                 }
-                \ZealPHP\elog('[security] Cross-origin redirect (allowed): ' . $url, 'warn');
+                \ZealPHP\elog('[security] Cross-origin redirect: ' . $url, 'warn');
             }
         }
 
