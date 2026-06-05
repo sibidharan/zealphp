@@ -145,11 +145,18 @@ class Response
     /**
      * Send an HTTP redirect.
      *
-     * @param string $url    Destination URL (absolute or relative)
-     * @param int    $status 301 Moved Permanently, 302 Found (default),
-     *                       307 Temporary Redirect, 308 Permanent Redirect
+     * @param string $url           Destination URL (absolute or relative)
+     * @param int    $status        301 Moved Permanently, 302 Found (default),
+     *                              307 Temporary Redirect, 308 Permanent Redirect
+     * @param bool   $allowExternal Permit cross-origin / protocol-relative
+     *                              targets. Default `false` — safe-by-default:
+     *                              a `//evil.com` or different-host absolute URL
+     *                              is REFUSED (open-redirect / CWE-601 guard).
+     *                              Set `true` only when an external redirect is
+     *                              genuinely intended (and validate user input
+     *                              against an allowlist first).
      */
-    public function redirect(string $url, int $status = 302): void
+    public function redirect(string $url, int $status = 302, bool $allowExternal = false): void
     {
         if (strpbrk($url, "\r\n\0") !== false) {
             throw new \InvalidArgumentException('Redirect URL contains control characters');
@@ -173,12 +180,21 @@ class Response
             throw new \InvalidArgumentException('Unsafe redirect URL scheme');
         }
 
+        // Open-redirect guard (CWE-601). Refuse cross-origin / protocol-relative
+        // targets by default — warning-and-emitting let `$res->redirect($_GET['next'])`
+        // ship an open redirect. Opt in with $allowExternal when truly intended.
         if (preg_match('#^//#', $url)) {
-            \ZealPHP\elog('[security] Protocol-relative redirect detected: ' . $url, 'warn');
+            if (!$allowExternal) {
+                throw new \InvalidArgumentException('Protocol-relative redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
+            }
+            \ZealPHP\elog('[security] Protocol-relative redirect (allowed): ' . $url, 'warn');
         } elseif (isset(parse_url($url)['host'])) {
             $requestHost = $this->g->server['HTTP_HOST'] ?? $this->g->server['SERVER_NAME'] ?? '';
             if ($requestHost !== '' && parse_url($url, PHP_URL_HOST) !== $requestHost) {
-                \ZealPHP\elog('[security] Cross-origin redirect: ' . $url, 'warn');
+                if (!$allowExternal) {
+                    throw new \InvalidArgumentException('Cross-origin redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
+                }
+                \ZealPHP\elog('[security] Cross-origin redirect (allowed): ' . $url, 'warn');
             }
         }
 

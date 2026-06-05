@@ -244,7 +244,7 @@ class AppConfigurablesTest extends TestCase
         $this->assertSame('198.51.100.7', App::clientIp());
     }
 
-    public function testClientIpFallsBackToFirstHopWhenAllTrusted(): void
+    public function testClientIpReturnsSocketPeerWhenAllHopsTrusted(): void
     {
         App::trustedProxies(['10.0.0.0/8', '192.168.0.0/16']);
         $g = RequestContext::instance();
@@ -252,7 +252,12 @@ class AppConfigurablesTest extends TestCase
             'REMOTE_ADDR' => '10.0.0.1',
             'HTTP_X_FORWARDED_FOR' => '192.168.1.5, 10.0.0.2',
         ];
-        $this->assertSame('192.168.1.5', App::clientIp());
+        // #249 (security BC change): when EVERY hop is trusted we cannot
+        // distinguish a legitimate all-trusted chain from a client that forged
+        // trusted-looking entries — the leftmost is the attacker-prependable one.
+        // Return the observed socket peer (Apache mod_remoteip / nginx realip),
+        // NOT the spoofable 192.168.1.5. Previously returned the leftmost hop.
+        $this->assertSame('10.0.0.1', App::clientIp());
     }
 
     public function testClientIpUsesXRealIpWhenForwardedForMissing(): void
