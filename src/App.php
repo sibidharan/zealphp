@@ -107,16 +107,19 @@ class App
      * DB connection budget, per-coroutine memory). With no ceiling a load burst
      * has no front-door shed path — it propagates inward until the first bounded
      * resource fails as a cliff (OOM / pool-acquire-timeout 500s) instead of
-     * OpenSwoole rejecting the over-limit coroutine. This conservative default
-     * restores backpressure: ~12k concurrent in-flight coroutines across 4
-     * workers, far above the c=1000 benchmark's ~250/worker, but a real bound.
+     * OpenSwoole rejecting the over-limit coroutine. This default restores
+     * backpressure while staying generous: ~40k concurrent in-flight coroutines
+     * across 4 workers (10k/worker), ~10x below OpenSwoole's 100k and far above
+     * the c=1000 benchmark's ~250/worker — a real bound that won't shed normal
+     * load or a typical streaming/WebSocket fan-in.
      *
-     * RAISE IT for streaming/WebSocket workloads with many long-lived
-     * connections (each holds a coroutine): `ZEALPHP_MAX_COROUTINE=20000` or
-     * `$app->run(['max_coroutine' => 20000])`. Pair with `ConcurrencyLimitMiddleware`
-     * (nginx limit_conn parity) for graceful 503s before the ceiling is hit.
+     * SCALE IT for very high long-lived-connection counts (each SSE/WS client
+     * holds a coroutine): `ZEALPHP_MAX_COROUTINE=50000` or
+     * `$app->run(['max_coroutine' => 50000])`, and/or add workers/nodes. Pair
+     * with `ConcurrencyLimitMiddleware` (nginx limit_conn parity) for graceful
+     * 503s before the ceiling is hit.
      */
-    public const DEFAULT_MAX_COROUTINE = 3000;
+    public const DEFAULT_MAX_COROUTINE = 10000;
     /** Bind address for the OpenSwoole server (e.g. `'0.0.0.0'` or `'127.0.0.1'`). Set in `__construct()` from `App::init()`. */
     protected string $host;
     // Widened protected → public so ZealPHP\CLI (extracted from App.php in the
