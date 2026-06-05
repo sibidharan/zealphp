@@ -4,7 +4,11 @@
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | Yes       |
+| 0.4.x   | Yes       |
+| < 0.4   | No        |
+
+ZealPHP is pre-1.0 (alpha): only the latest minor (currently **0.4.x**) receives
+security fixes. Upgrade to the newest `0.4.z` patch for the current fixes.
 
 ## Reporting a Vulnerability
 
