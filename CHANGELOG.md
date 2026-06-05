@@ -2,11 +2,29 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.3] - 2026-06-05
+
+A migration-hardening release: runtime, CGI, and session fixes surfaced by a downstream
+coroutine-legacy migration, plus the architecture-review hardening pass below. The #26
+boot-`$GLOBALS` fix needs **ext-zealphp 0.3.33+**.
 
 ### Security
 
 - **`{request}` / `{response}` / `{app}` URL params can no longer shadow the injected framework object (#240).** `ResponseMiddleware` now binds the reserved framework-object names (`request` / `req` / `response` / `res` / `app`) **before** any same-named URL segment, so a handler typed `function($request)` always receives the PSR-7 wrapper — never an attacker-controllable path string. **Behaviour change:** this reverses the prior "explicit `{req}` URL segment wins" precedence; a URL segment that uses a reserved name is now unbindable to that handler parameter (name it something else to read the segment). `ZealAPI` was already reserved-first and binds no URL placeholders; template/streaming closures bind only developer-provided args.
+
+### Fixed
+
+- **CGI workers preserve multiple same-name response headers (#260).** proc/pool/fork/fcgi CGI dispatch collapsed repeated headers (e.g. multiple `Set-Cookie`) to the last value; headers are now an ordered `[name, value]` list applied replace-aware, so every `Set-Cookie` / `Link` / `Vary` survives.
+- **`cgiMode('fcgi')` no longer fatals every request (#261).** The FastCGI dispatch (`OpenSwoole\Coroutine\Client`) ran outside a coroutine in the fcgi lifecycle, so every request 500'd with `API must be called in the coroutine`. It now runs inside `Coroutine::run()` when outside a coroutine.
+- **`$g->server` is seeded with CGI/SAPI vars at worker start + a per-request `UNIQUE_ID` (#270, #274).** Handlers reading `$_SERVER` / `$g->server` before dispatch see sane `REQUEST_METHOD` / `REQUEST_URI` / `SCRIPT_NAME` / `DOCUMENT_ROOT` / … values; each request gets a unique `UNIQUE_ID` (Apache `mod_unique_id` parity).
+- **`RedisSessionHandler` connects lazily, not in its constructor (#271).** The eager connect fataled under HOOK_ALL when the handler was constructed outside a coroutine (the common `onWorkerStart` registration); the connection now opens on first use (already per-coroutine).
+- **Boot-time `$GLOBALS` writes are visible to every request coroutine in coroutine-legacy (#26; needs ext-zealphp 0.3.33+).** `App::refreshGlobalsBaseline()` runs after the `onWorkerStart` hooks, folding an app bootstrap include's `$GLOBALS` writes into the per-coroutine baseline (previously visible only to the first request coroutine).
+
+### Documentation
+
+- **Loud `$_SESSION`-under-`superglobals(false)` contract (#272, #273).** The coroutines page now prominently warns that direct `$_SESSION` / `$_GET` under plain `superglobals(false)` (no ext-zealphp) is a concurrency bug — go through `$g->session`.
+- **`SECURITY.md` Supported Versions updated to 0.4.x.**
+- **`setup.sh` default ext-zealphp install version bumped to `v0.3.33`.**
 
 ### Security & hardening (architecture-review pass)
 
