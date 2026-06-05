@@ -35,6 +35,7 @@ $groups = [
         ['fastcgi-backends',      'FastCGI Backends'],
         ['environment-variables', 'Environment Variables'],
         ['fuzzing',               'Fuzzing'],
+        ['coroutine-isolation-security-research', 'Security Research'],
     ],
     'Background' => [
         ['/http#parity',           'Apache Parity'],

@@ -65,6 +65,22 @@ final class MarkdownRendererTest extends TestCase
         );
     }
 
+    public function testWithinDocsLinkKeepsDocsPrefix(): void
+    {
+        // Regression: a link to a file WITHIN docs/ (a subdir such as architecture/)
+        // must keep the docs/ segment. The old code stripped every leading ./ + ../
+        // and produced master/architecture/… (a 404) instead of
+        // master/docs/architecture/… . Both ./-prefixed and bare forms resolve here.
+        foreach (['[iso](./architecture/state-isolation-reference.md)',
+                  '[iso](architecture/state-isolation-reference.md)'] as $md) {
+            $html = MarkdownRenderer::render($md);
+            $this->assertStringContainsString(
+                'href="https://github.com/sibidharan/zealphp/blob/master/docs/architecture/state-isolation-reference.md"',
+                $html
+            );
+        }
+    }
+
     // ── render(): absolute / anchor links untouched ─────────────────────
 
     public function testAbsoluteHttpLinkUntouched(): void
