@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`RedisSessionHandler` no longer connects eagerly in its constructor — coroutine-safe under HOOK_ALL (#271).** Constructing the handler at a non-coroutine point (boot / middleware registration — e.g. with `App::sessionLifecycle(false)`, where the app installs its own save handler before the request loop) fataled "API must be called in the coroutine": the constructor called `\Redis->connect()`, which HOOK_ALL turns into a coroutine API. The connection is now established lazily on first use in `redis()` — a per-coroutine socket inside a request, or the already-lazy `$fallback` (`??=`) outside one. No change to the in-request path; only the eager construction-time connect is removed (so configuration errors now surface on first `open()`/`read()` instead of at construction).
+
 ### Security & hardening (architecture-review pass)
 
 A focused hardening pass closing the highest-blast-radius gaps from a full architectural review — scalability backpressure, session edge cases, and the cross-node Redis/WebSocket fabric. Most reuse patterns the framework already had elsewhere; defaults that were unsafe for production are now safe-by-default or surfaced with a boot advisory.

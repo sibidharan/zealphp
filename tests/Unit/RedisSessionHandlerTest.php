@@ -43,6 +43,23 @@ class RedisSessionHandlerTest extends TestCase
         );
     }
 
+    public function testConstructorDoesNotConnectEagerly(): void
+    {
+        // #271 — the constructor must NOT call connect(). Under HOOK_ALL,
+        // \Redis->connect() is a coroutine API, so connecting at construction
+        // (a non-coroutine point — boot / middleware registration with
+        // sessionLifecycle(false)) fataled "API must be called in the coroutine".
+        // Construction with an unreachable host must succeed without touching the
+        // socket; the connection is established lazily on first redis() use.
+        $handler = new RedisSessionHandler('192.0.2.1', 6379); // TEST-NET-1 (non-routable)
+        $ref = new \ReflectionProperty($handler, 'fallback');
+        $ref->setAccessible(true);
+        $this->assertNull(
+            $ref->getValue($handler),
+            'constructor must not establish the fallback connection (#271)'
+        );
+    }
+
     public function testExposesAllSessionHandlerInterfaceMethods(): void
     {
         $required = ['open', 'close', 'read', 'write', 'destroy', 'gc'];
