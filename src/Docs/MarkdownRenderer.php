@@ -38,7 +38,8 @@ final class MarkdownRenderer
         'getting-started', 'directory-structure', 'runtime-architecture',
         'routing', 'api-layer', 'error-handling', 'templates-and-rendering', 'htmx',
         'streaming', 'websocket', 'WSROUTER-PRODUCTION', 'tasks-and-concurrency', 'middleware-and-authentication',
-        'deployment', 'cli', 'hot-reload', 'fuzzing', 'fastcgi-backends', 'environment-variables',
+        'deployment', 'cli', 'hot-reload', 'fuzzing', 'coroutine-isolation-security-research',
+        'fastcgi-backends', 'environment-variables',
         'compatibility-database', 'running-modern-apps', 'competitive-analysis', 'standards-and-roadmap',
     ];
 
