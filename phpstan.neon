@@ -43,6 +43,17 @@ parameters:
         -
             message: '#^Negated boolean expression is always false\.$#'
             path: src/CLI.php
+        # openswoole/ide-helper stubs OpenSwoole\Http\Response::header()'s value
+        # param as `string`, but the real ext parses it as a zval (Z_PARAM_ZVAL)
+        # and, when given an ARRAY, emits one wire line per element — the
+        # documented mechanism for multiple same-name headers (the same path
+        # multiple Set-Cookie uses). Response::emitMultiHeader() relies on that
+        # array form to keep multiple Link / WWW-Authenticate / CSP appends on
+        # the wire (#260). Same ext-vs-stub category as the OpenSwoole entries
+        # above; scoped to the single call site.
+        -
+            message: '#^Parameter \#2 \$value of method OpenSwoole\\Http\\Response::header\(\) expects string, list<string> given\.$#'
+            path: src/HTTP/Response.php
         # ResponseMiddleware re-emits $g->status after handlers run; PHPStan
         # narrows from the constant ($beforeStatus = 200) and reports the
         # 3-way !== check as always-false. Runtime: status is mutated by

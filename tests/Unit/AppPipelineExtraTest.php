@@ -64,6 +64,10 @@ class AppPipelineExtraTest extends TestCase
         $app->route('/xtra/raw/str', ['raw' => true], fn() => 'raw-str');
         $app->route('/xtra/raw/arr', ['raw' => true], fn() => ['r' => true]);
         $app->route('/xtra/raw/int', ['raw' => true], fn() => 404);
+        // #259 — a raw route and a non-raw route both returning the same 4xx
+        // int, used to prove the error-page (renderError) behaviour is identical.
+        $app->route('/xtra/raw/err404', ['raw' => true], fn() => 404);
+        $app->route('/xtra/nonraw/err404', fn() => 404);
         $app->route('/xtra/raw/psr', ['raw' => true], fn() => new Response('raw-psr', 233));
         $app->route('/xtra/raw/gen', ['raw' => true], fn() => (function () {
             yield 'r1';
@@ -311,6 +315,36 @@ class AppPipelineExtraTest extends TestCase
     public function testRawRouteIntStatus(): void
     {
         $this->assertSame(404, $this->dispatch('/xtra/raw/int')->getStatusCode());
+    }
+
+    public function testRawRouteIntRoutesThroughCustomErrorPage(): void
+    {
+        // #259 — a `raw: true` route returning a 4xx int must fire the registered
+        // custom error page, exactly like a normal route (previously it emitted a
+        // bare empty-body status, skipping renderError).
+        $app = App::instance();
+        \assert($app !== null);
+        $app->setErrorHandler(404, fn($status) => "custom-$status-page");
+
+        $res = $this->dispatch('/xtra/raw/err404');
+        $this->assertSame(404, $res->getStatusCode());
+        $this->assertStringContainsString('custom-404-page', (string) $res->getBody());
+    }
+
+    public function testRawAndNonRawIntErrorPagesAreIdentical(): void
+    {
+        // #259 — the universal-return-contract guarantee: the SAME custom error
+        // page body for `return 404;` from a raw route AND a non-raw route.
+        $app = App::instance();
+        \assert($app !== null);
+        $app->setErrorHandler(404, fn($status) => "custom-$status-page");
+
+        $raw    = $this->dispatch('/xtra/raw/err404');
+        $nonRaw = $this->dispatch('/xtra/nonraw/err404');
+
+        $this->assertSame($nonRaw->getStatusCode(), $raw->getStatusCode());
+        $this->assertSame((string) $nonRaw->getBody(), (string) $raw->getBody());
+        $this->assertStringContainsString('custom-404-page', (string) $raw->getBody());
     }
 
     public function testRawRoutePsrReturnedDirectly(): void
