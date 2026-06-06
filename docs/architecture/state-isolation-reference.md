@@ -35,7 +35,7 @@ App::cgiMode('pool');  // default when processIsolation(true)
 - **PHP analog:** PHP-FPM
 - **Overhead:** ~5–10 ms amortized per request (pool of persistent subprocesses)
 - **Concurrency:** sequential per worker, parallel across pool size
-- **Pool size:** `App::cgiPoolSize(int)`, default 16
+- **Pool size:** `App::cgiPoolSize(int)`, default 4
 - **Recycle:** `App::cgiPoolMaxRequests(int)`, default 500 (set to 1 for true fresh-process semantics)
 - **When to use:** legacy/procedural PHP with `define()`/`function`/`class` at top level (WordPress, phpBB, Cacti, Nextcloud)
 
@@ -244,7 +244,7 @@ All setters return `self` (fluent) or the current value. Must be called BEFORE `
 | `App::enableCoroutine(bool)` | bool | follows `!$superglobals` | OpenSwoole `enable_coroutine` server setting |
 | `App::hookAll(bool\|int)` | bool/int | follows `!$superglobals` | OpenSwoole `Runtime::enableCoroutine` flags |
 | `App::cgiMode(string)` | `'pool'\|'proc'\|'fork'\|'fcgi'` | `'pool'` | CGI dispatch strategy |
-| `App::cgiPoolSize(int)` | int | 16 | Pool worker count |
+| `App::cgiPoolSize(int)` | int | 4 | Pool worker count (per OpenSwoole worker) |
 | `App::cgiPoolMaxRequests(int)` | int | 500 | Pool worker recycle threshold |
 | `App::cgiTimeout(int)` | int | 60 | Subprocess dispatch timeout (s) |
 | `App::functionIsolation(bool)` | bool | `false` | Per-request `process_state_clean` (functions+classes+includes) |

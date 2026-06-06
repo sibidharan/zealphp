@@ -120,7 +120,7 @@ ZealPHP's implicit routes in [`src/App.php`](../src/App.php) reproduce Apache's 
 | `AcceptPathInfo On` | `/script.php/extra/path` exposes `PATH_INFO=/extra/path`, rewrites `REQUEST_URI` to `/script.php` | `App::$path_info = true` |
 | `<FilesMatch "^\.">` deny | every implicit route + dedicated pattern route refuses any URL with a dotfile component | `App::$block_dotfiles = true` |
 | URL-decoded traversal rejection | `parse_url + rawurldecode` checked for `..`, `\0`, backslash before route matching → 400 | always on |
-| Static handler URL whitelist | OpenSwoole's `enable_static_handler` is constrained to `App::$static_handler_locations` (default: `/css`, `/js`, `/img`, `/fonts`, `/assets`, `/static`, `/favicon.ico`, `/robots.txt`) | `App::$static_handler_locations` |
+| Static handler URL whitelist | OpenSwoole's `enable_static_handler` is constrained to `App::$static_handler_locations` (default applied by `run()` when unset: `/css`, `/js`, `/img`, `/images`, `/fonts`, `/assets`, `/static`, `/favicon.ico`, `/robots.txt`) | `App::$static_handler_locations` |
 
 The static-handler whitelist is the real defense against `/.env` or `/.git/config` being served. OpenSwoole's built-in handler doesn't honor `<FilesMatch>` rules; by restricting it to known asset prefixes, anything outside the whitelist falls through to PHP routing, where dotfile and traversal checks fire.
 

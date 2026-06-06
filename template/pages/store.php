@@ -64,7 +64,8 @@ foreach ($demos as [$id, $title, $url, $code]) {
   <tr><th>Method</th><th>Returns</th></tr>
   <tr><td><code>Store::make($name, $maxRows, $columns)</code></td><td>OpenSwoole\Table</td></tr>
   <tr><td><code>Store::set($table, $key, $row)</code></td><td>bool</td></tr>
-  <tr><td><code>Store::get($table, $key, $field?)</code></td><td>array|mixed|false</td></tr>
+  <tr><td><code>Store::get($table, $key, $field?)</code></td><td>array|mixed|false (BC: <code>false</code> on miss)</td></tr>
+  <tr><td><code>Store::getStrict($table, $key, $field?)</code></td><td>mixed (<code>null</code> on miss — preferred for new code)</td></tr>
   <tr><td><code>Store::del($table, $key)</code></td><td>bool</td></tr>
   <tr><td><code>Store::exists($table, $key)</code></td><td>bool</td></tr>
   <tr><td><code>Store::incr($table, $key, $col, $by=1)</code></td><td>int (new value)</td></tr>
@@ -144,7 +145,7 @@ Cache::flush();                                    // clear everything</code></p
   </tr>
   <tr>
     <td><code>Counter</code> (<code>OpenSwoole\Atomic</code>) — <code>compareAndSet</code>, <code>increment</code>, <code>decrement</code>, <code>reset</code>, <code>get</code>, <code>set</code></td>
-    <td>✅ Lock-free atomic on a 32/64-bit integer</td>
+    <td>✅ Lock-free atomic on a 64-bit signed integer</td>
     <td>For single-value cross-worker counters, prefer this over Store.</td>
   </tr>
 </table>

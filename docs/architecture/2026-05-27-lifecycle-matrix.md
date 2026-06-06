@@ -75,7 +75,7 @@ session data via IPC.
 
 ### For new ZealPHP apps
 
-**Mode 1** — `App::superglobals(false)` (the default)
+**Mode 1** — `App::superglobals(false)` (the recommended default for new apps / the scaffold; the framework property default is `superglobals(true)`)
 
 ```php
 App::superglobals(false);

@@ -51,8 +51,11 @@
     </table>
     <p>
       <code>$req</code> / <code>$res</code> are accepted as short aliases for <code>$request</code> / <code>$response</code> —
-      they receive the exact same wrappers. An explicit <code>{req}</code> / <code>{res}</code> URL segment still wins:
-      a matched path parameter binds by name before the alias is considered.
+      they receive the exact same wrappers. The reserved framework-object names
+      (<code>request</code> / <code>req</code> / <code>response</code> / <code>res</code> / <code>app</code>) bind the injected object
+      <strong>before</strong> any same-named URL segment (security fix #240) — so a handler typed <code>function($req)</code>
+      always receives the wrapper, never an attacker-controllable path string. A URL segment that happens to use a
+      reserved name is simply unbindable to that parameter; name it something else to read the segment.
     </p>
     <p>
       Any other parameter with a default value gets its default. A parameter without a default that

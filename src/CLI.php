@@ -691,7 +691,7 @@ Options:
   -H, --host ADDR      Listen address (default: 0.0.0.0)
   -w, --workers N      Number of worker processes
   -d, --daemonize      Run in background
-  --task-workers N     Number of task workers (default: 0)
+  --task-workers N     Number of task workers (default: 8, set 0 to disable)
   --pid-file PATH      Custom PID file path
   --dev                Enable dev route hot-reload (watch route/*.php,
                        rebuild on change; no restart). Same as ZEALPHP_DEV=1.

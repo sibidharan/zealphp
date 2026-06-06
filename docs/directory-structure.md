@@ -41,7 +41,8 @@ zealphp/
 
 - **`src/`** – Framework source code. Important highlights:
   - `App.php` – The main server class responsible for routing, middleware orchestration, template rendering, and OpenSwoole integration.
-  - `G.php` – Lightweight container that virtualizes PHP superglobals per request.
+  - `RequestContext.php` – The per-request state container that virtualizes PHP superglobals (`$g->get`/`post`/`cookie`/`server`/`session`/…). Per-coroutine in coroutine mode, process-wide singleton in sync superglobals modes.
+  - `G.php` – A backward-compatibility shim: `require`s `RequestContext.php` and `class_alias`es `G` → `RequestContext` (the legacy `G::instance()` name still works).
   - `HTTP/` – Request and response wrappers that provide durable hooks for ZealPHP features while exposing the underlying OpenSwoole objects when needed.
   - `Session/` – Session managers that bridge traditional PHP session semantics with OpenSwoole’s coroutine context.
   - `utils.php` – Helper functions: `coproc()` (background-process spawner), logging utilities (`elog()`, `zlog()`, `access_log()`), and stack-trace helpers (`jTraceEx()`).
