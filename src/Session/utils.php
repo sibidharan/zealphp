@@ -159,7 +159,7 @@ function zeal_session_start(): bool
     $rawSavePath = $g->session_params['save_path'];
     $save_path = is_string($rawSavePath) ? $rawSavePath : '';
 
-    $handler = $g->session_params['handler'] ?? null;
+    $handler = $g->session_params['handler'] ?? \ZealPHP\App::resolveActiveSessionHandler();
 
     if (!($handler instanceof \SessionHandlerInterface)) {
         if (!isset($verified_paths[$save_path])) {
@@ -352,6 +352,41 @@ function zeal_session_strict_should_regenerate(
 }
 
 /**
+ * Coroutine-mode override of `session_set_save_handler()` (#295).
+ *
+ * Native `session_set_save_handler()` registers with PHP's session module, which
+ * the `zeal_session_*` overrides never consult — so a custom handler (Redis, etc.)
+ * was silently ignored and sessions fell back to the inline file path. This routes
+ * the handler to the slots the framework actually reads, in BOTH scopes:
+ *
+ *  - `App::$session_handler` (process-wide) so every future request and worker
+ *    sees it — the common boot-time call shape; and
+ *  - the current coroutine's `$g->session_params['handler']` (immediate) so a
+ *    per-request middleware call takes effect for THIS request.
+ *
+ * Only the object-handler form is supported (PHP's modern signature). The legacy
+ * 6-callable form and a non-handler argument are rejected (return `false`), as the
+ * `zeal_session_*` core requires a `\SessionHandlerInterface`.
+ *
+ * @param mixed $handler            A `\SessionHandlerInterface` instance.
+ * @param bool  $register_shutdown  Accepted for signature parity; unused (the
+ *                                  managers own the write-close lifecycle).
+ * @return bool  `true` when wired, `false` for an unsupported argument.
+ */
+function zeal_session_set_save_handler($handler = null, $register_shutdown = true): bool
+{
+    if (!($handler instanceof \SessionHandlerInterface)) {
+        return false;
+    }
+    // Process-wide: future requests/workers resolve it via App::resolveActiveSessionHandler().
+    \ZealPHP\App::sessionHandler($handler);
+    // Per-coroutine: this request sees it immediately, even before the manager runs.
+    $g = RequestContext::instance();
+    $g->session_params['handler'] = $handler;
+    return true;
+}
+
+/**
  * Get or set the session ID.
  *
  * With no argument: reads the `PHPSESSID` (or custom session name) cookie
@@ -499,7 +534,7 @@ function zeal_session_write_close(): bool
         assert(is_string($save_path));
         $session_file = $save_path . '/sess_' . basename((string)$session_id);
         $data = $useGSession ? $g->session : $GLOBALS['_SESSION'];
-        $wHandler = $g->session_params['handler'] ?? null;
+        $wHandler = $g->session_params['handler'] ?? \ZealPHP\App::resolveActiveSessionHandler();
         if ($wHandler instanceof \SessionHandlerInterface) {
             // Merge with stored data to mitigate concurrent-request races.
             // Apache serialises session access via file locks; ZealPHP
@@ -639,7 +674,7 @@ function zeal_session_destroy(): bool
     // Delete session data via handler or file
     $save_path = $g->session_params['save_path'] ?? '';
     assert(is_string($save_path));
-    $dHandler = $g->session_params['handler'] ?? null;
+    $dHandler = $g->session_params['handler'] ?? \ZealPHP\App::resolveActiveSessionHandler();
     if ($dHandler instanceof \SessionHandlerInterface) {
         $dHandler->destroy((string) $session_id);
     } else {
@@ -712,7 +747,7 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
     // empty session, and anything written afterwards (OAuth `sub`/`tokens`/
     // `profile`) is stranded under an ID the client may never receive.
     // mod_php's regenerate copies the current data to the new ID; mirror that.
-    $handler = $g->session_params['handler'] ?? null;
+    $handler = $g->session_params['handler'] ?? \ZealPHP\App::resolveActiveSessionHandler();
     if ($handler instanceof \SessionHandlerInterface) {
         // The live in-memory data is the canonical session contents for the
         // new ID (it already reflects any writes made before regeneration).
@@ -1056,7 +1091,7 @@ function zeal_session_gc(int $maxlifetime): int
     $maxlifetime = max(1, $maxlifetime);
     $g = RequestContext::instance();
 
-    $handler = $g->session_params['handler'] ?? null;
+    $handler = $g->session_params['handler'] ?? \ZealPHP\App::resolveActiveSessionHandler();
     if ($handler instanceof \SessionHandlerInterface) {
         $res = $handler->gc($maxlifetime);
         return is_int($res) ? $res : 0;

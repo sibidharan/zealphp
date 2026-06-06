@@ -1623,6 +1623,11 @@ class App
         self::overrideBuiltin('session_decode', '\ZealPHP\Session\zeal_session_decode');
         self::overrideBuiltin('session_save_path', '\ZealPHP\Session\zeal_session_save_path');
         self::overrideBuiltin('session_module_name', '\ZealPHP\Session\zeal_session_module_name');
+        // #295 — without this override, native session_set_save_handler() registers
+        // with PHP's session module, which the zeal_session_* overrides never consult,
+        // so a custom handler (Redis) was silently ignored and sessions fell back to
+        // the inline file path. Route it to $g->session_params['handler'] + App::$session_handler.
+        self::overrideBuiltin('session_set_save_handler', '\ZealPHP\Session\zeal_session_set_save_handler');
     }
 
     /**
@@ -3062,8 +3067,54 @@ class App
      */
     public static function sessionHandler(string|\SessionHandlerInterface|null $handler = null): string|\SessionHandlerInterface|null
     {
-        if (\func_num_args() > 0) self::$session_handler = $handler;
+        if (\func_num_args() > 0) {
+            self::$session_handler = $handler;
+            // Re-resolve on next access (a mid-run change must take effect).
+            self::$session_handler_resolved = false;
+            self::$resolved_session_handler = null;
+        }
         return self::$session_handler;
+    }
+
+    /** Memoised resolution of {@see $session_handler} (see resolveActiveSessionHandler). */
+    private static ?\SessionHandlerInterface $resolved_session_handler = null;
+
+    /** Whether {@see $resolved_session_handler} has been computed yet. */
+    private static bool $session_handler_resolved = false;
+
+    /**
+     * Resolve the configured session handler instance — the single source of truth
+     * the `zeal_session_*` overrides and both session managers consult.
+     *
+     * `$session_handler` is a string alias / instance / null. This memoises the
+     * resolution (one handler instance per worker) and returns it.
+     *
+     * **`null` preserves the framework file path** (the historical observable
+     * default) — it is deliberately NOT promoted to `TableSessionHandler` here, so
+     * a session-wiring fix never silently changes the durability of an app that
+     * didn't configure a handler (#295). A non-null alias/instance is honoured:
+     * `'redis'`/`'table'`/`'file'`/instance all wire through.
+     *
+     * Returns `null` when unconfigured (callers keep their inline-file fallback).
+     */
+    public static function resolveActiveSessionHandler(): ?\SessionHandlerInterface
+    {
+        if (self::$session_handler_resolved) {
+            return self::$resolved_session_handler;
+        }
+        self::$session_handler_resolved = true;
+        $h = self::$session_handler;
+        if ($h instanceof \SessionHandlerInterface) {
+            return self::$resolved_session_handler = $h;
+        }
+        // String alias → instance. null / unknown → null (inline file path).
+        self::$resolved_session_handler = match ($h) {
+            'file'  => new \ZealPHP\Session\Handler\FileSessionHandler(),
+            'table' => \ZealPHP\Session\Handler\TableSessionHandler::register(),
+            'redis' => new \ZealPHP\Session\Handler\RedisSessionHandler(),
+            default => null,
+        };
+        return self::$resolved_session_handler;
     }
 
     /**
@@ -7670,6 +7721,14 @@ class App
         // probabilistic per-request GC, so without this sess_* files / handler
         // entries accumulate forever and leaked PHPSESSIDs never expire.
         self::registerSessionGc();
+
+        // #295 — resolve the configured session handler ONCE in the master, BEFORE
+        // the worker fork. Memoises the instance (every worker shares it) and,
+        // critically, lets a configured TableSessionHandler allocate its
+        // OpenSwoole\Table here so it is shared-memory across workers rather than a
+        // per-worker table created lazily on first request. No-op when unconfigured
+        // (null) — the file default is preserved.
+        self::resolveActiveSessionHandler();
 
         # Snapshot the app.php-defined baseline (explicit routes + the alias /
         # App::when registries) BEFORE the file-based + implicit routes load, so
