@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`RedisSessionHandler` save-handler ops no longer fatal outside a request coroutine (#285, follow-up to #271).** #271 made the *constructor* lazy, but `open()`/`read()`/`write()`/`destroy()` are themselves the first hooked `\Redis` call (`connect()` + `watch`/`get`/`multi`/`exec`/`del`), so under `App::superglobals(true)` WITHOUT `enableCoroutine(true)` — where the `onRequest` handler isn't auto-wrapped in a coroutine but `HOOK_ALL` still hooks `\Redis` (e.g. an app installing its own save handler via `sessionLifecycle(false)` and calling `session_start()` from middleware) — every save-handler call ran at `getCid() == -1` and fataled "API must be called in the coroutine", killing the worker. The handler now routes every Redis op through an `io()` wrapper that runs it inside `Coroutine::run()` when outside a coroutine (reusing the persistent `$fallback` connection so `WATCH`/`MULTI`/`EXEC` optimistic locking still spans `read()` -> `write()`), and directly on the per-coroutine socket when inside one (issue #16 unchanged). Validated on PHP 8.4 + OpenSwoole 26.2.0 + phpredis 6.3: old code fatals, new code completes the full open/read/write/destroy cycle outside a coroutine, 30/30 concurrent sessions stay isolated, ASAN-clean. Canonical validation: `scripts/spike-session-handler-nocoroutine.php` (PHPUnit can't enable HOOK_ALL process-wide).
+
 ## [0.4.3] - 2026-06-05
 
 A migration-hardening release: runtime, CGI, and session fixes surfaced by a downstream

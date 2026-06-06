@@ -80,27 +80,83 @@ class RedisSessionHandler implements \SessionHandlerInterface
     }
 
     /**
-     * Per-coroutine Redis connection.
+     * Resolve the Redis connection for the CURRENT context.
      *
-     * Each coroutine gets its own socket so concurrent session I/O never crosses
-     * frames (issue #16). The connection is stored in the coroutine context under
-     * the key `'__zeal_redis_session'` and is reaped automatically when the
-     * coroutine ends. Outside a coroutine, the construction-time `$fallback`
-     * connection is reused.
+     * In a coroutine: a per-coroutine socket stored in the coroutine context
+     * (issue #16 — concurrent coroutines must never share a socket and interleave
+     * RESP frames; the connection is reaped when the coroutine ends). Outside a
+     * coroutine: the shared `$fallback`. The connection is established lazily here.
+     *
+     * Callers reach this only through `io()`, which guarantees a coroutine is live
+     * before `connect()`'s hooked `\Redis->connect()` runs.
      */
-    private function redis(): \Redis
+    private function conn(): \Redis
     {
         $cid = \OpenSwoole\Coroutine::getCid();
         if ($cid < 0) {
             return $this->fallback ??= $this->connect();
         }
         $context = \OpenSwoole\Coroutine::getContext($cid);
-        if (!isset($context['__zeal_redis_session'])) {
-            $context['__zeal_redis_session'] = $this->connect();
+        $existing = $context['__zeal_redis_session'] ?? null;
+        if ($existing instanceof \Redis) {
+            return $existing;
         }
-        $conn = $context['__zeal_redis_session'];
-        assert($conn instanceof \Redis);
-        return $conn;
+        $fresh = $this->connect();
+        $context['__zeal_redis_session'] = $fresh;
+        return $fresh;
+    }
+
+    /**
+     * Run a Redis save-handler operation, guaranteeing it executes inside a
+     * coroutine.
+     *
+     * Every `\Redis` call in this handler — the `connect()` plus
+     * `watch`/`get`/`multi`/`exec`/`del` — is hooked I/O under
+     * `OpenSwoole\Runtime::HOOK_ALL`, so it FATALS with
+     * "API must be called in the coroutine" when the PHP session save-handler
+     * chain fires OUTSIDE a request coroutine. That happens under
+     * `App::superglobals(true)` WITHOUT `enableCoroutine(true)`: the `onRequest`
+     * handler isn't auto-wrapped in a coroutine, yet HOOK_ALL still hooks `\Redis`
+     * — e.g. an app that installs its own save handler via `sessionLifecycle(false)`
+     * and calls `session_start()` from middleware. #271 made the *constructor*
+     * lazy, but `open()`/`read()` are themselves "first use" and still hit the wall
+     * (#285).
+     *
+     * When already in a coroutine, run `$op` directly on the per-coroutine
+     * connection. When NOT, run it inside `Coroutine::run()` on the shared
+     * `$fallback` (the `App::parallel` / #261 sync-mode idiom — `Coroutine::run`
+     * swallows throws, so capture + rethrow to keep a Redis error a catchable
+     * exception, not a worker-killing fatal). `$fallback` persists across these
+     * sequential transient runs, so the connection — and `WATCH` (read) ->
+     * `MULTI`/`EXEC` (write) optimistic locking — spans the whole request.
+     * Validated against a live Redis: a hooked socket created in one
+     * `Coroutine::run()` is reused, with `WATCH`/`MULTI`/`EXEC` intact, in later
+     * runs. (In this no-request-coroutine mode a worker handles requests
+     * sequentially, so there is no concurrent writer for the lock to guard anyway.)
+     *
+     * @param callable(\Redis): mixed $op
+     */
+    private function io(callable $op): mixed
+    {
+        if (\OpenSwoole\Coroutine::getCid() >= 0) {
+            return $op($this->conn());
+        }
+        $result = null;
+        $error  = null;
+        \OpenSwoole\Coroutine::run(function () use ($op, &$result, &$error): void {
+            try {
+                if ($this->fallback === null) {
+                    $this->fallback = $this->connect();
+                }
+                $result = $op($this->fallback);
+            } catch (\Throwable $e) {
+                $error = $e;
+            }
+        });
+        if ($error !== null) {
+            throw $error;
+        }
+        return $result;
     }
 
     /**
@@ -109,7 +165,7 @@ class RedisSessionHandler implements \SessionHandlerInterface
      */
     public function open($savePath, $sessionName): bool
     {
-        return $this->redis()->isConnected();
+        return $this->io(static fn(\Redis $r): bool => $r->isConnected()) === true;
     }
 
     /**
@@ -137,13 +193,16 @@ class RedisSessionHandler implements \SessionHandlerInterface
      */
     public function read($sessionId): string
     {
-        $redis = $this->redis();
         $key = $this->prefix . $sessionId;
-        $redis->watch($key);
-        $data = $redis->get($key);
-        $base = is_string($data) ? $data : '';
-        $this->baseData[(string) $sessionId] = $base;
-        return $base;
+        $sid = (string) $sessionId;
+        $out = $this->io(function (\Redis $redis) use ($key, $sid): string {
+            $redis->watch($key);
+            $data = $redis->get($key);
+            $base = is_string($data) ? $data : '';
+            $this->baseData[$sid] = $base;
+            return $base;
+        });
+        return is_string($out) ? $out : '';
     }
 
     /**
@@ -156,34 +215,34 @@ class RedisSessionHandler implements \SessionHandlerInterface
      */
     public function write($sessionId, $sessionData): bool
     {
-        $redis = $this->redis();
         $key = $this->prefix . $sessionId;
         $sid = (string) $sessionId;
+        return $this->io(function (\Redis $redis) use ($key, $sid, $sessionData): bool {
+            for ($attempt = 0; $attempt < 3; $attempt++) {
+                $pipe = $redis->multi();
+                $pipe->setex($key, $this->ttl, $sessionData);
+                $result = $pipe->exec();
+                if ($result !== false) {
+                    // The read→write merge baseline is consumed; drop it so the
+                    // per-instance map doesn't grow with every distinct session id
+                    // for the worker's lifetime (this is a singleton handler).
+                    unset($this->baseData[$sid]);
+                    return true;
+                }
 
-        for ($attempt = 0; $attempt < 3; $attempt++) {
-            $pipe = $redis->multi();
-            $pipe->setex($key, $this->ttl, $sessionData);
-            $result = $pipe->exec();
-            if ($result !== false) {
-                // The read→write merge baseline is consumed; drop it so the
-                // per-instance map doesn't grow with every distinct session id
-                // for the worker's lifetime (this is a singleton handler).
-                unset($this->baseData[$sid]);
-                return true;
+                // WATCH/MULTI conflict — concurrent writer beat us. Re-WATCH,
+                // read the current state, 3-way merge (base = our original
+                // read, local = our intended write, remote = current). Retry.
+                $redis->watch($key);
+                $remote = $redis->get($key);
+                $remoteStr = is_string($remote) ? $remote : '';
+                $base = $this->baseData[$sid] ?? '';
+                $sessionData = $this->merge3Sessions($base, $sessionData, $remoteStr);
+                $this->baseData[$sid] = $remoteStr;
             }
-
-            // WATCH/MULTI conflict — concurrent writer beat us. Re-WATCH,
-            // read the current state, 3-way merge (base = our original
-            // read, local = our intended write, remote = current). Retry.
-            $redis->watch($key);
-            $remote = $redis->get($key);
-            $remoteStr = is_string($remote) ? $remote : '';
-            $base = $this->baseData[$sid] ?? '';
-            $sessionData = $this->merge3Sessions($base, $sessionData, $remoteStr);
-            $this->baseData[$sid] = $remoteStr;
-        }
-        unset($this->baseData[$sid]); // bound the map even when all retries fail
-        return false;
+            unset($this->baseData[$sid]); // bound the map even when all retries fail
+            return false;
+        }) === true;
     }
 
     /**
@@ -296,9 +355,13 @@ class RedisSessionHandler implements \SessionHandlerInterface
      */
     public function destroy($sessionId): bool
     {
-        $this->redis()->del($this->prefix . $sessionId);
-        unset($this->baseData[(string) $sessionId]);
-        return true;
+        $key = $this->prefix . $sessionId;
+        $sid = (string) $sessionId;
+        return $this->io(function (\Redis $redis) use ($key, $sid): bool {
+            $redis->del($key);
+            unset($this->baseData[$sid]);
+            return true;
+        }) === true;
     }
 
     /**
@@ -319,6 +382,10 @@ class RedisSessionHandler implements \SessionHandlerInterface
      */
     public function getRedis(): \Redis
     {
-        return $this->redis();
+        $conn = $this->io(static fn(\Redis $r): \Redis => $r);
+        if (!$conn instanceof \Redis) {
+            throw new \RuntimeException('RedisSessionHandler: Redis connection unavailable.');
+        }
+        return $conn;
     }
 }
