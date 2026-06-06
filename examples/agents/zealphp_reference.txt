@@ -5497,7 +5497,7 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.4.3 .
+docker build -t zealphp:0.4.4 .
 ```
 
 The shipped `Dockerfile` is PHP 8.4-cli on `bookworm` with OpenSwoole and
@@ -5509,7 +5509,7 @@ versions with the build args:
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
     --build-arg ZEALPHP_EXT_VERSION=v0.3.33 \
-    -t zealphp:0.4.3 .
+    -t zealphp:0.4.4 .
 ```
 
 ### Run (single container)
@@ -5521,7 +5521,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.4.3
+    zealphp:0.4.4
 ```
 
 ### Production compose
@@ -5532,7 +5532,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.4.3
+    image: registry.example.com/zealphp-app:0.4.4
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
