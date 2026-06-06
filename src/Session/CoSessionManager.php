@@ -27,8 +27,11 @@ use ZealPHP\RequestContext;
  *    (`zealphp_reset_request_rtcaches`, `zealphp_reset_request_statics`,
  *    `zealphp_reset_request_class_statics`) when `App::$silent_redeclare` is active.
  *
- * The session handler is resolved once per worker from `App::$session_handler`:
- * `null` → `TableSessionHandler` (default, concurrent-safe);
+ * The session handler is resolved once per worker via
+ * `App::resolveActiveSessionHandler()` from `App::$session_handler`:
+ * `null` (default, unconfigured) → the inline file path (NOT auto-promoted to
+ * `TableSessionHandler` — #295 preserves the historical file default);
+ * `'table'` → `TableSessionHandler` (concurrent-safe; opt in explicitly);
  * `'file'` → `FileSessionHandler`;
  * `'redis'` → `RedisSessionHandler`;
  * or any `\SessionHandlerInterface` instance passed directly.

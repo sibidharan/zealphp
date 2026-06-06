@@ -130,7 +130,7 @@ PHP,
   <tr><th>Handler</th><th>When used</th><th>Concurrency safety</th></tr>
   <tr>
     <td><code>TableSessionHandler</code></td>
-    <td>Default in coroutine mode (<code>null</code> auto-pick in <code>CoSessionManager</code>)</td>
+    <td>Opt in with <code>App::sessionHandler('table')</code> &mdash; concurrent-safe, no Redis. <strong>Not</strong> the unconfigured default (see the note under the table).</td>
     <td>Optimistic versioning: CAS version check + recursive 3-way merge on conflict. Up to 3 retries. No Redis required.</td>
   </tr>
   <tr>
@@ -145,19 +145,20 @@ PHP,
   </tr>
   <tr>
     <td><code>FileSessionHandler</code></td>
-    <td>Always used in sync (non-coroutine) modes (mixed/legacy-cgi — <code>SessionManager</code> hardcodes it regardless of <code>App::sessionHandler()</code>); or <code>App::sessionHandler('file')</code> in coroutine-family modes</td>
-    <td>Last-writer-wins plain <code>file_put_contents</code> in the handler class. The coroutine session write path (<code>zeal_session_write_close</code>) does a read-merge-write under <code>LOCK_EX</code> for file-backed sessions. Safe for sequential workers; not recommended under coroutine concurrency.</td>
+    <td>The <strong>unconfigured default in every mode</strong> (the inline file path used when <code>App::sessionHandler()</code> is <code>null</code>); or set explicitly with <code>App::sessionHandler('file')</code>.</td>
+    <td>Last-writer-wins plain <code>file_put_contents</code> in the handler class. The coroutine session write path (<code>zeal_session_write_close</code>) does a read-merge-write under <code>LOCK_EX</code> for file-backed sessions. Safe for sequential workers; not recommended under coroutine concurrency &mdash; opt into <code>'table'</code>/<code>'redis'</code> there.</td>
   </tr>
 </table>
 
 <?php App::render('/components/_code', [
     'label' => 'Selecting a session handler',
     'code'  => <<<'PHP'
-// App::sessionHandler() is honored only by CoSessionManager (coroutine + coroutine-legacy modes).
-// In sync modes (mixed / legacy-cgi), SessionManager always uses FileSessionHandler.
+// App::sessionHandler() is honored by BOTH session managers — CoSessionManager
+// (coroutine / coroutine-legacy) and SessionManager (sync mixed / legacy-cgi).
 
-// Default: TableSessionHandler is auto-selected in coroutine mode.
-// No call needed unless you want a different backend.
+// Default (no call): the framework inline FILE path in every mode — NOT
+// TableSessionHandler. Under coroutine concurrency, opt into a concurrent-safe
+// backend with App::sessionHandler('table') (or 'redis' for cross-node).
 
 // Force Redis (cross-node, WATCH/MULTI concurrency safety):
 App::sessionHandler('redis');   // requires Store::defaultBackend(Store::BACKEND_REDIS) or ext-redis

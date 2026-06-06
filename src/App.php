@@ -902,14 +902,16 @@ class App
 
     /**
      * Session storage backend. One of:
-     *   - `null` (default) — auto-pick based on lifecycle mode:
-     *       coroutine → TableSessionHandler (concurrent-safe, in-memory
-     *       + file backing), sync → FileSessionHandler (flock + file).
-     *   - `'table'` — force TableSessionHandler regardless of mode.
-     *   - `'file'`  — force FileSessionHandler (simple, key-level merge).
-     *   - `'redis'` — force RedisSessionHandler (cross-node, WATCH/MULTI).
+     *   - `null` (default) — the framework inline **file** path in ALL modes
+     *       (flock read-merge-write under `$session_save_path`). #295: deliberately
+     *       NOT auto-promoted to TableSessionHandler; the unconfigured default is
+     *       file-backed everywhere. Opt into a concurrent-safe backend explicitly.
+     *   - `'table'` — TableSessionHandler (concurrent-safe, in-memory + file backing).
+     *   - `'file'`  — FileSessionHandler (simple, key-level merge).
+     *   - `'redis'` — RedisSessionHandler (cross-node, WATCH/MULTI).
      *   - SessionHandlerInterface instance — bring your own.
      *
+     * Resolved via `App::resolveActiveSessionHandler()`.
      * Set via `App::sessionHandler('table')` BEFORE `App::run()`.
      *
      * @var string|\SessionHandlerInterface|null
@@ -3062,8 +3064,9 @@ class App
     /**
      * Session storage backend selector. See $session_handler docblock.
      * Pass 'table', 'file', 'redis', or a SessionHandlerInterface instance.
-     * `null` = auto-pick (TableSessionHandler in coroutine modes,
-     * FileSessionHandler in sync mode).
+     * `null` (default) = the framework inline file path in ALL modes — #295: NOT
+     * auto-promoted to TableSessionHandler. Honored by both CoSessionManager and
+     * (since #295) SessionManager.
      */
     public static function sessionHandler(string|\SessionHandlerInterface|null $handler = null): string|\SessionHandlerInterface|null
     {

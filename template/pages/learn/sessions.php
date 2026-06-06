@@ -116,12 +116,16 @@ App::sessionHandler('redis');   // or: session_set_save_handler(new RedisSession
 // Backend-agnostic (Table / Redis / Tiered — follows Store::defaultBackend())
 StoreSessionHandler::register(ttl: 1440);   // TTL in seconds
 
-// Default (coroutine mode): auto-selected as TableSessionHandler
-// — no call needed; CoSessionManager picks it when App::sessionHandler() is null</code></pre>
+// Single-server, concurrent-safe, no Redis: opt into the Table-backed handler
+App::sessionHandler('table');
+
+// Default when you call NOTHING: the framework inline FILE path (every mode) —
+// safe for sequential workers, but under coroutine concurrency pick 'table'/'redis'.</code></pre>
     <p>
-      For single-server apps the default (<code>TableSessionHandler</code>) is already coroutine-safe
-      with no Redis dependency — it&rsquo;s fast, it survives restart, and the files are debuggable
+      For single-server apps, <code>App::sessionHandler('table')</code> gives you a coroutine-safe
+      store with no Redis dependency — fast, survives restart, and the files are debuggable
       with <code>cat</code>. Swap to <code>RedisSessionHandler</code> when you add a second server.
+      (Leaving it unset uses the plain file path, which is last-writer-wins under concurrency.)
     </p>
 
     <?php App::render('/components/_callout', [
