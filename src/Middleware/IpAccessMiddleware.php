@@ -42,10 +42,14 @@ use ZealPHP\RequestContext;
  * `['allow' => ['10.0.0.0/8'], 'deny' => ['10.1.2.3']]` is "allow the
  * subnet except this specific host".
  *
- * Note on proxied apps: reads `$g->server['REMOTE_ADDR']`. If you're behind
- * Traefik/Caddy/nginx, that's the proxy IP, not the real client. Use
- * `App::clientIp()` (once available) and pass the value into a custom
- * middleware, or terminate the trust at the proxy layer.
+ * Note on proxied apps (#239): the client IP comes from `App::clientIp()`, which
+ * honours `App::$trusted_proxies` + `X-Forwarded-For`. It is spoof-safe — XFF is
+ * trusted ONLY when the socket peer is inside a configured trusted-proxy CIDR;
+ * otherwise it returns the raw peer. So behind Traefik/Caddy/nginx, set
+ * `App::$trusted_proxies` to your proxy CIDRs and allow/deny matches the real
+ * client. With no `trusted_proxies` configured it falls back to the socket peer
+ * (the proxy IP) — same as before — so an over-broad/unset trust list can't be
+ * used to spoof an allow/deny decision.
  *
  * Usage in `app.php`:
  *
@@ -94,8 +98,12 @@ class IpAccessMiddleware implements MiddlewareInterface
 
     private function clientIp(ServerRequestInterface $request): string
     {
-        $g = RequestContext::instance();
-        $ip = (string)($g->server['REMOTE_ADDR'] ?? '');
+        // #239 — honour App::$trusted_proxies (X-Forwarded-For), parity with
+        // RateLimit/ConcurrencyLimit. App::clientIp() is spoof-safe: it returns the
+        // raw socket peer and IGNORES XFF unless REMOTE_ADDR is in a trusted CIDR,
+        // so an unconfigured deployment behaves exactly like the old raw read; only
+        // a configured proxy chain promotes the real client IP.
+        $ip = \ZealPHP\App::clientIp();
         if ($ip !== '') {
             return $this->normalizeIp($ip);
         }

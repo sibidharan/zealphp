@@ -545,16 +545,21 @@ class RangeMiddlewareTest extends TestCase
         $this->assertSame(206, $response->getStatusCode());
     }
 
-    public function testMultiRangePreservesSpecOrder(): void
+    public function testMultiRangeNormalisesToAscendingOrder(): void
     {
-        // Reversed spec order must be preserved in the multipart body (not sorted).
+        // #230: disjoint specs given out of order are coalesced into ascending,
+        // non-overlapping order (RFC 9110 §14.2 permits the server to reorder
+        // multipart ranges). `bytes=14-17,0-4` → parts emitted 0-4 THEN 14-17.
+        // (Was testMultiRangePreservesSpecOrder, which pinned the pre-coalesce
+        // source-order behaviour replaced by the DoS-amplification fix.)
         $response = $this->dispatchRange('bytes=14-17,0-4');
         $body = (string) $response->getBody();
-        $posThis = strpos($body, 'bytes 14-17/54');
         $posHello = strpos($body, 'bytes 0-4/54');
-        $this->assertNotFalse($posThis);
+        $posThis = strpos($body, 'bytes 14-17/54');
         $this->assertNotFalse($posHello);
-        $this->assertLessThan($posHello, $posThis);
+        $this->assertNotFalse($posThis);
+        // Both disjoint specs survive, now ascending: 0-4 precedes 14-17.
+        $this->assertLessThan($posThis, $posHello);
     }
 
     public function testMultiRangeDefaultContentTypeWhenMissing(): void

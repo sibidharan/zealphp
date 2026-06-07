@@ -301,9 +301,12 @@ class SecurityTest extends TestCase
 
     public function testSetrawcookieRejectsControlChars(): void
     {
+        // #291 — PHP 8.4 raw-cookie semantics: a CRLF in the value throws
+        // ValueError (closes the Set-Cookie header-injection vector by refusing
+        // to emit, matching native PHP 8.4 rather than warn-and-return-false).
         $this->makeResponse();
-        $result = @\ZealPHP\setrawcookie('session', "abc\r\nSet-Cookie: admin=1");
-        $this->assertFalse($result);
+        $this->expectException(\ValueError::class);
+        \ZealPHP\setrawcookie('session', "abc\r\nSet-Cookie: admin=1");
     }
 
     // ─────────────────────────────────────────────────────────────

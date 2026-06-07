@@ -76,6 +76,21 @@ class RangeMiddleware implements MiddlewareInterface
             return $response;
         }
 
+        // Content-Encoding guard (#235): a content-coded body (gzip/br/deflate/…)
+        // is opaque at the byte level — slicing it would hand the client a
+        // fragment of the COMPRESSED stream, which decodes to garbage (or fails
+        // outright). RFC 9110 §14.1.1 ranges are over the *selected
+        // representation's* bytes; once a coding is applied we can't honour a
+        // byte range without first decoding. Bail: serve the full body and tell
+        // the client ranges aren't available here (Accept-Ranges: none), rather
+        // than emit a corrupt 206. `identity` means "no transformation", so it's
+        // treated as no encoding.
+        $contentEncoding = strtolower(trim($response->getHeaderLine('Content-Encoding')));
+        if ($contentEncoding !== '' && $contentEncoding !== 'identity') {
+            $this->setHeader($g, 'Accept-Ranges', 'none');
+            return $response->withHeader('Accept-Ranges', 'none');
+        }
+
         $total = strlen($body);
 
         // Always advertise range support on eligible responses
@@ -226,31 +241,94 @@ class RangeMiddleware implements MiddlewareInterface
             return $this->unsatisfiable($total, $g);
         }
 
+        // C2b (#230): coalesce overlapping/adjacent specs into their union
+        // BEFORE slicing. The per-request count cap (line ~145) bounds the spec
+        // COUNT, but not the total bytes copied — N specs that each name the
+        // whole body still substr-copy N × $total bytes (the CVE-2011-3192
+        // amplification: 199 identical full-body ranges → 199 copies). Merging
+        // into disjoint unions makes the summed slice length ≤ $total, so the
+        // response can never exceed the representation size regardless of how
+        // many (duplicate/overlapping) specs the attacker sends. Mirrors
+        // Apache's byterange merge (set_byterange / merging adjacent ranges).
+        $ranges = self::coalesceRanges($ranges);
+
         $contentType = $response->getHeaderLine('Content-Type') ?: 'application/octet-stream';
 
         if (count($ranges) === 1) {
-            return $this->singleRange($ranges[0], $body, $total, $g);
+            return $this->singleRange($ranges[0], $body, $total, $contentType, $g);
         }
 
         return $this->multiRange($ranges, $body, $total, $contentType, $g);
     }
 
     /**
+     * Coalesce a list of [start, end] byte ranges (inclusive) into the minimal
+     * set of disjoint ranges covering the same bytes.
+     *
+     * Sorts by start, then merges any spec that overlaps OR is immediately
+     * adjacent to the running union (`next.start <= cur.end + 1`). Because every
+     * input spec is already clamped to `[0, total-1]`, the union of the result
+     * can never exceed the representation size — this is the DoS-amplification
+     * cap (#230): Σ(end-start+1) over the coalesced ranges ≤ total, no matter how
+     * many duplicate/overlapping specs were supplied.
+     *
+     * Order is NOT preserved (the result is start-ascending) — multi-range
+     * clients receive a normalised, non-overlapping multipart body, which RFC
+     * 9110 §14.2 explicitly permits a server to produce.
+     *
+     * @param array<int, array{0: int, 1: int}> $ranges
+     * @return list<array{0: int, 1: int}>
+     */
+    private static function coalesceRanges(array $ranges): array
+    {
+        usort($ranges, static fn(array $a, array $b): int => $a[0] <=> $b[0] ?: $a[1] <=> $b[1]);
+
+        /** @var list<array{0: int, 1: int}> $merged */
+        $merged = [];
+        foreach ($ranges as [$start, $end]) {
+            if ($merged === []) {
+                $merged[] = [$start, $end];
+                continue;
+            }
+            $lastIndex = count($merged) - 1;
+            [$curStart, $curEnd] = $merged[$lastIndex];
+            // Overlapping or adjacent (touching, e.g. 0-4 and 5-9) → extend the
+            // union. +1 makes back-to-back ranges merge so the boundary byte
+            // isn't duplicated across two parts.
+            if ($start <= $curEnd + 1) {
+                $merged[$lastIndex] = [$curStart, max($curEnd, $end)];
+            } else {
+                $merged[] = [$start, $end];
+            }
+        }
+        return $merged;
+    }
+
+    /**
      * @param array{0: int, 1: int} $range
      */
-    private function singleRange(array $range, string $body, int $total, RequestContext $g): ResponseInterface
+    private function singleRange(array $range, string $body, int $total, string $contentType, RequestContext $g): ResponseInterface
     {
         [$start, $end] = $range;
         $slice  = substr($body, $start, $end - $start + 1);
         $crHeader = "bytes {$start}-{$end}/{$total}";
 
+        // Preserve the representation's Content-Type on the 206 (#237). The
+        // upstream 200 already carried it, but constructing a fresh PSR-7
+        // Response below drops every upstream header, so re-set it here — both
+        // on the $g wrapper queue (production wire path) and the returned PSR-7
+        // response (what callers/tests read). multiRange() already does the
+        // equivalent for its multipart Content-Type; singleRange() was the gap.
+        $this->setHeader($g, 'Content-Type', $contentType);
         $this->setHeader($g, 'Content-Range', $crHeader);
         $this->setHeader($g, 'Content-Length', (string) strlen($slice));
         $g->status = 206;
 
-        $resp = (new Response($slice, 206))->withHeader('Content-Range', $crHeader);
+        $resp = (new Response($slice, 206))->withHeader('Content-Type', $contentType);
         assert($resp instanceof ResponseInterface);
-        return $resp->withHeader('Accept-Ranges', 'bytes');
+        return $resp
+            ->withHeader('Content-Range', $crHeader)
+            ->withHeader('Accept-Ranges', 'bytes');
     }
 
     /**

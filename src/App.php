@@ -1251,6 +1251,20 @@ class App
     }
 
     /**
+     * Whether a status code MUST be sent without a message body (RFC 7230
+     * §3.3.2 / RFC 9110 §6.4.1): every 1xx informational response, plus
+     * `204 No Content` and `304 Not Modified`. For these, a server must emit
+     * neither a body nor a `Content-Length` / `Content-Type` header — a
+     * non-empty body is a framing violation that some clients treat as the
+     * start of the next response. The emit chokepoint uses this to drop any
+     * body a handler accidentally produced (#290).
+     */
+    public static function statusForbidsBody(int $status): bool
+    {
+        return ($status >= 100 && $status < 200) || $status === 204 || $status === 304;
+    }
+
+    /**
      * Look up an IANA reason phrase for the given status code. Used by
      * `emitStatus()` to pass an explicit reason to OpenSwoole's two-arg
      * `$response->status($code, $reason)` — required because the native
@@ -8453,22 +8467,37 @@ class App
                     // Response::emit()'s one-arg status() call, so codes like
                     // 451 (missing from OpenSwoole's native C list) emit
                     // correctly. Body/header transcription mirrors vendor.
-                    App::emitStatus($response->parent, $serverResponse->getStatusCode());
+                    $emitStatus = $serverResponse->getStatusCode();
+                    App::emitStatus($response->parent, $emitStatus);
+                    // RFC 7230 §3.3.2: 1xx / 204 / 304 MUST carry no body and no
+                    // Content-Length / Content-Type. Drop both even if a handler
+                    // produced a body (e.g. http_response_code(204); echo "x";) so
+                    // the wire stays conformant and clients don't mis-frame (#290).
+                    $forbidsBody = App::statusForbidsBody($emitStatus);
                     foreach ($serverResponse->getHeaders() as $hName => $hValues) {
+                        if ($forbidsBody
+                            && (strcasecmp($hName, 'Content-Length') === 0
+                                || strcasecmp($hName, 'Content-Type') === 0)) {
+                            continue;
+                        }
                         foreach ($hValues as $hValue) {
                             $response->parent->header($hName, $hValue);
                         }
                     }
-                    $body = $serverResponse->getBody();
-                    $body->rewind();
-                    $chunkSize = \OpenSwoole\Core\Psr\Response::CHUNK_SIZE;
-                    if ($body->getSize() > $chunkSize) {
-                        while (!$body->eof()) {
-                            $response->parent->write($body->read($chunkSize));
-                        }
+                    if ($forbidsBody) {
                         $response->parent->end();
                     } else {
-                        $response->parent->end($body->getContents());
+                        $body = $serverResponse->getBody();
+                        $body->rewind();
+                        $chunkSize = \OpenSwoole\Core\Psr\Response::CHUNK_SIZE;
+                        if ($body->getSize() > $chunkSize) {
+                            while (!$body->eof()) {
+                                $response->parent->write($body->read($chunkSize));
+                            }
+                            $response->parent->end();
+                        } else {
+                            $response->parent->end($body->getContents());
+                        }
                     }
                 }
                 access_log($serverResponse->getStatusCode(), 0);

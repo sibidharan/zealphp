@@ -68,7 +68,16 @@ class ScopedMiddlewareTest extends TestCase
 
     private function process(ScopedMiddleware $mw, string $path): ResponseInterface
     {
-        $request = new ServerRequest($path, 'GET', '', []);
+        // Simulate the real server: the PSR ServerRequest carries the raw inbound
+        // target in getServerParams()['REQUEST_URI'] (LazyServerRequest derives it
+        // from OpenSwoole's request->server). ScopedMiddleware reads + normalizes
+        // that — the same source the router dispatches on — so the `//admin` case is
+        // exercised faithfully (the PSR Uri parser alone would treat `//admin` as
+        // authority and drop it).
+        // serverParams is the 7th positional arg (uri, method, body, headers,
+        // cookies, queryParams, serverParams) — pass REQUEST_URI there so
+        // getServerParams() carries it, mirroring the real LazyServerRequest.
+        $request = new ServerRequest($path, 'GET', '', [], [], [], ['REQUEST_URI' => $path]);
         $handler = new class implements RequestHandlerInterface {
             public function handle(ServerRequestInterface $request): ResponseInterface
             {
@@ -86,5 +95,39 @@ class ScopedMiddlewareTest extends TestCase
                 return new Response('blocked', 403, '', ['Content-Type' => 'text/plain']);
             }
         };
+    }
+
+    // #232 — the scope must match on the NORMALIZED path (the one the router
+    // dispatches against), so a guard scoped to /admin can't be bypassed with
+    // /./admin or //admin. Pre-fix these returned 200 (inner skipped) while the
+    // request still routed to /admin — an auth/IP/php-block bypass.
+
+    public function testDotSegmentDoesNotBypassScopedGuard(): void
+    {
+        $mw = ScopedMiddleware::location($this->blockingInner(), '/admin');
+        $response = $this->process($mw, '/./admin/secret');
+        $this->assertSame(403, $response->getStatusCode(), '/./admin must still be in scope');
+    }
+
+    public function testDoubleSlashDoesNotBypassScopedGuard(): void
+    {
+        $mw = ScopedMiddleware::location($this->blockingInner(), '/admin');
+        $response = $this->process($mw, '//admin/secret');
+        $this->assertSame(403, $response->getStatusCode(), '//admin must still be in scope');
+    }
+
+    public function testMixedDotAndSlashDoesNotBypassScopedGuard(): void
+    {
+        $mw = ScopedMiddleware::location($this->blockingInner(), '/admin');
+        $response = $this->process($mw, '/.//admin/secret');
+        $this->assertSame(403, $response->getStatusCode(), '/.//admin must still be in scope');
+    }
+
+    public function testNormalizedPathStillRejectsTrulyOutOfScope(): void
+    {
+        // Guard against over-normalization: a genuinely out-of-scope path stays out.
+        $mw = ScopedMiddleware::location($this->blockingInner(), '/admin');
+        $response = $this->process($mw, '/./public/page');
+        $this->assertSame(200, $response->getStatusCode(), '/public is out of scope → inner skipped');
     }
 }
