@@ -7,7 +7,7 @@
       'title'    => 'Async Patterns',
       'subtitle' => 'Channels, error handling, task workers, race conditions. Foundations covers the model.',
       'prev'     => ['slug' => 'learn/routing',     'title' => 'Routes & APIs'],
-      'next'     => ['slug' => 'learn/deployment',  'title' => 'Ship It'],
+      'next'     => ['slug' => 'learn/legacy-modes', 'title' => 'Lifecycle Modes & Legacy Apps'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
@@ -285,9 +285,9 @@ $counter->increment();</code></pre>
       <a class="lesson-chip lesson-chip-prev" href="/learn/routing"
          hx-get="/api/learn/page?slug=learn/routing" hx-target=".lesson-content"
          hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/routing">← Routes & APIs</a>
-      <a class="lesson-chip lesson-chip-next" href="/learn/deployment"
-         hx-get="/api/learn/page?slug=learn/deployment" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/deployment">Ship It →</a>
+      <a class="lesson-chip lesson-chip-next" href="/learn/legacy-modes"
+         hx-get="/api/learn/page?slug=learn/legacy-modes" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/legacy-modes">Lifecycle Modes →</a>
     </div>
   </article>
 </div>

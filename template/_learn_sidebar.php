@@ -39,6 +39,7 @@ $groups = [
   'Under the Hood' => [
     ['learn/routing',          'Routes & APIs'],
     ['learn/async',            'Async & Coroutines'],
+    ['learn/legacy-modes',     'Lifecycle Modes'],
     ['learn/deployment',       'Ship It'],
   ],
 ];
