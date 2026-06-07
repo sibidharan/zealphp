@@ -1305,13 +1305,13 @@ App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc', 'interpreter' => '/usr/bin/py
 // Takes the same mode / interpreter / address / fcgi_params config as registerCgiBackend().
 PHP]); ?>
 <div class="callout warn legacy-mt-prose-mb">
-  <p><strong>Known limitation.</strong> <code>cgiScriptAlias()</code> registers the resolution + ExecCGI scope, but URL-level implicit routing is wired <strong>per-extension only</strong>. A ScriptAlias-only setup (no matching <code>registerCgiBackend()</code>) is reachable via <code>App::include()</code> but does not yet get an automatic <code>/{file}.&lt;ext&gt;</code> route. Pair it with a per-extension backend whose <code>exec_paths</code> covers the same prefix for auto-routed implicit URLs, or add an explicit route. (Follow-up.)</p>
+  <p><strong>Implicit URL routing is automatic for ScriptAlias prefixes.</strong> <code>run()</code> registers an implicit <code>patternRoute</code> for every <code>cgiScriptAlias()</code> prefix, so a ScriptAlias-only setup (no matching <code>registerCgiBackend()</code>) gets an automatic GET/POST route — <code>cgiScriptAlias('/cgi-bin', ['mode' =&gt; 'proc'])</code> alone makes <code>GET /cgi-bin/hello.sh</code> work (the file runs via its <code>#!</code> shebang). A per-extension backend is only needed when you want a specific interpreter (e.g. <code>.py</code> &rarr; python3).</p>
 </div>
 
 <h3 class="legacy-mt-sm">pool mode — PHP only constraint</h3>
 <div class="callout warn legacy-mt-prose-mb">
   <p><strong>Why pool is PHP-only.</strong> <code>'pool'</code> pre-spawns PHP subprocesses that inherit the ZealPHP boot environment and reset global scope between requests. This warm-subprocess mechanism is specific to the PHP runtime. For other languages, use <code>'fcgi'</code> (warm pool managed by the language runtime) or <code>'proc'</code> (spawn on demand).</p>
-  <p>Attempting <code>App::registerCgiBackend('.py', ['mode' =&gt; 'pool'])</code> throws <code>\InvalidArgumentException</code> with the message: <em>"pool mode requires a PHP target; use 'fcgi' (warm pool, language-agnostic) or 'proc' for .py"</em>.</p>
+  <p>Attempting <code>App::registerCgiBackend('.py', ['mode' =&gt; 'pool'])</code> throws <code>\InvalidArgumentException</code> with the message: <em>"pool mode requires a PHP target; use 'fcgi' (warm external pool, language-agnostic) or 'proc' for .py"</em>.</p>
 </div>
 
 <h3 class="legacy-mt-sm">Reader: App::resolveCgiBackend()</h3>

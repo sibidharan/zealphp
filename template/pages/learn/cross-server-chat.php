@@ -240,7 +240,7 @@ App::ws('/chat',
 
 // Anywhere:
 WSRouter::sendToClient('alice', json_encode(['from' =&gt; 'bob', 'text' =&gt; 'hi']));
-WSRouter::broadcast('chat:room:42', json_encode(['hello' =&gt; 'everyone']));</code></pre>
+WSRouter::broadcast('chat.room.42', json_encode(['hello' =&gt; 'everyone']));</code></pre>
     <p>
       Same machinery, one boot call, two per-connection calls, two send helpers. Use the helper for
       new code; the four-step manual build above is for <em>understanding</em> what the helper is doing.
@@ -280,7 +280,7 @@ App::ws('/chat',
         WSRouter::own($username, $request-&gt;fd);
 
         // 3. Join whatever rooms the user belongs to.
-        WSRouter::room('chat:room:42')-&gt;join($username);
+        WSRouter::room('chat.room.42')-&gt;join($username);
     },
     onClose: function ($server, $fd) {
         // Find which user owned this fd + release on disconnect:
@@ -298,7 +298,7 @@ App::ws('/chat',
 <pre><code class="language-php">use ZealPHP\WSRouter;
 
 // In your handlers, $username is the SAME identifier you passed to WSRouter::own():
-$room = WSRouter::room('chat:room:42');
+$room = WSRouter::room('chat.room.42');
 $room-&gt;join($username);                 // SADD-equivalent + presence event broadcast cluster-wide
 
 // From anywhere on any server. Payload schema is APP-DEFINED — the

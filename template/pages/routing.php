@@ -240,7 +240,7 @@ PHP
 
 <!-- Injection cases -->
 <h2 class="route-h2">Parameter injection — every case</h2>
-<p class="route-mb-1-5">All panels below auto-run against the live server. The handler signature determines what gets injected. <code>$req</code> / <code>$res</code> are accepted as short aliases for <code>$request</code> / <code>$response</code> — an explicit <code>{req}</code> / <code>{res}</code> URL segment still wins.</p>
+<p class="route-mb-1-5">All panels below auto-run against the live server. The handler signature determines what gets injected. <code>$req</code> / <code>$res</code> are accepted as short aliases for <code>$request</code> / <code>$response</code> — and the reserved framework-object names bind the injected object <strong>before</strong> any same-named URL segment (security fix #240), so <code>function($req)</code> always receives the wrapper, never a path string.</p>
 
 <?php
 $cases = [
@@ -326,8 +326,8 @@ foreach ($routeTypes as [$id, $title, $url, $code]) {
 
 <table class="ztable">
 <tr><th>#</th><th>Source</th><th>Loaded</th></tr>
-<tr><td>1</td><td>Files in <code>route/*.php</code></td><td>At server startup (auto-included via <code>glob</code>)</td></tr>
-<tr><td>2</td><td>Explicit <code>$app->route()</code> in <code>app.php</code></td><td>Before <code>$app->run()</code></td></tr>
+<tr><td>1</td><td>Explicit <code>$app->route()</code> in <code>app.php</code></td><td>Before <code>$app->run()</code> (already in the table when <code>run()</code> starts)</td></tr>
+<tr><td>2</td><td>Files in <code>route/*.php</code></td><td>At server startup (auto-included by <code>run()</code> via <code>glob</code>, after app.php routes)</td></tr>
 <tr><td>3</td><td>Implicit API: <code>/api/{module}/{request}</code></td><td>Inside <code>$app->run()</code></td></tr>
 <tr><td>4</td><td>Implicit public files: <code>/</code>, <code>/{file}</code>, <code>/{dir}/{uri}</code></td><td>Inside <code>$app->run()</code></td></tr>
 <tr><td>5</td><td>Fallback handler (if <code>setFallback()</code> registered)</td><td>When nothing else matches</td></tr>

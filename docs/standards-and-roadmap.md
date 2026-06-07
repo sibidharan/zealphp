@@ -27,8 +27,8 @@ ZealPHP positions itself as a modern PHP framework that blends the productivity 
 ### htmx Convention
 The site uses htmx globally with `hx-boost="true"` on `<body>` for automatic AJAX navigation with progressive enhancement. Prefer htmx attributes (`hx-get`, `hx-post`, `hx-target`, `hx-swap`) over custom `fetch()`. Use WebSocket or SSE for server-push.
 
-### Known Tech Debt
-Legacy demo pages contain ~600 inline `style=` attributes and 10+ inline `<script>` blocks (worst: `home.php`, `performance.php`, `why-zealphp.php`). When modifying these files, extract inline JS/CSS to external files rather than adding more.
+### Separation of concerns (enforced)
+The inline `style=` / inline `<script>` debt was fully cleared in the Dec-2024 sweep — the ~1200 inline styles moved to `public/css/pages/*.css` and the inline scripts to `public/js/{,pages/}*.js`. The contract is now enforced: templates produce HTML only; CSS goes in `public/css/`, JS in `public/js/`. The single allowed `style=` left in `template/` is inside an escaped `<pre><code>` sample (displayed code, not a real attribute). Don't reintroduce inline styles/scripts.
 
 ## PSR Interoperability
 

@@ -138,7 +138,7 @@ $get = function($request, $response) {
 PHP]); ?>
 
 <div class="callout info apidoc-mt-half">
-<strong>Three equivalent ways to read query params</strong> inside an API handler — all are per-request safe (none touch the process-wide <code>$_GET</code> superglobal): <code>$request-&gt;get['id']</code> (injected parameter, cleanest), <code>RequestContext::instance()-&gt;get['id']</code> (useful when you also need <code>$g-&gt;session</code>), or <code>$this-&gt;_request-&gt;get['id']</code> (legacy form — works because the closure is bound to the <code>ZealAPI</code> instance and <code>$_request</code> is the same wrapper). Prefer the injected <code>$request</code> for new code. ZealAPI does NOT auto-inject <code>$g</code> by name — call <code>RequestContext::instance()</code> explicitly when you need it.
+<strong>Three equivalent ways to read query params</strong> inside an API handler — all are per-request safe (none touch the process-wide <code>$_GET</code> superglobal): <code>$request-&gt;get['id']</code> (injected parameter, cleanest), <code>RequestContext::instance()-&gt;get['id']</code> (useful when you also need <code>$g-&gt;session</code>), or <code>$this-&gt;_request['id']</code> (legacy form — <code>$this-&gt;_request</code> is the <strong>sanitized input array</strong> <code>ZealAPI</code> builds via <code>cleanInputs()</code>, so index it directly: <code>$this-&gt;_request['id']</code>, not <code>-&gt;get['id']</code>). Prefer the injected <code>$request</code> for new code. ZealAPI does NOT auto-inject <code>$g</code> by name — call <code>RequestContext::instance()</code> explicitly when you need it.
 </div>
 
 <h2>Streaming from APIs</h2>

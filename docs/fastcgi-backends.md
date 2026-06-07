@@ -130,12 +130,13 @@ regardless of extension. It takes the same `mode` / `interpreter` / `address` /
 App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc', 'interpreter' => '/usr/bin/python3']);
 ```
 
-> **Known limitation.** `cgiScriptAlias()` registers the resolution + ExecCGI
-> scope, but URL-level implicit routing is wired **per-extension only**. A
-> ScriptAlias-only setup (no matching `registerCgiBackend()`) is reachable via
-> `App::include()` but does not yet get an automatic `/{file}.<ext>` route.
-> Pair it with a per-extension backend (whose `exec_paths` covers the same
-> prefix) for auto-routed implicit URLs, or add an explicit route. (Follow-up.)
+> **Implicit URL routing is automatic for ScriptAlias prefixes.** `run()`
+> registers a `patternRoute('#^<prefix>/(?P<rest>.+?)/?$#', …)` for every
+> `cgiScriptAlias()` prefix (`registerImplicitRoutes()`), so a ScriptAlias-only
+> setup — no matching `registerCgiBackend()` — gets an automatic GET/POST route:
+> `cgiScriptAlias('/cgi-bin', ['mode' => 'proc'])` alone makes `GET /cgi-bin/hello.sh`
+> work (the file runs via its `#!` shebang). A per-extension backend is only needed
+> when you want a specific interpreter (e.g. `.py` → python3).
 
 ---
 

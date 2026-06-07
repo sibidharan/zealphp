@@ -271,7 +271,7 @@ Handlers can declare special parameters to access framework objects:
 - `$response` – `ZealPHP\HTTP\Response` wrapper
 - `$app` – the current `ZealPHP\App` instance
 
-`$req` / `$res` are accepted as short aliases for `$request` / `$response` — they receive the exact same wrapper instances. An explicit `{req}` / `{res}` URL segment still wins: a matched path parameter binds by name before the alias is considered.
+`$req` / `$res` are accepted as short aliases for `$request` / `$response` — they receive the exact same wrapper instances. The reserved framework-object names (`request` / `req` / `response` / `res` / `app`) bind the injected object **before** any same-named URL segment (security fix #240), so a handler typed `function($req)` always receives the wrapper — never an attacker-controllable path string. A URL segment that happens to use a reserved name is unbindable to that handler parameter; name it something else to read the segment.
 
 To access the underlying `OpenSwoole\HTTP\Server`, call `App::getServer()` — it is not an injectable handler parameter.
 

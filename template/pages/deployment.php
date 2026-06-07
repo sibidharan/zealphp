@@ -75,7 +75,7 @@ BASH
 <h3 class="deploy-h3">Site</h3>
 <table class="ztable deploy-table">
   <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-  <tr><td><code>ZEALPHP_SITE_URL</code></td><td>request host</td><td>Canonical site URL used by helpers and absolute-URL generation</td></tr>
+  <tr><td><code>ZEALPHP_SITE_URL</code></td><td>falls back to <code>ZEALPHP_SITE_HOST</code>, then <code>https://php.zeal.ninja</code></td><td>Canonical site URL used by <code>site_url()</code> and absolute-URL generation (never derived from the request host)</td></tr>
   <tr><td><code>ZEALPHP_SITE_HOST</code></td><td>—</td><td>Fallback host if <code>ZEALPHP_SITE_URL</code> is not set</td></tr>
 </table>
 

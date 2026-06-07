@@ -378,7 +378,7 @@ Chatroom::broadcast_to_room($server, $room, $payload);</code></pre>
         <pre><code class="language-php">Store::defaultBackend(Store::BACKEND_REDIS);
 WSRouter::init();
 // onMessage handler:
-$room = WSRouter::room('chat:' . $name);
+$room = WSRouter::room('chat.' . $name);  // room names allow [A-Za-z0-9_.-] — no ':' (#247)
 $room-&gt;join($username);
 $room-&gt;push($payload);</code></pre>
         <p>Cluster-wide membership + pub/sub fan-out. Same handler shape; different fabric.</p>

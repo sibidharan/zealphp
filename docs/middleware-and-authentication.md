@@ -487,9 +487,11 @@ $map = $app->describeRoutes();
 // [
 //   'global'  => ['CorsMiddleware', 'ETagMiddleware', 'ResponseMiddleware (router)'],
 //   'aliases' => ['auth', 'admin-only', 'throttle', 'request-id'],
+//   'when'    => [ ['scope' => '/internal', 'middleware' => ['IpAccessMiddleware']] ],
 //   'routes'  => [
 //     ['methods' => ['GET'], 'path' => '/admin/users',
-//      'middleware' => ['auth', 'request-id', 'IpAccessMiddleware'], 'handler' => 'Closure'],
+//      'middleware' => ['auth', 'request-id', 'IpAccessMiddleware'],
+//      'handler' => 'Closure', 'backend' => null],  // 'backend' = per-route CGI backend (or null)
 //   ],
 // ]
 ```

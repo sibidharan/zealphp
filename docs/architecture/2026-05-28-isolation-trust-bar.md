@@ -1,7 +1,7 @@
 # The Isolation Trust-Bar — running request-style PHP under coroutine concurrency
 
 **Date:** 2026-05-28
-**Mode under test:** `App::mode('coroutine-legacy')` = `superglobals(true)` + `isolation(coroutine)` + `silentRedeclare` + `includeIsolation` (Stage 7) + `coroutineGlobalsIsolation` + `defineIsolation`, on OpenSwoole 26.2.0 + ext-zealphp.
+**Mode under test:** `App::mode('coroutine-legacy')` = `superglobals(true)` + `isolation(coroutine)` + `silentRedeclare` + `includeIsolation` (Stage 7) + `coroutineGlobalsIsolation` + `coroutineStaticsIsolation`, on OpenSwoole 26.2.0 + ext-zealphp. (`defineIsolation` is a standalone opt-in — NOT auto-enabled by the preset.)
 
 ---
 
