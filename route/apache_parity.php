@@ -36,10 +36,14 @@ $app->route('/parity/headers-sent', ['methods' => ['GET']], function() {
     return ['sent' => headers_sent()];
 });
 
-// setrawcookie — value should NOT be urlencoded.
+// setrawcookie — value should NOT be urlencoded. The value uses special chars
+// `setcookie()` WOULD percent-encode (`+`/`/`/`:`) but that are valid in a raw
+// cookie value and accepted by PHP 8.4's setrawcookie (which rejects SP/`,`/`;`/
+// control chars with a ValueError) — so this proves "no url-encoding" without
+// tripping the 8.4 validation (#291).
 $app->route('/parity/setrawcookie', ['methods' => ['GET']], function() {
-    setrawcookie('rawck', 'a b+c/d', 0, '/');
-    setcookie('regularck', 'a b+c/d', 0, '/');
+    setrawcookie('rawck', 'a+b/c:d', 0, '/');
+    setcookie('regularck', 'a+b/c:d', 0, '/');
     return ['ok' => true];
 });
 

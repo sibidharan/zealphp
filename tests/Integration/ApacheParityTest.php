@@ -61,7 +61,10 @@ class ApacheParityTest extends TestCase
     {
         $r = $this->get('/parity/setrawcookie');
         $setCookie = $r['headers']['set-cookie'] ?? '';
-        $this->assertStringContainsString('rawck=a b+c/d', $setCookie,
+        // `+`/`/`/`:` are kept verbatim by setrawcookie (setcookie would
+        // percent-encode them). A space/`,`/`;` would trip PHP 8.4's ValueError
+        // guard (#291), so the parity value deliberately avoids those.
+        $this->assertStringContainsString('rawck=a+b/c:d', $setCookie,
             "setrawcookie should preserve special chars verbatim: $setCookie");
     }
 
