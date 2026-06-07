@@ -3,10 +3,10 @@
   <?php App::render('/_learn_sidebar', ['active' => $active]); ?>
   <article class="lesson-content">
     <?php App::render('/components/_lesson_header', [
-      'number'   => 26,
+      'number'   => 27,
       'title'    => 'Ship It',
       'subtitle' => 'From localhost to production. Plus: when to use ZealPHP and when not to.',
-      'prev'     => ['slug' => 'learn/async', 'title' => 'Async Patterns'],
+      'prev'     => ['slug' => 'learn/legacy-modes', 'title' => 'Lifecycle Modes & Legacy Apps'],
     ]); ?>
 
     <?php App::render('/components/_youwilllearn', ['items' => [
@@ -187,9 +187,9 @@ ZEALPHP_LOG_DIR           # Log directory (default: /tmp/zealphp)</code></pre>
     </div>
 
     <div class="lesson-chips">
-      <a class="lesson-chip lesson-chip-prev" href="/learn/async"
-         hx-get="/api/learn/page?slug=learn/async" hx-target=".lesson-content"
-         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/async">← Async Patterns</a>
+      <a class="lesson-chip lesson-chip-prev" href="/learn/legacy-modes"
+         hx-get="/api/learn/page?slug=learn/legacy-modes" hx-target=".lesson-content"
+         hx-swap="outerHTML show:.learn-layout:top" hx-push-url="/learn/legacy-modes">← Lifecycle Modes</a>
     </div>
   </article>
 </div>

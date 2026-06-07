@@ -36,6 +36,10 @@ All notable changes to this project will be documented in this file. The format 
 
 - **`Response::stream()` / `sse()` strip the body on HEAD (#238).** Both wrote the streamed body on a HEAD request (RFC 9110 §9.3.2 violation; SSE left an open stream a HEAD probe never expects). They now emit headers only and end, mirroring the Generator streaming path.
 
+### Documentation
+
+- **New learn lesson: "Lifecycle Modes & Legacy Apps" (`/learn/legacy-modes`, lesson 26).** Covers the four runtime modes, a decision guide (new apps → `coroutine`; Composer legacy → `mixed`; unmodified WordPress → `legacy-cgi`; both-superglobals-and-concurrency → `coroutine-legacy`), and an honest **why-`coroutine-legacy`-is-experimental** breakdown (needs ext-zealphp; the "old PHP just works" promise is conditional on warming the class graph; open `require_once`-WordPress teardown/leak issues; opcache rebinding). Inserted Under-the-Hood between Async and Ship-It; the `mental-model` + `lifecycle` callouts now state the reasons and link to it.
+
 ## [0.4.4] - 2026-06-06
 
 A focused follow-up release: the #285 `RedisSessionHandler` coroutine-safety fix — the `open()`-path sequel to #271 — so apps installing their own Redis save handler under `superglobals(true)` no longer crash workers outside a request coroutine.

@@ -18,7 +18,7 @@ ${basename(__FILE__, '.php')} = function () {
         'learn/notes', 'learn/ai-chat', 'learn/websocket', 'learn/tictactoe',
         'learn/chatroom',
         'learn/cross-server-chat',
-        'learn/routing', 'learn/async', 'learn/deployment'];
+        'learn/routing', 'learn/async', 'learn/legacy-modes', 'learn/deployment'];
 
     if ($slug === '') $slug = 'learn';
     if (!in_array($slug, $allowed, true)) {
