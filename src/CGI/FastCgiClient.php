@@ -4,16 +4,18 @@ declare(strict_types=1);
 
 namespace ZealPHP\CGI;
 
-use OpenSwoole\Coroutine\Client as CoClient;
 
 /**
  * FastCGI 1.0 `RESPONDER` client for ZealPHP's `cgiMode('fcgi')` dispatch path.
  *
  * Implements the FCGI binary protocol (`BEGIN_REQUEST` → `PARAMS` → `STDIN` →
- * `STDOUT` + `STDERR` + `END_REQUEST`) **over an `OpenSwoole\Coroutine\Client`
- * socket** — every `send()` / `recv()` yields under the OpenSwoole event loop,
- * so the call never blocks the worker. The protocol framing is hand-written
- * in PHP; the socket layer is OpenSwoole-native.
+ * `STDOUT` + `STDERR` + `END_REQUEST`) over a pluggable {@see FcgiTransport}.
+ * The protocol framing is hand-written in PHP; only connect/send/recv touch the
+ * socket, and `connect()` picks the transport by coroutine context (#289):
+ * {@see FcgiCoroutineTransport} (yields under the event loop) when inside a
+ * coroutine, {@see FcgiBlockingTransport} (plain blocking socket) when outside
+ * one — so the `legacy-cgi` / `superglobals(true)` lifecycles never nest a
+ * coroutine scheduler inside the reactor callback (the #261→#289 hang).
  *
  * Why hand-rolled framing — `OpenSwoole\Coroutine\FastCGI\Client` does NOT exist
  * in OpenSwoole 26.2 (upstream Swoole ships `Swoole\Coroutine\FastCGI\Client` but
@@ -92,28 +94,34 @@ final class FastCgiClient
 
     // ── Connection ───────────────────────────────────────────────────────────
 
-    private function connect(): CoClient
+    private function connect(): FcgiTransport
     {
         if (str_starts_with($this->address, 'unix:')) {
-            $conn = new CoClient(SWOOLE_UNIX_STREAM);
-            $path = substr($this->address, 5);
-            $ok   = $conn->connect($path, 0, (float) $this->timeout);
+            $isUnix = true;
+            $host   = substr($this->address, 5);
+            $port   = 0;
         } else {
-            $conn = new CoClient(SWOOLE_SOCK_TCP);
-            $parts = explode(':', $this->address, 2);
-            $host  = $parts[0];
-            $port  = isset($parts[1]) ? (int) $parts[1] : 9000;
-            $ok    = $conn->connect($host, $port, (float) $this->timeout);
+            $isUnix = false;
+            $parts  = explode(':', $this->address, 2);
+            $host   = $parts[0];
+            $port   = isset($parts[1]) ? (int) $parts[1] : 9000;
         }
 
-        if (!$ok) {
-            $errMsg = is_string($conn->errMsg) ? $conn->errMsg : 'unknown error';
-            throw new FastCgiException(
-                "FastCGI: cannot connect to {$this->address}: {$errMsg}"
-            );
-        }
+        // #289 — pick the transport by coroutine context. Inside a coroutine
+        // (getCid() >= 0, e.g. an fcgi backend reached from coroutine mode) use the
+        // yielding OpenSwoole client. OUTSIDE a coroutine (legacy-cgi /
+        // superglobals(true), where the request handler is not coroutine-wrapped)
+        // use a BLOCKING socket — #261 wrapped the coroutine client in a nested
+        // Coroutine::run() there, which deadlocks the FCGI read because the reactor
+        // callback that started it is parked waiting for the very scheduler that
+        // needs the reactor to deliver the socket event (#289). A blocking socket
+        // has no scheduler to deadlock and is the correct synchronous behaviour.
+        $transport = \OpenSwoole\Coroutine::getCid() >= 0
+            ? new FcgiCoroutineTransport($host, $port, $isUnix, (float) $this->timeout)
+            : new FcgiBlockingTransport($host, $port, $isUnix, (float) $this->timeout);
 
-        return $conn;
+        $transport->connect();
+        return $transport;
     }
 
     // ── Record framing (send side) ───────────────────────────────────────────
@@ -154,7 +162,7 @@ final class FastCgiClient
      * Body layout: `roleB1(1) roleB0(1) flags(1) reserved×5`
      * Source: `mod_proxy_fcgi.c:321-339`, FCGI spec §5.1
      */
-    private function sendBeginRequest(CoClient $conn, int $reqId): void
+    private function sendBeginRequest(FcgiTransport $conn, int $reqId): void
     {
         $body = pack(
             'nCCCCCC',
@@ -174,7 +182,7 @@ final class FastCgiClient
      *
      * @param array<string,string> $params
      */
-    private function sendParams(CoClient $conn, int $reqId, array $params): void
+    private function sendParams(FcgiTransport $conn, int $reqId, array $params): void
     {
         $encoded = $this->encodeParams($params);
 
@@ -193,7 +201,7 @@ final class FastCgiClient
      * Send `STDIN` record(s) followed by empty `STDIN` terminator.
      * Source: `mod_proxy_fcgi.c:742-758`
      */
-    private function sendStdin(CoClient $conn, int $reqId, string $body): void
+    private function sendStdin(FcgiTransport $conn, int $reqId, string $body): void
     {
         if ($body !== '') {
             $chunks = str_split($body, self::MAX_CONTENT);
@@ -208,7 +216,7 @@ final class FastCgiClient
     /**
      * Send `ABORT_REQUEST` to the backend (client disconnect / error path).
      */
-    private function sendAbort(CoClient $conn, int $reqId): void
+    private function sendAbort(FcgiTransport $conn, int $reqId): void
     {
         try {
             $this->sendRaw($conn, $this->encodeRecord(self::FCGI_ABORT_REQUEST, $reqId, ''));
@@ -217,13 +225,10 @@ final class FastCgiClient
         }
     }
 
-    private function sendRaw(CoClient $conn, string $data): void
+    private function sendRaw(FcgiTransport $conn, string $data): void
     {
-        $result = $conn->send($data);
-        if ($result === false) {
-            $errMsg = is_string($conn->errMsg) ? $conn->errMsg : 'unknown error';
-            throw new FastCgiException("FastCGI: send failed: {$errMsg}");
-        }
+        // The transport sends all bytes and throws FastCgiException on a write error.
+        $conn->send($data);
     }
 
     // ── NV-pair encoding (FCGI §3.4) ─────────────────────────────────────────
@@ -274,7 +279,7 @@ final class FastCgiClient
      *
      * @return array{status:int,headers:list<array{0:string,1:string}>,body:string,stderr:string}
      */
-    public function readResponse(CoClient $conn, int $reqId): array
+    public function readResponse(FcgiTransport $conn, int $reqId): array
     {
         $stdoutBuf = '';
         $stderrBuf = '';
@@ -413,22 +418,22 @@ final class FastCgiClient
      * OpenSwoole sockets can return short reads; this loop ensures the full
      * requested byte count is available before proceeding (partial-frame defence).
      */
-    public function recvExact(CoClient $conn, int $n): string
+    public function recvExact(FcgiTransport $conn, int $n): string
     {
         $buf       = '';
         $remaining = $n;
 
         while ($remaining > 0) {
+            // The transport throws FastCgiException on a hard error/timeout and
+            // returns '' on a clean EOF (peer closed mid-record).
             $chunk = $conn->recv($remaining);
-            if ($chunk === false || $chunk === '') {
-                $errMsg = is_string($conn->errMsg) ? $conn->errMsg : 'connection closed';
+            if ($chunk === '') {
                 throw new FastCgiException(
-                    "FastCGI: connection closed while reading ({$remaining} of {$n} bytes remaining): {$errMsg}"
+                    "FastCGI: connection closed while reading ({$remaining} of {$n} bytes remaining)"
                 );
             }
-            $chunkStr   = is_string($chunk) ? $chunk : '';
-            $buf       .= $chunkStr;
-            $remaining -= strlen($chunkStr);
+            $buf       .= $chunk;
+            $remaining -= strlen($chunk);
         }
 
         return $buf;

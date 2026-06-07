@@ -7,6 +7,9 @@ namespace ZealPHP\Tests\Unit;
 use PHPUnit\Framework\TestCase;
 use ZealPHP\CGI\FastCgiClient;
 use ZealPHP\CGI\FastCgiException;
+use ZealPHP\CGI\FcgiTransport;
+use ZealPHP\CGI\FcgiBlockingTransport;
+use ZealPHP\CGI\FcgiCoroutineTransport;
 
 /**
  * Protocol-layer unit tests for FastCgiClient.
@@ -391,40 +394,38 @@ class FastCgiClientTest extends TestCase
     }
 
     /**
-     * Wrap a PHP stream resource in a minimal CoClient-compatible object
-     * by using a real OpenSwoole Coroutine\Client connected to a unix socket.
-     * Since unit tests run outside a coroutine context we instead use
-     * reflection to call recvExact / readResponse with a thin adapter that
-     * reads from the stream.
-     *
-     * For tests that need recvExact we create a small anonymous subclass-
-     * compatible adapter via a mock approach using stream_get_contents /
-     * fread via a wrapper object.
+     * Wrap a PHP stream resource in an {@see FcgiTransport} that reads from the
+     * stream. `fread($stream, $maxLen)` honours the `recv()` "return at most
+     * $maxLen bytes" contract, so the FCGI record framing reads exact lengths
+     * (8-byte header, then content) without a real socket.
      *
      * @param resource $stream
-     * @return \OpenSwoole\Coroutine\Client
      */
-    private function wrapSocket(mixed $stream): \OpenSwoole\Coroutine\Client
+    private function wrapSocket(mixed $stream): FcgiTransport
     {
-        // We use a partial mock that redirects recv() to fread() on the stream
-        $mock = $this->getMockBuilder(\OpenSwoole\Coroutine\Client::class)
-            ->disableOriginalConstructor()
-            ->onlyMethods(['recv'])
-            ->getMock();
-
-        $mock->errMsg = '';
-
-        $mock->method('recv')
-            ->willReturnCallback(function (int $size) use ($stream): string|false {
-                if (feof($stream)) {
+        return new class($stream) implements FcgiTransport {
+            /** @param resource $stream */
+            public function __construct(private mixed $stream)
+            {
+            }
+            public function connect(): void
+            {
+            }
+            public function send(string $data): void
+            {
+            }
+            public function recv(int $maxLen): string
+            {
+                if ($maxLen < 1 || !is_resource($this->stream) || feof($this->stream)) {
                     return '';
                 }
-                $data = fread($stream, $size);
+                $data = fread($this->stream, $maxLen);
                 return ($data === false) ? '' : $data;
-            });
-
-        /** @var \OpenSwoole\Coroutine\Client $mock */
-        return $mock;
+            }
+            public function close(): void
+            {
+            }
+        };
     }
 
     /**
@@ -438,9 +439,56 @@ class FastCgiClientTest extends TestCase
     /**
      * @return array{status:int,headers:array<string,string>,body:string,stderr:string}
      */
-    private function invokeReadResponse(\OpenSwoole\Coroutine\Client $conn, int $reqId): array
+    private function invokeReadResponse(FcgiTransport $conn, int $reqId): array
     {
         return $this->client->readResponse($conn, $reqId);
+    }
+
+    // ── #289 transport error paths (no socket needed) ────────────────────────
+
+    public function testBlockingTransportRecvBeforeConnectThrows(): void
+    {
+        $t = new FcgiBlockingTransport('127.0.0.1', 9000, false, 5.0);
+        $this->expectException(FastCgiException::class);
+        $t->recv(8);
+    }
+
+    public function testBlockingTransportSendBeforeConnectThrows(): void
+    {
+        $t = new FcgiBlockingTransport('127.0.0.1', 9000, false, 5.0);
+        $this->expectException(FastCgiException::class);
+        $t->send('x');
+    }
+
+    public function testCoroutineTransportRecvBeforeConnectThrows(): void
+    {
+        $t = new FcgiCoroutineTransport('127.0.0.1', 9000, false, 5.0);
+        $this->expectException(FastCgiException::class);
+        $t->recv(8);
+    }
+
+    public function testCoroutineTransportSendBeforeConnectThrows(): void
+    {
+        $t = new FcgiCoroutineTransport('127.0.0.1', 9000, false, 5.0);
+        $this->expectException(FastCgiException::class);
+        $t->send('x');
+    }
+
+    public function testBlockingTransportConnectToDeadAddressThrows(): void
+    {
+        // Port 1 is reserved/unbound — connect must fail fast with a FastCgiException
+        // (not a fatal). Validates the blocking connect error path (#289).
+        $t = new FcgiBlockingTransport('127.0.0.1', 1, false, 1.0);
+        $this->expectException(FastCgiException::class);
+        $t->connect();
+    }
+
+    public function testBlockingTransportCloseIsIdempotent(): void
+    {
+        $t = new FcgiBlockingTransport('127.0.0.1', 9000, false, 5.0);
+        $t->close(); // never connected — must not error
+        $t->close();
+        $this->expectNotToPerformAssertions();
     }
 
     // ── New error-path tests (Part B coverage boost) ─────────────────────────
