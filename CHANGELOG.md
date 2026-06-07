@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **WebSocket routing & rooms can now follow your session auth (#234).** `WSRouter`/`Room` had no authorization: `WSRouter::own()` trusted a client-supplied `client_id` (cross-tenant routing hijack) and `Room::join`/`push`/`members` accepted any caller (presence forgery, roster enumeration). Added, consuming the SAME hooks the HTTP layer uses (`App::authChecker()` / `App::usernameProvider()`):
+  - `WSRouter::sessionPrincipal(): ?string` — the authenticated principal for the current connection (null when unauthenticated), resolved from the session at the WS handshake.
+  - `WSRouter::ownAuthenticated(int $fd, ?string $connId = null): string` — binds the connection to that principal instead of a client-supplied id (throws `WSAuthException` when unauthenticated, so an attacker can't claim another user's id); `WSRouter::principalForFd($fd)` recovers it in `onMessage` handlers.
+  - `WSRouter::roomAuthorizer(?callable $fn)` — `fn(string $action, string $room, string $clientId): bool`, `$action ∈ {join,leave,push,read}`, consulted **fail-closed** by every `Room` op (mutations throw `WSAuthException`, reads return empty). **Opt-in** — with no authorizer wired the room layer behaves exactly as before (BC).
+  - The `/demo/rooms/*` routes are documented as illustrative-only (intentionally unauthenticated for the public demo); production apps must wire `roomAuthorizer()` + `ownAuthenticated()`.
+
 ## [0.4.4] - 2026-06-06
 
 A focused follow-up release: the #285 `RedisSessionHandler` coroutine-safety fix — the `open()`-path sequel to #271 — so apps installing their own Redis save handler under `superglobals(true)` no longer crash workers outside a request coroutine.

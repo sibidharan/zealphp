@@ -62,6 +62,8 @@ final class Room
      */
     public function join(string $clientId): void
     {
+        // #234 — fail-closed when a roomAuthorizer is wired (BC no-op otherwise).
+        WSRouter::requireRoomAuth('join', $this->name, $clientId);
         $ok = Store::set(WSRouter::roomTable(), self::compositeKey($this->name, $clientId), [
             'room'      => $this->name,
             'client_id' => $clientId,
@@ -106,6 +108,8 @@ final class Room
      */
     public function leave(string $clientId): void
     {
+        // #234 — fail-closed when a roomAuthorizer is wired (BC no-op otherwise).
+        WSRouter::requireRoomAuth('leave', $this->name, $clientId);
         Store::del(WSRouter::roomTable(), self::compositeKey($this->name, $clientId));
         // WS-2: keep the per-room SET in sync. Idempotent SREM.
         if (WSRouter::hasRedisBackend()) {
@@ -124,9 +128,27 @@ final class Room
         ]);
     }
 
+    /**
+     * #234 — true when a roomAuthorizer is wired AND it denies a 'read' on this
+     * room for the current session principal. Roster reads (members/size/
+     * isMember) consult this so an authorizer can block cross-tenant enumeration.
+     * BC: with no authorizer the short-circuit returns false (reads unguarded)
+     * WITHOUT touching the session.
+     */
+    private function readForbidden(): bool
+    {
+        if (WSRouter::roomAuthorizer() === null) {
+            return false;
+        }
+        return !WSRouter::authorizeRoom('read', $this->name, WSRouter::sessionPrincipal() ?? '');
+    }
+
     /** True if `$clientId` is a current member (cluster-wide check). */
     public function isMember(string $clientId): bool
     {
+        if ($this->readForbidden()) {
+            return false;
+        }
         return Store::exists(WSRouter::roomTable(), self::compositeKey($this->name, $clientId));
     }
 
@@ -142,6 +164,9 @@ final class Room
      */
     public function size(): int
     {
+        if ($this->readForbidden()) {
+            return 0;
+        }
         if (WSRouter::hasRedisBackend()) {
             try { return Store::scard(WSRouter::roomMembersSetKey($this->name)); }
             catch (StoreException) { /* fall through to the iterate path */ }
@@ -168,6 +193,9 @@ final class Room
      */
     public function members(): array
     {
+        if ($this->readForbidden()) {
+            return [];
+        }
         if (WSRouter::hasRedisBackend()) {
             try {
                 $key   = WSRouter::roomMembersSetKey($this->name);
@@ -204,6 +232,9 @@ final class Room
      */
     public function membersPaged(string $cursor = '0', int $count = 100): array
     {
+        if ($this->readForbidden()) {
+            return ['cursor' => '0', 'members' => []];
+        }
         if (WSRouter::hasRedisBackend()) {
             try { return Store::sscanCursor(WSRouter::roomMembersSetKey($this->name), $cursor, $count); }
             catch (StoreException) { /* fall through */ }
@@ -222,6 +253,12 @@ final class Room
      */
     public function push(array|string $payload, ?string $fromClientId = null): int
     {
+        // #234 — when a sender is attributed, fail-closed authorize it (BC no-op
+        // when no roomAuthorizer). A null $fromClientId is a server-originated
+        // broadcast — trusted, not gated (the app already decided to send it).
+        if ($fromClientId !== null) {
+            WSRouter::requireRoomAuth('push', $this->name, $fromClientId);
+        }
         // Per-room rate limit (configured via WSRouter::setRoomRateLimit).
         // Sliding-window counter keyed by `{room}:{window-id}` — increments
         // an atomic counter (Atomic on Table backend, Redis INCR on Redis).

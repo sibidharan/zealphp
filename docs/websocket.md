@@ -239,6 +239,54 @@ $app->ws('/ws/auth',
 
 For multi-worker setups, persist the `fd → user` map in `Store` instead of `$g` so any worker that handles a subsequent message can resolve the identity. To route a message to a specific client by id across workers or hosts, use `WSRouter::own($clientId, $fd)` in `onOpen`, `WSRouter::release($clientId)` in `onClose`, and `WSRouter::sendToClient($clientId, $payload)` from anywhere — see the [Federated rooms](#federated-rooms-cross-host) section.
 
+### Binding WS identity & rooms to your session auth (#234)
+
+`WSRouter::own($clientId, $fd)` trusts a **caller-supplied** `client_id`, and `Room` ops accept any caller — so on their own they don't authorize anything. To make WS routing and rooms follow the same auth your HTTP layer uses, wire the framework's session hooks (the ones `ZealAPI` already consults):
+
+```php
+// app.php — the SAME hooks the HTTP/API layer uses
+App::authChecker(fn() => Session::isLoggedIn());          // is the session authenticated?
+App::usernameProvider(fn() => Session::get('username'));  // who?
+
+// Fail-closed room authorization: consulted by join/leave/push (throw on deny)
+// and members/size/isMember (return empty on deny). Without this call the room
+// layer is unguarded (backward-compatible).
+WSRouter::roomAuthorizer(function (string $action, string $room, string $clientId): bool {
+    if (!(App::authChecker())()) return false;            // must be authenticated
+    return $action === 'read' || str_starts_with($room, "u.$clientId."); // your policy
+});
+
+$app->ws('/ws/app',
+    onOpen: function ($server, $request, $g) {
+        // Bind the connection to the AUTHENTICATED principal — never a client value.
+        // Throws WSAuthException when the session isn't authenticated.
+        try {
+            $uid = WSRouter::ownAuthenticated($request->fd);   // = sessionPrincipal()
+        } catch (\ZealPHP\WS\WSAuthException) {
+            $server->disconnect($request->fd, WSRouter::CLOSE_AUTH_REQUIRED, 'Unauthorized');
+            return;
+        }
+        WSRouter::room("u.$uid.inbox")->join($uid);
+    },
+    onMessage: function ($server, $frame, $g) {
+        // Recover the authenticated identity bound at onOpen — no re-reading the session.
+        $uid = WSRouter::principalForFd($frame->fd);
+        if ($uid === null) { return; }
+        // Room ops are now authorized against $uid by the roomAuthorizer above.
+        WSRouter::room("u.$uid.inbox")->push(['from' => $uid, 'data' => $frame->data], fromClientId: $uid);
+    },
+);
+```
+
+| API | Purpose |
+|-----|---------|
+| `WSRouter::sessionPrincipal(): ?string` | The authenticated principal for the current connection (via `authChecker`+`usernameProvider`), or `null`. |
+| `WSRouter::ownAuthenticated($fd, $connId?): string` | Like `own()` but binds to `sessionPrincipal()`; throws `WSAuthException` when unauthenticated. |
+| `WSRouter::principalForFd($fd): ?string` | The principal bound at `ownAuthenticated()` — use in `onMessage`. |
+| `WSRouter::roomAuthorizer(?callable)` | `fn($action, $room, $clientId): bool`; fail-closed gate on every `Room` op. |
+
+The `/demo/rooms/*` routes are **illustrative only** — intentionally unauthenticated for the public docs site. Don't copy that shape into production; wire `roomAuthorizer()` + `ownAuthenticated()` as above.
+
 ## Heartbeats
 
 OpenSwoole has a built-in idle disconnector configured via two server settings:
