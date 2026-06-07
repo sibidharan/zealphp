@@ -7,6 +7,7 @@ namespace ZealPHP;
 use ZealPHP\Store\StoreException;
 use ZealPHP\WS\CapacityException;
 use ZealPHP\WS\Room;
+use ZealPHP\WS\WSAuthException;
 
 /**
  * Cross-server WebSocket routing helper.
@@ -145,6 +146,29 @@ final class WSRouter
 
     /** `true` once `init()` has wired the pub/sub subscribers and lifecycle hooks. */
     private static bool $initialized = false;
+
+    /**
+     * #234 — optional per-room authorizer. `fn(string $action, string $room,
+     * string $clientId): bool` where `$action ∈ {join,leave,push,read}`. When
+     * SET, every `Room` op consults it FAIL-CLOSED (a falsey return refuses);
+     * when null (default) the room layer is unguarded as before (BC). Wire it to
+     * your session auth — e.g. `WSRouter::roomAuthorizer(fn($a,$r,$c) =>
+     * App::authChecker() && (App::authChecker())())`.
+     *
+     * @var (callable(string,string,string):bool)|null
+     */
+    private static $roomAuthorizer = null;
+
+    /**
+     * #234 — server-derived principal bound to a connection at
+     * `ownAuthenticated()`, keyed by fd. Lets later `onMessage` handlers recover
+     * the authenticated identity (`principalForFd($fd)`) without re-reading the
+     * session, and ties a `client_id` to the authenticated session rather than a
+     * client-supplied string. Reaped in `release()`.
+     *
+     * @var array<int, string>
+     */
+    private static array $principalByFd = [];
 
     /**
      * WS-7 — per-worker record of the window id each rate-limit counter is
@@ -680,6 +704,128 @@ final class WSRouter
     /** Returns the configured server id (hostname:pid by default). */
     public static function serverId(): string { return self::$serverId; }
 
+    // ───────────────────────────────────────────────────────────────────────
+    // #234 — session-auth integration. WS routing/rooms follow the SAME auth
+    // hooks the HTTP layer uses (App::authChecker / App::usernameProvider), so a
+    // client can only own the identity it is authenticated as, and room ops can
+    // be gated fail-closed by app policy. Opt-in: with no authorizer wired, the
+    // room layer behaves exactly as before (BC).
+    // ───────────────────────────────────────────────────────────────────────
+
+    /**
+     * Register a per-room authorizer (or read it back). `fn(string $action,
+     * string $room, string $clientId): bool`, `$action ∈ {join,leave,push,read}`.
+     *
+     * When SET, every `Room` op consults it FAIL-CLOSED: a falsey return refuses
+     * the op (mutations throw {@see WSAuthException}; reads return empty). When
+     * `null` (default) the room layer is unguarded (BC). This is the WS analog of
+     * `App::authChecker()` — wire it to your session so WS follows your auth.
+     *
+     * @param (callable(string,string,string):bool)|null $fn
+     */
+    public static function roomAuthorizer(?callable $fn = null): ?callable
+    {
+        if (\func_num_args() > 0) {
+            self::$roomAuthorizer = $fn;
+        }
+        return self::$roomAuthorizer;
+    }
+
+    /**
+     * Resolve the authenticated principal for the CURRENT request/connection
+     * from the session, via the same hooks the HTTP layer uses:
+     * `App::authChecker()` (is the session authenticated?) then
+     * `App::usernameProvider()` (who?). Returns `null` when unauthenticated, the
+     * hooks aren't wired, or no username resolves.
+     *
+     * Call from a WS `onOpen` handler (the framework starts the session from the
+     * upgrade cookie there) to derive a server-trusted identity — never trust a
+     * client-supplied id for routing.
+     */
+    public static function sessionPrincipal(): ?string
+    {
+        $authChecker = \ZealPHP\App::authChecker();
+        if (!\is_callable($authChecker) || $authChecker() !== true) {
+            return null;
+        }
+        $usernameProvider = \ZealPHP\App::usernameProvider();
+        if (\is_callable($usernameProvider)) {
+            $name = $usernameProvider();
+            if (\is_string($name) && $name !== '') {
+                return $name;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Like {@see own()} but binds the connection to the authenticated session
+     * principal instead of a caller-supplied id (#234). Resolves
+     * {@see sessionPrincipal()}; throws {@see WSAuthException} when the session
+     * isn't authenticated, so an attacker can't claim another user's routing id.
+     * Records the principal for the fd ({@see principalForFd()}) so later
+     * `onMessage` handlers can authorize without re-reading the session.
+     *
+     * @throws WSAuthException when no authenticated principal is available.
+     */
+    public static function ownAuthenticated(int $fd, ?string $connId = null): string
+    {
+        $principal = self::sessionPrincipal();
+        if ($principal === null) {
+            self::stats()->inc('own_auth_denied_total');
+            throw new WSAuthException(
+                'WSRouter::ownAuthenticated(): no authenticated session principal — ' .
+                'wire App::authChecker()/App::usernameProvider() and start the session in onOpen.'
+            );
+        }
+        $result = self::own($principal, $fd, $connId);
+        self::$principalByFd[$fd] = $principal;
+        return $result;
+    }
+
+    /**
+     * The authenticated principal bound to this fd by {@see ownAuthenticated()},
+     * or `null` if the connection wasn't authenticated that way. Use it to
+     * authorize `onMessage`-time room ops without touching the session again.
+     */
+    public static function principalForFd(int $fd): ?string
+    {
+        return self::$principalByFd[$fd] ?? null;
+    }
+
+    /**
+     * Internal: consult the room authorizer (fail-closed when set). Returns true
+     * when there is no authorizer (BC) or it permits the op. {@see Room} calls
+     * this for reads (members/size/isMember) and {@see requireRoomAuth()} for
+     * mutations (join/leave/push).
+     *
+     * @internal
+     */
+    public static function authorizeRoom(string $action, string $room, string $clientId): bool
+    {
+        if (self::$roomAuthorizer === null) {
+            return true;
+        }
+        return (self::$roomAuthorizer)($action, $room, $clientId) === true;
+    }
+
+    /**
+     * Internal: like {@see authorizeRoom()} but throws {@see WSAuthException} on
+     * refusal — used by the mutating Room ops (join/leave/push).
+     *
+     * @internal
+     * @throws WSAuthException
+     */
+    public static function requireRoomAuth(string $action, string $room, string $clientId): void
+    {
+        if (!self::authorizeRoom($action, $room, $clientId)) {
+            self::stats()->inc('room_authz_denied_total');
+            throw new WSAuthException(
+                "WSRouter: room '{$action}' on '{$room}' denied for client '{$clientId}' by roomAuthorizer."
+            );
+        }
+    }
+
     /**
      * Record that this server now owns this client's WS connection.
      * Call from your ws onOpen handler — needs the assigned fd locally
@@ -769,6 +915,13 @@ final class WSRouter
         }
         unset(self::$localClientRooms[$clientId]);
 
+        // #234 — reap the fd→principal binding (capture the fd before dropping
+        // the local map, since $principalByFd is keyed by fd).
+        $releasedFd = self::$localFds[$clientId]['fd'] ?? null;
+        if (is_int($releasedFd)) {
+            unset(self::$principalByFd[$releasedFd]);
+        }
+
         unset(self::$localFds[$clientId]);
         Store::del(self::TABLE, $clientId);
         self::stats()->inc('releases_total');
@@ -847,6 +1000,8 @@ final class WSRouter
         self::$roomMessageHandlers = [];
         self::$roomPresenceHandlers= [];
         self::$rateLimitWindows    = [];
+        self::$roomAuthorizer      = null;
+        self::$principalByFd       = [];
     }
 
     /**

@@ -4,6 +4,14 @@ declare(strict_types=1);
 
 // Live demos for WSRouter::room() — federated WebSocket rooms (v0.3.0 P1.1).
 //
+// ⚠️  ILLUSTRATIVE ONLY — NOT a production template (#234). These endpoints take
+//     `room`/`client` straight from UNAUTHENTICATED query params so the public
+//     docs site can show the fabric working with ephemeral demo data. A real app
+//     MUST NOT expose room ops this way: derive the client identity server-side
+//     from the authenticated session (`WSRouter::ownAuthenticated($fd)`), and wire
+//     `WSRouter::roomAuthorizer(fn($action,$room,$client) => /* your session
+//     policy */)` so join/leave/push/read are fail-closed. See docs/websocket.md.
+//
 // Only wires when the Store backend is Redis (rooms require pub/sub).
 // Routes:
 //   GET /demo/rooms/join?room=<name>&client=<id>     → Room::join
