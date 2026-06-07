@@ -8,7 +8,6 @@ use function ZealPHP\get_current_render_time;
 
 use OpenSwoole\Coroutine as co;
 
-use ZealPHP\Session\Handler\FileSessionHandler;
 use ZealPHP\RequestContext;
 
 use OpenSwoole\Core\Psr\Middleware\StackHandler;
@@ -241,11 +240,13 @@ class SessionManager
             $sessionId = is_string($rawSid) ? $rawSid : null;
             session_id($sessionId);
 
-            static $handlerRegistered = false;
-            if (!$handlerRegistered) {
-                $handler = new FileSessionHandler();
-                @session_set_save_handler($handler, true);
-                $handlerRegistered = true;
+            // #295 — honour the configured session handler instead of hardcoding
+            // FileSessionHandler (which ignored App::sessionHandler()). Resolution is
+            // memoised per worker; unconfigured (null) keeps the file default via the
+            // read-site fallback to the same resolver.
+            $activeHandler = \ZealPHP\App::resolveActiveSessionHandler();
+            if ($activeHandler !== null) {
+                $g->session_params['handler'] = $activeHandler;
             }
 
             session_start();

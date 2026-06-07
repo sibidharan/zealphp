@@ -27,8 +27,11 @@ use ZealPHP\RequestContext;
  *    (`zealphp_reset_request_rtcaches`, `zealphp_reset_request_statics`,
  *    `zealphp_reset_request_class_statics`) when `App::$silent_redeclare` is active.
  *
- * The session handler is resolved once per worker from `App::$session_handler`:
- * `null` → `TableSessionHandler` (default, concurrent-safe);
+ * The session handler is resolved once per worker via
+ * `App::resolveActiveSessionHandler()` from `App::$session_handler`:
+ * `null` (default, unconfigured) → the inline file path (NOT auto-promoted to
+ * `TableSessionHandler` — #295 preserves the historical file default);
+ * `'table'` → `TableSessionHandler` (concurrent-safe; opt in explicitly);
  * `'file'` → `FileSessionHandler`;
  * `'redis'` → `RedisSessionHandler`;
  * or any `\SessionHandlerInterface` instance passed directly.
@@ -59,28 +62,6 @@ class CoSessionManager
 
     /** Whether to refuse session ids passed in query-string (`session.use_only_cookies`). */
     protected bool $useOnlyCookies;
-
-    /**
-     * Resolve the session handler from `App::$session_handler`. `CoSessionManager`
-     * runs in coroutine mode, so the default (`null`) is `TableSessionHandler` —
-     * concurrent-safe via 3-way merge + Atomic CAS + file backing.
-     */
-    private static function resolveHandler(): ?\SessionHandlerInterface
-    {
-        $h = \ZealPHP\App::$session_handler;
-        if ($h instanceof \SessionHandlerInterface) return $h;
-        switch ($h) {
-            case 'file':
-                return new \ZealPHP\Session\Handler\FileSessionHandler();
-            case 'table':
-            case null:  // default in coroutine mode — concurrent-safe
-                return \ZealPHP\Session\Handler\TableSessionHandler::register();
-            case 'redis':
-                return new \ZealPHP\Session\Handler\RedisSessionHandler();
-            default:
-                return null;
-        }
-    }
 
     /**
      * Returns `true` when it is safe to run `zealphp_process_state_clean()`.
@@ -189,17 +170,17 @@ class CoSessionManager
             && !\ZealPHP\App::cgiOwnsSessions();
 
         if ($manageSession) {
-            // One-shot per-worker handler registration. Resolves App::$session_handler:
-            //   null → auto-pick (TableSessionHandler — concurrent-safe, this IS coroutine mode)
-            //   'table'|'file'|'redis' → corresponding handler
-            //   SessionHandlerInterface → use directly
-            static $handlerRegistered = false;
-            if (!$handlerRegistered) {
-                $handler = self::resolveHandler();
-                if ($handler !== null) {
-                    @\session_set_save_handler($handler, true);
-                }
-                $handlerRegistered = true;
+            // #295 — wire the configured handler into THIS request's per-coroutine
+            // session_params so zeal_session_start()/write_close() actually use it.
+            // Resolution is memoised per worker (App::resolveActiveSessionHandler);
+            // this is just a per-request array assignment. The previous once-per-worker
+            // `@session_set_save_handler($h)` was a no-op for the zeal_session_*
+            // overrides, so the handler never reached session_params and sessions
+            // silently fell back to the inline file path. Unconfigured (null) keeps
+            // that file default — the read sites fall back to it via the same resolver.
+            $activeHandler = \ZealPHP\App::resolveActiveSessionHandler();
+            if ($activeHandler !== null) {
+                $g->session_params['handler'] = $activeHandler;
             }
 
             $sessionName = zeal_session_name();
