@@ -272,34 +272,17 @@ class Dispatcher
         $fcgiAddress = $address ?? App::$fcgi_address;
         try {
             $client = new \ZealPHP\CGI\FastCgiClient($fcgiAddress, App::$cgi_timeout);
-            // #261 — FastCgiClient uses OpenSwoole\Coroutine\Client, a coroutine
-            // API. cgiMode('fcgi') runs under the legacy / superglobals(true)
-            // lifecycles where the request handler is NOT wrapped in a coroutine,
-            // so a direct request() fatals "API must be called in the coroutine"
-            // before php-fpm is ever contacted. Run it inside Coroutine::run()
-            // when outside a coroutine (the App::parallel sync-mode idiom);
-            // Coroutine::run swallows uncaught throws, so capture + rethrow to keep
-            // the FastCgiException -> 502 path intact.
-            if (\OpenSwoole\Coroutine::getCid() >= 0) {
-                $response = $client->request($env, $stdinBody);
-            } else {
-                /** @var array{status:int,headers:array<string,string>,body:string,stderr:string}|null $response */
-                $response = null;
-                $fcgiErr  = null;
-                \OpenSwoole\Coroutine::run(function () use ($client, $env, $stdinBody, &$response, &$fcgiErr): void {
-                    try {
-                        $response = $client->request($env, $stdinBody);
-                    } catch (\Throwable $e) {
-                        $fcgiErr = $e;
-                    }
-                });
-                if ($fcgiErr !== null) {
-                    throw $fcgiErr;
-                }
-                if ($response === null) {
-                    throw new \ZealPHP\CGI\FastCgiException('FastCGI request did not complete (coroutine produced no response)');
-                }
-            }
+            // #289 — FastCgiClient::connect() picks its socket transport by
+            // coroutine context: the yielding OpenSwoole client inside a coroutine,
+            // a BLOCKING socket outside one (legacy-cgi / superglobals(true), where
+            // the request handler is NOT coroutine-wrapped). So request() runs
+            // DIRECTLY in both contexts — no nested Coroutine::run(). The #261 wrap
+            // that used to run here fixed the "API must be called in the coroutine"
+            // fatal but DEADLOCKED the FCGI read: the reactor callback that started
+            // Coroutine::run() was parked waiting for the very scheduler that needed
+            // the reactor to deliver the socket-readable event, so every request hung
+            // until cgi_timeout (#289). A blocking socket has no scheduler to deadlock.
+            $response = $client->request($env, $stdinBody);
         } catch (\ZealPHP\CGI\FastCgiException $e) {
             elog("cgiFcgi: FastCGI error for {$path}: " . $e->getMessage(), 'error');
             return 502;
