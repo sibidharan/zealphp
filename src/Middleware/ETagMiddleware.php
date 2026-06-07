@@ -64,6 +64,16 @@ class ETagMiddleware implements MiddlewareInterface
             return $response;
         }
 
+        // A 206 carries only the partial slice produced by RangeMiddleware, not
+        // the full representation — hashing it would mint an ETag for the slice,
+        // which then false-mismatches an If-Range that legitimately carries the
+        // full-body ETag (breaking the very Range request that produced the 206).
+        // Bail like the streaming case: leave the 206 (and any range headers on
+        // it) untouched (#236).
+        if ($status === 206) {
+            return $response;
+        }
+
         $method = $request->getMethod();
         $isGetOrHead = $method === 'GET' || $method === 'HEAD';
 

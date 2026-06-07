@@ -932,11 +932,18 @@ function response_add_header($key, $value, $replace = true): void
 /**
  * Sets the HTTP response status code.
  *
+ * Coerces out-of-range codes to 500 (Apache parity, RFC 7230 §3.1.2 — a status
+ * code is three digits, 100-599). This is the single chokepoint every status
+ * sink converges on — `http_response_code()`, `header("HTTP/1.1 600 …")` and the
+ * `Status:` CGI form all route here — so an out-of-range code never reaches the
+ * wire as a silent 200 (OpenSwoole's one-arg `status()` drops unknown codes).
+ * The coercion is logged once here via `App::coerceStatusCode()` (#292).
+ *
  * @param int $status The HTTP status code to set for the response.
  */
 function response_set_status(int $status): void
 {
-    RequestContext::instance()->status = $status;
+    RequestContext::instance()->status = \ZealPHP\App::coerceStatusCode($status);
 }
 
 /**
@@ -1000,8 +1007,12 @@ function setcookie($name, $value = "", int|array $expire_or_options = 0, $path =
  * Set a raw (URL-encoded) response cookie (uopz override of PHP's built-in `setrawcookie()`).
  *
  * Like `setcookie()` but the value is sent as-is without URL-encoding. Supports
- * the PHP 7.3+ options-array form for `$expire_or_options`. Validates for
- * control characters. Delegates to `$g->zealphp_response->rawCookie()`.
+ * the PHP 7.3+ options-array form for `$expire_or_options`. Because the raw
+ * variant does NOT url-encode, PHP 8.4 rejects a name or value carrying any of
+ * `,; \t\r\n\013\014\0` by throwing a `ValueError` (not a warning) — this
+ * override mirrors that so legacy code relying on the throw behaves identically
+ * (#291). `setcookie()` keeps its warn-and-return-false behaviour because it
+ * url-encodes the value, so the same characters are harmless there.
  *
  * @param string $name
  * @param string $value
@@ -1021,14 +1032,18 @@ function setrawcookie($name, $value = "", int|array $expire_or_options = 0, $pat
     } else {
         $expire = $expire_or_options;
     }
+    // PHP 8.4 raw-cookie semantics: a name or value containing a separator,
+    // SP/HTAB, or control char throws a ValueError (the value is never
+    // url-encoded, so these would corrupt the Set-Cookie header on the wire).
     if (strpbrk((string)$name, "=,; \t\r\n\013\014\0") !== false) {
-        trigger_error("Cookie names cannot contain any of the following '=,; \\t\\r\\n\\013\\014'", E_USER_WARNING);
-        return false;
+        throw new \ValueError("Cookie name cannot be empty or contain any of the following ',; ', or any control characters.");
     }
-    if (strpbrk((string)$value, "\r\n\0") !== false
-        || strpbrk((string)$path, "\r\n\0") !== false
+    if (strpbrk((string)$value, ",; \t\r\n\013\014\0") !== false) {
+        throw new \ValueError("Cookie value cannot contain any of the following ',; ', or any control characters.");
+    }
+    if (strpbrk((string)$path, "\r\n\0") !== false
         || strpbrk((string)$domain, "\r\n\0") !== false) {
-        trigger_error('Raw cookie value/path/domain contains control characters', E_USER_WARNING);
+        trigger_error('Raw cookie path/domain contains control characters', E_USER_WARNING);
         return false;
     }
     $cookie = "$name=$value";

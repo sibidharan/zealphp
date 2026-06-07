@@ -281,6 +281,20 @@ class Response
     public function stream(callable $fn): void
     {
         $this->g->_streaming = true;
+        // HEAD: emit headers only, never the streamed body — mirrors the
+        // Generator streaming path in App::emitGeneratorStream() (which ends the
+        // response without writing chunks). Without this, stream()/sse() (sse()
+        // delegates here) would invoke $fn and write a body on a HEAD request,
+        // violating RFC 9110 §9.3.2 (#238). Flush the queued headers, end the
+        // connection, and return WITHOUT calling $fn.
+        $method = (string) ($this->g->server['REQUEST_METHOD'] ?? 'GET');
+        if ($method === 'HEAD') {
+            $this->flush();
+            if ($this->parent->isWritable()) {
+                $this->parent->end();
+            }
+            return;
+        }
         $this->flush();
         // Guard each write: if the client disconnected, write() would return false
         // and OpenSwoole would emit ERRNO 1005 notices — return false silently instead.
@@ -415,7 +429,49 @@ class Response
             return ['status' => 'unsatisfiable', 'ranges' => []];
         }
 
-        return ['status' => 'ok', 'ranges' => $ranges];
+        // Coalesce overlapping/adjacent specs into disjoint unions before
+        // serving (#230). Mirrors RangeMiddleware::coalesceRanges() so the
+        // zero-copy sendFile() path has the same DoS-amplification cap as the
+        // buffered path: N duplicate/overlapping full-file ranges can't multiply
+        // the bytes written — Σ(end-start+1) over the result ≤ $total.
+        return ['status' => 'ok', 'ranges' => self::coalesceRanges($ranges)];
+    }
+
+    /**
+     * Coalesce a list of [start, end] byte ranges (inclusive) into the minimal
+     * set of disjoint ranges covering the same bytes.
+     *
+     * Sorts by start, then merges any spec that overlaps OR is immediately
+     * adjacent to the running union (`next.start <= cur.end + 1`). Every input
+     * spec is already clamped to `[0, total-1]` by {@see parseRange()}, so the
+     * union of the result can never exceed the resource size — the
+     * DoS-amplification cap (#230). Result is start-ascending (RFC 9110 §14.2
+     * permits the server to reorder/merge multipart ranges). Kept in lock-step
+     * with {@see \ZealPHP\Middleware\RangeMiddleware::coalesceRanges()}.
+     *
+     * @param array<int, array{0: int, 1: int}> $ranges
+     * @return list<array{0: int, 1: int}>
+     */
+    private static function coalesceRanges(array $ranges): array
+    {
+        usort($ranges, static fn(array $a, array $b): int => $a[0] <=> $b[0] ?: $a[1] <=> $b[1]);
+
+        /** @var list<array{0: int, 1: int}> $merged */
+        $merged = [];
+        foreach ($ranges as [$start, $end]) {
+            if ($merged === []) {
+                $merged[] = [$start, $end];
+                continue;
+            }
+            $lastIndex = count($merged) - 1;
+            [$curStart, $curEnd] = $merged[$lastIndex];
+            if ($start <= $curEnd + 1) {
+                $merged[$lastIndex] = [$curStart, max($curEnd, $end)];
+            } else {
+                $merged[] = [$start, $end];
+            }
+        }
+        return $merged;
     }
 
     /**

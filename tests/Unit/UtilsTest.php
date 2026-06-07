@@ -243,6 +243,44 @@ class UtilsTest extends TestCase
         $this->assertSame(307, http_response_code());
     }
 
+    /**
+     * #292 — an out-of-range http_response_code() must be coerced to 500 at the
+     * response_set_status() chokepoint, so the wire never silently stays 200
+     * (OpenSwoole's one-arg status() drops codes it doesn't recognise). Both the
+     * stored status and the value http_response_code() reads back are 500.
+     */
+    public function testHttpResponseCodeOutOfRangeCoercedTo500(): void
+    {
+        http_response_code(600);
+        $this->assertSame(500, RequestContext::instance()->status);
+        $this->assertSame(500, http_response_code());
+    }
+
+    public function testHttpResponseCodeBelowRangeCoercedTo500(): void
+    {
+        http_response_code(0);
+        $this->assertSame(500, RequestContext::instance()->status);
+    }
+
+    public function testHttpResponseCodeInRangeUnchanged(): void
+    {
+        http_response_code(404);
+        $this->assertSame(404, RequestContext::instance()->status);
+        http_response_code(599); // upper in-range bound
+        $this->assertSame(599, RequestContext::instance()->status);
+    }
+
+    /**
+     * #292 — the header("HTTP/1.1 <code> …") status-line path converges on the
+     * same chokepoint, so it coerces identically. (A 3-digit regex only matches
+     * 100-999; 600-999 in-range-digit-wise but semantically invalid → 500.)
+     */
+    public function testHeaderStatusLineOutOfRangeCoercedTo500(): void
+    {
+        header('HTTP/1.1 600 Bogus');
+        $this->assertSame(500, RequestContext::instance()->status);
+    }
+
     public function testHeadersListReturnsFormattedStrings(): void
     {
         header('X-A: 1');

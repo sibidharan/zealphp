@@ -56,7 +56,23 @@ final class ScopedMiddleware implements MiddlewareInterface
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        $path = $request->getUri()->getPath();
+        // #232 — match on the SAME path the router dispatches against. The router
+        // normalizes `$g->server['REQUEST_URI']` via App::normalizeRequestPath
+        // (collapse `//`, drop `/./`, unwind `..`) in ResponseMiddleware, AFTER this
+        // global ScopedMiddleware runs — so we must read the raw REQUEST_URI and
+        // normalize it identically here. Using `$request->getUri()->getPath()` is
+        // NOT equivalent: the PSR Uri parser treats a leading `//admin` as the URI
+        // authority, dropping it to `/secret`, so `//admin/secret` would skip a
+        // `/admin` guard while still routing to `/admin/secret` (auth/IP/php-block
+        // bypass). REQUEST_URI preserves the raw target. Fall back to the PSR path
+        // for pure-PSR contexts (tests) where REQUEST_URI isn't populated on $g.
+        $serverParams = $request->getServerParams();
+        $reqUri = $serverParams['REQUEST_URI'] ?? null;
+        $target = (is_string($reqUri) && $reqUri !== '')
+            ? $reqUri
+            : $request->getUri()->getPath();
+        $rawPath = explode('?', $target, 2)[0];
+        $path = \ZealPHP\App::normalizeRequestPath($rawPath);
         $inScope = $this->regex
             ? preg_match($this->pattern, $path) === 1
             : str_starts_with($path, $this->pattern);

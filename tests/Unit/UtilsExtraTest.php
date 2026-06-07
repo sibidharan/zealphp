@@ -153,23 +153,43 @@ class UtilsExtraTest extends TestCase
 
     public function testSetrawcookieRejectsInvalidName(): void
     {
-        $this->assertFalse(@setrawcookie('bad name', 'v'));
-        $this->assertFalse(@setrawcookie('bad=name', 'v'));
+        // #291 — PHP 8.4 raw-cookie semantics: a separator/control in the NAME
+        // throws ValueError (the raw value is never url-encoded).
+        $this->expectException(\ValueError::class);
+        setrawcookie('bad name', 'v');
+    }
+
+    public function testSetrawcookieRejectsInvalidNameEquals(): void
+    {
+        $this->expectException(\ValueError::class);
+        setrawcookie('bad=name', 'v');
     }
 
     public function testSetrawcookieRejectsCrlfInValue(): void
     {
-        $this->assertFalse(@setrawcookie('ok', "a\r\nb"));
+        // #291 — CR/LF in a raw value throws ValueError (header-injection vector).
+        $this->expectException(\ValueError::class);
+        setrawcookie('ok', "a\r\nb");
     }
 
     public function testSetrawcookieAllValueComponents(): void
     {
         // All optional components set → every cookie-string append branch runs.
-        $ok = setrawcookie('rawck', 'a b+c/d', time() + 3600, '/path', 'example.com', true, true);
+        // The value here is now url-safe (no SP/separator) so PHP 8.4's raw
+        // ValueError guard does not fire (#291).
+        $ok = setrawcookie('rawck', 'aXb+c/d', time() + 3600, '/path', 'example.com', true, true);
         $this->assertTrue($ok);
         $this->assertNotEmpty($this->resp->cookies);
         $last = end($this->resp->cookies);
         $this->assertSame('rawck', $last[0]);
+    }
+
+    public function testSetrawcookieRejectsSpaceInValue(): void
+    {
+        // #291 — a SPACE in the raw value is rejected with ValueError on PHP 8.4
+        // (it would corrupt the Set-Cookie header; setcookie() url-encodes it).
+        $this->expectException(\ValueError::class);
+        setrawcookie('rawck', 'a b');
     }
 
     // ── headers_sent / flush / ob_* (mock openswoole_response) ───────
