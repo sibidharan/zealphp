@@ -652,7 +652,9 @@ class ResponseMiddleware implements MiddlewareInterface
             $allowed = ['OPTIONS'];
             foreach ($app->routesByMethod() as $m => $routes) {
                 foreach ($routes as $route) {
-                    if (preg_match($route['pattern'], $uri)) {
+                    // Match the normalized path-only form — route patterns are
+                    // path-only, and REQUEST_URI now carries the query (#306).
+                    if (preg_match($route['pattern'], $path)) {
                         $allowed[] = $m;
                         if ($m === 'GET') $allowed[] = 'HEAD';
                         break;
@@ -692,6 +694,11 @@ class ResponseMiddleware implements MiddlewareInterface
     {
         $g = RequestContext::instance();
         $uri = (string)$g->server['REQUEST_URI'];
+        // REQUEST_URI now carries the query string for mod_php parity (#306); route
+        // keys + patterns are path-only, so match on the path component. parse_url
+        // returns null only for a degenerate target ('*'), where $uri is the right
+        // fallback (and OPTIONS '*' is handled earlier in process(), not here).
+        $matchPath = (string)(parse_url($uri, PHP_URL_PATH) ?: $uri);
         $app = App::instance();
         assert($app !== null);
 
@@ -699,12 +706,12 @@ class ResponseMiddleware implements MiddlewareInterface
         $matchMethod = ($method === 'HEAD') ? 'GET' : $method;
 
         $exactRoutes = $app->routesByExactMethod();
-        if (isset($exactRoutes[$matchMethod][$uri])) {
-            return $this->dispatchRoute($exactRoutes[$matchMethod][$uri], [], $method, $request);
+        if (isset($exactRoutes[$matchMethod][$matchPath])) {
+            return $this->dispatchRoute($exactRoutes[$matchMethod][$matchPath], [], $method, $request);
         }
 
         foreach ($app->routesByMethod()[$matchMethod] ?? [] as $route) {
-            if (preg_match($route['pattern'], $uri, $matches)) {
+            if (preg_match($route['pattern'], $matchPath, $matches)) {
                 $params = array_filter($matches, fn($k) => !is_numeric($k), ARRAY_FILTER_USE_KEY);
                 return $this->dispatchRoute($route, $params, $method, $request);
             }
@@ -718,7 +725,7 @@ class ResponseMiddleware implements MiddlewareInterface
         $allowed = [];
         foreach ($app->routesByMethod() as $m => $routes) {
             foreach ($routes as $route) {
-                if (preg_match($route['pattern'], $uri)) {
+                if (preg_match($route['pattern'], $matchPath)) {
                     $allowed[] = $m;
                     if ($m === 'GET') {
                         $allowed[] = 'HEAD';

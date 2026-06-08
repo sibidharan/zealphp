@@ -118,12 +118,26 @@ class SuperglobalParityUnitTest extends TestCase
         $this->assertSame('x=1&y=2', $out['QUERY_STRING']);
     }
 
-    public function testRequestUriLeftPathOnly(): void
+    public function testRequestUriReappendsQuery(): void
     {
-        // PR-A keeps REQUEST_URI path-only (the router matches on it); the
-        // mod_php query re-append is deferred to the query-safe-dispatch change.
-        $out = App::synthesizeRequestServerVars(['REQUEST_URI' => '/s.php', 'QUERY_STRING' => 'x=1']);
+        // #306 — REQUEST_URI carries the full mod_php value (path + ?query). The
+        // dispatch layer matches routes on a parse_url(PATH) of it, so this is safe.
+        $out = App::synthesizeRequestServerVars(['REQUEST_URI' => '/s.php', 'QUERY_STRING' => 'x=1&y=2']);
+        $this->assertSame('/s.php?x=1&y=2', $out['REQUEST_URI']);
+    }
+
+    public function testRequestUriNoQueryStaysPath(): void
+    {
+        $out = App::synthesizeRequestServerVars(['REQUEST_URI' => '/s.php']);
         $this->assertSame('/s.php', $out['REQUEST_URI']);
+        $this->assertSame('', $out['QUERY_STRING']);
+    }
+
+    public function testRequestUriNoDoubleAppendWhenAlreadyHasQuery(): void
+    {
+        // Guard against double-append if a request_uri already embeds the query.
+        $out = App::synthesizeRequestServerVars(['REQUEST_URI' => '/s.php?x=1', 'QUERY_STRING' => 'x=1']);
+        $this->assertSame('/s.php?x=1', $out['REQUEST_URI']);
     }
 
     public function testContentTypeAndLengthMirroredFromHeaders(): void
