@@ -605,4 +605,239 @@ class FastCgiClientTest extends TestCase
         $this->assertNotContains('BadLineWithoutColon', array_column($result['headers'], 0));
         $this->assertSame('body', $result['body']);
     }
+
+    // ── #289 transport SUCCESS paths over real sockets ───────────────────────
+
+    /**
+     * Exercise the full {@see FcgiBlockingTransport} lifecycle — connect, send,
+     * recv, clean-EOF, and close — against a real loopback TCP server. This is the
+     * path used OUTSIDE a coroutine (legacy-cgi / superglobals(true)); a blocking
+     * socket has no scheduler to deadlock (#289). Runs synchronously: the kernel
+     * completes the TCP handshake into the listen backlog, so connect() returns
+     * before we accept() server-side.
+     */
+    public function testBlockingTransportFullLifecycleOverLoopback(): void
+    {
+        $this->assertLessThan(0, \OpenSwoole\Coroutine::getCid(), 'precondition: outside a coroutine');
+
+        $errno  = 0;
+        $errstr = '';
+        $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+        $this->assertNotFalse($server, "server listen failed: {$errstr} ({$errno})");
+        $name = stream_socket_get_name($server, false);
+        $this->assertIsString($name);
+        $port = (int) substr($name, (int) strrpos($name, ':') + 1);
+        $this->assertGreaterThan(0, $port);
+
+        $t = new FcgiBlockingTransport('127.0.0.1', $port, false, 2.0);
+        $t->connect(); // kernel completes handshake into the accept backlog
+
+        // maxLen < 1 short-circuits without touching the socket
+        $this->assertSame('', $t->recv(0));
+
+        $peer = stream_socket_accept($server, 2);
+        $this->assertNotFalse($peer, 'accept failed');
+
+        // client → server
+        $t->send('PING-FROM-CLIENT');
+        $this->assertSame('PING-FROM-CLIENT', fread($peer, 4096));
+
+        // server → client
+        fwrite($peer, 'PONG-FROM-SERVER');
+        $this->assertSame('PONG-FROM-SERVER', $t->recv(4096));
+
+        // clean EOF: server closes → recv() returns '' (NOT a timeout throw)
+        fclose($peer);
+        usleep(30_000); // let the FIN land before the EOF read
+        $this->assertSame('', $t->recv(4096));
+
+        $t->close();
+        $t->close(); // idempotent
+        fclose($server);
+    }
+
+    /**
+     * Exercise the full {@see FcgiCoroutineTransport} lifecycle inside a coroutine
+     * — connect, send, and the read-ahead BUFFER slicing in recv() — against a real
+     * loopback server. This is the #289 fix: `OpenSwoole\Coroutine\Client::recv()`
+     * returns ALL available bytes at once (its arg is a timeout, not a length), so
+     * the transport buffers the whole response and hands back at most $maxLen per
+     * call. Two recv() calls (8-byte header then body) must reconstruct the exact
+     * bytes — proving the body isn't swallowed by recvExact(8) (the original bug).
+     */
+    public function testCoroutineTransportBufferSlicingOverLoopback(): void
+    {
+        $errno  = 0;
+        $errstr = '';
+        $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+        $this->assertNotFalse($server, "server listen failed: {$errstr} ({$errno})");
+        $name = stream_socket_get_name($server, false);
+        $this->assertIsString($name);
+        $port = (int) substr($name, (int) strrpos($name, ':') + 1);
+        $this->assertGreaterThan(0, $port);
+
+        // A response big enough to prove multi-call slicing out of one recv().
+        $payload     = 'HEADER01' . str_repeat('B', 4096);
+        $reconstruct = '';
+        $sentRequest = '';
+
+        \OpenSwoole\Coroutine::run(function () use ($server, $port, $payload, &$reconstruct, &$sentRequest): void {
+            $t = new FcgiCoroutineTransport('127.0.0.1', $port, false, 2.0);
+            $t->connect(); // Coroutine\Client connect — handshake via backlog
+
+            $peer = stream_socket_accept($server, 1); // ready from backlog → returns immediately
+            if ($peer === false) {
+                return;
+            }
+            stream_set_timeout($peer, 1);
+
+            $t->send('REQUEST-BYTES');           // client → server
+            $sentRequest = (string) fread($peer, 4096); // data already buffered → no block
+
+            fwrite($peer, $payload);             // server → client (whole response at once)
+            fclose($peer);                       // data delivered before FIN
+
+            // First recv refills the buffer with the WHOLE payload, returns 8 bytes;
+            // second recv slices the remainder out of the buffer (no socket read).
+            $head        = $t->recv(8);
+            $rest        = $t->recv(strlen($payload));
+            $reconstruct = $head . $rest;
+
+            $t->close();
+        });
+
+        $this->assertSame('REQUEST-BYTES', $sentRequest, 'server must have received the client send()');
+        $this->assertSame($payload, $reconstruct, 'recv() buffer slicing must reconstruct the exact response (#289)');
+        fclose($server);
+    }
+
+    /**
+     * End-to-end {@see FastCgiClient::request()} round-trip inside a coroutine
+     * against a mock FCGI server. Covers the transport selection in connect()
+     * (coroutine branch → {@see FcgiCoroutineTransport}) plus the BEGIN_REQUEST /
+     * PARAMS / STDIN send helpers and the full readResponse() loop — the complete
+     * #289 dispatch path. HOOK_ALL is enabled so the raw-socket mock server yields
+     * cooperatively under the scheduler, then restored so other tests are unaffected.
+     */
+    public function testFullRequestRoundTripInsideCoroutine(): void
+    {
+        $result = null;
+
+        // HOOK_ALL so the raw-socket mock server yields cooperatively; the listener
+        // MUST be created inside the hooked coroutine region and set non-blocking,
+        // else the hooked stream_socket_accept() can't see the coroutine client's
+        // connection. Restored to false afterwards so other tests are unaffected.
+        \OpenSwoole\Runtime::enableCoroutine(\OpenSwoole\Runtime::HOOK_ALL);
+        try {
+            \OpenSwoole\Coroutine::run(function () use (&$result): void {
+                $errno  = 0;
+                $errstr = '';
+                $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+                if ($server === false) {
+                    return;
+                }
+                stream_set_blocking($server, false);
+                $name = stream_socket_get_name($server, false);
+                $port = is_string($name) ? (int) substr($name, (int) strrpos($name, ':') + 1) : 0;
+
+                $client = new FastCgiClient("127.0.0.1:{$port}", 3);
+
+                // Canned FCGI response: STDOUT (headers + body) + empty STDOUT + END_REQUEST.
+                $stdout    = "Content-Type: text/plain\r\nStatus: 200 OK\r\n\r\nROUNDTRIP-BODY";
+                $response  = $client->encodeRecord(FastCgiClient::FCGI_STDOUT, 1, $stdout);
+                $response .= $client->encodeRecord(FastCgiClient::FCGI_STDOUT, 1, '');
+                $response .= $client->encodeRecord(FastCgiClient::FCGI_END_REQUEST, 1, pack('NCC', 0, 0, 0) . "\x00\x00\x00");
+
+                go(function () use ($server, $response): void {
+                    $peer = @stream_socket_accept($server, 3); // hooked → yields
+                    if ($peer === false) {
+                        return;
+                    }
+                    fread($peer, 8192);       // drain the client's request bytes
+                    fwrite($peer, $response); // hooked → yields
+                    fclose($peer);
+                });
+                go(function () use ($client, &$result): void {
+                    $result = $client->request(
+                        ['SCRIPT_FILENAME' => '/tmp/index.php', 'REQUEST_METHOD' => 'GET'],
+                        ''
+                    );
+                });
+            });
+        } finally {
+            \OpenSwoole\Runtime::enableCoroutine(false); // restore: don't leak hooks into other tests
+        }
+
+        $this->assertIsArray($result);
+        $this->assertSame(200, $result['status']);
+        $this->assertSame('ROUNDTRIP-BODY', $result['body']);
+        $this->assertContains(['Content-Type', 'text/plain'], $result['headers']);
+    }
+
+    /**
+     * A timeout <= 0 means "no explicit socket timeout" — connect() falls back to
+     * the `default_socket_timeout` ini value and skips stream_set_timeout().
+     */
+    public function testBlockingTransportZeroTimeoutUsesIniDefault(): void
+    {
+        $errno  = 0;
+        $errstr = '';
+        $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+        $this->assertNotFalse($server, "server listen failed: {$errstr} ({$errno})");
+        $name = stream_socket_get_name($server, false);
+        $this->assertIsString($name);
+        $port = (int) substr($name, (int) strrpos($name, ':') + 1);
+
+        $t = new FcgiBlockingTransport('127.0.0.1', $port, false, 0.0); // <= 0 → ini default
+        $t->connect();
+        $t->close();
+        fclose($server);
+        $this->assertTrue(true, 'connect() succeeded with the ini-default socket timeout');
+    }
+
+    /**
+     * Cover the {@see FcgiCoroutineTransport} UNIX-socket connect branch, the
+     * recv(maxLen < 1) short-circuit, and the clean-EOF path (peer closes without
+     * sending → recv() returns '').
+     */
+    public function testCoroutineTransportUnixSocketAndEofPaths(): void
+    {
+        $sockPath  = sys_get_temp_dir() . '/zealfcgi_' . getmypid() . '.sock';
+        @unlink($sockPath);
+        $emptyRecv = null;
+        $eofRecv   = null;
+
+        \OpenSwoole\Runtime::enableCoroutine(\OpenSwoole\Runtime::HOOK_ALL);
+        try {
+            \OpenSwoole\Coroutine::run(function () use ($sockPath, &$emptyRecv, &$eofRecv): void {
+                $errno  = 0;
+                $errstr = '';
+                $server = stream_socket_server('unix://' . $sockPath, $errno, $errstr);
+                if ($server === false) {
+                    return;
+                }
+                stream_set_blocking($server, false);
+
+                $t = new FcgiCoroutineTransport($sockPath, 0, true, 2.0); // isUnix=true
+                $t->connect();
+
+                $emptyRecv = $t->recv(0); // maxLen < 1 → '' without touching the socket
+
+                go(function () use ($server): void {
+                    $peer = @stream_socket_accept($server, 2);
+                    if ($peer !== false) {
+                        fclose($peer); // close WITHOUT sending → client sees a clean EOF
+                    }
+                });
+                $eofRecv = $t->recv(8); // buffer empty, peer closed → '' (clean EOF)
+                $t->close();
+            });
+        } finally {
+            \OpenSwoole\Runtime::enableCoroutine(false);
+            @unlink($sockPath);
+        }
+
+        $this->assertSame('', $emptyRecv, 'recv(0) must short-circuit to empty string');
+        $this->assertSame('', $eofRecv, 'recv() on a closed peer must return empty string (clean EOF)');
+    }
 }
