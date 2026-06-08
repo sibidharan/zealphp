@@ -56,7 +56,7 @@ final class RouteGroup
     {
         [$options, $handler] = $this->normalizeShorthand($options, $handler);
         $this->app->route(
-            $this->prefix . $path,
+            $this->joinPath($this->prefix, $path),
             $this->stripMiddleware($options),
             $handler,
             $methods,
@@ -151,10 +151,29 @@ final class RouteGroup
         }
         $child = new self(
             $this->app,
-            $this->prefix . $prefix,
+            $this->joinPath($this->prefix, $prefix),
             array_merge($this->middleware, App::normalizeMiddlewareSpec($middleware))
         );
         $registrar($child);
+    }
+
+    /**
+     * Join the group prefix to a child path (or nested-group prefix), collapsing
+     * the boundary slash so a trailing-slash prefix never produces a double slash
+     * (#308). `group('/admin/')->route('/users')` → `/admin/users`, not the
+     * unreachable `/admin//users`. An empty path yields the bare prefix; a missing
+     * leading slash on the path is also normalised (`route('users')` works).
+     */
+    private function joinPath(string $prefix, string $path): string
+    {
+        if ($prefix === '') {
+            return $path;
+        }
+        $base = rtrim($prefix, '/');
+        if ($path === '') {
+            return $base === '' ? '/' : $base;
+        }
+        return $base . '/' . ltrim($path, '/');
     }
 
     /**

@@ -81,7 +81,14 @@ final class HealthCheckMiddleware implements MiddlewareInterface
         $reason = null;
 
         if ($this->check !== null) {
-            $reason = ($this->check)();
+            try {
+                $reason = ($this->check)();
+            } catch (\Throwable $e) {
+                // A readiness probe that THROWS is unhealthy, not a 500 — a DB/
+                // Redis ping that raises instead of returning an error string must
+                // still surface as 503 so load balancers drain the node (#309).
+                $reason = 'health check threw: ' . $e->getMessage();
+            }
         }
 
         $healthy = $reason === null;

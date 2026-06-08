@@ -91,6 +91,24 @@ final class HealthCheckMiddlewareTest extends TestCase
         $this->assertSame('redis unreachable', $data['reason']);
     }
 
+    public function testCustomCheckThatThrowsIsTreatedAsUnhealthy(): void
+    {
+        // A readiness probe that THROWS (e.g. a DB/Redis ping that raises instead
+        // of returning an error string) must surface as 503, not a 500 (#309).
+        $mw = new HealthCheckMiddleware(check: function (): ?string {
+            throw new \RuntimeException('db connection refused');
+        });
+        $request = new ServerRequest('/healthz', 'GET');
+        $response = $mw->process($request, $this->handler);
+
+        $this->assertSame(503, $response->getStatusCode());
+        $this->assertFalse($this->handler->called);
+        $data = json_decode((string) $response->getBody(), true);
+        $this->assertIsArray($data);
+        $this->assertSame('unhealthy', $data['status']);
+        $this->assertStringContainsString('db connection refused', $data['reason']);
+    }
+
     public function testDefaultPathDoesNotMatchSubpaths(): void
     {
         $mw = new HealthCheckMiddleware();

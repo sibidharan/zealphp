@@ -8577,6 +8577,14 @@ class App
                 $hook($server, $workerId);
             }
 
+            // #311 — wire worker-scoped signal handlers. The master applies its
+            // handlers in the 'start' event (App::run()); worker-scoped handlers
+            // registered via App::onSignal(..., workerOnly: true) must be applied
+            // HERE, in-process per worker, or they silently never register.
+            if (self::$signalHandlers !== []) {
+                self::applySignalHandlersFor('worker');
+            }
+
             // #26 — fold any boot-time $GLOBALS writes made during the onWorkerStart
             // hooks (app bootstrap includes like load.php) into the per-coroutine
             // baseline, so every request coroutine sees them — not just the first.

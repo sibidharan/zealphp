@@ -86,6 +86,31 @@ final class AppV040HelpersTest extends TestCase
         $this->assertTrue($r->hasMethod('applySignalHandlersFor'));
     }
 
+    public function testOnSignalTagsWorkerOnlyHandlersForWorkerApply(): void
+    {
+        // #311 — worker-scoped handlers must be tagged worker_only:true so the
+        // per-worker workerStart applySignalHandlersFor('worker') (the fix) picks
+        // them up; the master 'start' path applies only worker_only:false ones.
+        // We assert the registry tag here (the Process::signal wiring is exercised
+        // by the live server — see the note above on event-loop contamination).
+        $sig = SIGUSR1;
+        App::onSignal($sig, fn() => null, workerOnly: true);
+
+        $prop = (new \ReflectionClass(App::class))->getProperty('signalHandlers');
+        $prop->setAccessible(true);
+        $all = $prop->getValue();
+        $this->assertIsArray($all);
+        $this->assertArrayHasKey($sig, $all);
+        $hasWorkerOnly = false;
+        foreach ($all[$sig] as $entry) {
+            if (($entry['worker_only'] ?? null) === true) {
+                $hasWorkerOnly = true;
+                break;
+            }
+        }
+        $this->assertTrue($hasWorkerOnly, 'worker-scoped handler must be tagged worker_only:true');
+    }
+
     // ── App::clearTimer guard ──────────────────────────────────────────
 
     public function testClearTimerWithZeroIsNoOp(): void

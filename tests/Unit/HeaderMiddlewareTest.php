@@ -605,4 +605,38 @@ class HeaderMiddlewareTest extends TestCase
         };
         return $mw->process($request, $handler);
     }
+
+    // ───────────── #310 structured-form missing 'value' → fail fast ─────────────
+
+    public function testSetRuleMissingValueThrowsAtConstruction(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches("/'set' rule for header 'X-Test'.*'value'/");
+        new HeaderMiddleware(['set' => ['X-Test' => ['always' => true]]]);
+    }
+
+    public function testAppendRuleMissingValueThrowsAtConstruction(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches("/'append' rule for header 'Vary'.*'value'/");
+        new HeaderMiddleware(['append' => ['Vary' => ['always' => false]]]);
+    }
+
+    public function testAddRuleStructuredMissingValueThrowsAtConstruction(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches("/'add' rule for header 'Set-Cookie'.*'value'/");
+        new HeaderMiddleware(['add' => ['Set-Cookie' => ['always' => true]]]);
+    }
+
+    public function testValidStructuredAndPlainFormsStillConstruct(): void
+    {
+        // The guard must not break the documented valid shapes.
+        $mw = new HeaderMiddleware([
+            'set'    => ['X-A' => ['value' => 'a', 'always' => true]],
+            'append' => ['Vary' => 'Accept-Encoding'],
+            'add'    => ['Link' => ['v1', 'v2'], 'X-B' => ['value' => ['b1', 'b2']]],
+        ]);
+        $this->assertInstanceOf(HeaderMiddleware::class, $mw);
+    }
 }
