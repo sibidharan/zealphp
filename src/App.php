@@ -2147,6 +2147,10 @@ class App
      * isolation:
      *
      *  - `QUERY_STRING`: always present; `''` when the request has no query.
+     *  - `REQUEST_URI`: full mod_php value — the original request target including
+     *    the query string (#306). OpenSwoole delivers a path-only request_uri, so
+     *    the query is re-appended here; the dispatch layer matches routes on a
+     *    parse_url(PATH) of it, so carrying the query is safe.
      *  - `CONTENT_TYPE` / `CONTENT_LENGTH`: mirrored from the request body
      *    headers (`HTTP_CONTENT_TYPE` / `HTTP_CONTENT_LENGTH`) when present.
      *  - HTTP Basic/Digest auth (#307): `Authorization: Basic <b64>` decodes to
@@ -2155,8 +2159,6 @@ class App
      *    Apache auth module handles the request. `HTTP_AUTHORIZATION` is kept
      *    (Bearer flows rely on it).
      *
-     * `REQUEST_URI` is intentionally left path-only here: re-appending the query
-     * for full mod_php parity needs a query-safe dispatch layer and is deferred.
      * PATH_INFO / PHP_SELF are NOT computed here — they depend on the matched
      * `.php` script and are set where the script resolves (`App::include()` /
      * the ResponseMiddleware PATH_INFO rewrite).
@@ -2167,10 +2169,24 @@ class App
     public static function synthesizeRequestServerVars(array $srv): array
     {
         // QUERY_STRING — always defined; default to '' when absent (mod_php
-        // always publishes it). REQUEST_URI is intentionally left as-is here:
-        // making it mod_php-correct (re-appending the query) requires the
-        // dispatch layer to be query-safe and is deferred to its own change.
-        $srv['QUERY_STRING'] = isset($srv['QUERY_STRING']) ? (string)$srv['QUERY_STRING'] : '';
+        // always publishes it).
+        $query = isset($srv['QUERY_STRING']) ? (string)$srv['QUERY_STRING'] : '';
+        $srv['QUERY_STRING'] = $query;
+
+        // REQUEST_URI — full mod_php value = original request target incl. the
+        // query string (#306). OpenSwoole delivers a path-only request_uri plus a
+        // separate query_string, so append `?QUERY_STRING` when there's a query and
+        // REQUEST_URI doesn't already carry one (the strpos guard makes this a
+        // no-op if a future/other OpenSwoole build embeds the query). The dispatch
+        // layer matches routes on a parse_url(PATH) of REQUEST_URI, so carrying the
+        // query here is safe — see ResponseMiddleware::matchAndDispatch().
+        if ($query !== ''
+            && isset($srv['REQUEST_URI'])
+            && is_string($srv['REQUEST_URI'])
+            && strpos($srv['REQUEST_URI'], '?') === false
+        ) {
+            $srv['REQUEST_URI'] = $srv['REQUEST_URI'] . '?' . $query;
+        }
 
         // CONTENT_TYPE / CONTENT_LENGTH — bare CGI vars mod_php sets from the
         // body headers (in addition to the HTTP_* copies buildServerVars made).
