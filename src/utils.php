@@ -1707,12 +1707,37 @@ function is_uploaded_file(string $filename): bool
 {
     $g = RequestContext::instance();
     foreach ($g->files as $entry) {
-        if (!is_array($entry)) continue;
+        if (!is_array($entry)) {
+            continue;
+        }
+        // PHP-canonical $_FILES is field-major (#304): the per-field 'tmp_name'
+        // is a scalar (single file) OR a (possibly nested) array of tmp paths
+        // for array/nested uploads. Walk it recursively so every registered
+        // tmp_name leaf is recognised.
         $tmp = $entry['tmp_name'] ?? null;
-        if (is_array($tmp)) {
-            if (in_array($filename, $tmp, true)) return true;
-        } elseif (is_string($tmp) && $tmp === $filename) {
+        if ($tmp !== null && _zealphp_tmp_name_matches($tmp, $filename)) {
             return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Recursively test whether `$filename` is one of the temp-path leaves in a
+ * field-major `$_FILES[...]['tmp_name']` value (scalar or nested array).
+ *
+ * @param mixed $tmp Scalar tmp path or an (possibly nested) array of them.
+ */
+function _zealphp_tmp_name_matches(mixed $tmp, string $filename): bool
+{
+    if (is_string($tmp)) {
+        return $tmp === $filename;
+    }
+    if (is_array($tmp)) {
+        foreach ($tmp as $leaf) {
+            if (_zealphp_tmp_name_matches($leaf, $filename)) {
+                return true;
+            }
         }
     }
     return false;

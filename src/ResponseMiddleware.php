@@ -564,6 +564,8 @@ class ResponseMiddleware implements MiddlewareInterface
                 $g->server['PATH_INFO']       = '/' . $extra;
                 $g->server['PATH_TRANSLATED'] = $docRoot . '/' . $extra;
                 $g->server['SCRIPT_NAME']     = $scriptPath;
+                // mod_php: PHP_SELF = SCRIPT_NAME . PATH_INFO (#306).
+                $g->server['PHP_SELF']        = $scriptPath . '/' . $extra;
                 $qs = parse_url($uri, PHP_URL_QUERY);
                 // When ignore_php_ext is on, the `.php` URI would hit the 403-block
                 // route — strip the extension so the implicit file route resolves it.

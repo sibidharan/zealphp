@@ -1923,6 +1923,181 @@ class App
     }
 
     /**
+     * Transpose OpenSwoole's `$request->files` into PHP/mod_php-canonical
+     * `$_FILES` (issue #304).
+     *
+     * OpenSwoole delivers a repeated/array file field (`files[]`) in
+     * **index-major** shape — `['files' => [0 => ['name'=>…,'tmp_name'=>…,…],
+     * 1 => […]]]` — while PHP's RFC 1867 parser publishes the **field-major**
+     * shape every PHP app codes against:
+     * `['files' => ['name'=>[0=>…,1=>…], 'type'=>[…], 'tmp_name'=>[…],
+     * 'error'=>[…], 'size'=>[…], 'full_path'=>[…]]]`. A SINGLE file field stays
+     * flat but gains the PHP 8.1+ `full_path` key (defaulting to `name` when
+     * OpenSwoole doesn't surface it). Nested names (`doc[main]`) are transposed
+     * recursively so the per-key sub-array mirrors the field structure.
+     *
+     * Pure function — no side effects; safe to unit-test directly.
+     *
+     * @param array<array-key, mixed> $files OpenSwoole's `$request->files`.
+     * @return array<string, mixed> Field-major `$_FILES`-shaped tree.
+     */
+    public static function normalizeUploadedFiles(array $files): array
+    {
+        /** @var array<string, mixed> $out */
+        $out = [];
+        foreach ($files as $field => $entry) {
+            $field = (string)$field;
+            if (!is_array($entry)) {
+                // Not a file struct — pass through untouched.
+                $out[$field] = $entry;
+                continue;
+            }
+            if (self::fileEntryIsSingle($entry)) {
+                $out[$field] = self::normalizeSingleFileEntry($entry);
+                continue;
+            }
+            // Array/nested field — index-major list of file structs (or nested
+            // sub-arrays of them). Transpose to field-major.
+            $out[$field] = self::transposeFileGroup($entry);
+        }
+        return $out;
+    }
+
+    /**
+     * True when `$entry` is a single PHP file struct (has a scalar/array
+     * `tmp_name` AND `error` directly on it), rather than an index/name-keyed
+     * group of nested file structs.
+     *
+     * @param array<array-key, mixed> $entry
+     */
+    private static function fileEntryIsSingle(array $entry): bool
+    {
+        return array_key_exists('tmp_name', $entry) && array_key_exists('error', $entry);
+    }
+
+    /**
+     * Normalise one flat OpenSwoole file struct to PHP canonical shape, adding
+     * the PHP 8.1+ `full_path` key when absent (value = `name`).
+     *
+     * @param array<array-key, mixed> $entry
+     * @return array<string, mixed>
+     */
+    private static function normalizeSingleFileEntry(array $entry): array
+    {
+        $name = $entry['name'] ?? '';
+        /** @var array<string, mixed> $out */
+        $out = [
+            'name'     => $name,
+            'type'     => $entry['type'] ?? '',
+            'tmp_name' => $entry['tmp_name'] ?? '',
+            'error'    => $entry['error'] ?? UPLOAD_ERR_OK,
+            'size'     => $entry['size'] ?? 0,
+        ];
+        $out['full_path'] = array_key_exists('full_path', $entry) ? $entry['full_path'] : $name;
+        return $out;
+    }
+
+    /**
+     * Transpose an index-major group of file structs (the OpenSwoole shape for
+     * `files[]` / `doc[main]`) into PHP's field-major layout. Recurses through
+     * nested name groups so `['main' => <struct>, 'thumb' => <struct>]` yields
+     * `['name'=>['main'=>…,'thumb'=>…], 'tmp_name'=>[…], …]`.
+     *
+     * @param array<array-key, mixed> $group Index/name-keyed file structs.
+     * @return array<string, array<array-key, mixed>>
+     */
+    private static function transposeFileGroup(array $group): array
+    {
+        $keys = ['name', 'type', 'tmp_name', 'error', 'size', 'full_path'];
+        /** @var array<string, array<array-key, mixed>> $out */
+        $out = [];
+        foreach ($keys as $k) {
+            $out[$k] = [];
+        }
+        foreach ($group as $idx => $child) {
+            if (!is_array($child)) {
+                continue;
+            }
+            if (self::fileEntryIsSingle($child)) {
+                $norm = self::normalizeSingleFileEntry($child);
+                foreach ($keys as $k) {
+                    $out[$k][$idx] = $norm[$k];
+                }
+            } else {
+                // A deeper nesting level — recurse and graft the per-key trees.
+                $nested = self::transposeFileGroup($child);
+                foreach ($keys as $k) {
+                    $out[$k][$idx] = $nested[$k];
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Synthesize the mod_php request-surface `$_SERVER` vars that OpenSwoole's
+     * raw `$request->server` omits or gets wrong (issue #306 + #307). Pure
+     * transform of an already-built server array — operates on the
+     * upper-cased keys `buildServerVars()` produces, so it is unit-testable in
+     * isolation:
+     *
+     *  - `QUERY_STRING`: always present; `''` when the request has no query.
+     *  - `CONTENT_TYPE` / `CONTENT_LENGTH`: mirrored from the request body
+     *    headers (`HTTP_CONTENT_TYPE` / `HTTP_CONTENT_LENGTH`) when present.
+     *  - HTTP Basic/Digest auth (#307): `Authorization: Basic <b64>` decodes to
+     *    `PHP_AUTH_USER` / `PHP_AUTH_PW`; `Digest` publishes `PHP_AUTH_DIGEST`.
+     *    `AUTH_TYPE` is deliberately NOT set — mod_php only publishes it when an
+     *    Apache auth module handles the request. `HTTP_AUTHORIZATION` is kept
+     *    (Bearer flows rely on it).
+     *
+     * `REQUEST_URI` is intentionally left path-only here: re-appending the query
+     * for full mod_php parity needs a query-safe dispatch layer and is deferred.
+     * PATH_INFO / PHP_SELF are NOT computed here — they depend on the matched
+     * `.php` script and are set where the script resolves (`App::include()` /
+     * the ResponseMiddleware PATH_INFO rewrite).
+     *
+     * @param array<string, bool|float|int|string|null> $srv
+     * @return array<string, bool|float|int|string|null>
+     */
+    public static function synthesizeRequestServerVars(array $srv): array
+    {
+        // QUERY_STRING — always defined; default to '' when absent (mod_php
+        // always publishes it). REQUEST_URI is intentionally left as-is here:
+        // making it mod_php-correct (re-appending the query) requires the
+        // dispatch layer to be query-safe and is deferred to its own change.
+        $srv['QUERY_STRING'] = isset($srv['QUERY_STRING']) ? (string)$srv['QUERY_STRING'] : '';
+
+        // CONTENT_TYPE / CONTENT_LENGTH — bare CGI vars mod_php sets from the
+        // body headers (in addition to the HTTP_* copies buildServerVars made).
+        if (isset($srv['HTTP_CONTENT_TYPE']) && !isset($srv['CONTENT_TYPE'])) {
+            $srv['CONTENT_TYPE'] = $srv['HTTP_CONTENT_TYPE'];
+        }
+        if (isset($srv['HTTP_CONTENT_LENGTH']) && !isset($srv['CONTENT_LENGTH'])) {
+            $srv['CONTENT_LENGTH'] = $srv['HTTP_CONTENT_LENGTH'];
+        }
+
+        // HTTP Basic / Digest auth → PHP SAPI vars (#307). AUTH_TYPE is NOT set:
+        // mod_php only publishes it when an Apache auth module handles the
+        // request, so with the credentials merely carried in the Authorization
+        // header (no auth module) Apache leaves AUTH_TYPE unset — match that.
+        if (isset($srv['HTTP_AUTHORIZATION'])) {
+            $auth = (string)$srv['HTTP_AUTHORIZATION'];
+            if (stripos($auth, 'Basic ') === 0) {
+                $decoded = base64_decode(substr($auth, 6), true);
+                if (is_string($decoded) && str_contains($decoded, ':')) {
+                    [$user, $pw] = explode(':', $decoded, 2);
+                    $srv['PHP_AUTH_USER'] = $user;
+                    $srv['PHP_AUTH_PW']   = $pw;
+                }
+            } elseif (stripos($auth, 'Digest ') === 0) {
+                $srv['PHP_AUTH_DIGEST'] = substr($auth, 7);
+            }
+        }
+
+        return $srv;
+    }
+
+    /**
      * Build the per-request `$_SERVER` array from an OpenSwoole request —
      * mod_php parity. Merges `$request->server` (upper-cased keys), the
      * `HTTP_*` header vars, and the constant CGI keys mod_php always provides
@@ -1951,6 +2126,14 @@ class App
         $srv = [];
         if ($request->server) {
             foreach ($request->server as $sk => $sv) {
+                // #306 — OpenSwoole's `path_info` is the WHOLE request path, but
+                // mod_php's PATH_INFO is ONLY the suffix after the script (unset
+                // when none). Don't let it pass through as $_SERVER['PATH_INFO'];
+                // the ResponseMiddleware `.php/extra` rewrite sets it correctly
+                // for the path-info case.
+                if ($sk === 'path_info') {
+                    continue;
+                }
                 $srv[strtoupper($sk)] = is_scalar($sv) || $sv === null ? $sv : null;
             }
         }
@@ -2012,6 +2195,12 @@ class App
         } else {
             $srv['REQUEST_SCHEME'] = $srv['REQUEST_SCHEME'] ?? 'http';
         }
+
+        // mod_php request-surface synthesis (#306 + #307): QUERY_STRING default,
+        // REQUEST_URI query re-append, bare CONTENT_TYPE/CONTENT_LENGTH, and
+        // HTTP Basic/Digest auth decode into PHP_AUTH_USER/PW. Pure transform —
+        // PATH_INFO/PHP_SELF stay script-dependent (set at include/dispatch).
+        $srv = self::synthesizeRequestServerVars($srv);
         return $srv;
     }
 
@@ -6506,9 +6695,14 @@ class App
         }
 
         $g = RequestContext::instance();
-        $g->server['PHP_SELF']        = '/' . $rel;
-        $g->server['SCRIPT_NAME']     = '/' . $rel;
+        $scriptName = '/' . $rel;
+        $g->server['SCRIPT_NAME']     = $scriptName;
         $g->server['SCRIPT_FILENAME'] = $absPath;
+        // #306 — PHP_SELF = SCRIPT_NAME . PATH_INFO. When the ResponseMiddleware
+        // `.php/extra` rewrite already set a PATH_INFO suffix for this request,
+        // honour it; otherwise PHP_SELF == SCRIPT_NAME (no path-info).
+        $pathInfo = isset($g->server['PATH_INFO']) ? (string)$g->server['PATH_INFO'] : '';
+        $g->server['PHP_SELF']        = $pathInfo !== '' ? $scriptName . $pathInfo : $scriptName;
 
         // A matched route's `backend:` option (request-scoped, set by
         // ResponseMiddleware::dispatchRoute) overrides the path-resolved backend
@@ -8346,8 +8540,10 @@ class App
             $post = $request->post ?? [];
             /** @var array<string, mixed> $cookie */
             $cookie = $request->cookie ?? [];
+            // #304 — transpose OpenSwoole's index-major $_FILES to PHP-canonical
+            // field-major + add the PHP 8.1+ full_path key.
             /** @var array<string, mixed> $files */
-            $files = $request->files ?? [];
+            $files = self::normalizeUploadedFiles($request->files ?? []);
             $g->get = $get;
             $g->post = $post;
             $g->request = $g->get + $g->post;
