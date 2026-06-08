@@ -2035,6 +2035,111 @@ class App
     }
 
     /**
+     * Parse a raw `Cookie:` header through PHP's cookie treat-data semantics
+     * (issue #305) — the same `php_default_treat_data` routine PHP applies to
+     * the query string, but with the cookie value-decoding rule:
+     *
+     *  - Pairs split on `;`; each pair split on its FIRST `=`. The name is
+     *    left-trimmed; the value is everything after the first `=`.
+     *  - Cookie NAMES get legacy mangling — leading whitespace stripped, `.`
+     *    and space → `_`, and `name[]` / `name[k]` build nested arrays.
+     *  - Cookie VALUES are `%XX`-decoded per RFC 6265 ONLY — a literal `+` is
+     *    NOT turned into a space (that `+`→space rule is form-urlencoded-only).
+     *
+     * Implementation re-uses PHP's `parse_str()` for the bracket-nesting +
+     * name-mangling, protecting each value's `+` / `&` / `=` so the assembled
+     * query survives the urldecode parse_str applies.
+     *
+     * Pure function — no side effects; safe to unit-test directly.
+     *
+     * @return array<string, mixed> PHP-canonical `$_COOKIE` tree.
+     */
+    public static function parseCookieHeader(string $raw): array
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return [];
+        }
+        $assembled = [];
+        foreach (explode(';', $raw) as $pair) {
+            if ($pair === '' || !str_contains($pair, '=')) {
+                // A bare `; flag` cookie segment with no `=` has no value to
+                // bind; PHP skips it.
+                continue;
+            }
+            [$name, $value] = explode('=', $pair, 2);
+            $name = ltrim($name);
+            if ($name === '') {
+                continue;
+            }
+            // Protect the value: parse_str urldecodes (turning `+`→space and
+            // honouring `&`/`=` as separators). Pre-encode those three so the
+            // value round-trips verbatim except for the cookie's own %XX, which
+            // parse_str's urldecode resolves — matching RFC 6265 value decoding.
+            $safeValue = str_replace(['+', '&', '='], ['%2B', '%26', '%3D'], $value);
+            $assembled[] = $name . '=' . $safeValue;
+        }
+        if ($assembled === []) {
+            return [];
+        }
+        /** @var array<array-key, mixed> $parsed */
+        $parsed = [];
+        parse_str(implode('&', $assembled), $parsed);
+        // Cookie names are always strings; normalise the key type so the
+        // declared array<string, mixed> contract holds (parse_str's signature
+        // is array-key-typed because numeric-string keys collapse to int).
+        $out = [];
+        foreach ($parsed as $name => $value) {
+            $out[(string)$name] = $value;
+        }
+        return $out;
+    }
+
+    /**
+     * mod_php-canonical cookie map for a request (issue #305).
+     *
+     * `App::run()` sets OpenSwoole's `http_parse_cookie => false` so OpenSwoole
+     * no longer parses cookies itself (its parser diverges from PHP — no array
+     * syntax, no `.`→`_` mangling, and a wrong `+`→space value decode). Instead
+     * it leaves the raw `Cookie:` header in `$request->header['cookie']` and its
+     * own `$request->cookie` empty. This parses that raw header through
+     * {@see parseCookieHeader()} and WRITES THE RESULT BACK onto
+     * `$request->cookie`, so every consumer — the superglobal populate, both
+     * session managers' `PHPSESSID` lookup, WebSocket `onOpen`, and user handlers
+     * reading `$request->cookie` — sees the SAME PHP-canonical map.
+     *
+     * Falls back to OpenSwoole's pre-parsed `$request->cookie` when there's no
+     * raw header (e.g. `http_parse_cookie` left on, or no Cookie sent). The
+     * write-back is idempotent — re-parsing the unchanged header is a no-op.
+     *
+     * @return array<string, mixed>
+     */
+    public static function requestCookieMap(\OpenSwoole\Http\Request $request): array
+    {
+        $header = $request->header;
+        if (is_array($header)
+            && isset($header['cookie'])
+            && is_string($header['cookie'])
+            && $header['cookie'] !== ''
+        ) {
+            $parsed = self::parseCookieHeader($header['cookie']);
+            $request->cookie = $parsed; // write-back so $request->cookie readers agree
+            return $parsed;
+        }
+        $existing = $request->cookie;
+        if (!is_array($existing)) {
+            return [];
+        }
+        // Normalise keys to string so the array<string, mixed> contract holds
+        // (OpenSwoole types $request->cookie as mixed; cookie names are strings).
+        $out = [];
+        foreach ($existing as $name => $value) {
+            $out[(string)$name] = $value;
+        }
+        return $out;
+    }
+
+    /**
      * Synthesize the mod_php request-surface `$_SERVER` vars that OpenSwoole's
      * raw `$request->server` omits or gets wrong (issue #306 + #307). Pure
      * transform of an already-built server array — operates on the
@@ -2255,7 +2360,7 @@ class App
         /** @var array<string, mixed> $post */
         $post = $req->post ?? [];
         /** @var array<string, mixed> $cookie */
-        $cookie = $req->cookie ?? [];
+        $cookie = self::requestCookieMap($req); // #305 — PHP-canonical $_COOKIE
         /** @var array<string, mixed> $files */
         $files = $req->files ?? [];
         $server = self::buildServerVars($req);
@@ -7866,6 +7971,15 @@ class App
             // Runtime compression is owned by OpenSwoole. Do not also register
             // CompressionMiddleware unless this setting is disabled.
             'http_compression' => true,
+            // #305 — ZealPHP owns cookie parsing (mod_php parity). OpenSwoole's
+            // built-in cookie parser diverges from PHP's treat-data (no array
+            // syntax, no `.`→`_` name-mangling, wrong `+`→space value decode), so
+            // we disable it: OpenSwoole then leaves the raw `Cookie:` header in
+            // $request->header['cookie'] and App::requestCookieMap() parses it
+            // PHP-canonically (writing the result back onto $request->cookie so
+            // every consumer agrees). Override only if you intentionally want
+            // OpenSwoole's parser back AND nothing relies on $_COOKIE parity.
+            'http_parse_cookie' => false,
             'pid_file' => $defaultPidFile,
             // Worker recycling — bounds memory growth from leaks accumulated
             // in long-running workers (static caches, closure captures, leaky
@@ -8538,8 +8652,11 @@ class App
             $get = $request->get ?? [];
             /** @var array<string, mixed> $post */
             $post = $request->post ?? [];
+            // #305 — PHP-canonical $_COOKIE from the raw Cookie header (OpenSwoole's
+            // own parser is disabled via http_parse_cookie=false). Idempotent: the
+            // session manager already parsed + wrote it back to $request->cookie.
             /** @var array<string, mixed> $cookie */
-            $cookie = $request->cookie ?? [];
+            $cookie = self::requestCookieMap($request);
             // #304 — transpose OpenSwoole's index-major $_FILES to PHP-canonical
             // field-major + add the PHP 8.1+ full_path key.
             /** @var array<string, mixed> $files */
@@ -8899,8 +9016,11 @@ class App
             $sessionName = function_exists('ZealPHP\\Session\\zeal_session_name')
                 ? \ZealPHP\Session\zeal_session_name()
                 : 'PHPSESSID';
-            if (is_array($request->cookie) && isset($request->cookie[$sessionName])) {
-                $rawSid = $request->cookie[$sessionName];
+            // #305 — parse the upgrade request's raw Cookie header (OpenSwoole's
+            // own parser is off via http_parse_cookie=false) for the PHPSESSID.
+            $wsCookies = self::requestCookieMap($request);
+            if (isset($wsCookies[$sessionName])) {
+                $rawSid = $wsCookies[$sessionName];
                 if (is_string($rawSid)) {
                     $g->cookie[$sessionName] = $rawSid;
                     \ZealPHP\Session\zeal_session_id($rawSid);
