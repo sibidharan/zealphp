@@ -485,11 +485,14 @@ class ResponseMiddleware implements MiddlewareInterface
         // Apache rejects these at the URI parse layer; we do the same so encoded
         // attacks (%2e%2e, %00, backslash) can't survive past pattern matching.
         $parsedPath = parse_url($uri, PHP_URL_PATH);
-        // Fall back to '/' (not $uri) for a degenerate query-only target: since
-        // #306 made REQUEST_URI carry the query, falling back to $uri would feed
-        // the query string into the traversal/null-byte checks below, which are
-        // meant to inspect the PATH component only.
-        $rawPath = is_string($parsedPath) ? $parsedPath : '/';
+        // parse_url() returns null for a protocol-relative-looking target such as
+        // `//json` (it reads `json` as the authority) — exactly the duplicate-slash
+        // case normalization must still collapse to `/json`. Fall back to the URI
+        // with the query stripped: that PRESERVES the path (so normalizeRequestPath
+        // below can fix it) while keeping the query out of the traversal/null-byte
+        // checks (#306 made REQUEST_URI carry the query). A bare `?query` target
+        // yields '' here, which normalizes to '/'.
+        $rawPath = is_string($parsedPath) ? $parsedPath : explode('?', $uri, 2)[0];
 
         // Apache AllowEncodedSlashes Off (default): an encoded slash in the RAW
         // path is refused with 404 before it can be decoded to a real `/`. Check
