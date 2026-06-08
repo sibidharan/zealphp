@@ -140,6 +140,14 @@ class SuperglobalParityUnitTest extends TestCase
         $this->assertSame('/s.php?x=1', $out['REQUEST_URI']);
     }
 
+    public function testRequestUriEmptyNotMalformedByQuery(): void
+    {
+        // An empty REQUEST_URI must NOT become a malformed '?query' (a query with
+        // no path) — the append guard requires a non-empty REQUEST_URI.
+        $out = App::synthesizeRequestServerVars(['REQUEST_URI' => '', 'QUERY_STRING' => 'x=1']);
+        $this->assertSame('', $out['REQUEST_URI']);
+    }
+
     public function testContentTypeAndLengthMirroredFromHeaders(): void
     {
         $out = App::synthesizeRequestServerVars([

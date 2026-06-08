@@ -2183,6 +2183,7 @@ class App
         if ($query !== ''
             && isset($srv['REQUEST_URI'])
             && is_string($srv['REQUEST_URI'])
+            && $srv['REQUEST_URI'] !== ''
             && strpos($srv['REQUEST_URI'], '?') === false
         ) {
             $srv['REQUEST_URI'] = $srv['REQUEST_URI'] . '?' . $query;
