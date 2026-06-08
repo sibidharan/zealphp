@@ -148,9 +148,9 @@ class HeaderMiddleware implements MiddlewareInterface
      */
     public function __construct(array $config = [], bool $alwaysByDefault = true)
     {
-        $this->set    = $this->normaliseScalarRules($config['set'] ?? [], $alwaysByDefault);
+        $this->set    = $this->normaliseScalarRules($config['set'] ?? [], $alwaysByDefault, 'set');
         $this->add    = $this->normaliseAddRules($config['add'] ?? [], $alwaysByDefault);
-        $this->append = $this->normaliseScalarRules($config['append'] ?? [], $alwaysByDefault);
+        $this->append = $this->normaliseScalarRules($config['append'] ?? [], $alwaysByDefault, 'append');
         $this->unset  = $config['unset'] ?? [];
     }
 
@@ -228,14 +228,25 @@ class HeaderMiddleware implements MiddlewareInterface
      * Input: array<string, string|array{value: string, always?: bool}>
      * Output: array<string, array{value: string, always: bool}>
      *
-     * @param array<string, string|array{value: string, always?: bool}> $rules
+     * @param array<string, string|array{value?: string, always?: bool}> $rules
      * @return array<string, array{value: string, always: bool}>
      */
-    private function normaliseScalarRules(array $rules, bool $alwaysByDefault): array
+    private function normaliseScalarRules(array $rules, bool $alwaysByDefault, string $op = 'set'): array
     {
         $out = [];
         foreach ($rules as $name => $spec) {
             if (is_array($spec)) {
+                if (!array_key_exists('value', $spec)) {
+                    // Structured array form must carry a 'value'. Fail fast at
+                    // construction with an actionable message instead of crashing
+                    // later inside PSR-7 withHeader() on a null value (#310).
+                    throw new \InvalidArgumentException(sprintf(
+                        "HeaderMiddleware: '%s' rule for header '%s' is missing the required 'value' key "
+                        . "(use ['value' => '...', 'always' => bool] or a plain string).",
+                        $op,
+                        $name
+                    ));
+                }
                 $out[$name] = [
                     'value'  => $spec['value'],
                     'always' => $spec['always'] ?? $alwaysByDefault,
@@ -256,7 +267,7 @@ class HeaderMiddleware implements MiddlewareInterface
      * Input allows: string, string[], or array{value: string|string[], always?: bool}
      * Output: array<string, list<array{value: string, always: bool}>>
      *
-     * @param array<string, string|string[]|array{value: string|string[], always?: bool}> $rules
+     * @param array<string, string|string[]|array{value?: string|string[], always?: bool}> $rules
      * @return array<string, list<array{value: string, always: bool}>>
      */
     private function normaliseAddRules(array $rules, bool $alwaysByDefault): array
@@ -272,6 +283,14 @@ class HeaderMiddleware implements MiddlewareInterface
                 $always = $spec['always'] ?? $alwaysByDefault;
                 $raw    = $spec['value'];
                 $values = is_array($raw) ? $raw : [$raw];
+            } elseif (is_array($spec) && array_key_exists('always', $spec)) {
+                // Structured form missing the required 'value' — fail fast with an
+                // actionable message rather than emitting a bogus header (#310).
+                throw new \InvalidArgumentException(sprintf(
+                    "HeaderMiddleware: 'add' rule for header '%s' is missing the required 'value' key "
+                    . "(use ['value' => '...', 'always' => bool], a plain string, or a list of strings).",
+                    $name
+                ));
             } elseif (is_array($spec)) {
                 // Plain array of strings: ['val1', 'val2']
                 /** @var string[] $spec */

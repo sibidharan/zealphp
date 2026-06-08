@@ -239,6 +239,38 @@ class RouteMiddlewareTest extends TestCase
         $this->assertSame(['auth'], $route['middleware']);
     }
 
+    // ───────────────── #308 trailing-slash prefix normalisation ─────────────────
+
+    public function testGroupTrailingSlashPrefixDoesNotDoubleSlash(): void
+    {
+        $token = uniqid();
+        // Idiomatic trailing-slash prefix must NOT yield "/grp-ts//users" (#308).
+        self::$app->group("/grp-ts-$token/", function ($g) {
+            $g->route('/users', fn() => '');
+        });
+        $this->assertSame("/grp-ts-$token/users", $this->lastRoute()['path']);
+    }
+
+    public function testNestedGroupTrailingSlashPrefixesDoNotDoubleSlash(): void
+    {
+        $token = uniqid();
+        self::$app->group("/outer-ts-$token/", function ($g) {
+            $g->group('/inner/', function ($g) {
+                $g->route('/z', fn() => '');
+            });
+        });
+        $this->assertSame("/outer-ts-$token/inner/z", $this->lastRoute()['path']);
+    }
+
+    public function testGroupRouteWithoutLeadingSlashJoinsCleanly(): void
+    {
+        $token = uniqid();
+        self::$app->group("/grp-nolead-$token", function ($g) {
+            $g->route('users', fn() => '');
+        });
+        $this->assertSame("/grp-nolead-$token/users", $this->lastRoute()['path']);
+    }
+
     // ───────────────────── onion ordering + short-circuit ─────────────────────
 
     public function testMiddlewareFrameRunsOutermostFirst(): void
