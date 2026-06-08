@@ -184,7 +184,11 @@ class CoSessionManager
             }
 
             $sessionName = zeal_session_name();
-            $reqCookie = is_array($request->cookie) ? $request->cookie : [];
+            // #305 — parse the raw Cookie header PHP-canonically (OpenSwoole's
+            // own cookie parser is disabled via http_parse_cookie=false). Writes
+            // the parsed map back onto $request->cookie, so the Request wrapper
+            // created below (and the superglobal populate) inherit it.
+            $reqCookie = \ZealPHP\App::requestCookieMap($request);
             $reqGet = is_array($request->get) ? $request->get : [];
             $hasSessionCookie = $this->useCookies && isset($reqCookie[$sessionName]);
             $hasSessionParam = !$this->useOnlyCookies && isset($reqGet[$sessionName]);

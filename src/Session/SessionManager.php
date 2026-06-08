@@ -220,7 +220,11 @@ class SessionManager
         $sessionId = null;
         if ($manageSession) {
             $sessionName = session_name() ?: 'PHPSESSID';
-            $reqCookie = is_array($request->cookie) ? $request->cookie : [];
+            // #305 — parse the raw Cookie header PHP-canonically (OpenSwoole's own
+            // cookie parser is disabled via http_parse_cookie=false). Writes the
+            // parsed map back onto $request->cookie so the Request wrapper created
+            // below (and the superglobal populate) inherit it.
+            $reqCookie = \ZealPHP\App::requestCookieMap($request);
             $reqGet = is_array($request->get) ? $request->get : [];
             // #244: track whether the id is CLIENT-SUPPLIED (cookie/query param)
             // vs server-minted by the idGenerator. Only a client id can be a

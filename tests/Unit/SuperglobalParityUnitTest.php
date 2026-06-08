@@ -204,4 +204,68 @@ class SuperglobalParityUnitTest extends TestCase
         $this->assertArrayNotHasKey('PHP_AUTH_USER', $out);
         $this->assertArrayNotHasKey('AUTH_TYPE', $out);
     }
+
+    // ---- #305: parseCookieHeader (the exact #305 table) -------------------
+
+    public function testCookieArraySyntaxBuildsList(): void
+    {
+        $this->assertSame(['arr' => ['x', 'y']], App::parseCookieHeader('arr[]=x; arr[]=y'));
+    }
+
+    public function testCookieMapSyntaxBuildsAssoc(): void
+    {
+        $this->assertSame(['map' => ['k' => 'v']], App::parseCookieHeader('map[k]=v'));
+    }
+
+    public function testCookieNameDotMangledToUnderscore(): void
+    {
+        $this->assertSame(['a_b' => '1'], App::parseCookieHeader('a.b=1'));
+    }
+
+    public function testCookiePlusIsLiteralNotSpace(): void
+    {
+        // RFC 6265: literal '+' is preserved (NOT form-urlencoded +→space) —
+        // the value-corruption case for base64/JWT cookies.
+        $this->assertSame(['plus' => 'a+b'], App::parseCookieHeader('plus=a+b'));
+    }
+
+    public function testCookieCombinedHeaderMatchesAppleToApple(): void
+    {
+        // The full #305 reproduction header, in one go.
+        $this->assertSame(
+            ['arr' => ['x', 'y'], 'map' => ['k' => 'v'], 'a_b' => '1', 'plus' => 'a+b'],
+            App::parseCookieHeader('arr[]=x; arr[]=y; map[k]=v; a.b=1; plus=a+b')
+        );
+    }
+
+    public function testCookieValuePercentDecodedPerRfc6265(): void
+    {
+        // %2B decodes to '+' (a base64/JWT value survives intact).
+        $this->assertSame(['v' => 'a+b'], App::parseCookieHeader('v=a%2Bb'));
+    }
+
+    public function testCookieValueWithEqualsAndAmpersandPreserved(): void
+    {
+        // '=' and '&' inside a value must not break parsing.
+        $this->assertSame(['t' => 'a=b&c'], App::parseCookieHeader('t=a=b&c'));
+    }
+
+    public function testCookieEmptyHeaderYieldsEmptyArray(): void
+    {
+        $this->assertSame([], App::parseCookieHeader(''));
+        $this->assertSame([], App::parseCookieHeader('   '));
+    }
+
+    public function testCookieBareFlagSegmentSkipped(): void
+    {
+        // A `; secure`-style segment with no '=' has no value to bind.
+        $this->assertSame(['a' => '1'], App::parseCookieHeader('a=1; secure'));
+    }
+
+    public function testCookieLeadingSpaceAfterSemicolonStripped(): void
+    {
+        // Cookie pairs are space-separated after ';'; the name's leading space
+        // must be stripped (PHP behaviour), not folded into the key.
+        $this->assertSame(['a' => '1', 'b' => '2'], App::parseCookieHeader('a=1; b=2'));
+    }
 }
