@@ -96,6 +96,32 @@ final class WorkerPoolTest extends TestCase
         }
     }
 
+    public function testDispatchFilterInputReadsSuperglobals(): void
+    {
+        // #316 — pool workers run under the CLI SAPI (empty internal request
+        // tables), so native filter_input() returns null despite populated
+        // superglobals. pool_worker.php must override it like cgi_worker.php
+        // and the main OpenSwoole worker.
+        $file = $this->fixture('filter-input.php', 'echo json_encode([
+            "get"     => filter_input(INPUT_GET, "q"),
+            "int"     => filter_input(INPUT_GET, "n", FILTER_VALIDATE_INT),
+            "missing" => filter_input(INPUT_GET, "nope"),
+            "arr"     => filter_input_array(INPUT_GET, ["n" => FILTER_VALIDATE_INT], false),
+        ]);');
+        $pool = new WorkerPool(size: 1);
+        try {
+            $resp = $pool->dispatch(['file' => $file, 'get' => ['q' => 'hello', 'n' => '7']]);
+            $out = json_decode((string) $resp['body'], true);
+            $this->assertIsArray($out, 'fixture output should be JSON, got: ' . (string) $resp['body']);
+            $this->assertSame('hello', $out['get'], 'INPUT_GET reads $_GET in pool mode (#316)');
+            $this->assertSame(7, $out['int']);
+            $this->assertNull($out['missing']);
+            $this->assertSame(['n' => 7], $out['arr']);
+        } finally {
+            $pool->close();
+        }
+    }
+
     public function testWorkerHandlesMultipleSequentialRequests(): void
     {
         $file = $this->fixture('count.php', 'echo "tick";');
