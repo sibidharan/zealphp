@@ -256,6 +256,28 @@ final class AppCoroutineConfigTest extends TestCase
         App::$coroutine_cwd_isolation = false;
     }
 
+    // ── coroutineLocaleIsolation() / coroutineUmaskIsolation() ──────────
+
+    public function testCoroutineLocaleIsolationRoundTrip(): void
+    {
+        App::$coroutine_locale_isolation = false;
+        $this->assertFalse(App::coroutineLocaleIsolation());
+        $this->assertTrue(App::coroutineLocaleIsolation(true));
+        $this->assertTrue(App::$coroutine_locale_isolation);
+        $this->assertFalse(App::coroutineLocaleIsolation(false));
+        App::$coroutine_locale_isolation = false;
+    }
+
+    public function testCoroutineUmaskIsolationRoundTrip(): void
+    {
+        App::$coroutine_umask_isolation = false;
+        $this->assertFalse(App::coroutineUmaskIsolation());
+        $this->assertTrue(App::coroutineUmaskIsolation(true));
+        $this->assertTrue(App::$coroutine_umask_isolation);
+        $this->assertFalse(App::coroutineUmaskIsolation(false));
+        App::$coroutine_umask_isolation = false;
+    }
+
     // ── functionIsolation() ──────────────────────────────────────────────
 
     public function testFunctionIsolationDefaultIsFalse(): void
@@ -318,6 +340,11 @@ final class AppCoroutineConfigTest extends TestCase
         // #323 CWD isolation default ON unless ZEALPHP_CWD_ISOLATION_DISABLE=1.
         $expectCwd = ((string) getenv('ZEALPHP_CWD_ISOLATION_DISABLE')) !== '1';
         $this->assertSame($expectCwd, App::coroutineCwdIsolation(), 'cwd isolation follows env opt-out (#323)');
+        // setlocale()/umask() — same chdir-class family, same env opt-outs.
+        $expectLocale = ((string) getenv('ZEALPHP_LOCALE_ISOLATION_DISABLE')) !== '1';
+        $this->assertSame($expectLocale, App::coroutineLocaleIsolation(), 'locale isolation follows env opt-out');
+        $expectUmask = ((string) getenv('ZEALPHP_UMASK_ISOLATION_DISABLE')) !== '1';
+        $this->assertSame($expectUmask, App::coroutineUmaskIsolation(), 'umask isolation follows env opt-out');
     }
 
     public function testModeCoroutineDoesNotEnableLegacyBundle(): void

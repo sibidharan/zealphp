@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Per-coroutine `setlocale()` + `umask()` isolation — the remaining chdir-class process-global state (ext-zealphp 0.3.38).** Audited after the #323 CWD stage: `setlocale()` (string casing, number/date formatting for every concurrently-running peer) and `umask()` (every peer's file-creation modes) are process-global and leak mid-request under coroutine concurrency — worse than PHP-FPM, which only leaks them *across* requests. New fluent knobs **`App::coroutineLocaleIsolation(?bool)`** and **`App::coroutineUmaskIsolation(?bool)`** (backing statics + boot pre-fork assertion, so boot-time `setlocale()`/`umask()` before `run()` become the worker baseline), **auto-enabled by `App::mode('coroutine-legacy')`** (opt out with `ZEALPHP_LOCALE_ISOLATION_DISABLE=1` / `ZEALPHP_UMASK_ISOLATION_DISABLE=1`). Ext side: exact clones of the CWD stage (save-on-yield + re-park baseline, restore-on-resume, re-park-on-close, fail-closed, zero cost when off); glibc composite locale strings round-trip; the umask read+re-park is a single syscall. Pinned by ext `tests/055`/`tests/056` (changer keeps its value across yields, bystander sees only the baseline, process re-parked) — 55/55 ext phpt green on PHP 8.4. Default ext pin bumped to **v0.3.39** — which also owner-gates the process-state saves (the #31-family go()-child steal applied to cwd/locale/umask: a fire-and-forget child's first yield re-parked the parent's divergent value to the baseline mid-request; caught E2E in coroutine-legacy and pinned in ext `tests/052/055/056`).
+
+### Fixed
+
+- **`TableSessionHandler` file backing no longer loses disk-only state on write-through (#233 residual).** The Table path was CAS+merge3-protected, but `writeFile()` (the spillover/persistence backing) was a blind `ftruncate`+write — state that only survived on disk (a value the Table column truncated, a writer outside the shard-lock discipline) was wiped wholesale by the next write-through. It now read-merges under the existing `LOCK_EX` (top-level keys, the writer winning on conflict — the same documented shallow-merge contract as the manager's file path), with **deletion awareness**: keys present in the writer's read snapshot but absent from its final state are explicit deletions and are NOT resurrected from disk. Pinned by two new `TableSessionHandlerTest` cases (disk-only key survives; deleted key stays gone).
+
 ## [0.4.5] - 2026-06-09
 
 ### Security

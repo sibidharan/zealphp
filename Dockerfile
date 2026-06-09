@@ -5,7 +5,7 @@ FROM php:8.4-cli-bookworm@sha256:ca4b9f44c281f6214a08313185b306368b9ec1e9a73b54b
 
 ARG OPENSWOOLE_VERSION=
 ARG UOPZ_VERSION=
-# ext-zealphp git tag to build (see setup.sh). Defaults to v0.3.37 there.
+# ext-zealphp git tag to build (see setup.sh). Defaults to v0.3.39 there.
 ARG ZEALPHP_EXT_VERSION=
 # Optional: rebuild opcache with the function-dups-fix patch so opcache can stay
 # fully ON in coroutine-legacy mode for legacy require_once apps (e.g. WordPress)
