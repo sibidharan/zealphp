@@ -73,6 +73,36 @@ final class RedisConnectionPoolTest extends RedisTestCase
         $pool->close();
     }
 
+    public function testColdConcurrentAcquireBuildsExactlyOneChannel(): void
+    {
+        // #322 — ensureChannel() TOCTOU. With HOOK_ALL on, each client connect
+        // in the fill loop yields, so every cold concurrent acquirer used to
+        // pass the `$ch === null` check and build its OWN full channel —
+        // leaking every channel (and its sockets) but the last. The pool must
+        // build exactly `size` clients no matter how many borrowers hit it cold.
+        $this->enableYieldingConnects();
+        $pool = new RedisConnectionPool($this->url, 2);
+        $oks = 0;
+        \OpenSwoole\Coroutine::run(function () use ($pool, &$oks): void {
+            $done = new \OpenSwoole\Coroutine\Channel(10);
+            for ($i = 0; $i < 10; $i++) {
+                go(function () use ($pool, $done): void {
+                    $done->push($pool->with(fn (RedisClient $c) => $c->ping()));
+                });
+            }
+            for ($i = 0; $i < 10; $i++) {
+                if ($done->pop(5.0) === true) { $oks++; }
+            }
+        });
+        $this->assertSame(10, $oks, 'every cold concurrent borrow completed');
+        $this->assertSame(
+            2,
+            $pool->stats()->get('pool_clients_created_total'),
+            'cold burst built exactly size=2 clients — not one channel per acquirer (#322)',
+        );
+        $pool->close();
+    }
+
     public function testWithReleasesClientEvenWhenCallableThrows(): void
     {
         $pool = new RedisConnectionPool($this->url, 1);

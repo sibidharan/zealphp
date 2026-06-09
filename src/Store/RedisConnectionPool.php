@@ -43,6 +43,14 @@ final class RedisConnectionPool
      */
     private bool $closed = false;
 
+    /**
+     * Size-1 channel used as a coroutine mutex around channel construction.
+     * Every client connect in the fill loop yields on network I/O, so without
+     * this gate every cold concurrent acquirer passed the `$ch === null` check
+     * and built its OWN full channel — leaking all but the last (#322).
+     */
+    private ?Channel $buildLock = null;
+
     /** Per-worker counters (`pool_acquires_total`, `pool_acquire_timeouts_total`, `pool_clients_created_total`). */
     private Stats $stats;
 
@@ -200,12 +208,52 @@ final class RedisConnectionPool
         if ($this->closed) {
             throw new StoreException('RedisConnectionPool: cannot build channel after close() — the pool is torn down');
         }
-        if ($this->ch !== null) { return $this->ch; }
-        // Must be called inside a coroutine — Channel::push throws otherwise.
-        $ch = new Channel($this->size);
-        for ($i = 0; $i < $this->size; $i++) {
-            $ch->push(new RedisClient($this->url, $this->opts));
-            $this->stats->inc('pool_clients_created_total');
+        $existing = $this->ch;
+        if ($existing !== null) { return $existing; }
+        // Coroutine-safe (#322): exactly ONE cold acquirer builds the channel;
+        // concurrent acquirers queue on the size-1 `$buildLock` channel and
+        // re-check after waking. `new Channel()` + assignment has no yield
+        // point, so the lock's own lazy init is race-free — unlike the client
+        // fill below, where every connect yields on network I/O.
+        if ($this->buildLock === null) { $this->buildLock = new Channel(1); }
+        $this->buildLock->push(true); // lock — cold peers park here until the build settles
+        try {
+            return $this->buildChannelLocked();
+        } finally {
+            $this->buildLock->pop(0.001); // release — wake the next parked acquirer
+        }
+    }
+
+    /**
+     * The serialized half of {@see ensureChannel()} — runs under `$buildLock`.
+     * Re-checks `$ch` first: a parked peer wakes here AFTER the winner built,
+     * so it must adopt the winner's channel instead of building another.
+     */
+    private function buildChannelLocked(): Channel
+    {
+        $existing = $this->ch; // re-read — a peer may have built it while we waited at the lock
+        if ($existing !== null) { return $existing; }
+        if ($this->closed) {
+            throw new StoreException('RedisConnectionPool: cannot build channel after close() — the pool is torn down');
+        }
+        $ch     = new Channel($this->size);
+        $filled = 0;
+        try {
+            for ($i = 0; $i < $this->size; $i++) {
+                $ch->push(new RedisClient($this->url, $this->opts)); // yields — peers held at the lock
+                $this->stats->inc('pool_clients_created_total');
+                $filled++;
+            }
+        } catch (\Throwable $e) {
+            // Partial fill must not leak: close what we built and leave
+            // `$this->ch` null so a later acquire retries cleanly.
+            for ($i = 0; $i < $filled; $i++) {
+                $c = $ch->pop(0.001);
+                if ($c instanceof RedisClient) {
+                    try { $c->close(); } catch (\Throwable) { /* already dead */ }
+                }
+            }
+            throw $e;
         }
         $this->ch = $ch;
         return $ch;

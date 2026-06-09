@@ -104,6 +104,14 @@ final class DbConnectionPool
     private bool $closed = false;
 
     /**
+     * Size-1 channel used as a coroutine mutex around channel construction.
+     * Every `build()` in the fill loop yields on network I/O, so without this
+     * gate every cold concurrent acquirer passed the `$ch === null` check and
+     * built its OWN full channel — leaking all but the last (#322).
+     */
+    private ?Channel $buildLock = null;
+
+    /**
      * @param PoolDriver<TConn> $driver           Connection-library adapter (PDO, mysqli, …).
      * @param int               $size             Max pool size per worker (default `8`).
      * @param ?string           $validationQuery  Liveness probe run on acquire (e.g. `'SELECT 1'`); null = skip.
@@ -353,13 +361,58 @@ final class DbConnectionPool
     /**
      * Lazily initialise the channel and pre-fill it with `$size` connections.
      * MUST be called inside a coroutine — `Channel::push()` throws otherwise.
+     *
+     * Coroutine-safe (#322): exactly ONE cold acquirer builds the channel;
+     * concurrent acquirers queue on `$buildLock` and re-check after waking.
+     * A fill that throws mid-way drains + disconnects its partial build so a
+     * transient connect failure can't leak connections or brick the pool —
+     * the next acquirer simply retries the build.
      */
     private function ensureChannel(): Channel
     {
-        if ($this->ch !== null) { return $this->ch; }
-        $ch = new Channel($this->size);
-        for ($i = 0; $i < $this->size; $i++) {
-            $ch->push($this->build());
+        $existing = $this->ch;
+        if ($existing !== null) { return $existing; }
+        // `new Channel()` + assignment has no yield point, so this lazy init
+        // is race-free — unlike the connection fill below.
+        if ($this->buildLock === null) { $this->buildLock = new Channel(1); }
+        $this->buildLock->push(true); // lock — cold peers park here until the build settles
+        try {
+            return $this->buildChannelLocked();
+        } finally {
+            $this->buildLock->pop(0.001); // release — wake the next parked acquirer
+        }
+    }
+
+    /**
+     * The serialized half of {@see ensureChannel()} — runs under `$buildLock`.
+     * Re-checks `$ch` first: a parked peer wakes here AFTER the winner built,
+     * so it must adopt the winner's channel instead of building another.
+     */
+    private function buildChannelLocked(): Channel
+    {
+        $existing = $this->ch; // re-read — a peer may have built it while we waited at the lock
+        if ($existing !== null) { return $existing; }
+        if ($this->closed) {
+            throw new DbException('DbConnectionPool: acquire() on a closed pool');
+        }
+        $ch     = new Channel($this->size);
+        $filled = 0;
+        try {
+            for ($i = 0; $i < $this->size; $i++) {
+                $ch->push($this->build()); // yields — peers are held at the lock
+                $filled++;
+            }
+        } catch (\Throwable $e) {
+            // Partial fill must not leak: disconnect what we built and
+            // leave `$this->ch` null so a later acquire retries cleanly.
+            for ($i = 0; $i < $filled; $i++) {
+                $c = $ch->pop(0.001);
+                if (is_object($c)) {
+                    /** @var TConn $c */
+                    $this->driver->disconnect($c);
+                }
+            }
+            throw $e;
         }
         $this->ch = $ch;
         return $ch;
