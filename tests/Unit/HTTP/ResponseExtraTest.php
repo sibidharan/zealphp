@@ -1101,8 +1101,10 @@ class ResponseExtraTest extends TestCase
 
     public function testFlushEmitsCookiesAndRawCookies(): void
     {
-        // Kills Foreach_→[] (420, 423) and MethodCallRemoval (421, 424): flush()
-        // must forward queued cookies and raw cookies to the parent.
+        // Kills Foreach_→[] and MethodCallRemoval in flush()'s cookie loops:
+        // queued cookies and raw cookies must reach the wire. Since #293 they
+        // are serialized in PHP (php_setcookie parity) and emitted as
+        // Set-Cookie header lines — NOT via the C-side parent->cookie().
         $g = RequestContext::instance();
         $g->status = 200;
         $fake = new FakeOpenSwooleResponse();
@@ -1112,8 +1114,16 @@ class ResponseExtraTest extends TestCase
 
         $this->assertTrue($resp->flush());
 
-        $this->assertContains(['cookie', 'sid', 'cv'], $fake->log);
-        $this->assertContains(['rawCookie', 'rk', 'rv'], $fake->log);
+        $setCookieValues = [];
+        foreach ($fake->log as $entry) {
+            if (($entry[0] ?? null) === 'header' && strcasecmp((string) $entry[1], 'Set-Cookie') === 0) {
+                $v = $entry[2];
+                foreach (is_array($v) ? $v : [$v] as $line) {
+                    $setCookieValues[] = $line;
+                }
+            }
+        }
+        $this->assertSame(['sid=cv; path=/', 'rk=rv; path=/'], $setCookieValues);
     }
 
     // (The former __get/__set diagnostic-logging tests are gone with the
