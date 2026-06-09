@@ -1116,36 +1116,9 @@ class ResponseExtraTest extends TestCase
         $this->assertContains(['rawCookie', 'rk', 'rv'], $fake->log);
     }
 
-    // ---- __get / __set diagnostic logging ---------------------------------
-
-    public function testGetLogsPropertyName(): void
-    {
-        // Kills FunctionCallRemoval on elog($name) in __get (74): reading a
-        // proxied property must emit the property name to the debug log.
-        $fake = new FakeOpenSwooleResponse();
-        $fake->fd = 5;
-        $resp = $this->wrap($fake);
-
-        $log = $this->captureDebugLog(function () use ($resp): void {
-            $_ = $resp->fd;
-        });
-
-        $this->assertStringContainsString('fd', $log, '__get must log the property name');
-    }
-
-    public function testSetLogsPropertyName(): void
-    {
-        // Kills FunctionCallRemoval on elog($name) in __set (94): writing a
-        // proxied property must emit the property name to the debug log.
-        $fake = new FakeOpenSwooleResponse();
-        $resp = $this->wrap($fake);
-
-        $log = $this->captureDebugLog(function () use ($resp): void {
-            $resp->fd = 7;
-        });
-
-        $this->assertStringContainsString('fd', $log, '__set must log the property name');
-    }
+    // (The former __get/__set diagnostic-logging tests are gone with the
+    // ungated elog($name) calls they pinned — #318 removed that log spam;
+    // the proxies are intentionally silent now.)
 
     // ---- redirect() security diagnostics ----------------------------------
 
