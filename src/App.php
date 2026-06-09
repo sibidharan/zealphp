@@ -8810,6 +8810,20 @@ class App
                 // $g->session. In superglobals mode the two names are now
                 // genuinely the same array.
                 unset($g->get, $g->post, $g->cookie, $g->files, $g->server, $g->request);
+
+                // #332 — claim live-superglobal OWNERSHIP for this request
+                // coroutine (ext-zealphp 0.3.36+). Without it, a `go()` child
+                // spawned by a handler/middleware (the async-log /
+                // fire-and-forget pattern) that yields would snapshot-and-clear
+                // the request's live superglobals under the CHILD's key — the
+                // request continued with EMPTY $_SERVER/$_SESSION (empty
+                // REQUEST_METHOD → 501 dispatch; session writes lost). With
+                // ownership claimed, only THIS coroutine's yields save+clear.
+                if (self::$coroutine_isolated_superglobals
+                    && \function_exists('zealphp_superglobals_owner')
+                ) {
+                    (\zealphp_superglobals_owner(...))();
+                }
             }
 
             $serverRequest  = new \ZealPHP\HTTP\LazyServerRequest($request->parent);
