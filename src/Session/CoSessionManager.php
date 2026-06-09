@@ -147,6 +147,19 @@ class CoSessionManager
             return;
         }
 
+        // #332 — claim live-superglobal OWNERSHIP for this request coroutine
+        // as early as possible (ext-zealphp 0.3.36+), so a `go()` child spawned
+        // anywhere in the request — including this preamble's own elog paths,
+        // whose async log channel spawns a coroutine on first use — can't
+        // snapshot-and-steal the request's superglobals on its first yield.
+        // The OnRequest populate claims again after writing $GLOBALS (same
+        // owner, idempotent). No-op without the ext function.
+        if (\ZealPHP\App::$coroutine_isolated_superglobals
+            && \function_exists('zealphp_superglobals_owner')
+        ) {
+            (\zealphp_superglobals_owner(...))();
+        }
+
         // $g->session is a declared typed property with default [] — always
         // "set". Only check for residue from a prior request in this worker.
         if (isset($g->session['__start_time'])) {
