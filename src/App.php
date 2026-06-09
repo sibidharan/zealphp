@@ -1310,6 +1310,33 @@ class App
     }
 
     /**
+     * Emit the EFFECTIVE response status and return the code that reached the
+     * wire. Resolves the raw `header("HTTP/x.x <code> <reason>")` override
+     * (#327): when the request carries `RequestContext::$raw_status_code`,
+     * that code is emitted — with its verbatim reason when one was given,
+     * else the IANA phrase — exactly as Apache mod_php forwards an explicit
+     * status line. Without an override this is `emitStatus()` on the PSR
+     * status. Callers use the returned code for body-forbidding rules and
+     * access logging so they agree with the wire.
+     */
+    public static function emitEffectiveStatus(\OpenSwoole\HTTP\Response $response, int $psrStatus): int
+    {
+        $g = RequestContext::instance();
+        $raw = $g->raw_status_code;
+        if ($raw === null) {
+            self::emitStatus($response, $psrStatus);
+            return $psrStatus;
+        }
+        $reason = $g->raw_status_reason ?? self::reasonPhrase($raw);
+        if ($reason !== '') {
+            $response->status($raw, $reason);
+        } else {
+            $response->status($raw);
+        }
+        return $raw;
+    }
+
+    /**
      * Stream a `\Generator` response chunk-by-chunk to the live OpenSwoole
      * response (SSR streaming), returning an empty placeholder `Response` once
      * done. Shared by the route dispatcher (`dispatchMatched`) and ZealAPI's
@@ -1323,7 +1350,7 @@ class App
         $g = RequestContext::instance();
         $streamStatus = $g->status ?? 200;
         // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-        App::emitStatus($g->openswoole_response, $streamStatus);
+        App::emitEffectiveStatus($g->openswoole_response, $streamStatus);
         // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
         $g->zealphp_response->header('Accept-Ranges', 'none');
         // HEAD: send headers only, never the streamed body (Apache strips
@@ -8837,6 +8864,11 @@ class App
                     }
                 }
 
+                // Effective wire status — overwritten by emitEffectiveStatus()
+                // on the writable path when a raw status-line override (#327)
+                // applies, so the access log below always matches the wire.
+                $emitStatus = $serverResponse->getStatusCode();
+
                 if ($response->parent->isWritable()) {
                     // mod_php header_register_callback() — fire once just before
                     // headers flush so header() calls inside it still land.
@@ -8855,12 +8887,13 @@ class App
                     if ($poweredBy !== null) {
                         $response->parent->header('X-Powered-By', $poweredBy);
                     }
-                    // Threaded emit — use App::emitStatus() instead of vendor
-                    // Response::emit()'s one-arg status() call, so codes like
-                    // 451 (missing from OpenSwoole's native C list) emit
-                    // correctly. Body/header transcription mirrors vendor.
-                    $emitStatus = $serverResponse->getStatusCode();
-                    App::emitStatus($response->parent, $emitStatus);
+                    // Threaded emit — use App::emitEffectiveStatus() instead of
+                    // vendor Response::emit()'s one-arg status() call, so codes
+                    // like 451 (missing from OpenSwoole's native C list) emit
+                    // correctly AND a raw `header("HTTP/x.x …")` status line
+                    // passes through verbatim (#327). Body/header transcription
+                    // mirrors vendor.
+                    $emitStatus = App::emitEffectiveStatus($response->parent, $emitStatus);
                     // RFC 7230 §3.3.2: 1xx / 204 / 304 MUST carry no body and no
                     // Content-Length / Content-Type. Drop both even if a handler
                     // produced a body (e.g. http_response_code(204); echo "x";) so
@@ -8892,7 +8925,7 @@ class App
                         }
                     }
                 }
-                access_log($serverResponse->getStatusCode(), 0);
+                access_log($emitStatus, 0);
             } catch (\Throwable|\OpenSwoole\ExitException $e) {
                 if ($e instanceof \OpenSwoole\ExitException
                     || ($e::class === 'ExitException' && method_exists($e, 'getStatus'))
