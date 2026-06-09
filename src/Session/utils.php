@@ -228,6 +228,15 @@ function zeal_session_start(): bool
 
     /** @var array<string, mixed> $session_data */
     $session_data = [];
+    // Whether the id had a BACKING STORE ENTRY at load time — the canonical
+    // session.use_strict_mode signal (a never-issued/foreign id has none; an
+    // issued-but-empty session does). Consumed by the managers' strict-mode
+    // check via zeal_session_strict_should_regenerate() (ext-zealphp#2).
+    // File store: the file existing (even zero-length) means the id was
+    // issued. Handler store: read() returning non-'' is the only signal a
+    // \SessionHandlerInterface exposes — an issued-but-never-written handler
+    // entry is indistinguishable from a missing one (documented limitation).
+    $session_existed = false;
 
     if ($handler instanceof \SessionHandlerInterface) {
         /** @var string $sessionName */
@@ -235,11 +244,13 @@ function zeal_session_start(): bool
         $handler->open($save_path, (string) $sessionName);
         $contents = $handler->read((string) $session_id);
         if (is_string($contents) && $contents !== '') {
+            $session_existed = true;
             $session_data = php_session_decode_to_array($contents);
         }
     } else {
         $session_file = $save_path . '/sess_' . basename((string)$session_id);
         if (file_exists($session_file)) {
+            $session_existed = true;
             // Shared lock prevents reading a partially-written file
             // from a concurrent write_close on another coroutine.
             $fp = @fopen($session_file, 'r');
@@ -268,6 +279,11 @@ function zeal_session_start(): bool
     // in-request unset() (must delete from store) from a concurrent add
     // (must survive the merge).
     $g->session_loaded_keys = array_keys($session_data);
+    // Record store-entry existence for the managers' strict-mode check
+    // (ext-zealphp#2 — see the $session_existed comment above).
+    $params = $g->session_params;
+    $params['session_existed'] = $session_existed;
+    $g->session_params = $params;
     if (\ZealPHP\App::$superglobals) {
         if (\ZealPHP\App::$coroutine_isolated_superglobals) {
             // Mode 4: bind $_SESSION as a reference to $g->session. PHP's
@@ -334,21 +350,42 @@ function zeal_valid_session_id(string $id): bool
  * `SessionManager` consult, kept here so it is unit-testable without driving a
  * full request through OpenSwoole.
  *
+ * PHP's `session.use_strict_mode` rejects ids the server NEVER ISSUED. When
+ * the caller can tell whether the id had a BACKING STORE ENTRY (file existed /
+ * handler returned data), that is the canonical signal (ext-zealphp#2): an
+ * issued-but-still-empty session — the cookie sent on a data-less first
+ * visit, a redirect, any page that stores nothing — is a KNOWN id and must
+ * NOT rotate. The old data-emptiness heuristic rotated those on EVERY
+ * request, which (combined with the regenerate→write_close sid desync, fixed
+ * alongside) cascaded into rotate-and-lose-every-write. The array heuristic
+ * remains the fallback for callers that cannot determine store existence.
+ *
  * @param bool   $strictMode      `App::$session_strict_mode`.
  * @param bool   $clientSupplied  Whether the active id came from the client
  *                                (cookie/query param) rather than being
  *                                server-minted.
  * @param array<array-key, mixed> $loadedSession  The session data the store
- *                                resolved for that id; only its emptiness is
- *                                inspected.
+ *                                resolved for that id; its emptiness is the
+ *                                FALLBACK signal when `$storeEntryExists`
+ *                                is unknown.
+ * @param bool|null $storeEntryExists  Whether the id had a backing store
+ *                                entry at load time (`$g->session_params
+ *                                ['session_existed']`); `null` = unknown.
  * @return bool  `true` when the id must be rotated to a fresh server id.
  */
 function zeal_session_strict_should_regenerate(
     bool $strictMode,
     bool $clientSupplied,
-    array $loadedSession
+    array $loadedSession,
+    ?bool $storeEntryExists = null
 ): bool {
-    return $strictMode && $clientSupplied && $loadedSession === [];
+    if (!$strictMode || !$clientSupplied) {
+        return false;
+    }
+    if ($storeEntryExists !== null) {
+        return !$storeEntryExists;
+    }
+    return $loadedSession === [];
 }
 
 /**
@@ -737,6 +774,16 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
     // Generate new session ID
     $new_session_id = bin2hex(random_bytes(32));
     zeal_session_id($new_session_id);
+    // ext-zealphp#2 root cause — keep write_close's canonical sid slot in
+    // sync. zeal_session_write_close() deliberately reads the sid from
+    // session_params (NOT zeal_session_id(), which suffers auto-global
+    // caching in Mode 4); without this sync every post-regenerate session
+    // write landed in the OLD (deleted) id's store — login flows lost their
+    // session, and under strict mode the next request loaded empty and
+    // rotated AGAIN (the rotate-and-lose-every-write cascade).
+    $params = $g->session_params;
+    $params['session_id'] = $new_session_id;
+    $g->session_params = $params;
 
     $save_path = $g->session_params['save_path'] ?? '';
     assert(is_string($save_path));

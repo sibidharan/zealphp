@@ -89,6 +89,40 @@ final class SessionStrictModeTest extends TestCase
         );
     }
 
+    // --- store-entry existence beats data-emptiness (ext-zealphp#2) ----------
+
+    /**
+     * PHP's session.use_strict_mode rejects ids the server NEVER ISSUED — an
+     * issued-but-still-empty session (cookie sent on a data-less first visit,
+     * a redirect, any page that stores nothing) is a KNOWN id and must NOT
+     * rotate. The old data-emptiness heuristic rotated those every request:
+     * combined with the regenerate→write_close sid desync it produced the
+     * rotate-and-lose-everything cascade on the rig (ext-zealphp#2).
+     */
+    public function testKnownStoreEntryWithEmptyDataDoesNotRegenerate(): void
+    {
+        $this->assertFalse(
+            zeal_session_strict_should_regenerate(true, true, [], storeEntryExists: true),
+            'an issued-but-empty session is a known id — no rotation'
+        );
+    }
+
+    public function testMissingStoreEntryRegenerates(): void
+    {
+        $this->assertTrue(
+            zeal_session_strict_should_regenerate(true, true, ['stale' => 1], storeEntryExists: false),
+            'no backing store entry = never-issued/foreign id → rotate, regardless of in-memory data'
+        );
+    }
+
+    public function testNullExistenceFallsBackToDataEmptinessHeuristic(): void
+    {
+        // BC: callers that cannot determine store existence keep the old
+        // data-emptiness behaviour.
+        $this->assertTrue(zeal_session_strict_should_regenerate(true, true, [], storeEntryExists: null));
+        $this->assertFalse(zeal_session_strict_should_regenerate(true, true, ['u' => 1], storeEntryExists: null));
+    }
+
     /**
      * The empty check is exact: a session holding only a falsy-keyed value is
      * still non-empty and must be preserved.
