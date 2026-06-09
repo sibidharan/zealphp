@@ -847,11 +847,22 @@ class Response
     {
         if ($this->parent->isWritable()) {
             $this->emitQueuedHeaders();
+            // Serialize cookies in PHP (#293) — OpenSwoole's C-side cookie()
+            // diverges from PHP 8.4 on the wire (dashed expires date, missing
+            // Max-Age, `+` for space, lowercase attribute names). Emit the
+            // PHP-8.4-identical lines as Set-Cookie header values instead,
+            // riding the same array-valued multi-header mechanism as #260.
+            $lines = [];
             foreach ($this->cookiesList as $cookie) {
-                $this->parent->cookie(...$cookie);
+                $lines[] = self::serializeCookie(...$cookie);
             }
             foreach ($this->rawCookiesList as $cookie) {
-                $this->parent->rawCookie(...$cookie);
+                $lines[] = self::serializeCookie(...[...$cookie, true]);
+            }
+            if (count($lines) === 1) {
+                $this->parent->header('Set-Cookie', $lines[0]);
+            } elseif ($lines !== []) {
+                $this->emitMultiHeader('Set-Cookie', $lines);
             }
             $this->headersList = [];
             $this->cookiesList = [];
@@ -860,6 +871,90 @@ class Response
             return true;
         }
         return false;
+    }
+
+    /**
+     * Serialize ONE `Set-Cookie` header value byte-identical to PHP 8.4's
+     * `php_setcookie()` (#293) — verified live against Apache 2.4.67 +
+     * mod_php 8.4:
+     *
+     * - `expires` uses the IMF-fixdate form with SPACES (`Wed, 18 May 2033 …`),
+     *   not the legacy dashed Netscape date.
+     * - `Max-Age=max(0, expire - now)` is emitted alongside `expires`
+     *   (RFC 6265 §5.2.2 — Max-Age wins where supported).
+     * - The value is `rawurlencode()`d — space is `%20` (never `+`; cookies are
+     *   not form-encoded, and a literal `+` corrupts base64 payloads like JWTs).
+     * - PHP's attribute order and casing: `path`, `domain`, `secure`,
+     *   `HttpOnly`, `SameSite`.
+     * - An EMPTY value emits PHP's canonical deletion form:
+     *   `name=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0`.
+     *
+     * #319: `SameSite=None` without `Secure` is emitted AS-IS — PHP/Apache do
+     * not auto-coerce, and parity wins — but a warning is logged, because
+     * modern browsers (Chrome 80+, RFC 6265bis) silently drop such cookies.
+     *
+     * @param string $name     Cookie name (validated upstream by setcookie/setrawcookie).
+     * @param string $value    Cookie value; ''  → PHP's deletion form.
+     * @param int    $expire   Unix expiry; 0 → session cookie (no expires/Max-Age).
+     * @param string $path     `path=` attribute ('' → omitted).
+     * @param string $domain   `domain=` attribute ('' → omitted).
+     * @param bool   $secure   Emit `secure`.
+     * @param bool   $httponly Emit `HttpOnly`.
+     * @param string $samesite `SameSite=` attribute ('' → omitted).
+     * @param string $priority `Priority=` attribute (Chrome extension; '' → omitted).
+     * @param bool   $raw      true → value passes through verbatim (setrawcookie).
+     */
+    public static function serializeCookie(
+        string $name,
+        string $value = '',
+        int $expire = 0,
+        string $path = '',
+        string $domain = '',
+        bool $secure = false,
+        bool $httponly = false,
+        string $samesite = '',
+        string $priority = '',
+        bool $raw = false,
+    ): string {
+        $parts = [];
+        if ($value === '') {
+            // PHP's deletion form: any empty-value setcookie() becomes an
+            // explicit expiry at epoch+1 regardless of the $expire given.
+            $parts[] = $name . '=deleted';
+            $parts[] = 'expires=Thu, 01 Jan 1970 00:00:01 GMT';
+            $parts[] = 'Max-Age=0';
+        } else {
+            $parts[] = $name . '=' . ($raw ? $value : rawurlencode($value));
+            if ($expire !== 0) {
+                $parts[] = 'expires=' . gmdate('D, d M Y H:i:s', $expire) . ' GMT';
+                $parts[] = 'Max-Age=' . max(0, $expire - time());
+            }
+        }
+        if ($path !== '') {
+            $parts[] = 'path=' . $path;
+        }
+        if ($domain !== '') {
+            $parts[] = 'domain=' . $domain;
+        }
+        if ($secure) {
+            $parts[] = 'secure';
+        }
+        if ($httponly) {
+            $parts[] = 'HttpOnly';
+        }
+        if ($samesite !== '') {
+            $parts[] = 'SameSite=' . $samesite;
+            if (!$secure && strcasecmp($samesite, 'None') === 0) {
+                \ZealPHP\elog(
+                    "Cookie '{$name}' sets SameSite=None without Secure — modern browsers silently drop it (add 'secure' => true)",
+                    'warn'
+                );
+            }
+        }
+        if ($priority !== '') {
+            $parts[] = 'Priority=' . $priority;
+        }
+        return implode('; ', $parts);
     }
 
     /**
