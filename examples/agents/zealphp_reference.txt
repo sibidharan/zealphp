@@ -164,7 +164,8 @@ zealphp/
 
 - **`src/`** – Framework source code. Important highlights:
   - `App.php` – The main server class responsible for routing, middleware orchestration, template rendering, and OpenSwoole integration.
-  - `G.php` – Lightweight container that virtualizes PHP superglobals per request.
+  - `RequestContext.php` – The per-request state container that virtualizes PHP superglobals (`$g->get`/`post`/`cookie`/`server`/`session`/…). Per-coroutine in coroutine mode, process-wide singleton in sync superglobals modes.
+  - `G.php` – A backward-compatibility shim: `require`s `RequestContext.php` and `class_alias`es `G` → `RequestContext` (the legacy `G::instance()` name still works).
   - `HTTP/` – Request and response wrappers that provide durable hooks for ZealPHP features while exposing the underlying OpenSwoole objects when needed.
   - `Session/` – Session managers that bridge traditional PHP session semantics with OpenSwoole’s coroutine context.
   - `utils.php` – Helper functions: `coproc()` (background-process spawner), logging utilities (`elog()`, `zlog()`, `access_log()`), and stack-trace helpers (`jTraceEx()`).
@@ -478,7 +479,7 @@ Handlers can declare special parameters to access framework objects:
 - `$response` – `ZealPHP\HTTP\Response` wrapper
 - `$app` – the current `ZealPHP\App` instance
 
-`$req` / `$res` are accepted as short aliases for `$request` / `$response` — they receive the exact same wrapper instances. An explicit `{req}` / `{res}` URL segment still wins: a matched path parameter binds by name before the alias is considered.
+`$req` / `$res` are accepted as short aliases for `$request` / `$response` — they receive the exact same wrapper instances. The reserved framework-object names (`request` / `req` / `response` / `res` / `app`) bind the injected object **before** any same-named URL segment (security fix #240), so a handler typed `function($req)` always receives the wrapper — never an attacker-controllable path string. A URL segment that happens to use a reserved name is unbindable to that handler parameter; name it something else to read the segment.
 
 To access the underlying `OpenSwoole\HTTP\Server`, call `App::getServer()` — it is not an injectable handler parameter.
 
@@ -1945,6 +1946,54 @@ $app->ws('/ws/auth',
 
 For multi-worker setups, persist the `fd → user` map in `Store` instead of `$g` so any worker that handles a subsequent message can resolve the identity. To route a message to a specific client by id across workers or hosts, use `WSRouter::own($clientId, $fd)` in `onOpen`, `WSRouter::release($clientId)` in `onClose`, and `WSRouter::sendToClient($clientId, $payload)` from anywhere — see the [Federated rooms](#federated-rooms-cross-host) section.
 
+### Binding WS identity & rooms to your session auth (#234)
+
+`WSRouter::own($clientId, $fd)` trusts a **caller-supplied** `client_id`, and `Room` ops accept any caller — so on their own they don't authorize anything. To make WS routing and rooms follow the same auth your HTTP layer uses, wire the framework's session hooks (the ones `ZealAPI` already consults):
+
+```php
+// app.php — the SAME hooks the HTTP/API layer uses
+App::authChecker(fn() => Session::isLoggedIn());          // is the session authenticated?
+App::usernameProvider(fn() => Session::get('username'));  // who?
+
+// Fail-closed room authorization: consulted by join/leave/push (throw on deny)
+// and members/size/isMember (return empty on deny). Without this call the room
+// layer is unguarded (backward-compatible).
+WSRouter::roomAuthorizer(function (string $action, string $room, string $clientId): bool {
+    if (!(App::authChecker())()) return false;            // must be authenticated
+    return $action === 'read' || str_starts_with($room, "u.$clientId."); // your policy
+});
+
+$app->ws('/ws/app',
+    onOpen: function ($server, $request, $g) {
+        // Bind the connection to the AUTHENTICATED principal — never a client value.
+        // Throws WSAuthException when the session isn't authenticated.
+        try {
+            $uid = WSRouter::ownAuthenticated($request->fd);   // = sessionPrincipal()
+        } catch (\ZealPHP\WS\WSAuthException) {
+            $server->disconnect($request->fd, WSRouter::CLOSE_AUTH_REQUIRED, 'Unauthorized');
+            return;
+        }
+        WSRouter::room("u.$uid.inbox")->join($uid);
+    },
+    onMessage: function ($server, $frame, $g) {
+        // Recover the authenticated identity bound at onOpen — no re-reading the session.
+        $uid = WSRouter::principalForFd($frame->fd);
+        if ($uid === null) { return; }
+        // Room ops are now authorized against $uid by the roomAuthorizer above.
+        WSRouter::room("u.$uid.inbox")->push(['from' => $uid, 'data' => $frame->data], fromClientId: $uid);
+    },
+);
+```
+
+| API | Purpose |
+|-----|---------|
+| `WSRouter::sessionPrincipal(): ?string` | The authenticated principal for the current connection (via `authChecker`+`usernameProvider`), or `null`. |
+| `WSRouter::ownAuthenticated($fd, $connId?): string` | Like `own()` but binds to `sessionPrincipal()`; throws `WSAuthException` when unauthenticated. |
+| `WSRouter::principalForFd($fd): ?string` | The principal bound at `ownAuthenticated()` — use in `onMessage`. |
+| `WSRouter::roomAuthorizer(?callable)` | `fn($action, $room, $clientId): bool`; fail-closed gate on every `Room` op. |
+
+The `/demo/rooms/*` routes are **illustrative only** — intentionally unauthenticated for the public docs site. Don't copy that shape into production; wire `roomAuthorizer()` + `ownAuthenticated()` as above.
+
 ## WebSocket — Heartbeats
 
 OpenSwoole has a built-in idle disconnector configured via two server settings:
@@ -2471,9 +2520,11 @@ $map = $app->describeRoutes();
 // [
 //   'global'  => ['CorsMiddleware', 'ETagMiddleware', 'ResponseMiddleware (router)'],
 //   'aliases' => ['auth', 'admin-only', 'throttle', 'request-id'],
+//   'when'    => [ ['scope' => '/internal', 'middleware' => ['IpAccessMiddleware']] ],
 //   'routes'  => [
 //     ['methods' => ['GET'], 'path' => '/admin/users',
-//      'middleware' => ['auth', 'request-id', 'IpAccessMiddleware'], 'handler' => 'Closure'],
+//      'middleware' => ['auth', 'request-id', 'IpAccessMiddleware'],
+//      'handler' => 'Closure', 'backend' => null],  // 'backend' = per-route CGI backend (or null)
 //   ],
 // ]
 ```
@@ -4574,12 +4625,13 @@ regardless of extension. It takes the same `mode` / `interpreter` / `address` /
 App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc', 'interpreter' => '/usr/bin/python3']);
 ```
 
-> **Known limitation.** `cgiScriptAlias()` registers the resolution + ExecCGI
-> scope, but URL-level implicit routing is wired **per-extension only**. A
-> ScriptAlias-only setup (no matching `registerCgiBackend()`) is reachable via
-> `App::include()` but does not yet get an automatic `/{file}.<ext>` route.
-> Pair it with a per-extension backend (whose `exec_paths` covers the same
-> prefix) for auto-routed implicit URLs, or add an explicit route. (Follow-up.)
+> **Implicit URL routing is automatic for ScriptAlias prefixes.** `run()`
+> registers a `patternRoute('#^<prefix>/(?P<rest>.+?)/?$#', …)` for every
+> `cgiScriptAlias()` prefix (`registerImplicitRoutes()`), so a ScriptAlias-only
+> setup — no matching `registerCgiBackend()` — gets an automatic GET/POST route:
+> `cgiScriptAlias('/cgi-bin', ['mode' => 'proc'])` alone makes `GET /cgi-bin/hello.sh`
+> work (the file runs via its `#!` shebang). A per-extension backend is only needed
+> when you want a specific interpreter (e.g. `.py` → python3).
 
 ---
 
@@ -4795,7 +4847,7 @@ ZealPHP's implicit routes in [`src/App.php`](../src/App.php) reproduce Apache's 
 | `AcceptPathInfo On` | `/script.php/extra/path` exposes `PATH_INFO=/extra/path`, rewrites `REQUEST_URI` to `/script.php` | `App::$path_info = true` |
 | `<FilesMatch "^\.">` deny | every implicit route + dedicated pattern route refuses any URL with a dotfile component | `App::$block_dotfiles = true` |
 | URL-decoded traversal rejection | `parse_url + rawurldecode` checked for `..`, `\0`, backslash before route matching → 400 | always on |
-| Static handler URL whitelist | OpenSwoole's `enable_static_handler` is constrained to `App::$static_handler_locations` (default: `/css`, `/js`, `/img`, `/fonts`, `/assets`, `/static`, `/favicon.ico`, `/robots.txt`) | `App::$static_handler_locations` |
+| Static handler URL whitelist | OpenSwoole's `enable_static_handler` is constrained to `App::$static_handler_locations` (default applied by `run()` when unset: `/css`, `/js`, `/img`, `/images`, `/fonts`, `/assets`, `/static`, `/favicon.ico`, `/robots.txt`) | `App::$static_handler_locations` |
 
 The static-handler whitelist is the real defense against `/.env` or `/.git/config` being served. OpenSwoole's built-in handler doesn't honor `<FilesMatch>` rules; by restricting it to known asset prefixes, anything outside the whitelist falls through to PHP routing, where dotfile and traversal checks fire.
 
@@ -5086,6 +5138,7 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 | `ZEALPHP_HTTP_COMPRESSION` | `!$compressionMiddleware` (true when `CompressionMiddleware` is NOT registered, false when it is) | user | In `app.php`, sets the OpenSwoole `http_compression` server setting (`env_flag`) — toggles OpenSwoole's built-in gzip/deflate response compression. |
 | `ZEALPHP_OPCACHE_ADVISORY` | unset (advisory enabled; only literal `'0'` suppresses) | user | Read in `App::opcacheLegacyBootCheck()` via `getenv()==='0'`; when `'0'`, suppresses the boot-time advisory about opcache + coroutine-legacy re-declaring `require_once`'d classes. |
 | `ZEALPHP_FN_STATICS_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineStaticsIsolation()` — when `'1'`, disables per-coroutine isolation of function-local `static $x` (Stage 5) for raw throughput. |
+| `ZEALPHP_CWD_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineCwdIsolation()` — when `'1'`, disables per-coroutine working-directory isolation (#323), so a request's `chdir()` leaks process-wide again. |
 | `ZEALPHP_FN_STATICS_RESET_DISABLE` | unset (reset ENABLED; any non-empty value not starting with `'0'` disables) | user | Read in ext-zealphp `zealphp_reset_request_statics()`; when set, disables the per-request reset of function-local `static $x` to their templates. |
 | `ZEALPHP_CLASS_STATICS_RESET_DISABLE` | unset (reset ENABLED; any non-empty value not starting with `'0'` disables) | user | Read in ext-zealphp `zealphp_reset_request_class_statics()`; when set, disables the per-request reset of class static properties to their templates. |
 | `ZEALPHP_POOL_FULL_RESET` | unset (off; only literal `'1'` enables) | user | **EXPERIMENTAL.** Read in `src/pool_worker.php` `pool_reset_request_state()`; when `'1'`, a REUSED `cgiMode('pool')` subprocess (`cgiPoolMaxRequests > 1`) runs the full coroutine-legacy reset stack (`zealphp_reset_request_rtcaches` + `_statics` + `_class_statics`) per request — letting *re-entrant* legacy apps warm-reuse a worker. Cannot make inherited-class-redeclaring apps safe (use the recycle=1 default or `cgiMode('fork')`). Inherited by the subprocess via the parent env. See `docs/architecture/2026-06-02-fork-per-request-cgi-pool.md`. |
@@ -5114,6 +5167,7 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 |----------|---------|-------|-------------|
 | `ZEALPHP_CORS_ORIGINS` | unset → `["*"]` (wildcard) with a one-time `elog()` warning | user | Comma-separated CORS origin allowlist read by `CorsMiddleware::resolveOriginsList()` when no explicit origins are passed to the constructor; empty/unset → wildcard `*`. |
 | `ZEALPHP_SESSION_SECURE` | unset → auto-detect HTTPS (Secure flag true when `HTTPS=on`, `X-Forwarded-Proto=https`, or `SERVER_PORT=443`) | user | When set, forces the session cookie's Secure flag via `filter_var(FILTER_VALIDATE_BOOLEAN)`; unset → auto-detect HTTPS (`src/Session/utils.php`). |
+| `ZEALPHP_SESSION_GC_INTERVAL` | `600000` (ms = 10 min) | user | Interval of the worker-0 deterministic session-GC timer (`App::registerSessionGc()`, `src/App.php`). Milliseconds; values `< 1000` are ignored and reset to `600000`. |
 | `ZEALPHP_WS_HMAC` | not read by the framework — app-supplied; effective default is no HMAC until the app wires it | user | Documented in the `WSRouter::setChannelHmacSecret()` docblock (`src/WSRouter.php:261`) as the env var an app reads in `app.php` to pass into `setChannelHmacSecret()`; the framework never calls `getenv` on it. When set, `WSRouter` signs/verifies `ws:server:*` and `ws:room:*` pub/sub publishes with an HMAC envelope. |
 | `ZEALPHP_SITE_URL` | unset/empty → falls back to `ZEALPHP_SITE_HOST`, then `https://php.zeal.ninja` | user | Canonical base URL used by `site_url()` (`src/utils.php`) to build absolute URLs; trailing slash trimmed and an `https://` scheme prepended if none present. |
 | `ZEALPHP_SITE_HOST` | unset → falls through to `ZEALPHP_SITE_URL` logic, ultimately `https://php.zeal.ninja` | user | Fallback canonical host used by `site_url()` only when `ZEALPHP_SITE_URL` is unset/empty; a bare host gets an `https://` scheme prepended. |
@@ -5497,7 +5551,7 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.4.4 .
+docker build -t zealphp:0.4.5 .
 ```
 
 The shipped `Dockerfile` is PHP 8.4-cli on `bookworm` with OpenSwoole and
@@ -5509,7 +5563,7 @@ versions with the build args:
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
     --build-arg ZEALPHP_EXT_VERSION=v0.3.33 \
-    -t zealphp:0.4.4 .
+    -t zealphp:0.4.5 .
 ```
 
 ### Run (single container)
@@ -5521,7 +5575,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.4.4
+    zealphp:0.4.5
 ```
 
 ### Production compose
@@ -5532,7 +5586,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.4.4
+    image: registry.example.com/zealphp-app:0.4.5
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -7418,8 +7472,8 @@ ZealPHP positions itself as a modern PHP framework that blends the productivity 
 ### htmx Convention
 The site uses htmx globally with `hx-boost="true"` on `<body>` for automatic AJAX navigation with progressive enhancement. Prefer htmx attributes (`hx-get`, `hx-post`, `hx-target`, `hx-swap`) over custom `fetch()`. Use WebSocket or SSE for server-push.
 
-### Known Tech Debt
-Legacy demo pages contain ~600 inline `style=` attributes and 10+ inline `<script>` blocks (worst: `home.php`, `performance.php`, `why-zealphp.php`). When modifying these files, extract inline JS/CSS to external files rather than adding more.
+### Separation of concerns (enforced)
+The inline `style=` / inline `<script>` debt was fully cleared in the Dec-2024 sweep — the ~1200 inline styles moved to `public/css/pages/*.css` and the inline scripts to `public/js/{,pages/}*.js`. The contract is now enforced: templates produce HTML only; CSS goes in `public/css/`, JS in `public/js/`. The single allowed `style=` left in `template/` is inside an escaped `<pre><code>` sample (displayed code, not a real attribute). Don't reintroduce inline styles/scripts.
 
 ## Standards and Roadmap — PSR Interoperability
 
