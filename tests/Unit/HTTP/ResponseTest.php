@@ -608,6 +608,130 @@ class ResponseTest extends TestCase
         $this->assertSame(strlen($body), $contentLength);
     }
 
+    public function testSendFileIfMatchMismatchReturns412(): void
+    {
+        // #321 — If-Match was ignored entirely: a mismatched validator MUST
+        // produce 412 Precondition Failed (RFC 9110 step 1), never a 200.
+        $path = $this->makeTempFile(str_repeat('f', 50), 'css');
+        $this->setRequestHeaders(['if-match' => '"no-such-etag"']);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        $this->assertContains(['status', 412, ''], $fake->log);
+        $this->assertContains(['end', ''], $fake->log);
+        foreach ($fake->log as $entry) {
+            $this->assertNotSame('sendfile', $entry[0] ?? null, '412 must not ship the body');
+        }
+    }
+
+    public function testSendFileIfUnmodifiedSinceInPastReturns412(): void
+    {
+        // #321 — If-Unmodified-Since was ignored: a date OLDER than the file's
+        // mtime means the resource WAS modified since → 412 (RFC 9110 step 2).
+        $path = $this->makeTempFile('x', 'css');
+        $mtime = (int) filemtime($path);
+        $this->setRequestHeaders([
+            'if-unmodified-since' => gmdate('D, d M Y H:i:s', $mtime - 3600) . ' GMT',
+        ]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        $this->assertContains(['status', 412, ''], $fake->log);
+    }
+
+    public function testSendFileIfMatchPrecedesIfNoneMatch(): void
+    {
+        // #321 — precedence: If-Match (step 1) is evaluated BEFORE
+        // If-None-Match (step 3); a failed If-Match → 412 even when the
+        // If-None-Match would have produced a 304.
+        $path = $this->makeTempFile(str_repeat('g', 50), 'css');
+        $mtime = (int) filemtime($path);
+        $etag = 'W/"' . dechex($mtime) . '-' . dechex(50) . '"';
+        $this->setRequestHeaders([
+            'if-match'      => '"no-such-etag"',
+            'if-none-match' => $etag,
+        ]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        $this->assertContains(['status', 412, ''], $fake->log);
+    }
+
+    public function testSendFileIfNoneMatchStrongFormOfWeakEtagStillMatches(): void
+    {
+        // #321 — weak comparison for If-None-Match (RFC 9110 §13.1.2): a
+        // client echoing the strong form of our weak ETag must still get the
+        // 304 — via ConditionalRequest::findEtagWeak, not the old
+        // ltrim($etag, 'W/') character-class hack.
+        $path = $this->makeTempFile(str_repeat('h', 50), 'css');
+        $mtime = (int) filemtime($path);
+        $strongForm = '"' . dechex($mtime) . '-' . dechex(50) . '"';
+        $this->setRequestHeaders(['if-none-match' => $strongForm]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        $this->assertContains(['status', 304, ''], $fake->log);
+    }
+
+    public function testSendFileMultiSuffixGzipResolvesInnerTypeAndEncoding(): void
+    {
+        // #317 — Apache mod_mime parity: `app.html.gz` walks the whole suffix
+        // chain → Content-Type from the inner suffix (text/html) plus
+        // Content-Encoding: gzip. Previously the magic-bytes/pathinfo fallback
+        // labelled it application/gzip with no Content-Encoding at all.
+        $path = $this->makeTempFile((string) gzencode('<h1>hi</h1>'), 'html.gz');
+        $this->setRequestHeaders([]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        $headers = $this->headerCalls($fake);
+        $this->assertContains(['header', 'Content-Type', 'text/html'], $headers);
+        $this->assertContains(['header', 'Content-Encoding', 'gzip'], $headers);
+    }
+
+    public function testSendFileLanguageSuffixResolvesContentLanguage(): void
+    {
+        // #317 — `page.fr.html` → text/html + Content-Language: fr (Apache
+        // AddLanguage parity; suffix order does not matter to mod_mime).
+        $path = $this->makeTempFile('<p>bonjour</p>', 'fr.html');
+        $this->setRequestHeaders([]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        $headers = $this->headerCalls($fake);
+        $this->assertContains(['header', 'Content-Type', 'text/html'], $headers);
+        $this->assertContains(['header', 'Content-Language', 'fr'], $headers);
+    }
+
+    public function testSendFileEncodingOnlySuffixDoesNotLeakArchiveType(): void
+    {
+        // #317 — a bare `.gz` with no inner type suffix must not let magic
+        // bytes label the ENCODING as the TYPE (application/gzip while also
+        // claiming Content-Encoding: gzip would make clients double-decode).
+        $path = $this->makeTempFile((string) gzencode('plain'), 'gz');
+        $this->setRequestHeaders([]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        $headers = $this->headerCalls($fake);
+        $this->assertContains(['header', 'Content-Encoding', 'gzip'], $headers);
+        $this->assertContains(['header', 'Content-Type', 'application/octet-stream'], $headers);
+    }
+
     public function testSendFileTooManyRangesServesFullBody(): void
     {
         $path = $this->makeTempFile(str_repeat('z', 500), 'bin');
