@@ -477,6 +477,98 @@ class Response
     /**
      * Serve a file with Range request support using OpenSwoole's zero-copy sendfile.
      *
+     * The default mod_mime suffix maps `sendFile()` resolves against (#317) —
+     * an Apache `mime.types` / `AddEncoding` / `AddLanguage` stock-conf subset.
+     * Built once per worker; override with {@see setFileMimeResolver()}.
+     */
+    private static ?MimeResolver $fileMimeResolver = null;
+
+    /**
+     * Override the suffix→metadata resolver `sendFile()` uses — pass your own
+     * `MimeResolver` (e.g. extra types, no language map), or `null` to restore
+     * the built-in Apache-parity default.
+     */
+    public static function setFileMimeResolver(?MimeResolver $resolver): void
+    {
+        self::$fileMimeResolver = $resolver ?? self::defaultFileMimeResolver();
+    }
+
+    private static function fileMimeResolver(): MimeResolver
+    {
+        return self::$fileMimeResolver ??= self::defaultFileMimeResolver();
+    }
+
+    /**
+     * Apache stock-conf parity maps: common `mime.types` entries, the
+     * `AddEncoding` compression suffixes, and the default-conf `AddLanguage`
+     * set. Kept deliberately modest — the full IANA registry belongs to a
+     * user-supplied resolver via {@see setFileMimeResolver()}.
+     */
+    private static function defaultFileMimeResolver(): MimeResolver
+    {
+        return new MimeResolver(
+            [
+                'html' => 'text/html', 'htm' => 'text/html',
+                'css'  => 'text/css',
+                'js'   => 'application/javascript', 'mjs' => 'application/javascript',
+                'json' => 'application/json',
+                'txt'  => 'text/plain',
+                'csv'  => 'text/csv',
+                'md'   => 'text/markdown',
+                'xml'  => 'application/xml',
+                'svg'  => 'image/svg+xml',
+                'png'  => 'image/png',
+                'jpg'  => 'image/jpeg', 'jpeg' => 'image/jpeg',
+                'gif'  => 'image/gif',
+                'webp' => 'image/webp',
+                'avif' => 'image/avif',
+                'ico'  => 'image/vnd.microsoft.icon',
+                'woff' => 'font/woff', 'woff2' => 'font/woff2',
+                'ttf'  => 'font/ttf', 'otf' => 'font/otf',
+                'mp3'  => 'audio/mpeg',
+                'ogg'  => 'audio/ogg',
+                'wav'  => 'audio/wav',
+                'mp4'  => 'video/mp4',
+                'webm' => 'video/webm',
+                'pdf'  => 'application/pdf',
+                'zip'  => 'application/zip',
+                'tar'  => 'application/x-tar',
+                'wasm' => 'application/wasm',
+            ],
+            ['gz' => 'gzip', 'br' => 'br', 'zst' => 'zstd', 'bz2' => 'x-bzip2', 'z' => 'compress'],
+            [
+                'ca' => 'ca', 'cs' => 'cs', 'da' => 'da', 'de' => 'de', 'el' => 'el',
+                'en' => 'en', 'es' => 'es', 'et' => 'et', 'fr' => 'fr', 'he' => 'he',
+                'hi' => 'hi', 'hr' => 'hr', 'it' => 'it', 'ja' => 'ja', 'ko' => 'ko',
+                'nl' => 'nl', 'pl' => 'pl', 'pt' => 'pt', 'ru' => 'ru', 'sv' => 'sv',
+                'ta' => 'ta', 'tr' => 'tr', 'zh' => 'zh',
+            ],
+        );
+    }
+
+    /**
+     * Resolve a file's response metadata for `sendFile()` (#317): walk the
+     * suffix chain via {@see MimeResolver} (Apache `mod_mime` semantics), then
+     * fall back to magic-bytes sniffing only when no suffix mapped a type.
+     * When the chain yielded an ENCODING but no type (`README.gz`), magic
+     * bytes must not label the encoding as the type (application/gzip +
+     * Content-Encoding: gzip would double-decode) — emit octet-stream.
+     *
+     * @return array{type: string, encoding: ?string, languages: list<string>}
+     */
+    private static function resolveFileMetadata(string $path): array
+    {
+        $resolved = self::fileMimeResolver()->resolve($path);
+        $type = $resolved['type'];
+        if ($type === null) {
+            $type = $resolved['encoding'] !== null
+                ? 'application/octet-stream'
+                : (mime_content_type($path) ?: 'application/octet-stream');
+        }
+        return ['type' => $type, 'encoding' => $resolved['encoding'], 'languages' => $resolved['languages']];
+    }
+
+    /**
      * @param string $path     Absolute path to the file
      * @param string $filename Optional download filename (triggers Content-Disposition: attachment)
      */
@@ -493,35 +585,39 @@ class Response
         $this->g->_streaming = true;
         $total = filesize($path);
         if ($total === false) { $total = 0; }
-        $mime = mime_content_type($path) ?: 'application/octet-stream';
-        if ($mime === 'text/plain' || $mime === 'application/octet-stream') {
-            $mime = match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
-                'css'  => 'text/css',
-                'js'   => 'application/javascript',
-                'json' => 'application/json',
-                'svg'  => 'image/svg+xml',
-                'xml'  => 'application/xml',
-                'woff' => 'font/woff',
-                'woff2'=> 'font/woff2',
-                'ttf'  => 'font/ttf',
-                'otf'  => 'font/otf',
-                'webp' => 'image/webp',
-                'avif' => 'image/avif',
-                'mp4'  => 'video/mp4',
-                'webm' => 'video/webm',
-                default => $mime,
-            };
-        }
+
+        // Content metadata — Apache mod_mime parity via the framework's own
+        // MimeResolver (#317): the WHOLE suffix chain is walked, so
+        // `app.html.gz` → Content-Type: text/html + Content-Encoding: gzip and
+        // `page.fr.html` → text/html + Content-Language: fr. Magic bytes / the
+        // legacy rightmost-suffix fallback only run when no suffix maps a type.
+        // NOTE the classic Apache gotcha applies on purpose: a `backup.tar.gz`
+        // download gets `Content-Encoding: gzip`, which browsers transparently
+        // decode — exactly what Apache's stock `AddEncoding x-gzip .gz` does.
+        $meta = self::resolveFileMetadata($path);
+        $mime = $meta['type'];
 
         $this->header('Content-Type', $mime);
+        if ($meta['encoding'] !== null) {
+            $this->header('Content-Encoding', $meta['encoding']);
+        }
+        if ($meta['languages'] !== []) {
+            $this->header('Content-Language', implode(', ', $meta['languages']));
+        }
         $this->header('Accept-Ranges', 'bytes');
 
         if ($filename !== '') {
             $this->header('Content-Disposition', 'attachment; filename="' . addcslashes($filename, '"\\') . '"');
         }
 
-        // Conditional GET — Apache-style ETag (inode-size-mtime as weak validator)
-        // + If-None-Match / If-Modified-Since handling. Returns 304 on match.
+        // Conditional preconditions — Apache-style ETag (mtime-size as weak
+        // validator), then DELEGATE to the framework's own
+        // ConditionalRequest::evaluate() (#321) so ALL FOUR conditional
+        // headers run in RFC 9110 / ap_meets_conditions() order:
+        // If-Match → If-Unmodified-Since → If-None-Match → If-Modified-Since.
+        // Previously only steps 3–4 were inlined here: If-Match /
+        // If-Unmodified-Since were ignored outright (no 412), and weak-ETag
+        // stripping used ltrim()'s character-class semantics.
         $mtime = filemtime($path);
         if ($mtime === false) { $mtime = 0; }
         $etag = 'W/"' . dechex($mtime) . '-' . dechex($total) . '"';
@@ -533,34 +629,17 @@ class Response
         if (!is_array($reqHeaders)) {
             $reqHeaders = [];
         }
-        $ifNoneMatch = $reqHeaders['if-none-match'] ?? '';
-        if (!is_string($ifNoneMatch)) {
-            $ifNoneMatch = '';
-        }
-        $ifModifiedSince = $reqHeaders['if-modified-since'] ?? '';
-        if (!is_string($ifModifiedSince)) {
-            $ifModifiedSince = '';
-        }
-        $notModified = false;
-        if ($ifNoneMatch !== '') {
-            foreach (array_map(static fn(string $s): string => trim($s), explode(',', $ifNoneMatch)) as $tag) {
-                if ($tag === $etag || $tag === '*' || $tag === ltrim($etag, 'W/')) {
-                    $notModified = true;
-                    break;
-                }
-            }
-        } elseif ($ifModifiedSince !== '') {
-            // Apache ap_condition_if_modified_since: a future-dated
-            // If-Modified-Since (later than the request time) is invalid and
-            // must NOT yield a 304 — otherwise a client can force spurious 304s
-            // by sending a date past "now". Guard with $since <= time().
-            $since = strtotime($ifModifiedSince);
-            if ($since !== false && $since <= time() && $since >= $mtime) {
-                $notModified = true;
+        $condHeaders = [];
+        foreach ($reqHeaders as $hk => $hv) {
+            if (is_string($hk) && is_string($hv)) {
+                $condHeaders[$hk] = $hv;
             }
         }
-        if ($notModified) {
-            $this->status(304);
+        $methodRaw = $this->g->server['REQUEST_METHOD'] ?? 'GET';
+        $method    = is_string($methodRaw) && $methodRaw !== '' ? $methodRaw : 'GET';
+        $cond = ConditionalRequest::evaluate($method, $condHeaders, $etag, $mtime);
+        if ($cond === 304 || $cond === 412) {
+            $this->status($cond);
             $this->flush();
             $this->parent->end('');
             return;
