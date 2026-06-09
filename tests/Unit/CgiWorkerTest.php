@@ -361,6 +361,45 @@ PHP);
         $this->assertSame(1, $meta['return_value']);
     }
 
+    public function testSubprocessFilterInputReadsSuperglobals(): void
+    {
+        // #316 — the subprocess runs under the CLI SAPI, whose internal request
+        // tables are EMPTY: native filter_input() returns null even though
+        // $_GET/$_POST/$_COOKIE/$_SERVER are fully populated from the IPC
+        // context. The worker must override filter_input()/filter_input_array()
+        // to read the live superglobals, like the main OpenSwoole worker does.
+        $f = $this->fixture('filter_input.php', '<?php
+            echo json_encode([
+                "get"         => filter_input(INPUT_GET, "name"),
+                "get_int_ok"  => filter_input(INPUT_GET, "age", FILTER_VALIDATE_INT),
+                "get_int_bad" => filter_input(INPUT_GET, "name", FILTER_VALIDATE_INT),
+                "post"        => filter_input(INPUT_POST, "city"),
+                "cookie"      => filter_input(INPUT_COOKIE, "sid"),
+                "server"      => filter_input(INPUT_SERVER, "REQUEST_METHOD"),
+                "missing"     => filter_input(INPUT_GET, "nope"),
+                "arr"         => filter_input_array(INPUT_GET, ["age" => FILTER_VALIDATE_INT], false),
+            ]);
+        ');
+        $r = $this->runSubprocess($f, [
+            'get'    => ['name' => 'alice', 'age' => '42'],
+            'post'   => ['city' => 'mtl'],
+            'cookie' => ['sid' => 'abc'],
+            'server' => ['REQUEST_METHOD' => 'POST'],
+        ]);
+
+        $this->assertSame(0, $r['exit']);
+        $out = json_decode($r['stdout'], true);
+        $this->assertIsArray($out, 'fixture output should be JSON, got: ' . $r['stdout']);
+        $this->assertSame('alice', $out['get'], 'INPUT_GET reads $_GET (#316)');
+        $this->assertSame(42, $out['get_int_ok'], 'FILTER_VALIDATE_INT passes through');
+        $this->assertFalse($out['get_int_bad'], 'failed validation is false, not null');
+        $this->assertSame('mtl', $out['post']);
+        $this->assertSame('abc', $out['cookie']);
+        $this->assertSame('POST', $out['server']);
+        $this->assertNull($out['missing'], 'missing key stays null');
+        $this->assertSame(['age' => 42], $out['arr'], 'filter_input_array reads the same bag');
+    }
+
     public function testSubprocessIntReturnContract(): void
     {
         $f = $this->fixture('int.php', "<?php\nreturn 404;\n");

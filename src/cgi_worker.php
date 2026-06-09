@@ -186,6 +186,37 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
         return false;
     }, true);
 
+    // mod_php-parity filter_input()/filter_input_array() (#316): this
+    // subprocess runs under the CLI SAPI, whose internal SAPI request tables
+    // are EMPTY — native filter_input() returns null even though
+    // $_GET/$_POST/$_COOKIE/$_SERVER are fully populated from the IPC context
+    // above. Resolve the INPUT_* bag from the LIVE superglobals and delegate
+    // to filter_var()/filter_var_array(), mirroring the main worker's
+    // \ZealPHP\filter_input override (App.php overrideBuiltin wiring).
+    $__z_filter_bag = function (int $type): array {
+        $bag = match ($type) {
+            INPUT_GET    => $_GET,
+            INPUT_POST   => $_POST,
+            INPUT_COOKIE => $_COOKIE,
+            INPUT_SERVER => $_SERVER,
+            INPUT_ENV    => $_ENV,
+            default      => [],
+        };
+        return is_array($bag) ? $bag : [];
+    };
+
+    $z_override('filter_input', function (int $type, string $var_name, int $filter = FILTER_DEFAULT, array|int $options = 0) use ($__z_filter_bag): mixed {
+        $bag = $__z_filter_bag($type);
+        if (!array_key_exists($var_name, $bag)) {
+            return null;
+        }
+        return filter_var($bag[$var_name], $filter, $options);
+    }, true);
+
+    $z_override('filter_input_array', function (int $type, array|int $options = FILTER_DEFAULT, bool $add_empty = true) use ($__z_filter_bag): array|false|null {
+        return filter_var_array($__z_filter_bag($type), $options, $add_empty);
+    }, true);
+
     $z_override('setcookie', function(
         string $name, string $value = '', int|array $expires_or_options = 0,
         string $path = '', string $domain = '', bool $secure = false,
