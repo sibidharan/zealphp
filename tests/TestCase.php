@@ -61,12 +61,19 @@ abstract class TestCase extends PhpUnitTestCase
         $headerRaw = substr($raw, 0, $hSize);
         $bodyRaw   = substr($raw, $hSize);
 
-        // Parse headers
+        // Parse headers. Duplicate names (multiple Set-Cookie lines, multi-value
+        // Link/WWW-Authenticate) ACCUMULATE comma-joined instead of last-wins —
+        // otherwise assertions only ever see whichever line the server emitted
+        // last, and reordering the wire (e.g. the #293 PHP-side cookie
+        // serialization vs the C-side session cookie) silently flips tests.
         $parsedHeaders = [];
         foreach (explode("\r\n", $headerRaw) as $line) {
             if (str_contains($line, ':')) {
                 [$k, $v] = explode(':', $line, 2);
-                $parsedHeaders[strtolower(trim($k))] = trim($v);
+                $key = strtolower(trim($k));
+                $parsedHeaders[$key] = isset($parsedHeaders[$key])
+                    ? $parsedHeaders[$key] . ', ' . trim($v)
+                    : trim($v);
             }
         }
 
