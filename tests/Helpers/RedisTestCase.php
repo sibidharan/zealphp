@@ -105,6 +105,21 @@ abstract class RedisTestCase extends TestCase
         $this->requireYieldingSubscribe();
     }
 
+    /**
+     * Enable HOOK_ALL so client CONNECTS yield inside coroutines — used by
+     * tests that need connection-establishment to be a yield point (e.g. the
+     * #322 cold-burst pool race). Unlike requireYieldingSubscribe() this does
+     * NOT skip under phpredis: connects ride php_stream and hook fine; only
+     * SUBSCRIBE's C-side blocking read doesn't. tearDown disables it again.
+     */
+    protected function enableYieldingConnects(): void
+    {
+        if (class_exists(\OpenSwoole\Runtime::class)) {
+            \OpenSwoole\Runtime::enableCoroutine(true, \OpenSwoole\Runtime::HOOK_ALL);
+            $this->hookAllEnabled = true;
+        }
+    }
+
     /** @internal — flag tracked so tearDown only resets when enabled. */
     private bool $hookAllEnabled = false;
 

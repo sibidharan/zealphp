@@ -276,6 +276,70 @@ final class DbConnectionPoolTest extends TestCase
         self::assertTrue($timedOut, 'acquire on an exhausted pool throws DbException after the timeout');
     }
 
+    public function testColdConcurrentAcquireBuildsExactlyOneChannel(): void
+    {
+        // #322 — ensureChannel() TOCTOU. A real connect() yields (network I/O),
+        // so every cold concurrent acquirer used to pass the `$this->ch === null`
+        // check, build its OWN full channel of `size` connections, and overwrite
+        // `$this->ch` — leaking every channel but the last (and its connections).
+        // The yielding factory below reproduces the cold-burst shape; the pool
+        // must build exactly `size` connections, no matter how many concurrent
+        // borrowers hit it cold.
+        $created = 0;
+        $results = [];
+        Coroutine::run(function () use (&$created, &$results): void {
+            $driver = new PdoDriver(function () use (&$created): \PDO {
+                Coroutine::usleep(5000); // simulated connect latency — a yield point
+                $created++;
+                return new \PDO('sqlite::memory:');
+            });
+            $pool = new DbConnectionPool($driver, 2);
+            $done = new \OpenSwoole\Coroutine\Channel(10);
+            for ($i = 0; $i < 10; $i++) {
+                go(function () use ($pool, $done): void {
+                    $done->push($pool->with(
+                        fn (\PDO $db): int => (int) $db->query('SELECT 1')->fetchColumn()
+                    ));
+                });
+            }
+            for ($i = 0; $i < 10; $i++) { $results[] = $done->pop(5.0); }
+            $pool->close();
+        });
+        self::assertSame(array_fill(0, 10, 1), $results, 'every cold concurrent borrow completed');
+        self::assertSame(2, $created, 'cold burst built exactly size=2 connections — not one channel per acquirer (#322)');
+    }
+
+    public function testPartialFillFailureDoesNotLeakOrBrickThePool(): void
+    {
+        // #322 companion — a connect that throws mid-fill (DB down at cold
+        // boot) must drain + disconnect the partial build and leave the pool
+        // unbuilt, so the NEXT acquire retries cleanly instead of timing out
+        // forever against a half-filled (or empty) channel.
+        $attempts = 0;
+        $value    = null;
+        Coroutine::run(function () use (&$attempts, &$value): void {
+            $driver = new PdoDriver(function () use (&$attempts): \PDO {
+                Coroutine::usleep(1000);
+                $attempts++;
+                if ($attempts === 2) { throw new \RuntimeException('connect refused'); }
+                return new \PDO('sqlite::memory:');
+            });
+            $pool = new DbConnectionPool($driver, 2);
+            try {
+                $pool->acquire(1.0);
+                self::fail('first cold acquire must surface the connect failure');
+            } catch (\RuntimeException $e) {
+                self::assertSame('connect refused', $e->getMessage());
+            }
+            // The failed build must NOT brick the pool — a later acquire
+            // rebuilds from scratch and succeeds (attempts 3 + 4 connect).
+            $value = $pool->with(fn (\PDO $db): int => (int) $db->query('SELECT 3')->fetchColumn());
+            $pool->close();
+        });
+        self::assertSame(3, $value, 'pool recovered after a failed cold build');
+        self::assertSame(4, $attempts, 'retry rebuilt the full channel (2 failed-batch attempts + 2 fresh)');
+    }
+
     public function testValidationReplacementFiresWhenProbeFails(): void
     {
         // A probe that always errors on a healthy connection forces the pool to
