@@ -943,7 +943,12 @@ function response_add_header($key, $value, $replace = true): void
  */
 function response_set_status(int $status): void
 {
-    RequestContext::instance()->status = \ZealPHP\App::coerceStatusCode($status);
+    $g = RequestContext::instance();
+    $g->status = \ZealPHP\App::coerceStatusCode($status);
+    // Any explicit status set supersedes a prior raw `HTTP/x.x` status line —
+    // last write wins, like mod_php (#327).
+    $g->raw_status_code = null;
+    $g->raw_status_reason = null;
 }
 
 /**
@@ -1095,9 +1100,20 @@ function header($header, $replace = true, $http_response_code = null) {
         return false;
     }
     // Apache mod_php form 1: status line — header("HTTP/1.1 404 Not Found");
+    // mod_php forwards this form VERBATIM — code AND reason — even for codes
+    // outside 100–599 (verified live: Apache 2.4.67 emits `HTTP/1.1 600
+    // Custom Reason` untouched, while http_response_code(600) → 500). The
+    // explicit status line is the developer saying "I know what I'm doing",
+    // so the raw pair is carried on RequestContext for the emit chokepoints
+    // (#327); response_set_status() keeps feeding the PSR layer a
+    // withStatus()-safe code (out-of-range → the #320 placeholder).
     if (stripos($header, 'HTTP/') === 0) {
-        if (preg_match('/\s(\d{3})/', $header, $m)) {
+        if (preg_match('/\s(\d{3})\s*(.*)$/', $header, $m)) {
             response_set_status((int)$m[1]);
+            $g = RequestContext::instance();
+            $g->raw_status_code = (int)$m[1];
+            $reason = trim($m[2]);
+            $g->raw_status_reason = $reason !== '' ? $reason : null;
         }
         return;
     }

@@ -47,6 +47,18 @@ class RequestContext
     /** @var array<string, mixed> */
     public array $session_params = [];
     public ?int $status = null;
+    /**
+     * Raw status-line override (#327): set ONLY by the `header("HTTP/1.1
+     * <code> <reason>")` form, which Apache mod_php forwards verbatim —
+     * code AND reason — even for codes outside 100–599. The vendor PSR-7
+     * `withStatus()` throws on out-of-table codes, so the raw pair rides
+     * these side-channel fields and `App::emitEffectiveStatus()` overrides
+     * the wire status at the emit chokepoints. Any later explicit status
+     * set (`http_response_code()`, `Status:` header, int return) clears
+     * them via `response_set_status()` — last write wins, like mod_php.
+     */
+    public ?int $raw_status_code = null;
+    public ?string $raw_status_reason = null;
     public ?bool $_streaming = null;
     public ?bool $_session_started = null;
     /**

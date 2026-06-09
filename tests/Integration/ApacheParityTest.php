@@ -74,6 +74,29 @@ class ApacheParityTest extends TestCase
         $this->assertStatus(418, $r);
     }
 
+    public function testRawStatusLinePassesThrough600(): void
+    {
+        // #327 — Apache mod_php forwards an explicit status line VERBATIM,
+        // even outside 100–599 (verified live on Apache 2.4.67 + PHP 8.4).
+        // Only http_response_code() coerces (#320). The reason phrase
+        // ("Custom Reason") is pinned at the unit level (RawStatusLineTest)
+        // and was byte-verified on the wire: `HTTP/1.1 600 Custom Reason`.
+        $r = $this->get('/parity/header-status-600');
+        $this->assertStatus(600, $r);
+    }
+
+    public function testRawStatusLineCustomReasonKeepsInRangeCode(): void
+    {
+        $r = $this->get('/parity/header-status-reason');
+        $this->assertStatus(418, $r);
+    }
+
+    public function testLaterHttpResponseCodeSupersedesRawStatusLine(): void
+    {
+        $r = $this->get('/parity/header-status-superseded');
+        $this->assertStatus(201, $r);
+    }
+
     public function testHeaderExplicitCodeParam(): void
     {
         $r = $this->get('/parity/header-code');

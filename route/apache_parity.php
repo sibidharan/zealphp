@@ -59,6 +59,27 @@ $app->route('/parity/header-code', ['methods' => ['GET']], function() {
     return ['ok' => true];
 });
 
+// #327 — raw status line passes through VERBATIM, code AND reason, even
+// outside 100–599 (Apache mod_php forwards an explicit status line untouched;
+// only http_response_code() coerces — see #320).
+$app->route('/parity/header-status-600', ['methods' => ['GET']], function() {
+    header('HTTP/1.1 600 Custom Reason');
+    return ['ok' => true];
+});
+
+// #327 — in-range code with a CUSTOM reason phrase (not the IANA one).
+$app->route('/parity/header-status-reason', ['methods' => ['GET']], function() {
+    header('HTTP/1.1 418 Custom Teapot');
+    return ['ok' => true];
+});
+
+// #327 — a later http_response_code() supersedes the raw line (last write wins).
+$app->route('/parity/header-status-superseded', ['methods' => ['GET']], function() {
+    header('HTTP/1.1 600 Custom');
+    http_response_code(201);
+    return ['ok' => true];
+});
+
 // apache_setenv / apache_getenv / apache_note — per-request key/value scratch.
 $app->route('/parity/apache-env', ['methods' => ['GET']], function() {
     apache_setenv('FOO', 'bar');
