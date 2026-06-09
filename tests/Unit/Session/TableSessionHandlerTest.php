@@ -319,6 +319,47 @@ final class TableSessionHandlerTest extends TestCase
         );
     }
 
+    // ── #233 residual — writeFile disk merge ─────────────────────────────
+
+    public function testWriteFileMergesDiskOnlyKeysInsteadOfTruncating(): void
+    {
+        // A key that only survives on DISK (e.g. dropped by a Table-column
+        // truncation, or written by a path outside the shard-lock discipline)
+        // must survive the next write-through — the old blind ftruncate+write
+        // wiped it (#233 residual).
+        $sid = $this->sid('diskmerge');
+        self::$handler->read($sid);                       // base = []
+        self::$handler->write($sid, 'mine|s:1:"a";');
+        // Simulate disk-only state: append a key directly to the backing file.
+        $file = self::$saveDir . '/sess_' . $sid;
+        file_put_contents($file, 'diskonly|i:7;mine|s:1:"a";');
+
+        self::$handler->read($sid);                       // fresh base
+        self::$handler->write($sid, 'mine|s:1:"b";');     // our update
+
+        $disk = (string) file_get_contents($file);
+        $this->assertStringContainsString('diskonly|i:7;', $disk, 'disk-only key survives the write-through merge');
+        $this->assertStringContainsString('mine|s:1:"b";', $disk, 'our value wins on the conflicting key');
+        $this->assertStringNotContainsString('mine|s:1:"a";', $disk);
+    }
+
+    public function testWriteFileDoesNotResurrectDeletedKeys(): void
+    {
+        // A key present in our read snapshot but absent from the final state
+        // is a DELETION — the disk merge must not bring it back.
+        $sid = $this->sid('delkey');
+        self::$handler->read($sid);
+        self::$handler->write($sid, 'keep|i:1;gone|i:2;');
+
+        self::$handler->read($sid);                       // base = {keep, gone}
+        self::$handler->write($sid, 'keep|i:1;');         // user unset 'gone'
+
+        $file = self::$saveDir . '/sess_' . $sid;
+        $disk = (string) file_get_contents($file);
+        $this->assertStringContainsString('keep|i:1;', $disk);
+        $this->assertStringNotContainsString('gone|i:2;', $disk, 'deleted key must not resurrect from the disk merge (#233)');
+    }
+
     public function testReadFileMissingReturnsEmpty(): void
     {
         $m = new \ReflectionMethod(self::$handler, 'readFile');

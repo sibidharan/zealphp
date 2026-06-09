@@ -253,8 +253,11 @@ final class TableSessionHandler implements \SessionHandlerInterface
                 ]);
                 $this->context[Coroutine::getCid()][$sessionId] = ['base' => $local, 'version' => $newVersion];
 
-                // Write-through to file backing.
-                $this->writeFile($sessionId, $data);
+                // Write-through to file backing. Keys present in our read
+                // snapshot but absent from the final state are DELETIONS —
+                // writeFile's disk merge must not resurrect them (#233).
+                $deleted = array_values(array_map('strval', array_diff(array_keys($base), array_keys($local))));
+                $this->writeFile($sessionId, $data, $deleted);
                 return true;
             } finally {
                 $writeLock->set(0);
@@ -458,13 +461,38 @@ final class TableSessionHandler implements \SessionHandlerInterface
         return '';
     }
 
-    private function writeFile(string $sessionId, string $data): bool
+    /**
+     * @param list<string> $deletedKeys Top-level keys the writer deleted this
+     *        request (in its read snapshot, absent from the final state) —
+     *        excluded from the disk merge so they don't resurrect.
+     */
+    private function writeFile(string $sessionId, string $data, array $deletedKeys = []): bool
     {
         $file = self::$savePath . '/sess_' . basename((string) $sessionId);
-        $fp = @fopen($file, 'c');
+        $fp = @fopen($file, 'c+');
         if (!$fp) return false;
         try {
             if (!flock($fp, LOCK_EX)) return false;
+            // #233 residual — read-merge-write under the lock. The Table path
+            // is CAS+merge3-protected, but this file backing (spillover +
+            // persistence) was a blind truncate+write, so state that only
+            // survived on DISK (e.g. a value the Table column truncated, or a
+            // writer outside the shard-lock discipline) was lost wholesale.
+            // Merge the on-disk state first — top-level keys, ours winning on
+            // conflict, our explicit deletions honoured — the same documented
+            // shallow-merge contract as the manager's file path in
+            // zeal_session_write_close().
+            $disk = stream_get_contents($fp);
+            if (is_string($disk) && $disk !== '') {
+                $diskData = $this->decode($disk);
+                if ($diskData !== []) {
+                    $merged = array_merge($diskData, $this->decode($data));
+                    foreach ($deletedKeys as $dk) {
+                        unset($merged[$dk]);
+                    }
+                    $data = $this->encode($merged);
+                }
+            }
             ftruncate($fp, 0);
             rewind($fp);
             $written = fwrite($fp, $data);

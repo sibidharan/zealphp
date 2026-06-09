@@ -470,6 +470,28 @@ class App
     public static bool $coroutine_cwd_isolation = false;
 
     /**
+     * Per-coroutine LOCALE isolation — setlocale() is process-global (string
+     * casing, number/date formatting), so one request's locale change leaks
+     * into every concurrently-running peer mid-request. When ON (ext-zealphp
+     * 0.3.38+), the scheduler hooks save each coroutine's locale on yield
+     * (re-parking the worker baseline captured at enable time — a boot-time
+     * setlocale() before App::run() IS the baseline) and restore it on
+     * resume. Auto-enabled by `App::mode('coroutine-legacy')` (opt out with
+     * env `ZEALPHP_LOCALE_ISOLATION_DISABLE=1`); off by default elsewhere.
+     */
+    public static bool $coroutine_locale_isolation = false;
+
+    /**
+     * Per-coroutine UMASK isolation — umask() is process-global file-mode
+     * state; one request's umask(0077) changes every peer's file creation
+     * mid-request. Same stage shape as locale/CWD (ext-zealphp 0.3.38+;
+     * the umask read+re-park is a single syscall). Auto-enabled by
+     * `App::mode('coroutine-legacy')` (opt out with env
+     * `ZEALPHP_UMASK_ISOLATION_DISABLE=1`); off by default elsewhere.
+     */
+    public static bool $coroutine_umask_isolation = false;
+
+    /**
      * Set true at the top of `App::run()` so the four lifecycle setters
      * (`superglobals`, `processIsolation`, `enableCoroutine`, `hookAll`)
      * can refuse mutations made AFTER the server has booted.
@@ -2672,6 +2694,10 @@ class App
                 // model for the working directory. Opt out with
                 // ZEALPHP_CWD_ISOLATION_DISABLE=1.
                 self::coroutineCwdIsolation((string) \getenv('ZEALPHP_CWD_ISOLATION_DISABLE') !== '1');
+                // setlocale()/umask() are the same chdir-class process-global
+                // state — isolate them per coroutine too (ext-zealphp 0.3.38+).
+                self::coroutineLocaleIsolation((string) \getenv('ZEALPHP_LOCALE_ISOLATION_DISABLE') !== '1');
+                self::coroutineUmaskIsolation((string) \getenv('ZEALPHP_UMASK_ISOLATION_DISABLE') !== '1');
                 break;
             case self::MODE_MIXED:
                 self::superglobals(true);
@@ -3799,6 +3825,31 @@ class App
             self::$coroutine_cwd_isolation = $on;
         }
         return self::$coroutine_cwd_isolation;
+    }
+
+    /**
+     * Per-coroutine locale isolation — see the $coroutine_locale_isolation
+     * docblock. Asserted at App::run() boot wiring (pre-fork, so a boot-time
+     * setlocale() becomes the baseline); setting here records the intent.
+     */
+    public static function coroutineLocaleIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$coroutine_locale_isolation = $on;
+        }
+        return self::$coroutine_locale_isolation;
+    }
+
+    /**
+     * Per-coroutine umask isolation — see the $coroutine_umask_isolation
+     * docblock. Asserted at App::run() boot wiring (pre-fork baseline).
+     */
+    public static function coroutineUmaskIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$coroutine_umask_isolation = $on;
+        }
+        return self::$coroutine_umask_isolation;
     }
 
     /**
@@ -8391,6 +8442,36 @@ class App
                 "[warn] coroutineCwdIsolation(true) requires ext-zealphp "
                 . "0.3.35+ with zealphp_cwd_isolation — a request's chdir() "
                 . "will leak across concurrently-running coroutines (#323).",
+                'warn'
+            );
+        }
+
+        // setlocale()/umask() — the same chdir-class process-global state,
+        // asserted pre-fork for the same baseline reason: a boot-time
+        // setlocale()/umask() before run() becomes the worker baseline.
+        if (self::$coroutine_locale_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_locale_isolation')
+        ) {
+            (\zealphp_locale_isolation(...))((bool) true);
+        } elseif (self::$coroutine_locale_isolation) {
+            elog(
+                "[warn] coroutineLocaleIsolation(true) requires ext-zealphp "
+                . "0.3.38+ with zealphp_locale_isolation — a request's "
+                . "setlocale() will leak across concurrently-running coroutines.",
+                'warn'
+            );
+        }
+        if (self::$coroutine_umask_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_umask_isolation')
+        ) {
+            (\zealphp_umask_isolation(...))((bool) true);
+        } elseif (self::$coroutine_umask_isolation) {
+            elog(
+                "[warn] coroutineUmaskIsolation(true) requires ext-zealphp "
+                . "0.3.38+ with zealphp_umask_isolation — a request's umask() "
+                . "will leak across concurrently-running coroutines.",
                 'warn'
             );
         }
