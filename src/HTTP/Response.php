@@ -71,8 +71,6 @@ class Response
      */
     public function &__get($name)
     {
-        \ZealPHP\elog($name);
-
         if (property_exists($this->parent, $name)) {
             return $this->parent->$name;
         } else {
@@ -91,7 +89,6 @@ class Response
      */
     public function __set($name, $value)
     {
-        \ZealPHP\elog($name);
         if($name == 'parent'){
             assert($value instanceof \OpenSwoole\Http\Response);
             $this->parent = $value;
