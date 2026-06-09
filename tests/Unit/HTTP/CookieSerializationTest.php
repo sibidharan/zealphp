@@ -119,6 +119,64 @@ class CookieSerializationTest extends TestCase
         );
     }
 
+    public function testTwoArgCallEmitsBareCookie(): void
+    {
+        // Pins the parameter defaults (expire=0, path='', domain='', flags off):
+        // a bare name=value call adds NO attributes at all. Kills the ±1
+        // default-expire mutants (expire=1/-1 would emit expires + Max-Age).
+        $this->assertSame('sid=v', ZResponse::serializeCookie('sid', 'v'));
+    }
+
+    // ---- #319 SameSite=None warning ----------------------------------------
+
+    /**
+     * Capture everything elog() appends to the debug log while $fn runs
+     * (same technique as ResponseExtraTest::captureDebugLog — the unit suite
+     * has no scheduler, so log_write falls back to a synchronous file append).
+     */
+    private function captureDebugLog(callable $fn): string
+    {
+        $path = \ZealPHP\log_file_for('debug');
+        if ($path === null || str_contains($path, '://')) {
+            $this->markTestSkipped('debug log not file-backed in this environment');
+        }
+        $dir = dirname($path);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        clearstatcache(true, $path);
+        $before = is_file($path) ? (int) filesize($path) : 0;
+        $fn();
+        clearstatcache(true, $path);
+        $contents = is_file($path) ? (string) file_get_contents($path) : '';
+        return substr($contents, $before);
+    }
+
+    public function testSameSiteNoneWithoutSecureLogsWarning(): void
+    {
+        $log = $this->captureDebugLog(static function (): void {
+            ZResponse::serializeCookie('warnck', 'v', 0, '/', '', false, false, 'None');
+        });
+        $this->assertStringContainsString('warnck', $log, '#319 warning names the cookie');
+        $this->assertStringContainsString('SameSite=None without Secure', $log);
+    }
+
+    public function testSameSiteNoneWithSecureDoesNotWarn(): void
+    {
+        $log = $this->captureDebugLog(static function (): void {
+            ZResponse::serializeCookie('okck', 'v', 0, '/', '', true, false, 'None');
+        });
+        $this->assertStringNotContainsString('SameSite=None without Secure', $log);
+    }
+
+    public function testSameSiteLaxWithoutSecureDoesNotWarn(): void
+    {
+        $log = $this->captureDebugLog(static function (): void {
+            ZResponse::serializeCookie('laxck', 'v', 0, '/', '', false, false, 'Lax');
+        });
+        $this->assertStringNotContainsString('SameSite=None without Secure', $log);
+    }
+
     // ---- flush() — emission path -------------------------------------------
 
     public function testFlushEmitsSerializedSetCookieHeaderLines(): void
