@@ -454,6 +454,22 @@ class App
     public static bool $coroutine_statics_isolation = false;
 
     /**
+     * Per-coroutine WORKING-DIRECTORY isolation (#323). `chdir()` is a
+     * process-level syscall, so under coroutine concurrency one request's
+     * `chdir()` (or the framework's own `executeFile()` chdir-to-script-dir)
+     * changes the CWD of every concurrently-running peer — racy relative
+     * includes / `fopen` across the whole worker. When ON (and ext-zealphp
+     * 0.3.35+ is loaded), the scheduler hooks save each coroutine's cwd on
+     * yield (re-parking the worker baseline so peers start clean) and restore
+     * it on resume — `chdir()` becomes per-coroutine, like PHP-FPM's
+     * per-process CWD. Auto-enabled by `App::mode('coroutine-legacy')`
+     * (opt out with env `ZEALPHP_CWD_ISOLATION_DISABLE=1`); off by default
+     * elsewhere (coroutines that never chdir cost one getcwd+strcmp per yield
+     * when on, zero when off).
+     */
+    public static bool $coroutine_cwd_isolation = false;
+
+    /**
      * Set true at the top of `App::run()` so the four lifecycle setters
      * (`superglobals`, `processIsolation`, `enableCoroutine`, `hookAll`)
      * can refuse mutations made AFTER the server has booted.
@@ -2623,6 +2639,12 @@ class App
                 // with ZEALPHP_FN_STATICS_DISABLE=1 for raw throughput on apps
                 // that don't rely on per-request function statics.
                 self::coroutineStaticsIsolation((string) \getenv('ZEALPHP_FN_STATICS_DISABLE') !== '1');
+                // #323: isolate the process CWD per coroutine, so a request's
+                // chdir() (and executeFile()'s own chdir-to-script-dir) can't
+                // leak into concurrently-running peers — the PHP-FPM mental
+                // model for the working directory. Opt out with
+                // ZEALPHP_CWD_ISOLATION_DISABLE=1.
+                self::coroutineCwdIsolation((string) \getenv('ZEALPHP_CWD_ISOLATION_DISABLE') !== '1');
                 break;
             case self::MODE_MIXED:
                 self::superglobals(true);
@@ -3735,6 +3757,21 @@ class App
             self::$coroutine_statics_isolation = $on;
         }
         return self::$coroutine_statics_isolation;
+    }
+
+    /**
+     * Per-coroutine CWD isolation (#323) — see the $coroutine_cwd_isolation
+     * docblock. The ext C-level flag is asserted at App::run() boot wiring
+     * (alongside the other isolation knobs) so the scheduler hooks are
+     * guaranteed installed and the worker baseline is captured pre-fork;
+     * setting it here only records the intent.
+     */
+    public static function coroutineCwdIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$coroutine_cwd_isolation = $on;
+        }
+        return self::$coroutine_cwd_isolation;
     }
 
     /**
@@ -6062,8 +6099,13 @@ class App
         // (/app), so those relative requires fail — the dominant 50-app-sweep blocker
         // in coroutine/sync modes (mybb, cacti, vanilla, …). chdir to the script's
         // directory for the duration of the include, restore immediately after.
-        // chdir is process-global; per-coroutine CWD stability across yields is
-        // provided by ext-zealphp's per-coroutine cwd snapshot (Stage 8).
+        // chdir is process-global (#323): if the include YIELDS (HOOK_ALL I/O),
+        // a peer coroutine would otherwise run with this script's CWD. Per-
+        // coroutine CWD stability across yields is provided by ext-zealphp
+        // 0.3.35+'s zealphp_cwd_isolation() stage — enabled via
+        // App::coroutineCwdIsolation() (auto-on in coroutine-legacy). Without
+        // the ext, sync modes are safe (no concurrency) but plain coroutine
+        // mode keeps the documented race for yielding includes.
         $prevCwd = \getcwd();
         $scriptDir = \dirname($absPath);
         $didChdir = ($scriptDir !== '' && $scriptDir !== '.') ? @\chdir($scriptDir) : false;
@@ -8302,6 +8344,26 @@ class App
                 "[warn] coroutineStaticsIsolation(true) requires ext-zealphp "
                 . "0.3.9+ with zealphp_coroutine_statics — function-local "
                 . "static \$x will NOT be isolated per coroutine.",
+                'warn'
+            );
+        }
+
+        // #323: per-coroutine CWD isolation. Asserted here (master, pre-fork)
+        // so the ext captures the worker BASELINE cwd while the process still
+        // sits at the app root — workers inherit both the installed scheduler
+        // hooks and the baseline via fork. After this, a request's chdir()
+        // (incl. executeFile()'s chdir-to-script-dir) is saved/restored per
+        // coroutine instead of leaking process-wide.
+        if (self::$coroutine_cwd_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_cwd_isolation')
+        ) {
+            (\zealphp_cwd_isolation(...))((bool) true);
+        } elseif (self::$coroutine_cwd_isolation) {
+            elog(
+                "[warn] coroutineCwdIsolation(true) requires ext-zealphp "
+                . "0.3.35+ with zealphp_cwd_isolation — a request's chdir() "
+                . "will leak across concurrently-running coroutines (#323).",
                 'warn'
             );
         }

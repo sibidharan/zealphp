@@ -184,6 +184,7 @@ The knobs `coroutine-legacy` auto-enables (each is also a standalone fluent sett
 | Stage 5 function statics | `App::coroutineStaticsIsolation(bool)` | function-local `static $x`. **Default-ON in coroutine-legacy** via a `ZEND_BIND_STATIC` touched-set registry — per-yield cost scales with static-*using* functions, not total functions (~µs/yield, decoupled from function count). Opt out: `ZEALPHP_FN_STATICS_DISABLE=1`. Closures/eval excluded (per-instance op_array lifetime) |
 | Stage 7 require_once | `App::includeIsolation(bool)` | per-request `require_once`/`include_once` re-execution (opcode hook on the process-wide `EG(included_files)` cache) |
 | `define()` *(standalone — NOT auto-enabled by the `coroutine-legacy` preset; opt in explicitly)* | `App::defineIsolation(bool)` | per-request `define()` constants, removed at request end |
+| CWD (#323) | `App::coroutineCwdIsolation(bool)` | the process working directory — `chdir()` (incl. `executeFile()`'s chdir-to-script-dir) is saved per coroutine on yield (worker baseline re-parked so peers + new coroutines start clean) and restored on resume. **Default-ON in coroutine-legacy** (requires ext-zealphp 0.3.35+'s `zealphp_cwd_isolation`); cost ~one `getcwd`+`strcmp` per yield when on, zero when off. Opt out: `ZEALPHP_CWD_ISOLATION_DISABLE=1` |
 
 **Honest boundary — what this stack does NOT isolate** (process-level state / OpenSwoole limits; the PHP-FPM mental model holds, not "any binary blob of PHP runs unchanged"):
 

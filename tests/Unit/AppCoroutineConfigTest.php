@@ -231,6 +231,31 @@ final class AppCoroutineConfigTest extends TestCase
         $this->assertTrue(App::$coroutine_statics_isolation);
     }
 
+    // ── coroutineCwdIsolation() (#323) ───────────────────────────────────
+
+    public function testCoroutineCwdIsolationDefaultIsFalse(): void
+    {
+        App::$coroutine_cwd_isolation = false;
+        $this->assertFalse(App::coroutineCwdIsolation());
+    }
+
+    public function testCoroutineCwdIsolationRoundTrip(): void
+    {
+        $this->assertTrue(App::coroutineCwdIsolation(true));
+        $this->assertTrue(App::$coroutine_cwd_isolation);
+        $this->assertTrue(App::coroutineCwdIsolation());
+        $this->assertFalse(App::coroutineCwdIsolation(false));
+        $this->assertFalse(App::$coroutine_cwd_isolation);
+    }
+
+    public function testCoroutineCwdIsolationNoArgIsGetterOnly(): void
+    {
+        App::$coroutine_cwd_isolation = true;
+        $this->assertTrue(App::coroutineCwdIsolation());
+        $this->assertTrue(App::$coroutine_cwd_isolation);
+        App::$coroutine_cwd_isolation = false;
+    }
+
     // ── functionIsolation() ──────────────────────────────────────────────
 
     public function testFunctionIsolationDefaultIsFalse(): void
@@ -290,6 +315,9 @@ final class AppCoroutineConfigTest extends TestCase
         // Stage 5 statics default ON unless ZEALPHP_FN_STATICS_DISABLE=1.
         $expectStatics = ((string) getenv('ZEALPHP_FN_STATICS_DISABLE')) !== '1';
         $this->assertSame($expectStatics, App::coroutineStaticsIsolation(), 'function statics follow env opt-out');
+        // #323 CWD isolation default ON unless ZEALPHP_CWD_ISOLATION_DISABLE=1.
+        $expectCwd = ((string) getenv('ZEALPHP_CWD_ISOLATION_DISABLE')) !== '1';
+        $this->assertSame($expectCwd, App::coroutineCwdIsolation(), 'cwd isolation follows env opt-out (#323)');
     }
 
     public function testModeCoroutineDoesNotEnableLegacyBundle(): void
