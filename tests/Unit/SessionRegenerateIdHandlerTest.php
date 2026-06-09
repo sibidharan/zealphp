@@ -194,4 +194,39 @@ class SessionRegenerateIdHandlerTest extends TestCase
         // @phpstan-ignore-next-line — fake response exposes ->cookies
         $this->assertEmpty($response->cookies, 'no Set-Cookie when sessionLifecycle is off');
     }
+
+    /**
+     * ext-zealphp#2 root cause — regeneration must keep
+     * `$g->session_params['session_id']` in sync. `zeal_session_write_close()`
+     * deliberately reads the sid from session_params (NOT zeal_session_id(),
+     * which suffers auto-global caching in Mode 4), so a desync makes EVERY
+     * post-regenerate session write land in the OLD (deleted) id's store:
+     * login flows lose their session, and the strict-mode rotation cascades
+     * (next request loads empty → rotates again → writes lost forever —
+     * the 1→2→2→2 / rotate-every-request signature on the rig).
+     */
+    public function testRegenerateSyncsSessionParamsSessionId(): void
+    {
+        App::superglobals(true);
+        App::sessionLifecycle(true);
+        $handler = $this->makeHandler();
+        $response = $this->makeResponse();
+        $g = $this->primeContext($handler, $response);
+        // write_close's canonical sid slot points at the OLD id, as
+        // zeal_session_start() would have left it.
+        $params = $g->session_params;
+        $params['session_id'] = $this->oldId;
+        $g->session_params = $params;
+        $GLOBALS['_SESSION'] = $this->authData;
+
+        $this->assertTrue(zeal_session_regenerate_id(true));
+
+        $newId = $g->cookie['PHPSESSID'];
+        $this->assertNotSame($this->oldId, $newId);
+        $this->assertSame(
+            $newId,
+            $g->session_params['session_id'] ?? null,
+            'write_close reads session_params[session_id] — regenerate must sync it or every later write lands in the deleted old id (ext-zealphp#2)'
+        );
+    }
 }

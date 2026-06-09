@@ -283,10 +283,12 @@ class SessionManager
             // the framework's uopz overrides; session_regenerate_id(true) routes
             // through zeal_session_regenerate_id (deletes old + emits Set-Cookie)
             // and session_id() returns the new id for the cookie emit below.
+            $storeEntryExists = $g->session_params['session_existed'] ?? null;
             if (zeal_session_strict_should_regenerate(
                 \ZealPHP\App::$session_strict_mode,
                 $clientSupplied,
-                isset($_SESSION) ? $_SESSION : []
+                isset($_SESSION) ? $_SESSION : [],
+                is_bool($storeEntryExists) ? $storeEntryExists : null
             )) {
                 session_regenerate_id(true);
                 $newId = session_id();

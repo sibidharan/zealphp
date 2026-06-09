@@ -203,20 +203,32 @@ class CoSessionManager
                 $g->_session_started = true;
 
                 // #244 session.use_strict_mode: this branch is reached ONLY for a
-                // client-supplied id, so if it loaded an EMPTY session (stale /
-                // foreign / never-issued) it must not be honoured — mint a fresh
-                // server-generated id so a fixated id can't become an authed
-                // session. The store was just read by zeal_session_start() into
-                // $g->session, so [] here means "id not recognised".
+                // client-supplied id, so an id with NO BACKING STORE ENTRY
+                // (stale / foreign / never-issued) must not be honoured — mint a
+                // fresh server-generated id so a fixated id can't become an
+                // authed session. zeal_session_start() just read the store and
+                // recorded entry existence in session_params['session_existed']
+                // (ext-zealphp#2: an issued-but-empty session is a KNOWN id and
+                // must NOT rotate — the old data-emptiness heuristic rotated it
+                // on every data-less request).
+                $coStoreExists = $g->session_params['session_existed'] ?? null;
                 if (zeal_session_strict_should_regenerate(
                     \ZealPHP\App::$session_strict_mode,
                     true,
-                    $g->session
+                    $g->session,
+                    is_bool($coStoreExists) ? $coStoreExists : null
                 )) {
                     $freshId = session_create_id();
                     if (is_string($freshId)) {
                         $sessionId = $freshId;
                         zeal_session_id($sessionId);
+                        // ext-zealphp#2 — keep write_close's canonical sid slot
+                        // in sync, or every write this request makes lands in
+                        // the rejected OLD id's store (same desync class as the
+                        // zeal_session_regenerate_id() fix).
+                        $params = $g->session_params;
+                        $params['session_id'] = $sessionId;
+                        $g->session_params = $params;
                     }
                 }
 
