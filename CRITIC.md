@@ -223,7 +223,7 @@ The "deliberate trade-off" framing was partly true — the ~57 design-tax sites 
 - **Raised by:** pastebin reviewer ("CORS middleware defaults to origin *, which... is also a security risk")
 - **Assessment:** Real foot-gun. `*` is the lowest-friction default but unsafe for any API serving credentials or user-scoped data. v0.2.x policy is no breaking changes, so a hard "require origins" can't ship — but a silent wildcard default is also wrong.
 - **Shipped:** `CorsMiddleware` constructor now accepts `?array $origins = null` and resolves in order: (1) explicit arg, (2) `ZEALPHP_CORS_ORIGINS` env var (comma-separated), (3) `['*']` with a one-time `elog()` warning. Backward-compatible with existing `new CorsMiddleware()` calls but the warning surfaces the risk in production logs.
-- **Scaffold:** `composer create-project sibidharan/zealphp-project` now ships an `app.php` that demonstrates explicit origins with a strongly-worded comment block.
+- **Scaffold:** `composer create-project zealphp/project` now ships an `app.php` that demonstrates explicit origins with a strongly-worded comment block.
 - **Status:** ✅ Wildcard still works (backward compat), but is visible and overridable without code changes
 
 #### `/exittest` route called `exit(1)` — worker-killer

@@ -8,7 +8,7 @@ ZealPHP wraps OpenSwoole’s event-driven HTTP server with a framework that feel
 
 `App::init()` performs one-time initialization:
 
-- Requires either **ext-zealphp** (recommended) or **uopz** to be loaded — both can intercept built-in functions such as `header()` or `setcookie()`. If neither is present, the constructor throws immediately with a message recommending `pie install sibidharan/ext-zealphp`.
+- Requires either **ext-zealphp** (recommended) or **uopz** to be loaded — both can intercept built-in functions such as `header()` or `setcookie()`. If neither is present, the constructor throws immediately with a message recommending `pie install zealphp/ext`.
 - Records the current working directory and entry script so the framework can build absolute paths later.
 - Prepares the PSR-15 middleware stack (`OpenSwoole\Core\Psr\Middleware\StackHandler`) with `ResponseMiddleware` as the terminal handler.
 - Configures coroutine hooks if superglobals are disabled (see below).

@@ -1421,7 +1421,7 @@ class App
         if (!extension_loaded('zealphp') && !extension_loaded('uopz')) {
             throw new \Exception(
                 "ext-zealphp or uopz is required for ZealPHP. "
-                . "Install: 'pie install sibidharan/ext-zealphp' (recommended) "
+                . "Install: 'pie install zealphp/ext' (recommended) "
                 . "or build from source: 'cd ext/zealphp && phpize && ./configure && make && sudo make install'. "
                 . "Then add extension=zealphp.so to php.ini."
             );
@@ -3884,7 +3884,7 @@ class App
             throw new \RuntimeException(
                 'ZealPHP lifecycle: App::superglobals(true) + App::enableCoroutine(true) requires '
                 . 'ext-zealphp for per-coroutine superglobal isolation. Install: '
-                . "'pie install sibidharan/ext-zealphp'. Without it, concurrent coroutines would "
+                . "'pie install zealphp/ext'. Without it, concurrent coroutines would "
                 . 'race $_GET/$_POST/$_SESSION (process-wide PHP arrays). '
                 . 'Alternative: use App::superglobals(false) for coroutine concurrency without ext-zealphp.'
             );
@@ -3893,7 +3893,7 @@ class App
             throw new \RuntimeException(
                 'ZealPHP lifecycle: App::superglobals(true) + App::hookAll(non-zero) requires '
                 . 'ext-zealphp for per-coroutine superglobal isolation. Install: '
-                . "'pie install sibidharan/ext-zealphp'. Without it, hooked I/O can yield mid-request, "
+                . "'pie install zealphp/ext'. Without it, hooked I/O can yield mid-request, "
                 . 'exposing process-wide superglobal mutations to other coroutines.'
             );
         }

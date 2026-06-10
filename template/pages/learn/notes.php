@@ -158,7 +158,7 @@ if (!$user) return;
 
     <h3>The data layer (already in vendor)</h3>
     <p>The <code>ZealPHP\Learn\Notes</code> class ships with the framework &mdash; you don&rsquo;t need to create it. Every method takes a <code>$userId</code> parameter. The user can never read or modify another user&rsquo;s notes:</p>
-    <pre><code class="language-php">// vendor/sibidharan/zealphp/src/Learn/Notes.php — already installed
+    <pre><code class="language-php">// vendor/zealphp/zealphp/src/Learn/Notes.php — already installed
 class Notes
 {
     public static function create(\PDO $db, int $userId, string $title, string $body): ?int

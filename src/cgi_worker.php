@@ -31,7 +31,7 @@ if ((string) getenv('ZEALPHP_CGI_DEBUG_DEPRECATIONS') !== '1') {
 // the Apache shims, and global helpers are undefined inside proc-mode CGI
 // includes — an inconsistency between the two CGI backends (issue #17).
 // Two layouts: this file as the repo root (vendor/ is a sibling of src/),
-// or installed as a dependency (vendor/sibidharan/zealphp/src/ → the real
+// or installed as a dependency (vendor/zealphp/zealphp/src/ → the real
 // autoloader is three levels up). First existing wins; missing is non-fatal
 // (unmodified WordPress/Drupal ships its own bootstrap and needs neither).
 // Default OFF — restores v0.2.0 zero-overhead subprocess start (~15 ms vs

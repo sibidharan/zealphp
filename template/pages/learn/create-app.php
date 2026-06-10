@@ -34,11 +34,11 @@
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'Already have PHP 8.3+?',
-      'body'    => 'You can skip the install script and just install the extensions: <code>pie install openswoole/openswoole</code> and <code>pie install sibidharan/ext-zealphp</code>. Verify with <code>php -m | grep -E "openswoole|zealphp"</code>.',
+      'body'    => 'You can skip the install script and just install the extensions: <code>pie install openswoole/openswoole</code> and <code>pie install zealphp/ext</code>. Verify with <code>php -m | grep -E "openswoole|zealphp"</code>.',
     ]); ?>
 
     <h2>Step 2: Scaffold a project</h2>
-    <pre><code class="language-bash">composer create-project sibidharan/zealphp-project my-app
+    <pre><code class="language-bash">composer create-project zealphp/project my-app
 cd my-app</code></pre>
     <p>This creates a starter project with the right folder structure, a minimal <a href="https://github.com/sibidharan/zealphp/blob/master/app.php" target="_blank"><code>app.php</code></a>,
       and all dependencies installed automatically &mdash; you can run immediately.</p>

@@ -51,7 +51,7 @@ zealphp/
 
 ## Extensions and Testing
 
-- **`ext/`** – C source for **ext-zealphp** (`ext/zealphp/`), the optional PHP extension that provides per-coroutine isolation of superglobals, `$GLOBALS`, function statics, `require_once` re-execution, and per-request class/function-static resets. Built with `phpize && ./configure && make`. Required for `App::mode(App::MODE_COROUTINE_LEGACY)`. Install via `pie install sibidharan/ext-zealphp` or `sudo bash setup.sh`.
+- **`ext/`** – C source for **ext-zealphp** (`ext/zealphp/`), the optional PHP extension that provides per-coroutine isolation of superglobals, `$GLOBALS`, function statics, `require_once` re-execution, and per-request class/function-static resets. Built with `phpize && ./configure && make`. Required for `App::mode(App::MODE_COROUTINE_LEGACY)`. Install via `pie install zealphp/ext` or `sudo bash setup.sh`.
 - **`tests/`** – PHPUnit 11 test suite. `tests/Unit/` runs without a server; `tests/Integration/` requires `php app.php` on `:8080` (or `ZEALPHP_TEST_PORT`). Run with `./vendor/bin/phpunit --testdox`. See [CLAUDE.md](../CLAUDE.md) for the full testing matrix.
 
 ## Scripts and Deployment

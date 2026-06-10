@@ -31,7 +31,7 @@
         <li><strong class="tradeoffs-strong-light">What it buys:</strong> unmodified PHP-FPM-era code works. Legacy
           libraries that call <code>session_start()</code> just work; you don't rewrite them.</li>
         <li><strong class="tradeoffs-strong-light">What it costs:</strong> requires the <code>ext-zealphp</code>
-          extension at install time (<code>pie install sibidharan/ext-zealphp</code> or build from source).
+          extension at install time (<code>pie install zealphp/ext</code> or build from source).
           PHPStan can't see through the redirection &mdash; it thinks <code>header()</code> writes to a global table,
           when at runtime it writes to <code>$response->headersList</code>.</li>
         <li><strong class="tradeoffs-strong-light">Design:</strong> allowlist-only (53 functions), no class manipulation,

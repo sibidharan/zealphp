@@ -749,7 +749,7 @@ class PhpInfoSectionsTest extends TestCase
         // l.166 Coalesce swap: `getPrettyVersion(...) ?? 'dev'` -> `'dev' ?? ...`
         // would emit the literal 'dev' instead of the real pretty version.
         try {
-            $pretty = \Composer\InstalledVersions::getPrettyVersion('sibidharan/zealphp') ?? 'dev';
+            $pretty = \Composer\InstalledVersions::getPrettyVersion('zealphp/zealphp') ?? 'dev';
         } catch (\Throwable $e) {
             $pretty = 'unknown';
         }

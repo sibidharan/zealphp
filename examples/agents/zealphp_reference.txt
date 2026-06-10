@@ -26,7 +26,7 @@ sudo apt install gcc php-dev \
 sudo pecl install openswoole-22.1.5     # or a newer 22.1.x / 26.2+ release
 
 ## Getting Started — ext-zealphp (ZealPHP's own extension) — via PIE or from source:
-pie install sibidharan/ext-zealphp
+pie install zealphp/ext
 ## Getting Started — Or: git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
 ## Getting Started — cd /tmp/ext-zealphp && phpize && ./configure && make && sudo make install
 ```
@@ -174,7 +174,7 @@ zealphp/
 
 ## Directory Structure — Extensions and Testing
 
-- **`ext/`** – C source for **ext-zealphp** (`ext/zealphp/`), the optional PHP extension that provides per-coroutine isolation of superglobals, `$GLOBALS`, function statics, `require_once` re-execution, and per-request class/function-static resets. Built with `phpize && ./configure && make`. Required for `App::mode(App::MODE_COROUTINE_LEGACY)`. Install via `pie install sibidharan/ext-zealphp` or `sudo bash setup.sh`.
+- **`ext/`** – C source for **ext-zealphp** (`ext/zealphp/`), the optional PHP extension that provides per-coroutine isolation of superglobals, `$GLOBALS`, function statics, `require_once` re-execution, and per-request class/function-static resets. Built with `phpize && ./configure && make`. Required for `App::mode(App::MODE_COROUTINE_LEGACY)`. Install via `pie install zealphp/ext` or `sudo bash setup.sh`.
 - **`tests/`** – PHPUnit 11 test suite. `tests/Unit/` runs without a server; `tests/Integration/` requires `php app.php` on `:8080` (or `ZEALPHP_TEST_PORT`). Run with `./vendor/bin/phpunit --testdox`. See [CLAUDE.md](../CLAUDE.md) for the full testing matrix.
 
 ## Directory Structure — Scripts and Deployment
@@ -4166,7 +4166,7 @@ ZealPHP wraps OpenSwoole’s event-driven HTTP server with a framework that feel
 
 `App::init()` performs one-time initialization:
 
-- Requires either **ext-zealphp** (recommended) or **uopz** to be loaded — both can intercept built-in functions such as `header()` or `setcookie()`. If neither is present, the constructor throws immediately with a message recommending `pie install sibidharan/ext-zealphp`.
+- Requires either **ext-zealphp** (recommended) or **uopz** to be loaded — both can intercept built-in functions such as `header()` or `setcookie()`. If neither is present, the constructor throws immediately with a message recommending `pie install zealphp/ext`.
 - Records the current working directory and entry script so the framework can build absolute paths later.
 - Prepares the PSR-15 middleware stack (`OpenSwoole\Core\Psr\Middleware\StackHandler`) with `ResponseMiddleware` as the terminal handler.
 - Configures coroutine hooks if superglobals are disabled (see below).
@@ -7485,7 +7485,7 @@ Treat Markdown files in `docs/` as canonical documentation. When proposing chang
 
 ## Standards and Roadmap — Release Management
 
-- Tag library (`sibidharan/zealphp`) and starter project (`sibidharan/zealphp-project`) in lockstep.
+- Tag library (`zealphp/zealphp`) and starter project (`zealphp/project`) in lockstep.
 - Ensure `composer install` passes without warnings *before* publishing a release.
 - After tagging, trigger Packagist webhooks so the new version is indexed promptly.
 

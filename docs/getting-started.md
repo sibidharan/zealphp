@@ -21,7 +21,7 @@ sudo apt install gcc php-dev \
 sudo pecl install openswoole-22.1.5     # or a newer 22.1.x / 26.2+ release
 
 # ext-zealphp (ZealPHP's own extension) — via PIE or from source:
-pie install sibidharan/ext-zealphp
+pie install zealphp/ext
 # Or: git clone --depth 1 https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
 #     cd /tmp/ext-zealphp && phpize && ./configure && make && sudo make install
 ```

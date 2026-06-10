@@ -113,7 +113,7 @@ BASH
       <br>
       <code class="gs-inline-code-block">curl -fsSL https://php.zeal.ninja/install.sh -o install.sh &amp;&amp; less install.sh &amp;&amp; sudo bash install.sh</code>
       Or fetch from GitHub directly to pin a specific commit:
-      <code class="gs-inline-code-block">curl -fsSL https://raw.githubusercontent.com/sibidharan/zealphp/master/setup.sh | sudo bash</code>
+      <code class="gs-inline-code-block">curl -fsSL https://raw.githubusercontent.com/zealphp/zealphp/master/setup.sh | sudo bash</code>
     </div>
 
     <p class="gs-mt-15">If you'd rather clone first (e.g. you want to send a PR):</p>
@@ -178,7 +178,7 @@ BASH
           'lang' => 'bash',
           'code' => <<<'BASH'
 composer create-project \
-  sibidharan/zealphp-project:^0.4.5 \
+  zealphp/project:^0.4.6 \
   my-app
 cd my-app && php app.php
 BASH
@@ -387,7 +387,7 @@ php -m | grep -E 'openswoole|zealphp'
 curl -s http://localhost:8080/ | head -5
 
 # Composer dependencies?
-composer show sibidharan/zealphp
+composer show zealphp/zealphp
 BASH
     ]); ?>
 

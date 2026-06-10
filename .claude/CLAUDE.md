@@ -157,7 +157,7 @@ Historically `App::superglobals()` bundled four decisions into one flag. As of v
 
 **Combination guard** — `App::run()` calls `App::validateLifecycleCombination()` and **throws `RuntimeException` at boot** for genuinely unsafe shapes. The rule changed once ext-zealphp landed: the superglobals-under-coroutines combos are **conditionally safe** — they throw only when the extension is absent:
 
-- `superglobals(true) + enableCoroutine(true)` **and** `superglobals(true) + hookAll(non-zero)` — **SAFE when ext-zealphp is loaded.** The extension's `on_yield`/`on_resume` hooks snapshot/restore `$_GET`/`$_POST`/`$_SESSION` (and the rest of the request-state stack) per coroutine, so concurrent coroutines don't race the process-wide arrays. **This is exactly `coroutine-legacy` mode.** Without ext-zealphp both still throw — the race they'd cause is how cross-request state-leak bugs ship to production (install: `pie install sibidharan/ext-zealphp`).
+- `superglobals(true) + enableCoroutine(true)` **and** `superglobals(true) + hookAll(non-zero)` — **SAFE when ext-zealphp is loaded.** The extension's `on_yield`/`on_resume` hooks snapshot/restore `$_GET`/`$_POST`/`$_SESSION` (and the rest of the request-state stack) per coroutine, so concurrent coroutines don't race the process-wide arrays. **This is exactly `coroutine-legacy` mode.** Without ext-zealphp both still throw — the race they'd cause is how cross-request state-leak bugs ship to production (install: `pie install zealphp/ext`).
 - `superglobals(false) + enableCoroutine(false)` — always throws: coroutine mode's `CoSessionManager` needs the scheduler for per-request `RequestContext` isolation.
 
 Apps that need a refused combo for security-audit / debugging can fork and remove the throw at `App::validateLifecycleCombination()`.
@@ -887,7 +887,7 @@ ZealPHP has two companion repos that must stay aligned with framework releases:
 
 | Repo | Composer name | Role |
 |---|---|---|
-| **Scaffold** | `sibidharan/zealphp-project` | Template for `composer create-project`. `vendor/` is gitignored as of v0.2.17 — `composer create-project` runs `composer install` automatically, so no need to ship vendor in the git tree. |
+| **Scaffold** | `zealphp/project` | Template for `composer create-project`. `vendor/` is gitignored as of v0.2.17 — `composer create-project` runs `composer install` automatically, so no need to ship vendor in the git tree. |
 | **WordPress showcase** | `sibidharan/zealphp-wordpress` | Demonstrates unmodified WordPress on ZealPHP |
 
 **Path discovery — never hardcode `~/zealphp-project`.** Different devs lay out their workspaces differently. Find each companion in this order, stop at the first hit:
@@ -921,14 +921,14 @@ Every release should exercise the full sample surface to catch regressions that 
 
 | Repo | Composer name | What to verify each release |
 |---|---|---|
-| **Scaffold** | `sibidharan/zealphp-project` | `composer create-project sibidharan/zealphp-project:^X.Y.Z temp-test && cd temp-test && php app.php` boots cleanly + serves the scaffold welcome page on the new tag |
+| **Scaffold** | `zealphp/project` | `composer create-project zealphp/project:^X.Y.Z temp-test && cd temp-test && php app.php` boots cleanly + serves the scaffold welcome page on the new tag |
 | **WordPress showcase** | `sibidharan/zealphp-wordpress` | Unmodified WP loads + serves homepage + admin login works under `superglobals(true) + processIsolation(true)` (or via the new `cgi_mode = 'fcgi'` path once wired) |
 | **Symfony bridge** | `sibidharan/zealphp-symfony` | A Symfony skeleton app boots + routes + sessions work via `superglobals(true) + processIsolation(false) + sessionLifecycle(false)` (Mixed-mode lifecycle) |
 
 **Release verification checklist** (in addition to the framework's own Pre-commit gates and the CI matrix):
 
 1. ✅ `php app.php` boots + every page in `template/pages/` renders without console errors (the OSS site is the smoke test).
-2. ✅ `composer create-project sibidharan/zealphp-project:^X.Y.Z temp-test` installs cleanly with the new version.
+2. ✅ `composer create-project zealphp/project:^X.Y.Z temp-test` installs cleanly with the new version.
 3. ✅ Each `examples/*` scaffold's README boot command still works (PHP/OpenSwoole/uopz version-bump regression check).
 4. ✅ WordPress showcase loads in both default and (if wired) `cgiMode('fcgi')` configurations.
 5. ✅ Symfony bridge boots a minimal Symfony app and serves a route.
@@ -1004,7 +1004,7 @@ git push origin vX.Y.Z && git push origin1 vX.Y.Z
 > and the master-only jobs (`Scorecard analysis`, `CycloneDX SBOM`) are NOT
 > required. To change protection: `gh api repos/sibidharan/zealphp/branches/master/protection`.
 
-Verify Packagist picked up the tag: `curl -sS https://repo.packagist.org/p2/sibidharan/zealphp.json | python3 -c "import json,sys; print(json.load(sys.stdin)['packages']['sibidharan/zealphp'][0]['version'])"` should return `vX.Y.Z`.
+Verify Packagist picked up the tag: `curl -sS https://repo.packagist.org/p2/zealphp/zealphp.json | python3 -c "import json,sys; print(json.load(sys.stdin)['packages']['zealphp/zealphp'][0]['version'])"` should return `vX.Y.Z`.
 
 ### Scaffold sync (after main tag is live on Packagist)
 
@@ -1016,21 +1016,21 @@ cp <main-repo>/examples/agents/zealphp_reference.txt <scaffold-path>/llms.txt
 # sanity: the new docs must be in it, e.g. `grep -c renderHtmx <scaffold-path>/llms.txt` > 0
 
 cd <scaffold-path>                            # discovered via the env-var/sibling chain above
-# Edit composer.json: "sibidharan/zealphp": "^X.Y.Z" (bump floor, not just caret)
-composer update sibidharan/zealphp --with-dependencies
+# Edit composer.json: "zealphp/zealphp": "^X.Y.Z" (bump floor, not just caret)
+composer update zealphp/zealphp --with-dependencies
 git add composer.json composer.lock llms.txt
-git commit -m "chore: bump sibidharan/zealphp floor to ^X.Y.Z + refresh llms.txt"
-git tag -a vX.Y.Z -m "Release vX.Y.Z — tracks sibidharan/zealphp vX.Y.Z"
+git commit -m "chore: bump zealphp/zealphp floor to ^X.Y.Z + refresh llms.txt"
+git tag -a vX.Y.Z -m "Release vX.Y.Z — tracks zealphp/zealphp vX.Y.Z"
 for remote in $(git remote); do
   git push $remote main && git push $remote vX.Y.Z
 done
 ```
 
-`vendor/` is gitignored in the scaffold as of v0.2.17 — `composer create-project sibidharan/zealphp-project` runs `composer install` after extracting, so vendor/ is recreated locally per install. Don't add it back to the commit. composer.lock IS tracked so installs are reproducible.
+`vendor/` is gitignored in the scaffold as of v0.2.17 — `composer create-project zealphp/project` runs `composer install` after extracting, so vendor/ is recreated locally per install. Don't add it back to the commit. composer.lock IS tracked so installs are reproducible.
 
 ### WordPress sync
 
-Usually a no-op for patch releases. WordPress's `composer.json` typically pins `"sibidharan/zealphp": "^X.Y"`, which auto-picks up `X.Y.Z+1` on next `composer update`.
+Usually a no-op for patch releases. WordPress's `composer.json` typically pins `"zealphp/zealphp": "^X.Y"`, which auto-picks up `X.Y.Z+1` on next `composer update`.
 
 If working tree is dirty: skip cleanly and surface to the user. If you decide to bump the floor explicitly (e.g., users should be on at least this patch): same flow as scaffold.
 
@@ -1043,6 +1043,6 @@ If working tree is dirty: skip cleanly and surface to the user. If you decide to
 
 ### Final verification
 
-1. `composer create-project sibidharan/zealphp-project temp-test` in a scratch dir installs cleanly with the new version.
+1. `composer create-project zealphp/project temp-test` in a scratch dir installs cleanly with the new version.
 2. Live website spot-check: install command, Docker tag, hero version all match the new release.
 3. Packagist `p2` JSON returns the new tag for both packages.

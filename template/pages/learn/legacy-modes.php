@@ -87,7 +87,7 @@
       'code'  => <<<'PHP'
 use ZealPHP\App;
 
-// Requires ext-zealphp: pie install sibidharan/ext-zealphp
+// Requires ext-zealphp: pie install zealphp/ext
 App::mode(App::MODE_COROUTINE_LEGACY);
 // equivalent to: superglobals(true) + isolation(coroutine) + silentRedeclare(true)
 //                + includeIsolation(true) + coroutineGlobalsIsolation(true)

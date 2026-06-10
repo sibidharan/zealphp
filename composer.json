@@ -1,5 +1,8 @@
 {
-    "name": "sibidharan/zealphp",
+    "name": "zealphp/zealphp",
+    "replace": {
+        "sibidharan/zealphp": "self.version"
+    },
     "description": "Coroutine-native PHP framework on OpenSwoole — async HTTP, WebSocket, streaming, and real-time applications.",
     "homepage": "https://php.zeal.ninja",
     "keywords": [
@@ -38,7 +41,7 @@
         "league/commonmark": "^2.8"
     },
     "suggest": {
-        "ext-zealphp": "Recommended: per-request function overrides + per-coroutine superglobals (pie install sibidharan/ext-zealphp)",
+        "ext-zealphp": "Recommended: per-request function overrides + per-coroutine superglobals (pie install zealphp/ext)",
         "ext-uopz": "Legacy fallback if ext-zealphp is not available"
     },
     "require-dev": {
