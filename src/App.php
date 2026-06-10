@@ -1647,6 +1647,15 @@ class App
         }
         self::$overridesRegistered = true;
 
+        // #338 — fatal→500 guard. MUST use PHP's NATIVE
+        // register_shutdown_function and MUST run before the override below
+        // replaces it globally (uopz/ext-zealphp overrides intercept even
+        // fully-qualified calls). Registered once in the master pre-fork;
+        // forked workers inherit the registration (BG(user_shutdown_function
+        // _names) copies on fork) and run it during THEIR engine shutdown —
+        // including the shutdown a fatal error triggers.
+        \register_shutdown_function([self::class, 'fatalResponseGuard']);
+
         // Response
         self::overrideBuiltin('header', '\ZealPHP\header');
         self::overrideBuiltin('header_remove', '\ZealPHP\header_remove');
@@ -8804,6 +8813,94 @@ class App
             $newStack = self::$middleware_stack->add($middleware);
             assert($newStack instanceof StackHandler);
             self::$middleware_stack = $newStack;
+        }
+    }
+
+    /**
+     * #338 — in-flight raw responses, per worker process. A worker-killing
+     * FATAL (E_COMPILE_ERROR / E_ERROR / …) never reaches the normal emit
+     * path, so the client connection — held open by the master's reactor —
+     * would hang until the CLIENT's timeout (HTTP 000). Apache/mod_php
+     * answers 500. The session managers track every request's raw
+     * OpenSwoole response here and release it on normal completion; the
+     * native shutdown guard below answers whatever is left when a fatal
+     * tears the worker down. Coroutine mode can hold several entries at
+     * once — one fatal kills them all, so all of them get the 500.
+     *
+     * @var array<int, \OpenSwoole\Http\Response>
+     */
+    private static array $fatal_guard_inflight = [];
+
+    /** #338 — track an in-flight raw response; returns the release key. */
+    public static function fatalGuardTrack(\OpenSwoole\Http\Response $response): int
+    {
+        $id = \spl_object_id($response);
+        self::$fatal_guard_inflight[$id] = $response;
+        return $id;
+    }
+
+    /** #338 — release a response tracked by fatalGuardTrack(). */
+    public static function fatalGuardRelease(int $id): void
+    {
+        unset(self::$fatal_guard_inflight[$id]);
+    }
+
+    /**
+     * #338 — native shutdown callback (registered in registerAllOverrides()
+     * BEFORE the register_shutdown_function override installs). On a fatal,
+     * answers every in-flight connection with a minimal 500 — mod_php
+     * parity — instead of leaving clients to time out, and surfaces the
+     * fatal in the PHP error log (debug.log misses engine fatals; that
+     * silence is what made ext-zealphp#36 a multi-day hunt).
+     *
+     * Uses only engine-native calls: during shutdown the coroutine
+     * scheduler (and thus elog()'s async channel) may be unavailable.
+     */
+    public static function fatalResponseGuard(): void
+    {
+        if (self::$fatal_guard_inflight === []) {
+            return;
+        }
+        $e = \error_get_last();
+        if ($e === null || !\in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+            return;
+        }
+
+        \error_log(sprintf(
+            'ZealPHP fatal-guard: answering %d in-flight request(s) with 500 after fatal: %s in %s:%d',
+            \count(self::$fatal_guard_inflight),
+            $e['message'],
+            $e['file'],
+            $e['line']
+        ));
+
+        $admin = self::$server_admin !== null && self::$server_admin !== ''
+            ? '<p>Please contact the server administrator at ' . \htmlspecialchars(self::$server_admin, ENT_QUOTES) . '.</p>'
+            : '';
+        $body = '<!DOCTYPE html><html><head><title>500 Internal Server Error</title></head><body>'
+            . '<h1>Internal Server Error</h1>'
+            . '<p>The server encountered an internal error and was unable to complete your request.</p>'
+            . $admin . '</body></html>';
+
+        foreach (self::$fatal_guard_inflight as $id => $response) {
+            unset(self::$fatal_guard_inflight[$id]);
+            try {
+                if (!$response->isWritable()) {
+                    continue;
+                }
+                $response->status(500, 'Internal Server Error');
+                $response->header('Content-Type', 'text/html; charset=utf-8');
+                $response->end($body);
+            } catch (\Throwable $t) {
+                // The connection may already be torn down mid-shutdown; a
+                // failed 500 still beats a silent hang — close so the client
+                // gets an immediate reset instead of a timeout.
+                try {
+                    $response->close();
+                } catch (\Throwable) {
+                    // nothing more we can do from a dying worker
+                }
+            }
         }
     }
 

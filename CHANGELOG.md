@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **Fatal→500 guard** ([#338](https://github.com/sibidharan/zealphp/issues/338)) — a worker-killing fatal mid-request (E_COMPILE_ERROR / E_ERROR / E_PARSE / E_CORE_ERROR) now answers every in-flight connection with a minimal **HTTP 500** (mod_php parity) instead of leaving clients to time out with HTTP 000, and surfaces the fatal (message + file:line) in the PHP error log. The native shutdown guard registers before the framework's `register_shutdown_function` override; the session managers track each request's raw response and release it on normal completion, so only orphaned connections are answered. Works in every lifecycle mode (validated E2E in coroutine and coroutine-legacy: 500 in ~14 ms + worker respawn + service continues). Test endpoint `/demo/fatal500` is gated behind `ZEALPHP_FATAL_TEST=1`; pinned by `tests/Integration/FatalGuardTest.php`. This failure class is what made the wgvpn "password_verify hang" ([ext#36](https://github.com/sibidharan/ext-zealphp/issues/36)) a multi-day chase — fatals are now self-diagnosing.
+
 ### Fixed
 - **ext-zealphp pin bumped to v0.3.41** — fixes [ext#37](https://github.com/sibidharan/ext-zealphp/issues/37): in coroutine-legacy, a fire-and-forget `go()` child's first yield or a service coroutine's mid-request resume (one `elog()` call suffices — the async-log runner) could steal/wipe the live request's `$GLOBALS` (user globals read back as NULL), orphan `define()`s, and roll class statics/ini back to stale copies. All per-request-state stages are now gated on a request-coroutine claim set, both save and restore sides; raw OpenSwoole usage (no claims) is unchanged. Pinned by ext `tests/057`; validated at 40-concurrent with zero leaks.
 

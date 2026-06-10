@@ -948,3 +948,21 @@ $app->route('/demo/view/chatroom/widget', ['methods' => ['GET']], function () {
         'learn/chatroom', 'Multi-Room Group Chat'
     );
 });
+
+// ── #338 — fatal→500 guard test endpoint ────────────────────────────────
+// Deliberately KILLS the worker with an uncatchable E_COMPILE_ERROR
+// (incompatible interface implementation, unique class names per request so
+// the inheritance-link fatal — not a redeclare — fires every time). The
+// fatalResponseGuard must answer this connection with HTTP 500 instead of
+// leaving the client to time out (mod_php parity). Gated off by default:
+// only enabled when the server is started with ZEALPHP_FATAL_TEST=1, so the
+// public demo site never exposes a crash-the-worker endpoint.
+$app->route('/demo/fatal500', function () {
+    if (getenv('ZEALPHP_FATAL_TEST') !== '1') {
+        return 403;
+    }
+    $n = 'F338_' . str_replace('.', '_', uniqid('', true));
+    eval("interface I{$n} { public function x(): array; }"
+        . "class C{$n} implements I{$n} { public function x(): string { return ''; } }");
+    return ['unreachable' => true]; // the eval above is a worker-killing fatal
+});

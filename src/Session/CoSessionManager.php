@@ -135,6 +135,7 @@ class CoSessionManager
             $g->session = [];
             $g->openswoole_request = $request;
             $g->openswoole_response = $response;
+            $zpFatalGuardId = \ZealPHP\App::fatalGuardTrack($response); // #338 — answer this connection with 500 if a fatal kills the worker
             $request = new \ZealPHP\HTTP\Request($request);
             $response = new \ZealPHP\HTTP\Response($response);
             $g->zealphp_request = $request;
@@ -142,6 +143,7 @@ class CoSessionManager
             try {
                 call_user_func($this->middleware, $request, $response);
             } finally {
+                \ZealPHP\App::fatalGuardRelease($zpFatalGuardId); // #338
                 unset($g->session);
             }
             return;
@@ -261,6 +263,7 @@ class CoSessionManager
             }
         }
 
+        $zpFatalGuardId = \ZealPHP\App::fatalGuardTrack($response); // #338 — answer this connection with 500 if a fatal kills the worker
         try {
             if ($manageSession) {
                 $g->session['__start_time'] = microtime(true);
@@ -275,6 +278,7 @@ class CoSessionManager
 
             call_user_func($this->middleware, $request, $response);
         } finally {
+            \ZealPHP\App::fatalGuardRelease($zpFatalGuardId); // #338
             if ($manageSession && $g->_session_started) {
                 zeal_session_write_close();
                 zeal_session_id('');
