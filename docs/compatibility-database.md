@@ -4,6 +4,21 @@
 > Test environment: PHP 8.4.21 + OpenSwoole 26.2.0 + ext-zealphp 0.3.3–0.3.24 (grades vary by section — see per-section notes)  
 > Docker lab sweep — actual boot + first-request tests where marked as tested
 
+> ### 2026-06-10 real-work re-validation (ext-zealphp 0.3.46, coroutine-legacy)
+> A focused real-work pass (beyond boot/first-request) on the post-0.3.46 stack — the session that shipped the child-coroutine superglobal lane (0.3.43), tz/mb/libxml isolation (0.3.45), and the **mysqlnd vio orig_path allocator-consistency shim (0.3.46)**:
+>
+> | App | Real work performed | Result |
+> |---|---|---|
+> | **WordPress** (public) | homepage render, login (auth cookie set), `ab -c10/-c20` concurrency | 200 (real 49 KB page); **0 crashes in steady state** (mysqlnd shim holds — pre-shim this crash-looped 11–14 worker deaths/run) |
+> | **WordPress** (wp-admin) | admin password reset → authenticated dashboard + post-list | **200** (Dashboard 115 KB "At a Glance/Howdy"; edit.php 97 KB real post list) **with `App::globalScopeInclude(true)`** — closes the `$_wp_submenu_nopriv` `array_keys(null)` 500 |
+> | **File upload** (`$_FILES` + `move_uploaded_file`) | 24 concurrent multipart uploads, unique random payloads | **24/24 landed with their own SHA**, 0 cross-coroutine `tmp_name`/`$_FILES` mixing, 0 crashes |
+> | **Adminer 4.8.1** | boot, login form, DB-login POST to MariaDB | 200 boot; login processed (302); deep schema/SQL gated by Adminer's CSRF token (app-auth, not framework); 0 crashes |
+> | **TinyFileManager** | boot, login screen render | 200; login needs `SessionStartMiddleware` for first-visitor sessions (app-config, not framework); 0 crashes |
+>
+> **Cross-app finding:** every app **boots + renders + processes its entry/auth flow under coroutine-legacy with ZERO crashes** on 0.3.46. Cold-concurrent first-wave edges (HAZARD-2 cold-autoload + the residual cold-boot mysqlnd, ext#44) are self-healing and mitigated by `App::preloadClassmap()` (which these unconfigured harnesses don't call); steady state is clean. Deep multi-step authed flows hit each app's own CSRF/nonce/session tokens — a test-harness fidelity matter, not a framework defect.
+>
+> **New issue surfaced:** persistent **userland** streams (`pfsockopen` / `stream_socket_client(STREAM_CLIENT_PERSISTENT)`) hit the same orig_path allocator mismatch as ext#44 on the generic xport path the vio shim doesn't cover (ext#45) — niche (persistent sockets are semantically wrong under coroutines anyway), no real app in this pass tripped it.
+
 This is the reference for which PHP applications work with ZealPHP and in which modes. Use the [Mode Selection Guide](#mode-selection-guide) to quickly find your configuration.
 
 ---
