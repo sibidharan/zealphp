@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **ext-zealphp pin bumped to v0.3.41** — fixes [ext#37](https://github.com/sibidharan/ext-zealphp/issues/37): in coroutine-legacy, a fire-and-forget `go()` child's first yield or a service coroutine's mid-request resume (one `elog()` call suffices — the async-log runner) could steal/wipe the live request's `$GLOBALS` (user globals read back as NULL), orphan `define()`s, and roll class statics/ini back to stale copies. All per-request-state stages are now gated on a request-coroutine claim set, both save and restore sides; raw OpenSwoole usage (no claims) is unchanged. Pinned by ext `tests/057`; validated at 40-concurrent with zero leaks.
+
+
 ## [0.4.6] - 2026-06-10
 
 ### Changed
