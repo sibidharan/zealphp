@@ -162,13 +162,13 @@ docker_setup() {
     docker-php-ext-enable --ini-name zz-openswoole.ini openswoole
     php -r 'exit(extension_loaded("openswoole") ? 0 : 1);' || { echo -e "${RED}OpenSwoole built but failed to load.${RESET}"; exit 1; }
 
-    echo -e "${YELLOW}Installing ext-zealphp ${ZEALPHP_EXT_VERSION:-v0.3.41} for Docker image.${RESET}"
+    echo -e "${YELLOW}Installing ext-zealphp ${ZEALPHP_EXT_VERSION:-v0.3.46} for Docker image.${RESET}"
     # Pinned for reproducibility + to dodge the pre-0.3.16 compile break on modern
     # toolchains (GCC 14 hardens -Wincompatible-pointer-types to an error; the old
     # zend_alter_ini_entry_ex call passed the entry struct instead of the name).
     # NOTE: the ext has its OWN 0.3.x version line — do NOT confuse it with the
     # framework's 0.3.x. Override with ZEALPHP_EXT_VERSION.
-    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.41}" https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
+    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.46}" https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
     if (cd /tmp/ext-zealphp && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && make install); then
         docker-php-ext-enable --ini-name zz-zealphp.ini zealphp
         rm -rf /tmp/ext-zealphp
@@ -600,7 +600,7 @@ install_zealphp_ext() {
 
     local tmpdir
     tmpdir="$(mktemp -d)"
-    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.41}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir/ext-zealphp" || {
+    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.46}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir/ext-zealphp" || {
         echo -e "${YELLOW}Failed to clone ext-zealphp repo. Falling back to uopz.${RESET}"
         rm -rf "$tmpdir"
         install_uopz_fallback
@@ -734,7 +734,7 @@ macos_setup() {
     echo -e "${GREEN}Installing ext-zealphp.${RESET}"
     local tmpdir
     tmpdir="$(mktemp -d)"
-    if git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.41}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir" && \
+    if git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.46}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir" && \
        (cd "$tmpdir" && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && make install); then
         echo "extension=zealphp.so" > "${php_ini_dir}/zz-zealphp.ini"
         rm -rf "$tmpdir"
