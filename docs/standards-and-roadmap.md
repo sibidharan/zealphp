@@ -40,7 +40,7 @@ Treat Markdown files in `docs/` as canonical documentation. When proposing chang
 
 ## Release Management
 
-- Tag library (`sibidharan/zealphp`) and starter project (`sibidharan/zealphp-project`) in lockstep.
+- Tag library (`zealphp/zealphp`) and starter project (`zealphp/project`) in lockstep.
 - Ensure `composer install` passes without warnings *before* publishing a release.
 - After tagging, trigger Packagist webhooks so the new version is indexed promptly.
 

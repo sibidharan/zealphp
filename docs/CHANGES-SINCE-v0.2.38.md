@@ -37,7 +37,7 @@ valkey-server --bind 127.0.0.1 --port 16379 --daemonize yes \
 mkdir -p /tmp/valkey-tryout
 
 # 2. Boot ZealPHP with Redis backend
-cd /var/labsstorage/home/sibidharan/zealphp
+cd /var/labsstorage/home/zealphp/zealphp
 ZEALPHP_STORE_BACKEND=redis ZEALPHP_REDIS_URL=redis://127.0.0.1:16379 \
   php app.php start -p 8090 -d
 
@@ -439,7 +439,7 @@ App::addProcess('log-shipper', function (\OpenSwoole\Process $p): void {
 ```bash
 mkdir -p /tmp/zealphp-smoke/public
 cat > /tmp/zealphp-smoke/app.php <<'PHP'
-<?php require '/var/labsstorage/home/sibidharan/zealphp/vendor/autoload.php';
+<?php require '/var/labsstorage/home/zealphp/zealphp/vendor/autoload.php';
 use ZealPHP\App; use ZealPHP\HTTP;
 App::superglobals(false);
 App::addProcess('heartbeat', function() {

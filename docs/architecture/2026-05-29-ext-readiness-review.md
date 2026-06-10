@@ -42,7 +42,7 @@ open issues, so it is production-ready only for a defined scope, with a working
   statics, `$GLOBALS` COW delta, `define()`, `ini_set`, `putenv/getenv`,
   `header/setcookie`, function-local `static $x`) under genuine concurrency —
   TrustBar 0/40 at ~µs/yield vs cgi-pool's ~30–50 ms `proc_open` fork.
-- Distribution as a scoped PECL/pie package (`pie install sibidharan/ext-zealphp`),
+- Distribution as a scoped PECL/pie package (`pie install zealphp/ext`),
   NTS-only.
 - DB-backed apps via the `cgiMode('pool')` subprocess fallback (returns 200 for
   apps coroutine-legacy can't host in-process, e.g. phpMyAdmin).

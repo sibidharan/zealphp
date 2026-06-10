@@ -35,7 +35,7 @@
  *   B. If ZealPHP is in your vendor/ on BOTH deployments (same source tree
  *      served by Apache and ZealPHP — the SNA Labs pattern), require this
  *      copy directly. A plain file include works without the autoloader:
- *        require_once __DIR__ . '/vendor/sibidharan/zealphp/compat/g.php';
+ *        require_once __DIR__ . '/vendor/zealphp/zealphp/compat/g.php';
  *
  * ── Which runtime gets which $g ──
  *

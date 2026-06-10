@@ -19,7 +19,7 @@
 
     <h2>The shape of a ZealPHP app</h2>
     <p>
-      A fresh app (from <code>composer create-project sibidharan/zealphp-project</code>) lays out
+      A fresh app (from <code>composer create-project zealphp/project</code>) lays out
       like this:
     </p>
     <pre><code>my-app/

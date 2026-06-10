@@ -189,7 +189,7 @@ PHP]); ?>
     <li><code>superglobals(true) + enableCoroutine(true)</code> without ext-zealphp</li>
     <li><code>superglobals(true) + hookAll(non-zero)</code> without ext-zealphp</li>
   </ul>
-  <p class="coro-mb"><strong>Migration path:</strong> install ext-zealphp (<code>pie install sibidharan/ext-zealphp</code>), set <code>App::superglobals(true)</code>, and enable coroutines. Your existing <code>$_GET</code> / <code>$_SESSION</code> code works unchanged with full concurrency.</p>
+  <p class="coro-mb"><strong>Migration path:</strong> install ext-zealphp (<code>pie install zealphp/ext</code>), set <code>App::superglobals(true)</code>, and enable coroutines. Your existing <code>$_GET</code> / <code>$_SESSION</code> code works unchanged with full concurrency.</p>
 </div>
 
 <div id="isolation-scope" class="callout warn coro-mb">

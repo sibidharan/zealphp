@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.6] - 2026-06-10
+
+### Changed
+- **Package renamed: `sibidharan/zealphp` → `zealphp/zealphp`** — the ZealPHP ecosystem now publishes under the `zealphp` Packagist vendor namespace (`zealphp/zealphp`, `zealphp/project`, `zealphp/ext`, `zealphp/mongodb`). **GitHub repos are unchanged** (`github.com/sibidharan/zealphp` — all existing clone URLs, issues, stars stay). Backwards compatibility: this package `replace`s `sibidharan/zealphp` (`self.version`), the old Packagist package keeps serving every existing tag forever and is marked abandoned with a replacement pointer. Existing `composer.json`s keep working; switch the require to `zealphp/zealphp` to receive new versions. Install commands across the website/docs now read `composer create-project zealphp/project` and `pie install zealphp/ext`.
+
+
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]

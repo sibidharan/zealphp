@@ -7,14 +7,14 @@
  * full explanation of why the shim can't be a framework feature and how the
  * two runtimes resolve `$g`. See:
  *
- *   - vendor/sibidharan/zealphp/compat/g.php   (the canonical source)
+ *   - vendor/zealphp/zealphp/compat/g.php   (the canonical source)
  *   - https://php.zeal.ninja/legacy-apps#dual-runtime
  *
  * Apps that have ZealPHP in vendor/ on both their Apache and ZealPHP
  * deployments can `require_once` the canonical copy directly instead of
  * keeping their own:
  *
- *   require_once __DIR__ . '/../vendor/sibidharan/zealphp/compat/g.php';
+ *   require_once __DIR__ . '/../vendor/zealphp/zealphp/compat/g.php';
  *
  * This scaffold keeps a local copy so it works standalone (before
  * `composer install`).

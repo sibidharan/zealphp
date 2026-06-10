@@ -4,7 +4,7 @@
 # so each sample reflects a different "moment in time" of the machine.
 set -uo pipefail
 
-ROOT="/var/labsstorage/home/sibidharan/zealphp"
+ROOT="/var/labsstorage/home/zealphp/zealphp"
 OUT="/tmp/bench/results-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUT"
 

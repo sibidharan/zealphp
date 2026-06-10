@@ -387,7 +387,7 @@ PHP]); ?>
 <p>The mechanism is a tiny <strong>compat shim</strong> that gives application code a single accessor — <code>$g-&gt;get</code>, <code>$g-&gt;session</code>, etc. — that resolves correctly in whichever runtime is loading the file:</p>
 
 <?php App::render('/components/_code', [
-    'label' => 'compat/g.php — shipped with ZealPHP at vendor/sibidharan/zealphp/compat/g.php',
+    'label' => 'compat/g.php — shipped with ZealPHP at vendor/zealphp/zealphp/compat/g.php',
     'code'  => <<<'PHP'
 <?php
 // Include this ONCE at the top of every entry point — on BOTH servers.
@@ -417,7 +417,7 @@ PHP]); ?>
     'label' => 'public/dashboard.php — runs unchanged on Apache and ZealPHP',
     'code'  => <<<'PHP'
 <?php
-require_once __DIR__ . '/../vendor/sibidharan/zealphp/compat/g.php';
+require_once __DIR__ . '/../vendor/zealphp/zealphp/compat/g.php';
 
 session_start();
 $g->session['hits'] = ($g->session['hits'] ?? 0) + 1;
@@ -1126,7 +1126,7 @@ PHP]); ?>
 <h2 class="legacy-mt-xl">Setup Steps</h2>
 <p>See the full working example: <a href="https://github.com/sibidharan/zealphp-wordpress" target="_blank">github.com/sibidharan/zealphp-wordpress</a></p>
 <ol class="legacy-list-steps">
-  <li>Create a ZealPHP project: <code>composer create-project sibidharan/zealphp-project my-wordpress</code></li>
+  <li>Create a ZealPHP project: <code>composer create-project zealphp/project my-wordpress</code></li>
   <li>Download WordPress into <code>public/</code>: <code>cd my-wordpress/public &amp;&amp; wp core download</code></li>
   <li>Configure <code>public/wp-config.php</code> with your database settings</li>
   <li>Write <code>app.php</code> as shown above</li>

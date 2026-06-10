@@ -263,7 +263,7 @@
 <h3 class="perf-h3-spaced">One-line install (Ubuntu/Debian)</h3>
 
 <p class="perf-install-lead">
-  Goes from a fresh box to a benched-ready clone — installs PHP 8.3, OpenSwoole, ext-zealphp, composer, wrk, ab, then clones <code>sibidharan/zealphp</code> to <code>~/zealphp</code> and runs <code>composer install</code>:
+  Goes from a fresh box to a benched-ready clone — installs PHP 8.3, OpenSwoole, ext-zealphp, composer, wrk, ab, then clones <code>zealphp/zealphp</code> to <code>~/zealphp</code> and runs <code>composer install</code>:
 </p>
 
 <?php App::render('/components/_code', [

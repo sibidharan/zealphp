@@ -1,5 +1,5 @@
 {
     "require": {
-        "sibidharan/zealphp": "^0.2"
+        "zealphp/zealphp": "^0.4"
     }
 }

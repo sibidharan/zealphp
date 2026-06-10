@@ -171,7 +171,7 @@ final class PhpInfo
         $coroSg = $hasZealphpExt && \function_exists('zealphp_coroutine_superglobals') ? 'available' : 'not available';
 
         try {
-            $zealVersion = \Composer\InstalledVersions::getPrettyVersion('sibidharan/zealphp') ?? 'dev';
+            $zealVersion = \Composer\InstalledVersions::getPrettyVersion('zealphp/zealphp') ?? 'dev';
         } catch (\Throwable $e) {
             $zealVersion = 'unknown';
         }
