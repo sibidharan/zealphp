@@ -8295,6 +8295,24 @@ class App
             });
         }
 
+        // Master-side request-path preload (coroutine modes): warm the framework
+        // Request/Response/PSR stack HERE, in the master before fork, NOT only in
+        // the onWorkerStart hook below. onWorkerStart runs in a coroutine, and
+        // under HOOK_ALL loading these classes triggers a file include that does
+        // I/O and YIELDS — letting the worker accept a request mid-warmup → cold
+        // concurrent compile → duplicate class entry → the OnRequest closure throws
+        // "Argument #1 ($request) must be of type ZealPHP\HTTP\Request,
+        // ZealPHP\HTTP\Request given" (a different CE), killing the worker in a
+        // respawn cascade (reproduced under unmodified WordPress + `ab -c20`). The
+        // master has no scheduler, so every load here is blocking + atomic; workers
+        // inherit the linked classes via copy-on-write fork and the onWorkerStart
+        // warm below becomes a no-op (class_exists on an already-defined class does
+        // not autoload, so it cannot yield). Gated to coroutine modes — sequential
+        // worker modes have no cold-concurrent wave to race.
+        if ($enableCoroutine) {
+            self::preloadRequestPathClasses();
+        }
+
         // Master-side bulk class preload (opt-in via preloadClassmap()/
         // preloadDir()): warm large/arbitrary class sets HERE — in the master,
         // before fork, where no coroutine scheduler exists — so a class with
