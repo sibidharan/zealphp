@@ -396,6 +396,22 @@ class ZealAPI extends REST
             echo $object;
         }
         $buffer = (string)ob_get_clean();
+        // #347 — Apache-parity for the unhandled-method shape: a filename-match
+        // closure that dispatches some methods internally (the labs WebAPI
+        // pattern: `$search` serves POST, no-ops on GET) returns null for the
+        // rest; under Apache their dispatcher 404s those before any handler
+        // body runs. Under ZealAPI that null previously surfaced as `200 OK` +
+        // empty body, silently breaking clients that expect a JSON error
+        // envelope. A null return with NO output, NO explicit status and NO
+        // streaming is an unhandled request, not an intentional empty 200 —
+        // emit the canonical envelope. A handler that MEANS "empty 200" can
+        // `return '';` (explicit empty string), set a status, or the app can
+        // opt out globally via App::apiNullNotFound(false).
+        if ($object === null && $buffer === '' && $status === 200
+            && App::$api_null_not_found) {
+            response_add_header('Content-Type', 'application/json');
+            return new Response($this->json(['error' => 'method_not_found']), 404);
+        }
         return new Response($buffer, $status);
     }
 
