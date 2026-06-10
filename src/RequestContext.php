@@ -123,6 +123,37 @@ class RequestContext
             if ($cid >= 0) {
                 $context = \OpenSwoole\Coroutine::getContext($cid);
                 if (!isset($context['__g'])) {
+                    // #42 — child-coroutine inheritance. A `go()` child (or an
+                    // App::parallel task) is a NEW coroutine with a fresh
+                    // OpenSwoole context, so a naive lookup here minted an EMPTY
+                    // RequestContext: every deep `$g->server[*]` read inside the
+                    // child returned null while the request's real context sat
+                    // one level up (observed in the wild as render-time
+                    // HTTP_HOST/PHP_SELF/DOCUMENT_ROOT = '' — issue #42's
+                    // two-key `UNIQUE_ID,REQUEST_URI` signature is an app logger
+                    // partially repopulating that fresh instance). Walk the
+                    // parent-coroutine chain and ADOPT the nearest ancestor's
+                    // instance — same object, so the child shares the request's
+                    // state exactly like nested includes share it in plain PHP
+                    // (one request = one $g). Depth-capped; coroutines spawned
+                    // outside a request (onWorkerStart, service runners) find no
+                    // ancestor instance and keep today's fresh-instance path.
+                    // Adoption is lazy: only code that actually calls
+                    // instance() in a child pays the walk, once.
+                    $pcid = $cid;
+                    for ($depth = 0; $depth < 32; $depth++) {
+                        $pcid = \OpenSwoole\Coroutine::getPcid($pcid);
+                        if ($pcid <= 0) {
+                            break;
+                        }
+                        $pctx = \OpenSwoole\Coroutine::getContext($pcid);
+                        if ($pctx !== null && isset($pctx['__g'])) {
+                            $context['__g'] = $pctx['__g'];
+                            break;
+                        }
+                    }
+                }
+                if (!isset($context['__g'])) {
                     $context['__g'] = new self();
                 }
                 $instance = $context['__g'];

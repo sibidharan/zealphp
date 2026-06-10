@@ -4650,6 +4650,46 @@ class App
     }
 
     /**
+     * #42 — make the CURRENT (child) coroutine inherit the spawning request's
+     * context. Two layers: `RequestContext::instance()` walks the
+     * parent-coroutine chain automatically (so `$g` is the request's), and —
+     * in coroutine-legacy, where `$g->server` et al. are live aliases of the
+     * process superglobals — `zealphp_superglobals_adopt()` (ext-zealphp
+     * 0.3.43+) gives this coroutine its OWN superglobal snapshot lane: its
+     * first yield CAPTURES the live view (the spawning request's state)
+     * without clearing it, so `$_SERVER`/`$_GET`/… survive the child's own
+     * yields and the parent is never stolen from. Safe no-op outside a
+     * coroutine or without the ext function. Called automatically by
+     * `App::go()` / `App::parallel()` / `App::parallelLimit()`.
+     */
+    public static function adoptRequestContext(): void
+    {
+        if (self::$coroutine_isolated_superglobals
+            && \function_exists('zealphp_superglobals_adopt')
+        ) {
+            (\zealphp_superglobals_adopt(...))();
+        }
+        // Touch the context so the parent-chain adoption happens eagerly at
+        // spawn time (deterministic) rather than lazily at the first $g read.
+        RequestContext::instance();
+    }
+
+    /**
+     * Request-aware `go()` — spawns a child coroutine that INHERITS the
+     * current request's context (`$g` + the live superglobals, #42). Use
+     * inside handlers instead of raw `go()` whenever the child reads
+     * `$g->server` / `$_SERVER` / `$_GET` etc. Returns the child's coroutine
+     * id, or false if creation failed.
+     */
+    public static function go(callable $fn, mixed ...$args): int|false
+    {
+        return \OpenSwoole\Coroutine::create(function () use ($fn, $args): void {
+            self::adoptRequestContext();
+            $fn(...$args);
+        });
+    }
+
+    /**
      * Fork-join helper — runs every closure in `$tasks` in its own
      * coroutine in parallel and returns the results in input order.
      *
@@ -4690,6 +4730,7 @@ class App
         $errors  = [];
         foreach ($tasks as $i => $task) {
             \OpenSwoole\Coroutine::create(function () use ($task, $i, &$results, &$errors, $done): void {
+                self::adoptRequestContext(); // #42 — inherit the request's superglobal lane
                 try { $results[$i] = $task(); }
                 catch (\Throwable $e) { $errors[$i] = $e; }
                 finally { $done->push(true); }
@@ -4741,6 +4782,7 @@ class App
         $errors = [];
         foreach ($items as $k => $item) {
             \OpenSwoole\Coroutine::create(function () use ($k, $item, $fn, &$results, &$errors, $sem, $done): void {
+                self::adoptRequestContext(); // #42 — inherit the request's superglobal lane
                 $sem->pop();
                 try { $results[$k] = $fn($item, $k); }
                 catch (\Throwable $e) { $errors[$k] = $e; }
