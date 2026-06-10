@@ -492,6 +492,40 @@ class App
     public static bool $coroutine_umask_isolation = false;
 
     /**
+     * Per-coroutine date_default_timezone_set() isolation — the default
+     * timezone is process-global; WordPress-class apps set it per request
+     * (core boot reads the site option), so one request's timezone leaks
+     * into every concurrently-running peer (measured 179/250 at 49-way
+     * concurrency). Same stage shape as locale/umask (ext-zealphp 0.3.45+,
+     * via the engine's own getter/setter pair). Auto-enabled by
+     * `App::mode('coroutine-legacy')` (opt out with env
+     * `ZEALPHP_TZ_ISOLATION_DISABLE=1`); off by default elsewhere.
+     */
+    public static bool $coroutine_tz_isolation = false;
+
+    /**
+     * Per-coroutine mb_internal_encoding() isolation — the mbstring current
+     * internal encoding is process-global; legacy code sets it before string
+     * work (measured 173/250 leaks at 49-way concurrency). ext-zealphp
+     * 0.3.45+; auto-refuses when mbstring is absent. Auto-enabled by
+     * `App::mode('coroutine-legacy')` (opt out with env
+     * `ZEALPHP_MBENC_ISOLATION_DISABLE=1`); off by default elsewhere.
+     */
+    public static bool $coroutine_mbenc_isolation = false;
+
+    /**
+     * Per-coroutine libxml_use_internal_errors() FLAG isolation — the libxml
+     * error-buffering flag is process-global (measured 128/250 leaks).
+     * ext-zealphp 0.3.45+. Fidelity note: collected errors are preserved
+     * within a slice (parse + libxml_get_errors with no yield between — the
+     * dominant pattern) but not across an I/O yield (php-src's own disable
+     * semantic frees the list on re-park). Auto-enabled by
+     * `App::mode('coroutine-legacy')` (opt out with env
+     * `ZEALPHP_LIBXML_ISOLATION_DISABLE=1`); off by default elsewhere.
+     */
+    public static bool $coroutine_libxml_isolation = false;
+
+    /**
      * Set true at the top of `App::run()` so the four lifecycle setters
      * (`superglobals`, `processIsolation`, `enableCoroutine`, `hookAll`)
      * can refuse mutations made AFTER the server has booted.
@@ -2750,6 +2784,13 @@ class App
                 // state — isolate them per coroutine too (ext-zealphp 0.3.38+).
                 self::coroutineLocaleIsolation((string) \getenv('ZEALPHP_LOCALE_ISOLATION_DISABLE') !== '1');
                 self::coroutineUmaskIsolation((string) \getenv('ZEALPHP_UMASK_ISOLATION_DISABLE') !== '1');
+                // date_default_timezone_set() / mb_internal_encoding() /
+                // libxml_use_internal_errors() — the remaining function-backed
+                // process-global settings legacy apps change per request
+                // (ext-zealphp 0.3.45+).
+                self::coroutineTimezoneIsolation((string) \getenv('ZEALPHP_TZ_ISOLATION_DISABLE') !== '1');
+                self::coroutineMbencIsolation((string) \getenv('ZEALPHP_MBENC_ISOLATION_DISABLE') !== '1');
+                self::coroutineLibxmlIsolation((string) \getenv('ZEALPHP_LIBXML_ISOLATION_DISABLE') !== '1');
                 break;
             case self::MODE_MIXED:
                 self::superglobals(true);
@@ -3902,6 +3943,42 @@ class App
             self::$coroutine_umask_isolation = $on;
         }
         return self::$coroutine_umask_isolation;
+    }
+
+    /**
+     * Per-coroutine default-timezone isolation — see the
+     * $coroutine_tz_isolation docblock. Asserted at App::run() boot wiring.
+     */
+    public static function coroutineTimezoneIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$coroutine_tz_isolation = $on;
+        }
+        return self::$coroutine_tz_isolation;
+    }
+
+    /**
+     * Per-coroutine mb-internal-encoding isolation — see the
+     * $coroutine_mbenc_isolation docblock. Asserted at App::run() boot wiring.
+     */
+    public static function coroutineMbencIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$coroutine_mbenc_isolation = $on;
+        }
+        return self::$coroutine_mbenc_isolation;
+    }
+
+    /**
+     * Per-coroutine libxml error-flag isolation — see the
+     * $coroutine_libxml_isolation docblock. Asserted at App::run() boot wiring.
+     */
+    public static function coroutineLibxmlIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$coroutine_libxml_isolation = $on;
+        }
+        return self::$coroutine_libxml_isolation;
     }
 
     /**
@@ -8584,6 +8661,53 @@ class App
                 "[warn] coroutineUmaskIsolation(true) requires ext-zealphp "
                 . "0.3.38+ with zealphp_umask_isolation — a request's umask() "
                 . "will leak across concurrently-running coroutines.",
+                'warn'
+            );
+        }
+
+        // Function-backed process-global settings (ext-zealphp 0.3.45+):
+        // default timezone, mb internal encoding, libxml error flag. Same
+        // pre-fork baseline rule: a boot-time date_default_timezone_set() /
+        // mb_internal_encoding() before run() becomes the worker baseline.
+        if (self::$coroutine_tz_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_timezone_isolation')
+        ) {
+            (\zealphp_timezone_isolation(...))((bool) true);
+        } elseif (self::$coroutine_tz_isolation) {
+            elog(
+                "[warn] coroutineTimezoneIsolation(true) requires ext-zealphp "
+                . "0.3.45+ with zealphp_timezone_isolation — a request's "
+                . "date_default_timezone_set() will leak across "
+                . "concurrently-running coroutines.",
+                'warn'
+            );
+        }
+        if (self::$coroutine_mbenc_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_mbenc_isolation')
+        ) {
+            (\zealphp_mbenc_isolation(...))((bool) true);
+        } elseif (self::$coroutine_mbenc_isolation) {
+            elog(
+                "[warn] coroutineMbencIsolation(true) requires ext-zealphp "
+                . "0.3.45+ with zealphp_mbenc_isolation — a request's "
+                . "mb_internal_encoding() will leak across "
+                . "concurrently-running coroutines.",
+                'warn'
+            );
+        }
+        if (self::$coroutine_libxml_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_libxml_isolation')
+        ) {
+            (\zealphp_libxml_isolation(...))((bool) true);
+        } elseif (self::$coroutine_libxml_isolation) {
+            elog(
+                "[warn] coroutineLibxmlIsolation(true) requires ext-zealphp "
+                . "0.3.45+ with zealphp_libxml_isolation — a request's "
+                . "libxml_use_internal_errors() will leak across "
+                . "concurrently-running coroutines.",
                 'warn'
             );
         }
