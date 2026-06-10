@@ -304,6 +304,61 @@ class RequestContext
     }
 
     /**
+     * ext-zealphp#42 (residual) — keep `isset($g->server)` truthful when the
+     * slot is an unset-and-proxied superglobal alias. PHP only consults
+     * `__isset` for inaccessible/uninitialized properties; without it,
+     * `isset($g->server)` reported FALSE in coroutine-legacy and under the
+     * #346 Apache bridge even though `__get` returned the fully-populated
+     * `$_SERVER`. App-level defensive code reacting to that false negative
+     * (`if (!isset($g->server)) { $g->server = []; }`) then wiped the live
+     * `$GLOBALS['_SERVER']` through `__set` for the rest of the request.
+     *
+     * Superglobals mode mirrors `isset($_X)` for the seven proxied names —
+     * Apache parity, so `isset($g->session)` stays FALSE until session_start
+     * creates `$_SESSION` — and `isset($GLOBALS[$key])` for legacy custom
+     * keys (symmetric with `__get`/`__set`). Coroutine mode reports FALSE:
+     * `__isset` firing at all means the typed slot is uninitialized (or the
+     * key undeclared), and `zeal_session_status()` depends on an unset
+     * `$g->session` reading as inactive.
+     */
+    public function __isset(string $key): bool
+    {
+        if (App::$superglobals) {
+            if (in_array($key, ['get', 'post', 'cookie', 'files', 'server', 'request', 'env', 'session'], true)) {
+                return isset($GLOBALS['_' . strtoupper($key)]);
+            }
+            return isset($GLOBALS[$key]);
+        }
+        return false;
+    }
+
+    /**
+     * For the seven proxied superglobal names this is deliberately a NO-OP,
+     * not the symmetric inverse of `__set`. The framework itself uses
+     * `unset($g->server)` as "detach the typed slot so the `__get` proxy
+     * takes over" — `bridgeSuperglobalSlots()`, the per-request populate in
+     * `App::run()`, and the session managers all do it. `__unset` only fires
+     * when the slot is ALREADY detached, so re-running any of those paths
+     * (bridge re-entry, request 2+ on a reused context) must not escalate
+     * into `unset($GLOBALS['_SERVER'])` and destroy live request state —
+     * exactly the class of wipe this fix exists to prevent. Deleting a whole
+     * superglobal through `$g` is not a real use case; code that means it
+     * can `unset($GLOBALS['_SESSION'])` directly (as
+     * `zeal_session_write_close()` does). Legacy CUSTOM keys keep `__set`
+     * symmetry: `unset($g->custom)` drops `$GLOBALS['custom']`. Coroutine
+     * mode is a no-op — `__unset` firing at all means the slot is already
+     * uninitialized, and `unset()` is idempotent by contract.
+     */
+    public function __unset(string $key): void
+    {
+        if (App::$superglobals
+            && !in_array($key, ['get', 'post', 'cookie', 'files', 'server', 'request', 'env', 'session'], true)
+        ) {
+            unset($GLOBALS[$key]);
+        }
+    }
+
+    /**
      * @param string $key
      * @return mixed
      */
