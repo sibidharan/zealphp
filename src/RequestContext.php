@@ -163,6 +163,31 @@ class RequestContext
         }
         if (self::$instance === null) {
             self::$instance = new self();
+            if (App::$superglobals) {
+                // #346 — Apache/mod_php (and any non-OpenSwoole SAPI) bridge:
+                // a DECLARED, default-initialized typed property ("public array
+                // $server = []") is "set", so reads resolve from the empty slot
+                // and the __get superglobals proxy NEVER runs — $g->server /
+                // $g->get / $g->request were always [] under plain Apache even
+                // though the SAPI populated $_SERVER/$_GET correctly. Unset the
+                // request-input slots at construction so reads AND writes route
+                // through __get/__set, which proxy to $GLOBALS['_SERVER'] etc.
+                // by reference (the same live-alias contract the ZealPHP
+                // server's OnRequest populate establishes per request — there
+                // this unset is simply idempotent; under Apache it is the only
+                // place that can establish the bridge, because no ZealPHP
+                // request lifecycle ever runs).
+                unset(
+                    self::$instance->get,
+                    self::$instance->post,
+                    self::$instance->cookie,
+                    self::$instance->files,
+                    self::$instance->server,
+                    self::$instance->request,
+                    self::$instance->session,
+                    self::$instance->env
+                );
+            }
         }
         return self::$instance;
     }

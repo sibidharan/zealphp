@@ -603,6 +603,17 @@ class App
      */
     public static bool $api_warn_collisions = true;
     /**
+     * #347 — Apache-parity for unhandled API methods: when a ZealAPI handler
+     * returns `null` with NO output, NO explicit status and NO streaming
+     * (the labs WebAPI shape — a filename-match closure that serves POST and
+     * no-ops on GET), emit `404` + `{"error":"method_not_found"}` instead of
+     * a silent `200 OK` + empty body. Default ON (matches the mod_php
+     * dispatch contract). A handler that genuinely means "empty 200" can
+     * `return '';` or set a status; set this `false` to restore the
+     * pre-#347 null→200-empty behaviour globally.
+     */
+    public static bool $api_null_not_found = true;
+    /**
      * Toggle the uopz override of the exec family (backtick / `shell_exec`
      * / `exec` / `system` / `passthru`) so they yield via OpenSwoole's
      * coroutine scheduler instead of blocking the worker.
@@ -1066,6 +1077,7 @@ class App
         'strip_trailing_slash'  => 'stripTrailingSlash',
         'server_admin'          => 'serverAdmin',
         'api_warn_collisions'   => 'apiWarnCollisions',
+        'api_null_not_found'    => 'apiNullNotFound',
         'directory_slash'       => 'directorySlash',
         'hostname_lookups'      => 'hostnameLookups',
     ];
@@ -1776,6 +1788,18 @@ class App
     }
 
     /**
+     * #347 — whether a ZealAPI handler returning `null` with no output, no
+     * explicit status and no streaming yields the Apache-parity
+     * `404 {"error":"method_not_found"}` envelope instead of `200` + empty
+     * body. Default `true`. No-arg call returns the current value.
+     */
+    public static function apiNullNotFound(?bool $on = null): bool
+    {
+        if ($on !== null) self::$api_null_not_found = $on;
+        return self::$api_null_not_found;
+    }
+
+    /**
      * Apache `DirectorySlash` — redirect `/foo` → `/foo/` when `foo` is a directory.
      * Default `true`. No-arg call returns the current value.
      */
@@ -2446,18 +2470,37 @@ class App
         if (!$req instanceof \ZealPHP\HTTP\Request) {
             return;
         }
+        // ext#43 — the CURRENT live superglobals win over the request-derived
+        // rebuild. A route callback mutating `$g->get` (= the live $_GET alias)
+        // before App::include() must have those mutations visible inside the
+        // included file — Apache/mod_php semantics ($_GET['x'] = ...; include)
+        // and MODE_COROUTINE behaviour. The original always-rebuild defended
+        // against the colliding-cid era where the live process globals could
+        // hold a PEER's data at this point; post-#40/#42 (ptr-keyed snapshot
+        // lanes) the live state inside a request coroutine is provably its own
+        // (0 leaks at 60+-way concurrency), so rebuilding from the pristine
+        // request only LOST legitimate mutations (labs: $g->get['username']
+        // written by the /profile route → empty in profile.php → infinite
+        // redirect loop). Request-derived values remain the fallback when the
+        // live array is empty (genuinely empty either way, or an edge where
+        // the populate never ran — the rebuild restores canonical values).
+        $curGet = $g->get;
         /** @var array<string, mixed> $get */
-        $get = $req->get ?? [];
+        $get = $curGet !== [] ? $curGet : ($req->get ?? []);
+        $curPost = $g->post;
         /** @var array<string, mixed> $post */
-        $post = $req->post ?? [];
+        $post = $curPost !== [] ? $curPost : ($req->post ?? []);
+        $curCookie = $g->cookie;
         /** @var array<string, mixed> $cookie */
-        $cookie = self::requestCookieMap($req); // #305 — PHP-canonical $_COOKIE
+        $cookie = $curCookie !== [] ? $curCookie : self::requestCookieMap($req); // #305 — PHP-canonical $_COOKIE
+        $curFiles = $g->files;
         /** @var array<string, mixed> $files */
-        $files = $req->files ?? [];
-        $server = self::buildServerVars($req);
+        $files = $curFiles !== [] ? $curFiles : ($req->files ?? []);
+        $curServer = $g->server;
+        $server = $curServer !== [] ? $curServer : self::buildServerVars($req);
         if ($serverOverlay !== null) {
             // Overlay wins: preserve per-include PHP_SELF / SCRIPT_NAME /
-            // SCRIPT_FILENAME over the request-derived defaults.
+            // SCRIPT_FILENAME over the live/request-derived values.
             $server = $serverOverlay + $server;
         }
         $request = $get + $post;
