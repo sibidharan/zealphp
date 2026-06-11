@@ -164,7 +164,7 @@ class CoSessionManager
 
         // $g->session is a declared typed property with default [] — always
         // "set". Only check for residue from a prior request in this worker.
-        if (isset($g->session['__start_time'])) {
+        if (isset($g->memo['__start_time'])) {
             elog('[warn] Session leak detected');
         }
         $g->session = [];
@@ -266,8 +266,12 @@ class CoSessionManager
         $zpFatalGuardId = \ZealPHP\App::fatalGuardTrack($response); // #338 — answer this connection with 500 if a fatal kills the worker
         try {
             if ($manageSession) {
-                $g->session['__start_time'] = microtime(true);
-                $g->session['UNIQUE_REQUEST_ID'] = uniqidReal();
+                // #374: framework bookkeeping lives in $g->memo, NOT in the
+                // user's $_SESSION — native PHP never injects its own keys
+                // into the session array (they were being persisted to the
+                // store and visible to count()/foreach/json_encode).
+                $g->memo['__start_time'] = microtime(true);
+                $g->memo['UNIQUE_REQUEST_ID'] = uniqidReal();
             }
             $g->openswoole_request = $request;
             $g->openswoole_response = $response;

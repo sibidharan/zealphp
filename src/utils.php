@@ -760,7 +760,7 @@ function zlog($log, $tag = "system", $filter = null, $invert_filter = false): vo
         $log = json_encode($log);
     }
     // @phpstan-ignore-next-line — session map is array<string, mixed>; UNIQUE_REQUEST_ID coerced to string at boundary
-    $unique_req_id = (string)($g->session['UNIQUE_REQUEST_ID'] ?? '');
+    $unique_req_id = (string)($g->memo['UNIQUE_REQUEST_ID'] ?? '');
     $request_uri = $g->server['REQUEST_URI'] ?? '';
     $callerFile = $caller['file'] ?? '(unknown)';
     $callerLine = $caller['line'] ?? 0;
@@ -808,7 +808,7 @@ function get_config($key)
 function get_current_render_time()
 {
     $finish = microtime(true);
-    $start = RequestContext::instance()->session['__start_time'] ?? 0.0;
+    $start = RequestContext::instance()->memo['__start_time'] ?? 0.0;
     $startFloat = is_numeric($start) ? (float)$start : 0.0;
     return (float) number_format(
         ($finish - $startFloat),
