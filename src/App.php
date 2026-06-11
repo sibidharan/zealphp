@@ -6423,10 +6423,22 @@ class App
                 // \ZealPHP\ob_end_flush() (the streaming uopz shim in utils.php),
                 // which flush()es-then-DISCARDS the buffer instead of stacking
                 // it down — the inner buffers' content would be lost.
+                // Collapse nested OB levels into ours by POP-AND-ECHO, not
+                // ob_end_flush: that builtin is overridden at boot
+                // (registerAllOverrides) by the streaming shim
+                // \ZealPHP\ob_end_flush(), which flush()es-then-DISCARDS the
+                // buffer — and namespace qualification cannot escape an
+                // engine-level internal-function override, so flushing here
+                // silently lost the app's own ob_start() content. ob_get_clean
+                // / ob_get_level are NOT overridden; the merge preserves wire
+                // order and strictly decreases the level (false → stop; never
+                // spins on a non-removable test-harness buffer).
                 while (ob_get_level() > $obBase + 1) {
-                    if (@\ob_end_flush() === false) {
-                        break;   // non-removable buffer (e.g. a test harness's) — stop, don't spin
+                    $innerBuf = @\ob_get_clean();
+                    if ($innerBuf === false) {
+                        break;
                     }
+                    echo $innerBuf;
                 }
                 $haltStatus = $e->getStatus();
                 if (is_int($haltStatus) && $haltStatus >= 100 && $haltStatus <= 599) {
@@ -6450,10 +6462,15 @@ class App
                 // at the top of executeFile() created ($obBase + 1).
                 // \ob_end_flush global-qualified — see the HaltException branch
                 // above (the \ZealPHP shim would discard, not stack down).
+                // Pop-and-echo merge — see the HaltException branch above for
+                // why ob_end_flush (overridden by the discarding streaming
+                // shim) must not be used here.
                 while (ob_get_level() > $obBase + 1) {
-                    if (@\ob_end_flush() === false) {
-                        break;   // non-removable buffer — stop, don't spin
+                    $innerBuf = @\ob_get_clean();
+                    if ($innerBuf === false) {
+                        break;
                     }
+                    echo $innerBuf;
                 }
                 if (is_int($status) && $status >= 100 && $status <= 599) {
                     $result = $status;
