@@ -1382,12 +1382,17 @@ class App
      */
     public static function emitStatus(\OpenSwoole\HTTP\Response $response, int $status): void
     {
+        // #370 — ALWAYS use the two-arg form. OpenSwoole's single-arg
+        // status($code) silently flattens any code outside its internal C-side
+        // whitelist to 200 OK (it even hits IANA 451 in a raw probe); the
+        // two-arg status($code, $reason) emits any in-range code intact. The
+        // universal return contract documents 100–599 as "emit as-is", so a
+        // non-IANA in-range code (299, nginx 444/499, 599, …) must reach the
+        // wire as its numeric code — only the reason phrase is unknown. We
+        // synthesize a NON-EMPTY placeholder ('Status N') for those because
+        // OpenSwoole ALSO downgrades status($code, '') (empty reason) to 200.
         $reason = self::reasonPhrase($status);
-        if ($reason !== '') {
-            $response->status($status, $reason);
-        } else {
-            $response->status($status);
-        }
+        $response->status($status, $reason !== '' ? $reason : 'Status ' . $status);
     }
 
     /**
@@ -1449,7 +1454,16 @@ class App
             if (!$g->openswoole_response->isWritable()) break;
             // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
             $g->openswoole_response->write((string)$chunk);
-            \OpenSwoole\Coroutine::sleep(0);
+            // #354 — yield to the scheduler ONLY when inside a coroutine.
+            // In mixed mode (enable_coroutine=false) the handler runs outside
+            // any coroutine, so Coroutine::sleep(0) throws "API must be called
+            // in the coroutine" → uncaught → worker exits status=255 with a
+            // truncated, unterminated chunked stream. write() already flushes
+            // each chunk; the yield is only a concurrency nicety, and there are
+            // no peer coroutines to yield to when enable_coroutine is off.
+            if (\OpenSwoole\Coroutine::getCid() > 0) {
+                \OpenSwoole\Coroutine::sleep(0);
+            }
         }
         // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
         if ($g->openswoole_response->isWritable()) {

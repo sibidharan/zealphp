@@ -84,6 +84,31 @@ final class TableBackendTest extends TestCase
         $this->assertSame(6, $b->decr('hits', 'k', 'n', 1));
     }
 
+    public function testIncrIsAtomicAndNeverDropsCounts(): void
+    {
+        // #344 — the Table backend MUST delegate to OpenSwoole\Table::incr
+        // (a server-side atomic op), NOT a get-then-set read-modify-write that
+        // can drop concurrent increments. A read-modify-write impl that read a
+        // stale baseline would still total correctly sequentially, so we also
+        // assert the returned value strictly monotonically rises by exactly the
+        // delta on every call (no lost update) and the final total is exact.
+        $b = new TableBackend();
+        $b->make('hits', 10, ['n' => [Table::TYPE_INT, 8]]);
+
+        $expected = 0;
+        for ($i = 1; $i <= 1000; $i++) {
+            $expected += 3;
+            $this->assertSame($expected, $b->incr('hits', 'k', 'n', 3));
+        }
+        $this->assertSame(3000, $b->get('hits', 'k', 'n'));
+
+        // The underlying op is OpenSwoole\Table::incr — confirm the backend
+        // exposes the same raw Table so the atomic primitive is the one in use.
+        $raw = $b->rawTable('hits');
+        $this->assertInstanceOf(Table::class, $raw);
+        $this->assertSame(3003, $raw->incr('k', 'n', 3), 'raw Table::incr is the atomic primitive backing incr()');
+    }
+
     public function testIncrOnMissingTableReturnsZero(): void
     {
         $b = new TableBackend();

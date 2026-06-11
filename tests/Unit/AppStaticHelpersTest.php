@@ -150,14 +150,41 @@ class AppStaticHelpersTest extends TestCase
         $this->assertSame([['status', 425, 'Too Early']], $fake->log);
     }
 
-    public function testEmitStatusUnknownCodeDefersToOneArgForm(): void
+    public function testEmitStatusUnknownCodeSynthesizesNonEmptyReason(): void
     {
-        // No reason in the table → empty reason string passed through (the
-        // FakeOpenSwooleResponse default param). emitStatus() takes the
-        // single-arg branch.
+        // #370 — a non-IANA in-range code (no REASON_PHRASES entry) must still
+        // reach the wire as its numeric code. OpenSwoole's single-arg form (and
+        // an empty-reason two-arg call) flatten it to 200, so emitStatus() now
+        // ALWAYS uses the two-arg form with a synthesized non-empty reason.
         $fake = new FakeOpenSwooleResponse();
         App::emitStatus($fake, 444);
-        $this->assertSame([['status', 444, '']], $fake->log);
+        $this->assertSame([['status', 444, 'Status 444']], $fake->log);
+    }
+
+    /**
+     * @return array<string, array{0:int}>
+     */
+    public static function nonIanaInRangeCodes(): array
+    {
+        return [
+            '299 warning'        => [299],
+            '444 nginx no-resp'  => [444],
+            '499 client closed'  => [499],
+            '599 in-range top'   => [599],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('nonIanaInRangeCodes')]
+    public function testEmitStatusInRangeNonIanaCodePreservesCode(int $code): void
+    {
+        // #370 — the numeric code must survive (a non-empty reason ensures
+        // OpenSwoole emits HTTP/1.1 <code> instead of downgrading to 200 OK).
+        $fake = new FakeOpenSwooleResponse();
+        App::emitStatus($fake, $code);
+        $this->assertCount(1, $fake->log);
+        $this->assertSame('status', $fake->log[0][0]);
+        $this->assertSame($code, $fake->log[0][1]);
+        $this->assertNotSame('', $fake->log[0][2], 'reason must be non-empty so OpenSwoole keeps the code');
     }
 
     public function testEmitStatusCommonCodesCarryReason(): void

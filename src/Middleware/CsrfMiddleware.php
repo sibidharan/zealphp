@@ -86,7 +86,7 @@ final class CsrfMiddleware implements MiddlewareInterface
         }
 
         foreach ($this->exempt as $prefix) {
-            if (str_starts_with($path, $prefix)) {
+            if (self::pathMatchesExempt($path, $prefix)) {
                 return $handler->handle($request);
             }
         }
@@ -101,5 +101,34 @@ final class CsrfMiddleware implements MiddlewareInterface
         }
 
         return $handler->handle($request);
+    }
+
+    /**
+     * Segment-boundary exemption match (#342).
+     *
+     * An exempt entry exempts the request path only on an exact match or a
+     * true path-segment boundary — NOT a loose `str_starts_with` prefix. So
+     * `'/api/stripe'` exempts `/api/stripe` and `/api/stripe/charge`, but
+     * NEVER `/api/stripeKeyUpdate` (the historical CSRF-bypass: an attacker
+     * appended text to an exempt prefix to skip validation on a sibling
+     * state-changing route). Same class of fix as the #232 `ScopedMiddleware`
+     * segment-safe scope. A trailing-slash entry (`'/api/stripe/'`) keeps its
+     * prefix semantics for the subtree below it (the next char after the
+     * prefix is already the `/` boundary).
+     */
+    private static function pathMatchesExempt(string $path, string $prefix): bool
+    {
+        if ($prefix === '') {
+            return false;
+        }
+        if ($path === $prefix) {
+            return true;
+        }
+        if (!str_starts_with($path, $prefix)) {
+            return false;
+        }
+        // Only a match when the prefix ends at a segment boundary: either the
+        // prefix already ends in '/', or the next char in the path is '/'.
+        return str_ends_with($prefix, '/') || $path[strlen($prefix)] === '/';
     }
 }

@@ -653,11 +653,15 @@ class AppPipelineExtraTest extends TestCase
         $this->assertSame(['status', 451, 'Unavailable For Legal Reasons'], $fake->log[0]);
     }
 
-    public function testEmitStatusUnknownCodeUsesOneArgForm(): void
+    public function testEmitStatusUnknownCodeSynthesizesReason(): void
     {
+        // #370 — emitStatus() now ALWAYS uses the two-arg form with a non-empty
+        // reason (synthesized for codes without a REASON_PHRASES entry), because
+        // OpenSwoole's single-arg form (and an empty-reason two-arg call) flatten
+        // the code to 200 OK. The numeric code must reach the wire intact.
         $fake = new FakeOpenSwooleResponse();
         App::emitStatus($fake, 799);
-        $this->assertSame(['status', 799, ''], $fake->log[0]);
+        $this->assertSame(['status', 799, 'Status 799'], $fake->log[0]);
     }
 
     // ── helpers ───────────────────────────────────────────────────────

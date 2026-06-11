@@ -126,6 +126,59 @@ final class CsrfMiddlewareTest extends TestCase
         $this->assertTrue($this->handler->called);
     }
 
+    public function testExemptPrefixDoesNotBypassSiblingRoute(): void
+    {
+        // #342 — an exempt prefix '/api/stripe' must NOT exempt the colliding
+        // sibling route '/api/stripeKeyUpdate'. The loose str_starts_with match
+        // let an attacker append text to an exempt prefix to skip CSRF.
+        $mw = new CsrfMiddleware(exempt: ['/api/stripe']);
+        $g = RequestContext::instance();
+        $g->session = ['_csrf_token' => bin2hex(random_bytes(32))];
+        $g->memo = [];
+        $g->post = [];
+        $g->server = ['REQUEST_METHOD' => 'POST'];
+
+        $request = new ServerRequest('/api/stripeKeyUpdate', 'POST');
+        $response = $mw->process($request, $this->handler);
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertFalse($this->handler->called);
+    }
+
+    public function testExemptPrefixMatchesExactPath(): void
+    {
+        // #342 — an exact match of the exempt entry is still exempt.
+        $mw = new CsrfMiddleware(exempt: ['/api/stripe']);
+        $g = RequestContext::instance();
+        $g->session = ['_csrf_token' => bin2hex(random_bytes(32))];
+        $g->memo = [];
+        $g->post = [];
+        $g->server = ['REQUEST_METHOD' => 'POST'];
+
+        $request = new ServerRequest('/api/stripe', 'POST');
+        $response = $mw->process($request, $this->handler);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertTrue($this->handler->called);
+    }
+
+    public function testExemptPrefixMatchesSegmentBoundarySubpath(): void
+    {
+        // #342 — a true subtree segment ('/api/stripe/charge') stays exempt.
+        $mw = new CsrfMiddleware(exempt: ['/api/stripe']);
+        $g = RequestContext::instance();
+        $g->session = ['_csrf_token' => bin2hex(random_bytes(32))];
+        $g->memo = [];
+        $g->post = [];
+        $g->server = ['REQUEST_METHOD' => 'POST'];
+
+        $request = new ServerRequest('/api/stripe/charge', 'POST');
+        $response = $mw->process($request, $this->handler);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertTrue($this->handler->called);
+    }
+
     public function testTokenPersistsAcrossRequests(): void
     {
         $g = RequestContext::instance();
