@@ -351,8 +351,9 @@ class Response
      *  - ['status' => 'ignore', 'ranges' => []]
      *        Header is not a `bytes=` range, contains a syntactically invalid
      *        spec (RFC 7233 §2.1: an invalid spec invalidates the whole header),
-     *        or the range count exceeds {@see MAX_RANGES} (CVE-2011-3192
-     *        mitigation). Caller serves the full body (200).
+     *        contains no spec at all (`bytes=,` — the empty byte-range-set, also
+     *        invalid per §2.1, #365), or the range count exceeds {@see MAX_RANGES}
+     *        (CVE-2011-3192 mitigation). Caller serves the full body (200).
      *  - ['status' => 'unsatisfiable', 'ranges' => []]
      *        Every well-formed spec is out of bounds (416).
      *  - ['status' => 'ok', 'ranges' => array<int, array{0: int, 1: int}>]
@@ -371,11 +372,20 @@ class Response
         }
 
         $ranges = [];
+        // Track whether the set contained ANY syntactically-valid spec. RFC 7233
+        // §2.1: byte-range-set = 1#( byte-range-spec / suffix-byte-range-spec ) —
+        // at least one spec is required. A header with none (`bytes=,`, `bytes=,,`,
+        // `bytes=, ,`) is not a valid Range request at all → ignore it and serve
+        // the full 200 (#365), as opposed to a valid spec that fell out of bounds
+        // (→ 416). Without this we can't tell "no parseable spec → ignore" from
+        // "all valid specs unsatisfiable → unsatisfiable".
+        $sawSpec = false;
         foreach ($specs as $spec) {
             $spec = trim($spec);
             if ($spec === '') {
                 continue;
             }
+            $sawSpec = true;
 
             // Strict byte-range-spec grammar (RFC 7233 §2.1):
             //   suffix:  "-" 1*DIGIT          (bytes=-N)
@@ -420,10 +430,15 @@ class Response
             }
         }
 
-        // Every spec was unsatisfiable/degenerate → 416 (RFC 7233 §4.4). A
-        // multi-range header keeps its satisfiable specs (the bad ones skipped above).
         if ($ranges === []) {
-            return ['status' => 'unsatisfiable', 'ranges' => []];
+            // No range survived. Distinguish the two empty cases (#365):
+            //  - No syntactically-valid spec was present at all (`bytes=,`) →
+            //    the header is invalid per RFC 7233 §2.1 → ignore → full 200.
+            //  - ≥1 valid spec parsed but every one fell outside [0, total) /
+            //    was degenerate (`bytes=500-600`, `bytes=-0`) → 416 (§4.4).
+            return $sawSpec
+                ? ['status' => 'unsatisfiable', 'ranges' => []]
+                : ['status' => 'ignore', 'ranges' => []];
         }
 
         // Coalesce overlapping/adjacent specs into disjoint unions before
@@ -604,7 +619,19 @@ class Response
         $this->header('Accept-Ranges', 'bytes');
 
         if ($filename !== '') {
-            $this->header('Content-Disposition', 'attachment; filename="' . addcslashes($filename, '"\\') . '"');
+            // RFC 6266 / RFC 5987: HTTP field values are US-ASCII (RFC 9110 §5.5),
+            // so a non-ASCII download name must travel as the `filename*` ext-value
+            // (UTF-8'' + percent-encoded), NOT raw UTF-8 octets inside the quoted
+            // `filename=` string (which browsers garble/strip). We always emit an
+            // ASCII-downgraded `filename=` fallback for legacy clients, and append
+            // `filename*=UTF-8''…` only when the name actually has non-ASCII bytes
+            // (#361). Matches mod_php / mod_dav download behaviour.
+            $ascii = (string) preg_replace('/[^\x20-\x7e]/', '_', $filename);
+            $disposition = 'attachment; filename="' . addcslashes($ascii, '"\\') . '"';
+            if ($ascii !== $filename) {
+                $disposition .= "; filename*=UTF-8''" . rawurlencode($filename);
+            }
+            $this->header('Content-Disposition', $disposition);
         }
 
         // Conditional preconditions — Apache-style ETag (mtime-size as weak
@@ -637,6 +664,23 @@ class Response
         $cond = ConditionalRequest::evaluate($method, $condHeaders, $etag, $mtime);
         if ($cond === 304 || $cond === 412) {
             $this->status($cond);
+            $this->flush();
+            $this->parent->end('');
+            return;
+        }
+
+        // HEAD (RFC 9110 §9.3.2): "identical to GET except that the server MUST
+        // NOT send content in the response." Emit every header a GET would
+        // (Content-Type / Content-Length / ETag / Last-Modified / Accept-Ranges,
+        // already queued above) but no body bytes. This mirrors the stream()/sse()
+        // HEAD guard (#238); without it the zero-copy sendfile() paths below would
+        // write the full file on HEAD (#358), bypassing ResponseMiddleware's
+        // HEAD body-strip (sendFile sets $g->_streaming = true). We advertise the
+        // full representation's Content-Length here — the body-less HEAD analogue
+        // of the 200 path — never a per-range length, matching Apache static HEAD.
+        if (strcasecmp($method, 'HEAD') === 0) {
+            $this->status(200);
+            $this->header('Content-Length', (string) $total);
             $this->flush();
             $this->parent->end('');
             return;
@@ -715,11 +759,18 @@ class Response
             return true;
         }
 
-        // Entity-tag form: starts with `"` or `W/"`. Strong comparison only —
-        // a weak validator must not be used to short-circuit a Range request,
-        // so a `W/`-prefixed If-Range never matches (mirrors Apache's
-        // ap_condition_if_range, which compares the raw strings).
+        // Entity-tag form: starts with `"` or `W/"`. RFC 9110 §13.1.5 mandates
+        // the STRONG comparison function for If-Range, and §8.8.1 forbids a weak
+        // validator from authorising sub-range retrieval. So if EITHER tag is
+        // weak (`W/`-prefixed) the validator can never satisfy If-Range → fall
+        // through to the full 200 (#362). Only two non-weak, byte-identical
+        // opaque-tags match. sendFile's ETag is always weak, so by-ETag If-Range
+        // on these resources always serves the full body — clients should use
+        // the HTTP-date If-Range form (handled by ifRangeDateMatches()).
         if (str_starts_with($ifRange, '"') || str_starts_with($ifRange, 'W/"')) {
+            if (str_starts_with($ifRange, 'W/') || str_starts_with($etag, 'W/')) {
+                return false;
+            }
             return $ifRange === $etag;
         }
 
@@ -809,9 +860,19 @@ class Response
             $this->parent->end('');
             return;
         }
+
+        // Assemble the whole multipart body and emit it in ONE length-delimited
+        // end($payload) call rather than incremental write()s (#366). The moment
+        // OpenSwoole sees a write() it switches the response to chunked
+        // transfer-encoding and silently drops the Content-Length we queued above
+        // — diverging from Apache, which sends multipart/byteranges length-
+        // delimited. coalesceRanges() in parseRange() caps Σ(slice) ≤ $total, so
+        // the buffered payload is bounded by the file size (the same byte budget
+        // a 200 would write). Result: the precomputed Content-Length survives on
+        // the wire, so clients can show a progress total for the multi-range fetch.
+        $payload = '';
         foreach ($ranges as $i => [$start, $end]) {
-            $part = ($i > 0 ? "\r\n" : '') . $partHeaders[$i];
-            $this->parent->write($part);
+            $payload .= ($i > 0 ? "\r\n" : '') . $partHeaders[$i];
             $remaining = $end - $start + 1;
             fseek($fh, $start);
             while ($remaining > 0) {
@@ -819,13 +880,13 @@ class Response
                 if ($chunk === false || $chunk === '') {
                     break;
                 }
-                $this->parent->write($chunk);
+                $payload .= $chunk;
                 $remaining -= strlen($chunk);
             }
         }
         fclose($fh);
-        $this->parent->write($closing);
-        $this->parent->end();
+        $payload .= $closing;
+        $this->parent->end($payload);
     }
 
     /**

@@ -296,18 +296,20 @@ class RangeMiddlewareConformanceTest extends TestCase
     }
 
     /**
-     * If-Range value is a weak ETag (W/"...") — handled via ETag path, not date path.
-     * Matching weak ETag → range honoured.
+     * If-Range value is a weak ETag (W/"...") — RFC 9110 §13.1.5 mandates the
+     * STRONG comparison for If-Range and §8.8.1 forbids a weak validator from
+     * authorising sub-range retrieval. So even a verbatim-matching weak ETag is
+     * ignored → full 200, never a 206 slice (#362).
      */
-    public function testIfRangeWeakETagMatchHonoursRange(): void
+    public function testIfRangeWeakETagIgnoredServesFullBody(): void
     {
         $response = $this->dispatch(
             ['range' => 'bytes=0-4', 'if-range' => 'W/"v2"'],
             ['ETag' => 'W/"v2"']
         );
 
-        $this->assertSame(206, $response->getStatusCode(), 'Matching weak ETag → 206');
-        $this->assertSame('Hello', (string) $response->getBody());
+        $this->assertSame(200, $response->getStatusCode(), 'Weak ETag If-Range → full 200');
+        $this->assertSame(self::BODY, (string) $response->getBody());
     }
 
     /**

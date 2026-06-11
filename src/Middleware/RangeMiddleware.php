@@ -111,13 +111,22 @@ class RangeMiddleware implements MiddlewareInterface
         $ifRange = $request->getHeaderLine('If-Range');
         if ($ifRange !== '') {
             if (str_starts_with($ifRange, '"') || str_starts_with($ifRange, 'W/"')) {
-                // ETag comparison — exact string match required (strong or weak tag).
+                // ETag comparison — RFC 9110 §13.1.5 requires the STRONG function
+                // for If-Range, and §8.8.1 forbids a weak validator from
+                // authorising sub-range retrieval. If EITHER the If-Range value or
+                // the response ETag is weak (`W/`-prefixed), the validator can
+                // never satisfy If-Range → ignore the Range, serve the full body
+                // (#362). Only two non-weak, byte-identical tags honour the range.
                 $etag = $response->getHeaderLine('ETag');
-                if ($etag !== '' && $ifRange !== $etag) {
-                    // ETag mismatch: ignore range, serve full body.
+                if (str_starts_with($ifRange, 'W/') || str_starts_with($etag, 'W/')) {
+                    // Weak validator on either side — never short-circuit a Range.
                     return $response->withHeader('Accept-Ranges', 'bytes');
                 }
-                // No ETag on response or tags match: fall through and honour range.
+                if ($etag !== '' && $ifRange !== $etag) {
+                    // Strong ETag mismatch: ignore range, serve full body.
+                    return $response->withHeader('Accept-Ranges', 'bytes');
+                }
+                // No ETag on response or strong tags match: honour the range.
             } else {
                 // HTTP-date comparison against Last-Modified — delegated to the
                 // single shared strong-validation helper so this buffered path
@@ -169,14 +178,22 @@ class RangeMiddleware implements MiddlewareInterface
         // the loop, rather than a 416.
         $valid = true;
 
+        // Track whether the set contained ANY syntactically-valid spec. RFC 7233
+        // §2.1: byte-range-set requires ≥1 spec. A header with none at all
+        // (`bytes=,`, `bytes=,,`) is invalid → ignore → full 200 (#365), distinct
+        // from a valid spec that fell out of bounds (→ 416).
+        $sawSpec = false;
+
         foreach ($rawSpecs as $spec) {
             $spec = trim($spec);
             if ($spec === '') {
                 // Empty token after trim (e.g. trailing comma, or bytes= with only
-                // whitespace).  Skip silently — no range added; if no valid spec is
-                // found the empty-$ranges check below will emit 416.
+                // whitespace).  Skip silently — no range added; if at least one
+                // VALID spec was seen the empty-$ranges check below emits 416,
+                // otherwise (#365) the header is invalid → full 200.
                 continue;
             }
+            $sawSpec = true;
 
             if (str_starts_with($spec, '-')) {
                 // Suffix range: bytes=-N → last N bytes
@@ -238,6 +255,11 @@ class RangeMiddleware implements MiddlewareInterface
         }
 
         if (empty($ranges)) {
+            // #365: no valid spec at all (`bytes=,`) → invalid header → full 200;
+            // ≥1 valid spec but all out of bounds → 416.
+            if (!$sawSpec) {
+                return $response->withHeader('Accept-Ranges', 'bytes');
+            }
             return $this->unsatisfiable($total, $g);
         }
 
