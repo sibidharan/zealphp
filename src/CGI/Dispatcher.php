@@ -182,7 +182,23 @@ class Dispatcher
         }
         $existing = $g->cookie[$name] ?? null;
         if (is_string($existing) && $existing !== '') {
+            // Returning visitor — forward the id the client SENT. Non-polluting
+            // (the client already had it) and required so the subprocess
+            // read/writes the session the client's cookie points at.
             return $existing;
+        }
+        // #355 — LAZY: a FIRST-time visitor (no incoming PHPSESSID) must NOT be
+        // minted a session id unless the app explicitly opts in. mod_php with
+        // session.auto_start=0 emits no Set-Cookie and leaves $_COOKIE clean
+        // for a script that never calls session_start(); the old unconditional
+        // host-mint here injected an id into BOTH the request-side $_COOKIE
+        // (request-input fidelity bug — a handler saw a cookie the client never
+        // sent) and the response Set-Cookie (unsolicited tracking cookie that
+        // defeats shared-cache caching). Eager first-visit minting stays
+        // available behind App::$cgi_session_auto_start for legacy apps that
+        // need the #108 "subprocess can't emit its own session cookie" workaround.
+        if (!\ZealPHP\App::$cgi_session_auto_start) {
+            return null;
         }
         if (!function_exists('session_create_id')) {
             return null;
@@ -204,6 +220,57 @@ class Dispatcher
             );
         }
         return $sid;
+    }
+
+    /**
+     * Emit the PHPSESSID Set-Cookie AFTER a CGI subprocess that STARTED a
+     * session (#108 / #355). The subprocess can't emit its own session cookie
+     * (PHP's session module uses the C-internal `php_setcookie()`, which the
+     * CLI SAPI discards), so it reports the active session id back in the
+     * metadata frame (`session_id`); the host emits the cookie here.
+     *
+     * Lazy + mod_php-faithful: a script that never calls `session_start()`
+     * reports no session id, so NOTHING is emitted (no unsolicited cookie). The
+     * cookie is also skipped when the client already sent that exact id (no
+     * redundant Set-Cookie on a returning visitor). This is the post-run
+     * counterpart to `mintCgiSession()`'s pre-run client-id forwarding — together
+     * they give #108 first-visit cookie delivery WITHOUT #355's eager mint.
+     *
+     * @param mixed $response the response wrapper carrying ->cookie()/->isWritable()
+     * @param array<array-key, mixed> $meta the decoded subprocess metadata frame
+     */
+    private static function emitCgiSessionCookieFromMeta(
+        \ZealPHP\RequestContext $g,
+        mixed $response,
+        array $meta
+    ): void {
+        if (!App::cgiOwnsSessions()) {
+            return;
+        }
+        $sid = $meta['session_id'] ?? null;
+        if (!is_string($sid) || $sid === '') {
+            return; // subprocess never started a session — emit nothing.
+        }
+        $metaName = $meta['session_name'] ?? null;
+        $name = (is_string($metaName) && $metaName !== '') ? $metaName : 'PHPSESSID';
+        // Returning visitor already holds this id — no redundant Set-Cookie.
+        $existing = $g->cookie[$name] ?? null;
+        if (is_string($existing) && $existing === $sid) {
+            return;
+        }
+        if (!is_object($response)) {
+            return;
+        }
+        // NB: the response wrapper (ZealPHP\HTTP\Response) forwards cookie()/
+        // isWritable() through __call, so method_exists() would report false —
+        // call directly and let the wrapper forward (mirrors the $applyCookie
+        // path that calls $respW->cookie(...) unconditionally above).
+        if (is_callable([$response, 'isWritable']) && !$response->isWritable()) {
+            return;
+        }
+        if (is_callable([$response, 'cookie'])) {
+            $response->cookie($name, $sid, 0, '/', '', false, true);
+        }
     }
 
     /**
@@ -488,6 +555,9 @@ class Dispatcher
                     $g->zealphp_response->rawCookie(...$args);
                 }
             }
+            // #108/#355 — emit PHPSESSID only when the subprocess actually
+            // started a session (reported via the meta frame).
+            self::emitCgiSessionCookieFromMeta($g, $g->zealphp_response, $meta);
             // Detect streaming content types (SSE, chunked, event-stream)
             foreach ($metaHeaders as $pair) {
                 if (is_array($pair) && count($pair) >= 2) {
@@ -1058,6 +1128,9 @@ class Dispatcher
             foreach ((array) ($resp['rawcookies'] ?? []) as $args) {
                 $applyCookie([$respW, 'rawCookie'], $narrow($args));
             }
+            // #108/#355 — emit PHPSESSID only when the pool subprocess actually
+            // started a session (reported in the response frame).
+            self::emitCgiSessionCookieFromMeta($g, $respW, $resp);
         }
 
         $body        = is_string($resp['body'] ?? null) ? $resp['body'] : '';

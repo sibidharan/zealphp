@@ -252,7 +252,7 @@ function fork_build_response(mixed $result, string $body): array
     $hasReturn   = is_int($result) || is_array($result) || is_string($result);
     $returnValue = $hasReturn ? $result : null;
 
-    return [
+    $frame = [
         'status'       => $__fm_status ?: 200,
         'headers'      => $__fm_headers,
         'cookies'      => $__fm_cookies,
@@ -261,6 +261,22 @@ function fork_build_response(mixed $result, string $body): array
         'return_value' => is_scalar($returnValue) || is_array($returnValue) || $returnValue === null ? $returnValue : null,
         'has_return'   => $hasReturn && $returnValue !== null && $returnValue !== 1,
     ];
+    // #355 — report the active session id so the host emits the PHPSESSID
+    // Set-Cookie ONLY for a session-using script (the fork child can't emit it;
+    // see Dispatcher::emitCgiSessionCookieFromMeta). No session_start() → no
+    // reported id → no unsolicited cookie (mod_php session.auto_start=0 parity).
+    if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE
+        && function_exists('session_id')
+    ) {
+        $__fm_sid = session_id();
+        if (is_string($__fm_sid) && $__fm_sid !== '') {
+            $frame['session_id'] = $__fm_sid;
+            $frame['session_name'] = function_exists('session_name') && is_string(session_name())
+                ? session_name()
+                : 'PHPSESSID';
+        }
+    }
+    return $frame;
 }
 
 $__fm_cwd = getenv('ZEALPHP_CWD');
