@@ -30,19 +30,23 @@ class FileSessionHandler implements \SessionHandlerInterface
     /**
      * Open the session storage at `$savePath`, creating the directory if absent.
      *
-     * Falls back to `/var/lib/php/sessions` when `$savePath` is empty.
+     * Falls back to the system temp dir when `$savePath` is empty — matching
+     * PHP-FPM, which uses `sys_get_temp_dir()` when `session.save_path` is the
+     * empty-string default (#343). The prior code computed the fallback into
+     * `$this->savePath` but then overwrote it back to the raw (empty)
+     * `$savePath` on the last line, AND ran `is_dir()`/`mkdir()` on the empty
+     * value — so writes hit `/sess_…` at the filesystem root and failed with
+     * Permission denied, breaking session storage entirely.
      */
     public function open($savePath, $sessionName): bool
     {
-        // if (!$savePath) {
-        //     $savePath = sys_get_temp_dir() . '/zealphp_sessions';
-        // }
-
-        $this->savePath = $savePath ?: '/var/lib/php/sessions';
-        if (!is_dir($savePath)) {
-            mkdir($savePath, 0700, true);
+        $resolved = ($savePath !== '')
+            ? $savePath
+            : (sys_get_temp_dir() ?: '/tmp');
+        if (!is_dir($resolved)) {
+            @mkdir($resolved, 0700, true);
         }
-        $this->savePath = $savePath;
+        $this->savePath = $resolved;
         return true;
     }
 

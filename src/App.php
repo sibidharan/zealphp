@@ -2299,6 +2299,39 @@ class App
     }
 
     /**
+     * Re-assert a session id the session manager already rotated, over a
+     * freshly-parsed request-cookie map (#371, CWE-384 session fixation).
+     *
+     * The session manager (`CoSessionManager`/`SessionManager`) runs BEFORE
+     * the OnRequest superglobal populate. On a forged / strict-mode-rejected
+     * id it mints a fresh server id and records it in
+     * `session_params['session_id']` (+ emits the rotated `Set-Cookie`). The
+     * populate then re-parses the RAW request cookie — which still carries the
+     * **forged** id — and writes it into `$g->cookie`, so a handler's
+     * `session_start()` → `zeal_session_id()` would read the forged id and
+     * persist the session under the attacker's value. This re-asserts the
+     * manager's rotated id into the cookie map whenever it differs from the
+     * raw value (the only thing that makes them differ is a manager rotation,
+     * including the first-visit mint where the raw cookie is absent).
+     *
+     * @param array<string, mixed> $cookie freshly-parsed request cookie map
+     * @return array<string, mixed>
+     */
+    public static function reassertRotatedSessionId(array $cookie): array
+    {
+        $g = RequestContext::instance();
+        $params = $g->session_params;
+        $name = $params['name'] ?? 'PHPSESSID';
+        $rotated = $params['session_id'] ?? null;
+        if (is_string($name) && $name !== '' && is_string($rotated) && $rotated !== ''
+            && ($cookie[$name] ?? null) !== $rotated
+        ) {
+            $cookie[$name] = $rotated;
+        }
+        return $cookie;
+    }
+
+    /**
      * Synthesize the mod_php request-surface `$_SERVER` vars that OpenSwoole's
      * raw `$request->server` omits or gets wrong (issue #306 + #307). Pure
      * transform of an already-built server array — operates on the
@@ -9257,6 +9290,11 @@ class App
             // session manager already parsed + wrote it back to $request->cookie.
             /** @var array<string, mixed> $cookie */
             $cookie = self::requestCookieMap($request);
+            // #371 — a session id the manager already rotated (forged /
+            // strict-mode-rejected) must not be clobbered back to the forged
+            // value by re-parsing the raw request cookie. Re-assert the
+            // manager's rotated id so zeal_session_id() reads it.
+            $cookie = self::reassertRotatedSessionId($cookie);
             // #304 — transpose OpenSwoole's index-major $_FILES to PHP-canonical
             // field-major + add the PHP 8.1+ full_path key.
             /** @var array<string, mixed> $files */
