@@ -68,7 +68,7 @@ All 50 apps sorted by category, with grades per mode.
 | 5 | Concrete CMS | CMS | 768 | Custom | **A** | C | B | F | 1 | Legacy OOP, superglobal-heavy |
 | 6 | October CMS | CMS | 11k | Laravel | C | **A** | A | NT | 3 | Laravel-based; Octane-aware |
 | 7 | Craft CMS | CMS | 3.1k | Yii-based | C | **A** | A | NT | 3 | Yii2 internals, clean OOP |
-| 8 | Grav | CMS | 14k | Custom | **B** | F | **B** | F | 1 or 4 | Mode 1 works after init; Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) worker-stable (sequential) — see sweep note |
+| 8 | Grav | CMS | 14k | Custom | **B** | F | **B** | F | 1 or 4 | Mode 1 works after init; `coroutine-legacy` (ext-zealphp 0.3.25) worker-stable (sequential) — see sweep note |
 | 9 | Kirby | CMS | 7.5k | Custom | B | **A** | A | NT | 3 | Modern OOP, no legacy cruft |
 | 10 | Statamic | CMS | 3.9k | Laravel | C | **A** | A | NT | 3 | Laravel-based |
 | 11 | Bagisto | E-comm | 15k | Laravel | C | **A** | A | NT | 3 | Laravel + Vue; clean |
@@ -116,7 +116,7 @@ All 50 apps sorted by category, with grades per mode.
 
 ## Coroutine-Mode Ranking (v0.3.8 + silent-define-redeclare, 2026-05-28)
 
-> **The goal**: run every PHP app in Mode 5 (Coroutine, no superglobals). When `coroutine` doesn't fit, fall to `coroutine-legacy` (coroutine + superglobals). `legacy-cgi` (pool/proc) is the **compatibility floor** — we pair it with FPM-equivalent semantics for apps that fundamentally need fresh-process state. The goal is to move every app UP this ranking.
+> **The goal**: run every PHP app in `coroutine` (no superglobals). When `coroutine` doesn't fit, fall to `coroutine-legacy` (coroutine + superglobals). `legacy-cgi` (pool/proc) is the **compatibility floor** — we pair it with FPM-equivalent semantics for apps that fundamentally need fresh-process state. The goal is to move every app UP this ranking.
 
 ### Tier S — Renders full UI in Mode 5 Coroutine (the real win)
 
@@ -137,7 +137,7 @@ Plus the 30x redirects that are working correctly: **freshrss** (301), **dokuwik
 
 **= 10 apps run in Mode 5 today.** This is what changed from earlier reports — silent-define-redeclare unlocked the const-heavy apps.
 
-### Tier A — Renders APP-LEVEL error in Mode 5 (framework served, app needs config)
+### Tier A — Renders APP-LEVEL error in `coroutine` (framework served, app needs config)
 
 The framework reached the app, the app responded with its own error UI. Not a framework bug:
 
@@ -161,7 +161,7 @@ The framework reached the app, the app responded with its own error UI. Not a fr
 | **mybb, piwigo, vanilla, grav, filegator** | various boot-time class/file misses |
 | **phpliteadmin** | PHP 8.x compatibility bug (`array_merge(null, ...)`) — broken on vanilla PHP 8.4, not a ZealPHP issue |
 
-### Tier C — Crash with worker death in Mode 5 (true framework gaps)
+### Tier C — Crash with worker death in `coroutine` (true framework gaps)
 
 | App | What happens |
 |---|---|
@@ -178,9 +178,9 @@ bookstack, flarum, monica, slim-app, drupal, filegator, phpbb, opencart, wallaba
 
 | Mode | Tier S (full render) | Tier A (app error rendered) | Tier B (config issue) | Tier C (worker crash) |
 |---|---:|---:|---:|---:|
-| **Mode 5 (Coroutine)** | **10** | 4 | 8 | 2 |
-| Mode 4 (Hybrid superglobals+coro) | 11 (+ WP, tinyfile) | 2 | 7 | 2 |
-| Mode 1 (Pool) | 13 + 5 redirect | 4 | 6 | 1 |
+| **`coroutine`** | **10** | 4 | 8 | 2 |
+| `coroutine-legacy` (superglobals+coro) | 11 (+ WP, tinyfile) | 2 | 7 | 2 |
+| `legacy-cgi` (pool) | 13 + 5 redirect | 4 | 6 | 1 |
 
 **Mode 5 today serves 10 apps end-to-end + 4 with app-level errors that are app fixes.** That's 14/32 (44%) of the matrix doing real work in pure coroutine mode. The remaining gap is dominated by per-app config (composer, paths, system extensions) — NOT framework limitations.
 
@@ -375,7 +375,7 @@ Full 32-app × 5-mode sweep after the FD-3 IPC fix. Each cell is **3 sequential 
 
 **Green in ALL 5 modes (production-portable):** adminer, kanboard, roundcube, traditional, freshrss
 
-**Require Mode 1 (CGI Pool):** phpMyAdmin, Cacti, Nextcloud, Privatebin, phpLiteAdmin, MyBB, Piwigo, Vanilla, MediaWiki, Drupal, Grav, WordPress
+**Require `legacy-cgi` (pool):** phpMyAdmin, Cacti, Nextcloud, Privatebin, phpLiteAdmin, MyBB, Piwigo, Vanilla, MediaWiki, Drupal, Grav, WordPress
 
 **Config-only failures (404 in every mode — wrong entry path, NOT a framework bug):** bookstack, elfinder, flarum, monica, opencart, phpbb, slim-app, wallabag
 
@@ -407,7 +407,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **Mode 5:** PARTIAL (crash on 2nd request) | **Mode 1:** PASS (200, 147 ms) | **Mode 4:** PASS (200, 27 ms) | **Mode 3:** PARTIAL (crash on 2nd request)
 - **Failure:** `Cannot redeclare function Adminer\connection()` — namespaced functions defined at top of `index.php` without `function_exists()` guard
 - **Grade: A (Mode 1/4), F (Mode 3/5 — crashes worker on 2nd request)**
-- Recommended: Mode 1 (simplest) or Mode 4 (better performance, requires ext-zealphp)
+- Recommended: `legacy-cgi` (simplest) or `coroutine-legacy` (better performance, requires ext-zealphp)
 
 ### TinyFileManager (File Manager)
 
@@ -415,7 +415,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **Mode 5:** PARTIAL (crash on 2nd request) | **Mode 1:** PASS (200, 42 ms) | **Mode 4:** PASS (worker-stable, sequential, ext-zealphp 0.3.25) | **Mode 3:** PARTIAL (crash on 2nd request)
 - Same function redeclaration issue as Adminer; fixed for sequential Mode 4 by the per-request state reset (ext-zealphp 0.3.25). True concurrent Mode 4 remains Mode 1's domain.
 - **Grade: A (Mode 1); B (Mode 4 sequential)**
-- Recommended: Mode 1 (simplest) or Mode 4 sequential
+- Recommended: `legacy-cgi` (simplest) or Mode 4 sequential
 
 ### FreshRSS (RSS Reader)
 
@@ -423,7 +423,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **Mode 5:** PARTIAL (crash on 2nd) | **Mode 1:** PASS (302, 42 ms) | **Mode 4:** PASS (worker-stable, sequential, ext-zealphp 0.3.25) | **Mode 3:** PARTIAL
 - Same redeclaration pattern — fixed for sequential Mode 4 by the per-request state reset (ext-zealphp 0.3.25). True concurrent Mode 4 remains Mode 1's domain.
 - **Grade: A (Mode 1); B (Mode 4 sequential)**
-- Recommended: Mode 1 (simplest) or Mode 4 sequential (better throughput at low concurrency)
+- Recommended: `legacy-cgi` (simplest) or Mode 4 sequential (better throughput at low concurrency)
 
 ### phpLiteAdmin (SQLite Admin)
 
@@ -482,7 +482,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 
 - **GitHub:** https://github.com/nextcloud/server — 27k stars
 - **Mode 5:** FAIL | **Mode 1:** PASS (200, 46 ms) | **Mode 4:** FAIL | **Mode 3:** FAIL
-- Mode 1 (CGI) loads the Nextcloud setup page successfully. Other modes crash due to `OC_*` constant redefinition and massive static state.
+- `legacy-cgi` loads the Nextcloud setup page successfully. Other modes crash due to `OC_*` constant redefinition and massive static state.
 - **Grade: A (Mode 1 only)**
 - Recommended: Mode 1
 
@@ -506,7 +506,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **PHP:** 7.4+ | **Framework:** Custom (procedural + hooks)
 - **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
 - **Key issues:** Thousands of `define()` calls without `defined()` guards, plugin ecosystem uses `die()`/`exit()` freely, static globals in core (`$wp`, `$wpdb`), function redeclaration in plugins
-- **Recommended:** Mode 1 (CGI Pool) — this is the only mode that gives plugins their own clean process state for full concurrent production use
+- **Recommended:** `legacy-cgi` (pool) — this is the only mode that gives plugins their own clean process state for full concurrent production use
 - The ZealPHP WordPress showcase (`sibidharan/zealphp-wordpress`) demonstrates this working end-to-end
 - **Mode 4 sequential note (ext-zealphp 0.3.25):** WordPress serves its public site + login auth + comment writes end-to-end in coroutine-legacy mode run *sequentially* (worker-stable, ASAN-clean). True concurrent WP (multiple simultaneous coroutines) remains Mode 1's domain due to the cold-boot `mysqlnd`/`libtasn1` connection-teardown layer and the cold-concurrent-autoload race on unwarmed inherited classes. See the Mode-4 caveat at the top of this document.
 
@@ -532,7 +532,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **PHP:** 8.2+ | **Framework:** Symfony components, PSR-compliant
 - **Mode 1:** B | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
 - **Key issues:** Symfony DI container (works in Mode 3), `TYPO3_REQUESTTYPE` constant needs `defined()` guard (already guarded in core), extensions may have issues
-- **Recommended:** Mode 3 (Sync)
+- **Recommended:** `mixed`
 
 #### Concrete CMS
 
@@ -563,7 +563,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **GitHub:** https://github.com/getgrav/grav — 14k stars
 - **PHP:** 8.1+ | **Framework:** Custom (PSR-7/PSR-15)
 - **Mode 1:** B | **Mode 3:** F | **Mode 4:** B | **Mode 5:** NT
-- **Key issues:** Constants `GRAV_REQUEST_TIME` / `GRAV_PHP_MIN` defined without `defined()` guards crash Mode 3 on 2nd request. Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
+- **Key issues:** Constants `GRAV_REQUEST_TIME` / `GRAV_PHP_MIN` defined without `defined()` guards crash Mode 3 on 2nd request. `coroutine-legacy` (ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
 - **Recommended:** Mode 1 or Mode 4 sequential. True concurrent Mode 4 remains Mode 1's domain.
 
 #### Kirby
@@ -608,7 +608,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **PHP:** 7.4+ | **Framework:** WordPress plugin
 - **Mode 1:** A | **Mode 3:** F | **Mode 4:** C | **Mode 5:** F
 - **Key issues:** Runs as a WordPress plugin — all WordPress constraints apply. `WC()` global, `wc_get_cart()` static singletons.
-- **Recommended:** Mode 1 (via WordPress CGI Pool)
+- **Recommended:** `legacy-cgi` (via the WordPress CGI pool)
 
 #### PrestaShop
 
@@ -651,7 +651,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **GitHub:** https://github.com/phpbb/phpbb — 1.8k stars
 - **PHP:** 7.1+ | **Framework:** Custom (procedural + legacy OOP)
 - **Mode 1:** A | **Mode 3:** D | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** Extensive `$phpbb_root_path`, `$phpEx` globals. Top-level includes with `define()`. `exit_handler()` calls `die()`. Login flows use `redirect() + exit`. Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
+- **Key issues:** Extensive `$phpbb_root_path`, `$phpEx` globals. Top-level includes with `define()`. `exit_handler()` calls `die()`. Login flows use `redirect() + exit`. `coroutine-legacy` (ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
 - **Recommended:** Mode 1 or Mode 4 sequential
 
 #### MyBB
@@ -659,7 +659,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **GitHub:** https://github.com/mybb/mybb — 2.9k stars
 - **PHP:** 7.3+ | **Framework:** Custom (procedural)
 - **Mode 1:** A | **Mode 3:** D | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** Global `$mybb`, `$db`, `$lang` objects, `define()`-based constants throughout, procedural plugin system with `run_hooks()` calling arbitrary functions. Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
+- **Key issues:** Global `$mybb`, `$db`, `$lang` objects, `define()`-based constants throughout, procedural plugin system with `run_hooks()` calling arbitrary functions. `coroutine-legacy` (ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
 - **Recommended:** Mode 1 or Mode 4 sequential
 
 #### Vanilla Forums
@@ -688,7 +688,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **PHP:** 8.2+ | **Framework:** Self
 - **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
 - **Key issues:** Kernel must be rebooted between requests in long-running mode, or use `kernel.terminate` event properly. `App::superglobals(true) + processIsolation(false)` (Mixed-mode) is the recommended ZealPHP-Symfony configuration per the `zealphp-symfony` bridge.
-- **Recommended:** Mode 3 (use the `sibidharan/zealphp-symfony` bridge)
+- **Recommended:** `mixed` (use the `sibidharan/zealphp-symfony` bridge)
 
 #### CodeIgniter 4
 
@@ -750,7 +750,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **Mode 1:** A | **Mode 3:** F | **Mode 4:** A | **Mode 5:** F
 - **Tested:** Mode 1 PASS (200, 147 ms), Mode 4 PASS (200, 27 ms), Mode 3/5 CRASH on 2nd request
 - **Root cause:** `function Adminer\connection()` declared at top of `index.php` without `function_exists()`. Worker loads the file per request — fatal on reload.
-- **Recommended:** Mode 1 (simplest) or Mode 4 (best performance, requires ext-zealphp)
+- **Recommended:** `legacy-cgi` (simplest) or `coroutine-legacy` (best performance, requires ext-zealphp)
 
 #### TinyFileManager
 
@@ -803,7 +803,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **PHP:** 7.4+ | **Framework:** Custom (procedural)
 - **Mode 1:** F (TESTED: CGI subprocess crash) | **Mode 3:** A (TESTED: 200, 17 ms) | **Mode 4:** A (TESTED: 200, 16 ms) | **Mode 5:** A (TESTED: 200, 27 ms)
 - **Key issues:** Works perfectly in-process. CGI pool subprocess crashes on DokuWiki's procedural startup sequence. Avoid Mode 1.
-- **Recommended:** Mode 3 (simplest), Mode 4 (concurrency), or Mode 5 (if wrapping the entrypoint)
+- **Recommended:** `mixed` (simplest), `coroutine-legacy` (concurrency), or `coroutine` (if wrapping the entrypoint)
 
 #### BookStack
 
@@ -822,7 +822,7 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **GitHub:** https://github.com/kanboard/kanboard — 8.4k stars
 - **PHP:** 8.0+ | **Framework:** Custom (micro-framework, clean OOP)
 - **Mode 1:** A | **Mode 3:** A | **Mode 4:** A | **Mode 5:** A
-- **Tested:** ALL 4 MODES PASS — fastest response in Mode 3 (45 ms), all modes stable across multiple requests
+- **Tested:** ALL 4 MODES PASS — fastest response in `mixed` (45 ms), all modes stable across multiple requests
 - **Why it's the gold standard:** Proper autoloading, `defined()` guards on all constants, no naked function declarations, no `die()` in normal paths, clean request/response cycle
 - **Recommended:** Any mode. Mode 5 for maximum performance if wrapping the entrypoint.
 
@@ -895,16 +895,16 @@ These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zeal
 - **GitHub:** https://github.com/FreshRSS/FreshRSS — 10k stars
 - **PHP:** 7.0.7+ | **Framework:** Custom (Minz micro-framework)
 - **Mode 1:** A | **Mode 3:** F | **Mode 4:** B | **Mode 5:** F
-- **Tested:** Mode 1 PASS (302, 42 ms); Mode 3/5 CRASH on 2nd request; Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) worker-stable sequentially.
+- **Tested:** Mode 1 PASS (302, 42 ms); Mode 3/5 CRASH on 2nd request; `coroutine-legacy` (ext-zealphp 0.3.25) worker-stable sequentially.
 - **Root cause:** Minz framework declares `function _t()`, `_s()`, `_n()` and others without `function_exists()` guards. These are PHP-level (not namespaced) function declarations that collide on worker reload. The per-request state reset (ext-zealphp 0.3.25) resolves this for sequential Mode 4.
-- **Recommended:** Mode 1 (simplest) or Mode 4 sequential
+- **Recommended:** `legacy-cgi` (simplest) or Mode 4 sequential
 
 #### Piwigo
 
 - **GitHub:** https://github.com/Piwigo/Piwigo — 3.1k stars
 - **PHP:** 7.1+ | **Framework:** Custom (procedural)
 - **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** Heavy use of global `$conf`, `$page`, `$user` arrays. Plugin system calls `die()`. `include()`-based dispatch. Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
+- **Key issues:** Heavy use of global `$conf`, `$page`, `$user` arrays. Plugin system calls `die()`. `include()`-based dispatch. `coroutine-legacy` (ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
 - **Recommended:** Mode 1 or Mode 4 sequential
 
 #### Lychee
@@ -1016,7 +1016,7 @@ die(json_encode(['error' => 'unauthorized']));
 
 **Affected apps:** OpenCart, phpBB, Matomo tracker, Cacti, Vanilla Forums, YOURLS  
 **Impact:** In Mode 3 and 5, `exit()` kills the worker process — OpenSwoole cannot trap it at PHP level. The worker is respawned by the manager, but response is lost and the next request gets a fresh worker.  
-**Modes affected:** All in-process modes (3, 4, 5) if unhandled. Mode 1 is immune (subprocess dies, pool spawns replacement). Mode 4 (coroutine-legacy) handles `exit()`/`die()` worker-survival via the coroutine-legacy isolation stack (ext-zealphp).  
+**Modes affected:** All in-process modes (3, 4, 5) if unhandled. Mode 1 is immune (subprocess dies, pool spawns replacement). `coroutine-legacy` handles `exit()`/`die()` worker-survival via the coroutine-legacy isolation stack (ext-zealphp).  
 **Note:** There is no `App::hookExit()`. The exec-family hook toggle is `App::hookExec()` (backtick/shell_exec/exec/system/passthru). `exit()`/`die()` worker-survival is part of the coroutine-legacy isolation stack, not a separate toggle.
 
 ### 5. Superglobal Access
@@ -1036,7 +1036,7 @@ $g->session['user'] = $user;
 ```
 
 **Affected apps:** All legacy apps (WordPress, Joomla, phpBB, etc.)  
-**Impact:** In Mode 5 (`superglobals(false)`), `$_GET`/`$_POST` are NOT populated per request. They remain as process-wide arrays, causing cross-request data contamination.  
+**Impact:** In `coroutine` (`superglobals(false)`), `$_GET`/`$_POST` are NOT populated per request. They remain as process-wide arrays, causing cross-request data contamination.  
 **Modes affected:** Mode 5 only. Modes 1, 3, and 4 all populate superglobals per request.  
 **Fix:** Use Mode 3 or Mode 4 for apps with direct superglobal access. Mode 5 is for native ZealPHP apps.
 
@@ -1056,11 +1056,11 @@ Use this decision tree to find the right mode for your app:
 
 ```
 Is this a native ZealPHP app using $g->get / $g->post?
-├─ YES → Mode 5 (Coroutine) — highest performance, full concurrency
+├─ YES → `coroutine` — highest performance, full concurrency
 └─ NO  ↓
 
 Is it built on Laravel, Symfony, CodeIgniter 4, Yii 2, or Laminas?
-├─ YES → Mode 3 (Sync) — cleanest lifecycle for framework apps
+├─ YES → `mixed` — cleanest lifecycle for framework apps
 │        (use zealphp-symfony bridge for Symfony)
 └─ NO  ↓
 
@@ -1068,17 +1068,17 @@ Does it use bare define() without defined() guards, OR
 function declarations without function_exists() guards?
 ├─ YES → Does it crash on 2nd request in Mode 3?
 │        ├─ YES → Do you have ext-zealphp installed?
-│        │        ├─ YES → Mode 4 (Hybrid) — per-coroutine isolation
-│        │        └─ NO  → Mode 1 (CGI Pool) — only safe option
-│        └─ NO  → Mode 3 (Sync) is fine
+│        │        ├─ YES → `coroutine-legacy` — per-coroutine isolation
+│        │        └─ NO  → `legacy-cgi` (pool) — only safe option
+│        └─ NO  → `mixed` is fine
 └─ NO  ↓
 
 Does it need $_{GET,POST,SESSION,SERVER} superglobals AND concurrency?
-├─ YES → Mode 4 (Hybrid) — requires ext-zealphp
+├─ YES → `coroutine-legacy` — requires ext-zealphp
 └─ NO  ↓
 
 Maximum compatibility with unknown/untested apps?
-└─ Mode 1 (CGI Pool) — runs anything, ~1–3 ms warm (pool default)
+└─ `legacy-cgi` (pool) — runs anything, ~1–3 ms warm (pool default)
 ```
 
 ### Quick Reference by App Type
@@ -1104,14 +1104,14 @@ Maximum compatibility with unknown/untested apps?
 | Total apps surveyed | 50 | Mix of tested and predicted |
 | Tested in Docker lab | 32 | All apps in `examples/sweep/apps/` deployed and tested |
 | All 4 modes pass | 5 | Kanboard, Roundcube, OpenCart, Joomla, traditional |
-| Mode 1 (CGI Pool) pass | 18 of 21 tested | adminer, cacti, dokuwiki (1st req), freshrss, joomla, kanboard, matomo, mybb, nextcloud, opencart, phpbb, phpliteadmin, piwigo, privatebin, roundcube, tinyfilemanager, traditional, vanilla, wordpress |
+| `legacy-cgi` (pool) pass | 18 of 21 tested | adminer, cacti, dokuwiki (1st req), freshrss, joomla, kanboard, matomo, mybb, nextcloud, opencart, phpbb, phpliteadmin, piwigo, privatebin, roundcube, tinyfilemanager, traditional, vanilla, wordpress |
 | Mode 1 fixed in this session | 4 root causes | 1) stderr deadlock from PHP 8.4 deprecations 2) constant/class/function leak across apps 3) flush/ob_end_flush/fastcgi_finish_request corrupting IPC stream 4) chdir() to script dir for relative includes |
 | Mode 1 known issues | 3 | phpMyAdmin (ResponseRenderer-from-shutdown architectural conflict — see below), DokuWiki (works 1st req, breaks on respawn), yourls (503 pool exhausted) |
-| **phpMyAdmin Mode 1 root cause** | architectural | phpMyAdmin registers `ResponseRenderer->response` as a shutdown function that writes HTML and calls `exit()`. Our pool worker's outer shutdown handler runs user shutdowns mid-cleanup; when `ResponseRenderer->response` exits, we never reach the IPC frame writeFrame line, parent sees null. **Use Mode 5 (Coroutine) for phpMyAdmin** — `HOOK_ALL` makes MySQL async, no subprocess context needed. Verified: M5 ✅ 3/3 PASS. Architectural fix would need separate IPC fd (fd 3) — not on roadmap. |
-| Mode 4 (Hybrid) pass | 5 of 16 tested | adminer, kanboard, joomla, roundcube, opencart |
+| **phpMyAdmin Mode 1 root cause** | architectural | phpMyAdmin registers `ResponseRenderer->response` as a shutdown function that writes HTML and calls `exit()`. Our pool worker's outer shutdown handler runs user shutdowns mid-cleanup; when `ResponseRenderer->response` exits, we never reach the IPC frame writeFrame line, parent sees null. **Use `coroutine` for phpMyAdmin** — `HOOK_ALL` makes MySQL async, no subprocess context needed. Verified: M5 ✅ 3/3 PASS. Architectural fix would need separate IPC fd (fd 3) — not on roadmap. |
+| `coroutine-legacy` pass | 5 of 16 tested | adminer, kanboard, joomla, roundcube, opencart |
 | Mode 4 partial | 6 | tinyfilemanager, dokuwiki, freshrss, vanilla, wordpress, matomo (alternating success — concurrent coroutine race on shared state) |
 | Mode 4 failing | 5 | cacti, nextcloud, phpmyadmin, mybb, phpbb (heavy legacy apps needing fresh state — architectural limit, use Mode 1) |
-| Mode 4 architectural limit | Process-wide state | Concurrent coroutines share function/class/constant tables. ext-zealphp's per-coroutine isolation handles superglobals + constants but NOT user-defined classes (loaded once, shared). For apps requiring fresh PHP state per request → use Mode 1 (CGI Pool) |
+| Mode 4 architectural limit | Process-wide state | Concurrent coroutines share function/class/constant tables. ext-zealphp's per-coroutine isolation handles superglobals + constants but NOT user-defined classes (loaded once, shared). For apps requiring fresh PHP state per request → use `legacy-cgi` (pool) |
 | User-globals cleanup | Yes (all modes) | Mode 1: FPM-style. Mode 3+FI: ext-zealphp zealphp_globals_clean. Mode 4/5: per-coroutine via `App::coroutineGlobalsIsolation(true)` (ext-zealphp v0.3.6+). |
 | Session merge granularity | Leaf-level | TableSessionHandler + RedisSessionHandler with 3-way merge |
 | Mode 1 recommended | ~24 | Legacy/procedural apps — WordPress, Magento, phpBB, etc. |
@@ -1125,7 +1125,7 @@ Maximum compatibility with unknown/untested apps?
 | Failure Cause | Apps Affected | Modes Affected | Fix |
 |---------------|--------------|----------------|-----|
 | Function redeclaration | Adminer, TinyFileManager, FreshRSS | 3, 5 (crash on 2nd req) | Mode 1 or Mode 4 |
-| Constant redefinition | Matomo, Grav | 3, 4, 5 (crash on 2nd req) | Mode 1 (CGI process isolation) |
+| Constant redefinition | Matomo, Grav | 3, 4, 5 (crash on 2nd req) | `legacy-cgi` (process isolation) |
 | CGI subprocess crash | DokuWiki, phpMyAdmin | 1 | Use Mode 3 instead |
 | PHP 8.4 compat bug | phpLiteAdmin | All | Fix app code (not ZealPHP issue) |
 | Missing composer deps | PrivateBin | All | Run `composer install` |
