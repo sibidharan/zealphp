@@ -658,6 +658,19 @@ class App
      */
     public static ?bool $hook_exec = null;
     /**
+     * Toggle the ext-zealphp interception of `exit()`/`die()` so a userland
+     * exit inside a coroutine throws `ZealPHP\HaltException` (which extends
+     * `\Error`, so the ubiquitous `try { … exit; } catch (\Exception)`
+     * legacy-router idiom cannot swallow the normal exit and turn it into a
+     * 500 — issue ext#47; FreshRSS/DokuWiki/CodeIgniter). The framework's
+     * halt-aware sites flush the buffered output as the body. `null`
+     * (default) resolves to "on when the coroutine scheduler is active"
+     * (`enableCoroutine` effective) at `App::run()`; a non-null value forces
+     * it. Requires ext-zealphp 0.3.48+ (`zealphp_exit_hook`); a no-op
+     * otherwise. Env opt-out: `ZEALPHP_EXIT_HOOK_DISABLE=1`.
+     */
+    public static ?bool $hook_exit = null;
+    /**
      * Enable the legacy CGI request handler for `public/*.php` paths.
      * Resolved from `$process_isolation` at `App::run()`; you generally
      * don't set this directly. See `App::processIsolation()` and the
@@ -1790,6 +1803,20 @@ class App
             self::$hook_exec = $value;
         }
         return self::$hook_exec;
+    }
+
+    /**
+     * Toggle the ext-zealphp `exit()`/`die()` → `ZealPHP\HaltException`
+     * interception (ext#47). Pass null (or no arg) to read; non-null to set.
+     * null = auto = follow the coroutine scheduler (on when `enableCoroutine`
+     * is effective) at `App::run()`. See `App::$hook_exit`.
+     */
+    public static function hookExit(?bool $value = null): ?bool
+    {
+        if ($value !== null) {
+            self::$hook_exit = $value;
+        }
+        return self::$hook_exit;
     }
 
     // -----------------------------------------------------------------------
@@ -6387,7 +6414,29 @@ class App
             if ($haltState !== null && $haltState['matched'] && $haltState['result'] !== null) {
                 $result = $haltState['result'];
             } else {
-                $result = 1;
+                // ext#47: a real exit()/die() intercepted by ext-zealphp rides
+                // this class with the exit argument in ->status (fragments and
+                // bare halts carry null). Mirror the ExitException mapping
+                // below: collapse nested OB levels into ours, echo a string
+                // status (mod_php parity), map int 100–599 to the HTTP status.
+                // NB: \ob_end_flush — global-qualified. Unqualified resolves to
+                // \ZealPHP\ob_end_flush() (the streaming uopz shim in utils.php),
+                // which flush()es-then-DISCARDS the buffer instead of stacking
+                // it down — the inner buffers' content would be lost.
+                while (ob_get_level() > $obBase + 1) {
+                    if (@\ob_end_flush() === false) {
+                        break;   // non-removable buffer (e.g. a test harness's) — stop, don't spin
+                    }
+                }
+                $haltStatus = $e->getStatus();
+                if (is_int($haltStatus) && $haltStatus >= 100 && $haltStatus <= 599) {
+                    $result = $haltStatus;
+                } else {
+                    if (is_string($haltStatus) && $haltStatus !== '') {
+                        echo $haltStatus;
+                    }
+                    $result = 1;
+                }
             }
         } catch (\Throwable $e) {
             // PHP 8.4+: exit()/die() throw \ExitException instead of
@@ -6399,8 +6448,12 @@ class App
                 // Collapse nested OB levels (apps like Adminer push extra buffers
                 // before exit()). Flush inner buffers into the one ob_start()
                 // at the top of executeFile() created ($obBase + 1).
+                // \ob_end_flush global-qualified — see the HaltException branch
+                // above (the \ZealPHP shim would discard, not stack down).
                 while (ob_get_level() > $obBase + 1) {
-                    ob_end_flush();
+                    if (@\ob_end_flush() === false) {
+                        break;   // non-removable buffer — stop, don't spin
+                    }
                 }
                 if (is_int($status) && $status >= 100 && $status <= 599) {
                     $result = $status;
@@ -8229,6 +8282,25 @@ class App
             // proc_open intentionally NOT overridden — App::rawExec()/cgiSubprocess() rely on it.
         }
 
+        // exit()/die() → ZealPHP\HaltException under coroutines (ext#47). A
+        // userland exit inside a coroutine otherwise throws OpenSwoole's
+        // ExitException (extends \Exception), which legacy routers'
+        // `try { … exit; } catch (\Exception)` swallow → 500. HaltException
+        // (extends \Error) dodges those catch-blocks and the framework's
+        // halt-aware sites flush the buffered output as the body. Default
+        // follows the coroutine scheduler; force via App::hookExit(); env
+        // kill-switch ZEALPHP_EXIT_HOOK_DISABLE. The class MUST be loaded
+        // before the hook fires — the ext deliberately does NOT autoload
+        // from an exit site — so warm it here, pre-fork.
+        $hookExit = self::$hook_exit ?? $enableCoroutine;
+        if ($hookExit
+            && !env_flag('ZEALPHP_EXIT_HOOK_DISABLE', false)
+            && \function_exists('zealphp_exit_hook')
+        ) {
+            \class_exists(\ZealPHP\HaltException::class);   // force autoload, pre-fork
+            (\zealphp_exit_hook(...))(true);
+        }
+
         if ($hookFlags !== 0) {
             co::set(['hook_flags' => $hookFlags]);
             // Two-arg form (enable, flags). Single-arg with an int as $enable
@@ -9348,6 +9420,7 @@ class App
             } catch (\Throwable|\OpenSwoole\ExitException $e) {
                 if ($e instanceof \OpenSwoole\ExitException
                     || ($e::class === 'ExitException' && method_exists($e, 'getStatus'))
+                    || $e instanceof \ZealPHP\HaltException
                 ) {
                     $exitStatus = $e->getStatus();
                     $body = is_string($exitStatus) ? $exitStatus : '';

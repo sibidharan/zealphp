@@ -163,6 +163,7 @@ class ResponseMiddleware implements MiddlewareInterface
         } catch (\Throwable|\OpenSwoole\ExitException $e) {
             if ($e instanceof \OpenSwoole\ExitException
                 || ($e::class === 'ExitException' && method_exists($e, 'getStatus'))
+                || $e instanceof \ZealPHP\HaltException
             ) {
                 $exitStatus = $e->getStatus();
                 $buffered = '';
@@ -410,6 +411,7 @@ class ResponseMiddleware implements MiddlewareInterface
         } catch (\Throwable|\OpenSwoole\ExitException $e) {
             if ($e instanceof \OpenSwoole\ExitException
                 || ($e::class === 'ExitException' && method_exists($e, 'getStatus'))
+                || $e instanceof \ZealPHP\HaltException
             ) {
                 $exitStatus = $e->getStatus();
                 $buffered = (string)ob_get_clean();
