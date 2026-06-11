@@ -397,12 +397,15 @@ final class ConditionalRequest
         if ($value === '') {
             return null;
         }
-        // Drop a legacy trailing parameter (e.g. "; length=62") — apr_date_parse_http
-        // tolerates it; strtotime does not.
+        // Drop a legacy trailing parameter (e.g. "; length=62") -- apr_date_parse_http
+        // tolerates it; strtotime does not. No rtrim is needed on the kept head:
+        // strtotime() already ignores surrounding whitespace, and the only way the
+        // head can be all-whitespace is a leading ';' (already removed by trim()),
+        // which substr() turns into '' -- caught by the guard below.
         $semi = \strpos($value, ';');
         if ($semi !== false) {
-            $value = \rtrim(\substr($value, 0, $semi));
-            if ($value === '') {
+            $value = \substr($value, 0, $semi);
+            if (\trim($value) === '') {
                 return null;
             }
         }
