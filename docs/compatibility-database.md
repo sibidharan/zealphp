@@ -55,7 +55,9 @@ This is the reference for which PHP applications work with ZealPHP and in which 
 
 All 50 apps sorted by category, with grades per mode.
 
-| # | App | Category | Stars | Framework | Mode 1 (CGI) | Mode 3 (Sync) | Mode 4 (Hybrid) | Mode 5 (Coroutine) | Best Mode | Key Issue |
+> **Headline mode: `coroutine-legacy` (Mode 4).** ZealPHP's reason-to-exist for legacy apps is **`App::mode(App::MODE_COROUTINE_LEGACY)`** — "old PHP just works, *concurrently*". That is the column to read first. **Mode 3 (Mixed/Sync) and Mode 1 (legacy-cgi) are sequential fallbacks** for apps that can't yet run under coroutine concurrency (pure-`require_once` class graphs, shared-connection internals). Mode 5 (Coroutine, no superglobals) is the native-rewrite target. A **ground-up re-validation of all 50 apps on the current stack (ZealPHP v0.4.8 + ext-zealphp v0.3.47, the Stage-8 object-global store-corruption fix) is in progress** — the coroutine-legacy grades below are being refreshed app-by-app from real installs (real DB, real auth, real writes, concurrent bursts); rows not yet re-validated still carry their 0.3.25-era preset grades (see the ⚠️ note above).
+
+| # | App | Category | Stars | Framework | Mode 1 (legacy-cgi, seq) | Mode 3 (Mixed, seq) | **Mode 4 (coroutine-legacy)** | Mode 5 (Coroutine) | Best Mode | Key Issue |
 |---|-----|----------|-------|-----------|:---:|:---:|:---:|:---:|-----------|-----------|
 | 1 | WordPress | CMS | 19k | Custom | **A** | C | B | F | 1 | Mode 1 verified end-to-end incl. wp-admin + block editor (issue #167). `define()` everywhere, plugin ecosystem |
 | 2 | Drupal | CMS | 4.3k | Custom | **A** | C | **B** | F | 1 or 4 | Static registry, `drupal_bootstrap()`; Mode 4 worker-stable (sequential) via class-static reset in 0.3.25 sweep |
