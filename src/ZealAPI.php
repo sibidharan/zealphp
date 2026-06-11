@@ -366,10 +366,20 @@ class ZealAPI extends REST
             // Clean halt mid-handler (#194): send whatever response()/echo already
             // buffered, with the status the handler set. Without this the halt would
             // propagate to the generic API error handler ($api->die → 4xx) and the
-            // buffered body would be lost.
+            // buffered body would be lost. ext#47: a real exit()/die() intercepted
+            // by ext-zealphp also lands here, carrying the exit argument in
+            // ->status — echo a string (mod_php parity), map int 100–599 to the
+            // HTTP status; bare halts/fragments carry null and behave as before.
             $buffer = (string) ob_get_clean();
             if ($g->_streaming ?? false) {
                 return null;
+            }
+            $haltStatus = $e->getStatus();
+            if (is_int($haltStatus) && $haltStatus >= 100 && $haltStatus <= 599) {
+                return new Response($buffer, $haltStatus);
+            }
+            if (is_string($haltStatus) && $haltStatus !== '') {
+                $buffer .= $haltStatus;
             }
             return new Response($buffer, $g->status ?? 200);
         }
