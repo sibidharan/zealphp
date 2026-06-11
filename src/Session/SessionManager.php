@@ -320,6 +320,28 @@ class SessionManager
                         $cookie['samesite'] ?? 'Lax'  // 8th arg — emit SameSite (was dropped)
                     );
                 }
+            } else {
+                // #355 — NO client-supplied session id: a stateless request.
+                // The session manager runs as a process-wide singleton in mixed
+                // mode (superglobals(true)), so `session_params['session_id']`
+                // and the native `session_id()` slot persist across requests in
+                // the worker. The eager path used to overwrite both every
+                // request; now that we skip it, a PRIOR request's id would
+                // survive — and `App::reassertRotatedSessionId()` (run in the
+                // OnRequest superglobal populate, AFTER this) would inject that
+                // stale id into `$_COOKIE`, so a handler's own `session_start()`
+                // re-opens the PREVIOUS visitor's session (counter drift /
+                // cross-request session bleed — SuperglobalsParityTest). Clear
+                // the per-request id state here so an app-level `session_start()`
+                // mints a genuinely fresh id (and `zeal_session_start()`'s
+                // first-visit path then emits its OWN Set-Cookie). This keeps
+                // the lazy contract — we still emit NO unsolicited cookie and
+                // start NO store entry for a request that never touches the
+                // session — while restoring per-request isolation.
+                $params = $g->session_params;
+                unset($params['session_id']);
+                $g->session_params = $params;
+                session_id('');
             }
         }
         $zpFatalGuardId = \ZealPHP\App::fatalGuardTrack($response); // #338 — answer this connection with 500 if a fatal kills the worker

@@ -964,6 +964,26 @@ class App
     public static bool $session_lifecycle = true;
 
     /**
+     * legacy-cgi only: eagerly mint a session id + Set-Cookie on a FIRST-time
+     * visitor (no incoming PHPSESSID) BEFORE the CGI subprocess runs (#108).
+     *
+     * Default **false** for `session.auto_start=0` / mod_php parity (#355): a
+     * CGI script that never calls `session_start()` must emit NO `Set-Cookie`
+     * and leave the request-side `$_COOKIE` untouched. With this off,
+     * `Dispatcher::mintCgiSession()` only forwards an id the client ALREADY
+     * sent (returning visitor); it never injects an unsolicited id into
+     * `$_COOKIE` or the response.
+     *
+     * Set **true** only for legacy `require_once`-bootstrap apps in `legacy-cgi`
+     * that depend on a first-visit session cookie being present before the
+     * subprocess emits one (the subprocess can't — PHP's session module sends
+     * the cookie via the C-internal `php_setcookie()`, which the CLI SAPI
+     * discards, so without an eager host mint a session-using app would loop
+     * with an empty PHPSESSID). The escape hatch for #108; off honours #355.
+     */
+    public static bool $cgi_session_auto_start = false;
+
+    /**
      * Session TTL in seconds. Default 7200 (2 hours — modern-app reasonable;
      * PHP's stock 1440 / 24 min is too short for typical workflows).
      * Set via `App::sessionTtl(3600)` BEFORE `App::run()`.

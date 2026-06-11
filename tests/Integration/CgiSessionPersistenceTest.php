@@ -49,6 +49,12 @@ class CgiSessionPersistenceTest extends PhpUnitTestCase
             . 'session_save_path(' . var_export(self::$sessionDir, true) . ');' . "\n"
             . 'session_start();' . "\n"
             . 'echo "Value: " . ($_SESSION["test"] ?? "EMPTY");' . "\n");
+        // #355 — a script that NEVER calls session_start(): must emit no
+        // Set-Cookie and report an EMPTY request-side $_COOKIE (mod_php
+        // session.auto_start=0 parity — no unsolicited tracking cookie /
+        // $_COOKIE pollution in legacy-cgi).
+        file_put_contents(self::$publicDir . '/nosession.php', '<?php' . "\n"
+            . 'echo "cookies=" . count($_COOKIE);' . "\n");
 
         $script = realpath(__DIR__ . '/../fixtures/cgi_isolation_server.php');
         if ($script === false) {
@@ -158,6 +164,28 @@ class CgiSessionPersistenceTest extends PhpUnitTestCase
             $r2['body'],
             'issue #108 — session value written in CGI subprocess (set.php) '
             . 'must persist and be readable in the next request (get.php)'
+        );
+    }
+
+    /**
+     * #355 — a legacy-cgi script that never calls session_start() must get NO
+     * Set-Cookie and an untouched request-side $_COOKIE. The old eager host
+     * mint injected an unsolicited PHPSESSID into both (defeating shared-cache
+     * caching + a request-input fidelity bug); now minting is lazy.
+     */
+    public function testNoSessionScriptEmitsNoCookieAndCleanCookieSuperglobal(): void
+    {
+        $r = $this->call('/nosession.php');
+        $this->assertSame(200, $r['status']);
+        $this->assertSame(
+            'cookies=0',
+            $r['body'],
+            '#355 — request-side $_COOKIE must stay empty (no minted PHPSESSID injected)'
+        );
+        $this->assertSame(
+            '',
+            $r['set_cookie'],
+            '#355 — no unsolicited Set-Cookie for a script that never started a session'
         );
     }
 }

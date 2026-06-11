@@ -179,6 +179,58 @@ final class CsrfMiddlewareTest extends TestCase
         $this->assertTrue($this->handler->called);
     }
 
+    public function testEmptyExemptPrefixNeverMatches(): void
+    {
+        // #342 — a '' entry must NOT exempt everything (the empty-prefix guard).
+        $mw = new CsrfMiddleware(exempt: ['']);
+        $g = RequestContext::instance();
+        $g->session = ['_csrf_token' => bin2hex(random_bytes(32))];
+        $g->memo = [];
+        $g->post = [];
+        $g->server = ['REQUEST_METHOD' => 'POST'];
+
+        $request = new ServerRequest('/anything', 'POST');
+        $response = $mw->process($request, $this->handler);
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertFalse($this->handler->called);
+    }
+
+    public function testNonMatchingExemptPrefixStillValidates(): void
+    {
+        // #342 — a path sharing no prefix with the exempt entry is NOT exempt
+        // (exercises the str_starts_with early-return branch).
+        $mw = new CsrfMiddleware(exempt: ['/webhooks']);
+        $g = RequestContext::instance();
+        $g->session = ['_csrf_token' => bin2hex(random_bytes(32))];
+        $g->memo = [];
+        $g->post = [];
+        $g->server = ['REQUEST_METHOD' => 'POST'];
+
+        $request = new ServerRequest('/account/delete', 'POST');
+        $response = $mw->process($request, $this->handler);
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertFalse($this->handler->called);
+    }
+
+    public function testTrailingSlashExemptPrefixMatchesSubtree(): void
+    {
+        // #342 — a trailing-slash entry keeps prefix semantics for its subtree.
+        $mw = new CsrfMiddleware(exempt: ['/api/hooks/']);
+        $g = RequestContext::instance();
+        $g->session = ['_csrf_token' => bin2hex(random_bytes(32))];
+        $g->memo = [];
+        $g->post = [];
+        $g->server = ['REQUEST_METHOD' => 'POST'];
+
+        $request = new ServerRequest('/api/hooks/github', 'POST');
+        $response = $mw->process($request, $this->handler);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertTrue($this->handler->called);
+    }
+
     public function testTokenPersistsAcrossRequests(): void
     {
         $g = RequestContext::instance();

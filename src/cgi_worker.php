@@ -104,6 +104,25 @@ function __z_send_meta() {
         'cookies' => $__z_cookies,
         'rawcookies' => $__z_rawcookies,
     ];
+    // #355 — report whether the subprocess actually STARTED a session and, if
+    // so, under which id. The host uses this to emit the PHPSESSID Set-Cookie
+    // ONLY for a session-using script (issue #108: the subprocess can't emit
+    // its own session cookie — PHP sends it via the C-internal php_setcookie()
+    // that the CLI SAPI discards). A script that never calls session_start()
+    // reports no session, so the host mints nothing — mod_php session.auto_start=0
+    // parity, no unsolicited Set-Cookie / $_COOKIE pollution.
+    if (function_exists('session_status')
+        && \session_status() === PHP_SESSION_ACTIVE
+        && function_exists('session_id')
+    ) {
+        $__z_sid = \session_id();
+        if (is_string($__z_sid) && $__z_sid !== '') {
+            $payload['session_id'] = $__z_sid;
+            $payload['session_name'] = function_exists('session_name') && is_string(\session_name())
+                ? \session_name()
+                : 'PHPSESSID';
+        }
+    }
     // Universal return contract: surface the include's return value so the
     // host process can apply the same int/array/string/null treatment that
     // executeFile() does in coroutine mode. Generator returns are streamed

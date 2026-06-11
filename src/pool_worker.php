@@ -707,7 +707,7 @@ function pool_finish_request(mixed $result, ?\Throwable $error, mixed $prevCwd):
         $result = null;
     }
 
-    return [
+    $frame = [
         'status'       => $__pw_status ?: 200,
         'headers'      => $__pw_headers,
         'cookies'      => $__pw_cookies,
@@ -715,6 +715,22 @@ function pool_finish_request(mixed $result, ?\Throwable $error, mixed $prevCwd):
         'body'         => $body,
         'return_value' => is_scalar($result) || is_array($result) || $result === null ? $result : null,
     ];
+    // #355 — report the active session id so the host emits the PHPSESSID
+    // Set-Cookie ONLY for a session-using script (the subprocess can't emit it;
+    // see Dispatcher::emitCgiSessionCookieFromMeta). A script that never calls
+    // session_start() reports nothing → no unsolicited cookie (mod_php parity).
+    if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE
+        && function_exists('session_id')
+    ) {
+        $__pw_sid = session_id();
+        if (is_string($__pw_sid) && $__pw_sid !== '') {
+            $frame['session_id'] = $__pw_sid;
+            $frame['session_name'] = function_exists('session_name') && is_string(session_name())
+                ? session_name()
+                : 'PHPSESSID';
+        }
+    }
+    return $frame;
 }
 
 /**
