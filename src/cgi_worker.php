@@ -71,6 +71,11 @@ $__z_cookies = [];
 $__z_rawcookies = [];
 $__z_status = 200;
 $__z_meta_sent = false;
+// #357 — single header_register_callback() slot (mod_php keeps one). The
+// registered callback is fired by __z_fire_header_callback() right after the
+// included file finishes (while the header() override is still active), so
+// header()/header_remove() calls inside it land in $__z_headers.
+$__z_header_callback = null;
 $__z_apache_env = [];
 $__z_apache_notes = [];
 $__z_uploaded = [];
@@ -88,6 +93,48 @@ $__z_return_value = null;
 $__z_has_return   = false;
 
 /**
+ * #357 — fire a registered header_register_callback() exactly once (mod_php
+ * keeps a single callback). Two registration sources, drained in order:
+ *   (1) the subprocess-local override above, which stashes into
+ *       $GLOBALS['__z_header_callback'] (the common case — autoload off);
+ *   (2) the framework's utils.php header_register_callback(), active when
+ *       ZEALPHP_CGI_AUTOLOAD=1, which stashes into the RequestContext memo.
+ *
+ * MUST be called while the header() override is still active (right after the
+ * included file finishes) — NOT from the shutdown function: uopz tears its
+ * overrides down before register_shutdown_function runs, so header() calls
+ * inside a callback fired at shutdown would not be captured into $__z_headers.
+ */
+function __z_fire_header_callback(): void
+{
+    global $__z_header_callback;
+    if (!is_callable($__z_header_callback)
+        && class_exists(\ZealPHP\RequestContext::class, false)
+    ) {
+        try {
+            $__z_g = \ZealPHP\RequestContext::instance();
+            $__z_memoCb = $__z_g->memo['_header_callback'] ?? null;
+            if (is_callable($__z_memoCb)) {
+                unset($__z_g->memo['_header_callback']);
+                $__z_header_callback = $__z_memoCb;
+            }
+        } catch (\Throwable) {
+            // RequestContext unavailable — fall through with no callback.
+        }
+    }
+    if (is_callable($__z_header_callback)) {
+        $__z_cb = $__z_header_callback;
+        $__z_header_callback = null; // single callback, fired once
+        try {
+            $__z_cb();
+        } catch (\Throwable $__z_cbErr) {
+            // A misbehaving callback must never abort the response.
+            fwrite(STDERR, 'header_register_callback threw: ' . $__z_cbErr->getMessage() . "\n");
+        }
+    }
+}
+
+/**
  * Write the metadata frame (status, headers, cookies, optional return value) to `STDERR`
  * as a single JSON line. Idempotent — subsequent calls are no-ops once `$__z_meta_sent`
  * is `true`. Called by the `flush()` override and the shutdown function so the frame is
@@ -95,8 +142,13 @@ $__z_has_return   = false;
  */
 function __z_send_meta() {
     global $__z_headers, $__z_cookies, $__z_rawcookies, $__z_status, $__z_meta_sent,
-           $__z_return_value, $__z_has_return;
+           $__z_return_value, $__z_has_return, $__z_header_callback;
     if ($__z_meta_sent) return;
+    // #357 — make sure any registered header_register_callback() has fired
+    // before we snapshot the headers (no-op if it already ran right after the
+    // include; the streaming/flush path reaches __z_send_meta() without that
+    // explicit call).
+    __z_fire_header_callback();
     $__z_meta_sent = true;
     $payload = [
         'status_code' => $__z_status,
@@ -199,6 +251,17 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
     $z_override('headers_list', function() {
         global $__z_headers;
         return array_map(fn($h) => $h[0] . ': ' . $h[1], $__z_headers);
+    }, true);
+
+    // #357 — header_register_callback() parity: store the callback in a
+    // subprocess-local slot. __z_fire_header_callback() invokes it right after
+    // the included file finishes (NOT at shutdown — uopz tears its overrides
+    // down before register_shutdown_function runs, so a header() inside the
+    // callback fired at shutdown would not be captured). header() inside the
+    // callback is a normal call into the still-active override.
+    $z_override('header_register_callback', function(callable $callback): bool {
+        $GLOBALS['__z_header_callback'] = $callback;
+        return true;
     }, true);
 
     $z_override('headers_sent', function(&$file = null, &$line = null) {
@@ -516,5 +579,11 @@ try {
     $__z_status = 500;
     echo '<pre>' . htmlspecialchars($__z_err->getMessage()) . "\n" . htmlspecialchars($__z_err->getTraceAsString()) . '</pre>';
 }
+
+// #357 — fire header_register_callback() here, while the header() override is
+// still active (the shutdown function runs AFTER uopz has torn its overrides
+// down, so a header() inside the callback fired there would be lost). Idempotent
+// with the __z_send_meta() call, which is a no-op once the callback has run.
+__z_fire_header_callback();
 
 // @codeCoverageIgnoreEnd

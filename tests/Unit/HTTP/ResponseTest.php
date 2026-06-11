@@ -580,11 +580,16 @@ class ResponseTest extends TestCase
         $this->assertNotNull($ct);
         $this->assertStringStartsWith('multipart/byteranges; boundary=zealphp_', (string) $ct);
 
-        // Reconstruct the multipart body from the captured write() calls.
+        // Reconstruct the multipart body from the captured write()/end() calls.
+        // #366: the multipart body is now emitted in a single length-delimited
+        // end($payload) (so the precomputed Content-Length survives instead of
+        // OpenSwoole falling back to chunked), not incremental write()s.
         $body = '';
         foreach ($fake->log as $entry) {
             if (($entry[0] ?? null) === 'write') {
                 $body .= (string) $entry[1];
+            } elseif (($entry[0] ?? null) === 'end') {
+                $body .= (string) ($entry[1] ?? '');
             }
         }
         // boundary token
@@ -606,6 +611,135 @@ class ResponseTest extends TestCase
             }
         }
         $this->assertSame(strlen($body), $contentLength);
+    }
+
+    public function testSendFileMultiRangeIsLengthDelimitedNotChunked(): void
+    {
+        // #366: the multipart/byteranges body must be emitted in ONE
+        // length-delimited end($payload) so the precomputed Content-Length
+        // survives — NOT incremental write()s (which make OpenSwoole fall back
+        // to chunked transfer-encoding, dropping Content-Length). Assert the body
+        // bytes rode end(), not write().
+        $path = $this->makeTempFile('0123456789', 'bin'); // 10 bytes
+        $this->setRequestHeaders(['range' => 'bytes=0-2,5-7']);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        $writes = array_filter($fake->log, static fn($e) => ($e[0] ?? null) === 'write');
+        $this->assertSame([], $writes, '#366: multipart must not use incremental write()');
+
+        $ends = array_values(array_filter($fake->log, static fn($e) => ($e[0] ?? null) === 'end'));
+        $this->assertCount(1, $ends, 'exactly one end() carries the whole multipart body');
+        $payload = (string) ($ends[0][1] ?? '');
+        $this->assertNotSame('', $payload, 'end() payload must contain the multipart body');
+
+        // Content-Length header must equal the single end() payload length.
+        $contentLength = null;
+        foreach ($this->headerCalls($fake) as $h) {
+            if ($h[1] === 'Content-Length') {
+                $contentLength = (int) $h[2];
+            }
+        }
+        $this->assertSame(strlen($payload), $contentLength);
+    }
+
+    public function testSendFileHeadEmitsHeadersButNoBody(): void
+    {
+        // #358 — RFC 9110 §9.3.2: HEAD MUST NOT send content. sendFile's
+        // zero-copy paths previously wrote the full file on HEAD. Assert HEAD
+        // gets 200 + the full-representation Content-Length but zero body bytes
+        // (no sendfile / no body-bearing write).
+        $path = $this->makeTempFile(str_repeat('z', 62), 'csv');
+        $g = RequestContext::instance();
+        $g->server = ['REQUEST_METHOD' => 'HEAD'];
+        $this->setRequestHeaders([]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        $this->assertContains(['status', 200, ''], $fake->log);
+        // No body: no sendfile, and end() carries no payload.
+        foreach ($fake->log as $entry) {
+            $this->assertNotSame('sendfile', $entry[0] ?? null, 'HEAD must not ship the body');
+        }
+        $this->assertContains(['end', ''], $fake->log);
+        // Content-Length is still the FULL representation size.
+        $cl = null;
+        foreach ($this->headerCalls($fake) as $h) {
+            if ($h[1] === 'Content-Length') { $cl = (int) $h[2]; }
+        }
+        $this->assertSame(62, $cl, 'HEAD advertises the full Content-Length');
+        // Validators a GET would emit are present.
+        $names = array_map(static fn($h) => $h[1], $this->headerCalls($fake));
+        $this->assertContains('ETag', $names);
+        $this->assertContains('Accept-Ranges', $names);
+        $g->server = [];
+    }
+
+    public function testSendFileHeadIgnoresRangeAndServesNo206(): void
+    {
+        // #358 — a HEAD with a Range must still be body-less and 200 (HEAD has no
+        // body to take a range of); never a 206 with bytes on the wire.
+        $path = $this->makeTempFile(str_repeat('z', 62), 'csv');
+        $g = RequestContext::instance();
+        $g->server = ['REQUEST_METHOD' => 'HEAD'];
+        $this->setRequestHeaders(['range' => 'bytes=0-9']);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path);
+
+        foreach ($fake->log as $entry) {
+            $this->assertNotSame('sendfile', $entry[0] ?? null);
+            $this->assertNotSame(206, $entry[1] ?? null);
+        }
+        $this->assertContains(['status', 200, ''], $fake->log);
+        $g->server = [];
+    }
+
+    public function testSendFileNonAsciiFilenameEmitsRfc6266ExtValue(): void
+    {
+        // #361 — a non-ASCII download name must travel as the RFC 6266
+        // `filename*=UTF-8''<pct-encoded>` ext-value, alongside an ASCII
+        // `filename=` fallback (RFC 5987 / RFC 9110 §5.5).
+        $path = $this->makeTempFile('data', 'csv');
+        $this->setRequestHeaders([]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path, 'café résumé.csv');
+
+        $disposition = null;
+        foreach ($this->headerCalls($fake) as $h) {
+            if ($h[1] === 'Content-Disposition') { $disposition = (string) $h[2]; }
+        }
+        $this->assertNotNull($disposition);
+        // ASCII fallback: each non-ASCII *byte* downgraded to '_' (é = 2 UTF-8
+        // bytes → '__'), no raw UTF-8 octets in the quoted-string.
+        $this->assertStringContainsString('filename="caf__ r__sum__.csv"', $disposition);
+        $this->assertDoesNotMatchRegularExpression('/filename="[^"]*[\x80-\xff]/', $disposition);
+        // RFC 6266 ext-value with UTF-8 percent-encoding of the true name.
+        $this->assertStringContainsString("filename*=UTF-8''caf%C3%A9%20r%C3%A9sum%C3%A9.csv", $disposition);
+    }
+
+    public function testSendFileAsciiFilenameHasNoExtValue(): void
+    {
+        // #361 — an ASCII name is unaffected: quoted filename only, no filename*.
+        $path = $this->makeTempFile('data', 'csv');
+        $this->setRequestHeaders([]);
+        $fake = $this->fake();
+        $resp = $this->wrap($fake);
+
+        $resp->sendFile($path, 'report.csv');
+
+        $disposition = null;
+        foreach ($this->headerCalls($fake) as $h) {
+            if ($h[1] === 'Content-Disposition') { $disposition = (string) $h[2]; }
+        }
+        $this->assertSame('attachment; filename="report.csv"', $disposition);
     }
 
     public function testSendFileIfMatchMismatchReturns412(): void
@@ -815,12 +949,14 @@ class ResponseTest extends TestCase
         $this->assertContains(['sendfile', $path, 0, 100], $fake->log);
     }
 
-    public function testSendFileIfRangeEtagVerbatimMatchHonoursRange(): void
+    public function testSendFileIfRangeWeakEtagIgnoredServesFullBody(): void
     {
+        // #362 — RFC 9110 §13.1.5 mandates the STRONG comparison for If-Range and
+        // §8.8.1 forbids a weak validator from authorising sub-range retrieval.
+        // sendFile's ETag is ALWAYS weak (W/"<mtime>-<size>"), so even a verbatim
+        // echo of it in If-Range MUST be ignored → full 200, NOT a 206 slice.
         $path = $this->makeTempFile(str_repeat('m', 100), 'bin');
         $mtime = (int) filemtime($path);
-        // sendFile's ETag is weak; a verbatim echo matches via strcmp (Apache
-        // ap_condition_if_range does a raw string compare) → honour the range.
         $etag = 'W/"' . dechex($mtime) . '-' . dechex(100) . '"';
         $this->setRequestHeaders([
             'range'    => 'bytes=0-9',
@@ -831,8 +967,32 @@ class ResponseTest extends TestCase
 
         $resp->sendFile($path);
 
-        $this->assertContains(['status', 206, ''], $fake->log);
-        $this->assertContains(['sendfile', $path, 0, 10], $fake->log);
+        foreach ($fake->log as $entry) {
+            $this->assertNotSame(206, $entry[1] ?? null, 'weak If-Range must not yield 206');
+        }
+        $this->assertContains(['sendfile', $path, 0, 100], $fake->log);
+    }
+
+    public function testSendFileIfRangeStrongEtagMatchHonoursRange(): void
+    {
+        // #362 — the strong path still works: a non-weak If-Range that byte-
+        // matches a non-weak ETag honours the range. sendFile emits a weak ETag,
+        // so we install a custom strong-ETag resolver context is not available;
+        // instead assert via the pure ifRangeMatches() helper that a strong pair
+        // matches and a weak pair does not.
+        $ref = new \ReflectionMethod(ZResponse::class, 'ifRangeMatches');
+        $ref->setAccessible(true);
+        $resp = $this->wrap($this->fake());
+        $strong = '"abc-123"';
+        $weak   = 'W/"abc-123"';
+        // strong If-Range vs strong ETag → match
+        $this->assertTrue($ref->invoke($resp, $strong, $strong, 0));
+        // weak If-Range vs strong ETag → no match (weak validator forbidden)
+        $this->assertFalse($ref->invoke($resp, $weak, $strong, 0));
+        // strong If-Range vs weak ETag → no match (weak validator forbidden)
+        $this->assertFalse($ref->invoke($resp, $strong, $weak, 0));
+        // weak vs weak → no match
+        $this->assertFalse($ref->invoke($resp, $weak, $weak, 0));
     }
 
     public function testSendFileIfRangeEtagMismatchServesFullBody(): void
@@ -939,6 +1099,26 @@ class ResponseTest extends TestCase
     {
         $this->assertSame(['status' => 'ignore', 'ranges' => []], ZResponse::parseRange('items=0-9', 100));
         $this->assertSame(['status' => 'ignore', 'ranges' => []], ZResponse::parseRange('not a range', 100));
+    }
+
+    public function testParseRangeEmptyByteRangeSetIgnored(): void
+    {
+        // #365 — RFC 7233 §2.1: byte-range-set requires ≥1 spec. A header with
+        // none at all (`bytes=,`, `bytes=,,`, `bytes=, ,`) is invalid → ignore →
+        // full 200, NOT unsatisfiable (416). 416 is reserved for a VALID spec
+        // that fell outside [0, total).
+        $this->assertSame(['status' => 'ignore', 'ranges' => []], ZResponse::parseRange('bytes=,', 5000));
+        $this->assertSame(['status' => 'ignore', 'ranges' => []], ZResponse::parseRange('bytes=,,', 5000));
+        $this->assertSame(['status' => 'ignore', 'ranges' => []], ZResponse::parseRange('bytes=, ,', 5000));
+        $this->assertSame(['status' => 'ignore', 'ranges' => []], ZResponse::parseRange('bytes= ', 5000));
+    }
+
+    public function testParseRangeDegenerateSuffixStillUnsatisfiable(): void
+    {
+        // #365 boundary vs #185: `bytes=-0` IS a syntactically-valid spec (just
+        // degenerate/zero-length) → it counts as "saw a spec" → 416, distinct
+        // from the empty set above which is "no spec → ignore".
+        $this->assertSame(['status' => 'unsatisfiable', 'ranges' => []], ZResponse::parseRange('bytes=-0', 100));
     }
 
     public function testParseRangeInvalidSpecIgnoresWholeHeader(): void

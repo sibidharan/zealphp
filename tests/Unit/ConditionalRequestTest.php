@@ -683,6 +683,50 @@ class ConditionalRequestTest extends TestCase
         $this->assertSame(304, $r);
     }
 
+    // ---- #363: tolerant parsing like apr_date_parse_http ------------------
+
+    public function testIfModifiedSinceWithLegacyLengthParameterStill304(): void
+    {
+        // #363 — Apache's apr_date_parse_http tolerates the historical trailing
+        // "; length=NNN" parameter that some caches append. strtotime rejects it,
+        // which downstream became a 304→200 cache miss. parseHttpDate now strips
+        // the trailing parameter, so the date still drives the comparison → 304.
+        $date = $this->dt(self::MTIME) . '; length=62';
+        $r = ConditionalRequest::evaluate('GET', ['if-modified-since' => $date], '', self::MTIME, self::NOW);
+        $this->assertSame(304, $r);
+    }
+
+    public function testIfUnmodifiedSinceWithLengthParameterStillEnforced(): void
+    {
+        // #363 — for an unsafe method, a malformed-but-parseable
+        // If-Unmodified-Since must still protect the resource (a past date →
+        // 412), not silently bypass the precondition because of the trailing
+        // "; length=" parameter. PAST < MTIME → resource modified since → 412.
+        $date = $this->dt(self::PAST) . '; length=128';
+        $r = ConditionalRequest::evaluate('PUT', ['if-unmodified-since' => $date], '', self::MTIME, self::NOW);
+        $this->assertSame(412, $r);
+    }
+
+    public function testIfModifiedSinceLegacyRfc850AndAsctimeFormatsParse(): void
+    {
+        // #363 — the three RFC 9110 §5.6.7 formats all parse (strtotime handles
+        // RFC 850 + asctime); only the trailing-parameter case needed the strip.
+        $rfc850  = gmdate('l, d-M-y H:i:s', self::MTIME) . ' GMT'; // RFC 850
+        $asctime = gmdate('D M j H:i:s Y', self::MTIME);          // asctime
+        $this->assertSame(304, ConditionalRequest::evaluate('GET', ['if-modified-since' => $rfc850], '', self::MTIME, self::NOW));
+        $this->assertSame(304, ConditionalRequest::evaluate('GET', ['if-modified-since' => $asctime], '', self::MTIME, self::NOW));
+    }
+
+    public function testIfModifiedSinceBareSemicolonIsIgnored(): void
+    {
+        // #363 — a value that is ONLY a parameter (no date before the ';') has no
+        // recognisable timestamp → NOMATCH → 200 (well outside the 60s window).
+        $requestTime = time();
+        $mtime = $requestTime - 100_000;
+        $r = ConditionalRequest::evaluate('GET', ['if-modified-since' => '; length=62'], '', $mtime, $requestTime);
+        $this->assertSame(200, $r);
+    }
+
     public function testParseHttpDateWhitespaceOnlyHeaderIsIgnored(): void
     {
         // Without trim(), strtotime('   ') returns the current wall-clock time
