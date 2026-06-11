@@ -113,6 +113,35 @@ function php_session_decode_to_array(string $data): array
  * The `ZEALPHP_SESSION_SECURE` env var overrides the `secure` cookie flag
  * (otherwise auto-detected from `X-Forwarded-Proto` / `HTTPS` / port `443`).
  */
+/**
+ * Resolve the active custom session handler, guaranteeing the
+ * `SessionHandlerInterface` contract that `open()` precedes any
+ * `read()`/`write()`/`destroy()` (#369). A freshly-resolved handler —
+ * `session_regenerate_id()` / `session_write_close()` reached without a
+ * prior `session_start()` in this request — was used un-`open()`ed, and
+ * `FileSessionHandler`'s typed `$savePath` fataled on first `write()`
+ * (breaking the textbook login fixation defence with an uncaught Error).
+ * `open()` is invoked once per request (flagged in `session_params`).
+ */
+function zeal_session_opened_handler(): ?\SessionHandlerInterface
+{
+    $g = RequestContext::instance();
+    $handler = $g->session_params['handler'] ?? \ZealPHP\App::resolveActiveSessionHandler();
+    if (!($handler instanceof \SessionHandlerInterface)) {
+        return null;
+    }
+    if (!isset($g->session_params['handler_opened'])) {
+        $save_path = $g->session_params['save_path'] ?? \ZealPHP\App::$session_save_path;
+        $name = $g->session_params['name'] ?? 'PHPSESSID';
+        $handler->open(is_string($save_path) ? $save_path : '', is_string($name) ? $name : 'PHPSESSID');
+        $params = $g->session_params;
+        $params['handler'] = $handler;
+        $params['handler_opened'] = true;
+        $g->session_params = $params;
+    }
+    return $handler;
+}
+
 function zeal_session_start(): bool
 {
     $g = RequestContext::instance();
@@ -128,7 +157,12 @@ function zeal_session_start(): bool
 
     // Ensure session parameters are initialized
     if (!isset($g->session_params['save_path'])) {
-        $g->session_params['save_path'] = '/var/lib/php/sessions';
+        // #373: honour App::sessionSavePath() — the App static IS the
+        // documented knob (defaults to /var/lib/php/sessions, so unconfigured
+        // behaviour is unchanged). Hardcoding the literal here silently
+        // dropped the configured path for the inline file backend AND
+        // FileSessionHandler.
+        $g->session_params['save_path'] = \ZealPHP\App::$session_save_path;
     }
     if (!isset($g->session_params['name'])) {
         $g->session_params['name'] = 'PHPSESSID';
@@ -242,6 +276,12 @@ function zeal_session_start(): bool
         /** @var string $sessionName */
         $sessionName = $g->session_params['name'];
         $handler->open($save_path, (string) $sessionName);
+        // #369: record the open so later regenerate/write_close resolution
+        // (zeal_session_opened_handler) doesn't re-open.
+        $params = $g->session_params;
+        $params['handler'] = $handler;
+        $params['handler_opened'] = true;
+        $g->session_params = $params;
         $contents = $handler->read((string) $session_id);
         if (is_string($contents) && $contents !== '') {
             $session_existed = true;
@@ -273,6 +313,10 @@ function zeal_session_start(): bool
     // $_SESSION would never round-trip through $g->session. Mirror to both:
     // $_SESSION is what user/Symfony code reads/writes, $g->session is what
     // coroutine-mode code reads/writes via the typed property.
+    // #374: framework bookkeeping no longer rides $_SESSION (it lives in
+    // $g->memo) — strip the two legacy keys that pre-fix releases persisted
+    // into user stores, so they don't survive via the loaded-keys merge.
+    unset($session_data['__start_time'], $session_data['UNIQUE_REQUEST_ID']);
     /** @var array<string, mixed> $session_data */
     $g->session = $session_data;
     // #21: snapshot the keys present at load so write_close() can tell an
@@ -590,7 +634,7 @@ function zeal_session_write_close(): bool
         assert(is_string($save_path));
         $session_file = $save_path . '/sess_' . basename((string)$session_id);
         $data = $useGSession ? $g->session : $GLOBALS['_SESSION'];
-        $wHandler = $g->session_params['handler'] ?? \ZealPHP\App::resolveActiveSessionHandler();
+        $wHandler = zeal_session_opened_handler();   // #369: guarantees open() ran
         if ($wHandler instanceof \SessionHandlerInterface) {
             // Merge with stored data to mitigate concurrent-request races.
             // Apache serialises session access via file locks; ZealPHP
@@ -812,7 +856,7 @@ function zeal_session_regenerate_id($delete_old_session = false): bool
     // empty session, and anything written afterwards (OAuth `sub`/`tokens`/
     // `profile`) is stranded under an ID the client may never receive.
     // mod_php's regenerate copies the current data to the new ID; mirror that.
-    $handler = $g->session_params['handler'] ?? \ZealPHP\App::resolveActiveSessionHandler();
+    $handler = zeal_session_opened_handler();   // #369: guarantees open() ran
     if ($handler instanceof \SessionHandlerInterface) {
         // The live in-memory data is the canonical session contents for the
         // new ID (it already reflects any writes made before regeneration).
@@ -922,17 +966,29 @@ function zeal_session_get_cookie_params(): array
  * @param bool   $secure
  * @param bool   $httponly
  */
-function zeal_session_set_cookie_params($lifetime_or_options, $path = '/', $domain = '', $secure = false, $httponly = false): void
+function zeal_session_set_cookie_params($lifetime_or_options, $path = null, $domain = null, $secure = null, $httponly = null): void
 {
     $g = RequestContext::instance();
+    // #375: PHP 8 semantics — omitted (null) positional params mean "keep the
+    // current value". The old non-null defaults ($secure=false,
+    // $httponly=false) made a bare session_set_cookie_params(3600) silently
+    // strip HttpOnly/Secure from the session cookie. The array form likewise
+    // merges over the CURRENT params (native: keys absent from the array keep
+    // their configured value), not over hardcoded defaults.
+    $current = $g->session_params['cookie_params'] ?? null;
+    $base = array_merge([
+        'lifetime' => 0, 'path' => '/', 'domain' => '',
+        'secure' => false, 'httponly' => false, 'samesite' => 'Lax',
+    ], is_array($current) ? $current : []);
     if (is_array($lifetime_or_options)) {
-        $g->session_params['cookie_params'] = array_merge([
-            'lifetime' => 0, 'path' => '/', 'domain' => '',
-            'secure' => false, 'httponly' => false, 'samesite' => 'Lax',
-        ], $lifetime_or_options);
+        $g->session_params['cookie_params'] = array_merge($base, $lifetime_or_options);
     } else {
-        $g->session_params['cookie_params'] = compact('path', 'domain', 'secure', 'httponly');
-        $g->session_params['cookie_params']['lifetime'] = $lifetime_or_options;
+        $base['lifetime'] = $lifetime_or_options;
+        if ($path !== null)     { $base['path'] = $path; }
+        if ($domain !== null)   { $base['domain'] = $domain; }
+        if ($secure !== null)   { $base['secure'] = $secure; }
+        if ($httponly !== null) { $base['httponly'] = $httponly; }
+        $g->session_params['cookie_params'] = $base;
     }
 }
 
@@ -1013,16 +1069,19 @@ function zeal_session_abort(): bool
             $session_data = [];
             $contents = @file_get_contents($session_file);
             if (is_string($contents) && $contents !== '') {
-                $decoded = @unserialize($contents, ['allowed_classes' => ['stdClass']]);
-                if (is_array($decoded)) {
-                    foreach ($decoded as $k => $v) {
-                        if (is_string($k)) {
-                            $session_data[$k] = $v;
-                        }
-                    }
-                }
+                // #372: session files are written in the native `php`
+                // serialize-handler format (`key|serialized;…`) — raw
+                // unserialize() can't parse it, returned false, and the
+                // "restored" session became [] which the manager's close then
+                // PERSISTED, wiping the store. Use the session decoder.
+                $session_data = php_session_decode_to_array($contents);
             }
             $g->session = $session_data;
+            // #379 superglobals modes: the canonical store is the live
+            // $GLOBALS['_SESSION'] — restore through it too.
+            if (\ZealPHP\App::$superglobals) {
+                $GLOBALS['_SESSION'] = $session_data;
+            }
             if (\ZealPHP\App::$superglobals) {
                 $GLOBALS['_SESSION'] = $session_data;
             }

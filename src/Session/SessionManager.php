@@ -186,7 +186,7 @@ class SessionManager
             && !\ZealPHP\App::cgiOwnsSessions();
 
         if ($manageSession) {
-            if(isset($_SESSION) and isset($_SESSION['__start_time'])) {
+            if(isset($g->memo['__start_time'])) {
                 elog('[warn] Session leak detected');
             }
             unset($_SESSION);
@@ -317,8 +317,9 @@ class SessionManager
         $zpFatalGuardId = \ZealPHP\App::fatalGuardTrack($response); // #338 — answer this connection with 500 if a fatal kills the worker
         try {
             if ($manageSession) {
-                $_SESSION['__start_time'] = microtime(true);
-                $_SESSION['UNIQUE_REQUEST_ID'] = uniqidReal();
+                // #374: bookkeeping in $g->memo, never in user $_SESSION.
+                $g->memo['__start_time'] = microtime(true);
+                $g->memo['UNIQUE_REQUEST_ID'] = uniqidReal();
             }
             $g->openswoole_request = $request;
             $g->openswoole_response = $response;
