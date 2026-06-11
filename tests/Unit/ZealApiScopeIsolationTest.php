@@ -93,6 +93,32 @@ class ZealApiScopeIsolationTest extends TestCase
             $apiDir . '/m/permethod.php',
             '<?php $get = function () { return ["method" => "get"]; };'
         );
+        // The FULL post-include dispatcher-local audit (#376 follow-up): the
+        // complete set of locals processApi() reads AFTER the include is
+        // {$g, $module, $request, $func, $file, $realFile}. $func feeds the
+        // $_vars[$func] handler lookup itself…
+        file_put_contents(
+            $apiDir . '/m/func.php',
+            '<?php $func = function () { return ["f" => true]; };'
+        );
+        // …$file feeds the reflection cache key, $realFile feeds
+        // SCRIPT_FILENAME + the in-file middleware compile. Pre-fix these
+        // were SILENT corruptors (wrong values downstream, not fatals).
+        file_put_contents(
+            $apiDir . '/m/file.php',
+            '<?php $file = function () { return ["file" => true]; };'
+        );
+        file_put_contents(
+            $apiDir . '/m/realFile.php',
+            '<?php $realFile = function () { return ["rf" => true]; };'
+        );
+        // Pre-include-only locals ($dir, $apiBase) — clobbering them must
+        // also be inert under isolation.
+        file_put_contents(
+            $apiDir . '/m/dirclobber.php',
+            '<?php $dir = "clobbered"; $apiBase = "clobbered";'
+            . ' $dirclobber = function () { return ["d" => true]; };'
+        );
     }
 
     protected function tearDown(): void
@@ -175,5 +201,39 @@ class ZealApiScopeIsolationTest extends TestCase
     {
         $result = $this->makeApi()->processApi('/m', 'permethod');
         $this->assertJsonBody($result, 200, 'method', 'get');
+    }
+
+    public function testEndpointNamedFuncDoesNotBreakHandlerResolution(): void
+    {
+        // Pre-fix: $func became the Closure and $_vars[$func] was an illegal
+        // offset — handler resolution itself broke.
+        $result = $this->makeApi()->processApi('/m', 'func');
+        $this->assertJsonBody($result, 200, 'f', true);
+    }
+
+    public function testEndpointNamedFileDoesNotPoisonReflectionCacheKey(): void
+    {
+        // Pre-fix SILENT corruptor: $file feeds the reflection cache key.
+        $result = $this->makeApi()->processApi('/m', 'file');
+        $this->assertJsonBody($result, 200, 'file', true);
+    }
+
+    public function testEndpointNamedRealFileKeepsScriptFilenameTruthful(): void
+    {
+        // Pre-fix SILENT corruptor: $realFile feeds SCRIPT_FILENAME and the
+        // in-file middleware compile.
+        $result = $this->makeApi()->processApi('/m', 'realFile');
+        $this->assertJsonBody($result, 200, 'rf', true);
+        $this->assertSame(
+            $this->tmpRoot . '/api/m/realFile.php',
+            G::instance()->server['SCRIPT_FILENAME'] ?? null,
+            'SCRIPT_FILENAME must be the real handler path, not the endpoint closure'
+        );
+    }
+
+    public function testPreIncludeLocalsClobberIsInert(): void
+    {
+        $result = $this->makeApi()->processApi('/m', 'dirclobber');
+        $this->assertJsonBody($result, 200, 'd', true);
     }
 }
