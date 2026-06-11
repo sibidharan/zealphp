@@ -259,8 +259,16 @@ final class SessionLifecycleModeTest extends TestCase
             'write_close must use session_params[session_id] as the file name');
     }
 
-    public function testWriteCloseUsesGSessionWhenCisTrue(): void
+    public function testWriteCloseUsesLiveGlobalsWhenCisTrue(): void
     {
+        // #379 contract INVERSION: cis=true (Mode 4) now persists the LIVE
+        // $GLOBALS['_SESSION'] — zeal_session_start() detaches the
+        // $g->session slot so the global IS the one store. The previous
+        // expectation here ("typed slot wins") pinned exactly the bug: once
+        // ext-zealphp's per-coroutine restore severed the
+        // `$_SESSION = &$g->session` binding, the slot held a stale load-time
+        // copy and every post-request-1 session mutation was silently lost
+        // (the phpMyAdmin login-loop / TinyFileManager lost-login class).
         App::superglobals(true);
         App::$coroutine_isolated_superglobals = true;
 
@@ -268,14 +276,13 @@ final class SessionLifecycleModeTest extends TestCase
         $g->session_params['session_id'] = 'wc-cis-sid';
         $g->session_params['save_path']  = $this->savePath;
 
-        // In cis=true mode, $g->session is the canonical store.
+        // A stale typed-slot copy (the severed-reference shape) …
         App::superglobals(false);
-        $g->session = ['cis_key' => 'cis_value'];
+        $g->session = ['stale_key' => 'stale_value'];
         App::superglobals(true);
 
-        // Deliberately set GLOBALS to something different — write_close
-        // must use $g->session, not $GLOBALS['_SESSION'].
-        $GLOBALS['_SESSION'] = ['wrong_key' => 'wrong_value'];
+        // … and the LIVE store holding the request's real mutations.
+        $GLOBALS['_SESSION'] = ['live_key' => 'live_value'];
 
         $result = zeal_session_write_close();
         $this->assertTrue($result);
@@ -283,10 +290,10 @@ final class SessionLifecycleModeTest extends TestCase
         $sessionFile = $this->savePath . '/sess_wc-cis-sid';
         $this->assertFileExists($sessionFile);
         $contents = (string) file_get_contents($sessionFile);
-        $this->assertStringContainsString('cis_key', $contents,
-            'write_close must persist $g->session contents when cis=true');
-        $this->assertStringNotContainsString('wrong_key', $contents,
-            'write_close must NOT use $GLOBALS[_SESSION] when cis=true');
+        $this->assertStringContainsString('live_key', $contents,
+            '#379: write_close must persist the LIVE $GLOBALS[_SESSION] when cis=true');
+        $this->assertStringNotContainsString('stale_key', $contents,
+            '#379: a stale typed-slot copy must NOT shadow the live store');
     }
 
     public function testWriteCloseFallsBackToZealSessionIdWhenNoSessionParamId(): void
