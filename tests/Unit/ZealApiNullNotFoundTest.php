@@ -11,16 +11,19 @@ use ZealPHP\Tests\TestCase;
 use ZealPHP\ZealAPI;
 
 /**
- * #347 — Apache-parity for the unhandled-method shape.
+ * #347 — the null-return contract, MODE-AWARE (corrected rule).
  *
- * A filename-match closure that dispatches some methods internally (the labs
- * WebAPI pattern: `$search` serves POST, no-ops on GET) returns null for the
- * rest; Apache's dispatcher 404s those before any handler body runs. ZealAPI
- * previously surfaced that null as `200 OK` + empty body. Now a null return
- * with NO output, NO explicit status and NO streaming yields
- * `404 {"error":"method_not_found"}` — and every intentional-empty escape
- * hatch (echoed output, explicit status, explicit `''`, the global opt-out)
- * keeps its pre-#347 behaviour.
+ * The two dispatch modes are mutually exclusive (filename match wins), so a
+ * `null` + empty + 200 return means different things and is graded by mode:
+ *   • FILENAME match (`$search` serves all methods, no-ops on some) → the
+ *     handler IS the responder and chose to emit nothing → **empty 200**
+ *     (native-PHP parity; an empty-set/infinite-scroll tail). The earlier
+ *     blanket 404 was a bug — it broke clients reading empty-200 as "no more".
+ *   • PER-METHOD (`$get`/`$post`/…) handler that ran and returned null →
+ *     `404 {"error":"method_not_found"}`. (A method with NO handler 405s
+ *     before reaching here.)
+ * Escape hatches unchanged: echoed output, an explicit status, explicit `''`,
+ * and `App::apiNullNotFound(false)` (disables the per-method 404).
  */
 class ZealApiNullNotFoundTest extends TestCase
 {
@@ -58,12 +61,20 @@ class ZealApiNullNotFoundTest extends TestCase
         $apiDir = $this->tmpRoot . '/api';
         @mkdir($apiDir . '/m', 0777, true);
 
-        // The labs shape: filename-match closure that no-ops on GET.
+        // The labs shape: FILENAME-MATCH closure that no-ops on GET. Under the
+        // corrected #347 rule this is an intentional empty 200 (the handler IS
+        // the responder for GET and chose to emit nothing) — NOT a 404.
         file_put_contents(
             $apiDir . '/m/search.php',
             '<?php $search = function() {'
             . ' if ((\ZealPHP\G::instance()->server["REQUEST_METHOD"] ?? "GET") !== "POST") { return null; }'
             . ' return ["results" => ["a"]]; };'
+        );
+        // PER-METHOD dispatch whose $get handler returns null → 404 (the only
+        // shape that still yields the method_not_found envelope under the rule).
+        file_put_contents(
+            $apiDir . '/m/pmnull.php',
+            '<?php $get = function() { return null; };'
         );
         // Intentional empty 200 — explicit empty string.
         file_put_contents(
@@ -118,9 +129,22 @@ class ZealApiNullNotFoundTest extends TestCase
         return new ZealAPI(new \stdClass(), new \stdClass(), $this->tmpRoot);
     }
 
-    public function testNullNoOutputNoStatusYields404Envelope(): void
+    public function testFilenameMatchNullYields200Empty(): void
     {
+        // Corrected #347 rule: a filename-match handler that returns null on a
+        // method it doesn't internally handle is an intentional empty 200 —
+        // never a 404 (the bug that broke empty-200-as-"no-more-data" clients).
         $result = $this->makeApi()->processApi('/m', 'search');
+        $this->assertInstanceOf(ResponseInterface::class, $result);
+        $this->assertSame(200, $result->getStatusCode());
+        $this->assertSame('', (string) $result->getBody());
+    }
+
+    public function testPerMethodNullYields404Envelope(): void
+    {
+        // The one shape that still 404s: a per-method handler ($get) that ran
+        // and produced no response.
+        $result = $this->makeApi()->processApi('/m', 'pmnull');
         $this->assertInstanceOf(ResponseInterface::class, $result);
         $this->assertSame(404, $result->getStatusCode());
         $decoded = json_decode((string) $result->getBody(), true);
@@ -163,7 +187,9 @@ class ZealApiNullNotFoundTest extends TestCase
     public function testGlobalOptOutRestoresNullTo200Empty(): void
     {
         App::apiNullNotFound(false);
-        $result = $this->makeApi()->processApi('/m', 'search');
+        // The opt-out only matters for the per-method shape (filename-match is
+        // already 200); with it off, a per-method null is a plain empty 200.
+        $result = $this->makeApi()->processApi('/m', 'pmnull');
         $this->assertInstanceOf(ResponseInterface::class, $result);
         $this->assertSame(200, $result->getStatusCode());
         $this->assertSame('', (string) $result->getBody());

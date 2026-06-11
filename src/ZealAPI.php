@@ -95,6 +95,18 @@ class ZealAPI extends REST
     public $cwd = null;
     /** @var array<string, mixed>|null */
     private ?array $_undefinedMethodError = null;
+    /**
+     * Which dispatch mode resolved the active handler (#347):
+     *   true  — filename match (`$list` in list.php; serves ALL methods)
+     *   false — per-method dispatch (`$get`/`$post`/…; one closure per method)
+     * Drives the null-return contract: a filename-match handler that returns
+     * null is an intentional empty 200 (it IS the handler for this method and
+     * chose to emit nothing — native-PHP parity), whereas a per-method handler
+     * returning null is "this method produced no response" → 404. The two modes
+     * are mutually exclusive by design (filename match wins; the framework warns
+     * if both are present), so this flag is unambiguous.
+     */
+    private bool $is_filename_match = false;
 
     /**
      * Construct a `ZealAPI` dispatcher bound to the current request/response pair.
@@ -219,7 +231,9 @@ class ZealAPI extends REST
                         }
                     }
                     $closureToBind = $filenameHandler;
+                    $this->is_filename_match = true;   // #347: null → empty 200
                 } else {
+                    $this->is_filename_match = false;  // #347: null → 404
                     /** @var array<string, \Closure> $methodHandlers */
                     $methodHandlers = [];
                     foreach (['get', 'post', 'put', 'delete', 'patch'] as $_m) {
@@ -422,19 +436,26 @@ class ZealAPI extends REST
             echo $object;
         }
         $buffer = (string)ob_get_clean();
-        // #347 — Apache-parity for the unhandled-method shape: a filename-match
-        // closure that dispatches some methods internally (the labs WebAPI
-        // pattern: `$search` serves POST, no-ops on GET) returns null for the
-        // rest; under Apache their dispatcher 404s those before any handler
-        // body runs. Under ZealAPI that null previously surfaced as `200 OK` +
-        // empty body, silently breaking clients that expect a JSON error
-        // envelope. A null return with NO output, NO explicit status and NO
-        // streaming is an unhandled request, not an intentional empty 200 —
-        // emit the canonical envelope. A handler that MEANS "empty 200" can
-        // `return '';` (explicit empty string), set a status, or the app can
-        // opt out globally via App::apiNullNotFound(false).
+        // #347 — null-return contract, mode-aware (the corrected rule). The two
+        // dispatch modes are mutually exclusive (filename match wins), so the
+        // intent of a `null` + empty + 200 return is unambiguous from the mode:
+        //
+        //   • FILENAME match (`$list` in list.php, serving ALL methods): the
+        //     handler IS the responder for this method and chose to emit
+        //     nothing → an intentional **empty 200** (native-PHP parity — a
+        //     function with no `return` is null; an infinite-scroll/poll tail
+        //     legitimately returns the empty set). NEVER 404 here — that was the
+        //     bug: it broke clients reading empty-200 as "no more to load".
+        //   • PER-METHOD dispatch (`$get`/`$post`/…): a defined method handler
+        //     that produced no response is "this method yielded nothing" →
+        //     `404 {"error":"method_not_found"}`. (A method with NO handler at
+        //     all never reaches here — it already 405'd above.)
+        //
+        // Escape hatches unchanged: `return '';`, an explicit status, or output
+        // all keep their value; App::apiNullNotFound(false) disables the
+        // per-method 404 entirely for pure-native APIs.
         if ($object === null && $buffer === '' && $status === 200
-            && App::$api_null_not_found) {
+            && !$this->is_filename_match && App::$api_null_not_found) {
             response_add_header('Content-Type', 'application/json');
             return new Response($this->json(['error' => 'method_not_found']), 404);
         }
