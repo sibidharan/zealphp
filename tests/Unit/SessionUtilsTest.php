@@ -422,7 +422,9 @@ class SessionUtilsTest extends TestCase
             $sid = 'mode4-idem';
             $g->cookie['PHPSESSID'] = $sid;
             $g->session_params['session_id'] = $sid;
-            $g->session = ['counter' => 5];
+            // #379: Mode 4's canonical store is the live $GLOBALS['_SESSION']
+            // (the start path detaches the $g->session slot).
+            $GLOBALS['_SESSION'] = ['counter' => 5];
             $g->session_loaded_keys = ['counter'];
             $g->_session_started = true;
 
