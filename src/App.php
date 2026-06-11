@@ -637,14 +637,16 @@ class App
      */
     public static bool $api_warn_collisions = true;
     /**
-     * #347 — Apache-parity for unhandled API methods: when a ZealAPI handler
-     * returns `null` with NO output, NO explicit status and NO streaming
-     * (the labs WebAPI shape — a filename-match closure that serves POST and
-     * no-ops on GET), emit `404` + `{"error":"method_not_found"}` instead of
-     * a silent `200 OK` + empty body. Default ON (matches the mod_php
-     * dispatch contract). A handler that genuinely means "empty 200" can
-     * `return '';` or set a status; set this `false` to restore the
-     * pre-#347 null→200-empty behaviour globally.
+     * #347 — the `404 {"error":"method_not_found"}` envelope for a ZealAPI
+     * handler that returns `null` with NO output, NO explicit status and NO
+     * streaming. **Mode-aware (corrected rule):** it applies ONLY to
+     * **per-method** dispatch (`$get`/`$post`/…) — a method handler that ran
+     * and produced nothing. A **filename-match** handler (`$list`, serving all
+     * methods) returning null is an intentional **empty 200** (native-PHP
+     * parity — an empty-set / infinite-scroll tail), never a 404. A method
+     * with no handler at all already 405s before this point. Default ON.
+     * Escape hatches: `return '';`, set a status, or this `false` (disables the
+     * per-method 404 for pure-native APIs).
      */
     public static bool $api_null_not_found = true;
     /**
