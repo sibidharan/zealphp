@@ -13,39 +13,75 @@ use ZealPHP\Middleware\SessionStartMiddleware;
 use ZealPHP\RequestContext;
 use ZealPHP\Tests\TestCase;
 
+use function ZealPHP\Session\zeal_session_status;
+
 /**
  * SessionStartMiddleware — eager session bootstrap so first-time visitors get a
  * PHPSESSID cookie even when their handler never calls session_start() (issue
- * #12). zeal_session_start() is stubbed via uopz so the test observes exactly
- * when the middleware triggers a start, with no real session-file side effects.
+ * #12). Runs the REAL `zeal_session_start()` (ext-zealphp is the override
+ * engine — no uopz stubbing) against a temp save_path, observing the
+ * middleware through the engine's own signals: the `_session_started` flag,
+ * the minted `session_params['session_id']`, and `zeal_session_status()`.
  */
 class SessionStartMiddlewareTest extends TestCase
 {
-    /** Count of zeal_session_start() invocations during a test. */
-    public static int $starts = 0;
+    private string $savePath = '';
+    private bool $hadSession = false;
+    /** @var mixed */
+    private $savedSession = null;
 
     protected function setUp(): void
     {
+        parent::setUp();
         App::$cwd = ZEALPHP_ROOT;
         App::superglobals(true);
-        self::$starts = 0;
-        uopz_set_return('ZealPHP\\Session\\zeal_session_start', static function (): void {
-            SessionStartMiddlewareTest::$starts++;
-        }, true);
+
+        $this->hadSession = array_key_exists('_SESSION', $GLOBALS);
+        $this->savedSession = $GLOBALS['_SESSION'] ?? null;
+        unset($GLOBALS['_SESSION']);
+
+        $this->savePath = sys_get_temp_dir() . '/zealphp_ssmw_' . bin2hex(random_bytes(6));
+        @mkdir($this->savePath, 0777, true);
+
+        $g = RequestContext::instance();
+        $g->_session_started = null;
+        $g->session_params = ['save_path' => $this->savePath];
+        $g->cookie = [];                       // no PHPSESSID → first-time visitor
+        $GLOBALS['_COOKIE'] = [];
     }
 
     protected function tearDown(): void
     {
-        uopz_unset_return('ZealPHP\\Session\\zeal_session_start');
-        RequestContext::instance()->_session_started = null;
+        $g = RequestContext::instance();
+        $g->_session_started = null;
+        $g->session_params = [];
+        $g->cookie = [];
+        if ($this->hadSession) {
+            $GLOBALS['_SESSION'] = $this->savedSession;
+        } else {
+            unset($GLOBALS['_SESSION']);
+        }
+        foreach (glob($this->savePath . '/sess_*') ?: [] as $f) {
+            @unlink($f);
+        }
+        @rmdir($this->savePath);
+        parent::tearDown();
     }
 
     public function testStartsSessionForFirstTimeVisitor(): void
     {
-        RequestContext::instance()->_session_started = null;
         $resp = $this->dispatch();
-        $this->assertSame(1, self::$starts, 'a first-time visitor must get exactly one eager session start');
-        $this->assertTrue(RequestContext::instance()->_session_started);
+
+        $g = RequestContext::instance();
+        $this->assertTrue($g->_session_started);
+        $sid = $g->session_params['session_id'] ?? null;
+        $this->assertIsString($sid, 'an eager start must mint a session id');
+        $this->assertNotSame('', $sid);
+        $this->assertSame(
+            PHP_SESSION_ACTIVE,
+            zeal_session_status(),
+            'the REAL engine must report an active session after the eager start'
+        );
         $this->assertSame('HANDLED', (string)$resp->getBody());
     }
 
@@ -53,13 +89,17 @@ class SessionStartMiddlewareTest extends TestCase
     {
         RequestContext::instance()->_session_started = true;
         $resp = $this->dispatch();
-        $this->assertSame(0, self::$starts, 'an already-started session must not be re-started');
+
+        $this->assertArrayNotHasKey(
+            'session_id',
+            RequestContext::instance()->session_params,
+            'an already-started session must not be re-started (no fresh id minted)'
+        );
         $this->assertSame('HANDLED', (string)$resp->getBody());
     }
 
     public function testFlagIsMarkedTrueAfterStart(): void
     {
-        RequestContext::instance()->_session_started = null;
         $this->dispatch();
         $this->assertTrue(
             RequestContext::instance()->_session_started,
