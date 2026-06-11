@@ -164,8 +164,24 @@ class ZealAPI extends REST
             }
 
             if (file_exists($realFile)) {
-                include $realFile;
-                $_vars = get_defined_vars();
+                // #376 — run the include in an ISOLATED scope. The filename-
+                // handler convention assigns the closure to
+                // `${basename(__FILE__, '.php')}`, so including directly in
+                // THIS scope let an endpoint named after any dispatcher local
+                // clobber it — `request.php` set $request = Closure and the
+                // Apache-parity `'/api'.$module.'/'.$request.'.php'` below
+                // fataled ("Object of class Closure could not be converted to
+                // string") on every call. The wrapper is a NON-static closure
+                // so `$this` stays bound for endpoint files that call
+                // `$this->isAuthenticated()` etc. at top level; everything
+                // else is out of reach, keeping the reserved-name list at
+                // zero. The parameter is unset before get_defined_vars() so
+                // only the file's own variables come back.
+                $_vars = (function ($_zealphp_handler_file) {
+                    include $_zealphp_handler_file;
+                    unset($_zealphp_handler_file);
+                    return get_defined_vars();
+                })($realFile);
 
                 // Resolution order:
                 // 1. Filename match ($list in list.php) → all HTTP methods
