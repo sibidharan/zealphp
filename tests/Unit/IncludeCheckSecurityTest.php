@@ -162,6 +162,49 @@ class IncludeCheckSecurityTest extends TestCase
         $this->assertFalse(self::$app->includeCheck($file));
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // includeCheck() — .well-known carve-out (#359, RFC 8615)
+    // ─────────────────────────────────────────────────────────────
+
+    public function testIncludeCheckAllowsWellKnownFile(): void
+    {
+        // #359 — a real file under /.well-known/ (security.txt, ACME HTTP-01
+        // challenge token) MUST be servable. The route guard already exempts
+        // .well-known; includeCheck() must mirror it or the exemption is dead.
+        mkdir($this->docRoot . '/.well-known');
+        $file = $this->docRoot . '/.well-known/security.txt';
+        file_put_contents($file, 'Contact: mailto:ops@example.com');
+        $this->assertTrue(self::$app->includeCheck($file));
+    }
+
+    public function testIncludeCheckAllowsWellKnownNestedFile(): void
+    {
+        // ACME HTTP-01: /.well-known/acme-challenge/<token>
+        mkdir($this->docRoot . '/.well-known/acme-challenge', 0755, true);
+        $file = $this->docRoot . '/.well-known/acme-challenge/tok123';
+        file_put_contents($file, 'challenge-response');
+        $this->assertTrue(self::$app->includeCheck($file));
+    }
+
+    public function testIncludeCheckStillBlocksWellKnownDecoyDotfile(): void
+    {
+        // A dotfile whose name merely STARTS WITH .well-known (but isn't the
+        // exact segment) must stay blocked — the carve-out is exact-match only.
+        $file = $this->docRoot . '/.well-knownx';
+        file_put_contents($file, 'secret');
+        $this->assertFalse(self::$app->includeCheck($file));
+    }
+
+    public function testIncludeCheckStillBlocksDotfileInsideWellKnown(): void
+    {
+        // The .well-known carve-out exempts the .well-known segment itself, not
+        // an additional dotfile nested under it (e.g. /.well-known/.env).
+        mkdir($this->docRoot . '/.well-known');
+        $file = $this->docRoot . '/.well-known/.env';
+        file_put_contents($file, 'SECRET=1');
+        $this->assertFalse(self::$app->includeCheck($file));
+    }
+
     public function testIncludeCheckRejectsDirectory(): void
     {
         mkdir($this->docRoot . '/sub');

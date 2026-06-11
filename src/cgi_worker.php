@@ -71,6 +71,9 @@ $__z_cookies = [];
 $__z_rawcookies = [];
 $__z_status = 200;
 $__z_meta_sent = false;
+// #357 — single header_register_callback() slot (mod_php keeps one). Fired once
+// in __z_send_meta() just before the buffered headers are captured.
+$__z_header_callback = null;
 $__z_apache_env = [];
 $__z_apache_notes = [];
 $__z_uploaded = [];
@@ -95,8 +98,27 @@ $__z_has_return   = false;
  */
 function __z_send_meta() {
     global $__z_headers, $__z_cookies, $__z_rawcookies, $__z_status, $__z_meta_sent,
-           $__z_return_value, $__z_has_return;
+           $__z_return_value, $__z_has_return, $__z_header_callback;
     if ($__z_meta_sent) return;
+    // #357 — mod_php header_register_callback() parity: fire any callback the
+    // script registered BEFORE the buffered headers are captured, so the
+    // header()/header_remove() calls inside it still land in $__z_headers (the
+    // subprocess's header() override is active here, so the callback writes
+    // straight into $__z_headers). Mirrors the in-worker fire-point in
+    // App::run() (the mixed/coroutine-legacy path); without it the CGI
+    // subprocess dropped the callback's headers entirely. Fire BEFORE setting
+    // $__z_meta_sent so the callback's header() writes are guaranteed captured.
+    if (is_callable($__z_header_callback)) {
+        $__z_cb = $__z_header_callback;
+        $__z_header_callback = null; // mod_php fires the single callback once
+        try {
+            $__z_cb();
+        } catch (\Throwable $__z_cbErr) {
+            // Never let a misbehaving callback abort the meta flush — the host
+            // still needs the response. Surface to stderr for diagnosis.
+            fwrite(STDERR, 'header_register_callback threw: ' . $__z_cbErr->getMessage() . "\n");
+        }
+    }
     $__z_meta_sent = true;
     $payload = [
         'status_code' => $__z_status,
@@ -180,6 +202,19 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
     $z_override('headers_list', function() {
         global $__z_headers;
         return array_map(fn($h) => $h[0] . ': ' . $h[1], $__z_headers);
+    }, true);
+
+    // #357 — header_register_callback() parity: store the callback in a
+    // subprocess-local slot (NOT the framework's RequestContext memo — that
+    // class isn't loaded unless ZEALPHP_CGI_AUTOLOAD=1). __z_send_meta() fires
+    // it just before capturing the buffered headers, so header() calls inside
+    // it still land. Overriding here ALSO shadows the framework's utils.php
+    // version when the autoloader IS present, keeping a single code path.
+    // Returns true (mod_php parity); last registration wins (single callback).
+    $z_override('header_register_callback', function(callable $callback): bool {
+        global $__z_header_callback;
+        $__z_header_callback = $callback;
+        return true;
     }, true);
 
     $z_override('headers_sent', function(&$file = null, &$line = null) {
