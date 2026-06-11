@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Fixed
+- **ext-zealphp pin bumped to v0.3.47 — Stage-8 object-global store-corruption fix.** A `require_once`-legacy app with a **process-global DB connection object** (`$ydb`/`$wpdb`/`$pdo` at file scope) under `App::mode(App::MODE_COROUTINE_LEGACY)` + `App::globalScopeInclude(true)` segfaulted workers under concurrent load (3–13 worker SIGSEGVs per 6-way burst; single-user traffic clean). Root cause (ext): Stage 8's `zealphp_require_global` runs the request in a `ZEND_CALL_TOP_CODE` frame sharing the process-wide `EG(symbol_table)`, so an object global lives as an `IS_INDIRECT` top-frame CV the whole request; a second concurrent coroutine's `zend_attach_symbol_table` alias-copies the object pointer (no addref) into its own frame and repoints the bucket, so first-to-unwind frees it under the peer → `EG(objects_store)` free-list poison → SIGSEGV in the next object allocation in ANY coroutine. ext 0.3.47 isolates these per coroutine (frame-CV-addressed: save + NULL the frame CV on yield, restore into the *resuming* coroutine's own frame CV — `reset_to_parent` untouched). **Validated:** minimal repro + real **YOURLS** + PDO-mysql + mysqli globals all **0 worker deaths** (was 3–13/burst), ext 58/58 phpt, valgrind 0 errors, CI ASAN 8.3/8.4/8.5 green. This generalises across the `require_once`-legacy-with-global-connection class. **WordPress** under heavy concurrency is a separate remaining frontier (the documented mysqlnd/libtasn1 cold-boot teardown corruption — distinct signature; the Stage-8 fix + `USE_ZEND_ALLOC=0` clears its worker SIGSEGVs but leaves request hangs entangled with that teardown class).
+
 
 ## [0.4.8] - 2026-06-10
 
