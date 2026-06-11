@@ -1,6 +1,6 @@
 # ZealPHP 50-App Compatibility Database
 
-> Last updated: 2026-05-31  
+> Last updated: 2026-06-11  
 > Test environment: PHP 8.4.21 + OpenSwoole 26.2.0 + ext-zealphp 0.3.3–0.3.24 (grades vary by section — see per-section notes)  
 > Docker lab sweep — actual boot + first-request tests where marked as tested
 
