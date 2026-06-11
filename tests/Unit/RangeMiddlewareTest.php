@@ -438,13 +438,26 @@ class RangeMiddlewareTest extends TestCase
         $this->assertSame('bytes 0-4/54', $response->getHeaderLine('Content-Range'));
     }
 
-    public function testEmptyRangeSpecIsUnsatisfiable(): void
+    public function testEmptyByteRangeSetIsIgnored(): void
     {
-        // "bytes= " → (.+) captures the space, spec trims to "" → skipped →
-        // ranges empty → 416.
+        // #365: "bytes= " → (.+) captures the space, spec trims to "" → no
+        // syntactically-valid spec present at all → invalid byte-range-set per
+        // RFC 7233 §2.1 → IGNORE the header → full 200 (not 416). 416 is
+        // reserved for a VALID spec that fell out of bounds.
         $response = $this->dispatchRange('bytes= ');
-        $this->assertSame(416, $response->getStatusCode());
-        $this->assertSame('bytes */54', $response->getHeaderLine('Content-Range'));
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(self::BODY, (string) $response->getBody());
+        $this->assertSame('bytes', $response->getHeaderLine('Accept-Ranges'));
+    }
+
+    public function testEmptyByteRangeSetCommaOnlyIsIgnored(): void
+    {
+        // #365: `bytes=,` / `bytes=,,` — every token empty, no spec → ignore → 200.
+        foreach (['bytes=,', 'bytes=,,', 'bytes=, ,'] as $hdr) {
+            $response = $this->dispatchRange($hdr);
+            $this->assertSame(200, $response->getStatusCode(), "$hdr must serve full 200");
+            $this->assertSame(self::BODY, (string) $response->getBody());
+        }
     }
 
     public function testUnsatisfiableStatusIsExactly416(): void
@@ -460,9 +473,10 @@ class RangeMiddlewareTest extends TestCase
 
     public function testIfRangeMatchHonoursRange(): void
     {
-        // If-Range == ETag → range applied (206). Kills LogicalAnd split: with
-        // `||`, etag!='' is true so it would short-circuit to 200 even on match.
-        $response = $this->dispatchRange('bytes=0-4', 200, null, 'GET', 'W/"v1"', 'W/"v1"');
+        // If-Range == strong ETag → range applied (206). Kills LogicalAnd split:
+        // with `||`, etag!='' is true so it would short-circuit to 200 even on
+        // match. STRONG tags only — RFC 9110 §13.1.5 (#362).
+        $response = $this->dispatchRange('bytes=0-4', 200, null, 'GET', '"v1"', '"v1"');
         $this->assertSame(206, $response->getStatusCode());
         $this->assertSame('Hello', (string) $response->getBody());
         $this->assertSame('bytes 0-4/54', $response->getHeaderLine('Content-Range'));
@@ -470,20 +484,37 @@ class RangeMiddlewareTest extends TestCase
 
     public function testIfRangeMismatchIgnoresRange(): void
     {
-        // If-Range != ETag → range ignored (200).
-        $response = $this->dispatchRange('bytes=0-4', 200, null, 'GET', 'W/"stale"', 'W/"fresh"');
+        // If-Range != ETag → range ignored (200). Strong tags, different values.
+        $response = $this->dispatchRange('bytes=0-4', 200, null, 'GET', '"stale"', '"fresh"');
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame(self::BODY, (string) $response->getBody());
         $this->assertSame('bytes', $response->getHeaderLine('Accept-Ranges'));
     }
 
+    public function testIfRangeWeakEtagIgnoredServesFullBody(): void
+    {
+        // #362 — RFC 9110 §13.1.5 / §8.8.1: a weak validator (either side
+        // W/-prefixed) MUST NOT authorise sub-range retrieval. A verbatim weak
+        // If-Range echo that previously honoured the range now serves the full
+        // 200. Covers both weak-vs-weak and weak-If-Range-vs-strong-ETag.
+        $weakBoth = $this->dispatchRange('bytes=0-4', 200, null, 'GET', 'W/"v1"', 'W/"v1"');
+        $this->assertSame(200, $weakBoth->getStatusCode(), 'weak/weak If-Range → full 200');
+        $this->assertSame(self::BODY, (string) $weakBoth->getBody());
+
+        $weakIfRange = $this->dispatchRange('bytes=0-4', 200, null, 'GET', 'W/"v1"', '"v1"');
+        $this->assertSame(200, $weakIfRange->getStatusCode(), 'weak If-Range vs strong ETag → full 200');
+
+        $weakEtag = $this->dispatchRange('bytes=0-4', 200, null, 'GET', '"v1"', 'W/"v1"');
+        $this->assertSame(200, $weakEtag->getStatusCode(), 'strong If-Range vs weak ETag → full 200');
+    }
+
     public function testIfRangeWithNoEtagOnResponseHonoursRange(): void
     {
-        // If-Range present but response has no ETag ($etag === '') → the
+        // If-Range present (strong) but response has no ETag ($etag === '') → the
         // `$etag !== '' && ...` is false → range applied. Kills LogicalAnd split:
-        // with `||`, `$ifRange !== $etag` ('W/"x"' !== '') is true so it would
-        // WRONGLY return 200.
-        $response = $this->dispatchRange('bytes=0-4', 200, null, 'GET', 'W/"x"', null);
+        // with `||`, `$ifRange !== $etag` ('"x"' !== '') is true so it would
+        // WRONGLY return 200. Strong If-Range so the #362 weak-reject doesn't fire.
+        $response = $this->dispatchRange('bytes=0-4', 200, null, 'GET', '"x"', null);
         $this->assertSame(206, $response->getStatusCode());
         $this->assertSame('Hello', (string) $response->getBody());
     }

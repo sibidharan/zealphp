@@ -103,6 +103,7 @@ class ResponseMiddlewarePipelineTest extends TestCase
         $g->status              = 200;
         $g->_streaming          = null;
         $g->server              = [];
+        $g->memo                = [];
     }
 
     private function dispatch(string $uri, string $method = 'GET'): ResponseInterface
@@ -260,6 +261,26 @@ class ResponseMiddlewarePipelineTest extends TestCase
     public function testPostOnlyRouteAcceptsPost(): void
     {
         $this->assertSame('posted', (string) $this->dispatch('/postonly', 'POST')->getBody());
+    }
+
+    // ── #364: PATH_INFO rewrite must NOT truncate REQUEST_URI ─────
+
+    public function testPathInfoKeepsFullRequestUri(): void
+    {
+        // RFC 3875 §4.1.7 / mod_php: REQUEST_URI is the original request target,
+        // unmodified — the PATH_INFO split derives SCRIPT_NAME / PATH_INFO from
+        // it but never mutates REQUEST_URI. ZealPHP previously overwrote
+        // REQUEST_URI with just the script path, dropping the path-info suffix
+        // (#364). public/api.php exists, so `/api.php/extra/path` triggers the
+        // PATH_INFO branch.
+        $g = RequestContext::instance();
+        $this->dispatch('/api.php/extra/path?q=1');
+
+        $this->assertSame('/extra/path', $g->server['PATH_INFO'] ?? null);
+        $this->assertSame('/api.php', $g->server['SCRIPT_NAME'] ?? null);
+        // REQUEST_URI must remain the full original target incl. the path-info
+        // suffix AND the query string — not the truncated `/api?q=1`.
+        $this->assertSame('/api.php/extra/path?q=1', $g->server['REQUEST_URI'] ?? null);
     }
 
     // ── security: traversal / null-byte rejection ─────────────────

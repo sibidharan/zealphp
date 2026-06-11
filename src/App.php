@@ -8445,6 +8445,20 @@ class App
             // native static handler for them can still add them via
             // App::staticHandlerLocations() (accepting the documented
             // prefix-match caveat).
+            //
+            // KNOWN OpenSwoole native-handler RFC divergences (#360, upstream
+            // openswoole/ext-openswoole#392 + #393 — confirmed pure-OpenSwoole,
+            // NOT a ZealPHP bug; the C handler answers before PHP runs, so the
+            // framework cannot guard them from PHP without disabling the handler):
+            //   1. `%00` path truncation — `GET /css/site.css%00.png` serves
+            //      `/css/site.css` (200) instead of 400. Stays inside the doc
+            //      root (no traversal), but defeats suffix/extension decisions.
+            //   2. HEAD returns the full body — RFC 9110 §9.3.2 requires no body
+            //      on HEAD; the native handler ships every byte.
+            // For security-sensitive assets, route them through the PHP
+            // `Response::sendFile()` path instead (it 400s `%00`, strips HEAD
+            // bodies per #358, and computes a proper conditional/range surface),
+            // or scope `static_handler_locations` to non-sensitive subtrees.
             'static_handler_locations' => self::$static_handler_locations !== []
                 ? self::$static_handler_locations
                 : self::defaultStaticHandlerLocations(),

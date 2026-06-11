@@ -123,7 +123,12 @@ class ResponseMiddleware implements MiddlewareInterface
                     if (!$g->openswoole_response->isWritable()) break;
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     $g->openswoole_response->write((string)$chunk);
-                    \OpenSwoole\Coroutine::sleep(0);
+                    // #354 — yield only inside a coroutine; in mixed mode
+                    // (enable_coroutine=false) Coroutine::sleep(0) throws and
+                    // crashes the worker (status=255) with a truncated stream.
+                    if (\OpenSwoole\Coroutine::getCid() > 0) {
+                        \OpenSwoole\Coroutine::sleep(0);
+                    }
                 }
                 // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 if ($g->openswoole_response->isWritable()) {
@@ -561,9 +566,9 @@ class ResponseMiddleware implements MiddlewareInterface
         }
 
         // Apache PATH_INFO — `/script.php/extra/path` exposes `/extra/path` to
-        // the script and rewrites REQUEST_URI to just the script. Triggers
-        // only when the literal `.php/` appears in the URL (WordPress/Drupal
-        // permalink style); implicit-extension routing is unaffected.
+        // the script via PATH_INFO/SCRIPT_NAME. Triggers only when the literal
+        // `.php/` appears in the URL (WordPress/Drupal permalink style);
+        // implicit-extension routing is unaffected.
         if (App::$path_info && strpos($path, '.php/') !== false) {
             [$scriptPath, $extra] = explode('.php/', $path, 2);
             $scriptPath .= '.php';
@@ -581,13 +586,23 @@ class ResponseMiddleware implements MiddlewareInterface
                 $rewritten = App::$ignore_php_ext
                     ? substr($scriptPath, 0, -4)
                     : $scriptPath;
-                $uri = $rewritten . ($qs ? '?' . $qs : '');
-                $g->server['REQUEST_URI'] = $uri;
-                // Keep $path in lock-step with the rewritten resource so the
-                // App::when() path-scope match (below) sees exactly what the
-                // router will dispatch — otherwise a `.php/extra` PATH_INFO URL
-                // could be matched by `when()` against the pre-rewrite path and
-                // a path-scoped auth guard could be evaded.
+                // RFC 3875 §4.1.7 / mod_php SAPI: REQUEST_URI is the request
+                // target EXACTLY as received — mod_php derives SCRIPT_NAME /
+                // PATH_INFO from it but NEVER mutates it. Routers, front
+                // controllers and access logs (%r) all rely on the full original
+                // target. So leave $g->server['REQUEST_URI'] alone (#364);
+                // previously it was overwritten with just the script path,
+                // dropping the `/extra/path` suffix.
+                //
+                // The route table dispatches against the *rewritten* resource
+                // path (the implicit file route), so stash it in a request-scoped
+                // memo that matchAndDispatch() prefers over re-parsing REQUEST_URI.
+                // Keep the local $path in lock-step too so the App::when()
+                // path-scope match (below) sees exactly what the router will
+                // dispatch — otherwise a `.php/extra` URL could be matched by
+                // when() against the pre-rewrite path and a path-scoped auth
+                // guard could be evaded.
+                $g->memo['_routing_path'] = $rewritten;
                 $path = $rewritten;
             }
         }
@@ -702,12 +717,21 @@ class ResponseMiddleware implements MiddlewareInterface
     public function matchAndDispatch(ServerRequestInterface $request, string $method): ResponseInterface
     {
         $g = RequestContext::instance();
-        $uri = (string)$g->server['REQUEST_URI'];
-        // REQUEST_URI now carries the query string for mod_php parity (#306); route
-        // keys + patterns are path-only, so match on the path component. parse_url
-        // returns null only for a degenerate target ('*'), where $uri is the right
-        // fallback (and OPTIONS '*' is handled earlier in process(), not here).
-        $matchPath = (string)(parse_url($uri, PHP_URL_PATH) ?: $uri);
+        // A `.php/extra/path` PATH_INFO request keeps REQUEST_URI as the full
+        // original target (#364, RFC 3875 §4.1.7), so the route table — which
+        // dispatches against the *rewritten* resource path (e.g. `/api`) — must
+        // match the stashed routing path, not the un-rewritten REQUEST_URI.
+        $routingPath = $g->memo['_routing_path'] ?? null;
+        if (is_string($routingPath) && $routingPath !== '') {
+            $matchPath = $routingPath;
+        } else {
+            $uri = (string)$g->server['REQUEST_URI'];
+            // REQUEST_URI now carries the query string for mod_php parity (#306); route
+            // keys + patterns are path-only, so match on the path component. parse_url
+            // returns null only for a degenerate target ('*'), where $uri is the right
+            // fallback (and OPTIONS '*' is handled earlier in process(), not here).
+            $matchPath = (string)(parse_url($uri, PHP_URL_PATH) ?: $uri);
+        }
         $app = App::instance();
         assert($app !== null);
 

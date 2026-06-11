@@ -378,15 +378,33 @@ final class ConditionalRequest
 
     /**
      * Parse an HTTP-date into a Unix timestamp, or null when unparseable.
-     * Accepts the three RFC 9110 §5.6.7 formats (`strtotime` covers IMF-fixdate,
-     * RFC 850, and asctime). Empty / malformed values yield null, mirroring
-     * Apache's `APR_DATE_BAD`.
+     *
+     * Tolerant like Apache's `apr_date_parse_http` (the reference this class
+     * ports), not as strict as a bare `strtotime`. `strtotime` already covers
+     * the three RFC 9110 §5.6.7 formats — IMF-fixdate (RFC 1123), RFC 850, and
+     * asctime — but it REJECTS the historical trailing `"; length=NNN"`
+     * parameter some caches still append to `If-Modified-Since`/`If-Unmodified-Since`
+     * (Netscape-era). `strtotime("…GMT; length=62")` returns false, which
+     * downstream becomes `COND_NOMATCH` → a 304→200 cache miss, or on an unsafe
+     * method a 412→bypass (#363). So strip any trailing parameter list (the
+     * first `;` and everything after it) before parsing, then defer to
+     * `strtotime`. Only a date with no recognisable timestamp yields null,
+     * mirroring Apache's `APR_DATE_BAD`.
      */
     private static function parseHttpDate(string $value): ?int
     {
         $value = \trim($value);
         if ($value === '') {
             return null;
+        }
+        // Drop a legacy trailing parameter (e.g. "; length=62") — apr_date_parse_http
+        // tolerates it; strtotime does not.
+        $semi = \strpos($value, ';');
+        if ($semi !== false) {
+            $value = \rtrim(\substr($value, 0, $semi));
+            if ($value === '') {
+                return null;
+            }
         }
         $ts = \strtotime($value);
         return $ts === false ? null : $ts;
