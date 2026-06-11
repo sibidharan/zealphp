@@ -232,86 +232,94 @@ class SessionManager
             // vs server-minted by the idGenerator. Only a client id can be a
             // planted/fixated value, so only it is subject to the strict-mode
             // rotation below.
-            $clientSupplied = false;
-            if ($this->useCookies && isset($reqCookie[$sessionName])) {
-                $rawSid = $reqCookie[$sessionName];
-                $clientSupplied = true;
-            } else if (!$this->useOnlyCookies && isset($reqGet[$sessionName])) {
-                $rawSid = $reqGet[$sessionName];
-                $clientSupplied = true;
-            } else {
-                $gen = $this->idGenerator;
-                $rawSid = is_callable($gen) ? $gen() : null;
-            }
-            $sessionId = is_string($rawSid) ? $rawSid : null;
-            session_id($sessionId);
+            // #355 — LAZY session, mirroring CoSessionManager. mod_php with the
+            // stock session.auto_start=0 mints NOTHING until the script calls
+            // session_start(): a stateless endpoint gets no Set-Cookie and an
+            // untouched $_COOKIE. The previous code unconditionally minted an id,
+            // called session_start(), and ALWAYS emitted Set-Cookie — so every
+            // response (incl. JSON/health) set an unsolicited tracking cookie and
+            // started a store entry per request (defeats shared-cache caching).
+            // Now we eagerly start + emit ONLY when the client already presented
+            // a session id (returning visitor). For brand-new visitors that
+            // genuinely need a session, register SessionStartMiddleware (opt-in,
+            // the same contract CoSessionManager documents); an app calling
+            // session_start() itself still flushes via the finally block.
+            $hasSessionCookie = $this->useCookies && isset($reqCookie[$sessionName]);
+            $hasSessionParam  = !$this->useOnlyCookies && isset($reqGet[$sessionName]);
+            if ($hasSessionCookie || $hasSessionParam) {
+                // A client-supplied id is always present in this branch, so #244
+                // strict-mode rotation below applies.
+                $rawSid = $hasSessionCookie ? $reqCookie[$sessionName] : $reqGet[$sessionName];
+                $sessionId = is_string($rawSid) ? $rawSid : null;
+                session_id($sessionId);
 
-            // #295 — honour the configured session handler instead of hardcoding
-            // FileSessionHandler (which ignored App::sessionHandler()). Resolution is
-            // memoised per worker; unconfigured (null) keeps the file default via the
-            // read-site fallback to the same resolver.
-            $activeHandler = \ZealPHP\App::resolveActiveSessionHandler();
-            if ($activeHandler !== null) {
-                $g->session_params['handler'] = $activeHandler;
-            }
+                // #295 — honour the configured session handler instead of hardcoding
+                // FileSessionHandler (which ignored App::sessionHandler()). Resolution is
+                // memoised per worker; unconfigured (null) keeps the file default via the
+                // read-site fallback to the same resolver.
+                $activeHandler = \ZealPHP\App::resolveActiveSessionHandler();
+                if ($activeHandler !== null) {
+                    $g->session_params['handler'] = $activeHandler;
+                }
 
-            session_start();
-            $g->_session_started = true;
+                session_start();
+                $g->_session_started = true;
 
-            // v0.2.27 — make $g->session and $_SESSION the same array.
-            //
-            // Reference assignment ($g->session = &$_SESSION) doesn't work
-            // because RequestContext has __get/__set ("overloaded object"
-            // forbids reference assignment in PHP). Instead: unset the
-            // declared typed property so the slot becomes "uninitialized,"
-            // which routes reads/writes through the existing __get proxy
-            // (RequestContext.php:111) that returns $GLOBALS['_SESSION'] by
-            // reference. Combined with the symmetric __set superglobal-key
-            // mapping (also added in v0.2.27), $g->session and $_SESSION are
-            // now indistinguishable in superglobals mode — both names point
-            // at the same array, mutations cross over immediately.
-            //
-            // The v0.2.22 mirror code in zeal_session_* stays in place as
-            // belt-and-suspenders for direct $g->session reads before the
-            // first session_*() call.
-            unset($g->session);
+                // v0.2.27 — make $g->session and $_SESSION the same array.
+                //
+                // Reference assignment ($g->session = &$_SESSION) doesn't work
+                // because RequestContext has __get/__set ("overloaded object"
+                // forbids reference assignment in PHP). Instead: unset the
+                // declared typed property so the slot becomes "uninitialized,"
+                // which routes reads/writes through the existing __get proxy
+                // (RequestContext.php:111) that returns $GLOBALS['_SESSION'] by
+                // reference. Combined with the symmetric __set superglobal-key
+                // mapping (also added in v0.2.27), $g->session and $_SESSION are
+                // now indistinguishable in superglobals mode — both names point
+                // at the same array, mutations cross over immediately.
+                //
+                // The v0.2.22 mirror code in zeal_session_* stays in place as
+                // belt-and-suspenders for direct $g->session reads before the
+                // first session_*() call.
+                unset($g->session);
 
-            // #244 session.use_strict_mode: a CLIENT-SUPPLIED id that opened an
-            // EMPTY session (stale / foreign / never-issued) must not be honoured
-            // — regenerate to a fresh server-generated id and delete the old one
-            // so a fixated id can't become an authed session. $_SESSION is the
-            // canonical store here (the typed $g->session slot was just unset);
-            // read it defensively in case an upstream cleared it. session_*() are
-            // the framework's uopz overrides; session_regenerate_id(true) routes
-            // through zeal_session_regenerate_id (deletes old + emits Set-Cookie)
-            // and session_id() returns the new id for the cookie emit below.
-            $storeEntryExists = $g->session_params['session_existed'] ?? null;
-            if (zeal_session_strict_should_regenerate(
-                \ZealPHP\App::$session_strict_mode,
-                $clientSupplied,
-                isset($_SESSION) ? $_SESSION : [],
-                is_bool($storeEntryExists) ? $storeEntryExists : null
-            )) {
-                session_regenerate_id(true);
-                $newId = session_id();
-                $sessionId = is_string($newId) ? $newId : $sessionId;
-            }
+                // #244 session.use_strict_mode: a CLIENT-SUPPLIED id that opened an
+                // EMPTY session (stale / foreign / never-issued) must not be honoured
+                // — regenerate to a fresh server-generated id and delete the old one
+                // so a fixated id can't become an authed session. $_SESSION is the
+                // canonical store here (the typed $g->session slot was just unset);
+                // read it defensively in case an upstream cleared it. session_*() are
+                // the framework's uopz overrides; session_regenerate_id(true) routes
+                // through zeal_session_regenerate_id (deletes old + emits Set-Cookie)
+                // and session_id() returns the new id for the cookie emit below.
+                $storeEntryExists = $g->session_params['session_existed'] ?? null;
+                if (zeal_session_strict_should_regenerate(
+                    \ZealPHP\App::$session_strict_mode,
+                    true,
+                    isset($_SESSION) ? $_SESSION : [],
+                    is_bool($storeEntryExists) ? $storeEntryExists : null
+                )) {
+                    session_regenerate_id(true);
+                    $newId = session_id();
+                    $sessionId = is_string($newId) ? $newId : $sessionId;
+                }
 
-            if ($this->useCookies) {
-                // zeal_session_get_cookie_params() is exactly what the uopz
-                // override of session_get_cookie_params() resolves to at runtime
-                // (App.php), but carries the samesite-inclusive return type.
-                $cookie = zeal_session_get_cookie_params();
-                $response->cookie(
-                    $sessionName,
-                    $sessionId,
-                    $cookie['lifetime'] ? time() + $cookie['lifetime'] : 0,
-                    $cookie['path'],
-                    $cookie['domain'],
-                    $cookie['secure'],
-                    $cookie['httponly'],
-                    $cookie['samesite'] ?? 'Lax'  // 8th arg — emit SameSite (was dropped)
-                );
+                if ($this->useCookies) {
+                    // zeal_session_get_cookie_params() is exactly what the uopz
+                    // override of session_get_cookie_params() resolves to at runtime
+                    // (App.php), but carries the samesite-inclusive return type.
+                    $cookie = zeal_session_get_cookie_params();
+                    $response->cookie(
+                        $sessionName,
+                        $sessionId,
+                        $cookie['lifetime'] ? time() + $cookie['lifetime'] : 0,
+                        $cookie['path'],
+                        $cookie['domain'],
+                        $cookie['secure'],
+                        $cookie['httponly'],
+                        $cookie['samesite'] ?? 'Lax'  // 8th arg — emit SameSite (was dropped)
+                    );
+                }
             }
         }
         $zpFatalGuardId = \ZealPHP\App::fatalGuardTrack($response); // #338 — answer this connection with 500 if a fatal kills the worker
@@ -330,7 +338,11 @@ class SessionManager
             call_user_func($this->middleware, $request, $response);
         } finally {
             \ZealPHP\App::fatalGuardRelease($zpFatalGuardId); // #338
-            if ($manageSession) {
+            // #355 — only write/close when a session was actually started (a
+            // returning visitor's id, an app-level session_start(), or
+            // SessionStartMiddleware). A stateless request that never started a
+            // session must not touch the store or re-emit a cookie.
+            if ($manageSession && ($g->_session_started ?? false)) {
                 elog('SessionManager:: session_write_close took '.get_current_render_time(), 'info');
                 session_write_close();
                 session_id('');

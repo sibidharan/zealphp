@@ -44,6 +44,8 @@ final class MemcachedBackend implements StoreBackend
     private array $schemas = [];
     /** @var array<string, array{ttl:int}> */
     private array $tableOpts = [];
+    /** @var array<string, true> Tables a non-atomic-incr advisory was already emitted for (#344; once per table per worker). */
+    private array $incrWarned = [];
 
     private \Memcached $client;
 
@@ -139,19 +141,26 @@ final class MemcachedBackend implements StoreBackend
 
     /**
      * Read-modify-write increment of column `$col` by `$by`.
-     * NOT atomic across concurrent workers — Memcached has no native hash
-     * `HINCRBY` equivalent. For cross-node atomic counters use `Counter`
-     * with a `RedisCounterBackend` instead.
+     *
+     * #344 — NOT atomic across concurrent workers. Memcached has no native hash
+     * `HINCRBY`: rows are stored as serialized arrays, so the native
+     * `Memcached::increment()` (plain ASCII-integer keys only) cannot operate
+     * on a multi-column row. Under concurrent increments, two callers read the
+     * same value and the last `set()` wins — increments are silently dropped
+     * (a +100 burst can land as e.g. +23). A safe atomic path would need
+     * `Memcached::cas()`, but ext-memcached's CAS-token read is not represented
+     * in the toolchain's stub, so it can't be wired without losing static-
+     * analysis coverage; rather than ship a half-checked CAS loop, this backend
+     * is honest about the limitation and emits a one-time runtime advisory
+     * (issue #344's documented minimum). For correct atomic counters use the
+     * Redis/Tiered backend (`HINCRBY`/`HINCRBYFLOAT`) or the standalone
+     * `Counter` facade — both are server-side atomic.
      */
     public function incr(string $name, string $key, string $col, int|float $by = 1): int|float
     {
         $this->assertMade($name);
+        $this->warnNonAtomicIncr($name);
         $schema = $this->schemas[$name];
-        // Memcached::increment only works on plain numeric keys; our rows
-        // are serialized arrays. Read-modify-write under best-effort
-        // semantics (no atomicity guarantee across multi-key races —
-        // contrast with Redis HINCRBY which IS atomic). For atomic cross-
-        // node counters, use the standalone Counter facade.
         $row = $this->get($name, $key);
         $row = is_array($row) ? $row : [];
         $type = $schema[$col][0] ?? Table::TYPE_INT;
@@ -167,6 +176,26 @@ final class MemcachedBackend implements StoreBackend
         $row[$col] = $new;
         $this->set($name, $key, $row);
         return $new;
+    }
+
+    /**
+     * Emit the non-atomic-incr advisory ONCE per table per worker (#344) — so a
+     * developer relying on `Store::incr()` for rate-limiting / inventory / view
+     * counts under load is warned that Memcached drops increments under
+     * contention, instead of silently getting drift.
+     */
+    private function warnNonAtomicIncr(string $name): void
+    {
+        if (isset($this->incrWarned[$name])) { return; }
+        $this->incrWarned[$name] = true;
+        $msg = "Store/Memcached '{$name}': incr()/decr() is NOT atomic on the Memcached backend "
+             . "(read-modify-write — concurrent increments are silently dropped under load). "
+             . "Use the Redis/Tiered backend (HINCRBY) or the Counter facade for accurate counters.";
+        if (function_exists('ZealPHP\\elog')) {
+            \ZealPHP\elog($msg, 'warn');
+        } else {
+            error_log($msg);
+        }
     }
 
     /** Decrement column `$col` by `$by` via `incr()` with a negated delta. Not atomic — see `incr()`. */

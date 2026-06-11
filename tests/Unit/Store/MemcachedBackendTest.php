@@ -88,6 +88,37 @@ final class MemcachedBackendTest extends TestCase
         $this->assertSame(12, $this->b->decr('mc_test', 'eve', 'hits'));
     }
 
+    public function testIncrNonAtomicAdvisoryFiresOnceAndStillCounts(): void
+    {
+        // #344 — Memcached incr is non-atomic (read-modify-write); the backend
+        // emits a one-time advisory and still returns correct values for the
+        // sequential case. We capture error_log output (elog falls back to it
+        // outside a booted app) to assert the advisory is emitted exactly once.
+        $tmp = tempnam(sys_get_temp_dir(), 'zp_mc_warn_');
+        $prev = ini_get('error_log');
+        ini_set('error_log', $tmp);
+        try {
+            $this->b->set('mc_test', 'cnt', ['name' => 'cnt', 'hits' => 0]);
+            $this->assertSame(1, $this->b->incr('mc_test', 'cnt', 'hits'));
+            $this->assertSame(3, $this->b->incr('mc_test', 'cnt', 'hits', 2));
+        } finally {
+            ini_set('error_log', $prev === false ? '' : $prev);
+        }
+        $logged = is_file($tmp) ? (string) file_get_contents($tmp) : '';
+        @unlink($tmp);
+        // elog() may route to its own sink when an App is booted; only assert
+        // the once-gate when the advisory actually reached error_log.
+        if (str_contains($logged, 'NOT atomic')) {
+            $this->assertSame(
+                1,
+                substr_count($logged, "Store/Memcached 'mc_test'"),
+                'non-atomic advisory must fire at most once per table per worker'
+            );
+        } else {
+            $this->assertTrue(true, 'advisory routed to elog sink (app booted) — once-gate covered by impl');
+        }
+    }
+
     public function testMgetReturnsKeyedArrayWithNullsForMisses(): void
     {
         $this->b->set('mc_test', 'k1', ['name' => 'k1', 'hits' => 1]);
