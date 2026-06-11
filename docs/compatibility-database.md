@@ -1,1238 +1,404 @@
-# ZealPHP 50-App Compatibility Database
+# Compatibility Database
 
-> Last updated: 2026-05-31  
-> Test environment: PHP 8.4.21 + OpenSwoole 26.2.0 + ext-zealphp 0.3.3–0.3.24 (grades vary by section — see per-section notes)  
-> Docker lab sweep — actual boot + first-request tests where marked as tested
+> Last updated: 2026-06-11
 
-> ### 2026-06-10 real-work re-validation (ext-zealphp 0.3.46, coroutine-legacy)
-> A focused real-work pass (beyond boot/first-request) on the post-0.3.46 stack — the session that shipped the child-coroutine superglobal lane (0.3.43), tz/mb/libxml isolation (0.3.45), and the **mysqlnd vio orig_path allocator-consistency shim (0.3.46)**:
->
-> | App | Real work performed | Result |
-> |---|---|---|
-> | **WordPress** (public) | homepage render, login (auth cookie set), `ab -c10/-c20` concurrency | 200 (real 49 KB page); **0 crashes in steady state** (mysqlnd shim holds — pre-shim this crash-looped 11–14 worker deaths/run) |
-> | **WordPress** (wp-admin) | admin password reset → authenticated dashboard + post-list | **200** (Dashboard 115 KB "At a Glance/Howdy"; edit.php 97 KB real post list) **with `App::globalScopeInclude(true)`** — closes the `$_wp_submenu_nopriv` `array_keys(null)` 500 |
-> | **File upload** (`$_FILES` + `move_uploaded_file`) | 24 concurrent multipart uploads, unique random payloads | **24/24 landed with their own SHA**, 0 cross-coroutine `tmp_name`/`$_FILES` mixing, 0 crashes |
-> | **Adminer 4.8.1** | boot, login form, DB-login POST to MariaDB | 200 boot; login processed (302); deep schema/SQL gated by Adminer's CSRF token (app-auth, not framework); 0 crashes |
-> | **TinyFileManager** | boot, login screen render | 200; login needs `SessionStartMiddleware` for first-visitor sessions (app-config, not framework); 0 crashes |
->
-> **Cross-app finding:** every app **boots + renders + processes its entry/auth flow under coroutine-legacy with ZERO crashes** on 0.3.46. Cold-concurrent first-wave edges (HAZARD-2 cold-autoload + the residual cold-boot mysqlnd, ext#44) are self-healing and mitigated by `App::preloadClassmap()` (which these unconfigured harnesses don't call); steady state is clean. Deep multi-step authed flows hit each app's own CSRF/nonce/session tokens — a test-harness fidelity matter, not a framework defect.
->
-> **New issue surfaced:** persistent **userland** streams (`pfsockopen` / `stream_socket_client(STREAM_CLIENT_PERSISTENT)`) hit the same orig_path allocator mismatch as ext#44 on the generic xport path the vio shim doesn't cover (ext#45) — niche (persistent sockets are semantically wrong under coroutines anyway), no real app in this pass tripped it.
+How 50 popular PHP apps run on ZealPHP across **all four runtime modes**, with **`coroutine-legacy`** — the headline mode for legacy apps ("old PHP just works, concurrently") — the column to read first. Each graded `coroutine-legacy` cell is a **real install**: real database, real authenticated login, real write, and a 6-way concurrent burst, tested individually on the current stack (**ZealPHP v0.4.8 + ext-zealphp v0.3.48**, PHP 8.4.21, OpenSwoole 26.2.0).
 
-This is the reference for which PHP applications work with ZealPHP and in which modes. Use the [Mode Selection Guide](#mode-selection-guide) to quickly find your configuration.
+**Rebuilt from scratch 2026-06-11** — current-stack data only, no historical grades, no superseded mode numbering. Apps not yet re-validated are marked _pending_ (they carry **no** grade rather than a stale one).
+
+**Status: 26/50 re-validated in `coroutine-legacy`** (B: 4 · C: 11 · D: 11); 24 pending.
 
 ---
 
-## Modes Reference
+## The four modes
 
-> **Canonical names, not numbers.** The framework's source of truth is `App::mode()` with the string presets **`legacy-cgi`**, **`mixed`**, **`coroutine-legacy`**, **`coroutine`** — there are no mode numbers in the API. The “Mode N” labels below survive only as historical aliases from an early draft whose numbering also contained a “Mode 2” (the per-process CGI variant, since folded into `legacy-cgi`'s `cgiMode('proc')`) — which is why old tables appear to skip 2. Anywhere this document says a bare number: 1 = `legacy-cgi`, 3 = `mixed`, 4 = `coroutine-legacy`, 5 = `coroutine`. The in-progress ground-up re-validation replaces numeric labels entirely.
+ZealPHP's only mode API is `App::mode()` with **four** string presets — there are no mode numbers.
 
-> **Canonical API:** use `App::mode(string)` to set both axes in one call. The "Mode N" labels below are shorthand used throughout this document; they map to the presets shown. See [/coroutines#lifecycle-modes](/coroutines#lifecycle-modes) for the full matrix.
+| Preset | `App::mode(...)` | Superglobals | Concurrency | Role |
+|--------|------------------|:---:|---|------|
+| **`legacy-cgi`** | `MODE_LEGACY_CGI` | yes | sequential (subprocess) | **Compatibility floor.** Per-request subprocess, Apache mod_php parity. Sub-strategy via **`cgiMode()`**: `pool` (pre-spawned, reused, ~1–3 ms — **the default**, what people mean by "pool"), `proc` (fresh process per request, ~30–50 ms), `fcgi`. For pure-`require_once` apps with no autoloader. |
+| **`mixed`** | `MODE_MIXED` | yes | sequential (in-process) | **Sequential fallback.** In-process, superglobals per request, no coroutine concurrency. No subprocess cost. |
+| **`coroutine-legacy`** | `MODE_COROUTINE_LEGACY` | yes | **full coroutine** | **The headline mode.** Unmodified request-style PHP (superglobals, `$_SESSION`, `exit`/`die`, `require_once`) under coroutine concurrency, with per-coroutine isolation of superglobals, `$GLOBALS`, function statics, constants, `require_once` re-execution. Requires ext-zealphp. |
+| **`coroutine`** | `MODE_COROUTINE` | no | full coroutine | Native ZealPHP — uses `$g->get`/`$g->post` instead of superglobals. Highest performance; the rewrite target. |
 
-| Mode | Canonical preset | Config (fine-grained equivalent) | Description | Overhead | Concurrency |
-|------|-----------------|----------------------------------|-------------|----------|-------------|
-| **`legacy-cgi`** *(historically “Mode 1 / CGI Pool”)* | `App::mode(App::MODE_LEGACY_CGI)` | `superglobals(true) + isolation(CgiPool)` | Each request runs in a pre-spawned pool worker subprocess. Like Apache mod_php. Fresh globals per request. | **~1–3 ms warm** (pool); opt-in `cgiMode('proc')` = ~30–50 ms cold per-process | Sequential per worker |
-| **`mixed`** *(historically “Mode 3 / Sync”)* | `App::mode(App::MODE_MIXED)` | `superglobals(true) + isolation(None)` | In-process, sequential. Superglobals populated per request. No subprocess overhead. | ~0 ms | Sequential per worker |
-| **`coroutine-legacy`** *(historically “Mode 4 / Hybrid”)* | `App::mode(App::MODE_COROUTINE_LEGACY)` | `superglobals(true) + isolation(Coroutine)` + silentRedeclare + includeIsolation + coroutineGlobalsIsolation + coroutineStaticsIsolation | Requires ext-zealphp. Full coroutine concurrency with per-coroutine isolation of superglobals, `$GLOBALS`, function statics, and `require_once` re-execution. (`define()` isolation is a separate opt-in: `App::defineIsolation(true)`.) | ~5 ms | Full coroutine |
-| **`coroutine`** *(historically “Mode 5”)* | `App::mode(App::MODE_COROUTINE)` | `superglobals(false) + isolation(Coroutine)` | Native ZealPHP mode. Uses `$g->get`/`$g->post` instead of `$_GET`/`$_POST`. Highest performance. | ~0 ms | Full coroutine |
+> **"Is pool a separate mode?"** No — **`pool` is `legacy-cgi`'s default sub-strategy** (`cgiMode('pool')`), not a fifth mode. `legacy-cgi` = the mode; `pool`/`proc`/`fcgi` = how it spawns the subprocess.
 
-> **⚠️ The Mode 4 grades below predate the full `coroutine-legacy` preset (root-caused 2026-05-30).** "Mode 4" as tested here (`superglobals + enableCoroutine + defineIsolation`, ext-zealphp 0.3.3–0.3.8) does NOT include Stage 7 `includeIsolation` + `silentRedeclare`, which `App::mode(App::MODE_COROUTINE_LEGACY)` now auto-enables. Under the full preset there is a hard rule: an inherited class (`extends`/`implements`) declared in a `require_once`'d file that Stage 7 re-executes per request corrupts its `default_properties_table` → hard SIGSEGV — fixed in ext-zealphp 0.3.24 (Stage 4 orphans inherited losers instead of destroying them). **Net effect, verified on real apps (PHP 8.4, ASAN, ext-zealphp as the sole override engine):** Composer/PSR-4 **autoload** apps are SAFE in coroutine-legacy (Adminer 5.4.2 ✓, CommonMark 2.x with 224 inherited classes ✓); legacy **`require_once`-bootstrap** apps (WordPress) also trip a separate cold-boot `mysqlnd`/`libtasn1` connection-teardown heap overflow and must use **Mode 1 / `legacy-cgi`** until that second layer lands. Re-graded against ext-zealphp 0.3.25 (this release): a 12-app coroutine-legacy sweep (PHP 8.4 + ASAN) upgraded **8 apps from Mode-1-only** — Adminer, TinyFileManager, FreshRSS, YOURLS, Grav, phpBB, MyBB, Piwigo — plus **Drupal** (via the per-request class-static reset) now run in coroutine-legacy **sequentially** (worker-stable, ASAN-clean, zero redeclaration crashes); MediaWiki boots. WordPress serves its public site + login auth + comment writes end-to-end sequentially. **True concurrency of pure-`require_once` apps (classic WordPress) remains the home of `legacy-cgi`.** The per-app Mode-4 grades in the tables below predate this sweep and skew pessimistic for those 8 apps.
-
----
-
-## Grading Scale
+## Grading scale
 
 | Grade | Meaning |
 |-------|---------|
-| **A** | Works out of the box, all requests pass |
-| **B** | Works with minor config (DB setup, config file, composer install) |
-| **C** | Works in specific mode only, or needs significant configuration |
-| **D** | Needs code patches or has significant limitations |
-| **F** | Fundamentally incompatible without major refactoring |
-| **NT** | Not tested — prediction based on architecture analysis |
+| **A** | All flows pass (homepage, login, write, concurrent burst) with only DB/config setup. |
+| **B** | All flows pass, but needed documented knobs (`globalScopeInclude`, `ignorePhpExt`, `preloadClassmap`, …) or minor workarounds. |
+| **C** | Read paths + login work; a real-work flow (write, or stability under burst) fails — documented. |
+| **D** | Boots but major breakage; usable only via a sequential fallback. |
+| **F** | Cannot boot/serve in that mode. |
+| **ENV** | A missing environment dependency (search engine, IMAP, license key) blocked full testing. |
+| **NT** | Not tested in this sweep (the sweep targets `coroutine-legacy`; `legacy-cgi` is the by-design floor, `coroutine` needs a `$g->` rewrite). |
+
+## Summary
+
+Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; **`mixed`** is derived from each app's sequential-fallback probe (lighter than the full protocol); **`legacy-cgi`** and **`coroutine`** are `NT` unless this sweep exercised them.
+
+| # | App | Cat | ★ | `legacy-cgi` | `mixed` | **`coroutine-legacy`** | `coroutine` | Top knob |
+|---|-----|-----|---|:---:|:---:|:---:|:---:|----------|
+| 1 | WordPress | CMS | 19k | NT | C | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) + App::globalScopeInc… |
+| 2 | Drupal | CMS | 4.3k | NT | F | **D** | NT | App::preloadClassmap() after composer dump-autoload -o (tem… |
+| 3 | Joomla | CMS | 4.7k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 4 | TYPO3 | CMS | 1.0k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 5 | Concrete CMS | CMS | 768 | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 6 | October CMS | CMS | 11k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 7 | Craft CMS | CMS | 3.1k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 8 | Grav | CMS | 14k | NT | C | **D** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
+| 9 | Kirby | CMS | 7.5k | NT | B | **C** | NT | define('KIRBY_HELPER_GO', false) before loading Kirby — Ope… |
+| 10 | Statamic | CMS | 3.9k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 11 | Bagisto | E-comm | 15k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 12 | Magento 2 | E-comm | 11k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 13 | WooCommerce | E-comm | 9.6k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 14 | PrestaShop | E-comm | 7.8k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 15 | OpenCart | E-comm | 7.3k | NT | C | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
+| 16 | Sylius | E-comm | 7.7k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 17 | Flarum | Forums | 15k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 18 | phpBB | Forums | 1.8k | A | A | **C** | NT | App::globalScopeInclude(true) (template default, kept) |
+| 19 | MyBB | Forums | 2.9k | NT | F | **C** | NT | App::ignorePhpExt(false) — REQUIRED: MyBB is multi-entry (*… |
+| 20 | Vanilla Forums | Forums | 2.9k | NT | A | **B** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
+| 21 | Laravel | Framework | 79k | NT | B | **B** | NT | App::preloadClassmap() + require app vendor/autoload.php in… |
+| 22 | Symfony | Framework | 30k | NT | A | **D** | NT | App::preloadClassmap() + require app vendor/autoload.php in… |
+| 23 | CodeIgniter 4 | Framework | 5.3k | NT | C | **D** | NT | CI_ENVIRONMENT=production (development mode fatals: Kint/De… |
+| 24 | CakePHP | Framework | 8.7k | NT | A | **D** | NT | composer require psr/http-message:^1.1 — skeleton vendor sh… |
+| 25 | Slim | Framework | 12k | NT | — | **B** | NT | App::preloadClassmap() + require /apps50/slim/vendor/autolo… |
+| 26 | Yii 2 | Framework | 14k | NT | B | **C** | NT | composer install --no-dev + composer dump-autoload -o (dev … |
+| 27 | Laminas | Framework | 5.1k | NT | A | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
+| 28 | phpMyAdmin | Admin | 7.2k | NT | C | **D** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
+| 29 | Adminer | Admin | 6.1k | NT | — | **B** | NT | App::defineIsolation(true) (Adminer defines per-request con… |
+| 30 | TinyFileManager | Admin | 6.2k | NT | F | **D** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
+| 31 | Roundcube | Admin | 6.0k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 32 | FileGator | Admin | 1.8k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 33 | elFinder | Admin | 3.0k | NT | F | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
+| 34 | MediaWiki | Wiki | 3.7k | NT | C | **D** | NT | App::mode(MODE_COROUTINE_LEGACY) |
+| 35 | DokuWiki | Wiki | 4.1k | NT | F | **D** | NT | App::globalScopeInclude(true) (template default, kept) |
+| 36 | BookStack | Wiki | 16k | NT | F | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
+| 37 | Kanboard | Business | 8.4k | NT | A | **D** | NT | globalScopeInclude(false) AND (true) both tried - session w… |
+| 38 | Invoice Ninja | Business | 8.3k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 39 | Leantime | Business | 4.1k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 40 | Monica CRM | Business | 22k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 41 | Crater | Business | 8.2k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 42 | Matomo | Analytics | 19k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 43 | Cacti | Analytics | 1.5k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 44 | LibreNMS | Analytics | 3.9k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 45 | FreshRSS | Content | 10k | NT | F | **C** | NT | App::globalScopeInclude(true) (template default, kept) |
+| 46 | Piwigo | Content | 3.1k | NT | F | **D** | NT | App::ignorePhpExt(false) — Piwigo needs direct *.php URLs (… |
+| 47 | Lychee | Content | 13k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 48 | Wallabag | Content | 10k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 49 | Nextcloud | Utility | 27k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 50 | YOURLS | Utility | 10k | NT | C | **C** | NT | App::ignorePhpExt(false) — YOURLS requires direct *.php URL… |
+
+> Failure-class root causes + fix status: [`docs/architecture/2026-06-11-coroutine-legacy-blocker-report.md`](architecture/2026-06-11-coroutine-legacy-blocker-report.md). Several blockers found in this sweep are already fixed on the current stack (Stage-8 object-store corruption → ext 0.3.47; `exit()`/`die()` swallow → ext 0.3.48; session persistence → #379; ZealAPI scope → #376), so _pending_ rows and the session-blocked C/D apps are expected to grade higher on re-run.
 
 ---
 
-## Summary Table
+## Per-app detail (re-validated in coroutine-legacy)
+
+#### WordPress — coroutine-legacy: **C**
+- **homepage** 200/69KB · **login** ok (wp-login.php POST -> wp-admin Dashboard 200; session persists across reques… · **write** ok: POST rest_route=/wp/v2/posts -> 201, post id 6 'ZealPHP coroutine-legacy te…
+- **concurrent burst** unstable: warm bursts 6-8x200 + 7-9x500 + 1-2x302 + 3-4x000(hung); 11 worker SIGSEGVs across 2 bursts (~5/burst, self-healing respawn); best observed…
+- **knobs:**
+  - `App::mode(App::MODE_COROUTINE_LEGACY) + App::globalScopeInclude(true) (template default; required for wp-admin)`
+  - `App::ignorePhpExt(false) — required so wp-login.php / wp-admin/*.php URLs are served instead of the framework's implicit .php 403 block`
+- **`mixed` fallback probe:** mixed: homepage 200/69KB and burst20 = 20x200 with 0 worker deaths (fully stable under concurrency); but /wp-admin/ returned 302 (admin session not re-validated under mixed) and REST write 403 (nonce unobtainable withou…
+
+#### Drupal — coroutine-legacy: **D**
+- **homepage** 200/21KB (15.7KB after big_pipe uni… · **login** failed: credentials accepted (POST /user/login -> 303 /user/1) but session neve… · **write** failed: GET/POST /node/add/page -> 403 Access denied (blocked on the login fail…
+- **concurrent burst** concurrent -P6: 20x500; sequential -P1: 20x200. 0 segfault/zend_mm/Fatal patterns in boot.log (workers survive; the 500s are clean Drupal exception p…
+- **knobs:**
+  - `App::preloadClassmap() after composer dump-autoload -o (template's globalScopeInclude removed)`
+  - `SessionStartMiddleware (first-visit PHPSESSID cookie)`
+  - `request-side cookie mirror PHPSESSID -> SESS<sha256(host)[0:32]> in front controller (Drupal cookie-auth applies())`
+  - `web/index.php: `require_once autoload.php` -> `require` (Stage 7 re-execution)`
+  - `drush pmu big_pipe (removed BigPipeHooks getOption()-on-null 500s; did NOT fix the concurrency 500s)`
+- **`mixed` fallback probe:** mixed: boots, homepage 200, but login fails IDENTICALLY (303 then anonymous on next request; node/add 403) — the Drupal session-handler bypass is mode-independent, so MODE_MIXED does not rescue auth/write flows either
+
+#### Grav — coroutine-legacy: **D**
+- **homepage** 200/13.5KB · **login** failed: login POST succeeds (303, writes session) but the immediately-following… · **write** n/a: admin dashboard 500s on every authenticated request, so no page-create pos…
+- **concurrent burst** 1-2x200 then 16-17x500 + worker SIGSEGV (signal=11); reproducible under 6-way concurrency even after sequential warmup. An earlier warm-sequentialize…
+- **knobs:**
+  - `App::mode(App::MODE_COROUTINE_LEGACY)`
+  - `App::globalScopeInclude(true)`
+  - `putenv GRAV_ROOT / GRAV_WEBROOT before boot`
+  - `define('PAGE_ORDER_PREFIX_REGEX') at boot (master) to survive per-request constant reset`
+  - `ini_set display_errors=0 to suppress benign re-define warnings`
+  - `zeal-entry.php wrapper to collapse Grav's open output buffers (register_shutdown_function never fires on long-lived worker)`
+  - `defineIsolation deliberately LEFT OFF (poisons Grav: GRAV_WEBROOT read back as YAML_EXT value on request 2)`
+- **`mixed` fallback probe:** mixed: App::MODE_MIXED FIXES the session-decode 500 (traditional SessionManager round-trips Grav's Messages object natively) — public homepage stays 200 across repeated cookied requests r1/r2/r3. BUT /admin/ then breaks…
+
+#### Kirby — coroutine-legacy: **C**
+- **homepage** 200/9843B · **login** ok — GET /panel/login 200/162KB (kirby_session cookie + 64-char csrf from panel… · **write** ok — POST /api/site/children created page 'zeal-revalid-1781185914' (200), PATC…
+- **concurrent burst** / : 9x200 11x500; /notes : 3x200 17x500 (xargs -P 6). 0 segfault/zend_mm/Fatal error/deadlock in boot.log this run; worker self-recovers — post-burst…
+- **knobs:**
+  - `define('KIRBY_HELPER_GO', false) before loading Kirby — OpenSwoole's go() shortname collides with Kirby's go() helper ('Cannot redeclare function go() in kirby…`
+  - `explicit catch-all patternRoute('#^/(?P<zealpath>.*)$#', all methods) registered before run() — Kirby routes every path virtually; ZealPHP's implicit /{file} +…`
+  - `use App::include($script) NOT App::includeFile($script) in the catch-all — includeFile() treats the docroot-relative '/index.php' as an outside-docroot ABSOLUT…`
+  - `require app vendor/autoload.php + App::preloadClassmap() at boot — REQUIRED: without it the per-request class-static reset breaks Kirby on request 2+ even sequ…`
+- **`mixed` fallback probe:** mixed: same install + same app.php with App::mode(App::MODE_MIXED) (app_mixed.php) — burst20 on / AND /notes both 20x200, 0 fatals/segfaults in boot_mixed.log; re-confirmed in this 2026-06-11 run
+
+#### OpenCart — coroutine-legacy: **C**
+- **homepage** 200/34KB · **login** ok · **write** ok: created category via admin POST catalog/category.save -> {category_id:59} a…
+- **concurrent burst** 16x200 4x000 (at -P6 vs 4 workers); 2 worker SIGSEGV (signal=11) + 1 coroutine deadlock during burst, server self-healed (respawned, port stayed up, …
+- **knobs:**
+  - `App::mode(App::MODE_COROUTINE_LEGACY)`
+  - `App::globalScopeInclude(true)`
+  - `App::defineIsolation(true) - REQUIRED: OpenCart define('VERSION',...) collides across requests; without it the admin path breaks (proven in MIXED-mode fallback…`
+  - `explicit routes for /index.php, /admin/index.php, /admin, /admin/ registered before run() - REQUIRED: ZealPHP's implicit .php-extension block returns 403, and …`
+  - `worker_num=4 (raised from template 2)`
+- **`mixed` fallback probe:** mixed: MODE_MIXED storefront burst 40/40 x200, 0 worker deaths, 0 segfaults (sequential-per-worker eliminates the concurrent-mysqli crash) - BUT MODE_MIXED lacks defineIsolation so OpenCart's define('VERSION') collides …
+
+#### phpBB — coroutine-legacy: **C**
+- **homepage** 200/13.8KB (forum index 'ZealPHP Te… · **login** ok (POST /ucp.php?mode=login with creation_time+form_token+sid -> 302; mode=log… · **write** ok: new topic via POST /posting.php?mode=post&f=2 -> 302 to /viewtopic.php?t=3;…
+- **concurrent burst** FAIL on ext 0.3.47: round1 19x500 1x000, round2 10x500 9x000 1x200; zend_mm_heap corrupted + SIGSEGV(11)/SIGABRT(6) worker deaths each burst; even 3-…
+- **knobs:**
+  - `App::globalScopeInclude(true) (template default, kept)`
+  - `App::ignorePhpExt(false) — phpBB lives on /ucp.php-style URLs; without it every .php URL 404s`
+  - `master pre-fork warmup: require phpBB3/vendor/autoload.php + register \phpbb\class_loader + App::preloadDir(phpBB3/phpbb) — phpbb\* is NOT in the composer clas…`
+  - `define('PHPBB_ROOT_PATH', abs path) — pins phpBB's CWD-relative $phpbb_root_path`
+  - `app-level prerequisite (not a ZealPHP knob): rename phpBB3/install/ after install or all pages render 'board currently unavailable'`
+  - `tried+rejected (prior session, same install): App::preloadClassmap() (force-loads symfony proxy-manager-bridge V1 compat shim -> boot fatal 'Declaration ... mu…`
+- **`mixed` fallback probe:** legacy-cgi: FULL PASS re-verified on this run — homepage 200/13.3KB, burst20 = 20x200, 0 worker deaths, 0 corruption lines (app_cgi.php kept beside app.php). mixed: unusable (class redeclare fatals).
+
+#### MyBB — coroutine-legacy: **C**
+- **homepage** 200/13.5KB · **login** ok (intermittent): succeeds with mybbuser cookie + User Control Panel, but ~1-i… · **write** ok: authenticated newthread.php form POST created thread tid=1 'ZealPHP corouti…
+- **concurrent burst** best (USE_ZEND_ALLOC=0 + defineIsolation): 14x200 1x500 5x000(conn refused), post-burst alive 200, 2 worker deaths (zend_mm_heap corrupted sig6 + mys…
+- **knobs:**
+  - `App::ignorePhpExt(false) — REQUIRED: MyBB is multi-entry (*.php URLs); default blocks them with 403, including install/index.php`
+  - `App::globalScopeInclude(true) — template default kept`
+  - `App::defineIsolation(true) — added for MyBB's per-request define()s (TIME_NOW/THIS_SCRIPT freeze: identical mybb[lastvisit] cookie values served minutes apart …`
+  - `USE_ZEND_ALLOC=0 env — with it the master survives worker crashes (self-healing respawn); without it the master died twice (full outage)`
+- **`mixed` fallback probe:** mixed: NOT usable — App::mode(App::MODE_MIXED) served 500 on EVERY request including request 1 and all of burst20 (0 crashes though); MyBB's require_once bootstrap never re-executes without Stage 7, so per-request state…
+
+#### Vanilla Forums — coroutine-legacy: **B**
+- **homepage** 200/52KB · **login** ok · **write** ok: created discussion #5 (admin, CategoryID=1), verified via GET /discussion/5…
+- **concurrent burst** cold-concurrent first wave ~6-10x500 then 200s (workers survive, 0 crashes); warm steady-state 20x200 repeatable across 3 rounds, 0 worker deaths
+- **knobs:**
+  - `App::mode(App::MODE_COROUTINE_LEGACY)`
+  - `App::globalScopeInclude(true)`
+  - `App::ignorePhpExt(false)`
+  - `App::$cwd + documentRoot set to /apps50/vanilla/public (Vanilla PATH_ROOT=getcwd())`
+  - `fallback sets $_GET['p']=clean-path so /categories /discussions route via Gdn_Request UrlFormat`
+  - `PATCH: garden-container Container.php — array_values() on 7 reflection-invoke sites (PHP8 named-param fatal $defaultgroup)`
+  - `PATCH: Vanilla\Models\ModelCache.php — hydrate() called with no args (PHP8 named-param fatal $junctionExclusions)`
+  - `manual conf/config.php (installer signed in admin + built all DB tables but never persisted config.php to disk under coroutine-legacy)`
+- **`mixed` fallback probe:** mixed: App::MODE_MIXED runs every failing flow clean — homepage 200, post-form request-2 200 (no Smarty fatal), burst20 20x200, 0 worker deaths. Sequential per-worker handling avoids the coroutine-concurrency state corr…
+
+#### Laravel — coroutine-legacy: **B**
+- **homepage** 200/70KB · **login** ok · **write** ok: POST /tasks (CSRF + auth session) created row, verified via GET /tasks + SE…
+- **concurrent burst** 20x200 (two clean consecutive runs, 0 worker deaths/segfaults). Later re-runs degraded to 500s solely from shared-MariaDB exhaustion: SQLSTATE[08004]…
+- **knobs:**
+  - `App::preloadClassmap() + require app vendor/autoload.php in master (template guidance for composer apps; globalScopeInclude removed)`
+  - `composer require psr/http-message:^1.1 — Laravel vendor ships psr/http-message v2 whose typed interfaces fatal /zeal's openswoole/core PSR-7 v1 classes (autolo…`
+  - `composer install --no-dev + dump-autoload -o --no-dev — dev-only classes (mockery PHPUnit TestListener trait, faker) hard-fatal the classmap warm (trait-not-fo…`
+  - `composer.json exclude-from-classmap: vendor/psy/psysh/ + vendor/symfony/*/DependencyInjection/ — psysh Hoa polyfills (incompatible signatures) and symfony opti…`
+  - `app.php fallback must use App::include('/index.php') NOT App::includeFile() — _template.php bug: includeFile takes an ABSOLUTE path, so '/index.php' resolves a…`
+  - `explicit catch-all $app->patternRoute('#^/.*$#', ...) -> front controller so non-/ URLs route to Laravel (implicit /{file} routes intercept single-segment path…`
+  - `public/index.php: '$app = require_once bootstrap/app.php' -> plain 'require' (1 line). With require_once, concurrent bursts raced Stage 7's per-request EG(incl…`
+  - `public/index.php: defined('LARAVEL_START') || define(...) guard — the constant persists per worker and the bare define() echoed an 'already defined' warning in…`
+- **`mixed` fallback probe:** mixed: full suite also passes (homepage 200/70KB, session counter, login ok, POST /tasks write ok, burst20 20x200, 0 fatals) — needs the same index.php require_once->require tweak; app_mixed.php left in tree
+
+#### Symfony — coroutine-legacy: **D**
+- **homepage** 200/18432B · **login** failed: credentials+CSRF accepted (POST /en/login -> 302 to /en/admin/post/) bu… · **write** blocked in coroutine-legacy (needs login). Proven under mixed fallback: POST /e…
+- **concurrent burst** 20x200 (coroutine-legacy), grep -ciE 'segfault|zend_mm|core dump|Fatal error' boot log = 0; mixed burst also 20x200
+- **knobs:**
+  - `App::preloadClassmap() + require app vendor/autoload.php in master (template guidance for composer apps; globalScopeInclude removed)`
+  - `composer require psr/http-message:^1.1 — demo vendor ships psr/http-message 2.0 whose typed interfaces fatal /zeal's openswoole/core PSR-7 v1 classes`
+  - `composer install --no-dev + dump-autoload -o --no-dev — phpstan-doctrine's MappingDriverChain has an incompatible-declaration CompileError that hard-fatals the…`
+  - `rm -rf var/cache/prod + cache:warmup AFTER --no-dev — container compiled with dev deps wires Twig profiler against symfony/stopwatch -> 'Class Stopwatch not fo…`
+  - `public/index.php replaced with classic front controller (require autoload, new Kernel, handle/send/terminate; original at index.php.orig) — symfony/runtime's a…`
+  - `APP_SECRET must be set in .env.local — create-project leaves it empty; doctrine console + login SignatureHasher throw 'A non-empty secret is required'`
+  - `explicit catch-all $app->patternRoute('#^/.*$#', ...) -> front controller (implicit /{file} routes intercept single-segment paths)`
+  - `curl-only note, not a ZealPHP knob: Symfony 8 stateless CSRF (csrf-token placeholder) validates via same-origin — POSTs need Origin: + Referer: headers, _csrf_…`
+  - `FAILED knobs for the login flow: App::sessionLifecycle(false) (zeal_session_write_close then persists NOTHING since $g->session is never set); security.session…`
+- **`mixed` fallback probe:** mixed: FULL suite passes with STOCK security config and zero extra knobs beyond the composer-app set — login ok (302 -> /en/admin/post/, admin Post List 200), admin post create ok (id=31, verified admin list + public sl…
+
+#### CodeIgniter 4 — coroutine-legacy: **D**
+- **homepage** 200/0KB - CI4 headers (Cache-Contro… · **login** n/a: appstarter ships no auth; custom session route used instead - 200/0b, body… · **write** failed: POST /demo/notes/add -> 200/0b AND row never reaches MariaDB (notes cou…
+- **concurrent burst** 20x200 (all 0-byte bodies); 0 segfault/zend_mm/fatal during burst; one earlier 'all coroutines asleep - deadlock' fatal at worker recycle
+- **knobs:**
+  - `CI_ENVIRONMENT=production (development mode fatals: Kint/Debug-Toolbar 'Cannot use a scalar value as an array' in ThirdParty/Kint/CallFinder.php:186; TypeError…`
+  - `app.php: function is_cli(): bool { return false; } (CI4 sees PHP_SAPI=cli in OpenSwoole workers -> builds CLIRequest -> TypeError array_shift(null) in HTTP/CLI…`
+  - `app.php: require APP_DIR/vendor/autoload.php before App::preloadClassmap() (preloadClassmap only warms REGISTERED composer loaders; warmed 1062 symbols)`
+  - `public/index.php: replaced exit(Boot::bootWeb($paths)) with plain call (did not fix body swallow)`
+  - `public/index.php: cleared G::instance()->shutdown_functions (CI4 Exceptions::shutdownHandler exits -> zeal log 'shutdown function threw: openswoole exit'; did …`
+  - `public/index.php: header_remove('Content-Length') (did not fix)`
+  - `MODE_MIXED only: require_once for Paths.php/Boot.php + defined() guard on FCPATH (plain require refataled 'Cannot redeclare class Config\Paths' every request)`
+- **`mixed` fallback probe:** mixed: boots + burst20 20x200 + zero fatals after require_once/FCPATH patches, but the SAME 0-byte body swallow on every CI4 page - fallback does not make the app usable either
+
+#### CakePHP — coroutine-legacy: **D**
+- **homepage** 200/7.5KB · **login** n/a: cakephp/app skeleton ships no auth plugin; per install hint verified sessi… · **write** ok: POST /posts/add (real 152-char _csrfToken from form + cookie jar) -> 302 Lo…
+- **concurrent burst** FAILS HARD: surviving bursts ~35-50% 500 (13x200 6x500 1x404); on BOTH 2026-06-11 re-validation runs the server then WEDGED PERMANENTLY mid-burst — w…
+- **knobs:**
+  - `composer require psr/http-message:^1.1 — skeleton vendor ships 2.0 whose typed interfaces conflict with /zeal openswoole/core PSR-7 v1 (Laravel-result playbook)`
+  - `config/app_local.php 'Error' => errorRenderer HtmlErrorRenderer + exceptionRenderer WebExceptionRenderer + errorLevel ~E_DEPRECATED — PHP_SAPI=cli under opensw…`
+  - `vendor 1-line patch Cake\Http\Session::options(): early-return when PHP_SAPI === 'cli' — per-request session ini_set() always fails under cli SAPI ('Session in…`
+  - `defined()-guards on all define()s in config/paths.php + vendor cakephp config/bootstrap.php, INSTEAD of App::defineIsolation(true) — defineIsolation's first-de…`
+  - `try/catch (\Throwable) around the 5 StaticConfigTrait::setConfig() calls in config/bootstrap.php (Cache/ConnectionManager/TransportFactory/Mailer/Log) — Stage …`
+  - `ZEALPHP_CLASS_STATICS_RESET_DISABLE=1 — the per-request class-statics reset produced cross-class static corruption under overlap (Schema\Column object assigned…`
+  - `App::preloadDir(vendor/cakephp/cakephp/src/Database) + App::preloadClassmap() (composer dump-autoload -o; composer.json exclude-from-classmap for vendor/symfon…`
+  - `ZealPHP\Middleware\SessionStartMiddleware added — first-time visitors got no session cookie (CoSessionManager only resumes existing PHPSESSID)`
+  - `config/app_local.php 'App' => ['fullBaseUrl' => 'http://127.0.0.1:9714'] — skeleton HostHeaderMiddleware throws SECURITY InternalErrorException when unset`
+  - `app.php per _template rev2: App::include() + explicit catch-all to webroot/index.php; boot const renamed ZCAKE_DIR because CakePHP's paths.php itself defines A…`
+- **`mixed` fallback probe:** mixed: FULL suite passes — homepage 200/7.5KB, GET /posts/add CSRF form 200, POST 302 + row in DB, flash message 'The post has been saved' RENDERS (session flash works), second requests 200, burst20 = 20x200 twice, 0 fa…
+
+#### Slim — coroutine-legacy: **B**
+- **homepage** 200/12B (Hello world!); GET /users … · **login** ok: POST /login user=admin/pass=secret -> {"login":"ok","user":"admin"}; $_SESS… · **write** ok: POST /tasks (session-authenticated) -> INSERT into MySQL zext_slim.tasks; v…
+- **concurrent burst** 20x200 (two consecutive runs) + auth burst 10x200 GET /tasks + 5x200 POST /tasks; boot.log new-fatal grep during bursts = 0. The single 'all coroutin…
+- **knobs:**
+  - `App::preloadClassmap() + require /apps50/slim/vendor/autoload.php in master (composer-app pattern; globalScopeInclude removed — it did NOT help session persist…`
+  - `composer require psr/http-message:^1.1 — slim-skeleton vendor ships psr/http-message 2.0 whose typed interfaces fatal /zeal's openswoole/core PSR-7 v1 classes …`
+  - `composer install + dump-autoload -o --no-dev — strip phpstan/prophecy/codesniffer dev classes from the optimized classmap so preloadClassmap warm in the master…`
+  - `App::addMiddleware(new SessionStartMiddleware()) — REQUIRED: ZealPHP's SessionManager only auto-emits Set-Cookie for RETURNING visitors (incoming PHPSESSID). W…`
+  - `HEADLINE FIX — $GLOBALS['_SESSION'] = &\ZealPHP\G::instance()->session at the top of every session-touching closure. In coroutine-legacy ZealPHP binds $_SESSIO…`
+  - `Run Slim in the request coroutine frame via a native catch-all $app->patternRoute('#^/.*$#', ...) + setFallback that require the front controller (public/slim_…`
+
+#### Yii 2 — coroutine-legacy: **C**
+- **homepage** 200/10170B · **login** ok: admin/admin via CSRF form POST, 'Logout (admin)' verified in response · **write** ok: contact form POST (CSRF + fixedVerifyCode captcha) -> .eml written to runti…
+- **concurrent burst** warm steady-state: 19x200 1x500 (also observed 20x200 and 38/40x200 runs); COLD first concurrent wave after fresh boot: 17-24 of 60 responses come ba…
+- **knobs:**
+  - `composer install --no-dev + composer dump-autoload -o (dev deps pull psr/http-message 2.0 via codeception/guzzle whose typed interfaces fatal against /zeal ope…`
+  - `require APP_DIR/vendor/autoload.php in master + App::preloadClassmap() (template composer-app shape; globalScopeInclude removed)`
+  - `require APP_DIR/vendor/yiisoft/yii2/Yii.php in master — class Yii has no namespace, is NOT PSR-4 compliant so absent from the optimized classmap; warms the Yii…`
+  - `web/index.php switched to YII_DEBUG=false / YII_ENV='prod' — required: master classmap warm executes BaseYii.php side-effect defines (YII_ENV='prod' baseline),…`
+  - `public -> web symlink for the protocol docroot`
+  - `tried, no effect, reverted: ZEALPHP_CLASS_STATICS_RESET_DISABLE=1 (burst anomaly rate unchanged: 2/40 vs 4/40)`
+- **`mixed` fallback probe:** mixed: MODE_MIXED + App::silentRedeclare(true) (entry plain-requires Yii.php every request) = EVERYTHING clean: login ok, contact flash ok, burst20 20x200 with 20/20 full homepage bodies, 0 fatals/deadlocks
+
+#### Laminas — coroutine-legacy: **C**
+- **homepage** 200/5KB · **login** ok (session route, HTTP 200; cookie round-trips via SessionStartMiddleware) · **write** failed: $_SESSION write inside App::include() (Laminas front-controller dispatc…
+- **concurrent burst** 20x200 (warm); first cold burst before worker-start warmup was 14x200 3x500 + 1 SIGSEGV worker death; after warmup 60x200 over 3 rounds, 0 deaths
+- **knobs:**
+  - `App::mode(App::MODE_COROUTINE_LEGACY)`
+  - `App::preloadClassmap() (warms ZealPHP own classmap in master)`
+  - `SessionStartMiddleware (required: first-time visitors otherwise get NO Set-Cookie, so session never round-trips)`
+  - `onWorkerStart: require app vendor/autoload.php + App::preloadDir('module') + preloadClassmap() (warms Laminas class graph single-coroutine; eliminates cold-con…`
+- **`mixed` fallback probe:** mixed: session write_op works perfectly under App::MODE_MIXED — hits increment 1->2->3->4->5->6->7 across requests, persists across second-request homepage. Confirms the write-back failure is coroutine-legacy snapshot x…
+
+#### phpMyAdmin — coroutine-legacy: **D**
+- **homepage** 200/48KB · **login** failed: session not persisted across requests in coroutine-legacy. phpMyAdmin u… · **write** n/a: blocked by login failure (cannot authenticate, so no authenticated write p…
+- **concurrent burst** sequential 20x200; concurrent wave (P6) -> 2x500 2x200 2x000 + worker heap-corruption crashes (delta +4 deaths). Total 8-10 worker deaths logged: 'ze…
+- **knobs:**
+  - `App::mode(App::MODE_COROUTINE_LEGACY)`
+  - `App::globalScopeInclude(true) [template default]`
+  - `App::ignorePhpExt(false) [phpMyAdmin serves /index.php?route=... URLs]`
+  - `App::documentRoot(/apps50/phpmyadmin/public)`
+  - `fallback front-controller in app.php routing all non-static URLs to /index.php`
+- **`mixed` fallback probe:** mixed: App::MODE_MIXED boots + homepage 200/48KB, but ALSO broken — request 2 throws 'Constant PHPMYADMIN already defined in index.php:23' (no Stage-7 include isolation in MIXED -> require_once'd bootstrap re-defines co…
+
+#### Adminer — coroutine-legacy: **B**
+- **homepage** 200/5.2KB · **login** ok · **write** ok: CREATE TABLE zeal_notes + INSERT via SQL-command UI POST (CSRF token) -> 'Q…
+- **concurrent burst** 20x200, 0 worker deaths (boot.log: 0 Fatal/segfault/zend_mm)
+- **knobs:**
+  - `App::defineIsolation(true) (Adminer defines per-request constants adminer\SERVER/DB/ME from $_GET)`
+  - `App::globalScopeInclude(true) (template default, kept)`
+  - `template fix: fallback must use App::include($script) not App::includeFile($script) — a docroot-relative '/adminer.php' fails includeFile's startsWith(docroot)…`
+  - `WORKAROUND for ext-zealphp define-isolation case bug: byte-patch define('Adminer\X') -> define('adminer\X') (12 sites; behavior-identical, PHP constant-namespa…`
+  - `wrapper entry public/index.php: ini_set('display_errors','0') + require adminer.php — suppresses the residual harmless 'Constant adminer\VERSION already define…`
+
+#### TinyFileManager — coroutine-legacy: **D**
+- **homepage** 200/13KB · **login** failed: SUCCESS branch runs (pv=1, vt=1, $_SESSION['filemanager']['logged']='ad… · **write** n/a: blocked by login failure — TFM upload (multipart + dzchunk* + token) is au…
+- **concurrent burst** 20x200 (0 worker deaths: segfault/zend_mm/Fatal=0)
+- **knobs:**
+  - `App::mode(App::MODE_COROUTINE_LEGACY)`
+  - `App::globalScopeInclude(true) [REQUIRED: TFM declares bare top-level $CONFIG/$root_path/$root_url and reads them via `global` inside methods; without it -> 'Ca…`
+  - `front-controller fallback in app.php (ENTRY=/index.php, static passthrough)`
+- **`mixed` fallback probe:** mixed: FAILS to render TFM at all — homepage 500/201B 'Tiny File Manager Error: Cannot load configuration' (App::globalScopeInclude is gated to coroutine-legacy via globalScopeIncludeEffective()&&silent_redeclare, so in…
+
+#### elFinder — coroutine-legacy: **C**
+- **homepage** 200/618b (HTML+JS shell); static as… · **login** n/a: elFinder is a file manager, no auth layer · **write** failed: connector mkdir/upload hang -> HTTP 200 but 0 bytes (6s timeout). elFin…
+- **concurrent burst** 20x200 on homepage, 0 worker deaths
+- **knobs:**
+  - `App::mode(App::MODE_COROUTINE_LEGACY)`
+  - `App::globalScopeInclude(true)`
+  - `App::hookAll(0)`
+  - `explicit $app->route('/php/connector.minimal.php') — the implicit .php-block route 403s direct .php URLs`
+  - `custom elFinderSessionInterface impl (pure $_SESSION wrapper) in connector — stock elFinderSession::start() registers a PROTECTED method via set_error_handler(…`
+- **`mixed` fallback probe:** mixed: SAME failure — under App::MODE_MIXED the connector still hangs/0-bytes (the ob_end_clean+echo+exit output path is broken in mixed too, JSON leaks to stdout). No mode reconciles elFinder's buffer-teardown output c…
+
+#### MediaWiki — coroutine-legacy: **D**
+- **homepage** rendered 36185 bytes internally but… · **login** failed: api.php token/clientlogin sequence cannot complete — worker crashes (co… · **write** failed: could not reach authenticated edit (login never completes; multi-reques…
+- **concurrent burst** n/a: server unstable — workers SIGSEGV per request, master dies
+- **knobs:**
+  - `App::mode(MODE_COROUTINE_LEGACY)`
+  - `App::globalScopeInclude(true)`
+  - `master pre-fork classmap preload of MediaWiki core+vendor+skins (custom resolver)`
+  - `preload denylist for per-request singletons (SettingsBuilder, ExtensionRegistry, RequestContext, DeferredUpdates, ActionEntryPoint, ApiEntryPoint)`
+  - `preload guard: skip /maintenance/ and /installer/ EXCEPT /installer/Hook/ (DatabaseUpdater.php top-level require_once Maintenance.php defines MW_ENTRY_POINT=cl…`
+  - `patch includes/BootstrapHelperFunctions.php wfIsCLI(): treat web MW_ENTRY_POINT as non-CLI (OpenSwoole runs PHP_SAPI=cli, made MW use FauxRequest -> Request UR…`
+  - `USE_ZEND_ALLOC=0 (converts zend_mm_heap-corrupted SIGABRT into SIGSEGV; still crashes at teardown)`
+  - `ob shield + MediaWikiEntryPoint enableOutputCapture (attempted output-flush workaround)`
+- **`mixed` fallback probe:** mixed: MODE_MIXED renders the homepage once per cold worker (200, 36184 bytes, real <title>ZextWiki</title> Vector-skin page) with NO crash, but re-includes fatal on wfWebStartNoLocalSettings() redeclaration (no silentR…
+
+#### DokuWiki — coroutine-legacy: **D**
+- **homepage** 302->200/8.0KB (index.php redirect … · **login** failed: POST /doku.php do=login returns 500 'DokuWiki Setup Error: openswoole e… · **write** page create via doku.php do[save] POST: state change SUCCEEDS (data/pages/zealt…
+- **concurrent burst** 2x200 5x500 13x000 on /doku.php?id=start at -P6 — both workers die (zend_mm_heap corrupted, signal 6/11) and then the OpenSwoole master itself crashe…
+- **knobs:**
+  - `App::globalScopeInclude(true) (template default, kept)`
+  - `App::ignorePhpExt(false) — DokuWiki uses direct .php entry points (doku.php, install.php, lib/exe/*.php); default .php-block returned 403`
+  - `App::defineIsolation(true) — DOKU_* constants re-defined on Stage-7 re-executed includes`
+  - `[workaround, tested then reverted] 2-line patch in inc/ActionRouter.php handleFatalException to rethrow OpenSwoole\ExitException — turns the 500 POST responses…`
+- **`mixed` fallback probe:** mixed: WORSE, not viable — homepage 500/212, burst alternates 500/200 (classic require_once request-2 breakage: init.php not re-executed, bootstrap globals gone), login session does not stick (logged_in=0), page save fa…
+
+#### BookStack — coroutine-legacy: **C**
+- **homepage** 302/354b (redirect to /login; authe… · **login** ok · **write** ok: created book + page via POST, verified in DB (entities id=2) and follow-up …
+- **concurrent burst** 4x ok (2x200 + 2x302), 16x500 — Laravel global-container concurrency race; 0 worker deaths
+- **knobs:**
+  - `App::mode(App::MODE_COROUTINE_LEGACY)`
+  - `App::preloadClassmap() (after composer dump-autoload -o)`
+  - `App::preloadDir('/apps50/bookstack/app')`
+  - `documentRoot=/apps50/bookstack/public (BookStack native web root)`
+  - `removed globalScopeInclude (modern Laravel/PSR-4 app)`
+  - `tried App::defineIsolation(true) — did NOT fix the concurrency 500s`
+- **`mixed` fallback probe:** mixed: NOT working — App::MODE_MIXED breaks BookStack's front-controller bootstrap (require bootstrap/app.php returns true, 'alias() on true' at index.php:19). The mixed-mode burst's '20x200' were 500-error pages served…
+
+#### Kanboard — coroutine-legacy: **D**
+- **homepage** 302/797B redirect -> login form 200… · **login** failed: CSRF token never persists - session writes are lost for pre-existing se… · **write** blocked: no authenticated session is obtainable in coroutine-legacy
+- **concurrent burst** run1: 12x302 8x500; run2: 7x500 2x302 then BOTH workers died (zend_mm_heap corrupted, sig6+sig11), server hung, 11 connections never answered; prior …
+- **knobs:**
+  - `globalScopeInclude(false) AND (true) both tried - session write-loss identical either way`
+  - `defineIsolation(true) - kept, but does NOT cover namespaced compile-time const (schema\VERSION) re-exec under Stage 7`
+  - `ini display_errors=0 - required to keep redeclare/session-ini warnings out of response bodies`
+  - `USE_ZEND_ALLOC=0 - burst still 13x500 + 3 worker deaths but no zend_mm fatal and server survives (vs total crash-loop death without it)`
+- **`mixed` fallback probe:** mixed: ALL flows pass - login admin/admin ok (dashboard 200 with Logout), project 'ZealProj' created (id=2), task 'Zeal task one' created and DB-verified (tasks.id=2), second_request 302/200, burst20 = 20x302, 0 worker …
+
+#### FreshRSS — coroutine-legacy: **C**
+- **homepage** 302->200/6.8KB (GET / redirects to … · **login** ok (2 caveats): real challenge-response login works in stock coroutine-legacy —… · **write** failed stock / ok patched: authenticated add-feed POST (?c=feed&a=add with _csr…
+- **concurrent burst** 17x302 3x000 on GET / at -P6, reproducible across boots: exactly one worker dies SIGSEGV (signal=11) per burst; server self-heals via respawn and pos…
+- **knobs:**
+  - `App::globalScopeInclude(true) (template default, kept)`
+  - `App::defineIsolation(true) — FreshRSS constants.php top-level consts re-executed by Stage 7`
+  - `fallback handler: docroot resolved via realpath() — public/ is a symlink to app/p, otherwise the static-file prefix check never matches and feed.xml 500s throu…`
+  - `fallback handler: directory URLs resolve to dir/index.php (FreshRSS app lives at /i/); App::include() not includeFile()`
+  - `php -d display_errors=0 at process start — per-request ini re-park overrides app.php boot-time ini_set; without it Stage-7 'Constant already defined' warnings …`
+  - `DB tables created via FreshRSS_UserDAO::createUser() in a one-off CLI script (cli/create-user.php skipped table creation because the user dir predated the MySQ…`
+  - `login scripting: POST to ?c=auth&a=login (CSRF-exempt, forwards internally to formLogin) — a=formLogin directly is CSRF-gated 403; challenge=crypt(storedHash.n…`
+  - `[workaround, tested then reverted] 2-line p/i/index.php patch rethrowing OpenSwoole\ExitException — turns the 500 POST responses (login, add-feed) into clean 3…`
+  - `[workaround, tested then reverted] 1-line app/Models/SimplePieCustom.php patch skipping CURLOPT_PROTOCOLS_STR/CURLOPT_REDIR_PROTOCOLS_STR — makes feed fetching…`
+- **`mixed` fallback probe:** mixed: WORSE, not viable (prior session on identical build, not re-run today): homepage 500/212B on request 2 (classic require_once breakage), login flow hung the server entirely — 6979 abnormal-exit/signal lines + two …
+
+#### Piwigo — coroutine-legacy: **D**
+- **homepage** 200/3.6KB · **login** ok via remember_me=1 workaround — POST identification.php 302 + pwg_remember co… · **write** failed: pwg.categories.add via ws.php -> 403 'Invalid security token'. pwg_toke…
+- **concurrent burst** 2x200 18x000 per burst (reproduced 3x) — workers crash under -P6 concurrency (signal=11 SIGSEGV + one signal=6, 6 worker deaths per burst, no PHP fat…
+- **knobs:**
+  - `App::ignorePhpExt(false) — Piwigo needs direct *.php URLs (install.php, ws.php, identification.php, admin.php)`
+  - `App::globalScopeInclude(true) (template default, required — bare top-level globals in section_init/menubar)`
+  - `ZEALPHP_CLASS_STATICS_RESET_DISABLE=1 — still required on ext 0.3.48: without it EVERY request 2+ 500s (ImageStdParams::$all_types array->int TypeError in coun…`
+  - `USE_ZEND_ALLOC=0 NO LONGER needed (was required on 0.3.46): login POST clean without it, and burst A/B identical with/without`
+  - `login workaround: remember_me=1 (pwg_remember cookie auto_login per request) — Piwigo's native session login never persists (getStatus=guest after 302+pwg_id)`
+- **`mixed` fallback probe:** mixed: NOT viable (prior-run evidence, same framework v0.4.8: homepage 500 — array_push(): Argument #1 must be array, null given at section_init.inc.php:666; globalScopeInclude is coroutine-legacy-gated so Piwigo's bare…
+
+#### YOURLS — coroutine-legacy: **C**
+- **homepage** 200/6KB · **login** ok · **write** ok: created short link 'zealtest' via authenticated admin-ajax (action=add + ad…
+- **concurrent burst** UNSTABLE: best round 17x200 3x500; repeats degrade (14x200 2x500 4x000; 7x200 9x500 4x000); 2-13 worker deaths per round (zend_mm_heap corrupted, SIG…
+- **knobs:**
+  - `App::ignorePhpExt(false) — YOURLS requires direct *.php URLs (admin/install.php, admin/admin-ajax.php, yourls-api.php); default .php-block route 403s them`
+  - `fallback handler must call App::include($script), not the template's App::includeFile($script) — includeFile() expects an ABSOLUTE path, so ENTRY '/yourls-load…`
+  - `App::globalScopeInclude(true) (template default, kept)`
+  - `created public/index.php from YOURLS' shipped sample-public-front-page.txt (stock YOURLS setup step; without it GET / 302-redirects to itself via yourls-loader)`
+  - `tried-but-ineffective: App::defineIsolation(true) and USE_ZEND_ALLOC=0 — neither stopped the concurrency heap corruption; final config omits both`
+- **`mixed` fallback probe:** mixed: stable under burst20 x2 (0 worker deaths, zero 500s; defineIsolation MUST be off in mixed or constants vanish on request 2) — request-2 OK, short-link 301 redirect OK, but homepage responses flap between 200 and …
 
-All 50 apps sorted by category, with grades per mode.
-
-> **Headline mode: `coroutine-legacy`.** ZealPHP's reason-to-exist for legacy apps is **`App::mode(App::MODE_COROUTINE_LEGACY)`** — "old PHP just works, *concurrently*". That is the column to read first. **`mixed` and `legacy-cgi` are sequential fallbacks** for apps that can't yet run under coroutine concurrency (pure-`require_once` class graphs, shared-connection internals). `coroutine` (no superglobals) is the native-rewrite target. Row values still use the historical numbers in the Best-Mode column (1 = `legacy-cgi`, 3 = `mixed`, 4 = `coroutine-legacy`, 5 = `coroutine`) until the re-validation lands. A **ground-up re-validation of all 50 apps on the current stack (ZealPHP v0.4.8 + ext-zealphp v0.3.47, the Stage-8 object-global store-corruption fix) is in progress** — the coroutine-legacy grades below are being refreshed app-by-app from real installs (real DB, real auth, real writes, concurrent bursts); rows not yet re-validated still carry their 0.3.25-era preset grades (see the ⚠️ note above).
-
-| # | App | Category | Stars | Framework | `legacy-cgi` (seq fallback) | `mixed` (seq fallback) | **`coroutine-legacy`** | `coroutine` | Best Mode | Key Issue |
-|---|-----|----------|-------|-----------|:---:|:---:|:---:|:---:|-----------|-----------|
-| 1 | WordPress | CMS | 19k | Custom | **A** | C | B | F | 1 | Mode 1 verified end-to-end incl. wp-admin + block editor (issue #167). `define()` everywhere, plugin ecosystem |
-| 2 | Drupal | CMS | 4.3k | Custom | **A** | C | **B** | F | 1 or 4 | Static registry, `drupal_bootstrap()`; Mode 4 worker-stable (sequential) via class-static reset in 0.3.25 sweep |
-| 3 | Joomla | CMS | 4.7k | Custom | **A** | **A** | **A** | **A** | Any | **TESTED: all 4 modes pass (200, 14ms)** |
-| 4 | TYPO3 | CMS | 1.0k | Symfony | B | **A** | A | NT | 3 | Symfony-based, clean OOP |
-| 5 | Concrete CMS | CMS | 768 | Custom | **A** | C | B | F | 1 | Legacy OOP, superglobal-heavy |
-| 6 | October CMS | CMS | 11k | Laravel | C | **A** | A | NT | 3 | Laravel-based; Octane-aware |
-| 7 | Craft CMS | CMS | 3.1k | Yii-based | C | **A** | A | NT | 3 | Yii2 internals, clean OOP |
-| 8 | Grav | CMS | 14k | Custom | **B** | F | **B** | F | 1 or 4 | Mode 1 works after init; Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) worker-stable (sequential) — see sweep note |
-| 9 | Kirby | CMS | 7.5k | Custom | B | **A** | A | NT | 3 | Modern OOP, no legacy cruft |
-| 10 | Statamic | CMS | 3.9k | Laravel | C | **A** | A | NT | 3 | Laravel-based |
-| 11 | Bagisto | E-comm | 15k | Laravel | C | **A** | A | NT | 3 | Laravel + Vue; clean |
-| 12 | Magento 2 | E-comm | 11k | Custom | **A** | D | C | F | 1 | Massive static state, DI container |
-| 13 | WooCommerce | E-comm | 9.6k | WordPress | **A** | F | C | F | 1 | WordPress plugin — same constraints |
-| 14 | PrestaShop | E-comm | 7.8k | Custom | **A** | C | B | F | 1 | Global objects, legacy OOP |
-| 15 | OpenCart | E-comm | 7.3k | Custom | **A** | **A** | **A** | **A** | Any | **TESTED: all 4 modes pass (302, 20ms)** |
-| 16 | Sylius | E-comm | 7.7k | Symfony | C | **A** | A | NT | 3 | Symfony-based, clean |
-| 17 | Flarum | Forums | 15k | Custom | B | **A** | A | NT | 3 | PSR-7, Laravel-Eloquent, clean OOP |
-| 18 | phpBB | Forums | 1.8k | Custom | **A** | D | **B** | F | 1 or 4 | Legacy procedural, global state; Mode 4 worker-stable (sequential) in 0.3.25 sweep |
-| 19 | MyBB | Forums | 2.9k | Custom | **A** | D | **B** | F | 1 or 4 | Procedural, superglobal-heavy; Mode 4 worker-stable (sequential) in 0.3.25 sweep |
-| 20 | Vanilla Forums | Forums | 2.9k | Custom | **A** | C | B | F | 1 | Hybrid OOP/procedural |
-| 21 | Laravel | Framework | 79k | Self | C | **A** | A | NT | 3 | Static facades, IOC container |
-| 22 | Symfony | Framework | 30k | Self | C | **A** | A | NT | 3 | PSR-15, kernel.terminate lifecycle |
-| 23 | CodeIgniter 4 | Framework | 5.3k | Self | B | **A** | A | NT | 3 | Clean OOP, minimal static state |
-| 24 | CakePHP | Framework | 8.7k | Self | B | **A** | A | NT | 3 | ORM, OOP, manageable state |
-| 25 | Slim | Framework | 12k | Self | B | **A** | A | B | 3 | **TESTED: framework routing works (405 = correct)** |
-| 26 | Yii 2 | Framework | 14k | Self | B | **A** | A | NT | 3 | Component model, OOP |
-| 27 | Laminas | Framework | 5.1k | Self | B | **A** | A | NT | 3 | PSR-7/15, Zend successor |
-| 28 | phpMyAdmin | Admin | 7.2k | Custom | C | **A** | A | A | 3 | Vendor deps needed; CGI crashes |
-| 29 | Adminer | Admin | 6.1k | Custom | **A** | F | A | F | 1 or 4 | Function redeclaration on 2nd req |
-| 30 | TinyFileManager | Admin | 6.2k | Custom | **A** | F | **B** | F | 1 or 4 | Function/constant redeclaration; Mode 4 worker-stable (sequential) in 0.3.25 sweep |
-| 31 | Roundcube | Admin | 6.0k | Custom | **A** | **A** | **A** | **A** | Any | **TESTED: all 4 modes pass** |
-| 32 | FileGator | Admin | 1.8k | Vue+PHP | B | **A** | A | NT | 3 | PHP API layer is clean |
-| 33 | elFinder | Admin | 3.0k | Custom | **A** | C | B | F | 1 | Procedural file manager |
-| 34 | MediaWiki | Wiki | 3.7k | Custom | **A** | D | C | F | 1 | Massive global state, `$wgUser` |
-| 35 | DokuWiki | Wiki | 4.1k | Custom | F | **A** | A | A | 3 or 4 | CGI subprocess crash; in-process fine |
-| 36 | BookStack | Wiki | 16k | Laravel | C | **A** | A | NT | 3 | Laravel-based, clean |
-| 37 | Kanboard | Business | 8.4k | Custom | **A** | **A** | **A** | **A** | Any | All 4 modes pass — cleanest app tested |
-| 38 | Invoice Ninja | Business | 8.3k | Laravel | C | **A** | A | NT | 3 | Laravel + React frontend |
-| 39 | Leantime | Business | 4.1k | Custom | B | **A** | A | NT | 3 | PSR-based, modern OOP |
-| 40 | Monica CRM | Business | 22k | Laravel | C | **A** | A | NT | 3 | Laravel, clean OOP |
-| 41 | Crater | Business | 8.2k | Laravel | C | **A** | A | NT | 3 | Laravel |
-| 42 | Matomo | Analytics | 19k | Custom | **A** | F | D | F | 1 | **Bundled php-di violates PSR `ContainerInterface` under PHP 8.4 LSP — fatals on vanilla PHP 8.4 too (app/vendor issue, not ZealPHP)** |
-| 43 | Cacti | Analytics | 1.5k | Custom | **A** | D | C | F | 1 | Old procedural, `exit()` calls |
-| 44 | LibreNMS | Analytics | 3.9k | Laravel | C | **A** | A | NT | 3 | Laravel-based |
-| 45 | FreshRSS | Content | 10k | Custom | **A** | F | **B** | F | 1 or 4 | Function redeclaration on 2nd req; Mode 4 worker-stable (sequential) in 0.3.25 sweep |
-| 46 | Piwigo | Content | 3.1k | Custom | **A** | C | **B** | F | 1 or 4 | Procedural, global variables; Mode 4 worker-stable (sequential) in 0.3.25 sweep |
-| 47 | Lychee | Content | 13k | Laravel | C | **A** | A | NT | 3 | Laravel, clean |
-| 48 | Wallabag | Content | 10k | Symfony | C | **A** | A | NT | 3 | Symfony-based |
-| 49 | Nextcloud | Utility | 27k | Custom | **A** | D | C | F | 1 | **TESTED: Mode 1 PASS (200, 46ms), others crash** |
-| 50 | YOURLS | Utility | 10k | Custom | **A** | C | **B** | F | 1 or 4 | `define()`-heavy, procedural; Mode 4 worker-stable (sequential) in 0.3.25 sweep |
-
----
-
-## Coroutine-Mode Ranking (v0.3.8 + silent-define-redeclare, 2026-05-28)
-
-> **The goal**: run every PHP app in Mode 5 (Coroutine, no superglobals). When `coroutine` doesn't fit, fall to `coroutine-legacy` (coroutine + superglobals). `legacy-cgi` (pool/proc) is the **compatibility floor** — we pair it with FPM-equivalent semantics for apps that fundamentally need fresh-process state. The goal is to move every app UP this ranking.
-
-### Tier S — Renders full UI in Mode 5 Coroutine (the real win)
-
-These apps boot cleanly under `superglobals(false)`/coroutine mode with Stage 3+4 silent-redeclare + silent-define-redeclare. They serve real content (>500 bytes of app-specific HTML), not framework error stubs.
-
-| App | M5 body size | M5 content |
-|---|---:|---|
-| **adminer** | 2995 B | "Login - Adminer" — full login form |
-| **joomla** | 23853 B | "Joomla: Environment Setup Incomplete" — install wizard |
-| **mediawiki** | 5855 B | "MediaWiki 1.47.0-alpha" — setup landing |
-| **nextcloud** | 2644 B | Full Nextcloud HTML (error page about GD ext — Nextcloud's own UI) |
-| **yourls** | 3325 B | "YOURLS — Your Own URL Shortener" — full landing |
-| **lychee** | 1961 B | "ROOT" — auth gate (working) |
-| **matomo** | 1155 B | Install wizard redirect |
-| **traditional** | 717 B | ZealPHP demo |
-
-Plus the 30x redirects that are working correctly: **freshrss** (301), **dokuwiki** (302 to install).
-
-**= 10 apps run in Mode 5 today.** This is what changed from earlier reports — silent-define-redeclare unlocked the const-heavy apps.
-
-### Tier A — Renders APP-LEVEL error in Mode 5 (framework served, app needs config)
-
-The framework reached the app, the app responded with its own error UI. Not a framework bug:
-
-| App | M5 body | What the app says |
-|---|---:|---|
-| **kanboard** | 98 B | `Internal Error: The directory "/app/user/data" must be writable` — chmod fix |
-| **wordpress** | 99 B | `Warning: Undefined array key "HTTP_HOST"` — WP needs `$_SERVER`; **WORKS in M4 Hybrid** |
-| **tinyfilemanager** | 419 B | Same HTTP_HOST issue — needs M4 Hybrid |
-| **roundcube** | 115 B | "Configure HTTP server to point to /public_html" — entry-path issue |
-
-### Tier B — Framework served, app boot fails internally (config / composer / dependencies)
-
-`/src/App.php` debug.log captured the actual app-level error:
-
-| App | Real error |
-|---|---|
-| **drupal** | `Failed opening required vendor/autoload_runtime.php` — `composer install` needed |
-| **privatebin** | `Class "PrivateBin\Controller" not found` — autoloader path issue |
-| **cacti** | `Call to undefined function check_status()` — Cacti's own dependency wiring |
-| **yourls** | `Failed opening required '/app/conf/constants.php'` — wrong include path |
-| **mybb, piwigo, vanilla, grav, filegator** | various boot-time class/file misses |
-| **phpliteadmin** | PHP 8.x compatibility bug (`array_merge(null, ...)`) — broken on vanilla PHP 8.4, not a ZealPHP issue |
-
-### Tier C — Crash with worker death in Mode 5 (true framework gaps)
-
-| App | What happens |
-|---|---|
-| **dokuwiki** | Worker crash on second request (the docs-only `flush()` / `ob_end_flush()` pattern doesn't translate to coroutine state cleanly; FD-3 IPC needed) |
-| **phpmyadmin** | Worker timeout (X) — works in M1 Pool only |
-
-### Tier D — 404 in every mode (path config — NOT app failure)
-
-These apps use Laravel/Symfony's `public/` entry pattern; the sweep probes `/<app>/` which doesn't exist. Probed correctly at `/<app>/public/` → real 500s (composer dep mismatches):
-
-bookstack, flarum, monica, slim-app, drupal, filegator, phpbb, opencart, wallabag
-
-### Mode comparison — same 32 apps
-
-| Mode | Tier S (full render) | Tier A (app error rendered) | Tier B (config issue) | Tier C (worker crash) |
-|---|---:|---:|---:|---:|
-| **Mode 5 (Coroutine)** | **10** | 4 | 8 | 2 |
-| Mode 4 (Hybrid superglobals+coro) | 11 (+ WP, tinyfile) | 2 | 7 | 2 |
-| Mode 1 (Pool) | 13 + 5 redirect | 4 | 6 | 1 |
-
-**Mode 5 today serves 10 apps end-to-end + 4 with app-level errors that are app fixes.** That's 14/32 (44%) of the matrix doing real work in pure coroutine mode. The remaining gap is dominated by per-app config (composer, paths, system extensions) — NOT framework limitations.
-
-### The real coroutine-mode gap — diagnosed (2026-05-28)
-
-The question "why does WordPress fail in coroutine mode if we capture all global state?" has a precise answer. **All five isolation layers are working**:
-
-| Layer | Mechanism | Status |
-|---|---|---|
-| `$GLOBALS` user vars | Stage 2 COW (parent + per-coroutine delta) | ✅ Per-coroutine |
-| Superglobals `$_GET/$_POST/$_SESSION` | OpenSwoole `on_yield` / `on_resume` snapshot | ✅ Per-coroutine |
-| Runtime `function foo()` (in if/method scope) | Stage 3 opcode hook on `ZEND_DECLARE_FUNCTION` | ✅ |
-| Top-level `function foo()` at file scope | Stage 4 `CG(function_table)` pointer swap in `zend_compile_file` | ✅ on cold compile |
-| `define()` constants | silent-define-redeclare intercept on `define()` | ✅ |
-
-**The one remaining gap — opcache hot path.**
-
-`zend_compile_file` is NOT called when opcache has the file cached. Instead, opcache's `zend_accel_load_script` (in `ext/opcache.so`, a separate shared object) replays the cached op_array and calls `do_bind_function` / `do_bind_class` directly to install the top-level declarations into `EG(function_table)`. On the second request, the bind fails with "Cannot redeclare" — and opcache itself calls `zend_accel_error_noreturn` which `zend_bailout`s out of the request.
-
-Stage 4's CG-table swap is on `zend_compile_file`. **Not invoked on opcache hits.** Stage 3's runtime opcode hook only catches conditional declarations, not top-level ones bound by opcache replay.
-
-**Why WordPress homepage `/wordpress/` works:** `wp-blog-header.php` and `wp-load.php` are loaded ONCE on the worker's first request. Their top-level functions land in the process-wide function table. Subsequent requests reuse the same functions — no re-bind happens because opcache sees they're already there.
-
-**Why `wp-login.php` fails:** it declares `login_header()`, `login_footer()`, `wp_login_form()`, `retrieve_password()` at file scope — files only loaded when someone visits the login URL. Worker request 1 → opcache caches the file with these function declarations. Worker request 2 → opcache replays the cached op_array → `do_bind_function('login_header', ...)` fails → bailout. Worker dies.
-
-**Three fix paths (ranked):**
-
-1. **M1 Pool for the specific endpoint** (current state). `App::registerCgiBackend()` lets you route `/wp-login.php`, `/wp-admin/install.php`, `/wp-admin/post.php` to a subprocess while serving `/` from M4 Hybrid. This is the FPM pair-up.
-2. **Stage 5 (planned, v0.4.0)**: hook `do_bind_function` / `do_bind_class` at the engine level so silent-redeclare catches opcache replays. Requires LD_PRELOAD or a small PHP-engine patch — not a clean ext-zealphp addition.
-3. **opcache configuration**: `opcache.blacklist_filename` with a list of WordPress files that have top-level declarations. Brittle (per-app maintenance) but works without engine changes.
-
-The doc summary table above reflects this honestly — Tier B apps (drupal/privatebin/cacti/etc.) often have similar patterns. Stage 4 closes a big slice of the redeclare crashes; opcache hot path is the residual 15–20%.
-
-### What we verified end-to-end on the 12-core perf VM (2026-05-28)
-
-Setting up real DB + real WordPress + real auth via wp-cli on `labs@172.30.0.3` with ZealPHP Mode 4 Hybrid (`superglobals(true) + enableCoroutine(true)` + ext-zealphp v0.3.8 with Stage 3+4+silent-define-redeclare):
-
-| Endpoint | First request | Subsequent requests | Note |
-|---|---|---|---|
-| `GET /wordpress/` (homepage) | **200, 68,684 B, 146 ms** | flickers — works on cold workers, 500 on warm | Mode 4 boots full WP including theme + DB queries |
-| `GET /wordpress/wp-admin/` | 302 -> wp-login.php (logged out); **200 Dashboard logged in** (M1, this release) | M4: same | M1 now renders the full admin incl. block editor (issue #167) |
-| `GET /wordpress/wp-login.php` | **200** (M1, this release) | M4: 500 | M1 global-scope include + recycle=1 fixed the redeclare; M4 still trips it |
-| `GET /wordpress/<anything>.php` (simple file) | 200 | 200 | `_test.php` returning "hello-php" works fine — limitation is WP-specific, not generic `.php` URL handling |
-
-**The honest finding for WordPress** (updated this release, issue #167): the table row above predates two fixes. **M1 Pool now serves wp-admin and the Gutenberg block editor end-to-end** — two changes landed it: (1) the CGI worker runs the request `include` at **true global scope**, so WordPress's top-level `$menu`/`$submenu` become real `$GLOBALS` and `wp-admin`'s `uksort($menu)` no longer fatals with `null given`; (2) `legacy-cgi` now defaults to `cgiPoolMaxRequests(1)`, so a reused subprocess never re-declares WordPress's unguarded top-level classes (`Cannot redeclare class …`). The **M4 Hybrid** (`coroutine-legacy`) admin flow is a separate story — it still trips the cold-boot `mysqlnd`/`libtasn1` teardown layer for pure-`require_once` WordPress (see the Mode-4 caveat at the top of this doc).
-
-- **WordPress on M1 Pool**: serves public site + login + **wp-admin + block editor** + content management correctly, ~200 ms per req (the FPM-equivalent cost). **This is the recommended mode for unmodified WordPress.**
-- **WordPress on M4 Hybrid**: serves the public-facing site, login auth, and comment writes sequentially; full **concurrent** wp-admin for pure-`require_once` WordPress remains M1's domain. (No Apache-throughput comparison is benchmarked — don't cite a multiplier.)
-
-The correct production deployment pairs both:
-- Public-facing requests → M4 Hybrid coroutine (high throughput)
-- Admin routes (`/wp-admin/`, `/wp-login.php`) → M1 Pool subprocess (compatibility)
-
-This is the FPM pair-up the doc references. v0.4.0's FastCGI backend register will make this routable per-URL via `App::registerCgiBackend()`.
-
-### Where the gap is (paired with FPM)
-
-When ZealPHP can't serve an app in Mode 5 today, it's almost always one of:
-
-1. **App relies on `$_SERVER['HTTP_HOST']` etc. without abstraction** — Mode 4 Hybrid fixes this.
-2. **App's vendor/ not installed** — `composer install --ignore-platform-reqs` fixes this.
-3. **App uses native PHP extensions the container lacks** — `ext-gd`, `ext-zip` etc. need installation.
-4. **App boot has redeclare patterns Stage 4 doesn't catch yet** — top-level functions in non-opcache flows.
-5. **App's own bugs on PHP 8.4** — phpLiteAdmin's `array_merge(null, ...)`.
-
-**For category 4 specifically**, the FPM pair-up makes sense: route those apps to a sidecar FPM via fastcgi backend (which ZealPHP supports — `App::cgiMode('fcgi')` / `App::registerCgiBackend('.py', ...)`). The framework doesn't have to RUN the legacy app in coroutine; it just has to PROXY to FPM for the niche cases. Today Mode 1 Pool does this in-process. v0.4.0 brings full FastCGI fallback for these.
-
----
-
-## Real App-Render Status (Deep-Dive Pass, 2026-05-28)
-
-The HTTP-200 sweep below tells you "the app didn't crash the worker" — but **200 OK doesn't mean the app is actually usable**. A deeper pass via Chrome DevTools + body-size + title inspection on Mode 1 Pool revealed four distinct states:
-
-### Verified rendering — full UI loads (production-ready)
-
-| App | Body size | Title | Notes |
-|---|---:|---|---|
-| **adminer** | 3 KB | Login - Adminer | Login screen renders; needs DB endpoint to actually log in |
-| **phpmyadmin** | 18 KB | phpMyAdmin | Login screen renders; needs DB |
-| **privatebin** | 23 KB | PrivateBin | Full paste-bin UI |
-| **joomla** | 24 KB | Joomla: Environment Setup Incomplete | Full setup wizard renders; reports missing PHP/system deps |
-| **traditional** | 717 B | Traditional PHP Test | ZealPHP demo page |
-| **lychee** | 2 KB | ROOT | Photo gallery shell |
-| **grav** | 16 KB | Grav Problems | Renders but reports config errors |
-
-### Stub / redirect responses (HTTP 200/30x with tiny body)
-
-| App | Body size | What's happening |
-|---|---:|---|
-| matomo | 627 B | Redirect to install path |
-| freshrss | 307 B | "Redirection" page (working — install wizard at next URL) |
-| roundcube | 115 B | Likely auth/install redirect |
-| cacti | 185 B | Install redirect |
-| tinyfilemanager | 53 B | Login prompt (auth required) |
-| nextcloud | 190 B | Install redirect |
-| vanilla | 92 B | Install redirect |
-| dokuwiki | 0 B | 302 to install (correct) |
-| wordpress | 0 B | 302 to wp-admin/install.php (correct) |
-| mybb | 0 B | Install redirect |
-| piwigo | 0 B | Install redirect |
-
-### In-body errors (200 OK but the body says "broken")
-
-| App | What the body says | Root cause |
-|---|---|---|
-| **kanboard** | `Internal Error: This PHP extension is required: "gd"` | **System dependency**, NOT framework — kanboard needs ext-gd installed in the container |
-| **mediawiki** | Setup/error page | Needs DB config |
-| **yourls** | `Fatal error` | Needs `user/config.php` setup |
-
-### 404 in every mode (app-config issue, NOT framework)
-
-bookstack, flarum, monica, slim-app use Laravel/Symfony's `public/` entry pattern → sweep tested `/<app>/` which doesn't have an `index.php`. Probed correctly at `/<app>/public/` they all return **HTTP 500** because their `vendor/` isn't installed. Composer install required:
-
-| App | Composer status | After install |
-|---|---|---|
-| bookstack | `composer.lock` mismatch (needs `composer update`) | Untested |
-| flarum | ✅ installed cleanly | Untested |
-| monica | `composer.lock` mismatch | Untested |
-| slim-app | ✅ installed cleanly | Untested |
-| drupal | `composer.lock` mismatch | Untested |
-| filegator | `composer.lock` mismatch | Untested |
-| phpbb | No composer.json (uses git submodule pattern) | Untested |
-| opencart | Path: `/opencart/upload/` returns **302 to install** | Working — entry path mistake in sweep |
-| wallabag | Needs symfony console + `php bin/console` setup | Untested |
-| elfinder | Pure JS — needs HTML integration page | N/A |
-
-### To-revisit list (this session focused on framework correctness; per-app config left for follow-up)
-
-These need real setup work — DB credentials wired into config files, `composer install/update`, system extensions installed, install-wizard walkthroughs:
-
-- **Database wiring** for: wordpress, drupal, joomla, mediawiki, bookstack, monica, flarum, vanilla, mybb, piwigo, opencart, matomo, cacti, lychee, roundcube
-- **System extension installs** for: kanboard (gd), possibly others (mbstring, intl, curl checks)
-- **Composer update** for: bookstack, monica, drupal, filegator (lock-file mismatches)
-- **App-side config** for: yourls, mediawiki, grav
-
-**Dummy DB infrastructure already provisioned** in the lab (sweep-mysql at 172.20.0.2, user `testuser`/`testpass`, all per-app databases created). Wiring each app's config file is the remaining task.
-
----
-
-## Latest Sweep (v0.3.8 — commit `9b8111b`, 2026-05-28)
-
-Full 32-app × 5-mode sweep after the FD-3 IPC fix. Each cell is **3 sequential GET probes** to `/<app>/`: a single code (e.g. `200`) = identical on all 3 probes; slashed (e.g. `302/500/500`) = differing per-probe responses (flicker / first-time install pages).
-
-> The Stage 2 COW `$GLOBALS` isolation is enabled by default in v0.3.7+. M3/M4/M5 flicker is now overwhelmingly from `Cannot redeclare function/class …` errors — Stage 3 silent-redeclare (see [state-isolation-reference.md §3](./architecture/state-isolation-reference.md#3-the-4-stages-of-globals-coroutine-isolation)) is the next mitigation.
-
-| App | M1 Pool | M1 Proc | M3 Sync+FI | M4 Hybrid | M5 Coro |
-|---|:---:|:---:|:---:|:---:|:---:|
-| adminer | **200** | **200** | **200** | **200** | 200/X/200 |
-| bookstack | 404 | 404 | 404 | 404 | 404 |
-| cacti | **200** | 500 | 500 | 500/X/500 | 500/X/500 |
-| dokuwiki | 302 | 302 | 302/X/302 | 302/500/500 | 302/500/500 |
-| drupal | 500 | 500 | 500/X/500 | 500/500/X | 500 |
-| elfinder | 404 | 404 | 404 | 404 | 404 |
-| filegator | 500 | 500 | 500 | 500 | 500 |
-| flarum | 404 | 404 | 404 | 404 | 404 |
-| freshrss | 301 | 301 | 301 | 301 | 301 |
-| grav | 500 | 500 | 500/500/200 | 500/200/200 | 500/200/200 |
-| joomla | **200** | X | **200** | **200** | **200** |
-| kanboard | **200** | **200** | **200** | **200** | **200** |
-| lychee | 403 | 403 | 403/X/403 | 403/X/403 | 403/X/403 |
-| matomo | **200** | **200** | 200/500/200 | 500/500/200 | 200/500/200 |
-| mediawiki | 500 | 500 | 500 | 500 | 500 |
-| monica | 404 | 404 | 404 | 404 | 404 |
-| mybb | 302 | 500 | 500 | 500 | 500 |
-| nextcloud | **200** | **200** | 500 | 500 | 500 |
-| opencart | 404 | 404 | 404 | 404 | 404 |
-| phpbb | 404 | 404 | 404 | 404 | 404 |
-| phpliteadmin | **200** | 500 | 500/X/500 | 500/X/X | 500/X/500 |
-| phpmyadmin | **200** † | X | 200/500/500 | 500 | X |
-| piwigo | 302 | 500 | 500 | 500 | 500 |
-| privatebin | **200** | 500 | 500 | 500 | 500 |
-| roundcube | **200** | **200** | **200** | **200** | **200** |
-| slim-app | 404 | 404 | 404 | 404 | 404 |
-| tinyfilemanager | **200** | X | 200/X/200 | 200/X/200 | 200/X/200 |
-| traditional | **200** | **200** | **200** | **200** | **200** |
-| vanilla | **200** | 500 | 500/200/500 | 500/200/500 | 500/200/500 |
-| wallabag | 404 | 404 | 404 | 404 | 404 |
-| wordpress | 302 | 302 | 302/500/500 | 302/500/500 | 302/302/500 |
-| yourls | 503 | 503 | 503/200/200 | 503/200/200 | 503/200/200 |
-
-`†` = NEW pass in v0.3.8 (was 504 timeout pre-`9b8111b`). The configured `zealphp-wordpress` container (separate from the sweep matrix above) ALSO restored from 0-byte body to full 68 KB body on `/` after the same fix.
-
-### Pass-rate summary
-
-| Mode | 3/3 200 OK | + Stable 30x redirects | Notes |
-|---|:---:|:---:|---|
-| **Mode 1 Pool** | **13/32 (41%)** | **18/32 (56%)** | The headline mode. phpMyAdmin, Cacti, Nextcloud, Privatebin, phpLiteAdmin all green here only. |
-| Mode 1 Proc | 8/32 (25%) | 13/32 (41%) | Pool wins decisively. `proc_open` per request hits joomla/phpmyadmin/tinyfilemanager with timeouts under serial load. |
-| Mode 3 Sync+FI | 4/32 stable | ~7/32 plausible | Many apps flicker — top-level redeclarations on warm workers. |
-| Mode 4 Hybrid | 4/32 stable | ~8/32 plausible | Stage 2 COW closes `$GLOBALS`; redeclare crashes still dominate. |
-| Mode 5 Coroutine | 3/32 stable | ~7/32 plausible | Pure coroutine; same redeclare ceiling as Mode 4. |
-
-**Green in ALL 5 modes (production-portable):** adminer, kanboard, roundcube, traditional, freshrss
-
-**Require Mode 1 (CGI Pool):** phpMyAdmin, Cacti, Nextcloud, Privatebin, phpLiteAdmin, MyBB, Piwigo, Vanilla, MediaWiki, Drupal, Grav, WordPress
-
-**Config-only failures (404 in every mode — wrong entry path, NOT a framework bug):** bookstack, elfinder, flarum, monica, opencart, phpbb, slim-app, wallabag
-
----
-
-## Actual Test Results (Docker Lab, 2026-05-28)
-
-These apps were deployed and boot-tested on PHP 8.4 + OpenSwoole 26.2 + ext-zealphp 0.3.3.
-
-### Kanboard (Project Management)
-
-- **GitHub:** https://github.com/kanboard/kanboard — 8.4k stars
-- **Mode 5:** PASS (302, 234 ms) | **Mode 1:** PASS (302, 51 ms) | **Mode 4:** PASS (302, 66 ms) | **Mode 3:** PASS (302, 45 ms)
-- **ALL 4 MODES PASS** — clean micro-framework architecture, proper autoloading, guarded constants
-- **Grade: A+ (all modes)**
-- Why it works: no unguarded `define()`, no naked function declarations in included files, no process-level singleton state that leaks between requests, proper use of `function_exists()` throughout
-
-### DokuWiki (Flat-file Wiki)
-
-- **GitHub:** https://github.com/dokuwiki/dokuwiki — 4.1k stars
-- **Mode 5:** PASS (200, 27 ms) | **Mode 1:** FAIL_500 (subprocess crash) | **Mode 4:** PASS (200, 16 ms) | **Mode 3:** PASS (200, 17 ms)
-- 3 of 4 modes pass. CGI subprocess crash — DokuWiki's procedural bootstrap triggers a pool worker death
-- **Grade: A (in-process modes), C (Mode 1)**
-- Recommended: Mode 3 or Mode 4
-
-### Adminer (DB Admin)
-
-- **GitHub:** https://github.com/vrana/adminer — 6.1k stars
-- **Mode 5:** PARTIAL (crash on 2nd request) | **Mode 1:** PASS (200, 147 ms) | **Mode 4:** PASS (200, 27 ms) | **Mode 3:** PARTIAL (crash on 2nd request)
-- **Failure:** `Cannot redeclare function Adminer\connection()` — namespaced functions defined at top of `index.php` without `function_exists()` guard
-- **Grade: A (Mode 1/4), F (Mode 3/5 — crashes worker on 2nd request)**
-- Recommended: Mode 1 (simplest) or Mode 4 (better performance, requires ext-zealphp)
-
-### TinyFileManager (File Manager)
-
-- **GitHub:** https://github.com/prasathmani/tinyfilemanager — 6.2k stars
-- **Mode 5:** PARTIAL (crash on 2nd request) | **Mode 1:** PASS (200, 42 ms) | **Mode 4:** PASS (worker-stable, sequential, ext-zealphp 0.3.25) | **Mode 3:** PARTIAL (crash on 2nd request)
-- Same function redeclaration issue as Adminer; fixed for sequential Mode 4 by the per-request state reset (ext-zealphp 0.3.25). True concurrent Mode 4 remains Mode 1's domain.
-- **Grade: A (Mode 1); B (Mode 4 sequential)**
-- Recommended: Mode 1 (simplest) or Mode 4 sequential
-
-### FreshRSS (RSS Reader)
-
-- **GitHub:** https://github.com/FreshRSS/FreshRSS — 10k stars
-- **Mode 5:** PARTIAL (crash on 2nd) | **Mode 1:** PASS (302, 42 ms) | **Mode 4:** PASS (worker-stable, sequential, ext-zealphp 0.3.25) | **Mode 3:** PARTIAL
-- Same redeclaration pattern — fixed for sequential Mode 4 by the per-request state reset (ext-zealphp 0.3.25). True concurrent Mode 4 remains Mode 1's domain.
-- **Grade: A (Mode 1); B (Mode 4 sequential)**
-- Recommended: Mode 1 (simplest) or Mode 4 sequential (better throughput at low concurrency)
-
-### phpLiteAdmin (SQLite Admin)
-
-- **GitHub:** https://github.com/sighook/phpLiteAdmin
-- **ALL MODES: FAIL_500**
-- PHP 8.x compatibility bug: `array_merge(null, ...)` at line 94. Not a ZealPHP issue — broken on vanilla PHP 8.4.
-- **Grade: N/A (broken on PHP 8.4)**
-
-### phpMyAdmin (DB Admin)
-
-- **GitHub:** https://github.com/phpmyadmin/phpmyadmin — 7.2k stars
-- **Mode 5:** 200 | **Mode 1:** 500 (CGI crash) | **Mode 4:** 200 | **Mode 3:** 200
-- Vendor deps installed. Works in all in-process modes. CGI pool crashes.
-- **Grade: A (Mode 3/4/5), C (Mode 1)**
-- Recommended: Mode 3
-
-### Roundcube (Webmail)
-
-- **GitHub:** https://github.com/roundcube/roundcubemail — 6.0k stars
-- **Mode 5:** PASS (200, 19 ms) | **Mode 1:** PASS (200, 42 ms) | **Mode 4:** PASS (200, 19 ms) | **Mode 3:** PASS (200, 22 ms)
-- **ALL 4 MODES PASS** — clean architecture with proper autoloading and no unguarded redeclarations
-- **Grade: A+ (all modes)**
-- Why it works: Roundcube uses Composer autoloading, no naked function declarations in request scope, singleton accessed but not leaked
-
-### Matomo (Analytics)
-
-- **GitHub:** https://github.com/matomo-org/matomo — 19k stars
-- **Mode 5:** PARTIAL (crash on 2nd) | **Mode 1:** PASS (200, 51 ms) | **Mode 4:** PARTIAL (crash on 2nd) | **Mode 3:** PARTIAL (crash on 2nd)
-- First request renders the install page. Matomo's bundled php-di violates PSR `ContainerInterface` under PHP 8.4's stricter LSP enforcement — it fatals on vanilla PHP 8.4 too, so this is an app/vendor incompatibility, NOT a ZealPHP issue (same category as phpLiteAdmin). Mode 1's per-request subprocess masks it; the in-process modes surface it on the 2nd request.
-- **Grade: A (Mode 1 only)**
-- Recommended: Mode 1
-
-### Grav (Flat-file CMS)
-
-- **GitHub:** https://github.com/getgrav/grav — 14k stars
-- **Mode 5:** FAIL | **Mode 1:** PASS (200, after first-request init) | **Mode 4:** FAIL | **Mode 3:** FAIL
-- Constants `GRAV_REQUEST_TIME`, `GRAV_PHP_MIN` defined without `defined()` guards. First CGI request returns 500 (init), second returns 200.
-- **Grade: B (Mode 1 — needs one warm-up request)**
-- Recommended: Mode 1
-
-### OpenCart (E-commerce)
-
-- **GitHub:** https://github.com/opencart/opencart — 7.3k stars
-- **Mode 5:** PASS (302, 19 ms) | **Mode 1:** PASS (302, 46 ms) | **Mode 4:** PASS (302, 20 ms) | **Mode 3:** PASS (302, 22 ms)
-- **ALL 4 MODES PASS** — install redirect works in every mode. Clean MVC with proper autoloading.
-- **Grade: A+ (all modes)**
-
-### Joomla (CMS)
-
-- **GitHub:** https://github.com/joomla/joomla-cms — 4.7k stars
-- **Mode 5:** PASS (200, 20 ms) | **Mode 1:** PASS (200, 40 ms) | **Mode 4:** PASS (200, 18 ms) | **Mode 3:** PASS (200, 14 ms)
-- **ALL 4 MODES PASS** — full 23KB install wizard renders in every mode. Joomla 5's modern Symfony-based architecture is ZealPHP-clean.
-- **Grade: A+ (all modes)**
-
-### Nextcloud (Cloud Storage)
-
-- **GitHub:** https://github.com/nextcloud/server — 27k stars
-- **Mode 5:** FAIL | **Mode 1:** PASS (200, 46 ms) | **Mode 4:** FAIL | **Mode 3:** FAIL
-- Mode 1 (CGI) loads the Nextcloud setup page successfully. Other modes crash due to `OC_*` constant redefinition and massive static state.
-- **Grade: A (Mode 1 only)**
-- Recommended: Mode 1
-
-### Slim Framework (Micro-framework)
-
-- **GitHub:** https://github.com/slimphp/Slim — 12k stars
-- Framework routing works correctly — returns proper 405 JSON response for unregistered route methods
-- Needs `setFallback()` front-controller routing in ZealPHP `app.php` (same as Laravel/Symfony)
-- **Grade: A (Mode 3), confirmed working**
-- Recommended: Mode 3
-
----
-
-## Category Breakdown
-
-### 1. CMS (10 apps)
-
-#### WordPress
-
-- **GitHub:** https://github.com/WordPress/WordPress — 19k stars
-- **PHP:** 7.4+ | **Framework:** Custom (procedural + hooks)
-- **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** Thousands of `define()` calls without `defined()` guards, plugin ecosystem uses `die()`/`exit()` freely, static globals in core (`$wp`, `$wpdb`), function redeclaration in plugins
-- **Recommended:** Mode 1 (CGI Pool) — this is the only mode that gives plugins their own clean process state for full concurrent production use
-- The ZealPHP WordPress showcase (`sibidharan/zealphp-wordpress`) demonstrates this working end-to-end
-- **Mode 4 sequential note (ext-zealphp 0.3.25):** WordPress serves its public site + login auth + comment writes end-to-end in coroutine-legacy mode run *sequentially* (worker-stable, ASAN-clean). True concurrent WP (multiple simultaneous coroutines) remains Mode 1's domain due to the cold-boot `mysqlnd`/`libtasn1` connection-teardown layer and the cold-concurrent-autoload race on unwarmed inherited classes. See the Mode-4 caveat at the top of this document.
-
-#### Drupal
-
-- **GitHub:** https://github.com/drupal/drupal — 4.3k stars
-- **PHP:** 8.3+ | **Framework:** Custom (Symfony components)
-- **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** `drupal_bootstrap()` builds a static service container, `\Drupal::state()` singleton, hooks fired via global function registry. The static service container / `Database` registry (class static properties) threw `ConnectionNotDefinedException` on request 2 — fixed by the class-static reset in ext-zealphp 0.3.25 (A/B verified: ON = `200`×8, OFF = `200` then `500`×7). Mode 4 is now worker-stable sequentially.
-- **Recommended:** Mode 1 for production concurrency; Mode 4 sequential viable with ext-zealphp 0.3.25+
-
-#### Joomla
-
-- **GitHub:** https://github.com/joomla/joomla-cms — 4.7k stars
-- **PHP:** 8.1+ | **Framework:** Custom (Joomla Framework)
-- **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** `JFactory::getApplication()` singleton pattern, global `$mainframe`, procedural bootstrap
-- **Recommended:** Mode 1
-
-#### TYPO3
-
-- **GitHub:** https://github.com/TYPO3/typo3 — 1.0k stars (monorepo)
-- **PHP:** 8.2+ | **Framework:** Symfony components, PSR-compliant
-- **Mode 1:** B | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Symfony DI container (works in Mode 3), `TYPO3_REQUESTTYPE` constant needs `defined()` guard (already guarded in core), extensions may have issues
-- **Recommended:** Mode 3 (Sync)
-
-#### Concrete CMS
-
-- **GitHub:** https://github.com/concretecms/concretecms — 768 stars
-- **PHP:** 8.0+ | **Framework:** Custom (Zend-derived)
-- **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** `Core::make()` singleton IoC, global `$c` page object, legacy `define()` constants
-- **Recommended:** Mode 1
-
-#### October CMS
-
-- **GitHub:** https://github.com/octobercms/october — 11k stars
-- **PHP:** 8.0+ | **Framework:** Laravel
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Laravel application container; `App::make()` singleton. Laravel's service providers run once at boot — fine for Mode 3's sequential model
-- **Recommended:** Mode 3
-
-#### Craft CMS
-
-- **GitHub:** https://github.com/craftcms/cms — 3.1k stars
-- **PHP:** 8.0+ | **Framework:** Yii 2
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Yii2 `Yii::$app` singleton, config via `craft\helpers\App`; Yii bootstraps once per process (ideal for Mode 3)
-- **Recommended:** Mode 3
-
-#### Grav
-
-- **GitHub:** https://github.com/getgrav/grav — 14k stars
-- **PHP:** 8.1+ | **Framework:** Custom (PSR-7/PSR-15)
-- **Mode 1:** B | **Mode 3:** F | **Mode 4:** B | **Mode 5:** NT
-- **Key issues:** Constants `GRAV_REQUEST_TIME` / `GRAV_PHP_MIN` defined without `defined()` guards crash Mode 3 on 2nd request. Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
-- **Recommended:** Mode 1 or Mode 4 sequential. True concurrent Mode 4 remains Mode 1's domain.
-
-#### Kirby
-
-- **GitHub:** https://github.com/getkirby/kirby — 7.5k stars
-- **PHP:** 8.1+ | **Framework:** Custom (modern OOP)
-- **Mode 1:** B | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Clean OOP, file-based CMS. Kirby's core avoids global state. Plugins vary.
-- **Recommended:** Mode 3
-
-#### Statamic
-
-- **GitHub:** https://github.com/statamic/cms — 3.9k stars
-- **PHP:** 8.1+ | **Framework:** Laravel
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Laravel-based; same considerations as October CMS
-- **Recommended:** Mode 3
-
----
-
-### 2. E-commerce (6 apps)
-
-#### Bagisto
-
-- **GitHub:** https://github.com/bagisto/bagisto — 15k stars
-- **PHP:** 8.1+ | **Framework:** Laravel
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Laravel + Vue.js frontend, clean service architecture
-- **Recommended:** Mode 3
-
-#### Magento 2
-
-- **GitHub:** https://github.com/magento/magento2 — 11k stars
-- **PHP:** 8.2+ | **Framework:** Custom (Zend/Laminas-derived)
-- **Mode 1:** A | **Mode 3:** D | **Mode 4:** C | **Mode 5:** F
-- **Key issues:** Enormous static DI container built at bootstrap. `\Magento\Framework\App\ObjectManager::getInstance()` is process-global. Area codes (`frontend`/`adminhtml`) are set once via static state. Session handling is deeply intertwined with `$_SESSION`. Worker restart between requests is effectively required.
-- **Recommended:** Mode 1 — no other mode is viable without significant patching
-
-#### WooCommerce
-
-- **GitHub:** https://github.com/woocommerce/woocommerce — 9.6k stars
-- **PHP:** 7.4+ | **Framework:** WordPress plugin
-- **Mode 1:** A | **Mode 3:** F | **Mode 4:** C | **Mode 5:** F
-- **Key issues:** Runs as a WordPress plugin — all WordPress constraints apply. `WC()` global, `wc_get_cart()` static singletons.
-- **Recommended:** Mode 1 (via WordPress CGI Pool)
-
-#### PrestaShop
-
-- **GitHub:** https://github.com/PrestaShop/PrestaShop — 7.8k stars
-- **PHP:** 8.1+ | **Framework:** Custom (Symfony components)
-- **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** `Context::getContext()` singleton with cart/customer/shop objects, `define()` for `_PS_ROOT_DIR_`, modules use `exit()`
-- **Recommended:** Mode 1
-
-#### OpenCart
-
-- **GitHub:** https://github.com/opencart/opencart — 7.3k stars
-- **PHP:** 8.0+ | **Framework:** Custom (MVC, procedural-style)
-- **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** Stores state in `$registry` object passed around, but that object lives in a global scope. Extensions use `exit()`. `define('DIR_APPLICATION', ...)` without guards.
-- **Recommended:** Mode 1
-
-#### Sylius
-
-- **GitHub:** https://github.com/Sylius/Sylius — 7.7k stars
-- **PHP:** 8.1+ | **Framework:** Symfony
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Clean Symfony-based architecture. PSR-compliant. Service container bootstrapped once per process.
-- **Recommended:** Mode 3
-
----
-
-### 3. Forums (4 apps)
-
-#### Flarum
-
-- **GitHub:** https://github.com/flarum/framework — 15k stars
-- **PHP:** 8.1+ | **Framework:** Laravel + Mithril.js frontend
-- **Mode 1:** B | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Modern PSR-7 HTTP pipeline, Laravel Eloquent ORM. Clean separation of concerns. Extensions follow hook system.
-- **Recommended:** Mode 3
-
-#### phpBB
-
-- **GitHub:** https://github.com/phpbb/phpbb — 1.8k stars
-- **PHP:** 7.1+ | **Framework:** Custom (procedural + legacy OOP)
-- **Mode 1:** A | **Mode 3:** D | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** Extensive `$phpbb_root_path`, `$phpEx` globals. Top-level includes with `define()`. `exit_handler()` calls `die()`. Login flows use `redirect() + exit`. Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
-- **Recommended:** Mode 1 or Mode 4 sequential
-
-#### MyBB
-
-- **GitHub:** https://github.com/mybb/mybb — 2.9k stars
-- **PHP:** 7.3+ | **Framework:** Custom (procedural)
-- **Mode 1:** A | **Mode 3:** D | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** Global `$mybb`, `$db`, `$lang` objects, `define()`-based constants throughout, procedural plugin system with `run_hooks()` calling arbitrary functions. Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
-- **Recommended:** Mode 1 or Mode 4 sequential
-
-#### Vanilla Forums
-
-- **GitHub:** https://github.com/vanilla/vanilla — 2.9k stars
-- **PHP:** 7.4+ | **Framework:** Custom (Garden framework)
-- **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** `Gdn::application()` singleton, `saveToConfig()` writes to filesystem per-request, `redirect()` calls `exit()`
-- **Recommended:** Mode 1
-
----
-
-### 4. Frameworks (7 apps)
-
-#### Laravel
-
-- **GitHub:** https://github.com/laravel/laravel — 79k stars (skeleton)
-- **PHP:** 8.2+ | **Framework:** Self
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** `app()` helper is a static facade over the IoC container, service providers run once and accumulate state, `DB::connection()` holds open database connections. Mode 3's sequential model is a good fit — one request at a time, service providers stay fresh. Laravel Octane (Swoole mode) is the "right" way for coroutine concurrency but requires app changes.
-- **Recommended:** Mode 3
-
-#### Symfony
-
-- **GitHub:** https://github.com/symfony/symfony — 30k stars
-- **PHP:** 8.2+ | **Framework:** Self
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Kernel must be rebooted between requests in long-running mode, or use `kernel.terminate` event properly. `App::superglobals(true) + processIsolation(false)` (Mixed-mode) is the recommended ZealPHP-Symfony configuration per the `zealphp-symfony` bridge.
-- **Recommended:** Mode 3 (use the `sibidharan/zealphp-symfony` bridge)
-
-#### CodeIgniter 4
-
-- **GitHub:** https://github.com/codeigniter4/CodeIgniter4 — 5.3k stars
-- **PHP:** 7.4+ | **Framework:** Self
-- **Mode 1:** B | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** CI4's `Services::` is a static registry but is designed to be reset per-request via `Services::reset()`. Call it in a ZealPHP `onRequest` middleware.
-- **Recommended:** Mode 3 with `Services::reset()` in request lifecycle
-
-#### CakePHP
-
-- **GitHub:** https://github.com/cakephp/cakephp — 8.7k stars
-- **PHP:** 8.1+ | **Framework:** Self
-- **Mode 1:** B | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Registry pattern in `TableLocator`, but instances are request-scoped by design in newer versions. Session handling is well-abstracted.
-- **Recommended:** Mode 3
-
-#### Slim
-
-- **GitHub:** https://github.com/slimphp/Slim — 12k stars
-- **PHP:** 7.4+ | **Framework:** Self (PSR-7/PSR-15)
-- **Mode 1:** B | **Mode 3:** A | **Mode 4:** A | **Mode 5:** B
-- **Key issues:** Fully PSR-7 compliant, no global state in the framework itself. App-level code may use superglobals — audit your middleware.
-- **Recommended:** Mode 3 for existing apps, Mode 5 if rewriting with `$g->`
-
-#### Yii 2
-
-- **GitHub:** https://github.com/yiisoft/yii2 — 14k stars
-- **PHP:** 7.2+ | **Framework:** Self
-- **Mode 1:** B | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** `Yii::$app` is a global singleton but is designed to be re-created. `yii\base\Application::__construct()` resets most state. Works well in Mode 3 where one app instance handles sequential requests.
-- **Recommended:** Mode 3
-
-#### Laminas (Zend)
-
-- **GitHub:** https://github.com/laminas — 5.1k stars (org)
-- **PHP:** 8.0+ | **Framework:** Self (PSR-7/PSR-15)
-- **Mode 1:** B | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Fully PSR-7/PSR-15 compliant. Laminas MVC application bootstraps cleanly. Good candidate for Mode 3.
-- **Recommended:** Mode 3
-
----
-
-### 5. Admin/Tools (6 apps)
-
-#### phpMyAdmin
-
-- **GitHub:** https://github.com/phpmyadmin/phpmyadmin — 7.2k stars
-- **PHP:** 7.2+ | **Framework:** Custom (Twig + PSR-7 partially)
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** A
-- **Tested:** Mode 3/4/5 PASS, Mode 1 FAIL (CGI pool crash). Requires `composer install`.
-- **Key issues:** CGI pool crashes on startup — startup sequence not subprocess-safe. In-process modes all work.
-- **Recommended:** Mode 3
-
-#### Adminer
-
-- **GitHub:** https://github.com/vrana/adminer — 6.1k stars
-- **PHP:** 5.2+ | **Framework:** None (single file)
-- **Mode 1:** A | **Mode 3:** F | **Mode 4:** A | **Mode 5:** F
-- **Tested:** Mode 1 PASS (200, 147 ms), Mode 4 PASS (200, 27 ms), Mode 3/5 CRASH on 2nd request
-- **Root cause:** `function Adminer\connection()` declared at top of `index.php` without `function_exists()`. Worker loads the file per request — fatal on reload.
-- **Recommended:** Mode 1 (simplest) or Mode 4 (best performance, requires ext-zealphp)
-
-#### TinyFileManager
-
-- **GitHub:** https://github.com/prasathmani/tinyfilemanager — 6.2k stars
-- **PHP:** 7.2+ | **Framework:** None (single file, ~7k LOC)
-- **Mode 1:** A | **Mode 3:** F | **Mode 4:** F | **Mode 5:** F
-- **Tested:** Mode 1 PASS (200, 42 ms), all others CRASH on 2nd request
-- **Root cause:** All functions (`fm_get_mime_type`, `fm_is_dir`, etc.) declared inline without `function_exists()`. ~200 function declarations, no namespace.
-- **Recommended:** Mode 1 only
-
-#### Roundcube
-
-- **GitHub:** https://github.com/roundcube/roundcubemail — 6.0k stars
-- **PHP:** 8.0+ | **Framework:** Custom
-- **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** `$RCMAIL` global singleton, plugin system uses global hook registry (`rcube::get_instance()`), `rcube_output` accumulates response state
-- **Recommended:** Mode 1
-
-#### FileGator
-
-- **GitHub:** https://github.com/filegator/filegator — 1.8k stars
-- **PHP:** 7.1+ | **Framework:** Vue.js + PHP API backend
-- **Mode 1:** B | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** PHP backend is a clean API layer with dependency injection. Frontend is a SPA. Good architecture.
-- **Recommended:** Mode 3
-
-#### elFinder
-
-- **GitHub:** https://github.com/Studio-42/elFinder — 3.0k stars
-- **PHP:** 5.4+ | **Framework:** Custom (procedural + OOP mix)
-- **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** `elFinder::$netDrivers` static state, connector script runs in a procedural style, `die()` in error paths
-- **Recommended:** Mode 1
-
----
-
-### 6. Wiki/Docs (3 apps)
-
-#### MediaWiki
-
-- **GitHub:** https://github.com/wikimedia/mediawiki — 3.7k stars (mirror)
-- **PHP:** 7.4+ | **Framework:** Custom
-- **Mode 1:** A | **Mode 3:** D | **Mode 4:** C | **Mode 5:** F
-- **Key issues:** Extensive `$wgUser`, `$wgTitle`, `$wgOut` process globals. `wfRunHooks()` registry is process-global. Extensions add hundreds of global variables. `wfAbortAllDB()` calls `die()`.
-- **Recommended:** Mode 1
-
-#### DokuWiki
-
-- **GitHub:** https://github.com/dokuwiki/dokuwiki — 4.1k stars
-- **PHP:** 7.4+ | **Framework:** Custom (procedural)
-- **Mode 1:** F (TESTED: CGI subprocess crash) | **Mode 3:** A (TESTED: 200, 17 ms) | **Mode 4:** A (TESTED: 200, 16 ms) | **Mode 5:** A (TESTED: 200, 27 ms)
-- **Key issues:** Works perfectly in-process. CGI pool subprocess crashes on DokuWiki's procedural startup sequence. Avoid Mode 1.
-- **Recommended:** Mode 3 (simplest), Mode 4 (concurrency), or Mode 5 (if wrapping the entrypoint)
-
-#### BookStack
-
-- **GitHub:** https://github.com/BookStackApp/BookStack — 16k stars
-- **PHP:** 8.1+ | **Framework:** Laravel
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Laravel-based, clean OOP. Same considerations as other Laravel apps.
-- **Recommended:** Mode 3
-
----
-
-### 7. Business (5 apps)
-
-#### Kanboard
-
-- **GitHub:** https://github.com/kanboard/kanboard — 8.4k stars
-- **PHP:** 8.0+ | **Framework:** Custom (micro-framework, clean OOP)
-- **Mode 1:** A | **Mode 3:** A | **Mode 4:** A | **Mode 5:** A
-- **Tested:** ALL 4 MODES PASS — fastest response in Mode 3 (45 ms), all modes stable across multiple requests
-- **Why it's the gold standard:** Proper autoloading, `defined()` guards on all constants, no naked function declarations, no `die()` in normal paths, clean request/response cycle
-- **Recommended:** Any mode. Mode 5 for maximum performance if wrapping the entrypoint.
-
-#### Invoice Ninja
-
-- **GitHub:** https://github.com/invoiceninja/invoiceninja — 8.3k stars
-- **PHP:** 8.1+ | **Framework:** Laravel
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Laravel + React frontend. `Ninja::` facades, queue workers for background jobs. Mode 3 handles the web frontend well.
-- **Recommended:** Mode 3
-
-#### Leantime
-
-- **GitHub:** https://github.com/Leantime/leantime — 4.1k stars
-- **PHP:** 8.1+ | **Framework:** Custom (PSR-based, modern OOP)
-- **Mode 1:** B | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** PSR-11 container, clean service layer. `bootstrap.php` uses proper class loading.
-- **Recommended:** Mode 3
-
-#### Monica CRM
-
-- **GitHub:** https://github.com/monicahq/monica — 22k stars
-- **PHP:** 8.1+ | **Framework:** Laravel
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Laravel, clean OOP. Background jobs via queues. Web frontend works cleanly in Mode 3.
-- **Recommended:** Mode 3
-
-#### Crater
-
-- **GitHub:** https://github.com/crater-invoice/crater — 8.2k stars
-- **PHP:** 8.0+ | **Framework:** Laravel
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Laravel + Vue.js frontend. Standard Laravel patterns.
-- **Recommended:** Mode 3
-
----
-
-### 8. Analytics (3 apps)
-
-#### Matomo
-
-- **GitHub:** https://github.com/matomo-org/matomo — 19k stars
-- **PHP:** 7.2.5+ | **Framework:** Custom (Piwik framework)
-- **Mode 1:** A | **Mode 3:** D | **Mode 4:** C | **Mode 5:** F
-- **Key issues:** `Piwik::$plugins` static registry, `StaticContainer::get()` DI, tracker script uses `die()` after response. The `piwik.php` tracker is a self-contained script that calls `die()` after emitting the GIF — Mode 1 handles this cleanly via process isolation.
-- **Recommended:** Mode 1
-
-#### Cacti
-
-- **GitHub:** https://github.com/Cacti/cacti — 1.5k stars
-- **PHP:** 7.2+ | **Framework:** Custom (procedural)
-- **Mode 1:** A | **Mode 3:** D | **Mode 4:** C | **Mode 5:** F
-- **Key issues:** Heavily procedural, `exit()` calls throughout SNMP polling paths, global `$config` array, `define()` for every constant
-- **Recommended:** Mode 1
-
-#### LibreNMS
-
-- **GitHub:** https://github.com/librenms/librenms — 3.9k stars
-- **PHP:** 8.1+ | **Framework:** Laravel
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Laravel-based web interface. Background polling daemons are separate processes. Web UI is clean Laravel.
-- **Recommended:** Mode 3
-
----
-
-### 9. Content/Media (4 apps)
-
-#### FreshRSS
-
-- **GitHub:** https://github.com/FreshRSS/FreshRSS — 10k stars
-- **PHP:** 7.0.7+ | **Framework:** Custom (Minz micro-framework)
-- **Mode 1:** A | **Mode 3:** F | **Mode 4:** B | **Mode 5:** F
-- **Tested:** Mode 1 PASS (302, 42 ms); Mode 3/5 CRASH on 2nd request; Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) worker-stable sequentially.
-- **Root cause:** Minz framework declares `function _t()`, `_s()`, `_n()` and others without `function_exists()` guards. These are PHP-level (not namespaced) function declarations that collide on worker reload. The per-request state reset (ext-zealphp 0.3.25) resolves this for sequential Mode 4.
-- **Recommended:** Mode 1 (simplest) or Mode 4 sequential
-
-#### Piwigo
-
-- **GitHub:** https://github.com/Piwigo/Piwigo — 3.1k stars
-- **PHP:** 7.1+ | **Framework:** Custom (procedural)
-- **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** Heavy use of global `$conf`, `$page`, `$user` arrays. Plugin system calls `die()`. `include()`-based dispatch. Mode 4 (coroutine-legacy, ext-zealphp 0.3.25) is worker-stable sequentially via the per-request state reset.
-- **Recommended:** Mode 1 or Mode 4 sequential
-
-#### Lychee
-
-- **GitHub:** https://github.com/LycheeOrg/Lychee — 13k stars
-- **PHP:** 8.2+ | **Framework:** Laravel
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Modern Laravel app, clean OOP, Vue.js frontend.
-- **Recommended:** Mode 3
-
-#### Wallabag
-
-- **GitHub:** https://github.com/wallabag/wallabag — 10k stars
-- **PHP:** 8.1+ | **Framework:** Symfony
-- **Mode 1:** C | **Mode 3:** A | **Mode 4:** A | **Mode 5:** NT
-- **Key issues:** Symfony-based. Clean PSR-7 architecture. Same Symfony boot considerations apply.
-- **Recommended:** Mode 3
-
----
-
-### 10. Utility (2 apps)
-
-#### Nextcloud
-
-- **GitHub:** https://github.com/nextcloud/server — 27k stars
-- **PHP:** 8.0+ | **Framework:** Custom (OC_ namespace, partially Symfony-influenced)
-- **Mode 1:** A | **Mode 3:** D | **Mode 4:** C | **Mode 5:** F
-- **Key issues:** `OC_Hook::emit()` global hook registry, `OCP\Share\IManager::getSharesBy()` static facades, DAV stack uses `exit()` in sync-client paths, `\OC\SystemConfig` is a process singleton. App framework is extensive but pre-dates modern DI patterns.
-- **Recommended:** Mode 1
-
-#### YOURLS
-
-- **GitHub:** https://github.com/YOURLS/YOURLS — 10k stars
-- **PHP:** 7.4+ | **Framework:** Custom (procedural hooks)
-- **Mode 1:** A | **Mode 3:** C | **Mode 4:** B | **Mode 5:** F
-- **Key issues:** `define('YOURLS_ABSPATH', ...)` without `defined()` guard, global `$yourls_filters` hook registry, `yourls_die()` wrapper calls `die()`. Plugin API is function-based.
-- **Recommended:** Mode 1
-
----
-
-## Compatibility Patterns
-
-These are the root causes behind most compatibility failures. Understanding them lets you predict whether an unlisted app will work.
-
-### 1. Function Redeclaration
-
-**What it is:** An app declares PHP functions in a file that gets included on every request, without a `function_exists()` guard.
-
-```php
-// BAD — crashes on 2nd request in Mode 3/5
-function format_date($date) { ... }
-
-// GOOD — safe in all modes
-if (!function_exists('format_date')) {
-    function format_date($date) { ... }
-}
-```
-
-**Affected apps (confirmed):** Adminer, TinyFileManager, FreshRSS  
-**Impact:** Fatal error `Cannot redeclare function X()` on 2nd request. Kills the worker process.  
-**Modes affected:** 3 and 5 (in-process, worker is reused). Mode 4 handles it via worker rotation + per-coroutine function table (ext-zealphp). Mode 1 is immune (fresh process per request).  
-**Fix:** Mode 1 or Mode 4. Or wrap the entry point in `runkit_function_remove()` / function table isolation — expensive.
-
-### 2. Constant Redefinition
-
-**What it is:** An app calls `define('CONSTANT', value)` without a `defined('CONSTANT')` guard.
-
-```php
-// BAD
-define('APP_ROOT', __DIR__);
-
-// GOOD
-defined('APP_ROOT') || define('APP_ROOT', __DIR__);
-```
-
-**Affected apps:** WordPress, Joomla, OpenCart, YOURLS, phpBB, MyBB  
-**Impact:** PHP notice (soft failure) in PHP 7, but becomes a warning in PHP 8. Some apps treat this as fatal. More importantly, the second `define()` silently fails, leaving the constant at its first value — which may be wrong if the include path changed.  
-**Modes affected:** 3 and 5. Mode 1 immune. Mode 4 can isolate via `defineIsolation(true)` in ext-zealphp.
-
-### 3. Static Singleton State
-
-**What it is:** Frameworks that use `Singleton::getInstance()` patterns where the instance accumulates request-specific state.
-
-```php
-// Common pattern — safe only if $instance is reset per-request
-class App {
-    private static $instance = null;
-    public static function getInstance() {
-        if (!self::$instance) self::$instance = new self();
-        return self::$instance;
-    }
-}
-```
-
-**Affected apps:** Magento 2, Joomla, phpBB, Cacti, Nextcloud, Matomo  
-**Impact:** State from request N leaks into request N+1. Login sessions may bleed, cache may show stale data, database connections may be in wrong state.  
-**Modes affected:** 3 and 5. Mode 1 resets per process. Mode 4's ext-zealphp snapshots static properties per-coroutine.  
-**Detection:** Grep for `static \$instance`, `static \$_instance`, `private static \$app`.
-
-### 4. exit()/die() Usage
-
-**What it is:** Application code calls `exit()` or `die()` to terminate the request — a common pattern in legacy PHP.
-
-```php
-// Common patterns
-header('Location: /login'); die;
-die(json_encode(['error' => 'unauthorized']));
-```
-
-**Affected apps:** OpenCart, phpBB, Matomo tracker, Cacti, Vanilla Forums, YOURLS  
-**Impact:** In Mode 3 and 5, `exit()` kills the worker process — OpenSwoole cannot trap it at PHP level. The worker is respawned by the manager, but response is lost and the next request gets a fresh worker.  
-**Modes affected:** All in-process modes (3, 4, 5) if unhandled. Mode 1 is immune (subprocess dies, pool spawns replacement). Mode 4 (coroutine-legacy) handles `exit()`/`die()` worker-survival via the coroutine-legacy isolation stack (ext-zealphp).  
-**Note:** There is no `App::hookExit()`. The exec-family hook toggle is `App::hookExec()` (backtick/shell_exec/exec/system/passthru). `exit()`/`die()` worker-survival is part of the coroutine-legacy isolation stack, not a separate toggle.
-
-### 5. Superglobal Access
-
-**What it is:** Code reads `$_GET`, `$_POST`, `$_SESSION`, `$_SERVER` directly instead of through a framework abstraction.
-
-```php
-// Mode 5 incompatible
-$user = $_POST['username'];
-session_start();
-$_SESSION['user'] = $user;
-
-// Mode 5 compatible (ZealPHP native)
-$g = G::instance();
-$user = $g->post['username'];
-$g->session['user'] = $user;
-```
-
-**Affected apps:** All legacy apps (WordPress, Joomla, phpBB, etc.)  
-**Impact:** In Mode 5 (`superglobals(false)`), `$_GET`/`$_POST` are NOT populated per request. They remain as process-wide arrays, causing cross-request data contamination.  
-**Modes affected:** Mode 5 only. Modes 1, 3, and 4 all populate superglobals per request.  
-**Fix:** Use Mode 3 or Mode 4 for apps with direct superglobal access. Mode 5 is for native ZealPHP apps.
-
-### 6. Composer Dependencies
-
-**What it is:** Apps that require `vendor/` autoloading but have not had `composer install` run in the container.
-
-**Affected apps:** phpMyAdmin (tested), Invoice Ninja, Flarum, most Laravel/Symfony apps  
-**Impact:** Fatal autoload failures on first request.  
-**Fix:** Always run `composer install --no-dev` in your Docker build step before starting ZealPHP. This is not a ZealPHP issue — it's standard PHP app deployment.
-
----
-
-## Mode Selection Guide
-
-Use this decision tree to find the right mode for your app:
-
-```
-Is this a native ZealPHP app using $g->get / $g->post?
-├─ YES → Mode 5 (Coroutine) — highest performance, full concurrency
-└─ NO  ↓
-
-Is it built on Laravel, Symfony, CodeIgniter 4, Yii 2, or Laminas?
-├─ YES → Mode 3 (Sync) — cleanest lifecycle for framework apps
-│        (use zealphp-symfony bridge for Symfony)
-└─ NO  ↓
-
-Does it use bare define() without defined() guards, OR
-function declarations without function_exists() guards?
-├─ YES → Does it crash on 2nd request in Mode 3?
-│        ├─ YES → Do you have ext-zealphp installed?
-│        │        ├─ YES → Mode 4 (Hybrid) — per-coroutine isolation
-│        │        └─ NO  → Mode 1 (CGI Pool) — only safe option
-│        └─ NO  → Mode 3 (Sync) is fine
-└─ NO  ↓
-
-Does it need $_{GET,POST,SESSION,SERVER} superglobals AND concurrency?
-├─ YES → Mode 4 (Hybrid) — requires ext-zealphp
-└─ NO  ↓
-
-Maximum compatibility with unknown/untested apps?
-└─ Mode 1 (CGI Pool) — runs anything, ~1–3 ms warm (pool default)
-```
-
-### Quick Reference by App Type
-
-| App Type | Recommended Mode | Reason |
-|----------|-----------------|--------|
-| Native ZealPHP app | **Mode 5** | Built for it |
-| Laravel app | **Mode 3** | Clean DI lifecycle |
-| Symfony app | **Mode 3** | PSR-15, use zealphp-symfony bridge |
-| WordPress + plugins | **Mode 1** | Plugin ecosystem needs isolation |
-| Magento 2 | **Mode 1** | Massive static DI, no alternatives |
-| Single-file PHP tool (Adminer, etc.) | **Mode 1** or **Mode 4** | Redeclaration issues |
-| Procedural legacy app | **Mode 1** | Process isolation handles everything |
-| Modern micro-framework (Slim, etc.) | **Mode 3** | PSR-compliant |
-| Flat-file CMS (Grav, Kirby, DokuWiki) | **Mode 3** | Clean OOP |
-
----
-
-## Statistics
-
-| Metric | Count | Notes |
-|--------|-------|-------|
-| Total apps surveyed | 50 | Mix of tested and predicted |
-| Tested in Docker lab | 32 | All apps in `examples/sweep/apps/` deployed and tested |
-| All 4 modes pass | 5 | Kanboard, Roundcube, OpenCart, Joomla, traditional |
-| Mode 1 (CGI Pool) pass | 18 of 21 tested | adminer, cacti, dokuwiki (1st req), freshrss, joomla, kanboard, matomo, mybb, nextcloud, opencart, phpbb, phpliteadmin, piwigo, privatebin, roundcube, tinyfilemanager, traditional, vanilla, wordpress |
-| Mode 1 fixed in this session | 4 root causes | 1) stderr deadlock from PHP 8.4 deprecations 2) constant/class/function leak across apps 3) flush/ob_end_flush/fastcgi_finish_request corrupting IPC stream 4) chdir() to script dir for relative includes |
-| Mode 1 known issues | 3 | phpMyAdmin (ResponseRenderer-from-shutdown architectural conflict — see below), DokuWiki (works 1st req, breaks on respawn), yourls (503 pool exhausted) |
-| **phpMyAdmin Mode 1 root cause** | architectural | phpMyAdmin registers `ResponseRenderer->response` as a shutdown function that writes HTML and calls `exit()`. Our pool worker's outer shutdown handler runs user shutdowns mid-cleanup; when `ResponseRenderer->response` exits, we never reach the IPC frame writeFrame line, parent sees null. **Use Mode 5 (Coroutine) for phpMyAdmin** — `HOOK_ALL` makes MySQL async, no subprocess context needed. Verified: M5 ✅ 3/3 PASS. Architectural fix would need separate IPC fd (fd 3) — not on roadmap. |
-| Mode 4 (Hybrid) pass | 5 of 16 tested | adminer, kanboard, joomla, roundcube, opencart |
-| Mode 4 partial | 6 | tinyfilemanager, dokuwiki, freshrss, vanilla, wordpress, matomo (alternating success — concurrent coroutine race on shared state) |
-| Mode 4 failing | 5 | cacti, nextcloud, phpmyadmin, mybb, phpbb (heavy legacy apps needing fresh state — architectural limit, use Mode 1) |
-| Mode 4 architectural limit | Process-wide state | Concurrent coroutines share function/class/constant tables. ext-zealphp's per-coroutine isolation handles superglobals + constants but NOT user-defined classes (loaded once, shared). For apps requiring fresh PHP state per request → use Mode 1 (CGI Pool) |
-| User-globals cleanup | Yes (all modes) | Mode 1: FPM-style. Mode 3+FI: ext-zealphp zealphp_globals_clean. Mode 4/5: per-coroutine via `App::coroutineGlobalsIsolation(true)` (ext-zealphp v0.3.6+). |
-| Session merge granularity | Leaf-level | TableSessionHandler + RedisSessionHandler with 3-way merge |
-| Mode 1 recommended | ~24 | Legacy/procedural apps — WordPress, Magento, phpBB, etc. |
-| Mode 3 recommended | ~19 | Framework-based apps — Laravel, Symfony, Flarum, etc. |
-| Mode 4 viable | ~30 | Apps where ext-zealphp resolves redeclaration and isolation |
-| Mode 5 applicable | ~5 | Native ZealPHP apps + clean PSR-7 apps (Slim, Kanboard) |
-| PHP 8.4 incompatible | ~2 | phpLiteAdmin (not a ZealPHP issue) |
-
-### Failure Mode Distribution (tested apps)
-
-| Failure Cause | Apps Affected | Modes Affected | Fix |
-|---------------|--------------|----------------|-----|
-| Function redeclaration | Adminer, TinyFileManager, FreshRSS | 3, 5 (crash on 2nd req) | Mode 1 or Mode 4 |
-| Constant redefinition | Matomo, Grav | 3, 4, 5 (crash on 2nd req) | Mode 1 (CGI process isolation) |
-| CGI subprocess crash | DokuWiki, phpMyAdmin | 1 | Use Mode 3 instead |
-| PHP 8.4 compat bug | phpLiteAdmin | All | Fix app code (not ZealPHP issue) |
-| Missing composer deps | PrivateBin | All | Run `composer install` |
-| Needs DB/config setup | MediaWiki, MyBB, Piwigo, YOURLS | All | Configure before testing |
-| **No issues (all pass)** | **Kanboard, Roundcube, OpenCart, Joomla** | **None** | **Works everywhere** |
-
----
-
-## ZealPHP Config Snippets
-
-### Mode 1 — Maximum Compatibility (CGI Pool)
-
-```php
-<?php
-use ZealPHP\App;
-
-// One-call preset — superglobals(true) + isolation(CgiPool).
-// As of this release legacy-cgi DEFAULTS to cgiPoolMaxRequests(1) — a fresh
-// subprocess per request (Apache mod_php prefork parity). Unmodified WordPress/
-// Drupal re-run unguarded top-level define()/class declarations every request,
-// so a REUSED subprocess hits "Cannot redeclare class". Apps with re-entrant
-// (guarded / Composer-autoloaded) boot can opt back into pool reuse with
-// App::cgiPoolMaxRequests(N) for the ~1–3 ms warm dispatch.
-App::mode(App::MODE_LEGACY_CGI);
-App::documentRoot('wordpress');        // serve from the app's docroot
-App::ignorePhpExt(false);              // allow .php URLs (wp-login.php, etc.)
-// WordPress's assets live outside the default whitelist (/css/,/js/,…) — add
-// the wp dirs so CSS/JS/images serve statically (admin asset subdirs too, but
-// NOT /wp-admin/ itself so its .php files still execute).
-App::staticHandlerLocations([
-    '/wp-includes/', '/wp-content/',
-    '/wp-admin/css/', '/wp-admin/js/', '/wp-admin/images/',
-]);
-
-$app = App::init('0.0.0.0', 8080);
-// Front-controller fallback (Apache's .htaccess `RewriteRule . /index.php [L]`).
-// Route unmatched URLs through the app's index.php — NOT raw REQUEST_URI, which
-// would 403 static assets / REST / 404 URLs that must reach the front controller.
-$app->setFallback(function() {
-    $g = \ZealPHP\G::instance();
-    $g->server['PHP_SELF']        = '/index.php';
-    $g->server['SCRIPT_NAME']     = '/index.php';
-    $g->server['SCRIPT_FILENAME'] = App::$cwd . '/wordpress/index.php';
-    return App::include('/index.php');
-});
-$app->run();
-```
-
-> **Verified (this release):** unmodified WordPress runs end-to-end in
-> `legacy-cgi` — public site, **wp-admin, and the Gutenberg block editor** —
-> with the global-scope include fix (issue #167) and the recycle=1 default. See
-> the WordPress row note below.
-
-### Mode 3 — Sync (Laravel / Symfony / Framework Apps)
-
-```php
-<?php
-use ZealPHP\App;
-
-// One-call preset — superglobals(true) + isolation(None).
-// In-process, sequential. No subprocess overhead.
-App::mode(App::MODE_MIXED);
-
-$app = App::init('0.0.0.0', 8080);
-// Register your framework's front controller:
-$app->setFallback(function() {
-    return App::include('/index.php');
-});
-$app->run();
-```
-
-### Mode 4 — coroutine-legacy (Concurrency + Superglobals, requires ext-zealphp)
-
-```php
-<?php
-use ZealPHP\App;
-
-// One-call preset — sets superglobals(true) + isolation(Coroutine)
-// and auto-enables silentRedeclare, includeIsolation,
-// coroutineGlobalsIsolation, coroutineStaticsIsolation.
-App::mode(App::MODE_COROUTINE_LEGACY);
-
-$app = App::init('0.0.0.0', 8080);
-$app->setFallback(function() {
-    return App::include('/index.php');
-});
-$app->run();
-```
-
-### Mode 5 — Native ZealPHP (New Apps)
-
-```php
-<?php
-use ZealPHP\App;
-
-// One-call preset — superglobals(false) + isolation(Coroutine).
-// This is also the default when App::mode() is not called.
-App::mode(App::MODE_COROUTINE);
-
-$app = App::init('0.0.0.0', 8080);
-$app->route('/api/users', function() {
-    $g = \ZealPHP\G::instance();
-    return ['users' => []];
-});
-$app->run();
-```
-
----
-
-*This document covers predicted behavior based on architectural analysis and confirmed Docker lab results. Real-world results may vary depending on plugin/extension state, database availability, and session configuration. File a GitHub issue with your app name and failure mode if you encounter a result that differs.*
