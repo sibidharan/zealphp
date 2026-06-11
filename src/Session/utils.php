@@ -286,13 +286,25 @@ function zeal_session_start(): bool
     $g->session_params = $params;
     if (\ZealPHP\App::$superglobals) {
         if (\ZealPHP\App::$coroutine_isolated_superglobals) {
-            // Mode 4: bind $_SESSION as a reference to $g->session. PHP's
-            // FETCH_R does ZVAL_COPY (refcount++) into a temp slot, so any
-            // write triggers COW separation — the mutation goes to a copy
-            // that's discarded when the include returns. A reference bypasses
-            // COW: writes follow it directly to $g->session, which is what
-            // zeal_session_write_close() reads.
-            $_SESSION = &$g->session;
+            // Mode 4 (#379): populate the live $_SESSION and DETACH the typed
+            // slot — the same slot-detach alias design every other superglobal
+            // uses (the v0.2.30 populate path for $_GET/$_SERVER/…). The
+            // previous `$_SESSION = &$g->session` reference binding was
+            // SEVERED by ext-zealphp's per-coroutine superglobal restore on
+            // the first post-bind yield (the restore ZVAL_COPYs a plain array
+            // into the $GLOBALS['_SESSION'] bucket, replacing the
+            // IS_REFERENCE wrapper): from then on user writes landed in
+            // $GLOBALS['_SESSION'] while $g->session kept the stale load-time
+            // copy — and write_close() persisted the stale copy, so every
+            // session mutation after request 1 was silently lost (the
+            // phpMyAdmin CSRF login loop / TinyFileManager post-yield write
+            // loss / "file frozen at request 1" class). With the slot
+            // detached, $g->session proxies the live $_SESSION via
+            // __get/__set/__isset (truthful since v0.4.8), there is exactly
+            // ONE store, and ext-zealphp's Stage-1 machinery isolates it per
+            // coroutine like the other six superglobals.
+            $GLOBALS['_SESSION'] = $session_data;
+            unset($g->session);
         } else {
             $GLOBALS['_SESSION'] = $session_data;
         }
@@ -552,7 +564,14 @@ function zeal_session_write_close(): bool
     // In Mode 4 (coroutine_isolated_superglobals), $g->session is the
     // canonical store — $_SESSION is bound via reference, but $GLOBALS['_SESSION']
     // may not follow the reference correctly across function scopes.
-    $useGSession = \ZealPHP\App::$coroutine_isolated_superglobals || !\ZealPHP\App::$superglobals;
+    // #379: in EVERY superglobals mode (incl. Mode 4) the canonical store is
+    // the live $GLOBALS['_SESSION'] — zeal_session_start() detaches the
+    // $g->session slot so it proxies $_SESSION; only pure coroutine mode
+    // (superglobals off) keeps $g->session as the canonical typed store. The
+    // old "Mode 4 reads $g->session" choice persisted the STALE load-time
+    // copy once the ext's per-coroutine restore severed the reference binding
+    // (every post-request-1 session mutation silently lost).
+    $useGSession = !\ZealPHP\App::$superglobals;
     $superglobals = \ZealPHP\App::$superglobals;
     $hasSession = $useGSession
         /** @phpstan-ignore-next-line isset.property — runtime tests uninitialized typed slot */
@@ -675,21 +694,20 @@ function zeal_session_write_close(): bool
         $g->_session_started = false;
         $g->session_loaded_keys = [];
 
-        // Clear the session store ONLY where it persists across requests: the
-        // process-wide-singleton mode (superglobals + NOT coroutine-isolated, i.e.
-        // Mixed). In Mode 4 (coroutine-isolated) `$g` is per-coroutine, so the next
-        // request already starts from a fresh `$g`; emptying `$g->session` here
-        // would corrupt the canonical store through the `$_SESSION = &$g->session`
-        // binding (the original bug). Pure coroutine mode ($g per-coroutine, no
-        // `$_SESSION` ref) keeps the historical unset — harmless, and the manager
-        // also clears `$g->session` after this returns.
+        // Clear the canonical store so zeal_session_status() reports
+        // PHP_SESSION_NONE for the remainder of the request. #379: every
+        // superglobals mode (Mixed AND Mode 4) now stores in the live
+        // $GLOBALS['_SESSION'] (the start path detaches the $g->session slot),
+        // so both take this branch; in Mode 4 ext-zealphp's request-end
+        // superglobals_clear() re-parks it anyway — this just makes the
+        // inactive signal correct for code running between close and teardown.
+        // Pure coroutine mode keeps the typed-slot unset.
         if ($superglobals && !$useGSession) {
             $GLOBALS['_SESSION'] = [];
             unset($GLOBALS['_SESSION']);
         } elseif (!$superglobals) {
             unset($g->session);
         }
-        // Mode 4: leave $g->session intact — coroutine isolation handles freshness.
     }
     return true;
 }
