@@ -1907,6 +1907,46 @@ class App
     }
 
     /**
+     * Compose `$_REQUEST` from the GET and POST bags per PHP's default
+     * `request_order='GP'` (#356).
+     *
+     * PHP merges the sources left-to-right with LATER sources overwriting
+     * earlier ones, so for `'GP'` (GET first, POST second) a key present in both
+     * takes the POST value — the form-submission-overrides-querystring
+     * convention. PHP's `+` array-union keeps the LEFT operand on a collision,
+     * so the POST-wins composition is `$post + $get`. COOKIE is deliberately
+     * excluded (matches PHP's `'GP'`, which omits C). The single source of truth
+     * for both the OnRequest populate and the CGI-context request builder.
+     *
+     * @param array<string, mixed> $get
+     * @param array<string, mixed> $post
+     * @return array<string, mixed>
+     */
+    public static function composeRequestArray(array $get, array $post): array
+    {
+        return $post + $get;
+    }
+
+    /**
+     * The built-in default `static_handler_locations` — DIRECTORY entries only,
+     * every one trailing-slash terminated so OpenSwoole's raw string-prefix
+     * match is segment-bounded (a bare `/js` would steal `/json`).
+     *
+     * #367 — FILE entries (`/favicon.ico`, `/robots.txt`) are deliberately
+     * EXCLUDED: a file can't take a trailing slash, so OpenSwoole's prefix match
+     * over-reaches (`/favicon.ico` steals `/favicon.icoX`, shadowing a user route
+     * like `/robots.txt-generator`). favicon.ico + robots.txt are served as
+     * ordinary `public/` files by the framework's implicit file routes instead.
+     * Used as the default when the app hasn't set `App::staticHandlerLocations()`.
+     *
+     * @return list<string>
+     */
+    public static function defaultStaticHandlerLocations(): array
+    {
+        return ['/css/', '/js/', '/img/', '/images/', '/fonts/', '/assets/', '/static/'];
+    }
+
+    /**
      * Block any request whose path contains a dotfile component (`.git`, `.env`,
      * `.htaccess`, etc.) with `403`. Default `true` — matches Apache's convention
      * of not serving hidden files. No-arg call returns the current value.
@@ -2597,7 +2637,9 @@ class App
             // SCRIPT_FILENAME over the live/request-derived values.
             $server = $serverOverlay + $server;
         }
-        $request = $get + $post;
+        // #356 — POST-wins precedence (PHP request_order='GP'); see
+        // composeRequestArray() for the rationale.
+        $request = self::composeRequestArray($get, $post);
         (\zealphp_request_input_set(...))($get, $post, $cookie, $server, $files, $request);
     }
 
@@ -7079,7 +7121,19 @@ class App
         }
         if (self::$block_dotfiles) {
             $relative = substr($realFile, strlen($realRoot));
-            foreach (explode(DIRECTORY_SEPARATOR, $relative) as $segment) {
+            $segments = explode(DIRECTORY_SEPARATOR, ltrim($relative, DIRECTORY_SEPARATOR));
+            // #359 — `.well-known/` is a registered public convention (RFC 8615):
+            // ACME HTTP-01 challenge tokens + security.txt (RFC 9116) live there.
+            // The route guard exempts it via negative lookahead; mirror that here
+            // so the exemption isn't dead code. Only the literal `.well-known`
+            // SEGMENT is exempt (and only as the first path segment, matching the
+            // registered-convention scope) — every OTHER dot-segment, including
+            // an additional dotfile nested under it (`.well-known/.env`), and a
+            // decoy like `.well-knownx`, stays blocked.
+            foreach ($segments as $i => $segment) {
+                if ($i === 0 && $segment === '.well-known') {
+                    continue; // the registered well-known root segment
+                }
                 if ($segment !== '' && $segment[0] === '.') {
                     return false; // dotfile (.git, .env, .htaccess, etc.)
                 }
@@ -8380,9 +8434,20 @@ class App
             // when /json on the docs site returned OpenSwoole's default 404
             // instead of routing into the framework). Trailing slash forces
             // segment-boundary matching.
+            //
+            // #367 — FILE entries (no trailing slash) can't use that workaround:
+            // OpenSwoole has no exact-match mode, so a bare `/favicon.ico` /
+            // `/robots.txt` prefix-matches `/favicon.icoX` / `/robots.txtABC`
+            // and steals a user route like `/robots.txt-generator`. So the
+            // default list ships DIRECTORY entries only (all segment-bounded);
+            // `favicon.ico` + `robots.txt` are served as ordinary public/ files
+            // by the framework's implicit file routes. A user who wants the
+            // native static handler for them can still add them via
+            // App::staticHandlerLocations() (accepting the documented
+            // prefix-match caveat).
             'static_handler_locations' => self::$static_handler_locations !== []
                 ? self::$static_handler_locations
-                : ['/css/', '/js/', '/img/', '/images/', '/fonts/', '/assets/', '/static/', '/favicon.ico', '/robots.txt'],
+                : self::defaultStaticHandlerLocations(),
             'enable_coroutine' => $enableCoroutine,
             'hook_flags' => $hookFlags,
             // Worker count default — cgroup-quota-aware so a CPU-limited
@@ -8992,8 +9057,14 @@ class App
 
         # Block URLs targeting dotfile segments (.git/, .env, .htaccess, …).
         # `.well-known/` is allowed — it's a registered convention (RFC 8615).
+        # #368 — match a dot-segment in ANY position (final `.env` OR a
+        # dot-directory `.git/config`), so both return a uniform 403 instead of
+        # 403-vs-404 (the old `[^/]*$`-anchored pattern only caught final-segment
+        # dotfiles, leaking which kind of dotpath was requested). The lookahead
+        # exempts ONLY the exact `.well-known` segment (`(?:/|$)` boundary), so a
+        # decoy `.well-knownx` stays blocked.
         if (App::$block_dotfiles) {
-            $this->patternRoute('/(.*/)?\.(?!well-known)[^/]*', [
+            $this->patternRoute('#(^|/)\.(?!well-known(?:/|$))[^/]*(/|$)#', [
                 'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD']
             ], function($response) {
                 $app = App::instance();
@@ -9301,7 +9372,9 @@ class App
             $files = self::normalizeUploadedFiles($request->files ?? []);
             $g->get = $get;
             $g->post = $post;
-            $g->request = $g->get + $g->post;
+            // #356 — POST-wins precedence (PHP request_order='GP'); see
+            // composeRequestArray() for the rationale.
+            $g->request = self::composeRequestArray($get, $post);
             $g->cookie = $cookie;
             $g->files = $files;
 

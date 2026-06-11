@@ -460,6 +460,49 @@ PHP);
         $this->assertSame('raw', $meta['rawcookies'][0][0]);
     }
 
+    /**
+     * #357 — header_register_callback() parity in legacy-cgi. A callback the
+     * script registers must fire just before the buffered headers are captured,
+     * so header() calls inside it still reach the wire. Before the fix the CGI
+     * subprocess captured $__z_headers WITHOUT ever invoking the callback, so
+     * any header it set was silently dropped (works in mixed/coroutine-legacy,
+     * absent under legacy-cgi).
+     */
+    public function testSubprocessFiresHeaderRegisterCallbackBeforeHeaderCapture(): void
+    {
+        $f = $this->fixture('hrc.php', <<<'PHP'
+<?php
+header('X-Before: set-directly');
+header_register_callback(function () {
+    header('X-From-Callback: yes');
+    // A callback may also REPLACE an already-set header — proves the callback
+    // runs before capture, not after.
+    header('X-Before: rewritten-in-callback', true);
+});
+echo 'callback body';
+PHP);
+        $r = $this->runSubprocess($f);
+
+        $this->assertSame('callback body', $r['stdout']);
+        $meta = $this->parseMeta($r['stderr']);
+
+        $headerPairs = [];
+        foreach ($meta['headers'] as $pair) {
+            $headerPairs[$pair[0]] = $pair[1];
+        }
+        $this->assertArrayHasKey(
+            'X-From-Callback',
+            $headerPairs,
+            'header() inside header_register_callback() must reach the captured headers'
+        );
+        $this->assertSame('yes', $headerPairs['X-From-Callback']);
+        $this->assertSame(
+            'rewritten-in-callback',
+            $headerPairs['X-Before'],
+            'callback fires before header capture, so its replace wins'
+        );
+    }
+
     public function testSubprocessGeneratorIsConsumedInline(): void
     {
         $f = $this->fixture('gen.php', "<?php\nreturn (function(){ yield '<a>'; yield '<b>'; })();\n");
