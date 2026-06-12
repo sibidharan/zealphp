@@ -2,13 +2,13 @@
 
 > Last updated: 2026-06-12
 
-How 50 popular PHP apps run on ZealPHP across **all four runtime modes**, with **`coroutine-legacy`** — the headline mode for legacy apps ("old PHP just works, concurrently") — the column to read first. Each graded `coroutine-legacy` cell is a **real install**: real database, real authenticated login, real write, and a 6-way concurrent burst, tested individually on the current stack (**ZealPHP master (v0.4.8+) + ext-zealphp v0.3.49**, PHP 8.4.21, OpenSwoole 26.2.0).
+How 50 popular PHP apps run on ZealPHP across **all four runtime modes**, with **`coroutine-legacy`** — the headline mode for legacy apps ("old PHP just works, concurrently") — the column to read first. Each graded `coroutine-legacy` cell is a **real install**: real database, real authenticated login, real write, and a 6-way concurrent burst, tested individually on the current stack (**ZealPHP master (v0.4.8+) + ext-zealphp v0.3.50**, PHP 8.4.21, OpenSwoole 26.2.0 (WordPress/MyBB rows re-validated on v0.3.50; the rest on v0.3.49 — no S2-frame-walk-affected behavior differs for them)).
 
 **Rebuilt from scratch 2026-06-11** on the 0.3.48 stack; **re-validation sweep 2026-06-12** on the **0.3.49 stack** (ext#52 concurrent-burst heap-corruption fix). Apps not yet re-validated are marked _pending_ (they carry **no** grade rather than a stale one).
 
-**2026-06-12 re-validation level:** every graded app below was re-run on 0.3.49 with the standard **84-request 6-way burst** (`burst6.php <port> 6 14`) plus a homepage check. Apps where the burst lifted to 0 worker deaths AND that previously failed *solely* on worker-crash were taken one level deeper (content sanity + scripted login/write where the harness allowed); the per-app detail notes the exact level reached ("full protocol" vs "burst+content" vs "burst-only"). The **ext#52 fix eliminated worker deaths** across most of the C/D set (kanboard, kirby, dokuwiki, phpmyadmin, yii2, laminas, elfinder, codeigniter4, tinyfilemanager, symfony, drupal all 0 deaths now), but **content-level checks revealed several apps whose 0-death bursts serve hollow/broken bodies** — those stay D/C honestly (CodeIgniter4 0-byte bodies, DokuWiki content "str() on null", TinyFileManager login still lost). A **new object-global-null regression cluster** surfaced on 0.3.49 for three `require_once`-bootstrap apps that served content on 0.3.48 (WordPress `wp_set_wpdb_vars` null, MyBB `read() on null`) — referenced to the object-global / mysqlnd-teardown frontier (ext#44/#49), not re-investigated here.
+**2026-06-12 re-validation level:** every graded app below was re-run on 0.3.49 with the standard **84-request 6-way burst** (`burst6.php <port> 6 14`) plus a homepage check. Apps where the burst lifted to 0 worker deaths AND that previously failed *solely* on worker-crash were taken one level deeper (content sanity + scripted login/write where the harness allowed); the per-app detail notes the exact level reached ("full protocol" vs "burst+content" vs "burst-only"). The **ext#52 fix eliminated worker deaths** across most of the C/D set (kanboard, kirby, dokuwiki, phpmyadmin, yii2, laminas, elfinder, codeigniter4, tinyfilemanager, symfony, drupal all 0 deaths now), but **content-level checks revealed several apps whose 0-death bursts serve hollow/broken bodies** — those stay D/C honestly (CodeIgniter4 0-byte bodies, DokuWiki content "str() on null", TinyFileManager login still lost). An **object-global-null regression cluster** surfaced on 0.3.49 (WordPress `wp_set_wpdb_vars` null, MyBB `read() on null` — 500 on every request) — root-caused the same day and **FIXED in ext-zealphp v0.3.50**: the S2 request-frame walkers trusted `ex->symbol_table` without gating on `ZEND_CALL_HAS_SYMBOL_TABLE`, so a plain function frame’s stale field could match and the parked `$wpdb` bucket was re-pointed into `require_wp_db()`’s dying frame (NOT the ext#44/#49 frontier as first suspected). On v0.3.50 both render again — see the per-app rows.
 
-**Status: 31/50 re-validated in `coroutine-legacy`** (B: 6 · C: 13 · D: 12); 19 pending. **Net grade changes 2026-06-12:** Kanboard D→B, Yii 2 C→B (both driven by ext#52 + session #379); 5 previously-_pending_ rows newly graded (TYPO3 C, Craft CMS C, Roundcube C, Concrete CMS D, Flarum D). Two **⚠ regressions** flagged (WordPress, MyBB — object-global null on 0.3.49). Leantime remains _pending_ (boot-fail: psr/http-message v2 conflict needs the documented `composer require psr/http-message:^1.1` harness fix).
+**Status: 31/50 re-validated in `coroutine-legacy`** (B: 6 · C: 13 · D: 12); 19 pending. **Net grade changes 2026-06-12:** Kanboard D→B, Yii 2 C→B (both driven by ext#52 + session #379); 5 previously-_pending_ rows newly graded (TYPO3 C, Craft CMS C, Roundcube C, Concrete CMS D, Flarum D). The two 0.3.49 regressions (WordPress, MyBB — object-global null) are **resolved on v0.3.50**. Leantime remains _pending_ (boot-fail: psr/http-message v2 conflict needs the documented `composer require psr/http-message:^1.1` harness fix).
 
 ---
 
@@ -43,7 +43,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 
 | # | App | Cat | ★ | `legacy-cgi` | `mixed` | **`coroutine-legacy`** | `coroutine` | Top knob |
 |---|-----|-----|---|:---:|:---:|:---:|:---:|----------|
-| 1 | WordPress | CMS | 19k | NT | C | **C⚠** | NT | ⚠ 0.3.49 regression: homepage now 500 (`wp_set_wpdb_vars` null — object-global frontier ext#44/#49). Was 200 on 0.3.48. |
+| 1 | WordPress | CMS | 19k | NT | C | **C** | NT | v0.3.50: homepage 200/69KB; burst 79x200 5x500 **0 worker deaths** (was 6+ deaths/burst pre-ext#52; the 0.3.49 every-request-500 regression is fixed) |
 | 2 | Drupal | CMS | 4.3k | NT | F | **D** | NT | App::preloadClassmap() after composer dump-autoload -o (tem… |
 | 3 | Joomla | CMS | 4.7k | NT | _pending_ | _pending_ | NT | re-validation in progress |
 | 4 | TYPO3 | CMS | 1.0k | NT | _pending_ | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) — homepage+content ok, 1 worker death/burst |
@@ -61,7 +61,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 | 16 | Sylius | E-comm | 7.7k | NT | _pending_ | _pending_ | NT | re-validation in progress |
 | 17 | Flarum | Forums | 15k | NT | _pending_ | **D** | NT | App::mode(App::MODE_COROUTINE_LEGACY) — boots+homepage 200 but 1 worker death/burst |
 | 18 | phpBB | Forums | 1.8k | A | A | **C** | NT | App::globalScopeInclude(true) (template default, kept) |
-| 19 | MyBB | Forums | 2.9k | NT | F | **C⚠** | NT | ⚠ 0.3.49 regression: homepage now 500 (`read() on null` — object-global frontier ext#44/#49). Was 200 on 0.3.48. |
+| 19 | MyBB | Forums | 2.9k | NT | F | **C** | NT | v0.3.50: homepage 200/14KB; burst 82x200 2x500 **0 worker deaths** (0.3.49 every-request-500 regression fixed) |
 | 20 | Vanilla Forums | Forums | 2.9k | NT | A | **B** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
 | 21 | Laravel | Framework | 79k | NT | B | **B** | NT | App::preloadClassmap() + require app vendor/autoload.php in… |
 | 22 | Symfony | Framework | 30k | NT | A | **D** | NT | App::preloadClassmap() + require app vendor/autoload.php in… |
@@ -100,8 +100,9 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 
 ## Per-app detail (re-validated in coroutine-legacy)
 
-#### WordPress — coroutine-legacy: **C ⚠ (0.3.49 regression — homepage 500)**
+#### WordPress — coroutine-legacy: **C**
 - **2026-06-12 re-validation (0.3.49, burst+content):** ⚠ **REGRESSION** — homepage now returns **500 on every request including the first sequential one** (`Error: Attempt to assign property "field_types" on null` at `wp_set_wpdb_vars` / `wp-includes/load.php:746`). The `$wpdb` object-global is null when `wp_set_wpdb_vars()` runs — the documented object-global-across-connect-yield interaction (CLAUDE.md "object-valued `$GLOBALS`" / mysqlnd-teardown frontier, ext#44/#49). DB (`zext_wordpress`) is present and reachable; this is NOT an env issue. Burst on `/` = 84x500, 0 worker deaths/segfaults (the ext#52 crash class is gone, but the app can't render). The 0.3.48 grade below (homepage 200/69KB) predates this. **Needs ext-level investigation before WordPress can re-grade.**
+- **2026-06-12 v0.3.50 re-validation (burst+content):** ✅ **regression FIXED** — the cause was NOT ext#44/#49 but a 0.3.49 S2 frame-walk bug (`ZEND_CALL_HAS_SYMBOL_TABLE` gate missing; the parked `$wpdb` bucket was re-pointed into `require_wp_db()`’s dying function frame — traced live with `ZEALPHP_TRACE_GLOBAL=wpdb`). On v0.3.50: homepage **200/69KB** (sequential x2), burst **79x200 5x500, 0 worker deaths, 0 segfaults** — the first time WordPress survives the full 6-way burst with zero deaths (pre-ext#52 it lost ~6 workers/burst). The 5x500 are the residual app-level cold-path class (ext#44/#49 teardown family). Login/write not re-run this pass — grade stays **C** pending the full protocol.
 - **homepage** 200/69KB · **login** ok (wp-login.php POST -> wp-admin Dashboard 200; session persists across reques… · **write** ok: POST rest_route=/wp/v2/posts -> 201, post id 6 'ZealPHP coroutine-legacy te…
 - **concurrent burst** unstable: warm bursts 6-8x200 + 7-9x500 + 1-2x302 + 3-4x000(hung); 11 worker SIGSEGVs across 2 bursts (~5/burst, self-healing respawn); best observed…
 - **knobs:**
@@ -172,6 +173,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** legacy-cgi: FULL PASS re-verified on this run — homepage 200/13.3KB, burst20 = 20x200, 0 worker deaths, 0 corruption lines (app_cgi.php kept beside app.php). mixed: unusable (class redeclare fatals).
 
 #### MyBB — coroutine-legacy: **C**
+- **2026-06-12 v0.3.50 re-validation (burst+content):** ✅ the 0.3.49 every-request-500 regression (`read() on null`) is **fixed** (same S2 frame-walk bug as WordPress). Homepage **200/14KB**; burst **82x200 2x500, 0 worker deaths**.
 - **homepage** 200/13.5KB · **login** ok (intermittent): succeeds with mybbuser cookie + User Control Panel, but ~1-i… · **write** ok: authenticated newthread.php form POST created thread tid=1 'ZealPHP corouti…
 - **concurrent burst** best (USE_ZEND_ALLOC=0 + defineIsolation): 14x200 1x500 5x000(conn refused), post-burst alive 200, 2 worker deaths (zend_mm_heap corrupted sig6 + mys…
 - **knobs:**
