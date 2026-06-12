@@ -66,8 +66,15 @@ final class ScopedMiddleware implements MiddlewareInterface
         // `/admin` guard while still routing to `/admin/secret` (auth/IP/php-block
         // bypass). REQUEST_URI preserves the raw target. Fall back to the PSR path
         // for pure-PSR contexts (tests) where REQUEST_URI isn't populated on $g.
+        // LazyServerRequest::getServerParams() returns OpenSwoole's native
+        // server array verbatim, whose keys are LOWER-case (`request_uri`),
+        // while the hydrated/$_SERVER path uses the CGI UPPER-case
+        // (`REQUEST_URI`). Accept either casing — reading only the upper form
+        // left this null on the live request path, silently falling back to
+        // the authority-dropping PSR path the fix above exists to avoid (the
+        // `//admin/secret` bypass would then reach the guard as `/secret`).
         $serverParams = $request->getServerParams();
-        $reqUri = $serverParams['REQUEST_URI'] ?? null;
+        $reqUri = $serverParams['REQUEST_URI'] ?? $serverParams['request_uri'] ?? null;
         $target = (is_string($reqUri) && $reqUri !== '')
             ? $reqUri
             : $request->getUri()->getPath();
