@@ -2556,7 +2556,20 @@ class App
                 if ($bind === '' || $bind === '0.0.0.0' || $bind === '::') {
                     $bind = (string)gethostname();
                 }
-                $resolved = filter_var($bind, FILTER_VALIDATE_IP) ? $bind : @gethostbyname($bind);
+                if (filter_var($bind, FILTER_VALIDATE_IP)) {
+                    $resolved = $bind;
+                } else {
+                    // A first via the system resolver (/etc/hosts-aware;
+                    // returns the input unchanged on failure), then AAAA so
+                    // an IPv6-only host still resolves.
+                    $resolved = gethostbyname($bind);
+                    if (!filter_var($resolved, FILTER_VALIDATE_IP)) {
+                        $aaaa = dns_get_record($bind, DNS_AAAA);
+                        if (is_array($aaaa) && isset($aaaa[0]['ipv6']) && is_string($aaaa[0]['ipv6'])) {
+                            $resolved = $aaaa[0]['ipv6'];
+                        }
+                    }
+                }
                 $serverAddr = filter_var($resolved, FILTER_VALIDATE_IP) ? $resolved : '127.0.0.1';
             }
             $srv['SERVER_ADDR'] = $serverAddr;
@@ -9633,34 +9646,6 @@ class App
                         // detached connection — the wire-frame carries neither
                         // (#290, RFC 9110 §6.4.1 / RFC 7230 §3.3.2). Keep-alive
                         // follows the request's Connection/protocol semantics.
-                        $reason = $g->raw_status_reason ?? self::reasonPhrase($emitStatus);
-                        $head = 'HTTP/1.1 ' . $emitStatus . ' '
-                            . ($reason !== '' ? $reason : 'Status ' . $emitStatus) . "\r\n";
-                        $haveDate = false;
-                        $nativeHeaders = is_array($response->parent->header) ? $response->parent->header : [];
-                        foreach ($nativeHeaders as $hName => $hValues) {
-                            $hName = (string)$hName;
-                            if (strcasecmp($hName, 'Connection') === 0
-                                || strcasecmp($hName, 'Content-Length') === 0
-                                || strcasecmp($hName, 'Content-Type') === 0) {
-                                continue;
-                            }
-                            $haveDate = $haveDate || strcasecmp($hName, 'Date') === 0;
-                            foreach (is_array($hValues) ? $hValues : [$hValues] as $hv) {
-                                if (is_scalar($hv)) {
-                                    $head .= $hName . ': ' . (string)$hv . "\r\n";
-                                }
-                            }
-                        }
-                        $nativeCookies = is_array($response->parent->cookie) ? $response->parent->cookie : [];
-                        foreach ($nativeCookies as $setCookie) {
-                            if (is_string($setCookie)) {
-                                $head .= 'Set-Cookie: ' . $setCookie . "\r\n";
-                            }
-                        }
-                        if (!$haveDate) {
-                            $head .= 'Date: ' . gmdate('D, d M Y H:i:s') . " GMT\r\n";
-                        }
                         $reqHeader = is_array($request->parent->header) ? $request->parent->header : [];
                         $reqServer = is_array($request->parent->server) ? $request->parent->server : [];
                         $connTok = $reqHeader['connection'] ?? '';
@@ -9669,14 +9654,62 @@ class App
                         $proto = is_string($proto) ? $proto : 'HTTP/1.1';
                         $keepAlive = $connTok === 'keep-alive'
                             || ($connTok !== 'close' && $proto === 'HTTP/1.1');
+                        $reason = $g->raw_status_reason ?? self::reasonPhrase($emitStatus);
+                        // Status line mirrors the request protocol (an HTTP/1.0
+                        // client gets an HTTP/1.0 status line, like Apache).
+                        $head = ($proto === 'HTTP/1.0' ? 'HTTP/1.0' : 'HTTP/1.1')
+                            . ' ' . $emitStatus . ' '
+                            . ($reason !== '' ? $reason : 'Status ' . $emitStatus) . "\r\n";
+                        $haveDate = false;
+                        $nativeHeaders = is_array($response->parent->header) ? $response->parent->header : [];
+                        foreach ($nativeHeaders as $hName => $hValues) {
+                            $hName = (string)$hName;
+                            // Body-framing headers can't appear on a body-less
+                            // status (Transfer-Encoding/Trailer included);
+                            // Connection is decided below from the request.
+                            if (strcasecmp($hName, 'Connection') === 0
+                                || strcasecmp($hName, 'Content-Length') === 0
+                                || strcasecmp($hName, 'Content-Type') === 0
+                                || strcasecmp($hName, 'Transfer-Encoding') === 0
+                                || strcasecmp($hName, 'Trailer') === 0) {
+                                continue;
+                            }
+                            // Raw-wire serialization: enforce the RFC 9110
+                            // token grammar on names and reject CR/LF-bearing
+                            // values (response-splitting guard).
+                            if (!preg_match('/^[A-Za-z0-9!#$%&\'*+.^_`|~-]+$/', $hName)) {
+                                continue;
+                            }
+                            $haveDate = $haveDate || strcasecmp($hName, 'Date') === 0;
+                            foreach (is_array($hValues) ? $hValues : [$hValues] as $hv) {
+                                if (is_scalar($hv) && !preg_match('/[\r\n]/', (string)$hv)) {
+                                    $head .= $hName . ': ' . (string)$hv . "\r\n";
+                                }
+                            }
+                        }
+                        $nativeCookies = is_array($response->parent->cookie) ? $response->parent->cookie : [];
+                        foreach ($nativeCookies as $setCookie) {
+                            if (is_string($setCookie) && !preg_match('/[\r\n]/', $setCookie)) {
+                                $head .= 'Set-Cookie: ' . $setCookie . "\r\n";
+                            }
+                        }
+                        if (!$haveDate) {
+                            $head .= 'Date: ' . gmdate('D, d M Y H:i:s') . " GMT\r\n";
+                        }
                         $head .= 'Connection: ' . ($keepAlive ? 'keep-alive' : 'close') . "\r\n\r\n";
                         $fd = $response->parent->fd;
-                        $response->parent->detach();
-                        if (is_int($fd) && self::$server !== null) {
+                        if (is_int($fd) && $fd > 0 && self::$server !== null) {
+                            $response->parent->detach();
                             self::$server->send($fd, $head);
                             if (!$keepAlive) {
                                 self::$server->close($fd);
                             }
+                        } else {
+                            // Prerequisites missing (no usable fd / no server
+                            // instance, e.g. a unit-test double): fall back to
+                            // the native end() — engine-default CT/CL reattach
+                            // there, but the client is never left hanging.
+                            $response->parent->end();
                         }
                     } else {
                         $body = $serverResponse->getBody();
