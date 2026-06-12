@@ -40,6 +40,7 @@ $groups = [
         ['/http#parity',           'Apache Parity',          'What Apache features port — and what doesn\'t.'],
         ['compatibility-database', 'Compatibility Database', 'Per-app coroutine-legacy compatibility grades from the real-world app sweep.'],
         ['running-modern-apps',    'Running Modern Apps',    'Config recipes for Symfony / Laravel / WordPress on ZealPHP.'],
+        ['just-works-roadmap',     'Road to "Just Works"',  'The honest scorecard: what already just works in coroutine-legacy, the conditional contract, and exactly what still stands in the way.'],
         ['competitive-analysis',   'Competitive Analysis',   'vs FrankenPHP, RoadRunner, Octane, AMPHP.'],
         ['standards-and-roadmap',  'Standards & Roadmap',    'PSR conformance + the v0.3.0+ roadmap.'],
     ],

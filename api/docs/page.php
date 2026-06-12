@@ -23,7 +23,7 @@ $page = function () {
         'streaming', 'websocket', 'WSROUTER-PRODUCTION', 'tasks-and-concurrency', 'middleware-and-authentication',
         'deployment', 'cli', 'hot-reload', 'fuzzing', 'coroutine-isolation-security-research',
         'fastcgi-backends', 'environment-variables',
-        'compatibility-database', 'running-modern-apps', 'competitive-analysis', 'standards-and-roadmap',
+        'compatibility-database', 'running-modern-apps', 'just-works-roadmap', 'competitive-analysis', 'standards-and-roadmap',
     ];
 
     // Landing page ('__index__' or empty slug) — re-render the docs landing

@@ -41,6 +41,7 @@ $groups = [
         ['/http#parity',           'Apache Parity'],
         ['compatibility-database', 'Compatibility Database'],
         ['running-modern-apps',    'Running Modern Apps'],
+        ['just-works-roadmap',     'Road to "Just Works"'],
         ['competitive-analysis',   'Competitive Analysis'],
         ['standards-and-roadmap',  'Standards & Roadmap'],
     ],
