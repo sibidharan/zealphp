@@ -1360,38 +1360,117 @@ function flush(): void
     if (!$g->openswoole_response->isWritable()) {
         return;
     }
+    // Collect the buffer FIRST — an EMPTY flush must be a complete no-op
+    // (Apache parity: flushing nothing is unobservable). Switching to
+    // streaming mode + sending headers on a 0-byte flush is the bug that
+    // 0-byte-bodied CodeIgniter 4: its bootstrap drains (empty) buffers
+    // early, the old code flipped `_streaming` + flushed headers, and
+    // ResponseMiddleware then skipped collecting the 17 KB body the app
+    // echoed later. Same hazard for any legacy app that sprinkles
+    // flush()/ob_end_flush() before producing output.
+    $data = null;
+    if (ob_get_level() > 0) {
+        $data = ob_get_clean();
+        ob_start();
+    }
+    if ($data === null || $data === false || $data === '') {
+        return;
+    }
     if (!($g->_streaming ?? false)) {
         $g->_streaming = true;
         if (isset($g->zealphp_response)) {
             $g->zealphp_response->flush();
         }
     }
-    if (ob_get_level() > 0) {
-        $data = ob_get_clean();
-        if ($data !== false && $data !== '') {
-            $g->openswoole_response->write($data);
-        }
-        ob_start();
-    }
+    $g->openswoole_response->write($data);
 }
 
 /**
- * Alias for `ZealPHP\flush()` — flushes the current output buffer to the client.
+ * Override of `ob_flush()` — floor-aware.
+ *
+ * Native `ob_flush()` passes the current buffer's content to the PARENT
+ * buffer without closing it. App-level buffers nested ABOVE the framework's
+ * capture buffer (`$g->_ob_floor`, recorded by `App::executeFile()`) must
+ * keep that native semantic; only at the framework floor does "flush" mean
+ * "stream to the client".
  */
 function ob_flush(): void
 {
+    // NB: we cannot call the native builtin here — the global ob_flush IS this
+    // function (zealphp_override; namespace qualification cannot escape an
+    // override). Native semantics are emulated by POP-AND-ECHO: pop the
+    // buffer, echo its content (lands in the PARENT buffer), re-open.
+    $nativeish = static function (): void {
+        if (\ob_get_level() === 0) {
+            return;
+        }
+        $data = \ob_get_clean();
+        if ($data !== false && $data !== '') {
+            echo $data;
+        }
+        \ob_start();
+    };
+    try {
+        $g = RequestContext::instance();
+        $floor = (int) ($g->_ob_floor ?? 1);
+    } catch (\Throwable) {
+        $nativeish();
+        return;
+    }
+    if (\ob_get_level() > $floor) {
+        $nativeish();   // native: content to the parent buffer, buffer stays open
+        return;
+    }
     \ZealPHP\flush();
 }
 
 /**
- * Flush the current output buffer and close it (uopz override of `ob_end_flush()`).
+ * Override of `ob_end_flush()` — floor-aware.
  *
- * Delegates to `ZealPHP\flush()`, then ends the active output buffer level.
+ * Native `ob_end_flush()` pops the current buffer INTO ITS PARENT. The old
+ * shim unconditionally streamed-or-DISCARDED, which ate the entire page of
+ * any app that ends its bootstrap with a plain nested `ob_end_flush()`
+ * (CodeIgniter 4's `Boot::bootWeb()` → 200 with a 0-byte body). Above the
+ * framework's capture floor we now keep native semantics; at the floor we
+ * keep the historical streaming behaviour (`flush()` + close the re-opened
+ * buffer) so legacy "flush everything to the client" callers still work.
  */
 function ob_end_flush(): void
 {
+    // NB: cannot call the native builtin — the global ob_end_flush IS this
+    // function (zealphp_override; namespace qualification cannot escape an
+    // override). Native semantics = POP-AND-ECHO: pop this buffer, echo its
+    // content into the PARENT buffer (the established exit-site pattern).
+    $nativeish = static function (): void {
+        if (\ob_get_level() === 0) {
+            return;
+        }
+        $data = \ob_get_clean();
+        if ($data !== false && $data !== '') {
+            echo $data;
+        }
+    };
+    try {
+        $g = RequestContext::instance();
+        $floor = (int) ($g->_ob_floor ?? 1);
+    } catch (\Throwable) {
+        $nativeish();
+        return;
+    }
+    if (\ob_get_level() > $floor) {
+        $nativeish();   // native: pop this buffer into its parent
+        return;
+    }
     \ZealPHP\flush();
-    if (ob_get_level() > 0) {
+    // The pop must be UNCONDITIONAL: buffer-owning apps drain the host's
+    // levels with `while (ob_get_level() > 0) ob_end_flush();` (CodeIgniter
+    // 4's app/Config/Events.php) and then open their OWN buffer — gating the
+    // pop on "did we stream" turns that drain into an infinite loop (both
+    // workers spinning at 100% CPU). With the empty-flush no-op above, an
+    // empty drain no longer flips streaming mode prematurely, the app's own
+    // replacement buffer takes the capture slot, and the framework's tail
+    // collection harvests the body from it.
+    if (\ob_get_level() > 0) {
         @ob_end_clean();
     }
 }

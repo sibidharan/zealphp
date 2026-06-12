@@ -243,12 +243,91 @@ class UtilsExtraTest extends TestCase
         $this->assertTrue($g->_streaming);
         $this->assertContains('chunk-data', $written);
 
-        // Second flush: already streaming, just writes new buffer content.
+        // ob_flush() is NATIVE above the framework's OB floor (pop content into
+        // the PARENT buffer, never the socket) — vanilla parity. The legacy
+        // streaming idiom is `ob_flush(); flush();`, where the plain flush()
+        // does the socket write. Here the parent is PHPUnit's buffer, so the
+        // content must NOT reach the streaming sink.
         echo 'more';
         ob_flush();
-        $this->assertContains('more', $written);
+        $this->assertNotContains('more', $written);
 
         ob_end_flush();
+    }
+
+    public function testEmptyFlushDoesNotSwitchToStreaming(): void
+    {
+        // The CI4-class bug: an app's bootstrap calls flush()/ob_end_flush()
+        // BEFORE producing any output. Flushing an EMPTY buffer must be a
+        // complete no-op — flipping `_streaming` + sending headers made
+        // ResponseMiddleware skip body collection (CodeIgniter 4 served 200
+        // with a 0-byte body for its 17 KB welcome page).
+        $this->obBaseline = ob_get_level();
+        $g = RequestContext::instance();
+        $written = [];
+        $flushed = false;
+        $g->openswoole_response = new class($written) {
+            /** @param array<int,string> $sink */
+            public function __construct(public array &$sink) {}
+            public function isWritable(): bool { return true; }
+            public function write(string $d): void { $this->sink[] = $d; }
+        };
+        $g->zealphp_response = new class($flushed) {
+            public function __construct(public bool &$f) {}
+            public function header(string $k, string $v, bool $u = true): void {}
+            public function flush(): void { $this->f = true; }
+        };
+        $g->_streaming = null;
+
+        ob_start();
+        zflush();   // nothing buffered → MUST stay non-streaming, no header flush
+
+        $this->assertFalse($flushed, 'empty flush must not emit headers');
+        $this->assertNotTrue($g->_streaming, 'empty flush must not switch to streaming');
+        $this->assertSame([], $written);
+        ob_end_clean();
+    }
+
+    public function testBufferOwningDrainLoopTerminatesAndBodySurvives(): void
+    {
+        // CodeIgniter 4's app/Config/Events.php drains the host's buffers with
+        // `while (ob_get_level() > 0) { ob_end_flush(); }` then opens its OWN
+        // buffer and echoes the page into it. The drain must TERMINATE (the
+        // override pops a level even when empty) without flipping streaming,
+        // and the replacement buffer's content must be harvestable.
+        $this->obBaseline = ob_get_level();
+        $g = RequestContext::instance();
+        $written = [];
+        $g->openswoole_response = new class($written) {
+            /** @param array<int,string> $sink */
+            public function __construct(public array &$sink) {}
+            public function isWritable(): bool { return true; }
+            public function write(string $d): void { $this->sink[] = $d; }
+        };
+        $g->zealphp_response = null;
+        $g->_streaming = null;
+        $prevFloor = $g->_ob_floor;
+        $floor = ob_get_level() + 1;
+        $g->_ob_floor = $floor;
+
+        ob_start();                       // the "framework capture" at $floor
+        ob_start();                       // a pre-existing nested level
+        $guard = 0;
+        while (ob_get_level() > $floor - 1 && $guard++ < 10) {
+            ob_end_flush();               // the CI4 drain
+        }
+        $this->assertLessThan(10, $guard, 'drain loop must terminate');
+        $this->assertNotTrue($g->_streaming, 'empty drain must not switch to streaming');
+
+        ob_start();                       // the app opens its OWN buffer
+        echo 'ci4-body';
+        $this->assertSame('ci4-body', ob_get_clean(), 'body survives in the replacement buffer');
+        $this->assertSame([], $written);
+
+        $g->_ob_floor = $prevFloor;
+        while (ob_get_level() > $this->obBaseline) {
+            ob_end_clean();
+        }
     }
 
     public function testFlushNoopWhenNoOpenswooleResponse(): void
