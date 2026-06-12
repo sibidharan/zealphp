@@ -310,7 +310,7 @@ short_open_tag=on
 pie install zealphp/ext
 
 # Or from source (pin the version setup.sh defaults to):
-git clone --depth 1 --branch v0.3.49 https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
+git clone --depth 1 --branch v0.3.50 https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
 cd /tmp/ext-zealphp && phpize && ./configure && make && sudo make install
 ```
 
