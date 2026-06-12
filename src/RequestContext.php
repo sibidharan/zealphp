@@ -61,6 +61,11 @@ class RequestContext
     public ?string $raw_status_reason = null;
     public ?bool $_streaming = null;
     public ?bool $_session_started = null;
+    /** OB level of the framework's capture buffer for the current include —
+     *  app buffers ABOVE it keep native ob_end_flush()/ob_flush() semantics
+     *  (pop into parent); at/below it the overrides stream to the client.
+     *  Set/restored by App::executeFile(). */
+    public ?int $_ob_floor = null;
     /**
      * Per-request CGI backend override set by the matched route's `backend:`
      * option in `ResponseMiddleware::dispatchRoute()`, read by `App::include()`

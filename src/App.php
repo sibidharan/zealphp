@@ -6499,6 +6499,14 @@ class App
 
         $obBase = ob_get_level();
         ob_start();
+        // OB floor for the \ZealPHP\ob_end_flush()/ob_flush() overrides: the
+        // app's OWN buffers live ABOVE this level and must keep NATIVE nested
+        // semantics (pop content into the parent buffer). Without the floor,
+        // a framework-level app calling a plain nested ob_end_flush() at the
+        // end of its bootstrap (CodeIgniter 4's Boot::bootWeb()) hit the
+        // streaming shim's discard path and served 200 with a 0-byte body.
+        $prevObFloor = $g->_ob_floor ?? null;
+        $g->_ob_floor = $obBase + 1;
         $result = null;
         try {
             try {
@@ -6594,11 +6602,13 @@ class App
             // @codeCoverageIgnoreEnd
             } else {
                 @ob_end_clean();
+                $g->_ob_floor = $prevObFloor;
                 self::restoreFragmentState($previousFragmentState);
                 throw $e;
             }
         }
         $output = ob_get_clean();
+        $g->_ob_floor = $prevObFloor;
         if ($output === false) {
             $output = '';
         }
