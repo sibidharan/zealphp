@@ -202,8 +202,8 @@ PHP]); ?>
 </tr>
 <tr>
   <td><code>App::mode(App::MODE_COROUTINE_LEGACY)</code></td>
-  <td><code>superglobals(true)</code> + <code>isolation(Coroutine)</code> + silentRedeclare + includeIsolation + coroutineGlobalsIsolation + coroutineStaticsIsolation</td>
-  <td>Modern Composer apps (Symfony/Laravel/Slim) or <code>require_once</code>-bootstrap apps run <strong>concurrently</strong>; requires <code>ext-zealphp</code></td>
+  <td><code>superglobals(true)</code> (S1) + <code>isolation(Coroutine)</code> + the per-coroutine isolation stack: silentRedeclare (S3) + includeIsolation (S7) + coroutineGlobalsIsolation (S2) + coroutineStaticsIsolation (S5a), plus the process-setting stages (S9) and per-request resets (S11)</td>
+  <td>Modern Composer apps (Symfony/Laravel/Slim) or <code>require_once</code>-bootstrap apps run <strong>concurrently</strong>; requires <code>ext-zealphp</code>. Stage names (S1&ndash;S12) follow the canonical taxonomy in <a href="https://github.com/sibidharan/zealphp/blob/master/docs/architecture/isolation-stages.md"><code>docs/architecture/isolation-stages.md</code></a>.</td>
 </tr>
 </table>
 <p>The older knob-by-knob form (<code>App::superglobals(true)</code> + <code>App::processIsolation(true)</code> + <code>App::cgiMode(...)</code>) still works and is what the examples below show for clarity — <code>App::mode()</code> is the one-liner shorthand on top. Full lifecycle matrix: <a href="/coroutines#lifecycle-modes">coroutines &rsaquo; lifecycle modes</a>.</p>

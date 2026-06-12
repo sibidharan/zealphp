@@ -68,7 +68,7 @@ BASH
   <tr><td><code>ZEALPHP_SESSION_SECURE</code></td><td>auto-detect</td><td>Force <code>Secure</code> cookie flag (<code>1</code>/<code>0</code>). Auto-detects HTTPS via <code>HTTPS</code>, <code>HTTP_X_FORWARDED_PROTO</code>, or <code>SERVER_PORT=443</code>.</td></tr>
   <tr><td><code>ZEALPHP_HTTP_COMPRESSION</code></td><td><code>1</code></td><td>Enable OpenSwoole native HTTP compression.</td></tr>
   <tr><td><code>ZEALPHP_COMPRESSION_MIDDLEWARE</code></td><td><code>0</code></td><td>Register the reference <code>CompressionMiddleware</code> (only if <code>ZEALPHP_HTTP_COMPRESSION=0</code>).</td></tr>
-  <tr><td><code>ZEALPHP_INI_ISOLATE</code></td><td><code>0</code></td><td>Register <code>IniIsolationMiddleware</code>. Snapshots <code>ini_set()</code> changes (timezone, error_reporting, display_errors, memory_limit, etc.) at request start and restores them on exit. Opt-in defense against ini changes leaking between requests on long-running workers.</td></tr>
+  <tr><td><code>ZEALPHP_INI_ISOLATE</code></td><td><code>0</code></td><td>Register <code>IniIsolationMiddleware</code> (a framework PSR-15 middleware — not the ext stage). Snapshots <code>ini_set()</code> changes (timezone, error_reporting, display_errors, memory_limit, etc.) at request start and restores them on exit. Opt-in defense against ini changes leaking between requests on long-running workers. Coroutine-legacy already isolates <code>ini_set()</code> per coroutine at the ext level (the <code>S9g</code> stage), so this middleware is for non-ext setups.</td></tr>
   <tr><td><code>ZEALPHP_DEMO_MIDDLEWARE</code></td><td><code>0</code></td><td>Enables the demo authentication/validation middleware in <code>app.php</code>. Off in production.</td></tr>
 </table>
 

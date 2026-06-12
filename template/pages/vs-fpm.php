@@ -297,7 +297,7 @@ $app->run();
   </p>
   <ul class="vsfpm-callout-slate-body">
     <li><strong><code>App::mode('legacy-cgi')</code></strong> — a fresh subprocess per request from the warm pool (mod_php / FPM parity), or <code>cgiMode('fork')</code>/<code>cgiMode('fcgi')</code>.</li>
-    <li><strong><code>App::mode('coroutine-legacy')</code></strong> — re-implements the per-request reset <em>in-process</em> via ext-zealphp (re-executes <code>require_once</code>'d files, resets statics/classes, runs at true global scope). It now runs unmodified WordPress end-to-end <strong>including wp-admin</strong>, and adds coroutine concurrency on top.</li>
+    <li><strong><code>App::mode('coroutine-legacy')</code></strong> — re-implements the per-request reset <em>in-process</em> via ext-zealphp (re-executes <code>require_once</code>'d files (S7), resets function/class statics (S11), runs at true global scope (S8)). It now runs unmodified WordPress end-to-end <strong>including wp-admin</strong>, and adds coroutine concurrency on top.</li>
   </ul>
   <p class="vsfpm-callout-slate-body">
     SNA Labs took a different route — full coroutine mode on dev with an async Rust MongoDB driver; see the <a href="/case-studies/sna-labs">case study</a>.

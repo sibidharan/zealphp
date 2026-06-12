@@ -3,6 +3,8 @@
 > Authoritative reference for execution modes, isolation features, and operational controls.
 > Last updated: 2026-05-28 · ext-zealphp v0.3.7 · ZealPHP v0.3.x
 
+> **Stage naming (2026-06-12):** the canonical isolation-stage taxonomy now lives in [`isolation-stages.md`](isolation-stages.md) — S-numbers are append-only, S4/S6 are retired tombstones, components get sub-letters (S3a/S3b/S3c, S9a–S9h, S11a–S11c). This document's "gen-0/gen-1/gen-2" headings are implementation GENERATIONS of S2 Globals, not stages. Parts of this reference predate the 4-mode consolidation and ext ≥0.3.26 stages (S8–S12) — see `isolation-stages.md` and the framework `CLAUDE.md` for the current full stack.
+
 This document is the single source of truth for what each mode/feature does, when to use it, and how to configure it. For the high-level positioning of ZealPHP as Application Server + Multi-SAPI runtime, see [`application-server-sapi.md`](application-server-sapi.md). For the 32-app compatibility sweep, see [`../compatibility-database.md`](../compatibility-database.md).
 
 ---
@@ -125,18 +127,18 @@ What's isolated per state category × execution mode.
 
 Evolution of how ext-zealphp handles `$GLOBALS` across coroutines.
 
-### Stage 0 — process-wide (pre-v0.3.6)
+### gen-0 — process-wide (pre-v0.3.6)
 
 `EG(symbol_table)` is one shared HashTable across all coroutines. `$GLOBALS['x'] = 'a'` in coroutine A is immediately visible to coroutine B. Last writer wins; classic race condition. Recommended workaround was to use `$g` (per-coroutine `RequestContext`) for request-scoped state.
 
-### Stage 1 — deep-copy snapshot (v0.3.6, REPLACED)
+### gen-1 — deep-copy snapshot (v0.3.6, REPLACED)
 
 ext-zealphp hooked OpenSwoole's `on_yield` / `on_resume` and snapshotted EVERY non-superglobal slot of `EG(symbol_table)` per coroutine via `ZVAL_DUP` (full deep-copy).
 
 - **Memory:** O(N keys) per active coroutine
-- **Why replaced:** Stage 2 has same correctness with O(deltas) memory
+- **Why replaced:** gen-2 (COW) has same correctness with O(deltas) memory
 
-### Stage 2 — copy-on-write parent + delta (v0.3.7, CURRENT)
+### S2 Globals — copy-on-write parent + delta (gen-2, v0.3.7, CURRENT)
 
 Three module-level HashTables:
 
@@ -154,21 +156,21 @@ Three module-level HashTables:
 2. Apply `deltas[cid]` over baseline.
 3. `zend_hash_del` each key in `tombstones[cid]`.
 
-**Memory characteristics:** 50 coros × 5 unique writes test → flat ~2 MB peak RSS. Stage 1 was O(N × coros).
+**Memory characteristics:** 50 coros × 5 unique writes test → flat ~2 MB peak RSS. gen-1 was O(N × coros).
 
-**The IS_UNDEF tombstone bug we fixed:** Initial Stage 2 attempt stored tombstones as `IS_UNDEF` zvals inside the delta array. ZEND_HASH_FOREACH macros silently skip `IS_UNDEF` because that's Zend's internal "deleted bucket" marker. Tombstones were invisible. Fix: separate `tombstones` HashTable with non-`IS_UNDEF` dummy values.
+**The IS_UNDEF tombstone bug we fixed:** The initial gen-2 attempt stored tombstones as `IS_UNDEF` zvals inside the delta array. ZEND_HASH_FOREACH macros silently skip `IS_UNDEF` because that's Zend's internal "deleted bucket" marker. Tombstones were invisible. Fix: separate `tombstones` HashTable with non-`IS_UNDEF` dummy values.
 
 **Adversary tests pass:**
 - Two coroutines write same key → each reads own ✓
 - A unsets parent key, B still sees parent (via tombstone path) ✓
 
-### Stage 3 — silent-redeclare opcode hooks (SHIPPED, v0.3.8)
+### S3a Redeclare — silent-redeclare opcode hooks (SHIPPED, v0.3.8)
 
 The 32-app sweep shows the dominant Mode 3/4/5 failure isn't `$GLOBALS` races (Stage 2 fixed that). It's `Fatal error: Cannot redeclare foo()` / `Cannot declare class Bar` on the second request — declarations in legacy code lit up `EG(function_table)` / `CG(class_table)` on request 1, and the engine refuses to declare them again on request 2.
 
 FPM doesn't hit this because each request gets a fresh PHP process — there's nothing to redeclare AGAINST. Mode 1 Pool sidesteps it too (subprocess scope). But Mode 3/4/5 share one process.
 
-Stage 3 hooks `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` / `ZEND_DECLARE_CLASS_DELAYED` opcode handlers via `zend_set_user_opcode_handler`:
+S3a hooks `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` / `ZEND_DECLARE_CLASS_DELAYED` opcode handlers via `zend_set_user_opcode_handler`:
 
 1. Look up the symbol name in `EG(function_table)` / `CG(class_table)`.
 2. If it exists → advance the opcode pointer and return `ZEND_USER_OPCODE_CONTINUE` (skip the bind). First declaration wins.
@@ -178,18 +180,18 @@ Stage 3 hooks `ZEND_DECLARE_FUNCTION` / `ZEND_DECLARE_CLASS` / `ZEND_DECLARE_CLA
 
 **Tests pin both branches:** `tests/018-silent-redeclare-function.phpt` (conditional fn redeclare), `tests/019-silent-redeclare-class.phpt` (conditional class redeclare).
 
-**Stage 3 LIMITATION — top-level (file-scope) decls** — `function foo() {}` and `class Bar {}` written at file scope are bound to `CG(function_table)` / `CG(class_table)` at COMPILE time by `zend_register_top_func` / `zend_register_top_class`, NOT through the runtime `ZEND_DECLARE_*` opcodes. The opcode hook cannot see them. A naive `zend_compile_file` intercept that snapshots+restores class-entry pointers around the compile breaks class inheritance + method-table invariants (tested locally — class-method calls after restore segfault). Closing this cleanly requires Stage 4: a careful class-entry teardown helper that preserves method tables, inheritance chains, and refcounting. `tests/020-silent-redeclare-toplevel.phpt` is SKIP-pinned with the explanation.
+**S3a LIMITATION — top-level (file-scope) decls** — `function foo() {}` and `class Bar {}` written at file scope are bound to `CG(function_table)` / `CG(class_table)` at COMPILE time by `zend_register_top_func` / `zend_register_top_class`, NOT through the runtime `ZEND_DECLARE_*` opcodes. The opcode hook cannot see them. A naive `zend_compile_file` intercept that snapshots+restores class-entry pointers around the compile breaks class inheritance + method-table invariants (tested locally — class-method calls after restore segfault). Closing this cleanly requires S3c: a careful class-entry teardown helper that preserves method tables, inheritance chains, and refcounting. `tests/020-silent-redeclare-toplevel.phpt` is SKIP-pinned with the explanation.
 
-**32-app × 5-mode sweep with Stage 3 ON (v0.3.8):**
+**32-app × 5-mode sweep with S3a ON (v0.3.8):**
 - WordPress M5: `302/302/500` → `302` stable (3/3)
 - Lychee M4/M5: `403/X/403` → `403` stable
-- Most other Mode 3/4/5 apps unchanged — their crashes are top-level decls (Stage 4) or non-redeclare causes (missing classes, autoload misses, framework-init failures)
+- Most other Mode 3/4/5 apps unchanged — their crashes are top-level decls (S3c) or non-redeclare causes (missing classes, autoload misses, framework-init failures)
 
-### Stage 4 — compile-time silent-redeclare via CG-table swap (SHIPPED, ext commit `892f979`)
+### S3c Redeclare — compile-time silent-redeclare via CG-table swap (SHIPPED, ext commit `892f979`)
 
-The first Stage 4 prototype (commit `226e9e3`) snapshot-then-detached the WHOLE user symbol table per compile with refcount bumps. Single-file unit test passed; production deadlocked every worker because every nested `zend_compile_file` walked AND mutated O(N) entries. With autoloader-driven nested compiles the cumulative cost was O(N×M), workers recycled before serving a request.
+The first S3c prototype (commit `226e9e3`) snapshot-then-detached the WHOLE user symbol table per compile with refcount bumps. Single-file unit test passed; production deadlocked every worker because every nested `zend_compile_file` walked AND mutated O(N) entries. With autoloader-driven nested compiles the cumulative cost was O(N×M), workers recycled before serving a request.
 
-The shipped Stage 4 (commit `892f979`) replaces that with a **pointer swap**:
+The shipped S3c (commit `892f979`) replaces that with a **pointer swap**:
 
 ```
 save real = CG(function_table)
@@ -208,13 +210,13 @@ Cleanup: the first-wins merge inserts into real only when the key isn't there. L
 
 **Verification:**
 
-- All 3 Stage 3/4 phpt tests pass (018 cond fn, 019 class, 020 top-level).
+- All 3 Stage 3a/4 phpt tests pass (018 cond fn, 019 class, 020 top-level).
 - Local stress: 50-file class-redeclare loop runs at 0.19 ms total with `silent_redeclare` ON (vs 0.31 ms cold). No deadlock.
 - Composer `vendor/autoload.php` re-includes loop at 0.10 ms for 10 iterations.
 
 **32-app × 5-mode lab sweep impact:**
 
-| App | Before Stage 4 | With Stage 4 |
+| App | Before Stage 3c | With Stage 3c |
 |---|---|---|
 | adminer M5 | `200/X/200` (flicker) | **`200`** stable |
 | lychee M3/M4/M5 | `403/X/403` | **`403`** stable |
@@ -222,14 +224,14 @@ Cleanup: the first-wins merge inserts into real only when the key isn't there. L
 | phpliteadmin M3 | `500/X/500` | **`500`** stable |
 | WordPress M3 | `302/500/500` (redirect-to-install) | **`200`/500/500** (now serves content on req 1) |
 | dokuwiki M4 | `302/500/500` | `302/X/302` improved |
-| Mode 1 Pool entire column | unchanged | **unchanged** (subprocess scope — Stage 4 doesn't apply) |
+| Mode 1 Pool entire column | unchanged | **unchanged** (subprocess scope — Stage 3c doesn't apply) |
 | wordpress M5 | `302` stable | `302/500/302` — minor regression, separate fix |
 
-Stage 3 + Stage 4 together close both lanes — runtime opcode declares and compile-time top-level declares.
+Stage 3a + Stage 3c together close both lanes — runtime opcode declares and compile-time top-level declares.
 
 ### Stage 5+ — per-coroutine `CG(function_table)` (NOT PLANNED)
 
-Would mean every coroutine triggers the autoloader independently when it touches a class — defeats the whole point of autoloading. Stage 3 + Stage 4 give the user-visible benefit without the architectural cost. **Not on roadmap.**
+Would mean every coroutine triggers the autoloader independently when it touches a class — defeats the whole point of autoloading. Stage 3a + Stage 3c give the user-visible benefit without the architectural cost. **Not on roadmap.**
 
 ---
 
@@ -492,13 +494,13 @@ Where each isolation feature sits in ZealPHP's release history.
 | `functionIsolation` | v0.3.4 | — | Full process_state cleanup with autoloader detection |
 | TableSessionHandler | v0.3.6 | — | Concurrent-safe sessions without Redis |
 | Session 3-way merge | v0.3.6 | — | Leaf-level merge granularity |
-| Stage 1 `$GLOBALS` deep-copy | v0.3.6 | v0.3.7 (replaced by Stage 2) | First per-coroutine $GLOBALS impl |
+| gen-1 `$GLOBALS` deep-copy | v0.3.6 | v0.3.7 (replaced by gen-2 COW) | First per-coroutine $GLOBALS impl |
 | Stage 2 `$GLOBALS` COW | **v0.3.7** | — | **CURRENT** — parent + delta + tombstone |
 | `ZEALPHP_GLOBALS_ISOLATION_DISABLE` env-var rollback | v0.3.7 | — | Emergency switch |
 | FD-3 IPC channel (CGI Pool) | **v0.3.8** (commit `9b8111b`) | — | Metadata on dedicated fd 3; STDOUT body-only. Survives `exit()` inside shutdown fn. Restores `wp_ob_end_flush_all()` body. Unblocks phpMyAdmin / WordPress on Mode 1. |
-| Stage 3 silent-redeclare opcode hooks | **v0.3.8** (ext commit `d09693d`) | — | Hooks `ZEND_DECLARE_FUNCTION` / `_CLASS` / `_DELAYED` so re-declaring an EXISTING symbol skips the opcode instead of `E_COMPILE_ERROR`. Covers conditional declares (in if / fn / method scope) cleanly. |
-| Stage 4 compile-time silent-redeclare via CG-table swap | **v0.3.8** (ext commit `892f979`) | — | `zend_compile_file` wrapper that swaps `CG(function_table)` / `CG(class_table)` pointers to scratch tables for the compile duration. Compile-time decls write to scratch; merged into real first-wins after compile. O(K) per compile, re-entrant safe. Closes the top-level-decl lane that Stage 3's opcode hook can't reach. |
-| Stage 5+ per-coroutine `CG(function_table)` / `CG(class_table)` | NOT PLANNED | — | Would break autoloaders by design (autoloaders register classes once; per-coroutine tables would mean every coroutine triggers the autoloader independently). Stage 3 + Stage 4 together are the pragmatic ceiling. |
+| Stage 3a silent-redeclare opcode hooks | **v0.3.8** (ext commit `d09693d`) | — | Hooks `ZEND_DECLARE_FUNCTION` / `_CLASS` / `_DELAYED` so re-declaring an EXISTING symbol skips the opcode instead of `E_COMPILE_ERROR`. Covers conditional declares (in if / fn / method scope) cleanly. |
+| Stage 3c compile-time silent-redeclare via CG-table swap | **v0.3.8** (ext commit `892f979`) | — | `zend_compile_file` wrapper that swaps `CG(function_table)` / `CG(class_table)` pointers to scratch tables for the compile duration. Compile-time decls write to scratch; merged into real first-wins after compile. O(K) per compile, re-entrant safe. Closes the top-level-decl lane that Stage 3a's opcode hook can't reach. |
+| Stage 5+ per-coroutine `CG(function_table)` / `CG(class_table)` | NOT PLANNED | — | Would break autoloaders by design (autoloaders register classes once; per-coroutine tables would mean every coroutine triggers the autoloader independently). Stage 3a + Stage 3c together are the pragmatic ceiling. |
 
 ---
 
