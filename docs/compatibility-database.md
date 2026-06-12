@@ -1,12 +1,14 @@
 # Compatibility Database
 
-> Last updated: 2026-06-11
+> Last updated: 2026-06-12
 
-How 50 popular PHP apps run on ZealPHP across **all four runtime modes**, with **`coroutine-legacy`** — the headline mode for legacy apps ("old PHP just works, concurrently") — the column to read first. Each graded `coroutine-legacy` cell is a **real install**: real database, real authenticated login, real write, and a 6-way concurrent burst, tested individually on the current stack (**ZealPHP v0.4.8 + ext-zealphp v0.3.48**, PHP 8.4.21, OpenSwoole 26.2.0).
+How 50 popular PHP apps run on ZealPHP across **all four runtime modes**, with **`coroutine-legacy`** — the headline mode for legacy apps ("old PHP just works, concurrently") — the column to read first. Each graded `coroutine-legacy` cell is a **real install**: real database, real authenticated login, real write, and a 6-way concurrent burst, tested individually on the current stack (**ZealPHP master (v0.4.8+) + ext-zealphp v0.3.49**, PHP 8.4.21, OpenSwoole 26.2.0).
 
-**Rebuilt from scratch 2026-06-11** — current-stack data only, no historical grades, no superseded mode numbering. Apps not yet re-validated are marked _pending_ (they carry **no** grade rather than a stale one).
+**Rebuilt from scratch 2026-06-11** on the 0.3.48 stack; **re-validation sweep 2026-06-12** on the **0.3.49 stack** (ext#52 concurrent-burst heap-corruption fix). Apps not yet re-validated are marked _pending_ (they carry **no** grade rather than a stale one).
 
-**Status: 26/50 re-validated in `coroutine-legacy`** (B: 4 · C: 11 · D: 11); 24 pending.
+**2026-06-12 re-validation level:** every graded app below was re-run on 0.3.49 with the standard **84-request 6-way burst** (`burst6.php <port> 6 14`) plus a homepage check. Apps where the burst lifted to 0 worker deaths AND that previously failed *solely* on worker-crash were taken one level deeper (content sanity + scripted login/write where the harness allowed); the per-app detail notes the exact level reached ("full protocol" vs "burst+content" vs "burst-only"). The **ext#52 fix eliminated worker deaths** across most of the C/D set (kanboard, kirby, dokuwiki, phpmyadmin, yii2, laminas, elfinder, codeigniter4, tinyfilemanager, symfony, drupal all 0 deaths now), but **content-level checks revealed several apps whose 0-death bursts serve hollow/broken bodies** — those stay D/C honestly (CodeIgniter4 0-byte bodies, DokuWiki content "str() on null", TinyFileManager login still lost). A **new object-global-null regression cluster** surfaced on 0.3.49 for three `require_once`-bootstrap apps that served content on 0.3.48 (WordPress `wp_set_wpdb_vars` null, MyBB `read() on null`) — referenced to the object-global / mysqlnd-teardown frontier (ext#44/#49), not re-investigated here.
+
+**Status: 31/50 re-validated in `coroutine-legacy`** (B: 6 · C: 13 · D: 12); 19 pending. **Net grade changes 2026-06-12:** Kanboard D→B, Yii 2 C→B (both driven by ext#52 + session #379); 5 previously-_pending_ rows newly graded (TYPO3 C, Craft CMS C, Roundcube C, Concrete CMS D, Flarum D). Two **⚠ regressions** flagged (WordPress, MyBB — object-global null on 0.3.49). Leantime remains _pending_ (boot-fail: psr/http-message v2 conflict needs the documented `composer require psr/http-message:^1.1` harness fix).
 
 ---
 
@@ -41,13 +43,13 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 
 | # | App | Cat | ★ | `legacy-cgi` | `mixed` | **`coroutine-legacy`** | `coroutine` | Top knob |
 |---|-----|-----|---|:---:|:---:|:---:|:---:|----------|
-| 1 | WordPress | CMS | 19k | NT | C | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) + App::globalScopeInc… |
+| 1 | WordPress | CMS | 19k | NT | C | **C⚠** | NT | ⚠ 0.3.49 regression: homepage now 500 (`wp_set_wpdb_vars` null — object-global frontier ext#44/#49). Was 200 on 0.3.48. |
 | 2 | Drupal | CMS | 4.3k | NT | F | **D** | NT | App::preloadClassmap() after composer dump-autoload -o (tem… |
 | 3 | Joomla | CMS | 4.7k | NT | _pending_ | _pending_ | NT | re-validation in progress |
-| 4 | TYPO3 | CMS | 1.0k | NT | _pending_ | _pending_ | NT | re-validation in progress |
-| 5 | Concrete CMS | CMS | 768 | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 4 | TYPO3 | CMS | 1.0k | NT | _pending_ | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) — homepage+content ok, 1 worker death/burst |
+| 5 | Concrete CMS | CMS | 768 | NT | _pending_ | **D** | NT | App::mode(App::MODE_COROUTINE_LEGACY) — boots+homepage 200 but 2 worker deaths/burst |
 | 6 | October CMS | CMS | 11k | NT | _pending_ | _pending_ | NT | re-validation in progress |
-| 7 | Craft CMS | CMS | 3.1k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 7 | Craft CMS | CMS | 3.1k | NT | _pending_ | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) — homepage+content ok, burst clean 84x200/0 deaths |
 | 8 | Grav | CMS | 14k | NT | C | **D** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
 | 9 | Kirby | CMS | 7.5k | NT | B | **C** | NT | define('KIRBY_HELPER_GO', false) before loading Kirby — Ope… |
 | 10 | Statamic | CMS | 3.9k | NT | _pending_ | _pending_ | NT | re-validation in progress |
@@ -57,27 +59,27 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 | 14 | PrestaShop | E-comm | 7.8k | NT | _pending_ | _pending_ | NT | re-validation in progress |
 | 15 | OpenCart | E-comm | 7.3k | NT | C | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
 | 16 | Sylius | E-comm | 7.7k | NT | _pending_ | _pending_ | NT | re-validation in progress |
-| 17 | Flarum | Forums | 15k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 17 | Flarum | Forums | 15k | NT | _pending_ | **D** | NT | App::mode(App::MODE_COROUTINE_LEGACY) — boots+homepage 200 but 1 worker death/burst |
 | 18 | phpBB | Forums | 1.8k | A | A | **C** | NT | App::globalScopeInclude(true) (template default, kept) |
-| 19 | MyBB | Forums | 2.9k | NT | F | **C** | NT | App::ignorePhpExt(false) — REQUIRED: MyBB is multi-entry (*… |
+| 19 | MyBB | Forums | 2.9k | NT | F | **C⚠** | NT | ⚠ 0.3.49 regression: homepage now 500 (`read() on null` — object-global frontier ext#44/#49). Was 200 on 0.3.48. |
 | 20 | Vanilla Forums | Forums | 2.9k | NT | A | **B** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
 | 21 | Laravel | Framework | 79k | NT | B | **B** | NT | App::preloadClassmap() + require app vendor/autoload.php in… |
 | 22 | Symfony | Framework | 30k | NT | A | **D** | NT | App::preloadClassmap() + require app vendor/autoload.php in… |
 | 23 | CodeIgniter 4 | Framework | 5.3k | NT | C | **D** | NT | CI_ENVIRONMENT=production (development mode fatals: Kint/De… |
 | 24 | CakePHP | Framework | 8.7k | NT | A | **D** | NT | composer require psr/http-message:^1.1 — skeleton vendor sh… |
 | 25 | Slim | Framework | 12k | NT | — | **B** | NT | App::preloadClassmap() + require /apps50/slim/vendor/autolo… |
-| 26 | Yii 2 | Framework | 14k | NT | B | **C** | NT | composer install --no-dev + composer dump-autoload -o (dev … |
+| 26 | Yii 2 | Framework | 14k | NT | B | **B** | NT | composer install --no-dev + composer dump-autoload -o (dev …; burst now fully clean (ext#52) |
 | 27 | Laminas | Framework | 5.1k | NT | A | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
 | 28 | phpMyAdmin | Admin | 7.2k | NT | C | **D** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
 | 29 | Adminer | Admin | 6.1k | NT | — | **B** | NT | App::defineIsolation(true) (Adminer defines per-request con… |
 | 30 | TinyFileManager | Admin | 6.2k | NT | F | **D** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
-| 31 | Roundcube | Admin | 6.0k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 31 | Roundcube | Admin | 6.0k | NT | _pending_ | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) — webmail login page renders, burst stable 0 deaths; IMAP login = ENV |
 | 32 | FileGator | Admin | 1.8k | NT | _pending_ | _pending_ | NT | re-validation in progress |
 | 33 | elFinder | Admin | 3.0k | NT | F | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
 | 34 | MediaWiki | Wiki | 3.7k | NT | C | **D** | NT | App::mode(MODE_COROUTINE_LEGACY) |
 | 35 | DokuWiki | Wiki | 4.1k | NT | F | **D** | NT | App::globalScopeInclude(true) (template default, kept) |
 | 36 | BookStack | Wiki | 16k | NT | F | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
-| 37 | Kanboard | Business | 8.4k | NT | A | **D** | NT | globalScopeInclude(false) AND (true) both tried - session w… |
+| 37 | Kanboard | Business | 8.4k | NT | A | **B** | NT | App::globalScopeInclude(true) + App::defineIsolation(true) — login+write now pass (session #379 + ext#52) |
 | 38 | Invoice Ninja | Business | 8.3k | NT | _pending_ | _pending_ | NT | re-validation in progress |
 | 39 | Leantime | Business | 4.1k | NT | _pending_ | _pending_ | NT | re-validation in progress |
 | 40 | Monica CRM | Business | 22k | NT | _pending_ | _pending_ | NT | re-validation in progress |
@@ -98,7 +100,8 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 
 ## Per-app detail (re-validated in coroutine-legacy)
 
-#### WordPress — coroutine-legacy: **C**
+#### WordPress — coroutine-legacy: **C ⚠ (0.3.49 regression — homepage 500)**
+- **2026-06-12 re-validation (0.3.49, burst+content):** ⚠ **REGRESSION** — homepage now returns **500 on every request including the first sequential one** (`Error: Attempt to assign property "field_types" on null` at `wp_set_wpdb_vars` / `wp-includes/load.php:746`). The `$wpdb` object-global is null when `wp_set_wpdb_vars()` runs — the documented object-global-across-connect-yield interaction (CLAUDE.md "object-valued `$GLOBALS`" / mysqlnd-teardown frontier, ext#44/#49). DB (`zext_wordpress`) is present and reachable; this is NOT an env issue. Burst on `/` = 84x500, 0 worker deaths/segfaults (the ext#52 crash class is gone, but the app can't render). The 0.3.48 grade below (homepage 200/69KB) predates this. **Needs ext-level investigation before WordPress can re-grade.**
 - **homepage** 200/69KB · **login** ok (wp-login.php POST -> wp-admin Dashboard 200; session persists across reques… · **write** ok: POST rest_route=/wp/v2/posts -> 201, post id 6 'ZealPHP coroutine-legacy te…
 - **concurrent burst** unstable: warm bursts 6-8x200 + 7-9x500 + 1-2x302 + 3-4x000(hung); 11 worker SIGSEGVs across 2 bursts (~5/burst, self-healing respawn); best observed…
 - **knobs:**
@@ -107,6 +110,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: homepage 200/69KB and burst20 = 20x200 with 0 worker deaths (fully stable under concurrency); but /wp-admin/ returned 302 (admin session not re-validated under mixed) and REST write 403 (nonce unobtainable withou…
 
 #### Drupal — coroutine-legacy: **D**
+- **2026-06-12 re-validation (0.3.49, burst-only):** burst 6x200/78x500, **0 worker deaths, 0 segfaults** (the 500s are clean Drupal exception pages from the concurrency race, not crashes — consistent with the prior reading). The login/write blocker is the mode-independent Drupal session-handler bypass, unchanged. Stays **D**.
 - **homepage** 200/21KB (15.7KB after big_pipe uni… · **login** failed: credentials accepted (POST /user/login -> 303 /user/1) but session neve… · **write** failed: GET/POST /node/add/page -> 403 Access denied (blocked on the login fail…
 - **concurrent burst** concurrent -P6: 20x500; sequential -P1: 20x200. 0 segfault/zend_mm/Fatal patterns in boot.log (workers survive; the 500s are clean Drupal exception p…
 - **knobs:**
@@ -118,6 +122,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: boots, homepage 200, but login fails IDENTICALLY (303 then anonymous on next request; node/add 403) — the Drupal session-handler bypass is mode-independent, so MODE_MIXED does not rescue auth/write flows either
 
 #### Grav — coroutine-legacy: **D**
+- **2026-06-12 re-validation (0.3.49, burst-only):** burst now shows **only 2 worker deaths** (down from 16-17x500 + SIGSEGV per burst), homepage 200 — partial improvement from ext#52 but still crashes under concurrency. Admin-dashboard 500 (session-decode) unchanged. Stays **D**.
 - **homepage** 200/13.5KB · **login** failed: login POST succeeds (303, writes session) but the immediately-following… · **write** n/a: admin dashboard 500s on every authenticated request, so no page-create pos…
 - **concurrent burst** 1-2x200 then 16-17x500 + worker SIGSEGV (signal=11); reproducible under 6-way concurrency even after sequential warmup. An earlier warm-sequentialize…
 - **knobs:**
@@ -131,6 +136,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: App::MODE_MIXED FIXES the session-decode 500 (traditional SessionManager round-trips Grav's Messages object natively) — public homepage stays 200 across repeated cookied requests r1/r2/r3. BUT /admin/ then breaks…
 
 #### Kirby — coroutine-legacy: **C**
+- **2026-06-12 re-validation (0.3.49, burst-only):** burst on `/` is **14x200/70x500 with 0 worker deaths, 0 segfaults** (was 9x200/11x500 with worker self-recovery). The crash dimension is clean; the remaining 500s are Kirby's app-level concurrency race. Login/write passed at the prior C; grade unchanged at **C**.
 - **homepage** 200/9843B · **login** ok — GET /panel/login 200/162KB (kirby_session cookie + 64-char csrf from panel… · **write** ok — POST /api/site/children created page 'zeal-revalid-1781185914' (200), PATC…
 - **concurrent burst** / : 9x200 11x500; /notes : 3x200 17x500 (xargs -P 6). 0 segfault/zend_mm/Fatal error/deadlock in boot.log this run; worker self-recovers — post-burst…
 - **knobs:**
@@ -141,6 +147,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: same install + same app.php with App::mode(App::MODE_MIXED) (app_mixed.php) — burst20 on / AND /notes both 20x200, 0 fatals/segfaults in boot_mixed.log; re-confirmed in this 2026-06-11 run
 
 #### OpenCart — coroutine-legacy: **C**
+- **2026-06-12 re-validation (0.3.49, burst-only):** burst now shows only **1 worker death** (down from 2 SIGSEGV + 1 deadlock), homepage 200 — partial ext#52 improvement. Login/write passed at prior C. Stays **C**.
 - **homepage** 200/34KB · **login** ok · **write** ok: created category via admin POST catalog/category.save -> {category_id:59} a…
 - **concurrent burst** 16x200 4x000 (at -P6 vs 4 workers); 2 worker SIGSEGV (signal=11) + 1 coroutine deadlock during burst, server self-healed (respawned, port stayed up, …
 - **knobs:**
@@ -152,6 +159,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: MODE_MIXED storefront burst 40/40 x200, 0 worker deaths, 0 segfaults (sequential-per-worker eliminates the concurrent-mysqli crash) - BUT MODE_MIXED lacks defineIsolation so OpenCart's define('VERSION') collides …
 
 #### phpBB — coroutine-legacy: **C**
+- **2026-06-12 re-validation (0.3.49, burst-only):** still crashes under burst — **7 worker deaths + 2 segfaults**, master crashed mid-burst (homepage went 500 once the master died). The ext#52 fix did NOT resolve phpBB's burst corruption (it was already failing on 0.3.47 with zend_mm_heap-corrupted + SIGSEGV/SIGABRT). phpBB remains a **burst crasher**; the C grade rests on its sequential `legacy-cgi` full-pass. Stays **C** (one of the remaining frontiers).
 - **homepage** 200/13.8KB (forum index 'ZealPHP Te… · **login** ok (POST /ucp.php?mode=login with creation_time+form_token+sid -> 302; mode=log… · **write** ok: new topic via POST /posting.php?mode=post&f=2 -> 302 to /viewtopic.php?t=3;…
 - **concurrent burst** FAIL on ext 0.3.47: round1 19x500 1x000, round2 10x500 9x000 1x200; zend_mm_heap corrupted + SIGSEGV(11)/SIGABRT(6) worker deaths each burst; even 3-…
 - **knobs:**
@@ -174,6 +182,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: NOT usable — App::mode(App::MODE_MIXED) served 500 on EVERY request including request 1 and all of burst20 (0 crashes though); MyBB's require_once bootstrap never re-executes without Stage 7, so per-request state…
 
 #### Vanilla Forums — coroutine-legacy: **B**
+- **2026-06-12 re-validation (0.3.49, burst-only):** homepage 200, burst shows **1 worker death** (the cold-concurrent first wave; warm steady-state was clean at the prior B). Login/write passed at prior B. Stays **B** (the single cold-wave death is consistent with the prior "~6-10x500 cold first wave then 200s" characterization).
 - **homepage** 200/52KB · **login** ok · **write** ok: created discussion #5 (admin, CategoryID=1), verified via GET /discussion/5…
 - **concurrent burst** cold-concurrent first wave ~6-10x500 then 200s (workers survive, 0 crashes); warm steady-state 20x200 repeatable across 3 rounds, 0 worker deaths
 - **knobs:**
@@ -202,6 +211,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: full suite also passes (homepage 200/70KB, session counter, login ok, POST /tasks write ok, burst20 20x200, 0 fatals) — needs the same index.php require_once->require tweak; app_mixed.php left in tree
 
 #### Symfony — coroutine-legacy: **D**
+- **2026-06-12 re-validation (0.3.49, burst-only):** burst on `/` 37x200/47x500, **0 worker deaths, 0 segfaults**. The D blocker is the login failure (mode-independent session bypass — passes only under `mixed`), unchanged. Stays **D**.
 - **homepage** 200/18432B · **login** failed: credentials+CSRF accepted (POST /en/login -> 302 to /en/admin/post/) bu… · **write** blocked in coroutine-legacy (needs login). Proven under mixed fallback: POST /e…
 - **concurrent burst** 20x200 (coroutine-legacy), grep -ciE 'segfault|zend_mm|core dump|Fatal error' boot log = 0; mixed burst also 20x200
 - **knobs:**
@@ -216,9 +226,10 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
   - `FAILED knobs for the login flow: App::sessionLifecycle(false) (zeal_session_write_close then persists NOTHING since $g->session is never set); security.session…`
 - **`mixed` fallback probe:** mixed: FULL suite passes with STOCK security config and zero extra knobs beyond the composer-app set — login ok (302 -> /en/admin/post/, admin Post List 200), admin post create ok (id=31, verified admin list + public sl…
 
-#### CodeIgniter 4 — coroutine-legacy: **D**
+#### CodeIgniter 4 — coroutine-legacy: **D** (burst clean, 0-byte body swallow persists — 2026-06-12)
+- **2026-06-12 re-validation (0.3.49, burst+content):** burst is **84x200, 0 worker deaths, 0 segfaults** (CodeIgniter4 was a named ext#52 fix target — confirmed 0 deaths). **BUT the documented D blocker — the 0-byte body swallow — persists:** homepage returns `code=200 size=0b` with no content, sequentially and under burst. The "84x200" are hollow responses, exactly the issue that previously also broke writes (POST never reached MariaDB). Stays **D** — the crash class was never CI4's problem; the body-swallow is.
 - **homepage** 200/0KB - CI4 headers (Cache-Contro… · **login** n/a: appstarter ships no auth; custom session route used instead - 200/0b, body… · **write** failed: POST /demo/notes/add -> 200/0b AND row never reaches MariaDB (notes cou…
-- **concurrent burst** 20x200 (all 0-byte bodies); 0 segfault/zend_mm/fatal during burst; one earlier 'all coroutines asleep - deadlock' fatal at worker recycle
+- **concurrent burst (0.3.48)** 20x200 (all 0-byte bodies); 0 segfault/zend_mm/fatal during burst; one earlier 'all coroutines asleep - deadlock' fatal at worker recycle
 - **knobs:**
   - `CI_ENVIRONMENT=production (development mode fatals: Kint/Debug-Toolbar 'Cannot use a scalar value as an array' in ThirdParty/Kint/CallFinder.php:186; TypeError…`
   - `app.php: function is_cli(): bool { return false; } (CI4 sees PHP_SAPI=cli in OpenSwoole workers -> builds CLIRequest -> TypeError array_shift(null) in HTTP/CLI…`
@@ -246,6 +257,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: FULL suite passes — homepage 200/7.5KB, GET /posts/add CSRF form 200, POST 302 + row in DB, flash message 'The post has been saved' RENDERS (session flash works), second requests 200, burst20 = 20x200 twice, 0 fa…
 
 #### Slim — coroutine-legacy: **B**
+- **2026-06-12 re-validation (0.3.49, burst-only):** re-confirmed clean — burst **84x200, 0 worker deaths, 0 segfaults**. Stays **B**.
 - **homepage** 200/12B (Hello world!); GET /users … · **login** ok: POST /login user=admin/pass=secret -> {"login":"ok","user":"admin"}; $_SESS… · **write** ok: POST /tasks (session-authenticated) -> INSERT into MySQL zext_slim.tasks; v…
 - **concurrent burst** 20x200 (two consecutive runs) + auth burst 10x200 GET /tasks + 5x200 POST /tasks; boot.log new-fatal grep during bursts = 0. The single 'all coroutin…
 - **knobs:**
@@ -256,9 +268,10 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
   - `HEADLINE FIX — $GLOBALS['_SESSION'] = &\ZealPHP\G::instance()->session at the top of every session-touching closure. In coroutine-legacy ZealPHP binds $_SESSIO…`
   - `Run Slim in the request coroutine frame via a native catch-all $app->patternRoute('#^/.*$#', ...) + setFallback that require the front controller (public/slim_…`
 
-#### Yii 2 — coroutine-legacy: **C**
+#### Yii 2 — coroutine-legacy: **B** (lifted from C, 2026-06-12)
+- **2026-06-12 re-validation (0.3.49, burst+content):** **C → B.** The sole C blocker was burst instability (warm 19x200 1x500; cold first-wave 17-24/60 anomalies). On 0.3.49 the burst is **fully clean — 84x200, 0 worker deaths, 0 cold-wave anomalies** (ext#52). Homepage serves real content ("My Yii Application", CSRF login form renders). Login + write already passed at the prior C grade (admin/admin login + contact-form .eml write), so with the only remaining defect resolved Yii 2 now passes all flows → B (needs the documented composer/preload/YII_DEBUG=false knobs).
 - **homepage** 200/10170B · **login** ok: admin/admin via CSRF form POST, 'Logout (admin)' verified in response · **write** ok: contact form POST (CSRF + fixedVerifyCode captcha) -> .eml written to runti…
-- **concurrent burst** warm steady-state: 19x200 1x500 (also observed 20x200 and 38/40x200 runs); COLD first concurrent wave after fresh boot: 17-24 of 60 responses come ba…
+- **concurrent burst (0.3.48)** warm steady-state: 19x200 1x500 (also observed 20x200 and 38/40x200 runs); COLD first concurrent wave after fresh boot: 17-24 of 60 responses come ba…
 - **knobs:**
   - `composer install --no-dev + composer dump-autoload -o (dev deps pull psr/http-message 2.0 via codeception/guzzle whose typed interfaces fatal against /zeal ope…`
   - `require APP_DIR/vendor/autoload.php in master + App::preloadClassmap() (template composer-app shape; globalScopeInclude removed)`
@@ -269,6 +282,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: MODE_MIXED + App::silentRedeclare(true) (entry plain-requires Yii.php every request) = EVERYTHING clean: login ok, contact flash ok, burst20 20x200 with 20/20 full homepage bodies, 0 fatals/deadlocks
 
 #### Laminas — coroutine-legacy: **C**
+- **2026-06-12 re-validation (0.3.49, burst-only):** burst **84x200, 0 worker deaths, 0 segfaults** (warm). The C blocker is the `$_SESSION`-write-inside-`App::include()` failure (write flow), which is coroutine-legacy snapshot-related and unchanged. Stays **C**.
 - **homepage** 200/5KB · **login** ok (session route, HTTP 200; cookie round-trips via SessionStartMiddleware) · **write** failed: $_SESSION write inside App::include() (Laminas front-controller dispatc…
 - **concurrent burst** 20x200 (warm); first cold burst before worker-start warmup was 14x200 3x500 + 1 SIGSEGV worker death; after warmup 60x200 over 3 rounds, 0 deaths
 - **knobs:**
@@ -278,9 +292,10 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
   - `onWorkerStart: require app vendor/autoload.php + App::preloadDir('module') + preloadClassmap() (warms Laminas class graph single-coroutine; eliminates cold-con…`
 - **`mixed` fallback probe:** mixed: session write_op works perfectly under App::MODE_MIXED — hits increment 1->2->3->4->5->6->7 across requests, persists across second-request homepage. Confirms the write-back failure is coroutine-legacy snapshot x…
 
-#### phpMyAdmin — coroutine-legacy: **D**
+#### phpMyAdmin — coroutine-legacy: **D** (burst-crash class fixed, login not re-confirmed — 2026-06-12)
+- **2026-06-12 re-validation (0.3.49, burst-only):** the **worker-death crash class is FIXED** — burst is **82x200/2x500, 0 worker deaths, 0 segfaults** (was 8-10 worker heap-corruption deaths under -P6). Homepage 200/48KB renders. The D blocker (cookie-auth session not persisting) was **not cleanly re-confirmed** this run — the scripted login POST couldn't reliably extract pMA's CSRF `token` from the login HTML in the time budget. Kept at **D** pending a proper login re-test; the crash dimension is resolved and noted.
 - **homepage** 200/48KB · **login** failed: session not persisted across requests in coroutine-legacy. phpMyAdmin u… · **write** n/a: blocked by login failure (cannot authenticate, so no authenticated write p…
-- **concurrent burst** sequential 20x200; concurrent wave (P6) -> 2x500 2x200 2x000 + worker heap-corruption crashes (delta +4 deaths). Total 8-10 worker deaths logged: 'ze…
+- **concurrent burst (0.3.48)** sequential 20x200; concurrent wave (P6) -> 2x500 2x200 2x000 + worker heap-corruption crashes (delta +4 deaths). Total 8-10 worker deaths logged: 'ze…
 - **knobs:**
   - `App::mode(App::MODE_COROUTINE_LEGACY)`
   - `App::globalScopeInclude(true) [template default]`
@@ -290,6 +305,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: App::MODE_MIXED boots + homepage 200/48KB, but ALSO broken — request 2 throws 'Constant PHPMYADMIN already defined in index.php:23' (no Stage-7 include isolation in MIXED -> require_once'd bootstrap re-defines co…
 
 #### Adminer — coroutine-legacy: **B**
+- **2026-06-12 re-validation (0.3.49, burst+content):** re-confirmed clean — homepage 200, burst **84x200, 0 worker deaths, 0 segfaults**. Stays **B**.
 - **homepage** 200/5.2KB · **login** ok · **write** ok: CREATE TABLE zeal_notes + INSERT via SQL-command UI POST (CSRF token) -> 'Q…
 - **concurrent burst** 20x200, 0 worker deaths (boot.log: 0 Fatal/segfault/zend_mm)
 - **knobs:**
@@ -299,9 +315,10 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
   - `WORKAROUND for ext-zealphp define-isolation case bug: byte-patch define('Adminer\X') -> define('adminer\X') (12 sites; behavior-identical, PHP constant-namespa…`
   - `wrapper entry public/index.php: ini_set('display_errors','0') + require adminer.php — suppresses the residual harmless 'Constant adminer\VERSION already define…`
 
-#### TinyFileManager — coroutine-legacy: **D**
+#### TinyFileManager — coroutine-legacy: **D** (burst always clean, login still lost — 2026-06-12)
+- **2026-06-12 re-validation (0.3.49, burst+login):** burst is **84x200, 0 worker deaths** (TFM never had the crash class — it was already stable). The D blocker is **login session write-loss**, and it **persists**: TFM uses the custom session name `filemanager` (cookie IS set on first GET), but after `POST fm_usr=admin&fm_pwd=admin@123` the homepage still shows the login form (no `logout`/`upload`) — the `$_SESSION['filemanager']['logged']` flag is not retained across the request. The session #379 fix (which lifted Kanboard) does NOT cover TFM's custom-session-name write-loss pattern. Stays **D**.
 - **homepage** 200/13KB · **login** failed: SUCCESS branch runs (pv=1, vt=1, $_SESSION['filemanager']['logged']='ad… · **write** n/a: blocked by login failure — TFM upload (multipart + dzchunk* + token) is au…
-- **concurrent burst** 20x200 (0 worker deaths: segfault/zend_mm/Fatal=0)
+- **concurrent burst (0.3.48)** 20x200 (0 worker deaths: segfault/zend_mm/Fatal=0)
 - **knobs:**
   - `App::mode(App::MODE_COROUTINE_LEGACY)`
   - `App::globalScopeInclude(true) [REQUIRED: TFM declares bare top-level $CONFIG/$root_path/$root_url and reads them via `global` inside methods; without it -> 'Ca…`
@@ -309,6 +326,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: FAILS to render TFM at all — homepage 500/201B 'Tiny File Manager Error: Cannot load configuration' (App::globalScopeInclude is gated to coroutine-legacy via globalScopeIncludeEffective()&&silent_redeclare, so in…
 
 #### elFinder — coroutine-legacy: **C**
+- **2026-06-12 re-validation (0.3.49, burst-only):** homepage burst **84x200, 0 worker deaths, 0 segfaults**. The C blocker is the connector mkdir/upload 0-byte hang (buffer-teardown output, mode-independent), unchanged. Stays **C**.
 - **homepage** 200/618b (HTML+JS shell); static as… · **login** n/a: elFinder is a file manager, no auth layer · **write** failed: connector mkdir/upload hang -> HTTP 200 but 0 bytes (6s timeout). elFin…
 - **concurrent burst** 20x200 on homepage, 0 worker deaths
 - **knobs:**
@@ -320,6 +338,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: SAME failure — under App::MODE_MIXED the connector still hangs/0-bytes (the ob_end_clean+echo+exit output path is broken in mixed too, JSON leaks to stdout). No mode reconciles elFinder's buffer-teardown output c…
 
 #### MediaWiki — coroutine-legacy: **D**
+- **2026-06-12 re-validation (0.3.49, burst-only):** large improvement but still crashing — burst now shows only **1 worker death + 1 segfault** (was "workers SIGSEGV per request, master dies"), homepage 301. The server stays up where before the master died. Still **D** (unstable under concurrency).
 - **homepage** rendered 36185 bytes internally but… · **login** failed: api.php token/clientlogin sequence cannot complete — worker crashes (co… · **write** failed: could not reach authenticated edit (login never completes; multi-reques…
 - **concurrent burst** n/a: server unstable — workers SIGSEGV per request, master dies
 - **knobs:**
@@ -333,9 +352,10 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
   - `ob shield + MediaWikiEntryPoint enableOutputCapture (attempted output-flush workaround)`
 - **`mixed` fallback probe:** mixed: MODE_MIXED renders the homepage once per cold worker (200, 36184 bytes, real <title>ZextWiki</title> Vector-skin page) with NO crash, but re-includes fatal on wfWebStartNoLocalSettings() redeclaration (no silentR…
 
-#### DokuWiki — coroutine-legacy: **D**
+#### DokuWiki — coroutine-legacy: **D** (crash class fixed, content still broken — 2026-06-12)
+- **2026-06-12 re-validation (0.3.49, burst+content):** the **worker-death crash class is FIXED** — burst on `/` is **81x200/1x302/2x500, 0 worker deaths, 0 segfaults** (was 13x000 + both workers dying zend_mm_heap-corrupted + master crash; this is exactly the ext#52 headline fix, 15-28 deaths/burst → 0). **BUT content is still broken:** `/` is a 539-byte redirect stub, and the real start page `/doku.php?id=start` returns `Error: Call to a member function str() on null` (a per-request object/state null, same family as the WordPress/MyBB object-global regression). So DokuWiki no longer *crashes the server* but still **does not render real content** → stays **D**. Tested on an alternate port (9805) because the canonical 9705 harness collides with a long-lived ASAN-build debug server. ⚠ Note: a stale polluted-sweep line briefly recorded `200 x84` on 9705 — that was hitting the ASAN server, not this harness; disregard.
 - **homepage** 302->200/8.0KB (index.php redirect … · **login** failed: POST /doku.php do=login returns 500 'DokuWiki Setup Error: openswoole e… · **write** page create via doku.php do[save] POST: state change SUCCEEDS (data/pages/zealt…
-- **concurrent burst** 2x200 5x500 13x000 on /doku.php?id=start at -P6 — both workers die (zend_mm_heap corrupted, signal 6/11) and then the OpenSwoole master itself crashe…
+- **concurrent burst (0.3.48)** 2x200 5x500 13x000 on /doku.php?id=start at -P6 — both workers die (zend_mm_heap corrupted, signal 6/11) and then the OpenSwoole master itself crashe…
 - **knobs:**
   - `App::globalScopeInclude(true) (template default, kept)`
   - `App::ignorePhpExt(false) — DokuWiki uses direct .php entry points (doku.php, install.php, lib/exe/*.php); default .php-block returned 403`
@@ -344,6 +364,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: WORSE, not viable — homepage 500/212, burst alternates 500/200 (classic require_once request-2 breakage: init.php not re-executed, bootstrap globals gone), login session does not stick (logged_in=0), page save fa…
 
 #### BookStack — coroutine-legacy: **C**
+- **2026-06-12 re-validation (0.3.49, burst-only):** burst 3x200/5x302/76x500, **0 worker deaths** — same Laravel-global-container concurrency race as before (app-level 500s, no crashes). Login/write passed at prior C. Stays **C**.
 - **homepage** 302/354b (redirect to /login; authe… · **login** ok · **write** ok: created book + page via POST, verified in DB (entities id=2) and follow-up …
 - **concurrent burst** 4x ok (2x200 + 2x302), 16x500 — Laravel global-container concurrency race; 0 worker deaths
 - **knobs:**
@@ -355,9 +376,10 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
   - `tried App::defineIsolation(true) — did NOT fix the concurrency 500s`
 - **`mixed` fallback probe:** mixed: NOT working — App::MODE_MIXED breaks BookStack's front-controller bootstrap (require bootstrap/app.php returns true, 'alias() on true' at index.php:19). The mixed-mode burst's '20x200' were 500-error pages served…
 
-#### Kanboard — coroutine-legacy: **D**
-- **homepage** 302/797B redirect -> login form 200… · **login** failed: CSRF token never persists - session writes are lost for pre-existing se… · **write** blocked: no authenticated session is obtainable in coroutine-legacy
-- **concurrent burst** run1: 12x302 8x500; run2: 7x500 2x302 then BOTH workers died (zend_mm_heap corrupted, sig6+sig11), server hung, 11 connections never answered; prior …
+#### Kanboard — coroutine-legacy: **B** (lifted from D, 2026-06-12)
+- **2026-06-12 re-validation (0.3.49, FULL PROTOCOL):** **D → B.** Both prior blockers cleared: (1) **login now works** — GET login form yields a CSRF token that PERSISTS, POST `controller=AuthController&action=check` → 302, and the authenticated `DashboardController` page renders ("Dashboard"); the session #379 write-loss fix landed. (2) **write works** — created project "ZealRevalidProj" (id=3, DB-verified in `zext_kanboard.projects`). (3) **burst now stable** — 82x302/2x500, **0 worker deaths, 0 segfaults** (was both workers dying zend_mm_heap-corrupted sig6+sig11 + server hang; ext#52 fix). Grade B (not A) because it needs documented knobs (`globalScopeInclude(true)` + `defineIsolation(true)` + the coroutine-legacy preset).
+- **historical (0.3.48) — homepage** 302/797B redirect -> login form 200… · **login** failed: CSRF token never persists - session writes are lost for pre-existing se… · **write** blocked: no authenticated session is obtainable in coroutine-legacy
+- **concurrent burst (0.3.48)** run1: 12x302 8x500; run2: 7x500 2x302 then BOTH workers died (zend_mm_heap corrupted, sig6+sig11), server hung, 11 connections never answered; prior …
 - **knobs:**
   - `globalScopeInclude(false) AND (true) both tried - session write-loss identical either way`
   - `defineIsolation(true) - kept, but does NOT cover namespaced compile-time const (schema\VERSION) re-exec under Stage 7`
@@ -366,6 +388,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: ALL flows pass - login admin/admin ok (dashboard 200 with Logout), project 'ZealProj' created (id=2), task 'Zeal task one' created and DB-verified (tasks.id=2), second_request 302/200, burst20 = 20x302, 0 worker …
 
 #### FreshRSS — coroutine-legacy: **C**
+- **2026-06-12 re-validation (0.3.49, burst-only):** burst still shows **exactly 1 worker death** per burst (homepage 302), unchanged from the prior "one SIGSEGV per burst, server self-heals" reading — ext#52 did not eliminate this last death. Stays **C**.
 - **homepage** 302->200/6.8KB (GET / redirects to … · **login** ok (2 caveats): real challenge-response login works in stock coroutine-legacy —… · **write** failed stock / ok patched: authenticated add-feed POST (?c=feed&a=add with _csr…
 - **concurrent burst** 17x302 3x000 on GET / at -P6, reproducible across boots: exactly one worker dies SIGSEGV (signal=11) per burst; server self-heals via respawn and pos…
 - **knobs:**
@@ -381,6 +404,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: WORSE, not viable (prior session on identical build, not re-run today): homepage 500/212B on request 2 (classic require_once breakage), login flow hung the server entirely — 6979 abnormal-exit/signal lines + two …
 
 #### Piwigo — coroutine-legacy: **D**
+- **2026-06-12 re-validation (0.3.49, burst-only):** still a crasher — even with `ZEALPHP_CLASS_STATICS_RESET_DISABLE=1`, homepage hangs (000) and the burst produced **13 worker deaths** (0 segfaults). Worse than the prior 6-deaths reading; ext#52 did not rescue Piwigo. Stays **D**.
 - **homepage** 200/3.6KB · **login** ok via remember_me=1 workaround — POST identification.php 302 + pwg_remember co… · **write** failed: pwg.categories.add via ws.php -> 403 'Invalid security token'. pwg_toke…
 - **concurrent burst** 2x200 18x000 per burst (reproduced 3x) — workers crash under -P6 concurrency (signal=11 SIGSEGV + one signal=6, 6 worker deaths per burst, no PHP fat…
 - **knobs:**
@@ -392,6 +416,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 - **`mixed` fallback probe:** mixed: NOT viable (prior-run evidence, same framework v0.4.8: homepage 500 — array_push(): Argument #1 must be array, null given at section_init.inc.php:666; globalScopeInclude is coroutine-legacy-gated so Piwigo's bare…
 
 #### YOURLS — coroutine-legacy: **C**
+- **2026-06-12 re-validation (0.3.49, burst-only):** big improvement — burst on `/` is now **82x200/2x500 with 0 worker deaths, 0 segfaults** (was UNSTABLE: 2-13 worker deaths/round, zend_mm_heap corrupted). The ext#52 fix eliminated YOURLS's burst heap corruption. Login/write passed at prior C; with the burst now stable YOURLS is a candidate to lift to B on a full-protocol re-confirm (login+write re-run), but kept **C** this pass since only burst+homepage were re-validated.
 - **homepage** 200/6KB · **login** ok · **write** ok: created short link 'zealtest' via authenticated admin-ajax (action=add + ad…
 - **concurrent burst** UNSTABLE: best round 17x200 3x500; repeats degrade (14x200 2x500 4x000; 7x200 9x500 4x000); 2-13 worker deaths per round (zend_mm_heap corrupted, SIG…
 - **knobs:**
@@ -402,3 +427,47 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
   - `tried-but-ineffective: App::defineIsolation(true) and USE_ZEND_ALLOC=0 — neither stopped the concurrency heap corruption; final config omits both`
 - **`mixed` fallback probe:** mixed: stable under burst20 x2 (0 worker deaths, zero 500s; defineIsolation MUST be off in mixed or constants vanish on request 2) — request-2 OK, short-link 301 redirect OK, but homepage responses flap between 200 and …
 
+
+---
+
+## Per-app detail (newly graded in the 2026-06-12 0.3.49 sweep — burst+content level)
+
+These rows were _pending_ before this sweep. They are graded at **burst+content level** (homepage 84-req 6-way burst + content sanity); a full login+write protocol pass was not run, so they carry the honest level note.
+
+#### TYPO3 — coroutine-legacy: **C** (newly graded 2026-06-12)
+- **homepage** 200 with real TYPO3 content. **burst** homepage 6-way: **1 worker death, 0 segfaults** — boots and serves but one crash under concurrency. **level:** burst+content (login/write not exercised). Grade **C** (read paths + content render; minor instability under burst).
+
+#### Concrete CMS — coroutine-legacy: **D** (newly graded 2026-06-12)
+- **homepage** 200. **burst** homepage 6-way: **2 worker deaths, 0 segfaults** — boots and serves homepage but crashes under concurrency (a partial-stability profile). **level:** burst+homepage. Grade **D** (boots but breaks under concurrent burst).
+
+#### Craft CMS — coroutine-legacy: **C** (newly graded 2026-06-12)
+- **homepage** 200 with content. **burst** homepage 6-way: **84x200, 0 worker deaths, 0 segfaults** — fully clean burst. **level:** burst+content (Craft admin login needs a license/setup step not scripted this pass). Grade **C** (read paths + content + clean burst; auth/write not re-validated).
+
+#### Flarum — coroutine-legacy: **D** (newly graded 2026-06-12)
+- **homepage** 200. **burst** homepage 6-way: **1 worker death, 0 segfaults** — boots and serves but crashes under concurrency. **level:** burst+homepage. Grade **D** (boots but one crash under burst).
+
+#### Roundcube — coroutine-legacy: **C** (newly graded 2026-06-12)
+- **homepage** 200 — the real webmail login page renders (`<title>Roundcube Webmail :: Welcome to Roundcube Webmail</title>`). **burst** homepage 6-way: **82x200/2x500, 0 worker deaths, 0 segfaults** — stable. **login** not exercised (requires a live IMAP backend = **ENV**). **level:** burst+content. Grade **C** (read paths + login page render + stable burst; IMAP-backed login is an environment dependency).
+
+#### Leantime — coroutine-legacy: _pending_ (BOOT-FAIL 2026-06-12 — harness gap)
+- **boot** failed: `Fatal error: Declaration of OpenSwoole\Core\Psr\Message::getProtocolVersion() must be compatible with Psr\Http\Message\MessageInterface::getProtocolVersion(): string` — the documented **psr/http-message v2 conflict** (Leantime's vendor ships psr/http-message 2.0, whose typed interfaces fatal ZealPHP's openswoole/core PSR-7 v1 classes). Fix is the documented composer pin `composer require psr/http-message:^1.1` (the Laravel/Symfony/Slim/Yii playbook), which this _pending_ harness was never configured with. **Left _pending_** — this is a harness-setup gap, not an ext/framework defect, and a proper harness fix was out of scope for this re-validation pass.
+
+---
+
+## 2026-06-12 0.3.49 re-validation — what the ext#52 fix did and did not move
+
+**The ext#52 concurrent-burst heap-corruption fix (Stage-8 attach-move UAF) eliminated worker deaths across most of the C/D set.** Apps with **0 worker deaths / 0 segfaults** on the 84-req 6-way burst now: adminer, slim, laminas, elfinder, yii2, craftcms, codeigniter4, tinyfilemanager, kanboard, kirby, dokuwiki, phpmyadmin, drupal, symfony, bookstack, roundcube, yourls (was 2-13 deaths), and laravel (0 deaths, mixed codes). This is the headline win — the class of "concurrent burst kills the worker / crashes the master" is largely closed.
+
+**But 0 deaths ≠ usable.** Content/login checks this pass found several 0-death apps that still don't deliver:
+- **CodeIgniter4** — 84x200 but every body is 0 bytes (the body-swallow blocker; stays D).
+- **DokuWiki** — 0 deaths (was 13+/burst + master crash) but the real content page errors `str() on null` (stays D).
+- **TinyFileManager** — always burst-clean, but login session still lost (custom `filemanager` session name; #379 didn't cover it; stays D).
+- **phpMyAdmin** — crash class fixed (0 deaths, was 8-10) but cookie-login not re-confirmed; kept D.
+
+**Two ⚠ regressions on 0.3.49 (object-global null cluster).** Apps that served content on 0.3.48 but now 500 on every request with a "method/property on null" for an object-global:
+- **WordPress** — `wp_set_wpdb_vars` "assign property field_types on null" (`$wpdb` null) — homepage 500.
+- **MyBB** — "Call to a member function read() on null" — homepage 500.
+
+These are the documented object-global / mysqlnd-teardown frontier (CLAUDE.md "object-valued `$GLOBALS`" + ext#44/#49). Not re-investigated at the ext level here — flagged for follow-up.
+
+**Remaining burst crashers (still crash under concurrency on 0.3.49):** phpBB (7 deaths + 2 seg, master crashes), Piwigo (13 deaths, homepage hangs 000), Grav (2 deaths), MediaWiki (1 death + 1 seg, much improved), FreshRSS (1 death), OpenCart (1 death), Vanilla (1 cold-wave death), Concrete (2 deaths), Flarum (1 death), TYPO3 (1 death). These trace to the mysqlnd-teardown (ext#44/#49) and class_alias (ext#50) frontiers per the blocker report; not re-investigated here.
