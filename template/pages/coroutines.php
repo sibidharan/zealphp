@@ -197,24 +197,30 @@ PHP]); ?>
   <code>superglobals(true) + isolation(coroutine)</code> combo isolates the
   <strong>7 PHP superglobals</strong> (<code>$_GET</code>, <code>$_POST</code>,
   <code>$_COOKIE</code>, <code>$_SERVER</code>, <code>$_FILES</code>,
-  <code>$_REQUEST</code>, <code>$_SESSION</code>) plus <code>header()</code> /
+  <code>$_REQUEST</code>, <code>$_SESSION</code> &mdash; that's <strong>S1
+  Superglobals</strong>) plus <code>header()</code> /
   <code>setcookie()</code> response state per coroutine.
   <strong><code>App::mode(App::MODE_COROUTINE_LEGACY)</code> goes much further</strong> &mdash;
   it auto-enables the full per-coroutine isolation stack so traditional request-style
   PHP runs concurrently with <em>every</em> request-state primitive isolated:
   <code>$GLOBALS</code> / <code>global $x</code> (including object-valued globals like
-  <code>$wpdb</code>, ext&nbsp;0.3.23), function-local <code>static $x</code>,
-  conditional <code>function</code>/<code>class</code> re-declaration (first wins), and
-  per-request <code>require_once</code> / <code>include_once</code> re-execution.
-  Each stage is also a standalone fluent setter (<code>App::coroutineGlobalsIsolation()</code>,
-  <code>App::coroutineStaticsIsolation()</code>, <code>App::silentRedeclare()</code>,
-  <code>App::includeIsolation()</code>), default off outside <code>coroutine-legacy</code>.
-  <code>define()</code> constant isolation is a separate opt-in via
+  <code>$wpdb</code>, ext&nbsp;0.3.23) &mdash; <strong>S2 Globals</strong>;
+  function-local <code>static $x</code> &mdash; <strong>S5a</strong>;
+  conditional <code>function</code>/<code>class</code> re-declaration (first wins) &mdash;
+  <strong>S3 Redeclare</strong>; and
+  per-request <code>require_once</code> / <code>include_once</code> re-execution &mdash;
+  <strong>S7 Include-once</strong>.
+  Each stage is also a standalone fluent setter (<code>App::coroutineGlobalsIsolation()</code> (S2),
+  <code>App::coroutineStaticsIsolation()</code> (S5a), <code>App::silentRedeclare()</code> (S3),
+  <code>App::includeIsolation()</code> (S7)), default off outside <code>coroutine-legacy</code>.
+  <code>define()</code> constant isolation (<strong>S10 Constants</strong>) is a separate opt-in via
   <code>App::defineIsolation(true)</code> (not auto-enabled by the preset). What it does <strong>NOT</strong> isolate: live DB
   connections and resource handles (process-shared by nature) &mdash; use one connection per
   coroutine. For pure <code>require_once</code> apps with no autoloader (classic unmodified
   WordPress), the race-free home is <code>App::mode(App::MODE_LEGACY_CGI)</code> (process-isolated).
   See <a href="#lifecycle-modes">the mode matrix</a> below.
+  <em>Stage names (S1&ndash;S12) follow the canonical taxonomy in
+  <code>docs/architecture/isolation-stages.md</code>.</em>
 </div>
 
 <h3 id="coroutine-isolation-hybrid" class="coro-h3">Mode 6 — Coroutine + Process Isolation (the hybrid)</h3>
@@ -268,12 +274,12 @@ App::hookAll(\OpenSwoole\Runtime::HOOK_ALL); // hooks pipe I/O (resolved from nu
   <tr><th>Pattern</th><th>Why it leaks</th><th>What to do</th></tr>
   <tr>
     <td><code>function foo() { static $cache = []; ... }</code></td>
-    <td>Static-in-function lives in the function's symbol table, which is process-scoped.</td>
+    <td>Static-in-function lives in the function's symbol table, which is process-scoped. <small>(<code>coroutine-legacy</code> isolates these per coroutine — <strong>S5a</strong> — and resets them to the boot template per request — <strong>S11b</strong>.)</small></td>
     <td>Don't use it for request-scoped data. Use a local variable or a property on <code>$g</code>.</td>
   </tr>
   <tr>
     <td><code>class MyService { private static $instance; }</code></td>
-    <td>Class-level statics live on the class, which is loaded once per worker.</td>
+    <td>Class-level statics live on the class, which is loaded once per worker. <small>(<code>coroutine-legacy</code> isolates class statics per coroutine — <strong>S5b</strong> — and resets them per request — <strong>S11c</strong>.)</small></td>
     <td>Treat any class static as cross-request state. Singletons are worker-lifetime.</td>
   </tr>
   <tr>
@@ -288,7 +294,7 @@ App::hookAll(\OpenSwoole\Runtime::HOOK_ALL); // hooks pipe I/O (resolved from nu
   </tr>
   <tr>
     <td><code>ini_set('date.timezone', ...)</code> and friends</td>
-    <td>Mutates process state. PHP doesn't reset it between requests.</td>
+    <td>Mutates process state. PHP doesn't reset it between requests. <small>(In <code>coroutine-legacy</code> the stage stack isolates these per coroutine: timezone is <strong>S9d</strong>, <code>ini_set()</code> values <strong>S9g</strong>, locale <strong>S9b</strong>, umask <strong>S9c</strong>, mb encoding <strong>S9e</strong>, cwd <strong>S9a</strong> — see <a href="#isolation-scope">isolation scope</a>.)</small></td>
     <td>Set globally at boot (in <code>app.php</code> before <code>App::run()</code>) or accept that the change is sticky. Don't <code>ini_set()</code> per request.</td>
   </tr>
   <tr>

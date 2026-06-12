@@ -100,7 +100,7 @@ $rungs = [
     'n'    => '4',
     'title' => 'Full coroutine mode',
     'code'  => 'App::mode(\'coroutine\');  // modern default: per-coroutine $g isolation + HOOK_ALL non-blocking I/O',
-    'desc'  => '<code>App::mode(\'coroutine\')</code> is the modern, recommended preset — <code>superglobals(false)</code> + per-coroutine <code>$g</code>/<code>RequestContext</code> isolation + <code>HOOK_ALL</code> non-blocking I/O, no extension required. Read input via <code>$g->get</code> / <code>$g->post</code> / <code>$g->session</code>. If you have legacy request-style code that reads real <code>$_GET</code>/<code>$_SESSION</code> and you want it to run under coroutine concurrency, <code>App::mode(\'coroutine-legacy\')</code> is the <strong>experimental</strong> compatibility runtime (requires ext-zealphp; it isolates the seven superglobals, <code>$GLOBALS</code>, function statics, and <code>require_once</code> state per coroutine). See <a href="/coroutines#lifecycle-modes">lifecycle modes</a> for the full preset matrix.',
+    'desc'  => '<code>App::mode(\'coroutine\')</code> is the modern, recommended preset — <code>superglobals(false)</code> + per-coroutine <code>$g</code>/<code>RequestContext</code> isolation + <code>HOOK_ALL</code> non-blocking I/O, no extension required. Read input via <code>$g->get</code> / <code>$g->post</code> / <code>$g->session</code>. If you have legacy request-style code that reads real <code>$_GET</code>/<code>$_SESSION</code> and you want it to run under coroutine concurrency, <code>App::mode(\'coroutine-legacy\')</code> is the <strong>experimental</strong> compatibility runtime (requires ext-zealphp; it isolates the seven superglobals (S1), <code>$GLOBALS</code> (S2), function-local statics (S5a), and <code>require_once</code> state (S7) per coroutine). See <a href="/coroutines#lifecycle-modes">lifecycle modes</a> for the full preset matrix.',
     'wins'  => 'Peak throughput. <a href="/performance">117k req/s on 4 workers</a> — Express on the same box does 20k. Thousands of concurrent connections per worker, sub-millisecond TTFB.',
     'gives_up' => 'Blocking I/O outside coroutine-hooked extensions still blocks the worker. Use <code>HOOK_ALL</code> and coroutine-aware drivers. <code>coroutine-legacy</code> is experimental and needs ext-zealphp.',
     'highlight' => true,
@@ -147,7 +147,7 @@ foreach ($rungs as $r):
     routes to the right OpenSwoole response without you knowing.
   </li>
   <li>
-    <strong>Per-coroutine superglobal isolation.</strong>
+    <strong>Per-coroutine superglobal isolation (S1).</strong>
     ext-zealphp hooks into OpenSwoole's yield/resume/close scheduler callbacks so
     <code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code> are saved and restored
     on every context switch. <code>superglobals(true) + enableCoroutine(true)</code> just works —

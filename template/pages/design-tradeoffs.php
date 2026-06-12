@@ -48,7 +48,7 @@
         <code>$g-&gt;get</code> / <code>$g-&gt;session</code> (<code>Coroutine::getContext()</code>).
         <code>App::superglobals(true)</code> populates <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>
         per request &mdash; with ext-zealphp, these are <strong>per-coroutine safe</strong> (saved/restored
-        on every yield/resume), so legacy code works with full coroutine concurrency. Without ext-zealphp,
+        on every yield/resume — S1), so legacy code works with full coroutine concurrency. Without ext-zealphp,
         superglobals mode runs sequentially (one request at a time per worker). The lifecycle is now
         described by two orthogonal axes with a one-call preset:
         <code>App::mode()</code> (constants: <code>App::MODE_COROUTINE</code>,
@@ -74,7 +74,7 @@
         <li><strong class="tradeoffs-strong-light">Mitigation:</strong> coroutine mode is the documented default for
           new projects (scaffold ships it). With <code>ext-zealphp</code> (v0.3.0+), <strong>all mode
           combinations are safe</strong> &mdash; the extension provides per-coroutine superglobal
-          save/restore, so <code>superglobals(true) + enableCoroutine(true)</code> just works.
+          save/restore (S1), so <code>superglobals(true) + enableCoroutine(true)</code> just works.
           Without ext-zealphp, the legacy constraint applies: unsafe combinations throw
           <code>RuntimeException</code> at boot. The
           <a href="/coroutines" class="tradeoffs-link">/coroutines</a> page has a side-by-side safety
@@ -225,7 +225,7 @@ PHP]); ?>
     <div class="tradeoffs-block">
       <h2 class="tradeoffs-h2">7. The discipline contract for user-level statics</h2>
       <p class="tradeoffs-p">
-        ZealPHP isolates the state <em>it</em> owns (request, response, session, $_SERVER) per coroutine. It
+        ZealPHP isolates the state <em>it</em> owns (request, response, session, $_SERVER — S1) per coroutine. It
         does <strong>not</strong> isolate <code>static $cache = []</code> inside your handler, or
         <code>private static $instance</code> on your singleton class. Those live in worker process memory and
         survive every request boundary.

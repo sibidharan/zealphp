@@ -354,7 +354,7 @@ $app->addMiddleware(new RequestIdMiddleware('X-Correlation-Id', trustInbound: fa
 PHP]); ?>
 
 <h3 id="ini-isolation" class="mw-h3"><code>IniIsolationMiddleware</code></h3>
-<p>Snapshots <code>ini_set()</code> changes (<code>timezone</code>, <code>error_reporting</code>, <code>display_errors</code>, <code>memory_limit</code>, etc.) at request start and restores them on exit. Opt-in defence against ini-value leakage across requests on long-running workers — see <a href="/coroutines#what-survives">what survives a request</a>. Enable with <code>ZEALPHP_INI_ISOLATE=1</code> or by registering it explicitly.</p>
+<p>Snapshots <code>ini_set()</code> changes (<code>timezone</code>, <code>error_reporting</code>, <code>display_errors</code>, <code>memory_limit</code>, etc.) at request start and restores them on exit. Opt-in defence against ini-value leakage across requests on long-running workers — see <a href="/coroutines#what-survives">what survives a request</a>. Enable with <code>ZEALPHP_INI_ISOLATE=1</code> or by registering it explicitly. This is a framework PSR-15 middleware for setups <em>without</em> ext-zealphp; coroutine-legacy isolates <code>ini_set()</code> per coroutine natively at the ext level (the <code>S9g</code> isolation stage), so you don't need this middleware there.</p>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
 use ZealPHP\Middleware\IniIsolationMiddleware;

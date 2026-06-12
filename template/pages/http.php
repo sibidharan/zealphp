@@ -166,7 +166,8 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
 <p>
   <strong>Recommended:</strong> use <code>$g-&gt;get</code> / <code>$g-&gt;session</code> (zero overhead, always safe).
   With ext-zealphp, <code>$_GET</code> / <code>$_SESSION</code> are also per-coroutine safe —
-  saved/restored on every yield/resume via OpenSwoole scheduler hooks.
+  saved/restored on every yield/resume via OpenSwoole scheduler hooks (the superglobal-snapshot
+  isolation stage, <code>S1</code>).
 </p>
 
 <h3 class="parity-group">$_SERVER keys</h3>
@@ -225,7 +226,8 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
 <p>
   On PHP 8.3, use <code>throw new \ZealPHP\HaltException()</code> instead of <code>exit()</code>.
   On PHP 8.4+, <code>exit()</code>/<code>die()</code> throw <code>\ExitException</code> which ZealPHP catches
-  and treats as a clean halt.
+  and treats as a clean halt. The exit-hook isolation stage (<code>S12</code>, <code>App::hookExit()</code>)
+  routes <code>exit()</code>/<code>die()</code> through <code>\ZealPHP\HaltException</code> so the worker survives.
 </p>
 
 <h3 id="parity-gaps" class="parity-group">Known gaps</h3>
@@ -233,10 +235,10 @@ foreach ($demos as [$id, $title, $method, $url, $code]) {
   <tr><th>Gap</th><th>Why</th><th>Workaround</th></tr>
   <tr><td><code>.htaccess</code> file parsing</td><td>No runtime file watcher</td><td>Use middleware — all major directives have equivalents above</td></tr>
   <tr><td><code>PHP_SAPI</code> constant</td><td>Constants cannot be redefined at runtime</td><td>Use <code>php_sapi_name()</code> function (overridden, configurable)</td></tr>
-  <tr><td><code>exit()</code>/<code>die()</code> on PHP 8.3</td><td>Language constructs, not functions</td><td><code>throw new HaltException()</code> or upgrade to PHP 8.4+</td></tr>
-  <tr><td><code>define()</code> persists across requests</td><td>Long-running process — constants are permanent once defined</td><td><code>processIsolation(true)</code> for define-heavy apps (WordPress/Drupal)</td></tr>
-  <tr><td>Static class properties persist</td><td>Class entries survive between requests</td><td><code>max_request</code> recycles workers; avoid mutable static state</td></tr>
-  <tr><td><code>getenv()</code>/<code>putenv()</code> for CGI vars</td><td>Not request-scoped</td><td>Read from <code>$g-&gt;server</code> / <code>$_SERVER</code></td></tr>
+  <tr><td><code>exit()</code>/<code>die()</code> on PHP 8.3</td><td>Language constructs, not functions</td><td><code>throw new HaltException()</code> or upgrade to PHP 8.4+ (the <code>S12</code> exit-hook stage)</td></tr>
+  <tr><td><code>define()</code> persists across requests</td><td>Long-running process — constants are permanent once defined</td><td><code>processIsolation(true)</code> for define-heavy apps (WordPress/Drupal), or coroutine-legacy's opt-in constants stage (<code>S10</code>, <code>App::defineIsolation(true)</code>)</td></tr>
+  <tr><td>Static class properties persist</td><td>Class entries survive between requests</td><td><code>max_request</code> recycles workers; avoid mutable static state. Coroutine-legacy isolates class statics per coroutine (<code>S5b</code>) and resets them to the boot template per request (<code>S11c</code>).</td></tr>
+  <tr><td><code>getenv()</code>/<code>putenv()</code> for CGI vars</td><td>Not request-scoped</td><td>Read from <code>$g-&gt;server</code> / <code>$_SERVER</code>; coroutine-legacy isolates the environment per coroutine (the <code>S9h</code> process-settings sub-stage)</td></tr>
   <tr><td><code>mail()</code></td><td>Relies on system <code>sendmail</code></td><td>Configurable transport planned</td></tr>
 </table>
 
