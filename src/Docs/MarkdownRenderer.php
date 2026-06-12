@@ -40,7 +40,7 @@ final class MarkdownRenderer
         'streaming', 'websocket', 'WSROUTER-PRODUCTION', 'tasks-and-concurrency', 'middleware-and-authentication',
         'deployment', 'cli', 'hot-reload', 'fuzzing', 'coroutine-isolation-security-research',
         'fastcgi-backends', 'environment-variables',
-        'compatibility-database', 'running-modern-apps', 'competitive-analysis', 'standards-and-roadmap',
+        'compatibility-database', 'running-modern-apps', 'just-works-roadmap', 'competitive-analysis', 'standards-and-roadmap',
     ];
 
     /** GitHub blob base for `.md` files that aren't surfaced guides. */
