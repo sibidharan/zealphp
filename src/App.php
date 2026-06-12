@@ -2457,6 +2457,19 @@ class App
             $srv['REQUEST_URI'] = $srv['REQUEST_URI'] . '?' . $query;
         }
 
+        // SERVER_PORT / REMOTE_PORT — CGI/1.1 meta-variables are strings
+        // (RFC 3875 §4.1): mod_php publishes e.g. '443', but OpenSwoole's
+        // $request->server carries both as PHP ints, so the common strict
+        // `$_SERVER['SERVER_PORT'] === '443'` comparison silently fails
+        // (#306). Cast both to the mod_php string form. REQUEST_TIME(_FLOAT)
+        // stay int/float — mod_php itself publishes those numerically.
+        if (isset($srv['SERVER_PORT'])) {
+            $srv['SERVER_PORT'] = (string)$srv['SERVER_PORT'];
+        }
+        if (isset($srv['REMOTE_PORT'])) {
+            $srv['REMOTE_PORT'] = (string)$srv['REMOTE_PORT'];
+        }
+
         // CONTENT_TYPE / CONTENT_LENGTH — bare CGI vars mod_php sets from the
         // body headers (in addition to the HTTP_* copies buildServerVars made).
         if (isset($srv['HTTP_CONTENT_TYPE']) && !isset($srv['CONTENT_TYPE'])) {
@@ -2526,6 +2539,27 @@ class App
                 }
                 $srv[strtoupper($sk)] = is_scalar($sv) || $sv === null ? $sv : null;
             }
+        }
+        // SERVER_ADDR — mod_php always publishes the accepting interface IP;
+        // OpenSwoole's $request->server has no equivalent key, so synthesize
+        // it from the bound listen address (#306). A wildcard bind
+        // (0.0.0.0 / ::) resolves to the host's primary address once per
+        // worker (OpenSwoole doesn't expose the connection's local address);
+        // a hostname bind resolves the same way. Best-effort fallback is the
+        // loopback so the key is never absent (Undefined-array-key in vhost/
+        // multi-homed app code).
+        if (!isset($srv['SERVER_ADDR'])) {
+            /** @var string|null $serverAddr */
+            static $serverAddr = null;
+            if ($serverAddr === null) {
+                $bind = self::$instance !== null ? self::$instance->host : '';
+                if ($bind === '' || $bind === '0.0.0.0' || $bind === '::') {
+                    $bind = (string)gethostname();
+                }
+                $resolved = filter_var($bind, FILTER_VALIDATE_IP) ? $bind : @gethostbyname($bind);
+                $serverAddr = filter_var($resolved, FILTER_VALIDATE_IP) ? $resolved : '127.0.0.1';
+            }
+            $srv['SERVER_ADDR'] = $serverAddr;
         }
         if ($request->header) {
             foreach ($request->header as $key => $value) {
@@ -9589,7 +9623,61 @@ class App
                         }
                     }
                     if ($forbidsBody) {
-                        $response->parent->end();
+                        // The strip above only filters the PSR-side headers —
+                        // the native end() then re-injects its engine defaults
+                        // (`Content-Type: text/html` + `Content-Length: 0`) at
+                        // the C level, where no header() call can reach them:
+                        // a null value restores the default and ''/false emits
+                        // a malformed bare `Content-Type:`. So for 1xx/204/304
+                        // serialize the head ourselves and send it raw on the
+                        // detached connection — the wire-frame carries neither
+                        // (#290, RFC 9110 §6.4.1 / RFC 7230 §3.3.2). Keep-alive
+                        // follows the request's Connection/protocol semantics.
+                        $reason = $g->raw_status_reason ?? self::reasonPhrase($emitStatus);
+                        $head = 'HTTP/1.1 ' . $emitStatus . ' '
+                            . ($reason !== '' ? $reason : 'Status ' . $emitStatus) . "\r\n";
+                        $haveDate = false;
+                        $nativeHeaders = is_array($response->parent->header) ? $response->parent->header : [];
+                        foreach ($nativeHeaders as $hName => $hValues) {
+                            $hName = (string)$hName;
+                            if (strcasecmp($hName, 'Connection') === 0
+                                || strcasecmp($hName, 'Content-Length') === 0
+                                || strcasecmp($hName, 'Content-Type') === 0) {
+                                continue;
+                            }
+                            $haveDate = $haveDate || strcasecmp($hName, 'Date') === 0;
+                            foreach (is_array($hValues) ? $hValues : [$hValues] as $hv) {
+                                if (is_scalar($hv)) {
+                                    $head .= $hName . ': ' . (string)$hv . "\r\n";
+                                }
+                            }
+                        }
+                        $nativeCookies = is_array($response->parent->cookie) ? $response->parent->cookie : [];
+                        foreach ($nativeCookies as $setCookie) {
+                            if (is_string($setCookie)) {
+                                $head .= 'Set-Cookie: ' . $setCookie . "\r\n";
+                            }
+                        }
+                        if (!$haveDate) {
+                            $head .= 'Date: ' . gmdate('D, d M Y H:i:s') . " GMT\r\n";
+                        }
+                        $reqHeader = is_array($request->parent->header) ? $request->parent->header : [];
+                        $reqServer = is_array($request->parent->server) ? $request->parent->server : [];
+                        $connTok = $reqHeader['connection'] ?? '';
+                        $connTok = is_string($connTok) ? strtolower($connTok) : '';
+                        $proto = $reqServer['server_protocol'] ?? 'HTTP/1.1';
+                        $proto = is_string($proto) ? $proto : 'HTTP/1.1';
+                        $keepAlive = $connTok === 'keep-alive'
+                            || ($connTok !== 'close' && $proto === 'HTTP/1.1');
+                        $head .= 'Connection: ' . ($keepAlive ? 'keep-alive' : 'close') . "\r\n\r\n";
+                        $fd = $response->parent->fd;
+                        $response->parent->detach();
+                        if (is_int($fd) && self::$server !== null) {
+                            self::$server->send($fd, $head);
+                            if (!$keepAlive) {
+                                self::$server->close($fd);
+                            }
+                        }
                     } else {
                         $body = $serverResponse->getBody();
                         $body->rewind();
