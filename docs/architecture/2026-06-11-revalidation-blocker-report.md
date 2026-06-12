@@ -23,6 +23,8 @@ These four prove the session-persistence + exit-hook fixes landed. The first two
 
 ## 2. The DOMINANT remaining blocker — concurrent-burst heap corruption
 
+> **✅ RESOLVED 2026-06-12 — ext-zealphp v0.3.49 ([ext#52](https://github.com/sibidharan/ext-zealphp/issues/52) closed).** The ASAN session overturned the concurrent-compile theory below: the real bug was the engine's `zend_attach_symbol_table`/`zend_detach_symbol_table`/leave-reattach protocol MOVING values between frame CVs (no refcount change, single-flow assumption) while concurrent Stage-8 requests share `EG(symbol_table)` — a peer's attach hijacked `IS_INDIRECT` buckets and left stale aliases whose overwrite over-freed (ASAN 10/10: DokuWiki's top-level `$config_group`). ext 0.3.47 parked objects only; 0.3.49 parks ALL request-frame globals per yield + severs the bucket at park + parks `global $x`-bound REF slots (previously exempt by a pre/post-deref pointer bug) + restores through refs + scrubs on bailout. **Re-run of this section's matrix on v0.3.49:** DokuWiki 15–28 → **0**, phpMyAdmin 13–17 → **0**, Kanboard 0–16 → **0**, CodeIgniter4 → **0**; ASAN 0 reports, Valgrind 0 errors, pinned bidirectionally by ext `tests/062`. The section below is preserved as the original (mis)diagnosis record — note how the gdb `require_once` frame was a victim site, not the cause.
+
 **Signature:** worker `SIGSEGV` (11) / `SIGABRT` (6) with **`zend_mm_heap corrupted`** under 6-way concurrent burst. Sequential traffic is clean.
 
 **Affected (deaths per ~80-req burst):** phpMyAdmin 17, DokuWiki 15–28, Kanboard 0–16 (timing-sensitive), WordPress 6, Grav 3, FreshRSS 3, CodeIgniter4 1.
