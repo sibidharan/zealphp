@@ -83,3 +83,49 @@ for unmodified WordPress under sustained load (process-isolated, no coroutine te
 Supersedes the "bug #2 = `$wpdb` allocator mismatch" conclusion in
 `docs/architecture/2026-06-03-mysqlnd-teardown-rootcause.md` for the steady-state/under-load case
 (that doc predates the 0.3.46 vio shim).
+
+---
+
+## BREAKTHROUGH (later 2026-06-13): patched opcache eliminates the leak — the real fix
+
+The `max_request` recycle above *bounds* the leak; **opcache eliminates it at the source.** The
+leak comes from Stage 7 **re-COMPILING** WP's `require_once`'d class files every request (each
+re-compile mints an orphaned inherited-loser CE — the ext#12 leak, ~6.4 MB/req for WP because its
+inherited classes are method-heavy). The leak tests ran under **CLI SAPI with
+`opcache.enable_cli=0`** — opcache OFF — forcing re-compilation. With **opcache ON**, Stage 7 still
+**re-EXECUTES** the file (side effects stay fresh — the FPM contract preserved) but runs the
+**cached op_array instead of re-compiling** → no new loser CE → **no leak.** This is the
+"compile-once box."
+
+The only blocker was the documented php-src inconsistency (php-src#22214): stock opcache's
+function-table copy ignores `opcache.dups_fix`, fataling on WP's re-executed function files
+(`Cannot redeclare function _wp_can_use_pcre_u()`). **`patches/opcache-function-dups-fix.patch`**
+(shipped in the repo; built via `docker/patch-opcache.sh` / `ZEALPHP_PATCH_OPCACHE`) closes it.
+
+**Validated — unmodified WordPress, coroutine-legacy, real MySQL, clean ext 0.3.55 + patched
+opcache (`enable_cli=1 dups_fix=1 validate_timestamps=0`):**
+
+| | result |
+|---|---|
+| Sequential (100 req) | **100/100 200s, RSS FLAT (~12 KB/req vs 6400 KB/req opcache-off)**, 0 redeclare |
+| Concurrent (`wrk -t6 -c60 -d45s`) | **0 `zend_mm_heap corrupted`, 0 OOM, 0 redeclare, 0 abnormal exits**, 42.5 req/s (**10×** the 3.7 req/s opcache-off) |
+
+So the memory-safety story for unmodified WP under coroutine-legacy is **closed** with patched
+opcache — **no leak, no OOM, no worker-exit corruption, no `max_request`, no `USE_ZEND_ALLOC=0`.**
+The recipe: the patched-opcache Docker image (`ZEALPHP_PATCH_OPCACHE=1`) + a php.ini with
+`opcache.enable_cli=1`, `opcache.dups_fix=1`, `opcache.validate_timestamps=0`. Bonus: opcache
+compiles at worker-start (single-coroutine), so classes link before request concurrency hits —
+also dodging the cold-concurrent-autoload unlinked-class race.
+
+### Remaining: the `$wpdb`-null *functional* concurrency race (not memory-safety)
+
+With the crashes gone, a pre-existing functional race is exposed: under concurrency a fraction of
+requests get a clean 500 `Call to a member function prepare() on null` — `$wpdb` reads NULL.
+Appears at concurrency ≥2, climbs to ~43% at c16; **0 crashes** (worker survives). It is the
+**#18/ext#52 family**: WP's `global $wpdb; $wpdb = new wpdb()` — whose ctor yields on connect — is
+an IS_REFERENCE global-bound write across a yield on the **shared `EG(symbol_table)`** (Stage 8),
+and a peer coroutine running during that yield drops it. Resetting EG user-globals to baseline at
+request start (a `zealphp_coroutine_globals_request_begin()` primitive) was tried and **did NOT
+fix it** (each request *does* create its own `$wpdb`, but still loses it) — confirming the race is
+the REF-bound-write-across-connect-yield leg, not WP's `isset($wpdb)` guard. This is the deep S2
+frontier (historically multi-iteration); the memory-safety win above is independent of it.
