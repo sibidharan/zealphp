@@ -320,6 +320,16 @@ final class Room
     /** @param array<string,mixed> $envelope */
     private function publish(array $envelope): int
     {
+        // #417 — cross-node fan-out needs the Redis backend. On the Table
+        // backend (single-node) there is nothing to publish to, so skip
+        // silently instead of letting Store::publish throw AFTER join()/leave()
+        // have already mutated the membership row (a half-completed join). The
+        // read side already degrades to the O(N) iterate-fallback on Table, so
+        // a single-node room stays fully functional. Mirrors the guarded
+        // SADD/SREM siblings.
+        if (!WSRouter::hasRedisBackend()) {
+            return 0;
+        }
         // WS-3: sign the envelope when a channel HMAC secret is configured;
         // passthrough otherwise. Subscribers verify on receive (init()).
         $signed = WSRouter::signPayload((string) json_encode($envelope));

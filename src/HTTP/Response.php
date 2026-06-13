@@ -159,44 +159,69 @@ class Response
         return true;
     }
 
-    /**
-     * Strip the `:port` suffix from a host, leaving the bare hostname/IP.
-     * Handles bracketed IPv6 literals (`[::1]`, `[::1]:8080`) and the common
-     * `host:port` form. Used to make the open-redirect host comparison
-     * port-insensitive (#432).
-     */
-    private function hostWithoutPort(string $host): string
+    /** Default port for a URL scheme (RFC 6454 origin). 0 = unknown scheme. */
+    private function defaultPort(string $scheme): int
     {
-        if ($host !== '' && $host[0] === '[') {
-            // IPv6 literal — `[::1]` or `[::1]:8080`.
-            $end = strpos($host, ']');
-            return $end !== false ? substr($host, 0, $end + 1) : $host;
-        }
-        $colon = strpos($host, ':');
-        return $colon === false ? $host : substr($host, 0, $colon);
+        return match (strtolower($scheme)) {
+            'http', 'ws'   => 80,
+            'https', 'wss' => 443,
+            default        => 0,
+        };
     }
 
     /**
-     * Same-origin test for the open-redirect (CWE-601) guard. ZealPHP's guard
-     * uses the HOST as the redirect boundary (a same-host target is your own
-     * surface — this deliberately permits an http→https upgrade or a
-     * different-port redirect to the same host, the common, legitimate cases).
+     * Split a host[:port] authority into [bare host, port]. Handles bracketed
+     * IPv6 literals (`[::1]`, `[::1]:8080`) and the `host:port` form. A missing
+     * or non-numeric port yields `null` for the port (the caller applies the
+     * scheme default).
      *
-     * The fix here (#432) is the PORT: the request host comes from `HTTP_HOST`,
-     * which carries the port (`127.0.0.1:8122`), while `parse_url(...host)`
-     * strips it (`127.0.0.1`). The old host-only string compare therefore
-     * mismatched a legitimate same-origin absolute redirect on every
-     * non-default port → `InvalidArgumentException` → 500. We now compare the
-     * port-stripped host on both sides, case-insensitively (DNS is
-     * case-insensitive).
+     * @return array{0: string, 1: ?int}
+     */
+    private function splitHostPort(string $authority): array
+    {
+        if ($authority !== '' && $authority[0] === '[') {
+            // IPv6 literal — `[::1]` or `[::1]:8080`.
+            $end = strpos($authority, ']');
+            if ($end === false) {
+                return [$authority, null];
+            }
+            $host = substr($authority, 0, $end + 1);
+            $rest = substr($authority, $end + 1);
+            $port = (str_starts_with($rest, ':') && ctype_digit(substr($rest, 1)))
+                ? (int) substr($rest, 1) : null;
+            return [$host, $port];
+        }
+        $colon = strrpos($authority, ':');
+        if ($colon === false) {
+            return [$authority, null];
+        }
+        $portStr = substr($authority, $colon + 1);
+        return ctype_digit($portStr)
+            ? [substr($authority, 0, $colon), (int) $portStr]
+            : [$authority, null];
+    }
+
+    /**
+     * RFC 6454 same-origin test for the open-redirect (CWE-601) guard. An
+     * origin is the triple (scheme, host, port); two URLs are same-origin iff
+     * all three match (#432). This is **strict by design**: ZealPHP commonly
+     * runs several instances on the same host at different ports (`php app.php
+     * -p 8081` vs `-p 8082`), so a same-host different-PORT target is a
+     * *different instance* and must be treated as cross-origin — and a
+     * scheme/port downgrade to an attacker-controlled service on the same host
+     * is a genuine CWE-601 hole. Same-origin absolute redirects keep working
+     * because the request's own (scheme, host, port) is compared, not a
+     * default — fixing the prior port-blind over-block (a same-origin redirect
+     * 500'd on every non-default port) and the host-only under-block together.
      *
      * A target with no host (relative URL) is same-origin; an undeterminable
-     * request host preserves the historical "allow".
+     * request host preserves the historical "allow" so a working relative
+     * redirect never regresses.
      */
     private function isSameOrigin(string $url): bool
     {
-        $targetHost = parse_url($url, PHP_URL_HOST);
-        if (!is_string($targetHost) || $targetHost === '') {
+        $target = parse_url($url);
+        if (!is_array($target) || !isset($target['host'])) {
             return true; // relative / no host → same-origin
         }
         /** @var mixed $reqHostRaw */
@@ -204,10 +229,31 @@ class Response
         if (!is_string($reqHostRaw) || $reqHostRaw === '') {
             return true; // request origin undeterminable → don't over-block
         }
-        return strcasecmp(
-            $this->hostWithoutPort($reqHostRaw),
-            $this->hostWithoutPort($targetHost)
-        ) === 0;
+
+        // Request scheme — HTTPS via the HTTPS flag, X-Forwarded-Proto, or the
+        // bound port 443.
+        $https      = strtolower((string) ($this->g->server['HTTPS'] ?? ''));
+        $xfp        = strtolower((string) ($this->g->server['HTTP_X_FORWARDED_PROTO'] ?? ''));
+        $serverPort = (string) ($this->g->server['SERVER_PORT'] ?? '');
+        $reqScheme  = ($https !== '' && $https !== 'off') || $xfp === 'https' || $serverPort === '443'
+            ? 'https' : 'http';
+
+        // Request host + port — HTTP_HOST carries the client-visible port; fall
+        // back to SERVER_NAME[:SERVER_PORT], then to the scheme default.
+        [$reqHost, $reqPort] = $this->splitHostPort($reqHostRaw);
+        if ($reqPort === null) {
+            $reqPort = ctype_digit($serverPort) ? (int) $serverPort : $this->defaultPort($reqScheme);
+        }
+
+        // Target origin — scheme is present on any absolute URL (`//host` is the
+        // protocol-relative branch handled before this is reached).
+        $tgtScheme = isset($target['scheme']) ? strtolower($target['scheme']) : $reqScheme;
+        $tgtHost   = $target['host'];
+        $tgtPort   = isset($target['port']) ? (int) $target['port'] : $this->defaultPort($tgtScheme);
+
+        return $reqScheme === $tgtScheme
+            && strcasecmp($reqHost, $tgtHost) === 0
+            && $reqPort === $tgtPort;
     }
 
     /**

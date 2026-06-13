@@ -615,7 +615,19 @@ final class WSRouter
         // App::stats() between init() and run()) see a populated registry.
         // The onWorkerStart hook below adds a periodic refresh; this just
         // closes the boot-window gap.
-        self::writeServerRegistryRow();
+        //
+        // #416 — defer the eager write only when it would actually fatal: on
+        // the Redis backend the write opens a hooked stream_socket_client
+        // (predis) that throws `API must be called in the coroutine` when init()
+        // runs in the master (no coroutine). The Table backend write is always
+        // coroutine-safe. So write eagerly UNLESS we're outside a coroutine on
+        // the Redis backend — in which case the per-worker onWorkerStart hook
+        // below writes the row (no lost registration).
+        $deferForRedis = \OpenSwoole\Coroutine::getCid() < 0
+            && \ZealPHP\Store::defaultBackend() instanceof \ZealPHP\Store\RedisBackend;
+        if (!$deferForRedis) {
+            self::writeServerRegistryRow();
+        }
 
         // Single PSUBSCRIBE pattern covers every room — no per-room
         // subscriber proliferation. Handler dispatches to user-registered

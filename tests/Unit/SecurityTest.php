@@ -142,7 +142,9 @@ class SecurityTest extends TestCase
     public function testRedirectAcceptsSameOriginUrl(): void
     {
         $response = $this->makeResponse();
-        \ZealPHP\G::instance()->server = ['HTTP_HOST' => 'example.test'];
+        // #432 strict RFC 6454: request origin (scheme,host,port) must match the
+        // https target — HTTPS=on makes the request https.
+        \ZealPHP\G::instance()->server = ['HTTP_HOST' => 'example.test', 'HTTPS' => 'on'];
         $response->redirect('https://example.test/account');
         $this->assertSame(302, \ZealPHP\G::instance()->status);
     }

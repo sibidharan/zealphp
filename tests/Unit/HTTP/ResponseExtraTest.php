@@ -394,7 +394,10 @@ class ResponseExtraTest extends TestCase
         // Behaviorally both still emit the redirect, so we pin the Location +
         // status which must be identical regardless of branch.
         $g = RequestContext::instance();
-        $g->server = ['HTTP_HOST' => 'mysite.com'];
+        // #432 strict RFC 6454: the request origin must match the https target's
+        // (scheme, host, port). HTTPS=on makes the request https so a same-host
+        // https redirect is genuinely same-origin.
+        $g->server = ['HTTP_HOST' => 'mysite.com', 'HTTPS' => 'on'];
         $fake = new FakeOpenSwooleResponse();
         $resp = $this->wrap($fake);
 
@@ -1194,7 +1197,8 @@ class ResponseExtraTest extends TestCase
         // Kills the second NotIdentical on line 180 (parse_url !== requestHost):
         // a same-host absolute redirect must NOT log a cross-origin warning.
         $g = RequestContext::instance();
-        $g->server = ['HTTP_HOST' => 'mysite.com'];
+        // #432 strict RFC 6454 — request is https so the https target matches.
+        $g->server = ['HTTP_HOST' => 'mysite.com', 'HTTPS' => 'on'];
         $resp = $this->wrap();
 
         $log = $this->captureDebugLog(function () use ($resp): void {
@@ -1242,7 +1246,8 @@ class ResponseExtraTest extends TestCase
         // Reinforces the Coalesce kill (179): when SERVER_NAME matches the
         // redirect host, no cross-origin warning is logged.
         $g = RequestContext::instance();
-        $g->server = ['SERVER_NAME' => 'canonical.example'];
+        // #432 strict RFC 6454 — request is https so the https target matches.
+        $g->server = ['SERVER_NAME' => 'canonical.example', 'HTTPS' => 'on'];
         $resp = $this->wrap();
 
         $log = $this->captureDebugLog(function () use ($resp): void {
@@ -1260,7 +1265,8 @@ class ResponseExtraTest extends TestCase
         // same-host redirect → no warning. The swapped (SERVER_NAME ?? HTTP_HOST)
         // would pick SERVER_NAME → treat it as cross-origin and log.
         $g = RequestContext::instance();
-        $g->server = ['HTTP_HOST' => 'real.example', 'SERVER_NAME' => 'other.example'];
+        // #432 strict RFC 6454 — request is https so the https target matches.
+        $g->server = ['HTTP_HOST' => 'real.example', 'SERVER_NAME' => 'other.example', 'HTTPS' => 'on'];
         $resp = $this->wrap();
 
         $log = $this->captureDebugLog(function () use ($resp): void {
