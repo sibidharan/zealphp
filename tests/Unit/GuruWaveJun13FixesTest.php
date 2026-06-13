@@ -187,6 +187,98 @@ final class GuruWaveJun13FixesTest extends TestCase
         }
     }
 
+    // ── mutation-kill coverage for the new helpers (#432/#403/#429) ──────
+
+    public function testDefaultPortAllArms(): void
+    {
+        $resp = $this->makeResponse();
+        $m = new \ReflectionMethod(Response::class, 'defaultPort');
+        $m->setAccessible(true);
+        // Kills MatchArmRemoval on each arm + the default arm.
+        $this->assertSame(80, $m->invoke($resp, 'http'));
+        $this->assertSame(80, $m->invoke($resp, 'ws'));
+        $this->assertSame(443, $m->invoke($resp, 'https'));
+        $this->assertSame(443, $m->invoke($resp, 'wss'));
+        $this->assertSame(443, $m->invoke($resp, 'HTTPS'), 'case-insensitive (kills UnwrapStrToLower)');
+        $this->assertSame(0, $m->invoke($resp, 'ftp'), 'unknown scheme → 0 (kills default-arm change)');
+    }
+
+    public function testIsSameOriginSchemeDetectionMatrix(): void
+    {
+        $resp = $this->makeResponse();
+        $g = RequestContext::instance();
+        $m = new \ReflectionMethod(Response::class, 'isSameOrigin');
+        $m->setAccessible(true);
+
+        // HTTPS flag → request is https (kills the HTTPS coalesce/compare).
+        $g->server = ['HTTP_HOST' => 'h.test', 'HTTPS' => 'on'];
+        $this->assertTrue($m->invoke($resp, 'https://h.test/x'));
+        $this->assertFalse($m->invoke($resp, 'http://h.test/x'));
+
+        // HTTPS=off must NOT count as https (kills the `!== 'off'` arm).
+        $g->server = ['HTTP_HOST' => 'h.test', 'HTTPS' => 'off'];
+        $this->assertTrue($m->invoke($resp, 'http://h.test/x'));
+        $this->assertFalse($m->invoke($resp, 'https://h.test/x'));
+
+        // X-Forwarded-Proto: https → request is https.
+        $g->server = ['HTTP_HOST' => 'h.test', 'HTTP_X_FORWARDED_PROTO' => 'https'];
+        $this->assertTrue($m->invoke($resp, 'https://h.test/x'));
+
+        // SERVER_PORT 443 → request is https even with no flag.
+        $g->server = ['HTTP_HOST' => 'h.test', 'SERVER_PORT' => '443'];
+        $this->assertTrue($m->invoke($resp, 'https://h.test/x'));
+
+        // Explicit target port compared as int (kills CastInt on target port).
+        $g->server = ['HTTP_HOST' => 'h.test:8081'];
+        $this->assertTrue($m->invoke($resp, 'http://h.test:8081/x'));
+        $this->assertFalse($m->invoke($resp, 'http://h.test:8082/x'));
+
+        // SERVER_NAME fallback + SERVER_PORT when no HTTP_HOST.
+        $g->server = ['SERVER_NAME' => 'canon.test', 'SERVER_PORT' => '9000'];
+        $this->assertTrue($m->invoke($resp, 'http://canon.test:9000/x'));
+        $this->assertFalse($m->invoke($resp, 'http://canon.test:9001/x'));
+
+        // Uppercase target host still matches (kills strcasecmp → strcmp).
+        $g->server = ['HTTP_HOST' => 'Host.Test'];
+        $this->assertTrue($m->invoke($resp, 'http://host.test/x'));
+    }
+
+    public function testCollapseMappedIpArms(): void
+    {
+        $m = new \ReflectionMethod(App::class, 'collapseMappedIp');
+        $m->setAccessible(true);
+        $this->assertSame('10.0.0.5', $m->invoke(null, '::ffff:10.0.0.5'), 'mapped → v4');
+        $this->assertSame('10.0.0.5', $m->invoke(null, '10.0.0.5'), 'plain v4 unchanged');
+        $this->assertSame('2001:db8::1', $m->invoke(null, '2001:db8::1'), 'real v6 unchanged');
+        $this->assertSame('not-an-ip', $m->invoke(null, 'not-an-ip'), 'garbage unchanged');
+    }
+
+    public function testLocationHeaderBuildUrlComponentMatrix(): void
+    {
+        $mw = new LocationHeaderMiddleware(8443);
+        $m  = new \ReflectionMethod(LocationHeaderMiddleware::class, 'buildUrl');
+        $m->setAccessible(true);
+        // Each variant changes a distinct concat operand → kills Concat /
+        // ConcatOperandRemoval for scheme, userinfo, host, port, path, query, fragment.
+        $this->assertSame('http://h/p', $m->invoke($mw, (array) parse_url('http://h/p')));
+        $this->assertSame('http://h:9/p', $m->invoke($mw, (array) parse_url('http://h:9/p')));
+        $this->assertSame('http://u@h/p', $m->invoke($mw, (array) parse_url('http://u@h/p')), 'user only (no pass)');
+        $this->assertSame('http://u:pw@h/p', $m->invoke($mw, (array) parse_url('http://u:pw@h/p')));
+        $this->assertSame('http://h/p?q=1', $m->invoke($mw, (array) parse_url('http://h/p?q=1')));
+        $this->assertSame('http://h/p#f', $m->invoke($mw, (array) parse_url('http://h/p#f')));
+        // No scheme → no `scheme://` prefix (buildUrl emits host+path bare).
+        $this->assertSame('h/p', $m->invoke($mw, (array) parse_url('//h/p')), 'no scheme');
+    }
+
+    public function testFlattenHeadersEmptyAndMulti(): void
+    {
+        $m = new \ReflectionMethod(HTTP::class, 'flattenHeaders');
+        $m->setAccessible(true);
+        $this->assertSame([], $m->invoke(null, []));
+        // Exact strings kill Concat + ConcatOperandRemoval on "$name: $value".
+        $this->assertSame(['A: 1', 'B: 2'], $m->invoke(null, ['A' => '1', 'B' => '2']));
+    }
+
     // ── #417 — WS\Room works on the Table backend (no Redis) ─────────────
 
     public function testRoomJoinOnTableBackendDoesNotThrow(): void

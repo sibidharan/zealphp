@@ -182,7 +182,27 @@ class LazyServerRequest implements ServerRequestInterface
 
     public function getUri(): UriInterface
     {
-        return $this->hydrate()->getUri();
+        try {
+            return $this->hydrate()->getUri();
+        } catch (\TypeError $e) {
+            // #435 — defence in depth against OpenSwoole os#395: a request
+            // target that makes parse_url() return false (e.g. a `///echo`
+            // triple-slash) crashes Core\Psr\Uri::parse() with a TypeError
+            // BEFORE any handler runs, turning a malformed target into an
+            // unauthenticated 500 for every getUri()-calling middleware
+            // (ScopedMiddleware / BlockPhpExt / Referer / Redirect). Rebuild a
+            // valid Uri from the raw target with leading-slash runs collapsed so
+            // the access-control middleware sees a clean path instead of 500-ing.
+            $server = $this->native->server ?? [];
+            $target = is_array($server) && is_string($server['request_uri'] ?? null)
+                ? $server['request_uri'] : '/';
+            // Collapse a run of leading slashes to one ("///echo" → "/echo") so
+            // parse_url() no longer reads the path as an authority and returns
+            // false. Strip a query for the Uri's path portion (the framework
+            // reads the query from query_string elsewhere).
+            $path = (string) (parse_url('http://placeholder' . '/' . ltrim($target, '/'), PHP_URL_PATH) ?? '/');
+            return new \OpenSwoole\Core\Psr\Uri($path);
+        }
     }
 
     /** @return array<string, \Psr\Http\Message\UploadedFileInterface> */

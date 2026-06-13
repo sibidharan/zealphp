@@ -199,6 +199,22 @@ class LazyServerRequestTest extends TestCase
         $this->assertStringContainsString('/foo/bar', (string) $uri);
     }
 
+    /**
+     * #435 — a `///`-prefixed request target makes parse_url() return false,
+     * crashing OpenSwoole's Uri::parse() with a TypeError (os#395). getUri()
+     * must catch that and return a sanitized Uri (leading-slash run collapsed)
+     * instead of letting an unauthenticated 500 reach getUri()-calling
+     * middleware.
+     */
+    public function testGetUriRecoversFromTripleSlashTarget(): void
+    {
+        $native = $this->makeNative(['request_uri' => '///echo', 'request_method' => 'GET']);
+        $lazy = new LazyServerRequest($native);
+        $uri = $this->silenceHydrationWarning(fn() => $lazy->getUri());
+        $this->assertInstanceOf(UriInterface::class, $uri);
+        $this->assertSame('/echo', $uri->getPath(), 'triple-slash collapsed to a clean path, no 500');
+    }
+
     public function testGetUploadedFilesHydrates(): void
     {
         $files = $this->silenceHydrationWarning(fn() => $this->makeLazy()->getUploadedFiles());
