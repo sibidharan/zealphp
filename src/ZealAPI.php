@@ -44,7 +44,7 @@ use ZealPHP\Middleware\Pipeline\ApiDispatchHandler;
  *
  * Parameter injection (by name)
  * -----------------------------
- *   `$app`      → the `ZealAPI` instance
+ *   `$app`      → the `ZealPHP\App` instance
  *   `$request`  → `ZealPHP\HTTP\Request`
  *   `$response` → `ZealPHP\HTTP\Response`
  *   `$server`   → `OpenSwoole` server
@@ -308,7 +308,7 @@ class ZealAPI extends REST
                 foreach (self::$reflectionCache[$cacheKey] as $param) {
                     $pname = $param->getName();
                     if ($pname == 'app'){
-                        $invokeArgs[] = $this;
+                        $invokeArgs[] = App::instance();
                     } else if ($pname == 'request' || $pname == 'req'){
                         $invokeArgs[] = $this->request;
                     } else if ($pname == 'response' || $pname == 'res'){

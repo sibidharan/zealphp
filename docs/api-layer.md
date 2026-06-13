@@ -69,7 +69,7 @@ Behaviour of per-method dispatch:
 ZealPHP inspects the closure signature and injects arguments by name. Supported parameters:
 
 - **Framework objects**:
-  - `$app` – current `ZealPHP\ZealAPI` instance
+  - `$app` – current `ZealPHP\App` instance
   - `$request` – `ZealPHP\HTTP\Request` wrapper (`$req` is accepted as a short alias)
   - `$response` – `ZealPHP\HTTP\Response` wrapper (`$res` is accepted as a short alias)
   - `$server` – underlying `OpenSwoole\HTTP\Server`

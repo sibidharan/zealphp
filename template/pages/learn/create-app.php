@@ -50,7 +50,7 @@ cd my-app</code></pre>
 
     <?php App::render('/components/_callout', [
       'variant' => 'info',
-      'title'   => 'What\'s App::superglobals(false)?',
+      'title'   => 'What\'s App::mode(App::MODE_COROUTINE)?',
       'body'    => 'You\'ll see this line near the top of <code>app.php</code>. It tells ZealPHP to run in <strong>coroutine mode</strong> &mdash; the recommended default for new projects. It means each request gets its own isolated state, so many requests can run at the same time without stepping on each other. You don\'t need to understand the details yet &mdash; <a href="/learn/mental-model">Lesson 4 (The Mental Model)</a> explains it. For now, just leave it as-is.',
     ]); ?>
 

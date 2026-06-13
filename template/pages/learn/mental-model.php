@@ -13,7 +13,7 @@
     <?php App::render('/components/_youwilllearn', ['items' => [
       'Why traditional PHP throws everything away after each request — and what that costs you',
       'What stays warm in ZealPHP (and what doesn\'t)',
-      'The modes — selected with <code>App::mode()</code> — and which one you should use',
+      'The four modes — selected with <code>App::mode()</code> — and which one you should use',
       'The Apache→ZealPHP swap table: what changes in your code, and what doesn\'t',
     ]]); ?>
 
@@ -126,10 +126,10 @@
       overlap. The bug is intermittent, traffic-dependent, and impossible to reproduce locally with
       one user clicking around — which is the worst kind of bug to debug in production.
     </p>
-    <p><strong>ZealPHP solves it two ways</strong> — these are the two modes:</p>
+    <p><strong>ZealPHP solves it with four different modes</strong> (configured via <code>App::mode()</code> or the <code>App::MODE_*</code> constants):</p>
     <ul>
       <li>
-        <strong>Coroutine mode (<code>App::mode('coroutine')</code>, default).</strong> The
+        <strong>Coroutine mode (<code>App::MODE_COROUTINE</code>).</strong> The recommended default for new apps. The
         superglobals are simply <em>not populated</em>. Use <code>$g->get</code>, <code>$g->post</code>,
         <code>$g->cookie</code>, <code>$g->server</code>, <code>$g->files</code> instead — these live on
         the coroutine’s own context object via <code>Coroutine::getContext()</code>, so concurrent
@@ -137,39 +137,40 @@
         returns <code>null</code>, which is loud and obviously wrong — not silently-wrong like a race.
       </li>
       <li>
-        <strong>Superglobals mode (<code>App::mode('mixed')</code> or <code>App::mode('legacy-cgi')</code>).</strong>
-        <code>$_GET</code> et al. are populated normally, one request at a time per warm worker — the
-        same shared-nothing-per-request model PHP-FPM gives you, so there's no race to lose to. With
-        <code>mixed</code> the request runs in-process (the drop-in PHP-FPM equivalent — no FastCGI hop,
-        no separate web server). With <code>legacy-cgi</code> each public <code>.php</code> file is
-        dispatched through a warm, pre-spawned PHP worker pool (true isolated address spaces, interpreter
-        resident between requests, ~1–3 ms warm), so <code>define()</code>-heavy code like unmodified
-        WordPress / Drupal — any code base whose mental model is "I am the only PHP script running" —
-        works without a line changing.
+        <strong>Coroutine-Legacy mode (<code>App::MODE_COROUTINE_LEGACY</code>).</strong> <strong>Experimental, but incredibly powerful!</strong>
+        It keeps real <code>$_GET</code>, <code>$_POST</code>, and friends populated per request <em>and</em> runs concurrently.
+        It isolates the seven superglobals, <code>$GLOBALS</code>, and function statics per coroutine via <strong>ext-zealphp</strong>.
+        This gives you the ultimate superpower: <em>you can just write classic PHP syntax</em>, but enjoy the blistering concurrency and performance of coroutines.
+      </li>
+      <li>
+        <strong>Mixed mode (<code>App::MODE_MIXED</code>).</strong> The in-process drop-in PHP-FPM equivalent.
+        Native <code>$_GET</code>/<code>$_SESSION</code> are populated normally, handling one request at a time per warm worker.
+        No fastCGI hop, no separate web server. Safe, traditional, shared-nothing per request.
+      </li>
+      <li>
+        <strong>Legacy CGI mode (<code>App::MODE_LEGACY_CGI</code>).</strong> Dispatch through a warm, pre-spawned PHP worker pool (fork, pool, proc, fcgi).
+        True isolated address spaces, resident between requests (~1-3 ms warm). It's designed so <code>define()</code>-heavy code like
+        unmodified WordPress or Drupal — any code base whose mental model is "I am the only PHP script running" — works without a line changing.
       </li>
     </ul>
     <p>
-      Sessions are the one exception that works in <em>both</em> modes via <code>$_SESSION</code> as
+      Sessions are the one exception that works in <em>all</em> modes via <code>$_SESSION</code> as
       well as <code>$g->session</code>. The framework intercepts every <code>session_*()</code> call
       via ext-zealphp at startup so legacy <code>session_start()</code> code routes to a per-request session
       bag instead of a shared global. See <a href="/learn/sessions">Lesson 16: Sessions</a> for the
       mechanics.
     </p>
 
-    <h2>The two modes</h2>
+    <h2>The four modes</h2>
     <p>
-      ZealPHP has two runtime modes, both selected with one call to <code>App::mode()</code>.
-      New apps default to <strong>coroutine mode</strong> (<code>App::mode('coroutine')</code>) —
+      ZealPHP has four runtime modes, all selected with one call to <code>App::mode()</code> using the <code>App::MODE_*</code> constants.
+      New apps default to <strong>coroutine mode</strong> (<code>App::MODE_COROUTINE</code>) —
       that’s the one the framework demo and every <code>composer create-project</code> scaffold ship
-      with. The other one, <strong>superglobals mode</strong>, comes in two flavours:
-      <code>App::mode('mixed')</code> (the in-process drop-in PHP-FPM equivalent — native
-      <code>$_GET</code>/<code>$_SESSION</code>, one request at a time per warm worker, no FastCGI hop)
-      and <code>App::mode('legacy-cgi')</code> (process-isolated dispatch through a warm PHP worker pool,
-      for running unmodified WordPress or Drupal without touching their source).
+      with.
     </p>
-    <div class="lmm-modes">
+    <div class="lmm-modes" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
       <div>
-        <h4 class="lmm-mode-title lmm-mode-title-coro">Coroutine mode (default)</h4>
+        <h4 class="lmm-mode-title lmm-mode-title-coro">1. Coroutine Mode</h4>
         <pre class="mermaid">graph TD
     R[Request] --> CO[Coroutine spawned]
     CO --> CTX["RequestContext on coroutine context"]
@@ -180,7 +181,30 @@
         <p class="lmm-mode-caption">Per-coroutine state · concurrent · isolated</p>
       </div>
       <div>
-        <h4 class="lmm-mode-title lmm-mode-title-super">Superglobals mode</h4>
+        <h4 class="lmm-mode-title lmm-mode-title-super">2. Coroutine-Legacy Mode</h4>
+        <pre class="mermaid">graph TD
+    R[Request] --> CO[Coroutine spawned]
+    CO --> CTX["ext-zealphp isolates global state"]
+    CTX --> H["Classic PHP syntax ($_GET, global $x)"]
+    H --> RES[Response]
+    style CO fill:#fffbeb,stroke:#f59e0b,stroke-width:2px
+    style CTX fill:#ecfdf5,stroke:#059669
+    style H fill:#fef2f2,stroke:#f87171</pre>
+        <p class="lmm-mode-caption">Concurrent · Classic PHP syntax powered by ext-zealphp</p>
+      </div>
+      <div style="margin-top: 1rem;">
+        <h4 class="lmm-mode-title lmm-mode-title-super">3. Mixed Mode</h4>
+        <pre class="mermaid">graph TD
+    R[Request] --> W[Warm Worker Process]
+    W --> G["true $_GET, $_POST, $_SESSION"]
+    G --> H[Legacy PHP code]
+    H --> RES[Response]
+    style W fill:#fef2f2,stroke:#f87171
+    style G fill:#fef2f2,stroke:#f87171</pre>
+        <p class="lmm-mode-caption">In-process sequential · PHP-FPM drop-in</p>
+      </div>
+      <div style="margin-top: 1rem;">
+        <h4 class="lmm-mode-title lmm-mode-title-super">4. Legacy-CGI Mode</h4>
         <pre class="mermaid">graph TD
     R[Request] --> CGI[Pre-warmed subprocess pool]
     CGI --> G["true $_GET, $_POST, $_SESSION"]
@@ -192,32 +216,26 @@
       </div>
     </div>
     <p>
-      Coroutine mode is the one you want for new code. It’s faster (no fork per request),
-      cleaner (no global state leaking between requests), and the only mode where you get to use
-      real concurrency inside a request — fan out three DB queries in parallel, wait on all
+      <strong>Coroutine mode</strong> is faster, cleaner (no global state leaking between requests), and lets you
+      use real concurrency inside a request — fan out three DB queries in parallel, wait on all
       three, return the result.
     </p>
     <p>
-      Superglobals mode keeps native <code>$_GET</code>/<code>$_SESSION</code> by handling one request
-      at a time per warm worker. <code>App::mode('mixed')</code> does this in-process — the closest
-      apples-to-apples swap for PHP-FPM, with no per-request boot, no FastCGI socket, no separate web
-      server to bridge HTTP↔FastCGI. <code>App::mode('legacy-cgi')</code> adds full process isolation
-      by dispatching each <code>.php</code> through a warm, pre-spawned worker pool (~1–3 ms warm). In
-      return, <em>any</em> PHP code that mutates <code>$_SESSION</code> directly, sets globals, modifies
-      <code>ini_set()</code>, or assumes “this script runs alone” works unchanged. It’s the bridge for
-      migrating legacy apps without rewriting them.
+      <strong>Coroutine-Legacy mode</strong> (experimental) is the superpower. It gives you the blistering concurrent
+      performance of coroutines but lets you <em>write classic PHP syntax</em>. You just write <code>$_GET</code>,
+      <code>$_POST</code>, and <code>global $x</code>, and the C-extension isolates them per-coroutine for you! We will show both side by side in the lessons.
     </p>
-
-    <?php App::render('/components/_callout', [
-      'variant' => 'info',
-      'title'   => 'A third option (experimental): coroutine-legacy mode',
-      'body'    => '<p><strong>Experimental.</strong> There is a middle ground: <code>App::mode(\'coroutine-legacy\')</code> keeps real <code>$_GET</code>, <code>$_POST</code>, and friends populated per request <em>and</em> runs concurrently — it solves the race shown above by isolating the seven superglobals, <code>$GLOBALS</code>, function statics, and <code>require_once</code> state per coroutine via <strong>ext-zealphp</strong> (required). It is the compatibility runtime for Composer-based legacy apps (Symfony, Laravel, Slim) that need real superglobals but also want coroutine concurrency.</p><p>It carries the experimental flag because it needs a C extension, the &ldquo;old PHP just works&rdquo; promise is <em>conditional</em> on warming the class graph first, and there are open issues on unmodified <code>require_once</code> WordPress. For the stable apples-to-apples PHP-FPM swap, reach for <code>App::mode(\'mixed\')</code> instead. The full picture — when to use each mode and why coroutine-legacy is experimental — is <a href="/learn/legacy-modes">Lesson&nbsp;26: Lifecycle Modes &amp; Legacy Apps</a>.</p>',
-    ]); ?>
+    <p>
+      <strong>Mixed mode</strong> keeps native <code>$_GET</code>/<code>$_SESSION</code> by handling one request
+      at a time per warm worker in-process. <strong>Legacy-CGI mode</strong> adds full process isolation
+      by dispatching each <code>.php</code> through a warm, pre-spawned worker pool (fork/pool/proc/fcgi).
+      These are your bridges for migrating legacy apps without rewriting them.
+    </p>
 
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'Which mode is this app in?',
-      'body'    => '<p>Open <code>app.php</code>. Look near the top — if you see <code>App::mode(\'coroutine\')</code> (or the underlying <code>App::superglobals(false)</code>), you’re in coroutine mode (the default for the framework demo and any <code>composer create-project</code> scaffold). To run legacy code unchanged, switch to <code>App::mode(\'mixed\')</code> for the in-process PHP-FPM equivalent, or <code>App::mode(\'legacy-cgi\')</code> for process-isolated WordPress/Drupal — then drop the file into <code>public/</code>. ZealPHP takes care of the rest.</p>',
+      'body'    => '<p>Open <code>app.php</code>. Look near the top — if you see <code>App::mode(App::MODE_COROUTINE)</code>, you’re in coroutine mode. To write classic PHP syntax but keep coroutine concurrency, switch to <code>App::mode(App::MODE_COROUTINE_LEGACY)</code>. To run legacy code completely unchanged, switch to <code>App::MODE_MIXED</code> or <code>App::MODE_LEGACY_CGI</code>. ZealPHP takes care of the rest.</p>',
     ]); ?>
 
     <h2>What this means for you, in practice</h2>
@@ -258,7 +276,7 @@
       'options'  => [
         'a' => 'A fresh, uninitialized value (PHP re-initializes statics per request).',
         'b' => 'The value the previous request left there.',
-        'c' => 'It depends on whether <code>App::superglobals(false)</code> is set.',
+        'c' => 'It depends on your current <code>App::mode()</code>.',
       ],
     ]); ?>
 
@@ -266,7 +284,7 @@
       'Traditional PHP throws away the entire runtime after each request. ZealPHP keeps it.',
       'Workers boot once, live for thousands of requests, and isolate per-request state via <code>RequestContext</code>.',
       'Headers, cookies, sessions, and templates work exactly like Apache PHP — the framework wires them to the right request.',
-      'Coroutine mode is the default for new apps. Superglobals mode exists to run legacy code unchanged.',
+      'Coroutine mode is the default for new apps. Coroutine-legacy mode lets you keep classic PHP syntax with blistering concurrency.',
       'Anything request-specific belongs in <code>$g</code> or handler parameters — never in your own static class state.',
     ]]); ?>
 

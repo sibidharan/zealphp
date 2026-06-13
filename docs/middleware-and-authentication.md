@@ -305,9 +305,9 @@ Every route registrar — `route()`, `nsRoute()`, `nsPathRoute()`, `patternRoute
 use ZealPHP\Middleware\IpAccessMiddleware;
 
 $app->route('/admin/users',
+    fn() => User::all(),
     methods: ['GET'],
     middleware: ['auth', 'request-id', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']])],
-    handler: fn() => User::all(),
 );
 ```
 
@@ -316,7 +316,7 @@ There are two ways to declare middleware on a route, and they **combine**: the a
 ```php
 $app->route('/reports',
     ['middleware' => ['audit-log']],     // array option → outermost
-    handler: fn() => Report::all(),
+    fn() => Report::all(),
     middleware: ['request-id'],          // named arg    → inner of the two
 );
 ```
@@ -332,7 +332,7 @@ App::middlewareAlias('auth',       fn() => new BasicAuthMiddleware(htpasswdFile:
 App::middlewareAlias('admin-only', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']]));
 App::middlewareAlias('throttle',   fn($n = '60') => new RateLimitMiddleware(limit: (int)$n));
 
-$app->route('/api/heavy', middleware: ['throttle:120'], handler: fn() => Heavy::run());
+$app->route('/api/heavy', fn() => Heavy::run(), middleware: ['throttle:120']);
 ```
 
 **Stateless contract:** one alias instance serves every concurrent coroutine, so middleware objects must hold *no per-request state*. Put request-scoped data in `$g` (the request context / memo), never on the middleware instance — exactly how `RequestIdMiddleware` stashes its id in `$g->memo['request_id']`.

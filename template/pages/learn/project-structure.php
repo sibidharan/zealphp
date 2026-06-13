@@ -30,9 +30,8 @@
 │   ├── about.php          → GET /about
 │   └── css/site.css       → GET /css/site.css (static)
 ├── api/                   ← file-based REST API (auto-routed)
-│   └── users/
-│       ├── get.php        → GET  /api/users
-│       └── post.php       → POST /api/users
+│   ├── users.php          → GET/POST /api/users
+│   └── devices.php        → GET/POST /api/devices
 ├── route/                 ← explicit routes — loaded at startup
 │   ├── ws.php             ← WebSocket endpoints
 │   ├── streaming.php      ← $app->route() with custom paths
@@ -71,7 +70,7 @@ use ZealPHP\App;
 use ZealPHP\Store;
 use ZealPHP\Middleware\{CorsMiddleware, ETagMiddleware, SessionStartMiddleware};
 
-App::superglobals(false);                          // coroutine mode (default for new apps)
+App::mode(App::MODE_COROUTINE);                     // coroutine mode (default for new apps)
 
 $app = App::init('0.0.0.0', 8080);
 
@@ -93,6 +92,48 @@ $app->run();</code></pre>
       Everything above <code>$app-&gt;run()</code> runs <em>once</em>, in the master process, before
       workers fork. Use it for setup that the whole server depends on: middleware, shared tables,
       timer registration. Anything per-request goes in a handler.
+    </p>
+
+    <h2>The Magic of <code>ext-zealphp</code>: Classic PHP Just Works</h2>
+    <p>
+      By default, new projects use <code>App::mode(App::MODE_COROUTINE)</code>. This mode is extremely fast and completely avoids global state leaking across requests.
+      However, if you're migrating an existing app or simply prefer the classic PHP-FPM mental model, you can flip one switch and install the C-extension:
+    </p>
+
+    <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
+      <div style="flex: 1;">
+        <?php App::render('/components/_code', [
+          'label' => 'Coroutine Mode (Default)',
+          'code'  => <<<'PHP'
+<?php
+// 1. New syntax isolates per-request safely
+$g = \ZealPHP\G::instance();
+$g->session['visits'] ??= 0;
+$g->session['visits']++;
+
+$name = $g->get['name'] ?? 'Guest';
+echo "Hello, $name! Visits: {$g->session['visits']}";
+PHP
+        ]); ?>
+      </div>
+      <div style="flex: 1;">
+        <?php App::render('/components/_code', [
+          'label' => 'Coroutine-Legacy Mode',
+          'code'  => <<<'PHP'
+<?php
+// 2. Classic PHP syntax just works!
+session_start();
+$_SESSION['visits'] ??= 0;
+$_SESSION['visits']++;
+
+$name = $_GET['name'] ?? 'Guest';
+echo "Hello, $name! Visits: {$_SESSION['visits']}";
+PHP
+        ]); ?>
+      </div>
+    </div>
+    <p>
+      Powered by <strong><code>ext-zealphp</code></strong>, <code>App::MODE_COROUTINE_LEGACY</code> transparently intercepts OpenSwoole's scheduler and isolates <code>$_GET</code>, <code>$_SESSION</code>, and <code>$GLOBALS</code> per-coroutine. You get the blistering concurrency of coroutines without having to rewrite your entire app to use <code>RequestContext</code> variables!
     </p>
 
     <h2>The six directories — what goes where</h2>

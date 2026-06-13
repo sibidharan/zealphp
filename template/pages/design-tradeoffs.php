@@ -42,14 +42,14 @@
 
     <!-- ─── Dual-mode runtime ─── -->
     <div class="tradeoffs-block">
-      <h2 class="tradeoffs-h2">2. Dual-mode runtime: coroutine vs superglobals</h2>
+      <h2 class="tradeoffs-h2">2. Dual-mode runtime: coroutine vs legacy modes</h2>
       <p class="tradeoffs-p">
-        <code>App::superglobals(false)</code> (recommended default) uses per-coroutine state via
+        <code>App::mode(App::MODE_COROUTINE)</code> (recommended default) uses per-coroutine state via
         <code>$g-&gt;get</code> / <code>$g-&gt;session</code> (<code>Coroutine::getContext()</code>).
-        <code>App::superglobals(true)</code> populates <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>
+        <code>App::mode(App::MODE_MIXED)</code> or <code>App::MODE_LEGACY_CGI</code> populates <code>$_GET</code>/<code>$_POST</code>/<code>$_SESSION</code>
         per request &mdash; with ext-zealphp, these are <strong>per-coroutine safe</strong> (saved/restored
         on every yield/resume — S1), so legacy code works with full coroutine concurrency. Without ext-zealphp,
-        superglobals mode runs sequentially (one request at a time per worker). The lifecycle is now
+        legacy modes without ext-zealphp run sequentially (one request at a time per worker). The lifecycle is now
         described by two orthogonal axes with a one-call preset:
         <code>App::mode()</code> (constants: <code>App::MODE_COROUTINE</code>,
         <code>App::MODE_LEGACY_CGI</code>, <code>App::MODE_COROUTINE_LEGACY</code>,
@@ -74,7 +74,7 @@
         <li><strong class="tradeoffs-strong-light">Mitigation:</strong> coroutine mode is the documented default for
           new projects (scaffold ships it). With <code>ext-zealphp</code> (v0.3.0+), <strong>all mode
           combinations are safe</strong> &mdash; the extension provides per-coroutine superglobal
-          save/restore (S1), so <code>superglobals(true) + enableCoroutine(true)</code> just works.
+          save/restore (S1), so <code>App::mode(App::MODE_COROUTINE_LEGACY)</code> just works.
           Without ext-zealphp, the legacy constraint applies: unsafe combinations throw
           <code>RuntimeException</code> at boot. The
           <a href="/coroutines" class="tradeoffs-link">/coroutines</a> page has a side-by-side safety
@@ -204,7 +204,7 @@ PHP]); ?>
         <code>$server</code>, <code>$get</code>, <code>$post</code>, <code>$cookie</code>,
         <code>$session</code>, <code>$zealphp_request</code>, <code>$zealphp_response</code>, and the rest. In
         coroutine mode it's stored in <code>Coroutine::getContext()</code> — one instance per coroutine,
-        isolated. In superglobals mode it's a process singleton bridging to <code>$_GET</code> / <code>$_POST</code> / <code>$_SESSION</code>.
+        isolated. In legacy modes it's a process singleton bridging to <code>$_GET</code> / <code>$_POST</code> / <code>$_SESSION</code>.
       </p>
       <ul class="tradeoffs-list">
         <li><strong class="tradeoffs-strong-light">What it buys:</strong> a single named object for every per-request

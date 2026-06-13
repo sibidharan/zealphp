@@ -325,7 +325,7 @@ class ResponseMiddleware implements MiddlewareInterface
             // reserved name is simply unbindable to that handler parameter — name
             // it something else to read the segment.
             if ($pname === 'app') {
-                $invokeArgs[] = $this;
+                $invokeArgs[] = App::instance();
             } else if ($pname === 'request' || $pname === 'req') {
                 $invokeArgs[] = $g->zealphp_request;
             } else if ($pname === 'response' || $pname === 'res') {

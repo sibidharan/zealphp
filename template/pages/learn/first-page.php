@@ -50,21 +50,39 @@ echo "&lt;p&gt;This page was served by ZealPHP.&lt;/p&gt;";</code></pre>
     </p>
 
     <h2>Adding dynamic content</h2>
-    <p>These are PHP files, so you can use any PHP you want. Let's make the greeting personal:</p>
-    <pre><code class="language-php">&lt;?php
-// $g gives you the current request's data — query params, form data,
-// cookies, session. Always use $g-&gt;get instead of $_GET in ZealPHP.
+    <p>These are PHP files, so you can use any PHP you want. Let's make the greeting personal. Depending on your <strong>Lifecycle Mode</strong>, you have two amazing ways to do this:</p>
+
+    <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
+      <div style="flex: 1;">
+        <?php App::render('/components/_code', [
+          'label' => 'Coroutine Mode (Default)',
+          'code'  => <<<'PHP'
+<?php
+// $g gives you the current request's data safely.
 $g    = \ZealPHP\G::instance();
-$name = htmlspecialchars($g-&gt;get['name'] ?? 'World');
-echo "&lt;h1&gt;Hello, {$name}!&lt;/h1&gt;";
-echo "&lt;p&gt;The time is " . date('H:i:s') . "&lt;/p&gt;";</code></pre>
+$name = htmlspecialchars($g->get['name'] ?? 'World');
+echo "<h1>Hello, {$name}!</h1>";
+PHP
+        ]); ?>
+      </div>
+      <div style="flex: 1;">
+        <?php App::render('/components/_code', [
+          'label' => 'Coroutine-Legacy Mode',
+          'code'  => <<<'PHP'
+<?php
+// Classic PHP syntax just works!
+$name = htmlspecialchars($_GET['name'] ?? 'World');
+echo "<h1>Hello, {$name}!</h1>";
+PHP
+        ]); ?>
+      </div>
+    </div>
+
     <p>Visit <code>/greeting?name=Alice</code> and the page greets Alice by name.</p>
     <p>
-      <strong>Why <code>$g-&gt;get</code> instead of <code>$_GET</code>?</strong> &nbsp;<code>$g-&gt;get</code>
-      works in every mode ZealPHP supports &mdash; it&rsquo;s always scoped to <em>your</em> request.
-      <code>$_GET</code> also works if you have ext-zealphp installed (it makes superglobals
-      per-request safe), but <code>$g-&gt;get</code> is the recommended convention.
-      <a href="/learn/mental-model">Lesson&nbsp;4</a> explains the difference.
+      <strong>Which one should I use?</strong> For brand new apps, <strong>Coroutine Mode</strong> (the default) is the fastest and uses <code>$g-&gt;get</code> to prevent global state leaks.
+      However, if you are migrating an older application or simply prefer writing classic PHP syntax, you can flip the switch in your <code>app.php</code> to <code>App::mode(App::MODE_COROUTINE_LEGACY)</code>. This leverages <code>ext-zealphp</code> to magically isolate <code>$_GET</code> and other superglobals per-coroutine! 
+      <a href="/learn/mental-model">Lesson 4</a> explains the mental model, and <a href="/learn/legacy-modes">Lesson 26</a> details the caveats you should be careful about when using the experimental coroutine-legacy mode.
     </p>
 
     <?php App::render('/components/_tryit', [
@@ -112,7 +130,7 @@ App::render('/_master', [
     <?php App::render('/components/_keytakeaways', ['items' => [
       'Files in <code>public/</code> automatically become URLs — no routing config needed',
       'The URL mirrors the file path: <code>public/blog/post.php</code> → <code>/blog/post</code>',
-      'Use <code>$g-&gt;get</code> for query parameters — works in every mode, always safe',
+      'Use <code>$g-&gt;get</code> or switch to Coroutine-Legacy mode for classic <code>$_GET</code> — both are safe!',
       '<code>.php</code> extensions are stripped — clean URLs by default',
     ]]); ?>
 

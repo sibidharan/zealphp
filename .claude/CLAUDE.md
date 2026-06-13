@@ -369,9 +369,9 @@ Middleware can be scoped to individual routes (and route groups), not just the g
 
 - **`middleware:` route option** on `route()` / `nsRoute()` / `nsPathRoute()` / `patternRoute()`. Accepts a list of `Psr\Http\Server\MiddlewareInterface` instances and/or alias strings:
   ```php
-  $app->route('/admin/users', methods: ['GET'],
+  $app->route('/admin/users', fn() => User::all(),
       middleware: ['auth', 'request-id', new IpAccessMiddleware([...])],
-      handler: fn() => User::all());
+      methods: ['GET']);
   ```
   Two declaration forms — the named arg `middleware: [...]` AND the array option `['middleware' => [...]]` — which **combine**: array-option entries run first (outermost), then named-arg entries.
 - **`App::middlewareAlias(string $name, MiddlewareInterface|callable $factory): void`** — named alias registry. Pass a ready instance (reused as-is) or a factory callable returning a `MiddlewareInterface`. **Factories run ONCE at `App::run()`** (boot, single-coroutine); the resulting instance is **SHARED across every request** using the alias. Parameterised references — `'throttle:120'` calls the factory with the comma-split args (`fn('120')`), mirroring Laravel's `'throttle:60,1'`. **Stateless contract:** one instance serves all concurrent coroutines, so per-request state goes in `$g` / `RequestContext`, **never** on the middleware object.

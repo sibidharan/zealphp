@@ -93,12 +93,12 @@ $app->route('/hello/{name}', fn($name) => "Hi {$name}");
 $app->route('/users', ['methods' => ['GET', 'POST']], $handler);
 
 // Named arguments — same result:
-$app->route('/users', methods: ['GET', 'POST'], handler: $handler);
+$app->route('/users', $handler, methods: ['GET', 'POST']);
 
 // raw: skip output buffering for a hand-rolled streaming writer:
-$app->route('/export.csv', methods: ['GET'], raw: true, handler: function($response) {
+$app->route('/export.csv', function($response) {
     $response->stream(fn($write) => $write("id,name\n"));
-});
+}, methods: ['GET'], raw: true);
 PHP
 ]); ?>
 
@@ -119,12 +119,11 @@ PHP
 use ZealPHP\Middleware\{RequestIdMiddleware, IpAccessMiddleware};
 
 // Mix alias strings with a live instance:
-$app->route('/admin/users', methods: ['GET'],
-    middleware: ['auth', 'request-id', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']])],
-    handler: fn() => User::all());
+$app->route('/admin/users', fn() => User::all(), methods: ['GET'],
+    middleware: ['auth', 'request-id', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']])]);
 
 // Same option on nsRoute / nsPathRoute / patternRoute:
-$app->nsRoute('api', '/jobs', middleware: ['request-id'], handler: $list);
+$app->nsRoute('api', '/jobs', $list, middleware: ['request-id']);
 
 // Array-option form — entries here run OUTSIDE the named-arg ones:
 $app->route('/report', ['middleware' => ['auth']], $handler, middleware: ['request-id']);
@@ -149,7 +148,7 @@ App::middlewareAlias('request-id', fn() => new RequestIdMiddleware());
 // comma-split args, e.g. fn('120') — mirrors Laravel 'throttle:60,1'.
 App::middlewareAlias('throttle', fn($n = '60') => new RateLimitMiddleware(limit: (int)$n));
 
-$app->route('/admin/users', middleware: ['auth', 'admin-only', 'throttle:120'], handler: $fn);
+$app->route('/admin/users', $fn, middleware: ['auth', 'admin-only', 'throttle:120']);
 PHP
 ]); ?>
 
@@ -226,8 +225,7 @@ $app->group('/admin', ['auth', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']
     $g->route('/users', fn() => User::all());                       // auth -> ip -> handler
 
     // 4) One route gets an extra, tighter rate limit on top of the group chain.
-    $g->route('/export', methods: ['POST'], middleware: ['throttle:30'],
-        handler: fn() => Report::export());                         // auth -> ip -> throttle:30 -> handler
+    $g->route('/export', fn() => Report::export(), methods: ['POST'], middleware: ['throttle:30']);                         // auth -> ip -> throttle:30 -> handler
 });
 
 $app->run();

@@ -67,10 +67,10 @@ $rungs = [
   [
     'n'    => '0',
     'title' => 'Drop in your entire app, unchanged',
-    'code'  => 'App::superglobals(true); $app->setFallback(fn() => App::include(\'/index.php\'));',
+    'code'  => 'App::mode(App::MODE_COROUTINE_LEGACY); $app->setFallback(fn() => App::include(\'/index.php\'));',
     'desc'  => 'Drop your PHP files into <code>public/</code> (the document root — configurable via <code>App::documentRoot()</code>). <code>setFallback()</code> catches every URL and routes it through your existing <code>index.php</code>, just like Apache\'s <code>RewriteRule . /index.php [L]</code>. With ext-zealphp, <code>$_GET</code>/<code>$_SESSION</code> are per-coroutine safe, so coroutines work out of the box. Apps that use <code>define()</code> heavily (WordPress/Drupal) can opt into <code>processIsolation(true)</code> for the CGI bridge. See <a href="/legacy-apps#limitations">documented limits</a> for complex apps.',
     'wins'  => 'Persistent process, no per-request boot. Sub-millisecond TTFB on cached routes. Coroutines + superglobals together — no code rewrites needed.',
-    'gives_up' => 'Apps with <code>define()</code> need <code>processIsolation(true)</code> (the legacy CGI bridge, <code>App::mode(\'legacy-cgi\')</code>). Dispatch goes through the warm worker pool — <code>cgiMode(\'pool\')</code>, the default, ~1–3 ms warm because the PHP interpreter stays resident — or <code>cgiMode(\'fcgi\')</code> to forward to an external FastCGI / php-fpm pool. Without ext-zealphp, <code>superglobals(true) + enableCoroutine(true)</code> throws a <code>RuntimeException</code> at boot — install ext-zealphp (<code>pie install zealphp/ext</code>) or use <code>App::mode(\'coroutine\')</code> for coroutine concurrency without it.',
+    'gives_up' => 'Apps with <code>define()</code> need <code>App::mode(App::MODE_LEGACY_CGI)</code> (the legacy CGI bridge). Dispatch goes through the warm worker pool — <code>cgiMode(\'pool\')</code>, the default, ~1–3 ms warm because the PHP interpreter stays resident — or <code>cgiMode(\'fcgi\')</code> to forward to an external FastCGI / php-fpm pool. Without ext-zealphp, running coroutines with superglobals throws a <code>RuntimeException</code> at boot — install ext-zealphp (<code>pie install zealphp/ext</code>) or use <code>App::mode(App::MODE_COROUTINE)</code> for coroutine concurrency without it.',
   ],
   [
     'n'    => '1',
@@ -161,7 +161,7 @@ foreach ($rungs as $r):
   </li>
   <li>
     <strong>CGI worker bridge (opt-in).</strong> When <code>processIsolation(true)</code>
-    is set (<code>App::mode('legacy-cgi')</code>), each public <code>.php</code> file is
+    is set (<code>App::mode(App::MODE_LEGACY_CGI)</code>), each public <code>.php</code> file is
     dispatched through a configurable isolation backend — full process isolation for
     <code>define()</code>-heavy apps like WordPress/Drupal. Four strategies are available:
     <code>cgiMode('pool')</code> (default) keeps a pre-spawned warm worker pool resident in
@@ -182,10 +182,10 @@ foreach ($rungs as $r):
   you opt into higher rungs when you want framework features like WebSocket and SSE.
 </p>
 
-<h2 class="mig-h2-mt-xl">The drop-in PHP-FPM equivalent: <code>App::mode('mixed')</code></h2>
+<h2 class="mig-h2-mt-xl">The drop-in PHP-FPM equivalent: <code>App::mode(App::MODE_MIXED)</code></h2>
 <p>
   If you want the closest apples-to-apples swap for a PHP-FPM deployment,
-  <code>App::mode('mixed')</code> is it. It gives you native <code>$_GET</code>,
+  <code>App::mode(App::MODE_MIXED)</code> is it. It gives you native <code>$_GET</code>,
   <code>$_POST</code>, <code>$_SESSION</code> populated per request, one request at a
   time per warm worker — the exact execution model PHP-FPM / mod_php use — but
   <strong>in-process</strong>, with no FastCGI socket hop and no separate web server
@@ -199,7 +199,7 @@ foreach ($rungs as $r):
   on the superglobals to worry about: it's the same shared-nothing-per-request mental
   model you already have, minus the FastCGI plumbing. This is the drop-in FPM
   replacement story. When you're ready for concurrency, move up to
-  <code>App::mode('coroutine')</code>.
+  <code>App::mode(App::MODE_COROUTINE)</code>.
 </p>
 
 <h2 class="mig-h2-mt-xl">Apache+mod_php parity reference</h2>

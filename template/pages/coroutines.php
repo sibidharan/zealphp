@@ -74,12 +74,12 @@ foreach ($demos as [$id, $title, $url, $code]) {
 <table class="ztable coro-mb">
   <tr><th>Mode</th><th><code>$g-&gt;get</code> / <code>$g-&gt;post</code> / …</th><th><code>$_GET</code> / <code>$_POST</code> / …</th></tr>
   <tr>
-    <td><code>App::superglobals(true)</code><br><small>legacy / migration mode</small></td>
+    <td><code>App::mode(App::MODE_MIXED)</code><br><small>legacy / migration mode</small></td>
     <td>✅ Bridged to <code>$GLOBALS['_GET']</code> etc. on each request — both forms read &amp; write the same backing array, so they're observationally equivalent.</td>
     <td>✅ Repopulated per request by the framework. With ext-zealphp + <code>enableCoroutine(true)</code>, superglobals are saved/restored per coroutine — concurrent requests are safe. Without ext-zealphp, sequential mode (one request at a time per worker).</td>
   </tr>
   <tr>
-    <td><code>App::superglobals(false)</code><br><small>coroutine mode (recommended default)</small></td>
+    <td><code>App::mode(App::MODE_COROUTINE)</code><br><small>coroutine mode (recommended default)</small></td>
     <td>✅ A per-coroutine typed property on <code>RequestContext</code>, stored on <code>Coroutine::getContext()</code>. Isolated per request even when thousands run concurrently in the same worker.</td>
     <td>⚠️ <strong>Not populated by default.</strong> With <code>ext-zealphp</code> + <code>zealphp_coroutine_superglobals(true)</code>, they become per-coroutine safe (saved/restored on yield/resume). Without ext-zealphp, they&rsquo;re process-wide and leak across coroutines.</td>
   </tr>

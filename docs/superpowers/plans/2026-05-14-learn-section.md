@@ -1802,7 +1802,7 @@ Commit: `feat(learn): lesson 4 components prose around render demos`.
 
 Sections:
 1. Implicit public (`public/X.php` → `/X`).
-2. Implicit API (`api/users/get.php` → `GET /api/users`).
+2. Implicit API (`api/users.php` → `GET/POST /api/users`).
 3. Explicit (`$app->route('/users/{id}', fn($id) => ...)`).
 4. Namespaced (`nsRoute`, `nsPathRoute`).
 5. Parameter injection rules — table.
@@ -2524,8 +2524,8 @@ Write `/var/labsstorage/home/sibidharan/zealphp/api/learn/chat/status.php`:
 <?php
 // ZealAPI file: GET /api/learn/chat/status maps to api/learn/chat/status.php.
 // The variable name MUST match basename($file, '.php') — here: $status.
-// $this is the ZealAPI instance; we can call $this->response(), $this->json(), etc.
-${basename(__FILE__, '.php')} = function () {
+// $app is the App instance; $this is the ZealAPI instance (Closure::bind)
+${basename(__FILE__, '.php')} = function ($app) {
     $key = (string)(getenv('OPENAI_API_KEY') ?: '');
     $this->response($this->json([
         'ai_enabled' => $key !== '',
