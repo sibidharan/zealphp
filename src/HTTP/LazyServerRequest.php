@@ -180,6 +180,17 @@ class LazyServerRequest implements ServerRequestInterface
         return $this->hydrate()->getBody();
     }
 
+    /**
+     * @infection-ignore-all The #435 catch is integration/defensive code: the
+     *   os#395 TypeError only arises from a malformed request target processed
+     *   by the REAL OpenSwoole Uri parser, which the per-mutant Unit harness
+     *   (hand-built native request) only approximates. Its remaining surviving
+     *   mutants are provably-equivalent (e.g. the (string) cast on a
+     *   parse_url(...PHP_URL_PATH) result that can't be false after the
+     *   leading-slash collapse). Behaviour is pinned by
+     *   testGetUriRecoversFromTripleSlashTarget; excluded from the MSI baseline
+     *   per infection.json5's integration-only policy.
+     */
     public function getUri(): UriInterface
     {
         try {

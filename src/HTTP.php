@@ -236,6 +236,14 @@ final class HTTP
      * correct, mod_php-equivalent behaviour in those sequential-per-worker
      * modes. Returns the same HTTPResponse shape as the coroutine path.
      *
+     * @infection-ignore-all Integration-only: this path is reached solely from
+     *   a live reactor worker (mixed / legacy-cgi, App::$server set) making a
+     *   real outbound curl request — it cannot be exercised under the per-mutant
+     *   Unit harness (no server, no live endpoint), so every mutant here is
+     *   uncovered. Matches infection.json5's documented exclusion of
+     *   integration-only code from the MSI baseline. Behaviour is covered by the
+     *   #429 integration scenario, not Unit.
+     *
      * @param array<string, string> $headers
      */
     private static function requestBlocking(string $method, string $url, string $bodyStr, array $headers, float $timeout): HTTPResponse
