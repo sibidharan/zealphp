@@ -25,10 +25,10 @@ HTML]); ?>
 <?php App::render('/components/_code', [
     'label' => 'Server: the route returns the new row',
     'code'  => <<<'PHP'
-$app->route('/items', methods: ['POST'], handler: function ($request) {
+$app->route('/items', function ($request) {
     $item = Item::create($request->post['item']);
     return "<li>" . htmlspecialchars($item->name) . "</li>";
-});
+}, methods: ['POST']);
 PHP]); ?>
 
 <p><strong>Progressive enhancement.</strong> Because the markup is real HTML — a real <code>&lt;form action&gt;</code> / <code>&lt;a href&gt;</code> underneath the htmx attributes — the same page still works with JavaScript disabled. htmx is an enhancement layer, not a hard dependency.</p>
@@ -74,7 +74,7 @@ HTML]); ?>
 <?php App::render('/components/_code', [
     'label' => 'Branch on isHtmx() — partial for htmx, full page for a direct hit',
     'code'  => <<<'PHP'
-$app->route('/search', methods: ['GET'], handler: function ($request) {
+$app->route('/search', function ($request) {
     $hits = Search::run($request->get['q'] ?? '');
 
     if ($request->isHtmx()) {
@@ -83,7 +83,7 @@ $app->route('/search', methods: ['GET'], handler: function ($request) {
     }
     // Direct navigation — return the whole page.
     return App::render('search/page', ['hits' => $hits]);
-});
+}, methods: ['GET']);
 PHP]); ?>
 
 <p>That branch is common enough that ZealPHP ships <a href="#render-htmx"><code>App::renderHtmx()</code></a> to collapse it to one line.</p>
@@ -199,7 +199,7 @@ PHP]); ?>
     <div class="code-label">Before — the manual branch</div>
 <?php App::render('/components/_code', [
     'code'  => <<<'PHP'
-$app->route('/search', methods: ['GET'], handler: function ($request) {
+$app->route('/search', function ($request) {
     $hits = Search::run($request->get['q'] ?? '');
     if ($request->isHtmx()) {
         $target = ltrim($request->htmxTarget() ?? '', '#');
@@ -209,17 +209,17 @@ $app->route('/search', methods: ['GET'], handler: function ($request) {
         return App::render('search', ['hits' => $hits]);
     }
     return App::render('search', ['hits' => $hits]);
-});
+}, methods: ['GET']);
 PHP]); ?>
   </div>
   <div class="htmx-ba-col">
     <div class="code-label">After — one line</div>
 <?php App::render('/components/_code', [
     'code'  => <<<'PHP'
-$app->route('/search', methods: ['GET'], handler: fn($request) =>
+$app->route('/search', fn($request) =>
     App::renderHtmx('search', [
         'hits' => Search::run($request->get['q'] ?? ''),
-    ]));
+    ]), methods: ['GET']);
 PHP]); ?>
   </div>
 </div>
@@ -228,8 +228,8 @@ PHP]); ?>
 
 <?php App::render('/components/_code', [
     'code'  => <<<'PHP'
-$app->route('/widget', methods: ['GET'], handler: fn() =>
-    App::renderHtmx('widget/partial', ['w' => $w], fullPageTemplate: 'widget/page'));
+$app->route('/widget', fn() =>
+    App::renderHtmx('widget/partial', ['w' => $w], fullPageTemplate: 'widget/page'), methods: ['GET']);
 PHP]); ?>
 
 <h2 id="oob" class="htmx-mt-2">Out-of-band swaps</h2>
@@ -237,12 +237,12 @@ PHP]); ?>
 
 <?php App::render('/components/_code', [
     'code'  => <<<'PHP'
-$app->route('/cart/add', methods: ['POST'], handler: function ($request) {
+$app->route('/cart/add', function ($request) {
     $cart = Cart::add($request->post['sku']);
     // Primary swap: a confirmation. OOB: the cart badge updates too.
     return "<div>Added.</div>"
          . HtmxResponse::oob('cart-count', (string) $cart->count);
-});
+}, methods: ['POST']);
 PHP]); ?>
 
 <p>The <code>id</code> and swap value are HTML-escaped; the tag is sanitised to alphanumerics (falling back to <code>div</code>).</p>

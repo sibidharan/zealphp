@@ -21,10 +21,10 @@ A normal AJAX setup returns JSON and rebuilds the DOM in JavaScript. htmx invert
 The route just returns the new row's HTML:
 
 ```php
-$app->route('/items', methods: ['POST'], handler: function ($request) {
+$app->route('/items', function ($request) {
     $item = Item::create($request->post['item']);
     return "<li>" . htmlspecialchars($item->name) . "</li>";
-});
+}, methods: ['POST']);
 ```
 
 **Progressive enhancement.** Because the markup is real HTML — a real `<form action>` / `<a href>` underneath the htmx attributes — the same page still works with JavaScript disabled. htmx is an enhancement layer, not a hard dependency.
@@ -66,7 +66,7 @@ With `hx-boost="true"` on `<body>`, **every** `<a>` and `<form>` on the page is 
 Branch on `isHtmx()` to serve a partial to htmx and a full page to a direct hit:
 
 ```php
-$app->route('/search', methods: ['GET'], handler: function ($request) {
+$app->route('/search', function ($request) {
     $hits = Search::run($request->get['q'] ?? '');
 
     if ($request->isHtmx()) {
@@ -75,7 +75,7 @@ $app->route('/search', methods: ['GET'], handler: function ($request) {
     }
     // Direct navigation — return the whole page (which includes the results).
     return App::render('search/page', ['hits' => $hits]);
-});
+}, methods: ['GET']);
 ```
 
 That branch is common enough that ZealPHP ships [`App::renderHtmx()`](#fragments--apprenderhtmx) to collapse it to one line.
@@ -190,7 +190,7 @@ Called outside a request (a CLI render, a warmup), it falls back to the full-pag
 **Before** — the manual branch:
 
 ```php
-$app->route('/search', methods: ['GET'], handler: function ($request) {
+$app->route('/search', function ($request) {
     $hits = Search::run($request->get['q'] ?? '');
     if ($request->isHtmx()) {
         $target = ltrim($request->htmxTarget() ?? '', '#');
@@ -200,14 +200,14 @@ $app->route('/search', methods: ['GET'], handler: function ($request) {
         return App::render('search', ['hits' => $hits]);
     }
     return App::render('search', ['hits' => $hits]);
-});
+}, methods: ['GET']);
 ```
 
 **After** — one line:
 
 ```php
-$app->route('/search', methods: ['GET'], handler: fn($request) =>
-    App::renderHtmx('search', ['hits' => Search::run($request->get['q'] ?? '')]));
+$app->route('/search', fn($request) =>
+    App::renderHtmx('search', ['hits' => Search::run($request->get['q'] ?? '')]), methods: ['GET']);
 ```
 
 Same shell, the `App::fragment('results', …)` region inside `search.php` is what an htmx `hx-target="#results"` request gets back; a direct hit gets the whole page.
@@ -215,8 +215,8 @@ Same shell, the `App::fragment('results', …)` region inside `search.php` is wh
 Separate-template form — a bare partial for htmx plus a distinct full-page shell:
 
 ```php
-$app->route('/widget', methods: ['GET'], handler: fn() =>
-    App::renderHtmx('widget/partial', ['w' => $w], fullPageTemplate: 'widget/page'));
+$app->route('/widget', fn() =>
+    App::renderHtmx('widget/partial', ['w' => $w], fullPageTemplate: 'widget/page'), methods: ['GET']);
 ```
 
 ## Out-of-band swaps
@@ -237,12 +237,12 @@ public static function oob(
 Append it to any response body to perform an OOB swap with no extra round-trip:
 
 ```php
-$app->route('/cart/add', methods: ['POST'], handler: function ($request) {
+$app->route('/cart/add', function ($request) {
     $cart = Cart::add($request->post['sku']);
     // Primary swap: the product row. OOB: the cart badge.
     return "<div>Added.</div>"
          . HtmxResponse::oob('cart-count', (string) $cart->count);
-});
+}, methods: ['POST']);
 ```
 
 The `id` and swap value are HTML-escaped; the tag is sanitised to alphanumerics (falling back to `div`).

@@ -71,16 +71,16 @@ PHP]);
 use ZealPHP\Middleware\IpAccessMiddleware;
 
 $app->route('/admin/users',
+    fn() => User::all(),
     methods: ['GET'],
     middleware: ['auth', 'request-id', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']])],
-    handler: fn() => User::all(),
 );
 
 // Two ways to declare middleware — they COMBINE.
 // Array-option entries run first (outermost), then named-arg entries.
 $app->route('/reports',
     ['middleware' => ['audit-log']],     // array option  → outermost
-    handler: fn() => Report::all(),
+    fn() => Report::all(),
     middleware: ['request-id'],          // named arg     → inner of the two
 );
 PHP]); ?>
@@ -96,7 +96,7 @@ App::middlewareAlias('auth',       fn() => new BasicAuthMiddleware(htpasswdFile:
 App::middlewareAlias('admin-only', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']]));
 App::middlewareAlias('throttle',   fn($n = '60') => new RateLimitMiddleware(limit: (int)$n));
 
-$app->route('/api/heavy', middleware: ['throttle:120'], handler: fn() => Heavy::run());
+$app->route('/api/heavy', fn() => Heavy::run(), middleware: ['throttle:120']);
 PHP]); ?>
 <p class="mw-note"><strong>Stateless contract:</strong> one alias instance serves every concurrent coroutine, so middleware objects must hold <em>no per-request state</em>. Put request-scoped data in <code>$g</code> (the request context / memo), never on the middleware instance — exactly how <code>RequestIdMiddleware</code> stashes its id in <code>$g->memo['request_id']</code>.</p>
 <p class="mw-note"><strong>Path-sensitive guards:</strong> the router matches on the <em>normalized</em> path (collapsed <code>//</code>, decoded traversal, <code>AllowEncodedSlashes</code>), which it writes to <code>$g->server['REQUEST_URI']</code>. A per-route middleware that keys off the URL should read <code>$g->server['REQUEST_URI']</code> rather than <code>$request->getUri()->getPath()</code> — the PSR-7 request still carries the original, un-normalized path.</p>
@@ -344,10 +344,10 @@ $app->addMiddleware(new RequestIdMiddleware());
 
 // Or per-route via an alias (see "Per-route middleware" below)
 App::middlewareAlias('request-id', fn() => new RequestIdMiddleware());
-$app->route('/api/job', middleware: ['request-id'], handler: function () {
+$app->route('/api/job', function () {
     $id = RequestContext::once('request_id', fn() => null);  // read it in the handler
     return ['job' => 'queued', 'request_id' => $id];
-});
+}, middleware: ['request-id']);
 
 // Custom header / always mint a fresh id (ignore inbound)
 $app->addMiddleware(new RequestIdMiddleware('X-Correlation-Id', trustInbound: false));
@@ -473,6 +473,11 @@ PHP]); ?>
 
 <h3 id="rate-limit" class="mw-h3"><code>RateLimitMiddleware</code></h3>
 <p>Sliding-window request rate limiter using <code>Store</code> for cross-worker shared state. nginx parity: <code>limit_req zone=one rate=10r/s burst=20;</code>. Returns <code>429 Too Many Requests</code> with <code>Retry-After</code> when the window is full.</p>
+<ul class="mw-list">
+    <li><strong>Automatic IP Resolution:</strong> Automatically uses <code>App::clientIp()</code> to handle <code>X-Forwarded-For</code> and trusted proxies.</li>
+    <li><strong>Automatic Loopback Bypass:</strong> Requests from <code>127.0.0.1</code> or <code>::1</code> are automatically bypassed (not rate-limited) so your local testing and integration suites don't get blocked. Opt back in by setting <code>ZEALPHP_RATE_LIMIT_LOOPBACK=1</code>.</li>
+    <li><strong>Automatic Fail-Open:</strong> If the <code>Store</code> table fills up or doesn't exist, the middleware automatically <em>fails open</em> (allows the request through) and logs a warning instead of taking your application down.</li>
+</ul>
 <?php App::render('/components/_code', [
     'code' => <<<'PHP'
 use ZealPHP\Middleware\RateLimitMiddleware;

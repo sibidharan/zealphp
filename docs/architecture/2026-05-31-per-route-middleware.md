@@ -86,10 +86,9 @@ These are what an FPM-shaped "just add PSR-15 per route" design gets wrong. Ever
 Mirrors the existing `methods:` / `raw:` named args:
 
 ```php
-$app->route('/admin/users',
-    methods: ['GET'],
+$app->route('/admin/users', fn() => User::all(),
     middleware: ['auth', 'admin-only', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']])],
-    handler: fn() => User::all());
+    methods: ['GET']);
 ```
 
 `middleware:` accepts **instances** or **string aliases** (resolved from a registry). Array form composes too: `['methods' => [...], 'middleware' => [...]]`.

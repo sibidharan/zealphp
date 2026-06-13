@@ -65,10 +65,10 @@ class ZealApiProcessApiTest extends TestCase
         $apiDir = $this->tmpRoot . '/api';
         @mkdir($apiDir . '/users', 0777, true);
 
-        // GET /api/users/get → array → JSON
+        // GET /api/users/get_action → array → JSON
         file_put_contents(
-            $apiDir . '/users/get.php',
-            '<?php $get = function() { return ["users" => ["alice", "bob"]]; };'
+            $apiDir . '/users/get_action.php',
+            '<?php $get_action = function() { return ["users" => ["alice", "bob"]]; };'
         );
         // string return → echoed verbatim
         file_put_contents(

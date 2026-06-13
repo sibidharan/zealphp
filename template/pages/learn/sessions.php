@@ -206,12 +206,12 @@ App::sessionHandler('table');
     <p>
       Which session manager runs depends on the lifecycle mode set by
       <a href="/coroutines#lifecycle-modes"><code>App::mode()</code></a>:
-      in coroutine mode (<code>App::superglobals(false)</code>) each request gets a
+      in coroutine mode (<code>App::mode(App::MODE_COROUTINE)</code>) each request gets a
       <strong><code>CoSessionManager</code></strong> with its own per-coroutine
       <code>RequestContext</code>; in <code>legacy-cgi</code> and <code>mixed</code> modes
-      (<code>App::superglobals(true)</code> + coroutines off) the shared-process
+      (<code>App::mode(App::MODE_MIXED)</code>) the shared-process
       <strong><code>SessionManager</code></strong> runs instead — <em>except</em>
-      <code>coroutine-legacy</code> mode, which uses <code>superglobals(true)</code> but
+      <code>App::MODE_COROUTINE_LEGACY</code> mode, which keeps real superglobals but
       keeps <code>CoSessionManager</code> because coroutines remain on. Either way
       <code>$g-&gt;session</code> is the safe access path.
     </p>

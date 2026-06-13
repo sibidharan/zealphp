@@ -149,9 +149,9 @@ $app = App::instance();
 // 'auth' + 'request-id' are named aliases (declared below);
 // IpAccessMiddleware is passed as a ready instance. They combine.
 $app->route('/admin/users',
-    methods: ['GET'],
+    fn() => \App\Models\User::all(),
     middleware: ['auth', 'request-id', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']])],
-    handler: fn() => \App\Models\User::all());
+    methods: ['GET']);
 
 // A sibling route with NO middleware — proves scoping. It pays zero
 // added cost and never sees the auth check above.
@@ -188,7 +188,8 @@ App::middlewareAlias('demo-header', fn() => new HeaderMiddleware([
 
 // Parameterised reference, Laravel-style: 'throttle:120' calls the
 // factory with the comma-split args, i.e. $factory('120').
-App::middlewareAlias('throttle', fn(string $rpm = '60') => new RateLimitHeader((int) $rpm));
+// Note: RateLimitMiddleware requires a Store table named 'rate_limit' created before App::run()
+App::middlewareAlias('throttle', fn(string $rpm = '60') => new \ZealPHP\Middleware\RateLimitMiddleware(limit: (int) $rpm));
 // ... later: middleware: ['throttle:120']
 PHP,
     ]); ?>
@@ -267,13 +268,11 @@ use ZealPHP\RequestContext;
 // fresh one (bin2hex(random_bytes(16)) = 32 hex chars).
 App::middlewareAlias('request-id', new RequestIdMiddleware());
 
-$app->route('/orders/{id}',
-    middleware: ['request-id'],
-    handler: function ($id) {
+$app->route('/orders/{id}', function ($id) {
         // The middleware stored the id in the per-request memo — read it back.
         $rid = RequestContext::once('request_id', fn() => null);
         return ['order' => $id, 'request_id' => $rid];
-    });
+    }, middleware: ['request-id']);
 PHP,
     ]); ?>
     <p>
@@ -337,7 +336,7 @@ curl -s http://localhost:8080/demo/middleware/visualize | jq</code></pre>
 
     <?php App::render('/components/_concept_check', [
       'id'       => 'mw2',
-      'question' => 'You write <code>$app-&gt;group(\'/admin\', [\'auth\'], fn($g) =&gt; $g-&gt;route(\'/users\', middleware: [\'rate-limit\'], handler: $h))</code>. In what order do the layers wrap the handler?',
+      'question' => 'You write <code>$app-&gt;group(\'/admin\', [\'auth\'], fn($g) =&gt; $g-&gt;route(\'/users\', $h, middleware: [\'rate-limit\']))</code>. In what order do the layers wrap the handler?',
       'correct'  => 'b',
       'explain'  => 'Group middleware wraps OUTSIDE the route\'s own middleware, which wraps outside the handler: global → group (auth) → route (rate-limit) → handler. So auth sees the request first; rate-limit runs just before the handler. The response unwinds in reverse.',
       'options'  => [

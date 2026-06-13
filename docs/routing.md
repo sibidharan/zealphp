@@ -58,12 +58,12 @@ $app->route('/hello/{name}', fn (string $name) => "Hi {$name}");
 $app->route('/users', ['methods' => ['GET', 'POST']], $handler);
 
 // Named-argument form — same result:
-$app->route('/users', methods: ['GET', 'POST'], handler: $handler);
+$app->route('/users', $handler, methods: ['GET', 'POST']);
 
 // raw: skip output buffering for a hand-rolled streaming writer:
-$app->route('/export.csv', methods: ['GET'], raw: true, handler: function ($response) {
+$app->route('/export.csv', function ($response) {
     $response->stream(fn ($write) => $write("id,name\n"));
-});
+}, methods: ['GET'], raw: true);
 ```
 
 > **Handler last, no `handler:` keyword needed.** The second argument is type-dispatched: a **callable** second arg *is* the handler (`route('/x', $fn)`), an **array** second arg is the options (`route('/x', ['methods' => [...]], $fn)` — handler stays last). So you only need the `handler:` named argument when you want to *skip* options and still pass other named args. The one combination PHP itself forbids is a **positional handler after a named argument** — `route('/x', methods: ['GET'], $fn)` is a fatal "positional argument after named argument"; in that case put `methods` in the options array (`route('/x', ['methods' => ['GET']], $fn)`) or name the handler too.
@@ -115,12 +115,11 @@ Each entry is either a ready `MiddlewareInterface` **instance** or a named **ali
 use ZealPHP\Middleware\{RequestIdMiddleware, IpAccessMiddleware};
 
 // Mix alias strings with a live instance:
-$app->route('/admin/users', methods: ['GET'],
-    middleware: ['auth', 'request-id', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']])],
-    handler: fn () => User::all());
+$app->route('/admin/users', fn () => User::all(), methods: ['GET'],
+    middleware: ['auth', 'request-id', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']])]);
 
 // Same option on any registrar:
-$app->nsRoute('api', '/jobs', middleware: ['request-id'], handler: $list);
+$app->nsRoute('api', '/jobs', $list, middleware: ['request-id']);
 
 // Array-option + named-arg combine — array entries are outermost:
 $app->route('/report', ['middleware' => ['auth']], $handler, middleware: ['request-id']);
@@ -142,7 +141,7 @@ App::middlewareAlias('request-id', fn () => new RequestIdMiddleware());
 // comma-split args (fn('120')), mirroring Laravel 'throttle:60,1'.
 App::middlewareAlias('throttle', fn ($n = '60') => new RateLimitMiddleware(limit: (int) $n));
 
-$app->route('/admin/users', middleware: ['auth', 'admin-only', 'throttle:120'], handler: $fn);
+$app->route('/admin/users', $fn, middleware: ['auth', 'admin-only', 'throttle:120']);
 ```
 
 A factory runs **once at `App::run()`** (boot, single-coroutine) and the resulting instance is **shared across every request** that uses the alias. Therefore middleware **must be stateless** — one object serves all concurrent coroutines; keep per-request state in `$g` (`RequestContext`), never on the middleware object.
@@ -224,8 +223,7 @@ $app->group('/admin', ['auth', new IpAccessMiddleware(['allow' => ['10.0.0.0/8']
     $g->route('/users', fn () => User::all());                       // auth -> ip -> handler
 
     // 4) One route adds a tighter rate limit on top of the group chain.
-    $g->route('/export', methods: ['POST'], middleware: ['throttle:30'],
-        handler: fn () => Report::export());                         // auth -> ip -> throttle:30 -> handler
+    $g->route('/export', fn () => Report::export(), methods: ['POST'], middleware: ['throttle:30']);                         // auth -> ip -> throttle:30 -> handler
 });
 
 $app->run();
@@ -246,13 +244,11 @@ use ZealPHP\App;
 App::cgiMode('fork');
 
 // …but this one route forwards to an external php-fpm pool:
-$app->route('/legacy/{path}', methods: ['GET', 'POST'],
-    backend: ['mode' => 'fcgi', 'address' => 'unix:/run/php-fpm.sock'],
-    handler: fn ($path) => App::include("/legacy/$path"));
+$app->route('/legacy/{path}', fn ($path) => App::include("/legacy/$path"), methods: ['GET', 'POST'],
+    backend: ['mode' => 'fcgi', 'address' => 'unix:/run/php-fpm.sock']);
 
 // …and this one runs a Python CGI script via proc:
-$app->route('/report', backend: ['mode' => 'proc', 'interpreter' => '/usr/bin/python3'],
-    handler: fn () => App::include('/cgi-bin/report.py'));
+$app->route('/report', fn () => App::include('/cgi-bin/report.py'), backend: ['mode' => 'proc', 'interpreter' => '/usr/bin/python3']);
 
 // Array-option form + a named alias (registered once at boot):
 App::cgiBackendAlias('wp-fork', 'fork');

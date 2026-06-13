@@ -73,7 +73,7 @@ api/learn/login.php          → /api/learn/login</code></pre>
     </p>
     <pre><code class="language-php">// api/users/list.php
 $list = function ($app, $request, $response) {
-    // $app is the ZealAPI instance; $this also works (Closure::bind)
+    // $app is the App instance; $this is the ZealAPI instance (Closure::bind)
     return User::all();  // array → auto-JSON encoded
 };</code></pre>
     <p>

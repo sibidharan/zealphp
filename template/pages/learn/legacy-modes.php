@@ -22,7 +22,7 @@
     <p>
       Everything about how a request is handled &mdash; whether <code>$_GET</code>/<code>$_SESSION</code> are real,
       whether requests run concurrently, whether each <code>.php</code> file gets its own process &mdash; is decided
-      by a single call near the top of <code>app.php</code>. The trade-off behind every mode is the same one you met
+      by a single call near the top of <code>app.php</code>. You can pass the <code>App::MODE_*</code> constants (preferred) or their string equivalents. The trade-off behind every mode is the same one you met
       in <a href="/learn/mental-model">Lesson&nbsp;3</a>: <strong>process-wide superglobals are not safe across
       concurrent coroutines</strong>. Each mode resolves that tension differently.
     </p>
@@ -35,25 +35,25 @@
         <th>Best for</th>
       </tr>
       <tr>
-        <td><code>App::mode('coroutine')</code><br><span class="muted">the default</span></td>
+        <td><code>App::mode(App::MODE_COROUTINE)</code><br><span class="muted">or <code>'coroutine'</code></span><br><span class="muted">the default</span></td>
         <td>Off &mdash; use <code>$g-&gt;get</code> / <code>$g-&gt;session</code></td>
         <td>✅ Full coroutine concurrency</td>
         <td>New apps. Fastest, cleanest, real in-request parallelism.</td>
       </tr>
       <tr>
-        <td><code>App::mode('mixed')</code></td>
+        <td><code>App::mode(App::MODE_MIXED)</code><br><span class="muted">or <code>'mixed'</code></span></td>
         <td>✅ Real <code>$_GET</code>/<code>$_SESSION</code></td>
         <td>Sequential (one request at a time per worker)</td>
         <td>Symfony / Laravel bridges &mdash; the stable PHP-FPM drop-in.</td>
       </tr>
       <tr>
-        <td><code>App::mode('legacy-cgi')</code></td>
+        <td><code>App::mode(App::MODE_LEGACY_CGI)</code><br><span class="muted">or <code>'legacy-cgi'</code></span></td>
         <td>✅ Real, fully isolated per process</td>
         <td>Sequential, process-per-file (warm pool, ~1&ndash;3&nbsp;ms)</td>
         <td>Unmodified WordPress / Drupal &mdash; maximum compatibility.</td>
       </tr>
       <tr>
-        <td><code>App::mode('coroutine-legacy')</code><br><span class="muted">experimental</span></td>
+        <td><code>App::mode(App::MODE_COROUTINE_LEGACY)</code><br><span class="muted">or <code>'coroutine-legacy'</code></span><br><span class="muted">experimental</span></td>
         <td>✅ Real, isolated per coroutine</td>
         <td>✅ Full coroutine concurrency</td>
         <td>Composer/PSR-4 legacy apps that want real superglobals <em>and</em> concurrency.</td>
@@ -67,6 +67,52 @@
       lesson is an honest look at it.
     </p>
 
+    <h2>The Superpower: Side-by-Side</h2>
+    <p>
+      The whole point of <code>coroutine-legacy</code> is that you get to write classic PHP syntax while keeping
+      the performance and concurrency of coroutines. Let's look at what that means in practice:
+    </p>
+
+    <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
+      <div style="flex: 1;">
+        <?php App::render('/components/_code', [
+          'label' => 'Coroutine Mode',
+          'code'  => <<<'PHP'
+// In pure Coroutine Mode, you must use $g
+$g = \ZealPHP\RequestContext::instance();
+
+$id = $g->get['id'] ?? null;
+
+if (!isset($g->session['user'])) {
+    $g->session['user'] = 'guest';
+}
+
+echo "Hello, " . $g->session['user'];
+PHP
+        ]); ?>
+      </div>
+      <div style="flex: 1;">
+        <?php App::render('/components/_code', [
+          'label' => 'Coroutine-Legacy Mode',
+          'code'  => <<<'PHP'
+// In Coroutine-Legacy Mode, classic PHP just works!
+session_start();
+
+$id = $_GET['id'] ?? null;
+
+if (!isset($_SESSION['user'])) {
+    $_SESSION['user'] = 'guest';
+}
+
+echo "Hello, " . $_SESSION['user'];
+PHP
+        ]); ?>
+      </div>
+    </div>
+    <p>
+      In Coroutine-Legacy mode, <code>ext-zealphp</code> isolates <code>$_GET</code>, <code>$_SESSION</code>, and other global state per-coroutine. You don't have to rewrite your app to use <code>RequestContext</code>.
+    </p>
+
     <h2>What <code>coroutine-legacy</code> is trying to do</h2>
     <p>
       It is a <strong>compatibility runtime</strong>: it lets traditional request-style PHP &mdash; the PHP-FPM
@@ -78,7 +124,7 @@
     </p>
     <p>
       It pulls this off with <strong>ext-zealphp</strong>, a small C extension that hooks OpenSwoole&rsquo;s
-      scheduler and snapshots/restores per-coroutine state across every yield. <code>App::mode('coroutine-legacy')</code>
+      scheduler and snapshots/restores per-coroutine state across every yield. <code>App::mode(App::MODE_COROUTINE_LEGACY)</code>
       auto-enables the whole isolation stack:
     </p>
 
@@ -104,7 +150,7 @@ PHP
       'body'    => '<p>coroutine-legacy works today for a <strong>well-defined class of apps</strong>, with caveats and open issues on the hardest targets. The reasons it carries the experimental flag:</p>
         <ol>
           <li><strong>It needs a C extension.</strong> The isolation runtime depends on <code>ext-zealphp</code> being compiled and loaded. The other three modes run on stock PHP.</li>
-          <li><strong>&ldquo;Old PHP just works&rdquo; is <em>conditional</em>.</strong> Request <em>state</em> isolates transparently, but <em>class loading</em> does not. A class with <code>extends</code>/<code>implements</code> first compiled while several coroutines overlap (the first cold concurrent wave) can land present-but-<em>unlinked</em> for a moment &rarr; intermittent <code>Class not found</code> 500s. The honest promise is &ldquo;runs concurrently <em>provided its class graph is warmed before concurrency hits it</em>&rdquo; (via <code>App::preloadClassmap()</code>).</li>
+          <li><strong>&ldquo;Classic PHP just works&rdquo; is <em>conditional</em>.</strong> Request <em>state</em> isolates transparently, but <em>class loading</em> does not. A class with <code>extends</code>/<code>implements</code> first compiled while several coroutines overlap (the first cold concurrent wave) can land present-but-<em>unlinked</em> for a moment &rarr; intermittent <code>Class not found</code> 500s. The honest promise is &ldquo;runs concurrently <em>provided its class graph is warmed before concurrency hits it</em>&rdquo; (via <code>App::preloadClassmap()</code>).</li>
           <li><strong>Open frontier issues on unmodified WordPress.</strong> A <code>$wpdb</code> connection-teardown crash and a bounded per-worker memory leak under <code>require_once</code> re-execution are still being worked at the extension level. Composer apps don&rsquo;t hit these; classic <code>require_once</code> WordPress does.</li>
           <li><strong>opcache rebinding.</strong> A warm opcache can fight the per-request class re-declaration (&ldquo;Cannot redeclare class&rdquo;) unless you set <code>opcache.dups_fix=1</code> (and, for the function case, use the patched opcache the Docker image ships).</li>
           <li><strong>It is young and moving fast.</strong> The isolation stack has shipped a dozen memory-safety fixes in a matter of weeks &mdash; stabilising, but not yet &ldquo;set and forget.&rdquo;</li>
@@ -140,7 +186,7 @@ PHP
     <?php App::render('/components/_callout', [
       'variant' => 'info',
       'title'   => 'Rule of thumb',
-      'body'    => '<p>Reach for the simplest mode that fits: <strong><code>coroutine</code></strong> for new code, <strong><code>mixed</code></strong> for a Composer legacy app that just needs real <code>$_SESSION</code> (no concurrency-inside-a-request), <strong><code>legacy-cgi</code></strong> for unmodified WordPress/Drupal, and <strong><code>coroutine-legacy</code></strong> only when a Composer-based legacy app genuinely needs <em>both</em> real superglobals <em>and</em> coroutine concurrency &mdash; and you can warm its class graph. When in doubt, <code>mixed</code> is the stable PHP-FPM equivalent.</p>',
+      'body'    => '<p>Reach for the simplest mode that fits: <strong><code>App::MODE_COROUTINE</code></strong> for new code, <strong><code>App::MODE_MIXED</code></strong> for a Composer legacy app that just needs real <code>$_SESSION</code> (no concurrency-inside-a-request), <strong><code>App::MODE_LEGACY_CGI</code></strong> for unmodified WordPress/Drupal, and <strong><code>App::MODE_COROUTINE_LEGACY</code></strong> only when a Composer-based legacy app genuinely needs <em>both</em> real superglobals <em>and</em> coroutine concurrency &mdash; and you can warm its class graph. When in doubt, <code>App::MODE_MIXED</code> is the stable PHP-FPM equivalent.</p>',
     ]); ?>
 
     <?php App::render('/components/_concept_check', [
@@ -149,19 +195,19 @@ PHP
       'correct'  => 'c',
       'explain'  => 'Classic WordPress loads its class graph via <code>require_once</code> with no autoloader, so it can\'t be pre-warmed &mdash; which is exactly the condition <code>coroutine-legacy</code> needs. <code>legacy-cgi</code> runs each request in an isolated process (warm pool), so there is no coroutine race at all. It\'s the race-free home for unmodified WordPress/Drupal. Reach for <code>coroutine-legacy</code> only for Composer/PSR-4 apps whose class graph you can warm.',
       'options'  => [
-        'a' => '<code>coroutine</code> — it\'s the fastest, so always start there.',
-        'b' => '<code>coroutine-legacy</code> — it keeps real superglobals and runs concurrently.',
-        'c' => '<code>legacy-cgi</code> — process-isolated, no coroutine race, built for this.',
+        'a' => '<code>App::MODE_COROUTINE</code> — it\'s the fastest, so always start there.',
+        'b' => '<code>App::MODE_COROUTINE_LEGACY</code> — it keeps real superglobals and runs concurrently.',
+        'c' => '<code>App::MODE_LEGACY_CGI</code> — process-isolated, no coroutine race, built for this.',
       ],
     ]); ?>
 
     <?php App::render('/components/_keytakeaways', ['items' => [
       'One call &mdash; <code>App::mode()</code> &mdash; selects the runtime; the axis behind every mode is the superglobals-vs-concurrency trade-off.',
-      '<code>coroutine</code> (default) for new apps; <code>mixed</code> for stable PHP-FPM-style Composer legacy; <code>legacy-cgi</code> for unmodified WordPress/Drupal.',
-      '<code>coroutine-legacy</code> is the experimental compatibility runtime: real superglobals + coroutine concurrency, via per-coroutine isolation in <strong>ext-zealphp</strong> (required).',
+      '<code>App::MODE_COROUTINE</code> (default) for new apps; <code>App::MODE_MIXED</code> for stable PHP-FPM-style Composer legacy; <code>App::MODE_LEGACY_CGI</code> for unmodified WordPress/Drupal.',
+      '<code>App::MODE_COROUTINE_LEGACY</code> is the experimental compatibility runtime: real superglobals + coroutine concurrency, via per-coroutine isolation in <strong>ext-zealphp</strong> (required).',
       'It\'s experimental because it needs a C extension, the &ldquo;just works&rdquo; promise is conditional on warming the class graph, there are open WordPress-teardown issues, and opcache can fight class re-declaration.',
-      'The dividing line is class loading: PSR-4/Composer apps can be warmed and work; pure <code>require_once</code> apps (classic WordPress) belong in <code>legacy-cgi</code> for now.',
-      'When unsure, pick <code>mixed</code> &mdash; the stable apples-to-apples PHP-FPM swap.',
+      'The dividing line is class loading: PSR-4/Composer apps can be warmed and work; pure <code>require_once</code> apps (classic WordPress) belong in <code>App::MODE_LEGACY_CGI</code> for now.',
+      'When unsure, pick <code>App::MODE_MIXED</code> &mdash; the stable apples-to-apples PHP-FPM swap.',
     ]]); ?>
 
     <div class="lesson-chips">

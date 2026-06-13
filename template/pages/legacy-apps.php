@@ -206,7 +206,7 @@ PHP]); ?>
   <td>Modern Composer apps (Symfony/Laravel/Slim) or <code>require_once</code>-bootstrap apps run <strong>concurrently</strong>; requires <code>ext-zealphp</code>. Stage names (S1&ndash;S12) follow the canonical taxonomy in <a href="https://github.com/sibidharan/zealphp/blob/master/docs/architecture/isolation-stages.md"><code>docs/architecture/isolation-stages.md</code></a>.</td>
 </tr>
 </table>
-<p>The older knob-by-knob form (<code>App::superglobals(true)</code> + <code>App::processIsolation(true)</code> + <code>App::cgiMode(...)</code>) still works and is what the examples below show for clarity — <code>App::mode()</code> is the one-liner shorthand on top. Full lifecycle matrix: <a href="/coroutines#lifecycle-modes">coroutines &rsaquo; lifecycle modes</a>.</p>
+<p>The older knob-by-knob form (<code>App::superglobals(true)</code> + <code>App::processIsolation(true)</code> + <code>App::cgiMode(...)</code>) still works, but <code>App::mode()</code> is the recommended one-liner shorthand on top. The examples below show the <code>App::mode()</code> syntax. Full lifecycle matrix: <a href="/coroutines#lifecycle-modes">coroutines &rsaquo; lifecycle modes</a>.</p>
 </div>
 
 <h2 id="wordpress-tested" class="legacy-mt-xl">WordPress — tested end-to-end</h2>
@@ -251,8 +251,7 @@ PHP]); ?>
 require 'vendor/autoload.php';
 use ZealPHP\App;
 
-App::superglobals(true);                  // mod_php-style superglobals
-App::cgiMode('pool');                     // warm FPM-style worker pool (default)
+App::mode(App::MODE_LEGACY_CGI);          // mod_php-style superglobals + warm FPM-style worker pool
 App::cgiPoolMaxRequests(1);               // recycle each request — WP needs a fresh boot
 // App::cgiSubprocessAutoload(false);     // default — DO NOT enable for WP
 App::$ignore_php_ext = false;             // allow /wp-login.php in URLs
@@ -277,9 +276,29 @@ PHP]); ?>
 require 'vendor/autoload.php';
 use ZealPHP\App;
 
-App::superglobals(true);
+App::mode(App::MODE_LEGACY_CGI);
 App::cgiPoolSize(8);                      // 8 subprocesses pre-spawned per HTTP worker
 App::cgiPoolMaxRequests(1);               // recycle after EVERY request — WP needs fresh boot
+App::$ignore_php_ext = false;
+
+$app = App::init('0.0.0.0', 9501);
+$app->setFallback(function() { App::include('/index.php'); });
+$app->run();
+PHP]); ?>
+
+<h3 id="wordpress-coroutine-legacy" class="legacy-mt-md">Experimental: Concurrent WordPress via <code>App::MODE_COROUTINE_LEGACY</code></h3>
+
+<p>If you want to run WordPress concurrently using coroutines instead of a worker pool, you can use the experimental <code>App::MODE_COROUTINE_LEGACY</code> mode. This requires <code>ext-zealphp</code> to isolate superglobals, statics, and <code>require_once</code> state per coroutine natively.</p>
+
+<?php App::render('/components/_code', [
+    'label' => 'app.php — Concurrent WordPress via coroutine-legacy',
+    'code'  => <<<'PHP'
+<?php
+require 'vendor/autoload.php';
+use ZealPHP\App;
+
+// Requires ext-zealphp to be installed and loaded!
+App::mode(App::MODE_COROUTINE_LEGACY);
 App::$ignore_php_ext = false;
 
 $app = App::init('0.0.0.0', 9501);
@@ -439,7 +458,7 @@ PHP]); ?>
 <tr><td>Apache + mod_php</td><td><code>false</code></td><td>shim's <code>&amp;$_GET</code> reference</td><td>populated natively by PHP</td></tr>
 </table>
 
-<p class="legacy-mt-prose"><strong>With ext-zealphp (v0.3.0+):</strong> <code>superglobals(true) + enableCoroutine(true)</code> is safe &mdash; <code>$_GET</code>/<code>$_SESSION</code> are per-coroutine. Legacy code using <code>$_GET</code> works unchanged with full coroutine concurrency. <code>$g-&gt;X</code> also works &mdash; both accessors are valid in all modes. Without ext-zealphp, coroutine-mode apps must use <code>$g-&gt;X</code> exclusively (superglobals stay empty to prevent races).</p>
+<p class="legacy-mt-prose"><strong>With ext-zealphp (v0.3.0+):</strong> <code>App::mode(App::MODE_COROUTINE_LEGACY)</code> is safe &mdash; <code>$_GET</code>/<code>$_SESSION</code> are per-coroutine. Legacy code using <code>$_GET</code> works unchanged with full coroutine concurrency. <code>$g-&gt;X</code> also works &mdash; both accessors are valid in all modes. Without ext-zealphp, coroutine-mode apps must use <code>$g-&gt;X</code> exclusively (superglobals stay empty to prevent races).</p>
 
 <h2 class="legacy-mt-xl">Apache rewrite recipes — the 12 patterns</h2>
 <p>Real <code>.htaccess</code> files are full of <code>RewriteRule</code> destinations that end in <code>.php</code>. Each recipe below shows the Apache directive and its ZealPHP equivalent. Every example uses the <a href="/coroutines#state-parity"><code>$g</code> form</a> for query-string injection — works in both modes, no per-coroutine leak in coroutine mode. The legacy <code>$_GET</code> equivalent appears as a comment for readers porting older code.</p>
