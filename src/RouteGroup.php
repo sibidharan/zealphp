@@ -46,48 +46,89 @@ final class RouteGroup
     }
 
     /**
-     * @param array<string, mixed>|callable $options
-     * @param callable|null $handler
-     * @param list<string> $methods
-     * @param array<int, MiddlewareInterface|string> $middleware
-     * @param array<string,mixed>|string|null $backend Per-route CGI backend (bare mode / `App::cgiBackendAlias()` name / inline config); delegated to `App::route()`.
+     * @param callable|array<int|string, mixed> $handler
+     * @param array<string, mixed> $options
+     * @param array<int, \Psr\Http\Server\MiddlewareInterface|string> $middleware
+     * @param array<string, mixed>|string|null $backend
      */
-
     public function get(string $path, callable|array $handler, array $options = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         $this->route($path, $options, $handler, ['GET'], $raw, $middleware, $backend);
     }
 
+    /**
+     * @param callable|array<int|string, mixed> $handler
+     * @param array<string, mixed> $options
+     * @param array<int, \Psr\Http\Server\MiddlewareInterface|string> $middleware
+     * @param array<string, mixed>|string|null $backend
+     */
     public function post(string $path, callable|array $handler, array $options = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         $this->route($path, $options, $handler, ['POST'], $raw, $middleware, $backend);
     }
 
+    /**
+     * @param callable|array<int|string, mixed> $handler
+     * @param array<string, mixed> $options
+     * @param array<int, \Psr\Http\Server\MiddlewareInterface|string> $middleware
+     * @param array<string, mixed>|string|null $backend
+     */
     public function put(string $path, callable|array $handler, array $options = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         $this->route($path, $options, $handler, ['PUT'], $raw, $middleware, $backend);
     }
 
+    /**
+     * @param callable|array<int|string, mixed> $handler
+     * @param array<string, mixed> $options
+     * @param array<int, \Psr\Http\Server\MiddlewareInterface|string> $middleware
+     * @param array<string, mixed>|string|null $backend
+     */
     public function patch(string $path, callable|array $handler, array $options = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         $this->route($path, $options, $handler, ['PATCH'], $raw, $middleware, $backend);
     }
 
+    /**
+     * @param callable|array<int|string, mixed> $handler
+     * @param array<string, mixed> $options
+     * @param array<int, \Psr\Http\Server\MiddlewareInterface|string> $middleware
+     * @param array<string, mixed>|string|null $backend
+     */
     public function delete(string $path, callable|array $handler, array $options = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         $this->route($path, $options, $handler, ['DELETE'], $raw, $middleware, $backend);
     }
 
+    /**
+     * @param callable|array<int|string, mixed> $handler
+     * @param array<string, mixed> $options
+     * @param array<int, \Psr\Http\Server\MiddlewareInterface|string> $middleware
+     * @param array<string, mixed>|string|null $backend
+     */
     public function options(string $path, callable|array $handler, array $options = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         $this->route($path, $options, $handler, ['OPTIONS'], $raw, $middleware, $backend);
     }
 
+    /**
+     * @param callable|array<int|string, mixed> $handler
+     * @param array<string, mixed> $options
+     * @param array<int, \Psr\Http\Server\MiddlewareInterface|string> $middleware
+     * @param array<string, mixed>|string|null $backend
+     */
     public function any(string $path, callable|array $handler, array $options = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         $this->route($path, $options, $handler, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], $raw, $middleware, $backend);
     }
 
+    /**
+     * @param array<string, mixed>|callable $options
+     * @param callable|array<int|string, mixed>|null $handler
+     * @param list<string> $methods
+     * @param array<int, MiddlewareInterface|string> $middleware
+     * @param array<string,mixed>|string|null $backend Per-route CGI backend (bare mode / `App::cgiBackendAlias()` name / inline config); delegated to `App::route()`.
+     */
     public function route(string $path, $options = [], $handler = null, array $methods = [], bool $raw = false, array $middleware = [], array|string|null $backend = null): void
     {
         [$options, $handler] = $this->normalizeShorthand($options, $handler);
@@ -219,8 +260,8 @@ final class RouteGroup
      * `int|string` key ambiguity PHPStan infers from the callable-array union.
      *
      * @param array<string, mixed>|callable $options
-     * @param callable|null $handler
-     * @return array{0: array<string, mixed>, 1: callable|null}
+     * @param callable|array<int|string, mixed>|null $handler
+     * @return array{0: array<string, mixed>, 1: callable|array<int|string, mixed>|null}
      */
     private function normalizeShorthand($options, $handler): array
     {

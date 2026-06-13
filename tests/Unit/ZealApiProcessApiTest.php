@@ -34,6 +34,13 @@ class ZealApiProcessApiTest extends TestCase
         parent::setUp();
         App::$cwd = ZEALPHP_ROOT;
         App::superglobals(true);
+        // $app injection resolves App::instance() (the singleton). Boot it
+        // deterministically so testParameterInjectionBindsAppAndDefaults
+        // doesn't depend on whether a prior test in the suite happened to
+        // construct it (init() is idempotent — only builds when null).
+        if (App::instance() === null) {
+            App::init('127.0.0.1', 0);
+        }
 
         // Per-request state — the RestTest pattern. response() writes through
         // zealphp_response; processApi reads/writes $g->server.
@@ -95,10 +102,11 @@ class ZealApiProcessApiTest extends TestCase
             $apiDir . '/users/gen.php',
             '<?php $gen = function() { return (function() { yield "a"; yield "b"; })(); };'
         );
-        // Parameter injection by name — $app must be the ZealAPI instance
+        // Parameter injection by name — $app is the App instance (the ZealAPI
+        // instance is reachable via $this inside the handler closure).
         file_put_contents(
             $apiDir . '/users/inject.php',
-            '<?php $inject = function($app, $missing = "dflt") { return ["is_api" => $app instanceof \ZealPHP\ZealAPI, "missing" => $missing]; };'
+            '<?php $inject = function($app, $missing = "dflt") { return ["is_app" => $app instanceof \ZealPHP\App, "missing" => $missing]; };'
         );
         // Handler that calls a real method on $this
         file_put_contents(
@@ -204,7 +212,7 @@ class ZealApiProcessApiTest extends TestCase
 
     public function testArrayReturnEmitsJsonResponse(): void
     {
-        $r = $this->dispatch($this->makeApi(), 'users', 'get');
+        $r = $this->dispatch($this->makeApi(), 'users', 'get_action');
         $this->assertInstanceOf(ResponseInterface::class, $r['return']);
         $body = (string) $r['return']->getBody();
         $this->assertSame(['users' => ['alice', 'bob']], json_decode($body, true));
@@ -253,7 +261,7 @@ class ZealApiProcessApiTest extends TestCase
     {
         $r = $this->dispatch($this->makeApi(), 'users', 'inject');
         $body = json_decode((string) $r['return']->getBody(), true);
-        $this->assertTrue($body['is_api']);
+        $this->assertTrue($body['is_app']);
         $this->assertSame('dflt', $body['missing']);
     }
 
@@ -269,8 +277,8 @@ class ZealApiProcessApiTest extends TestCase
     {
         // Two invocations of the same endpoint hit the cached reflection
         // params on the second call — both must still produce identical output.
-        $first = $this->dispatch($this->makeApi(), 'users', 'get');
-        $second = $this->dispatch($this->makeApi(), 'users', 'get');
+        $first = $this->dispatch($this->makeApi(), 'users', 'get_action');
+        $second = $this->dispatch($this->makeApi(), 'users', 'get_action');
         $this->assertSame(
             (string) $first['return']->getBody(),
             (string) $second['return']->getBody()

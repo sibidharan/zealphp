@@ -175,9 +175,10 @@ class ResponseMiddlewarePipelineTest extends TestCase
 
     // ── #240: reserved framework-object params bind before URL segments ──
 
-    public function testReservedAppParamInjectsResponseMiddleware(): void
+    public function testReservedAppParamInjectsAppInstance(): void
     {
-        $this->assertSame('app:ResponseMiddleware', (string) $this->dispatch('/inject/app')->getBody());
+        // $app injects the ZealPHP\App singleton (uniform with the ZealAPI path).
+        $this->assertSame('app:App', (string) $this->dispatch('/inject/app')->getBody());
     }
 
     public function testReservedResParamInjectsResponseWrapper(): void

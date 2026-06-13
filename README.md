@@ -5,7 +5,7 @@ ZealPHP runs PHP as the HTTP server itself — not a CGI worker behind one. Buil
 The headline mode is **`coroutine-legacy`**: a compatibility runtime where traditional request-style PHP — `$_GET` / `$_POST` / `$_SESSION`, `session_start()`, `header()`, `setcookie()`, `exit`/`die`, `require_once` — runs unchanged **under coroutine concurrency**, with every request-state primitive (the seven superglobals, `$GLOBALS`, function/class statics, constants, `require_once` re-execution, locale/timezone/cwd/umask) isolated per coroutine by [ext-zealphp](https://github.com/sibidharan/ext-zealphp). "Old PHP just works, concurrently" — with one honest conditional: the app's class graph must be **warmed before concurrency hits it** (`App::preloadClassmap()` for Composer apps; pure-`require_once` apps with no autoloader belong in `legacy-cgi`). Alpha — see stability note below.
 
 [![Packagist Version](https://img.shields.io/packagist/v/zealphp/zealphp?style=flat-square&color=orange&logo=packagist&logoColor=white)](https://packagist.org/packages/zealphp/zealphp) [![Packagist Downloads](https://img.shields.io/packagist/dt/zealphp/zealphp?style=flat-square&logo=packagist&logoColor=white)](https://packagist.org/packages/zealphp/zealphp) [![License](https://img.shields.io/packagist/l/zealphp/zealphp?style=flat-square)](https://packagist.org/packages/zealphp/zealphp)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sibidharan/zealphp) [![GitHub stars](https://img.shields.io/github/stars/zealphp/zealphp?style=flat-square&logo=github&logoColor=white)](https://github.com/sibidharan/zealphp/stargazers) [![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square&logo=php&logoColor=white)](https://www.php.net/) [![PHP tested](https://img.shields.io/badge/tested-PHP%208.3%20%7C%208.4%20%7C%208.5--experimental-777bb4?style=flat-square&logo=php&logoColor=white)](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml) [![Stability](https://img.shields.io/badge/stability-active%20alpha-orange?style=flat-square)](CHANGELOG.md)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sibidharan/zealphp) [![GitHub stars](https://img.shields.io/github/stars/sibidharan/zealphp?style=flat-square&logo=github&logoColor=white)](https://github.com/sibidharan/zealphp/stargazers) [![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square&logo=php&logoColor=white)](https://www.php.net/) [![PHP tested](https://img.shields.io/badge/tested-PHP%208.3%20%7C%208.4%20%7C%208.5--experimental-777bb4?style=flat-square&logo=php&logoColor=white)](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml) [![Stability](https://img.shields.io/badge/stability-active%20alpha-orange?style=flat-square)](CHANGELOG.md)
 [![CI](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml/badge.svg)](https://github.com/sibidharan/zealphp/actions/workflows/tests.yml) [![CodeQL](https://github.com/sibidharan/zealphp/actions/workflows/codeql.yml/badge.svg)](https://github.com/sibidharan/zealphp/actions/workflows/codeql.yml) [![gitleaks](https://github.com/sibidharan/zealphp/actions/workflows/gitleaks.yml/badge.svg)](https://github.com/sibidharan/zealphp/actions/workflows/gitleaks.yml) [![Coverage](https://codecov.io/gh/sibidharan/zealphp/branch/master/graph/badge.svg)](https://codecov.io/gh/sibidharan/zealphp) [![PHPStan](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsibidharan%2Fzealphp%2Fmaster%2F.github%2Fbadges%2Fphpstan.json)](phpstan.neon) [![Mutation MSI](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsibidharan%2Fzealphp%2Fmaster%2F.github%2Fbadges%2Fmutation.json)](https://github.com/sibidharan/zealphp/actions/workflows/mutation.yml) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/sibidharan/zealphp/badge)](https://securityscorecards.dev/viewer/?uri=github.com/sibidharan/zealphp) [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX-blue?style=flat-square)](https://github.com/sibidharan/zealphp/actions/workflows/sbom.yml)
 [![OpenSwoole](https://img.shields.io/badge/OpenSwoole-22%20%7C%2026-ff5722?style=flat-square)](https://openswoole.com/) [![Benchmarks](https://img.shields.io/badge/benchmarks-reproducible-success?style=flat-square)](https://github.com/sibidharan/zealphp/tree/master/scripts) [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa?style=flat-square)](CODE_OF_CONDUCT.md) [![Sponsor](https://img.shields.io/github/sponsors/sibidharan?style=flat-square&logo=github&logoColor=white)](https://github.com/sponsors/sibidharan)
 
@@ -97,7 +97,7 @@ docker compose up app
 
 ```bash
 # New project
-composer create-project zealphp/project:^0.4.8 my-project
+composer create-project zealphp/project:^0.4.9 my-project
 cd my-project
 php app.php
 # → https://php.zeal.ninja
@@ -469,16 +469,16 @@ The fine-grained setters (`App::superglobals()`, `App::isolation()`, `App::enabl
 2. Run `composer validate`, `./vendor/bin/phpunit`, and `./vendor/bin/phpstan analyse --no-progress` (level 10, zero errors).
 3. Open a release PR, wait for required checks to go green, and merge (rebase):
    ```bash
-   git checkout -b release/v0.4.8
-   git commit -am "chore: release v0.4.8"
-   git push origin1 release/v0.4.8
-   gh pr create --base master --head release/v0.4.8 --title "chore: release v0.4.8"
+   git checkout -b release/v0.4.9
+   git commit -am "chore: release v0.4.9"
+   git push origin1 release/v0.4.9
+   gh pr create --base master --head release/v0.4.9 --title "chore: release v0.4.9"
    ```
 4. After merge, tag the merged commit and push to both remotes (tags aren't protected):
    ```bash
    git checkout master && git pull origin1 master --ff-only
-   git tag -a v0.4.8 -m "Release v0.4.8"
-   git push origin v0.4.8 && git push origin1 v0.4.8
+   git tag -a v0.4.9 -m "Release v0.4.9"
+   git push origin v0.4.9 && git push origin1 v0.4.9
    ```
 5. Bump `zealphp/project` (the scaffold) to the same version and refresh its `llms.txt`. Packagist auto-syncs via webhook for both packages.
 
