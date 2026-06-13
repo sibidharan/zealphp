@@ -4373,7 +4373,8 @@ class App
      *   3. If `REMOTE_ADDR` IS in a trusted CIDR, walk `X-Forwarded-For` right-to-left
      *      (Apache `mod_remoteip` semantics) and return the rightmost IP that is
      *      NOT in `trusted_proxies` — that's the real client. If every entry is
-     *      trusted, fall back to the leftmost address.
+     *      trusted, fall back to the socket peer (`REMOTE_ADDR`) — NOT the
+     *      leftmost entry, which a client can forge by prepending (#249/#434).
      *   4. If `X-Forwarded-For` is absent but `X-Real-IP` is present (and the peer
      *      is trusted), return `X-Real-IP`.
      *

@@ -616,6 +616,13 @@ class ResponseMiddleware implements MiddlewareInterface
         // default is On, but ZealPHP ships TraceEnable Off as a hardening choice.
         // Set App::traceEnabled(true) to opt into the Apache ap_send_http_trace()
         // behaviour: echo the request back as a message/http body.
+        //
+        // ⚠️ #413 — over plain HTTP this branch is UNREACHABLE: OpenSwoole's
+        // HTTP parser rejects the TRACE method token at the transport layer with
+        // a bare `400 Bad Request` BEFORE the PHP onRequest handler runs, so
+        // App::traceEnabled(true) cannot surface the echo on the wire. The branch
+        // is kept as defensive/contract code (and exercises in unit tests that
+        // invoke dispatch directly) but does not fire for real TRACE requests.
         if ($method === 'TRACE') {
             if (!App::$trace_enabled) {
                 response_set_status(405);

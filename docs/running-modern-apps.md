@@ -105,8 +105,12 @@ distinct issues were root-caused (see
 - **`Undefined constant AUTOLOAD_FILE` / `ROOT_PATH`** — only appears if you
   enable `defineIsolation(true)` (the S10 constants stage) *without*
   `includeIsolation(true)` (S7 Include-once). Clearing request-scoped constants
-  is only sound when the `require_once`'d files that define them re-execute. `App::mode(App::MODE_COROUTINE_LEGACY)` enables both together,
-  so don't hand-roll that half-combo (the framework now warns at boot if you do).
+  is only sound when the `require_once`'d files that define them re-execute.
+  `App::mode(App::MODE_COROUTINE_LEGACY)` enables `includeIsolation` but **NOT**
+  `defineIsolation` (S10 is a standalone opt-in — request-scoped constants are
+  *not* isolated per coroutine by default; that's the ext#16 structural limit).
+  So if you opt into `defineIsolation(true)`, do it on top of coroutine-legacy
+  (which already provides `includeIsolation`) — never `defineIsolation` alone.
 - **Bootstrap hang (000)** — phpMyAdmin's deeply-recursive Symfony DI container
   build hits a coroutine yield/resume scheduling race under HOOK_ALL (a
   Heisenbug: extra I/O makes it pass). Open; `cgiMode('pool')` is the supported
