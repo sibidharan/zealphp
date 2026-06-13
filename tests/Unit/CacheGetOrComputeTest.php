@@ -29,6 +29,13 @@ final class CacheGetOrComputeTest extends TestCase
         // prior run's stored values don't pre-satisfy getOrCompute.
         $dir = '/tmp/cache-goc-test-' . bin2hex(random_bytes(3));
         Cache::init(maxRows: 64, cacheDir: $dir);
+
+        // Release any stampede lock slot a prior test left held — the named
+        // process-global Counters aren't cleared by freshCache()/init()/flush();
+        // a stuck slot sends getOrCompute down the no-store path so the value
+        // never caches (the order-dependent "computed twice" flake).
+        Cache::resetStampedeLocksForTest();
+        Cache::flush();
     }
 
     public function testFirstCallComputesAndStores(): void
