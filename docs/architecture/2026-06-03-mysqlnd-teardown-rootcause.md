@@ -1,5 +1,14 @@
 # The "mysqlnd/libtasn1 connection-teardown" crash — root-caused (2026-06-03)
 
+> **⚠️ SUPERSEDED for the under-load case (2026-06-13).** "Bug #2 = `$wpdb` allocator mismatch"
+> below predates the 0.3.46 mysqlnd vio shim. On the current ext the orig_path mismatch is **fully
+> shimmed** (0 culprit closes under load), and the dominant WP-under-load crash is **not** an
+> allocator mismatch — it's a **WordPress-specific ~6.4 MB/request memory leak → `memory_limit` OOM
+> → coroutine-legacy worker-EXIT teardown corruption**, which `USE_ZEND_ALLOC=0` only masks by
+> disabling `memory_limit`. Fix = `max_request` recycle. See
+> `docs/architecture/2026-06-13-use-zend-alloc-reframe.md`. The analysis below is retained for its
+> bug-#1 (constant UAF, fixed 0.3.27) record and the gdb method notes.
+
 **TL;DR (FINAL, ASAN + zend_mm confirmed):** There are **TWO independent bugs** behind the
 coroutine-legacy WordPress crash, with opposite allocator visibility. Both are now isolated:
 
