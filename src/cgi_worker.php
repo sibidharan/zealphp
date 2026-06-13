@@ -307,6 +307,10 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
         global $__z_cookies;
         if (is_array($expires_or_options)) {
             $o = $expires_or_options;
+            // #427 — carry the `samesite` attribute (8th positional of
+            // Response::cookie) so the proc strategy emits SameSite like the
+            // pool/fork paths and mod_php do; dropping it silently weakened
+            // every cookie's CSRF protection under cgiMode('proc').
             $__z_cookies[] = [
                 $name, $value,
                 (int)($o['expires'] ?? 0),
@@ -314,9 +318,10 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
                 (string)($o['domain'] ?? ''),
                 (bool)($o['secure'] ?? false),
                 (bool)($o['httponly'] ?? false),
+                (string)($o['samesite'] ?? ''),
             ];
         } else {
-            $__z_cookies[] = [$name, $value, $expires_or_options, $path, $domain, $secure, $httponly];
+            $__z_cookies[] = [$name, $value, $expires_or_options, $path, $domain, $secure, $httponly, $samesite];
         }
         return true;
     }, true);
@@ -324,11 +329,13 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
     $z_override('setrawcookie', function(
         string $name, string $value = '', int|array $expires_or_options = 0,
         string $path = '', string $domain = '', bool $secure = false,
-        bool $httponly = false
+        bool $httponly = false, string $samesite = ''
     ) {
         global $__z_rawcookies;
         if (is_array($expires_or_options)) {
             $o = $expires_or_options;
+            // #427 — carry `samesite` so the proc strategy emits SameSite (the
+            // pool/fork paths and mod_php do).
             $__z_rawcookies[] = [
                 $name, $value,
                 (int)($o['expires'] ?? 0),
@@ -336,9 +343,10 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
                 (string)($o['domain'] ?? ''),
                 (bool)($o['secure'] ?? false),
                 (bool)($o['httponly'] ?? false),
+                (string)($o['samesite'] ?? ''),
             ];
         } else {
-            $__z_rawcookies[] = [$name, $value, $expires_or_options, $path, $domain, $secure, $httponly];
+            $__z_rawcookies[] = [$name, $value, $expires_or_options, $path, $domain, $secure, $httponly, $samesite];
         }
         return true;
     }, true);

@@ -3938,6 +3938,34 @@ class App
      * app's files recompile per request (framework + vendor stay cached). Returns
      * the advisory string, or null when N/A. Suppress with ZEALPHP_OPCACHE_ADVISORY=0.
      */
+    /**
+     * #423 — boot advisory: `App::keepGlobals(true)` is NOT honored in
+     * coroutine-legacy. The per-coroutine `$GLOBALS` isolation path
+     * (`zealphp_coroutine_globals_request_end()`) resets `$GLOBALS` every
+     * request unconditionally — it's coupled to the object-global drain that
+     * releases `$wpdb`-class destructors in coroutine context (memory-safety
+     * critical), so it can't be skipped for `keep_globals` without an ext-side
+     * change. `keep_globals` is consulted only on the `function_isolation`
+     * reset path, which coroutine-legacy leaves off. Surface the mismatch at
+     * boot rather than silently ignoring the knob. Returns the advisory string,
+     * or null when N/A.
+     *
+     * @internal — public for tests; not part of the user-facing API.
+     */
+    public static function keepGlobalsCoroutineLegacyBootCheck(): ?string
+    {
+        if (self::$keep_globals
+            && self::$coroutine_globals_isolation
+            && !self::$function_isolation
+        ) {
+            return 'App::keepGlobals(true) is not honored in coroutine-legacy: per-coroutine $GLOBALS '
+                . 'isolation resets $GLOBALS every request (it is coupled to the object-global drain that '
+                . 'safely releases I/O destructors in coroutine context). Use a Store/Cache backend for a '
+                . 'worker-lifetime cache, or run in mixed mode where keepGlobals takes effect.';
+        }
+        return null;
+    }
+
     public static function opcacheLegacyBootCheck(): ?string
     {
         if (!self::$silent_redeclare) {
@@ -6065,14 +6093,17 @@ class App
         } catch (\Throwable $e) {
             $warnings[] = 'Store(H6): Redis backend ping FAILED at boot: ' . $e->getMessage();
         }
-        // H7 — phpredis + HOOK_ALL=0 deadlock guard. wirePubSubBoot() auto-forces
-        // the predis driver for the subscriber runner in this exact condition, so
-        // this is now an advisory (the deadlock is prevented), not a live hazard.
+        // H7 — HOOK_ALL=0 subscriber-deadlock guard (#419). A blocking
+        // SUBSCRIBE/XREADGROUP runner can't run concurrently with request
+        // serving without HOOK_ALL — true for BOTH phpredis (C-side read) and
+        // predis (stream read hooked only under HOOK_ALL). wirePubSubBoot()
+        // skips the runner in this case; this advisory surfaces it at boot.
         $hasSubscribers = self::$pubsubRegistry !== [] || self::$reliableRegistry !== [];
-        if ($hasSubscribers && self::phpredisSubscribeWouldBlock()) {
-            $warnings[] = 'Store(H7): phpredis SUBSCRIBE blocks the worker WITHOUT HOOK_ALL — the pub/sub ' .
-                'runner has been auto-switched to the predis driver (pure-PHP socket, yields without HOOK_ALL). ' .
-                'To run subscribers on phpredis, re-enable HOOK_ALL (default in coroutine mode).';
+        if ($hasSubscribers && self::hookAll() === 0) {
+            $warnings[] = 'Store(H7): pub/sub subscriber runners require HOOK_ALL (coroutine mode) to run ' .
+                'concurrently with request serving — with HOOK_ALL off (mixed / legacy-cgi) a blocking ' .
+                'SUBSCRIBE/XREADGROUP would deadlock the worker, so the runner is NOT spawned. Run ' .
+                'subscribers in coroutine mode, or in a dedicated sidecar via App::addProcess().';
         }
         return $warnings;
     }
@@ -6111,6 +6142,21 @@ class App
                 if (self::$pubsubRegistry !== [] || self::$reliableRegistry !== []) {
                     error_log('App::onPubSub / onReliableMessage handlers are registered but the Store backend is not redis — runners NOT spawned. Set ZEALPHP_STORE_BACKEND=redis or Store::defaultBackend(\'redis\').');
                 }
+                return;
+            }
+            // #419 — a blocking SUBSCRIBE / XREADGROUP runner can only run
+            // CONCURRENTLY with request serving when its socket read yields the
+            // coroutine, which requires HOOK_ALL. With HOOK_ALL off (mixed /
+            // legacy-cgi) NEITHER phpredis (C-side read) NOR predis
+            // (stream_socket_client + fread, hooked only under HOOK_ALL) yields,
+            // so the runner would park the worker's single event loop and starve
+            // every route. Skip it and tell the user how to run subscribers.
+            if (self::hookAll() === 0) {
+                error_log('App::onPubSub / onReliableMessage: subscriber runners need HOOK_ALL '
+                    . '(coroutine mode) to run concurrently with request serving — with HOOK_ALL off '
+                    . '(mixed / legacy-cgi) a blocking SUBSCRIBE/XREADGROUP would deadlock the worker, so '
+                    . 'the runner is NOT spawned. Run subscribers in coroutine mode, or in a dedicated '
+                    . 'sidecar process via App::addProcess().');
                 return;
             }
             $url    = $backend->url();
@@ -7599,6 +7645,7 @@ class App
                     'fcgi'  => \ZealPHP\CGI\Dispatcher::cgiFcgi($path, $b['address'] ?? null, $b['fcgi_params'] ?? []),
                     'pool'  => \ZealPHP\CGI\Dispatcher::cgiPool($path),
                     'proc'  => \ZealPHP\CGI\Dispatcher::cgiSubprocess($path, $b['interpreter'] ?? null),
+                    'fork'  => \ZealPHP\CGI\Dispatcher::cgiFork($path),  // #428 — was missing; fork silently fell to pool
                     default => \ZealPHP\CGI\Dispatcher::cgiPool($path),
                 };
             }
@@ -7618,6 +7665,7 @@ class App
                 'fcgi'  => \ZealPHP\CGI\Dispatcher::cgiFcgi($path, $b['address'] ?? null, $b['fcgi_params'] ?? []),
                 'pool'  => \ZealPHP\CGI\Dispatcher::cgiPool($path),
                 'proc'  => \ZealPHP\CGI\Dispatcher::cgiSubprocess($path, $b['interpreter'] ?? null),
+                'fork'  => \ZealPHP\CGI\Dispatcher::cgiFork($path),  // #428 — was missing; fork silently fell to pool
                 default => \ZealPHP\CGI\Dispatcher::cgiPool($path),
             };
         }
@@ -8505,6 +8553,12 @@ class App
             error_log($opcacheAdvisory);
         }
 
+        // #423 — warn when keepGlobals(true) is set but ineffective in
+        // coroutine-legacy (the per-coroutine $GLOBALS reset is unconditional).
+        if (($keepGlobalsAdvisory = self::keepGlobalsCoroutineLegacyBootCheck()) !== null) {
+            error_log($keepGlobalsAdvisory);
+        }
+
         // Capture boot timestamp + resolved worker counts for App::stats().
         self::$bootedAt = time();
         $resolvedWorkers = isset($settings['worker_num']) && is_int($settings['worker_num']) ? $settings['worker_num'] : 0;
@@ -8575,6 +8629,11 @@ class App
                     . '— CGI pipe I/O incompatible with coroutines. Workers run synchronously (Mode 5/9).', 'warn');
                 $enableCoroutine = false;
                 $hookFlags = 0;
+                // #424 — write the effective value back so the public getter
+                // App::enableCoroutine() reports the downgrade (workers run
+                // synchronously, cid=-1) instead of the originally-requested
+                // true. Mirrors the sg=false branch flipping $process_isolation.
+                App::$enable_coroutine_override = false;
             } else {
                 elog('[lifecycle] processIsolation + enableCoroutine(sg=false): forcing pi=false '
                     . '— CGI pipe I/O incompatible with coroutines and sg=false requires ec=true. '

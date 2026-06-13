@@ -166,7 +166,10 @@ final class SecurityHardeningAuditTest extends TestCase
     {
         $this->freshResponse()->redirect('/dashboard');
         $this->assertSame(302, RequestContext::instance()->status);
-        $this->freshResponse()->redirect('https://myapp.test/account', 301);
+        // #432 strict RFC 6454: freshResponse() is plain http (HTTP_HOST only),
+        // so a same-origin absolute target must also be http — http→https is a
+        // different origin under the strict (scheme,host,port) comparison.
+        $this->freshResponse()->redirect('http://myapp.test/account', 301);
         $this->assertSame(301, RequestContext::instance()->status);
     }
 

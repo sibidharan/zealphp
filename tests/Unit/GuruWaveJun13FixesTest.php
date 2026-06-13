@@ -18,6 +18,7 @@ use ZealPHP\Middleware\ScopedMiddleware;
 use ZealPHP\RequestContext;
 use ZealPHP\Store;
 use ZealPHP\Tests\TestCase;
+use ZealPHP\WSRouter;
 
 /**
  * Fixes for the 2026-06-13 issue wave reported by Guruprasanth-M:
@@ -128,28 +129,80 @@ final class GuruWaveJun13FixesTest extends TestCase
         $resp->redirect('http://evil.example/phish', 302);
     }
 
-    public function testIsSameOriginViaReflection(): void
+    public function testIsSameOriginStrictRfc6454(): void
     {
+        // #432 strict RFC 6454: same-origin iff (scheme, host, port) all match.
         $resp = $this->makeResponse();
         $g = RequestContext::instance();
-        $g->server = ['HTTP_HOST' => 'mysite.com:8443'];
         $m = new \ReflectionMethod(Response::class, 'isSameOrigin');
         $m->setAccessible(true);
 
-        $this->assertTrue($m->invoke($resp, 'https://mysite.com/x'), 'same host (port-stripped) → same origin');
+        // http request on :8081 → only the exact (http, host, 8081) target is same-origin.
+        $g->server = ['HTTP_HOST' => 'app.local:8081'];
+        $this->assertTrue($m->invoke($resp, 'http://app.local:8081/x'), 'same scheme+host+port');
         $this->assertTrue($m->invoke($resp, '/relative/path'), 'relative → same origin');
-        $this->assertFalse($m->invoke($resp, 'https://other.com/x'), 'different host → cross origin');
+        $this->assertFalse($m->invoke($resp, 'http://app.local:8082/x'), 'different PORT (another instance) → cross origin');
+        $this->assertFalse($m->invoke($resp, 'https://app.local:8081/x'), 'different SCHEME → cross origin');
+        $this->assertFalse($m->invoke($resp, 'http://other.local:8081/x'), 'different HOST → cross origin');
+
+        // https request (HTTPS=on) → https same host on the default 443 is same-origin.
+        $g->server = ['HTTP_HOST' => 'secure.local', 'HTTPS' => 'on'];
+        $this->assertTrue($m->invoke($resp, 'https://secure.local/x'), 'https request → https target same-origin');
+        $this->assertFalse($m->invoke($resp, 'http://secure.local/x'), 'https request → http target cross-origin');
     }
 
-    public function testHostWithoutPortHandlesIpv6(): void
+    public function testSplitHostPort(): void
     {
         $resp = $this->makeResponse();
-        $m = new \ReflectionMethod(Response::class, 'hostWithoutPort');
+        $m = new \ReflectionMethod(Response::class, 'splitHostPort');
         $m->setAccessible(true);
-        $this->assertSame('127.0.0.1', $m->invoke($resp, '127.0.0.1:8080'));
-        $this->assertSame('example.com', $m->invoke($resp, 'example.com'));
-        $this->assertSame('[::1]', $m->invoke($resp, '[::1]:8080'));
-        $this->assertSame('[::1]', $m->invoke($resp, '[::1]'));
+        $this->assertSame(['127.0.0.1', 8080], $m->invoke($resp, '127.0.0.1:8080'));
+        $this->assertSame(['example.com', null], $m->invoke($resp, 'example.com'));
+        $this->assertSame(['[::1]', 8080], $m->invoke($resp, '[::1]:8080'));
+        $this->assertSame(['[::1]', null], $m->invoke($resp, '[::1]'));
+    }
+
+    // ── #423 — keepGlobals boot advisory under coroutine-legacy ──────────
+
+    public function testKeepGlobalsCoroutineLegacyBootCheck(): void
+    {
+        $prev = [App::$keep_globals, App::$coroutine_globals_isolation, App::$function_isolation];
+        try {
+            // coroutine-legacy shape: globals-isolation on, function-isolation off.
+            App::$keep_globals = true;
+            App::$coroutine_globals_isolation = true;
+            App::$function_isolation = false;
+            $this->assertNotNull(App::keepGlobalsCoroutineLegacyBootCheck());
+
+            // function_isolation path DOES honor keep_globals → no advisory.
+            App::$function_isolation = true;
+            $this->assertNull(App::keepGlobalsCoroutineLegacyBootCheck());
+
+            // keepGlobals off → never advises.
+            App::$keep_globals = false;
+            App::$function_isolation = false;
+            $this->assertNull(App::keepGlobalsCoroutineLegacyBootCheck());
+        } finally {
+            [App::$keep_globals, App::$coroutine_globals_isolation, App::$function_isolation] = $prev;
+        }
+    }
+
+    // ── #417 — WS\Room works on the Table backend (no Redis) ─────────────
+
+    public function testRoomJoinOnTableBackendDoesNotThrow(): void
+    {
+        Store::defaultBackend(Store::BACKEND_TABLE);
+        WSRouter::reset();
+        WSRouter::init('table-node');
+        $room = 'gw_tbl_' . uniqid();
+        // Previously join() threw "Store::publish requires the redis backend"
+        // AFTER writing the membership row (half-completed join). Now publish is
+        // a clean no-op on Table and join/leave complete (#417).
+        WSRouter::room($room)->join('client-a');
+        $this->assertSame(1, WSRouter::room($room)->size());
+        WSRouter::room($room)->leave('client-a');
+        $this->assertSame(0, WSRouter::room($room)->size());
+        WSRouter::reset();
     }
 
     // ── #409 — RedirectMiddleware preserves the query string ─────────────
