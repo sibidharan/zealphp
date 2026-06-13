@@ -246,10 +246,12 @@ class Response
         }
 
         // Target origin — scheme is present on any absolute URL (`//host` is the
-        // protocol-relative branch handled before this is reached).
-        $tgtScheme = isset($target['scheme']) ? strtolower($target['scheme']) : $reqScheme;
+        // protocol-relative branch handled before this is reached). parse_url()
+        // already lower-cases the scheme and returns an int port, so no extra
+        // strtolower()/(int) is needed (avoids redundant-cast mutants).
+        $tgtScheme = $target['scheme'] ?? $reqScheme;
         $tgtHost   = $target['host'];
-        $tgtPort   = isset($target['port']) ? (int) $target['port'] : $this->defaultPort($tgtScheme);
+        $tgtPort   = $target['port'] ?? $this->defaultPort($tgtScheme);
 
         return $reqScheme === $tgtScheme
             && strcasecmp($reqHost, $tgtHost) === 0
