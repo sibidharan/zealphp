@@ -193,8 +193,8 @@ foreach ($rungs as $r):
   there's no per-request interpreter startup either.
 </p>
 <p>
-  Under the hood it expands to <code>superglobals(true) + processIsolation(false)</code>
-  with the session lifecycle handled per request — but the preset is the recommended
+  Under the hood it expands to <code>superglobals(true) + processIsolation(false) + enableCoroutine(false)</code>
+  (which turns off the coroutine scheduler entirely) with the session lifecycle handled per request — but the preset is the recommended
   surface. Because each worker handles one request at a time, there's no coroutine race
   on the superglobals to worry about: it's the same shared-nothing-per-request mental
   model you already have, minus the FastCGI plumbing. This is the drop-in FPM

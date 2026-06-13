@@ -117,7 +117,7 @@ $get = function($request, $response) {
     // ZealAPI's dispatcher injects these by parameter name (reflection-cached):
     //   $request  → ZealPHP\HTTP\Request  (wrapped OpenSwoole request; alias: $req)
     //   $response → ZealPHP\HTTP\Response (wrapped OpenSwoole response; alias: $res)
-    //   $app      → ZealAPI instance      (same as $this)
+    //   $app      → ZealPHP\App instance  (the main application instance)
     //   $server   → \OpenSwoole\Http\Server (raw OpenSwoole server handle)
     //   $this     → ZealAPI instance      (handler runs inside Closure::bind)
     // Any other named parameter receives its default value (or null if none).
