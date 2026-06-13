@@ -68,7 +68,15 @@ class RedirectMiddleware implements MiddlewareInterface
             if ($target === null) {
                 continue;
             }
+            // The OpenSwoole-core PSR ServerRequest builds its Uri from the
+            // path-only `request_uri`, so getUri()->getQuery() is empty here
+            // (#409) — fall back to the `query_string` server param (lower-case
+            // key in this runtime) so the incoming query survives the redirect.
             $query = $request->getUri()->getQuery();
+            if ($query === '') {
+                $qs = $request->getServerParams()['query_string'] ?? '';
+                $query = is_scalar($qs) ? (string)$qs : '';
+            }
             if ($query !== '') {
                 // Apache mod_rewrite QSA: merge incoming query with & when the
                 // target already carries its own query string; otherwise prefix

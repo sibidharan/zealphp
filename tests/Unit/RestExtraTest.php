@@ -83,11 +83,30 @@ class RestExtraTest extends TestCase
 
     public function testUnsupportedMethodEmits406(): void
     {
-        // inputs() falls to default → response('', 406) during construction.
-        $this->makeRest(['REQUEST_METHOD' => 'PATCH']);
+        // A method outside the supported set (GET/HEAD/POST/PUT/PATCH/DELETE)
+        // falls to default → response('', 406) during construction. HEAD and
+        // PATCH are now supported (#411), so use a genuinely unknown method.
+        $this->makeRest(['REQUEST_METHOD' => 'PURGE']);
         $this->assertSame(406, $this->response->status);
         // setHeaders() set the default content type as a side effect.
         $this->assertSame('application/json', $this->response->headers['Content-Type']);
+    }
+
+    public function testHeadSharesGetInputSemantics(): void
+    {
+        // #411 — HEAD must NOT 406; it shares GET's input parsing.
+        $rest = $this->makeRest(
+            ['REQUEST_METHOD' => 'HEAD'],
+            ['q' => ' <b>hi</b> ']
+        );
+        $this->assertSame(['q' => 'hi'], $rest->_request);
+    }
+
+    public function testPatchParsesBodyLikePut(): void
+    {
+        // #411 — PATCH carries a body and must parse it like PUT, not 406.
+        $rest = $this->makeRest(['REQUEST_METHOD' => 'PATCH']);
+        $this->assertIsArray($rest->_request);
     }
 
     public function testResponseSetsStatusAndContentTypeHeader(): void
