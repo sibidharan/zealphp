@@ -43,6 +43,7 @@ ignore:
   - "api/**"
   - "task/**"
   - "scripts/**"
+  - "scratch/**"
   - "src/cgi_worker.php"
   - "src/pool_worker.php"
   - "src/fork_master.php"

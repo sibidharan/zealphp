@@ -740,5 +740,31 @@ class Cache
         self::$fileRotations = new Counter(0);
         self::$tagInvalidations = new Counter(0);
         self::$initialized = true;
+
+        self::resetStampedeLocksForTest();
+    }
+
+    /**
+     * Release every stampede lock slot.
+     *
+     * The stampede gate's lock Counters (`__cache_stampede_slot_N`) are NAMED,
+     * so on the Atomic backend they live in process-global shared memory for
+     * the worker's lifetime — `flush()` (which only clears cache entries) does
+     * NOT touch them, and `new Counter(0, $name)` uses `setIfAbsent` (N-1), so
+     * a slot left at `1` is never reset by construction. In a long-lived
+     * PHPUnit process this leaks ACROSS tests: a slot another test left held
+     * makes a later `getOrCompute()` lose the CAS, fall through the wait loop
+     * to the no-store `return $compute()` path, and never cache the value — so
+     * the next read re-computes (the order-dependent "compute called twice"
+     * flake). Production workers never hit this (one request flow per
+     * coroutine, lock always released in `finally`); it is purely a
+     * shared-process test-isolation artifact. Tests call this in setUp().
+     * @internal
+     */
+    public static function resetStampedeLocksForTest(): void
+    {
+        for ($slot = 0; $slot < self::STAMPEDE_LOCK_SLOTS; $slot++) {
+            (new Counter(0, '__cache_stampede_slot_' . $slot))->set(0);
+        }
     }
 }
