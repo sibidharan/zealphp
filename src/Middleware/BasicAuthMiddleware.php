@@ -185,6 +185,12 @@ class BasicAuthMiddleware implements MiddlewareInterface
         if ($this->htpasswdFile === null) {
             return null;
         }
+        // #410 — clear the per-path stat cache so an external edit (the dev
+        // workflow this mtime re-read supports) is seen immediately. Without it
+        // a long-lived worker serves the cached mtime and never re-reads, so a
+        // freshly added/changed credential keeps returning 401 until unrelated
+        // traffic happens to stat another path and evict the single-slot cache.
+        clearstatcache(true, $this->htpasswdFile);
         $mtime = @filemtime($this->htpasswdFile);
         if ($mtime === false) {
             return null;

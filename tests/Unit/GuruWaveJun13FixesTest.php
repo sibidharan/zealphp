@@ -11,8 +11,12 @@ use Psr\Http\Server\RequestHandlerInterface;
 use ZealPHP\App;
 use ZealPHP\HTTP;
 use ZealPHP\HTTP\Response;
+use ZealPHP\Middleware\LocationHeaderMiddleware;
 use ZealPHP\Middleware\RedirectMiddleware;
+use ZealPHP\Middleware\RequestHeaderMiddleware;
+use ZealPHP\Middleware\ScopedMiddleware;
 use ZealPHP\RequestContext;
+use ZealPHP\Store;
 use ZealPHP\Tests\TestCase;
 
 /**
@@ -190,5 +194,87 @@ final class GuruWaveJun13FixesTest extends TestCase
         $m->setAccessible(true);
         $out = $m->invoke(null, ['Content-Type' => 'application/json', 'X-A' => 'b']);
         $this->assertSame(['Content-Type: application/json', 'X-A: b'], $out);
+    }
+
+    // ── #420 — Store::incr on a TYPE_FLOAT column ────────────────────────
+
+    public function testStoreIncrOnFloatColumnDoesNotThrow(): void
+    {
+        $table = 'gw_float_' . uniqid();
+        Store::make($table, 8, ['amount' => [Store::TYPE_FLOAT, 8]]);
+        Store::set($table, 'k', ['amount' => 1.5]);
+        // Previously fatal: TableBackend::incr(): Return value must be of type int.
+        Store::incr($table, 'k', 'amount', 2);
+        $row = Store::get($table, 'k');
+        $this->assertIsArray($row);
+        // Float column accumulated the fractional base + the increment.
+        $this->assertEqualsWithDelta(3.5, $row['amount'], 0.0001);
+    }
+
+    // ── #404 — RequestHeaderMiddleware rejects an unknown op ─────────────
+
+    public function testRequestHeaderUnknownOpIsNoOp(): void
+    {
+        $g = RequestContext::instance();
+        $g->server = [];
+        $mw = new RequestHeaderMiddleware([
+            ['op' => 'frobnicate', 'name' => 'X-Unknown', 'value' => 'UVAL'],
+        ]);
+        $request = new ServerRequest('/', 'GET', '', []);
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new \OpenSwoole\Core\Psr\Response('OK', 200);
+            }
+        };
+        $mw->process($request, $handler);
+        // The unknown op must NOT silently set the header (it used to via the
+        // shared set/default arm).
+        $this->assertArrayNotHasKey('HTTP_X_UNKNOWN', $g->server);
+    }
+
+    // ── #403 — LocationHeaderMiddleware preserves userinfo ───────────────
+
+    public function testLocationHeaderBuildUrlPreservesUserinfo(): void
+    {
+        $mw = new LocationHeaderMiddleware(8443);
+        $m  = new \ReflectionMethod(LocationHeaderMiddleware::class, 'buildUrl');
+        $m->setAccessible(true);
+        $parts = parse_url('http://user:pass@example.com:9999/next?q=1');
+        $this->assertIsArray($parts);
+        $this->assertSame(
+            'http://user:pass@example.com:9999/next?q=1',
+            $m->invoke($mw, $parts)
+        );
+    }
+
+    // ── #406 — ScopedMiddleware reads lower-case request_uri ─────────────
+
+    public function testScopedMiddlewareUsesLowerCaseRequestUri(): void
+    {
+        $blocked = false;
+        $inner = new class($blocked) implements \Psr\Http\Server\MiddlewareInterface {
+            /** @param bool $flag */
+            public function __construct(private bool &$flag) {}
+            public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+            {
+                $this->flag = true;
+                return new \OpenSwoole\Core\Psr\Response('BLOCKED', 403);
+            }
+        };
+        $mw = ScopedMiddleware::location($inner, '/admin');
+        // Live-request shape: server params carry the raw target under the
+        // LOWER-case `request_uri` key (OpenSwoole native), and the `//admin`
+        // form whose PSR Uri path is `/secret`.
+        $request = new ServerRequest('//admin/secret', 'GET', '', [], [], [], ['request_uri' => '//admin/secret']);
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new \OpenSwoole\Core\Psr\Response('HANDLER', 200);
+            }
+        };
+        $resp = $mw->process($request, $handler);
+        $this->assertTrue($blocked, 'guard must fire on //admin via lower-case request_uri (#406)');
+        $this->assertSame(403, $resp->getStatusCode());
     }
 }

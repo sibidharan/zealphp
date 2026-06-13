@@ -72,8 +72,18 @@ class RequestHeaderMiddleware implements MiddlewareInterface
                             : $rule['value'];
                         break;
                     case 'set':
-                    default:
                         $g->server[$key] = $rule['value'];
+                        break;
+                    default:
+                        // #404 — an unknown op (a typo, or Apache's unsupported
+                        // `edit`/`edit*` regex op) must NOT silently apply as a
+                        // `set`. Apache rejects an invalid action at startup; we
+                        // log and skip so the mistake surfaces instead of
+                        // overwriting the header with the literal value.
+                        \ZealPHP\elog(
+                            "RequestHeaderMiddleware: ignoring unknown op '{$rule['op']}' for header '{$rule['name']}'",
+                            'warn',
+                        );
                         break;
                 }
             }

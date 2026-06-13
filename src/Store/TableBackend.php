@@ -125,28 +125,34 @@ final class TableBackend implements StoreBackend
     }
 
     /**
-     * Atomically increment column `$col` by `$by` (coerced to int — `OpenSwoole\Table`
-     * does not support float increment; use `RedisBackend` for `HINCRBYFLOAT`).
-     * Returns `0` when the table doesn't exist.
+     * Atomically increment column `$col` by `$by`. Returns the new column value
+     * — `int` for an INT column, `float` for a FLOAT column (`OpenSwoole\Table`
+     * supports both) — or `0` when the table doesn't exist. Matches the
+     * `StoreBackend::incr(): int|float` contract. `$by` is passed through
+     * unchanged so a FLOAT column increments by a fractional amount (#420 — the
+     * old `(int) $by` cast truncated the step AND the narrow `: int` return type
+     * fatally rejected the float a FLOAT column returns).
      */
-    public function incr(string $name, string $key, string $col, int|float $by = 1): int
+    public function incr(string $name, string $key, string $col, int|float $by = 1): int|float
     {
         $t = $this->tables[$name] ?? null;
         if ($t === null) { return 0; }
-        // OpenSwoole\Table::incr accepts int — floats are coerced to int here.
-        // RedisBackend (Task 6) honours the float type via HINCRBYFLOAT.
-        return $t->incr($key, $col, (int) $by);
+        // The openswoole/ide-helper stub types Table::incr as (int): int, but the
+        // real ext accepts a float $by and returns a float for a FLOAT column —
+        // the param/return stub mismatches are suppressed in phpstan.neon (#420).
+        return $t->incr($key, $col, $by);
     }
 
     /**
-     * Atomically decrement column `$col` by `$by` (coerced to int).
-     * Returns `0` when the table doesn't exist.
+     * Atomically decrement column `$col` by `$by`. Returns the new column value
+     * (`int`/`float` per the column type), or `0` when the table doesn't exist.
      */
-    public function decr(string $name, string $key, string $col, int|float $by = 1): int
+    public function decr(string $name, string $key, string $col, int|float $by = 1): int|float
     {
         $t = $this->tables[$name] ?? null;
         if ($t === null) { return 0; }
-        return $t->decr($key, $col, (int) $by);
+        // Same ide-helper stub mismatch as incr() — see phpstan.neon (#420).
+        return $t->decr($key, $col, $by);
     }
 
     /** Return the number of rows in the named table, or `0` when the table doesn't exist. */

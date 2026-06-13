@@ -100,6 +100,18 @@ parameters:
             message: "#^Strict comparison using !== between '' and '' will always evaluate to false\\.$#"
             path: src/Learn/Chat.php
 
+        # OpenSwoole\Table::incr()/decr() are stubbed by openswoole/ide-helper as
+        # (int $by): int, but the real ext accepts a float $by and returns a float
+        # for a FLOAT column. TableBackend::incr/decr pass $by through and return
+        # int|float (the StoreBackend contract) so a FLOAT column is incrementable
+        # instead of fataling on the narrow return type (#420).
+        -
+            message: '#^Parameter \#3 \$(incr|decr)By of method OpenSwoole\\Table::(incr|decr)\(\) expects int, float\|int given\.$#'
+            path: src/Store/TableBackend.php
+        -
+            message: '#^Method ZealPHP\\Store\\TableBackend::(incr|decr)\(\) never returns float so it can be removed from the return type\.$#'
+            path: src/Store/TableBackend.php
+
         # ─── REST.php constructor backward-compat ───────────────────────
         # REST.php constructor signature kept for backward compatibility;
         # body uses G::instance() instead of the passed-in objects.
