@@ -585,7 +585,7 @@ Behaviour of per-method dispatch:
 ZealPHP inspects the closure signature and injects arguments by name. Supported parameters:
 
 - **Framework objects**:
-  - `$app` – current `ZealPHP\ZealAPI` instance
+  - `$app` – current `ZealPHP\App` instance
   - `$request` – `ZealPHP\HTTP\Request` wrapper (`$req` is accepted as a short alias)
   - `$response` – `ZealPHP\HTTP\Response` wrapper (`$res` is accepted as a short alias)
   - `$server` – underlying `OpenSwoole\HTTP\Server`
@@ -2942,7 +2942,7 @@ How 50 popular PHP apps run on ZealPHP across **all four runtime modes**, with *
 
 **2026-06-12 re-validation level:** every graded app below was re-run on 0.3.49 with the standard **84-request 6-way burst** (`burst6.php <port> 6 14`) plus a homepage check. Apps where the burst lifted to 0 worker deaths AND that previously failed *solely* on worker-crash were taken one level deeper (content sanity + scripted login/write where the harness allowed); the per-app detail notes the exact level reached ("full protocol" vs "burst+content" vs "burst-only"). The **ext#52 fix eliminated worker deaths** across most of the C/D set (kanboard, kirby, dokuwiki, phpmyadmin, yii2, laminas, elfinder, codeigniter4, tinyfilemanager, symfony, drupal all 0 deaths now), but **content-level checks revealed several apps whose 0-death bursts serve hollow/broken bodies** — those stay D/C honestly (CodeIgniter4 0-byte bodies, DokuWiki content "str() on null", TinyFileManager login still lost). An **object-global-null regression cluster** surfaced on 0.3.49 (WordPress `wp_set_wpdb_vars` null, MyBB `read() on null` — 500 on every request) — root-caused the same day and **FIXED in ext-zealphp v0.3.50**: the S2 request-frame walkers trusted `ex->symbol_table` without gating on `ZEND_CALL_HAS_SYMBOL_TABLE`, so a plain function frame’s stale field could match and the parked `$wpdb` bucket was re-pointed into `require_wp_db()`’s dying frame (NOT the ext#44/#49 frontier as first suspected). On v0.3.50 both render again — see the per-app rows.
 
-**Status: 31/50 re-validated in `coroutine-legacy`** (B: 7 · C: 15 · D: 9); 19 pending. **2026-06-12 late corrections (ext v0.3.51 + framework OB fix):** CodeIgniter 4 D→**B** (0-byte bodies were a framework flush bug, fixed), DokuWiki D→**C** (content restored by the ext#50 class_alias fix), TinyFileManager D→**C** (login proven working — the sweep probe missed the CSRF token and didn't follow redirects). **Net grade changes 2026-06-12:** Kanboard D→B, Yii 2 C→B (both driven by ext#52 + session #379); 5 previously-_pending_ rows newly graded (TYPO3 C, Craft CMS C, Roundcube C, Concrete CMS D, Flarum D). The two 0.3.49 regressions (WordPress, MyBB — object-global null) are **resolved on v0.3.50**. Leantime remains _pending_ (boot-fail: psr/http-message v2 conflict needs the documented `composer require psr/http-message:^1.1` harness fix).
+**Status: 31/50 re-validated in `coroutine-legacy`** (B: 7 · C: 15 · D: 9); 19 pending. **2026-06-12 late corrections (ext v0.3.51 + framework OB fix):** CodeIgniter 4 D→**B** (0-byte bodies were a framework flush bug, fixed), DokuWiki D→**C** (content restored by the ext#50 class_alias fix), TinyFileManager D→**C** (login proven working — the sweep probe missed the CSRF token and didn't follow redirects). **Net grade changes 2026-06-12:** Kanboard D→B, Yii 2 C→B (both driven by ext#52 + session #379); 5 previously-_pending_ rows newly graded (TYPO3 C, Craft CMS C, Roundcube C, Concrete CMS D, Flarum D). The two 0.3.49 regressions (WordPress, MyBB — object-global null) are **resolved on v0.3.50**. Leantime now **F** (boot-fail: its prebuilt vendor directory without composer.json blocks the psr/http-message v1 fix, leading to cascading PHP 8.4 fatal errors).
 
 ---
 
@@ -2992,7 +2992,7 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 | 13 | WooCommerce | E-comm | 9.6k | NT | _pending_ | _pending_ | NT | re-validation in progress |
 | 14 | PrestaShop | E-comm | 7.8k | NT | _pending_ | _pending_ | NT | re-validation in progress |
 | 15 | OpenCart | E-comm | 7.3k | NT | C | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
-| 16 | Sylius | E-comm | 7.7k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 16 | Sylius | E-comm | 7.7k | NT | F | **F** | NT | Harness blocked: openswoole/core breaks on psr/http-message:^1.1 |
 | 17 | Flarum | Forums | 15k | NT | _pending_ | **D** | NT | App::mode(App::MODE_COROUTINE_LEGACY) — boots+homepage 200 but 1 worker death/burst |
 | 18 | phpBB | Forums | 1.8k | A | A | **C** | NT | App::globalScopeInclude(true) (template default, kept) |
 | 19 | MyBB | Forums | 2.9k | NT | F | **C** | NT | v0.3.50: homepage 200/14KB; burst 82x200 2x500 **0 worker deaths** (0.3.49 every-request-500 regression fixed) |
@@ -3014,18 +3014,18 @@ Columns are the four modes. **`coroutine-legacy`** is the rigorous fresh grade; 
 | 35 | DokuWiki | Wiki | 4.1k | NT | F | **C** | NT | content RESTORED by ext v0.3.51 (class_alias first-wins — inc/legacy.php aliases were the 'str() on null'); login/write pending re-run |
 | 36 | BookStack | Wiki | 16k | NT | F | **C** | NT | App::mode(App::MODE_COROUTINE_LEGACY) |
 | 37 | Kanboard | Business | 8.4k | NT | A | **B** | NT | App::globalScopeInclude(true) + App::defineIsolation(true) — login+write now pass (session #379 + ext#52) |
-| 38 | Invoice Ninja | Business | 8.3k | NT | _pending_ | _pending_ | NT | re-validation in progress |
-| 39 | Leantime | Business | 4.1k | NT | _pending_ | _pending_ | NT | re-validation in progress |
-| 40 | Monica CRM | Business | 22k | NT | _pending_ | _pending_ | NT | re-validation in progress |
-| 41 | Crater | Business | 8.2k | NT | _pending_ | _pending_ | NT | re-validation in progress |
-| 42 | Matomo | Analytics | 19k | NT | _pending_ | _pending_ | NT | re-validation in progress |
-| 43 | Cacti | Analytics | 1.5k | NT | _pending_ | _pending_ | NT | re-validation in progress |
-| 44 | LibreNMS | Analytics | 3.9k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 38 | Invoice Ninja | Business | 8.3k | NT | F | **F** | NT | PHP 8.4 incompat / Download issues |
+| 39 | Leantime | Business | 4.1k | NT | _pending_ | **F** | NT | Harness blocked: prebuilt vendor breaks on psr/http-message:^1.1 fix |
+| 40 | Monica CRM | Business | 22k | NT | F | **F** | NT | Harness blocked: openswoole/core breaks on psr/http-message:^1.1 |
+| 41 | Crater | Business | 8.2k | NT | F | **F** | NT | PHP <8.2 required |
+| 42 | Matomo | Analytics | 19k | NT | F | **F** | NT | Harness blocked: psr/log interface conflict |
+| 43 | Cacti | Analytics | 1.5k | NT | D | **D** | NT | App::globalScopeInclude(true) + zend_mm_heap corrupted on DB failure die() |
+| 44 | LibreNMS | Analytics | 3.9k | NT | F | **F** | NT | PHP 8.4 incompat in Composer script |
 | 45 | FreshRSS | Content | 10k | NT | F | **C** | NT | App::globalScopeInclude(true) (template default, kept) |
 | 46 | Piwigo | Content | 3.1k | NT | F | **D** | NT | App::ignorePhpExt(false) — Piwigo needs direct *.php URLs (… |
-| 47 | Lychee | Content | 13k | NT | _pending_ | _pending_ | NT | re-validation in progress |
-| 48 | Wallabag | Content | 10k | NT | _pending_ | _pending_ | NT | re-validation in progress |
-| 49 | Nextcloud | Utility | 27k | NT | _pending_ | _pending_ | NT | re-validation in progress |
+| 47 | Lychee | Content | 13k | NT | F | **F** | NT | PHP 8.4 incompat in Composer script |
+| 48 | Wallabag | Content | 10k | NT | F | **F** | NT | PHP 8.4 incompat in Composer script |
+| 49 | Nextcloud | Cloud | 24k | NT | C | **C** | NT | App::globalScopeInclude(true) |
 | 50 | YOURLS | Utility | 10k | NT | C | **C** | NT | App::ignorePhpExt(false) — YOURLS requires direct *.php URL… |
 
 > Failure-class root causes + fix status: [`docs/architecture/2026-06-11-coroutine-legacy-blocker-report.md`](architecture/2026-06-11-coroutine-legacy-blocker-report.md). Several blockers found in this sweep are already fixed on the current stack (Stage-8 object-store corruption → ext 0.3.47; `exit()`/`die()` swallow → ext 0.3.48; session persistence → #379; ZealAPI scope → #376), so _pending_ rows and the session-blocked C/D apps are expected to grade higher on re-run.
@@ -3387,8 +3387,8 @@ These rows were _pending_ before this sweep. They are graded at **burst+content 
 #### Roundcube — coroutine-legacy: **C** (newly graded 2026-06-12)
 - **homepage** 200 — the real webmail login page renders (`<title>Roundcube Webmail :: Welcome to Roundcube Webmail</title>`). **burst** homepage 6-way: **82x200/2x500, 0 worker deaths, 0 segfaults** — stable. **login** not exercised (requires a live IMAP backend = **ENV**). **level:** burst+content. Grade **C** (read paths + login page render + stable burst; IMAP-backed login is an environment dependency).
 
-#### Leantime — coroutine-legacy: _pending_ (BOOT-FAIL 2026-06-12 — harness gap)
-- **boot** failed: `Fatal error: Declaration of OpenSwoole\Core\Psr\Message::getProtocolVersion() must be compatible with Psr\Http\Message\MessageInterface::getProtocolVersion(): string` — the documented **psr/http-message v2 conflict** (Leantime's vendor ships psr/http-message 2.0, whose typed interfaces fatal ZealPHP's openswoole/core PSR-7 v1 classes). Fix is the documented composer pin `composer require psr/http-message:^1.1` (the Laravel/Symfony/Slim/Yii playbook), which this _pending_ harness was never configured with. **Left _pending_** — this is a harness-setup gap, not an ext/framework defect, and a proper harness fix was out of scope for this re-validation pass.
+#### Leantime — coroutine-legacy: **F** (Harness Blocked — 2026-06-12)
+- **boot** failed: `Fatal error: Declaration of OpenSwoole\Core\Psr\Message::getProtocolVersion()...` The documented **psr/http-message v2 conflict** occurs because Leantime's prebuilt release ships `psr/http-message 2.0`. Attempting the standard `composer require psr/http-message:^1.1` fix fails because the tarball lacks a `composer.json`, causing Composer to wipe the `vendor/` directory. Manually injecting the v1.1 package resolves the Swoole error but immediately triggers cascading PHP 8.4 compatibility fatals in the stale `doctrine/cache` and `symfony/http-kernel` components. The app cannot boot on the PHP 8.4 / 8.5 stack without a rebuilt `composer.json`. **Grade: F**.
 
 ---
 
@@ -4807,7 +4807,7 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.4.8 .
+docker build -t zealphp:0.4.9 .
 ```
 
 The shipped `Dockerfile` is PHP 8.4-cli on `bookworm` with OpenSwoole and
@@ -4819,7 +4819,7 @@ versions with the build args:
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
     --build-arg ZEALPHP_EXT_VERSION=v0.3.33 \
-    -t zealphp:0.4.8 .
+    -t zealphp:0.4.9 .
 ```
 
 ### Run (single container)
@@ -4831,7 +4831,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.4.8
+    zealphp:0.4.9
 ```
 
 ### Production compose
@@ -4842,7 +4842,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.4.8
+    image: registry.example.com/zealphp-app:0.4.9
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
