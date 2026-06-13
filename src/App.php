@@ -158,12 +158,17 @@ class App
     public static ?string $default_php_self = null;
     private static ?self $instance = null;
     /**
-     * When `true`, framework error pages render the captured exception +
-     * stack trace inline (development default). Set `false` in production
-     * via `App::displayErrors(false)` so 5xx pages show a friendly message
-     * instead of leaking traces.
+     * Whether framework error pages render the captured exception + stack
+     * trace inline. Secure-by-default: `null` (the default) resolves at
+     * runtime to the `ZEALPHP_DEV` env var — OFF in production, so 5xx pages
+     * show a generic message and never leak traces/secrets (#412). Call
+     * `App::displayErrors(true)` for the inline-trace development view; an
+     * explicit setter call always wins over the env resolution.
+     *
+     * Read through `App::displayErrors()` (not the raw property) to get the
+     * env-resolved value; a raw `null`/`false` is treated as "do not leak".
      */
-    public static bool $display_errors = true;
+    public static ?bool $display_errors = null;
     /**
      * Per-request lifecycle mode (the dial that picks `$g` storage +
      * SessionManager + `enable_coroutine` + HOOK_ALL default). See the
@@ -1465,6 +1470,12 @@ class App
         // content buckets via ctx->final_header_only). Streaming length is
         // unknown/chunked, so no Content-Length is emitted.
         if ($method === 'HEAD') {
+            // RFC 7231 §4.3.2: a HEAD response carries the same header fields a
+            // GET would (only the body is omitted). flush() BEFORE end() so the
+            // queued headers/cookies — Accept-Ranges, any $response->header()/
+            // ->cookie() — actually reach the wire instead of being dropped (#418).
+            // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+            $g->zealphp_response->flush();
             // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
             $g->openswoole_response->end();
             return (new Response('', $streamStatus));
@@ -1994,15 +2005,20 @@ class App
     }
 
     /**
-     * Whether framework error pages render the captured exception and stack trace
-     * inline. Default `true` (development-friendly). Set `false` in production so
-     * `5xx` pages show a generic message instead of leaking internal details.
-     * No-arg call returns the current value.
+     * Whether framework error pages render the captured exception and stack
+     * trace inline. Secure-by-default (#412): a one-arg call sets the value
+     * explicitly (and wins forever after); a no-arg call returns the resolved
+     * value — when never set explicitly, `null` falls back to the `ZEALPHP_DEV`
+     * env var, so production (env unset) returns `false` and never leaks traces.
      */
     public static function displayErrors(?bool $on = null): bool
     {
         if ($on !== null) self::$display_errors = $on;
-        return self::$display_errors;
+        if (self::$display_errors !== null) {
+            return self::$display_errors;
+        }
+        $env = getenv('ZEALPHP_DEV');
+        return $env !== false && $env !== '' && $env !== '0';
     }
 
     /**
@@ -4394,6 +4410,25 @@ class App
      * `false` on any parse failure rather than throwing — defensive for header-
      * sourced input.
      */
+    /**
+     * Collapse an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) to its IPv4 form
+     * so an IPv4 CIDR matches a mapped peer (#433). Mirrors
+     * `IpAccessMiddleware::normalizeIp` byte-for-byte. Non-mapped input is
+     * returned unchanged.
+     */
+    private static function collapseMappedIp(string $ip): string
+    {
+        $bin = @inet_pton($ip);
+        if ($bin !== false && strlen($bin) === 16
+            && str_starts_with($bin, "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff")) {
+            $v4 = @inet_ntop(substr($bin, 12));
+            if ($v4 !== false) {
+                return $v4;
+            }
+        }
+        return $ip;
+    }
+
     private static function cidrContains(string $cidr, string $ip): bool
     {
         if ($cidr === '' || $ip === '') return false;
@@ -4412,6 +4447,15 @@ class App
             }
             $bits = (int)$prefix;
         }
+
+        // Collapse IPv4-mapped IPv6 (`::ffff:a.b.c.d`) to its IPv4 form on BOTH
+        // sides before packing (#433). A dual-stack listener (or a proxy hop)
+        // presents IPv4 peers in the mapped 16-byte form; without this an IPv4
+        // CIDR (4-byte) could never match the peer, so a trusted proxy looked
+        // untrusted and `clientIp()`'s reverse walk mis-attributed the client.
+        // Mirrors IpAccessMiddleware::normalizeIp so the two matchers agree.
+        $net = self::collapseMappedIp($net);
+        $ip  = self::collapseMappedIp($ip);
 
         $netPacked = @inet_pton($net);
         $ipPacked  = @inet_pton($ip);
@@ -5015,6 +5059,15 @@ class App
     {
         if ($tasks === []) { return []; }
         if (\OpenSwoole\Coroutine::getCid() < 0) {
+            // Outside any coroutine. In a reactor worker (mixed / legacy-cgi,
+            // enable_coroutine off) a nested Coroutine::run() NEVER returns and
+            // deadlocks the worker (#429); run the tasks sequentially instead —
+            // correct results in input order, just without the concurrency
+            // those modes can't provide anyway. Only a standalone CLI / unit-
+            // test process (no server) can safely start a scheduler here.
+            if (self::$server !== null) {
+                return self::runTasksSequentially($tasks);
+            }
             // Coroutine::run swallows uncaught throws — capture + rethrow
             // outside so callers see the same exception semantics they'd
             // get from inside a request coroutine.
@@ -5051,6 +5104,25 @@ class App
     }
 
     /**
+     * Sequential fallback for `parallel()` when no coroutine scheduler is
+     * available (reactor worker in mixed / legacy-cgi — #429). Runs each task
+     * in input order; the first throw propagates immediately, matching
+     * `parallel()`'s fail-fast-on-first-error contract.
+     *
+     * @template T
+     * @param  list<callable(): T> $tasks
+     * @return list<T>
+     */
+    private static function runTasksSequentially(array $tasks): array
+    {
+        $results = [];
+        foreach ($tasks as $task) {
+            $results[] = $task();
+        }
+        return $results;
+    }
+
+    /**
      * Bounded fan-out — runs `$fn` over each item with at most
      * `$concurrency` in-flight coroutines at a time. Results keyed by
      * the input's original keys.
@@ -5069,6 +5141,15 @@ class App
             throw new \InvalidArgumentException('parallelLimit: $concurrency must be >= 1');
         }
         if (\OpenSwoole\Coroutine::getCid() < 0) {
+            // Reactor worker (mixed / legacy-cgi): nesting Coroutine::run()
+            // deadlocks the worker (#429) — degrade to sequential mapping
+            // (correct results, no concurrency). Standalone CLI starts a real
+            // scheduler.
+            if (self::$server !== null) {
+                $results = [];
+                foreach ($items as $k => $item) { $results[$k] = $fn($item, $k); }
+                return $results;
+            }
             $out = [];
             $err = null;
             \OpenSwoole\Coroutine::run(function () use ($items, $fn, $concurrency, &$out, &$err): void {
@@ -8155,7 +8236,7 @@ class App
             $errorPayload = [
                 'status'  => $status,
                 'message' => $reason,
-                'trace'   => ($exception && self::$display_errors) ? jTraceEx($exception) : null,
+                'trace'   => ($exception && self::displayErrors()) ? jTraceEx($exception) : null,
             ];
             // Apache ServerAdmin parity: surface the configured contact in
             // machine-readable error responses too, so API clients can route
@@ -8178,7 +8259,7 @@ class App
         }
 
         $body = "<pre>{$status} {$reason}</pre>";
-        if ($exception && self::$display_errors) {
+        if ($exception && self::displayErrors()) {
             $body .= "\n<pre>" . htmlspecialchars(jTraceEx($exception)) . "</pre>";
         }
         // Apache ServerAdmin parity: default error pages show a contact line
@@ -9837,7 +9918,7 @@ class App
                     } catch (\Throwable $e2) {
                         App::emitStatus($response->parent, 500);
                         $g->status = 500;
-                        $body = App::$display_errors
+                        $body = App::displayErrors()
                             ? "<pre>".jTraceEx($e)."</pre>"
                             : "<pre>500 Internal Server Error</pre>";
                         $response->parent->end($body);

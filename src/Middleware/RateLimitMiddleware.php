@@ -176,18 +176,24 @@ class RateLimitMiddleware implements MiddlewareInterface
             $reset = is_numeric($existing['reset'] ?? null) ? (int)$existing['reset'] : 0;
             $count = is_numeric($existing['count'] ?? null) ? (int)$existing['count'] : 0;
             if ($now < $reset) {
-                if ($count >= $effectiveLimit) {
-                    // Over limit + burst — reject (or observe-only in dry-run).
+                // Atomic increment-THEN-check closes the check-then-act race
+                // (#408): the previous code read $count, compared, then incr'd —
+                // so K concurrent coroutines could all read the same sub-limit
+                // value and pass before any incremented (12 admitted at limit 10
+                // under a 40-way burst). OpenSwoole\Table::incr is atomic and
+                // returns the post-increment value; comparing on THAT means
+                // exactly the (limit+1)th concurrent arrival is the first to
+                // exceed — no over-admission.
+                $newCount = Store::incr($this->tableName, $ip, 'count', 1);
+                if ($newCount > $effectiveLimit) {
                     if ($this->dryRun) {
-                        // Dry-run: still record the excess count so accounting
-                        // reflects real traffic, then forward the request.
-                        Store::incr($this->tableName, $ip, 'count', 1);
-                        $this->logDryRunBlock($ip, $count + 1, $reset - $now);
+                        // Dry-run: the excess is already recorded by the incr
+                        // above; log and forward.
+                        $this->logDryRunBlock($ip, $newCount, $reset - $now);
                         return $handler->handle($request);
                     }
                     return $this->tooMany($reset - $now);
                 }
-                Store::incr($this->tableName, $ip, 'count', 1);
                 return $handler->handle($request);
             }
         }

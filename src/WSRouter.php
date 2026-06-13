@@ -662,7 +662,10 @@ final class WSRouter
 
         // Per-worker lifecycle hooks — heartbeat + GC + graceful sweep.
         // onWorkerStart runs IN a coroutine (HOOK_ALL active) so Store ops yield.
-        App::onWorkerStart(function (int $workerId): void {
+        // The framework invokes worker hooks as $fn($server, $workerId) (#415),
+        // so the closure MUST accept the Server as arg #1 — typing the first
+        // slot `int $workerId` made every worker crash-loop with a TypeError.
+        App::onWorkerStart(function ($server, int $workerId): void {
             // Register THIS process in the server registry. Refresh row on
             // every heartbeat tick — GC drops rows older than SERVER_STALE_AFTER_SEC.
             self::writeServerRegistryRow();
@@ -681,7 +684,7 @@ final class WSRouter
         // Graceful-stop sweeper — drop this server's rows AND its server-
         // registry row when worker 0 shuts down cleanly. Hard crashes are
         // covered by the periodic GC above.
-        App::onWorkerStop(function (int $workerId): void {
+        App::onWorkerStop(function ($server, int $workerId): void {
             if ($workerId === 0) {
                 self::sweepThisServer();
             }

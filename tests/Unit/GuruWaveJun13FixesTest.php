@@ -1,0 +1,194 @@
+<?php
+
+declare(strict_types=1);
+
+namespace ZealPHP\Tests\Unit;
+
+use OpenSwoole\Core\Psr\ServerRequest;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\RequestHandlerInterface;
+use ZealPHP\App;
+use ZealPHP\HTTP;
+use ZealPHP\HTTP\Response;
+use ZealPHP\Middleware\RedirectMiddleware;
+use ZealPHP\RequestContext;
+use ZealPHP\Tests\TestCase;
+
+/**
+ * Fixes for the 2026-06-13 issue wave reported by Guruprasanth-M:
+ *   - #412 App::displayErrors() secure-by-default (null → ZEALPHP_DEV)
+ *   - #432 Response::redirect() same-origin guard is port-aware
+ *   - #433 App::cidrContains() collapses IPv4-mapped IPv6
+ *   - #409 RedirectMiddleware preserves the query string
+ *   - #429 parallel()/HTTP fall back cleanly without a coroutine scheduler
+ */
+final class GuruWaveJun13FixesTest extends TestCase
+{
+    // ── #412 — display_errors secure-by-default ──────────────────────────
+
+    public function testDisplayErrorsDefaultsToEnvWhenUnset(): void
+    {
+        $prev    = App::$display_errors;
+        $prevEnv = getenv('ZEALPHP_DEV');
+        try {
+            // Never explicitly set + no env → secure default OFF.
+            App::$display_errors = null;
+            putenv('ZEALPHP_DEV');
+            $this->assertFalse(App::displayErrors(), 'no env → false (no trace leak)');
+
+            // ZEALPHP_DEV=1 → development trace view on.
+            App::$display_errors = null;
+            putenv('ZEALPHP_DEV=1');
+            $this->assertTrue(App::displayErrors(), 'ZEALPHP_DEV=1 → true');
+
+            // An explicit setter call wins over the env resolution.
+            App::displayErrors(false);
+            $this->assertFalse(App::displayErrors(), 'explicit false wins over env');
+            App::displayErrors(true);
+            $this->assertTrue(App::displayErrors(), 'explicit true wins');
+        } finally {
+            App::$display_errors = $prev;
+            if ($prevEnv === false) {
+                putenv('ZEALPHP_DEV');
+            } else {
+                putenv('ZEALPHP_DEV=' . $prevEnv);
+            }
+        }
+    }
+
+    // ── #433 — cidrContains IPv4-mapped IPv6 ─────────────────────────────
+
+    private static function cidr(string $cidr, string $ip): bool
+    {
+        $m = new \ReflectionMethod(App::class, 'cidrContains');
+        $m->setAccessible(true);
+        return (bool) $m->invoke(null, $cidr, $ip);
+    }
+
+    public function testCidrContainsMatchesMappedIpv4(): void
+    {
+        // Plain and mapped forms of an in-range IPv4 both match the IPv4 CIDR.
+        $this->assertTrue(self::cidr('10.0.0.0/8', '10.0.0.5'));
+        $this->assertTrue(self::cidr('10.0.0.0/8', '::ffff:10.0.0.5'), 'mapped v4 must match v4 CIDR (#433)');
+        // Out-of-range mapped address still does not match.
+        $this->assertFalse(self::cidr('10.0.0.0/8', '::ffff:11.0.0.5'));
+        // A genuine IPv6 address never matches an IPv4 CIDR.
+        $this->assertFalse(self::cidr('10.0.0.0/8', '2001:db8::1'));
+    }
+
+    public function testClientIpTrustsMappedProxyHop(): void
+    {
+        App::trustedProxies(['10.0.0.0/8']);
+        $g = RequestContext::instance();
+        // The socket peer arrives in IPv4-mapped form (dual-stack listener).
+        $g->server = [
+            'REMOTE_ADDR'          => '::ffff:10.0.0.6',
+            'HTTP_X_FORWARDED_FOR' => '198.51.100.7, 10.0.0.6',
+        ];
+        // The mapped 10.0.0.6 hop must be recognised as trusted and skipped,
+        // so the real client (198.51.100.7) is returned — not the proxy (#433).
+        $this->assertSame('198.51.100.7', App::clientIp());
+        App::trustedProxies([]);
+    }
+
+    // ── #432 — redirect same-origin guard is port-aware ──────────────────
+
+    private function makeResponse(): Response
+    {
+        $osResponse = new \OpenSwoole\Http\Response();
+        $g = RequestContext::instance();
+        $g->status = null;
+        $g->server = [];
+        $response  = new Response($osResponse);
+        $g->zealphp_response = $response;
+        return $response;
+    }
+
+    public function testSameOriginAbsoluteRedirectOnNonDefaultPortIsAllowed(): void
+    {
+        $resp = $this->makeResponse();
+        $g = RequestContext::instance();
+        $g->server = ['HTTP_HOST' => '127.0.0.1:8122'];
+        // Previously threw (host-only compare: '127.0.0.1' !== '127.0.0.1:8122').
+        $resp->redirect('http://127.0.0.1:8122/dashboard', 302);
+        $this->assertSame(302, $g->status);
+    }
+
+    public function testCrossHostAbsoluteRedirectStillBlocked(): void
+    {
+        $resp = $this->makeResponse();
+        $g = RequestContext::instance();
+        $g->server = ['HTTP_HOST' => '127.0.0.1:8122'];
+        $this->expectException(\InvalidArgumentException::class);
+        $resp->redirect('http://evil.example/phish', 302);
+    }
+
+    public function testIsSameOriginViaReflection(): void
+    {
+        $resp = $this->makeResponse();
+        $g = RequestContext::instance();
+        $g->server = ['HTTP_HOST' => 'mysite.com:8443'];
+        $m = new \ReflectionMethod(Response::class, 'isSameOrigin');
+        $m->setAccessible(true);
+
+        $this->assertTrue($m->invoke($resp, 'https://mysite.com/x'), 'same host (port-stripped) → same origin');
+        $this->assertTrue($m->invoke($resp, '/relative/path'), 'relative → same origin');
+        $this->assertFalse($m->invoke($resp, 'https://other.com/x'), 'different host → cross origin');
+    }
+
+    public function testHostWithoutPortHandlesIpv6(): void
+    {
+        $resp = $this->makeResponse();
+        $m = new \ReflectionMethod(Response::class, 'hostWithoutPort');
+        $m->setAccessible(true);
+        $this->assertSame('127.0.0.1', $m->invoke($resp, '127.0.0.1:8080'));
+        $this->assertSame('example.com', $m->invoke($resp, 'example.com'));
+        $this->assertSame('[::1]', $m->invoke($resp, '[::1]:8080'));
+        $this->assertSame('[::1]', $m->invoke($resp, '[::1]'));
+    }
+
+    // ── #409 — RedirectMiddleware preserves the query string ─────────────
+
+    public function testRedirectMiddlewarePreservesQueryFromServerParam(): void
+    {
+        // Mirror the real runtime: the PSR Uri is path-only and the query rides
+        // the `query_string` server param (lower-case key).
+        $request = new ServerRequest('/old/page', 'GET', '', [], [], [], ['query_string' => 'ref=x&utm=y']);
+        $mw = new RedirectMiddleware([['from' => '/old', 'to' => '/new']]);
+        $handler = new class implements RequestHandlerInterface {
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return new \OpenSwoole\Core\Psr\Response('OK', 200);
+            }
+        };
+        $resp = $mw->process($request, $handler);
+        $this->assertSame('/new/page?ref=x&utm=y', $resp->getHeaderLine('Location'));
+    }
+
+    // ── #429 — sync-mode fallbacks (no coroutine scheduler) ──────────────
+
+    public function testRunTasksSequentiallyPreservesOrder(): void
+    {
+        $m = new \ReflectionMethod(App::class, 'runTasksSequentially');
+        $m->setAccessible(true);
+        $out = $m->invoke(null, [fn() => 'a', fn() => 'b', fn() => 'c']);
+        $this->assertSame(['a', 'b', 'c'], $out);
+    }
+
+    public function testRunTasksSequentiallyPropagatesFirstThrow(): void
+    {
+        $m = new \ReflectionMethod(App::class, 'runTasksSequentially');
+        $m->setAccessible(true);
+        $this->expectException(\RuntimeException::class);
+        $m->invoke(null, [fn() => 'a', fn() => throw new \RuntimeException('boom'), fn() => 'c']);
+    }
+
+    public function testHttpFlattenHeaders(): void
+    {
+        $m = new \ReflectionMethod(HTTP::class, 'flattenHeaders');
+        $m->setAccessible(true);
+        $out = $m->invoke(null, ['Content-Type' => 'application/json', 'X-A' => 'b']);
+        $this->assertSame(['Content-Type: application/json', 'X-A: b'], $out);
+    }
+}

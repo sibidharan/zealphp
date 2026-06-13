@@ -108,9 +108,12 @@ final class HTTP
      */
     public static function request(string $method, string $url, mixed $body = null, array $headers = [], float $timeout = 30.0): HTTPResponse
     {
-        if (\OpenSwoole\Coroutine::getCid() < 0) {
-            // Outside coroutine — wrap in Coroutine::run so the hooked
-            // socket calls have a scheduler.
+        if (\OpenSwoole\Coroutine::getCid() < 0 && App::$server === null) {
+            // Standalone CLI / unit test (no server) — wrap in Coroutine::run
+            // so the hooked socket calls have a scheduler. NOT taken inside a
+            // reactor worker: there a nested Coroutine::run() deadlocks the
+            // worker (#429) — that case falls through to the blocking transport
+            // below after the shared parse/body-prep.
             $r = null;
             $err = null;
             \OpenSwoole\Coroutine::run(function () use ($method, $url, $body, $headers, $timeout, &$r, &$err): void {
@@ -150,6 +153,15 @@ final class HTTP
             return new HTTPResponse(0, '', [], new \InvalidArgumentException(
                 'HTTP::request: $body must be null, string, or array; got ' . get_debug_type($body)
             ));
+        }
+
+        if (\OpenSwoole\Coroutine::getCid() < 0) {
+            // Reactor worker in mixed / legacy-cgi: no per-request coroutine and
+            // nesting Coroutine::run() deadlocks the worker (#429). Use a
+            // blocking curl transport — it blocks the worker for the request
+            // duration, which is correct in these sequential-per-worker modes
+            // (exactly mod_php + curl semantics). Same HTTPResponse shape.
+            return self::requestBlocking(strtoupper($method), $url, $bodyStr, $finalHeaders, $timeout);
         }
 
         try {
@@ -214,5 +226,79 @@ final class HTTP
             if (strtolower($k) === $lower) { return true; }
         }
         return false;
+    }
+
+    /**
+     * Blocking transport used when no coroutine scheduler is available — a
+     * reactor worker in mixed / legacy-cgi mode, where the coroutine HTTP
+     * client can't run and nesting Coroutine::run() deadlocks (#429). Uses
+     * ext-curl, which blocks the worker for the request duration; that is the
+     * correct, mod_php-equivalent behaviour in those sequential-per-worker
+     * modes. Returns the same HTTPResponse shape as the coroutine path.
+     *
+     * @param array<string, string> $headers
+     */
+    private static function requestBlocking(string $method, string $url, string $bodyStr, array $headers, float $timeout): HTTPResponse
+    {
+        if (!\function_exists('curl_init')) {
+            return new HTTPResponse(0, '', [], new \RuntimeException(
+                'HTTP::request: no coroutine scheduler (mixed/legacy-cgi) and ext-curl is unavailable for the blocking transport'
+            ));
+        }
+        $ch = curl_init();
+        if (!$ch instanceof \CurlHandle) {
+            return new HTTPResponse(0, '', [], new \RuntimeException('HTTP::request: curl_init failed'));
+        }
+        /** @var array<string, string> $respHeaders */
+        $respHeaders = [];
+        $timeoutMs = (int) ($timeout * 1000);
+        curl_setopt_array($ch, [
+            CURLOPT_URL               => $url,
+            CURLOPT_CUSTOMREQUEST     => $method,
+            CURLOPT_RETURNTRANSFER    => true,
+            CURLOPT_TIMEOUT_MS        => $timeoutMs > 0 ? $timeoutMs : 0,
+            CURLOPT_CONNECTTIMEOUT_MS => $timeoutMs > 0 ? $timeoutMs : 0,
+            CURLOPT_HTTPHEADER        => self::flattenHeaders($headers),
+            CURLOPT_HEADERFUNCTION    => function ($_ch, string $line) use (&$respHeaders): int {
+                $idx = strpos($line, ':');
+                if ($idx !== false) {
+                    $name = trim(substr($line, 0, $idx));
+                    if ($name !== '') {
+                        $respHeaders[$name] = trim(substr($line, $idx + 1));
+                    }
+                }
+                return strlen($line);
+            },
+        ]);
+        if ($bodyStr !== '') {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $bodyStr);
+        }
+        $out = curl_exec($ch);
+        if ($out === false) {
+            $err = curl_error($ch);
+            curl_close($ch);
+            return new HTTPResponse(0, '', [], new \RuntimeException($err !== '' ? $err : 'HTTP::request: curl_exec failed'));
+        }
+        /** @var mixed $statusRaw */
+        $statusRaw = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $status = is_int($statusRaw) ? $statusRaw : (is_numeric($statusRaw) ? (int) $statusRaw : 0);
+        curl_close($ch);
+        $respBody = is_string($out) ? $out : '';
+        return new HTTPResponse($status, $respBody, $respHeaders);
+    }
+
+    /**
+     * Flatten an associative header map to curl's `['Name: value', ...]` form.
+     *
+     * @param  array<string, string> $headers
+     * @return list<string>
+     */
+    private static function flattenHeaders(array $headers): array
+    {
+        $out = [];
+        foreach ($headers as $name => $value) {
+            $out[] = $name . ': ' . $value;
+        }
+        return $out;
     }
 }

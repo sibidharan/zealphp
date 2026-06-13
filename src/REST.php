@@ -52,12 +52,19 @@ class REST {
                 $this->_request = $this->cleanInputs(array_merge($getData, $postData));
                 break;
             case "GET":
+            // HEAD is GET with the body stripped later by the dispatch layer
+            // (RFC 9110 §9.3.2) — it must share GET's input semantics, NOT
+            // fall through to a spurious 406 during construction (#411).
+            case "HEAD":
                 $this->_request = $this->cleanInputs($getData);
                 break;
             case "DELETE":
                 $this->_request = $this->cleanInputs($getData);
                 break;
             case "PUT":
+            // PATCH carries a request body like PUT — parse it the same way
+            // rather than 406-ing (#411).
+            case "PATCH":
                 parse_str((string)file_get_contents("php://input"),$this->_request);
                 $this->_request = $this->cleanInputs($this->_request);
                 break;

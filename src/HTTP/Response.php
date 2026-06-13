@@ -160,6 +160,57 @@ class Response
     }
 
     /**
+     * Strip the `:port` suffix from a host, leaving the bare hostname/IP.
+     * Handles bracketed IPv6 literals (`[::1]`, `[::1]:8080`) and the common
+     * `host:port` form. Used to make the open-redirect host comparison
+     * port-insensitive (#432).
+     */
+    private function hostWithoutPort(string $host): string
+    {
+        if ($host !== '' && $host[0] === '[') {
+            // IPv6 literal — `[::1]` or `[::1]:8080`.
+            $end = strpos($host, ']');
+            return $end !== false ? substr($host, 0, $end + 1) : $host;
+        }
+        $colon = strpos($host, ':');
+        return $colon === false ? $host : substr($host, 0, $colon);
+    }
+
+    /**
+     * Same-origin test for the open-redirect (CWE-601) guard. ZealPHP's guard
+     * uses the HOST as the redirect boundary (a same-host target is your own
+     * surface — this deliberately permits an http→https upgrade or a
+     * different-port redirect to the same host, the common, legitimate cases).
+     *
+     * The fix here (#432) is the PORT: the request host comes from `HTTP_HOST`,
+     * which carries the port (`127.0.0.1:8122`), while `parse_url(...host)`
+     * strips it (`127.0.0.1`). The old host-only string compare therefore
+     * mismatched a legitimate same-origin absolute redirect on every
+     * non-default port → `InvalidArgumentException` → 500. We now compare the
+     * port-stripped host on both sides, case-insensitively (DNS is
+     * case-insensitive).
+     *
+     * A target with no host (relative URL) is same-origin; an undeterminable
+     * request host preserves the historical "allow".
+     */
+    private function isSameOrigin(string $url): bool
+    {
+        $targetHost = parse_url($url, PHP_URL_HOST);
+        if (!is_string($targetHost) || $targetHost === '') {
+            return true; // relative / no host → same-origin
+        }
+        /** @var mixed $reqHostRaw */
+        $reqHostRaw = $this->g->server['HTTP_HOST'] ?? $this->g->server['SERVER_NAME'] ?? '';
+        if (!is_string($reqHostRaw) || $reqHostRaw === '') {
+            return true; // request origin undeterminable → don't over-block
+        }
+        return strcasecmp(
+            $this->hostWithoutPort($reqHostRaw),
+            $this->hostWithoutPort($targetHost)
+        ) === 0;
+    }
+
+    /**
      * Send an HTTP redirect.
      *
      * @param string $url           Destination URL (absolute or relative)
@@ -205,14 +256,12 @@ class Response
                 throw new \InvalidArgumentException('Protocol-relative redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
             }
             \ZealPHP\elog('[security] Protocol-relative redirect detected: ' . $url, 'warn');
-        } elseif (isset(parse_url($url)['host'])) {
-            $requestHost = $this->g->server['HTTP_HOST'] ?? $this->g->server['SERVER_NAME'] ?? '';
-            if ($requestHost !== '' && parse_url($url, PHP_URL_HOST) !== $requestHost) {
-                if (!$allowExternal) {
-                    throw new \InvalidArgumentException('Cross-origin redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
-                }
-                \ZealPHP\elog('[security] Cross-origin redirect: ' . $url, 'warn');
+        } elseif (isset(parse_url($url)['host']) && !$this->isSameOrigin($url)) {
+            // Cross-origin per the RFC 6454 (scheme, host, port) triple (#432).
+            if (!$allowExternal) {
+                throw new \InvalidArgumentException('Cross-origin redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
             }
+            \ZealPHP\elog('[security] Cross-origin redirect: ' . $url, 'warn');
         }
 
         $this->g->status = $status;

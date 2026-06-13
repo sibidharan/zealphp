@@ -112,6 +112,11 @@ class ResponseMiddleware implements MiddlewareInterface
                 // strips content buckets via ctx->final_header_only). Streaming
                 // length is unknown/chunked, so no Content-Length is emitted.
                 if ($method === 'HEAD') {
+                    // RFC 7231 §4.3.2: HEAD returns the same headers a GET would.
+                    // flush() BEFORE end() so queued headers/cookies (Accept-Ranges,
+                    // $response->header()/->cookie()) reach the wire (#418).
+                    // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
+                    $g->zealphp_response->flush();
                     // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                     $g->openswoole_response->end();
                     return (new Response('', $streamStatus));

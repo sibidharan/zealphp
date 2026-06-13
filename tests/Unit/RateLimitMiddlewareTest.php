@@ -144,9 +144,12 @@ class RateLimitMiddlewareTest extends TestCase
         // Request 4 (limit+1) must be 429.
         $blocked = $this->hit($mw, $ip);
         $this->assert429($blocked);
-        // And the stored count stays pinned at the limit (no further incr on block).
+        // The atomic increment-then-check gate (#408) counts the blocked attempt
+        // too — count climbs to 4. Harmless (bounded per window, stays above the
+        // limit so every further in-window request is blocked) and is the price
+        // of closing the check-then-act over-admission race.
         $row = Store::get($table, $ip);
-        $this->assertSame(3, $row['count']);
+        $this->assertSame(4, $row['count']);
     }
 
     public function testLimitOfOneBlocksSecondRequest(): void
