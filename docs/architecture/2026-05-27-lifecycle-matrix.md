@@ -59,9 +59,14 @@ P = Pass, F = Fail, N/A = not applicable for this mode
 *Mode 1/11/12 (sg=false): `$_GET`/`$_SERVER` not populated by design. Use `$g->get`, `$g->server`.
 Traditional PHP patterns that read `$_GET` directly need sg=true.
 
-**Mode 4: PHP auto-global CV caching. `$_SESSION` zend_array pointer is cached per compiled
-scope in OpenSwoole coroutines. `$_GET` works via `parse_str` workaround in `executeFile()`.
-Session fix requires ext-zealphp C-level `zealphp_rearm_autoglobals()`.
+**Mode 4 (UPDATE — fixed on ext-zealphp ≥ 0.3.x, #426/#379): `$_SESSION` now works.** The
+ext snapshots/restores all 7 superglobals (incl. `$_SESSION`) per coroutine on `on_yield`/
+`on_resume` (`zealphp_superglobals_save`/`_restore`/`_set`, IS_REFERENCE-aware), so a
+`$_SESSION` write before a yield survives and the post-yield read sees the request's own
+value. Pinned by ext phpt 046/047 and #379 (closed). The previously-proposed
+`zealphp_rearm_autoglobals()` was never implemented — the snapshot/restore family is the
+mechanism instead. (Historical note: the original limitation was PHP auto-global CV caching
+of the `$_SESSION` zend_array pointer per compiled scope.)
 
 ***proc mode: `Set-Cookie` headers from CGI subprocess not always forwarded (cookie
 round-trip gap in `cgiSubprocess` response builder).
@@ -142,22 +147,28 @@ pipes, which is incompatible with coroutine scheduling regardless of `hookAll`.
 
 A warning is logged via `elog()` so the configuration mismatch is visible.
 
-### Mode 4 Auto-Global Caching (Deep Dive)
+### Mode 4 Auto-Global Caching (Deep Dive) — RESOLVED (#426/#379)
 
-In OpenSwoole coroutine mode, PHP's auto-global mechanism caches the `zend_array*`
-pointer per compiled scope. When `$_GET` is first accessed in an included file, PHP
-resolves it from `EG(symbol_table)` and caches the pointer in the compiled variable
-(CV) table. On subsequent coroutines reusing the same compiled opcodes (via opcache),
-the CV still points to the OLD `zend_array*`.
+> **This section is historical.** `$_SESSION` works in Mode 4 (coroutine-legacy) on the
+> shipped ext-zealphp. The fix was the per-coroutine superglobal snapshot/restore family
+> (`zealphp_superglobals_save`/`_restore`/`_set`), NOT the `zealphp_rearm_autoglobals()`
+> function proposed below (which was never implemented). Pinned by ext phpt 046/047 and
+> the closed #379; verified 0/120 lost across a 40-concurrent × 3-round burst, including
+> the opcache-compiled-included-file path the "CV caching" concern below is about. The
+> account below is kept only as the record of the original investigation.
 
-**What works**: `parse_str($_SERVER['QUERY_STRING'], $_GET)` modifies the existing
-`zend_array` in-place, preserving the pointer. This is why `$_GET` works in Mode 4
-but `$_SESSION` does not — there is no `parse_str` equivalent for `$_SESSION`.
+The original limitation: in OpenSwoole coroutine mode, PHP's auto-global mechanism caches
+the `zend_array*` pointer per compiled scope. When `$_GET` is first accessed in an included
+file, PHP resolves it from `EG(symbol_table)` and caches the pointer in the compiled
+variable (CV) table. On subsequent coroutines reusing the same compiled opcodes (via
+opcache), the CV still pointed to the OLD `zend_array*`.
 
-**What's needed**: ext-zealphp C-level function `zealphp_rearm_autoglobals()` that
-iterates `CG(auto_globals)` and sets `armed = true` on each entry, forcing PHP to
-re-resolve from `EG(symbol_table)` on next access. Called at the start of each
-request in Mode 4.
+**What worked then**: `parse_str($_SERVER['QUERY_STRING'], $_GET)` modifies the existing
+`zend_array` in-place, preserving the pointer — which is why `$_GET` worked early while
+`$_SESSION` lagged.
+
+**What was proposed (NOT shipped)**: a `zealphp_rearm_autoglobals()` that iterates
+`CG(auto_globals)` and re-arms each entry. Superseded by the snapshot/restore family above.
 
 **In-place zend_hash update attempt**: replacing `ZVAL_COPY` with `zend_hash_clean()`
 + entry-by-entry copy (preserving the `zend_array*` pointer) caused alternating
