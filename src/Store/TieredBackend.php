@@ -171,12 +171,15 @@ final class TieredBackend implements StoreBackend
                 $hmac = is_string($msg['hmac'] ?? null) ? $msg['hmac'] : '';
                 $expected = $this->computeHmac($name, $key, $origin);
                 if ($hmac === '' || !hash_equals($expected, $hmac)) {
-                    if (function_exists('elog')) {
-                        elog(
-                            "TieredBackend: dropped invalidation with bad/missing HMAC for {$name}:{$key} (origin={$origin})",
-                            'warn',
-                        );
-                    }
+                    // #421 — `elog` lives in the ZealPHP namespace; the old
+                    // unqualified `function_exists('elog')` guard resolved
+                    // against the GLOBAL namespace (always false), so this
+                    // forge / L1-DoS audit warning never fired. Call it fully
+                    // qualified, matching every other Store backend's advisory.
+                    \ZealPHP\elog(
+                        "TieredBackend: dropped invalidation with bad/missing HMAC for {$name}:{$key} (origin={$origin})",
+                        'warn',
+                    );
                     return;
                 }
             }

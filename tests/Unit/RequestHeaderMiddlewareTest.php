@@ -81,16 +81,18 @@ class RequestHeaderMiddlewareTest extends TestCase
         $this->assertSame('new', $server['HTTP_X_TAG'] ?? null);
     }
 
-    public function testUnknownOpFallsToDefaultSet(): void
+    public function testUnknownOpIsIgnored(): void
     {
-        // An op that isn't unset/append/add/set hits `default` -> set semantics.
-        // Kills the SharedCaseRemoval dropping `default`.
+        // #404 — an op that isn't unset/append/add/set is a no-op (logged), NOT
+        // a silent `set`. Apache rejects an invalid action at startup; we leave
+        // the existing header untouched so a typo'd/`edit` op surfaces instead
+        // of overwriting the value with the literal replacement string.
         $server = $this->process(
             [['op' => 'replace', 'name' => 'X-Tag', 'value' => 'fresh']],
             ['HTTP_X_TAG' => 'stale']
         );
 
-        $this->assertSame('fresh', $server['HTTP_X_TAG'] ?? null);
+        $this->assertSame('stale', $server['HTTP_X_TAG'] ?? null);
     }
 
     public function testAppendJoinsWithExistingValue(): void

@@ -67,7 +67,13 @@ final class ScopedMiddleware implements MiddlewareInterface
         // bypass). REQUEST_URI preserves the raw target. Fall back to the PSR path
         // for pure-PSR contexts (tests) where REQUEST_URI isn't populated on $g.
         $serverParams = $request->getServerParams();
-        $reqUri = $serverParams['REQUEST_URI'] ?? null;
+        // #406 — the live request's server params come from OpenSwoole's native
+        // `$request->server`, whose keys are LOWER-case (`request_uri`). Reading
+        // only the upper-case `REQUEST_URI` made the #232 raw-target guard inert
+        // on every real request (it always fell back to the authority-dropping
+        // PSR path, so `//admin/secret` bypassed a `/admin` scope). Accept both
+        // casings.
+        $reqUri = $serverParams['REQUEST_URI'] ?? $serverParams['request_uri'] ?? null;
         $target = (is_string($reqUri) && $reqUri !== '')
             ? $reqUri
             : $request->getUri()->getPath();
