@@ -220,9 +220,21 @@ final class GuruWaveJun13FixesTest extends TestCase
         $this->assertTrue($m->invoke($resp, 'http://h.test/x'));
         $this->assertFalse($m->invoke($resp, 'https://h.test/x'));
 
+        // Uppercase HTTPS=OFF must ALSO not count as https — kills the
+        // strtolower-unwrap mutant on the HTTPS flag (without it, 'OFF' !== 'off'
+        // would wrongly read as https).
+        $g->server = ['HTTP_HOST' => 'h.test', 'HTTPS' => 'OFF'];
+        $this->assertFalse($m->invoke($resp, 'https://h.test/x'), 'uppercase OFF → not https');
+        $this->assertTrue($m->invoke($resp, 'http://h.test/x'));
+
         // X-Forwarded-Proto: https → request is https.
         $g->server = ['HTTP_HOST' => 'h.test', 'HTTP_X_FORWARDED_PROTO' => 'https'];
         $this->assertTrue($m->invoke($resp, 'https://h.test/x'));
+
+        // Uppercase X-Forwarded-Proto must still detect https (kills the
+        // strtolower-unwrap mutant on the XFP comparison).
+        $g->server = ['HTTP_HOST' => 'h.test', 'HTTP_X_FORWARDED_PROTO' => 'HTTPS'];
+        $this->assertTrue($m->invoke($resp, 'https://h.test/x'), 'uppercase XFP → https');
 
         // SERVER_PORT 443 → request is https even with no flag.
         $g->server = ['HTTP_HOST' => 'h.test', 'SERVER_PORT' => '443'];
