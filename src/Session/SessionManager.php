@@ -358,21 +358,12 @@ class SessionManager
             $g->zealphp_request = $request;
             $g->zealphp_response = $response;
             // #28: per-request function-static REFRESH at request BEGIN — the
-            // concurrency companion to the request-END zealphp_reset_request_statics().
-            // The end-reset gives fresh-per-request statics SEQUENTIALLY, but under
-            // coroutine concurrency a peer can read a process-global static (e.g.
-            // WordPress wp_start_object_cache()'s `static $first_init`) that another
-            // in-flight request set false, BEFORE that request's end-reset runs — so
-            // it skips wp_cache_init() and $wp_object_cache stays null
-            // ("switch_to_blog() on null"). Refreshing registered statics to their
-            // template at the start of THIS request makes its first read see the
-            // template; S5a's per-yield save then captures it per-coroutine. Same gate
-            // as the end-resets; no-op without the ext function.
-            if (\ZealPHP\App::perRequestStateResetsActive()
-                && \function_exists('zealphp_reset_request_statics_begin')
-            ) {
-                (\zealphp_reset_request_statics_begin(...))();
-            }
+            // concurrency companion to the request-END zealphp_reset_request_statics()
+            // (closes WordPress's wp_start_object_cache() `static $first_init`
+            // cross-coroutine leak → $wp_object_cache null). See
+            // App::runRequestStaticsBeginRefresh() for the full rationale; gated and
+            // no-op'd there.
+            \ZealPHP\App::runRequestStaticsBeginRefresh();
             call_user_func($this->middleware, $request, $response);
         } finally {
             \ZealPHP\App::fatalGuardRelease($zpFatalGuardId); // #338
