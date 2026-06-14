@@ -4093,6 +4093,41 @@ class App
     }
 
     /**
+     * Request-BEGIN function-static refresh (coroutine-legacy, #28).
+     *
+     * The concurrency companion to the request-END `zealphp_reset_request_statics()`.
+     * The end-reset makes function-local `static $x` fresh-per-request SEQUENTIALLY,
+     * but under coroutine concurrency a peer can read a process-global static that
+     * another in-flight request mutated BEFORE that request's end-reset runs. The
+     * canonical break is WordPress's `wp_start_object_cache()`: its `static $first_init`
+     * is set false on the first run, so a concurrent peer reading that false skips
+     * `wp_cache_init()` and leaves its own `$wp_object_cache` null → "Call to a member
+     * function switch_to_blog() on null". Refreshing every registered static to its
+     * template at request begin makes THIS request coroutine's first read see the
+     * template; the per-yield static snapshot (S5a) then multiplexes per coroutine.
+     *
+     * Gated identically to the end-resets (`perRequestStateResetsActive()`), and a
+     * no-op when the ext primitive is absent (older ext, or `legacy-cgi`/sync modes).
+     * Returns whether the refresh ran, so the call sites — `CoSessionManager` /
+     * `SessionManager` just before dispatch — stay one-liners and the behaviour is
+     * unit-testable without a live request. The ext primitive's refreshed-count
+     * return value is discarded (mirrors the sibling `zealphp_reset_request_*`
+     * calls), so no return-type plumbing crosses the ext boundary.
+     *
+     * @return bool True when the refresh ran (resets active + ext primitive present).
+     */
+    public static function runRequestStaticsBeginRefresh(): bool
+    {
+        if (!self::perRequestStateResetsActive()
+            || !\function_exists('zealphp_reset_request_statics_begin')
+        ) {
+            return false;
+        }
+        (\zealphp_reset_request_statics_begin(...))();
+        return true;
+    }
+
+    /**
      * Stage 8 global-scope request include (coroutine-legacy). A no-arg call
      * returns the current setting; a one-arg call sets it. See the
      * `$global_scope_include` docblock for the contract. Set BEFORE `App::run()`.
