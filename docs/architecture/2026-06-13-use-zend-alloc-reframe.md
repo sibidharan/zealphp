@@ -117,15 +117,46 @@ The recipe: the patched-opcache Docker image (`ZEALPHP_PATCH_OPCACHE=1`) + a php
 compiles at worker-start (single-coroutine), so classes link before request concurrency hits —
 also dodging the cold-concurrent-autoload unlinked-class race.
 
-### Remaining: the `$wpdb`-null *functional* concurrency race (not memory-safety)
+### The `$wpdb`-null *functional* concurrency race — FIXED (Phase R, ext 0.3.56)
 
-With the crashes gone, a pre-existing functional race is exposed: under concurrency a fraction of
-requests get a clean 500 `Call to a member function prepare() on null` — `$wpdb` reads NULL.
-Appears at concurrency ≥2, climbs to ~43% at c16; **0 crashes** (worker survives). It is the
-**#18/ext#52 family**: WP's `global $wpdb; $wpdb = new wpdb()` — whose ctor yields on connect — is
-an IS_REFERENCE global-bound write across a yield on the **shared `EG(symbol_table)`** (Stage 8),
-and a peer coroutine running during that yield drops it. Resetting EG user-globals to baseline at
-request start (a `zealphp_coroutine_globals_request_begin()` primitive) was tried and **did NOT
-fix it** (each request *does* create its own `$wpdb`, but still loses it) — confirming the race is
-the REF-bound-write-across-connect-yield leg, not WP's `isset($wpdb)` guard. This is the deep S2
-frontier (historically multi-iteration); the memory-safety win above is independent of it.
+With the crashes gone, a pre-existing functional race was exposed: under concurrency a fraction of
+requests got a clean 500 `Call to a member function prepare() on null` — `$wpdb` reads NULL
+(~43% at c16; **0 crashes**, worker survives).
+
+**Decisive root cause (not what was first assumed).** At the 500, `$GLOBALS['wpdb']` is a live
+**OBJ** in 149/149 captures while the *function local* `$wpdb` reads NULL. So the global is fine —
+the failure is a **stale local REF-binding**: a deep WP function (`get_posts` /
+`_prime_post_caches` / `get_terms` / …) did `global $wpdb`, binding its CV to one
+`zend_reference`, but the engine's attach/detach symbol-table protocol (the re-attach in
+`zend_leave_helper`, which assumes a single flow of control) on the **shared `EG(symbol_table)`**
+(Stage 8) later handed the `wpdb` bucket a *different* canonical reference. The deep frame keeps
+an **orphaned reference reading NULL** while `$GLOBALS['wpdb']` reads the live object. 100%
+Stage-8-attributed (controlled A/B: Stage 8 ON → 1533 ref divergences + 160 `prepare()`-on-null
+at c8; Stage 8 OFF → **0** of both). It hits OBJECT globals (`$wpdb`) and ARRAY globals
+(`$wp_filter` → `array_pop(): … null given`) identically.
+
+**Fix — `snapshot_restore` "Phase R".** A type-agnostic end-of-restore single `O(frames × vars)`
+sweep: for every live-frame CV carrying the stale signature (IS_REFERENCE whose deref is
+NULL/UNDEF), look up the key in `EG(symbol_table)`; if the bucket holds a live OBJECT/ARRAY
+canonical via a *different* `zend_reference`, converge the CV onto it (`ZVAL_REF` + `GC_ADDREF`,
+releasing the old ref). Tightly guarded so a genuine non-global by-ref local is never repointed.
+Validated WP c8×200 (Stage-8 ON + opcache): `prepare()`-on-null **160 → 0**, `array_pop`-on-null
+**→ 0**, 0 segv, 0 crash; ext phpt **67/67** (incl. the 062 ext#52 concurrency pin + new
+063 deep-binding-survives-yield pin). Refcount-balanced; no ASAN / isolation regression.
+
+### Remaining: `$wp_object_cache` lost-object-global (a *different* root cause — tracked)
+
+A separate, narrower residual remains under **opcache** concurrency: `switch_to_blog()` on null
+(~30% at c8, opcache-specific). Here the BUCKET itself is NULL (`$GLOBALS['wp_object_cache']`
+absent), not a stale ref. Root cause: WP's `wp_start_object_cache()` has
+`static $first_init = true;` and on `!$first_init` calls `wp_cache_switch_to_blog()` instead of
+`wp_cache_init()` — so `$wp_object_cache` is never created for that request. That function-local
+static **leaks across concurrent coroutines** because **S5a (per-coroutine function-static
+isolation) is bypassed under opcache** — opcache-cached op_arrays route `ZEND_BIND_STATIC` through
+the baked-in handler, not S5a's user-opcode hook, so the touched-set registry never sees the
+function. Matrix (c8×200, opcache on): S5a-on ≈ S5a-off (≈61/200 — S5a not helping), reset-off =
+200/200 (the request-END `zealphp_reset_request_statics` is the only thing working, but can't stop
+a concurrent in-flight read). Forcing `$first_init = true` each call → 200/200 (confirms). The
+complete fix needs **per-coroutine function-static storage (fresh-per-request)**, beyond the
+current per-yield-save/restore + request-end-reset model. The memory-safety win above is
+independent of both.
