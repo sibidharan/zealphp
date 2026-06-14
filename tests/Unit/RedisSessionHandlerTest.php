@@ -206,4 +206,28 @@ class RedisSessionHandlerTest extends TestCase
         $this->assertSame(0, $h->gc(0));
         $h->close();
     }
+
+    public function testPerCoroutineConnectionIsClosedWhenCoroutineEnds(): void
+    {
+        // #438 — the per-coroutine socket must be closed deterministically via
+        // Coroutine::defer() when the coroutine ends, NOT left for context GC.
+        // Relying on GC leaked one FD per request under HOOK_ALL (CLOSE-WAIT
+        // sockets) until Redis/Valkey's maxclients was exhausted. Drive one
+        // coroutine that opens a per-coroutine connection, capture it, and assert
+        // it is disconnected once the coroutine has ended.
+        $h = $this->skipIfNoRedis();
+        $captured = null;
+        \OpenSwoole\Coroutine::run(function () use ($h, &$captured): void {
+            // io() resolves and stores the per-coroutine \Redis socket; the
+            // deferred close is registered alongside it.
+            $captured = $h->getRedis();
+            $this->assertTrue($captured->isConnected(), 'connection should be live inside the coroutine');
+        });
+        // After the coroutine ends, the deferred close has run.
+        $this->assertInstanceOf(\Redis::class, $captured);
+        $this->assertFalse(
+            $captured->isConnected(),
+            '#438: per-coroutine \Redis socket must be closed when the coroutine ends, not leaked to context GC'
+        );
+    }
 }

@@ -18,11 +18,13 @@ namespace ZealPHP\Session\Handler;
  * session collapsing to a handful of keys).
  *
  * This handler keeps **one connection per coroutine**, stored in the coroutine's
- * context and reaped when the coroutine ends, so concurrent requests never share
- * a socket. Outside a coroutine (CLI, tests) it uses a single fallback
- * connection created at construction. High-throughput deployments that want to
- * avoid per-request connection churn should front this with a connection pool;
- * the per-coroutine model here is correct-by-default.
+ * context, so concurrent requests never share a socket. The socket is closed
+ * deterministically via `Coroutine::defer()` when the coroutine ends (issue #438
+ * — relying on context GC leaked one FD per request under HOOK_ALL until
+ * `maxclients` was exhausted; see `conn()`). Outside a coroutine (CLI, tests) it
+ * uses a single lazily-created fallback connection. High-throughput deployments
+ * that want to avoid per-request connection churn should front this with a
+ * connection pool; the per-coroutine model here is correct-by-default.
  *
  * Every method requires a live Redis connection, so it is verified against a
  * real server rather than unit tests — excluded from coverage measurement
@@ -84,8 +86,18 @@ class RedisSessionHandler implements \SessionHandlerInterface
      *
      * In a coroutine: a per-coroutine socket stored in the coroutine context
      * (issue #16 — concurrent coroutines must never share a socket and interleave
-     * RESP frames; the connection is reaped when the coroutine ends). Outside a
-     * coroutine: the shared `$fallback`. The connection is established lazily here.
+     * RESP frames). Outside a coroutine: the shared `$fallback`. The connection
+     * is established lazily here.
+     *
+     * The per-coroutine socket is closed **deterministically** via
+     * `Coroutine::defer()` (issue #438), NOT by context GC. Under HOOK_ALL the
+     * socket is hooked I/O; once the coroutine has already exited there is no live
+     * coroutine left to drive its hooked `close`, so relying on context teardown
+     * leaked one FD per request (visible as `CLOSE-WAIT` sockets) until the worker
+     * eventually exhausted Redis/Valkey's `maxclients`. The `defer` closure runs
+     * while the coroutine is still alive (just before context teardown), so the
+     * hooked `close()` can yield and the FD is released. Registered exactly once,
+     * on first creation, so a single deferred close fires per coroutine.
      *
      * Callers reach this only through `io()`, which guarantees a coroutine is live
      * before `connect()`'s hooked `\Redis->connect()` runs.
@@ -103,6 +115,14 @@ class RedisSessionHandler implements \SessionHandlerInterface
         }
         $fresh = $this->connect();
         $context['__zeal_redis_session'] = $fresh;
+        // Close the hooked socket while THIS coroutine is still alive (#438).
+        \OpenSwoole\Coroutine::defer(static function () use ($fresh): void {
+            try {
+                $fresh->close();
+            } catch (\Throwable) {
+                // Socket already gone / never fully opened — nothing to release.
+            }
+        });
         return $fresh;
     }
 
@@ -169,8 +189,15 @@ class RedisSessionHandler implements \SessionHandlerInterface
     }
 
     /**
-     * No-op: per-coroutine connections are reaped by the coroutine context,
-     * not by the session manager lifecycle.
+     * No-op: the per-coroutine connection is closed by the `Coroutine::defer()`
+     * registered in `conn()` (#438), not by the session-manager lifecycle.
+     *
+     * `close()` deliberately does NOT close the socket: PHP can call the
+     * save-handler `close` more than once per coroutine (every
+     * `session_write_close()`), and the socket is shared across all session
+     * operations in the request — closing it here would break a later
+     * `read()`/`write()` on the same coroutine. The deferred close fires exactly
+     * once, when the coroutine ends.
      */
     public function close(): bool
     {
