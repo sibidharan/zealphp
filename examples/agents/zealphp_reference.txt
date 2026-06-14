@@ -2881,8 +2881,12 @@ distinct issues were root-caused (see
 - **`Undefined constant AUTOLOAD_FILE` / `ROOT_PATH`** — only appears if you
   enable `defineIsolation(true)` (the S10 constants stage) *without*
   `includeIsolation(true)` (S7 Include-once). Clearing request-scoped constants
-  is only sound when the `require_once`'d files that define them re-execute. `App::mode(App::MODE_COROUTINE_LEGACY)` enables both together,
-  so don't hand-roll that half-combo (the framework now warns at boot if you do).
+  is only sound when the `require_once`'d files that define them re-execute.
+  `App::mode(App::MODE_COROUTINE_LEGACY)` enables `includeIsolation` but **NOT**
+  `defineIsolation` (S10 is a standalone opt-in — request-scoped constants are
+  *not* isolated per coroutine by default; that's the ext#16 structural limit).
+  So if you opt into `defineIsolation(true)`, do it on top of coroutine-legacy
+  (which already provides `includeIsolation`) — never `defineIsolation` alone.
 - **Bootstrap hang (000)** — phpMyAdmin's deeply-recursive Symfony DI container
   build hits a coroutine yield/resume scheduling race under HOOK_ALL (a
   Heisenbug: extra I/O makes it pass). Open; `cgiMode('pool')` is the supported
@@ -2943,6 +2947,8 @@ How 50 popular PHP apps run on ZealPHP across **all four runtime modes**, with *
 **2026-06-12 re-validation level:** every graded app below was re-run on 0.3.49 with the standard **84-request 6-way burst** (`burst6.php <port> 6 14`) plus a homepage check. Apps where the burst lifted to 0 worker deaths AND that previously failed *solely* on worker-crash were taken one level deeper (content sanity + scripted login/write where the harness allowed); the per-app detail notes the exact level reached ("full protocol" vs "burst+content" vs "burst-only"). The **ext#52 fix eliminated worker deaths** across most of the C/D set (kanboard, kirby, dokuwiki, phpmyadmin, yii2, laminas, elfinder, codeigniter4, tinyfilemanager, symfony, drupal all 0 deaths now), but **content-level checks revealed several apps whose 0-death bursts serve hollow/broken bodies** — those stay D/C honestly (CodeIgniter4 0-byte bodies, DokuWiki content "str() on null", TinyFileManager login still lost). An **object-global-null regression cluster** surfaced on 0.3.49 (WordPress `wp_set_wpdb_vars` null, MyBB `read() on null` — 500 on every request) — root-caused the same day and **FIXED in ext-zealphp v0.3.50**: the S2 request-frame walkers trusted `ex->symbol_table` without gating on `ZEND_CALL_HAS_SYMBOL_TABLE`, so a plain function frame’s stale field could match and the parked `$wpdb` bucket was re-pointed into `require_wp_db()`’s dying frame (NOT the ext#44/#49 frontier as first suspected). On v0.3.50 both render again — see the per-app rows.
 
 **Status: 31/50 re-validated in `coroutine-legacy`** (B: 7 · C: 15 · D: 9); 19 pending. **2026-06-12 late corrections (ext v0.3.51 + framework OB fix):** CodeIgniter 4 D→**B** (0-byte bodies were a framework flush bug, fixed), DokuWiki D→**C** (content restored by the ext#50 class_alias fix), TinyFileManager D→**C** (login proven working — the sweep probe missed the CSRF token and didn't follow redirects). **Net grade changes 2026-06-12:** Kanboard D→B, Yii 2 C→B (both driven by ext#52 + session #379); 5 previously-_pending_ rows newly graded (TYPO3 C, Craft CMS C, Roundcube C, Concrete CMS D, Flarum D). The two 0.3.49 regressions (WordPress, MyBB — object-global null) are **resolved on v0.3.50**. Leantime now **F** (boot-fail: its prebuilt vendor directory without composer.json blocks the psr/http-message v1 fix, leading to cascading PHP 8.4 fatal errors).
+
+> **Note on `USE_ZEND_ALLOC=0` in the per-app burst notes below.** It is a **diagnostic toggle, not a recommended production setting.** Root-caused 2026-06-13 (`docs/architecture/2026-06-13-use-zend-alloc-reframe.md`): for the WordPress-class apps it does not fix an allocator bug — it disables Zend MM, which disables `memory_limit` enforcement, so a worker carrying a per-request memory accumulation never hits the OOM fatal that triggers the coroutine-legacy worker-exit teardown corruption. The production-correct knob for an accumulating legacy app under a long-lived worker is **`max_request` worker recycle** (`run(['max_request' => 50])`, FPM `pm.max_requests` parity), or `cgi-pool`/`legacy-cgi`. The burst notes that mention it are kept as accurate observations of what was seen, not as guidance.
 
 ---
 
@@ -4807,7 +4813,7 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.4.9 .
+docker build -t zealphp:0.4.10 .
 ```
 
 The shipped `Dockerfile` is PHP 8.4-cli on `bookworm` with OpenSwoole and
@@ -4819,7 +4825,7 @@ versions with the build args:
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
     --build-arg ZEALPHP_EXT_VERSION=v0.3.33 \
-    -t zealphp:0.4.9 .
+    -t zealphp:0.4.10 .
 ```
 
 ### Run (single container)
@@ -4831,7 +4837,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.4.9
+    zealphp:0.4.10
 ```
 
 ### Production compose
@@ -4842,7 +4848,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.4.9
+    image: registry.example.com/zealphp-app:0.4.10
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
