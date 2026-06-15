@@ -197,7 +197,7 @@ Inside the closure, the universal contract applies — `return 404;` for auth, `
 
 ## Universal return contract
 
-One contract, every entry point. Route handler, fallback, error handler, `App::render() / renderToString() / renderStream() / include()`, public file, API closure, streaming-template Closure — every one rides the same return-shape mapping. The shared private core that implements this is `App::executeFile()`.
+One contract, every entry point. Route handler, fallback, error handler, `App::render() / renderToString() / renderStream() / include()`, public file, API closure, streaming-template Closure — every one rides the same return-shape mapping. The shared private core that implements this is `App::executeFile()`. (One caveat: *combining* `echo` with an explicit non-null `return` — the † rows below — concatenates only on the `executeFile`-backed entry points, **not** a top-level route handler, which `ResponseMiddleware` invokes directly.)
 
 | The handler / file does | Core sees | `ResponseMiddleware` emits |
 |-------------------------|-----------|----------------------------|
@@ -205,11 +205,13 @@ One contract, every entry point. Route handler, fallback, error handler, `App::r
 | `return 404;` | `404` (int) | 404 status, empty body |
 | `return ['ok' => true];` | `['ok' => true]` (array) | 200 + JSON (`Content-Type: application/json`) |
 | `return "explicit html";` | `"explicit html"` (string) | HTML body |
-| `echo "shell"; return "body";` | `"shellbody"` (concatenated) | HTML body (wire order preserved) |
+| `echo "shell"; return "body";` † | `"shellbody"` (concatenated) | HTML body (wire order preserved) |
 | `return (function() { yield ...; })();` | `\Generator` | SSR stream — each `yield` flushed |
 | `return function($req) { yield ...; };` | `\Closure` (param-injected when invoked) | SSR stream after invocation |
-| `echo "header"; return (function() { yield ...; })();` | `\Generator` wrapping `"header"` + delegated yields | Streamed in source order |
+| `echo "header"; return (function() { yield ...; })();` † | `\Generator` wrapping `"header"` + delegated yields | Streamed in source order |
 | `return new Response($body, 200);` | `ResponseInterface` | PSR-7 response used directly (output buffer ignored) |
+
+**† `echo` + explicit non-null `return` — `executeFile` entry points only.** The `"shellbody"` concatenation and the `echo`-then-`Generator` prepend are implemented inside `App::executeFile()`, so they hold for the `executeFile`-backed entry points: `App::render() / renderToString() / renderStream() / include()`, public files, API closures, and CGI-dispatched files. A **top-level route handler**, by contrast, is invoked directly by `ResponseMiddleware`, which discards the buffered output once the handler returns a non-null value — so a pre-`return` `echo` is **dropped** and only the returned value reaches the wire. In a route handler use **echo-only** *or* **return-only** (a returned non-null value replaces any buffered echo); to concatenate buffered output with an explicit body, route through `App::include()` / `App::render()`.
 
 **Valid HTTP status codes.** When the contract says `int = HTTP status`, the int must be in the range **100–599** (RFC 7230). Codes outside that range are coerced to 500 with a warning logged via `elog()`. `return 1;` is the one special case — PHP's `include` returns `1` when a file has no explicit `return`, so the framework treats it as "no explicit return" inside `App::include() / render() / renderToString() / renderStream()` and surfaces the buffered echo as the response body. If you want HTTP 1 specifically, return `100` instead.
 
