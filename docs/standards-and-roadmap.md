@@ -32,7 +32,7 @@ The inline `style=` / inline `<script>` debt was fully cleared in the Dec-2024 s
 
 ## PSR Interoperability
 
-ZealPHP implements PSR-3, PSR-4, PSR-7, PSR-11, PSR-15, PSR-16, PSR-17, and PSR-18 — see [STANDARDS.md](../STANDARDS.md) for the complete interoperability table (proving tests, conformance level, implementing class per PSR).
+ZealPHP implements PSR-3, PSR-4, PSR-7, PSR-15, PSR-16, PSR-17, and PSR-18 — see [STANDARDS.md](../STANDARDS.md#psr-interoperability-php-fig) for the complete interoperability table (implementing class, conformance level, proving test per PSR).
 
 ## Documentation Expectations
 
