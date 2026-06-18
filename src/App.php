@@ -7008,8 +7008,17 @@ class App
             $candidate = "$templateDir/" . $tpl . '.php';
         }
 
-        $resolved = realpath($candidate);
-        if (!$resolved || !file_exists($resolved) || strpos($resolved, self::$cwd) !== 0) {
+        $resolved     = realpath($candidate);
+        $templateRoot = realpath($templateDir);
+        // #442 — confine template resolution to the template dir (the documented
+        // jail: a leading "/" means "absolute from template/"), NOT the project
+        // root. Use the segment-aware pathWithinRoot() containment — the same
+        // check App::include()/includeCheck() applies to public/ — so a
+        // "../"-bearing name can't escape into a sibling dir and a shared-prefix
+        // sibling (template-data/ vs template/) can't bypass via the old
+        // strpos($resolved, self::$cwd) === 0 prefix match.
+        if ($resolved === false || $templateRoot === false
+            || !self::pathWithinRoot($resolved, $templateRoot)) {
             $bt = debug_backtrace();
             $caller = array_shift($bt);
             throw new TemplateUnavailableException(
