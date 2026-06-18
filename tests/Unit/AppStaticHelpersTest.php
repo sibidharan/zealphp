@@ -81,6 +81,32 @@ class AppStaticHelpersTest extends TestCase
         $this->assertStringEndsWith($base['PHP_SELF'], $base['SCRIPT_FILENAME']);
     }
 
+    public function testServerNameFromHostStripsPort(): void
+    {
+        // #459 — SERVER_NAME is the host NAME only (CGI/1.1, RFC 3875 §4.1.14);
+        // the port from the Host header must NOT leak into it (it belongs in
+        // SERVER_PORT). A port-less host is unchanged; IPv6 literals keep their
+        // brackets but lose the port.
+        $m = new \ReflectionMethod(App::class, 'serverNameFromHost');
+        $m->setAccessible(true);
+        // host:port → host
+        $this->assertSame('hms.example', $m->invoke(null, 'hms.example:1234'));
+        $this->assertSame('127.0.0.1', $m->invoke(null, '127.0.0.1:8093'));
+        // no port → unchanged (surrounding whitespace trimmed)
+        $this->assertSame('hms.example', $m->invoke(null, 'hms.example'));
+        $this->assertSame('hms.example', $m->invoke(null, '  hms.example:80  '));
+        // bracketed IPv6 literal keeps its brackets (canonical form), drops the port
+        $this->assertSame('[::1]', $m->invoke(null, '[::1]:8080'));
+        $this->assertSame('[2001:db8::1]', $m->invoke(null, '[2001:db8::1]:443'));
+        $this->assertSame('[::1]', $m->invoke(null, '[::1]'));
+        // a non-numeric ":segment" is not a port → left intact
+        $this->assertSame('example.com:x', $m->invoke(null, 'example.com:x'));
+        // absent / whitespace-only Host → configured site host (not the raw value)
+        $fallback = $m->invoke(null, null);
+        $this->assertNotSame('', $fallback);
+        $this->assertSame($fallback, $m->invoke(null, '   '));
+    }
+
     // ─────────────────────────────────────────────────────────────
     // coerceStatusCode()
     // ─────────────────────────────────────────────────────────────
