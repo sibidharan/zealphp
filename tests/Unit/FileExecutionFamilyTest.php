@@ -182,4 +182,15 @@ class FileExecutionFamilyTest extends TestCase
         // 'W[CB||CA]'. A no-selector nested render must not inherit.
         $this->assertSame('W[CB|CRI|CA]', App::render('parent_frag', ['fragment' => 'want'], self::DIR));
     }
+
+    // ── #458: page-scope isolation (app vars don't clobber framework) ──
+
+    public function testPageReassigningGDoesNotClobberFrameworkContext(): void
+    {
+        // #458 — a page assigning an ordinary $g (an array) must NOT corrupt
+        // executeFile()'s RequestContext local (pre-fix: "Attempt to assign
+        // property _ob_floor on array" → 500). The include runs in an isolated
+        // runUserFile() scope, so the page's $g only shadows a throwaway local.
+        $this->assertSame('clobber-ok', App::render('clobbers_g', [], self::DIR));
+    }
 }
