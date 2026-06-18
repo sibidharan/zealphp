@@ -1798,8 +1798,14 @@ function output_reset_rewrite_vars(): bool
  * Verifies that `$filename` is one of the temp paths registered in this
  * request's `$_FILES` (via `$g->files`). Rejects forged paths from user input.
  */
-function is_uploaded_file(string $filename): bool
+function is_uploaded_file(?string $filename): bool
 {
+    // #455 — native is_uploaded_file() is internal: in coercive mode it coerces
+    // null→'' and returns false (deprecation at most), never throws. A userland
+    // typed param does NOT coerce null, so mirror native: null/'' → false.
+    if ($filename === null || $filename === '') {
+        return false;
+    }
     $g = RequestContext::instance();
     foreach ($g->files as $entry) {
         if (!is_array($entry)) {
@@ -1844,8 +1850,14 @@ function _zealphp_tmp_name_matches(mixed $tmp, string $filename): bool
  * Equivalent to Apache+mod_php behaviour, gated by `is_uploaded_file()` and
  * falling back to `copy()`+`unlink()` across filesystems when `rename()` fails.
  */
-function move_uploaded_file(string $from, string $to): bool
+function move_uploaded_file(?string $from, ?string $to): bool
 {
+    // #455 — mirror native coercive semantics: null/'' args return false (the
+    // ubiquitous optional-upload idiom move_uploaded_file($_FILES[x]['tmp_name'],
+    // $dest) passes null when no file was sent), never a TypeError → 500.
+    if ($from === null || $from === '' || $to === null || $to === '') {
+        return false;
+    }
     if (!is_uploaded_file($from)) {
         return false;
     }

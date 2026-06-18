@@ -120,6 +120,13 @@ class App
      * 503s before the ceiling is hit.
      */
     public const DEFAULT_MAX_COROUTINE = 10000;
+    /**
+     * Default per-worker request-recycle cap (OpenSwoole `max_request`): the
+     * worker exits cleanly and respawns after this many requests, bounding
+     * memory growth from leaks. `0` disables recycling (OpenSwoole native
+     * semantics) — see resolveMaxRequest() / the ZEALPHP_MAX_REQUEST env. (#449)
+     */
+    public const DEFAULT_MAX_REQUEST = 100000;
     /** Bind address for the OpenSwoole server (e.g. `'0.0.0.0'` or `'127.0.0.1'`). Set in `__construct()` from `App::init()`. */
     protected string $host;
     // Widened protected → public so ZealPHP\CLI (extracted from App.php in the
@@ -1375,6 +1382,22 @@ class App
     }
 
     /**
+     * Resolve OpenSwoole's `max_request` from the raw ZEALPHP_MAX_REQUEST env
+     * value. #449 — `getenv()` returns `false` when unset and the string `"0"`
+     * when explicitly set to disable; the old `getenv() ?: 100000` collapsed
+     * both to the default (`"0"` is falsy in `?:`), so `ZEALPHP_MAX_REQUEST=0`
+     * ("set `0` to disable", per docs/deployment.md) silently never reached the
+     * server. Test for presence (`=== false`) instead, so `0` is honoured
+     * (OpenSwoole: never recycle the worker).
+     *
+     * @param string|false $env Raw `getenv('ZEALPHP_MAX_REQUEST')` result.
+     */
+    public static function resolveMaxRequest(string|false $env): int
+    {
+        return $env === false ? self::DEFAULT_MAX_REQUEST : (int) $env;
+    }
+
+    /**
      * Whether a status code MUST be sent without a message body (RFC 7230
      * §3.3.2 / RFC 9110 §6.4.1): every 1xx informational response, plus
      * `204 No Content` and `304 Not Modified`. For these, a server must emit
@@ -2517,6 +2540,38 @@ class App
     }
 
     /**
+     * Derive SERVER_NAME from the request Host header. SERVER_NAME is the
+     * server host NAME only (CGI/1.1, RFC 3875 §4.1.14) — the port belongs in
+     * SERVER_PORT. The Host header carries `host[:port]`, so strip the port.
+     * Bracketed IPv6 literals keep their brackets (`[::1]:8080` → `[::1]`, the
+     * canonical host form), and a trailing `:segment` is only treated as a port
+     * when numeric. A whitespace-only or absent Host falls back to the
+     * configured site host. Bracket-aware, mirroring
+     * HostRouterMiddleware::stripPort / Response::splitHostPort. (#459)
+     */
+    private static function serverNameFromHost(?string $host): string
+    {
+        $host = $host === null ? '' : trim($host);
+        if ($host === '') {
+            return site_host();
+        }
+        // Bracketed IPv6 literal: `[::1]` / `[::1]:8080` → keep up to and
+        // including `]`, dropping any `:port` that follows.
+        if ($host[0] === '[') {
+            $end = strpos($host, ']');
+
+            return $end === false ? $host : substr($host, 0, $end + 1);
+        }
+        // Normal host: strip a trailing `:port` only when the port is numeric.
+        $colon = strrpos($host, ':');
+        if ($colon !== false && ctype_digit(substr($host, $colon + 1))) {
+            return substr($host, 0, $colon);
+        }
+
+        return $host;
+    }
+
+    /**
      * Build the per-request `$_SERVER` array from an OpenSwoole request —
      * mod_php parity. Merges `$request->server` (upper-cased keys), the
      * `HTTP_*` header vars, and the constant CGI keys mod_php always provides
@@ -2595,11 +2650,14 @@ class App
                 $srv['HTTP_' . strtr(strtoupper($key), '-', '_')] = $value;
             }
         }
+        // #459 — SERVER_NAME must be the host only (no port); SERVER_PORT already
+        // carries the real listen port. Strip any port off the Host header.
+        $httpHost = isset($srv['HTTP_HOST']) ? (string)$srv['HTTP_HOST'] : null;
         $srv += [
             'REQUEST_METHOD' => 'GET',
             'REQUEST_URI' => '/',
             'SCRIPT_NAME' => '/app.php',
-            'SERVER_NAME' => $srv['HTTP_HOST'] ?? site_host(),
+            'SERVER_NAME' => self::serverNameFromHost($httpHost),
             'DOCUMENT_ROOT' => self::resolveDocumentRoot(),
             'PHP_SELF' => App::$default_php_self,
             'SERVER_SOFTWARE' => $serverSoftware,
@@ -6736,6 +6794,12 @@ class App
                 'matched' => false,
                 'result'  => null,
             ];
+        } else {
+            // #446 — a nested render with NO selector must not inherit the
+            // parent's active fragment selector; clear it so the child runs its
+            // own App::fragment() regions inline. The parent's state is saved
+            // above and restored on exit, so this only scopes the child.
+            $g->memo['_fragment'] = null;
         }
 
         // Mode 4: $_SESSION reference is established in zeal_session_start()
@@ -6973,8 +7037,17 @@ class App
             $candidate = "$templateDir/" . $tpl . '.php';
         }
 
-        $resolved = realpath($candidate);
-        if (!$resolved || !file_exists($resolved) || strpos($resolved, self::$cwd) !== 0) {
+        $resolved     = realpath($candidate);
+        $templateRoot = realpath($templateDir);
+        // #442 — confine template resolution to the template dir (the documented
+        // jail: a leading "/" means "absolute from template/"), NOT the project
+        // root. Use the segment-aware pathWithinRoot() containment — the same
+        // check App::include()/includeCheck() applies to public/ — so a
+        // "../"-bearing name can't escape into a sibling dir and a shared-prefix
+        // sibling (template-data/ vs template/) can't bypass via the old
+        // strpos($resolved, self::$cwd) === 0 prefix match.
+        if ($resolved === false || $templateRoot === false
+            || !self::pathWithinRoot($resolved, $templateRoot)) {
             $bt = debug_backtrace();
             $caller = array_shift($bt);
             throw new TemplateUnavailableException(
@@ -7174,14 +7247,25 @@ class App
             return self::render($fullPageTemplate ?? $template, $args);
         }
 
-        // Explicit fragment wins.
+        // Explicit fragment wins (either form).
         if ($fragmentName !== null) {
             return self::render($template, $args + ['fragment' => $fragmentName]);
         }
 
-        // Derive the fragment from the request: HX-Target (strip a leading
-        // '#'), else HX-Trigger-Name. If neither is present, render the bare
-        // partial with no fragment key.
+        // #444 — separate-template form: a non-null $fullPageTemplate signals
+        // that $template is a BARE PARTIAL (the htmx swap content itself, with no
+        // App::fragment() region), not a fragment-bearing page. A real htmx swap
+        // carries HX-Target, so deriving a fragment here would ask the partial
+        // for a region it doesn't have → executeFile's post-flight 404. The
+        // partial IS the response — render it directly. Fragment derivation only
+        // applies to the single-template form (a page that holds the regions).
+        if ($fullPageTemplate !== null) {
+            return self::render($template, $args);
+        }
+
+        // Single-template form: derive the fragment from the request — HX-Target
+        // (strip a leading '#'), else HX-Trigger-Name. If neither is present,
+        // render the template with no fragment key (its bare partial output).
         $target = $req->htmxTarget();
         $derived = $target !== null ? ltrim($target, '#') : $req->htmxTriggerName();
         if ($derived !== null && $derived !== '') {
@@ -8841,7 +8925,7 @@ class App
             // extensions). After this many requests a worker exits cleanly and
             // is respawned with a fresh PHP arena. Set 0 to disable. Override
             // via ZEALPHP_MAX_REQUEST env var or $app->run(['max_request' => N]).
-            'max_request' => (int)(getenv('ZEALPHP_MAX_REQUEST') ?: 100000),
+            'max_request' => self::resolveMaxRequest(getenv('ZEALPHP_MAX_REQUEST')),
             'task_worker_num' => 0,
             'task_enable_coroutine' => true,
             // Suppress NOTICE-level messages from OpenSwoole internals (e.g. ERRNO 1005
