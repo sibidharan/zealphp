@@ -1745,12 +1745,23 @@ class App
      * routing calls to the given ZealPHP replacement. Uses `zealphp_override()`
      * when ext-zealphp is loaded (preferred), falling back to `uopz_set_return()`.
      *
+     * #457 — ext-zealphp denylists a small set of builtins it refuses to
+     * trampoline (`session_set_save_handler`); calling `zealphp_override()` on
+     * one emits an E_WARNING every boot and installs nothing. For those, skip
+     * the ext path and use uopz (which CAN override them — restoring the #295
+     * custom-save-handler routing); if uopz is absent the override is simply
+     * skipped, with no warning.
+     *
      * @param callable-string $callable Fully-qualified ZealPHP replacement function name.
      */
     private static function overrideBuiltin(string $name, string $callable): void
     {
         $cb = \Closure::fromCallable($callable);
-        if (\extension_loaded('zealphp') && \function_exists('zealphp_override')) {
+        // ext-zealphp's zealphp_override() denylists session_set_save_handler:
+        // calling it warns + installs nothing (#457). Skip the ext path for it
+        // and use uopz (which CAN override it — keeps the #295 save-handler routing).
+        $extRefuses = ($name === 'session_set_save_handler');
+        if (\extension_loaded('zealphp') && \function_exists('zealphp_override') && !$extRefuses) {
             (\zealphp_override(...))($name, $cb);
         } elseif (\function_exists('uopz_set_return')) {
             \uopz_set_return($name, $cb, true);
@@ -1887,6 +1898,29 @@ class App
             self::$hook_exit = $value;
         }
         return self::$hook_exit;
+    }
+
+    /**
+     * Boot-time advisory for `App::hookExit(true)` set without a coroutine
+     * scheduler (#454). The ext-zealphp exit() interception is scheduler-bound:
+     * with `enableCoroutine` off (mixed / in-process-sync modes) a userland
+     * exit()/die() still throws OpenSwoole\ExitException (extends \Exception) —
+     * which a legacy `try { … exit; } catch (\Exception)` router swallows — NOT
+     * ZealPHP\HaltException. Forcing the hook on there is silently inert, so
+     * surface it at boot rather than let the developer believe exit() is
+     * protected. Returns the advisory string, or null when N/A; the `null`
+     * (auto) default follows the scheduler and never warns. Testable seam.
+     */
+    public static function exitHookAdvisory(?bool $forced, bool $hasScheduler): ?string
+    {
+        if ($forced === true && !$hasScheduler) {
+            return '[advisory] App::hookExit(true) has no effect without the coroutine '
+                . 'scheduler (this mode runs with enableCoroutine=false): exit()/die() will '
+                . 'still throw OpenSwoole\\ExitException (not ZealPHP\\HaltException), which a '
+                . "legacy `catch (\\Exception)` swallows. Use App::mode('coroutine-legacy') "
+                . '(or enableCoroutine(true)) if you need exit()-hook protection.';
+        }
+        return null;
     }
 
     // -----------------------------------------------------------------------
@@ -6756,6 +6790,37 @@ class App
     // -----------------------------------------------------------------------
 
     /**
+     * Run a user file (template / public page) in an ISOLATED scope and return
+     * its value (#458). The file is included HERE, not in executeFile(), so a
+     * page that reuses a common variable name — `$g`, `$result`, `$output`,
+     * `$args`, … — only shadows this helper's throwaway locals and never
+     * corrupts executeFile()'s framework state used after the include (which
+     * previously fatalled "Attempt to assign property _ob_floor on array" → 500
+     * when a page did `$g = …`). Locals are `$__zeal_`-prefixed (and EXTR_SKIP
+     * keeps them safe during extract) to stay clear of app/template names.
+     *
+     * @param array<string,mixed> $__zeal_args   Template/route args, bound by name.
+     * @param object              $__zeal_g       Request RequestContext (bound as $g).
+     * @param bool                $__zeal_global  Run at true global scope (Stage 8).
+     */
+    private static function runUserFile(string $__zeal_abs, array $__zeal_args, object $__zeal_g, bool $__zeal_global): mixed
+    {
+        // $__zeal_global already implies the function exists (the caller ANDs in
+        // function_exists), but re-check so PHPStan narrows it (the ext function
+        // is unstubbed) and as a safe fallback to the plain include.
+        if ($__zeal_global && \function_exists('zealphp_require_global')) {
+            // Stage 8: TRUE global scope — bare file-scope vars (WordPress
+            // $menu/$submenu/$_wp_submenu_nopriv) become real $GLOBALS; the file
+            // does NOT see $g / route params (this mode is for legacy apps that
+            // read request state via superglobals).
+            return \zealphp_require_global($__zeal_abs);
+        }
+        $__zeal_args['g'] = $__zeal_g;
+        extract($__zeal_args, EXTR_SKIP);
+        return include $__zeal_abs;
+    }
+
+    /**
      * Run a PHP file with the framework's universal return contract.
      *
      * Captures buffered output, then maps the included file's result:
@@ -6861,18 +6926,19 @@ class App
         $result = null;
         try {
             try {
-                $args['g'] = $g;
-                extract($args, EXTR_SKIP);
-                if (self::globalScopeIncludeEffective() && \function_exists('zealphp_require_global')) {
-                    // Stage 8: run the file at TRUE global scope so bare file-scope
-                    // vars (WordPress $menu/$submenu/$_wp_submenu_nopriv) become real
-                    // $GLOBALS. The included file does NOT see the extracted $g /
-                    // route params (they stay in this frame) — by contract this mode
-                    // is for legacy apps that read request state via superglobals.
-                    $result = \zealphp_require_global($absPath);
-                } else {
-                    $result = include $absPath;
-                }
+                // #458 — run the user file in an ISOLATED helper scope. A plain
+                // `include` HERE shares executeFile()'s frame, so an ordinary app
+                // variable (`$g = getGrade(...)`, an array — or $result/$output/…)
+                // clobbers framework state the post-include logic depends on →
+                // "Attempt to assign property _ob_floor on array" 500. runUserFile()
+                // binds the args + $g and includes in its OWN frame, so any name the
+                // page reuses only shadows throwaway locals, never executeFile()'s.
+                $result = self::runUserFile(
+                    $absPath,
+                    $args,
+                    $g,
+                    self::globalScopeIncludeEffective() && \function_exists('zealphp_require_global')
+                );
             } finally {
                 if ($didChdir && $prevCwd !== false) {
                     @\chdir($prevCwd);
@@ -8833,6 +8899,12 @@ class App
         ) {
             \class_exists(\ZealPHP\HaltException::class);   // force autoload, pre-fork
             (\zealphp_exit_hook(...))(true);
+        }
+        // #454 — forcing App::hookExit(true) without a coroutine scheduler is
+        // silently inert (the ext interception is scheduler-bound). Surface it.
+        $exitAdvisory = self::exitHookAdvisory(self::$hook_exit, $enableCoroutine);
+        if ($exitAdvisory !== null) {
+            elog($exitAdvisory, 'warn');
         }
 
         if ($hookFlags !== 0) {

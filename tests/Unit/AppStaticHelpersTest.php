@@ -143,6 +143,22 @@ class AppStaticHelpersTest extends TestCase
         $this->assertSame(250, App::resolveMaxRequest('250'));
     }
 
+    public function testExitHookAdvisoryOnlyWhenForcedWithoutScheduler(): void
+    {
+        // #454 — hookExit(true) is silently inert without the coroutine scheduler
+        // (the ext exit() interception is scheduler-bound). The advisory fires
+        // ONLY for forced-true + no-scheduler; it stays silent for the auto
+        // (null) default, explicit-off, and forced-true WITH a scheduler.
+        $this->assertNull(App::exitHookAdvisory(null, false));    // auto default → no warn
+        $this->assertNull(App::exitHookAdvisory(null, true));
+        $this->assertNull(App::exitHookAdvisory(false, false));   // explicitly off → no warn
+        $this->assertNull(App::exitHookAdvisory(true, true));      // forced + scheduler → works
+        $adv = App::exitHookAdvisory(true, false);                 // forced + NO scheduler → advise
+        $this->assertIsString($adv);
+        $this->assertStringContainsString('hookExit(true)', $adv);
+        $this->assertStringContainsString('enableCoroutine=false', $adv);
+    }
+
     // ─────────────────────────────────────────────────────────────
     // reasonPhrase() + REASON_PHRASES
     // ─────────────────────────────────────────────────────────────
