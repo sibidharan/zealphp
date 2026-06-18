@@ -169,4 +169,17 @@ class FileExecutionFamilyTest extends TestCase
         $this->expectException(\ZealPHP\TemplateUnavailableException::class);
         App::render('/../render-sibling/leak', [], self::DIR);
     }
+
+    // ── #446: nested-render fragment-selector isolation ───────────
+
+    public function testNestedRenderDoesNotInheritParentFragmentSelector(): void
+    {
+        // Standalone child: its own 'cr' fragment runs inline.
+        $this->assertSame('CB|CRI|CA', App::render('child_frag', [], self::DIR));
+        // #446 — nested inside the parent's matched 'want' fragment, the child's
+        // 'cr' region must STILL run inline. Pre-fix the child inherited the
+        // parent's 'want' selector ('cr' != 'want') and was silently dropped →
+        // 'W[CB||CA]'. A no-selector nested render must not inherit.
+        $this->assertSame('W[CB|CRI|CA]', App::render('parent_frag', ['fragment' => 'want'], self::DIR));
+    }
 }

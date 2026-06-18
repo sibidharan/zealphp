@@ -6794,6 +6794,12 @@ class App
                 'matched' => false,
                 'result'  => null,
             ];
+        } else {
+            // #446 — a nested render with NO selector must not inherit the
+            // parent's active fragment selector; clear it so the child runs its
+            // own App::fragment() regions inline. The parent's state is saved
+            // above and restored on exit, so this only scopes the child.
+            $g->memo['_fragment'] = null;
         }
 
         // Mode 4: $_SESSION reference is established in zeal_session_start()
@@ -7241,14 +7247,25 @@ class App
             return self::render($fullPageTemplate ?? $template, $args);
         }
 
-        // Explicit fragment wins.
+        // Explicit fragment wins (either form).
         if ($fragmentName !== null) {
             return self::render($template, $args + ['fragment' => $fragmentName]);
         }
 
-        // Derive the fragment from the request: HX-Target (strip a leading
-        // '#'), else HX-Trigger-Name. If neither is present, render the bare
-        // partial with no fragment key.
+        // #444 — separate-template form: a non-null $fullPageTemplate signals
+        // that $template is a BARE PARTIAL (the htmx swap content itself, with no
+        // App::fragment() region), not a fragment-bearing page. A real htmx swap
+        // carries HX-Target, so deriving a fragment here would ask the partial
+        // for a region it doesn't have → executeFile's post-flight 404. The
+        // partial IS the response — render it directly. Fragment derivation only
+        // applies to the single-template form (a page that holds the regions).
+        if ($fullPageTemplate !== null) {
+            return self::render($template, $args);
+        }
+
+        // Single-template form: derive the fragment from the request — HX-Target
+        // (strip a leading '#'), else HX-Trigger-Name. If neither is present,
+        // render the template with no fragment key (its bare partial output).
         $target = $req->htmxTarget();
         $derived = $target !== null ? ltrim($target, '#') : $req->htmxTriggerName();
         if ($derived !== null && $derived !== '') {
