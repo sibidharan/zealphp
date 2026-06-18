@@ -130,6 +130,19 @@ class AppStaticHelpersTest extends TestCase
         $this->assertSame(500, App::coerceStatusCode(600));   // first invalid above range
     }
 
+    public function testResolveMaxRequestHonoursZeroAndPresence(): void
+    {
+        // #449 — getenv() returns false when unset, "0" when set to disable.
+        // The old `getenv() ?: 100000` made "0" (falsy in ?:) collapse to the
+        // default, so ZEALPHP_MAX_REQUEST=0 ("set 0 to disable") never disabled
+        // recycling. Test presence (=== false) so "0" reaches OpenSwoole.
+        $this->assertSame(100000, App::DEFAULT_MAX_REQUEST);                          // pin the default
+        $this->assertSame(App::DEFAULT_MAX_REQUEST, App::resolveMaxRequest(false));   // unset → default
+        $this->assertSame(0, App::resolveMaxRequest('0'));                            // explicit disable honoured
+        $this->assertSame(5, App::resolveMaxRequest('5'));                            // normal value
+        $this->assertSame(250, App::resolveMaxRequest('250'));
+    }
+
     // ─────────────────────────────────────────────────────────────
     // reasonPhrase() + REASON_PHRASES
     // ─────────────────────────────────────────────────────────────

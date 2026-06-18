@@ -120,6 +120,13 @@ class App
      * 503s before the ceiling is hit.
      */
     public const DEFAULT_MAX_COROUTINE = 10000;
+    /**
+     * Default per-worker request-recycle cap (OpenSwoole `max_request`): the
+     * worker exits cleanly and respawns after this many requests, bounding
+     * memory growth from leaks. `0` disables recycling (OpenSwoole native
+     * semantics) — see resolveMaxRequest() / the ZEALPHP_MAX_REQUEST env. (#449)
+     */
+    public const DEFAULT_MAX_REQUEST = 100000;
     /** Bind address for the OpenSwoole server (e.g. `'0.0.0.0'` or `'127.0.0.1'`). Set in `__construct()` from `App::init()`. */
     protected string $host;
     // Widened protected → public so ZealPHP\CLI (extracted from App.php in the
@@ -1372,6 +1379,22 @@ class App
             . "See template/pages/responses.php#status-range.)"
         );
         return 500;
+    }
+
+    /**
+     * Resolve OpenSwoole's `max_request` from the raw ZEALPHP_MAX_REQUEST env
+     * value. #449 — `getenv()` returns `false` when unset and the string `"0"`
+     * when explicitly set to disable; the old `getenv() ?: 100000` collapsed
+     * both to the default (`"0"` is falsy in `?:`), so `ZEALPHP_MAX_REQUEST=0`
+     * ("set `0` to disable", per docs/deployment.md) silently never reached the
+     * server. Test for presence (`=== false`) instead, so `0` is honoured
+     * (OpenSwoole: never recycle the worker).
+     *
+     * @param string|false $env Raw `getenv('ZEALPHP_MAX_REQUEST')` result.
+     */
+    public static function resolveMaxRequest(string|false $env): int
+    {
+        return $env === false ? self::DEFAULT_MAX_REQUEST : (int) $env;
     }
 
     /**
@@ -8885,7 +8908,7 @@ class App
             // extensions). After this many requests a worker exits cleanly and
             // is respawned with a fresh PHP arena. Set 0 to disable. Override
             // via ZEALPHP_MAX_REQUEST env var or $app->run(['max_request' => N]).
-            'max_request' => (int)(getenv('ZEALPHP_MAX_REQUEST') ?: 100000),
+            'max_request' => self::resolveMaxRequest(getenv('ZEALPHP_MAX_REQUEST')),
             'task_worker_num' => 0,
             'task_enable_coroutine' => true,
             // Suppress NOTICE-level messages from OpenSwoole internals (e.g. ERRNO 1005
