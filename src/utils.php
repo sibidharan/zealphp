@@ -1599,25 +1599,45 @@ function apache_request_headers(): array
 {
     $g = RequestContext::instance();
     $out = [];
-    $raw = [];
     if (isset($g->zealphp_request)) {
+        // In-process (coroutine / mixed / in-process include): read the live
+        // OpenSwoole request header map — exact and multi-value aware.
         $raw = $g->zealphp_request->parent->header ?? [];
-    }
-    if (!is_array($raw)) {
+        if (!is_array($raw)) {
+            return $out;
+        }
+        foreach ($raw as $name => $value) {
+            $canonical = str_replace(' ', '-', ucwords(str_replace('-', ' ', strtolower((string)$name))));
+            if (is_array($value)) {
+                $strValues = [];
+                foreach ($value as $v) {
+                    if (is_scalar($v)) {
+                        $strValues[] = (string)$v;
+                    }
+                }
+                $out[$canonical] = implode(', ', $strValues);
+            } else {
+                $out[$canonical] = is_scalar($value) ? (string)$value : '';
+            }
+        }
         return $out;
     }
-    foreach ($raw as $name => $value) {
-        $canonical = str_replace(' ', '-', ucwords(str_replace('-', ' ', strtolower((string)$name))));
-        if (is_array($value)) {
-            $strValues = [];
-            foreach ($value as $v) {
-                if (is_scalar($v)) {
-                    $strValues[] = (string)$v;
-                }
-            }
-            $out[$canonical] = implode(', ', $strValues);
-        } else {
-            $out[$canonical] = is_scalar($value) ? (string)$value : '';
+    // #453 — no live OpenSwoole request object: this is a legacy-cgi CGI
+    // subprocess (pool/proc). Reconstruct the header map from $_SERVER HTTP_*
+    // meta-vars (+ CONTENT_TYPE / CONTENT_LENGTH), RFC 3875 §4.1.18 / Apache
+    // mod_php parity. Pre-fix this returned [] on the pool backend even though
+    // the headers ARE present in $_SERVER, silently breaking getallheaders()-
+    // based auth / CORS / signature code in unmodified apps.
+    foreach ($_SERVER as $name => $value) {
+        if (!is_string($name) || !is_scalar($value)) {
+            continue;
+        }
+        if (strncmp($name, 'HTTP_', 5) === 0) {
+            $canonical = str_replace(' ', '-', ucwords(str_replace('_', ' ', strtolower(substr($name, 5)))));
+            $out[$canonical] = (string)$value;
+        } elseif ($name === 'CONTENT_TYPE' || $name === 'CONTENT_LENGTH') {
+            $canonical = str_replace(' ', '-', ucwords(str_replace('_', ' ', strtolower($name))));
+            $out[$canonical] = (string)$value;
         }
     }
     return $out;

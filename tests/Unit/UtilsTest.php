@@ -385,4 +385,32 @@ class UtilsTest extends TestCase
     {
         $this->assertIsBool(set_time_limit(30));
     }
+
+    public function testApacheRequestHeadersFallsBackToServerWhenNoRequestObject(): void
+    {
+        // #453 — a legacy-cgi CGI subprocess has no live OpenSwoole request
+        // object; getallheaders()/apache_request_headers() must reconstruct the
+        // header map from $_SERVER HTTP_* (+ CONTENT_TYPE) — it returned [] on
+        // the pool backend despite the headers being present in $_SERVER.
+        $g = RequestContext::instance();
+        $hadReq = isset($g->zealphp_request);
+        $savedReq = $hadReq ? $g->zealphp_request : null;
+        $savedServer = $_SERVER;
+        try {
+            unset($g->zealphp_request);                 // simulate the subprocess
+            $_SERVER['HTTP_X_PROBE'] = 'hello123';
+            $_SERVER['HTTP_HOST']    = 'example.test';
+            $_SERVER['CONTENT_TYPE'] = 'application/json';
+            $headers = \ZealPHP\apache_request_headers();
+            $this->assertSame('hello123', $headers['X-Probe'] ?? null);
+            $this->assertSame('example.test', $headers['Host'] ?? null);
+            $this->assertSame('application/json', $headers['Content-Type'] ?? null);
+            $this->assertSame($headers, \ZealPHP\getallheaders(), 'getallheaders() must agree');
+        } finally {
+            $_SERVER = $savedServer;
+            if ($hadReq) {
+                $g->zealphp_request = $savedReq;
+            }
+        }
+    }
 }
