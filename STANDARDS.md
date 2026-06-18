@@ -16,6 +16,31 @@ a perf-regression smoke (`scripts/perf_smoke.sh`) guard against silent erosion.
 
 ---
 
+## PSR Interoperability (PHP-FIG)
+
+The PHP-FIG standards ZealPHP implements, one row per PSR: the implementing class
+(or composer config), the conformance level, and the test that proves it. Each
+listed PSR has a class in `src/` implementing the corresponding interface and is
+pinned by a CI test. The upstream interface packages `psr/log`, `psr/http-message`,
+`psr/simple-cache`, `psr/http-factory`, and `psr/http-client` are direct
+`composer.json` dependencies.
+
+| Standard | Implementing class / config | Level | Proving test |
+|---|---|---|---|
+| **PSR-3** Logger | `ZealPHP\Log\Logger` (extends `Psr\Log\AbstractLogger`) | Behavioral | `tests/Unit/LoggerTest.php` |
+| **PSR-4** Autoloading | composer `autoload.psr-4` `ZealPHP\` → `src/` | Behavioral | composer autoload (CI `composer install`) |
+| **PSR-7** HTTP Message | `ZealPHP\HTTP\LazyServerRequest implements ServerRequestInterface` | Behavioral | `tests/Unit/HTTP/LazyServerRequestTest.php` |
+| **PSR-15** Server Request Handlers | `ZealPHP\Middleware\Pipeline\MiddlewareFrame` + `src/Middleware/*` (`implements Psr\Http\Server\MiddlewareInterface`) | Behavioral | `tests/Unit/Middleware/Pipeline/MiddlewareFrameTest.php` |
+| **PSR-16** Simple Cache | `ZealPHP\Cache\SimpleCacheAdapter implements CacheInterface` | Behavioral | `tests/Unit/SimpleCacheAdapterTest.php` |
+| **PSR-17** HTTP Factories | `ZealPHP\HTTP\Factory\*` (Request / Response / ServerRequest / Stream / UploadedFile / Uri) | Behavioral | `tests/Unit/HttpFactoryTest.php` |
+| **PSR-18** HTTP Client | `ZealPHP\HTTP\Client implements ClientInterface` | Behavioral | `tests/Unit/HttpClientTest.php` |
+
+> **PSR-11** (Container) is **not** implemented — ZealPHP ships no
+> `Psr\Container\ContainerInterface` and does not depend on `psr/container`.
+> It is intentionally excluded from the list above.
+
+---
+
 ## HTTP core (RFC 9110 / 9111 / 9112, IANA registries)
 
 | Standard / clause | ZealPHP | Level | Proving test |

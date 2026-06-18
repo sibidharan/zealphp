@@ -205,4 +205,22 @@ PHP);
         $result = App::renderHtmx('status-page', [], 'gone');
         $this->assertSame(410, $result);
     }
+
+    // ──────────────────────────────────────────────────────────────
+    // #444 — separate-template form: bare partial + fullPageTemplate.
+    // ──────────────────────────────────────────────────────────────
+
+    public function testHtmxSeparateTemplateFormRendersBarePartialNotDerivedFragment(): void
+    {
+        // #444 — $template is a BARE PARTIAL (no fragment region) paired with a
+        // fullPageTemplate. A real htmx swap carries HX-Target/HX-Trigger-Name,
+        // but the partial IS the response; deriving a fragment from those headers
+        // asks the partial for a region it lacks → executeFile post-flight 404.
+        // The partial must be rendered directly (return its body, not 404).
+        $this->request(['hx-request' => 'true', 'hx-target' => '#results']);
+        $this->assertSame('[BARE-PARTIAL]', App::renderHtmx('partial', [], null, 'full'));
+
+        $this->request(['hx-request' => 'true', 'hx-trigger-name' => 'results']);
+        $this->assertSame('[BARE-PARTIAL]', App::renderHtmx('partial', [], null, 'full'));
+    }
 }
