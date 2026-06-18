@@ -2517,6 +2517,38 @@ class App
     }
 
     /**
+     * Derive SERVER_NAME from the request Host header. SERVER_NAME is the
+     * server host NAME only (CGI/1.1, RFC 3875 §4.1.14) — the port belongs in
+     * SERVER_PORT. The Host header carries `host[:port]`, so strip the port.
+     * Bracketed IPv6 literals keep their brackets (`[::1]:8080` → `[::1]`, the
+     * canonical host form), and a trailing `:segment` is only treated as a port
+     * when numeric. A whitespace-only or absent Host falls back to the
+     * configured site host. Bracket-aware, mirroring
+     * HostRouterMiddleware::stripPort / Response::splitHostPort. (#459)
+     */
+    private static function serverNameFromHost(?string $host): string
+    {
+        $host = $host === null ? '' : trim($host);
+        if ($host === '') {
+            return site_host();
+        }
+        // Bracketed IPv6 literal: `[::1]` / `[::1]:8080` → keep up to and
+        // including `]`, dropping any `:port` that follows.
+        if ($host[0] === '[') {
+            $end = strpos($host, ']');
+
+            return $end === false ? $host : substr($host, 0, $end + 1);
+        }
+        // Normal host: strip a trailing `:port` only when the port is numeric.
+        $colon = strrpos($host, ':');
+        if ($colon !== false && ctype_digit(substr($host, $colon + 1))) {
+            return substr($host, 0, $colon);
+        }
+
+        return $host;
+    }
+
+    /**
      * Build the per-request `$_SERVER` array from an OpenSwoole request —
      * mod_php parity. Merges `$request->server` (upper-cased keys), the
      * `HTTP_*` header vars, and the constant CGI keys mod_php always provides
@@ -2595,11 +2627,14 @@ class App
                 $srv['HTTP_' . strtr(strtoupper($key), '-', '_')] = $value;
             }
         }
+        // #459 — SERVER_NAME must be the host only (no port); SERVER_PORT already
+        // carries the real listen port. Strip any port off the Host header.
+        $httpHost = isset($srv['HTTP_HOST']) ? (string)$srv['HTTP_HOST'] : null;
         $srv += [
             'REQUEST_METHOD' => 'GET',
             'REQUEST_URI' => '/',
             'SCRIPT_NAME' => '/app.php',
-            'SERVER_NAME' => $srv['HTTP_HOST'] ?? site_host(),
+            'SERVER_NAME' => self::serverNameFromHost($httpHost),
             'DOCUMENT_ROOT' => self::resolveDocumentRoot(),
             'PHP_SELF' => App::$default_php_self,
             'SERVER_SOFTWARE' => $serverSoftware,
