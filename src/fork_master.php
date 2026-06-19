@@ -412,6 +412,24 @@ while ($__fm_running) {
             try {
                 /** @psalm-suppress UnresolvableInclude */
                 $__fm_result = include $__fm_file;   // ← TRUE GLOBAL SCOPE
+                // #443 — a returned Closure/Generator is the documented SSR-stream
+                // idiom; pool/proc (cgi_worker.php) invoke + iterate it into the
+                // response body. The fork child must too, else the streamed output
+                // is silently lost (empty 200, Content-Length: 0 — the Generator is
+                // never iterated). Resolve it while the output buffer is still
+                // active so the chunks (and any echo inside the generator) are
+                // captured into $__fm_body below, in wire order.
+                if ($__fm_result instanceof \Closure) {
+                    // Param injection across the fork pipe is unsupported (the
+                    // documented CGI limitation) — invoke with no args, as cgi_worker.
+                    $__fm_result = $__fm_result();
+                }
+                if ($__fm_result instanceof \Generator) {
+                    foreach ($__fm_result as $__fm_chunk) {
+                        echo \is_scalar($__fm_chunk) ? (string) $__fm_chunk : '';
+                    }
+                    $__fm_result = null;   // streamed output captured into the body
+                }
             } catch (\Throwable $e) {
                 $__fm_resp = ['status' => 500, 'body' => 'fork_master: ' . $e->getMessage(), 'headers' => [], 'cookies' => [], 'rawcookies' => []];
                 while (ob_get_level() > 0) { ob_end_clean(); }
