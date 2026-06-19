@@ -1401,7 +1401,9 @@ Inside the closure, the universal contract applies — `return 404;` for auth, `
 
 ## Templates and Rendering — Universal return contract
 
-One contract, every entry point. Route handler, fallback, error handler, `App::render() / renderToString() / renderStream() / include()`, public file, API closure, streaming-template Closure — every one rides the same return-shape mapping. The shared private core that implements this is `App::executeFile()`.
+One contract, every entry point. Route handler, fallback, error handler, `App::render() / renderToString() / renderStream() / include()`, public file, API closure, streaming-template closure — every one rides the same return-shape mapping, implemented by the shared private core `App::executeFile()`.
+
+**One exception:** *combining* `echo` with an explicit non-null `return` concatenates only on the `executeFile`-backed entry points, **not** a top-level route handler, which `ResponseMiddleware` invokes directly. The two affected rows are marked `[1]`; see the note below the table.
 
 | The handler / file does | Core sees | `ResponseMiddleware` emits |
 |-------------------------|-----------|----------------------------|
@@ -1409,11 +1411,13 @@ One contract, every entry point. Route handler, fallback, error handler, `App::r
 | `return 404;` | `404` (int) | 404 status, empty body |
 | `return ['ok' => true];` | `['ok' => true]` (array) | 200 + JSON (`Content-Type: application/json`) |
 | `return "explicit html";` | `"explicit html"` (string) | HTML body |
-| `echo "shell"; return "body";` | `"shellbody"` (concatenated) | HTML body (wire order preserved) |
+| `echo "shell"; return "body";` `[1]` | `"shellbody"` (concatenated) | HTML body (wire order preserved) |
 | `return (function() { yield ...; })();` | `\Generator` | SSR stream — each `yield` flushed |
 | `return function($req) { yield ...; };` | `\Closure` (param-injected when invoked) | SSR stream after invocation |
-| `echo "header"; return (function() { yield ...; })();` | `\Generator` wrapping `"header"` + delegated yields | Streamed in source order |
+| `echo "header"; return (function() { yield ...; })();` `[1]` | `\Generator` wrapping `"header"` + delegated yields | Streamed in source order |
 | `return new Response($body, 200);` | `ResponseInterface` | PSR-7 response used directly (output buffer ignored) |
+
+**`[1]` `echo` + explicit non-null `return` — `executeFile` entry points only.** The `"shellbody"` concatenation and the `echo`-then-`Generator` prepend are implemented inside `App::executeFile()`, so they hold for the `executeFile`-backed entry points: `App::render() / renderToString() / renderStream() / include()`, public files, API closures, and CGI-dispatched files. A **top-level route handler**, by contrast, is invoked directly by `ResponseMiddleware`, which discards the buffered output once the handler returns a non-null value — so a pre-`return` `echo` is **dropped** and only the returned value reaches the wire. In a route handler use **echo-only** *or* **return-only** (a returned non-null value replaces any buffered echo); to concatenate buffered output with an explicit body, route through `App::include()` / `App::render()`.
 
 **Valid HTTP status codes.** When the contract says `int = HTTP status`, the int must be in the range **100–599** (RFC 7230). Codes outside that range are coerced to 500 with a warning logged via `elog()`. `return 1;` is the one special case — PHP's `include` returns `1` when a file has no explicit `return`, so the framework treats it as "no explicit return" inside `App::include() / render() / renderToString() / renderStream()` and surfaces the buffered echo as the response body. If you want HTTP 1 specifically, return `100` instead.
 
@@ -4401,6 +4405,10 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 | `ZEALPHP_CWD_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineCwdIsolation()` — when `'1'`, disables per-coroutine working-directory isolation (S9a, #323), so a request's `chdir()` leaks process-wide again. |
 | `ZEALPHP_LOCALE_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineLocaleIsolation()` — when `'1'`, disables per-coroutine `setlocale()` isolation (S9b). |
 | `ZEALPHP_UMASK_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineUmaskIsolation()` — when `'1'`, disables per-coroutine `umask()` isolation (S9c). |
+| `ZEALPHP_TZ_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineTimezoneIsolation()` — when `'1'`, disables per-coroutine `date_default_timezone_set()` isolation (S9d). |
+| `ZEALPHP_MBENC_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineMbencIsolation()` — when `'1'`, disables per-coroutine `mb_internal_encoding()` isolation (S9e). |
+| `ZEALPHP_LIBXML_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineLibxmlIsolation()` — when `'1'`, disables per-coroutine `libxml_use_internal_errors()` flag isolation (S9f). |
+| `ZEALPHP_EXIT_HOOK_DISABLE` | `false` (hook follows the coroutine scheduler at `run()`) | user | Read in `App::run()` via `env_flag('ZEALPHP_EXIT_HOOK_DISABLE', false)`; when truthy, disables the ext-zealphp `exit()`/`die()` interception (`App::hookExit()`) that makes a coroutine `exit` throw `ZealPHP\HaltException` (stage S12, ext#47). No-op without ext-zealphp 0.3.48+. |
 | `ZEALPHP_FN_STATICS_RESET_DISABLE` | unset (reset ENABLED; any non-empty value not starting with `'0'` disables) | user | Read in ext-zealphp `zealphp_reset_request_statics()`; when set, disables the per-request reset of function-local `static $x` to their templates (S11b). |
 | `ZEALPHP_CLASS_STATICS_RESET_DISABLE` | unset (reset ENABLED; any non-empty value not starting with `'0'` disables) | user | Read in ext-zealphp `zealphp_reset_request_class_statics()`; when set, disables the per-request reset of class static properties to their templates (S11c). |
 | `ZEALPHP_POOL_FULL_RESET` | unset (off; only literal `'1'` enables) | user | **EXPERIMENTAL.** Read in `src/pool_worker.php` `pool_reset_request_state()`; when `'1'`, a REUSED `cgiMode('pool')` subprocess (`cgiPoolMaxRequests > 1`) runs the full coroutine-legacy reset stack (`zealphp_reset_request_rtcaches` + `_statics` + `_class_statics`) per request — letting *re-entrant* legacy apps warm-reuse a worker. Cannot make inherited-class-redeclaring apps safe (use the recycle=1 default or `cgiMode('fork')`). Inherited by the subprocess via the parent env. See `docs/architecture/2026-06-02-fork-per-request-cgi-pool.md`. |
@@ -4813,7 +4821,7 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.4.10 .
+docker build -t zealphp:0.4.11 .
 ```
 
 The shipped `Dockerfile` is PHP 8.4-cli on `bookworm` with OpenSwoole and
@@ -4825,7 +4833,7 @@ versions with the build args:
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
     --build-arg ZEALPHP_EXT_VERSION=v0.3.33 \
-    -t zealphp:0.4.10 .
+    -t zealphp:0.4.11 .
 ```
 
 ### Run (single container)
@@ -4837,7 +4845,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.4.10
+    zealphp:0.4.11
 ```
 
 ### Production compose
@@ -4848,7 +4856,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.4.10
+    image: registry.example.com/zealphp-app:0.4.11
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -6833,7 +6841,7 @@ The inline `style=` / inline `<script>` debt was fully cleared in the Dec-2024 s
 
 ## Standards and Roadmap — PSR Interoperability
 
-ZealPHP implements PSR-3, PSR-4, PSR-7, PSR-11, PSR-15, PSR-16, PSR-17, and PSR-18 — see [STANDARDS.md](../STANDARDS.md) for the complete interoperability table (proving tests, conformance level, implementing class per PSR).
+ZealPHP implements PSR-3, PSR-4, PSR-7, PSR-15, PSR-16, PSR-17, and PSR-18 — see [STANDARDS.md](../STANDARDS.md#psr-interoperability-php-fig) for the complete interoperability table (implementing class, conformance level, proving test per PSR).
 
 ## Standards and Roadmap — Documentation Expectations
 
