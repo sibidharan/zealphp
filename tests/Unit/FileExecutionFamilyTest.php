@@ -149,4 +149,48 @@ class FileExecutionFamilyTest extends TestCase
         $this->expectException(\ZealPHP\TemplateUnavailableException::class);
         App::render('does_not_exist_xyz', [], self::DIR);
     }
+
+    // ── #442: template containment (jailed to the template dir) ───
+
+    public function testRenderRefusesRelativeEscapeOutsideTemplateDir(): void
+    {
+        // A "../"-bearing name resolving to a REAL .php in a sibling dir (which
+        // shares the "render" prefix) must be refused — render() is jailed to
+        // the template dir, not the project root. Pre-fix this leaked
+        // tests/fixtures/render-sibling/leak.php via the strpos()===0 anchor.
+        $this->expectException(\ZealPHP\TemplateUnavailableException::class);
+        App::render('../render-sibling/leak', [], self::DIR);
+    }
+
+    public function testRenderRefusesAbsoluteEscapeOutsideTemplateDir(): void
+    {
+        // The leading-"/" ("absolute from template/") form must stay jailed too:
+        // "/../render-sibling/leak" escapes the template dir → refused.
+        $this->expectException(\ZealPHP\TemplateUnavailableException::class);
+        App::render('/../render-sibling/leak', [], self::DIR);
+    }
+
+    // ── #446: nested-render fragment-selector isolation ───────────
+
+    public function testNestedRenderDoesNotInheritParentFragmentSelector(): void
+    {
+        // Standalone child: its own 'cr' fragment runs inline.
+        $this->assertSame('CB|CRI|CA', App::render('child_frag', [], self::DIR));
+        // #446 — nested inside the parent's matched 'want' fragment, the child's
+        // 'cr' region must STILL run inline. Pre-fix the child inherited the
+        // parent's 'want' selector ('cr' != 'want') and was silently dropped →
+        // 'W[CB||CA]'. A no-selector nested render must not inherit.
+        $this->assertSame('W[CB|CRI|CA]', App::render('parent_frag', ['fragment' => 'want'], self::DIR));
+    }
+
+    // ── #458: page-scope isolation (app vars don't clobber framework) ──
+
+    public function testPageReassigningGDoesNotClobberFrameworkContext(): void
+    {
+        // #458 — a page assigning an ordinary $g (an array) must NOT corrupt
+        // executeFile()'s RequestContext local (pre-fix: "Attempt to assign
+        // property _ob_floor on array" → 500). The include runs in an isolated
+        // runUserFile() scope, so the page's $g only shadows a throwaway local.
+        $this->assertSame('clobber-ok', App::render('clobbers_g', [], self::DIR));
+    }
 }

@@ -81,6 +81,32 @@ class AppStaticHelpersTest extends TestCase
         $this->assertStringEndsWith($base['PHP_SELF'], $base['SCRIPT_FILENAME']);
     }
 
+    public function testServerNameFromHostStripsPort(): void
+    {
+        // #459 — SERVER_NAME is the host NAME only (CGI/1.1, RFC 3875 §4.1.14);
+        // the port from the Host header must NOT leak into it (it belongs in
+        // SERVER_PORT). A port-less host is unchanged; IPv6 literals keep their
+        // brackets but lose the port.
+        $m = new \ReflectionMethod(App::class, 'serverNameFromHost');
+        $m->setAccessible(true);
+        // host:port → host
+        $this->assertSame('hms.example', $m->invoke(null, 'hms.example:1234'));
+        $this->assertSame('127.0.0.1', $m->invoke(null, '127.0.0.1:8093'));
+        // no port → unchanged (surrounding whitespace trimmed)
+        $this->assertSame('hms.example', $m->invoke(null, 'hms.example'));
+        $this->assertSame('hms.example', $m->invoke(null, '  hms.example:80  '));
+        // bracketed IPv6 literal keeps its brackets (canonical form), drops the port
+        $this->assertSame('[::1]', $m->invoke(null, '[::1]:8080'));
+        $this->assertSame('[2001:db8::1]', $m->invoke(null, '[2001:db8::1]:443'));
+        $this->assertSame('[::1]', $m->invoke(null, '[::1]'));
+        // a non-numeric ":segment" is not a port → left intact
+        $this->assertSame('example.com:x', $m->invoke(null, 'example.com:x'));
+        // absent / whitespace-only Host → configured site host (not the raw value)
+        $fallback = $m->invoke(null, null);
+        $this->assertNotSame('', $fallback);
+        $this->assertSame($fallback, $m->invoke(null, '   '));
+    }
+
     // ─────────────────────────────────────────────────────────────
     // coerceStatusCode()
     // ─────────────────────────────────────────────────────────────
@@ -102,6 +128,35 @@ class AppStaticHelpersTest extends TestCase
         $this->assertSame(500, App::coerceStatusCode(42));
         $this->assertSame(500, App::coerceStatusCode(999));
         $this->assertSame(500, App::coerceStatusCode(600));   // first invalid above range
+    }
+
+    public function testResolveMaxRequestHonoursZeroAndPresence(): void
+    {
+        // #449 — getenv() returns false when unset, "0" when set to disable.
+        // The old `getenv() ?: 100000` made "0" (falsy in ?:) collapse to the
+        // default, so ZEALPHP_MAX_REQUEST=0 ("set 0 to disable") never disabled
+        // recycling. Test presence (=== false) so "0" reaches OpenSwoole.
+        $this->assertSame(100000, App::DEFAULT_MAX_REQUEST);                          // pin the default
+        $this->assertSame(App::DEFAULT_MAX_REQUEST, App::resolveMaxRequest(false));   // unset → default
+        $this->assertSame(0, App::resolveMaxRequest('0'));                            // explicit disable honoured
+        $this->assertSame(5, App::resolveMaxRequest('5'));                            // normal value
+        $this->assertSame(250, App::resolveMaxRequest('250'));
+    }
+
+    public function testExitHookAdvisoryOnlyWhenForcedWithoutScheduler(): void
+    {
+        // #454 — hookExit(true) is silently inert without the coroutine scheduler
+        // (the ext exit() interception is scheduler-bound). The advisory fires
+        // ONLY for forced-true + no-scheduler; it stays silent for the auto
+        // (null) default, explicit-off, and forced-true WITH a scheduler.
+        $this->assertNull(App::exitHookAdvisory(null, false));    // auto default → no warn
+        $this->assertNull(App::exitHookAdvisory(null, true));
+        $this->assertNull(App::exitHookAdvisory(false, false));   // explicitly off → no warn
+        $this->assertNull(App::exitHookAdvisory(true, true));      // forced + scheduler → works
+        $adv = App::exitHookAdvisory(true, false);                 // forced + NO scheduler → advise
+        $this->assertIsString($adv);
+        $this->assertStringContainsString('hookExit(true)', $adv);
+        $this->assertStringContainsString('enableCoroutine=false', $adv);
     }
 
     // ─────────────────────────────────────────────────────────────

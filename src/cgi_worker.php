@@ -393,12 +393,16 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
         // no-op: streaming is driven by flush()/ob_flush() calls explicitly
     }, true);
 
-    $z_override('is_uploaded_file', function(string $filename) {
+    $z_override('is_uploaded_file', function(?string $filename) {
+        // #455 — mirror native: null/'' → false, never a TypeError.
+        if ($filename === null || $filename === '') return false;
         global $__z_uploaded;
         return isset($__z_uploaded[$filename]);
     }, true);
 
-    $z_override('move_uploaded_file', function(string $from, string $to) {
+    $z_override('move_uploaded_file', function(?string $from, ?string $to) {
+        // #455 — mirror native: null/'' → false, never a TypeError.
+        if ($from === null || $from === '' || $to === null || $to === '') return false;
         global $__z_uploaded;
         if (!isset($__z_uploaded[$from])) return false;
         if (@rename($from, $to)) {

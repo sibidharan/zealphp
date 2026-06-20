@@ -41,8 +41,13 @@ class StringUtilsTest extends TestCase
 
     public function testGetStringBetweenMissingEnd(): void
     {
-        // Start present, end absent — exercises the strpos-false branch.
-        $r = StringUtils::get_string_between('foo[bar', '[', ']');
-        $this->assertIsString($r);
+        // #448 — start present, end absent: return '' (no complete "between"
+        // match), not the corrupt offset-dependent partial slice the old
+        // unguarded `false - $ini` negative-length substr() produced.
+        $this->assertSame('', StringUtils::get_string_between('foo[bar', '[', ']'));
+        $this->assertSame('', StringUtils::get_string_between('abcdefghij', 'c', 'Z'));
+        $this->assertSame('', StringUtils::get_string_between('hello-world-here', 'hello-', '##'));
+        // A present end delimiter still slices correctly (no regression).
+        $this->assertSame('bar', StringUtils::get_string_between('foo[bar]baz', '[', ']'));
     }
 }

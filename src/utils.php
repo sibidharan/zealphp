@@ -1599,25 +1599,45 @@ function apache_request_headers(): array
 {
     $g = RequestContext::instance();
     $out = [];
-    $raw = [];
     if (isset($g->zealphp_request)) {
+        // In-process (coroutine / mixed / in-process include): read the live
+        // OpenSwoole request header map — exact and multi-value aware.
         $raw = $g->zealphp_request->parent->header ?? [];
-    }
-    if (!is_array($raw)) {
+        if (!is_array($raw)) {
+            return $out;
+        }
+        foreach ($raw as $name => $value) {
+            $canonical = str_replace(' ', '-', ucwords(str_replace('-', ' ', strtolower((string)$name))));
+            if (is_array($value)) {
+                $strValues = [];
+                foreach ($value as $v) {
+                    if (is_scalar($v)) {
+                        $strValues[] = (string)$v;
+                    }
+                }
+                $out[$canonical] = implode(', ', $strValues);
+            } else {
+                $out[$canonical] = is_scalar($value) ? (string)$value : '';
+            }
+        }
         return $out;
     }
-    foreach ($raw as $name => $value) {
-        $canonical = str_replace(' ', '-', ucwords(str_replace('-', ' ', strtolower((string)$name))));
-        if (is_array($value)) {
-            $strValues = [];
-            foreach ($value as $v) {
-                if (is_scalar($v)) {
-                    $strValues[] = (string)$v;
-                }
-            }
-            $out[$canonical] = implode(', ', $strValues);
-        } else {
-            $out[$canonical] = is_scalar($value) ? (string)$value : '';
+    // #453 — no live OpenSwoole request object: this is a legacy-cgi CGI
+    // subprocess (pool/proc). Reconstruct the header map from $_SERVER HTTP_*
+    // meta-vars (+ CONTENT_TYPE / CONTENT_LENGTH), RFC 3875 §4.1.18 / Apache
+    // mod_php parity. Pre-fix this returned [] on the pool backend even though
+    // the headers ARE present in $_SERVER, silently breaking getallheaders()-
+    // based auth / CORS / signature code in unmodified apps.
+    foreach ($_SERVER as $name => $value) {
+        if (!is_string($name) || !is_scalar($value)) {
+            continue;
+        }
+        if (strncmp($name, 'HTTP_', 5) === 0) {
+            $canonical = str_replace(' ', '-', ucwords(str_replace('_', ' ', strtolower(substr($name, 5)))));
+            $out[$canonical] = (string)$value;
+        } elseif ($name === 'CONTENT_TYPE' || $name === 'CONTENT_LENGTH') {
+            $canonical = str_replace(' ', '-', ucwords(str_replace('_', ' ', strtolower($name))));
+            $out[$canonical] = (string)$value;
         }
     }
     return $out;
@@ -1798,8 +1818,14 @@ function output_reset_rewrite_vars(): bool
  * Verifies that `$filename` is one of the temp paths registered in this
  * request's `$_FILES` (via `$g->files`). Rejects forged paths from user input.
  */
-function is_uploaded_file(string $filename): bool
+function is_uploaded_file(?string $filename): bool
 {
+    // #455 — native is_uploaded_file() is internal: in coercive mode it coerces
+    // null→'' and returns false (deprecation at most), never throws. A userland
+    // typed param does NOT coerce null, so mirror native: null/'' → false.
+    if ($filename === null || $filename === '') {
+        return false;
+    }
     $g = RequestContext::instance();
     foreach ($g->files as $entry) {
         if (!is_array($entry)) {
@@ -1844,8 +1870,14 @@ function _zealphp_tmp_name_matches(mixed $tmp, string $filename): bool
  * Equivalent to Apache+mod_php behaviour, gated by `is_uploaded_file()` and
  * falling back to `copy()`+`unlink()` across filesystems when `rename()` fails.
  */
-function move_uploaded_file(string $from, string $to): bool
+function move_uploaded_file(?string $from, ?string $to): bool
 {
+    // #455 — mirror native coercive semantics: null/'' args return false (the
+    // ubiquitous optional-upload idiom move_uploaded_file($_FILES[x]['tmp_name'],
+    // $dest) passes null when no file was sent), never a TypeError → 500.
+    if ($from === null || $from === '' || $to === null || $to === '') {
+        return false;
+    }
     if (!is_uploaded_file($from)) {
         return false;
     }

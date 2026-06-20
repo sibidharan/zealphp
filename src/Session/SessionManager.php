@@ -357,6 +357,13 @@ class SessionManager
             $response = new \ZealPHP\HTTP\Response($response);
             $g->zealphp_request = $request;
             $g->zealphp_response = $response;
+            // #28: per-request function-static REFRESH at request BEGIN — the
+            // concurrency companion to the request-END zealphp_reset_request_statics()
+            // (closes WordPress's wp_start_object_cache() `static $first_init`
+            // cross-coroutine leak → $wp_object_cache null). See
+            // App::runRequestStaticsBeginRefresh() for the full rationale; gated and
+            // no-op'd there.
+            \ZealPHP\App::runRequestStaticsBeginRefresh();
             call_user_func($this->middleware, $request, $response);
         } finally {
             \ZealPHP\App::fatalGuardRelease($zpFatalGuardId); // #338

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.4.11] - 2026-06-14
+
+### Fixed
+- **WordPress `$wp_object_cache` lost-global under coroutine-legacy concurrency — FIXED** (consumed via [ext-zealphp 0.3.57](https://github.com/sibidharan/ext-zealphp/releases/tag/v0.3.57); closes the residual called out in 0.4.10's notes) — WordPress's `wp_start_object_cache()` has `static $first_init = true;` and on the *second* run takes the "already initialised" branch (`wp_cache_switch_to_blog()`) instead of `wp_cache_init()`. That function-local static is process-global, so under coroutine concurrency a peer coroutine could read another in-flight request's `false` **before** that request's request-end reset ran — skipping `wp_cache_init()` and leaving its own `$wp_object_cache` null → `Call to a member function switch_to_blog() on null` (~30% of requests at c8 + opcache). ext 0.3.57 adds a request-**begin** function-static refresh (`zealphp_reset_request_statics_begin()`) and makes the request-**end** reset rewrite to the template **in place** (stable table address, no destroy-window); `CoSessionManager` + `SessionManager` call the begin-refresh just before dispatch under the existing `perRequestStateResetsActive()` gate. Result (coroutine-legacy + patched opcache): WordPress homepage **c8×200 = 200/200**, **c16×480 = 480/480**, worker RSS flat (~0.06 KB/req, no leak), 0 crashes/segv — down from ~30% 500s. ext phpt 68/68 (incl. the new 064 begin-refresh pin). With the `$wpdb`-null Phase R fix (0.4.10 / ext 0.3.56), unmodified WordPress now serves clean under coroutine-legacy concurrency.
+
 ## [0.4.10] - 2026-06-14
 
 ### Fixed

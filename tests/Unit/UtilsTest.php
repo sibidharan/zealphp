@@ -30,6 +30,7 @@ use function ZealPHP\apache_setenv;
 use function ZealPHP\apache_getenv;
 use function ZealPHP\apache_note;
 use function ZealPHP\is_uploaded_file;
+use function ZealPHP\move_uploaded_file;
 use function ZealPHP\connection_status;
 use function ZealPHP\connection_aborted;
 use function ZealPHP\set_time_limit;
@@ -360,6 +361,20 @@ class UtilsTest extends TestCase
         $this->assertFalse(is_uploaded_file('/etc/passwd'));
     }
 
+    public function testUploadShimsRejectNullAndEmptyLikeNativePhp(): void
+    {
+        // #455 — native is_uploaded_file()/move_uploaded_file() are internal and
+        // coerce null→'' → return false (no throw). The userland overrides must
+        // mirror that, so the ubiquitous optional-upload idiom
+        // move_uploaded_file($_FILES['x']['tmp_name'], $dest) — tmp_name null when
+        // no file was sent — returns false instead of a TypeError → HTTP 500.
+        $this->assertFalse(is_uploaded_file(null));
+        $this->assertFalse(is_uploaded_file(''));
+        $this->assertFalse(move_uploaded_file(null, '/tmp/x'));
+        $this->assertFalse(move_uploaded_file('/tmp/from', null));
+        $this->assertFalse(move_uploaded_file('', ''));
+    }
+
     public function testConnectionHelpers(): void
     {
         $this->assertIsInt(connection_status());
@@ -369,5 +384,33 @@ class UtilsTest extends TestCase
     public function testSetTimeLimitReturnsBool(): void
     {
         $this->assertIsBool(set_time_limit(30));
+    }
+
+    public function testApacheRequestHeadersFallsBackToServerWhenNoRequestObject(): void
+    {
+        // #453 — a legacy-cgi CGI subprocess has no live OpenSwoole request
+        // object; getallheaders()/apache_request_headers() must reconstruct the
+        // header map from $_SERVER HTTP_* (+ CONTENT_TYPE) — it returned [] on
+        // the pool backend despite the headers being present in $_SERVER.
+        $g = RequestContext::instance();
+        $hadReq = isset($g->zealphp_request);
+        $savedReq = $hadReq ? $g->zealphp_request : null;
+        $savedServer = $_SERVER;
+        try {
+            unset($g->zealphp_request);                 // simulate the subprocess
+            $_SERVER['HTTP_X_PROBE'] = 'hello123';
+            $_SERVER['HTTP_HOST']    = 'example.test';
+            $_SERVER['CONTENT_TYPE'] = 'application/json';
+            $headers = \ZealPHP\apache_request_headers();
+            $this->assertSame('hello123', $headers['X-Probe'] ?? null);
+            $this->assertSame('example.test', $headers['Host'] ?? null);
+            $this->assertSame('application/json', $headers['Content-Type'] ?? null);
+            $this->assertSame($headers, \ZealPHP\getallheaders(), 'getallheaders() must agree');
+        } finally {
+            $_SERVER = $savedServer;
+            if ($hadReq) {
+                $g->zealphp_request = $savedReq;
+            }
+        }
     }
 }

@@ -41,6 +41,7 @@ Welcome to the official documentation set for ZealPHP, a coroutine-aware PHP fra
 
 ## How to use these guides
 
+- **Guided learning experience**: If you want a guided learning experience, head over to the [learn section](/learn).
 - **Start with the essentials**: follow `getting-started.md` to set up the toolchain, enable required extensions, and boot the runtime.
 - **Understand the shape of a project**: `directory-structure.md` and `runtime-architecture.md` describe what ships with the framework, how the request lifecycle works, and how state is managed safely.
 - **Build product features**: use `routing.md`, `api-layer.md`, `templates-and-rendering.md`, and `middleware-and-authentication.md` to implement routes, API contracts, HTML streaming, and cross-cutting policies such as authentication.

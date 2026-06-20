@@ -439,7 +439,11 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
     // SAPI upload list is empty under OpenSwoole — so WordPress's
     // wp_handle_upload() fails every media upload with "Specified file failed
     // upload test." (handles both scalar and array `tmp_name` shapes).
-    $z_override('is_uploaded_file', function (string $filename): bool {
+    $z_override('is_uploaded_file', function (?string $filename): bool {
+        // #455 — mirror native: null/'' → false, never a TypeError.
+        if ($filename === null || $filename === '') {
+            return false;
+        }
         foreach ($_FILES as $entry) {
             if (!is_array($entry)) {
                 continue;
@@ -456,7 +460,11 @@ if (function_exists('zealphp_override') || function_exists('uopz_set_return')) {
         return false;
     }, true);
 
-    $z_override('move_uploaded_file', function (string $from, string $to): bool {
+    $z_override('move_uploaded_file', function (?string $from, ?string $to): bool {
+        // #455 — mirror native: null/'' → false, never a TypeError.
+        if ($from === null || $from === '' || $to === null || $to === '') {
+            return false;
+        }
         $isUpload = false;
         foreach ($_FILES as $entry) {
             if (!is_array($entry)) {

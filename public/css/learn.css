@@ -209,6 +209,7 @@
 .lesson-crumb a { color: var(--accent, #f59e0b); text-decoration: none; }
 .lesson-title { font-size: 2.25rem; font-weight: 800; letter-spacing: -.03em; line-height: 1.15; margin: 0 0 .25rem; }
 .lesson-subtitle { color: #57534e; font-size: 1.05rem; margin: 0 0 1rem; }
+.lesson-subtitle--top-gap { margin-top: 1rem; }
 .lesson-chips { display: flex; gap: .6rem; margin-top: .75rem; }
 .lesson-chip { display: inline-block; padding: .35rem .8rem; border: 1px solid #e7e5e4; border-radius: 999px; font-size: .82rem; color: #44403c; text-decoration: none; background: #fff; transition: border-color .15s, color .15s; }
 .lesson-chip:hover { border-color: var(--accent, #f59e0b); color: var(--accent, #f59e0b); text-decoration: none; }

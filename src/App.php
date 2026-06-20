@@ -120,6 +120,13 @@ class App
      * 503s before the ceiling is hit.
      */
     public const DEFAULT_MAX_COROUTINE = 10000;
+    /**
+     * Default per-worker request-recycle cap (OpenSwoole `max_request`): the
+     * worker exits cleanly and respawns after this many requests, bounding
+     * memory growth from leaks. `0` disables recycling (OpenSwoole native
+     * semantics) — see resolveMaxRequest() / the ZEALPHP_MAX_REQUEST env. (#449)
+     */
+    public const DEFAULT_MAX_REQUEST = 100000;
     /** Bind address for the OpenSwoole server (e.g. `'0.0.0.0'` or `'127.0.0.1'`). Set in `__construct()` from `App::init()`. */
     protected string $host;
     // Widened protected → public so ZealPHP\CLI (extracted from App.php in the
@@ -1375,6 +1382,22 @@ class App
     }
 
     /**
+     * Resolve OpenSwoole's `max_request` from the raw ZEALPHP_MAX_REQUEST env
+     * value. #449 — `getenv()` returns `false` when unset and the string `"0"`
+     * when explicitly set to disable; the old `getenv() ?: 100000` collapsed
+     * both to the default (`"0"` is falsy in `?:`), so `ZEALPHP_MAX_REQUEST=0`
+     * ("set `0` to disable", per docs/deployment.md) silently never reached the
+     * server. Test for presence (`=== false`) instead, so `0` is honoured
+     * (OpenSwoole: never recycle the worker).
+     *
+     * @param string|false $env Raw `getenv('ZEALPHP_MAX_REQUEST')` result.
+     */
+    public static function resolveMaxRequest(string|false $env): int
+    {
+        return $env === false ? self::DEFAULT_MAX_REQUEST : (int) $env;
+    }
+
+    /**
      * Whether a status code MUST be sent without a message body (RFC 7230
      * §3.3.2 / RFC 9110 §6.4.1): every 1xx informational response, plus
      * `204 No Content` and `304 Not Modified`. For these, a server must emit
@@ -1722,12 +1745,23 @@ class App
      * routing calls to the given ZealPHP replacement. Uses `zealphp_override()`
      * when ext-zealphp is loaded (preferred), falling back to `uopz_set_return()`.
      *
+     * #457 — ext-zealphp denylists a small set of builtins it refuses to
+     * trampoline (`session_set_save_handler`); calling `zealphp_override()` on
+     * one emits an E_WARNING every boot and installs nothing. For those, skip
+     * the ext path and use uopz (which CAN override them — restoring the #295
+     * custom-save-handler routing); if uopz is absent the override is simply
+     * skipped, with no warning.
+     *
      * @param callable-string $callable Fully-qualified ZealPHP replacement function name.
      */
     private static function overrideBuiltin(string $name, string $callable): void
     {
         $cb = \Closure::fromCallable($callable);
-        if (\extension_loaded('zealphp') && \function_exists('zealphp_override')) {
+        // ext-zealphp's zealphp_override() denylists session_set_save_handler:
+        // calling it warns + installs nothing (#457). Skip the ext path for it
+        // and use uopz (which CAN override it — keeps the #295 save-handler routing).
+        $extRefuses = ($name === 'session_set_save_handler');
+        if (\extension_loaded('zealphp') && \function_exists('zealphp_override') && !$extRefuses) {
             (\zealphp_override(...))($name, $cb);
         } elseif (\function_exists('uopz_set_return')) {
             \uopz_set_return($name, $cb, true);
@@ -1864,6 +1898,29 @@ class App
             self::$hook_exit = $value;
         }
         return self::$hook_exit;
+    }
+
+    /**
+     * Boot-time advisory for `App::hookExit(true)` set without a coroutine
+     * scheduler (#454). The ext-zealphp exit() interception is scheduler-bound:
+     * with `enableCoroutine` off (mixed / in-process-sync modes) a userland
+     * exit()/die() still throws OpenSwoole\ExitException (extends \Exception) —
+     * which a legacy `try { … exit; } catch (\Exception)` router swallows — NOT
+     * ZealPHP\HaltException. Forcing the hook on there is silently inert, so
+     * surface it at boot rather than let the developer believe exit() is
+     * protected. Returns the advisory string, or null when N/A; the `null`
+     * (auto) default follows the scheduler and never warns. Testable seam.
+     */
+    public static function exitHookAdvisory(?bool $forced, bool $hasScheduler): ?string
+    {
+        if ($forced === true && !$hasScheduler) {
+            return '[advisory] App::hookExit(true) has no effect without the coroutine '
+                . 'scheduler (this mode runs with enableCoroutine=false): exit()/die() will '
+                . 'still throw OpenSwoole\\ExitException (not ZealPHP\\HaltException), which a '
+                . "legacy `catch (\\Exception)` swallows. Use App::mode('coroutine-legacy') "
+                . '(or enableCoroutine(true)) if you need exit()-hook protection.';
+        }
+        return null;
     }
 
     // -----------------------------------------------------------------------
@@ -2517,6 +2574,38 @@ class App
     }
 
     /**
+     * Derive SERVER_NAME from the request Host header. SERVER_NAME is the
+     * server host NAME only (CGI/1.1, RFC 3875 §4.1.14) — the port belongs in
+     * SERVER_PORT. The Host header carries `host[:port]`, so strip the port.
+     * Bracketed IPv6 literals keep their brackets (`[::1]:8080` → `[::1]`, the
+     * canonical host form), and a trailing `:segment` is only treated as a port
+     * when numeric. A whitespace-only or absent Host falls back to the
+     * configured site host. Bracket-aware, mirroring
+     * HostRouterMiddleware::stripPort / Response::splitHostPort. (#459)
+     */
+    private static function serverNameFromHost(?string $host): string
+    {
+        $host = $host === null ? '' : trim($host);
+        if ($host === '') {
+            return site_host();
+        }
+        // Bracketed IPv6 literal: `[::1]` / `[::1]:8080` → keep up to and
+        // including `]`, dropping any `:port` that follows.
+        if ($host[0] === '[') {
+            $end = strpos($host, ']');
+
+            return $end === false ? $host : substr($host, 0, $end + 1);
+        }
+        // Normal host: strip a trailing `:port` only when the port is numeric.
+        $colon = strrpos($host, ':');
+        if ($colon !== false && ctype_digit(substr($host, $colon + 1))) {
+            return substr($host, 0, $colon);
+        }
+
+        return $host;
+    }
+
+    /**
      * Build the per-request `$_SERVER` array from an OpenSwoole request —
      * mod_php parity. Merges `$request->server` (upper-cased keys), the
      * `HTTP_*` header vars, and the constant CGI keys mod_php always provides
@@ -2595,11 +2684,14 @@ class App
                 $srv['HTTP_' . strtr(strtoupper($key), '-', '_')] = $value;
             }
         }
+        // #459 — SERVER_NAME must be the host only (no port); SERVER_PORT already
+        // carries the real listen port. Strip any port off the Host header.
+        $httpHost = isset($srv['HTTP_HOST']) ? (string)$srv['HTTP_HOST'] : null;
         $srv += [
             'REQUEST_METHOD' => 'GET',
             'REQUEST_URI' => '/',
             'SCRIPT_NAME' => '/app.php',
-            'SERVER_NAME' => $srv['HTTP_HOST'] ?? site_host(),
+            'SERVER_NAME' => self::serverNameFromHost($httpHost),
             'DOCUMENT_ROOT' => self::resolveDocumentRoot(),
             'PHP_SELF' => App::$default_php_self,
             'SERVER_SOFTWARE' => $serverSoftware,
@@ -4090,6 +4182,41 @@ class App
     {
         return self::$silent_redeclare
             && (self::$function_isolation || self::$include_isolation);
+    }
+
+    /**
+     * Request-BEGIN function-static refresh (coroutine-legacy, #28).
+     *
+     * The concurrency companion to the request-END `zealphp_reset_request_statics()`.
+     * The end-reset makes function-local `static $x` fresh-per-request SEQUENTIALLY,
+     * but under coroutine concurrency a peer can read a process-global static that
+     * another in-flight request mutated BEFORE that request's end-reset runs. The
+     * canonical break is WordPress's `wp_start_object_cache()`: its `static $first_init`
+     * is set false on the first run, so a concurrent peer reading that false skips
+     * `wp_cache_init()` and leaves its own `$wp_object_cache` null → "Call to a member
+     * function switch_to_blog() on null". Refreshing every registered static to its
+     * template at request begin makes THIS request coroutine's first read see the
+     * template; the per-yield static snapshot (S5a) then multiplexes per coroutine.
+     *
+     * Gated identically to the end-resets (`perRequestStateResetsActive()`), and a
+     * no-op when the ext primitive is absent (older ext, or `legacy-cgi`/sync modes).
+     * Returns whether the refresh ran, so the call sites — `CoSessionManager` /
+     * `SessionManager` just before dispatch — stay one-liners and the behaviour is
+     * unit-testable without a live request. The ext primitive's refreshed-count
+     * return value is discarded (mirrors the sibling `zealphp_reset_request_*`
+     * calls), so no return-type plumbing crosses the ext boundary.
+     *
+     * @return bool True when the refresh ran (resets active + ext primitive present).
+     */
+    public static function runRequestStaticsBeginRefresh(): bool
+    {
+        if (!self::perRequestStateResetsActive()
+            || !\function_exists('zealphp_reset_request_statics_begin')
+        ) {
+            return false;
+        }
+        (\zealphp_reset_request_statics_begin(...))();
+        return true;
     }
 
     /**
@@ -6663,6 +6790,37 @@ class App
     // -----------------------------------------------------------------------
 
     /**
+     * Run a user file (template / public page) in an ISOLATED scope and return
+     * its value (#458). The file is included HERE, not in executeFile(), so a
+     * page that reuses a common variable name — `$g`, `$result`, `$output`,
+     * `$args`, … — only shadows this helper's throwaway locals and never
+     * corrupts executeFile()'s framework state used after the include (which
+     * previously fatalled "Attempt to assign property _ob_floor on array" → 500
+     * when a page did `$g = …`). Locals are `$__zeal_`-prefixed (and EXTR_SKIP
+     * keeps them safe during extract) to stay clear of app/template names.
+     *
+     * @param array<string,mixed> $__zeal_args   Template/route args, bound by name.
+     * @param object              $__zeal_g       Request RequestContext (bound as $g).
+     * @param bool                $__zeal_global  Run at true global scope (Stage 8).
+     */
+    private static function runUserFile(string $__zeal_abs, array $__zeal_args, object $__zeal_g, bool $__zeal_global): mixed
+    {
+        // $__zeal_global already implies the function exists (the caller ANDs in
+        // function_exists), but re-check so PHPStan narrows it (the ext function
+        // is unstubbed) and as a safe fallback to the plain include.
+        if ($__zeal_global && \function_exists('zealphp_require_global')) {
+            // Stage 8: TRUE global scope — bare file-scope vars (WordPress
+            // $menu/$submenu/$_wp_submenu_nopriv) become real $GLOBALS; the file
+            // does NOT see $g / route params (this mode is for legacy apps that
+            // read request state via superglobals).
+            return \zealphp_require_global($__zeal_abs);
+        }
+        $__zeal_args['g'] = $__zeal_g;
+        extract($__zeal_args, EXTR_SKIP);
+        return include $__zeal_abs;
+    }
+
+    /**
      * Run a PHP file with the framework's universal return contract.
      *
      * Captures buffered output, then maps the included file's result:
@@ -6701,6 +6859,12 @@ class App
                 'matched' => false,
                 'result'  => null,
             ];
+        } else {
+            // #446 — a nested render with NO selector must not inherit the
+            // parent's active fragment selector; clear it so the child runs its
+            // own App::fragment() regions inline. The parent's state is saved
+            // above and restored on exit, so this only scopes the child.
+            $g->memo['_fragment'] = null;
         }
 
         // Mode 4: $_SESSION reference is established in zeal_session_start()
@@ -6762,18 +6926,19 @@ class App
         $result = null;
         try {
             try {
-                $args['g'] = $g;
-                extract($args, EXTR_SKIP);
-                if (self::globalScopeIncludeEffective() && \function_exists('zealphp_require_global')) {
-                    // Stage 8: run the file at TRUE global scope so bare file-scope
-                    // vars (WordPress $menu/$submenu/$_wp_submenu_nopriv) become real
-                    // $GLOBALS. The included file does NOT see the extracted $g /
-                    // route params (they stay in this frame) — by contract this mode
-                    // is for legacy apps that read request state via superglobals.
-                    $result = \zealphp_require_global($absPath);
-                } else {
-                    $result = include $absPath;
-                }
+                // #458 — run the user file in an ISOLATED helper scope. A plain
+                // `include` HERE shares executeFile()'s frame, so an ordinary app
+                // variable (`$g = getGrade(...)`, an array — or $result/$output/…)
+                // clobbers framework state the post-include logic depends on →
+                // "Attempt to assign property _ob_floor on array" 500. runUserFile()
+                // binds the args + $g and includes in its OWN frame, so any name the
+                // page reuses only shadows throwaway locals, never executeFile()'s.
+                $result = self::runUserFile(
+                    $absPath,
+                    $args,
+                    $g,
+                    self::globalScopeIncludeEffective() && \function_exists('zealphp_require_global')
+                );
             } finally {
                 if ($didChdir && $prevCwd !== false) {
                     @\chdir($prevCwd);
@@ -6938,8 +7103,17 @@ class App
             $candidate = "$templateDir/" . $tpl . '.php';
         }
 
-        $resolved = realpath($candidate);
-        if (!$resolved || !file_exists($resolved) || strpos($resolved, self::$cwd) !== 0) {
+        $resolved     = realpath($candidate);
+        $templateRoot = realpath($templateDir);
+        // #442 — confine template resolution to the template dir (the documented
+        // jail: a leading "/" means "absolute from template/"), NOT the project
+        // root. Use the segment-aware pathWithinRoot() containment — the same
+        // check App::include()/includeCheck() applies to public/ — so a
+        // "../"-bearing name can't escape into a sibling dir and a shared-prefix
+        // sibling (template-data/ vs template/) can't bypass via the old
+        // strpos($resolved, self::$cwd) === 0 prefix match.
+        if ($resolved === false || $templateRoot === false
+            || !self::pathWithinRoot($resolved, $templateRoot)) {
             $bt = debug_backtrace();
             $caller = array_shift($bt);
             throw new TemplateUnavailableException(
@@ -7139,14 +7313,25 @@ class App
             return self::render($fullPageTemplate ?? $template, $args);
         }
 
-        // Explicit fragment wins.
+        // Explicit fragment wins (either form).
         if ($fragmentName !== null) {
             return self::render($template, $args + ['fragment' => $fragmentName]);
         }
 
-        // Derive the fragment from the request: HX-Target (strip a leading
-        // '#'), else HX-Trigger-Name. If neither is present, render the bare
-        // partial with no fragment key.
+        // #444 — separate-template form: a non-null $fullPageTemplate signals
+        // that $template is a BARE PARTIAL (the htmx swap content itself, with no
+        // App::fragment() region), not a fragment-bearing page. A real htmx swap
+        // carries HX-Target, so deriving a fragment here would ask the partial
+        // for a region it doesn't have → executeFile's post-flight 404. The
+        // partial IS the response — render it directly. Fragment derivation only
+        // applies to the single-template form (a page that holds the regions).
+        if ($fullPageTemplate !== null) {
+            return self::render($template, $args);
+        }
+
+        // Single-template form: derive the fragment from the request — HX-Target
+        // (strip a leading '#'), else HX-Trigger-Name. If neither is present,
+        // render the template with no fragment key (its bare partial output).
         $target = $req->htmxTarget();
         $derived = $target !== null ? ltrim($target, '#') : $req->htmxTriggerName();
         if ($derived !== null && $derived !== '') {
@@ -8715,6 +8900,12 @@ class App
             \class_exists(\ZealPHP\HaltException::class);   // force autoload, pre-fork
             (\zealphp_exit_hook(...))(true);
         }
+        // #454 — forcing App::hookExit(true) without a coroutine scheduler is
+        // silently inert (the ext interception is scheduler-bound). Surface it.
+        $exitAdvisory = self::exitHookAdvisory(self::$hook_exit, $enableCoroutine);
+        if ($exitAdvisory !== null) {
+            elog($exitAdvisory, 'warn');
+        }
 
         if ($hookFlags !== 0) {
             co::set(['hook_flags' => $hookFlags]);
@@ -8806,7 +8997,7 @@ class App
             // extensions). After this many requests a worker exits cleanly and
             // is respawned with a fresh PHP arena. Set 0 to disable. Override
             // via ZEALPHP_MAX_REQUEST env var or $app->run(['max_request' => N]).
-            'max_request' => (int)(getenv('ZEALPHP_MAX_REQUEST') ?: 100000),
+            'max_request' => self::resolveMaxRequest(getenv('ZEALPHP_MAX_REQUEST')),
             'task_worker_num' => 0,
             'task_enable_coroutine' => true,
             // Suppress NOTICE-level messages from OpenSwoole internals (e.g. ERRNO 1005

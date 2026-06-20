@@ -68,6 +68,10 @@ $guideCount = array_sum(array_map(
         <code>src/</code> docblocks and covers every public method, property,
         and class.
       </p>
+      <p class="lesson-subtitle lesson-subtitle--top-gap">
+        <strong>Want a guided learning experience?</strong> Head over to the
+        <a href="/learn">Learn section</a> for step-by-step tutorials.
+      </p>
     </header>
 
     <div class="docs-markdown">

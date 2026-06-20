@@ -24,7 +24,8 @@ class StringUtils
      * @param string $string
      * @param string $start  Opening delimiter
      * @param string $end    Closing delimiter
-     * @return string The sliced string, or '' if $start was not found.
+     * @return string The substring strictly between $start and $end, or '' if
+     *                either delimiter is absent.
      */
     public static function get_string_between($string, $start, $end)
     {
@@ -35,8 +36,15 @@ class StringUtils
         }
 
         $ini += strlen($start);
-        $len = strpos($string, $end, $ini) - $ini;
-        return substr($string, $ini, $len);
+        // #448 — guard the missing-end case. strpos() returns false when $end is
+        // absent; the old unguarded `false - $ini` is a negative length, so
+        // substr() returned a corrupt offset-dependent slice instead of ''.
+        // No closing delimiter → no "between".
+        $end_pos = strpos($string, $end, $ini);
+        if ($end_pos === false) {
+            return '';
+        }
+        return substr($string, $ini, $end_pos - $ini);
     }
 
 
