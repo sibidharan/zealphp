@@ -350,9 +350,17 @@ class ResponseMiddleware implements MiddlewareInterface
             ob_start();
             $object = call_user_func_array($handler, $invokeArgs);
 
-            // Fast paths — discard output buffer without string copy
             if ($object instanceof \Generator) {
-                ob_end_clean();
+                // A handler may echo/print BEFORE returning a generator
+                // (`echo "header"; return (function(){ yield ...; })();`). Capture
+                // that output and prepend it so it streams in source order instead
+                // of being lost — matching the universal return contract. For a
+                // plain generator function (no pre-return echo) the buffer is
+                // empty, so this is a cheap ob_get_clean() returning ''.
+                $pre = ob_get_clean();
+                if ($pre !== false && $pre !== '') {
+                    $object = App::prependToStreamable($pre, $object);
+                }
                 return App::emitGeneratorStream($object, $method);
             }
 

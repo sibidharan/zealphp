@@ -23,6 +23,31 @@ class StreamingTest extends TestCase
         $this->assertStringContainsString('Posts', $r['body']);
     }
 
+    /**
+     * echo / print inside a generator body follow the universal return contract:
+     * streamed to the client in source order (interleaved with the yields), not
+     * leaked to the server's stdout. /stream/echo-yield emits exactly "ABCDE"
+     * from: echo 'A'; yield 'B'; print 'C'; yield 'D'; echo 'E';
+     */
+    public function testEchoAndPrintInterleaveWithYieldInSourceOrder(): void
+    {
+        $r = $this->get('/stream/echo-yield');
+        $this->assertStatus(200, $r);
+        $this->assertSame('ABCDE', $r['body']);
+    }
+
+    /**
+     * A handler that echoes BEFORE returning a generator: the pre-generator
+     * output is prepended to the stream rather than discarded. /stream/pre-echo
+     * emits "PRE" then the generator's "G" + "EN" → "PREGEN".
+     */
+    public function testEchoBeforeReturnedGeneratorIsPrepended(): void
+    {
+        $r = $this->get('/stream/pre-echo');
+        $this->assertStatus(200, $r);
+        $this->assertSame('PREGEN', $r['body']);
+    }
+
     public function testStreamCallbackReturns200(): void
     {
         $r = $this->get('/stream/words');

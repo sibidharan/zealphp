@@ -146,3 +146,32 @@ $app->route('/stream/events', function($response) {
         $emit(json_encode(['message' => 'stream complete']), 'done');
     });
 });
+
+// ---------------------------------------------------------------------------
+// 4. echo / print interleaved with yield
+//    Inside a generator body, echo and print follow the universal return
+//    contract just like yield — streamed to the client in source order, not
+//    leaked to the server's stdout. This endpoint emits exactly "ABCDE".
+// ---------------------------------------------------------------------------
+$app->route('/stream/echo-yield', function() {
+    return (function() {
+        echo 'A';        // buffered, flushed before the next yield
+        yield 'B';
+        print 'C';       // print behaves like echo
+        yield 'D';
+        echo 'E';        // trailing output after the final yield
+    })();
+});
+
+// ---------------------------------------------------------------------------
+// 5. echo BEFORE returning a generator
+//    A handler that echoes and then returns a generator: the pre-generator
+//    output is prepended to the stream (source order preserved). Emits "PREGEN".
+// ---------------------------------------------------------------------------
+$app->route('/stream/pre-echo', function() {
+    echo 'PRE';
+    return (function() {
+        yield 'G';
+        yield 'EN';
+    })();
+});
