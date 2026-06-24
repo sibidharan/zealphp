@@ -398,12 +398,34 @@ function log_file_for(string $kind): ?string
  * The consumer goroutine falls back to `php://stderr` when the file cannot be
  * opened (avoids silent log loss). Results are memoised per path.
  */
+/**
+ * Per-worker registry for the async-log sinks and their consumer-spawn guard.
+ *
+ * Held on a BOOT CLASS static — defined here in src/utils.php (a composer
+ * `files` autoload entry, loaded at worker boot) ON PURPOSE. Under
+ * `coroutine-legacy` mode, function-local `static` variables are isolated
+ * per-coroutine (Stage 5a) AND reset to their template at the end of every
+ * request (Stage 11). `log_sink_for()` previously memoised `$sinks`/`$started`
+ * as function statics, so the consumer-spawn guard was empty on EVERY request →
+ * a fresh `Channel` + detached consumer `go()` was spawned per request, blocked
+ * forever on `pop()`, accumulating until OpenSwoole's `max_coroutine` cap was
+ * hit (issue #55). A boot-class static is exempt from the per-request reset, so
+ * the memoisation correctly survives for the worker's lifetime.
+ */
+final class LogSinkRegistry
+{
+    /** @var array<string, \OpenSwoole\Coroutine\Channel> */
+    public static array $sinks = [];
+    /** @var array<string, bool> */
+    public static array $started = [];
+}
+
 function log_sink_for(string $path): ?\OpenSwoole\Coroutine\Channel
 {
     /** @var array<string, \OpenSwoole\Coroutine\Channel> $sinks */
-    static $sinks = [];
+    $sinks = &LogSinkRegistry::$sinks;
     /** @var array<string, bool> $started */
-    static $started = [];
+    $started = &LogSinkRegistry::$started;
 
     if (isset($sinks[$path])) {
         return $sinks[$path];
