@@ -9,7 +9,9 @@ use ZealPHP\Tests\TestCase;
 
 use function ZealPHP\resolve_log_dir;
 use function ZealPHP\log_file_for;
+use function ZealPHP\log_sink_for;
 use function ZealPHP\log_write;
+use ZealPHP\LogSinkRegistry;
 use function ZealPHP\debug_logging_enabled;
 use function ZealPHP\access_logging_enabled;
 use function ZealPHP\async_logging_enabled;
@@ -471,5 +473,43 @@ class UtilsLoggingTest extends TestCase
         $this->assertFalse(\ZealPHP\apache_getenv('NOPE', true));
         \ZealPHP\apache_setenv('WALKVAR', 'wval', true);
         $this->assertSame('wval', \ZealPHP\apache_getenv('WALKVAR', true));
+    }
+
+    // ── async-log sink registry (#55 regression) ─────────────────
+    //
+    // log_sink_for() memoizes the async Channel sink + consumer-spawn guard on
+    // the BOOT-CLASS static LogSinkRegistry, NOT function-local statics. Under
+    // coroutine-legacy, function statics reset every request (Stage 11), which
+    // emptied the guard and spawned a fresh Channel + detached consumer go() per
+    // request — accumulating to OpenSwoole's max_coroutine cap (#55). A boot
+    // class static survives the per-request reset. The full no-leak behaviour is
+    // integration-verified (needs a live coroutine scheduler); here we pin the
+    // structural contract that the memoisation lives on the class static.
+
+    public function testLogSinkRegistryIsBootClassWithStaticArrayState(): void
+    {
+        $rc = new \ReflectionClass(LogSinkRegistry::class);
+        $this->assertTrue($rc->isFinal(), 'LogSinkRegistry should be final');
+        foreach (['sinks', 'started'] as $name) {
+            $prop = $rc->getProperty($name);
+            $this->assertTrue($prop->isStatic(), "$name must be static (boot-class state)");
+            $this->assertTrue($prop->isPublic(), "$name must be public");
+        }
+    }
+
+    public function testLogSinkForMemoizesViaRegistryClassStatic(): void
+    {
+        // A pre-seeded registry entry short-circuits log_sink_for() at the top
+        // (before any coroutine/async gate), proving the function reads the
+        // boot-class static — so the guard survives per-request resets and the
+        // consumer go() is spawned at most once per path per worker.
+        $path = sys_get_temp_dir() . '/zealphp-test-sink-' . uniqid() . '.log';
+        $channel = new \OpenSwoole\Coroutine\Channel(1);
+        LogSinkRegistry::$sinks[$path] = $channel;
+        try {
+            $this->assertSame($channel, log_sink_for($path));
+        } finally {
+            unset(LogSinkRegistry::$sinks[$path]);
+        }
     }
 }
