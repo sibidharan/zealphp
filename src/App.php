@@ -1505,20 +1505,51 @@ class App
         }
         // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
         $g->zealphp_response->flush();
-        foreach ($object as $chunk) {
-            // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-            if (!$g->openswoole_response->isWritable()) break;
-            // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
-            $g->openswoole_response->write((string)$chunk);
-            // #354 — yield to the scheduler ONLY when inside a coroutine.
-            // In mixed mode (enable_coroutine=false) the handler runs outside
-            // any coroutine, so Coroutine::sleep(0) throws "API must be called
-            // in the coroutine" → uncaught → worker exits status=255 with a
-            // truncated, unterminated chunked stream. write() already flushes
-            // each chunk; the yield is only a concurrency nicety, and there are
-            // no peer coroutines to yield to when enable_coroutine is off.
-            if (\OpenSwoole\Coroutine::getCid() > 0) {
-                \OpenSwoole\Coroutine::sleep(0);
+        // Capture echo/print emitted INSIDE the generator body (between yields)
+        // so it follows the universal return contract — streamed to the client
+        // in wire order — instead of leaking to the server's stdout. A handler
+        // that interleaves `echo "a"; yield "b"; echo "c"; yield "d";` writes
+        // a, b, c, d in source order. `print` is `echo` with a return value, so
+        // capturing the output buffer covers it too.
+        $obLevel = \ob_get_level();
+        \ob_start();
+        try {
+            foreach ($object as $chunk) {
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                if (!$g->openswoole_response->isWritable()) break;
+                // Flush any echo/print buffered BEFORE this yield first, so output
+                // emitted earlier in the generator body precedes the yielded chunk.
+                $buffered = \ob_get_contents();
+                if ($buffered !== false && $buffered !== '') {
+                    \ob_clean();
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                    $g->openswoole_response->write($buffered);
+                }
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                $g->openswoole_response->write((string)$chunk);
+                // #354 — yield to the scheduler ONLY when inside a coroutine.
+                // In mixed mode (enable_coroutine=false) the handler runs outside
+                // any coroutine, so Coroutine::sleep(0) throws "API must be called
+                // in the coroutine" → uncaught → worker exits status=255 with a
+                // truncated, unterminated chunked stream. write() already flushes
+                // each chunk; the yield is only a concurrency nicety, and there are
+                // no peer coroutines to yield to when enable_coroutine is off.
+                if (\OpenSwoole\Coroutine::getCid() > 0) {
+                    \OpenSwoole\Coroutine::sleep(0);
+                }
+            }
+        } finally {
+            // Always tear down our buffer level. Flush any trailing echo/print
+            // (output after the final yield, or a generator that only echoes and
+            // never yields) before the stream ends; on an exception this still
+            // closes the level and the throw propagates to the dispatch handler.
+            if (\ob_get_level() > $obLevel) {
+                $trailing = \ob_get_clean();
+                // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                if ($trailing !== false && $trailing !== '' && $g->openswoole_response->isWritable()) {
+                    // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
+                    $g->openswoole_response->write($trailing);
+                }
             }
         }
         // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
@@ -7170,7 +7201,7 @@ class App
      * is "echo first, then stream". Returns a new Generator that yields the
      * buffered chunk before delegating to the original.
      */
-    private static function prependToStreamable(string $prefix, \Generator $gen): \Generator
+    public static function prependToStreamable(string $prefix, \Generator $gen): \Generator
     {
         yield $prefix;
         yield from $gen;
