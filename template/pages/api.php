@@ -85,6 +85,10 @@ PHP]); ?>
 <strong>Don't mix both conventions in one file.</strong> If <code>api/list.php</code> defines both <code>$list</code> (filename match) <em>and</em> <code>$get</code>/<code>$post</code>, the filename match wins and method handlers are unreachable. The framework logs a warning to <code>debug.log</code> when this happens.
 </div>
 
+<div class="callout warning">
+<strong>Watch the verb-named file gotcha.</strong> <code>$get</code>/<code>$post</code>/… aren't globally "reserved" — but if the <em>filename itself</em> is an HTTP verb (e.g. <code>api/php/get.php</code>), then <code>$get</code> is a <strong>filename match</strong> (it equals <code>${basename(__FILE__, '.php')}</code> and serves every method), <em>not</em> per-method dispatch. Filename match always wins, so a verb-named file can never do per-method routing. To dispatch by method, put the handlers in a non-verb-named file (<code>api/users.php</code> → <code>$get</code>/<code>$post</code>). The framework logs a <code>debug.log</code> warning when <code>$get</code> in <code>get.php</code> collapses to a filename match.
+</div>
+
 <h2>Return value conventions</h2>
 <p>API handlers ride the <a href="/responses#return-contract">universal return contract</a> — same shapes as route handlers, public files, <code>App::render()</code>, and <code>App::include()</code>. <code>int</code> = status, <code>array</code> = JSON, <code>string</code> = HTML, <code>Generator</code> = stream, <code>ResponseInterface</code> = PSR-7 used directly.</p>
 
@@ -111,9 +115,13 @@ PHP]); ?>
     'label' => 'Magic parameters: $request, $response, $app, $server (auto-injected by name)',
     'code'  => <<<'PHP'
 <?php
+// File: api/user/show.php  →  /api/user/show
+// Canonical convention: the closure variable name matches the filename
+// (basename without .php). One handler serves EVERY HTTP method — branch
+// on the verb with $this->get_request_method() if you need to.
 use ZealPHP\RequestContext;
 
-$get = function($request, $response) {
+${basename(__FILE__, '.php')} = function($request, $response) {
     // ZealAPI's dispatcher injects these by parameter name (reflection-cached):
     //   $request  → ZealPHP\HTTP\Request  (wrapped OpenSwoole request; alias: $req)
     //   $response → ZealPHP\HTTP\Response (wrapped OpenSwoole response; alias: $res)
@@ -277,8 +285,11 @@ $sapi_name = function() {
 };
 PHP],
   ['api-get',  'GET /api/php/get — dump GET params',          '/api/php/get?demo=zealapi&works=true', <<<'PHP'
-// api/php/get.php
-$get = function() {
+// api/php/get.php → /api/php/get
+// NOTE: $get here is a FILENAME MATCH (the file is named get.php), NOT
+// per-method dispatch. ${basename(__FILE__, '.php')} resolves to $get and
+// serves every HTTP method. See the gotcha under "Per-method dispatch".
+${basename(__FILE__, '.php')} = function() {
     $g = G::instance();
     return ['query_params' => $g->get, 'async' => php_sapi_name() === 'cli'];
 };

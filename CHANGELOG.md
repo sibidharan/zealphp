@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.4.12] - 2026-06-25
+
+### Added
+- **`echo`/`print` now interleaves correctly with `yield` in streamed generators** — a streamed generator (route handler or streaming template) that both `echo`es and `yield`s now flushes the two in wire order instead of buffering the `echo` output until after the generator drains. The output-buffer level captured at generator entry is restored around each `yield`, so a handler can freely mix `echo "<chunk>"` and `yield "<chunk>"` and the bytes land in source order.
+
+### Fixed
+- **Async-log consumer coroutine leak under coroutine-legacy — FIXED** (consumed via [ext-zealphp 0.3.59](https://github.com/sibidharan/ext-zealphp/releases/tag/v0.3.59); [ext#55](https://github.com/sibidharan/ext-zealphp/issues/55)) — the async-logging consumer coroutine could leak under coroutine-legacy; the consumer lifecycle is now bounded.
+- **Fork-CGI child now streams a returned `Generator`/`Closure`** ([#443](https://github.com/sibidharan/zealphp/issues/443)) — a `cgiMode('fork')` child that returns a `Generator` or `Closure` from the included file now iterates it into the response (universal return-contract parity with the in-process and `proc` paths) instead of dropping it.
+- **coroutine-legacy page-scope isolation + exit-hook advisory + session-handler override** ([#458](https://github.com/sibidharan/zealphp/issues/458), [#454](https://github.com/sibidharan/zealphp/issues/454), [#457](https://github.com/sibidharan/zealphp/issues/457)).
+- **`getallheaders()` / `apache_request_headers()` in the CGI subprocess** ([#453](https://github.com/sibidharan/zealphp/issues/453)) — both now reconstruct the request header set from `$_SERVER`'s `HTTP_*` entries inside the CGI subprocess, so legacy apps that call them see the real inbound headers.
+- **htmx separate-template + nested-fragment render fixes** ([#444](https://github.com/sibidharan/zealphp/issues/444), [#446](https://github.com/sibidharan/zealphp/issues/446)).
+- **`ZEALPHP_MAX_REQUEST=0` now disables worker recycle** ([#449](https://github.com/sibidharan/zealphp/issues/449)) — the max-request resolver used a falsy `?:` check, so `0` (the documented "never recycle" value) fell through to the default. It is now a presence check, so `0` means unbounded.
+- **Upload shims accept `null` like native PHP** ([#455](https://github.com/sibidharan/zealphp/issues/455)) — optional file-upload helpers no longer 500 on a missing/`null` upload.
+- **`StringUtils::get_string_between()` returns `''` when the end delimiter is absent** ([#448](https://github.com/sibidharan/zealphp/issues/448)).
+- **`App::render()` template resolution confined to the template dir** ([#442](https://github.com/sibidharan/zealphp/issues/442)) — path-traversal hardening on the template name.
+- **`SERVER_NAME` is host-only** ([#459](https://github.com/sibidharan/zealphp/issues/459)) — the port is stripped from the `Host` header when populating `$_SERVER['SERVER_NAME']`.
+
+### Changed
+- **Docker base image bumped to PHP 8.5** (`8.4-cli-bookworm` → `8.5-cli-bookworm`).
+- CI/dev dependency bumps: `actions/checkout` 6.0.3→7.0.0, `codecov/codecov-action` 6.0.1→7.0.0, the actions-minor-and-patch group, `predis/predis` 2.4.1→3.5.1, `phpstan/phpstan`, `infection/infection`.
+
+### Documentation
+- **PSR interoperability table in `STANDARDS.md`; over-claimed PSR-11 dropped** ([#451](https://github.com/sibidharan/zealphp/issues/451)).
+- **Four user-facing isolation/exit `ZEALPHP_*` knobs documented** ([#450](https://github.com/sibidharan/zealphp/issues/450)).
+- **API page: the verb-named-file gotcha** — `$get` in `api/php/get.php` is a *filename match* (serves every HTTP method), not per-method dispatch; documented with the `${basename(__FILE__, '.php')}` canonical form.
+- Return-contract note scoped to the `executeFile()` entry points plus Copilot-review follow-ups ([#445](https://github.com/sibidharan/zealphp/issues/445)); Learn-section link added to the docs index; agent reference refreshed.
+
 ## [0.4.11] - 2026-06-14
 
 ### Fixed
