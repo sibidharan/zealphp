@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+### Changed
+- **`setup.sh` installs ext-zealphp via [pie](https://github.com/php/pie) (PHP Installer for Extensions), with a tagged source build as fallback — and drops the uopz fallback entirely.** Interactive installs (Linux + macOS) now run `pie install zealphp/ext:^0.3.59` first, so the extension is version-resolved, `--enable-zealphp` is applied and php.ini is wired by pie — meaning **updates are just `pie install zealphp/ext`**. If pie is unavailable or its build fails, setup.sh falls back to the tagged git source build (`phpize && ./configure --enable-zealphp && make && make install`). The Docker image keeps its pinned source build (deliberately reproducible — no build-time pie/Packagist network dependency, same rationale as the OpenSwoole build). **uopz is no longer installed as a fallback** — ext-zealphp is required; the framework still *accepts* a user-supplied uopz at runtime, only the `session_set_save_handler` override (#295/#457) degrades gracefully (skipped, no warning) without it. The post-install enable step is now `php -m`-aware so pie's own enable isn't doubled. Default ext pin bumped `v0.3.52` → `v0.3.59`.
+
 ## [0.4.12] - 2026-06-25
 
 ### Added

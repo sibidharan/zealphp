@@ -162,27 +162,21 @@ docker_setup() {
     docker-php-ext-enable --ini-name zz-openswoole.ini openswoole
     php -r 'exit(extension_loaded("openswoole") ? 0 : 1);' || { echo -e "${RED}OpenSwoole built but failed to load.${RESET}"; exit 1; }
 
-    echo -e "${YELLOW}Installing ext-zealphp ${ZEALPHP_EXT_VERSION:-v0.3.52} for Docker image.${RESET}"
-    # Pinned for reproducibility + to dodge the pre-0.3.16 compile break on modern
-    # toolchains (GCC 14 hardens -Wincompatible-pointer-types to an error; the old
-    # zend_alter_ini_entry_ex call passed the entry struct instead of the name).
+    echo -e "${YELLOW}Installing ext-zealphp ${ZEALPHP_EXT_VERSION:-v0.3.59} for Docker image.${RESET}"
+    # Pinned tagged SOURCE build for the Docker image — deliberately reproducible and
+    # supply-chain-proof (same rationale as OpenSwoole above: do not depend on pie /
+    # Packagist network state at image-build time). Interactive installs use pie;
+    # the image pins a known-good tag. ext-zealphp is required — no uopz fallback.
     # NOTE: the ext has its OWN 0.3.x version line — do NOT confuse it with the
     # framework's 0.3.x. Override with ZEALPHP_EXT_VERSION.
-    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.52}" https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
+    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.59}" https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
     if (cd /tmp/ext-zealphp && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && make install); then
         docker-php-ext-enable --ini-name zz-zealphp.ini zealphp
         rm -rf /tmp/ext-zealphp
     else
-        echo -e "${YELLOW}ext-zealphp failed. Falling back to uopz.${RESET}"
+        echo -e "${RED}ext-zealphp build failed. ZealPHP requires ext-zealphp.${RESET}"
         rm -rf /tmp/ext-zealphp
-        if [ -n "${UOPZ_VERSION:-}" ]; then
-            pecl install "uopz-${UOPZ_VERSION}"
-        elif ! pecl install uopz 2>/dev/null; then
-            git clone --depth 1 https://github.com/krakjoe/uopz.git /tmp/uopz-src
-            (cd /tmp/uopz-src && phpize && ./configure && make -j"${ZEALPHP_BUILD_JOBS}" && make install)
-            rm -rf /tmp/uopz-src
-        fi
-        docker-php-ext-enable --ini-name zz-uopz.ini uopz
+        exit 1
     fi
 
     {
@@ -195,7 +189,7 @@ docker_setup() {
 
     php -m | grep -q '^sockets$'
     php -m | grep -q '^openswoole$'
-    php -m | grep -qE '^(zealphp|uopz)$'
+    php -m | grep -q '^zealphp$'
 
     echo -e "${GREEN}Docker image dependencies installed successfully.${RESET}"
 }
@@ -592,55 +586,75 @@ check_and_remove_uopz() {
     return 0 # removal is successful
 }
 
+# Locate or fetch pie (the PHP Installer for Extensions, https://github.com/php/pie).
+# pie is a single phar — like Composer for C extensions. Sets $PIE_BIN on success.
+# Returns 0 if pie is available, 1 otherwise (caller falls back to a source build).
+PIE_BIN=""
+ensure_pie() {
+    [ -n "$PIE_BIN" ] && return 0
+    if command -v pie >/dev/null 2>&1; then PIE_BIN="$(command -v pie)"; return 0; fi
+    [ -x /usr/local/bin/pie ] && { PIE_BIN="/usr/local/bin/pie"; return 0; }
+    echo -e "${YELLOW}Fetching pie (PHP Installer for Extensions).${RESET}"
+    local tmp
+    tmp="$(mktemp)"
+    if curl -fsSL https://github.com/php/pie/releases/latest/download/pie.phar -o "$tmp" 2>/dev/null \
+       && php "$tmp" --version >/dev/null 2>&1; then
+        if $SUDO install -m 0755 "$tmp" /usr/local/bin/pie 2>/dev/null; then
+            rm -f "$tmp"; PIE_BIN="/usr/local/bin/pie"; return 0
+        fi
+        PIE_BIN="php $tmp"; return 0   # run from the temp phar if /usr/local/bin isn't writable
+    fi
+    rm -f "$tmp"
+    echo -e "${YELLOW}pie unavailable; will build ext-zealphp from source.${RESET}"
+    return 1
+}
+
+# Install zealphp/ext via pie. pie compiles from source under the hood but resolves
+# the version, applies the --enable-zealphp configure option, and wires php.ini — so
+# updates are just `pie install zealphp/ext`. Returns 0 on success, 1 to fall back.
+pie_install_zealphp_ext() {
+    ensure_pie || return 1
+    local ver="${ZEALPHP_EXT_VERSION:-v0.3.59}"
+    local constraint="^${ver#v}"   # v0.3.59 -> ^0.3.59 (newest patch within the line)
+    echo -e "${YELLOW}Installing zealphp/ext ${constraint} via pie.${RESET}"
+    # shellcheck disable=SC2086
+    if $SUDO $PIE_BIN install "zealphp/ext:${constraint}"; then
+        echo -e "${GREEN}ext-zealphp installed via pie — update later with: pie install zealphp/ext${RESET}"
+        return 0
+    fi
+    echo -e "${YELLOW}pie install failed; falling back to a tagged source build.${RESET}"
+    return 1
+}
+
 # Function to install ext-zealphp (ZealPHP's own extension).
-# Falls back to uopz if ext-zealphp build fails.
-# Returns 0 if installation is successful, 1 if both fail.
+# pie-first (so `pie install zealphp/ext` manages installs + updates), with a tagged
+# source build as the fallback. ext-zealphp is required — there is no uopz fallback.
+# Returns 0 if installation succeeds, 1 if both pie and the source build fail.
 install_zealphp_ext() {
     echo -e "${YELLOW}Installing ext-zealphp (ZealPHP's function-override extension)${RESET}"
 
+    # Preferred path: pie (updatable, version-resolved, php.ini wired).
+    if pie_install_zealphp_ext; then
+        return 0
+    fi
+
+    # Fallback: tagged source build (pie unavailable or its install failed).
     local tmpdir
     tmpdir="$(mktemp -d)"
-    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.52}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir/ext-zealphp" || {
-        echo -e "${YELLOW}Failed to clone ext-zealphp repo. Falling back to uopz.${RESET}"
+    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.59}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir/ext-zealphp" || {
+        echo -e "${RED}Failed to clone ext-zealphp repo.${RESET}"
         rm -rf "$tmpdir"
-        install_uopz_fallback
-        return $?
+        return 1
     }
-
     if (cd "$tmpdir/ext-zealphp" && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && $SUDO make install); then
         rm -rf "$tmpdir"
-        echo -e "${GREEN}ext-zealphp built and installed.${RESET}"
+        echo -e "${GREEN}ext-zealphp built and installed from source.${RESET}"
         return 0
     fi
 
-    echo -e "${YELLOW}ext-zealphp build failed. Falling back to uopz.${RESET}"
     rm -rf "$tmpdir"
-    install_uopz_fallback
-    return $?
-}
-
-install_uopz_fallback() {
-    echo -e "${YELLOW}Installing uopz as fallback${RESET}"
-    if $SUDO pecl install uopz 2>/dev/null; then
-        echo -e "${GREEN}uopz installed via PECL.${RESET}"
-        return 0
-    fi
-    echo -e "${YELLOW}PECL uopz failed. Building from git source.${RESET}"
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    git clone --depth 1 https://github.com/krakjoe/uopz.git "$tmpdir" || {
-        echo -e "${RED}Failed to clone uopz from GitHub.${RESET}"
-        rm -rf "$tmpdir"
-        return 1
-    }
-    (cd "$tmpdir" && phpize && ./configure && make -j"${ZEALPHP_BUILD_JOBS}" && $SUDO make install) || {
-        echo -e "${RED}Failed to build uopz from source.${RESET}"
-        rm -rf "$tmpdir"
-        return 1
-    }
-    rm -rf "$tmpdir"
-    echo -e "${GREEN}uopz built and installed from source (fallback).${RESET}"
-    return 0
+    echo -e "${RED}ext-zealphp install failed (pie + source build). ZealPHP requires ext-zealphp.${RESET}"
+    return 1
 }
 
 # Function to check if Composer is installed
@@ -732,23 +746,22 @@ macos_setup() {
     }
 
     echo -e "${GREEN}Installing ext-zealphp.${RESET}"
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    if git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.52}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir" && \
-       (cd "$tmpdir" && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && make install); then
-        echo "extension=zealphp.so" > "${php_ini_dir}/zz-zealphp.ini"
-        rm -rf "$tmpdir"
-        echo -e "${GREEN}ext-zealphp built and installed.${RESET}"
+    # pie-first (updatable); tagged source build as the fallback. No uopz fallback.
+    if pie_install_zealphp_ext; then
+        : # pie installed + enabled the extension itself
     else
-        echo -e "${YELLOW}ext-zealphp failed. Falling back to uopz.${RESET}"
-        rm -rf "$tmpdir"
+        local tmpdir
         tmpdir="$(mktemp -d)"
-        if ! "$pecl_bin" install uopz 2>/dev/null; then
-            git clone --depth 1 https://github.com/krakjoe/uopz.git "$tmpdir" || { rm -rf "$tmpdir"; return 1; }
-            (cd "$tmpdir" && phpize && ./configure && make -j"${ZEALPHP_BUILD_JOBS}" && make install) || { rm -rf "$tmpdir"; return 1; }
+        if git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.59}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir" && \
+           (cd "$tmpdir" && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && make install); then
+            echo "extension=zealphp.so" > "${php_ini_dir}/zz-zealphp.ini"
             rm -rf "$tmpdir"
+            echo -e "${GREEN}ext-zealphp built and installed from source.${RESET}"
+        else
+            rm -rf "$tmpdir"
+            echo -e "${RED}ext-zealphp install failed (pie + source build). ZealPHP requires ext-zealphp.${RESET}"
+            return 1
         fi
-        echo "extension=uopz.so" > "${php_ini_dir}/zz-uopz.ini"
     fi
 
     echo -e "${YELLOW}Verifying extensions.${RESET}"
@@ -859,10 +872,15 @@ fi
 
 if check_and_remove_uopz; then
     if install_zealphp_ext; then
-        if [ -f "$(php -i 2>/dev/null | awk -F'=> ' '/^extension_dir/ {print $2}' | head -1 | tr -d ' ')/zealphp.so" ]; then
+        # pie enables the extension itself; only enable here if it isn't already
+        # loaded (i.e. the source-build fallback ran and just dropped the .so).
+        if php -m 2>/dev/null | grep -qix 'zealphp'; then
+            echo -e "${GREEN}ext-zealphp already enabled.${RESET}"
+        elif [ -f "$(php -i 2>/dev/null | awk -F'=> ' '/^extension_dir/ {print $2}' | head -1 | tr -d ' ')/zealphp.so" ]; then
             configure_php_extension "extension=zealphp.so"
         else
-            configure_php_extension "extension=uopz.so"
+            echo -e "${RED}zealphp.so not found after install.${RESET}"
+            exit 1
         fi
     else
         exit 1
