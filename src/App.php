@@ -2781,6 +2781,58 @@ class App
     }
 
     /**
+     * Resolve a request's POST form map, with a raw-body fallback (#478).
+     *
+     * OpenSwoole's pre-parsed `$request->post` can arrive EMPTY on some request
+     * shapes even when the body carries a valid `application/x-www-form-urlencoded`
+     * payload — the parsed-form map lags raw-body availability (observed behind
+     * buffering reverse proxies and with chunked transfer-encoding). Trusting
+     * `$request->post` alone then left `$g->post` (and, in `superglobals(true)`
+     * mode, `$_POST`) silently empty, so self-posting form handlers became no-ops.
+     *
+     * When `->post` is empty AND the Content-Type is urlencoded, we parse the raw
+     * body ourselves via `parse_str()`. `multipart/form-data` is deliberately left
+     * untouched — it needs boundary parsing, which OpenSwoole already performs into
+     * `->post`/`->files`; running `parse_str()` on a multipart body would mangle it.
+     * `rawContent()` is buffered/repeatable, so reading it here does not consume the
+     * body or disturb the `php://input` wrapper.
+     *
+     * @return array<string, mixed>
+     */
+    private static function requestPostMap(\ZealPHP\HTTP\Request $request): array
+    {
+        /** @var array<string, mixed> $post */
+        $post = $request->post ?? [];
+        if ($post !== []) {
+            return $post;
+        }
+        $header = $request->header;
+        $ct = (\is_array($header) && isset($header['content-type']))
+            ? $header['content-type']
+            : '';
+        // Only the urlencoded shape is safe to reparse from the raw body. multipart,
+        // JSON and empty bodies fall through with the empty (or OpenSwoole-parsed) map.
+        if (\stripos($ct, 'application/x-www-form-urlencoded') === false) {
+            return $post;
+        }
+        $raw = $request->rawContent();
+        if (!\is_string($raw) || $raw === '') {
+            return $post;
+        }
+        /** @var array<array-key, mixed> $parsed */
+        $parsed = [];
+        \parse_str($raw, $parsed);
+        // Field names are always strings; normalise the key type so the declared
+        // array<string, mixed> contract holds (parse_str is array-key-typed because
+        // numeric-string keys collapse to int). Mirrors parseCookieHeader().
+        $out = [];
+        foreach ($parsed as $name => $value) {
+            $out[(string)$name] = $value;
+        }
+        return $out;
+    }
+
+    /**
      * Re-establish the request-input superglobals ($_GET / $_POST / $_COOKIE /
      * $_SERVER / $_FILES / $_REQUEST) FROM the per-coroutine OpenSwoole request,
      * in the coroutine that is about to read them. Called right before every
@@ -2845,7 +2897,7 @@ class App
         $get = $curGet !== [] ? $curGet : ($req->get ?? []);
         $curPost = $g->post;
         /** @var array<string, mixed> $post */
-        $post = $curPost !== [] ? $curPost : ($req->post ?? []);
+        $post = $curPost !== [] ? $curPost : self::requestPostMap($req); // #478 — raw-body fallback
         $curCookie = $g->cookie;
         /** @var array<string, mixed> $cookie */
         $cookie = $curCookie !== [] ? $curCookie : self::requestCookieMap($req); // #305 — PHP-canonical $_COOKIE
@@ -9902,7 +9954,7 @@ class App
             /** @var array<string, mixed> $get */
             $get = $request->get ?? [];
             /** @var array<string, mixed> $post */
-            $post = $request->post ?? [];
+            $post = self::requestPostMap($request); // #478 — raw-body fallback for urlencoded
             // #305 — PHP-canonical $_COOKIE from the raw Cookie header (OpenSwoole's
             // own parser is disabled via http_parse_cookie=false). Idempotent: the
             // session manager already parsed + wrote it back to $request->cookie.
