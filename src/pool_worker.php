@@ -67,8 +67,14 @@ $GLOBALS['__zeal_cgi_raw_input'] = '';
 @stream_wrapper_unregister('php');
 @stream_wrapper_register('php', \ZealPHP\CGI\CgiInputStream::class);
 
-$maxRequests = (int) (getenv('ZEALPHP_POOL_MAX_REQUESTS') ?: '500');
-$count       = 0;
+// #467 — the request `include` below runs at GLOBAL scope, so these loop-control
+// vars MUST follow the worker's `$__pw_` collision-safe convention (every other
+// worker-state var already does). Unprefixed `$count`/`$maxRequests` were readable
+// AND writable by the included app — a WordPress global `$count` (a non-alphanumeric
+// string) then made `$count++` emit "Increment on non-alphanumeric string" every
+// request (fatal on PHP 9) and let the app corrupt the subprocess recycle counter.
+$__pw_max_requests = (int) (getenv('ZEALPHP_POOL_MAX_REQUESTS') ?: '500');
+$__pw_count        = 0;
 
 // Per-request capture state. Reset by reset_request_state() between frames.
 $__pw_headers    = [];   /** @var list<array{0:string,1:string}> */
@@ -541,7 +547,7 @@ if (function_exists('zealphp_process_state_snapshot')) {
 // reads this for boot sync (bounds the dispatch-after-spawn window).
 fwrite(STDERR, "ZEALPHP_POOL_WORKER_READY\n");
 
-while ($count < $maxRequests) {
+while ($__pw_count < $__pw_max_requests) {
     $req = IPC::readFrame(STDIN);
     if ($req === null) {
         break; // parent closed pipe → clean exit
@@ -594,7 +600,7 @@ while ($count < $maxRequests) {
     $__pw_mid_request = false;
 
     pool_reset_request_state();
-    $count++;
+    $__pw_count++;
 }
 
 exit(0);

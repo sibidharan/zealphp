@@ -1473,6 +1473,26 @@ class App
     }
 
     /**
+     * Clear the raw `header("HTTP/1.1 <code> <reason>")` status override at
+     * request-begin. #474 — resetting `$g->status = 200` alone is NOT enough: a
+     * prior request that set its status via a RAW status line (the canonical
+     * PSR-7 ResponseEmitter form used by Slim/Symfony) leaves
+     * `$g->raw_status_code`/`raw_status_reason` armed, and `emitEffectiveStatus()`
+     * forces that stale code onto the NEXT response. In `mixed`/`legacy-cgi` the
+     * worker reuses ONE `RequestContext` across in-worker responses, so without
+     * clearing the raw pair the status bleeds across request boundaries (e.g. a
+     * ZealAPI `404 method_not_found` served on the wire as `200 OK`). The
+     * coroutine modes get a fresh per-coroutine `RequestContext` and are immune.
+     * Restores PHP-FPM's "status is strictly request-local" contract. (`$g->status`
+     * itself is reset inline at the call site so its flow-narrowing is preserved.)
+     */
+    private static function clearRawStatusOverride(RequestContext $g): void
+    {
+        $g->raw_status_code = null;
+        $g->raw_status_reason = null;
+    }
+
+    /**
      * Stream a `\Generator` response chunk-by-chunk to the live OpenSwoole
      * response (SSR streaming), returning an empty placeholder `Response` once
      * done. Shared by the route dispatcher (`dispatchMatched`) and ZealAPI's
@@ -9606,33 +9626,46 @@ class App
      */
     private function registerImplicitRoutes(): void
     {
-        # Implicit route for including APIs.
+        # Implicit routes for including APIs — registered ONLY when an `api/`
+        # directory exists under the app cwd (ZealAPI resolves handlers from
+        # `self::$cwd.'/api/...'`, see ZealAPI::processApi). #471 — a project with
+        # NO api/ dir (e.g. hosting a foreign front-controller app like
+        # Slim/Shaarli whose own REST API lives under /api/*) would otherwise have
+        # its entire /api/* silently shadowed by these catch-alls returning the
+        # terminal #347 `method_not_found` 404, never reaching App::setFallback().
+        # Gating on the api/ dir cedes /api to the hosted app — the `/{dir}/{uri}`
+        # public route below matches `/api/...`, finds no file, and falls through
+        # to the fallback — while genuine ZealAPI projects (which DO have an api/
+        # dir) keep the implicit routes AND the #347 404 for an unmatched method.
+        #
         # The two-segment route is registered FIRST so that /api/users/list
         # matches with module=users, request=list (a single segment passing
         # the security regex), instead of being captured by the one-segment
         # catch-all as request="users/list" — which contains a slash and
         # would fail validation with a misleading "invalid_request" error.
-        $this->nsPathRoute('api', "{module}/{rquest}", [
-            'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
-        ], function(string $module, string $rquest, $response, $request){
-            $api = new ZealAPI($request, $response, self::$cwd);
-            try {
-                return $api->processApi($module, $rquest);
-            } catch (\Exception $e){
-                $api->die($e);
-            }
-        });
+        if (is_dir(self::$cwd . '/api')) {
+            $this->nsPathRoute('api', "{module}/{rquest}", [
+                'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
+            ], function(string $module, string $rquest, $response, $request){
+                $api = new ZealAPI($request, $response, self::$cwd);
+                try {
+                    return $api->processApi($module, $rquest);
+                } catch (\Exception $e){
+                    $api->die($e);
+                }
+            });
 
-        $this->nsPathRoute('api', "{rquest}", [
-            'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
-        ], function(string $rquest, $response, $request){
-            $api = new ZealAPI($request, $response, self::$cwd);
-            try {
-                return $api->processApi("", $rquest);
-            } catch (\Exception $e){
-                $api->die($e);
-            }
-        });
+            $this->nsPathRoute('api', "{rquest}", [
+                'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
+            ], function(string $rquest, $response, $request){
+                $api = new ZealAPI($request, $response, self::$cwd);
+                try {
+                    return $api->processApi("", $rquest);
+                } catch (\Exception $e){
+                    $api->die($e);
+                }
+            });
+        }
 
         # Implicit route for ignoring PHP extensions
 
@@ -9951,6 +9984,7 @@ class App
             $g = RequestContext::instance();
 
             $g->status = 200;
+            self::clearRawStatusOverride($g); // #474 — a prior raw status line must not bleed in
             /** @var array<string, mixed> $get */
             $get = $request->get ?? [];
             /** @var array<string, mixed> $post */
