@@ -133,4 +133,42 @@ class RawStatusLineTest extends TestCase
         $this->assertSame(451, $effective);
         $this->assertContains(['status', 451, 'Unavailable For Legal Reasons'], $fake->log);
     }
+
+    // ---- #474: a raw status line must not bleed into the NEXT request --------
+
+    public function testRequestBeginResetClearsRawStatusOverride(): void
+    {
+        $g = RequestContext::instance();
+        zheader('HTTP/1.1 200 OK');                 // prior request armed the raw override
+        $this->assertSame(200, $g->raw_status_code);
+
+        $m = new \ReflectionMethod(App::class, 'clearRawStatusOverride');
+        $m->setAccessible(true);
+        $m->invoke(null, $g);                       // the NEXT request begins
+
+        $this->assertNull($g->raw_status_code, '#474 — raw override cleared at request-begin');
+        $this->assertNull($g->raw_status_reason);
+        // The helper clears only the raw pair; $g->status is reset inline at the
+        // call site (left at the zheader-set 200 here, untouched by the helper).
+        $this->assertSame(200, $g->status);
+    }
+
+    public function testStatusDoesNotBleedAcrossRequestsAfterRawLine(): void
+    {
+        // request N: a Slim-style raw 200 emit arms raw_status_code on the reused $g.
+        $g = RequestContext::instance();
+        zheader('HTTP/1.1 200 OK');
+
+        // request N+1 begins (mixed/legacy-cgi reuse the same RequestContext):
+        $m = new \ReflectionMethod(App::class, 'clearRawStatusOverride');
+        $m->setAccessible(true);
+        $m->invoke(null, $g);
+
+        // request N+1 is a ZealAPI 404 — it must reach the wire as 404, not the stale 200.
+        $fake = new \ZealPHP\Tests\Unit\HTTP\FakeOpenSwooleResponse();
+        $effective = App::emitEffectiveStatus($fake, 404);
+
+        $this->assertSame(404, $effective, '#474 — 404 no longer inherits the prior 200');
+        $this->assertContains(['status', 404, 'Not Found'], $fake->log);
+    }
 }

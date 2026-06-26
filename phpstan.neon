@@ -54,23 +54,13 @@ parameters:
         -
             message: '#^Parameter \#2 \$value of method OpenSwoole\\Http\\Response::header\(\) expects string, list<string> given\.$#'
             path: src/HTTP/Response.php
-        # ResponseMiddleware re-emits $g->status after handlers run; PHPStan
-        # narrows from the constant ($beforeStatus = 200) and reports the
-        # 3-way !== check as always-false. Runtime: status is mutated by
-        # uopz overrides (http_response_code(), Response::status()) before
-        # we get here.
-        -
-            message: '#^Result of && is always false\.$#'
-            path: src/App.php
-        -
-            message: '#^Strict comparison using !== between 200 and 200 will always evaluate to false\.$#'
-            path: src/App.php
-        -
-            message: '#^Strict comparison using !== between 200 and null will always evaluate to true\.$#'
-            path: src/App.php
-        -
-            message: '#^Strict comparison using !== between \*NEVER\* and int will always evaluate to true\.$#'
-            path: src/App.php
+        # (#474) The 4 `$g->status` always-false/true ignores that used to live here
+        # were removed: the request-begin reset now calls
+        # App::clearRawStatusOverride($g), and PHPStan (2.2.x) no longer narrows
+        # `$g->status` from the constant `200` past that call — so it correctly
+        # analyses the downstream ResponseMiddleware re-emit block as LIVE (status
+        # is mutated by uopz http_response_code()/Response::status() at runtime),
+        # and the suppressions became unmatched (non-ignorable).
         # OpenSwoole\ExitException is thrown by the ext when a coroutine
         # is killed by exit()/die() inside user code; PHPStan's reflection
         # can't see throws across the openswoole stub boundary, so it
