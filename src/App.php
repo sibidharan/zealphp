@@ -466,6 +466,39 @@ class App
     public static bool $coroutine_statics_isolation = false;
 
     /**
+     * SHARED STATICS — accept function/class statics as worker-global for raw
+     * throughput, while keeping every other legacy-PHP semantic per-request.
+     *
+     * `App::sharedStatics(true)` in coroutine-legacy turns OFF the entire
+     * statics machinery: S5a per-coroutine function-static isolation (the
+     * per-yield registry walk, which scales with the app's touched statics),
+     * S5b class-static parking, and the request-begin/end static resets.
+     * Statics then behave exactly like vanilla long-running PHP (OpenSwoole /
+     * CLI): worker-global, persistent across requests, and shared across
+     * concurrently-running coroutines mid-request. Superglobals, $GLOBALS,
+     * constants, header()/session, ini/putenv, include-once re-execution and
+     * silent-redeclare all stay per-request isolated as usual.
+     *
+     * THE CONTRACT the app accepts: statics must be REQUEST-AGNOSTIC —
+     * memoisation caches, parsed config, compiled patterns. An init-once guard
+     * that gates PER-REQUEST work (WordPress's `static $first_init` in
+     * wp_start_object_cache) latches after the first request and WILL break;
+     * a static carrying per-request data (a user id, a tenant) WILL leak
+     * across requests. Unmodified legacy apps that assume PHP-FPM's fresh
+     * statics belong in full coroutine-legacy (default) or legacy-cgi.
+     *
+     * Why you'd opt in: the per-yield statics snapshot is the one
+     * coroutine-legacy cost that GROWS with app size (O(touched statics) per
+     * yield — measured -22%/yield with ~400 statics); shared statics removes
+     * it entirely, putting coroutine-legacy at plain-coroutine throughput.
+     *
+     * `null` (default) = off. Env fallback: `ZEALPHP_SHARED_STATICS=1`.
+     * Set BEFORE `App::run()`. No effect outside coroutine-legacy (statics
+     * are already worker-global in every other mode).
+     */
+    public static ?bool $shared_statics = null;
+
+    /**
      * Per-coroutine WORKING-DIRECTORY isolation (#323). `chdir()` is a
      * process-level syscall, so under coroutine concurrency one request's
      * `chdir()` (or the framework's own `executeFile()` chdir-to-script-dir)
@@ -4313,7 +4346,8 @@ class App
      */
     public static function runRequestStaticsBeginRefresh(): bool
     {
-        if (!self::perRequestStateResetsActive()
+        if (self::sharedStatics()                     // statics deliberately worker-global
+            || !self::perRequestStateResetsActive()
             || !\function_exists('zealphp_reset_request_statics_begin')
         ) {
             return false;
@@ -4362,6 +4396,23 @@ class App
             self::$coroutine_statics_isolation = $on;
         }
         return self::$coroutine_statics_isolation;
+    }
+
+    /**
+     * Shared statics — statics stay worker-global (vanilla long-process PHP)
+     * in coroutine-legacy for raw throughput; every other legacy semantic
+     * keeps per-request isolation. See the $shared_statics docblock for the
+     * request-agnostic-statics contract. Set BEFORE App::run().
+     */
+    public static function sharedStatics(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$shared_statics = $on;
+        }
+        if (self::$shared_statics !== null) {
+            return self::$shared_statics;
+        }
+        return \getenv('ZEALPHP_SHARED_STATICS') === '1';
     }
 
     /**
@@ -9397,6 +9448,29 @@ class App
             && \function_exists('zealphp_silent_redeclare')
         ) {
             (\zealphp_silent_redeclare(...))((bool) true);
+        }
+
+        // Shared statics: the app accepts worker-global statics (vanilla
+        // long-process semantics) for raw throughput — turn off the WHOLE
+        // statics machinery before it activates: S5a below (force the flag
+        // off), and the ext-side per-request resets + S5b class-static v2 via
+        // their env kill-switches. putenv() here runs in the MASTER pre-fork,
+        // so workers inherit; the ext reads each switch lazily once per
+        // worker. Everything else (superglobals, $GLOBALS, constants, S7/S3,
+        // rtcache reset) is untouched. See the $shared_statics docblock.
+        if (self::sharedStatics()) {
+            self::$coroutine_statics_isolation = false;
+            \putenv('ZEALPHP_FN_STATICS_DISABLE=1');
+            \putenv('ZEALPHP_FN_STATICS_RESET_DISABLE=1');
+            \putenv('ZEALPHP_CLASS_STATICS_RESET_DISABLE=1');
+            \putenv('ZEALPHP_CLASS_STATICS_V2_DISABLE=1');
+            elog(
+                '[info] sharedStatics(true): function/class statics are '
+                . 'WORKER-GLOBAL (shared across requests and concurrent '
+                . 'coroutines). Statics must be request-agnostic — '
+                . 'memoisation/config only.',
+                'info'
+            );
         }
 
         // Stage 5: per-coroutine function-local static isolation. Default-ON
