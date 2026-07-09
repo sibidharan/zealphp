@@ -131,13 +131,43 @@ class ZealAPI extends REST
      * injects named parameters, applies any in-file `$middleware`, and returns the
      * result through the universal return contract.
      *
-     * @param string      $module  URL sub-path (e.g. `'device'` for `/api/device/list`)
-     * @param string|null $request Basename without `.php` (e.g. `'list'`)
+     * @param string      $module  URL sub-path (e.g. `'device'` for `/api/device/list`).
+     *                             May be arbitrarily nested (`'a/b/c'`) — slashes become
+     *                             directory components under `api/`.
+     * @param string|null $request Handler basename without `.php` (e.g. `'list'`). A
+     *                             slashed tail (what the implicit route's catch-all
+     *                             captures for nested URLs, e.g. `'notes/download'`) is
+     *                             accepted: its directory components are folded into
+     *                             `$module` before validation (#485).
      * @return mixed
      */
     public function processApi($module, $request=null)
     {
         $g = RequestContext::instance();
+
+        // #485: the implicit /api routes compile their LAST {param} as a
+        // slash-matching catch-all, so a nested URL arrives with the whole
+        // path tail in $request — /api/programs/notes/download dispatches as
+        // $module="programs", $request="notes/download" — while file
+        // resolution needs the directories in $module (slashes are legal
+        // there and become path components under api/) and the slash-free
+        // script basename in $request. Fold the tail's directories into
+        // $module so endpoint nesting depth is unbounded, exactly like
+        // filesystem routing under mod_php/FPM. Malformed tails (an empty
+        // segment from a leading, trailing, or doubled slash) are left
+        // untouched so the strict $request validation below keeps rejecting
+        // them with 400 invalid_request, exactly as before. Traversal stays
+        // impossible downstream: the $module regex admits no dots and the
+        // realpath() containment gate is unchanged.
+        if (\is_string($request) && ($slash = \strrpos($request, '/')) !== false) {
+            $dirs = \substr($request, 0, $slash);
+            $base = \substr($request, $slash + 1);
+            if ($dirs !== '' && $base !== '' && !\str_contains('/' . $dirs . '/', '//')) {
+                $module  = ($module ? $module . '/' : '') . $dirs;
+                $request = $base;
+            }
+        }
+
         $module = $module ? '/'.$module : '';
         $func = basename($request ?? '');
 

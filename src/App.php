@@ -9713,10 +9713,13 @@ class App
         # dir) keep the implicit routes AND the #347 404 for an unmatched method.
         #
         # The two-segment route is registered FIRST so that /api/users/list
-        # matches with module=users, request=list (a single segment passing
-        # the security regex), instead of being captured by the one-segment
-        # catch-all as request="users/list" — which contains a slash and
-        # would fail validation with a misleading "invalid_request" error.
+        # matches with module=users, request=list, instead of being captured
+        # by the one-segment catch-all as request="users/list". For URLs
+        # nested DEEPER than one directory level the catch-all still puts the
+        # whole tail in {rquest} (module="a", rquest="b/c/d") — processApi()
+        # folds the tail's directory components back into $module before
+        # validation (#485), so endpoint files may nest arbitrarily deep
+        # under api/, exactly like filesystem routing under mod_php.
         if (is_dir(self::$cwd . '/api')) {
             $this->nsPathRoute('api', "{module}/{rquest}", [
                 'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
