@@ -162,14 +162,14 @@ docker_setup() {
     docker-php-ext-enable --ini-name zz-openswoole.ini openswoole
     php -r 'exit(extension_loaded("openswoole") ? 0 : 1);' || { echo -e "${RED}OpenSwoole built but failed to load.${RESET}"; exit 1; }
 
-    echo -e "${YELLOW}Installing ext-zealphp ${ZEALPHP_EXT_VERSION:-v0.3.59} for Docker image.${RESET}"
+    echo -e "${YELLOW}Installing ext-zealphp ${ZEALPHP_EXT_VERSION:-v0.3.60} for Docker image.${RESET}"
     # Pinned tagged SOURCE build for the Docker image — deliberately reproducible and
     # supply-chain-proof (same rationale as OpenSwoole above: do not depend on pie /
     # Packagist network state at image-build time). Interactive installs use pie;
     # the image pins a known-good tag. ext-zealphp is required — no uopz fallback.
     # NOTE: the ext has its OWN 0.3.x version line — do NOT confuse it with the
     # framework's 0.3.x. Override with ZEALPHP_EXT_VERSION.
-    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.59}" https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
+    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.60}" https://github.com/sibidharan/ext-zealphp.git /tmp/ext-zealphp
     if (cd /tmp/ext-zealphp && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && make install); then
         docker-php-ext-enable --ini-name zz-zealphp.ini zealphp
         rm -rf /tmp/ext-zealphp
@@ -614,8 +614,8 @@ ensure_pie() {
 # updates are just `pie install zealphp/ext`. Returns 0 on success, 1 to fall back.
 pie_install_zealphp_ext() {
     ensure_pie || return 1
-    local ver="${ZEALPHP_EXT_VERSION:-v0.3.59}"
-    local constraint="^${ver#v}"   # v0.3.59 -> ^0.3.59 (newest patch within the line)
+    local ver="${ZEALPHP_EXT_VERSION:-v0.3.60}"
+    local constraint="^${ver#v}"   # v0.3.60 -> ^0.3.59 (newest patch within the line)
     echo -e "${YELLOW}Installing zealphp/ext ${constraint} via pie.${RESET}"
     # shellcheck disable=SC2086
     if $SUDO $PIE_BIN install "zealphp/ext:${constraint}"; then
@@ -641,7 +641,7 @@ install_zealphp_ext() {
     # Fallback: tagged source build (pie unavailable or its install failed).
     local tmpdir
     tmpdir="$(mktemp -d)"
-    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.59}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir/ext-zealphp" || {
+    git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.60}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir/ext-zealphp" || {
         echo -e "${RED}Failed to clone ext-zealphp repo.${RESET}"
         rm -rf "$tmpdir"
         return 1
@@ -752,7 +752,7 @@ macos_setup() {
     else
         local tmpdir
         tmpdir="$(mktemp -d)"
-        if git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.59}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir" && \
+        if git clone --depth 1 --branch "${ZEALPHP_EXT_VERSION:-v0.3.60}" https://github.com/sibidharan/ext-zealphp.git "$tmpdir" && \
            (cd "$tmpdir" && phpize && ./configure --enable-zealphp && make -j"${ZEALPHP_BUILD_JOBS}" && make install); then
             echo "extension=zealphp.so" > "${php_ini_dir}/zz-zealphp.ini"
             rm -rf "$tmpdir"
