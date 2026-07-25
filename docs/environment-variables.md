@@ -34,6 +34,8 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 
 > `ZEALPHP_LOG_DIR` has a per-user fallback chain — when unset, the resolver tries `/tmp/zealphp`, then per-user XDG/temp dirs, then `./tmp/zealphp` and `./logs/zealphp`. See [`docs/cli.md`](cli.md) and [`docs/hot-reload.md`](hot-reload.md) for the log/PID directory behaviour.
 
+> **Every `*_LOG_FILE` variable accepts a PHP stream wrapper**, so `php://stdout` / `php://stderr` turn the file sinks into container streams — the 12-factor setup, see [Container-friendly logging](deployment.md#container-friendly-logging-stdout--stderr). This also matters because **`error_log()` is overridden** to write into the debug log rather than stderr ([note](runtime-architecture.md#️-error_log-is-overridden--it-writes-to-debuglog-not-stderr)); without the redirect above, `error_log()` output never reaches `docker logs`.
+
 | Variable | Default | Scope | Description |
 |----------|---------|-------|-------------|
 | `ZEALPHP_LOG_DIR` | unset → first writable candidate (`/tmp/zealphp`, then per-user XDG/temp, then `./tmp/zealphp`, `./logs/zealphp`) | user | Explicit override for the directory ZealPHP writes logs and per-port PID files into (read in `zealphp_log_dir_candidates()` in `src/utils.php` and the PID-dir/logs resolution in `App.php`). |

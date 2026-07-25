@@ -323,3 +323,31 @@ App::onWorkerStart(function($server, $workerId) {
 When the server stops (SIGTERM, `php app.php stop`, or `Ctrl+C`), ZealPHP's `shutdown` handler sends a WebSocket CLOSE frame with code **1001 Going Away** to every connected client before the process exits. Browser-side `ws.onclose` handlers receive `event.code === 1001`, which is the standard signal to back off and reconnect rather than treat the disconnect as an error.
 
 `App::onWorkerStart()` is also where you'd warm up shared state, start producer coroutines, or pre-populate `Store` tables — anything that should run once per worker before the first connection arrives.
+
+### `App::onWorkerStart()` callback signature
+
+The hook is always invoked with **two** arguments, in this order:
+
+```php
+App::onWorkerStart(function ($server, int $workerId) { /* … */ });
+//                            ^^^^^^^  ^^^^^^^^^^
+//                            OpenSwoole server   0-based worker id
+```
+
+Take both parameters even if you only need the id. PHP silently drops extra arguments passed to a userland closure, so a one-parameter `function ($workerId)` binds the **server object** to `$workerId` — no warning, no exception. That breaks the most common use of the hook, running something exactly once per server rather than once per worker:
+
+```php
+App::onWorkerStart(function ($workerId) {      // ✗ WRONG — $workerId is the Server
+    if ($workerId === 0) {                     //   never true
+        startSingletonTicker();                //   silently never runs
+    }
+});
+
+App::onWorkerStart(function ($server, $workerId) {   // ✓ correct
+    if ($workerId === 0) {
+        startSingletonTicker();
+    }
+});
+```
+
+Task workers fire this hook too, with ids continuing past the HTTP worker range — so `$workerId === 0` selects exactly one process in the whole server.

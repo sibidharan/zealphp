@@ -235,6 +235,25 @@ When superglobals are disabled, `CoSessionManager` applies the same behaviour wh
 - `jTraceEx($exception)` builds Java-style stack traces for easier debugging.
 - When `App::$display_errors` is false, clients receive generic `500 Internal Server Error` responses even if the server logs the detailed exception.
 
+### ⚠️ `error_log()` is overridden — it writes to `debug.log`, not stderr
+
+ZealPHP replaces the `error_log` builtin at boot (`App::overrideBuiltin('error_log', …)`), so it does **not** follow PHP's `error_log` ini directive (which under the CLI SAPI means stderr). Every `error_log($msg)` call lands in the debug log — `/tmp/zealphp/debug.log` by default — tagged `[error_log]`.
+
+This matters most in containers, where nothing tails `/tmp`: the output is effectively lost, and because the failure mode is **silence**, it reads as *"my code path never ran"* rather than *"my log went somewhere else"*.
+
+| call | container stdout/stderr (`docker logs`) | `debug.log` |
+|---|---|---|
+| `error_log($m)` | ✗ | ✓ (tagged `[error_log]`) |
+| `ZealPHP\elog($m)` | ✗ | ✓ |
+| `fwrite(STDERR, $m)` | ✓ | ✗ |
+| `fwrite(STDOUT, $m)` | ✓ | ✗ |
+
+**Rules of thumb**
+
+- Want it on the container's stream regardless of configuration? Use `fwrite(STDERR, …)` — the worker's stderr is *not* detached, it is the same pipe as PID 1's.
+- Want it in the framework's structured log? Use `elog()` — that is the intended API, and it carries levels.
+- Want `error_log()` (and everything else) on stdout/stderr? Point the log files at PHP stream wrappers — see [Container-friendly logging](deployment.md#container-friendly-logging-stdout--stderr).
+
 ## Choosing Between Execution Modes
 
 ### One-call presets — `App::mode()`

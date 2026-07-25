@@ -2031,6 +2031,34 @@ When the server stops (SIGTERM, `php app.php stop`, or `Ctrl+C`), ZealPHP's `shu
 
 `App::onWorkerStart()` is also where you'd warm up shared state, start producer coroutines, or pre-populate `Store` tables — anything that should run once per worker before the first connection arrives.
 
+### `App::onWorkerStart()` callback signature
+
+The hook is always invoked with **two** arguments, in this order:
+
+```php
+App::onWorkerStart(function ($server, int $workerId) { /* … */ });
+//                            ^^^^^^^  ^^^^^^^^^^
+//                            OpenSwoole server   0-based worker id
+```
+
+Take both parameters even if you only need the id. PHP silently drops extra arguments passed to a userland closure, so a one-parameter `function ($workerId)` binds the **server object** to `$workerId` — no warning, no exception. That breaks the most common use of the hook, running something exactly once per server rather than once per worker:
+
+```php
+App::onWorkerStart(function ($workerId) {      // ✗ WRONG — $workerId is the Server
+    if ($workerId === 0) {                     //   never true
+        startSingletonTicker();                //   silently never runs
+    }
+});
+
+App::onWorkerStart(function ($server, $workerId) {   // ✓ correct
+    if ($workerId === 0) {
+        startSingletonTicker();
+    }
+});
+```
+
+Task workers fire this hook too, with ids continuing past the HTTP worker range — so `$workerId === 0` selects exactly one process in the whole server.
+
 ## Middleware and Authentication
 
 Middleware is the preferred way to enforce cross-cutting policies in ZealPHP. The framework embraces PSR-15 (`Psr\Http\Server\MiddlewareInterface`) and runs every request through a configurable stack before handing it to the routing engine. This guide shows how to register middleware, build authentication flows, and combine them with the file-based routing model.
@@ -3657,6 +3685,25 @@ When superglobals are disabled, `CoSessionManager` applies the same behaviour wh
 - `jTraceEx($exception)` builds Java-style stack traces for easier debugging.
 - When `App::$display_errors` is false, clients receive generic `500 Internal Server Error` responses even if the server logs the detailed exception.
 
+### ⚠️ `error_log()` is overridden — it writes to `debug.log`, not stderr
+
+ZealPHP replaces the `error_log` builtin at boot (`App::overrideBuiltin('error_log', …)`), so it does **not** follow PHP's `error_log` ini directive (which under the CLI SAPI means stderr). Every `error_log($msg)` call lands in the debug log — `/tmp/zealphp/debug.log` by default — tagged `[error_log]`.
+
+This matters most in containers, where nothing tails `/tmp`: the output is effectively lost, and because the failure mode is **silence**, it reads as *"my code path never ran"* rather than *"my log went somewhere else"*.
+
+| call | container stdout/stderr (`docker logs`) | `debug.log` |
+|---|---|---|
+| `error_log($m)` | ✗ | ✓ (tagged `[error_log]`) |
+| `ZealPHP\elog($m)` | ✗ | ✓ |
+| `fwrite(STDERR, $m)` | ✓ | ✗ |
+| `fwrite(STDOUT, $m)` | ✓ | ✗ |
+
+**Rules of thumb**
+
+- Want it on the container's stream regardless of configuration? Use `fwrite(STDERR, …)` — the worker's stderr is *not* detached, it is the same pipe as PID 1's.
+- Want it in the framework's structured log? Use `elog()` — that is the intended API, and it carries levels.
+- Want `error_log()` (and everything else) on stdout/stderr? Point the log files at PHP stream wrappers — see [Container-friendly logging](deployment.md#container-friendly-logging-stdout--stderr).
+
 ## Runtime Architecture — Choosing Between Execution Modes
 
 ### One-call presets — `App::mode()`
@@ -4370,6 +4417,8 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 
 > `ZEALPHP_LOG_DIR` has a per-user fallback chain — when unset, the resolver tries `/tmp/zealphp`, then per-user XDG/temp dirs, then `./tmp/zealphp` and `./logs/zealphp`. See [`docs/cli.md`](cli.md) and [`docs/hot-reload.md`](hot-reload.md) for the log/PID directory behaviour.
 
+> **Every `*_LOG_FILE` variable accepts a PHP stream wrapper**, so `php://stdout` / `php://stderr` turn the file sinks into container streams — the 12-factor setup, see [Container-friendly logging](deployment.md#container-friendly-logging-stdout--stderr). This also matters because **`error_log()` is overridden** to write into the debug log rather than stderr ([note](runtime-architecture.md#️-error_log-is-overridden--it-writes-to-debuglog-not-stderr)); without the redirect above, `error_log()` output never reaches `docker logs`.
+
 | Variable | Default | Scope | Description |
 |----------|---------|-------|-------------|
 | `ZEALPHP_LOG_DIR` | unset → first writable candidate (`/tmp/zealphp`, then per-user XDG/temp, then `./tmp/zealphp`, `./logs/zealphp`) | user | Explicit override for the directory ZealPHP writes logs and per-port PID files into (read in `zealphp_log_dir_candidates()` in `src/utils.php` and the PID-dir/logs resolution in `App.php`). |
@@ -4402,6 +4451,7 @@ This is the canonical reference for every `ZEALPHP_*` environment variable read 
 | `ZEALPHP_HTTP_COMPRESSION` | `!$compressionMiddleware` (true when `CompressionMiddleware` is NOT registered, false when it is) | user | In `app.php`, sets the OpenSwoole `http_compression` server setting (`env_flag`) — toggles OpenSwoole's built-in gzip/deflate response compression. |
 | `ZEALPHP_OPCACHE_ADVISORY` | unset (advisory enabled; only literal `'0'` suppresses) | user | Read in `App::opcacheLegacyBootCheck()` via `getenv()==='0'`; when `'0'`, suppresses the boot-time advisory about opcache + coroutine-legacy re-declaring `require_once`'d classes. |
 | `ZEALPHP_FN_STATICS_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineStaticsIsolation()` — when `'1'`, disables per-coroutine isolation of function-local `static $x` (S5a) for raw throughput. |
+| `ZEALPHP_SHARED_STATICS` | unset (off; only literal `'1'` enables) | user | Read by `App::sharedStatics()` when no explicit setter call was made. When `'1'` in coroutine-legacy, the WHOLE statics machinery is off (S5a isolation, S5b class-static parking, begin/end per-request static resets) — statics become worker-global like vanilla long-running PHP, while superglobals/$GLOBALS/constants/session/ini stay per-request isolated. Contract: statics must be request-agnostic (memoisation/config only). See the `App::$shared_statics` docblock. |
 | `ZEALPHP_CWD_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineCwdIsolation()` — when `'1'`, disables per-coroutine working-directory isolation (S9a, #323), so a request's `chdir()` leaks process-wide again. |
 | `ZEALPHP_LOCALE_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineLocaleIsolation()` — when `'1'`, disables per-coroutine `setlocale()` isolation (S9b). |
 | `ZEALPHP_UMASK_ISOLATION_DISABLE` | unset (isolation stays ENABLED in coroutine-legacy; only literal `'1'` disables) | user | Read in `App::mode()` via `(string)getenv()!=='1'` to set `coroutineUmaskIsolation()` — when `'1'`, disables per-coroutine `umask()` isolation (S9c). |
@@ -4734,6 +4784,23 @@ systemd unit (`Environment="..."`), Docker `-e` flags, or shell.
 | `ZEALPHP_LOG_ASYNC` | bool | `1` | Use coroutine channels for log writes |
 | `ZEALPHP_BENCH_MODE` | bool | `0` | Disables all logging for benchmarks |
 
+#### Container-friendly logging (stdout / stderr)
+
+By default every stream is a **file** under `ZEALPHP_LOG_DIR` (`/tmp/zealphp`). In a container that is the wrong destination: nothing tails `/tmp`, so logs vanish with the container and `docker logs` stays empty. Note this also swallows `error_log()` output, which ZealPHP redirects into `debug.log` rather than stderr — see [the `error_log()` override note](runtime-architecture.md#️-error_log-is-overridden--it-writes-to-debuglog-not-stderr).
+
+The log-file resolver accepts PHP stream wrappers, so the 12-factor setup is just three env vars:
+
+```yaml
+environment:
+  ZEALPHP_ACCESS_LOG_FILE: "php://stdout"
+  ZEALPHP_DEBUG_LOG_FILE:  "php://stderr"
+  ZEALPHP_ZLOG_FILE:       "php://stderr"
+```
+
+With that set, `/tmp/zealphp/` holds only the PID file, and `docker logs` carries boot messages, route registration, access lines, `elog()` output **and** `error_log()` output — ready for `docker logs`, `kubectl logs`, or any log shipper reading the container's streams. Verified on v0.4.13.
+
+If you would rather keep files (for `logrotate`, or to keep access logs off the error stream), leave these unset and mount `ZEALPHP_LOG_DIR` on a volume instead.
+
 ### Compression
 
 | Variable | Type | Default | Purpose |
@@ -4821,7 +4888,7 @@ needed.
 ### Build
 
 ```bash
-docker build -t zealphp:0.4.12 .
+docker build -t zealphp:0.4.13 .
 ```
 
 The shipped `Dockerfile` is PHP 8.4-cli on `bookworm` with OpenSwoole and
@@ -4833,7 +4900,7 @@ versions with the build args:
 docker build \
     --build-arg OPENSWOOLE_VERSION=22.1.2 \
     --build-arg ZEALPHP_EXT_VERSION=v0.3.33 \
-    -t zealphp:0.4.12 .
+    -t zealphp:0.4.13 .
 ```
 
 ### Run (single container)
@@ -4845,7 +4912,7 @@ docker run -d \
     -e ZEALPHP_TASK_WORKERS=0 \
     --restart unless-stopped \
     --name zealphp \
-    zealphp:0.4.12
+    zealphp:0.4.13
 ```
 
 ### Production compose
@@ -4856,7 +4923,7 @@ production, bake your app into the image and avoid volume mounts:
 ```yaml
 services:
   app:
-    image: registry.example.com/zealphp-app:0.4.12
+    image: registry.example.com/zealphp-app:0.4.13
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -5034,7 +5101,10 @@ use ZealPHP\Counter;
 
 $reqs = new Counter(0, 'http_requests_total');
 
-App::onWorkerStart(function ($workerId) use ($reqs) {
+// Hooks are called as $fn($server, $workerId) — take BOTH parameters. Writing
+// `function ($workerId)` binds the SERVER to $workerId, so the `=== 0` guard
+// below silently never matches and the ticker never starts (#491).
+App::onWorkerStart(function ($server, $workerId) use ($reqs) {
     if ($workerId !== 0) return;        // worker 0 only
     App::tick(15_000, function () use ($reqs) {
         $lines = [
