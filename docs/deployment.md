@@ -132,6 +132,23 @@ systemd unit (`Environment="..."`), Docker `-e` flags, or shell.
 | `ZEALPHP_LOG_ASYNC` | bool | `1` | Use coroutine channels for log writes |
 | `ZEALPHP_BENCH_MODE` | bool | `0` | Disables all logging for benchmarks |
 
+#### Container-friendly logging (stdout / stderr)
+
+By default every stream is a **file** under `ZEALPHP_LOG_DIR` (`/tmp/zealphp`). In a container that is the wrong destination: nothing tails `/tmp`, so logs vanish with the container and `docker logs` stays empty. Note this also swallows `error_log()` output, which ZealPHP redirects into `debug.log` rather than stderr — see [the `error_log()` override note](runtime-architecture.md#️-error_log-is-overridden--it-writes-to-debuglog-not-stderr).
+
+The log-file resolver accepts PHP stream wrappers, so the 12-factor setup is just three env vars:
+
+```yaml
+environment:
+  ZEALPHP_ACCESS_LOG_FILE: "php://stdout"
+  ZEALPHP_DEBUG_LOG_FILE:  "php://stderr"
+  ZEALPHP_ZLOG_FILE:       "php://stderr"
+```
+
+With that set, `/tmp/zealphp/` holds only the PID file, and `docker logs` carries boot messages, route registration, access lines, `elog()` output **and** `error_log()` output — ready for `docker logs`, `kubectl logs`, or any log shipper reading the container's streams. Verified on v0.4.13.
+
+If you would rather keep files (for `logrotate`, or to keep access logs off the error stream), leave these unset and mount `ZEALPHP_LOG_DIR` on a volume instead.
+
 ### Compression
 
 | Variable | Type | Default | Purpose |
@@ -432,7 +449,10 @@ use ZealPHP\Counter;
 
 $reqs = new Counter(0, 'http_requests_total');
 
-App::onWorkerStart(function ($workerId) use ($reqs) {
+// Hooks are called as $fn($server, $workerId) — take BOTH parameters. Writing
+// `function ($workerId)` binds the SERVER to $workerId, so the `=== 0` guard
+// below silently never matches and the ticker never starts (#491).
+App::onWorkerStart(function ($server, $workerId) use ($reqs) {
     if ($workerId !== 0) return;        // worker 0 only
     App::tick(15_000, function () use ($reqs) {
         $lines = [

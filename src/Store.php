@@ -78,6 +78,14 @@ class Store
     private static array $backendConfig = ['kind' => 'table'];
 
     /**
+     * #490 — whether the deferred Tiered-advisory worker-start hook is already
+     * registered. Scheduling must be idempotent: `defaultBackend()` can be
+     * called more than once (re-configuration, test setup) and each call would
+     * otherwise append another hook and duplicate the boot warning.
+     */
+    private static bool $tieredAdvisoryScheduled = false;
+
+    /**
      * Get or set the process-wide default backend.
      *
      * Prefers `StoreBackendKind` (type-safe enum) but accepts the bare
@@ -201,24 +209,90 @@ class Store
 
         $backend = new TieredBackend(new TableBackend(), $l2, l1Ttl: $l1Ttl, invalidationSecret: $secret);
 
-        // Surface the silent cross-node coherence gap at build time. The
-        // default Tiered backend ships with invalidation OFF (it needs a
-        // coroutine + a secret decision the framework can't make for the
-        // operator), so a key updated on node A serves stale from node B's L1
-        // for up to $l1Ttl. We do NOT auto-enable it (that changes Redis
-        // subscription behaviour) — we make the gap LOUD instead. The
-        // testable decision lives in tieredAdvisory(); emit it via elog so it
-        // reaches the same boot-log channel as the other Store advisories.
-        $advisory = self::tieredAdvisory($backend);
-        if ($advisory !== null) {
-            if (function_exists('ZealPHP\\elog')) {
-                \ZealPHP\elog($advisory, 'warn');
-            } else {
-                error_log($advisory);
-            }
-        }
+        // Surface the silent cross-node coherence gap. The default Tiered
+        // backend ships with invalidation OFF (it needs a coroutine + a secret
+        // decision the framework can't make for the operator), so a key updated
+        // on node A serves stale from node B's L1 for up to $l1Ttl. We do NOT
+        // auto-enable it (that changes Redis subscription behaviour) — we make
+        // the gap LOUD instead. The testable decision lives in
+        // tieredAdvisory(); scheduling decides WHEN it is evaluated (#490).
+        self::scheduleTieredAdvisory();
 
         return $backend;
+    }
+
+    /**
+     * Schedule the Tiered advisory for evaluation at a moment when the operator
+     * could actually have satisfied it (#490).
+     *
+     * The advisory asks for `enableInvalidation()`, which MUST run inside a
+     * coroutine — i.e. from an `App::onWorkerStart()` hook. That is necessarily
+     * LATER than this build moment: `Store::defaultBackend()` is called at
+     * `app.php` file scope, before `App::init()`/`run()`, when no scheduler
+     * exists. Evaluating the decision here therefore made it STRUCTURALLY
+     * UNSATISFIABLE — an app doing exactly what the message asks still logged
+     * "invalidation is OFF" on every boot, forever. Worse, because that branch
+     * always won at build time, the SECOND advisory (invalidation ON but
+     * UNAUTHENTICATED — a real evict-forgery/DoS signal) was unreachable.
+     *
+     * So defer it: register a worker-start hook that arms a 1 ms timer. The
+     * timer fires once the worker-start callback returns to the event loop —
+     * i.e. after EVERY worker-start hook has run — so the decision observes the
+     * final state regardless of whether the operator registered their
+     * `enableInvalidation()` hook before or after this backend was built (hooks
+     * run in registration order, and this backend is usually built first).
+     * Gated to worker 0 so a 32-worker server logs the advisory once, not 32
+     * times; task workers (higher ids) are skipped by the same gate.
+     *
+     * The hook fires against the CURRENT process-wide default backend, not the
+     * instance built here, so a backend swapped after this call is advised
+     * accurately. Scheduling is idempotent — repeated `defaultBackend()` calls
+     * (tests, re-configuration) must not pile up hooks or duplicate warnings.
+     *
+     * If no server ever runs (plain CLI script, unit test) the hook simply
+     * never fires and nothing is logged; `Store::tieredBootChecks()` remains
+     * the synchronous seam for callers that want the decision on demand.
+     */
+    private static function scheduleTieredAdvisory(): void
+    {
+        if (self::$tieredAdvisoryScheduled) {
+            return;
+        }
+        self::$tieredAdvisoryScheduled = true;
+
+        App::onWorkerStart(static function ($server, int $workerId): void {
+            if ($workerId !== 0) {
+                return;   // one advisory per server, not one per worker
+            }
+            // 1 ms (not 0 — OpenSwoole\Timer requires >= 1) lands on the next
+            // loop iteration, i.e. after the whole hook chain has completed.
+            App::after(1, static function (): void {
+                self::emitTieredAdvisory();
+            });
+        });
+    }
+
+    /**
+     * Emit the Tiered advisory (if any) for the CURRENT default backend, on the
+     * boot-log channel the other Store/App advisories use. Split from the
+     * decision (`tieredAdvisory()`, pure) and the timing
+     * (`scheduleTieredAdvisory()`) so each is testable on its own.
+     */
+    private static function emitTieredAdvisory(): void
+    {
+        $backend = self::$backend;
+        if (!$backend instanceof TieredBackend) {
+            return;   // swapped to a non-Tiered backend before the timer fired
+        }
+        $advisory = self::tieredAdvisory($backend);
+        if ($advisory === null) {
+            return;
+        }
+        if (function_exists('ZealPHP\\elog')) {
+            \ZealPHP\elog($advisory, 'warn');
+        } else {
+            error_log($advisory);
+        }
     }
 
     /**
@@ -229,12 +303,13 @@ class Store
      * cross-node L1 coherence is OFF, how to turn it on, and the
      * enable-relative-to-make boot-order requirement. When invalidation IS
      * enabled but no HMAC secret is set, the message instead warns that any
-     * Redis writer can forge an evict (the C2 trust-mode gap). Returns null
-     * when invalidation is enabled with a secret — nothing to warn about.
+     * Redis writer can forge an evict (the C2 trust-mode gap) — a branch that
+     * was unreachable from the boot path until #490 moved the evaluation past
+     * worker start. Returns null when invalidation is enabled with a secret.
      *
      * Pure (no side effects) so a unit test can assert the decision; the
-     * build path emits it via `elog`. Mirrors the shape of
-     * `App::redisBootChecks()` / `App::opcacheLegacyBootCheck()`.
+     * boot path emits it via `elog` (see `scheduleTieredAdvisory()`). Mirrors
+     * the shape of `App::redisBootChecks()` / `App::opcacheLegacyBootCheck()`.
      */
     public static function tieredAdvisory(StoreBackend $backend): ?string
     {
@@ -244,8 +319,9 @@ class Store
         if (!$backend->isInvalidationEnabled()) {
             return 'Store(Tiered): cross-node L1 invalidation is OFF — a key updated on one node serves '
                 . 'STALE from another node\'s L1 cache for up to l1_ttl (' . $backend->l1Ttl() . 's). '
-                . 'Call $backend->enableInvalidation() inside a coroutine at boot to evict peer L1 entries '
-                . 'sub-millisecond, and set an invalidation_secret (or ZEALPHP_TIERED_INVALIDATION_SECRET) '
+                . 'Call $backend->enableInvalidation() from an App::onWorkerStart() hook to evict peer L1 '
+                . 'entries sub-millisecond — it spawns a subscriber coroutine, so it CANNOT be called at '
+                . 'app.php file scope (no scheduler yet) — and set an invalidation_secret (or ZEALPHP_TIERED_INVALIDATION_SECRET) '
                 . 'so peers can authenticate evicts. BOOT-ORDER: call enableInvalidation() during boot for '
                 . 'every table you make() (tables made() before OR after enable() auto-subscribe; do not '
                 . 'interleave make()/stop()/enable() at runtime).';
