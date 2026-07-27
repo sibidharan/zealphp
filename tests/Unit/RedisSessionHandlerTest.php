@@ -85,12 +85,18 @@ class RedisSessionHandlerTest extends TestCase
         // instantiation needed (which would trigger Redis connect()).
         $ref = new \ReflectionMethod(RedisSessionHandler::class, '__construct');
         $params = $ref->getParameters();
-        $this->assertCount(4, $params, 'constructor should take host, port, prefix, ttl');
+        $this->assertCount(5, $params, 'constructor should take host, port, prefix, ttl, auth');
         $names = array_map(static fn(\ReflectionParameter $p): string => $p->getName(), $params);
-        $this->assertSame(['host', 'port', 'prefix', 'ttl'], $names);
+        // #494: `auth` is appended LAST and defaulted, so the pre-existing
+        // positional order is untouched and 4-argument call sites keep working.
+        $this->assertSame(['host', 'port', 'prefix', 'ttl', 'auth'], $names);
         foreach ($params as $p) {
             $this->assertTrue($p->isDefaultValueAvailable(), "{$p->getName()} should have a default");
         }
+        $this->assertNull(
+            $params[4]->getDefaultValue(),
+            'auth must default to null — sending AUTH to a passwordless server is an error'
+        );
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -229,5 +235,110 @@ class RedisSessionHandlerTest extends TestCase
             $captured->isConnected(),
             '#438: per-coroutine \Redis socket must be closed when the coroutine ends, not leaked to context GC'
         );
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // #494 — AUTH support. The credential decision is a pure protected
+    // seam, so these run WITHOUT ext-redis or a live server.
+    // ──────────────────────────────────────────────────────────────
+
+    /** Expose the protected seam — subclassing also proves the visibility fix. */
+    private function credentialOf(RedisSessionHandler $h): string|array|null
+    {
+        $probe = new class ('127.0.0.1', 6379) extends RedisSessionHandler {
+            public static function credential(RedisSessionHandler $h): string|array|null
+            {
+                // Same-class scope: a subclass can reach the protected seam.
+                return $h->authCredential();
+            }
+        };
+        return $probe::credential($h);
+    }
+
+    public function testNoAuthByDefaultSoPasswordlessServersKeepWorking(): void
+    {
+        // Redis errors on an AUTH sent to a server with no requirepass, so the
+        // default MUST stay "send nothing" — otherwise every existing
+        // passwordless deployment breaks on upgrade.
+        $this->assertNull($this->credentialOf(new RedisSessionHandler()));
+    }
+
+    public function testFourArgumentConstructionStillWorks(): void
+    {
+        // BC: $auth is trailing + defaulted; pre-#494 call sites are unaffected.
+        $h = new RedisSessionHandler('127.0.0.1', 6379, 'PHPREDIS_SESSION:', 1440);
+        $this->assertNull($this->credentialOf($h));
+    }
+
+    public function testPasswordIsUsedAsRequirepassCredential(): void
+    {
+        $h = new RedisSessionHandler('127.0.0.1', 6379, 'PHPREDIS_SESSION:', 1440, 's3cret');
+        $this->assertSame('s3cret', $this->credentialOf($h));
+    }
+
+    public function testUserPasswordPairIsPreservedForRedis6AclUsers(): void
+    {
+        // phpredis takes [user, pass] for an ACL user — the scoped-account case.
+        $h = new RedisSessionHandler('127.0.0.1', 6379, 'PHPREDIS_SESSION:', 1440, ['sessions', 's3cret']);
+        $this->assertSame(['sessions', 's3cret'], $this->credentialOf($h));
+    }
+
+    /**
+     * Blank/empty configurations must normalise to null (no AUTH sent) rather
+     * than sending an empty credential a server would reject.
+     *
+     * @return array<string, array{0: string|array<int,mixed>|null}>
+     */
+    public static function blankCredentialProvider(): array
+    {
+        return [
+            'null'            => [null],
+            'empty string'    => [''],
+            'empty array'     => [[]],
+            'array of blanks' => [['', '']],
+        ];
+    }
+
+    /**
+     * @param string|array<int,mixed>|null $auth
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('blankCredentialProvider')]
+    public function testBlankCredentialsSendNoAuth(string|array|null $auth): void
+    {
+        /** @var string|list<string>|null $auth */
+        $h = new RedisSessionHandler('127.0.0.1', 6379, 'PHPREDIS_SESSION:', 1440, $auth);
+        $this->assertNull($this->credentialOf($h));
+    }
+
+    public function testConstructorStillDoesNotConnectEagerlyWithAuth(): void
+    {
+        // #271 must continue to hold with a credential configured — construction
+        // at a non-coroutine point (boot / middleware registration) must not dial.
+        $h = new RedisSessionHandler('192.0.2.1', 6379, 'PHPREDIS_SESSION:', 1440, 's3cret');
+        $ref = new \ReflectionProperty($h, 'fallback');
+        $ref->setAccessible(true);
+        $this->assertNull($ref->getValue($h));
+    }
+
+    public function testConnectionSurfaceIsExtendable(): void
+    {
+        // #494's secondary ask: the connection surface must be overridable so a
+        // consumer can add TLS options / timeouts / select() WITHOUT
+        // reimplementing SessionHandlerInterface and duplicating the 3-way merge.
+        $sub = new class ('10.0.0.9', 6380, 'X:', 60, 'pw') extends RedisSessionHandler {
+            public function describe(): string
+            {
+                // Reaches the protected connection fields from a subclass.
+                return "{$this->host}:{$this->port}:{$this->prefix}:{$this->ttl}";
+            }
+        };
+        $this->assertSame('10.0.0.9:6380:X::60', $sub->describe());
+
+        foreach (['connect', 'conn', 'authCredential'] as $method) {
+            $this->assertTrue(
+                (new \ReflectionMethod(RedisSessionHandler::class, $method))->isProtected(),
+                "$method() must be protected so the connection can be extended (#494)"
+            );
+        }
     }
 }

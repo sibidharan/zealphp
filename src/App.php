@@ -1071,7 +1071,11 @@ class App
      *       file-backed everywhere. Opt into a concurrent-safe backend explicitly.
      *   - `'table'` — TableSessionHandler (concurrent-safe, in-memory + file backing).
      *   - `'file'`  — FileSessionHandler (simple, key-level merge).
-     *   - `'redis'` — RedisSessionHandler (cross-node, WATCH/MULTI).
+     *   - `'redis'` — RedisSessionHandler (cross-node, WATCH/MULTI) built with
+     *       DEFAULTS: `127.0.0.1:6379`, no password. To reach an authenticated
+     *       (`requirepass` / ACL) or non-local server, pass a configured instance
+     *       instead — `App::sessionHandler(new RedisSessionHandler(host: …, auth: …))`
+     *       (#494).
      *   - SessionHandlerInterface instance — bring your own.
      *
      * Resolved via `App::resolveActiveSessionHandler()`.

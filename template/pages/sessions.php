@@ -135,7 +135,7 @@ PHP,
   </tr>
   <tr>
     <td><code>RedisSessionHandler</code></td>
-    <td><code>App::sessionHandler('redis')</code></td>
+    <td><code>App::sessionHandler('redis')</code> for a local, passwordless server. For an authenticated (<code>requirepass</code> / ACL) or remote server pass a configured instance: <code>App::sessionHandler(new RedisSessionHandler('10.0.0.5', 6379, 'PHPREDIS_SESSION:', 1440, 's3cret'))</code> &mdash; the 5th argument is a password, or <code>[user, pass]</code> for a Redis&nbsp;6+ ACL user.</td>
     <td>WATCH/MULTI optimistic locking with 3-way merge retry on conflict. Cross-node safe.</td>
   </tr>
   <tr>
