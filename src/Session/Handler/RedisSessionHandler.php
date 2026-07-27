@@ -34,33 +34,63 @@ namespace ZealPHP\Session\Handler;
  */
 class RedisSessionHandler implements \SessionHandlerInterface
 {
-    /** Redis host (default `'127.0.0.1'`). */
-    private string $host;
+    /**
+     * Redis host (default `'127.0.0.1'`).
+     *
+     * The connection surface (`$host`/`$port`/`$prefix`/`$ttl`/`$auth`/`$fallback`
+     * plus `connect()`/`conn()`) is `protected` rather than `private` so a
+     * subclass can extend how the socket is made — TLS context options, custom
+     * timeouts, `select()`ing a non-zero DB — without reimplementing
+     * `SessionHandlerInterface` and duplicating the 3-way merge (#494). The
+     * merge internals stay private: they are correctness-critical under
+     * coroutine concurrency, not extension points.
+     */
+    protected string $host;
 
     /** Redis port (default `6379`). */
-    private int $port;
+    protected int $port;
 
     /** Key prefix used for session entries (default `'PHPREDIS_SESSION:'`). */
-    private string $prefix;
+    protected string $prefix;
 
     /** Session TTL in seconds (default `1440`). */
-    private int $ttl;
-
-    /** Single connection used outside coroutine context (CLI / tests). */
-    private ?\Redis $fallback = null;
+    protected int $ttl;
 
     /**
-     * @param string $host   Redis host.
-     * @param int    $port   Redis port.
-     * @param string $prefix Key prefix; use the phpredis default (`'PHPREDIS_SESSION:'`) for cross-handler compatibility.
-     * @param int    $ttl    Session TTL in seconds.
+     * Credential sent via `AUTH` on each new connection, or `null` for an
+     * unauthenticated server. A plain string is a `requirepass` password; a
+     * `[user, pass]` pair authenticates as a Redis 6+ ACL user.
+     *
+     * @var string|list<string>|null
      */
-    public function __construct(string $host = '127.0.0.1', int $port = 6379, string $prefix = 'PHPREDIS_SESSION:', int $ttl = 1440)
-    {
+    protected string|array|null $auth;
+
+    /** Single connection used outside coroutine context (CLI / tests). */
+    protected ?\Redis $fallback = null;
+
+    /**
+     * @param string                  $host   Redis host.
+     * @param int                     $port   Redis port.
+     * @param string                  $prefix Key prefix; use the phpredis default (`'PHPREDIS_SESSION:'`) for cross-handler compatibility.
+     * @param int                     $ttl    Session TTL in seconds.
+     * @param string|list<string>|null $auth  Password for a `requirepass` server, or `[user, pass]`
+     *                                        for a Redis 6+ ACL user. `null` (default) sends no
+     *                                        `AUTH` — required for unauthenticated servers, which
+     *                                        reject an unsolicited `AUTH`. Trailing + defaulted, so
+     *                                        existing 4-argument call sites are unaffected (#494).
+     */
+    public function __construct(
+        string $host = '127.0.0.1',
+        int $port = 6379,
+        string $prefix = 'PHPREDIS_SESSION:',
+        int $ttl = 1440,
+        string|array|null $auth = null
+    ) {
         $this->host = $host;
         $this->port = $port;
         $this->prefix = $prefix;
         $this->ttl = $ttl;
+        $this->auth = $auth;
         // #271 — do NOT connect eagerly here. Under HOOK_ALL, `\Redis->connect()`
         // is a coroutine API, so constructing the handler at a non-coroutine point
         // (boot / middleware registration — e.g. with `sessionLifecycle(false)`,
@@ -72,12 +102,47 @@ class RedisSessionHandler implements \SessionHandlerInterface
     }
 
     /**
-     * Open a new `\Redis` connection to `$this->host:$this->port`.
+     * The credential to send with `AUTH`, or `null` when the server is
+     * unauthenticated.
+     *
+     * Split out from `connect()` and kept **pure** so the decision is unit-testable
+     * without ext-redis or a live server (`connect()` needs both). Normalises every
+     * "nothing configured" shape — `null`, `''`, `[]`, an array of blanks — to
+     * `null`, because Redis errors on an `AUTH` sent to a server with no
+     * `requirepass`; an unconditional call would break every existing
+     * passwordless deployment (#494).
+     *
+     * @return string|list<string>|null
      */
-    private function connect(): \Redis
+    protected function authCredential(): string|array|null
+    {
+        if ($this->auth === null) {
+            return null;
+        }
+        if (is_string($this->auth)) {
+            return $this->auth !== '' ? $this->auth : null;
+        }
+        // [user, pass] for a Redis 6+ ACL user — drop blank members.
+        $parts = array_values(array_filter(
+            $this->auth,
+            static fn (string $v): bool => $v !== ''
+        ));
+        return $parts !== [] ? $parts : null;
+    }
+
+    /**
+     * Open a new `\Redis` connection to `$this->host:$this->port`, authenticating
+     * when a credential is configured (#494).
+     */
+    protected function connect(): \Redis
     {
         $redis = new \Redis();
         $redis->connect($this->host, $this->port);
+        $credential = $this->authCredential();
+        if ($credential !== null) {
+            // phpredis accepts a password string, or [user, pass] for ACL users.
+            $redis->auth($credential);
+        }
         return $redis;
     }
 
@@ -102,7 +167,7 @@ class RedisSessionHandler implements \SessionHandlerInterface
      * Callers reach this only through `io()`, which guarantees a coroutine is live
      * before `connect()`'s hooked `\Redis->connect()` runs.
      */
-    private function conn(): \Redis
+    protected function conn(): \Redis
     {
         $cid = \OpenSwoole\Coroutine::getCid();
         if ($cid < 0) {
