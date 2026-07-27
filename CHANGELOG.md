@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.15] - 2026-07-27
 
 ### Added
 - **`RedisSessionHandler` can authenticate to Redis/Valkey** ([#494](https://github.com/sibidharan/zealphp/issues/494)) — the handler accepted only `(host, port, prefix, ttl)`, so it could talk to an **unauthenticated** server only, and because every member was `private` it could not be subclassed to add `AUTH` either. Any deployment using it was forced to run its session store with no `requirepass`: enabling one made every session read/write fail with `NOAUTH Authentication required`, logging out every user. The constructor now takes an optional trailing `$auth` — a password string, or `[user, pass]` for a Redis 6+ ACL user — which `connect()` sends via `AUTH` on each new connection. Trailing and defaulted to `null`, so existing 4-argument call sites are untouched; and the credential is sent **only when configured**, because Redis errors on an `AUTH` sent to a server without `requirepass` (an unconditional call would break every existing passwordless deployment). The decision lives in a pure, protected `authCredential()` seam that normalises `null` / `''` / `[]` / all-blank arrays to "send nothing", so it is unit-testable without ext-redis or a live server. Note `App::sessionHandler('redis')` still builds the handler with **defaults** (localhost, no password) — pass a configured instance to authenticate; documented on `App::$session_handler`.
