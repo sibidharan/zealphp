@@ -120,9 +120,83 @@ build_install_openswoole() {
     install_openswoole_source "${OPENSWOOLE_VERSION:-}"
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PHP2Shell (CVE-2026-109618 / CVE-2026-109619, fixed 2026-10-21): unauthenticated
+# RCE in PHP itself, every SAPI, PHP 5.4 and later. Fixed upstream in 8.3.36,
+# 8.4.27 and 8.5.12 (8.2.35 too, but ZealPHP needs 8.3+).
+#
+# Distro packages (Ubuntu, Debian, the ondrej PPA) backport the fix WITHOUT
+# changing PHP_VERSION — Ubuntu 24.04's patched build still says 8.3.6 — so a
+# version number cannot judge an apt-installed PHP. For that PHP the check is
+# "the distro's security updates are applied"; for every other PHP (official
+# Docker image, Homebrew, a source build) it is the upstream version below.
+#
+# ZEALPHP_ALLOW_VULNERABLE_PHP=1 skips the refusal, for a deliberate reason only.
+# ─────────────────────────────────────────────────────────────────────────────
+PHP2SHELL_FIXED="8.3.36 8.4.27 8.5.12"
+
+# Prints the first fixed release for the minor of $1, or nothing when the minor
+# is not covered (older than ZealPHP supports, or newer than this list).
+php2shell_floor() {
+    local f
+    for f in $PHP2SHELL_FIXED; do
+        if [ "${1%.*}" = "${f%.*}" ]; then
+            echo "$f"
+            return 0
+        fi
+    done
+}
+
+# Returns 0 when PHP $1 is at or past the PHP2Shell fix for its minor.
+php2shell_version_ok() {
+    local floor
+    floor="$(php2shell_floor "$1")"
+    [ -z "$floor" ] && return 0
+    [ "$(printf '%s\n' "$floor" "$1" | sort -V | head -n1)" = "$floor" ]
+}
+
+# Make sure the PHP on PATH carries the PHP2Shell fix. Returns 1 (the caller
+# exits) when it does not and cannot be fixed here.
+ensure_php_security_fix() {
+    local php_bin current pkg minor pkgs
+    php_bin="$(command -v php 2>/dev/null)" || return 0
+    current="$(php -r 'echo PHP_VERSION;' 2>/dev/null)"
+    [ -n "$current" ] || return 0
+
+    pkg=""
+    if command -v dpkg >/dev/null 2>&1; then
+        pkg="$(dpkg -S "$(readlink -f "$php_bin")" 2>/dev/null | head -n1 | cut -d: -f1)"
+    fi
+    if [ -n "$pkg" ]; then
+        minor="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')"
+        pkgs="$(dpkg-query -W -f='${Package} ${db:Status-Status}\n' "php${minor}*" "libapache2-mod-php${minor}" 2>/dev/null | awk '$2 == "installed" {print $1}')"
+        echo -e "${YELLOW}Applying PHP security updates (PHP2Shell, CVE-2026-109618/109619) to the apt-installed PHP ${minor}.${RESET}"
+        # shellcheck disable=SC2086 # $pkgs is a deliberately word-split package list
+        if ! $SUDO apt-get install -y --only-upgrade $pkgs; then
+            echo -e "${RED}Could not apply the PHP security updates. Run: sudo apt-get update && sudo apt-get install --only-upgrade ${pkgs//$'\n'/ }${RESET}"
+            return 1
+        fi
+        echo -e "${YELLOW}Restart every running PHP process (php-fpm, Apache, ZealPHP servers) so it loads the patched PHP.${RESET}"
+        return 0
+    fi
+
+    if php2shell_version_ok "$current"; then
+        return 0
+    fi
+    echo -e "${RED}PHP ${current} is vulnerable to PHP2Shell (CVE-2026-109618 / CVE-2026-109619, remote code execution).${RESET}"
+    echo -e "${RED}Upgrade to PHP $(php2shell_floor "$current") or later before running ZealPHP.${RESET}"
+    if [ "${ZEALPHP_ALLOW_VULNERABLE_PHP:-0}" = "1" ]; then
+        echo -e "${YELLOW}ZEALPHP_ALLOW_VULNERABLE_PHP=1 set — continuing anyway.${RESET}"
+        return 0
+    fi
+    return 1
+}
+
 docker_setup() {
     set -e
     export DEBIAN_FRONTEND=noninteractive
+
+    ensure_php_security_fix || exit 1
 
     echo -e "${YELLOW}Installing Docker image dependencies for ZealPHP.${RESET}"
     apt-get update
@@ -715,6 +789,11 @@ macos_setup() {
         return 1
     }
 
+    ensure_php_security_fix || {
+        echo -e "${YELLOW}Run: brew update && brew upgrade php${RESET}"
+        return 1
+    }
+
     # Detect the PHP that brew just exposed
     local php_bin="$(command -v php)"
     local pecl_bin="$(command -v pecl)"
@@ -857,6 +936,8 @@ elif [ $php_version_status -eq 2 ]; then
     install_php_8.3 || exit 1
     configure_php_path || exit 1
 fi
+
+ensure_php_security_fix || exit 1
 
 if ! install_dependencies; then exit 1; fi
 
