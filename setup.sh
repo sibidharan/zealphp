@@ -120,9 +120,159 @@ build_install_openswoole() {
     install_openswoole_source "${OPENSWOOLE_VERSION:-}"
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PHP2Shell (CVE-2026-109618 / CVE-2026-109619, fixed 2026-10-21): unauthenticated
+# RCE in PHP itself, every SAPI, PHP 5.4 and later. Fixed upstream in 8.3.36,
+# 8.4.27 and 8.5.12 (8.2.35 too, but ZealPHP needs 8.3+).
+#
+# Two kinds of apt-installed PHP, judged differently:
+#   - Upstream-release builds — the ondrej PPA (version "…+deb.sury.org+1"),
+#     packages.sury.org ("…+debian12~1.gbp…") or a distro that simply ships the
+#     new release. PHP_VERSION moves with the fix
+#     (patched = 8.4.27), so the upstream floor below decides. On release day the
+#     PPA served 8.4.26 for hours: "apt says up to date" is NOT evidence here.
+#   - Distro backports — Ubuntu and Debian security updates patch the fix into the
+#     OLD upstream version (Ubuntu 24.04's patched build is 8.3.6-0ubuntu0.24.04.13
+#     and still says 8.3.6). A version number cannot judge these; the package
+#     changelog naming both CVEs is the evidence.
+# Every other PHP (official Docker image, Homebrew, a source build) is judged by
+# the upstream floor alone.
+#
+# ZEALPHP_ALLOW_VULNERABLE_PHP=1 skips the refusal, for a deliberate reason only.
+# ─────────────────────────────────────────────────────────────────────────────
+PHP2SHELL_FIXED="8.3.36 8.4.27 8.5.12"
+PHP2SHELL_CVES="CVE-2026-109618 CVE-2026-109619"
+
+# Prints the first fixed release for the minor of $1, or nothing when the minor
+# is not covered (older than ZealPHP supports, or newer than this list).
+php2shell_floor() {
+    local f
+    for f in $PHP2SHELL_FIXED; do
+        if [ "${1%.*}" = "${f%.*}" ]; then
+            echo "$f"
+            return 0
+        fi
+    done
+}
+
+# Returns 0 when PHP $1 is at or past the PHP2Shell fix for its minor.
+php2shell_version_ok() {
+    local floor
+    floor="$(php2shell_floor "$1")"
+    [ -z "$floor" ] && return 0
+    [ "$(printf '%s\n' "$floor" "$1" | sort -V | head -n1)" = "$floor" ]
+}
+
+# Does the changelog of installed package $1 (version $2) name both CVEs?
+# Returns 0 = yes, 1 = changelog read and the fix is NOT in it, 2 = no changelog
+# could be read (Docker minimal images drop /usr/share/doc via dpkg path-exclude,
+# and `apt-get changelog` needs network), i.e. no evidence either way.
+php2shell_changelog_status() {
+    local pkg="$1" ver="$2" docdir="${PHP2SHELL_DOC_DIR:-/usr/share/doc}" log text cve
+    log="${docdir}/${pkg}/changelog.Debian.gz"
+    if [ -r "$log" ]; then
+        for cve in $PHP2SHELL_CVES; do
+            zgrep -q "$cve" "$log" || return 1
+        done
+        return 0
+    fi
+    text="$(apt-get changelog -qq "${pkg}=${ver}" 2>/dev/null)"
+    [ -n "$text" ] || return 2
+    for cve in $PHP2SHELL_CVES; do
+        grep -q "$cve" <<<"$text" || return 1
+    done
+    return 0
+}
+
+# Prints the refusal reason $1 and returns 1, unless ZEALPHP_ALLOW_VULNERABLE_PHP=1.
+php2shell_refuse() {
+    echo -e "${RED}$1${RESET}"
+    if [ "${ZEALPHP_ALLOW_VULNERABLE_PHP:-0}" = "1" ]; then
+        echo -e "${YELLOW}ZEALPHP_ALLOW_VULNERABLE_PHP=1 set — continuing anyway.${RESET}"
+        return 0
+    fi
+    return 1
+}
+
+# Make sure the PHP on PATH carries the PHP2Shell fix. Returns 1 (the caller
+# exits) when it does not and cannot be fixed here.
+ensure_php_security_fix() {
+    local php_bin current pkg minor pkgs ref ver status update_out update_rc
+    php_bin="$(command -v php 2>/dev/null)" || return 0
+    current="$(php -r 'echo PHP_VERSION;' 2>/dev/null)"
+    [ -n "$current" ] || return 0
+
+    pkg=""
+    if command -v dpkg >/dev/null 2>&1; then
+        pkg="$(dpkg -S "$(readlink -f "$php_bin")" 2>/dev/null | head -n1 | cut -d: -f1)"
+    fi
+    if [ -n "$pkg" ]; then
+        minor="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')"
+        pkgs="$(dpkg-query -W -f='${Package} ${db:Status-Status}\n' "php${minor}*" "libapache2-mod-php${minor}" 2>/dev/null | awk '$2 == "installed" {print $1}')"
+        echo -e "${YELLOW}Applying PHP security updates (PHP2Shell, CVE-2026-109618/109619) to the apt-installed PHP ${minor}.${RESET}"
+        # Without fresh lists --only-upgrade is a silent no-op that exits 0. And
+        # apt-get update itself exits 0 when a source cannot be fetched (it only
+        # prints "W: Failed to fetch"), so its output is checked too.
+        update_out="$($SUDO apt-get update 2>&1)"
+        update_rc=$?
+        printf '%s\n' "$update_out"
+        if [ "$update_rc" -ne 0 ] || grep -qE '^(W|E): (Failed to fetch|Some index files failed)' <<<"$update_out"; then
+            php2shell_refuse "Could not refresh the apt package lists, so PHP ${current} cannot be verified against PHP2Shell. Fix apt (network, sources), then re-run."
+            return
+        fi
+        # shellcheck disable=SC2086 # $pkgs is a deliberately word-split package list
+        if ! $SUDO apt-get install -y --only-upgrade $pkgs; then
+            php2shell_refuse "Could not apply the PHP security updates. Run: sudo apt-get update && sudo apt-get install --only-upgrade ${pkgs//$'\n'/ }"
+            return
+        fi
+
+        # Verify — an upgrade that exited 0 proves nothing about the fix.
+        current="$(php -r 'echo PHP_VERSION;' 2>/dev/null)"
+        ref=""
+        for ref in "php${minor}-common" "php${minor}-cli" "$pkg"; do
+            ver="$(dpkg-query -W -f='${Version}' "$ref" 2>/dev/null)" && [ -n "$ver" ] && break
+            ver=""
+        done
+        if [[ "$ver" == *deb.sury.org* || "$ver" == *.gbp* ]]; then
+            # Upstream-release build: PHP_VERSION is authoritative.
+            if php2shell_version_ok "$current"; then
+                echo -e "${GREEN}PHP ${current} (${ref} ${ver}) carries the PHP2Shell fix.${RESET}"
+            else
+                php2shell_refuse "PHP ${current} (${ref} ${ver}) is vulnerable to PHP2Shell (CVE-2026-109618 / CVE-2026-109619, remote code execution) and the repository offers nothing newer yet. Wait for PHP $(php2shell_floor "$current") in the PPA, then re-run."
+                return
+            fi
+        elif php2shell_version_ok "$current"; then
+            echo -e "${GREEN}PHP ${current} (${ref} ${ver}) is at or past the upstream PHP2Shell fix.${RESET}"
+        else
+            php2shell_changelog_status "$ref" "$ver"
+            status=$?
+            case "$status" in
+                0)
+                    echo -e "${GREEN}PHP ${current} (${ref} ${ver}): the package changelog lists the PHP2Shell fix (CVE-2026-109618, CVE-2026-109619).${RESET}" ;;
+                1)
+                    php2shell_refuse "PHP ${current} (${ref} ${ver}) is vulnerable to PHP2Shell: its changelog does not list CVE-2026-109618 and CVE-2026-109619, and no fixed package is available yet."
+                    return ;;
+                *)
+                    php2shell_refuse "PHP ${current} (${ref} ${ver}) cannot be verified against PHP2Shell: no package changelog is readable (/usr/share/doc excluded and 'apt-get changelog' unavailable). Check ${ref} ${ver} against your distribution's security notice."
+                    return ;;
+            esac
+        fi
+        echo -e "${YELLOW}Restart every running PHP process (php-fpm, Apache, ZealPHP servers) so it loads the patched PHP.${RESET}"
+        return 0
+    fi
+
+    if php2shell_version_ok "$current"; then
+        return 0
+    fi
+    php2shell_refuse "PHP ${current} is vulnerable to PHP2Shell (CVE-2026-109618 / CVE-2026-109619, remote code execution).
+Upgrade to PHP $(php2shell_floor "$current") or later before running ZealPHP."
+}
+
 docker_setup() {
     set -e
     export DEBIAN_FRONTEND=noninteractive
+
+    ensure_php_security_fix || exit 1
 
     echo -e "${YELLOW}Installing Docker image dependencies for ZealPHP.${RESET}"
     apt-get update
@@ -715,6 +865,11 @@ macos_setup() {
         return 1
     }
 
+    ensure_php_security_fix || {
+        echo -e "${YELLOW}Run: brew update && brew upgrade php${RESET}"
+        return 1
+    }
+
     # Detect the PHP that brew just exposed
     local php_bin="$(command -v php)"
     local pecl_bin="$(command -v pecl)"
@@ -857,6 +1012,8 @@ elif [ $php_version_status -eq 2 ]; then
     install_php_8.3 || exit 1
     configure_php_path || exit 1
 fi
+
+ensure_php_security_fix || exit 1
 
 if ! install_dependencies; then exit 1; fi
 
