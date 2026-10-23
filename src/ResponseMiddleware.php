@@ -587,7 +587,7 @@ class ResponseMiddleware implements MiddlewareInterface
             $scriptPath .= '.php';
             $docRoot = App::resolveDocumentRoot();
             $abs = realpath($docRoot . $scriptPath);
-            if ($abs && is_file($abs) && strpos($abs, $docRoot) === 0) {
+            if ($abs && is_file($abs) && App::pathWithinRoot($abs, $docRoot)) {
                 $g->server['PATH_INFO']       = '/' . $extra;
                 $g->server['PATH_TRANSLATED'] = $docRoot . '/' . $extra;
                 $g->server['SCRIPT_NAME']     = $scriptPath;

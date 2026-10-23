@@ -116,6 +116,22 @@ final class TaskCallbackDispatchTest extends TestCase
         $this->assertFalse(App::dispatchTaskCallback([$task]));
     }
 
+    public function testHandlerPathWithDotsIsRejectedBeforeInclude(): void
+    {
+        // A .php file OUTSIDE the task dir that a traversal would reach.
+        $outside = dirname(self::$tmpDir) . '/zp_task_escape_' . getmypid() . '.php';
+        file_put_contents($outside, "<?php\n\$escaped = function () { return 'ESCAPED'; };\n");
+        try {
+            foreach (['/../' . basename($outside, '.php'), '/task/../task/echo', '/task/echo.php', 'task/echo'] as $bad) {
+                $task = new \stdClass();
+                $task->data = ['handler' => $bad, 'args' => []];
+                $this->assertFalse(App::dispatchTaskCallback([$task]), "handler '$bad' must be refused");
+            }
+        } finally {
+            @unlink($outside);
+        }
+    }
+
     public function testUnknownHandlerFileReturnsTaskShapeWithFalseResult(): void
     {
         // Missing handler file is non-fatal — wrapper still returns the

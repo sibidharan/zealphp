@@ -5316,6 +5316,13 @@ class App
             elog('Task payload missing string "handler"; dropping', 'error');
             return false;
         }
+        // The handler names a file under the app root: same charset rule as
+        // ZealAPI modules, so no dot (and therefore no `..`) can ever reach the
+        // include below, whatever a task payload carries.
+        if (!preg_match('#^/[A-Za-z0-9_/-]+$#', $handler)) {
+            elog('Task payload "handler" must match ^/[A-Za-z0-9_/-]+$; dropping', 'error');
+            return false;
+        }
         $args = $data['args'] ?? [];
         if (!is_array($args)) {
             elog('Task payload "args" must be an array; dropping', 'error');
@@ -7999,8 +8006,9 @@ class App
     public static function includeFile(string $path): mixed
     {
         $docAbs = self::resolveDocumentRoot();
-        if (strpos($path, $docAbs) === 0) {
-            $rel = substr($path, strlen($docAbs));
+        // Segment-aware: a sibling like `<docroot>-old/x.php` is NOT under docroot.
+        if (self::pathWithinRoot($path, $docAbs)) {
+            $rel = substr($path, strlen(rtrim($docAbs, DIRECTORY_SEPARATOR)));
             return self::include($rel, []);
         }
         // Outside the document root — preserve legacy "trust the caller"
