@@ -759,9 +759,8 @@ class Dispatcher
      * Parse a raw CGI/1.1 interpreter response (RFC 3875) into status, headers
      * and body — pure, side-effect-free string handling.
      *
-     * The header block is split from the body on the FIRST blank line. Per RFC
-     * 3875 the separator is CRLF CRLF; a bare LF LF is tolerated as a fallback
-     * (the CRLF CRLF form is searched first regardless of position). Header
+     * The header block is split from the body on the FIRST blank line, CRLF or
+     * bare LF alike ({@see FastCgiClient::splitHeaderBlock()}). Header
      * lines are parsed `Name: value` (first colon splits; colons in the value
      * are preserved). The `Status: NNN Reason` pseudo-header (§6.3.3) is
      * extracted into the returned `status` (only when `NNN` is a valid 100–599
@@ -777,21 +776,14 @@ class Dispatcher
      */
     public static function parseCgiResponse(string $raw): array
     {
-        // Split the CGI header block from the body on the first blank line.
-        // Per RFC 3875 the separator is CRLF CRLF, but tolerate bare LF LF too.
-        $sep = "\r\n\r\n";
-        $pos = strpos($raw, $sep);
-        if ($pos === false) {
-            $sep = "\n\n";
-            $pos = strpos($raw, $sep);
-        }
-
-        if ($pos === false) {
+        // Split the CGI header block from the body on the FIRST blank line,
+        // CRLF or bare LF alike (C2: a later CRLF CRLF inside the body must
+        // never pull body bytes into the headers).
+        $split = FastCgiClient::splitHeaderBlock($raw);
+        if ($split === null) {
             return ['status' => null, 'headers' => [], 'body' => $raw];
         }
-
-        $headerBlock = substr($raw, 0, $pos);
-        $body        = substr($raw, $pos + strlen($sep));
+        [$headerBlock, $body] = $split;
 
         $status  = null;
         $headers = [];
@@ -806,13 +798,7 @@ class Dispatcher
             // RFC 3875 §6.3.3 — "Status: NNN Reason" sets the HTTP status and
             // must not be forwarded to the client as a header.
             if (strcasecmp($name, 'Status') === 0) {
-                $codeStr = strtok($value, ' ');
-                if ($codeStr !== false && ctype_digit($codeStr)) {
-                    $code = (int)$codeStr;
-                    if ($code >= 100 && $code <= 599) {
-                        $status = $code;
-                    }
-                }
+                $status = FastCgiClient::statusCode($value) ?? $status;
                 continue;
             }
 
@@ -901,7 +887,7 @@ class Dispatcher
 
         // No header block at all. If the script produced nothing and exited
         // non-zero, surface a 500 (mod_cgi: "malformed header from script").
-        if (strpos($raw, "\r\n\r\n") === false && strpos($raw, "\n\n") === false) {
+        if (FastCgiClient::splitHeaderBlock($raw) === null) {
             if ($raw === '') {
                 if ($exit !== 0) {
                     elog("cgiInterpreterResponse: empty output, exit code $exit for $path", "error");
