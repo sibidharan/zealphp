@@ -218,4 +218,21 @@ final class IPCTest extends TestCase
         fclose($read);
         fclose($write);
     }
+
+    /**
+     * Invalid UTF-8 OUTSIDE `body` (a query string or cookie byte) defeats the
+     * base64 fallback. writeFrame() must substitute the bad bytes and still
+     * deliver the payload, not swap it for the synthetic 500 frame.
+     */
+    public function testWriteFrameSubstitutesInvalidUtf8OutsideBody(): void
+    {
+        $fp = $this->makePipe();
+        IPC::writeFrame($fp, ['file' => '/x.php', 'get' => ['q' => "a\xffb"], 'body' => '']);
+        rewind($fp);
+        $out = IPC::readFrame($fp);
+
+        $this->assertIsArray($out);
+        $this->assertSame('/x.php', $out['file'] ?? null, 'the request itself must survive');
+        $this->assertSame(['q' => "a\u{FFFD}b"], $out['get'] ?? null);
+    }
 }

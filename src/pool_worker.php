@@ -172,14 +172,9 @@ final class ZealPHP_IPC_Sender
 
         try {
             if ($__pw_fd3 !== null && is_resource($__pw_fd3)) {
-                // FD-3 IPC: write metadata + body_length to fd 3 FIRST so
-                // the parent knows how many body bytes to drain from STDOUT.
-                $resp['body_length'] = strlen($body);
-                IPC::writeFrame($__pw_fd3, $resp);
-                if ($body !== '') {
-                    fwrite(STDOUT, $body);
-                }
-                fflush(STDOUT);
+                // FD-3 IPC: metadata frame, then the body, both on fd 3
+                // (see pool_send_response()).
+                pool_send_response($__pw_fd3, $resp, $body);
             } else {
                 // Legacy single-channel: stuff body into the frame.
                 $resp['body'] = $body;
@@ -192,6 +187,20 @@ final class ZealPHP_IPC_Sender
 }
 
 ZealPHP_IPC_Sender::init();
+
+/**
+ * Save handler that stores nothing. Used only by pool_reset_session() (below) to
+ * run a throwaway session through session_destroy() without touching real data.
+ */
+final class ZealPHP_Pool_NullSessionHandler implements \SessionHandlerInterface
+{
+    public function open(string $path, string $name): bool { return true; }
+    public function close(): bool { return true; }
+    public function read(string $id): string { return ''; }
+    public function write(string $id, string $data): bool { return true; }
+    public function destroy(string $id): bool { return true; }
+    public function gc(int $max_lifetime): int { return 0; }
+}
 
 // exit()/die() survival — the ZealPHP_IPC_Sender::__destruct() above is the
 // PRIMARY mechanism. It fires LAST in PHP's teardown sequence, even AFTER
@@ -504,6 +513,20 @@ while (ob_get_level() > 0) {
     ob_end_clean();
 }
 
+// Session INI baseline for pool_reset_session(), taken before any request runs.
+$__pw_session_ini = [];
+if (function_exists('ini_get_all')) {
+    $__pw_session_ini_all = @ini_get_all('session', false);
+    if (is_array($__pw_session_ini_all)) {
+        foreach ($__pw_session_ini_all as $__pw_k => $__pw_v) {
+            if (is_string($__pw_k) && is_string($__pw_v)) {
+                $__pw_session_ini[$__pw_k] = $__pw_v;
+            }
+        }
+    }
+    unset($__pw_session_ini_all, $__pw_k, $__pw_v);
+}
+
 // $GLOBALS snapshot for FPM-style per-request cleanup (issue #18 follow-up).
 // Captures every key in $GLOBALS RIGHT NOW — after autoloader load, after
 // uopz overrides, after `use ZealPHP\CGI\IPC` etc., but BEFORE the first
@@ -571,10 +594,9 @@ while ($__pw_count < $__pw_max_requests) {
         $resp = pool_finish_request($__pw_inc_result, $__pw_inc_error, $__pw_prep['prevCwd']);
     }
 
-    // FD-3 IPC happy path: body goes to STDOUT, metadata frame goes to fd 3.
-    // The metadata frame carries `body_length` so the parent reads exactly
-    // that many bytes from STDOUT — needed because STDOUT is a persistent
-    // pipe (no EOF between iterations on the same worker).
+    // FD-3 IPC happy path: metadata frame then body, both on fd 3. The frame
+    // carries `body_length` so the parent reads exactly that many bytes —
+    // needed because fd 3 is a persistent pipe (no EOF between iterations).
     $body = '';
     if (isset($resp['body']) && is_string($resp['body'])) {
         $body = $resp['body'];
@@ -582,14 +604,7 @@ while ($__pw_count < $__pw_max_requests) {
     }
 
     if ($__pw_fd3 !== null && is_resource($__pw_fd3)) {
-        // Write metadata FIRST to fd 3 (parent reads metadata first to
-        // learn the body length), then stream the body to STDOUT.
-        $resp['body_length'] = strlen($body);
-        IPC::writeFrame($__pw_fd3, $resp);
-        if ($body !== '') {
-            fwrite(STDOUT, $body);
-        }
-        fflush(STDOUT);
+        pool_send_response($__pw_fd3, $resp, $body);
     } else {
         // Legacy fallback: parent reads a single frame from STDOUT when
         // fd 3 isn't open. Put the body back into the frame.
@@ -604,6 +619,82 @@ while ($__pw_count < $__pw_max_requests) {
 }
 
 exit(0);
+
+/**
+ * Write one response to the fd 3 channel: the metadata frame (with
+ * `body_length` and `body_fd` = 3), then exactly that many body bytes.
+ *
+ * The body used to go to STDOUT with only its length framed. Any direct write
+ * to fd 1 by app code — fwrite(STDOUT), a php://stdout logger, a destructor
+ * echo during reset after output buffering is closed — then shifted bytes into
+ * the NEXT request's response on this subprocess, i.e. another user's page.
+ * fd 3 is written only here, so the framing cannot drift; the parent drains
+ * STDOUT separately and logs it.
+ *
+ * @param resource            $fd3
+ * @param array<mixed,mixed>  $resp
+ */
+function pool_send_response($fd3, array $resp, string $body): void
+{
+    $resp['body_length'] = strlen($body);
+    $resp['body_fd'] = 3;
+    fwrite($fd3, IPC::encodeFrame($resp) . $body);
+    fflush($fd3);
+}
+
+/**
+ * Forget the previous request's session before the next one runs (H1).
+ *
+ * session_write_close() saves and closes the session but leaves the module's
+ * internal id set. The next request's session_start() then reuses it instead
+ * of reading its own cookie, so a visitor with no cookie (or a different one)
+ * was handed the previous user's session — data and, via the host-emitted
+ * Set-Cookie, the id itself. FPM gets this for free from per-request module
+ * shutdown; a reused pool subprocess has to do it by hand.
+ *
+ * PHP has no call that only clears the id: session_id('') stores an EMPTY id,
+ * which makes session_start() skip the cookie and mint a new session, so the
+ * returning owner would lose theirs. session_destroy() is the one path that
+ * resets the module's request globals (id back to NULL). So when an id is left
+ * over, start a throwaway session on a no-op save handler and destroy that;
+ * the real session's data, already written by session_write_close(), is never
+ * touched.
+ *
+ * Then restore the session INI settings the request may have changed
+ * (session_name(), session_save_path(), session_set_cookie_params(), the save
+ * handler, ini_set), so one app's session configuration does not carry into
+ * the next request.
+ *
+ * @param array<string,string> $baseline session INI values at boot
+ */
+function pool_reset_session(array $baseline): void
+{
+    if (!function_exists('session_status')) {
+        return;
+    }
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_abort();
+    }
+    if (session_id() !== '') {
+        if (@session_set_save_handler(new ZealPHP_Pool_NullSessionHandler(), false)) {
+            @session_id('zealphppoolreset');
+            $started = @session_start([
+                'use_cookies'     => 0,
+                'use_strict_mode' => 0,
+                'cache_limiter'   => '',
+                'gc_probability'  => 0,
+            ]);
+            if ($started) {
+                @session_destroy();
+            }
+        }
+    }
+    foreach ($baseline as $key => $value) {
+        if (ini_get($key) !== $value) {
+            @ini_set($key, $value);
+        }
+    }
+}
 
 /**
  * Prepare per-request state and return the file to include + the prior cwd.
@@ -646,6 +737,11 @@ function pool_prepare_request(array $req): array
         $__pw_body = (string) base64_decode($__pw_body, true);
     }
     $GLOBALS['__zeal_cgi_raw_input'] = is_string($__pw_body) ? $__pw_body : '';
+
+    // Belt and braces for H1: whatever the previous iteration left behind
+    // (a session the reset could not close), this request starts with no
+    // session id and the boot session settings.
+    pool_reset_session($GLOBALS['__pw_session_ini'] ?? []);
 
     $prevCwd = getcwd();
     chdir(dirname($file));
@@ -781,6 +877,7 @@ function pool_reset_request_state(): void
     if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
         session_write_close();
     }
+    pool_reset_session($GLOBALS['__pw_session_ini'] ?? []);
 
     $_SERVER  = [];
     $_GET     = [];
@@ -800,6 +897,10 @@ function pool_reset_request_state(): void
     while (ob_get_level() > 0) {
         ob_end_clean();
     }
+    // Catch output from destructors fired by the cleanup below (request-scope
+    // globals being unset). With no buffer it would go straight to fd 1 and
+    // mark headers as sent for the rest of this subprocess's life.
+    ob_start();
 
     // FPM-style request-scope cleanup. Unset every $GLOBALS key that wasn't
     // in the boot snapshot. Skip:
@@ -853,5 +954,9 @@ function pool_reset_request_state(): void
         if (function_exists('zealphp_reset_request_class_statics')) {
             @zealphp_reset_request_class_statics();
         }
+    }
+
+    while (ob_get_level() > 0) {
+        ob_end_clean();
     }
 }
