@@ -266,32 +266,107 @@ class RedisSessionHandler implements \SessionHandlerInterface
      */
     public function close(): bool
     {
+        // Drop this request's read snapshots (the socket stays — see above).
+        $cid = \OpenSwoole\Coroutine::getCid();
+        if ($cid >= 0) {
+            $ctx = \OpenSwoole\Coroutine::getContext($cid);
+            if ($ctx !== null) {
+                unset($ctx[self::CTX_BASE]);
+            }
+        } else {
+            $this->baseData = [];
+        }
         return true;
     }
 
     /**
-     * Per-coroutine read snapshot for 3-way merge on write conflict.
+     * Read snapshots (session id => data) used OUTSIDE a coroutine only. In a
+     * coroutine the snapshot lives in the coroutine's context and goes away
+     * with it. This used to be one per-worker map for everything: an id that
+     * was read but never written (rotated by strict mode, a forged cookie, a
+     * read-only request) stayed in it for the worker's lifetime, so a client
+     * cycling cookies grew it without bound. Capped all the same.
      *
      * @var array<string, string>
      */
     private array $baseData = [];
 
+    /** Cap on `$baseData` (non-coroutine use is one request at a time). */
+    private const BASE_DATA_MAX = 64;
+
+    /** Coroutine-context slot holding that coroutine's read snapshots. */
+    private const CTX_BASE = '__zeal_redis_session_base';
+
+    /**
+     * Remember the data `read()` saw for `$sid` (the 3-way merge base).
+     * `$cid` is the CALLER's coroutine id, taken before io() — io() may run
+     * the operation in a transient coroutine of its own.
+     */
+    private function setBase(int $cid, string $sid, string $data): void
+    {
+        if ($cid >= 0) {
+            $ctx = \OpenSwoole\Coroutine::getContext($cid);
+            if ($ctx !== null) {
+                $map = $ctx[self::CTX_BASE] ?? [];
+                $map = is_array($map) ? $map : [];
+                $map[$sid] = $data;
+                $ctx[self::CTX_BASE] = $map;
+                return;
+            }
+        }
+        unset($this->baseData[$sid]);
+        if (count($this->baseData) >= self::BASE_DATA_MAX) {
+            array_shift($this->baseData);
+        }
+        $this->baseData[$sid] = $data;
+    }
+
+    private function getBase(int $cid, string $sid): ?string
+    {
+        if ($cid >= 0) {
+            $ctx = \OpenSwoole\Coroutine::getContext($cid);
+            if ($ctx !== null) {
+                $map = $ctx[self::CTX_BASE] ?? [];
+                $v = is_array($map) ? ($map[$sid] ?? null) : null;
+                return is_string($v) ? $v : null;
+            }
+        }
+        return $this->baseData[$sid] ?? null;
+    }
+
+    private function dropBase(int $cid, string $sid): void
+    {
+        if ($cid >= 0) {
+            $ctx = \OpenSwoole\Coroutine::getContext($cid);
+            if ($ctx !== null) {
+                $map = $ctx[self::CTX_BASE] ?? [];
+                if (is_array($map)) {
+                    unset($map[$sid]);
+                    $ctx[self::CTX_BASE] = $map;
+                }
+                return;
+            }
+        }
+        unset($this->baseData[$sid]);
+    }
+
     /**
      * Read and return the serialised session data for `$sessionId`.
      *
      * Also `WATCH`es the key so a concurrent write is detected during the
-     * subsequent `write()` call; stores the baseline data in `$baseData` for
+     * subsequent `write()` call; stores the baseline data (per coroutine) for
      * the 3-way merge.
      */
     public function read($sessionId): string
     {
         $key = $this->prefix . $sessionId;
         $sid = (string) $sessionId;
-        $out = $this->io(function (\Redis $redis) use ($key, $sid): string {
+        $cid = \OpenSwoole\Coroutine::getCid();
+        $out = $this->io(function (\Redis $redis) use ($key, $sid, $cid): string {
             $redis->watch($key);
             $data = $redis->get($key);
             $base = is_string($data) ? $data : '';
-            $this->baseData[$sid] = $base;
+            $this->setBase($cid, $sid, $base);
             return $base;
         });
         return is_string($out) ? $out : '';
@@ -309,16 +384,15 @@ class RedisSessionHandler implements \SessionHandlerInterface
     {
         $key = $this->prefix . $sessionId;
         $sid = (string) $sessionId;
-        return $this->io(function (\Redis $redis) use ($key, $sid, $sessionData): bool {
+        $cid = \OpenSwoole\Coroutine::getCid();
+        return $this->io(function (\Redis $redis) use ($key, $sid, $sessionData, $cid): bool {
             for ($attempt = 0; $attempt < 3; $attempt++) {
                 $pipe = $redis->multi();
                 $pipe->setex($key, $this->ttl, $sessionData);
                 $result = $pipe->exec();
                 if ($result !== false) {
-                    // The read→write merge baseline is consumed; drop it so the
-                    // per-instance map doesn't grow with every distinct session id
-                    // for the worker's lifetime (this is a singleton handler).
-                    unset($this->baseData[$sid]);
+                    // The read→write merge baseline is consumed.
+                    $this->dropBase($cid, $sid);
                     return true;
                 }
 
@@ -328,11 +402,20 @@ class RedisSessionHandler implements \SessionHandlerInterface
                 $redis->watch($key);
                 $remote = $redis->get($key);
                 $remoteStr = is_string($remote) ? $remote : '';
-                $base = $this->baseData[$sid] ?? '';
+                $base = $this->getBase($cid, $sid) ?? '';
+                if ($base !== '' && $remoteStr === '') {
+                    // The key we read with data is gone: the session was
+                    // destroyed (logout) or rotated after our read. SETEX
+                    // would recreate it from our stale copy — refuse; the
+                    // session layer re-reads and drops the write.
+                    $redis->unwatch();
+                    $this->dropBase($cid, $sid);
+                    return false;
+                }
                 $sessionData = $this->merge3Sessions($base, $sessionData, $remoteStr);
-                $this->baseData[$sid] = $remoteStr;
+                $this->setBase($cid, $sid, $remoteStr);
             }
-            unset($this->baseData[$sid]); // bound the map even when all retries fail
+            $this->dropBase($cid, $sid); // bound the map even when all retries fail
             return false;
         }) === true;
     }
@@ -356,33 +439,17 @@ class RedisSessionHandler implements \SessionHandlerInterface
     /**
      * Parse a PHP session-encoded string into a key→value array.
      *
-     * Uses the `php` serialisation format (`key|serialized_value`). Unknown or
-     * malformed entries are silently skipped. Only `stdClass` objects are
+     * Uses the `php` serialisation format (`key|serialized_value`). A
+     * malformed session decodes to `[]` as a whole. Only `stdClass` objects are
      * allowed in `unserialize()` (matches the whitelist in `src/Session/utils.php`).
      *
      * @return array<mixed,mixed>
      */
     public static function parseSession(string $data): array
     {
-        if ($data === '') return [];
-        $result = [];
-        $offset = 0;
-        $len = strlen($data);
-        while ($offset < $len) {
-            $eq = strpos($data, '|', $offset);
-            if ($eq === false) break;
-            $key = substr($data, $offset, $eq - $offset);
-            $offset = $eq + 1;
-            try {
-                $value = @unserialize(substr($data, $offset), ['allowed_classes' => ['stdClass']]);
-            } catch (\Throwable) {
-                break;
-            }
-            if ($value === false && substr($data, $offset, 4) !== 'b:0;') break;
-            $offset += strlen(serialize($value));
-            $result[$key] = $value;
-        }
-        return $result;
+        // The session layer's decoder: an undecodable session is empty, never
+        // partially parsed (see php_session_decode_to_array()).
+        return $data === '' ? [] : \ZealPHP\Session\php_session_decode_to_array($data);
     }
 
     /**
@@ -392,11 +459,8 @@ class RedisSessionHandler implements \SessionHandlerInterface
      */
     public static function serializeSession(array $data): string
     {
-        $out = '';
-        foreach ($data as $key => $val) {
-            $out .= $key . '|' . serialize($val);
-        }
-        return $out;
+        /** @var array<string, mixed> $data */
+        return \ZealPHP\Session\php_session_encode_from_array($data);
     }
 
     /**
@@ -449,9 +513,10 @@ class RedisSessionHandler implements \SessionHandlerInterface
     {
         $key = $this->prefix . $sessionId;
         $sid = (string) $sessionId;
-        return $this->io(function (\Redis $redis) use ($key, $sid): bool {
+        $cid = \OpenSwoole\Coroutine::getCid();
+        return $this->io(function (\Redis $redis) use ($key, $sid, $cid): bool {
             $redis->del($key);
-            unset($this->baseData[$sid]);
+            $this->dropBase($cid, $sid);
             return true;
         }) === true;
     }

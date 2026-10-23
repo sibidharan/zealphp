@@ -44,6 +44,15 @@ class RequestContext
      * @var list<string>
      */
     public array $session_loaded_keys = [];
+    /**
+     * md5 of each value's serialization at session-load time (key => digest).
+     * `zeal_session_write_close()` writes only the keys whose value differs
+     * from this snapshot onto the CURRENT store, so a request that never
+     * touched a key cannot revert or resurrect it after a concurrent request
+     * changed or removed it. Empty when the session loaded empty.
+     * @var array<string, string>
+     */
+    public array $session_loaded_digest = [];
     /** @var array<string, mixed> */
     public array $session_params = [];
     public ?int $status = null;
