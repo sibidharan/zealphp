@@ -123,7 +123,9 @@ class SessionUtilsCoverageTest extends TestCase
         $g->session_params = [];
 
         $this->assertTrue(zeal_session_start());
-        $this->assertSame('/var/lib/php/sessions', $g->session_params['save_path']);
+        // The default is ZealPHP's own directory, not PHP's shared /var/lib/php/sessions.
+        $this->assertSame(\ZealPHP\App::sessionSavePath(), $g->session_params['save_path']);
+        $this->assertNotSame('/var/lib/php/sessions', $g->session_params['save_path']);
         $this->assertSame('PHPSESSID', $g->session_params['name']);
     }
 
