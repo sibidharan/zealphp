@@ -64,7 +64,7 @@ final class TableBackend implements StoreBackend
         $t = $this->tables[$name] ?? null;
         if ($t === null) { return false; }
         try {
-            $ok = $t->set($key, $row);
+            $ok = $t->set(self::key($key), $row);
         } catch (\OpenSwoole\Exception) {
             $ok = false;
         }
@@ -72,6 +72,25 @@ final class TableBackend implements StoreBackend
             $this->warnCapacity($name, $t, $key);
         }
         return $ok;
+    }
+
+    /**
+     * The key a row is stored under. OpenSwoole\Table keeps at most 63 bytes
+     * of a key: a longer one is truncated in the stored row (with only a
+     * warning), so iterate() yields a key that get()/del() cannot find and
+     * keys sharing a 63-byte prefix collapse onto one stored key — a WS room
+     * member key, a server id, a regenerated 64-hex session id. Keys up to 63
+     * bytes are stored as-is (unchanged behaviour, and a key iterate() yields
+     * maps to itself); longer ones by a 46-byte digest (`~h~` + base64url
+     * SHA-256) that a short key cannot collide with by chance. iterate()
+     * yields the digest for such rows.
+     */
+    public static function key(string $key): string
+    {
+        if (strlen($key) <= 63) {
+            return $key;
+        }
+        return '~h~' . rtrim(strtr(base64_encode(hash('sha256', $key, true)), '+/', '-_'), '=');
     }
 
     /**
@@ -108,20 +127,21 @@ final class TableBackend implements StoreBackend
     {
         $t = $this->tables[$name] ?? null;
         if ($t === null) { return null; }
-        $v = $field !== null ? $t->get($key, $field) : $t->get($key);
+        $k = self::key($key);
+        $v = $field !== null ? $t->get($k, $field) : $t->get($k);
         return $v === false ? null : $v;
     }
 
     /** Delete a row by key. Returns `false` when the table doesn't exist or the key was already absent. */
     public function del(string $name, string $key): bool
     {
-        return (bool) (($this->tables[$name] ?? null)?->del($key) ?? false);
+        return (bool) (($this->tables[$name] ?? null)?->del(self::key($key)) ?? false);
     }
 
     /** Return `true` when the named table contains a row with the given key. */
     public function exists(string $name, string $key): bool
     {
-        return (bool) (($this->tables[$name] ?? null)?->exists($key) ?? false);
+        return (bool) (($this->tables[$name] ?? null)?->exists(self::key($key)) ?? false);
     }
 
     /**
@@ -140,7 +160,11 @@ final class TableBackend implements StoreBackend
         // The openswoole/ide-helper stub types Table::incr as (int): int, but the
         // real ext accepts a float $by and returns a float for a FLOAT column —
         // the param/return stub mismatches are suppressed in phpstan.neon (#420).
-        return $t->incr($key, $col, $by);
+        // A new key in a FULL table returns false (no row to create): report 0
+        // rather than violate the int|float return type.
+        /** @var int|float|false $r */
+        $r = $t->incr(self::key($key), $col, $by);
+        return $r === false ? 0 : $r;
     }
 
     /**
@@ -152,7 +176,9 @@ final class TableBackend implements StoreBackend
         $t = $this->tables[$name] ?? null;
         if ($t === null) { return 0; }
         // Same ide-helper stub mismatch as incr() — see phpstan.neon (#420).
-        return $t->decr($key, $col, $by);
+        /** @var int|float|false $r */
+        $r = $t->decr(self::key($key), $col, $by);
+        return $r === false ? 0 : $r;
     }
 
     /** Return the number of rows in the named table, or `0` when the table doesn't exist. */

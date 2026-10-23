@@ -341,10 +341,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
      */
     public static function rowKey(string $sessionId): string
     {
-        if (strlen($sessionId) <= 63) {
-            return $sessionId;
-        }
-        return '~h~' . rtrim(strtr(base64_encode(hash('sha256', $sessionId, true)), '+/', '-_'), '=');
+        return \ZealPHP\Store\TableBackend::key($sessionId);
     }
 
     /**
