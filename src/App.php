@@ -1790,6 +1790,7 @@ class App
         // Applied here in the master before fork; explicit fluent setters still win
         // (resolveCgiEnv only fills knobs that weren't set in code).
         self::resolveCgiEnv();
+        self::resolveTrustedProxiesEnv();
 
         if ($cwd === null) {
             $php_self = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1)[0]['file'] ?? '';
@@ -4748,6 +4749,25 @@ class App
      * @param  array<int, string>|null $cidrs
      * @return array<int, string>
      */
+    /**
+     * `ZEALPHP_TRUSTED_PROXIES` (comma-separated CIDRs/IPs, e.g. `127.0.0.1`)
+     * fills trustedProxies() when the app didn't set it. Behind a same-host
+     * Apache/nginx with none configured, X-Forwarded-Proto is ignored, so the
+     * session cookie lost its Secure flag on an HTTPS site, and every client
+     * shared one rate-limit/IP-access key (127.0.0.1).
+     */
+    public static function resolveTrustedProxiesEnv(): void
+    {
+        if (self::$trusted_proxies !== []) {
+            return;
+        }
+        $env = getenv('ZEALPHP_TRUSTED_PROXIES');
+        if (!is_string($env) || trim($env) === '') {
+            return;
+        }
+        self::$trusted_proxies = array_values(array_filter(array_map('trim', explode(',', $env)), static fn (string $c): bool => $c !== ''));
+    }
+
     public static function trustedProxies(?array $cidrs = null): array
     {
         if ($cidrs !== null) self::$trusted_proxies = array_values($cidrs);
