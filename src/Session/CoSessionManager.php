@@ -292,8 +292,17 @@ class CoSessionManager
         } finally {
             \ZealPHP\App::fatalGuardRelease($zpFatalGuardId); // #338
             if ($manageSession && $g->_session_started) {
-                zeal_session_write_close();
-                zeal_session_id('');
+                try {
+                    zeal_session_write_close();
+                } catch (\Throwable $e) {
+                    // PHP-FPM parity: an unwritable session (a value that can't be
+                    // serialized, a session handler that throws) fails THIS
+                    // request's write. Escaping here killed the whole worker, and
+                    // with it every in-flight request, and skipped the resets below.
+                    elog('Session write failed: ' . $e->getMessage(), 'error');
+                } finally {
+                    zeal_session_id('');
+                }
             }
             $g->session = [];
             unset($g->session);

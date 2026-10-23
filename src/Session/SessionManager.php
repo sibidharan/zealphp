@@ -377,10 +377,21 @@ class SessionManager
             // session must not touch the store or re-emit a cookie.
             if ($manageSession && ($g->_session_started ?? false)) {
                 elog('SessionManager:: session_write_close took '.get_current_render_time(), 'info');
-                session_write_close();
-                session_id('');
-                $_SESSION = [];
-                unset($_SESSION);
+                try {
+                    session_write_close();
+                } catch (\Throwable $e) {
+                    // PHP-FPM parity: fail this request's session write, not the
+                    // worker (see CoSessionManager). A write that threw can leave
+                    // the session active, which would block session_id('') below.
+                    elog('Session write failed: ' . $e->getMessage(), 'error');
+                    if (session_status() === PHP_SESSION_ACTIVE) {
+                        @session_abort();
+                    }
+                } finally {
+                    session_id('');
+                    $_SESSION = [];
+                    unset($_SESSION);
+                }
             }
             if (\ZealPHP\App::$define_isolation
                 && \function_exists('zealphp_constants_clear')
