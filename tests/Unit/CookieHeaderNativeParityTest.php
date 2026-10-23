@@ -41,7 +41,9 @@ final class CookieHeaderNativeParityTest extends TestCase
             'arrays'                                 => ['arr[]=x; arr[]=y; map[k]=v; map[k]=w', ['arr' => ['x', 'y'], 'map' => ['k' => 'w']]],
             'array replaces scalar'                  => ['x=1; x[]=2', ['x' => ['2']]],
             'scalar does not replace array'          => ['x[]=1; x=2', ['x' => ['1']]],
-            'value with =, empty name, bare flag'    => ['a=b=c; =novalue; flag; e=', ['a' => 'b=c', 'flag' => '', 'e' => '']],
+            // PHP binds the bare `flag` as ''; ZealPHP keeps skipping it
+            // (SuperglobalParityUnitTest::testCookieBareFlagSegmentSkipped).
+            'value with =, empty name, bare flag'    => ['a=b=c; =novalue; flag; e=', ['a' => 'b=c', 'e' => '']],
             'unmatched ['                            => ['a[b=1', ['a_b' => '1']],
             'unmatched [ then dot'                   => ['a[b.c=1', ['a_b_c' => '1']],
             'unmatched inner ['                      => ['a[x][y=1', ['a' => ['x' => '1']]],

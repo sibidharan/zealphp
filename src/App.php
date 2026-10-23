@@ -2474,8 +2474,9 @@ class App
      * Parse a raw `Cookie:` header the way PHP builds `$_COOKIE` (issue #305):
      *
      *  - Pairs split on `;`; leading whitespace is stripped; each pair splits
-     *    on its FIRST `=` (a pair without `=` is a cookie with an empty value;
-     *    an empty name is skipped).
+     *    on its FIRST `=`. A pair with an empty name, or without `=` (a bare
+     *    `; secure` segment), is skipped — PHP itself binds the latter as an
+     *    empty cookie; ZealPHP has always skipped it.
      *  - NAMES are taken literally — never URL-decoded — then mangled like any
      *    PHP variable name: ` ` and `.` → `_`, `name[]` / `name[k]` build
      *    nested arrays (an unmatched `[` becomes `_`).
@@ -2505,8 +2506,11 @@ class App
                 continue;
             }
             $eq = strpos($pair, '=');
-            $name = $eq === false ? $pair : substr($pair, 0, $eq);
-            $value = $eq === false ? '' : rawurldecode(substr($pair, $eq + 1));
+            if ($eq === false) {
+                continue;
+            }
+            $name = substr($pair, 0, $eq);
+            $value = rawurldecode(substr($pair, $eq + 1));
             if ($name === '') {
                 continue;
             }
