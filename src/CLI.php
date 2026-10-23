@@ -19,17 +19,6 @@ use function ZealPHP\elog;
 class CLI
 {
     /**
-     * Parse `$argv`, execute any lifecycle sub-command, and return server-config overrides.
-     *
-     * Sub-commands (`stop`, `status`, `logs`, `restart`) are handled in-process and
-     * call `exit()` when done. The `start` / default path returns an array of
-     * OpenSwoole `$server->set()` override keys (`_host`, `_port`, `worker_num`,
-     * `daemonize`, etc.) that `App::run()` merges into its config. Returns an
-     * empty array when no overrides are needed.
-     *
-     * @return array<string, mixed>
-     */
-    /**
      * Print $message and stop with $code. On PHP 8.4+ with OpenSwoole loaded,
      * exit() outside a coroutine was seen to set the status and RETURN (CI,
      * 8.4/8.5), which would let a refused start carry on booting — so if
@@ -43,6 +32,17 @@ class CLI
         throw new \RuntimeException($message);
     }
 
+    /**
+     * Parse `$argv`, execute any lifecycle sub-command, and return server-config overrides.
+     *
+     * Sub-commands (`stop`, `status`, `logs`, `restart`) are handled in-process and
+     * call `exit()` when done. The `start` / default path returns an array of
+     * OpenSwoole `$server->set()` override keys (`_host`, `_port`, `worker_num`,
+     * `daemonize`, etc.) that `App::run()` merges into its config. Returns an
+     * empty array when no overrides are needed.
+     *
+     * @return array<string, mixed>
+     */
     public static function parseCliArgs(): array
     {
         $rawArgv = $_SERVER['argv'] ?? $GLOBALS['argv'] ?? [];
