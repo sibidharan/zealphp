@@ -2014,7 +2014,7 @@ class App
      * (auto) default follows the scheduler and never warns. Testable seam.
      */
     /** First ext-zealphp release with the PHP2Shell-audit isolation fixes. */
-    public const MIN_EXT_VERSION_COROUTINE_LEGACY = '0.3.61';
+    public const MIN_EXT_VERSION_COROUTINE_LEGACY = '0.4.0';
 
     /**
      * coroutine-legacy (superglobals + coroutines) isolates request state in
