@@ -212,6 +212,10 @@ class SessionManager
         $g->_streaming               = null;
         $g->ignore_user_abort_state  = 0;
         $g->_session_started         = false;
+        // RequestContext::once() is documented as REQUEST-scoped memoization;
+        // on the singleton its scratch space otherwise survives forever, so
+        // request N+1's once('current_user', ...) returned request N's user.
+        $g->memo                     = [];
         // ResponseMiddleware stashes the canonical PSR-7 request here each
         // request; on the process-wide singleton (superglobals mode) it would
         // otherwise pin the previous request's object until the next dispatch
