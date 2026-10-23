@@ -134,7 +134,7 @@ class AppCliArgsTest extends TestCase
             . '\\ZealPHP\\CLI::parseCliArgs(); echo "RETURNED";';
         exec(escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' 2>&1', $out, $status);
         $text = implode("\n", $out);
-        $this->assertSame(1, $status, $text);
+        $this->assertNotSame(0, $status, $text);
         $this->assertStringContainsString("unknown flag '-x'", $text);
         $this->assertStringNotContainsString('RETURNED', $text);
     }

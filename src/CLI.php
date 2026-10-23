@@ -29,6 +29,20 @@ class CLI
      *
      * @return array<string, mixed>
      */
+    /**
+     * Print $message and stop with $code. On PHP 8.4+ with OpenSwoole loaded,
+     * exit() outside a coroutine was seen to set the status and RETURN (CI,
+     * 8.4/8.5), which would let a refused start carry on booting — so if
+     * exit() comes back, throw.
+     */
+    private static function abort(string $message, int $code = 1): never
+    {
+        echo $message, "\n";
+        exit($code);
+        // @phpstan-ignore-next-line deadCode.unreachable — reached on 8.4+ when exit() returns
+        throw new \RuntimeException($message);
+    }
+
     public static function parseCliArgs(): array
     {
         $rawArgv = $_SERVER['argv'] ?? $GLOBALS['argv'] ?? [];
@@ -104,8 +118,7 @@ class CLI
                 // Refuse, don't ignore: an ignored `--prot 9000` booted on the
                 // default port instead — next to (or, via the orphan cleanup,
                 // in place of) whatever server already owns it.
-                echo "Error: unknown flag '{$arg}'. Run 'php app.php --help' for the list.\n";
-                exit(1);
+                self::abort("Error: unknown flag '{$arg}'. Run 'php app.php --help' for the list.");
             }
             $i++;
         }
