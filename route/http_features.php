@@ -121,12 +121,16 @@ $app->route('/http/sendfile-test', ['methods' => ['GET']], function($response) {
 // ---------------------------------------------------------------------------
 $app->route('/http/session-redirect', ['methods' => ['GET']], function() {
     session_start();
-    $_SESSION['oauth_state'] = 'state-xyz';
+    // Coroutine mode: the request's session is $g->session ($_SESSION is one
+    // process-wide array here, shared by every request on the worker).
+    $session = (array) G::instance()->session;
+    $session['oauth_state'] = 'state-xyz';
+    G::instance()->session = $session;
     header('Location: /http/session-target');
     http_response_code(302);
 });
 
 $app->route('/http/session-target', ['methods' => ['GET']], function() {
     session_start();
-    return ['oauth_state' => $_SESSION['oauth_state'] ?? null];
+    return ['oauth_state' => G::instance()->session['oauth_state'] ?? null];
 });

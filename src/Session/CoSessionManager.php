@@ -122,6 +122,23 @@ class CoSessionManager
     }
 
     /**
+     * Once per worker: code wrote $_SESSION in coroutine mode. Those writes are
+     * not stored, and while they sit in the process-wide array a concurrent
+     * request can read them. Point at the request-scoped API.
+     */
+    private static function warnSessionSuperglobalOnce(): void
+    {
+        static $warned = false;
+        if ($warned) {
+            return;
+        }
+        $warned = true;
+        elog('[warn] $_SESSION was written in coroutine mode. It is one process-wide array here, not this '
+            . "request's session: the writes are NOT saved, and concurrent requests can see them. Use \$g->session "
+            . "(G::instance()->session), or App::mode('coroutine-legacy') for per-request superglobals.", 'warn');
+    }
+
+    /**
      * Handle one HTTP request: set up `RequestContext`, optionally start the
      * session, invoke the middleware stack, then close the session and run
      * per-request isolation resets in the `finally` block.
@@ -170,6 +187,12 @@ class CoSessionManager
         $g->session = [];
         $g->_session_started = false;
         $g->_session_persisted_hash = null;
+        // Coroutine mode: $_SESSION is ONE process-wide array, not this
+        // request's session (that is $g->session). Data left in it by an
+        // earlier request would be read by this one — another user's session.
+        if (!\ZealPHP\App::$superglobals) {
+            unset($GLOBALS['_SESSION']);
+        }
 
         // Session lifecycle is opt-out (via App::sessionLifecycle(false)) for
         // setups where another framework owns sessions — e.g. Symfony's
@@ -307,6 +330,10 @@ class CoSessionManager
             }
             $g->session = [];
             unset($g->session);
+            if (!\ZealPHP\App::$superglobals && !empty($GLOBALS['_SESSION'])) {
+                self::warnSessionSuperglobalOnce();
+                unset($GLOBALS['_SESSION']);
+            }
             if (\ZealPHP\App::$define_isolation
                 && \function_exists('zealphp_constants_clear')
             ) {
