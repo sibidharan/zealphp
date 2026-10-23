@@ -274,7 +274,11 @@ class Response
      */
     public function redirect(string $url, int $status = 302, bool $allowExternal = false): void
     {
-        if (strpbrk($url, "\r\n\0") !== false) {
+        // Any C0 control or DEL, anywhere: besides header injection (CR/LF),
+        // browsers silently drop tab/newline inside a URL and strip leading
+        // controls, so `/\t/evil.com` and `"\x01//evil.com"` both become
+        // `//evil.com` after this guard has looked at them.
+        if (preg_match('/[\x00-\x1F\x7F]/', $url) === 1) {
             throw new \InvalidArgumentException('Redirect URL contains control characters');
         }
         // Leading/trailing whitespace bypasses the scheme-prefix check below:
@@ -299,12 +303,24 @@ class Response
         // Open-redirect guard (CWE-601). Refuse cross-origin / protocol-relative
         // targets by default — warning-and-emitting let `$res->redirect($_GET['next'])`
         // ship an open redirect. Opt in with $allowExternal when truly intended.
+        $parts = parse_url($url);
         if (preg_match('#^//#', $url)) {
             if (!$allowExternal) {
                 throw new \InvalidArgumentException('Protocol-relative redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
             }
             \ZealPHP\elog('[security] Protocol-relative redirect detected: ' . $url, 'warn');
-        } elseif (isset(parse_url($url)['host']) && !$this->isSameOrigin($url)) {
+        } elseif (preg_match('#^[a-z][a-z0-9+.-]*:#i', $url) === 1 && !isset($parts['host'])) {
+            // A scheme with no host that parse_url could read: `https:///evil.com`
+            // (parse_url fails, browsers skip the extra slashes) or
+            // `https:evil.com` (a browser treats it as an authority when the
+            // scheme differs from the page's). Neither is a same-origin path.
+            if (!$allowExternal) {
+                throw new \InvalidArgumentException('Redirect URL with a scheme but no readable host blocked: ' . $url . ' (pass $allowExternal=true to permit)');
+            }
+            \ZealPHP\elog('[security] Hostless scheme redirect: ' . $url, 'warn');
+        } elseif ($parts === false) {
+            throw new \InvalidArgumentException('Malformed redirect URL');
+        } elseif (isset($parts['host']) && !$this->isSameOrigin($url)) {
             // Cross-origin per the RFC 6454 (scheme, host, port) triple (#432).
             if (!$allowExternal) {
                 throw new \InvalidArgumentException('Cross-origin redirect blocked: ' . $url . ' (pass $allowExternal=true to permit)');
@@ -840,8 +856,19 @@ class Response
                 return;
             }
 
-            $this->sendMultipart($path, $ranges, $total, $mime);
-            return;
+            // multipart/byteranges is assembled in memory (see sendMultipart()),
+            // so one `Range: bytes=0-0,2-` on a large file would buffer the whole
+            // file per request and trip memory_limit, killing the worker and
+            // every request on it. Past the cap, ignore the Range (RFC 9110
+            // §14.2 lets a server do that) and stream a 200 with sendfile().
+            $bytes = 0;
+            foreach ($ranges as [$start, $end]) {
+                $bytes += $end - $start + 1;
+            }
+            if ($bytes <= self::MULTIPART_BUFFER_LIMIT) {
+                $this->sendMultipart($path, $ranges, $total, $mime);
+                return;
+            }
         }
 
         // status === 'ignore' — full body (200).
@@ -927,6 +954,9 @@ class Response
         return true;
     }
 
+    /** Largest multi-range payload (sum of slices) sendFile() buffers for a 206. */
+    public const MULTIPART_BUFFER_LIMIT = 8 * 1024 * 1024;
+
     /**
      * Emit a 206 multipart/byteranges response for two or more ranges,
      * streaming each slice straight from the file. Body framing mirrors
@@ -974,10 +1004,10 @@ class Response
         // OpenSwoole sees a write() it switches the response to chunked
         // transfer-encoding and silently drops the Content-Length we queued above
         // — diverging from Apache, which sends multipart/byteranges length-
-        // delimited. coalesceRanges() in parseRange() caps Σ(slice) ≤ $total, so
-        // the buffered payload is bounded by the file size (the same byte budget
-        // a 200 would write). Result: the precomputed Content-Length survives on
-        // the wire, so clients can show a progress total for the multi-range fetch.
+        // delimited. sendFile() only gets here with Σ(slice) ≤
+        // MULTIPART_BUFFER_LIMIT, which bounds the buffered payload. Result: the
+        // precomputed Content-Length survives on the wire, so clients can show a
+        // progress total for the multi-range fetch.
         $payload = '';
         foreach ($ranges as $i => [$start, $end]) {
             $payload .= ($i > 0 ? "\r\n" : '') . $partHeaders[$i];

@@ -589,11 +589,20 @@ class ZealAPI extends REST
      */
     public function die($e): void
     {
+        // The message of a plain \Exception is the API's own error text
+        // (`throw new \Exception("Invalid input")`, the "Unauthorized" /
+        // "Not found" sentinels below) and goes to the client. A library
+        // exception's message (PDOException: DB user and host,
+        // TemplateUnavailableException: an absolute path) and the stack trace
+        // only go out with App::displayErrors() on; the log always has both.
+        $debug = App::displayErrors();
         $data = [
-            "error" => $e->getMessage(),
-            "stack" => jTraceEx($e),
+            "error" => ($debug || get_class($e) === \Exception::class) ? $e->getMessage() : "Internal error",
             "type" => "exception"
         ];
+        if ($debug) {
+            $data["stack"] = jTraceEx($e);
+        }
         elog(jTraceEx($e), "error");
         $response_code = 400;
         if ($e->getMessage() == "Expired token" || $e->getMessage() == "Unauthorized") {

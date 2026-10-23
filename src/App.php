@@ -10234,6 +10234,14 @@ class App
     private static int $connection_turn_seq = 0;
 
     /**
+     * Most requests one connection may have parked behind its running request.
+     * Each parked request is a coroutine holding its parsed body; without a cap
+     * a client that keeps one slow request open (a stream it never reads) and
+     * pipelines thousands more fills the worker up to max_coroutine.
+     */
+    public const MAX_PIPELINED_REQUESTS = 32;
+
+    /**
      * Run $handler for a request on connection $fd only after every earlier
      * request on the SAME connection has finished. OpenSwoole dispatches each
      * pipelined request into its own coroutine at once, so their responses were
@@ -10241,14 +10249,24 @@ class App
      * client (or a pipelining proxy) then pairs each response with the wrong
      * request. Different connections never wait on each other; outside a
      * coroutine (sequential modes) this is a plain call.
+     *
+     * A request arriving with MAX_PIPELINED_REQUESTS already queued on its
+     * connection is not run: $onOverflow is called instead (the server closes
+     * the connection, which releases the queue).
      */
-    public static function inConnectionOrder(int $fd, callable $handler): void
+    public static function inConnectionOrder(int $fd, callable $handler, ?callable $onOverflow = null): void
     {
         if (\OpenSwoole\Coroutine::getCid() < 0) {
             $handler();
             return;
         }
         if (isset(self::$connection_turns[$fd])) {
+            if (\count(self::$connection_turns[$fd][1]) >= self::MAX_PIPELINED_REQUESTS) {
+                if ($onOverflow !== null) {
+                    $onOverflow();
+                }
+                return;
+            }
             $turn = new \OpenSwoole\Coroutine\Channel(1);
             self::$connection_turns[$fd][1][] = $turn;
             $owner = self::$connection_turns[$fd][0];
@@ -10642,9 +10660,16 @@ class App
             }
         });
         // Pipelined requests on one connection must be answered in order.
-        $server->on("request", static function (\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response) use ($requestHandler): void {
-            $fd = $request->fd;
-            self::inConnectionOrder(\is_int($fd) ? $fd : 0, static fn () => $requestHandler($request, $response));
+        $server->on("request", static function (\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response) use ($requestHandler, $server): void {
+            $fd = \is_int($request->fd) ? $request->fd : 0;
+            self::inConnectionOrder(
+                $fd,
+                static fn () => $requestHandler($request, $response),
+                static function () use ($server, $fd): void {
+                    \ZealPHP\elog("[security] fd $fd pipelined more than " . self::MAX_PIPELINED_REQUESTS . ' requests behind a running one; closing the connection', 'warn');
+                    $server->close($fd);
+                }
+            );
         });
     }
 
