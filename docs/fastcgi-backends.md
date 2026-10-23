@@ -130,11 +130,12 @@ regardless of extension. It takes the same `mode` / `interpreter` / `address` /
 App::cgiScriptAlias('/cgi-bin', ['mode' => 'proc', 'interpreter' => '/usr/bin/python3']);
 ```
 
-> **What ScriptAlias will run.** With no `interpreter`, a file runs through its
-> own `#!` line, so it must **start with `#!`** (Apache parity: without one,
-> `exec()` fails and `/bin/sh` would run the file as a shell script, whatever it
-> contains) and must **not be group- or world-writable** (suexec parity). Either
-> failure is a 500 with the reason in the error log.
+> **What ScriptAlias will run.** With no `interpreter`, a file is exec'd
+> directly, so it must be a **`#!` script or a compiled binary** (ELF/Mach-O).
+> Apache parity: anything else made `exec()` fail and `/bin/sh` ran the file as
+> a shell script, whatever it contained. It must also **not be world-writable**.
+> Group-writable is fine (deploy-group setups); only suexec refuses that.
+> Either failure is a 500 with the reason in the error log.
 
 > **Implicit URL routing is automatic for ScriptAlias prefixes.** `run()`
 > registers a `patternRoute('#^<prefix>/(?P<rest>.+?)/?$#', …)` for every

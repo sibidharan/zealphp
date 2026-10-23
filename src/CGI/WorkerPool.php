@@ -158,6 +158,21 @@ final class WorkerPool
             ];
         }
 
+        // A slot whose last spawn failed: start its subprocess now, or give
+        // the slot back and answer 503 rather than touch its dead pipes.
+        if (isset($this->spawnFailed[$idx])) {
+            $this->reapAndSpawn($idx);
+            if (isset($this->spawnFailed[$idx])) {
+                $this->returnToIdle($idx);
+                return [
+                    'status'  => 503,
+                    'body'    => 'WorkerPool: subprocess could not be started',
+                    'headers' => [],
+                    'cookies' => [],
+                ];
+            }
+        }
+
         // C1 — anything already waiting on fd 3 was written after the previous
         // response (a destructor during the reset, say) and belongs to no
         // request. Reading it as this request's response would hand this user
@@ -545,7 +560,10 @@ final class WorkerPool
             return;
         }
         $this->closed = true;
-        foreach ($this->workers as $w) {
+        foreach ($this->workers as $i => $w) {
+            if (isset($this->spawnFailed[$i])) {
+                continue;   // already reaped; its replacement never started
+            }
             @fclose($w['stdin']);   // signal EOF → subprocess exits its loop
             @fclose($w['stdout']);
             @fclose($w['stderr']);
@@ -783,9 +801,32 @@ final class WorkerPool
      */
     private function respawn(int $idx): void
     {
-        $this->reap($idx);
-        $this->workers[$idx] = $this->spawn();
+        $this->reapAndSpawn($idx);
         $this->returnToIdle($idx);
+    }
+
+    /**
+     * Slots whose replacement subprocess could not be started. The slot stays
+     * in the pool (it used to be lost for good, shrinking the pool with every
+     * failed spawn) and is spawned again when next checked out.
+     *
+     * @var array<int, true>
+     */
+    private array $spawnFailed = [];
+
+    /** Reap the slot's subprocess (unless already reaped) and start a new one; never throws. */
+    private function reapAndSpawn(int $idx): void
+    {
+        if (!isset($this->spawnFailed[$idx])) {
+            $this->reap($idx);
+        }
+        try {
+            $this->workers[$idx] = $this->spawn();
+            unset($this->spawnFailed[$idx]);
+        } catch (\Throwable $e) {
+            $this->spawnFailed[$idx] = true;
+            \ZealPHP\elog('WorkerPool: could not start a subprocess for slot ' . $idx . ': ' . $e->getMessage(), 'error');
+        }
     }
 
     /**
@@ -796,16 +837,17 @@ final class WorkerPool
      */
     private function replace(int $idx): void
     {
-        $old = $this->workers[$idx];
-        try {
-            if ($this->isAlive($old)) {
-                @proc_terminate($old['proc'], 9);
+        if (!isset($this->spawnFailed[$idx])) {
+            $old = $this->workers[$idx];
+            try {
+                if ($this->isAlive($old)) {
+                    @proc_terminate($old['proc'], 9);
+                }
+            } catch (\Throwable) {
+                // already gone
             }
-        } catch (\Throwable) {
-            // already gone
         }
-        $this->reap($idx);
-        $this->workers[$idx] = $this->spawn();
+        $this->reapAndSpawn($idx);
     }
 
     /** Close every pipe of the subprocess at `$idx` and wait for it to exit. */

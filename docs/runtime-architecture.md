@@ -158,9 +158,9 @@ an unregistered fallback (`['mode' => App::$cgi_mode]`, `mayExecute = false`).
 > Pair `cgiScriptAlias()` with a `registerCgiBackend()` for the extensions you
 > want auto-routed, or add an explicit route. (Follow-up.)
 
-Without an `interpreter`, a ScriptAlias file runs through its own `#!` line: it
-must start with `#!` and must not be group- or world-writable, or the request
-fails with a 500 (Apache / suexec parity).
+Without an `interpreter`, a ScriptAlias file is exec'd directly: it must be a
+`#!` script or a compiled binary (ELF/Mach-O), and must not be world-writable,
+or the request fails with a 500 (Apache parity: nothing falls back to /bin/sh).
 
 `App::resolveCgiBackend('/path/file.py', '/cgi-bin/file.py')` returns
 `['backend' => [...], 'mayExecute' => bool]` for a given path + URL. Full

@@ -574,9 +574,22 @@ class Dispatcher
 
         $deadline = microtime(true) + App::$cgi_timeout;
         if ($isPhp) {
-            // cgi_worker.php reads the whole context before anything else.
-            self::writeAll($pipes[4], $ctx, $deadline);
+            // cgi_worker.php reads the whole context before anything else. A
+            // context that did not get through (timeout, broken pipe) must not
+            // run the script with empty $_GET/$_POST/$_COOKIE/$_SERVER.
+            $ctxSent = self::writeAll($pipes[4], $ctx, $deadline);
             fclose($pipes[4]);
+            if (!$ctxSent) {
+                elog("cgiSubprocess: request context not delivered to $path; aborting", 'error');
+                proc_terminate($process, 9);
+                foreach ($pipes as $p) {
+                    if (is_resource($p)) {
+                        @fclose($p);
+                    }
+                }
+                proc_close($process);
+                return 500;
+            }
         }
         try {
             // @phpstan-ignore-next-line — zealphp_request set by CoSessionManager before any route dispatches
@@ -813,17 +826,24 @@ class Dispatcher
         if (!is_executable($path)) {
             return 'file not executable; ScriptAlias dispatch requires +x and a #! shebang';
         }
+        // World-writable only: any local user could rewrite it. Group-writable
+        // is normal for deploy-group setups (umask 002, 0775) and mod_cgi runs
+        // it; only suexec refuses that.
         $perms = @fileperms($path);
-        if ($perms === false || ($perms & 0022) !== 0) {
-            return 'script is group- or world-writable; ScriptAlias refuses to run it (suexec parity)';
+        if ($perms === false || ($perms & 0002) !== 0) {
+            return 'script is world-writable; ScriptAlias refuses to run it';
         }
+        // The kernel must be able to exec it directly — a #! script or a
+        // compiled binary (ELF, Mach-O), as under Apache. Anything else used to
+        // fall back to /bin/sh (ENOEXEC) and run as a shell script.
         $fh = @fopen($path, 'rb');
-        $magic = $fh !== false ? (string) fread($fh, 2) : '';
+        $magic = $fh !== false ? (string) fread($fh, 4) : '';
         if ($fh !== false) {
             fclose($fh);
         }
-        if ($magic !== '#!') {
-            return 'script has no #! line; ScriptAlias runs only files that name their interpreter (Apache parity)';
+        $execMagics = ["\x7fELF", "\xcf\xfa\xed\xfe", "\xce\xfa\xed\xfe", "\xfe\xed\xfa\xcf", "\xfe\xed\xfa\xce", "\xca\xfe\xba\xbe"];
+        if (!str_starts_with($magic, '#!') && !in_array($magic, $execMagics, true)) {
+            return 'file is neither a #! script nor a compiled binary; ScriptAlias does not run it through /bin/sh';
         }
         return null;
     }

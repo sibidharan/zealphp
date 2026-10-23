@@ -19,8 +19,8 @@ use ZealPHP\RequestContext;
  *    that hits E2BIG at ~128 KB.
  *  - C10: an interpreter script's stderr is drained while stdout is read, and
  *    its buffered output is capped.
- *  - C11: ScriptAlias runs only files with a `#!` line that are not group- or
- *    world-writable (Apache / suexec parity).
+ *  - C11: ScriptAlias runs only #! scripts or compiled binaries (Apache
+ *    parity), and refuses world-writable files.
  *  - C8: the host emits the CGI session cookie with the app's
  *    session_get_cookie_params(), not hard-coded defaults.
  */
@@ -196,15 +196,33 @@ final class CgiProcHardeningTest extends TestCase
         $this->assertFileDoesNotExist($marker, 'a file without #! is never handed to /bin/sh');
     }
 
-    public function testScriptAliasRefusesWritableScripts(): void
+    public function testScriptAliasRefusesWorldWritableScripts(): void
     {
-        foreach (['world' => 0757, 'group' => 0775] as $who => $mode) {
-            $marker = self::$tmpDir . '/ran-' . $who;
-            @unlink($marker);
-            $f = $this->file($who . '.cgi', "#!/bin/sh\ntouch " . escapeshellarg($marker) . "\nprintf 'Content-Type: text/plain\\n\\nran'\n", $mode);
-            $this->assertSame(500, Dispatcher::cgiSubprocess($f), "{$who}-writable script refused");
-            $this->assertFileDoesNotExist($marker);
+        $marker = self::$tmpDir . '/ran-world';
+        @unlink($marker);
+        $f = $this->file('world.cgi', "#!/bin/sh\ntouch " . escapeshellarg($marker) . "\nprintf 'Content-Type: text/plain\\n\\nran'\n", 0757);
+        $this->assertSame(500, Dispatcher::cgiSubprocess($f), 'world-writable script refused');
+        $this->assertFileDoesNotExist($marker);
+    }
+
+    /** Group-writable is a normal deploy-group setup (umask 002): mod_cgi runs it, only suexec refuses. */
+    public function testScriptAliasRunsGroupWritableScripts(): void
+    {
+        $refusal = new \ReflectionMethod(Dispatcher::class, 'scriptAliasRefusal');
+        $f = $this->file('group.cgi', "#!/bin/sh\nprintf 'Content-Type: text/plain\\n\\nran'\n", 0775);
+        $this->assertNull($refusal->invoke(null, $f));
+    }
+
+    /** Compiled CGI binaries (ELF / Mach-O) exec directly, as under Apache; no #! needed. */
+    public function testScriptAliasAcceptsCompiledBinaries(): void
+    {
+        $refusal = new \ReflectionMethod(Dispatcher::class, 'scriptAliasRefusal');
+        foreach (["\x7fELF", "\xcf\xfa\xed\xfe", "\xca\xfe\xba\xbe"] as $i => $magic) {
+            $f = $this->file("bin$i.cgi", $magic . str_repeat("\0", 60), 0755);
+            $this->assertNull($refusal->invoke(null, $f), bin2hex($magic));
         }
+        $text = $this->file('text.cgi', "echo hi\n", 0755);
+        $this->assertIsString($refusal->invoke(null, $text), 'plain text without #! is still refused');
     }
 
     public function testScriptAliasRunsAProperScript(): void

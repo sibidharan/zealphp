@@ -231,4 +231,32 @@ final class WorkerPoolIntegrityTest extends TestCase
         $this->assertSame(504, $result['r']['status'] ?? null);
         $this->assertLessThan(4.0, $result['elapsed'] ?? 99.0);
     }
+
+    /**
+     * A replacement that cannot be started must not cost the pool its slot:
+     * the next checkout tries again (503 while it still fails), and a later
+     * successful spawn serves normally.
+     */
+    public function testAFailedRespawnKeepsTheSlot(): void
+    {
+        $pool = new WorkerPool(size: 1, maxRequestsPerWorker: 100);
+        try {
+            $failed = new \ReflectionProperty(WorkerPool::class, 'spawnFailed');
+            $reap = new \ReflectionMethod(WorkerPool::class, 'reap');
+            $reap->invoke($pool, 0);
+            $failed->setValue($pool, [0 => true]);   // as after a spawn() that threw
+
+            $file = sys_get_temp_dir() . '/zp_wpi_ok_' . getmypid() . '.php';
+            file_put_contents($file, '<?php echo "served";');
+            try {
+                $r = $pool->dispatch(['file' => $file], 5.0);
+                $this->assertSame('served', $r['body'], 'the slot was spawned again on checkout');
+                $this->assertSame([], $failed->getValue($pool));
+            } finally {
+                @unlink($file);
+            }
+        } finally {
+            $pool->close();
+        }
+    }
 }
