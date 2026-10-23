@@ -9,7 +9,8 @@ use OpenSwoole\Table;
 /**
  * Redis/Valkey-backed `StoreBackend`.
  *
- * Row layout: HASH at `{prefix}:{table}:{key}` (columns → hash fields).
+ * Row layout: HASH at `{prefix}:{table}:{key}` (columns → hash fields); a
+ * key equal to `__keys__` or starting with `~` is stored as `~{key}`.
  * Membership (tracked mode): SET at `{prefix}:{table}:__keys__`.
  *
  * Two modes chosen at `make()`:
@@ -269,7 +270,7 @@ final class RedisBackend implements StoreBackend
             try {
                 foreach ($client->scanKeys($prefix . '*') as $rowKey) {
                     if ($rowKey === $sk) { continue; }
-                    $key   = substr($rowKey, strlen($prefix));
+                    $key   = self::rowKeyToKey(substr($rowKey, strlen($prefix)));
                     $row   = $this->codec->decodeRow($schema, $client->hgetall($rowKey));
                     if ($row !== null) { yield $key => $row; }
                 }
@@ -321,7 +322,7 @@ final class RedisBackend implements StoreBackend
             if ($mode === 'ttl') {
                 [$nextCursor, $rowKeys] = $c->scanCursor($prefix . '*', $cursor, $count);
                 $rowKeys = array_values(array_filter($rowKeys, fn (string $k): bool => $k !== $sk));
-                $keys    = array_map(fn (string $rk): string => substr($rk, strlen($prefix)), $rowKeys);
+                $keys    = array_map(fn (string $rk): string => self::rowKeyToKey(substr($rk, strlen($prefix))), $rowKeys);
             } else {
                 [$nextCursor, $keys] = $c->sscanCursor($sk, $cursor, $count);
                 $rowKeys = array_map(fn (string $k): string => $this->rowKey($name, $k), $keys);
@@ -371,7 +372,7 @@ final class RedisBackend implements StoreBackend
             }
             $members = iterator_to_array($c->sscan($sk), false);
             foreach (array_chunk($members, 100) as $batch) {
-                $rkeys = array_map(fn(string $k): string => $prefix . $k, $batch);
+                $rkeys = array_map(fn(string $k): string => $this->rowKey($name, $k), $batch);
                 $c->unlink(...$rkeys);
             }
             $c->unlink($sk);
@@ -595,10 +596,31 @@ final class RedisBackend implements StoreBackend
         });
     }
 
-    /** Build the Redis HASH key for a specific row: `{prefix}:{table}:{key}`. */
+    /**
+     * Build the Redis HASH key for a specific row: `{prefix}:{table}:{key}`.
+     *
+     * The row namespace shares its prefix with the membership SET
+     * (`{prefix}:{table}:__keys__`), so a row keyed `__keys__` — row keys are
+     * often request-derived (cache keys, client ids) — landed ON the SET: a
+     * WRONGTYPE error for every later set()/count()/iterate() of the table.
+     * That key, and any key starting with the `~` escape, is stored as
+     * `~{key}`; every other key keeps its plain layout. {@see rowKeyToKey()}
+     * reverses it for SCAN-based iteration.
+     */
     private function rowKey(string $table, string $key): string
     {
-        return $this->prefix . ':' . $table . ':' . $key;
+        return $this->prefix . ':' . $table . ':' . self::escapeKey($key);
+    }
+
+    private static function escapeKey(string $key): string
+    {
+        return ($key === '__keys__' || str_starts_with($key, '~')) ? '~' . $key : $key;
+    }
+
+    /** The row key (as `{prefix}:{table}:`-stripped by SCAN) back to the caller's key. */
+    private static function rowKeyToKey(string $stored): string
+    {
+        return str_starts_with($stored, '~') ? substr($stored, 1) : $stored;
     }
 
     /** Build the Redis SET key for the membership index: `{prefix}:{table}:__keys__`. */

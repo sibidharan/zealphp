@@ -2471,20 +2471,27 @@ class App
     }
 
     /**
-     * Parse a raw `Cookie:` header through PHP's cookie treat-data semantics
-     * (issue #305) — the same `php_default_treat_data` routine PHP applies to
-     * the query string, but with the cookie value-decoding rule:
+     * Parse a raw `Cookie:` header the way PHP builds `$_COOKIE` (issue #305):
      *
-     *  - Pairs split on `;`; each pair split on its FIRST `=`. The name is
-     *    left-trimmed; the value is everything after the first `=`.
-     *  - Cookie NAMES get legacy mangling — leading whitespace stripped, `.`
-     *    and space → `_`, and `name[]` / `name[k]` build nested arrays.
-     *  - Cookie VALUES are `%XX`-decoded per RFC 6265 ONLY — a literal `+` is
-     *    NOT turned into a space (that `+`→space rule is form-urlencoded-only).
+     *  - Pairs split on `;`; leading whitespace is stripped; each pair splits
+     *    on its FIRST `=`. A pair with an empty name, or without `=` (a bare
+     *    `; secure` segment), is skipped — PHP itself binds the latter as an
+     *    empty cookie; ZealPHP has always skipped it.
+     *  - NAMES are taken literally — never URL-decoded — then mangled like any
+     *    PHP variable name: ` ` and `.` → `_`, `name[]` / `name[k]` build
+     *    nested arrays (an unmatched `[` becomes `_`).
+     *  - A name that mangling turns into a `__Host-` / `__Secure-` prefix it
+     *    did not literally have is dropped (CVE-2022-31629): those prefixes
+     *    promise the browser set the cookie with Secure (and Path=/, no Domain)
+     *    and must not be forgeable through `..Host-x`.
+     *  - The FIRST cookie of a name wins (a sibling-domain or path cookie sent
+     *    after the real one must not shadow it); array elements accumulate.
+     *  - VALUES are `%XX`-decoded per RFC 6265 — `rawurldecode()`, so a
+     *    literal `+` is NOT a space.
      *
-     * Implementation re-uses PHP's `parse_str()` for the bracket-nesting +
-     * name-mangling, protecting each value's `+` / `&` / `=` so the assembled
-     * query survives the urldecode parse_str applies.
+     * This used to run the pairs through `parse_str()`, which URL-decoded the
+     * names (`%5F%5FHost-x` became `__Host-x`, re-opening the prefix bypass),
+     * let the LAST duplicate win, and split a name at `&`.
      *
      * Pure function — no side effects; safe to unit-test directly.
      *
@@ -2492,43 +2499,94 @@ class App
      */
     public static function parseCookieHeader(string $raw): array
     {
-        $raw = trim($raw);
-        if ($raw === '') {
-            return [];
-        }
-        $assembled = [];
+        $out = [];
         foreach (explode(';', $raw) as $pair) {
-            if ($pair === '' || !str_contains($pair, '=')) {
-                // A bare `; flag` cookie segment with no `=` has no value to
-                // bind; PHP skips it.
+            $pair = ltrim($pair, " \t\n\r\v\f");
+            if ($pair === '') {
                 continue;
             }
-            [$name, $value] = explode('=', $pair, 2);
-            $name = ltrim($name);
+            $eq = strpos($pair, '=');
+            if ($eq === false) {
+                continue;
+            }
+            $name = substr($pair, 0, $eq);
+            $value = rawurldecode(substr($pair, $eq + 1));
             if ($name === '') {
                 continue;
             }
-            // Protect the value: parse_str urldecodes (turning `+`→space and
-            // honouring `&`/`=` as separators). Pre-encode those three so the
-            // value round-trips verbatim except for the cookie's own %XX, which
-            // parse_str's urldecode resolves — matching RFC 6265 value decoding.
-            $safeValue = str_replace(['+', '&', '='], ['%2B', '%26', '%3D'], $value);
-            $assembled[] = $name . '=' . $safeValue;
-        }
-        if ($assembled === []) {
-            return [];
-        }
-        /** @var array<array-key, mixed> $parsed */
-        $parsed = [];
-        parse_str(implode('&', $assembled), $parsed);
-        // Cookie names are always strings; normalise the key type so the
-        // declared array<string, mixed> contract holds (parse_str's signature
-        // is array-key-typed because numeric-string keys collapse to int).
-        $out = [];
-        foreach ($parsed as $name => $value) {
-            $out[(string)$name] = $value;
+
+            // Mangle the base name up to the first matched `[`.
+            $len = strlen($name);
+            $base = '';
+            $i = 0;
+            $nested = false;
+            for (; $i < $len; $i++) {
+                $c = $name[$i];
+                if ($c === '[' && strpos($name, ']', $i + 1) !== false) {
+                    $nested = true;
+                    break;
+                }
+                $base .= ($c === ' ' || $c === '.' || $c === '[') ? '_' : $c;
+            }
+            if ($base === '') {
+                continue;
+            }
+            foreach (['__Host-', '__Secure-'] as $prefix) {
+                if (str_starts_with($base, $prefix) && !str_starts_with($name, $prefix)) {
+                    continue 2;
+                }
+            }
+
+            /** @var list<string|null> $indices `null` = append (`[]`) */
+            $indices = [];
+            while ($nested && $i < $len && $name[$i] === '[') {
+                $close = strpos($name, ']', $i + 1);
+                if ($close === false) {
+                    break;
+                }
+                $indices[] = $close === $i + 1 ? null : substr($name, $i + 1, $close - $i - 1);
+                $i = $close + 1;
+            }
+            if (count($indices) > 64) {
+                continue; // max_input_nesting_level
+            }
+
+            if ($indices === []) {
+                if (!array_key_exists($base, $out)) {
+                    $out[$base] = $value;
+                }
+            } else {
+                $out[$base] = self::cookieAssign($out[$base] ?? null, $indices, $value);
+            }
         }
         return $out;
+    }
+
+    /**
+     * Set `$value` at the `$indices` path below `$node` (replacing a scalar
+     * on the way with an array, as PHP does); `null` index = append.
+     *
+     * @param list<string|null> $indices non-empty
+     * @return array<array-key, mixed>
+     */
+    private static function cookieAssign(mixed $node, array $indices, string $value): array
+    {
+        $arr = is_array($node) ? $node : [];
+        $idx = array_shift($indices);
+        if ($indices === []) {
+            if ($idx === null) {
+                $arr[] = $value;
+            } else {
+                $arr[$idx] = $value;
+            }
+            return $arr;
+        }
+        if ($idx === null) {
+            $arr[] = self::cookieAssign(null, $indices, $value);
+        } else {
+            $arr[$idx] = self::cookieAssign($arr[$idx] ?? null, $indices, $value);
+        }
+        return $arr;
     }
 
     /**

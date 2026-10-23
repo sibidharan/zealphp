@@ -24,8 +24,13 @@ use OpenSwoole\Coroutine as co;
  */
 class FileSessionHandler implements \SessionHandlerInterface
 {
-    /** Absolute path to the session-file directory, resolved in `open()`. */
-    private string $savePath;
+    /**
+     * Absolute path to the session-file directory, resolved in `open()`.
+     * Empty until then — every method refuses to touch the filesystem with
+     * it (an uninitialized typed property used to throw an Error from gc(),
+     * which the GC timer reaches without a request having opened the handler).
+     */
+    private string $savePath = '';
 
     /**
      * Open the session storage at `$savePath`, creating the directory if absent.
@@ -57,12 +62,27 @@ class FileSessionHandler implements \SessionHandlerInterface
      */
     public function read($sessionId): string
     {
-        $file = $this->savePath . '/sess_' . basename((string) $sessionId);
-        if (file_exists($file)) {
-            $contents = file_get_contents($file);
-            return $contents === false ? '' : $contents;
+        if ($this->savePath === '') {
+            return '';
         }
-        return '';
+        $file = $this->savePath . '/sess_' . basename((string) $sessionId);
+        $fp = @fopen($file, 'r');
+        if ($fp === false) {
+            return '';
+        }
+        try {
+            // Shared lock: write() truncates then writes under LOCK_EX, so an
+            // unlocked read could see the empty or half-written file (a torn
+            // read, i.e. an empty or truncated — undecodable — session).
+            if (!flock($fp, LOCK_SH)) {
+                return '';
+            }
+            $contents = stream_get_contents($fp);
+            flock($fp, LOCK_UN);
+            return $contents === false ? '' : $contents;
+        } finally {
+            fclose($fp);
+        }
     }
 
     /**
@@ -73,8 +93,13 @@ class FileSessionHandler implements \SessionHandlerInterface
      */
     public function write($sessionId, $sessionData): bool
     {
+        if ($this->savePath === '') {
+            return false;
+        }
         $file = $this->savePath . '/sess_' . basename((string) $sessionId);
-        return file_put_contents($file, $sessionData) !== false;
+        // Exclusive lock around truncate + write, so a concurrent read() (or
+        // another write) never sees the file in between.
+        return file_put_contents($file, $sessionData, LOCK_EX) !== false;
     }
 
     /**
@@ -83,6 +108,9 @@ class FileSessionHandler implements \SessionHandlerInterface
      */
     public function destroy($sessionId): bool
     {
+        if ($this->savePath === '') {
+            return true;
+        }
         $file = $this->savePath . '/sess_' . basename((string) $sessionId);
         if (file_exists($file)) {
             unlink($file);
@@ -108,11 +136,14 @@ class FileSessionHandler implements \SessionHandlerInterface
      */
     public function gc($maxLifetime): int
     {
+        if ($this->savePath === '') {
+            return 0;
+        }
         $files = glob("$this->savePath/sess_*") ?: [];
         foreach ($files as $file) {
             $mtime = filemtime($file);
             if ($mtime !== false && $mtime + $maxLifetime < time()) {
-                unlink($file);
+                @unlink($file);
             }
         }
         return 0;
