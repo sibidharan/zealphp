@@ -10078,6 +10078,72 @@ class App
     }
 
     /**
+     * Per-connection request turnstile (HTTP/1.1 pipelining): fd => [owner token,
+     * queue of waiting requests]. Present while a request on that connection runs.
+     *
+     * @var array<int, array{0: int, 1: list<\OpenSwoole\Coroutine\Channel>}>
+     */
+    private static array $connection_turns = [];
+
+    /** Monotonic owner token for $connection_turns (detects fd reuse). */
+    private static int $connection_turn_seq = 0;
+
+    /**
+     * Run $handler for a request on connection $fd only after every earlier
+     * request on the SAME connection has finished. OpenSwoole dispatches each
+     * pipelined request into its own coroutine at once, so their responses were
+     * written in completion order — HTTP/1.1 requires request order, and a
+     * client (or a pipelining proxy) then pairs each response with the wrong
+     * request. Different connections never wait on each other; outside a
+     * coroutine (sequential modes) this is a plain call.
+     */
+    public static function inConnectionOrder(int $fd, callable $handler): void
+    {
+        if (\OpenSwoole\Coroutine::getCid() < 0) {
+            $handler();
+            return;
+        }
+        if (isset(self::$connection_turns[$fd])) {
+            $turn = new \OpenSwoole\Coroutine\Channel(1);
+            self::$connection_turns[$fd][1][] = $turn;
+            $owner = self::$connection_turns[$fd][0];
+            $turn->pop();
+        } else {
+            $owner = ++self::$connection_turn_seq;
+            self::$connection_turns[$fd] = [$owner, []];
+        }
+        try {
+            $handler();
+        } finally {
+            // Hand the connection to the next pipelined request — unless the
+            // connection closed meanwhile and the fd now belongs to a new one.
+            $state = self::$connection_turns[$fd] ?? null;
+            if ($state !== null && $state[0] === $owner) {
+                $next = \array_shift($state[1]);
+                if ($next !== null) {
+                    self::$connection_turns[$fd] = $state;
+                    $next->push(true);
+                } else {
+                    unset(self::$connection_turns[$fd]);
+                }
+            }
+        }
+    }
+
+    /**
+     * Connection closed: release any requests still queued behind it (their
+     * responses go nowhere) and forget the fd so a reused fd starts fresh.
+     */
+    public static function releaseConnectionTurns(int $fd): void
+    {
+        $state = self::$connection_turns[$fd] ?? null;
+        unset(self::$connection_turns[$fd]);
+        foreach ($state[1] ?? [] as $waiting) {
+            $waiting->push(true);
+        }
+    }
+
+    /**
      * Register the OnRequest event handler — the per-request entry point that
      * populates RequestContext, runs the middleware stack, fires shutdown
      * functions, and emits the response. Extracted verbatim from App::run()
@@ -10101,7 +10167,7 @@ class App
         // statics, $GLOBALS, superglobals) — so it survives. registerOnRequest()
         // runs AFTER buildMiddlewareStack(), so this is the fully assembled chain.
         $bootMiddleware = self::$middleware_stack;
-        $server->on("request",new $sessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) use ($bootMiddleware) {
+        $requestHandler = new $sessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) use ($bootMiddleware) {
             $g = RequestContext::instance();
             // error_get_last() is process-global and OpenSwoole never runs request
             // shutdown, so without this every request inherited the previous
@@ -10420,7 +10486,11 @@ class App
                     }
                 }
             }
-        }));
+        });
+        // Pipelined requests on one connection must be answered in order.
+        $server->on("request", static function (\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response) use ($requestHandler): void {
+            self::inConnectionOrder((int) $request->fd, static fn () => $requestHandler($request, $response));
+        });
     }
 
     /**
@@ -10629,6 +10699,7 @@ class App
         });
 
         $server->on('close', function(\OpenSwoole\WebSocket\Server $server, int $fd) use (&$wsFdMap) {
+            self::releaseConnectionTurns($fd);
             $path  = $wsFdMap[$fd] ?? null;
             unset($wsFdMap[$fd]);
             $g     = RequestContext::instance();
