@@ -6333,6 +6333,69 @@ class App
     }
 
     /**
+     * Symlinks the OpenSwoole static handler would follow out of the document
+     * root: [link path, resolved target] pairs, scanning each directory entry
+     * of static_handler_locations (or the whole docroot when the list is
+     * empty), capped at $maxEntries filesystem entries. Empty when the static
+     * handler is off.
+     *
+     * @param array<string, mixed> $effectiveSettings
+     * @return list<array{0: string, 1: string}>
+     * @internal — public for tests; not part of the user-facing API.
+     */
+    public static function staticHandlerSymlinkEscapes(array $effectiveSettings, int $maxEntries = 20000): array
+    {
+        if (empty($effectiveSettings['enable_static_handler'])) {
+            return [];
+        }
+        $docRoot = \is_string($effectiveSettings['document_root'] ?? null)
+            ? \realpath($effectiveSettings['document_root']) : false;
+        if ($docRoot === false) {
+            return [];
+        }
+        $locations = $effectiveSettings['static_handler_locations'] ?? [];
+        if (!\is_array($locations) || $locations === []) {
+            $locations = ['/'];   // no whitelist: OpenSwoole serves the whole docroot
+        }
+        $escapes = [];
+        $seen = 0;
+        $check = static function (string $path) use ($docRoot, &$escapes): void {
+            if (!\is_link($path)) {
+                return;
+            }
+            $target = \realpath($path);
+            if ($target !== false && !self::pathWithinRoot($target, $docRoot)) {
+                $escapes[] = [$path, $target];
+            }
+        };
+        foreach ($locations as $location) {
+            if (!\is_string($location) || !\str_ends_with($location, '/')) {
+                continue;   // file entries: checked when they are a directory's children
+            }
+            $dir = \rtrim($docRoot . $location, '/');
+            if (!\file_exists($dir)) {
+                continue;
+            }
+            $check($dir);   // the prefix directory itself may be the link
+            if (\is_link($dir) || !\is_dir($dir)) {
+                continue;
+            }
+            $it = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::SELF_FIRST
+            );
+            foreach ($it as $entry) {
+                if (++$seen > $maxEntries) {
+                    break 2;
+                }
+                \assert($entry instanceof \SplFileInfo);
+                $check($entry->getPathname());
+            }
+        }
+        return $escapes;
+    }
+
+    /**
      * Boot-time backpressure advisory (pure testable seam over the resolved
      * server settings). Returns a warning when the per-worker coroutine ceiling
      * has been raised into OpenSwoole's effectively-unbounded range (>= 100000)
@@ -9244,6 +9307,30 @@ class App
         // shed path). Logged once at boot, visible in master logs before fork.
         if (($bpAdvisory = self::backpressureBootAdvisory($effective_settings)) !== null) {
             error_log($bpAdvisory);
+        }
+
+        // OpenSwoole's static handler serves its prefixes in C before any PHP
+        // guard runs, and it follows symlinks: a link that leaves the docroot is
+        // an arbitrary file read. Warn at boot (or refuse, with
+        // ZEALPHP_STATIC_SYMLINK_STRICT=1) instead of finding out from a request.
+        $staticEscapes = self::staticHandlerSymlinkEscapes($effective_settings);
+        if ($staticEscapes !== []) {
+            $lines = [];
+            foreach (\array_slice($staticEscapes, 0, 10) as [$link, $target]) {
+                $lines[] = "  $link -> $target";
+            }
+            $msg = '[warn] OpenSwoole static handler would serve ' . \count($staticEscapes)
+                . ' symlink(s) that point outside the document root (no PHP guard applies there):'
+                . "\n" . \implode("\n", $lines)
+                . "\nRemove them, move them out of static_handler_locations, or set ZEALPHP_STATIC_SYMLINK_STRICT=1 to refuse to boot.";
+            error_log($msg);
+            if ((string) \getenv('ZEALPHP_STATIC_SYMLINK_STRICT') === '1') {
+                // Refuse loudly: stderr + non-zero exit, so a supervisor or CI
+                // sees the failure (a thrown exception here was swallowed by
+                // the boot path and the process exited 0).
+                \fwrite(\STDERR, $msg . "\nRefusing to start (ZEALPHP_STATIC_SYMLINK_STRICT=1).\n");
+                exit(1);
+            }
         }
 
         // Deterministic session GC on a worker-0 timer — ZealPHP replaced PHP's
