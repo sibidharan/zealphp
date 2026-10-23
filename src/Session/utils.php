@@ -599,7 +599,7 @@ function zeal_session_name($name = null)
  */
 function zeal_session_write_close(): bool
 {
-    return zeal_session_commit(true);
+    return zeal_session_store(true);
 }
 
 /**
@@ -622,7 +622,7 @@ function zeal_session_persist_before_send(): void
         return;
     }
     try {
-        zeal_session_commit(false);
+        zeal_session_store(false);
     } catch (\Throwable $e) {
         // Same contract as the managers: a failed write fails this request's
         // session, never the response. The manager's close retries it.
@@ -635,7 +635,7 @@ function zeal_session_persist_before_send(): void
  * @internal Shared body of zeal_session_write_close() ($close = true) and
  * zeal_session_persist_before_send() ($close = false).
  */
-function zeal_session_commit(bool $close): bool
+function zeal_session_store(bool $close): bool
 {
     $g = RequestContext::instance();
 
