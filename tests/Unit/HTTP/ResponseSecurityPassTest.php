@@ -45,6 +45,7 @@ final class ResponseSecurityPassTest extends TestCase
         $g->_session_persisted_hash = null;
         $g->session_params = [];
         $g->session_loaded_keys = [];
+        $g->session_loaded_digest = [];
         unset($GLOBALS['_SESSION']);
         foreach (array_merge(glob($this->dir . '/*') ?: [], $this->tmpFiles) as $f) {
             @unlink($f);
@@ -67,6 +68,7 @@ final class ResponseSecurityPassTest extends TestCase
         $g->_session_started = true;
         $g->_session_persisted_hash = null;
         $g->session_loaded_keys = [];
+        $g->session_loaded_digest = [];
         $g->session_params = ['session_id' => self::SID, 'save_path' => $this->dir];
         $GLOBALS['_SESSION'] = ['user' => 'alice'];
         return $this->dir . '/sess_' . self::SID;

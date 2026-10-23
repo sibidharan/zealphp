@@ -119,7 +119,7 @@ class RedirectMiddleware implements MiddlewareInterface
         // A `$N` in the host may only fill in DNS labels (`https://$1.example.com`):
         // the result must still match the host's fixed parts, so a capture can't
         // carry `@evil.com` or a `.evil.com` suffix into the authority.
-        $hostPattern = '/^' . (string) preg_replace('/\\\$\d+/', '[a-z0-9-]*', preg_quote($toHost, '/')) . '$/i';
+        $hostPattern = '/^' . (string) preg_replace('/\\\\\$\d+/', '[a-z0-9-]*', preg_quote($toHost, '/')) . '$/i';
         $targetHost = parse_url($target, PHP_URL_HOST);
         return is_string($targetHost) && preg_match($hostPattern, $targetHost) === 1;
     }
