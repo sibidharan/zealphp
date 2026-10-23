@@ -99,7 +99,7 @@ class ETagMiddleware implements MiddlewareInterface
         $resp = $g->zealphp_response;
         \assert($resp !== null);
 
-        if ($etag !== '' && $isGetOrHead) {
+        if ($etag !== '') {
             $resp->header('ETag', $etag);
         }
 

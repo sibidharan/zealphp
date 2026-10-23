@@ -113,6 +113,24 @@ class ZealApiHelpersTest extends TestCase
         $this->assertSame('exception', $body['type']);
     }
 
+    public function testDieHidesDriverAndEngineDetailsWithoutDisplayErrors(): void
+    {
+        $prev = \ZealPHP\App::displayErrors();
+        \ZealPHP\App::displayErrors(false);
+        try {
+            foreach ([new \PDOException('Access denied for user app@10.0.0.5'), new \TypeError('f(): Argument #1 in /srv/app/x.php')] as $e) {
+                $r = $this->captureStatus(fn() => $this->api->die($e));
+                $body = json_decode($r['echo'], true);
+                $this->assertSame('Internal error', $body['error'], get_class($e));
+                $this->assertArrayNotHasKey('stack', $body);
+            }
+            $r = $this->captureStatus(fn() => $this->api->die(new \RuntimeException('boom')));
+            $this->assertArrayNotHasKey('stack', json_decode($r['echo'], true));
+        } finally {
+            \ZealPHP\App::displayErrors($prev);
+        }
+    }
+
     public function testDieMapsUnauthorizedTo403(): void
     {
         $r = $this->captureStatus(fn() => $this->api->die(new \RuntimeException('Unauthorized')));

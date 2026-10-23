@@ -4697,10 +4697,10 @@ class App
     public static function wsAllowedOrigins(?array $origins = null): array
     {
         if ($origins !== null) {
-            self::$ws_allowed_origins = array_values(array_map(
+            self::$ws_allowed_origins = array_map(
                 static fn (string $o): string => strtolower(rtrim($o, '/')),
                 $origins
-            ));
+            );
         }
         return self::$ws_allowed_origins;
     }

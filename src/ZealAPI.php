@@ -607,15 +607,16 @@ class ZealAPI extends REST
      */
     public function die($e): void
     {
-        // The message of a plain \Exception is the API's own error text
-        // (`throw new \Exception("Invalid input")`, the "Unauthorized" /
-        // "Not found" sentinels below) and goes to the client. A library
-        // exception's message (PDOException: DB user and host,
-        // TemplateUnavailableException: an absolute path) and the stack trace
-        // only go out with App::displayErrors() on; the log always has both.
+        // An exception the API throws on purpose (`throw new \Exception("Invalid
+        // input")`, a RuntimeException, the "Unauthorized" / "Not found"
+        // sentinels below) carries text meant for the client. Driver, engine
+        // and framework exceptions carry internals (PDOException: DB user and
+        // host; TypeError: file paths; TemplateUnavailableException: an
+        // absolute path): their message, like the stack trace, only goes out
+        // with App::displayErrors() on. The log always has both.
         $debug = App::displayErrors();
         $data = [
-            "error" => ($debug || get_class($e) === \Exception::class) ? $e->getMessage() : "Internal error",
+            "error" => ($debug || !self::exceptionCarriesInternals($e)) ? $e->getMessage() : "Internal error",
             "type" => "exception"
         ];
         if ($debug) {
@@ -632,6 +633,16 @@ class ZealAPI extends REST
         }
         $data = $this->json($data);
         $this->response($data, $response_code);
+    }
+
+    private static function exceptionCarriesInternals(\Throwable $e): bool
+    {
+        return $e instanceof \Error
+            || $e instanceof \PDOException
+            || $e instanceof \ErrorException
+            || $e instanceof \JsonException
+            || (class_exists(\mysqli_sql_exception::class, false) && $e instanceof \mysqli_sql_exception)
+            || str_starts_with(get_class($e), 'ZealPHP\\');
     }
 
     /**
