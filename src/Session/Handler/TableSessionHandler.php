@@ -385,6 +385,18 @@ final class TableSessionHandler implements \SessionHandlerInterface
         $this->context[$cid][$sessionId] = ['base' => $base, 'version' => $version];
     }
 
+    /**
+     * True only when no process has this pid. kill(pid, 0) also fails with
+     * EPERM for a LIVE process of another user; only ESRCH means it is gone.
+     */
+    private static function processIsGone(int $pid): bool
+    {
+        if (!function_exists('posix_kill') || @posix_kill($pid, 0)) {
+            return false;
+        }
+        return posix_get_last_error() === 3;   // ESRCH
+    }
+
     /** Longest a request waits for a shard lock before failing its session write. */
     public static float $lockTimeoutSeconds = 5.0;
 
@@ -403,8 +415,7 @@ final class TableSessionHandler implements \SessionHandlerInterface
         while (!$lock->cmpset(0, $me)) {
             if (microtime(true) >= $deadline) {
                 $holder = $lock->get();
-                if ($holder > 0 && $holder !== $me && function_exists('posix_kill') && !@posix_kill($holder, 0)
-                    && $lock->cmpset($holder, $me)) {
+                if ($holder > 0 && $holder !== $me && self::processIsGone($holder) && $lock->cmpset($holder, $me)) {
                     return;   // the holder is gone: reclaim its lock
                 }
                 throw new \RuntimeException('TableSessionHandler: session shard lock held by pid ' . $holder . ' for over '
