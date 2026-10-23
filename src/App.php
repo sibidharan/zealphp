@@ -537,6 +537,18 @@ class App
     public static bool $coroutine_umask_isolation = false;
 
     /**
+     * Per-coroutine LAST-ERROR isolation — error_get_last() reads
+     * PG(last_error_*), which is process-global and never reset between
+     * OpenSwoole requests, so one request's warning (message + file) was
+     * readable by the next request and by concurrent peers. Requires
+     * ext-zealphp with zealphp_last_error_isolation. Auto-enabled by
+     * `App::mode('coroutine-legacy')` (opt out with env
+     * `ZEALPHP_LAST_ERROR_ISOLATION_DISABLE=1`); off by default elsewhere,
+     * where the request handler still clears the last error per request.
+     */
+    public static bool $coroutine_last_error_isolation = false;
+
+    /**
      * Per-coroutine date_default_timezone_set() isolation — the default
      * timezone is process-global; WordPress-class apps set it per request
      * (core boot reads the site option), so one request's timezone leaks
@@ -3217,6 +3229,9 @@ class App
                 // state — isolate them per coroutine too (ext-zealphp 0.3.38+).
                 self::coroutineLocaleIsolation((string) \getenv('ZEALPHP_LOCALE_ISOLATION_DISABLE') !== '1');
                 self::coroutineUmaskIsolation((string) \getenv('ZEALPHP_UMASK_ISOLATION_DISABLE') !== '1');
+                // error_get_last() is process-global engine state; without this a
+                // request reads a peer's (or the previous request's) last warning.
+                self::coroutineLastErrorIsolation((string) \getenv('ZEALPHP_LAST_ERROR_ISOLATION_DISABLE') !== '1');
                 // date_default_timezone_set() / mb_internal_encoding() /
                 // libxml_use_internal_errors() — the remaining function-backed
                 // process-global settings legacy apps change per request
@@ -4457,6 +4472,18 @@ class App
             self::$coroutine_umask_isolation = $on;
         }
         return self::$coroutine_umask_isolation;
+    }
+
+    /**
+     * Per-coroutine last-error isolation — see the
+     * $coroutine_last_error_isolation docblock. Asserted at App::run() boot wiring.
+     */
+    public static function coroutineLastErrorIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$coroutine_last_error_isolation = $on;
+        }
+        return self::$coroutine_last_error_isolation;
     }
 
     /**
@@ -9548,6 +9575,19 @@ class App
                 'warn'
             );
         }
+        if (self::$coroutine_last_error_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_last_error_isolation')
+        ) {
+            (\zealphp_last_error_isolation(...))((bool) true);
+        } elseif (self::$coroutine_last_error_isolation) {
+            elog(
+                "[warn] coroutineLastErrorIsolation(true) requires ext-zealphp "
+                . "with zealphp_last_error_isolation — error_get_last() will "
+                . "return concurrently-running peers' warnings.",
+                'warn'
+            );
+        }
 
         // Function-backed process-global settings (ext-zealphp 0.3.45+):
         // default timezone, mb internal encoding, libxml error flag. Same
@@ -10063,6 +10103,12 @@ class App
         $bootMiddleware = self::$middleware_stack;
         $server->on("request",new $sessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) use ($bootMiddleware) {
             $g = RequestContext::instance();
+            // error_get_last() is process-global and OpenSwoole never runs request
+            // shutdown, so without this every request inherited the previous
+            // request's last warning. Under ext last-error isolation this only
+            // clears this coroutine's own lane; without it (plain coroutine mode)
+            // concurrent peers still share one slot — see coroutineLastErrorIsolation.
+            \error_clear_last();
 
             $g->status = 200;
             self::clearRawStatusOverride($g); // #474 — a prior raw status line must not bleed in

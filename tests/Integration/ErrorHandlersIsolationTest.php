@@ -40,6 +40,18 @@ class ErrorHandlersIsolationTest extends TestCase
         $this->assertTrue($body['ok']);
     }
 
+    public function testLastErrorDoesNotCarryIntoNextRequest(): void
+    {
+        // OpenSwoole never runs request shutdown, so PG(last_error_*) used to
+        // survive into the next request — another tenant's warning text.
+        $r = $this->get('/__error_test/last-error-seed');
+        $this->assertStatus(200, $r);
+        $r = $this->get('/__error_test/last-error-read');
+        $this->assertStatus(200, $r);
+        $body = $this->assertJsonResponse($r);
+        $this->assertNull($body['last'], 'previous request\'s error_get_last() leaked');
+    }
+
     public function testHandlerIsolationBetweenCoroutines(): void
     {
         // Fire /slow first (sets a per-coroutine handler that writes its CID to

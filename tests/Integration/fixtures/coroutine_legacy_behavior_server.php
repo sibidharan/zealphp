@@ -130,5 +130,21 @@ $app->route('/contract', function ($request) {
     };
 });
 
+// ── /last-error — error_get_last() is process-global engine state. Each request
+// raises a warning carrying its own token, yields so peers interleave (and raise
+// theirs), then reads error_get_last(): it must be its OWN warning, never a
+// peer's. Without ?t it raises nothing — it must see no error at all (no
+// inheritance from a finished request).
+$app->route('/last-error', function ($request) use ($interleave) {
+    $g = \ZealPHP\G::instance();
+    $t = (string)($g->get['t'] ?? '');
+    $before = error_get_last()['message'] ?? null;
+    if ($t !== '') {
+        @trigger_error("last-error-token-$t", E_USER_WARNING);
+        $interleave(20);
+    }
+    return ['t' => $t, 'before' => $before, 'after' => error_get_last()['message'] ?? null];
+});
+
 $app->route('/ping', fn() => ['ok' => true]);
 $app->run(['worker_num' => $workers, 'task_worker_num' => 0, 'log_level' => 5]);
