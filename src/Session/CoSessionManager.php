@@ -169,6 +169,7 @@ class CoSessionManager
         }
         $g->session = [];
         $g->_session_started = false;
+        $g->_session_persisted_hash = null;
 
         // Session lifecycle is opt-out (via App::sessionLifecycle(false)) for
         // setups where another framework owns sessions — e.g. Symfony's

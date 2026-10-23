@@ -637,6 +637,7 @@ class Dispatcher
             }
             // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
             if ($g->openswoole_response->isWritable()) {
+                \ZealPHP\Session\zeal_session_persist_before_send();
                 // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 $g->openswoole_response->end();
             }
@@ -943,6 +944,7 @@ class Dispatcher
             }
             // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
             if ($g->openswoole_response->isWritable()) {
+                \ZealPHP\Session\zeal_session_persist_before_send();
                 // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
                 $g->openswoole_response->end();
             }

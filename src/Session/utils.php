@@ -599,6 +599,44 @@ function zeal_session_name($name = null)
  */
 function zeal_session_write_close(): bool
 {
+    return zeal_session_commit(true);
+}
+
+/**
+ * Persist the active session to its store WITHOUT closing it — called by the
+ * response layer just before the response's last byte is sent.
+ *
+ * The managers used to write the session in their `finally`, i.e. after
+ * `end()`. A client that issues its next request as soon as the response
+ * arrives (a redirect after login/logout, an OAuth state set before the
+ * provider bounce) could then read the store before the write landed, so a
+ * logout was not yet visible and an OAuth/CSRF state could be lost. Saving
+ * here closes that window; the manager's close afterwards skips the write
+ * when nothing changed since, and writes again when the app kept mutating
+ * the session after the response went out. No-op when no session is active.
+ */
+function zeal_session_persist_before_send(): void
+{
+    $g = RequestContext::instance();
+    if (!($g->_session_started ?? false)) {
+        return;
+    }
+    try {
+        zeal_session_commit(false);
+    } catch (\Throwable $e) {
+        // Same contract as the managers: a failed write fails this request's
+        // session, never the response. The manager's close retries it.
+        $g->_session_persisted_hash = null;
+        elog('Session write failed: ' . $e->getMessage(), 'error');
+    }
+}
+
+/**
+ * @internal Shared body of zeal_session_write_close() ($close = true) and
+ * zeal_session_persist_before_send() ($close = false).
+ */
+function zeal_session_commit(bool $close): bool
+{
     $g = RequestContext::instance();
 
     // In superglobals mode the canonical session store is $_SESSION (the
@@ -634,8 +672,15 @@ function zeal_session_write_close(): bool
         assert(is_string($save_path));
         $session_file = $save_path . '/sess_' . basename((string)$session_id);
         $data = $useGSession ? $g->session : $GLOBALS['_SESSION'];
-        $wHandler = zeal_session_opened_handler();   // #369: guarantees open() ran
-        if ($wHandler instanceof \SessionHandlerInterface) {
+        // The id is part of the fingerprint: a session_regenerate_id() after the
+        // early save must still be written under the new id.
+        $hash = md5($session_file . "\0" . serialize($data));
+        $unchanged = $g->_session_persisted_hash === $hash;
+        $wHandler = $unchanged ? null : zeal_session_opened_handler();   // #369: guarantees open() ran
+        if ($unchanged) {
+            // Already persisted before the response was sent, and the app has
+            // not touched the session since — nothing to write.
+        } elseif ($wHandler instanceof \SessionHandlerInterface) {
             // Merge with stored data to mitigate concurrent-request races.
             // Apache serialises session access via file locks; ZealPHP
             // handles requests concurrently, so two requests both reading
@@ -723,6 +768,22 @@ function zeal_session_write_close(): bool
                 file_put_contents($session_file, php_session_encode_from_array($data));
             }
         }
+
+        if (!$close) {
+            // Keep the session open. Remember what was stored, and treat every
+            // key that is now in the store as loaded, so a key the app unsets
+            // after this point is deleted by the final close instead of being
+            // resurrected from the store by the merge.
+            $g->_session_persisted_hash = $hash;
+            if (is_array($data)) {
+                $g->session_loaded_keys = array_values(array_unique(array_merge(
+                    $g->session_loaded_keys,
+                    array_map('strval', array_keys($data))
+                )));
+            }
+            return true;
+        }
+        $g->_session_persisted_hash = null;
 
         // Mark the session closed so a RE-ENTRANT close is a true no-op (#2).
         // The framework runs a double session lifecycle: a handler may call

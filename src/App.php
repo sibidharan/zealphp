@@ -1568,6 +1568,7 @@ class App
             // ->cookie() — actually reach the wire instead of being dropped (#418).
             // @phpstan-ignore-next-line — zealphp_response set by CoSessionManager before any route dispatches
             $g->zealphp_response->flush();
+            \ZealPHP\Session\zeal_session_persist_before_send();
             // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
             $g->openswoole_response->end();
             return (new Response('', $streamStatus));
@@ -1623,6 +1624,7 @@ class App
         }
         // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
         if ($g->openswoole_response->isWritable()) {
+            \ZealPHP\Session\zeal_session_persist_before_send();
             // @phpstan-ignore-next-line — openswoole_response set by CoSessionManager before any route dispatches
             $g->openswoole_response->end();
         }
@@ -10205,6 +10207,7 @@ class App
                 }
                 $response->status(500, 'Internal Server Error');
                 $response->header('Content-Type', 'text/html; charset=utf-8');
+                \ZealPHP\Session\zeal_session_persist_before_send();
                 $response->end($body);
             } catch (\Throwable $t) {
                 // The connection may already be torn down mid-shutdown; a
@@ -10573,6 +10576,7 @@ class App
                             // instance, e.g. a unit-test double): fall back to
                             // the native end() — engine-default CT/CL reattach
                             // there, but the client is never left hanging.
+                            \ZealPHP\Session\zeal_session_persist_before_send();
                             $response->parent->end();
                         }
                     } else {
@@ -10583,8 +10587,10 @@ class App
                             while (!$body->eof()) {
                                 $response->parent->write($body->read($chunkSize));
                             }
+                            \ZealPHP\Session\zeal_session_persist_before_send();
                             $response->parent->end();
                         } else {
+                            \ZealPHP\Session\zeal_session_persist_before_send();
                             $response->parent->end($body->getContents());
                         }
                     }
@@ -10600,6 +10606,7 @@ class App
                     $code = (is_int($exitStatus) && $exitStatus >= 100 && $exitStatus <= 599) ? $exitStatus : ($g->status ?? 200);
                     if ($response->parent->isWritable()) {
                         App::emitStatus($response->parent, $code);
+                        \ZealPHP\Session\zeal_session_persist_before_send();
                         $response->parent->end($body);
                     }
                     access_log($code, strlen($body));
@@ -10620,6 +10627,7 @@ class App
                             }
                         }
                         $g->status = $errResp->getStatusCode();
+                        \ZealPHP\Session\zeal_session_persist_before_send();
                         $response->parent->end((string)$errResp->getBody());
                     } catch (\Throwable $e2) {
                         App::emitStatus($response->parent, 500);
@@ -10627,6 +10635,7 @@ class App
                         $body = App::displayErrors()
                             ? "<pre>".jTraceEx($e)."</pre>"
                             : "<pre>500 Internal Server Error</pre>";
+                        \ZealPHP\Session\zeal_session_persist_before_send();
                         $response->parent->end($body);
                     }
                 }

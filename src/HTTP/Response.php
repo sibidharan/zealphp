@@ -335,6 +335,7 @@ class Response
             foreach ($this->rawCookiesList as $cookie) {
                 $this->parent->rawCookie(...$cookie);
             }
+            \ZealPHP\Session\zeal_session_persist_before_send();
             $this->parent->end();
         }
     }
@@ -361,6 +362,7 @@ class Response
 
     public function end(?string $data = null): bool
     {
+        \ZealPHP\Session\zeal_session_persist_before_send();
         return $this->parent->end($data);
     }
 
@@ -385,6 +387,7 @@ class Response
         if ($method === 'HEAD') {
             $this->flush();
             if ($this->parent->isWritable()) {
+                \ZealPHP\Session\zeal_session_persist_before_send();
                 $this->parent->end();
             }
             return;
@@ -402,6 +405,7 @@ class Response
             // Swallow exceptions from disconnected client writes inside streaming callbacks
         }
         if ($this->parent->isWritable()) {
+            \ZealPHP\Session\zeal_session_persist_before_send();
             $this->parent->end();
         }
     }
@@ -687,6 +691,7 @@ class Response
             $this->status(404);
             $this->g->_streaming = true;
             $this->flush();
+            \ZealPHP\Session\zeal_session_persist_before_send();
             $this->parent->end('File not found');
             return;
         }
@@ -762,6 +767,7 @@ class Response
         if ($cond === 304 || $cond === 412) {
             $this->status($cond);
             $this->flush();
+            \ZealPHP\Session\zeal_session_persist_before_send();
             $this->parent->end('');
             return;
         }
@@ -779,6 +785,7 @@ class Response
             $this->status(200);
             $this->header('Content-Length', (string) $total);
             $this->flush();
+            \ZealPHP\Session\zeal_session_persist_before_send();
             $this->parent->end('');
             return;
         }
@@ -813,6 +820,7 @@ class Response
             $this->status(416);
             $this->header('Content-Range', "bytes */{$total}");
             $this->flush();
+            \ZealPHP\Session\zeal_session_persist_before_send();
             $this->parent->end('');
             return;
         }
@@ -827,6 +835,7 @@ class Response
                 $this->header('Content-Range', "bytes {$start}-{$end}/{$total}");
                 $this->header('Content-Length', (string) $length);
                 $this->flush();
+                \ZealPHP\Session\zeal_session_persist_before_send();
                 $this->parent->sendfile($path, $start, $length);
                 return;
             }
@@ -838,6 +847,7 @@ class Response
         // status === 'ignore' — full body (200).
         $this->header('Content-Length', (string) $total);
         $this->flush();
+        \ZealPHP\Session\zeal_session_persist_before_send();
         $this->parent->sendfile($path, 0, $total);
     }
 
@@ -954,6 +964,7 @@ class Response
 
         $fh = fopen($path, 'rb');
         if ($fh === false) {
+            \ZealPHP\Session\zeal_session_persist_before_send();
             $this->parent->end('');
             return;
         }
@@ -983,6 +994,7 @@ class Response
         }
         fclose($fh);
         $payload .= $closing;
+        \ZealPHP\Session\zeal_session_persist_before_send();
         $this->parent->end($payload);
     }
 

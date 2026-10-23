@@ -61,6 +61,9 @@ class RequestContext
     public ?string $raw_status_reason = null;
     public ?bool $_streaming = null;
     public ?bool $_session_started = null;
+    /** md5 of the session data zeal_session_persist_before_send() stored, so
+     *  the manager's close skips an identical second write. */
+    public ?string $_session_persisted_hash = null;
     /** OB level of the framework's capture buffer for the current include —
      *  app buffers ABOVE it keep native ob_end_flush()/ob_flush() semantics
      *  (pop into parent); at/below it the overrides stream to the client.
