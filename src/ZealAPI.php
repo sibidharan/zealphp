@@ -635,15 +635,40 @@ class ZealAPI extends REST
         $this->response($data, $response_code);
     }
 
+    /**
+     * Allowlist, not denylist: a client sees an exception's message only when
+     * the APP threw it on purpose — one of PHP's plain SPL exception classes,
+     * or a class the app itself declares (outside vendor/ and the framework's src/).
+     * Everything else carries internals in its message: engine \Error,
+     * extension classes (PDOException, RedisException, JsonException, …: DB
+     * users, hosts, DSNs) and library exceptions from vendor/ (Guzzle request
+     * URLs, Predis/AWS endpoints).
+     */
     private static function exceptionCarriesInternals(\Throwable $e): bool
     {
-        return $e instanceof \Error
-            || $e instanceof \PDOException
-            || $e instanceof \ErrorException
-            || $e instanceof \JsonException
-            || (class_exists(\mysqli_sql_exception::class, false) && $e instanceof \mysqli_sql_exception)
-            || str_starts_with(get_class($e), 'ZealPHP\\');
+        if ($e instanceof \Error) {
+            return true;
+        }
+        if (in_array(get_class($e), self::CLIENT_SAFE_SPL_EXCEPTIONS, true)) {
+            return false;
+        }
+        $file = (new \ReflectionClass($e))->getFileName();
+        if ($file === false) {
+            return true;   // declared by an extension
+        }
+        $file = str_replace('\\', '/', $file);
+        return str_contains($file, '/vendor/')
+            || str_starts_with($file, str_replace('\\', '/', __DIR__) . '/');   // the framework's own src/
     }
+
+    /** SPL exception classes an API throws for client errors (exact class, not subclasses). */
+    private const CLIENT_SAFE_SPL_EXCEPTIONS = [
+        \Exception::class, \RuntimeException::class, \LogicException::class,
+        \InvalidArgumentException::class, \DomainException::class, \LengthException::class,
+        \OutOfRangeException::class, \OutOfBoundsException::class, \RangeException::class,
+        \OverflowException::class, \UnderflowException::class, \UnexpectedValueException::class,
+        \BadFunctionCallException::class, \BadMethodCallException::class,
+    ];
 
     /**
      * Catch missing-method calls from inside an API handler closure (e.g. a typo

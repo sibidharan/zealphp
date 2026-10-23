@@ -131,6 +131,33 @@ class ZealApiHelpersTest extends TestCase
         }
     }
 
+    public function testDieShowsOnlyAppThrownMessagesWithoutDisplayErrors(): void
+    {
+        $prev = \ZealPHP\App::displayErrors();
+        \ZealPHP\App::displayErrors(false);
+        try {
+            $hidden = [
+                new \JsonException('Syntax error near db.internal:5432'),
+                new \PHPUnit\Framework\Exception('vendor library message with http://10.0.0.5/api'),
+            ];
+            foreach ($hidden as $e) {
+                $body = json_decode($this->captureStatus(fn() => $this->api->die($e))['echo'], true);
+                $this->assertSame('Internal error', $body['error'], get_class($e));
+            }
+            $shown = [
+                new \InvalidArgumentException('email is required'),
+                new \DomainException('plan not available'),
+                new ZealApiHelpersTestAppException('quota exceeded'),
+            ];
+            foreach ($shown as $e) {
+                $body = json_decode($this->captureStatus(fn() => $this->api->die($e))['echo'], true);
+                $this->assertSame($e->getMessage(), $body['error'], get_class($e));
+            }
+        } finally {
+            \ZealPHP\App::displayErrors($prev);
+        }
+    }
+
     public function testDieMapsUnauthorizedTo403(): void
     {
         $r = $this->captureStatus(fn() => $this->api->die(new \RuntimeException('Unauthorized')));
@@ -198,4 +225,9 @@ class ZealApiHelpersTest extends TestCase
 
         $this->assertTrue($api->requirePostAuth());
     }
+}
+
+/** An exception class the APP declares (outside vendor/): its message is meant for the client. */
+final class ZealApiHelpersTestAppException extends \RuntimeException
+{
 }
