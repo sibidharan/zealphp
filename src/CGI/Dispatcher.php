@@ -447,7 +447,7 @@ class Dispatcher
             if ($isPhp) {
                 // PHP target: route through cgi_worker.php for uopz header/cookie captures.
                 $cgiWorker = __DIR__ . '/../cgi_worker.php';
-                $cmd = PHP_BINARY . ' -d display_errors=stderr ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
+                $cmd = PHP_BINARY . ' -d display_errors=stderr -d ' . App::subprocessStrictModeIni() . ' ' . escapeshellarg($cgiWorker) . ' ' . escapeshellarg($path);
             } else {
                 // Non-PHP file with no explicit interpreter (the `cgiScriptAlias`-only
                 // path): exec the file directly, relying on its `#!` shebang line.

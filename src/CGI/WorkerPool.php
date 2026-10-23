@@ -619,7 +619,7 @@ final class WorkerPool
             \ZealPHP\App::$cgi_pool_env_allowlist,
             $this->maxRequestsPerWorker
         );
-        $proc = proc_open([\PHP_BINARY, '-d', 'display_errors=stderr', $entry], $desc, $pipes, null, $env);
+        $proc = proc_open([\PHP_BINARY, '-d', 'display_errors=stderr', '-d', \ZealPHP\App::subprocessStrictModeIni(), $entry], $desc, $pipes, null, $env);
         if (!is_resource($proc)) {
             throw new \RuntimeException('WorkerPool: proc_open failed for ' . $entry);
         }

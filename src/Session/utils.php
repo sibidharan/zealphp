@@ -181,6 +181,34 @@ function zeal_session_close_handler(): void
     }
 }
 
+/**
+ * Emit the session cookie for $id with the configured cookie params.
+ *
+ * @internal
+ */
+function zeal_session_emit_cookie(string $name, string $id): void
+{
+    $g = RequestContext::instance();
+    if ($g->openswoole_response === null) {
+        return;
+    }
+    $cookieParams = zeal_session_get_cookie_params();
+    $g->openswoole_response->cookie(
+        $name,
+        $id,
+        $cookieParams['lifetime'] ? time() + (int)$cookieParams['lifetime'] : 0,
+        $cookieParams['path'],
+        $cookieParams['domain'],
+        $cookieParams['secure'],
+        $cookieParams['httponly'],
+        // SameSite (8th arg) — was computed ('Lax') but never emitted, so an
+        // explicit None (iframe/OAuth/SSO) or Strict override was silently
+        // dropped on the wire. The None⇒Secure invariant is enforced in
+        // zeal_session_get_cookie_params().
+        $cookieParams['samesite'] ?? 'Lax'
+    );
+}
+
 function zeal_session_start(): bool
 {
     $g = RequestContext::instance();
@@ -282,21 +310,7 @@ function zeal_session_start(): bool
         && is_string($session_id)
         && $session_id !== ''
         && $g->openswoole_response->isWritable()) {
-        $cookieParams = zeal_session_get_cookie_params();
-        $g->openswoole_response->cookie(
-            $sessionNameForCookie,
-            $session_id,
-            $cookieParams['lifetime'] ? time() + (int)$cookieParams['lifetime'] : 0,
-            $cookieParams['path'],
-            $cookieParams['domain'],
-            $cookieParams['secure'],
-            $cookieParams['httponly'],
-            // SameSite (8th arg) — was computed ('Lax') but never emitted, so an
-            // explicit None (iframe/OAuth/SSO) or Strict override was silently
-            // dropped on the wire. The None⇒Secure invariant is enforced in
-            // zeal_session_get_cookie_params().
-            $cookieParams['samesite'] ?? 'Lax'
-        );
+        zeal_session_emit_cookie($sessionNameForCookie, $session_id);
     }
 
     /** @var array<string, mixed> $session_data */
@@ -352,6 +366,35 @@ function zeal_session_start(): bool
     // $_SESSION would never round-trip through $g->session. Mirror to both:
     // $_SESSION is what user/Symfony code reads/writes, $g->session is what
     // coroutine-mode code reads/writes via the typed property.
+    // session.use_strict_mode where no session manager runs. When the CGI
+    // subprocess owns sessions (App::cgiOwnsSessions()) the managers step
+    // aside, so an in-process route's own session_start() is the only gate:
+    // without this it took the client's PHPSESSID as-is, and wrote it, for an
+    // id the store never issued (session fixation). Rotate like PHP does.
+    if (!$session_existed
+        && $hadIncomingSessionCookie
+        && \ZealPHP\App::$session_strict_mode
+        && \ZealPHP\App::cgiOwnsSessions()
+        && $session_id === ($g->cookie[$sessionNameForCookie] ?? null)
+        // Not an id this request minted itself (a second session_start()).
+        && $session_id !== ($g->session_params['strict_minted'] ?? null)) {
+        $fresh = session_create_id();
+        if (is_string($fresh) && $fresh !== '') {
+            $session_id = $fresh;
+            $session_data = [];
+            zeal_session_id($fresh);
+            $params = $g->session_params;
+            $params['session_id'] = $fresh;
+            $params['strict_minted'] = $fresh;
+            $g->session_params = $params;
+            if ((bool) ini_get('session.use_cookies')
+                && $g->openswoole_response !== null
+                && $g->openswoole_response->isWritable()) {
+                zeal_session_emit_cookie($sessionNameForCookie, $fresh);
+            }
+        }
+    }
+
     // #374: framework bookkeeping no longer rides $_SESSION (it lives in
     // $g->memo) — strip the two legacy keys that pre-fix releases persisted
     // into user stores, so they don't survive via the loaded-keys merge.

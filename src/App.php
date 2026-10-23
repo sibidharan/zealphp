@@ -8421,6 +8421,17 @@ class App
     }
 
     /**
+     * `-d` value carrying App::$session_strict_mode into PHP subprocesses (CGI
+     * proc, pool, fork). They run PHP's native session module, which reads
+     * php.ini — Ubuntu/Debian ship session.use_strict_mode=0 — so a client-
+     * chosen PHPSESSID was accepted there even with strict mode on.
+     */
+    public static function subprocessStrictModeIni(): string
+    {
+        return 'session.use_strict_mode=' . (self::$session_strict_mode ? '1' : '0');
+    }
+
+    /**
      * Parse a raw CGI/1.1 interpreter response (RFC 3875) into status, headers
      * and body — pure, side-effect-free string handling.
      *
