@@ -193,6 +193,38 @@ final class CoroutineLegacyBehaviorTest extends TestCase
         $this->assertSame($n, $ok);
     }
 
+    public function testLastErrorIsIsolatedPerCoroutine(): void
+    {
+        $this->skipUnlessServerUp();
+        // Concurrent: every request must read back ITS OWN warning after peers
+        // raised theirs during its yield — before the fix, all saw the last peer's.
+        $n = 30;
+        [$ok, $err] = $this->concurrent(
+            $n,
+            function (int $i) {
+                $ch = curl_init('http://127.0.0.1:' . self::PORT . "/last-error?t=le$i");
+                curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20]);
+                return $ch;
+            },
+            fn (int $i, array $d): bool => \array_key_exists('before', $d) && $d['before'] === null
+                && ($d['after'] ?? null) === "last-error-token-le$i"
+        );
+        $this->assertSame(0, $err, "error_get_last() leaked across coroutines: $err of $n");
+        $this->assertSame($n, $ok);
+
+        // Sequential: a request that raises nothing must not inherit the previous
+        // request's warning (OpenSwoole never runs request shutdown between them).
+        $status = null;
+        $this->httpGet('http://127.0.0.1:' . self::PORT . '/last-error?t=prev', $status);
+        $body = $this->httpGet('http://127.0.0.1:' . self::PORT . '/last-error', $status);
+        $d = json_decode($body, true);
+        $this->assertSame(200, $status);
+        $this->assertIsArray($d);
+        $this->assertArrayHasKey('before', $d);
+        $this->assertNull($d['before'], 'request inherited the previous request\'s last error');
+        $this->assertNull($d['after']);
+    }
+
     public function testUniversalReturnContractUnderCoroutineLegacy(): void
     {
         $this->skipUnlessServerUp();

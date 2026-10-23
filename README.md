@@ -452,7 +452,7 @@ App::onWorkerStart(function($server, $workerId) use ($hitCounter) {
 |--------|---------|
 | `App::mode(App::MODE_COROUTINE)` | Modern ZealPHP apps — recommended default |
 | `App::mode(App::MODE_LEGACY_CGI)` | Unmodified WordPress/Drupal — pure `require_once` apps |
-| `App::mode(App::MODE_COROUTINE_LEGACY)` | Legacy request-style PHP run **concurrently** — per-coroutine isolation of `$_GET/$_POST/$_SESSION`, `$GLOBALS`, function statics, `require_once`, silent re-declaration. `define()` isolation is opt-in via `App::defineIsolation(true)`, not part of the preset. **Requires ext-zealphp.** |
+| `App::mode(App::MODE_COROUTINE_LEGACY)` | Legacy request-style PHP run **concurrently** — per-coroutine isolation of `$_GET/$_POST/$_SESSION`, `$GLOBALS`, function statics, `require_once`, silent re-declaration. `define()` isolation is opt-in via `App::defineIsolation(true)`, not part of the preset. Statics (function-local and class) of code defined **before the server starts** (in `app.php`, or preloaded) are boot state and are shared by every request in the worker; only code loaded during a request is reset per request. **Requires ext-zealphp.** |
 | `App::mode(App::MODE_MIXED)` | Symfony/Laravel bridge — real `$_SESSION`, sequential, no CGI fork cost |
 
 The fine-grained setters (`App::superglobals()`, `App::isolation()`, `App::enableCoroutine()`, etc.) remain available for custom combinations. See the [lifecycle modes reference](https://php.zeal.ninja/coroutines#lifecycle-modes) for the full matrix.

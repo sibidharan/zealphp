@@ -212,6 +212,10 @@ class SessionManager
         $g->_streaming               = null;
         $g->ignore_user_abort_state  = 0;
         $g->_session_started         = false;
+        // RequestContext::once() is documented as REQUEST-scoped memoization;
+        // on the singleton its scratch space otherwise survives forever, so
+        // request N+1's once('current_user', ...) returned request N's user.
+        $g->memo                     = [];
         // ResponseMiddleware stashes the canonical PSR-7 request here each
         // request; on the process-wide singleton (superglobals mode) it would
         // otherwise pin the previous request's object until the next dispatch
@@ -373,10 +377,24 @@ class SessionManager
             // session must not touch the store or re-emit a cookie.
             if ($manageSession && ($g->_session_started ?? false)) {
                 elog('SessionManager:: session_write_close took '.get_current_render_time(), 'info');
-                session_write_close();
-                session_id('');
-                $_SESSION = [];
-                unset($_SESSION);
+                try {
+                    session_write_close();
+                // session_write_close() throws from the serializer (a value it
+                // rejects) and from user session handlers, though its stub says not.
+                // @phpstan-ignore-next-line catch.neverThrown
+                } catch (\Throwable $e) {
+                    // PHP-FPM parity: fail this request's session write, not the
+                    // worker (see CoSessionManager). A write that threw can leave
+                    // the session active, which would block session_id('') below.
+                    elog('Session write failed: ' . $e->getMessage(), 'error');
+                    if (session_status() === PHP_SESSION_ACTIVE) {
+                        @session_abort();
+                    }
+                } finally {
+                    session_id('');
+                    $_SESSION = [];
+                    unset($_SESSION);
+                }
             }
             if (\ZealPHP\App::$define_isolation
                 && \function_exists('zealphp_constants_clear')

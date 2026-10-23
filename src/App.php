@@ -537,6 +537,18 @@ class App
     public static bool $coroutine_umask_isolation = false;
 
     /**
+     * Per-coroutine LAST-ERROR isolation — error_get_last() reads
+     * PG(last_error_*), which is process-global and never reset between
+     * OpenSwoole requests, so one request's warning (message + file) was
+     * readable by the next request and by concurrent peers. Requires
+     * ext-zealphp with zealphp_last_error_isolation. Auto-enabled by
+     * `App::mode('coroutine-legacy')` (opt out with env
+     * `ZEALPHP_LAST_ERROR_ISOLATION_DISABLE=1`); off by default elsewhere,
+     * where the request handler still clears the last error per request.
+     */
+    public static bool $coroutine_last_error_isolation = false;
+
+    /**
      * Per-coroutine date_default_timezone_set() isolation — the default
      * timezone is process-global; WordPress-class apps set it per request
      * (core boot reads the site option), so one request's timezone leaks
@@ -3217,6 +3229,9 @@ class App
                 // state — isolate them per coroutine too (ext-zealphp 0.3.38+).
                 self::coroutineLocaleIsolation((string) \getenv('ZEALPHP_LOCALE_ISOLATION_DISABLE') !== '1');
                 self::coroutineUmaskIsolation((string) \getenv('ZEALPHP_UMASK_ISOLATION_DISABLE') !== '1');
+                // error_get_last() is process-global engine state; without this a
+                // request reads a peer's (or the previous request's) last warning.
+                self::coroutineLastErrorIsolation((string) \getenv('ZEALPHP_LAST_ERROR_ISOLATION_DISABLE') !== '1');
                 // date_default_timezone_set() / mb_internal_encoding() /
                 // libxml_use_internal_errors() — the remaining function-backed
                 // process-global settings legacy apps change per request
@@ -4460,6 +4475,18 @@ class App
     }
 
     /**
+     * Per-coroutine last-error isolation — see the
+     * $coroutine_last_error_isolation docblock. Asserted at App::run() boot wiring.
+     */
+    public static function coroutineLastErrorIsolation(?bool $on = null): bool
+    {
+        if ($on !== null) {
+            self::$coroutine_last_error_isolation = $on;
+        }
+        return self::$coroutine_last_error_isolation;
+    }
+
+    /**
      * Per-coroutine default-timezone isolation — see the
      * $coroutine_tz_isolation docblock. Asserted at App::run() boot wiring.
      */
@@ -5287,6 +5314,13 @@ class App
         $handler = $data['handler'] ?? '';
         if (!is_string($handler) || $handler === '') {
             elog('Task payload missing string "handler"; dropping', 'error');
+            return false;
+        }
+        // The handler names a file under the app root: same charset rule as
+        // ZealAPI modules, so no dot (and therefore no `..`) can ever reach the
+        // include below, whatever a task payload carries.
+        if (!preg_match('#^/[A-Za-z0-9_/-]+$#', $handler)) {
+            elog('Task payload "handler" must match ^/[A-Za-z0-9_/-]+$; dropping', 'error');
             return false;
         }
         $args = $data['args'] ?? [];
@@ -6296,6 +6330,69 @@ class App
         int $batchSize = 16,
     ): void {
         self::subscribeReliable($stream, $handler, $group, $blockMs, $batchSize);
+    }
+
+    /**
+     * Symlinks the OpenSwoole static handler would follow out of the document
+     * root: [link path, resolved target] pairs, scanning each directory entry
+     * of static_handler_locations (or the whole docroot when the list is
+     * empty), capped at $maxEntries filesystem entries. Empty when the static
+     * handler is off.
+     *
+     * @param array<string, mixed> $effectiveSettings
+     * @return list<array{0: string, 1: string}>
+     * @internal — public for tests; not part of the user-facing API.
+     */
+    public static function staticHandlerSymlinkEscapes(array $effectiveSettings, int $maxEntries = 20000): array
+    {
+        if (empty($effectiveSettings['enable_static_handler'])) {
+            return [];
+        }
+        $docRoot = \is_string($effectiveSettings['document_root'] ?? null)
+            ? \realpath($effectiveSettings['document_root']) : false;
+        if ($docRoot === false) {
+            return [];
+        }
+        $locations = $effectiveSettings['static_handler_locations'] ?? [];
+        if (!\is_array($locations) || $locations === []) {
+            $locations = ['/'];   // no whitelist: OpenSwoole serves the whole docroot
+        }
+        $escapes = [];
+        $seen = 0;
+        $check = static function (string $path) use ($docRoot, &$escapes): void {
+            if (!\is_link($path)) {
+                return;
+            }
+            $target = \realpath($path);
+            if ($target !== false && !self::pathWithinRoot($target, $docRoot)) {
+                $escapes[] = [$path, $target];
+            }
+        };
+        foreach ($locations as $location) {
+            if (!\is_string($location) || !\str_ends_with($location, '/')) {
+                continue;   // file entries: checked when they are a directory's children
+            }
+            $dir = \rtrim($docRoot . $location, '/');
+            if (!\file_exists($dir)) {
+                continue;
+            }
+            $check($dir);   // the prefix directory itself may be the link
+            if (\is_link($dir) || !\is_dir($dir)) {
+                continue;
+            }
+            $it = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::SELF_FIRST
+            );
+            foreach ($it as $entry) {
+                if (++$seen > $maxEntries) {
+                    break 2;
+                }
+                \assert($entry instanceof \SplFileInfo);
+                $check($entry->getPathname());
+            }
+        }
+        return $escapes;
     }
 
     /**
@@ -7972,8 +8069,9 @@ class App
     public static function includeFile(string $path): mixed
     {
         $docAbs = self::resolveDocumentRoot();
-        if (strpos($path, $docAbs) === 0) {
-            $rel = substr($path, strlen($docAbs));
+        // Segment-aware: a sibling like `<docroot>-old/x.php` is NOT under docroot.
+        if (self::pathWithinRoot($path, $docAbs)) {
+            $rel = substr($path, strlen(rtrim($docAbs, DIRECTORY_SEPARATOR)));
             return self::include($rel, []);
         }
         // Outside the document root — preserve legacy "trust the caller"
@@ -9211,6 +9309,30 @@ class App
             error_log($bpAdvisory);
         }
 
+        // OpenSwoole's static handler serves its prefixes in C before any PHP
+        // guard runs, and it follows symlinks: a link that leaves the docroot is
+        // an arbitrary file read. Warn at boot (or refuse, with
+        // ZEALPHP_STATIC_SYMLINK_STRICT=1) instead of finding out from a request.
+        $staticEscapes = self::staticHandlerSymlinkEscapes($effective_settings);
+        if ($staticEscapes !== []) {
+            $lines = [];
+            foreach (\array_slice($staticEscapes, 0, 10) as [$link, $target]) {
+                $lines[] = "  $link -> $target";
+            }
+            $msg = '[warn] OpenSwoole static handler would serve ' . \count($staticEscapes)
+                . ' symlink(s) that point outside the document root (no PHP guard applies there):'
+                . "\n" . \implode("\n", $lines)
+                . "\nRemove them, move them out of static_handler_locations, or set ZEALPHP_STATIC_SYMLINK_STRICT=1 to refuse to boot.";
+            error_log($msg);
+            if ((string) \getenv('ZEALPHP_STATIC_SYMLINK_STRICT') === '1') {
+                // Refuse loudly: stderr + non-zero exit, so a supervisor or CI
+                // sees the failure (a thrown exception here was swallowed by
+                // the boot path and the process exited 0).
+                \fwrite(\STDERR, $msg . "\nRefusing to start (ZEALPHP_STATIC_SYMLINK_STRICT=1).\n");
+                exit(1);
+            }
+        }
+
         // Deterministic session GC on a worker-0 timer — ZealPHP replaced PHP's
         // probabilistic per-request GC, so without this sess_* files / handler
         // entries accumulate forever and leaked PHPSESSIDs never expire.
@@ -9545,6 +9667,19 @@ class App
                 "[warn] coroutineUmaskIsolation(true) requires ext-zealphp "
                 . "0.3.38+ with zealphp_umask_isolation — a request's umask() "
                 . "will leak across concurrently-running coroutines.",
+                'warn'
+            );
+        }
+        if (self::$coroutine_last_error_isolation
+            && \extension_loaded('zealphp')
+            && \function_exists('zealphp_last_error_isolation')
+        ) {
+            (\zealphp_last_error_isolation(...))((bool) true);
+        } elseif (self::$coroutine_last_error_isolation) {
+            elog(
+                "[warn] coroutineLastErrorIsolation(true) requires ext-zealphp "
+                . "with zealphp_last_error_isolation — error_get_last() will "
+                . "return concurrently-running peers' warnings.",
                 'warn'
             );
         }
@@ -10038,6 +10173,75 @@ class App
     }
 
     /**
+     * Per-connection request turnstile (HTTP/1.1 pipelining): fd => [owner token,
+     * queue of waiting requests]. Present while a request on that connection runs.
+     *
+     * @var array<int, array{0: int, 1: list<\OpenSwoole\Coroutine\Channel>}>
+     */
+    private static array $connection_turns = [];
+
+    /** Monotonic owner token for $connection_turns (detects fd reuse). */
+    private static int $connection_turn_seq = 0;
+
+    /**
+     * Run $handler for a request on connection $fd only after every earlier
+     * request on the SAME connection has finished. OpenSwoole dispatches each
+     * pipelined request into its own coroutine at once, so their responses were
+     * written in completion order — HTTP/1.1 requires request order, and a
+     * client (or a pipelining proxy) then pairs each response with the wrong
+     * request. Different connections never wait on each other; outside a
+     * coroutine (sequential modes) this is a plain call.
+     */
+    public static function inConnectionOrder(int $fd, callable $handler): void
+    {
+        if (\OpenSwoole\Coroutine::getCid() < 0) {
+            $handler();
+            return;
+        }
+        if (isset(self::$connection_turns[$fd])) {
+            $turn = new \OpenSwoole\Coroutine\Channel(1);
+            self::$connection_turns[$fd][1][] = $turn;
+            $owner = self::$connection_turns[$fd][0];
+            $turn->pop();
+        } else {
+            $owner = ++self::$connection_turn_seq;
+            self::$connection_turns[$fd] = [$owner, []];
+        }
+        try {
+            $handler();
+        } finally {
+            // Hand the connection to the next pipelined request — unless the
+            // connection closed meanwhile and the fd now belongs to a new one.
+            // (releaseConnectionTurns() may have removed the entry from another
+            // coroutine while $handler ran, which static analysis can't see.)
+            // @phpstan-ignore-next-line nullCoalesce.offset
+            $state = self::$connection_turns[$fd] ?? null;
+            if ($state !== null && $state[0] === $owner) {
+                $next = \array_shift($state[1]);
+                if ($next !== null) {
+                    self::$connection_turns[$fd] = $state;
+                    $next->push(true);
+                } else {
+                    unset(self::$connection_turns[$fd]);
+                }
+            }
+        }
+    }
+
+    /**
+     * Connection closed: release any requests still queued behind it (their
+     * responses go nowhere) and forget the fd so a reused fd starts fresh.
+     */
+    public static function releaseConnectionTurns(int $fd): void
+    {
+        $state = self::$connection_turns[$fd] ?? null;
+        unset(self::$connection_turns[$fd]);
+        foreach ($state[1] ?? [] as $waiting) {
+            $waiting->push(true);
+        }
+    }
+
+    /**
      * Register the OnRequest event handler — the per-request entry point that
      * populates RequestContext, runs the middleware stack, fires shutdown
      * functions, and emits the response. Extracted verbatim from App::run()
@@ -10061,8 +10265,14 @@ class App
         // statics, $GLOBALS, superglobals) — so it survives. registerOnRequest()
         // runs AFTER buildMiddlewareStack(), so this is the fully assembled chain.
         $bootMiddleware = self::$middleware_stack;
-        $server->on("request",new $sessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) use ($bootMiddleware) {
+        $requestHandler = new $sessionManager(function(\ZealPHP\HTTP\Request $request, \ZealPHP\HTTP\Response $response) use ($bootMiddleware) {
             $g = RequestContext::instance();
+            // error_get_last() is process-global and OpenSwoole never runs request
+            // shutdown, so without this every request inherited the previous
+            // request's last warning. Under ext last-error isolation this only
+            // clears this coroutine's own lane; without it (plain coroutine mode)
+            // concurrent peers still share one slot — see coroutineLastErrorIsolation.
+            \error_clear_last();
 
             $g->status = 200;
             self::clearRawStatusOverride($g); // #474 — a prior raw status line must not bleed in
@@ -10374,7 +10584,12 @@ class App
                     }
                 }
             }
-        }));
+        });
+        // Pipelined requests on one connection must be answered in order.
+        $server->on("request", static function (\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response) use ($requestHandler): void {
+            $fd = $request->fd;
+            self::inConnectionOrder(\is_int($fd) ? $fd : 0, static fn () => $requestHandler($request, $response));
+        });
     }
 
     /**
@@ -10583,6 +10798,7 @@ class App
         });
 
         $server->on('close', function(\OpenSwoole\WebSocket\Server $server, int $fd) use (&$wsFdMap) {
+            self::releaseConnectionTurns($fd);
             $path  = $wsFdMap[$fd] ?? null;
             unset($wsFdMap[$fd]);
             $g     = RequestContext::instance();

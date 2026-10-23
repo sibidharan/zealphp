@@ -19,6 +19,15 @@ final class ZealApiNestedRoutingTest extends TestCase
 {
     // ── functional: unbounded nesting depth ─────────────────────────────
 
+    public function testDemoDeviceIdEndpointEscapesReflectedInput(): void
+    {
+        // api/device/new/id.php echoed ?id= raw into a text/html response.
+        $res = $this->get('/api/device/new/id?id=' . rawurlencode('<script>alert(1)</script>'));
+        $this->assertStatus(206, $res);
+        $this->assertStringNotContainsString('<script>', $res['body'], 'reflected XSS in demo api/device/new/id');
+        $this->assertStringContainsString('&lt;script&gt;', $res['body']);
+    }
+
     public function testOneLevelControlStillWorks(): void
     {
         $res = $this->get('/api/nested/ping');

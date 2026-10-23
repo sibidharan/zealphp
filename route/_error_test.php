@@ -166,6 +166,16 @@ $app->route('/__error_test/slow-handler-set', function() {
     return ['slow-done' => true];
 });
 
+// error_get_last() must not carry one request's warning into the next.
+$app->route('/__error_test/last-error-seed', function() {
+    @trigger_error('last-error-seed-secret', E_USER_WARNING);
+    return ['seeded' => true];
+});
+
+$app->route('/__error_test/last-error-read', function() {
+    return ['last' => error_get_last()['message'] ?? null];
+});
+
 // Isolation test side B: trigger a warning during A's sleep.
 $app->route('/__error_test/fast-trigger', function() {
     @trigger_error('from-fast', E_USER_WARNING);
