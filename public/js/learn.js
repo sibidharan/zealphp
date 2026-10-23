@@ -238,7 +238,10 @@
     });
   }
 
-  function cssEscape(s) { return String(s).replace(/"/g, '\\"'); }
+  function cssEscape(s) {
+    if (window.CSS && typeof CSS.escape === 'function') return CSS.escape(String(s));
+    return String(s).replace(/["\\]/g, '\\$&');
+  }
   function cryptoRandomId() {
     const a = new Uint8Array(8);
     (window.crypto || window.msCrypto).getRandomValues(a);
