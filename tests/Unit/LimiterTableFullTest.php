@@ -174,6 +174,17 @@ final class LimiterTableFullTest extends TestCase
         $this->assertSame('::/64', RateLimitMiddleware::clientKey('::1'));
     }
 
+    public function testANormalRequestDoesNotSweepOtherClientsIdleRows(): void
+    {
+        $table = 'cln_' . uniqid('', true);
+        Store::make($table, 64, ['count' => [\OpenSwoole\Table::TYPE_INT, 4]]);
+        Store::set($table, 'idle-client', ['count' => 0]);
+        $mw = new ConcurrencyLimitMiddleware(maxConcurrent: 1, counter: null, tableName: $table);
+
+        $this->assertSame(200, $this->hit($mw, '198.51.100.9')->getStatusCode(), 'the first request of a client is within its limit');
+        $this->assertTrue(Store::exists($table, 'idle-client'), 'eviction only runs when the table is full');
+    }
+
     /** @internal for the nested handler above */
     public function hitPublic(ConcurrencyLimitMiddleware $mw, string $ip): int
     {

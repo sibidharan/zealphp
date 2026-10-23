@@ -127,9 +127,6 @@ class RateLimitMiddleware implements MiddlewareInterface
      */
     public static function clientKey(string $ip): string
     {
-        if (!str_contains($ip, ':')) {
-            return $ip;
-        }
         $bin = @inet_pton($ip);
         if (!is_string($bin) || strlen($bin) !== 16) {
             return $ip;
@@ -165,7 +162,7 @@ class RateLimitMiddleware implements MiddlewareInterface
     public static function evictRows(string $table, callable $isDead): int
     {
         $now = time();
-        if ((self::$lastEviction[$table] ?? 0) === $now) {
+        if (isset(self::$lastEviction[$table]) && self::$lastEviction[$table] === $now) {
             return 0;
         }
         self::$lastEviction[$table] = $now;
