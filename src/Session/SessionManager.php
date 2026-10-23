@@ -258,7 +258,8 @@ class SessionManager
                 // zeal_session_id() replaces a malformed id with a fresh one; use
                 // what it returns, or the cookie below echoes the raw malformed
                 // value back (strict mode off).
-                $sessionId = \ZealPHP\Session\zeal_session_id(is_string($rawSid) ? $rawSid : null);
+                $validId = \ZealPHP\Session\zeal_session_id(is_string($rawSid) ? $rawSid : null);
+                $sessionId = is_string($validId) ? $validId : null;
 
                 // #295 — honour the configured session handler instead of hardcoding
                 // FileSessionHandler (which ignored App::sessionHandler()). Resolution is
