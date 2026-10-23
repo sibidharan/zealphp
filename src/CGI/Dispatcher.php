@@ -376,16 +376,38 @@ class Dispatcher
         // mode, etc.) are unaffected.
         self::mintCgiSession($g);
 
-        $ctx = json_encode([
-            'server' => $g->server,
-            'get'    => $g->get,
-            'post'   => $g->post,
-            'cookie' => $g->cookie,
-            'files'  => $g->files,
-            'env'    => $g->env ?? $_ENV,
-        ], JSON_UNESCAPED_SLASHES);
+        if (App::$fcgi_forward_context) {
+            $ctx = json_encode([
+                'server' => $g->server,
+                'get'    => $g->get,
+                'post'   => $g->post,
+                'cookie' => $g->cookie,
+                'files'  => $g->files,
+                'env'    => $g->env ?? $_ENV,
+            ], JSON_UNESCAPED_SLASHES);
+            $env = self::buildCgiEnv($g->server, is_string($ctx) ? $ctx : '{}');
+        } else {
+            // C6 — PHP-FPM builds its superglobals from the CGI params. The
+            // channels below exist for cgi_worker.php; ZEALPHP_REQUEST_CONTEXT
+            // also carries the server's whole environment (secrets included),
+            // which would land in the upstream's $_SERVER. Opt-in only
+            // (App::fcgiForwardContext()).
+            $env = self::buildCgiEnv($g->server, '');
+            unset(
+                $env['ZEALPHP_REQUEST_CONTEXT'],
+                $env['ZEALPHP_CWD'],
+                $env['ZEALPHP_CGI_DISPLAY_ERRORS'],
+                $env['ZEALPHP_CGI_AUTOLOAD'],
+            );
+        }
 
-        $env = self::buildCgiEnv($g->server, is_string($ctx) ? $ctx : '{}');
+        // C5 — session.use_strict_mode follows App::$session_strict_mode, as
+        // it already does for the proc/pool/fork subprocesses (-d on their
+        // command line). FPM reads php.ini, and Debian/Ubuntu ship it off, so
+        // a client-chosen PHPSESSID was adopted there. PHP_VALUE is per
+        // request; a backend's own fcgi_params PHP_VALUE is appended after
+        // this line, so an explicit setting there still wins.
+        $env['PHP_VALUE'] = App::subprocessStrictModeIni();
 
         // FCGI mandatory vars
         $env['SCRIPT_FILENAME'] = $path;
@@ -396,6 +418,11 @@ class Dispatcher
 
         // Per-backend extra params (nginx fastcgi_param / Apache SetEnvIf parity)
         foreach ($extraParams as $k => $v) {
+            if ($k === 'PHP_VALUE' && $v !== '') {
+                // Multiple ini lines are newline-separated; later lines win.
+                $env[$k] .= "\n" . $v;
+                continue;
+            }
             $env[$k] = $v;
         }
 
