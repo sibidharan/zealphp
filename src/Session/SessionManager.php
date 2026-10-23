@@ -255,8 +255,10 @@ class SessionManager
                 // A client-supplied id is always present in this branch, so #244
                 // strict-mode rotation below applies.
                 $rawSid = $hasSessionCookie ? $reqCookie[$sessionName] : $reqGet[$sessionName];
-                $sessionId = is_string($rawSid) ? $rawSid : null;
-                session_id($sessionId);
+                // zeal_session_id() replaces a malformed id with a fresh one; use
+                // what it returns, or the cookie below echoes the raw malformed
+                // value back (strict mode off).
+                $sessionId = \ZealPHP\Session\zeal_session_id(is_string($rawSid) ? $rawSid : null);
 
                 // #295 — honour the configured session handler instead of hardcoding
                 // FileSessionHandler (which ignored App::sessionHandler()). Resolution is

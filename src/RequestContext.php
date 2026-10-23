@@ -70,6 +70,8 @@ class RequestContext
     public ?string $raw_status_reason = null;
     public ?bool $_streaming = null;
     public ?bool $_session_started = null;
+    /** Cid of the coroutine that created this context (-1 for the process singleton). */
+    public int $_owner_cid = -1;
     /** md5 of the session data zeal_session_persist_before_send() stored, so
      *  the manager's close skips an identical second write. */
     public ?string $_session_persisted_hash = null;
@@ -133,6 +135,22 @@ class RequestContext
     {
     }
 
+    /**
+     * Cid of the request this code runs for: the coroutine that owns the
+     * context, even from a go()/App::parallel child (which shares it). Per-
+     * request caches keyed by Coroutine::getCid() missed in children, so a
+     * child's session I/O bypassed the request's read snapshots.
+     */
+    public static function ownerCid(): int
+    {
+        $cid = \OpenSwoole\Coroutine::getCid();
+        if ($cid < 0) {
+            return $cid;
+        }
+        $owner = self::instance()->_owner_cid;
+        return $owner >= 0 ? $owner : $cid;
+    }
+
     public static function instance(): self
     {
         if (!App::$superglobals || App::$coroutine_isolated_superglobals) {
@@ -172,6 +190,7 @@ class RequestContext
                 }
                 if (!isset($context['__g'])) {
                     $context['__g'] = new self();
+                    $context['__g']->_owner_cid = $cid;
                 }
                 $instance = $context['__g'];
                 assert($instance instanceof self);

@@ -31,6 +31,13 @@ namespace {
             }
             public function unwatch(): bool { $this->watched = []; return true; }
             public function get(string $key): string|false { return self::$data[$key] ?? false; }
+            /** @var array<string, int> TTL set by the last expire() per key */
+            public static array $expired = [];
+            public function expire(string $key, int $ttl): bool
+            {
+                self::$expired[$key] = $ttl;
+                return isset(self::$data[$key]);
+            }
             public function multi(): self { $this->inMulti = true; $this->queue = []; return $this; }
             public function setex(string $key, int $ttl, string $value): self|bool
             {
@@ -120,6 +127,16 @@ namespace ZealPHP\Tests\Unit\Session {
             $this->assertIsArray($v);
             /** @var array<string, string> $v */
             return $v;
+        }
+
+        /** A session that is only read (never changed) keeps sliding: read() refreshes its TTL. */
+        public function testReadRefreshesTheTtl(): void
+        {
+            \Redis::$data['T:abc'] = 'user|s:5:"alice";';
+            \Redis::$expired = [];
+            $h = new RedisSessionHandler('127.0.0.1', 6379, 'T:', 900);
+            $this->assertSame('user|s:5:"alice";', $h->read('abc'));
+            $this->assertSame(['T:abc' => 900], \Redis::$expired);
         }
 
         public function testIdsReadButNeverWrittenDoNotAccumulate(): void

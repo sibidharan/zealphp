@@ -480,13 +480,11 @@ function zeal_session_start(): bool
  */
 function zeal_valid_session_id(string $id): bool
 {
-    if ($id === '' || strlen($id) > 256) {
-        return false;
-    }
-    if (strpbrk($id, "/\\\0") !== false) {
-        return false;
-    }
-    return strpos($id, '..') === false;
+    // PHP's alphabet (php_session_valid_key: [A-Za-z0-9,-]) plus '_' for synthetic ids, which
+    // rules out path separators, NUL, dots and whitespace. Capped at 128 bytes
+    // (ids PHP or ZealPHP mint are 26-64; 256 plus the "sess_" prefix exceeded
+    // NAME_MAX on most filesystems).
+    return $id !== '' && strlen($id) <= 128 && preg_match('/^[A-Za-z0-9,_-]+$/D', $id) === 1;
 }
 
 /**

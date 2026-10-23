@@ -361,8 +361,13 @@ class RedisSessionHandler implements \SessionHandlerInterface
     {
         $key = $this->prefix . $sessionId;
         $sid = (string) $sessionId;
-        $cid = \OpenSwoole\Coroutine::getCid();
+        $cid = \ZealPHP\RequestContext::ownerCid();
         $out = $this->io(function (\Redis $redis) use ($key, $sid, $cid): string {
+            // Sliding expiry, like PHP's own session.lazy_write timestamp
+            // update: a session that is read but not changed stays alive.
+            // BEFORE the WATCH — an EXPIRE after it counts as a modification
+            // and would abort this request's own EXEC.
+            $redis->expire($key, $this->ttl);
             $redis->watch($key);
             $data = $redis->get($key);
             $base = is_string($data) ? $data : '';
@@ -384,7 +389,7 @@ class RedisSessionHandler implements \SessionHandlerInterface
     {
         $key = $this->prefix . $sessionId;
         $sid = (string) $sessionId;
-        $cid = \OpenSwoole\Coroutine::getCid();
+        $cid = \ZealPHP\RequestContext::ownerCid();
         return $this->io(function (\Redis $redis) use ($key, $sid, $sessionData, $cid): bool {
             for ($attempt = 0; $attempt < 3; $attempt++) {
                 $pipe = $redis->multi();
@@ -513,7 +518,7 @@ class RedisSessionHandler implements \SessionHandlerInterface
     {
         $key = $this->prefix . $sessionId;
         $sid = (string) $sessionId;
-        $cid = \OpenSwoole\Coroutine::getCid();
+        $cid = \ZealPHP\RequestContext::ownerCid();
         return $this->io(function (\Redis $redis) use ($key, $sid, $cid): bool {
             $redis->del($key);
             $this->dropBase($cid, $sid);

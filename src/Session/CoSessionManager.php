@@ -243,8 +243,10 @@ class CoSessionManager
             // For new visitors, use SessionStartMiddleware to eagerly start sessions.
             if ($hasSessionCookie || $hasSessionParam) {
                 $rawSid = $hasSessionCookie ? $reqCookie[$sessionName] : $reqGet[$sessionName];
-                $sessionId = is_string($rawSid) ? $rawSid : null;
-                zeal_session_id($sessionId);
+                // zeal_session_id() replaces a malformed id with a fresh one;
+                // use what it returns, or the cookie below would echo the raw
+                // malformed value back (strict mode off).
+                $sessionId = zeal_session_id(is_string($rawSid) ? $rawSid : null);
                 zeal_session_start();
                 $g->_session_started = true;
 
