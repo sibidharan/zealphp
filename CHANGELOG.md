@@ -2,6 +2,58 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.16] - 2026-10-24
+
+Security release. Findings from four audits after PHP2Shell (CVE-2026-109618/109619): static reviews of the HTTP surface, of sessions/WebSocket/CGI/state, and of ext-zealphp, plus an independent second-model review. Each was reproduced in a lab before it was fixed, and every fix has a regression test that fails on 0.4.15. PHP2Shell itself never reaches the default runtime; patch PHP anyway.
+
+### Security
+- **Sessions are stored before the response is sent.** They were written after `end()`, so a client that followed a redirect at once could read the old session: a logout not yet in effect, a lost OAuth/CSRF state.
+- **Coroutine mode: `$_SESSION` no longer carries one user's data into the next request.** In coroutine mode `$_SESSION` is a single process-wide array; the request's session is `$g->session`. Writes to it were never stored, and the next request on the worker could read them. It is now cleared at the start and end of every request, with a one-time warning when it was written. Concurrent requests can still see it; use `$g->session`, or coroutine-legacy for per-request superglobals.
+- **Session fixation closed in three places.** Strict mode now covers WebSocket upgrades (the handshake used to create `sess_<client id>`), a route's own `session_start()` when the CGI subprocess owns sessions, and the CGI proc/pool/fork subprocesses (`-d session.use_strict_mode` follows `App::$session_strict_mode`).
+- **Sessions default to ZealPHP's own directory**: `<log dir>/sessions`, mode 0700, overridable with `ZEALPHP_SESSION_DIR`. The old default was PHP's `/var/lib/php/sessions`, which every mod_php/FPM app on the host shares: their session ids were adopted along with their data, and ZealPHP's GC removed their sessions. Session files are now 0600, and a boot warning fires if `sessionSavePath()` is PHP's own directory. **Existing file sessions are not carried over, so users are logged out once on upgrade.**
+- **A logout can no longer be undone** by a request that was still in flight with the old session. Body-less responses (204/304) now also store the session before the head is sent.
+- **A session key built from input can no longer redefine the whole session.** `php_serialize` data is only accepted when the whole string round-trips.
+- **A second `session_start()` in coroutine mode is a no-op.** It used to reload the store over the request's own writes.
+- **`App::when()` and `ScopedMiddleware` also match the decoded path.** `/wp-%61dmin` reached a fallback front controller's `/wp-admin` without passing the scope.
+- **`ZEALPHP_TRUSTED_PROXIES`.** Behind a same-host proxy with none configured, the session cookie lost `Secure` on HTTPS sites, and every client shared one rate-limit key.
+- **Access log values are escaped like Apache does** (`"`, `\`, control bytes), and the public `$_SERVER` dump page (`/server_info`) is gone.
+- **Session store hardening.**
+  - A failed value decode now discards the whole session (keys could be injected from inside a stored string), and keys containing `|` are refused.
+  - An in-flight request can no longer resurrect a destroyed session or revert a removed key: only changed keys are written.
+  - File and Table handlers lock and size-check their writes.
+  - Handler memory no longer grows with forged ids.
+  - GC uses `sessionSavePath()`.
+- **CGI pool:**
+  - A reused subprocess no longer hands the previous visitor's session id to the next one.
+  - Stray stdout can no longer shift into the next user's response; the body now travels on the framed channel.
+  - Floods of warnings no longer wedge a worker.
+  - Proc-mode error output is escaped and only shown with `displayErrors()`.
+- **HTTP surface:**
+  - ZealAPI no longer sends stack traces or driver/engine exception text to clients without `displayErrors()`.
+  - `redirect()`, `RedirectMiddleware` and `ScopedMiddleware` bypasses are closed.
+  - A WebSocket upgrade from a foreign Origin no longer loads the cookie session (`App::wsAllowedOrigins()`).
+  - Pipelined requests per connection are capped at 32.
+  - Multi-range `sendFile()` no longer buffers whole files.
+  - `sendFile()` sends `nosniff` and never sniffs uploads into HTML/SVG.
+  - httpoxy: `Proxy:` no longer becomes `HTTP_PROXY`, and underscore headers can't overwrite their dashed twin.
+  - `Response::cookie()` and `setcookie()` apply native attribute rules.
+  - The cookie parser follows PHP's rules (the `__Host-` prefix bypass is closed).
+  - Rate and concurrency limiters evict instead of failing open when full, and key IPv6 by /64.
+  - BasicAuth no longer leaks valid usernames through timing.
+  - Non-canonical IPv6 IpAccess rules now match.
+  - `phpinfo()` masks secrets and cookies.
+  - Engine warnings stay out of responses when `displayErrors()` is off.
+- **CLI:** unknown flags are refused instead of ignored, and an "orphaned" server is only reclaimed if it was started from the same app directory. An ignored `--port` once let a test instance stop a production server.
+- **coroutine-legacy requires ext-zealphp 0.4.0.** It fixes state moving between requests across an inline `Channel::push()` resume, plus OOM, request-end and cache-key issues. See the ext-zealphp v0.4.0 tag.
+
+### Changed
+- In CGI pool mode, stray `php://stdout` output goes to the log instead of the response.
+- Proc-mode PHP warnings are hidden unless `ZEALPHP_DEV` or `App::displayErrors(true)` is set.
+- `X-HTTP-Method-Override` is honoured only for PUT, PATCH and DELETE.
+- `ETagMiddleware` no longer turns an unsafe method's response into 412 after the handler has run.
+- `/api/<name>` only calls public methods declared by an app's `ZealAPI` subclass.
+- 21 demo files used `<?` and printed their source with `short_open_tag=Off`. They use `<?php` now, with a test that keeps it that way.
+
 ## [0.4.15] - 2026-07-27
 
 ### Added
