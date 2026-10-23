@@ -10212,6 +10212,9 @@ class App
         } finally {
             // Hand the connection to the next pipelined request — unless the
             // connection closed meanwhile and the fd now belongs to a new one.
+            // (releaseConnectionTurns() may have removed the entry from another
+            // coroutine while $handler ran, which static analysis can't see.)
+            // @phpstan-ignore-next-line nullCoalesce.offset
             $state = self::$connection_turns[$fd] ?? null;
             if ($state !== null && $state[0] === $owner) {
                 $next = \array_shift($state[1]);
@@ -10584,7 +10587,8 @@ class App
         });
         // Pipelined requests on one connection must be answered in order.
         $server->on("request", static function (\OpenSwoole\Http\Request $request, \OpenSwoole\Http\Response $response) use ($requestHandler): void {
-            self::inConnectionOrder((int) $request->fd, static fn () => $requestHandler($request, $response));
+            $fd = $request->fd;
+            self::inConnectionOrder(\is_int($fd) ? $fd : 0, static fn () => $requestHandler($request, $response));
         });
     }
 

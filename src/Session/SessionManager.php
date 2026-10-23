@@ -379,6 +379,9 @@ class SessionManager
                 elog('SessionManager:: session_write_close took '.get_current_render_time(), 'info');
                 try {
                     session_write_close();
+                // session_write_close() throws from the serializer (a value it
+                // rejects) and from user session handlers, though its stub says not.
+                // @phpstan-ignore-next-line catch.neverThrown
                 } catch (\Throwable $e) {
                     // PHP-FPM parity: fail this request's session write, not the
                     // worker (see CoSessionManager). A write that threw can leave
